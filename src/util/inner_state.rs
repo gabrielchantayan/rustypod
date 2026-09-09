@@ -176,6 +176,150 @@ pub unsafe extern "C" fn inner_clear_cached_results(inner: *mut u8) {
     (inner.add(RESULT_COUNT) as *mut u32).write(0);
 }
 
+/// The callback-root field of an inner query resource. `repr(C)` preserves
+/// its target offset while using a host-width pointer in host fixtures.
+#[repr(C)]
+struct InnerResourceCallbackOwner {
+    _before_callback_root: [u8; 0x40],
+    callback_root: *mut u8,
+}
+
+/// Literal callback continuation loaded from `0x08059b20`.
+const SELECTED_RESOURCE_CALLBACK: usize = 0x080d_43c4;
+
+type ResolveSelectedResource = unsafe extern "C" fn(object: *mut u8) -> *mut u8;
+type IsResourceSelected = unsafe extern "C" fn(inner: *mut u8, object: *mut u8) -> u32;
+type SetResourceSelected = unsafe extern "C" fn(selected: u32, inner: *mut u8, object: *mut u8);
+type DispatchSelectedResource = unsafe extern "C" fn(
+    callback_root: *mut u8,
+    callback: usize,
+    context: *mut u8,
+) -> i32;
+
+#[derive(Clone, Copy)]
+struct InnerSelectedResourceOps {
+    resolve: ResolveSelectedResource,
+    is_selected: IsResourceSelected,
+    set_selected: SetResourceSelected,
+    dispatch: DispatchSelectedResource,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_resolve_selected_resource(object: *mut u8) -> *mut u8 {
+    let resolve: ResolveSelectedResource = core::mem::transmute(0x0805_1ce4usize);
+    resolve(object)
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_is_resource_selected(inner: *mut u8, object: *mut u8) -> u32 {
+    let is_selected: IsResourceSelected = core::mem::transmute(0x0805_4710usize);
+    is_selected(inner, object)
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_set_resource_selected(
+    selected: u32,
+    inner: *mut u8,
+    object: *mut u8,
+) {
+    let set_selected: SetResourceSelected = core::mem::transmute(0x0806_7450usize);
+    set_selected(selected, inner, object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_dispatch_selected_resource(
+    callback_root: *mut u8,
+    callback: usize,
+    context: *mut u8,
+) -> i32 {
+    crate::app::resource::cache::resource_callback_dispatch(callback_root, callback, context)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_resolve_selected_resource(_object: *mut u8) -> *mut u8 {
+    panic!("inner_dispatch_selected_resource requires resolver 0x08051ce4")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_is_resource_selected(_inner: *mut u8, _object: *mut u8) -> u32 {
+    panic!("inner_dispatch_selected_resource requires selection test 0x08054710")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_set_resource_selected(
+    _selected: u32,
+    _inner: *mut u8,
+    _object: *mut u8,
+) {
+    panic!("inner_dispatch_selected_resource requires selection setter 0x08067450")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_dispatch_selected_resource(
+    _callback_root: *mut u8,
+    _callback: usize,
+    _context: *mut u8,
+) -> i32 {
+    panic!("inner_dispatch_selected_resource requires resource callback dispatch")
+}
+
+#[cfg(target_os = "none")]
+const DEFAULT_INNER_SELECTED_RESOURCE_OPS: InnerSelectedResourceOps = InnerSelectedResourceOps {
+    resolve: firmware_resolve_selected_resource,
+    is_selected: firmware_is_resource_selected,
+    set_selected: firmware_set_resource_selected,
+    dispatch: firmware_dispatch_selected_resource,
+};
+
+#[cfg(not(target_os = "none"))]
+const DEFAULT_INNER_SELECTED_RESOURCE_OPS: InnerSelectedResourceOps = InnerSelectedResourceOps {
+    resolve: missing_resolve_selected_resource,
+    is_selected: missing_is_resource_selected,
+    set_selected: missing_set_resource_selected,
+    dispatch: missing_dispatch_selected_resource,
+};
+
+/// The three unported inner-resource helpers and callback dispatcher used by
+/// [`inner_dispatch_selected_resource`]. The target defaults preserve their
+/// original call boundaries; host tests replace the complete operation set.
+static mut INNER_SELECTED_RESOURCE_OPS: InnerSelectedResourceOps =
+    DEFAULT_INNER_SELECTED_RESOURCE_OPS;
+
+/// inner_dispatch_selected_resource — original: `FUN_08059ad4` @
+/// 0x08059ad4 (76 bytes: 72 instruction bytes plus literal callback word at
+/// 0x08059b20; next entry 0x08059b24).
+///
+/// Raw decoding of every ARM B/BL word in `osos.dec` finds 16 direct call
+/// sites, all unconditional `bl`; no predicated call or data-word occurrence
+/// exists. One additional unconditional `b` at 0x0813d044 tail-branches here.
+///
+/// Resolves the object’s active inner resource, returns zero when resolution
+/// fails or its selection bit for `object + 1` is clear, otherwise clears that
+/// bit and dispatches callback continuation 0x080d43c4 over the inner’s
+/// callback-root at `+0x40`. The dispatcher status is returned unchanged.
+///
+/// The three simple but unported helpers at 0x08051ce4, 0x08054710, and
+/// 0x08067450 remain direct firmware calls on target. The callback literal
+/// enters the middle of a larger firmware routine and is not given an invented
+/// identity; the existing resource dispatcher supplies its recovered r4/r2
+/// callback register contract. Deliberate deviation: ARM tail-branches to the
+/// dispatcher after restoring registers, while Rust makes an ordinary call
+/// through the volatile operation slot so host tests can observe the boundary.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_dispatch_selected_resource(object: *mut u8) -> i32 {
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(INNER_SELECTED_RESOURCE_OPS));
+    let inner = (ops.resolve)(object);
+    if inner.is_null() || (ops.is_selected)(inner, object) == 0 {
+        return 0;
+    }
+
+    (ops.set_selected)(0, inner, object);
+    let owner = inner.cast::<InnerResourceCallbackOwner>();
+    let callback_root = core::ptr::addr_of!((*owner).callback_root).read();
+    (ops.dispatch)(callback_root, SELECTED_RESOURCE_CALLBACK, object)
+}
+
 /// Default [`INNER_MATERIALIZE_COUNT`] stub: the no-op path of the
 /// unported materialize-and-count tail target `FUN_080542a0` @
 /// 0x080542a0 — reads the cached result-count word at inner+0xef4
@@ -485,6 +629,209 @@ mod tests {
         assert_eq!(fixture.word(CACHED_RESULTS), 0);
         assert_eq!(fixture.word(CACHED_AUXILIARY), 0x7777_8888);
         assert_eq!(fixture.word(RESULT_COUNT), 0);
+    }
+
+    // ---- inner_dispatch_selected_resource -----------------------------
+
+    static SELECTED_RESOURCE_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut SELECTED_RESOURCE_INNER: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_IS_SELECTED: u32 = 0;
+    static mut SELECTED_RESOURCE_STATUS: i32 = 0;
+    static mut SELECTED_RESOURCE_RESOLVE_CALLS: u32 = 0;
+    static mut SELECTED_RESOURCE_SELECT_CALLS: u32 = 0;
+    static mut SELECTED_RESOURCE_SET_CALLS: u32 = 0;
+    static mut SELECTED_RESOURCE_DISPATCH_CALLS: u32 = 0;
+    static mut SELECTED_RESOURCE_RESOLVE_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_SELECT_INNER: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_SELECT_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_SET_SELECTED: u32 = u32::MAX;
+    static mut SELECTED_RESOURCE_SET_INNER: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_SET_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_DISPATCH_ROOT: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_DISPATCH_CALLBACK: usize = 0;
+    static mut SELECTED_RESOURCE_DISPATCH_CONTEXT: *mut u8 = core::ptr::null_mut();
+    static mut SELECTED_RESOURCE_RESOLVE_STAGE: u32 = 0;
+    static mut SELECTED_RESOURCE_SELECT_STAGE: u32 = 0;
+    static mut SELECTED_RESOURCE_SET_STAGE: u32 = 0;
+    static mut SELECTED_RESOURCE_DISPATCH_STAGE: u32 = 0;
+    static mut SELECTED_RESOURCE_STAGE: u32 = 0;
+
+    unsafe extern "C" fn mock_resolve_selected_resource(object: *mut u8) -> *mut u8 {
+        SELECTED_RESOURCE_RESOLVE_CALLS += 1;
+        SELECTED_RESOURCE_RESOLVE_OBJECT = object;
+        SELECTED_RESOURCE_STAGE += 1;
+        SELECTED_RESOURCE_RESOLVE_STAGE = SELECTED_RESOURCE_STAGE;
+        SELECTED_RESOURCE_INNER
+    }
+
+    unsafe extern "C" fn mock_is_resource_selected(inner: *mut u8, object: *mut u8) -> u32 {
+        SELECTED_RESOURCE_SELECT_CALLS += 1;
+        SELECTED_RESOURCE_SELECT_INNER = inner;
+        SELECTED_RESOURCE_SELECT_OBJECT = object;
+        SELECTED_RESOURCE_STAGE += 1;
+        SELECTED_RESOURCE_SELECT_STAGE = SELECTED_RESOURCE_STAGE;
+        SELECTED_RESOURCE_IS_SELECTED
+    }
+
+    unsafe extern "C" fn mock_set_resource_selected(
+        selected: u32,
+        inner: *mut u8,
+        object: *mut u8,
+    ) {
+        SELECTED_RESOURCE_SET_CALLS += 1;
+        SELECTED_RESOURCE_SET_SELECTED = selected;
+        SELECTED_RESOURCE_SET_INNER = inner;
+        SELECTED_RESOURCE_SET_OBJECT = object;
+        SELECTED_RESOURCE_STAGE += 1;
+        SELECTED_RESOURCE_SET_STAGE = SELECTED_RESOURCE_STAGE;
+    }
+
+    unsafe extern "C" fn mock_dispatch_selected_resource(
+        callback_root: *mut u8,
+        callback: usize,
+        context: *mut u8,
+    ) -> i32 {
+        SELECTED_RESOURCE_DISPATCH_CALLS += 1;
+        SELECTED_RESOURCE_DISPATCH_ROOT = callback_root;
+        SELECTED_RESOURCE_DISPATCH_CALLBACK = callback;
+        SELECTED_RESOURCE_DISPATCH_CONTEXT = context;
+        SELECTED_RESOURCE_STAGE += 1;
+        SELECTED_RESOURCE_DISPATCH_STAGE = SELECTED_RESOURCE_STAGE;
+        SELECTED_RESOURCE_STATUS
+    }
+
+    struct SelectedResourceOpsRestore;
+
+    impl Drop for SelectedResourceOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(INNER_SELECTED_RESOURCE_OPS)
+                    .write_volatile(DEFAULT_INNER_SELECTED_RESOURCE_OPS);
+            }
+        }
+    }
+
+    fn install_selected_resource_mocks() -> SelectedResourceOpsRestore {
+        unsafe {
+            SELECTED_RESOURCE_INNER = core::ptr::null_mut();
+            SELECTED_RESOURCE_IS_SELECTED = 0;
+            SELECTED_RESOURCE_STATUS = 0;
+            SELECTED_RESOURCE_RESOLVE_CALLS = 0;
+            SELECTED_RESOURCE_SELECT_CALLS = 0;
+            SELECTED_RESOURCE_SET_CALLS = 0;
+            SELECTED_RESOURCE_DISPATCH_CALLS = 0;
+            SELECTED_RESOURCE_RESOLVE_OBJECT = core::ptr::null_mut();
+            SELECTED_RESOURCE_SELECT_INNER = core::ptr::null_mut();
+            SELECTED_RESOURCE_SELECT_OBJECT = core::ptr::null_mut();
+            SELECTED_RESOURCE_SET_SELECTED = u32::MAX;
+            SELECTED_RESOURCE_SET_INNER = core::ptr::null_mut();
+            SELECTED_RESOURCE_SET_OBJECT = core::ptr::null_mut();
+            SELECTED_RESOURCE_DISPATCH_ROOT = core::ptr::null_mut();
+            SELECTED_RESOURCE_DISPATCH_CALLBACK = 0;
+            SELECTED_RESOURCE_DISPATCH_CONTEXT = core::ptr::null_mut();
+            SELECTED_RESOURCE_RESOLVE_STAGE = 0;
+            SELECTED_RESOURCE_SELECT_STAGE = 0;
+            SELECTED_RESOURCE_SET_STAGE = 0;
+            SELECTED_RESOURCE_DISPATCH_STAGE = 0;
+            SELECTED_RESOURCE_STAGE = 0;
+            core::ptr::addr_of_mut!(INNER_SELECTED_RESOURCE_OPS).write_volatile(
+                InnerSelectedResourceOps {
+                    resolve: mock_resolve_selected_resource,
+                    is_selected: mock_is_resource_selected,
+                    set_selected: mock_set_resource_selected,
+                    dispatch: mock_dispatch_selected_resource,
+                },
+            );
+        }
+        SelectedResourceOpsRestore
+    }
+
+    #[repr(C)]
+    struct SelectedResourceInnerFixture {
+        before_callback_root: [u8; 0x40],
+        callback_root: *mut u8,
+    }
+
+    #[test]
+    fn selected_resource_returns_zero_without_testing_a_missing_inner() {
+        let _lock = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _restore = install_selected_resource_mocks();
+        let mut object = [SENTINEL; 2];
+
+        let result = unsafe { inner_dispatch_selected_resource(object.as_mut_ptr()) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(SELECTED_RESOURCE_RESOLVE_CALLS, 1);
+            assert_eq!(SELECTED_RESOURCE_RESOLVE_OBJECT, object.as_mut_ptr());
+            assert_eq!(SELECTED_RESOURCE_SELECT_CALLS, 0);
+            assert_eq!(SELECTED_RESOURCE_SET_CALLS, 0);
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn selected_resource_leaves_a_clear_selection_bit_untouched() {
+        let _lock = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _restore = install_selected_resource_mocks();
+        let mut object = [SENTINEL; 2];
+        let mut inner = SelectedResourceInnerFixture {
+            before_callback_root: [SENTINEL; 0x40],
+            callback_root: 0x1234_5678usize as *mut u8,
+        };
+        unsafe {
+            SELECTED_RESOURCE_INNER = (&mut inner as *mut SelectedResourceInnerFixture).cast();
+        }
+
+        let result = unsafe { inner_dispatch_selected_resource(object.as_mut_ptr()) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(SELECTED_RESOURCE_RESOLVE_CALLS, 1);
+            assert_eq!(SELECTED_RESOURCE_SELECT_CALLS, 1);
+            assert_eq!(SELECTED_RESOURCE_SELECT_INNER, (&mut inner as *mut SelectedResourceInnerFixture).cast());
+            assert_eq!(SELECTED_RESOURCE_SELECT_OBJECT, object.as_mut_ptr());
+            assert_eq!(SELECTED_RESOURCE_SET_CALLS, 0);
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn selected_resource_clears_then_dispatches_and_propagates_status() {
+        let _lock = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _restore = install_selected_resource_mocks();
+        let mut object = [SENTINEL; 2];
+        let mut callback_root = [0; 1];
+        let mut inner = SelectedResourceInnerFixture {
+            before_callback_root: [SENTINEL; 0x40],
+            callback_root: callback_root.as_mut_ptr(),
+        };
+        unsafe {
+            SELECTED_RESOURCE_INNER = (&mut inner as *mut SelectedResourceInnerFixture).cast();
+            SELECTED_RESOURCE_IS_SELECTED = 1;
+            SELECTED_RESOURCE_STATUS = -0x32;
+        }
+
+        let result = unsafe { inner_dispatch_selected_resource(object.as_mut_ptr()) };
+
+        assert_eq!(result, -0x32);
+        unsafe {
+            assert_eq!(SELECTED_RESOURCE_SET_SELECTED, 0);
+            assert_eq!(SELECTED_RESOURCE_SET_INNER, (&mut inner as *mut SelectedResourceInnerFixture).cast());
+            assert_eq!(SELECTED_RESOURCE_SET_OBJECT, object.as_mut_ptr());
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_ROOT, callback_root.as_mut_ptr());
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CALLBACK, SELECTED_RESOURCE_CALLBACK);
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CONTEXT, object.as_mut_ptr());
+            assert_eq!(
+                (
+                    SELECTED_RESOURCE_RESOLVE_STAGE,
+                    SELECTED_RESOURCE_SELECT_STAGE,
+                    SELECTED_RESOURCE_SET_STAGE,
+                    SELECTED_RESOURCE_DISPATCH_STAGE,
+                ),
+                (1, 2, 3, 4),
+            );
+        }
     }
 
     // ---- inner_result_count -------------------------------------------

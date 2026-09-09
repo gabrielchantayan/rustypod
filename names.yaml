@@ -29561,6 +29561,42 @@ functions:
       prove primary-only release, ordered primary-plus-auxiliary release, and
       the NULL-primary asymmetric case.
 
+
+  - address: 0x08059ad4
+    ghidra: FUN_08059ad4
+    name: inner_dispatch_selected_resource
+    size: 76
+    sig: "i32 inner_dispatch_selected_resource(void *object)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: object
+      FUN_08051ce4: resolve_selected_resource
+      FUN_08054710: is_resource_selected
+      FUN_08067450: set_resource_selected
+      FUN_0806b604: resource_callback_dispatch
+      DAT_08059b20: SELECTED_RESOURCE_CALLBACK
+    notes: >-
+      Raw osos.dec decode gives 72 instruction bytes plus the literal-pool
+      callback word at 0x08059b20; the separately entered next function
+      starts at 0x08059b24. It resolves the active inner resource for object,
+      returns zero if resolution fails or that inner's selection bit for
+      object+1 is clear, otherwise clears the selection bit through
+      set_resource_selected(0, inner, object), then dispatches the inner
+      +0x40 callback root with literal 0x080d43c4 and returns that status
+      unchanged. Every ARM B/BL word in osos.dec was decoded: 16 direct
+      unconditional bl call sites, no predicated calls and no data-word
+      occurrence, plus one unconditional tail b at 0x0813d044. The literal
+      0x080d43c4 starts in the middle of a larger firmware routine, so no
+      callee identity is invented; resource_callback_dispatch preserves its
+      recovered r4/r2 callback contract. The unported resolver, selection
+      test, and setter retain direct target calls at 0x08051ce4, 0x08054710,
+      and 0x08067450 through one volatile operation set; host tests replace
+      it. Deliberate deviation: the ARM epilogue tail-branches to the
+      dispatcher, while Rust makes the equivalent ordinary operation call.
+      Host tests prove null resolution stops before selection, a clear bit
+      leaves state untouched, and a set bit clears before dispatching the
+      exact root/callback/context and propagates its nonzero status.
   - address: 0x0813b7c4
     ghidra: FUN_0813b7c4
     name: inner_set_state_4
