@@ -29605,6 +29605,34 @@ functions:
       store to +8, return this; LLVM adds the crate-standard frame-
       pointer prologue and keeps `this` in r5 across the call (the
       original relies on the base constructor preserving r0).
+  - address: 0x081384a0
+    ghidra: FUN_081384a0
+    name: refcounted_base_destroy
+    size: 40
+    sig: "FixedValue *refcounted_base_destroy(FixedValue *this)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1: this
+      DAT_081384c8: REFCOUNTED_BASE_VTABLE
+      DAT_081384cc: SCHEDULER_SINGLETON_GLOBAL
+      FUN_082738e0: timing_wheel_remove
+    notes: >-
+      The shared refcounted-base destructor body: installs the base vtable
+      word 0x08984ca0 at +0x00, loads the live scheduler singleton from
+      global 0x089cc7e0, then calls timing_wheel_remove(table, this) and
+      returns this. Raw ARM is ten instruction words (40 bytes) at
+      0x081384a0..0x081384c4 followed by the two literal-pool words at
+      0x081384c8/0x081384cc; the next separately linked function begins
+      at 0x081384d0, so the full extent is 48 bytes. Decoding every ARM
+      B/BL word finds 15 direct calls, all unconditional bl, plus nine
+      unconditional B tail callers; no predicated form or raw DATA word
+      targets this address. The target reads the scheduler global directly;
+      host tests use animation's shared scheduler-table model. match.py
+      (worktree archive): ten original instructions versus thirteen Rust;
+      LLVM adds the frame-pointer prologue and emits the vtable store before
+      moving this into r1, but retains the literal loads, direct wheel-remove
+      bl, and returned this-pointer flow.
 
   - address: 0x08076370
     ghidra: FUN_08076370

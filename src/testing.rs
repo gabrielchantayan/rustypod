@@ -192,6 +192,10 @@ pub mod hints {
     // controller, timer, and activity fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const PROGRESS_LAYOUT_TRANSITION: usize = 0xba00_0000;
+    // 0xbc00_0000: dedicated to app/fixed_value's refcounted-base
+    // destructor fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const REFCOUNTED_BASE_DESTROY: usize = 0xbc00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -329,3 +333,8 @@ pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// recording enqueues into that one mutable global, so a module-private
 /// lock would race teardown across modules.
 pub static EVENT_CODE_QUEUE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes host tests that mutate the shared timing-wheel bucket array
+/// behind `app::animation::scheduler_table`. The animation and refcounted
+/// base-destruction ports both unlink nodes through this one host model.
+pub static SCHEDULER_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
