@@ -229,7 +229,8 @@ fn hooks() -> CondvarHooks {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CONDVAR_HOOKS)) }
 }
 
-/// list_pop_front — original: `FUN_080f10b8` @ 0x080f10b8 (48 bytes).
+/// list_pop_front — original: `FUN_080f10b8` @ 0x080f10b8 (52 bytes;
+/// 16 bl call sites, all unconditional).
 ///
 /// Removes and returns the head node, or NULL when the list is empty.
 /// When the popped node was also the tail (single-element list) both

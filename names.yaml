@@ -50763,3 +50763,39 @@ functions:
       stores, and the crate fp frame - accepted ADS-vs-LLVM noise. Symbol
       resolves standalone in librustypod.a under its own link_section (no
       LLVM body fold observed).
+
+  - address: 0x080f10b8
+    ghidra: FUN_080f10b8
+    name: list_pop_front
+    size: 52
+    sig: "ListNode *list_pop_front(ListHead *list)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      r0: list (then node/return value)
+      r1: list (saved)
+      r2: node->next, then list->tail
+      r3: zero
+    notes: >-
+      Intrusive singly-linked list pop-front over a {head, tail} anchor
+      pair: load head, return NULL when empty (r0 already holds the NULL
+      head, bxeq lr); else head = head->next; when the popped node was
+      also the tail (single-element list) BOTH anchor words are cleared
+      (two streq on the tail==node compare); the popped node's next is
+      always zeroed; returns the popped node. 16 bl call sites,
+      binary-verified (every B/BL word in osos.dec decoded), ALL plain
+      unconditional bl - zero predicated forms, so callers never guard
+      the call (the callee's own empty-list early-out is the only
+      guard). Ghidra's 52-byte extent is CORRECT here: the next function
+      (list_remove @ 0x080f10ec) starts immediately after the trailing
+      bx lr. Already ported as the exported `list_pop_front` in
+      kernel/condvar.rs by the condvar-layer region port (0x0807f5cc
+      entry); this record adds the per-address mapping, like the
+      task_yield commit (9ac77aa) did. Doc-header size fixed 48 -> 52
+      bytes. match.py structural: same instruction sequence modulo the
+      crate fp frame (push/pop {fp,lr}) and LLVM materializing the zero
+      in r2/r1 instead of the original's shared r3 - accepted ADS-vs-
+      LLVM noise. Host coverage already in kernel::condvar::tests:
+      list_pop_empty_returns_null, list_push_pop_fifo_order (FIFO order
+      + next zeroed + anchors cleared), list_single_element_clears_
+      both_anchors.
