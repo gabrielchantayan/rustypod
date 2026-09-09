@@ -46981,6 +46981,49 @@ functions:
       rearm path), the strh tag pair and the cmp/moveq status select;
       deltas are the four seam blx indirections, the crate's fp frame,
       the inlined conversion and the elided identity destroy above.
+  - address: 0x080495d0
+    ghidra: FUN_080495d0
+    name: diag_ring_attach_strings
+    size: 192
+    sig: "void diag_ring_attach_strings(i32 count, ...)"
+    module: kernel/diag_ring_strings
+    status: ported
+    renames:
+      param_1/r0/sp+0x20: count
+      r4: total_len
+      r5: capacity
+      r6: string_index
+      r7: string_cursor
+      r8: owned_string
+      r9: current_string
+      FUN_08043c18: traced_alloc
+      FUN_08043994: traced_free
+      FUN_08392478: strlen
+      FUN_08043f3c: traced_realloc
+      FUN_0804228c: strlcat
+      FUN_08049bbc: diag_ring_attach_owned_string
+    notes: >-
+      Raw extent is 0x080495d0..0x08049690; the next BL-targeted function
+      starts at 0x08049690, so Ghidra's 192-byte extent is right. Every ARM
+      B/BL word in osos.dec was decoded: 14 direct calls, all unconditional
+      bl (zero blne/bleq). Callers use 2, 4, and 6 string arguments, proving
+      this is a true ARM varargs function, not a three-string helper. It
+      allocates 81 bytes through traced_alloc, joins exactly count non-NULL
+      C strings, and grows only when the signed accumulated strlen exceeds
+      the signed capacity (new capacity = length + 20). Realloc failure frees
+      the old buffer and returns; success attaches the owned result with flag
+      3 to the current diagnostic-ring record. The target export is a small
+      ARM wrapper that spills r1-r3 directly beside caller-stack arguments,
+      preserving the original varargs sequence before entering typed Rust.
+      Ported traced_alloc, traced_free, and strlen are direct calls; unported
+      traced_realloc and record attachment dispatch through volatile
+      DIAG_RING_STRING_OPS defaults (NULL realloc / inert attach). The
+      unported strlcat's bounded byte behavior is reproduced locally because
+      its return value is discarded. Host tests cover NULL strings across a
+      fourth spilled argument, the strict 80-byte growth boundary, realloc
+      failure release, negative count without varargs dereference, and initial
+      allocation failure. match.py structural review is necessarily split
+      between the ABI wrapper and typed body.
   - address: 0x08049a84
     ghidra: FUN_08049a84
     name: diag_ring_record
