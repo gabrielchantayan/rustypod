@@ -8611,6 +8611,33 @@ functions:
       pointer, `blx` for the original mutex-ctor address, and distinct Rust
       lock/unlock calls in place of the retail direct bl instructions.
 
+  - address: 0x082804b8
+    ghidra: FUN_082804b8
+    name: region_elem_default_construct
+    size: 40
+    sig: "void *region_elem_default_construct(void *dst)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1: dst
+    notes: >-
+      Binary-verified extent: 36 bytes of instructions
+      (0x082804b8..0x082804dc) plus vtable literal 0x089a6444 at
+      0x082804e0; the next sibling begins at 0x082804e4. Full ARM B/BL
+      decoding finds 13 unconditional bl call sites and no predicated or
+      tail-b sites. The constructor has no NULL guard: it stores the raw
+      vtable address, clears dst +0x4 and +0x8, invokes the recursive-mutex
+      constructor @ 0x082621b0 on dst +0xc, and returns dst. The device port
+      calls that unported constructor directly; the host model composes its
+      ported attribute/settype/PosixMutex dependencies, enabling the test to
+      prove stale pointer/scalar references are cleared and the resulting
+      mutex is live, recursive, and status-zero. Pointer fields use word
+      indices, with a host-width NULL write so the target's 32-bit clear
+      remains a real NULL pointer in 64-bit fixtures. match.py structural
+      review is expected to differ: LLVM emits the helper call path rather
+      than the retail direct bl and target builds use a function-address
+      call for the unported mutex constructor.
+
   - address: 0x08280430
     ghidra: FUN_08280430
     name: block_to_region_start
