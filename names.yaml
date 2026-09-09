@@ -41277,6 +41277,43 @@ functions:
       veneer's target body) directly instead of the veneer. match.py:
       same load/lsl #2/bl memcpy/reload-count/store structure; the diff
       is the crate fp frame and register allocation.
+  - address: 0x082cf7bc
+    ghidra: FUN_082cf7bc
+    name: word_list_modular_square_assign
+    size: 72
+    sig: "void word_list_modular_square_assign(WordList *accumulator, const ModularReductionContext *modulus)"
+    module: util/word_list_modular_square
+    status: ported
+    renames:
+      param_1: accumulator
+      param_2: modulus
+    notes: >-
+      Modular squaring assignment for the small counted-u32 WordList type:
+      construct an empty capacity-10 temporary list on the stack, square
+      accumulator into it through FUN_082d24a4, reduce it through
+      FUN_082cdb04 with r2 = 0, then word_list_copy the reduced contents
+      back to accumulator. Raw extent verified: the next distinct function
+      starts exactly at 0x082cf804 with push {r4,r5,r6,lr}, so Ghidra's
+      18-instruction / 72-byte extent is correct. FUN_082d24a4 is a
+      schoolbook squaring core: it emits each limb square then doubled
+      cross-products with carry propagation, and trims a high zero word.
+      All 12 decoded B/BL references are plain unconditional BLs
+      (0 predicated); no osos.dec data word holds 0x082cf7bc, so this is
+      not a virtual dispatch target. FUN_082d24a4 and FUN_082cdb04 have
+      no ported names.yaml entries, so the Rust port uses a volatile
+      operation-table seam that transmutes their exact retail addresses
+      on target and test-installed reference models on host. The
+      capacity-10 constructor FUN_082d81c8 is reproduced inline rather
+      than introduced as another exported port. Host tests prove square ->
+      mode-zero reduce ordering, the empty capacity-10 temporary contract,
+      retention of high square bits until reduction, two-word input
+      handling, zero-count output, and preserving the destination buffer
+      and capacity.
+      match.py: same square/reduce/copy call order and capacity-ten temporary;
+      the diff is the crate fp frame, volatile operation-table load with blx
+      seams for the two unported cores, merged count/capacity initialization,
+      and a direct word_list_copy call whose archive relocation disassembles
+      as address zero.
   - address: 0x082ceabc
     ghidra: FUN_082ceabc
     name: word_list_modular_multiply_assign
