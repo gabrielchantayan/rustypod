@@ -141,15 +141,21 @@ pub unsafe extern "C" fn expr_code(parse: *mut u8, expr: *mut u8, target: i32) -
 }
 
 #[cfg(test)]
+extern crate std;
+
+/// Serializes host tests that replace the global expression-code generator
+/// seam. It is shared with callers of [`EXPR_CODE_OPS`].
+#[cfg(test)]
+pub(crate) static EXPR_CODE_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+
+#[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use crate::sqlite::vdbe::{Vdbe, VdbeOp};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
-
-    /// Serializes tests that swap the code-generator slot.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     /// Every `(expr, target)` pair the slot was called with, in order.
     /// (The `parse` pointer is the context's own address in every
@@ -171,7 +177,7 @@ mod tests {
     /// Installs the recording mock and returns the lock guard, which
     /// must stay alive for the whole test.
     fn bench(in_reg: i32) -> MutexGuard<'static, ()> {
-        let ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ops_guard = EXPR_CODE_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*core::ptr::addr_of_mut!(CALLS)).clear();
             *core::ptr::addr_of_mut!(MOCK_IN_REG) = in_reg;

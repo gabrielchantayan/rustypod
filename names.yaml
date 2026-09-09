@@ -22574,6 +22574,36 @@ functions:
       call, return target; LLVM uses a branch + the seam's blx where
       ADS predicated (ldrne/cmpne/movne/blne).
 
+  - address: 0x08377b9c
+    ghidra: FUN_08377b9c
+    name: expr_code_temp
+    size: 84
+    sig: "int expr_code_temp(Parse *parse, Expr *expr, int *out_temp_reg)"
+    module: sqlite/expr_code_temp
+    status: ported
+    renames:
+      param_1: parse
+      param_2: expr
+      param_3: out_temp_reg
+      iVar1: temp_reg
+      iVar2: in_reg
+    notes: >-
+      SQLite 3.5.9's sqlite3ExprCodeTemp (expr.c). Binary-scanned:
+      16 unconditional bl call sites, zero predicated bl and zero tail b
+      sites: 0x082c3cd0, 0x082c3d00, 0x08376fd0, 0x083773ec,
+      0x08377400, 0x08377498, 0x083776dc, 0x083778d0, 0x083779a4,
+      0x08378040, 0x083781a0, 0x083781d4, 0x083782f8, 0x08378440,
+      0x08378474, 0x0838e42c. Algorithm: get_temp_reg(parse) @
+      0x0837a3bc, call sqlite3ExprCodeTarget(parse, expr, temp_reg) @
+      0x08376ef0, and return that register. When it is the requested
+      temporary, write it to out_temp_reg; otherwise release_temp_reg
+      @ 0x08381f98 returns the unused temporary to the free list, write
+      zero (SQLite's no-register sentinel), then return the generator's
+      register. No NULL guards precede either output store. The expression
+      generator remains unported and uses the existing EXPR_CODE_OPS seam;
+      its default returns temp_reg, so the shipped default takes the retain
+      path. No new dispatch seam was introduced.
+
   # ---- Big-endian byte stores (src/util/beload.rs) ----
   - address: 0x08046b1c
     ghidra: FUN_08046b1c
