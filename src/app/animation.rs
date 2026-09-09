@@ -193,7 +193,7 @@ fn animation_init_ops() -> AnimationInitOps {
 /// pointer (created lazily @ 0x082739a0); host builds model the created
 /// state with a house-static bucket array.
 #[cfg(target_os = "none")]
-fn scheduler_table() -> *mut u8 {
+pub(crate) fn scheduler_table() -> *mut u8 {
     unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *mut u32) as *mut u8 }
 }
 
@@ -201,7 +201,7 @@ fn scheduler_table() -> *mut u8 {
 static mut HOST_SCHEDULER_BUCKETS: [u32; TIMING_WHEEL_BUCKETS] = [0; TIMING_WHEEL_BUCKETS];
 
 #[cfg(not(target_os = "none"))]
-fn scheduler_table() -> *mut u8 {
+pub(crate) fn scheduler_table() -> *mut u8 {
     unsafe { core::ptr::addr_of_mut!(HOST_SCHEDULER_BUCKETS).cast::<u8>() }
 }
 /// timing_wheel_remove — original: `FUN_082738e0` @ 0x082738e0 (96 bytes).
@@ -472,12 +472,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
-
-    /// Serializes swaps of [`ANIMATION_INIT_OPS`] and the shared fixture
-    /// slab across this module's tests.
-    pub(crate) static ANIMATION_INIT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::{
+        note_missing_u32_fixture, try_map_u32_slab, SCHEDULER_TABLE_TEST_LOCK,
+    };
+    use std::sync::{LazyLock, MutexGuard, OnceLock};
 
     /// Restores the ops seam even if a test panics mid-run.
     struct SeamGuard;
@@ -554,7 +552,7 @@ mod tests {
     }
 
     fn take_lock() -> MutexGuard<'static, ()> {
-        ANIMATION_INIT_TEST_LOCK
+        SCHEDULER_TABLE_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }

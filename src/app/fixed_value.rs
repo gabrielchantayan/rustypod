@@ -130,6 +130,38 @@ pub unsafe extern "C" fn refcounted_base_init(this: *mut FixedValue) {
     flags_word.write_volatile(flags_word.read_volatile() & 0x3);
 }
 
+/// `refcounted_base_destroy` — original: `FUN_081384a0` @ 0x081384a0
+/// (40 instruction bytes; the two trailing 32-bit literal-pool words at
+/// 0x081384c8/0x081384cc make its true extent 48 bytes through 0x081384cf).
+///
+/// Binary decoding finds 15 direct, unconditional `bl` call sites and nine
+/// unconditional `b` tail callers; no predicated calls or raw DATA-word
+/// references target this body. It restores the shared refcounted-base
+/// vtable, unlinks `this` from the scheduler timing wheel, and returns
+/// `this`. The remove helper clears only the linked bit at +0x14, so the
+/// refcount/ownership bits survive exactly as in stock.
+///
+/// The scheduler singleton is read from its live global word on target and
+/// from animation's shared host model during tests; that is the only
+/// deliberate host deviation.
+///
+/// # Safety
+///
+/// `this` must identify a live, 4-byte-aligned firmware object with at least
+/// 0x18 writable bytes. When its linked bit is set, its timing-wheel links
+/// and rank must form a valid wheel node; stock has no NULL or bounds checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_base_destroy(this: *mut FixedValue) -> *mut FixedValue {
+    (*this).vtable = REFCOUNTED_BASE_VTABLE;
+    crate::app::animation::timing_wheel_remove(
+        crate::app::animation::scheduler_table().cast(),
+        this.cast(),
+    );
+    this
+}
+
+
 /// fixed_value_init — original: `FUN_081523b8` @ 0x081523b8 (32 bytes).
 ///
 /// Constructs a Q16.16 scalar value object in the caller-allocated
@@ -182,6 +214,8 @@ pub unsafe extern "C" fn fixed_value_default_init(this: *mut FixedValue) -> *mut
 mod tests {
     extern crate std;
     use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, SCHEDULER_TABLE_TEST_LOCK};
+    use std::sync::LazyLock;
     use std::vec::Vec;
 
     /// A scratch object pre-filled with sentinels, so the constructor's
@@ -194,6 +228,16 @@ mod tests {
             opaque: [0x1111_1111, 0x2222_2222],
             flags: 0xffff_ffff,
         }
+    }
+
+    static BASE_DESTROY_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::REFCOUNTED_BASE_DESTROY, 0x1000)
+            .map(|pointer| pointer as usize)
+    });
+
+    fn base_destroy_fixture() -> Option<(*mut FixedValue, *mut FixedValue)> {
+        let base = (*BASE_DESTROY_FIXTURE)? as *mut u8;
+        Some(unsafe { (base.cast(), base.add(0x18).cast()) })
     }
 
     #[test]
@@ -262,6 +306,65 @@ mod tests {
             unsafe { refcounted_base_init(core::ptr::addr_of_mut!(object)) };
             assert_eq!(object.flags, 0, "prior {prior:#x}");
         }
+    }
+
+    #[test]
+    fn base_destroy_leaves_an_unlinked_objects_payload_and_flags_untouched() {
+        let mut object = dirty();
+        object.flags = 0xffff_fffe;
+        let this = core::ptr::addr_of_mut!(object);
+
+        assert_eq!(unsafe { refcounted_base_destroy(this) }, this);
+        assert_eq!(object.vtable, REFCOUNTED_BASE_VTABLE);
+        assert_eq!(object.flags, 0xffff_fffe, "clear linked bit skips the wheel");
+        assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32);
+        assert_eq!(object.aux, 0xcafe_babe);
+        assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    fn base_destroy_restores_vtable_and_unlinks_a_live_wheel_node() {
+        let Some((node, successor)) = base_destroy_fixture() else {
+            assert!(note_missing_u32_fixture("app::fixed_value::refcounted_base_destroy"));
+            return;
+        };
+        let _guard = SCHEDULER_TABLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let table = crate::app::animation::scheduler_table().cast::<u32>();
+        let buckets = unsafe {
+            core::slice::from_raw_parts_mut(table, crate::app::animation::TIMING_WHEEL_BUCKETS)
+        };
+        buckets.fill(0);
+
+        let node_address = node as usize as u32;
+        let successor_address = successor as usize as u32;
+        unsafe {
+            core::ptr::write(node, FixedValue {
+                vtable: 0xdead_beef,
+                value_q16: 0x0bad_f00d_u32 as i32,
+                aux: 1,
+                opaque: [0, successor_address],
+                flags: 0x0000_0007,
+            });
+            core::ptr::write(successor, FixedValue {
+                vtable: 0xfeed_face,
+                value_q16: 0,
+                aux: 0,
+                opaque: [node_address, 0],
+                flags: 0,
+            });
+            *table = node_address;
+        }
+
+        assert_eq!(unsafe { refcounted_base_destroy(node) }, node);
+        assert_eq!(unsafe { (*node).vtable }, REFCOUNTED_BASE_VTABLE);
+        assert_eq!(unsafe { (*node).flags }, 0x0000_0006, "only linked bit clears");
+        assert_eq!(unsafe { *table }, successor_address, "head advances to successor");
+        assert_eq!(unsafe { (*successor).opaque[0] }, 0, "successor prev clears");
+        assert_eq!(unsafe { (*node).value_q16 }, 0x0bad_f00d_u32 as i32);
+        assert_eq!(unsafe { (*node).aux }, 1);
+        assert_eq!(unsafe { (*node).opaque[0] }, 0);
     }
 
     #[test]
