@@ -51051,3 +51051,32 @@ functions:
       Exhaustive host tests cover every packed byte and every selector byte,
       including high-bit aliasing and out-of-range zero results. Deliberate
       deviations: none.
+
+  # --- Lazy Tdat payload allocator ---
+  - address: 0x0803c328
+    ghidra: FUN_0803c328
+    name: ensure_tdat_payload
+    size: 104
+    sig: "u32 ensure_tdat_payload(TdatPayloadOwner *owner)"
+    module: ui/tdat_payload
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_1[0]: element
+      param_1[4]: payload
+      element_plus_0x48: pool
+    notes: >-
+      Raw ARM extent is exactly 104 bytes: push {r4,lr} begins at
+      0x0803c328 and the next independently linked function begins with
+      push {r4-r9,lr} at 0x0803c390. The function returns 1 immediately when
+      payload[0] has bit 0 set. Otherwise it calls the ported
+      ui_element_is_tdat_class at 0x0806aa3c on owner->element. A matching
+      'tdat' element supplies its pool descriptor from +0x48 to unported
+      FUN_0805de1c; its result replaces owner->payload, gets byte 0 set to
+      1, and returns success only if non-NULL. Allocation failure stores and
+      returns 0; a non-'tdat' element leaves the old payload untouched. Call
+      count verified by decoding every ARM B/BL word in osos.dec: 16 direct
+      calls, all unconditional bl and zero predicated forms. Deliberate
+      deviation: dispatches through TDAT_PAYLOAD_OPS to the still-unported
+      0x0805de1c pool allocator, while directly calling the already-ported
+      class predicate; target default calls the original allocator.

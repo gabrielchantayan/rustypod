@@ -175,6 +175,9 @@ pub mod hints {
     // named-attribute table fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const NAMED_ATTRIBUTE_LOOKUP: usize = 0x9e00_0000;
+    // 0x9f00_0000: dedicated to ui/tdat_payload's raw-u32 element, pool,
+    // and payload fixture; mappings never unmap, so no other user may share it.
+    pub const TDAT_PAYLOAD: usize = 0x9f00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
