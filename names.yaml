@@ -19627,6 +19627,47 @@ functions:
       (multiply/range guard, backwards copy loop); its exit-1 mnemonic
       diff is expected.
 
+  - address: 0x083544bc
+    ghidra: FUN_083544bc
+    name: encoded_word_block_sign
+    size: 76
+    sig: "i32 encoded_word_block_sign(const EncodedWordBlock *block)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      DAT_08354508: ENCODED_COUNT_MULTIPLIER (0x0a7e377f)
+      iVar1/r0: is_zero (limb-zero scan result)
+      uVar2/r4: sign
+    notes: >-
+      Sign of an EncodedWordBlock viewed as a signed multi-limb
+      integer: 0 when every decoded limb is zero, +1 when the decoded
+      header count is positive, -1 otherwise. Raw ARM confirms the
+      76-byte instruction body 0x083544bc..0x08354508 followed by its
+      literal-pool multiplier 0x0a7e377f at 0x08354508; the next
+      function's push prologue starts at 0x0835450c, so the full
+      extent is 80 bytes (Ghidra's 76 drops the pool word and
+      mislabels it as the global DAT_08354508). Call count verified by
+      decoding every ARM B/BL word in osos.dec: exactly 12 direct call
+      sites, all unconditional bl, 0 predicated forms; the address
+      occurs in no data word, so it is not dispatched virtually.
+      Algorithm: call the limb-zero scan FUN_082fc770 and return 0 for
+      ANY nonzero answer; otherwise reload the header and return the
+      sign of encoded_count * 0x0a7e377f (signed; a non-positive
+      product maps to -1). The callee FUN_082fc770 @ 0x082fc770
+      (84 bytes, 11 unconditional bl sites, a leaf) is unported and
+      rides a dispatch seam: target builds transmute the retail
+      address, host builds default ENCODED_WORD_BLOCK_IS_ZERO_FN to a
+      faithful model of its decoded algorithm (wrapping-abs decoded
+      count; scan words high-to-low; a word is nonzero iff
+      word * 0x76b4197f != 0, that key being odd hence invertible
+      mod 2^32; a non-positive decoded count, i32::MIN included,
+      returns 1 without reading words). match.py is structurally
+      equivalent (seam call, header reload, multiply, sign select;
+      LLVM's blx-via-pool to 0x082fc770 reaches the same callee and
+      its cmp/mvnlt sign select matches the original's movle/movgt
+      semantics); its exit-1 mnemonic diff is expected.
+
   - address: 0x08322bcc
     ghidra: FUN_08322bcc
     name: copy_encoded_word_block_from
