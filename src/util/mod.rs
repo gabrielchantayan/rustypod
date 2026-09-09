@@ -23,6 +23,7 @@ pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod field_access;
 pub mod four_word_record;
+pub mod four_word_sentinel_init;
 pub mod first_entry_payload;
 pub mod global_state;
 pub mod highest_set_bit;
