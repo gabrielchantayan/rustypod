@@ -42905,6 +42905,30 @@ functions:
       byte is NUL), return packing, and a reference-model sweep;
       match.py structural diff reviewed after the ARM release build.
 
+  # --- proprietary STANDARD cipher: third byte lookup table ---
+  - address: 0x0802de90
+    ghidra: FUN_0802de90
+    name: standard_cipher_table_three_lookup
+    size: 12
+    sig: "u8 standard_cipher_table_three_lookup(u32 index)"
+    module: crypto/standard_cipher_table_three
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0802e0d8: STANDARD_CIPHER_TABLE_THREE
+      DAT_0891f24c: STANDARD_CIPHER_TABLE_THREE
+    notes: >-
+      Raw ARM is exactly ldr r1,[pc,#0x240]; ldrb r0,[r1,r0]; bx lr, loading
+      the literal 0x0891f24c from 0x0802e0d8 and returning the byte at its raw
+      r0 offset. The next function starts at 0x0802de9c, confirming the
+      12-byte extent. A full decoded scan of every B/BL word in osos.dec finds
+      14 callers, all unconditional bl (zero predicated calls): 0x08027e0c,
+      0x08027e4c, 0x08027e90, 0x08027ea0, 0x08027f00, 0x0802804c,
+      0x0802808c, 0x080280d0, 0x080280e0, 0x08028140, 0x0802ae60,
+      0x0802ae70, 0x0802aeb4, and 0x0802aef4. The callers pass byte-range
+      inputs while constructing or applying the proprietary STANDARD cipher's
+      table-driven transforms. No deviations: unchecked Rust indexing retains
+      the original's unguarded valid-byte caller contract.
   # --- proprietary STANDARD cipher: fourth byte lookup table ---
   - address: 0x0802de9c
     ghidra: FUN_0802de9c
