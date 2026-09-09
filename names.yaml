@@ -20859,6 +20859,32 @@ functions:
       .text.refcounted_ptr_construct_variant section prevents LLVM folding
       this separately hookable export into the canonical template instance.
 
+  - address: 0x0839f1b0
+    ghidra: FUN_0839f1b0
+    name: refcounted_ptr_assign_owned
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_assign_owned(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+    notes: >-
+      Raw decoding establishes the exact 48-byte body
+      (0x0839f1b0..0x0839f1e0), followed by a separately linked sibling.
+      Decoding every ARM B/BL word in osos.dec finds 13 direct bl callers,
+      all unconditional (0x0822398c, 0x08223a28, and
+      0x08223df0..0x08223f58 at 0x24-byte strides): no b sites, no
+      predicated forms, and no image word equals the address, so it is never
+      virtually dispatched. It compares SLOT pointers and, when distinct,
+      calls owning release 0x0839d2c0 before loading *src and attaching it
+      through 0x0839d284, returning dst. The attach helper is byte-identical
+      to ported refcounted_body_attach @ 0x0839d370 after normalizing its two
+      branch displacements; that shared port preserves the unconditional
+      store, optional-mutex refcount bump, and wrapping add. The owning
+      release port preserves the old body's final disposal/deletion, so the
+      Rust sequence has the source load after release like the ARM.
+
   - address: 0x0839ed38
     ghidra: FUN_0839ed38
     name: refcounted_ptr_construct
