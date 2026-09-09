@@ -9,6 +9,7 @@ pub mod checked_word_block;
 pub mod checked_byte_block;
 pub mod bswap;
 pub mod context_field;
+pub mod copy_four_words;
 pub mod clock_pair;
 pub mod crc32;
 pub mod crts_object;
