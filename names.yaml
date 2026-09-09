@@ -52832,3 +52832,27 @@ functions:
       Scanning aligned osos.dec words finds no 0x082ab3ec data reference, so
       this is not dispatched virtually. The Rust call cannot guarantee the
       ARM tail-call shape but preserves both observable return paths.
+
+  - address: 0x08248698
+    ghidra: FUN_08248698
+    name: copy_four_words
+    size: 36
+    sig: "u32 copy_four_words(const u32 *source, u32 *destination)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      r2: copied_word
+      r0 (after final ldr): final_word
+    notes: >-
+      Raw ARM is exactly nine instructions at 0x08248698..0x082486b8; the
+      next separately linked function opens at 0x082486bc. It copies four
+      words from source (r0) to destination (r1), preserving each ordered
+      ldr/str pair. The final ldr writes r0, so its observed value is stored
+      at destination+12 and returned; preceding stores can alter that final
+      read for overlapping ranges. Decoding every ARM B/BL word in osos.dec
+      found exactly 14 inbound direct bl sites, all unconditional, with no
+      predicated BL forms or tail branches. The body has no callee or dispatch
+      seam; its only deliberate Rust choice is to expose the otherwise
+      untyped r0 result as u32.
