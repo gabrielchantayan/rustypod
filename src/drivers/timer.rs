@@ -376,6 +376,47 @@ pub unsafe extern "C" fn usec_timer_elapsed_millis(start: u32, milliseconds: u32
     }
 }
 
+/// iram_msec_delay_veneer — original: `thunk_EXT_FUN_22001f38` @
+/// 0x08037df0 (Ghidra reports 4 bytes; the real stub is **8** — the
+/// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037df0 plus the absolute
+/// target word 0x22001f38 at 0x08037df4, binary-decoded).
+///
+/// **16 direct `bl` call sites: 15 unconditional and one `bleq` at
+/// 0x0836e33c; 0 tail `b` call sites**, verified by decoding every ARM
+/// `B`/`BL` word in `work/firmware/osos.dec` for every condition code and
+/// resolving its target. No data word holds 0x08037df0, so this veneer is not
+/// indirectly dispatched.
+///
+/// The IRAM target mirrors the separately linked **64-byte** body at
+/// 0x08001f38..0x08001f78: reject intervals above 0x0041_8937 with return
+/// value 9; otherwise multiply milliseconds by 1,000, capture Timer E's
+/// microsecond counter, and poll [`usec_timer_elapsed`] until that interval
+/// has passed. The zero-duration case still captures once and invokes the
+/// predicate once. The sole predicated call site is caller-side equality
+/// gating, not a NULL guard; the callee takes only the duration.
+///
+/// Deviation: the eight-byte firmware veneer tail-transfers to the unported
+/// mirrored body. This hook symbol embeds that fully decoded body while
+/// calling the already-ported Timer E read and elapsed helpers directly;
+/// this preserves the target's counter-read order, polling, overflow limit,
+/// argument, and result without adding an invented dispatch seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_msec_delay_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_msec_delay_veneer(milliseconds: u32) -> u32 {
+    const MAX_MILLISECONDS: u32 = 0x0041_8937;
+
+    if milliseconds > MAX_MILLISECONDS {
+        return 9;
+    }
+
+    let interval = milliseconds * 1_000;
+    let start = unsafe { usec_timer_read() };
+    while !unsafe { usec_timer_elapsed(start, interval) } {}
+    0
+}
+
+
 /// usec_delay — original: `FUN_08001f78` @ 0x08001f78 (44 bytes).
 /// Reference: `ipod-decomp/decomp/c/000/08001f78_FUN_08001f78.c` and
 /// `ipod-decomp/decomp/osos.asm` @ 0x08001f78..0x08001fa4.
@@ -604,6 +645,33 @@ mod usec_timer_tests {
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
         assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 1_015);
     }
+    /// The IRAM 0x22001f38 target rejects an overflow-prone interval before
+    /// it samples the counter. Valid waits preserve the target's start-read
+    /// plus one-predicate-read-per-poll order, including counter wrap.
+    #[test]
+    fn msec_delay_veneer_validates_and_polls_across_counter_wrap() {
+        let _guard = configure_usec_timer(123, 1_000);
+
+        assert_eq!(unsafe { iram_msec_delay_veneer(0x0041_8938) }, 9);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 0);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 123);
+
+        HOST_USEC_TIMER_COUNT.store(u32::MAX - 999, Ordering::Relaxed);
+        assert_eq!(unsafe { iram_msec_delay_veneer(2) }, 0);
+        // Start, a 1,000-usec failed predicate, then the exact 2,000-usec
+        // predicate after the free-running counter wrapped.
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 2_000);
+    }
+
+    #[test]
+    fn msec_delay_veneer_zero_duration_still_samples_and_polls_once() {
+        let _guard = configure_usec_timer(u32::MAX, 0);
+
+        assert_eq!(unsafe { iram_msec_delay_veneer(0) }, 0);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
+    }
+
 
     /// The IRAM veneer @ 0x08037ef0 must be behaviorally transparent: the
     /// same busy-wait `usec_delay` @ 0x08001f78 runs — one start capture

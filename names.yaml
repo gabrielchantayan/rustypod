@@ -1320,6 +1320,31 @@ functions:
       them (enables clocks). Target uses volatile MMIO; host tests install a
       recording driver-local guard/MMIO seam.
 
+  - address: 0x08037df0
+    ghidra: thunk_EXT_FUN_22001f38
+    name: iram_msec_delay_veneer
+    size: 8
+    sig: "u32 iram_msec_delay_veneer(u32 milliseconds)"
+    module: drivers/timer
+    status: ported
+    renames: {thunk_EXT_FUN_22001f38: iram_msec_delay_veneer,
+      EXT_FUN_22001f38: iram_msec_delay}
+    notes: >-
+      Ghidra's 4-byte extent omits the literal target word: raw osos.dec has
+      ldr pc,[pc,#-4] (0xe51ff004) at 0x08037df0 and 0x22001f38 at
+      0x08037df4; the next thunk starts at 0x08037df8, proving an 8-byte
+      extent. The relocator at 0x080046e0 copies 0xaed8 bytes from
+      0x08000000 to 0x22000000, so the IRAM target is the 64-byte
+      0x08001f38..0x08001f78 millisecond busy-wait: values over
+      0x00418937 return 9 before any timer read; valid values multiply by
+      1000, sample Timer E TECNT, and poll usec_timer_elapsed until done,
+      returning 0. Every ARM B/BL word was decoded: 16 direct bl calls,
+      15 unconditional and one bleq at 0x0836e33c; no tail b and no data
+      word contains 0x08037df0, so the predication is caller-side equality
+      gating, not a callee NULL guard or virtual dispatch. The Rust hook
+      embeds the unported mirrored target body and calls the existing Timer E
+      helpers directly, preserving validation-before-read and poll order.
+
   - address: 0x08037de8
     ghidra: thunk_EXT_FUN_22000318
     name: iram_pwrcon_update_masks_veneer
