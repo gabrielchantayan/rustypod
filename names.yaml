@@ -41513,6 +41513,44 @@ functions:
   # "ssl3-sha1"/"RSA-SHA1" @ 0x0805f574 and "signature has problems,
   # re-make with post SSLeay045" @ 0x08063268; Apple's own arc is
   # "1.3.6.1.4.1.63.42" / "iPod Serial Number" @ 0x080782bc.
+  - address: 0x0805ef18
+    ghidra: FUN_0805ef18
+    name: obj_nid2obj
+    size: 172
+    sig: "ASN1_OBJECT *obj_nid2obj(int nid)"
+    module: crypto/obj_dat
+    vars: {param_1: nid}
+    renames:
+      DAT_0805efbc: NID_OBJS
+      DAT_0805efc0: ADDED_SLOT
+      local_1c: key_nid
+      local_c: key_kind
+      local_8: key_object
+    status: ported
+    notes: >-
+      OpenSSL's OBJ_nid2obj from crypto/objects/obj_dat.c. Raw ARM extent is
+      172 bytes: code 0x0805ef18-0x0805efb8 followed by literal-pool words
+      0x0805efbc (NID_OBJS = 0x08906668) and 0x0805efc0 (ADDED_SLOT =
+      0x08a0c334); Ghidra's 164-byte extent omits both words, and the
+      separately linked next function starts at 0x0805efc4. For unsigned
+      nid < NUM_NID (650), it computes NID_OBJS + nid * sizeof(ASN1_OBJECT)
+      and returns that entry if nid == NID_undef or entry->nid != NID_undef.
+      An unresolved in-range entry records error (8, 0x67, 0x65, 0, 0) and
+      returns NULL without probing added. Out-of-range, including negative,
+      nids probe lh_retrieve(added, { ADDED_NID = 3, &nid }) when added is
+      non-NULL; a hit returns adp->obj, while a miss emits the same error and
+      returns NULL. Identification is corroborated by the adjacent
+      OBJ_obj2nid @ 0x0805f074, shared ASN1_OBJECT nid field at +0x08, shared
+      added slot, and lh_retrieve @ 0x082d7e0c documented in obj_dat.rs.
+      Call sites binary-verified by decoding every ARM B/BL word in
+      osos.dec: exactly 18 plain unconditional bl, ZERO predicated forms and
+      ZERO plain b, so callers rely on this function's internal failure
+      result. Deliberate deviation: the raw body stores nid at sp+0xc but
+      hands the ADDED_NID key an object pointer to uninitialized sp+4; sibling
+      FUN_0805ee68 repeats this sequence. Rust passes &nid per OpenSSL source
+      rather than reproduce undefined stack contents. Device NID_OBJS remains
+      the original absolute array; host tests install an inline fixture.
+
   - address: 0x0805f074
     ghidra: FUN_0805f074
     name: obj_obj2nid
