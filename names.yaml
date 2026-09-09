@@ -14509,6 +14509,61 @@ functions:
       `FUN_08122220`, `FUN_081225f0`, `FUN_08087554`, `FUN_081b111c`) plus the
       indirect callback slot at `DAT_08037f34`. Verified call count: 21 `bl`
       sites.
+  - address: 0x081de270
+    ghidra: FUN_081de270
+    name: event_code_queue_post
+    size: 40
+    sig: "void event_code_queue_post(EventCodeQueue *this, u32 code)"
+    module: app/event_code_queue
+    status: ported
+    renames:
+      param_1: this
+      param_2: code
+      FUN_0807f5c4: mutex_lock (direct, ported in kernel/sync_mutex)
+      FUN_0807f6a0: mutex_unlock (direct, ported in kernel/sync_mutex)
+      FUN_083dfeb8: queue push (EVENT_CODE_QUEUE_HOOKS.enqueue slot)
+    notes: >-
+      Exact 40-byte extent 0x081de270..0x081de298 - the base-class ctor
+      opens `push {r4, r5, r6, r7, r8, lr}` at 0x081de298 and there is
+      no literal pool, so Ghidra's 40 is right for once. 16 bl-form
+      call sites verified by decoding every B/BL word in osos.dec: 11
+      plain bl, 1 blne and 4 bleq (0x081a565c, 0x81a5680, 0x081a5844,
+      0x081a5bfc, 0x081a7184); the predicated sites gate on the
+      caller's own incoming-event kind/payload compares, never on
+      queue state - the callee has no guards. No tail b sites, and a
+      full data-word scan finds no reference to the address: never
+      virtually dispatched.
+      A method of the deferred event-code queue base class (base ctor
+      0x081de298, vtable 0x0898e9b0), derived into registry class
+      0x8c00 (singleton_class_8c00 @ 0x081a5500, ported in
+      app/singletons) through intermediate ctor 0x08143efc. The body:
+      push {r0, r1, r4, lr} makes a stack copy of `code` at sp+4,
+      mutex_lock(&this->mutex_34), queue_push_u32(&this->queue_08,
+      &code) @ 0x083dfeb8, mutex_unlock, pop discards the scratch
+      slots. Void - r0 ends as mutex_unlock's result and no caller
+      reads it. Observed codes: 0, 6, 7, 8, 0xb, 0xd, 0x14..0x17,
+      0x1a, 0x1b; the push has exactly two callers image-wide (this
+      method and the ctor's bulk-seed helper 0x083ea558), so this is
+      the class's sole runtime enqueue point.
+      Layout (target): vtable +0, pad +4, queue container +8..+0x30
+      (count word at container+0x20 per the ported container_is_empty
+      family), word +0x30, Mutex +0x34; base size 0x3c - the derived
+      ctor @ 0x08143efc starts its own fields at +0x3c
+      (binary-verified).
+      Deviations - the push @ 0x083dfeb8 is unported (an ADS STL
+      push_back with a grow path through 0x083df988 / operator_new),
+      so it rides EVENT_CODE_QUEUE_HOOKS.enqueue; the default stub
+      drops the code (inert, NOT hook-ready until the container family
+      is ported). mutex_lock/unlock are called directly (the
+      kernel/mutex_handoff precedent), so LLVM may inline their
+      ROM-dispatch guards. Host tests prove the enqueue is bracketed
+      by wait/signal on the mutex handle and receives the container
+      base plus the exact code, that a NULL cell or zero handle still
+      enqueues without touching the ROM, and that the default enqueue
+      leaves the container untouched. match.py structural: same
+      three-call shape with the mutex address held in a callee-saved
+      register; the diff is the crate fp prologue and a `blx` through
+      the hook table standing in for `bl 0x083dfeb8`.
   - address: 0x081ded14
     ghidra: FUN_081ded14
     name: lazy_singleton_0x28

@@ -26,6 +26,7 @@ pub mod demo_mode_datetime;
 pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod element_registry;
+pub mod event_code_queue;
 pub mod event_hub;
 pub mod event_list;
 pub mod event_source;
