@@ -30521,6 +30521,63 @@ functions:
       original relies on the base constructor preserving r0) - the
       accepted house deviations.
 
+  - address: 0x08067b4c
+    ghidra: FUN_08067b4c
+    name: tdat_element_set_flag_20_bit_2
+    size: 108
+    sig: "u32 tdat_element_set_flag_20_bit_2(u8 *element, u32 value)"
+    module: ui/tdat_flag_20_bit_2
+    status: ported
+    vars:
+      param_1/r0/r4: element
+      param_2/r1/r2: value
+      DAT_08067bb4: ENABLE_NOTIFY_TAG
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_0806aa64: tdat_refcount_release (seam, unported)
+      FUN_0806aaac: tdat_refcount_addref (seam, unported)
+      FUN_08066bb8: tdat_tagged_list_notify (seam, unported)
+    notes: >-
+      Setter for bit 2 of the 'tdat' UI-element flag byte at +0x20 with
+      refcount coupling. Ghidra's 172-byte extent is wrong: the true
+      extent is 108 bytes (0x08067b4c..0x08067bb8, including the
+      literal-pool word 0x74646472 @ 0x08067bb4); the next function, a
+      two-field setter (str r1,[r0,#0x4c]; str r2,[r0,#0x50]; bx lr),
+      starts at 0x08067bb8. Algorithm: run the ported 'tdat' class
+      predicate ui_element_is_tdat_class (0x0806aa3c); on success load
+      the flag byte at +0x20 and return it unchanged when value exactly
+      equals its bit 2 (cmp r2, r1 lsr #31 after lsl r1, r0, #29 - an
+      exact u32 compare against 0/1, not a mask test). Otherwise store
+      (flags & ~4) | ((value << 2) & 4) back to +0x20 - only bit 0 of
+      value reaches the byte, all other bits of the old byte survive.
+      value == 0 tail-branches to the refcount release @ 0x0806aa64
+      (halfword at element+0x40, fires the virtual handler at +0x4c
+      with key 0x7464726c 'tdrl' on reaching zero) and returns its
+      result; nonzero value calls the addref @ 0x0806aaac (result
+      discarded), then walks the tagged-handler list at element+0x54
+      via 0x08066bb8 with event key 0x74646472, the element as context
+      and zeroed flags/stack args, returning the walker's result. NO
+      NULL guard of its own: when the class check fails (NULL included)
+      the flag store still happens with the old byte treated as 0.
+      Call count verified by decoding every B/BL word in osos.dec: 14
+      bl (12 unconditional, 2 blne @ 0x0805d3c8 and 0x0806ce10) plus 3
+      predicated tail branches (bne @ 0x0805d338, bne @ 0x0805d360,
+      beq @ 0x0805d390, all passing value 1) - the predicated sites
+      gate the call on their own state, consistent with the missing
+      NULL guard. Deliberate deviation: the three callees 0x0806aa64,
+      0x0806aaac and 0x08066bb8 are unported, so they dispatch through
+      the TDAT_FLAG_20_OPS seam (target defaults transmute the stock
+      addresses); the ported class predicate is called directly. Host
+      tests (8) prove the early-return/no-side-effect paths, bit
+      preservation, non-tdat zero-based store, exact-compare semantics
+      for value 3 (proceeds, sets bit) and value 2 (proceeds, clears
+      bit, takes the addref path), and the exact notify argument tuple
+      (element+0x54, 0x74646472, element, 0, 0). match.py --lib
+      <worktree archive> --size 108: same class-check/bl, byte
+      load/bit-2 extract/compare, mask-store, value==0 split and
+      notify-tail structure; deltas are the crate fp frame, the
+      seam-static ldrd/blx indirection, and LLVM's and/lsr lowering of
+      the bit extract vs ADS lsl #29/lsr #31.
+
   - address: 0x08067ca4
     ghidra: FUN_08067ca4
     name: inner_set_state
