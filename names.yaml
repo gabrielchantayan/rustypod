@@ -46271,6 +46271,38 @@ functions:
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
 
+  - address: 0x0827288c
+    ghidra: FUN_0827288c
+    name: bitfield_test
+    size: 28
+    sig: "u32 bitfield_test(const u32 *const *word_handle, u32 bit)"
+    module: util/bitfield
+    status: ported
+    vars: {param_1: word_handle, param_2: bit}
+    notes: >-
+      (**word_handle & (1 << bit)) ? 1 : 0 - a single-bit test of a
+      word reached through a handle (callers pass &local where local
+      holds the word address; two ldr derefs), same convention as its
+      sibling bitfield_extract. Raw bytes decoded: e5900000 e3a02001
+      e5900000 e1a01112 e0110000 13a00001 e12fff1e - 28 bytes exact,
+      bx lr at +0x18, sibling FUN_082728a8 opens at 0x082728a8 (extent
+      confirmed by adjacency, not Ghidra). Call sites verified by
+      decoding every B/BL word in osos.dec: exactly 17, all plain
+      unconditional bl, zero predicated, all from the packed-config
+      decoder FUN_08188b8c @ 0x08188b8c (0x08188d90-0x08189008), which
+      stores each 0/1 result byte into the same struct bitfield_extract
+      fills - the decoder uses bitfield_test for one-bit fields and
+      bitfield_extract for multi-bit ones. The mask shift is by
+      register (mov r1, r2, lsl r1), so ARM register-shift rules apply
+      to the bit index (amount = bottom byte, 32..=255 yields mask 0,
+      256 wraps to bit 0), replicated via berec::arm_lsl. The ands /
+      movne pair normalises the result to exactly 0 or 1, so returning
+      u32::from(bool) is exact. Deliberate deviations: none. match.py
+      (exit 1, diff expected): same double-ldr + mask-build + ands +
+      movne core; LLVM renders the shift-amount clamp explicitly
+      (and #255, cmp #31, movhi #0) exactly as it does for the sibling,
+      plus the crate-wide fp frame.
+
   - address: 0x082728a8
     ghidra: FUN_082728a8
     name: bitfield_extract
@@ -46294,8 +46326,8 @@ functions:
       rules apply (amount = bottom byte, 32..=255 yields 0), replicated
       via berec::arm_lsl/arm_lsr: width 32 makes the mask all-ones,
       lo >= 32 returns 0. Sibling FUN_0827288c @ 0x0827288c (28 bytes)
-      is the same handle convention as a single-bit test - a separate
-      port. Deliberate deviations: none. match.py (exit 1, diff
+      is the same handle convention as a single-bit test, ported as
+      bitfield_test in this same module. Deliberate deviations: none. match.py (exit 1, diff
       expected): same double-ldr + lsr + mask-build + and core; LLVM
       renders the >=32 clamps as cmp/bhi and bicls, exactly as it does
       for the already-ported berec_extract_bits.
