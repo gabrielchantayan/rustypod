@@ -36178,6 +36178,36 @@ functions:
       round-trips through the returned pointer, and NULL and an
       unaligned record both pass straight through.
 
+  - address: 0x08264214
+    ghidra: FUN_08264214
+    name: draw_state_move_to
+    size: 8
+    sig: "void draw_state_move_to(u8 *draw_state, i32 x, i32 y)"
+    module: cxx/draw_state_line
+    status: ported
+    renames:
+      param_1/r0: draw_state (the 0x44-byte scoped draw-state record)
+      param_2/r1: x (local current-point horizontal coordinate)
+      param_3/r2: y (local current-point vertical coordinate)
+    notes: >-
+      Whole function binary-verified: 0x08264214 begins `stm r0,{r1,r2}`
+      and the next function begins at 0x0826421c with `ldm r1,{r2,r3}`;
+      Ghidra's 8-byte extent has no swallowed literal pool or sibling.
+      Raw ARM is then `bx lr`: it replaces the scoped draw-state record's
+      consecutive current-point words +0/+4 with local x/y, without
+      drawing, coordinate translation, or validation. This is the
+      `move_to` sibling of draw_state_line_to @ 0x082641a4: the latter
+      reads these words as its starting point, draws, then overwrites them
+      with its endpoint. Every direct B/BL word in osos.dec was decoded:
+      12 direct bl call sites, all unconditional, zero predicated forms,
+      and zero tail b calls (sites 0x080906fc, 0x081285c8, 0x08128608,
+      0x08140f6c, 0x08143238, 0x08148c48, 0x081b3278, 0x081ca6b8,
+      0x0820de20, 0x08285f30, 0x08285f64, 0x08290c18). No deliberate
+      deviations. Host tests prove signed-extreme full-width writes, both
+      coordinates overwritten across consecutive calls, and all remaining
+      record and guard bytes untouched. match.py structural review is run
+      against draw_state_move_to; the expected diff is the crate frame
+      around the two stores and return.
   - address: 0x0826412c
     ghidra: FUN_0826412c
     name: draw_state_line
