@@ -51292,3 +51292,35 @@ functions:
       deviation: the existing kernel semaphore ports preserve the unconditional
       lock-release order; the already-established raw I2C target/host seam
       uses indirect blx calls in place of retail direct bl calls.
+
+  # --- Encoded word block signed-shift dispatcher ---
+  - address: 0x08342d70
+    ghidra: FUN_08342d70
+    name: encoded_word_block_shift
+    size: 52
+    sig: "u32 encoded_word_block_shift(EncodedWordBlock *block, i32 signed_distance)"
+    module: util/encoded_word_block_shift
+    status: ported
+    renames:
+      param_1/r0: block
+      param_2/r1: signed_distance
+      iVar1/r0: magnitude
+      FUN_08322c48: encoded_word_block_shift_right
+      FUN_08341910: encoded_word_block_shift_left
+    notes: >-
+      Raw ARM confirms the exact 52-byte extent 0x08342d70..0x08342da4:
+      `movs r2,r1` tests signed_distance, zero sets r0 to 0 and returns
+      without dereferencing block, a non-negative distance tail-branches to
+      0x08322c48 with r0 unchanged, and a negative distance uses `rsb r0,r2,#0`
+      before tail-branching to 0x08341910. The independently linked next
+      function starts with `push {r0,r4-r11,lr}` at 0x08342da4, so there is no
+      literal pool. Disassembly of both branch targets identifies 0x08322c48
+      as the encoded-word-block right shift and 0x08341910 as its left-shift
+      sibling; neither target has an existing port ledger entry. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly 15 direct inbound calls, all
+      unconditional bl (0 predicated), and no tail-b callers; the address
+      occurs in no aligned image word, so it is not a known virtual-dispatch
+      target. i32::MIN retains the ARM wrapping-negation magnitude
+      0x80000000. Deliberate deviation: none on target; release codegen
+      restores its frame and tail-branches through the selected fixed entry.
+      Host builds replace the address with a volatile callback seam.
