@@ -22816,6 +22816,37 @@ functions:
       vs fall-through return 0; LLVM renders the loop as a countdown
       with post-increment pointer walk in place of ADS' index form.
 
+  - address: 0x08376b48
+    ghidra: FUN_08376b48
+    name: expr_cache_affinity_change
+    size: 64
+    sig: "void expr_cache_affinity_change(Parse *parse, int first_reg, int count)"
+    module: sqlite/expr_cache_affinity_change
+    status: ported
+    renames:
+      param_1: parse
+      param_2: first_reg
+      param_3: count
+      iVar1: i
+      iVar2: i_reg
+      iVar3: record
+    notes: >-
+      SQLite 3.5.9's sqlite3ExprCacheAffinityChange (expr.c). Ghidra
+      reports 68 bytes, but raw osos.dec words at 0x08376b48..0x08376b88
+      end with pop {r4,pc}; the independent next entry starts at
+      0x08376b8c, so the verified extent is 64 bytes. 15 unconditional
+      bl call sites, no predicated bl or tail b sites (binary-scanned):
+      0x082c3a30, 0x082c3c7c, 0x082c3c8c, 0x082d0428, 0x082d0504,
+      0x08368b34, 0x08368c38, 0x08373460, 0x083736b0, 0x0837768c,
+      0x083777dc, 0x08379c20, 0x0837a028, 0x08385da8, 0x0839628c.
+      Algorithm: calculate last_reg as first_reg + count - 1 with ARM
+      wrapping arithmetic; load nColCache once from Parse +0x58; for
+      every 16-byte aColCache record at +0x60, set its affChange byte at
+      +0x08 to one when its iReg word at +0x0c lies in the inclusive
+      signed range [first_reg,last_reg]. No NULL guard exists. No
+      deliberate deviations: count zero and integer overflow preserve
+      the original wrapped endpoint semantics.
+
   - address: 0x08376bf4
     ghidra: FUN_08376bf4
     name: expr_code
