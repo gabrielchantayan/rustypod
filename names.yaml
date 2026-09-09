@@ -6863,6 +6863,26 @@ functions:
       resets — equivalent on the 32-bit layout, portable on wider
       hosts).
 
+  - address: 0x0803f350
+    ghidra: FUN_0803f350
+    name: memzero_20_aligned
+    size: 8
+    sig: "void *memzero_20_aligned(void *dst) -> dst + 20"
+    module: libc/memzero
+    status: ported
+    renames:
+      r0: dst
+      r1: byte_count_20
+    notes: >-
+      Raw extent is exactly 0x0803f350..0x0803f358: `mov r1, #20; b
+      0x08037db8`. The branch tail-dispatches through the ported
+      iram_memzero_aligned_veneer to the 0x2200027c IRAM mirror of
+      memzero_aligned. Binary decoding finds 18 direct BL call sites, all
+      unconditional. The underlying ADS block fill advances r0, so this
+      port clears five aligned words and returns dst + 20; it deliberately
+      does not inherit the public memzero_aligned port's dst-return
+      compatibility deviation.
+
   - address: 0x080304a0
     ghidra: FUN_080304a0
     name: stdio_init
