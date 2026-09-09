@@ -42859,6 +42859,30 @@ functions:
       byte is NUL), return packing, and a reference-model sweep;
       match.py structural diff reviewed after the ARM release build.
 
+  # --- proprietary STANDARD cipher: fifth byte lookup table ---
+  - address: 0x0802dea8
+    ghidra: FUN_0802dea8
+    name: standard_cipher_table_five_lookup
+    size: 12
+    sig: "u8 standard_cipher_table_five_lookup(u32 index)"
+    module: crypto/standard_cipher_table_five
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0802e0e0: STANDARD_CIPHER_TABLE_FIVE
+      DAT_0891f44c: STANDARD_CIPHER_TABLE_FIVE
+    notes: >-
+      12-byte leaf (0x0802dea8..0x0802deb4): ldr r1,[pc,#0x230];
+      ldrb r0,[r1,r0]; bx lr. The literal pool word at 0x0802e0e0 is
+      0x0891f44c, the fifth 256-byte table of the proprietary STANDARD
+      cipher. It reads that table at raw r0 without a bounds or NULL guard.
+      Every decoded ARM B/BL instruction in osos.dec finds exactly 14
+      callers, all unconditional bl: 0x08027e18, 0x08027e58, 0x08027e6c,
+      0x08027eac, 0x08027f0c, 0x08028058, 0x08028098, 0x080280ac,
+      0x080280ec, 0x0802814c, 0x0802ae54, 0x0802ae94, 0x0802aea8, and
+      0x0802aee8. Their index values are bytes. No deviations: the
+      unchecked Rust array access retains the valid-byte caller contract.
+
   # --- proprietary STANDARD cipher: sixth byte lookup table ---
   - address: 0x0802deb4
     ghidra: FUN_0802deb4
