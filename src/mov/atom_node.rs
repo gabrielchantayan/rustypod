@@ -192,6 +192,33 @@ pub unsafe extern "C" fn mov_atom_node_new(fourcc: u32) -> *mut MovAtomNode {
     unsafe { atom_node_init(block.cast(), fourcc) }
 }
 
+/// MOV atom node link reset — original: `FUN_0814d2e0` @ 0x0814d2e0
+/// (20 bytes, 0x0814d2e0..0x0814d2f4, 5 instructions, no literal pool).
+/// The next function starts at 0x0814d2f4. All 17 direct call sites are
+/// unconditional `bl` instructions (none predicated), verified by decoding
+/// every ARM B/BL word in osos.dec; no aligned data word references it.
+///
+/// Clears the MOV atom node's duplicate-chain, child-A, and child-B links in
+/// that exact store order (+0x08, +0x00, +0x04), preserving every other node
+/// field. The stock `bx lr` leaves r0 unchanged; unlike Ghidra's `void`
+/// signature, this port returns `node` to preserve that observed ABI result.
+/// No NULL guard is added: the original's first store faults for NULL.
+///
+/// # Safety
+///
+/// `node` must point to one writable [`MovAtomNode`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_clear_links")]
+pub unsafe extern "C" fn mov_atom_node_clear_links(node: *mut MovAtomNode) -> *mut MovAtomNode {
+    unsafe {
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).dup_chain), 0);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).child_a), 0);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).child_b), 0);
+    }
+    node
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -264,5 +291,32 @@ mod tests {
                 assert_eq!(node, block.cast::<MovAtomNode>());
             }
         }
+    }
+    #[test]
+    fn clears_only_atom_node_links_and_returns_node() {
+        let mut node = MovAtomNode {
+            child_a: 0x1111_1111,
+            child_b: 0x2222_2222,
+            dup_chain: 0x3333_3333,
+            unused_0c: 0x4444_4444,
+            offset_lo: 0x5555_5555,
+            offset_hi: 0x6666_6666,
+            size_lo: 0x7777_7777,
+            size_hi: 0x8888_8888,
+            flag: 0x99,
+            kind: 0xaa,
+            pad_22: [0xbb, 0xcc],
+            fourcc: 0xdddd_dddd,
+        };
+        let node_ptr = core::ptr::addr_of_mut!(node);
+
+        let result = unsafe { mov_atom_node_clear_links(node_ptr) };
+
+        assert_eq!(result, node_ptr, "r0 remains the input node");
+        assert_eq!((node.child_a, node.child_b, node.dup_chain), (0, 0, 0));
+        assert_eq!(node.unused_0c, 0x4444_4444);
+        assert_eq!((node.offset_lo, node.offset_hi), (0x5555_5555, 0x6666_6666));
+        assert_eq!((node.size_lo, node.size_hi), (0x7777_7777, 0x8888_8888));
+        assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0x99, 0xaa, [0xbb, 0xcc], 0xdddd_dddd));
     }
 }
