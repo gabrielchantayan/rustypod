@@ -37,3 +37,4 @@ pub mod cipher_name;
 pub mod digest_init;
 pub mod evp_digest_update;
 pub mod obj_dat;
+pub mod xor_f6_in_place;
