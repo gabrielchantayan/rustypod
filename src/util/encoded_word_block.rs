@@ -31,6 +31,11 @@ pub struct EncodedWordBlock {
 const ENCODED_COUNT_MULTIPLIER: i32 = 0x0a7e_377f;
 const MAX_DECODED_WORD_COUNT: i32 = 28;
 
+// Producer-side keys (inverses modulo 2^32 of the reader-side keys):
+// 0xed99887f * 0x0a7e377f == 1 and 0xd561a67f * 0x76b4197f == 1 (mod 2^32).
+const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
+const ENCODED_WORD_MULTIPLIER: u32 = 0xd561_a67f;
+
 /// A one-word firmware header for an encoded-count word block with INLINE
 /// storage: the word payload follows the header immediately at offset +4,
 /// so the block occupies `4 + 4 * decoded_count` contiguous bytes.
@@ -145,6 +150,69 @@ pub unsafe extern "C" fn copy_encoded_word_block_from(
         }
     }
 
+    0
+}
+
+/// Initializes an encoded-count word block from a plain signed 32-bit
+/// integer: the producer half of the [`EncodedWordBlock`] family. Always
+/// returns 0.
+///
+/// Original: `FUN_083555f8` @ 0x083555f8 (116-byte instruction body
+/// 0x083555f8..0x0835566c, trailing literal-pool words `0xd561a67f` at
+/// 0x0835566c and `0xed99887f` at 0x08355670; the next function's
+/// `stmdb sp!, {...}` prologue starts at 0x08355674, so the full extent
+/// is 124 bytes. Ghidra reports 116 and mislabels both pool words as the
+/// globals `DAT_0835566c`/`DAT_08355670`; they are constants, referenced
+/// from nowhere else. A complete B/BL decode of osos.dec finds exactly
+/// 17 direct call sites, all unconditional `bl` (no predicated forms);
+/// the address occurs in no data word, so it is not dispatched
+/// virtually).
+///
+/// Algorithm: take the wrapping absolute value of `value`, then emit it
+/// as base-2^32 limbs from low to high: each stored word is
+/// `limb * 0xd561a67f` (mod 2^32). The header is then set to
+/// `signed_limb_count * 0xed99887f`, the count negated when `value` was
+/// negative. `0xed99887f` is the multiplicative inverse of
+/// [`ENCODED_COUNT_MULTIPLIER`] modulo 2^32, and `0x76b4197f` (seen in
+/// reader literal pools, e.g. at 0x082eafa0) inverts `0xd561a67f`, so a
+/// block written here decodes back to `value` through the family's
+/// readers. Word stores precede the header store, as in the original.
+///
+/// The limb loop is `while high != 0 || limb != 0 { store; limb = high;
+/// high = 0; }` with `high = limb >> 31` (arithmetic), so every value in
+/// `-2^31 < value < 2^31` emits exactly one limb (zero emits none), but
+/// `i32::MIN` — whose wrapping absolute value stays `0x80000000` —
+/// shifts out a `-1` high part and emits TWO limbs,
+/// `[0x80000000 * key, 0xffffffff * key]` with count -2. That is a
+/// faithful quirk of the original, not a general multi-limb conversion.
+///
+/// Deliberate deviation: none.
+///
+/// # Safety
+/// `destination` must point to a writable [`EncodedWordBlock`] whose
+/// `words` array has room for the emitted limbs: 0 words for `value == 0`,
+/// 1 word otherwise, and 2 words for `i32::MIN`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn encoded_word_block_set_int(
+    value: i32,
+    destination: *mut EncodedWordBlock,
+) -> u32 {
+    let mut limb = if value < 0 { value.wrapping_neg() } else { value };
+    let mut high = limb >> 31;
+    let mut count: i32 = 0;
+    while high != 0 || limb != 0 {
+        *(*destination).words.add(count as usize) =
+            (limb as u32).wrapping_mul(ENCODED_WORD_MULTIPLIER);
+        count += 1;
+        limb = high;
+        high = 0;
+    }
+    if value < 0 {
+        count = count.wrapping_neg();
+    }
+    (*destination).encoded_count =
+        (count as u32).wrapping_mul(ENCODED_COUNT_INVERSE) as i32;
     0
 }
 
@@ -299,11 +367,14 @@ mod tests {
 
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_from, copy_inline_encoded_word_block,
-        inline_encoded_word_block_compare, EncodedWordBlock, InlineEncodedWordBlock,
+        encoded_word_block_set_int, inline_encoded_word_block_compare, EncodedWordBlock,
+        InlineEncodedWordBlock,
     };
 
 
     const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
+    const ENCODED_WORD_MULTIPLIER: u32 = 0xd561_a67f;
+    const ENCODED_WORD_INVERSE: u32 = 0x76b4_197f;
     const INLINE_ENCODED_COUNT_INVERSE: u32 = 0xda8e_bbff;
 
     fn encoded_count(decoded_count: i32) -> i32 {
@@ -564,6 +635,87 @@ mod tests {
 
         unsafe { copy_inline_encoded_word_block(destination, source) };
         assert_eq!(words, [encoded, 0xaa, 0xbb, 0xaa, 0xbb, 0xcc]);
+    }
+
+    #[test]
+    fn set_int_zero_writes_header_only() {
+        let mut words = [0xdead_beef; 2];
+        let mut block = EncodedWordBlock {
+            encoded_count: encoded_count(5),
+            words: words.as_mut_ptr(),
+        };
+
+        assert_eq!(unsafe { encoded_word_block_set_int(0, &mut block) }, 0);
+        assert_eq!(block.encoded_count, 0);
+        assert_eq!(words, [0xdead_beef; 2]);
+    }
+
+    #[test]
+    fn set_int_stores_single_wrapped_limb_and_signed_count() {
+        for value in [1, 7, 0x1234_5678, i32::MAX, -1, -7, i32::MAX.wrapping_neg()] {
+            let mut words = [0xdead_beef; 2];
+            let mut block = EncodedWordBlock {
+                encoded_count: 0,
+                words: words.as_mut_ptr(),
+            };
+
+            assert_eq!(unsafe { encoded_word_block_set_int(value, &mut block) }, 0);
+            let magnitude = (value as i64).unsigned_abs() as u32;
+            assert_eq!(words[0], magnitude.wrapping_mul(ENCODED_WORD_MULTIPLIER));
+            // Readers invert both keys modulo 2^32 and recover the value.
+            assert_eq!(words[0].wrapping_mul(ENCODED_WORD_INVERSE), magnitude);
+            let decoded_count = block
+                .encoded_count
+                .wrapping_mul(super::ENCODED_COUNT_MULTIPLIER);
+            assert_eq!(decoded_count, if value < 0 { -1 } else { 1 });
+            assert_eq!(words[1], 0xdead_beef);
+        }
+    }
+
+    #[test]
+    fn set_int_min_emits_two_limbs_from_wrapping_negation() {
+        // i32::MIN's wrapping absolute value stays 0x80000000, so the
+        // arithmetic `>> 31` yields -1 and the original's loop emits a
+        // second limb: [0x80000000 * key, 0xffffffff * key], count -2.
+        let mut words = [0xdead_beef; 3];
+        let mut block = EncodedWordBlock {
+            encoded_count: 0,
+            words: words.as_mut_ptr(),
+        };
+
+        assert_eq!(unsafe { encoded_word_block_set_int(i32::MIN, &mut block) }, 0);
+        assert_eq!(words[0], 0x8000_0000u32.wrapping_mul(ENCODED_WORD_MULTIPLIER));
+        assert_eq!(words[1], 0xffff_ffffu32.wrapping_mul(ENCODED_WORD_MULTIPLIER));
+        let decoded_count = block
+            .encoded_count
+            .wrapping_mul(super::ENCODED_COUNT_MULTIPLIER);
+        assert_eq!(decoded_count, -2);
+        assert_eq!(words[2], 0xdead_beef);
+    }
+
+    #[test]
+    fn set_int_result_decodes_through_copy_reader() {
+        // A block produced here must round-trip through the family's
+        // copy reader: same header, same words, count accepted (<= 28).
+        let mut produced_words = [0; 2];
+        let mut produced = EncodedWordBlock {
+            encoded_count: 0,
+            words: produced_words.as_mut_ptr(),
+        };
+        unsafe { encoded_word_block_set_int(-0x0bad_f00d, &mut produced) };
+
+        let mut copied_words = [0; 2];
+        let mut copied = EncodedWordBlock {
+            encoded_count: 0,
+            words: copied_words.as_mut_ptr(),
+        };
+        assert_eq!(unsafe { copy_encoded_word_block(&mut copied, &produced) }, 0);
+        assert_eq!(copied.encoded_count, produced.encoded_count);
+        assert_eq!(copied_words[0], produced_words[0]);
+        assert_eq!(
+            copied_words[0].wrapping_mul(ENCODED_WORD_INVERSE),
+            0x0bad_f00d
+        );
     }
 
 }
