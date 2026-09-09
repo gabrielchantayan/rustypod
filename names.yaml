@@ -7535,6 +7535,31 @@ functions:
       .pool_init stub until ported. match.py structural (identical size
       math/tag/degrade branch; hook-table ldrd noise).
 
+  - address: 0x0807a0c8
+    ghidra: FUN_0807a0c8
+    name: utf8_next_codepoint_permissive
+    size: 116
+    sig: "u32 utf8_next_codepoint_permissive(const u8 **cursor)"
+    module: util/utf8_next_codepoint_permissive
+    status: ported
+    renames:
+      param_1/r0: cursor
+      pbVar1/r0: sequence
+      uVar2/r0: lead
+      uVar3/r2: second_byte
+    notes: >-
+      Raw ARM is 29 instructions at 0x0807a0c8..0x0807a13c, followed by the
+      distinct 0x0807a13c entry; it is byte-identical to the decoder at
+      0x08276214. It advances the cursor by one for ASCII, two for a
+      0b110xxxxx lead, and three for a 0b1110xxxx lead, masking continuation
+      payload bits without validation. All other high-bit leads, including
+      4-byte UTF-8, advance by three and return zero. The binary scan finds
+      17 direct BL call sites: 14 plain BL plus BLCC at 0x08263010,
+      0x08263cec, and 0x0826400c. The separate target-only text section
+      prevents LLVM from folding this independently hookable copy into the
+      byte-identical 0x08276214 port. Host tests cover NUL/ASCII, malformed
+      two- and three-byte continuation payloads, and invalid/four-byte leads.
+
   - address: 0x0809eab8
     ghidra: FUN_0809eab8
     name: queue_pool_init
