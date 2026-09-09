@@ -34,10 +34,13 @@
 //! [`bn_num_bits`] ports the `BIGNUM` bit-length query from bn_lib.c
 //! (the 0x0803d800..0x08041000 bignum cluster: `d`/`top`/`dmax`/`neg`/
 //! `flags` layout, RSA-1024 `== 0x400` caller in the X.509 chain walk).
+//! [`bn_ucmp`] ports its unsigned magnitude comparison from the same
+//! file.
 pub mod bio_printf;
 pub mod bio_snprintf;
 pub mod bio_ctrl;
 pub mod bn_num_bits;
+pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
 pub mod evp_digest_update;
