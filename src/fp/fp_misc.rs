@@ -1883,6 +1883,127 @@ pub unsafe extern "C" fn plist_node_ctor(
     node
 }
 
+/// Unported direct-copy callee `FUN_0825c61c`.
+pub type PlistNodeChildCopyFn =
+    unsafe extern "C" fn(*mut PlistNode, *const PlistNode) -> *mut PlistNode;
+
+/// Unported capacity-growth callee `FUN_083e32ac`.
+pub type PlistNodeChildVectorGrowFn = unsafe extern "C" fn(
+    *mut PlistNodeChildVector,
+    *mut PlistNode,
+    *const PlistNode,
+) -> *mut PlistNode;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_plist_node_child_copy(
+    destination: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    let copy: PlistNodeChildCopyFn = unsafe { core::mem::transmute(0x0825_c61cusize) };
+    unsafe { copy(destination, source) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_plist_node_child_copy(
+    _destination: *mut PlistNode,
+    _source: *const PlistNode,
+) -> *mut PlistNode {
+    panic!("plist_node_child_vector_push_back requires child copy constructor 0x0825c61c")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_plist_node_child_vector_grow(
+    vector: *mut PlistNodeChildVector,
+    position: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    let grow: PlistNodeChildVectorGrowFn = unsafe { core::mem::transmute(0x083e_32acusize) };
+    unsafe { grow(vector, position, source) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_plist_node_child_vector_grow(
+    _vector: *mut PlistNodeChildVector,
+    _position: *mut PlistNode,
+    _source: *const PlistNode,
+) -> *mut PlistNode {
+    panic!("plist_node_child_vector_push_back requires growth helper 0x083e32ac")
+}
+
+/// Operations provided by the two unported direct callees of
+/// [`plist_node_child_vector_push_back`].
+#[derive(Clone, Copy)]
+pub struct PlistNodeChildVectorPushBackOps {
+    pub copy: PlistNodeChildCopyFn,
+    pub grow: PlistNodeChildVectorGrowFn,
+}
+
+#[cfg(target_os = "none")]
+pub static mut PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS: PlistNodeChildVectorPushBackOps =
+    PlistNodeChildVectorPushBackOps {
+        copy: firmware_plist_node_child_copy,
+        grow: firmware_plist_node_child_vector_grow,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS: PlistNodeChildVectorPushBackOps =
+    PlistNodeChildVectorPushBackOps {
+        copy: missing_plist_node_child_copy,
+        grow: missing_plist_node_child_vector_grow,
+    };
+
+#[inline(always)]
+unsafe fn plist_node_child_vector_push_back_ops() -> PlistNodeChildVectorPushBackOps {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS
+        ))
+    }
+}
+
+/// plist_node_child_vector_push_back — original: `FUN_0825c1a0` @
+/// 0x0825c1a0 (48 bytes).
+///
+/// Raw bytes are exactly twelve ARM instructions at 0x0825c1a0..0x0825c1cc;
+/// the separately linked `FUN_0825c1d0` begins immediately afterward. A
+/// complete ARM B/BL-word decode of `osos.dec` finds 14 incoming `bl` sites,
+/// all unconditional (0x08272ca0, 0x08272d30, 0x08272e78/84, 0x08272f08/78/88,
+/// 0x08273178, 0x082731e4, and 0x082732bc/0x08273330/a4/b0/bc); there are no
+/// predicated incoming calls or incoming tail branches.
+///
+/// Appends `source` to `owner.children`. With spare capacity it advances
+/// `end` by one 0x28-byte node, then tail-dispatches the node copy constructor
+/// for the old end (or returns NULL if that old pointer was NULL). At capacity
+/// it tail-dispatches the vector growth/insert helper with the child-vector
+/// address, old end, and source, preserving that helper's return register.
+///
+/// Deliberate deviation: `FUN_0825c61c` and `FUN_083e32ac` have no `ported`
+/// ledger entries, so target builds reach their verified retailOS addresses
+/// through a volatile operation table; host tests install recording bodies.
+/// `wrapping_add(1)` is the same 0x28-byte ARM pointer advance while keeping
+/// the firmware's otherwise-invalid NULL-vector state testable on the host.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_child_vector_push_back(
+    owner: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    let children = unsafe { &mut (*owner).children };
+    let destination = children.end;
+    let ops = unsafe { plist_node_child_vector_push_back_ops() };
+
+    if destination == children.capacity {
+        return unsafe { (ops.grow)(children, destination, source) };
+    }
+
+    children.end = destination.wrapping_add(1);
+    if destination.is_null() {
+        destination
+    } else {
+        unsafe { (ops.copy)(destination, source) }
+    }
+}
+
 #[cfg(test)]
 #[repr(C)]
 struct PlistNodeCtorStringStorage {
@@ -5656,6 +5777,171 @@ mod tests {
             query_object_destroy_port(query);
             assert_eq!(*core::ptr::addr_of!(QUERY_DESTROY_EVENTS), Vec::from(["inner", "tail"]));
             assert!(QUERY_DESTROY_INNER.is_null(), "mode two does not add a NULL guard");
+        }
+    }
+
+    // ---- plist_node_child_vector_push_back ----
+
+    static PLIST_NODE_CHILD_PUSH_BACK_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut PLIST_NODE_CHILD_COPY_CALL: Option<(*mut PlistNode, *const PlistNode)> = None;
+    static mut PLIST_NODE_CHILD_COPY_END: *mut PlistNode = core::ptr::null_mut();
+    static mut PLIST_NODE_CHILD_PUSH_BACK_OWNER: *mut PlistNode = core::ptr::null_mut();
+    static mut PLIST_NODE_CHILD_GROW_CALL:
+        Option<(*mut PlistNodeChildVector, *mut PlistNode, *const PlistNode)> = None;
+
+    unsafe extern "C" fn record_plist_node_child_copy(
+        destination: *mut PlistNode,
+        source: *const PlistNode,
+    ) -> *mut PlistNode {
+        PLIST_NODE_CHILD_COPY_CALL = Some((destination, source));
+        PLIST_NODE_CHILD_COPY_END = (*PLIST_NODE_CHILD_PUSH_BACK_OWNER).children.end;
+        destination
+    }
+
+    unsafe extern "C" fn record_plist_node_child_grow(
+        vector: *mut PlistNodeChildVector,
+        position: *mut PlistNode,
+        source: *const PlistNode,
+    ) -> *mut PlistNode {
+        PLIST_NODE_CHILD_GROW_CALL = Some((vector, position, source));
+        source as *mut PlistNode
+    }
+
+    struct PlistNodeChildPushBackMock {
+        previous: PlistNodeChildVectorPushBackOps,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PlistNodeChildPushBackMock {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS)
+                    .write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_plist_node_child_push_back_mock(
+        owner: *mut PlistNode,
+    ) -> PlistNodeChildPushBackMock {
+        let lock = PLIST_NODE_CHILD_PUSH_BACK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            PLIST_NODE_CHILD_COPY_CALL = None;
+            PLIST_NODE_CHILD_COPY_END = core::ptr::null_mut();
+            PLIST_NODE_CHILD_PUSH_BACK_OWNER = owner;
+            PLIST_NODE_CHILD_GROW_CALL = None;
+            let previous = core::ptr::addr_of!(PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS).read_volatile();
+            core::ptr::addr_of_mut!(PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS).write_volatile(
+                PlistNodeChildVectorPushBackOps {
+                    copy: record_plist_node_child_copy,
+                    grow: record_plist_node_child_grow,
+                },
+            );
+            PlistNodeChildPushBackMock { previous, _lock: lock }
+        }
+    }
+
+    fn empty_plist_node_for_child_push() -> PlistNode {
+        PlistNode {
+            tag: core::ptr::null_mut(),
+            attributes: PlistNodeAttributeVector {
+                begin: core::ptr::null_mut(),
+                end: core::ptr::null_mut(),
+                capacity: core::ptr::null_mut(),
+            },
+            value: core::ptr::null_mut(),
+            children: PlistNodeChildVector {
+                begin: core::ptr::null_mut(),
+                end: core::ptr::null_mut(),
+                capacity: core::ptr::null_mut(),
+            },
+            companion: core::ptr::null_mut(),
+            kind: 0,
+        }
+    }
+
+    #[test]
+    fn plist_node_child_vector_push_back_advances_end_before_copying() {
+        let mut slots = [
+            empty_plist_node_for_child_push(),
+            empty_plist_node_for_child_push(),
+        ];
+        let slot = slots.as_mut_ptr();
+        let mut owner = empty_plist_node_for_child_push();
+        owner.children = PlistNodeChildVector {
+            begin: slot,
+            end: slot,
+            capacity: unsafe { slot.add(2) },
+        };
+        let source = empty_plist_node_for_child_push();
+        let _mock = install_plist_node_child_push_back_mock(&mut owner);
+
+        assert_eq!(
+            unsafe { plist_node_child_vector_push_back(&mut owner, &source) },
+            slot
+        );
+        unsafe {
+            let Some((copy_destination, copy_source)) = PLIST_NODE_CHILD_COPY_CALL else {
+                panic!("spare-capacity path must invoke the copy constructor");
+            };
+            assert_eq!(copy_destination, slot);
+            assert_eq!(copy_source, core::ptr::addr_of!(source));
+            assert_eq!(PLIST_NODE_CHILD_COPY_END, slot.add(1));
+            assert_eq!(owner.children.begin, slot, "push leaves begin intact");
+            assert_eq!(owner.children.end, slot.add(1));
+            assert_eq!(owner.children.capacity, slot.add(2), "push leaves capacity intact");
+            assert_eq!(PLIST_NODE_CHILD_GROW_CALL, None, "spare capacity skips growth");
+        }
+    }
+
+    #[test]
+    fn plist_node_child_vector_push_back_delegates_full_vector_growth() {
+        let mut slots = [
+            empty_plist_node_for_child_push(),
+            empty_plist_node_for_child_push(),
+        ];
+        let slot = slots.as_mut_ptr();
+        let end = unsafe { slot.add(1) };
+        let mut owner = empty_plist_node_for_child_push();
+        owner.children = PlistNodeChildVector {
+            begin: slot,
+            end,
+            capacity: end,
+        };
+        let source = empty_plist_node_for_child_push();
+        let _mock = install_plist_node_child_push_back_mock(&mut owner);
+
+        assert_eq!(
+            unsafe { plist_node_child_vector_push_back(&mut owner, &source) },
+            &source as *const PlistNode as *mut PlistNode,
+            "growth helper's r0 return propagates unchanged"
+        );
+        unsafe {
+            let Some((grow_vector, grow_position, grow_source)) = PLIST_NODE_CHILD_GROW_CALL else {
+                panic!("full-vector path must invoke the growth helper");
+            };
+            assert_eq!(grow_vector, core::ptr::addr_of_mut!(owner.children));
+            assert_eq!(grow_position, end);
+            assert_eq!(grow_source, core::ptr::addr_of!(source));
+            assert_eq!(PLIST_NODE_CHILD_COPY_CALL, None, "full vector does not copy directly");
+            assert_eq!(owner.children.end, end, "growth helper owns all vector mutation");
+        }
+    }
+
+    #[test]
+    fn plist_node_child_vector_push_back_preserves_null_end_edge_case() {
+        let mut owner = empty_plist_node_for_child_push();
+        owner.children.capacity = core::ptr::NonNull::<PlistNode>::dangling().as_ptr();
+        let source = empty_plist_node_for_child_push();
+        let _mock = install_plist_node_child_push_back_mock(&mut owner);
+
+        assert!(unsafe { plist_node_child_vector_push_back(&mut owner, &source) }.is_null());
+        unsafe {
+            assert_eq!(owner.children.end, core::ptr::null_mut::<PlistNode>().wrapping_add(1));
+            assert_eq!(PLIST_NODE_CHILD_COPY_CALL, None);
+            assert_eq!(PLIST_NODE_CHILD_GROW_CALL, None);
         }
     }
 }
