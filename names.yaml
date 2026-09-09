@@ -4190,6 +4190,26 @@ functions:
       0x083de4f0, 0x083de504, and 0x083eada4. Ghidra's 18-call count is
       exact.
 
+  - address: 0x083da344
+    ghidra: FUN_083da344
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Alias of the existing deque_seg_capacity Rust export: raw ARM is
+      `mov r0, #0x20; bx lr`, returning 0x20 elements per deque segment.
+      Decoding every ARM B/BL word in osos.dec finds exactly 13
+      unconditional plain bl call sites and no predicated calls:
+      0x08215784, 0x08215798, 0x082157a0, 0x082157dc, 0x082157ec,
+      0x083da394, 0x083df308, 0x083df3a8, 0x083df404, 0x083df428,
+      0x083df43c, 0x083df450, and 0x083df4f0. This is one of the 17
+      byte-identical deque-template copies, so the canonical export
+      deliberately serves it directly rather than adding an
+      indistinguishable second Rust body.
+
   - address: 0x083d9eec
     ghidra: FUN_083d9eec
     name: deque_iter_init
