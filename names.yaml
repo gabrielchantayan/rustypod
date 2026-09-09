@@ -49806,3 +49806,34 @@ functions:
       test records the base constructor, nested array construction, resource
       resolve, both timers, empty-string clear, derived array ABI, returned
       this, copied words, the underflow clamp, and untouched padding.
+
+  - address: 0x0814d2e0
+    ghidra: FUN_0814d2e0
+    name: mov_atom_node_clear_links
+    size: 20
+    sig: "MovAtomNode *mov_atom_node_clear_links(MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_1_plus_0x00: child_a
+      param_1_plus_0x04: child_b
+      param_1_plus_0x08: dup_chain
+    notes: >-
+      Raw ARM establishes the exact 20-byte extent
+      0x0814d2e0..0x0814d2f4: mov r1,#0; str r1,[r0,#8];
+      str r1,[r0]; str r1,[r0,#4]; bx lr. The separately linked next
+      function begins at 0x0814d2f4. Decoding every ARM B/BL word in
+      osos.dec finds 17 direct call sites, all unconditional plain bl:
+      0x080c60a8, 0x08121168, 0x08121194, 0x081e6038, 0x081e6040,
+      0x081e6074, 0x081e607c, 0x0820c740..0x0820c760, and
+      0x0820c7bc..0x0820c7dc; there are zero predicated BL forms.
+      The leaf clears only a MOV atom node's duplicate-fourcc chain,
+      child-A, and child-B link fields in that store order, preserving
+      offset, size, kind, flag, and fourcc. The low-level code leaves r0
+      unchanged on return, despite Ghidra inferring void; the Rust export
+      returns node to preserve this ABI-visible result used by
+      FUN_080c6080 after its recursive child teardown. No null guard:
+      stock faults on the first store. No aligned data word in osos.dec
+      holds 0x0814d2e0. Host test poisons every field, proves all three
+      links clear, all other fields survive, and the input pointer returns.
