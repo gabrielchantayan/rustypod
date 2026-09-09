@@ -262,6 +262,10 @@ pub mod hints {
     // source/destination storage fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const OBSERVABLE_ARRAY_COPY_CONSTRUCT: usize = 0xf000_0000;
+    // 0xf100_0000: dedicated to app/iap_packet_event_schedule's raw-u32
+    // active-context, packet, owner and pending-node fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const IAP_PACKET_EVENT_SCHEDULE: usize = 0xf100_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -404,6 +408,16 @@ pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// recording enqueues into that one mutable global, so a module-private
 /// lock would race teardown across modules.
 pub static EVENT_CODE_QUEUE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes tests that replace the active service-handler context slot at
+/// 0x089ccb5c. The readiness gate and iAP packet event scheduler share it.
+pub static ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
+/// Serializes tests that replace `app::pending_event_insert`'s shared ops
+/// table. The queue port and packet-event caller both install host models.
+pub static PENDING_EVENT_INSERT_OPS_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
 
 /// Serializes host tests that mutate the shared timing-wheel bucket array
 /// behind `app::animation::scheduler_table`. The animation and refcounted

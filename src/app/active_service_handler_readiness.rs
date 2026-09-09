@@ -55,6 +55,20 @@ unsafe fn active_service_handler_context() -> *const ActiveServiceHandlerContext
     }
 }
 
+/// Raw pointer to the runtime-selected context slot shared by the service
+/// readiness gate and iAP event scheduler.
+#[inline(always)]
+pub(crate) unsafe fn active_service_handler_context_raw() -> *mut u8 {
+    active_service_handler_context().cast_mut().cast()
+}
+
+#[cfg(all(test, not(target_os = "none")))]
+pub(crate) unsafe fn replace_active_service_handler_context(context: *mut u8) -> *mut u8 {
+    let previous = HOST_ACTIVE_SERVICE_HANDLER_CONTEXT;
+    HOST_ACTIVE_SERVICE_HANDLER_CONTEXT = context.cast();
+    previous.cast_mut().cast()
+}
+
 /// active_service_handler_is_ready — original: `FUN_081946ec` @ 0x081946ec
 /// (76 bytes including its trailing literal; 14 direct unconditional `bl`
 /// call sites).
@@ -99,6 +113,7 @@ mod tests {
         SERVICE_HANDLER_AVAILABILITY_OPS_LOCK,
     };
     use crate::app::service_manager::SERVICE_MANAGER_INSTANCE;
+    use crate::testing::ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK;
 
     static mut EXPECTED_MANAGER: *mut u8 = ptr::null_mut();
     static mut EXPECTED_SELECTOR: u32 = 0;
@@ -138,6 +153,7 @@ mod tests {
     #[test]
     fn missing_context_handler_or_high_selector_short_circuits() {
         let _guard = SERVICE_HANDLER_AVAILABILITY_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _context_guard = ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut manager = [0u32; 1];
         let mut context = ActiveServiceHandlerContext {
             _before_active_handler: [0; 0x2d0 / 4],
@@ -168,6 +184,7 @@ mod tests {
     #[test]
     fn delegates_valid_and_negative_selectors_then_normalizes_result() {
         let _guard = SERVICE_HANDLER_AVAILABILITY_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _context_guard = ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut manager = [0u32; 1];
         let mut context = ActiveServiceHandlerContext {
             _before_active_handler: [0; 0x2d0 / 4],

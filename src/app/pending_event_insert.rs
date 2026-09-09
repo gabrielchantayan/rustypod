@@ -278,7 +278,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, PENDING_EVENT_INSERT_OPS_TEST_LOCK,
+    };
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -325,6 +327,7 @@ mod tests {
 
     struct Bench {
         _lock: MutexGuard<'static, ()>,
+        _ops_lock: MutexGuard<'static, ()>,
         previous_ops: PendingEventInsertOps,
         slab: *mut u8,
     }
@@ -432,6 +435,7 @@ mod tests {
     }
 
     fn bench() -> Option<Bench> {
+        let ops_lock = PENDING_EVENT_INSERT_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let slab = unsafe { slab() };
         if slab.is_null() {
@@ -451,6 +455,7 @@ mod tests {
         Some(Bench {
             _lock: lock,
             previous_ops,
+            _ops_lock: ops_lock,
             slab,
         })
     }
