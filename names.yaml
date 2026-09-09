@@ -43329,6 +43329,49 @@ functions:
       limb select, and i*32 add correspond one-to-one; the diff is
       the seam's indirect call and LLVM's shrink-wrapped frame.
       #[inline(never)] for the 22 `bl` targets.
+  - address: 0x08040ddc
+    ghidra: FUN_08040ddc
+    name: bn_ucmp
+    size: 88
+    sig: "int bn_ucmp(const BigNum *a, const BigNum *b)"
+    module: crypto/bn_ucmp
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      OpenSSL's `BN_ucmp` from crypto/bn/bn_lib.c, verbatim minus the
+      compiled-out bn_check_top asserts - same SSLeay-era libcrypto
+      bignum cluster as bn_num_bits (0x0803d800..0x08041000, BIGNUM
+      d/top/dmax/neg/flags layout). Body decoded from the raw image:
+      22 words, no literal pool, and the next entry @ 0x08040e34 is a
+      separately linked function with its own push {r3-r9, lr}
+      prologue and callers, so Ghidra's 88-byte extent is exactly
+      right. Algorithm: if a->top - b->top != 0 return the RAW signed
+      difference (not a normalized sign - e.g. 5 or -3); otherwise
+      scan limbs i = top - 1 down to 0, and at the first wa != wb
+      return +1/-1 by UNSIGNED comparison (mvnls/movhi), else 0.
+      Magnitude only: the neg word @ +0x0c is never read (that is the
+      `u` in BN_ucmp; BN_cmp @ 0x08040d68 handles signs first). The
+      most-significant-first scan means the highest differing limb
+      decides and lower limbs are never read; equal tops <= 0 return
+      0 without dereferencing d. Call count binary-verified by
+      decoding every B/BL word in osos.dec: exactly 15 sites, ALL
+      unconditional `bl` (cond 0xe) - no caller NULL-guards or
+      flag-gates the compare, and none is needed (no NULL check
+      exists). No DATA word in the image holds 0x08040ddc, so it is
+      never dispatched virtually. Deviations: none beyond wrapping_*
+      index arithmetic (same single sub on target; a bogus negative
+      top cannot trip host overflow checks). Host tests: raw signed
+      top difference both directions, both-zero-top equality with
+      NULL limb buffers, most-significant-difference precedence,
+      least-significant-limb scan to index 0, unsigned limb semantics
+      (0x80000000 > 0x7fffffff), identical bignums equal, and 500
+      deterministic xorshift cases against a textbook reference.
+      match.py structural - the early-out, descending scan and
+      mvn/movhi -1/+1 correspond one-to-one; the diff is LLVM's
+      shrink-wrapped frame and rotated loop. #[inline(never)] for the
+      15 `bl` targets.
   # --- display object: the six-layer compositor root ---
   - address: 0x081d892c
     ghidra: FUN_081d892c
