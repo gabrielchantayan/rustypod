@@ -47577,6 +47577,50 @@ functions:
       blx through a literal slot. Reference C:
       decomp/c/004/08057874_FUN_08057874.c.
 
+  - address: 0x0805e79c
+    ghidra: FUN_0805e79c
+    name: stream_seek
+    size: 64
+    sig: "i32 stream_seek(StreamObject **stream, i32 offset)"
+    module: util/stream_seek
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: offset
+      iVar1/r0: status
+      pcVar2/r1: seek
+    notes: >-
+      Absolute seek wrapper over the same double-dereferenced stream handle
+      family as the ported stream_read_be32 @ 0x08057874: the read core @
+      0x0805e754 dispatches vtable slot +0x10, this wrapper dispatches slot
+      +0x14, and the tell wrapper @ 0x0805e6d0 dispatches slot +0x1c (all
+      return -5 on a NULL handle). Algorithm: if the handle is NULL return
+      -5; else load object = *handle, sign-extend the 32-bit offset into
+      r2:r3 (asr #31), and blx vtable slot +0x14 with (object, position);
+      return 0 when the slot reports 0, else -5 (mvn r0, #4) -- the
+      underlying status is discarded. The r1 word at the blx is leftover
+      scratch (the loaded slot pointer), not a real argument; the s64
+      position rides in r2:r3 per AAPCS even-pair rules. Raw extent
+      verified: the next function opens with push {r4-r8, lr} at
+      0x0805e7dc, exactly after this function's pop {ip, pc}, so Ghidra's
+      64-byte size is correct; the mov r3,#0 / str r3,[sp] pair is a dead
+      store whose slot is only re-popped into ip. Decoding every B/BL word
+      in osos.dec finds exactly 15 direct call sites, all plain
+      unconditional bl and zero predicated forms -- the wrapper's own NULL
+      guard is the only guard, so callers never check first. Callers in
+      the 0x080570cc-0x08057874 record-walking cluster seek with
+      tell(stream) + delta idioms; FUN_080a69cc rewinds with offset 0.
+      Deliberate deviations: the dead store is not reproduced; the host
+      vtable model widens structurally on 64-bit hosts while the filler
+      keeps slot +0x14 at its target byte offset on device; the slot
+      target is runtime vtable data dispatched through the object's own
+      vtable, so no dispatch seam is needed (app/class_8900.rs precedent).
+      match.py (exit 1, diff expected): same NULL check, double deref,
+      sign extension, slot +0x14 load, blx, and 0/-5 normalization; LLVM
+      folds the branches into predicated mvneq/bxeq/mvnne and adds the
+      crate-wide fp frame. Reference C:
+      decomp/c/004/0805e79c_FUN_0805e79c.c.
+
   - address: 0x0839179c
     ghidra: FUN_0839179c
     name: sqlite3_value_text

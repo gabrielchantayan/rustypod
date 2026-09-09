@@ -44,6 +44,7 @@ pub mod state_flags;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
 pub mod stream_read_be32_or_zero;
+pub mod stream_seek;
 pub mod string_pool;
 pub mod startup_relocation_offset;
 pub mod str_fold_upper;
