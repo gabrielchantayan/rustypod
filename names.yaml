@@ -5328,6 +5328,36 @@ functions:
     status: ported
     notes: Nesting high-water, outermost -> frame->TCB, scheduler tail.
 
+  - address: 0x081669dc
+    ghidra: FUN_081669dc
+    name: irq_binding_attach_enable
+    size: 24
+    sig: "void irq_binding_attach_enable(IrqBinding *binding, Option<IrqHandler> handler)"
+    module: kernel/irq_binding
+    status: ported
+    renames:
+      param_1: binding
+      param_2: handler
+    notes: >-
+      Verified extent 0x081669dc..0x081669f4 (24 bytes); Ghidra reports 28
+      by absorbing the `push {r4,lr}` of the next sibling FUN_081669f4.
+      Front door of the IrqBinding family (8-byte POD: u8 irq @ +0, handler
+      word @ +4; ctor 0x08166a2c, set 0x081669bc, enable 0x08166a14,
+      disable 0x081669a4, unbind 0x081669f4, empty dtor 0x08166a3c).
+      Attaches `handler` to `binding->irq` in the IRAM dispatch table
+      0x22010200 (bl FUN_081669bc) then unmasks the source in the VIC
+      INTENABLE (tail b FUN_08166a14). Ghidra's C drops the r1 handler
+      argument entirely. Binary scan: 15 unconditional bl call sites, zero
+      predicated forms; callers pass the handler from a literal-pool word
+      (e.g. driver init 0x08058388 builds ten bindings for irqs 8, 0x15,
+      0x21, 3, 2, 1, 0, 0x10, 0x11, 0x18). Both callees unported, so they
+      ride the IRQ_BINDING_ATTACH_OPS read_volatile seam (animation.rs
+      precedent): target defaults transmute 0x081669bc/0x08166a14
+      (hook-ready), host defaults inert. No NULL guard, no irq-range guard
+      at this level (table helpers ignore >= 64). match.py: structural
+      diff only from the seam indirection (ldrd/blx vs bl); LLVM kept the
+      enable as a tail call.
+
   - address: 0x08037db0
     name: rom_thunk_table
     size: 1264

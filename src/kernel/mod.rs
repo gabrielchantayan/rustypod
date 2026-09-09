@@ -7,6 +7,7 @@ pub mod gateway_request;
 pub mod gateway_signal;
 pub mod gateway_request_blocking;
 pub mod irq;
+pub mod irq_binding;
 pub mod kobj;
 pub mod mqueue;
 pub mod os_heap;
