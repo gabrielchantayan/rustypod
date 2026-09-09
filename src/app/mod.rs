@@ -68,6 +68,7 @@ pub mod no_content_layout_default;
 pub mod object_byte_at_5;
 pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
+pub mod opaque_collection_item_count;
 pub mod object_dispatch_target;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;

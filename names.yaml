@@ -56049,3 +56049,35 @@ functions:
       C-ABI input/output behavior; no deliberate deviations. Host tests
       cover every u8 input plus u32::MAX, including the sign-extended -1
       representation passed by byte-field callers.
+
+  # --- opaque collection item-count accessor ---
+  - address: 0x08299d78
+    ghidra: FUN_08299d78
+    name: opaque_collection_item_count
+    size: 8
+    sig: "u32 opaque_collection_item_count(const void *collection)"
+    module: app/opaque_collection_item_count
+    status: ported
+    renames:
+      param_1/r0: collection
+      "collection+0x8": item_count
+    notes: >-
+      True raw extent is exactly 8 bytes, 0x08299d78..0x08299d80: `ldr
+      r0,[r0,#8]; bx lr`; the next function starts at 0x08299d80. It returns
+      the aligned raw u32 at collection+8, with no NULL guard, validation, or
+      writes. Decoding every ARM B/BL immediate in osos.dec found exactly 12
+      incoming plain unconditional bl calls, at 0x08126c84, 0x08127be8,
+      0x08127d00, 0x08127d48, 0x08127d78, 0x08127f50, 0x08299728,
+      0x08299974, 0x082999a0, 0x082999b4, 0x082999f0, and 0x08299a98; no
+      predicated bl calls. There is also one non-call tail `bne` at
+      0x082996f8, following an owner+0xbc NULL check, and no literal
+      data-word reference to 0x08299d78. Direct callers use the value as a
+      count, including item-loop bounds, while sibling indexed accessors
+      operate on the same opaque object; its concrete class is not recovered.
+      No deliberate behavioral deviation: the port retains the aligned word load and no
+      NULL guard. Its private .text section prevents LLVM from folding this
+      tiny body onto an identical accessor. Host tests cover ordinary, zero,
+      high-bit, and u32::MAX values and prove no object word is written.
+      match.py structural (exit 1, diff expected): the common ldr r0,[r0,#8]
+      remains, with the crate-wide frame-pointer push/mov/pop replacing bx
+      lr.
