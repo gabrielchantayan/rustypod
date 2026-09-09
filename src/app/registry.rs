@@ -67,6 +67,7 @@
 //! | 0x08187ad0 | [`demo_mode_keyed_object`] | 20 | 29 `bl` |
 //! | 0x081883fc | [`demo_mode_instance`] | 28 | 328 `bl` |
 //! | 0x08172124 | [`instance_of_class_6000`] | 24 | 72 `bl` |
+//! | 0x08171ff8 | [`instance_6000_settings_block`] | 8 | 13 `bl` |
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
 //! | 0x0812f0a4 | [`instance_of_class_4e00`] | 24 | 7 `bl` |
 //! | 0x081353e8 | [`instance_of_class_8f00`] | 24 | 2 `bl` |
@@ -710,6 +711,47 @@ pub unsafe extern "C" fn demo_mode_keyed_object(
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn instance_of_class_6000() -> *mut u8 {
     instance_of_class(0x6000)
+}
+
+/// instance_6000_settings_block — original: `FUN_08171ff8` @ 0x08171ff8
+/// (8 bytes; **13 `bl` call sites**, binary-scanned over osos.dec — all
+/// unconditional, no predicated forms, no tail `b`, no data-word
+/// references). Ghidra's 8-byte extent is exact: the word @ 0x08172000
+/// is a lone `bx lr` (an empty C++ destructor) and the next function
+/// starts @ 0x08172004. Ghidra's osos.asm listing of this whole page is
+/// misaligned garbage (`add r0,r0,#0x60` for the entry, `blx r1` for
+/// 0x0817a8bc); the raw bytes above are the truth.
+///
+/// ```text
+/// add r0, r0, #0x60
+/// bx  lr
+/// ```
+///
+/// Returns a pointer to the settings block embedded at +0x60 of the
+/// class-0x6000 singleton. The one non-view caller @ 0x08163148 feeds
+/// [`instance_of_class_6000`]'s result straight in; the twelve
+/// settings-view callers @ 0x081ebe80..0x081ede24 reach the same object
+/// through their context's +0x378 field (`ldr r0, [r5, #0x378]; bl
+/// 0x08171ff8`).
+///
+/// The block is at least 0x11 bytes: seven signed enum bytes at
+/// +0x00..=+0x06 (the setter @ 0x081edddc writes the -2/-1 sentinels),
+/// a `u64` at +0x08, and a byte at +0x10 (default 25 = 0x19). The
+/// sibling @ 0x0817209c mirrors every one of them into the media-player
+/// state object through the set-then-notify family
+/// 0x08067738..0x08067850 (the repeat/shuffle cluster), so the block is
+/// the playback-preferences record; the individual enum meanings stay
+/// with whichever port recovers them.
+///
+/// No NULL guard, matching the original: a NULL `instance` yields
+/// 0x00000060 (the caller @ 0x08163148 passes
+/// [`instance_of_class_6000`]'s possibly-NULL result through unguarded
+/// and faults on the subsequent `ldrb [r0, #1]`, exactly as stock
+/// does). `wrapping_add` keeps that arithmetic UB-free on the host.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_6000_settings_block(instance: *mut u8) -> *mut u8 {
+    instance.wrapping_add(0x60)
 }
 
 /// instance_of_class_6600 — original: `FUN_08100b74` @ 0x08100b74
@@ -1860,5 +1902,40 @@ mod tests {
 
         unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(second), STOCK_KEY) };
         assert_eq!(unsafe { KEYED_ARGS }.0, ptr::addr_of_mut!(second) as usize);
+    }
+
+    // ---- instance_6000_settings_block ----
+
+    #[test]
+    fn settings_block_is_the_object_plus_0x60() {
+        // Canary-framed object: the accessor must return this + 0x60
+        // without reading or writing a single byte of the object.
+        let mut object = [0xa5_u8; 0x80];
+        let base = ptr::addr_of_mut!(object).cast::<u8>();
+        let block = unsafe { instance_6000_settings_block(base) };
+        assert_eq!(block as usize, base as usize + 0x60);
+        assert!(object.iter().all(|&b| b == 0xa5), "pure arithmetic, no memory touched");
+    }
+
+    #[test]
+    fn settings_block_of_null_is_0x60_without_faulting() {
+        // The original is an unguarded `add r0, r0, #0x60`: a NULL
+        // singleton (never registered) yields 0x60 and the CALLER faults
+        // on the field read, not the accessor.
+        let block = unsafe { instance_6000_settings_block(ptr::null_mut()) };
+        assert_eq!(block as usize, 0x60);
+    }
+
+    #[test]
+    fn settings_block_preserves_unaligned_addresses() {
+        // No alignment fixup, no masking: byte-exact `this + 0x60` for
+        // every low-two-bits combination.
+        let mut object = [0_u8; 0x84];
+        let base = ptr::addr_of_mut!(object).cast::<u8>();
+        for misalign in 0..4_usize {
+            let this = unsafe { base.add(misalign) };
+            let block = unsafe { instance_6000_settings_block(this) };
+            assert_eq!(block as usize, this as usize + 0x60);
+        }
     }
 }

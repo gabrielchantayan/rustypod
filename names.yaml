@@ -13341,6 +13341,42 @@ functions:
       unidentified (their ctors never name themselves to the factory).
       Ghidra renders the tail veneer as a recovered-jumptable warning.
 
+  - address: 0x08171ff8
+    ghidra: FUN_08171ff8
+    name: instance_6000_settings_block
+    size: 8
+    sig: "u8 *instance_6000_settings_block(u8 *instance)"
+    module: app/registry
+    status: ported
+    renames:
+      param_1/r0: instance
+    notes: >-
+      `add r0, r0, #0x60; bx lr` - returns a pointer to the settings
+      block embedded at +0x60 of the class-0x6000 singleton (the object
+      instance_of_class_6000 resolves; the caller @ 0x08163148 feeds
+      that accessor's result straight in, the twelve settings-view
+      callers @ 0x081ebe80..0x081ede24 reach the same object through
+      their context's +0x378 field). 13 bl call sites, binary-scanned
+      over osos.dec - all unconditional, no predicated forms, no tail b,
+      no data-word references (not virtually dispatched). Ghidra's
+      8-byte extent is exact: the word @ 0x08172000 is a lone `bx lr`
+      (an empty C++ destructor) and the next function starts @
+      0x08172004. Ghidra's osos.asm listing of this page is misaligned
+      garbage (entry rendered as `add r0,r0,#0x60` against a wrong
+      label, 0x0817a8bc as `blx r1`); the raw bytes are the truth. The
+      block is at least 0x11 bytes: seven signed enum bytes at
+      +0x00..=+0x06 (the setter @ 0x081edddc writes the -2/-1
+      sentinels), a u64 at +0x08 and a byte at +0x10 (default 25 =
+      0x19); the sibling @ 0x0817209c mirrors all of them into the
+      media-player state object via the set-then-notify family
+      0x08067738..0x08067850 (the repeat/shuffle cluster), so the block
+      is the playback-preferences record. No NULL guard, matching the
+      original: a NULL instance yields 0x60 and the caller faults on the
+      field read, as stock does (port uses wrapping_add so host arithmetic
+      stays UB-free). match.py: the core `add r0, r0, #0x60` matches;
+      LLVM adds the frame-pointer push/pop every tiny port in this crate
+      shows (observable_set_changed precedent).
+
   - address: 0x08172124
     ghidra: FUN_08172124
     name: instance_of_class_6000
