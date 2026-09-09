@@ -338,6 +338,11 @@ pub static CPP_ARRAY_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new
 /// 0x080496f0) will share it, so they must hold this lock rather than
 /// each keeping a private one.
 pub static DIAG_RING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that swaps
+/// `kernel::diag_ring_strings::DIAG_RING_STRING_OPS`. The varargs string
+/// joiner owns this seam today; future callers must reuse this lock so their
+/// restoration cannot race its tests.
+pub static DIAG_RING_STRING_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// Serializes every host test that swaps `app::view_event::VIEW_EVENT_OPS`.
 /// The view-event epilogue and `app::view_timer` both invoke the unported

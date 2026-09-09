@@ -3,6 +3,7 @@ pub mod condvar;
 pub mod control_state;
 pub mod csem;
 pub mod diag_ring_record;
+pub mod diag_ring_strings;
 pub mod gateway_request;
 pub mod gateway_signal;
 pub mod gateway_request_blocking;
