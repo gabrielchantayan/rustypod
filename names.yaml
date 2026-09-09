@@ -1234,6 +1234,42 @@ functions:
       for the unported branch thunk; this preserves one volatile sample and
       one word store.
 
+  - address: 0x08086e38
+    ghidra: FUN_08086e38
+    name: read_usec_timer_into_2
+    size: 20
+    sig: "void read_usec_timer_into_2(u32 *out)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      thunk_FUN_08056658: usec_timer_read_thunk
+      FUN_0836af80: usec_timer_read
+    notes: >-
+      Binary extent is 0x08086e38..0x08086e4c; the next function opens with
+      its own `push {r3,lr}` at 0x08086e4c. Instruction-identical twin of
+      read_usec_timer_into @ 0x08086e24: `push {r4,lr}; mov r4,r0;
+      bl 0x08056658; str r0,[r4]; pop {r4,pc}` — the bl immediate differs
+      only because the PC-relative offset to the same thunk shifts with the
+      address. The thunk at 0x08056658 branches to 0x0836af80, whose body
+      reads the Timer E TECNT MMIO word at 0x3c7000b4, so this samples
+      exactly once and stores the raw word through its unguarded output
+      pointer; there is no NULL guard. Raw decoding of every ARM B/BL word
+      in osos.dec finds 15 direct bl call sites, all unconditional, with
+      zero predicated bl and zero tail b call sites — Ghidra's 15-call
+      count is exact. Call sites (0x0808cd10, 0x0812b3e0, 0x0812b5f8,
+      0x08131530, 0x08159134, 0x0815942c, 0x0815f720, 0x08182800,
+      0x08182b10, 0x081a0f5c, 0x081b7908, 0x081bb38c, 0x081bc024,
+      0x082249fc, 0x0826c5f0) use it for the same elapsed-time
+      instrumentation as the twin's. Rust calls the already-ported
+      usec_timer_read directly rather than adding a seam for the unported
+      branch thunk. A dedicated link_section (.text.read_usec_timer_into_2)
+      keeps LLVM identical-code folding from collapsing this independently
+      hookable copy onto the twin's body; both symbols verified present
+      and unfolded in librustypod.a. match.py: structural match — LLVM
+      adds sl/fp frame bookkeeping around the same push/mov/bl/str/pop
+      spine.
+
   - address: 0x08001ee8
     ghidra: FUN_08001ee8
     name: usec_timer_elapsed
