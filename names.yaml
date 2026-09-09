@@ -50163,6 +50163,55 @@ functions:
       compares the capacity loop, allocation/copy, realloc, and byte-store
       paths; the seam and null-result guard add control flow.
 
+  # --- Legacy printf sprintf veneer ---
+  - address: 0x080edc2c
+    ghidra: FUN_080edc2c
+    name: retail_sprintf
+    size: 28
+    sig: "i32 retail_sprintf(u8 *buf, const u8 *format, VaList args)"
+    module: printf/format_buffer
+    status: ported
+    renames:
+      param_1/r0: buf
+      param_2/r1: format
+      FUN_080f3c24: retail_vsprintf
+    notes: >-
+      The legacy format-conversion family's sprintf, named retail_sprintf
+      to distinguish it from the separately ported standard-library veneer
+      sprintf @ 0x0802f724. Raw ARM confirms the 28-byte extent exactly
+      (0x080edc2c..0x080edc48; the distinct next function begins at
+      0x080edc48): push {r0,r1,r2,r3} (ADS variadic spill), push {r4,lr},
+      ldr r1,[sp,#12] (reload the spilled format), add r2,sp,#16 (va_list
+      at the spilled third argument), bl 0x080f3c24, pop {r4},
+      ldr pc,[sp],#20 (drop the spill and return). r0 passes through
+      untouched and the callee's count survives the epilogue, so the veneer
+      returns it unchanged; no NULL guard on any argument. Decoding every
+      ARM B/BL word in osos.dec finds exactly 15 inbound BL call sites,
+      all unconditional (no predicated BL, no tail B): 0x0806e0cc,
+      0x080beed8, 0x080d34d0, 0x08112234, 0x081125cc, 0x08112850,
+      0x08116864, 0x081168bc, 0x0812bacc, 0x081cb0ac, 0x081cb0f4,
+      0x081eb48c, 0x081ebb5c, 0x081ef4d0, and 0x0828b73c. Call site
+      0x0806e0a4 pins the shape: format literal "%d.%d.%d" unpacking a
+      packed word into four version bytes, three register args plus one
+      stack arg. The callee retail_vsprintf @ 0x080f3c24 is NOT ported
+      (decoded: spills r2/r3, seeds a cursor at buf, calls conversion core
+      0x08077c94 as (sink descriptor 0x0807ca58, &cursor, 0xffffffff,
+      format, args), NUL-terminates at the final cursor, returns the core
+      count), so the call dispatches through the RETAIL_VSPRINTF seam
+      whose wired default is the ported vsprintf @ 0x0802f654 - same
+      unbounded, NUL-terminating, count-returning contract, differing only
+      in the conversion engine (0x08034374 family vs the unported
+      0x08077c94 core). Deviations: the variadic ... becomes an explicit
+      VaList (house convention; args IS the pointer the spill builds), and
+      the bl becomes an indirect tail call through the seam. Host tests
+      prove verbatim forwarding of buf/format/args, count propagation
+      (including a negative count), NULL pass-through without a guard,
+      that the veneer writes nothing itself, and the wired default's
+      identity. match.py structural: both bodies are 7-instruction
+      forward-and-return veneers; the diff is the crate's fp frame and the
+      seam indirection (bx r3 through RETAIL_VSPRINTF instead of a direct
+      bl), the documented deviations.
+
   # --- Four-word record constructor ---
   - address: 0x0803a488
     ghidra: FUN_0803a488
