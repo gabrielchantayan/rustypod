@@ -1,29 +1,46 @@
-//! Unaligned big-endian u32 load @ 0x080743b8.
+//! Unaligned big-endian load pair @ 0x0807439c / 0x080743b8.
 //!
-//! The big-endian counterpart of the `le_read` family: rather than
-//! gathering four bytes directly, the original delegates to
-//! [`read_u32_le`] @ 0x080ed748 (the ADS `__packed` u32 reader) with a
-//! real `bl` and then byte-reverses the result in registers —
+//! These adjacent pure leaf functions assemble packed network-order values
+//! from individual `ldrb`s, which is safe at every byte alignment on the
+//! ARM926EJ-S. The 16-bit member gathers its two bytes directly. The 32-bit
+//! member delegates to [`read_u32_le`] @ 0x080ed748 (the ADS `__packed` u32
+//! reader) with a real `bl` and then byte-reverses the result in registers —
 //! `lsl r1, r0, #24`, `orr` of `r0 & 0xff00` shifted left 8, `orr` of
 //! `r0 & 0xff0000` shifted right 8, `orr` of `r0 >> 24`.
 //!
-//! Behaviorally identical to `load_be32` @ 0x081f3b30/0x0837a158 and
-//! `unpack_be32` @ 0x08261770 (both in `util/beload.rs`), but a distinct
-//! firmware function from a different object file, so it keeps its own
-//! address, symbol, and text section.
+//! The raw words, rather than Ghidra's extent, establish:
 //!
-//! Extent and call sites decoded from the raw words in osos.dec, not from
-//! Ghidra: the function is 24 bytes (`push {lr}` … `pop {pc}` at
-//! 0x080743d8), not the 36 Ghidra reports — the extra 12 bytes are the
-//! separately-linked sibling @ 0x080743dc (`bl read_u64_le` + tail
-//! branch, the 64-bit twin). 41 `bl` call sites, all unpredicated; the
-//! recovered ones (0x0813xxxx, 0x08155xxx, 0x081c5xxx, 0x08202xxx) walk
-//! packed big-endian record arrays with strides of 4, 8 and 0xc, one
-//! field per call.
+//! - `read_u16_be` — `FUN_0807439c` @ 0x0807439c (28 bytes; 18 `bl` call
+//!   sites, all unpredicated). It gathers `p[0] << 8 | p[1]`.
+//! - `read_u32_be` — `FUN_080743b8` @ 0x080743b8 (24 bytes; 41 `bl` call
+//!   sites, all unpredicated). It is behaviorally identical to `load_be32` @
+//!   0x081f3b30/0x0837a158 and `unpack_be32` @ 0x08261770 (both in
+//!   `util/beload.rs`), but a distinct firmware function from a different
+//!   object file, so it keeps its own address, symbol, and text section.
+//!
+//! Ghidra assigns the 32-bit function 36 bytes; `pop {pc}` at 0x080743d8
+//! proves its actual 24-byte extent, with the separately linked 64-bit
+//! sibling beginning at 0x080743dc.
 //!
 //! [`read_u32_le`]: crate::util::le_read::read_u32_le
 
 use crate::util::le_read::read_u32_le;
+
+/// read_u16_be — original: `FUN_0807439c` @ 0x0807439c (28 bytes; 18 `bl`
+/// call sites, all unpredicated, counted by decoding every B/BL word in
+/// osos.dec).
+///
+/// Unaligned big-endian u16 load: returns `p[0] << 8 | p[1]`, zero-extended
+/// to the full return register. The original is exactly two `ldrb`s, two
+/// `orr`s, one `lsl`, one `bic #0x00ff0000`, and `bx lr`; its mask clears the
+/// byte-two artifact from forming the swapped result. No NULL or bounds check
+/// occurs. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.read_u16_be")]
+#[inline(never)]
+pub unsafe extern "C" fn read_u16_be(p: *const u8) -> u32 {
+    ((*p as u32) << 8) | (*p.add(1) as u32)
+}
 
 /// read_u32_be — original: `FUN_080743b8` @ 0x080743b8 (24 bytes;
 /// 41 `bl` call sites, all unpredicated, counted by decoding every B/BL
@@ -59,6 +76,32 @@ mod tests {
 
     fn pattern(size: usize, seed: u8) -> Vec<u8> {
         (0..size).map(|i| ((i as u16 * seed as u16 + 7) % 251) as u8).collect()
+    }
+
+    /// All byte alignments, edge values, and both byte lanes against the
+    /// independent standard-library big-endian decoder.
+    #[test]
+    fn read_u16_be_matches_reference() {
+        let buf = pattern(64, 53);
+        for off in 0..=buf.len() - 2 {
+            let want = u16::from_be_bytes([buf[off], buf[off + 1]]) as u32;
+            assert_eq!(unsafe { read_u16_be(buf.as_ptr().add(off)) }, want, "off={off}");
+        }
+
+        for value in [0u16, 1, 0x00ff, 0xff00, 0x8000, 0x1234, u16::MAX] {
+            for off in 0..4usize {
+                let mut padded = vec![0xa5u8; 6];
+                padded[off..off + 2].copy_from_slice(&value.to_be_bytes());
+                assert_eq!(unsafe { read_u16_be(padded.as_ptr().add(off)) }, value as u32);
+            }
+        }
+    }
+
+    /// The byte-wise body must select exactly the two requested bytes.
+    #[test]
+    fn read_u16_be_ignores_adjacent_bytes() {
+        let buf = [0xa5u8, 0x12, 0x34, 0x5a];
+        assert_eq!(unsafe { read_u16_be(buf.as_ptr().add(1)) }, 0x1234);
     }
 
     /// Every offset in a patterned buffer, against `u32::from_be_bytes`.
