@@ -15,9 +15,10 @@
 //!   to leave the deque pointer there), so the export keeps the
 //!   three-argument shape.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
-//!   `FUN_083d9fcc` @ 0x083d9fcc, `FUN_083da1a8` @ 0x083da1a8,
+//!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
+//!   `FUN_083da1a8` @ 0x083da1a8,
 //!   `FUN_083da240` @ 0x083da240, and `FUN_083da344` @ 0x083da344
-//!   (8 bytes each: `mov r0, #0x20; bx lr`; 7, 18, 12, 12, and 13 direct `bl`
+//!   (8 bytes each: `mov r0, #0x20; bx lr`; 7, 12, 18, 12, 12, and 13 direct `bl`
 //!   call sites respectively, binary-verified). Elements per deque segment:
 //!   0x20 elements of 0x28 bytes = the 0x500-byte segment stride of the
 //!   seed walk.
@@ -429,7 +430,8 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
 }
 
 /// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
-/// `FUN_083d9fcc` @ 0x083d9fcc, `FUN_083da1a8` @ 0x083da1a8,
+/// `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
+/// `FUN_083da1a8` @ 0x083da1a8,
 /// `FUN_083da240` @ 0x083da240, and `FUN_083da344` @ 0x083da344
 /// (8 bytes each).
 ///
@@ -437,7 +439,11 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
 /// per deque segment. `FUN_083da240` has 12 unconditional `bl` call sites
 /// and no predicated calls, binary-verified; `FUN_083da344` has 13;
 /// `FUN_083da1a8` has 12 (callers scale the result by 4, the pointer-sized
-/// element stride of that instantiation). Deliberate deviation: this one
+/// element stride of that instantiation); `FUN_083d9f5c` has 12 (callers
+/// scale the result by 0xc, the 12-byte element stride of that
+/// instantiation — e.g. the iterator ctor at 0x083d9f88 builds
+/// `seg_end = seg_base + 0x20 * 0xc`, and the pop path frees a spent
+/// segment via `cxx_array_dealloc(seg, 0x20, 0)`). Deliberate deviation: this one
 /// export serves these byte-identical template copies rather than duplicating
 /// an indistinguishable Rust body.
 #[cfg_attr(target_os = "none", no_mangle)]
