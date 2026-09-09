@@ -31,6 +31,7 @@ pub mod list_find;
 pub mod ptr_vector;
 pub mod resource_list;
 pub mod pascal_string;
+pub mod plane_cursor;
 pub mod q15_mul;
 pub mod operation_dispatch;
 pub mod query_object_release;

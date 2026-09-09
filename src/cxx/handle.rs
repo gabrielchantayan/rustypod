@@ -111,6 +111,48 @@ pub unsafe extern "C" fn handle_deref_field12(slot: *const *const *mut u8) -> *m
     cell.add(3).read()
 }
 
+/// handle_elem_ptr — original: `FUN_083d60dc` @ 0x083d60dc (20 bytes;
+/// 3 `bl` call sites, all unconditional and all inside
+/// `plane_cursor_init` @ 0x0839bae0 — verified by decoding every branch
+/// word in osos.dec: no `b` sites, no predicated forms, no data-word
+/// references). One byte-identical copy exists, `FUN_083d60f0` @
+/// 0x083d60f0 (3 more `bl` sites, all inside the byte-similar sibling
+/// cursor init @ 0x0839bb58); hook both addresses to this symbol.
+///
+/// The indexed member of the [`handle_deref_or_null`] family:
+///
+/// ```text
+/// ldr   r0, [r0]            ; cell = *slot
+/// cmp   r0, #0
+/// ldrne r0, [r0]            ; base = cell ? *cell : NULL
+/// add   r0, r0, r1, lsl #2  ; base + index (4-byte elements)
+/// bx    lr
+/// ```
+///
+/// i.e. a pointer to word `index` of the u32 array whose base is the
+/// cell's first word. NOTE: like the rest of the family the NULL test
+/// is on the INNER pointer (a NULL `slot` faults), and the element add
+/// is UNCONDITIONAL — a NULL cell does not yield NULL but
+/// `index * 4` as a bare address. The elements are typed u32 because
+/// the `lsl #2` fixes a 4-byte element size; what a word holds is the
+/// caller's business (the video colorspace converter treats them as
+/// packed pixel words).
+///
+/// # Safety
+/// `slot` must be readable; the cell it holds must be readable when
+/// non-NULL. The returned pointer is never dereferenced here.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn handle_elem_ptr(slot: *const *const *const u32, index: u32) -> *mut u32 {
+    let cell = slot.read();
+    let base = if cell.is_null() {
+        core::ptr::null()
+    } else {
+        cell.read()
+    };
+    base.wrapping_add(index as usize).cast_mut()
+}
+
 /// Shared body of the C++ layer's refcounted handles — the object a
 /// `*mut RefcountedBody` slot points at. On the ARM target its three words
 /// are the implementation pointer (+0), signed reference count (+4), and
@@ -1115,6 +1157,42 @@ mod tests {
             let mut cell: [*mut u8; 4] = [core::ptr::null_mut(); 4];
             let slot: *const *mut u8 = cell.as_mut_ptr();
             assert!(handle_deref_field12(&slot).is_null());
+        }
+    }
+
+    /// Both indirection levels, then a word-scaled add: element 3 sits
+    /// 12 bytes past the array base.
+    #[test]
+    fn elem_ptr_walks_both_levels_and_scales_the_index_by_four() {
+        unsafe {
+            let words = [0x1111_1111u32; 6];
+            let cell: *const u32 = words.as_ptr();
+            let slot: *const *const u32 = &cell;
+            assert_eq!(handle_elem_ptr(&slot, 3), words.as_ptr().add(3) as *mut u32);
+            assert_eq!(handle_elem_ptr(&slot, 0), words.as_ptr() as *mut u32);
+        }
+    }
+
+    /// A NULL cell skips the second load — and the element add still
+    /// runs, so the result is `index * 4` as a bare address, NOT NULL.
+    #[test]
+    fn elem_ptr_null_cell_yields_index_times_four_not_null() {
+        unsafe {
+            let slot: *const *const u32 = core::ptr::null();
+            assert!(handle_elem_ptr(&slot, 0).is_null());
+            assert_eq!(handle_elem_ptr(&slot, 3) as usize, 12);
+        }
+    }
+
+    /// A non-NULL cell holding a NULL base passes the NULL through the
+    /// same unconditional add — no second guard, as in the original.
+    #[test]
+    fn elem_ptr_null_base_is_scaled_without_a_second_guard() {
+        unsafe {
+            let cell: *const u32 = core::ptr::null();
+            let slot: *const *const u32 = &cell;
+            assert!(handle_elem_ptr(&slot, 0).is_null());
+            assert_eq!(handle_elem_ptr(&slot, 5) as usize, 20);
         }
     }
 
