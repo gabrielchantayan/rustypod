@@ -35919,6 +35919,35 @@ functions:
       original is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
 
+  - address: 0x08262138
+    ghidra: FUN_08262138
+    name: resource_handle_release_if_owned
+    size: 32
+    sig: "ResourceHandle *resource_handle_release_if_owned(ResourceHandle *handle)"
+    module: cxx/resource_handle_release
+    status: ported
+    renames:
+      param_1: handle
+      FUN_082620d8: unported immediate resource-handle release helper
+    notes: >-
+      Raw extent is exactly 32 bytes (0x08262138..0x08262158): push
+      {r4,lr}; save this; load byte this+8; compare zero; only when zero
+      move this into r0 and bleq 0x082620d8; restore this into r0; pop.
+      The next distinct function begins at 0x08262158, and there is no
+      literal pool. Binary decoding every B/BL word in osos.dec finds 14
+      direct call sites, all unconditional plain bl at 0x08165330,
+      0x081654c0, 0x081939d8, 0x081d7788, 0x081d77f8, 0x081e6c10,
+      0x082011a0, 0x082628b0, 0x0839e938, 0x0839e958, 0x0839eaa4,
+      0x0839eac4, 0x0839f480, and 0x0839f4a0; no predicated BL forms
+      and no word-aligned DATA references. The gate byte marks a handle
+      whose resource release is skipped; the helper's status is discarded
+      and this is always returned. 0x082620d8 is absent from names.yaml:
+      target builds call that fixed retailOS address, while host tests use
+      a volatile recording seam solely to prove zero/nonzero gating and
+      handle passthrough. match.py structural review: the Rust early return
+      is the inverse branch of the retail predicated call, followed by a
+      literal-loaded blx to the same unported helper address.
+
   # --- retailOS per-kind mask-table union fold ---
   - address: 0x08055db8
     ghidra: FUN_08055db8
