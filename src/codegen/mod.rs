@@ -40,3 +40,6 @@ pub mod rbsp_read_bits;
 /// the display path; not IR, but it lives inside the JIT's address
 /// block and is ported under the same `cg_*` roof.
 pub mod timer_wait;
+/// `cg_two_bit_code_or_zero` @ 0x082b4964 — preserves the code
+/// generator's nonzero two-bit codes and rejects all other representations.
+pub mod two_bit_code;
