@@ -56,16 +56,16 @@
 //!
 //! ## RetailOS boundaries
 //!
-//! The constructor (0x08206e40) and facade accessor (0x0818a0bc) remain
-//! retailOS boundaries, so their wired defaults call their fixed firmware
-//! addresses on `target_os = "none"`. The destructor @ 0x08206e6c is
-//! ported below: its device default reaches this port, which calls the
-//! still-retail base teardown @ 0x0818a0fc. Host builds cannot call
-//! retailOS: the guard ctor/dtor defaults are no-ops and the fetch default
-//! fails closed with a stand-in facade whose slot +0x50 answers 0 ("does
-//! not exist" — the vtable_set.rs `store_ctor_unported` policy), so the
-//! default chain is total on host and returns the same 0 every call site
-//! treats as absent.
+//! The base guard constructor @ 0x0818a0c4 and facade accessor @
+//! 0x0818a0bc remain retailOS boundaries. The base constructor's device
+//! default calls its fixed firmware address; host tests replace its seam with
+//! a layout-valid mock. The destructor @ 0x08206e6c is ported below and its
+//! device default reaches that port, which calls the still-retail base
+//! teardown @ 0x0818a0fc. Host builds cannot call retailOS: the guard-ctor
+//! seam is a no-op by default and the fetch default fails closed with a
+//! stand-in facade whose slot +0x50 answers 0 ("does not exist" — the
+//! vtable_set.rs `store_ctor_unported` policy), so the default chain is total
+//! on host and returns the same 0 every call site treats as absent.
 //!
 //! ## Call-site census
 //!
@@ -93,25 +93,35 @@
 //!   the slot is read before the unlock — the probe runs inside the
 //!   critical section.
 //!
-//! - The unported guard constructor and facade accessor ride the
-//!   [`PATH_PROBE_GUARD_CTOR`] / [`PATH_PROBE_FACADE_FETCH`] seams
-//!   (read_volatile dispatch; host tests install recording mocks). On
-//!   `target_os = "none"` their defaults call their fixed retailOS
-//!   addresses; on host they fail closed (see above). The guard destructor
-//!   seam reaches [`path_probe_guard_destroy`] on device and remains a
-//!   no-op host boundary because the host default constructor does not
-//!   establish a real counted lock.
+//! - The constructor is now [`path_probe_guard_construct`]. Its caller seam
+//!   remains only to keep the host-only fail-closed path-probe default and
+//!   recording tests possible; device builds route it to this port. Its
+//!   unresolved base constructor @ 0x0818a0c4 rides
+//!   [`PATH_PROBE_GUARD_BASE_CONSTRUCT`] (a fixed firmware call on device).
+//!   The facade accessor rides [`PATH_PROBE_FACADE_FETCH`] (read_volatile
+//!   dispatch; host tests install recording mocks). On `target_os = "none"`
+//!   its default calls the fixed retailOS address. The guard destructor seam
+//!   reaches [`path_probe_guard_destroy`] on device and remains a no-op host
+//!   boundary because the host default constructor does not establish a real
+//!   counted lock.
 
 use core::mem::MaybeUninit;
 
 use crate::cxx::string_object::StringObject;
 
 use crate::kernel::sync_mutex::{mutex_unlock_counted, CountedMutex};
+#[cfg(target_os = "none")]
+use crate::kernel::sync_mutex::counted_mutex_guard_acquire;
+#[cfg(not(target_os = "none"))]
+use crate::kernel::sync_mutex::mutex_lock_counted;
 
 /// Firmware load address of the interface-guard constructor (the `bl`
 /// @ 0x080f4ae4). Kept as an identity constant for the boundary
 /// default.
 pub const GUARD_CTOR_ADDRESS: usize = 0x0820_6e40;
+/// Firmware load address of the shared transition-addon base constructor
+/// called first by this guard constructor (`bl` @ 0x08206e48).
+pub const GUARD_BASE_CONSTRUCT_ADDRESS: usize = 0x0818_a0c4;
 
 /// Firmware load address of the facade accessor veneer (the `bl` @
 /// 0x080f4af0): `ldr r0, [r0, #0x4]; b 0x08296ec0`.
@@ -181,10 +191,19 @@ pub struct FacadeObject {
 pub type PathProbeQuery =
     unsafe extern "C" fn(facade: *mut FacadeObject, path_object: *mut StringObject) -> u32;
 
-/// The interface-guard constructor @ 0x08206e40: builds the scoped
-/// lock over the 16-byte frame (the original returns `this`; the
-/// caller discards it — `mov r0, sp` re-establishes the frame).
-pub type GuardConstruct = unsafe extern "C" fn(this: *mut InterfaceGuard);
+/// The interface-guard constructor @ 0x08206e40. It forwards `base_hint` to
+/// the shared base constructor and returns the constructed guard.
+pub type GuardConstruct =
+    unsafe extern "C" fn(this: *mut InterfaceGuard, base_hint: u32) -> *mut InterfaceGuard;
+
+/// The unresolved shared base constructor @ 0x0818a0c4. It returns the
+/// storage it was given after initializing the vtable, interface word, and
+/// two flag bytes; the identity is not ported yet, so it is a boundary.
+pub type GuardBaseConstruct = unsafe extern "C" fn(
+    this: *mut InterfaceGuard,
+    base_hint: u32,
+    base_flag: u32,
+) -> *mut InterfaceGuard;
 
 /// The facade accessor @ 0x0818a0bc: takes the constructed guard and
 /// the [`FACADE_SELECTOR`] immediate, returns the facade object.
@@ -196,20 +215,45 @@ pub type FacadeFetch =
 pub type GuardDestroy =
     unsafe extern "C" fn(this: *mut InterfaceGuard) -> *mut InterfaceGuard;
 
-/// Boundary default for the guard constructor: calls the stock
-/// 0x08206e40, which remains in retailOS (the ui/object_state.rs
-/// `firmware_clock_sample` precedent). The host default is a no-op —
-/// the fail-closed fetch never reads the guard.
-unsafe extern "C" fn firmware_guard_construct(this: *mut InterfaceGuard) {
+/// Boundary default for the shared base constructor @ 0x0818a0c4. Device
+/// builds call retailOS. The host default returns storage without trying to
+/// invent the unported interface-resolution graph; direct constructor tests
+/// install a layout-valid base mock instead.
+unsafe extern "C" fn firmware_guard_base_construct(
+    this: *mut InterfaceGuard,
+    base_hint: u32,
+    base_flag: u32,
+) -> *mut InterfaceGuard {
     #[cfg(target_os = "none")]
     {
-        let construct: GuardConstruct = core::mem::transmute(GUARD_CTOR_ADDRESS);
-        construct(this)
+        let construct: GuardBaseConstruct = core::mem::transmute(GUARD_BASE_CONSTRUCT_ADDRESS);
+        construct(this, base_hint, base_flag)
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        let _ = this;
+        let _ = base_hint;
+        let _ = base_flag;
+        this
+    }
+}
+
+/// Boundary default for the guard constructor. Device builds route this
+/// caller seam to [`path_probe_guard_construct`]; host builds preserve the
+/// fail-closed facade probe default without manufacturing a live interface.
+unsafe extern "C" fn firmware_guard_construct(
+    this: *mut InterfaceGuard,
+    base_hint: u32,
+) -> *mut InterfaceGuard {
+    #[cfg(target_os = "none")]
+    {
+        path_probe_guard_construct(this, base_hint)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = base_hint;
+        this
     }
 }
 
@@ -281,9 +325,13 @@ unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) -> *mut I
     }
 }
 
-/// The active interface-guard constructor — the dispatch seam for
-/// 0x08206e40 (`bl` @ 0x080f4ae4). Host tests install a recording
-/// mock; the wired default is the retailOS boundary.
+/// The active unported base constructor @ 0x0818a0c4. Device builds call its
+/// fixed firmware address; host tests install a live-interface mock.
+pub static mut PATH_PROBE_GUARD_BASE_CONSTRUCT: GuardBaseConstruct =
+    firmware_guard_base_construct;
+
+/// The active interface-guard constructor. Device builds route it to
+/// [`path_probe_guard_construct`] while host tests install a recording mock.
 pub static mut PATH_PROBE_GUARD_CTOR: GuardConstruct = firmware_guard_construct;
 
 /// The active facade accessor — the dispatch seam for 0x0818a0bc
@@ -299,6 +347,11 @@ pub static mut PATH_PROBE_GUARD_DTOR: GuardDestroy = firmware_guard_destroy;
 #[inline(always)]
 unsafe fn guard_ctor_fn() -> GuardConstruct {
     core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_CTOR))
+}
+
+#[inline(always)]
+unsafe fn guard_base_construct_fn() -> GuardBaseConstruct {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_BASE_CONSTRUCT))
 }
 
 #[inline(always)]
@@ -327,6 +380,47 @@ unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut Interf
     #[cfg(not(target_os = "none"))]
     {
         this
+    }
+}
+
+/// path_probe_guard_construct — original: `FUN_08206e40` @ 0x08206e40
+/// (40 instruction bytes plus its 4-byte literal pool; **14 direct `bl`
+/// call sites**, all unconditional; no predicated `bl` forms).
+///
+/// Runs the unresolved shared base constructor @ 0x0818a0c4 with
+/// `(storage, base_hint, 0)`, plants the interface-guard vtable, then
+/// acquires the CountedMutex scope guard at +0x0c through the ported
+/// [`crate::kernel::sync_mutex::counted_mutex_guard_acquire`]. Its returned
+/// guard pointer is backed up by 12 bytes, so this returns the base
+/// constructor's result. The literal pool at 0x08206e68 is
+/// [`INTERFACE_GUARD_VTABLE_ADDRESS`]; the next distinct function begins at
+/// 0x08206e6c. Deliberate host-only deviation: the 16-byte firmware frame
+/// stores 32-bit words, whereas the ported acquire helper's host model uses
+/// native-width pointer fields. Host builds therefore perform the identical
+/// lock-address store and `mutex_lock_counted` call directly; device builds
+/// call the ported acquire helper.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_probe_guard_construct(
+    storage: *mut InterfaceGuard,
+    base_hint: u32,
+) -> *mut InterfaceGuard {
+    let guard = guard_base_construct_fn()(storage, base_hint, 0);
+    (*guard).words[0] = INTERFACE_GUARD_VTABLE_ADDRESS;
+
+    #[cfg(target_os = "none")]
+    {
+        let scope = core::ptr::addr_of_mut!((*guard).words[3]).cast::<*mut CountedMutex>();
+        return counted_mutex_guard_acquire(scope, guard.cast()).cast::<u8>().sub(12).cast();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let interface = (*guard).words[1] as usize as *mut u8;
+        let lock = interface.add(0x44).cast::<CountedMutex>();
+        (*guard).words[3] = lock as usize as u32;
+        mutex_lock_counted(lock);
+        guard
     }
 }
 
@@ -361,22 +455,23 @@ pub unsafe extern "C" fn path_probe_guard_destroy(
 /// Constructs the scoped interface guard, fetches the filesystem
 /// facade through it, runs the facade's vtable-slot-+0x50 path probe
 /// with `path_object`, destroys the guard, and returns the query
-/// status verbatim. `flags` is dead in the original (spilled into the
-/// guard frame, never reloaded). See the module header for the stock
-/// instruction sequence, the callee analysis, and the seam policy.
+/// status verbatim. `flags` is forwarded as the constructor's live `r1`
+/// base hint, even though the later facade query receives only
+/// `path_object`. See the module header for the stock instruction sequence,
+/// the callee analysis, and the seam policy.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn path_probe_via_facade(
     path_object: *mut StringObject,
     flags: u32,
 ) -> u32 {
-    // The original's r0-r3 spill slots: the whole 16-byte guard
-    // object, addressed as `sp` throughout the body. arg2's spill
-    // (sp+4) is never read back — flags is dead.
-    let _ = flags;
+    // The original's r0-r3 spill slots form the whole 16-byte guard object,
+    // addressed as `sp` throughout the body. `r1` survives `mov r0, sp` and
+    // becomes the constructor's base hint; the facade selector replaces it
+    // only after construction.
     let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
     let guard = guard.as_mut_ptr();
-    guard_ctor_fn()(guard);
+    guard_ctor_fn()(guard, flags);
     let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
     // ldr r1, [r0, #0x0]; ldr r2, [r1, #0x50]; mov r1, r4; blx r2:
     // the probe runs with the facade in r0 and the path object in r1,
@@ -394,14 +489,14 @@ pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Serializes the tests that swap the three probe seams (the
+    /// Serializes tests that swap the four probe seams (the
     /// vtable_query.rs `SLOT_TEST_LOCK` precedent). `pub(crate)` so
     /// path_exists.rs's default-chain integration test can serialize
     /// against these; path_probe tests never take any sibling lock,
     /// so no lock-order cycle is possible.
     pub(crate) static PATH_PROBE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Restores all three seams to their wired defaults on drop, even
+    /// Restores all four seams to their wired defaults on drop, even
     /// when a test panics (the templates.rs OpsGuard precedent).
     struct SeamGuard;
 
@@ -414,6 +509,8 @@ pub(crate) mod tests {
     impl Drop for SeamGuard {
         fn drop(&mut self) {
             unsafe {
+                core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
+                    .write_volatile(firmware_guard_base_construct);
                 core::ptr::addr_of_mut!(PATH_PROBE_GUARD_CTOR)
                     .write_volatile(firmware_guard_construct);
                 core::ptr::addr_of_mut!(PATH_PROBE_FACADE_FETCH)
@@ -437,6 +534,11 @@ pub(crate) mod tests {
     static mut EVENT_COUNT: usize = 0;
 
     static mut CTOR_THIS: *mut InterfaceGuard = core::ptr::null_mut();
+    static mut CTOR_HINT: u32 = 0;
+    static mut BASE_THIS: *mut InterfaceGuard = core::ptr::null_mut();
+    static mut BASE_HINT: u32 = 0;
+    static mut BASE_FLAG: u32 = 1;
+    static mut BASE_INTERFACE_ADDRESS: u32 = 0;
     static mut FETCH_GUARD: *mut InterfaceGuard = core::ptr::null_mut();
     static mut FETCH_SELECTOR: u32 = 0;
     static mut QUERY_FACADE: *mut FacadeObject = core::ptr::null_mut();
@@ -461,9 +563,26 @@ pub(crate) mod tests {
         EVENT_COUNT += 1;
     }
 
-    unsafe extern "C" fn recording_guard_ctor(this: *mut InterfaceGuard) {
+    unsafe extern "C" fn recording_guard_ctor(
+        this: *mut InterfaceGuard,
+        base_hint: u32,
+    ) -> *mut InterfaceGuard {
         record(EVENT_GUARD_CTOR);
         CTOR_THIS = this;
+        CTOR_HINT = base_hint;
+        this
+    }
+
+    unsafe extern "C" fn recording_base_construct(
+        this: *mut InterfaceGuard,
+        base_hint: u32,
+        base_flag: u32,
+    ) -> *mut InterfaceGuard {
+        BASE_THIS = this;
+        BASE_HINT = base_hint;
+        BASE_FLAG = base_flag;
+        (*this).words = [0x1234_5678, BASE_INTERFACE_ADDRESS, 0x8765_4321, 0];
+        this
     }
 
     unsafe extern "C" fn recording_fetch(
@@ -509,6 +628,11 @@ pub(crate) mod tests {
         EVENTS = [0; 16];
         EVENT_COUNT = 0;
         CTOR_THIS = core::ptr::null_mut();
+        CTOR_HINT = 0;
+        BASE_THIS = core::ptr::null_mut();
+        BASE_HINT = 0;
+        BASE_FLAG = 1;
+        BASE_INTERFACE_ADDRESS = 0;
         FETCH_GUARD = core::ptr::null_mut();
         FETCH_SELECTOR = 0;
         QUERY_FACADE = core::ptr::null_mut();
@@ -573,14 +697,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fetch_receives_selector_one_and_flags_is_dead() {
+    fn fetch_receives_selector_one_and_constructor_receives_flags() {
         let _lock = take_lock();
         let _restore = unsafe { SeamGuard::new() };
         unsafe {
             install_recording();
             for flags in [0u32, 1, 0x5a5a_f00d] {
                 FETCH_SELECTOR = 0xdead_beef;
+                CTOR_HINT = 0;
                 path_probe_via_facade(core::ptr::addr_of_mut!(PATH_OBJECT), flags);
+                assert_eq!(
+                    CTOR_HINT, flags,
+                    "r1 is live through mov r0, sp and reaches the base constructor"
+                );
                 assert_eq!(
                     FETCH_SELECTOR, FACADE_SELECTOR,
                     "mov r1, #0x1: the selector is the immediate, never arg2"
@@ -688,6 +817,56 @@ pub(crate) mod tests {
                 "unlocking a free counted mutex wraps, as the raw sub does"
             );
             assert_eq!(guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS);
+        }
+    }
+
+    #[test]
+    fn guard_constructor_forwards_hint_installs_vtable_and_acquires_lock() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::PATH_PROBE_GUARD_CONSTRUCT,
+            0x48 + core::mem::size_of::<CountedMutex>(),
+        ) else {
+            return;
+        };
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            let interface = slab.add(4);
+            let lock = interface.add(0x44).cast::<CountedMutex>();
+            lock.write(CountedMutex {
+                mutex: crate::kernel::sync_mutex::Mutex {
+                    sem_cell: core::ptr::null_mut(),
+                    unused: 0,
+                },
+                hold_count: 0,
+            });
+            BASE_INTERFACE_ADDRESS = interface as usize as u32;
+            core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
+                .write_volatile(recording_base_construct);
+
+            let mut guard = InterfaceGuard {
+                words: [0xffff_ffff; 4],
+            };
+            let this = core::ptr::addr_of_mut!(guard);
+            assert_eq!(
+                path_probe_guard_construct(this, 0x5a5a_f00d),
+                this,
+                "the acquire result is rebased by 12 bytes to this"
+            );
+            assert_eq!(BASE_THIS, this, "the base constructor receives storage");
+            assert_eq!(BASE_HINT, 0x5a5a_f00d, "r1 reaches the base constructor");
+            assert_eq!(BASE_FLAG, 0, "mov r2, #0 is the third base argument");
+            assert_eq!(
+                guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS,
+                "the derived constructor overwrites the base vtable"
+            );
+            assert_eq!(
+                guard.words[3], lock as usize as u32,
+                "the +0x0c scope word receives interface +0x44 before locking"
+            );
+            assert_eq!((*lock).hold_count, 1, "the counted mutex is acquired");
+            path_probe_guard_destroy(this);
+            assert_eq!((*lock).hold_count, 0, "the paired destructor releases it");
         }
     }
 }

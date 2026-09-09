@@ -11471,6 +11471,36 @@ functions:
       unconditional - a NULL cell or zero handle skips the ROM op but
       still decrements, and unlocking a free lock wraps to 0xffffffff.
 
+  - address: 0x08206e40
+    ghidra: FUN_08206e40
+    name: path_probe_guard_construct
+    size: 40
+    sig: "InterfaceGuard *path_probe_guard_construct(InterfaceGuard *storage, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: storage (16-byte scoped interface-guard storage)
+      param_2/r1: base_hint (live shared-base-constructor hint)
+      DAT_08206e68: INTERFACE_GUARD_VTABLE_ADDRESS (0x08991978)
+      FUN_0818a0c4: interface-guard shared base constructor (unported boundary)
+      FUN_0818a144: counted_mutex_guard_acquire (ported)
+    notes: >-
+      Raw ARM proves the 40-byte instruction extent from 0x08206e40 through
+      0x08206e64, followed by literal-pool word 0x08991978 at 0x08206e68;
+      the next distinct function begins at 0x08206e6c. Decoding every ARM
+      B/BL word in osos.dec finds exactly 14 direct references, all
+      unconditional BLs (no predicated forms and no tail B): 0x08084d64,
+      0x08089110, 0x080891a0, 0x08089228, 0x08089278, 0x080892d4,
+      0x08090b94, 0x08090c0c, 0x0809b618, 0x0809b6b4, 0x080a8eec,
+      0x080b6b64, 0x080f4ae4 and 0x080f4b80. It calls the unported base
+      constructor with storage, the live r1 base hint, and zero r2; installs
+      the derived vtable; then calls the ported counted_mutex_guard_acquire
+      on storage+0x0c and returns its result rebased by 12 bytes. The
+      unresolved base constructor has a device fixed-address boundary and a
+      host test seam. Device builds call the ported acquire helper directly;
+      host builds manually preserve its lock-address store and acquisition
+      because the target's raw 32-bit 16-byte guard frame cannot be passed to
+      the helper's native-pointer host model.
   - address: 0x08206e6c
     ghidra: FUN_08206e6c
     name: path_probe_guard_destroy
