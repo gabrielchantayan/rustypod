@@ -68,6 +68,7 @@ pub mod vtable_query;
 pub mod wang_hash;
 pub mod word_list;
 pub mod word_list_modular_multiply;
+pub mod word_list_modular_square;
 pub mod wstr_casecmp;
 pub mod value_predicate;
 pub mod xor_transposed_block;
