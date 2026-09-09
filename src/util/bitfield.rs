@@ -28,9 +28,12 @@
 //! returns 0. The width byte is `(hi - lo + 1) & 0xff`, so `hi < lo`
 //! yields width 0 mod 256 only when `hi == lo - 1` (mask 0).
 //!
-//! Sibling `FUN_0827288c` @ 0x0827288c (28 bytes) is the same handle
-//! convention reduced to a single-bit test (`ands` + `movne`); it is a
-//! separate port.
+//! Sibling `bitfield_test` (`FUN_0827288c` @ 0x0827288c, 28 bytes;
+//! 17 `bl` call sites, binary-scanned: all unconditional, all from the
+//! same packed-config decoder) reduces the same handle convention to a
+//! single-bit test (`ands` + `movne`), ported below. Its shift is by
+//! register too, so bit indices 32..=255 return 0 and 256 wraps to
+//! bit 0.
 
 use super::berec::{arm_lsl, arm_lsr};
 
@@ -56,8 +59,118 @@ pub unsafe extern "C" fn bitfield_extract(
     arm_lsr(word, lo) & arm_lsl(1, hi.wrapping_sub(lo).wrapping_add(1)).wrapping_sub(1)
 }
 
+/// bitfield_test — original: `FUN_0827288c` @ 0x0827288c (28 bytes; 17
+/// `bl` call sites, binary-scanned: all unconditional, all from the
+/// packed-config decoder `FUN_08188b8c` @ 0x08188b8c, which stores each
+/// result byte into the same struct `bitfield_extract` fills).
+///
+/// Tests a single bit of the word behind `word_handle`, returning 1 or
+/// 0. Original instructions:
+///
+/// ```text
+/// ldr   r0, [r0]          @ handle -> word address
+/// mov   r2, #1
+/// ldr   r0, [r0]          @ the word itself
+/// mov   r1, r2, lsl r1    @ mask = 1 << bit  (ARM register shift)
+/// ands  r0, r0, r1        @ word & mask, flags
+/// movne r0, #1
+/// bx    lr
+/// ```
+///
+/// The shift is by register, so ARM rules apply to the bit index: only
+/// the bottom 8 bits count and amounts 32..=255 shift the 1 completely
+/// out, yielding mask 0 (returns 0). Replicated via `berec::arm_lsl`.
+/// Consequences: `bit >= 256` wraps to `bit & 0xff`, so e.g. bit 256
+/// tests bit 0.
+///
+/// The mask is ANDed into r0 by `ands` and then normalised to 0/1 by
+/// the predicated `movne`; returning a C bool is exact.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `word_handle` must point to a readable word pointer, which in turn
+/// must point to a readable word. The original performs both loads
+/// unchecked; this port adds no NULL or validity guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitfield_test(word_handle: *const *const u32, bit: u32) -> u32 {
+    u32::from(**word_handle & arm_lsl(1, bit) != 0)
+}
+
 #[cfg(test)]
-mod tests {
+mod test_tests {
+    use super::*;
+
+    /// Runs the test through a stack handle, exactly like the firmware
+    /// callers (`&local`, local holds the address).
+    unsafe fn test_bit(word: u32, bit: u32) -> u32 {
+        let addr: *const u32 = &word;
+        bitfield_test(&addr, bit)
+    }
+
+    #[test]
+    fn every_bit_of_a_known_pattern() {
+        let word = 0b10_01_11_00_10_01_11_00_10_01_11_00_10_01_11_00u32;
+        for bit in 0..32 {
+            let expect = (word >> bit) & 1;
+            assert_eq!(unsafe { test_bit(word, bit) }, expect, "bit {bit}");
+        }
+    }
+
+    #[test]
+    fn returns_exactly_zero_or_one() {
+        // The ands/movne pair normalises to 0/1 even when the mask is
+        // the sign bit.
+        assert_eq!(unsafe { test_bit(0x8000_0000, 31) }, 1);
+        assert_eq!(unsafe { test_bit(0x7fff_ffff, 31) }, 0);
+        assert_eq!(unsafe { test_bit(1, 0) }, 1);
+        assert_eq!(unsafe { test_bit(0xffff_fffe, 0) }, 0);
+    }
+
+    #[test]
+    fn caller_pattern_single_bits_into_byte_struct() {
+        // Real call sites pass a bare bit index (19, 18, 13, 12, 9,
+        // 6, 3, 0...) and store the byte result; reproduce a few.
+        let word = 0x000c_0249u32;
+        for bit in [19u32, 18, 13, 12, 9, 6, 3, 0] {
+            let expect = (word >> bit) & 1;
+            assert_eq!(unsafe { test_bit(word, bit) }, expect, "bit {bit}");
+        }
+    }
+
+    #[test]
+    fn bit_index_32_to_255_reads_zero() {
+        // ARM register shift: amounts 32..=255 push the 1 out -> mask 0.
+        for bit in [32u32, 33, 63, 100, 255] {
+            assert_eq!(unsafe { test_bit(0xffff_ffff, bit) }, 0, "bit {bit}");
+        }
+    }
+
+    #[test]
+    fn bit_index_wraps_mod_256() {
+        // Only the bottom 8 bits of the amount count: bit 256 tests
+        // bit 0, bit 257 tests bit 1.
+        assert_eq!(unsafe { test_bit(1, 256) }, 1);
+        assert_eq!(unsafe { test_bit(0xffff_fffe, 256) }, 0);
+        assert_eq!(unsafe { test_bit(2, 257) }, 1);
+        assert_eq!(unsafe { test_bit(0x8000_0000, 287) }, 1);
+    }
+
+    #[test]
+    fn matches_naive_reference_for_sane_bits_on_patterns() {
+        let patterns = [0u32, !0u32, 0xaaaa_5555, 0x0123_4567, 0x89ab_cdef];
+        for &word in &patterns {
+            for bit in 0..32 {
+                assert_eq!(unsafe { test_bit(word, bit) }, (word >> bit) & 1, "{word:#x}[{bit}]");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod extract_tests {
     use super::*;
 
     /// Runs the extractor against `word` through a stack handle, exactly
