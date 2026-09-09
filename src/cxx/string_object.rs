@@ -1401,6 +1401,43 @@ pub unsafe extern "C" fn string_object_append(
     string_object_insert_cstr(this, i32::MAX, source);
     this
 }
+/// string_object_concatenate — original: `FUN_082aade4` @ 0x082aade4
+/// (56 bytes; **13 direct `bl` call sites**, all unconditional, zero
+/// predicated, binary-scanned).
+///
+/// Raw `osos.dec` bytes run from `push {r2,r3,r4,r5,r6,lr}` at
+/// 0x082aade4 through `pop {r2,r3,r4,r5,r6,pc}` at 0x082aae18; the next
+/// separately linked function begins at 0x082aae1c. The function has no
+/// literal pool. Its 13 callers are 0x081041bc, 0x081041f4, 0x08104354,
+/// 0x08104634, 0x08104718, 0x08104728, 0x08118038, 0x08118690,
+/// 0x0815e558, 0x08173c64, 0x08173c74, 0x081d12b4, and 0x081d12c4.
+///
+/// Copy-constructs a stack temporary from `first`, appends `second` to that
+/// temporary, copy-constructs `out` from the result, then destroys the
+/// temporary. This is the sret `StringObject` concatenation helper: callers
+/// ignore the register value incidentally left by the final destructor.
+/// All three callees are existing direct Rust ports, so there are no
+/// deliberate deviations.
+///
+/// # Safety
+///
+/// `out` must be writable raw `StringObject` storage; `first` and `second`
+/// must be readable StringObjects whose payloads remain valid through any
+/// virtual allocation the append triggers. The original has no NULL guards.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_concatenate(
+    out: *mut StringObject,
+    first: *const StringObject,
+    second: *const StringObject,
+) {
+    let mut temporary = MaybeUninit::<StringObject>::uninit();
+    let temporary = temporary.as_mut_ptr();
+    string_object_copy_construct(temporary, first);
+    string_object_append(temporary, second);
+    string_object_copy_construct(out, temporary);
+    string_object_destroy(temporary);
+}
 
 /// string_object_codepoint_count — original: FUN_082a5394 @ 0x082a5394
 /// (8 bytes). Load the payload and tail-call utf8_codepoint_count_safe.
@@ -4097,6 +4134,87 @@ pub(crate) mod tests {
         }
         guard
     }
+    /// Successive virtual allocations used by the concatenation test. The
+    /// preserving middle allocation has 32-byte backing on both sides.
+    static mut CONCAT_ALLOCATION_RESULTS: [usize; 3] = [0; 3];
+    static mut CONCAT_ALLOCATION_INDEX: usize = 0;
+
+    unsafe extern "C" fn recording_concat_allocate(
+        this: *mut StringObject,
+        requested_size: usize,
+        flags: u32,
+    ) -> *mut u8 {
+        let index = core::ptr::read_volatile(core::ptr::addr_of!(CONCAT_ALLOCATION_INDEX));
+        let destination = core::ptr::read_volatile(
+            core::ptr::addr_of!(CONCAT_ALLOCATION_RESULTS).cast::<usize>().add(index),
+        ) as *mut u8;
+        (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).push((
+            this as usize,
+            requested_size,
+            flags,
+        ));
+        if flags != 0 {
+            core::ptr::copy_nonoverlapping((*this).payload, destination, 32);
+        }
+        (*this).payload = destination;
+        core::ptr::addr_of_mut!(CONCAT_ALLOCATION_INDEX).write(index + 1);
+        destination
+    }
+
+    #[test]
+    fn concatenate_constructs_appends_copies_then_destroys_the_temporary() {
+        let mut first_text = [0u8; 32];
+        first_text[..5].copy_from_slice(b"left\0");
+        let mut second_text = [0u8; 32];
+        second_text[..6].copy_from_slice(b"right\0");
+        let first = StringObject {
+            vtable: core::ptr::null(),
+            payload: first_text.as_mut_ptr(),
+        };
+        let second = StringObject {
+            vtable: core::ptr::null(),
+            payload: second_text.as_mut_ptr(),
+        };
+        let mut temporary_copy = [0xa5u8; 32];
+        let mut appended = [0xa5u8; 32];
+        let mut result = [0xa5u8; 32];
+        let mut out = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let _assign = assign_cstr_bench(core::ptr::null_mut());
+        let _release = bench();
+        unsafe {
+            let results = core::ptr::addr_of_mut!(CONCAT_ALLOCATION_RESULTS).cast::<usize>();
+            results.write(temporary_copy.as_mut_ptr() as usize);
+            results.add(1).write(appended.as_mut_ptr() as usize);
+            results.add(2).write(result.as_mut_ptr() as usize);
+            core::ptr::addr_of_mut!(CONCAT_ALLOCATION_INDEX).write(0);
+            (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
+                recording_concat_allocate;
+
+            string_object_concatenate(&mut out, &first, &second);
+        }
+
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(out.payload, result.as_mut_ptr());
+        assert_eq!(&result[..10], b"leftright\0");
+        assert!(result[10..].iter().all(|&byte| byte == 0xa5));
+        assert_eq!(&first_text[..5], b"left\0");
+        assert_eq!(&second_text[..6], b"right\0");
+        let allocation_shapes: Vec<(usize, u32)> = unsafe {
+            (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS))
+                .iter()
+                .map(|&(_, size, flags)| (size, flags))
+                .collect()
+        };
+        assert_eq!(allocation_shapes, std::vec![(5, 0), (32, 1), (10, 0)]);
+        let releases = release_calls();
+        assert_eq!(releases.len(), 1, "the stack temporary is destroyed");
+        assert_eq!(releases[0].1, &STRING_OBJECT_VTABLE as *const _ as usize);
+    }
+
 
     #[test]
     fn utf16_insertions_preserve_code_units_and_the_bounded_nul_overwrite() {
