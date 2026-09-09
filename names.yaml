@@ -24088,6 +24088,37 @@ functions:
       target-width string-list fixture below 4 GiB so u32 vararg pointers
       cannot silently truncate.
 
+  # ---- SQLite OS write forwarding wrapper (src/sqlite/os_write.rs) ----
+  - address: 0x0837dbf8
+    ghidra: FUN_0837dbf8
+    name: sqlite_os_write
+    size: 32
+    sig: "i32 sqlite_os_write(sqlite3_file *file, const void *buffer, u32 amount, i64 offset)"
+    module: sqlite/os_write
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: buffer
+      param_3/r2: amount
+      r3: AAPCS alignment padding before offset
+      stack_arg_1: offset low word
+      stack_arg_2: offset high word
+      "file->pMethods": sqlite3_io_methods
+      "pMethods+0x0c": xWrite
+    notes: >-
+      Raw bytes are eight words at 0x0837dbf8..0x0837dc14; the next
+      separately linked function begins at 0x0837dc18. The wrapper copies
+      its two incoming stack words into the outgoing stack-argument slots,
+      loads file->pMethods then xWrite at +0x0c, blx-calls it, and returns
+      its i32 status unchanged. The adjacent 0x0837db44..0x0837dc18
+      forwarding family is SQLite sqlite3_io_methods (xClose/xRead/xWrite/
+      xTruncate...), establishing this as sqlite3OsWrite. Its i64 offset is
+      stack-passed under AAPCS because r3 is the alignment pad. Decoding
+      every ARM B/BL word in osos.dec finds exactly 13 direct calls, all
+      unconditional bl; no predicated call or tail branch targets it. The
+      concrete xWrite implementation is runtime vtable data, so the port
+      dispatches the supplied method table rather than inventing a callee.
+
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
     name: parse_expr
