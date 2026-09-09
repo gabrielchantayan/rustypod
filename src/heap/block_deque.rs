@@ -14,10 +14,12 @@
 //!   r1 is scratch the callee never reads (both stock call sites happen
 //!   to leave the deque pointer there), so the export keeps the
 //!   three-argument shape.
-//! - `deque_seg_capacity` — original: `FUN_083d9ec0` @ 0x083d9ec0
-//!   (8 bytes: `mov r0, #0x20; bx lr`; 7 bl call sites, binary-
-//!   verified). Elements per deque segment: 0x20 elements of 0x28 bytes
-//!   = the 0x500-byte segment stride of the seed walk.
+//! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
+//!   `FUN_083d9fcc` @ 0x083d9fcc, and `FUN_083da344` @ 0x083da344
+//!   (8 bytes each: `mov r0, #0x20; bx lr`; 7, 18, and 13 direct `bl`
+//!   call sites respectively, binary-verified). Elements per deque segment:
+//!   0x20 elements of 0x28 bytes = the 0x500-byte segment stride of the
+//!   seed walk.
 //! - `deque_iter_init` — original: `FUN_083d9eec` @ 0x083d9eec
 //!   (68 bytes; 9 bl call sites, binary-verified). Builds an iterator:
 //!   `cur` as given; `seg_base`/`seg_end` from the segment-map slot
@@ -425,12 +427,15 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
     dst.write(src.read());
 }
 
-/// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0 and
-/// `FUN_083d9fcc` @ 0x083d9fcc (8 bytes each).
+/// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
+/// `FUN_083d9fcc` @ 0x083d9fcc, and `FUN_083da344` @ 0x083da344
+/// (8 bytes each).
 ///
-/// Both bodies are `mov r0, #0x20; bx lr`: return the 0x20 elements per
-/// deque segment.  The single export deliberately serves these byte-identical
-/// template copies rather than duplicating an indistinguishable Rust body.
+/// The raw ARM body is `mov r0, #0x20; bx lr`: return the 0x20 elements
+/// per deque segment. `FUN_083da344` has 13 unconditional `bl` call sites
+/// and no predicated calls, binary-verified. Deliberate deviation: this one
+/// export serves these byte-identical template copies rather than duplicating
+/// an indistinguishable Rust body.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {
