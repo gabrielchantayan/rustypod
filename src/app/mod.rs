@@ -50,6 +50,7 @@ pub mod image_format;
 pub mod kinded_controller;
 pub mod lock_service;
 pub mod managed_entry;
+pub mod lazy_handle_manager;
 pub mod media_command_facade;
 pub mod media_ext;
 pub mod media_player;

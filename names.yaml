@@ -54936,3 +54936,39 @@ functions:
       host tests use its deterministic zeroing seam and a pointer-width
       fixture to avoid 64-bit offset/pointer truncation. Rust uses a normal
       call rather than the final conditional tail branch to operator_delete.
+
+  # --- Lazy shared-handle manager singleton ---
+  - address: 0x081bbf98
+    ghidra: FUN_081bbf98
+    name: lazy_handle_manager_get
+    size: 88
+    sig: "LazyHandleManager *lazy_handle_manager_get(void)"
+    module: app/lazy_handle_manager
+    status: ported
+    renames:
+      DAT_081bbfe0: lazy_handle_manager_guard
+      DAT_081bbfe4: lazy_handle_manager
+      DAT_081bbfe8: __dso_handle
+      DAT_081bbfec: lazy_handle_manager_destructor_unidentified
+      FUN_081bc0c4: lazy_handle_manager_construct_unported
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      True raw extent is 88 bytes: 72 instruction bytes at
+      0x081bbf98..0x081bbfe0 plus the four-word literal pool through
+      0x081bbff0; the separately linked next function opens at 0x081bbff0.
+      Ghidra's stated 72-byte size excludes the pool. Decoding every ARM B/BL
+      word in osos.dec finds exactly 13 direct callers: all are unconditional
+      plain bl, with zero predicated forms and zero tail b sites. The accessor
+      tests bit 0 of guard 0x089cc9fc, calls cxa_guard_acquire, invokes the
+      unported manager constructor 0x081bc0c4 on the fixed 16-byte object
+      0x08ac8890, registers the constructor return with cxa_atexit using
+      handler 0x081b1210 and __dso_handle 0x089ca09c, releases the guard, and
+      reloads/returns the fixed object rather than the constructor result. The
+      handler is a real raw ARM entry (starts mov ip,r0) but has no assigned
+      identity; target Rust dispatches to its verified address and host uses a
+      no-op only for shutdown-chain test teardown. Target Rust likewise
+      dispatches the unported constructor to its verified address; host tests
+      substitute a recording constructor. This makes the accessor hook-ready
+      on target without inventing either callee.
