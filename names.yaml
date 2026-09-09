@@ -49820,6 +49820,71 @@ functions:
       allocation failure, copy-read and intern failure propagation with
       the heap buffer still freed, and the zero-length blob.
 
+  # --- "crts" string-pool counted-string store (util/string_pool) ---
+  - address: 0x080be81c
+    ghidra: FUN_080be81c
+    name: string_pool_store_counted
+    size: 20
+    sig: "int string_pool_store_counted(StringPool *pool, const uint16_t *counted, int *id_out)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: counted (u16-length-prefixed UTF-16 string)
+      param_3/r2: id_out
+      FUN_080b4e60: string_pool_store seam (replace-and-intern wrapper, unported)
+      FUN_080a7714: '"crts" tag guard (runs inside the tail target)'
+      FUN_080c5efc: string_pool_release (runs inside the tail target)
+      FUN_080c5a94: string_pool_intern seam (the tail target's own tail target, unported)
+    notes: >-
+      Stores a counted UTF-16 string into the pool, replacing the id the
+      caller holds in *id_out. Extent self-verified from raw bytes: the
+      body is exactly five instructions, 0x080be81c through the tail b
+      0x080b4e60 at 0x080be82c, and the next separately linked function
+      (string_pool_copy_entry) starts with push r4-r8,lr at 0x080be830,
+      so Ghidra's 20 bytes is exact; its C, however, silently inlines
+      the bodies of BOTH the tail target 0x080b4e60 and that function's
+      own tail target 0x080c5a94, which is why it shows releases, pool
+      locks and allocation loops that this address never executes. The
+      thunk: mov r3,r2 (id_out); movs r2,r1; ldrhne r2,[r1],#2; lslne
+      r2,r2,#1; b 0x080b4e60 - a non-NULL counted yields data = counted
+      + 1 (the payload directly follows the length word) and len =
+      *counted * 2 (the prefix counts 16-bit units, the pool stores
+      bytes), while a NULL counted leaves both zero, which is how a
+      caller clears a slot: the wrapper releases the old id and the
+      interning writer's zero-length path zeroes *id_out and returns 0.
+      The tail target 0x080b4e60 (76 bytes; the bx lr at 0x080b4eb0 is
+      alignment padding, not body) was decoded from raw bytes for the
+      seam ABI: it runs the 0x080a7714 tag guard, releases *id_out via
+      string_pool_release (ldr r1,[r4] is unconditional, so a NULL
+      id_out faults and callers never pass one), then tail-branches into
+      0x080c5a94 with the same four arguments; a failed release
+      short-circuits with its status. Call census by decoding every ARM
+      B/BL word in osos.dec: exactly 15 direct bl sites, all
+      unconditional (0x08046388, 0x0804644c, 0x0804650c, 0x08046570,
+      0x080465d4, 0x080671e8, 0x080672a0, 0x08067bd8, 0x08067c04,
+      0x08067c30, 0x08067c84, 0x08094d24, 0x080cb24c, 0x080cb298,
+      0x080dcb2c), no predicated forms, no tail branches, and the
+      address occurs in no data word, so it is never dispatched
+      virtually. Deliberate deviations: the unported tail target
+      dispatches through the volatile STRING_POOL_STORE seam whose
+      default transmutes retail 0x080b4e60 (the util/crts_object.rs
+      precedent - no identity beyond the raw-byte-verified behaviour
+      documented on the StringPoolStore ABI alias is invented for it),
+      and the length is widened to u32 before doubling as the original's
+      ldrh + 32-bit lsl do, so a count of 0x8000 yields 0x10000 bytes,
+      not 0. match.py structural (exit-1 diff expected): same NULL gate,
+      halfword load, doubling shift and tail dispatch; differs by the
+      crate fp frame, LLVM choosing beq over predicated execution, an
+      explicit mov r1,#0 on the NULL path, and blx-equivalent indirect
+      dispatch through the volatile seam word. Five host tests through a
+      recording store seam prove the NULL string (data NULL, len 0,
+      status and id_out untouched), the empty string (data = counted + 2,
+      len 0), payload passthrough as little-endian bytes with a NULL
+      id_out forwarded unchecked, the u32 widening at count 0x8000, and
+      that a NULL pool and a failing status pass through with no guard
+      in the thunk itself.
+
   # --- "crts" string-pool entry release (util/string_pool) ---
   - address: 0x080c5efc
     ghidra: FUN_080c5efc

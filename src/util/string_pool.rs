@@ -256,6 +256,11 @@ pub const STRING_POOL_READ_ADDRESS: usize = 0x080b_4318;
 /// (824 bytes).
 pub const STRING_POOL_INTERN_ADDRESS: usize = 0x080c_5a94;
 
+/// RetailOS load address of the unported replace-and-intern wrapper
+/// [`string_pool_store_counted`] tail-branches into (76 bytes; the
+/// `bx lr` at 0x080b4eb0 is inter-function alignment padding, not body).
+pub const STRING_POOL_STORE_ADDRESS: usize = 0x080b_4e60;
+
 /// ABI of the pool blob reader @ 0x080b4318, decoded from raw bytes.
 /// With `dst` NULL it reports the payload length of entry `id` through
 /// `len_out` without copying; otherwise it copies
@@ -285,6 +290,17 @@ pub type StringPoolIntern = unsafe extern "C" fn(
     len: u32,
     id_out: *mut i32,
 ) -> i32;
+
+/// The replace-and-intern wrapper @ 0x080b4e60 shares the
+/// [`StringPoolIntern`] ABI exactly (`(pool, data, len, id_out)` in
+/// r0-r3). Decoded from raw bytes: it runs the 0x080a7714 tag guard,
+/// releases the id currently stored at `*id_out`
+/// ([`string_pool_release`] — the `ldr r1, [r4]` is unconditional, so a
+/// NULL `id_out` faults and callers never pass one), and on a successful
+/// release tail-branches into the interning writer 0x080c5a94 with the
+/// same four arguments, propagating its status. A failed release
+/// short-circuits: its status is returned and nothing is interned.
+pub type StringPoolStore = StringPoolIntern;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_string_pool_read(
@@ -330,6 +346,27 @@ unsafe extern "C" fn missing_string_pool_intern(
     panic!("string_pool_copy_entry requires pool intern 0x080c5a94")
 }
 
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_string_pool_store(
+    pool: *mut StringPool,
+    data: *const u8,
+    len: u32,
+    id_out: *mut i32,
+) -> i32 {
+    let body: StringPoolStore = core::mem::transmute(STRING_POOL_STORE_ADDRESS);
+    body(pool, data, len, id_out)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_pool_store(
+    _pool: *mut StringPool,
+    _data: *const u8,
+    _len: u32,
+    _id_out: *mut i32,
+) -> i32 {
+    panic!("string_pool_store_counted requires replace-and-intern wrapper 0x080b4e60")
+}
+
 /// Active boundary for the unported pool blob reader. On the target it
 /// calls directly into retailOS @ 0x080b4318; host tests replace it with
 /// a recording implementation.
@@ -357,6 +394,20 @@ unsafe fn string_pool_read_seam() -> StringPoolRead {
 #[inline(always)]
 unsafe fn string_pool_intern_seam() -> StringPoolIntern {
     ptr::read_volatile(ptr::addr_of!(STRING_POOL_INTERN))
+}
+
+/// Active boundary for the unported replace-and-intern wrapper, same
+/// policy as [`STRING_POOL_READ`]; retail target 0x080b4e60.
+#[cfg(target_os = "none")]
+pub static mut STRING_POOL_STORE: StringPoolStore = retail_string_pool_store;
+
+/// Active host boundary for the unported replace-and-intern wrapper.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_POOL_STORE: StringPoolStore = missing_string_pool_store;
+
+#[inline(always)]
+unsafe fn string_pool_store_seam() -> StringPoolStore {
+    ptr::read_volatile(ptr::addr_of!(STRING_POOL_STORE))
 }
 
 /// string_pool_copy_entry — original: `FUN_080be830` @ 0x080be830
@@ -450,6 +501,76 @@ pub unsafe extern "C" fn string_pool_copy_entry(
         crate::heap::veneers::free_tag4(blob);
     }
     status
+}
+
+/// string_pool_store_counted — original: `FUN_080be81c` @ 0x080be81c
+/// (20 bytes; **15 direct `bl` call sites, all unconditional; no tail
+/// branches and no data-word references** — binary-verified by decoding
+/// every B/BL word and every word equal to the address in osos.dec).
+///
+/// Stores a counted UTF-16 string into the pool, replacing the id the
+/// caller holds in `*id_out`. The whole body is a five-instruction
+/// argument-mangling thunk — Ghidra's 20 bytes is exact, and its C
+/// silently inlines the bodies of both the tail target 0x080b4e60 and
+/// that function's own tail target 0x080c5a94:
+///
+/// ```text
+/// mov     r3, r2              ; id_out
+/// movs    r2, r1              ; counted, setting Z on NULL
+/// ldrhne  r2, [r1], #2        ; len = *counted, data = counted + 1
+/// lslne   r2, r2, #1          ; len in bytes = u16 unit count * 2
+/// b       0x080b4e60          ; tail: store(pool, data, len, id_out)
+/// ```
+///
+/// A non-NULL `counted` yields `data = counted + 1` (the payload
+/// directly follows the length word) and `len = *counted * 2` — the
+/// prefix counts 16-bit units, the pool stores bytes. A NULL `counted`
+/// leaves both zero (`movs` copies the NULL into the length register
+/// and the predicated halfword load is skipped), so storing NULL is how
+/// a caller clears a slot: the wrapper releases the old id, and the
+/// interning writer's zero-length path zeroes `*id_out` and returns 0.
+/// The thunk itself guards and dereferences nothing — every check
+/// (pool tag, NULL `id_out`) is the tail target's, exactly as in the
+/// original.
+///
+/// The fifteen call sites (0x08046388, 0x0804644c, 0x0804650c,
+/// 0x08046570, 0x080465d4, 0x080671e8, 0x080672a0, 0x08067bd8,
+/// 0x08067c04, 0x08067c30, 0x08067c84, 0x08094d24, 0x080cb24c,
+/// 0x080cb298, 0x080dcb2c) are all plain `bl`; the address occurs in
+/// no data word, so the function is never dispatched virtually.
+///
+/// # Deliberate deviations
+///
+/// - The unported tail target dispatches through the volatile seam
+///   [`STRING_POOL_STORE`], whose default transmutes the retail address
+///   0x080b4e60 so the port is hook-ready on device, while host tests
+///   install a recording mock (the `util/crts_object.rs` precedent). No
+///   identity beyond the raw-byte-verified behaviour documented on
+///   [`StringPoolStore`] is invented for it.
+/// - The length is widened to `u32` before doubling, as the original's
+///   `ldrh` + `lsl` on a 32-bit register do: a count of 0x8000 yields
+///   0x10000 bytes, not 0.
+///
+/// # Safety
+///
+/// `counted` must be NULL or point to a readable `u16` length followed
+/// by that many `u16` units; `pool` and `id_out` are forwarded
+/// unchecked to the retail wrapper, which requires a valid `"crts"`
+/// pool and a writable id slot.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_store_counted(
+    pool: *mut StringPool,
+    counted: *const u16,
+    id_out: *mut i32,
+) -> i32 {
+    let mut data = counted as *const u8;
+    let mut len = 0u32;
+    if !counted.is_null() {
+        len = (counted.read() as u32) << 1;
+        data = counted.add(1) as *const u8;
+    }
+    string_pool_store_seam()(pool, data, len, id_out)
 }
 
 #[cfg(test)]
@@ -772,6 +893,7 @@ mod tests {
             unsafe {
                 STRING_POOL_READ = missing_string_pool_read;
                 STRING_POOL_INTERN = missing_string_pool_intern;
+                STRING_POOL_STORE = missing_string_pool_store;
                 core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
                     .write(crate::heap::veneers::DEFAULT_HEAP_OPS);
                 READ_CALLS = Vec::new();
@@ -781,6 +903,8 @@ mod tests {
                 INTERN_CALLS = Vec::new();
                 INTERN_STATUS = 0;
                 INTERN_NEW_ID = 0;
+                STORE_CALLS = Vec::new();
+                STORE_STATUS = 0;
             }
         }
     }
@@ -974,5 +1098,161 @@ mod tests {
             assert!(INTERN_CALLS[0].bytes.is_empty());
         }
         assert_eq!(alloc_log().0, 0);
+    }
+
+    // --- string_pool_store_counted seam-mock scaffolding ---
+
+    /// One observed replace-and-intern call, with the payload bytes
+    /// captured at call time (the caller's string may be dead by assert
+    /// time). `data` keeps the raw pointer so the NULL/empty distinction
+    /// stays visible.
+    #[derive(Clone, PartialEq, Debug)]
+    struct StoreCall {
+        pool: usize,
+        data: usize,
+        bytes: Vec<u8>,
+        id_out: usize,
+    }
+
+    static mut STORE_CALLS: Vec<StoreCall> = Vec::new();
+    static mut STORE_STATUS: i32 = 0;
+
+    unsafe extern "C" fn recording_pool_store(
+        pool: *mut StringPool,
+        data: *const u8,
+        len: u32,
+        id_out: *mut i32,
+    ) -> i32 {
+        let bytes = if data.is_null() || len == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data, len as usize).to_vec()
+        };
+        STORE_CALLS.push(StoreCall { pool: pool as usize, data: data as usize, bytes, id_out: id_out as usize });
+        STORE_STATUS
+    }
+
+    /// Installs the recording store seam. Takes the same COPY_LOCK so a
+    /// store test can never run beside a copy test while the shared
+    /// seam statics are swapped; the heap lock is not needed (the thunk
+    /// allocates nothing).
+    fn store_mock() -> (MutexGuard<'static, ()>, Reset) {
+        let copy_guard = COPY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            STRING_POOL_STORE = recording_pool_store;
+        }
+        (copy_guard, Reset)
+    }
+
+    /// The little-endian byte image of a u16 slice, as the pool's byte
+    /// blob would hold it.
+    fn utf16_bytes(units: &[u16]) -> Vec<u8> {
+        units.iter().flat_map(|u| u.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn null_string_stores_len_zero_from_a_null_data_pointer() {
+        let (_copy_guard, _reset) = store_mock();
+        unsafe {
+            STORE_STATUS = 42;
+            let mut slot = 9i32;
+            let status = string_pool_store_counted(
+                SRC_POOL as *mut StringPool,
+                ptr::null(),
+                &mut slot,
+            );
+            assert_eq!(status, 42, "the wrapper's status passes through");
+            assert_eq!(slot, 9, "the thunk never writes id_out itself");
+            assert_eq!(
+                STORE_CALLS,
+                std::vec![StoreCall {
+                    pool: SRC_POOL,
+                    data: 0,
+                    bytes: Vec::new(),
+                    id_out: &mut slot as *mut i32 as usize,
+                }],
+                "movs r2, r1 leaves data and length both zero"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_string_stores_zero_bytes_past_the_length_word() {
+        let (_copy_guard, _reset) = store_mock();
+        let counted = [0u16];
+        unsafe {
+            let mut slot = 0i32;
+            let status = string_pool_store_counted(
+                SRC_POOL as *mut StringPool,
+                counted.as_ptr(),
+                &mut slot,
+            );
+            assert_eq!(status, 0);
+            assert_eq!(STORE_CALLS.len(), 1);
+            let call = &STORE_CALLS[0];
+            assert_eq!(call.data, counted.as_ptr() as usize + 2);
+            assert!(call.bytes.is_empty(), "a zero count doubles to zero bytes");
+        }
+    }
+
+    #[test]
+    fn counted_payload_passes_through_as_bytes() {
+        let (_copy_guard, _reset) = store_mock();
+        let counted = [3u16, 0x0061, 0x0062, 0x0063]; // "abc"
+        unsafe {
+            let status = string_pool_store_counted(
+                SRC_POOL as *mut StringPool,
+                counted.as_ptr(),
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(
+                STORE_CALLS,
+                std::vec![StoreCall {
+                    pool: SRC_POOL,
+                    data: counted.as_ptr() as usize + 2,
+                    bytes: utf16_bytes(&counted[1..]),
+                    id_out: 0, // a NULL id_out is forwarded unchecked
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn the_count_widens_to_u32_before_doubling() {
+        let (_copy_guard, _reset) = store_mock();
+        // 0x8000 units: a u16 shift would wrap to a zero length, the
+        // original's 32-bit lsl gives 0x10000 bytes.
+        let mut counted = std::vec![0u16; 0x8001];
+        counted[0] = 0x8000;
+        unsafe {
+            let status = string_pool_store_counted(
+                SRC_POOL as *mut StringPool,
+                counted.as_ptr(),
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(STORE_CALLS.len(), 1);
+            assert_eq!(STORE_CALLS[0].bytes.len(), 0x10000);
+            assert_eq!(STORE_CALLS[0].data, counted.as_ptr() as usize + 2);
+        }
+    }
+
+    #[test]
+    fn pool_and_failure_status_pass_through_unchecked() {
+        let (_copy_guard, _reset) = store_mock();
+        let counted = [1u16, 0x0078];
+        unsafe {
+            STORE_STATUS = PARAM_ERR;
+            let status = string_pool_store_counted(
+                ptr::null_mut(),
+                counted.as_ptr(),
+                ptr::null_mut(),
+            );
+            assert_eq!(status, PARAM_ERR);
+            assert_eq!(STORE_CALLS.len(), 1, "the thunk guards nothing itself");
+            assert_eq!(STORE_CALLS[0].pool, 0, "even a NULL pool is forwarded");
+            assert_eq!(STORE_CALLS[0].bytes, utf16_bytes(&counted[1..]));
+        }
     }
 }
