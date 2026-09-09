@@ -55319,3 +55319,53 @@ functions:
       and flag byte. Its ARM r0 is the dead stack temporary after drop,
       while the -1 tail path returns scope; every caller discards it, so
       Rust deliberately exports void rather than a dangling result.
+  - address: 0x08054664
+    ghidra: FUN_08054664
+    name: ui_plst_slot_item_position
+    size: 172
+    sig: "u32 ui_plst_slot_item_position(u8 *handle, u32 selector, u32 reverse_flag)"
+    module: ui/plst_slot_position
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: selector
+      param_3/r2: reverse_flag
+      FUN_080b48dc: normalize_selector_unported
+      FUN_080df1b8: materialize_slot_unported
+      FUN_080ca00c: build_position_map_unported
+      FUN_080daad4: slot_index_of_unported
+    notes: >-
+      Reverse slot lookup on the same element family ui/plst_slot_item
+      (0x08052728) reads forward: where that port maps (selector, index)
+      to an item word, this one maps (selector, item word) back to its
+      index. The handle is a two-word object {element @ +0x0, peer @
+      +0x4}; the peer is only NULL-gated, never dereferenced. Guard chain
+      (handle, element, peer, selector all non-NULL) is entirely
+      internal, matching the verified call profile: decoding every B/BL
+      word in osos.dec finds exactly 13 incoming calls, all unconditional
+      plain bl, 0 predicated. Ghidra's 172-byte extent is exact (the next
+      function's body starts at 0x08054710). The element carries a SECOND
+      49-word table at +0x470 (0x3ac + 49*4), a per-selector cache of
+      sorted key->index maps, parallel to the +0x3ac slot table. Selector
+      and flag-byte pass through the shared stock normalizer 0x080b48dc
+      by pointer. On a cache miss with normalized selector in 1..=48 the
+      slot is materialized via 0x80df1b8 and, ONLY when that returns 0
+      (unlike the sibling, this caller checks), the map is built from the
+      slot via 0x080ca00c (alloc 16+count*8, {key = slot item word @
+      +0x10+i*4, value = i} pairs, count @ +4, sort by key via 0x8061ecc)
+      and cached. The cache word is then re-read; a non-NULL map is
+      searched via 0x80daad4 (binary search + linear fallback, -1 on
+      miss, reverse-adjusts a hit to count-index-1 when the flag byte is
+      nonzero) with the handle ITSELF as key. All failure paths return
+      -1 (0xffffffff). All four callees are unported and sit behind the
+      PLST_SLOT_POSITION_OPS seam (stock addresses on target; host
+      defaults identity-normalize / never-materialize / panic-on-reach);
+      the normalize/materialize fn-pointer types are reused from
+      ui/plst_slot_item. The handle's pointer fields are read as u32
+      target words and widened (native-width reads faulted the first
+      host-test run). Host fixture hint PLST_SLOT_POSITION 0xd3000000,
+      far clear of the sequential run. match.py structural: LLVM fp
+      frame, ldrd/blx dispatch of the ops quartet, and the sel-1 u< 49
+      lowering of the sel!=0 && sel<49 bound; guard chain, +0x470/+0x3ac
+      addressing, materialize-return check, cache store/re-read, and the
+      handle-as-key search all match the original's structure.
