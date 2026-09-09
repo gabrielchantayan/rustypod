@@ -4281,6 +4281,33 @@ functions:
       instantiation), so the canonical export deliberately serves it
       directly rather than adding an indistinguishable second Rust body.
 
+  - address: 0x083d9f5c
+    ghidra: FUN_083d9f5c
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Alias of the existing deque_seg_capacity Rust export: raw ARM is
+      `mov r0, #0x20; bx lr` (words 0xe3a00020 0xe12fff1e, byte-identical
+      to canonical 0x083d9ec0), returning 0x20 elements per deque segment.
+      Decoding every ARM B/BL word in osos.dec finds exactly 12
+      unconditional plain bl call sites and no predicated calls:
+      0x083d9fac, 0x083ddcf0, 0x083ddd50, 0x083ddd88, 0x083ddeb0,
+      0x083dded4, 0x083ddf5c, 0x083ddf70, 0x083ddf78, 0x083ddfb4,
+      0x083ddfc8, and 0x083de0a8. Ghidra's 12-call count is exact. No
+      data-word references (not vtable-dispatched). Callers scale the
+      result by 0xc, the 12-byte element stride of this instantiation:
+      the iterator ctor at 0x083d9f88 builds
+      `seg_end = seg_base + capacity * 0xc`, and the pop paths at
+      0x083ddcf0/0x083de0a8 free a spent segment via
+      `cxx_array_dealloc(seg, 0x20, 0)`. This is one of the 17
+      byte-identical per-template copies, so the canonical export
+      deliberately serves it directly rather than adding an
+      indistinguishable second Rust body.
+
   - address: 0x083d9eec
     ghidra: FUN_083d9eec
     name: deque_iter_init
