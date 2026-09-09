@@ -20810,6 +20810,38 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839eca0
+    ghidra: FUN_0839eca0
+    name: refcounted_handle_construct_variant
+    size: 104
+    sig: "RefcountedBody **refcounted_handle_construct_variant(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      Raw bytes establish the exact 104-byte extent
+      (0x0839eca0..0x0839ed08), where another separately linked function
+      begins. Decoding every ARM B/BL word in
+      osos.dec finds exactly 13 direct BL callers, all unconditional: no
+      tail B sites, no predicated forms, and no image data word references,
+      so this template instantiation is not virtually dispatched. It clears
+      slot first; with a non-NULL implementation, tag-2 operator_new(12)
+      creates RefcountedBody { implementation, 1, NULL }; want_mutex
+      allocates and zeroes tag-2 operator_new(8), stores it at body+8, then
+      calls mutex_create before publishing body. Returns slot. This is
+      byte-identical to refcounted_ptr_construct @ 0x0839ed38 after
+      normalizing the three BL displacements. Deliberate codegen deviation:
+      LLVM inlines ported mutex_create (including ROM_KERNEL dispatch), so
+      the ARM body is larger but retains the alloc/init/store sequence. The
+      dedicated target section prevents folding this separately hookable copy
+      into its byte-identical siblings; host tests use oversized arenas
+      because the host structs are wider than the target's 12/8-byte layouts.
+
   - address: 0x0839eda0
     ghidra: FUN_0839eda0
     name: refcounted_ptr_assign
