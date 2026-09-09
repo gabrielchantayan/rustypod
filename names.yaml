@@ -53331,3 +53331,79 @@ functions:
       boundary; host tests install a recording seam and use a dedicated
       below-4-GiB raw-u32 root/context fixture. The runtime root global uses
       app/context_scope.rs's existing APP_ROOT_OBJECT model of 0x089ca674.
+  - address: 0x08139dec
+    ghidra: FUN_08139dec
+    name: iap_incoming_client_base_construct
+    size: 144
+    sig: "u8 *iap_incoming_client_base_construct(u8 *this, usize incoming_r1, usize scope_word0, usize scope_word1)"
+    module: app/iap_incoming_client_base
+    status: ported
+    renames:
+      param_1/r0/r4: this (writable 0x2d0-byte iAP incoming-client base object)
+      DAT_08139e78: IAP_INCOMING_CLIENT_BASE_VTABLE (0x08984cb8; the 0x0898xxxx
+        page is stale RW data in the image, so only the address constant
+        survives - the util/resource_list precedent)
+      FUN_08261e28: cxx_mutex_construct (ported, called directly; its r1 is the
+        vtable literal, its r2/r3 are the caller's register-shape seeds)
+      thunk_EXT_FUN_2200027c: memzero_aligned via the IRAM veneer 0x08037db8
+        (ported; called through a read_volatile fn-pointer load so LLVM does
+        not inline it and re-lower to __aeabi_memclr4)
+      FUN_081d71c0: iap_incoming_process_thread_instance (ported, called
+        directly, twice - the second read is a genuine re-read)
+      FUN_081d6e38: register_client (unported; IAP_INCOMING_CLIENT_BASE_OPS
+        seam, target default transmutes 0x081d6e38)
+      FUN_081d7270: iap_incoming_process_thread_slot_poll (ported, called
+        directly)
+      FUN_08030f44: heap_panic (ported, direct; the slot == -1 path is fatal
+        and not host-testable)
+    notes: >-
+      The shared base-class constructor of every object that registers as a
+      client of the CIapIncomingProcessThread incoming-packet worker. Verified
+      extent 0x08139dec..0x08139e7c: Ghidra's 140 covers exactly the
+      instructions; the vtable literal 0x08984cb8 at 0x08139e78 (reached by
+      the first ldr's [pc,#128]) extends the span to 144, and the next
+      function at 0x08139e7c is the matching base DESTRUCTOR (replants the
+      same vtable, polls then unregisters the slot via 0x081d7270/0x081d66fc,
+      destroys the mutex via 0x08261e54, returns this) - a separate port.
+      Call count binary-verified by decoding every B/BL word in osos.dec: 14
+      bl sites, ALL unconditional (0x0813a2e8, 0x081650b0, 0x08193cbc,
+      0x08193e3c, 0x08195338, 0x08196e94, 0x081af24c, 0x081d7c30, 0x081e30b8,
+      0x081f25f0, 0x081f38ec, 0x08200c64, 0x08201224, 0x08209548), zero
+      predicated forms, zero tail b, and no DATA word references the address -
+      only ever direct-called, never virtual. Every site is a derived
+      constructor that immediately overwrites the vtable word (0x081650ac
+      plants 0x08987e04 and extends the object at +0x2d0, proving the base
+      size 0x2d0). Algorithm: plant vtable at +0x00, cxx_mutex_construct the
+      0x1c-byte pool-guard mutex at +0x2ac, slot word +0x2c8 = -1, self
+      pointer +0x2cc = this, memzero(this+4, 0x2a8), then thread the 32
+      20-byte pool nodes at +0x2c..+0x2ac newest-first onto the head word at
+      +0x18 (afterwards head = this+0x298, node at +0x2c terminates NULL; the
+      loop's bic r0,r0,#0x10000 is dead for the 1..32 count and preserved),
+      then register this with the thread context (0x081d6e38 wraps
+      0x081d6dbc: free slot of the 29-slot table at context+0x154, a
+      0x24-byte wait-registration object into the slot's +0 word, the client
+      into the +4 context word, returns the index or -1), store the slot at
+      +0x2c8 even when it is -1 BEFORE the fatal check, and finish with one
+      zero-timeout poll of the new slot after a second, genuine instance
+      re-read. Of the constant-1 registration arguments, r1 seeds the scoped
+      object built inside 0x081d6e38 (bl 0x08261e94); r3 is carried into
+      0x081d6dbc but never read there. Deviations: the registration wrapper
+      rides the IAP_INCOMING_CLIENT_BASE_OPS seam (host default inert,
+      returning slot 0; tests install recording mocks) - hook-ready for the
+      registration call only once 0x081d6e38 is ported, the target default
+      reaching the stock body until then; incoming_r1/scope_word0/
+      scope_word1 keep the register shape only (the original overwrites r1
+      with the vtable literal and forwards its caller's r2/r3 into
+      cxx_mutex_construct's stack-scope seeds - the ADS uninitialized-frame
+      idiom that port documents). LLVM fully unrolls the 32-iteration
+      threading loop and keeps the head in registers (intermediate head
+      values never land in memory) - unobservable in a single-threaded
+      constructor; match.py structural (exit 1, diff expected): same vtable
+      plant / mutex bl / -1 store / zero-fill / chain shape / register blx /
+      cmn-store-beq panic / re-read / poll / return-this. Host tests (serial
+      suite): full layout + registration + poll of slot 3, the instance
+      re-read proven by re-publishing a second thread fixture inside the
+      register mock, and edge slot 28 flowing verbatim to the +0x2c8 word and
+      the poll; fixtures map one slab at the dedicated
+      hints::IAP_INCOMING_CLIENT_BASE (0xca000000) with the client object at
+      +0x000 and two 0x240-byte thread contexts at +0x400/+0x800.
