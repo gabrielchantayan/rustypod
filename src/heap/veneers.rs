@@ -69,6 +69,10 @@
 //!   -8, count @ -4) and tail-calls the destructor walk, which returns
 //!   the true block start (`array - 8`); a NULL array skips the walk and
 //!   returns NULL (r0 unchanged). Sole osos caller: `cxx_vec_delete`.
+//! - `cpp_finalise_dtor_guard` — original `FUN_082ab3ec` @ 0x082ab3ec
+//!   (20 bytes; 14 `bl` + 3 tail-`b` call sites). Preserves an array when
+//!   its element destructor is NULL; otherwise tail-branches to
+//!   `__cpp_finalise` with the caller-supplied count and stride.
 //! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
 //!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
 //!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3,
@@ -612,6 +616,32 @@ pub unsafe extern "C" fn cpp_finalise_null_guard(
     let elem_size = *(array.sub(8) as *const u32) as usize;
     let count = *(array.sub(4) as *const u32) as usize;
     crate::runtime::atexit::__cpp_finalise(array, dtor, elem_size, count)
+}
+
+/// cpp_finalise_dtor_guard — original `FUN_082ab3ec` @ 0x082ab3ec
+/// (20 bytes; 14 unconditional `bl` + 3 unconditional tail-`b` call
+/// sites, binary-verified).
+///
+/// The raw body is `mov ip,r1; movs r1,r3; movne r3,ip; bne
+/// __cpp_finalise; mov pc,lr`: it returns `array` unchanged when `dtor` is
+/// NULL. Otherwise it calls the C++ destructor-array walk with the supplied
+/// element stride and count, returning that walk's `array - 8` result.
+///
+/// Deliberate deviation: Rust has no guaranteed tail call, so the
+/// `__cpp_finalise` transfer is a normal call. All 17 inbound direct branches
+/// are unconditional; no aligned data word references this address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cpp_finalise_dtor_guard(
+    array: *mut u8,
+    count: usize,
+    elem_size: usize,
+    dtor: Option<extern "C" fn(*mut u8)>,
+) -> *mut u8 {
+    match dtor {
+        Some(dtor) => crate::runtime::atexit::__cpp_finalise(array, dtor, elem_size, count),
+        None => array,
+    }
 }
 
 /// cxx_vec_delete — original: `FUN_0803170c` @ 0x0803170c (16 bytes;
@@ -1277,6 +1307,42 @@ pub(crate) mod tests {
             assert_eq!(DTOR_SEEN[0], array as usize + 4);
             assert_eq!(DTOR_SEEN[1], array as usize);
             assert_eq!(FREE_CALLS, 0, "the guard itself must not free");
+        }
+    }
+
+    #[test]
+    fn finalise_dtor_guard_skips_null_and_forwards_array_shape() {
+        let _lock = mock_heap();
+        unsafe {
+            DTOR_CALLS = 0;
+            // `movs r1,r3; movne r3,ip`: NULL dtor returns r0 without
+            // dereferencing it, regardless of the otherwise-dead inputs.
+            let sentinel = 0x1234usize as *mut u8;
+            assert_eq!(cpp_finalise_dtor_guard(sentinel, usize::MAX, 0, None), sentinel);
+            assert_eq!(DTOR_CALLS, 0);
+
+            // Place the array after an in-bounds eight-byte cookie so the
+            // finaliser's documented `array - 8` return stays valid.
+            let mut storage = [0u8; 8 + 12];
+            let array = storage.as_mut_ptr().add(8);
+            assert_eq!(
+                cpp_finalise_dtor_guard(array, 4, 3, Some(logging_dtor)),
+                storage.as_mut_ptr()
+            );
+            assert_eq!(DTOR_CALLS, 4);
+            assert_eq!(DTOR_SEEN[..4], [
+                array as usize + 9,
+                array as usize + 6,
+                array as usize + 3,
+                array as usize,
+            ]);
+
+            DTOR_CALLS = 0;
+            assert_eq!(
+                cpp_finalise_dtor_guard(array, 0, 3, Some(logging_dtor)),
+                storage.as_mut_ptr()
+            );
+            assert_eq!(DTOR_CALLS, 0, "zero count still reaches finalise");
         }
     }
 

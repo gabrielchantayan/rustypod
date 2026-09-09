@@ -130,6 +130,7 @@ pub unsafe fn __cpp_initialise(table: *const extern "C" fn(), count: usize) {
 /// with element stride `elem_size`, LAST element first, exactly once per
 /// element. Returns `base - 8` unconditionally, matching the original
 /// (ADS `__vec_delete` array-header convention).
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe fn __cpp_finalise(
     base: *mut u8,
