@@ -49731,3 +49731,48 @@ functions:
       `bleq` heap_panic, and the seam's literal-load + blx for the
       unported wait callee - the same four deltas the ported poll
       sibling records.
+
+  - address: 0x081b36e0
+    ghidra: FUN_081b36e0
+    name: string_view_array_construct
+    size: 176
+    sig: "StringViewArray *string_view_array_construct(StringViewArray *this, ResourceProvider *resources, void *controller, void *parent, const StringViewArraySpec *spec)"
+    module: ui/string_view_array
+    status: ported
+    renames:
+      param_1: this
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      in_stack_00000000: spec
+      DAT_081b3788: STRING_VIEW_ARRAY_VTABLE_ADDRESS
+      DAT_081b378c: ARRAY_ELEMENT_CONSTRUCTOR_ADDRESS
+      FUN_08291c24: string_view_construct (direct, ported in ui/string_view)
+      FUN_08277440: string_default_construct (direct, ported in cxx/string_object)
+      FUN_082ab234: cpp_array_construct (direct, ported in runtime/cpp_array_construct)
+      FUN_0827639c: string_object_assign_cstr (direct, ported in cxx/string_object)
+      FUN_0811108c: timer_schedule_shim (direct, ported in drivers/timer)
+    notes: >-
+      Raw ARM establishes a 176-byte extent: 168 bytes of code from
+      0x081b36e0 through the return at 0x081b3784, followed by its two
+      literal-pool words at 0x081b3788 and 0x081b378c; the separately
+      linked next function begins at 0x081b3790. Decoding every B/BL word
+      in osos.dec finds exactly 17 direct call sites, all unconditional
+      plain bl, with zero predicated BL forms and no B tail callers. The
+      five-argument derived StringView constructor forwards its register
+      arguments and stacked spec to string_view_construct, overwrites the
+      base vtable with 0x0898b884, default-constructs then clears the
+      trailing StringObject at +0x220, and asks cpp_array_construct to
+      initialize five 0x6c-byte elements at +0x248. It copies spec+0x6c,
+      +0x68, +0x74 and +0x78 into +0x22c, +0x230, +0x238 and +0x23c,
+      stores saturating unsigned spec+0x70 minus spec+0x78 at +0x234,
+      clears +0x228 and +0x244, then builds a timer at +0x468 with this
+      as config word. The raw constructor word 0x081a87b0 is not a decoded
+      function entry and remains deliberately unnamed. Ghidra's no-argument
+      int signature drops all inputs and the pointer return. The host port
+      plants the derived StringObject's two target-width words directly,
+      because its required host alignment conflicts with the embedded base
+      StringView strings; ARM calls string_default_construct directly. Host
+      test records the base constructor, nested array construction, resource
+      resolve, both timers, empty-string clear, derived array ABI, returned
+      this, copied words, the underflow clamp, and untouched padding.

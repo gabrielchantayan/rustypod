@@ -151,6 +151,9 @@ pub mod hints {
     // block carries the chain head as a raw u32 word); mappings never
     // unmap, so no other user may share this hint.
     pub const RESOURCE_CHAIN_ON_CURRENT_TASK: usize = 0x7600_0000;
+    // 0x6d00_0000: dedicated to ui/string_view_array's derived-view
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const STRING_VIEW_ARRAY: usize = 0x6d00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
@@ -245,6 +248,11 @@ pub static VIEW_EVENT_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// The timer module and view-timer callers both drive the ported timer
 /// helpers through this one dispatch table.
 pub static TIMER_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps `ui::string_view::STRING_VIEW_OPS`.
+/// Both the base view constructor tests and derived-view constructor tests
+/// replace this shared mutable table.
+pub static STRING_VIEW_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes host tests that replace
 /// `app::screen_layout::SCREEN_LAYOUT_ASSIGN_OPS`. The notification callback
