@@ -21,6 +21,7 @@ pub mod context;
 pub mod controller_layout_dispatch;
 pub mod controller_history_select;
 pub mod context_scope;
+pub mod demo_mode_datetime;
 pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod element_registry;

@@ -49172,3 +49172,51 @@ functions:
       nDb==0 and nDb<0 finding nothing, and the default hooks resolving
       to the real ports. Fixture: u32-word slab via
       testing::hints::SQLITE_FIND_TABLE.
+
+  # --- app: the demo mode's canned calendar record ---
+  - address: 0x08284e4c
+    ghidra: FUN_08284e4c
+    name: demo_mode_datetime
+    size: 44
+    sig: "DateTime *demo_mode_datetime(DateTime *out)"
+    module: app/demo_mode_datetime
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      FUN_081883fc: demo_mode_instance
+      FUN_0827216c: resource_chain_find
+      DAT_08284e78: RESOURCE_ID_DEMO_MODE_DATETIME (0x000080aa)
+      DAT_08284e7c: RESOURCE_KIND_DTTM (0x4474546d, "DtTm" big-endian)
+      0x08037db0: __rt_memcpy (ROM thunk table entry 0)
+    notes: >-
+      Copies the demo mode's canned ten-byte calendar record into the
+      caller's DateTime: demo_mode_instance() (TCDemoMode singleton,
+      class 0x8080) -> resource_chain_find(head, "DtTm", 0x80aa) ->
+      tail __rt_memcpy(out, record, 10) through thunk 0x08037db0 (ROM
+      0x22000020 == osos 0x08000020, ported in libc/rt_memcpy.rs). The
+      record is the time/datetime.rs ten-byte DateTime - pinned by the
+      callers: FUN_082851d0 round-trips the buffer through
+      datetime_to_unix_seconds 0x08093c38 / unix_seconds_to_datetime
+      0x080964cc, and FUN_082ca58c fills two adjacent fields at +0x08
+      and +0x12 (a 10-byte stride). functions.csv's 44 is the exact
+      code size (eleven instructions, 0x08284e4c..0x08284e78); the
+      two-word literal pool (id @ 0x08284e78, kind @ 0x08284e7c) makes
+      the true extent 52 bytes, ending where the next function pushes
+      {r0-r4,lr} @ 0x08284e80. 17 call sites, binary-scanned over
+      every B/BL word in osos.dec: 16 bl plus one bleq @ 0x08203a1c
+      that gates the fill of an object's field +0x1a on its flag byte
+      +0x18 being clear - caller-side gating, no callee contract. No
+      DATA word in the image holds 0x08284e4c, so it is never
+      dispatched virtually. All three callees were already ported and
+      are called directly, no seam. Deviations: none structural - the
+      original has NO NULL guard (a missing singleton or unanswered
+      entry copies ten bytes from address 0) and the port keeps that;
+      the tail b propagates __rt_memcpy's r0, so the port returns out.
+      match.py structural: same call/load order and tail branch; LLVM
+      adds the usual {fp,lr} frame and forms 0x80aa with mov/orr
+      instead of a second literal-pool load. Host tests (4): full
+      ten-byte copy of a distinct fixture record with out returned,
+      size_of::<DateTime>() == 10 (the mov r2,#10 literal), the find
+      hitting the demo-mode object itself with exactly (kind
+      0x4474546d, id 0x80aa), and the walk continuing past a declining
+      first provider to a second node.
