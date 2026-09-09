@@ -49277,3 +49277,49 @@ functions:
       hitting the demo-mode object itself with exactly (kind
       0x4474546d, id 0x80aa), and the walk continuing past a declining
       first provider to a second node.
+
+  - address: 0x0827c9c8
+    ghidra: FUN_0827c9c8
+    name: query_param_list_push
+    size: 60
+    sig: "void query_param_list_push(ParamList *list, u32 value)"
+    module: app/query_param_list
+    vars: {param_1: list, param_2: value}
+    status: ported
+    notes: >-
+      Extent byte-verified: fifteen ARM words @ 0x0827c9c8..0x0827ca00,
+      ending where the separately linked list initializer sibling pushes
+      {r4, lr} @ 0x0827ca04; Ghidra's 60 bytes is correct. Binary scan
+      of every B/BL word in osos.dec: exactly 17 call sites, all
+      unconditional `bl`, and all seventeen live inside the 18-slot
+      binder FUN_0827c8a8 @ 0x0827c8a8 (one per register/stack
+      argument; the 18th push is inlined there verbatim). No predicated
+      forms, no tail branches, no DATA-word references, so the function
+      is never vtable-dispatched. The receiver is the media library SQL
+      query layer's fixed 18-slot bound-parameter list (callers build
+      statements such as "SELECT version ... FROM genius"; the
+      initializer @ 0x0827ca04 chains string_default_construct @
+      0x08277440 for the base sub-object, then fills all 18 slots with
+      -1 and clears all 18 tag bytes). Layout: +0x00/+0x04 base
+      sub-object, +0x08 count, +0x0c values u32[18], +0x54 tagged
+      u8[18], +0x68 heap token (operator_delete @ 0x082aad24'd by the
+      binder when it changes). Algorithm: value 0xffffffff is the
+      slot-absent sentinel and returns with no store; otherwise a set
+      bit31 sets tagged[count] = 1 and is stripped from the word stored
+      at values[count]; count then increments. No NULL guard and no
+      capacity guard - the firmware relies on the sole caller never
+      pushing more than 18. All three observed binder invocations push
+      small ints (0, 1, 2) and -1 sentinels, so the bit31 tag path is
+      contract-only, not exercised by any caller in the image.
+      Deviation: the stock code reloads count from +0x08 three times;
+      the port reads it once (unobservable - nothing it touches can
+      alias the receiver). match.py structural: 15 instructions on both
+      sides with the same blocks (sentinel early-out, tag strip + flag
+      byte store, value store, count increment); LLVM adds its usual
+      {fp, lr} frame and tests bit31 as a signed bgt instead of
+      predicated tst. Host tests (6): sentinel dropped with zero
+      stores, plain value stored at count with count increment and
+      later slots untouched, bit31 tag sets the flag byte and strips
+      the bit, 0x80000000 is not the sentinel, 0x7fffffff stored
+      unchanged, and sequential pushes including an interleaved
+      sentinel fill slots in order with per-slot tags.
