@@ -40,6 +40,7 @@ pub mod mutex;
 pub mod mutex_destroy;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;
+pub mod recursive_mutex;
 pub mod observable_array;
 pub mod pending_event;
 pub mod null_pointer_status;
