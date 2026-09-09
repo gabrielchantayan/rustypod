@@ -15611,6 +15611,38 @@ functions:
       AAPCS halves, and a resolved zero identifier. match.py structural review
       is recorded with this port's commit.
 
+  - address: 0x082a6554
+    ghidra: FUN_082a6554
+    name: ui_element_reference_construct_string
+    size: 144
+    sig: "void ui_element_reference_construct_string(StringObject *out, const UiElementReference *reference)"
+    module: ui/element_reference_construct_string
+    status: ported
+    vars: {param_1: out, param_2: reference, "reference+0x0": vtable, "reference+0x4": target, "vtable+0xc": resolve_slot, "vtable+0x20": string_route_slot, local_20c: utf16_unit_count, "local_20a": utf16_units, DAT_082a65dc: resource_chain_global, DAT_082a65e0: fallback_string_id}
+    notes: >-
+      Raw extent is exactly 144 bytes: 136 bytes of instructions from
+      0x082a6554 through 0x082a65d8, plus literal-pool words at 0x082a65dc
+      (0x089cc870) and 0x082a65e0 (0x0dad06c2); the next separately linked
+      function opens push {r4,lr} at 0x082a65e4. The function default-constructs
+      out through string_default_construct, resolves the reference by raw vtable
+      slot +0xc, and returns that empty object when resolve yields zero. A
+      resolved reference dispatches raw vtable slot +0x20: zero calls unported
+      0x080544dc with reference+0x4 and stack count/buffer then assigns exactly
+      that many UTF-16 units through string_object_assign_utf16; nonzero finds
+      string resource 0x0dad06c2 from the chain pointer in global 0x089cc870
+      then assigns the returned C string, including NULL. Decoding every ARM
+      B/BL word in osos.dec finds 14 direct plain unconditional BL callers
+      (0x08102d28, 0x0812cc50, 0x0813dc50, 0x08174d08, 0x081769d4,
+      0x08176f28, 0x08177110, 0x081776d4, 0x081b5a0c, 0x081b61b8,
+      0x0823288c, 0x08236f58, 0x08238f8c, 0x08239b98), zero predicated and
+      zero direct B. The slot +0xc static value 0x0826acd8 decodes as the
+      {0x801e,0x08ae5474} selector/implementation data pair, not a function
+      entry; slot identities remain unestablished, so the port preserves raw
+      dispatch rather than inventing callees. Deliberate host deviations:
+      native-width vtable function-pointer fixtures, a modeled chain-global
+      pointer, and a test-replaceable direct boundary for unported 0x080544dc;
+      firmware builds call the latter at its fixed load address.
+
   - address: 0x082a65e4
     ghidra: FUN_082a65e4
     name: context_scope_subject_matches_context_field_f40
