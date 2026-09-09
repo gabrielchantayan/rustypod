@@ -50142,6 +50142,42 @@ functions:
       all 16 call sites are plain bl, with no predicated calls or tail
       branches. No NULL guards or deliberate deviations.
 
+  - address: 0x082e2a48
+    ghidra: FUN_082e2a48
+    name: fat_dirent_is_directory
+    size: 32
+    sig: "u32 fat_dirent_is_directory(const FatDirentHandle *handle)"
+    module: fs/fat_dirent
+    status: ported
+    renames:
+      param_1/r0: handle
+      bVar1: flag_clear
+    notes: >-
+      FAT lookup-handle directory predicate. It answers 1 when the
+      handle's cached directory flag at +0x14 is nonzero, without
+      dereferencing anything else; otherwise it reads the attribute byte
+      at +0x0b of the FatDirEntry pointed at by handle +0x04 and tests
+      ATTR_DIRECTORY (0x10). Handle word +0x00 is the FatVolume and +0x04
+      the dirent, confirmed by callers FUN_082e20d0/FUN_082e1448 which
+      feed the same pair to fat_dirent_start_cluster; the opendir paths
+      (FUN_082e20d0, FUN_082e3080) require a nonzero answer while the
+      unlink path FUN_082e47a0 rejects on one. The byte at dirent +0x0b
+      is the FAT attribute byte: sibling FUN_082e2a68 tests its 0x08
+      (volume label) bit, and FUN_082e47a0 masks it with 0x19
+      (read-only | volume | directory). Raw extent byte-verified: the bx
+      lr at 0x082e2a64 ends the 32-byte body and the separately entered
+      sibling starts at 0x082e2a68, so Ghidra's 32 bytes is exact. Every
+      B/BL word in osos.dec was decoded: all 12 call sites are plain bl,
+      with no predicated calls or tail branches, so the missing NULL
+      guard matters to no caller. FatDirentHandle keeps native pointers
+      with named fields; 32-bit-only offset asserts pin entry at +0x04
+      and directory_flag at +0x14. match.py (exit 1, diff expected):
+      same field offsets and short-circuit; LLVM emits and r0, r1, r0,
+      lsr #4 for the bit test and adds the crate's fp frame, both
+      accepted house deviations. Host tests cover flag short-circuit
+      with a dangling entry pointer, attribute bits 0x10/0x30/0x1f
+      answering 1, and 0x00/0x08/0x20/0x0f answering 0.
+
   - address: 0x0836f91c
     ghidra: FUN_0836f91c
     name: sqlite_auth_check
