@@ -19132,6 +19132,32 @@ functions:
       live average, expiration clear, and wrapping sum. match.py
       structural diff reviewed after the release ARM build.
 
+  - address: 0x08292d08
+    ghidra: FUN_08292d08
+    name: controller_history_select_with_callback
+    size: 20
+    sig: "void controller_history_select_with_callback(void)"
+    module: app/controller_history_select
+    status: ported
+    renames:
+      DAT_08292d18: controller_history_resource_id
+      FUN_08292d1c: controller_history_select
+    notes: >-
+      Raw ARM verifies a 20-byte extent at 0x08292d08..0x08292d1c: `ldr
+      r0,[pc,#8]; mov r2,#0; mov r1,#1; b 0x08292d1c` followed by private
+      resource-id literal 0x0dad073a. The next function begins at
+      0x08292d1c, so Ghidra's 212-byte extent is incorrect. Scanning every
+      ARM B/BL encoding finds 13 direct BL call sites: ten unconditional
+      BL, two BLEQ, and one BLNE; it also finds one BNE tail caller. The
+      wrapper has no guard; predicated callers supply their own gates.
+      Algorithm: select the controller-history resource through the shared
+      helper with history flag 1 and skip-callback flag 0, installing its
+      CntrlHistoryFn callback after selection. Deliberate deviation: the ARM
+      port uses a literal veneer for the stock helper because a payload
+      cannot retain the retail PC-relative tail branch; host builds call a
+      volatile callback seam. Host tests prove the exact resource id and
+      complementary (1,0) policy flags. match.py structural review is
+      recorded after the release ARM build.
   - address: 0x08292e58
     ghidra: FUN_08292e58
     name: controller_history_select_without_callback
