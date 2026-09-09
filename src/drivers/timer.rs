@@ -195,6 +195,30 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
     }
 }
 
+/// read_usec_timer_into — original: `FUN_08086e24` @ 0x08086e24 (20 bytes,
+/// 0x08086e24..0x08086e38, binary-decoded).
+///
+/// **18 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 0 tail `b` call sites**, verified by decoding every ARM `B`/`BL`
+/// word in `work/firmware/osos.dec`.
+///
+/// Takes one raw Timer E `TECNT` sample and writes it to `out`. The firmware
+/// preserves `out` in r4 across its call to the one-instruction branch thunk
+/// @ 0x08056658; that thunk transfers to @ 0x0836af80, whose three-word body
+/// reads 0x3c70_00b4 and returns the sample in r0 before the final store.
+/// There is deliberately no NULL guard.
+///
+/// Deviation: calls the already-ported [`usec_timer_read`] directly rather
+/// than creating a dispatch seam for the branch thunk. The raw target still
+/// performs exactly one volatile Timer E read before its ordinary word store.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn read_usec_timer_into(out: *mut u32) {
+    unsafe {
+        out.write_volatile(usec_timer_read());
+    }
+}
+
 /// usec_timer_read_seconds — original: `FUN_0826c5e8` @ 0x0826c5e8
 /// (**28 bytes**, 0x0826c5e8..0x0826c604, binary-decoded).
 ///
@@ -455,6 +479,31 @@ mod usec_timer_tests {
         for count in [0, 1, 0x1234_5678, u32::MAX] {
             HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
             assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+
+    #[test]
+    fn timer_read_into_stores_one_sample_without_touching_neighboring_words() {
+        let _guard = configure_usec_timer(0, 1);
+
+        for (counter, old_destination) in [
+            (0, u32::MAX),
+            (1, 0),
+            (0x1234_5678, 0xdead_beef),
+            (u32::MAX, 0xfeed_face),
+        ] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            let mut words = [0xaaaa_aaaa, old_destination, 0x5555_5555];
+
+            unsafe { read_usec_timer_into(&mut words[1]) };
+
+            assert_eq!(words, [0xaaaa_aaaa, counter, 0x5555_5555]);
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed),
+                counter.wrapping_add(1)
+            );
         }
     }
 

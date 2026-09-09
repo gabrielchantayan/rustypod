@@ -1140,6 +1140,31 @@ functions:
       for timeout polling. Target uses volatile MMIO; host uses a
       deterministic driver-local counter seam.
 
+  - address: 0x08086e24
+    ghidra: FUN_08086e24
+    name: read_usec_timer_into
+    size: 20
+    sig: "void read_usec_timer_into(u32 *out)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      thunk_FUN_08056658: usec_timer_read_thunk
+      FUN_0836af80: usec_timer_read
+      uVar1/r0: timer_e_counter
+    notes: >-
+      Binary extent is 0x08086e24..0x08086e38: `push {r4,lr}; mov r4,r0;
+      bl 0x08056658; str r0,[r4]; pop {r4,pc}`. The branch thunk at
+      0x08056658 goes directly to 0x0836af80, whose body reads the Timer E
+      TECNT MMIO word at 0x3c7000b4. Therefore this function samples exactly
+      once and stores the raw word through its unguarded output pointer.
+      Raw decoding of every ARM B/BL word in osos.dec finds 18 direct bl,
+      all unconditional, with zero predicated bl and zero tail b call sites.
+      The separately linked next function at 0x08086e38 is byte-identical.
+      Rust calls existing usec_timer_read directly instead of adding a seam
+      for the unported branch thunk; this preserves one volatile sample and
+      one word store.
+
   - address: 0x08001ee8
     ghidra: FUN_08001ee8
     name: usec_timer_elapsed
