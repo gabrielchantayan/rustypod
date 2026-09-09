@@ -48590,6 +48590,52 @@ functions:
       signed non-positive lengths, single positive reads, verbatim read
       status, bank selection, and invalid-bank no-transfer behavior.
 
+  # --- PCF50635 register write (drivers/i2c) ---
+  - address: 0x0836d524
+    ghidra: FUN_0836d524
+    name: pmu_i2c_write
+    size: 60
+    sig: "i32 pmu_i2c_write(u32 reg, i32 len, const u8 *data)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: len
+      param_3/r2: data
+      local_10: packet
+      iVar1/r0: copied
+      FUN_0836bb84: i2c_write
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent 0x0836d524..0x0836d560:
+      the following push {r3,r4,r5,lr} at 0x0836d560 starts the separately
+      linked sibling (the PMU reg-0x1d/0x1b writer), with no literal pool.
+      The write twin of pmu_i2c_read (FUN_0836d3b8): push {r2,r3,r4,lr}
+      reserves a 16-byte stack frame, strb stores only the low byte of reg
+      at [sp], a signed byte loop (cmp r0,r1 / ldrblt / strblt) copies len
+      payload bytes to [sp+1+i] (non-positive signed lengths copy nothing),
+      then FUN_0836bb84 is called as i2c_write(0x73, len+1, sp) — the
+      PCF50635 PMU slave — and its raw status returns verbatim. A payload
+      above 15 bytes would overrun the retail frame; every caller passes
+      small lengths. Decoding every ARM B/BL word in osos.dec verifies 17
+      unconditional BL call sites at 0x082e5a94, 0x0836d0ac, 0x0836d0f0,
+      0x0836d258, 0x0836d2c8, 0x0836d2e0, 0x0836d430, 0x0836d4f8,
+      0x0836d57c, 0x0836d5a0, 0x0836d5e8, 0x0836d65c, 0x0836d6dc,
+      0x0836d6f8, 0x0836d7d4, 0x0836d7ec, and 0x0836d804; no predicated
+      BL forms. The conditional direct branches bne 0x0836d474, bcc
+      0x0836d518, beq 0x0836d710, and beq 0x0836d824 are tail-branch
+      references, not calls. PORT DEVIATIONS: the raw S5L8702 I2C write
+      primitive remains unported and is reached through a typed
+      fixed-address target call / volatile host-test seam, yielding blx
+      instead of the retail direct bl; the payload copy uses volatile byte
+      accesses so LLVM cannot fold it into a memcpy; LLVM zeroes the
+      packet frame with __aeabi_memclr (resolved from compiler_builtins)
+      where retail leaves the unsent tail bytes as stack garbage — only
+      len+1 bytes are ever transmitted and all are written, so the wire
+      behaviour is identical. Host tests cover packet layout, the low-byte
+      strb of reg, verbatim status passthrough, signed non-positive
+      lengths (len 0 sends the lone reg byte, len -1 wraps the count to
+      0), and the 15-byte maximum frame payload.
+
   # --- Bootstrap-to-current mutex handoff (kernel/mutex_handoff) ---
   - address: 0x081fca10
     ghidra: FUN_081fca10
