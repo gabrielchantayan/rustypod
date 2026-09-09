@@ -47195,6 +47195,36 @@ functions:
       none. Host coverage proves both table edges, NULL-word propagation, and
       the uncached reload.
 
+  - address: 0x08193e84
+    ghidra: FUN_08193e84
+    name: service_manager_secondary_handler_code_get
+    size: 20
+    sig: "u16 service_manager_secondary_handler_code_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_1_plus_slot_times_0x20_plus_0x1c: handler_code
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x08193e84..0x08193e98: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; ldrh r0,[r0,#28]; bx lr`; the next
+      `cmp r1,#3` at 0x08193e98 begins the separately linked setter. It
+      returns the low u16 at +0x1c in one of three 8-word secondary handler
+      records. The signed `blge` admits negative slots, which address
+      unchecked before the table exactly as retailOS does; slots >=3 terminate
+      through ported non-returning heap_panic. Decoding every ARM B/BL word in
+      osos.dec found exactly 17 inbound direct call sites, all unconditional
+      plain BL (0x08138734, 0x08138ce4, 0x08139940, 0x08163b60, 0x08163dc8,
+      0x0818e448, 0x0818e87c, 0x0818ef90, 0x0818f338, 0x08190464,
+      0x08190650, 0x081917f8, 0x08192074, 0x0819279c, 0x08192c54,
+      0x08193984, and 0x08195714); no predicated forms or tail branches.
+      Callers pass the result to a u16-keyed lookup table, so it is named a
+      handler code without asserting a concrete code identity. Deliberate
+      deviations: none. Host coverage proves all valid record offsets,
+      halfword truncation, uncached reload, and the signed negative-slot
+      path using an allocation that makes the retail address valid.
   - address: 0x08193ec0
     ghidra: FUN_08193ec0
     name: service_manager_secondary_handler_get
