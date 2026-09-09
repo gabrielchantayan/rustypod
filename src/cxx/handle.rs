@@ -56,10 +56,11 @@
 //! [`refcounted_body_release_owned_variant`] @ 0x0839cf4c is an owning
 //! sibling whose implementation disposer remains an unported direct call.
 //! [`refcounted_body_attach`] @ 0x0839d370 is the store-and-bump half of
-//! the copy-assignment operators (the assign minus its `*src` load), and
-//! [`refcounted_ptr_copy_assign`] @ 0x0839f28c is the C++
-//! copy-assignment operator itself: slot-pointer-guarded release (the
-//! slot-1 teardown) followed by attach, returning `dst`.
+//! the copy-assignment operators (the assign minus its `*src` load).
+//! [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines the owning
+//! release with that attach; [`refcounted_ptr_copy_assign`] @ 0x0839f28c
+//! is the C++ copy-assignment operator itself: slot-pointer-guarded
+//! slot-1 release followed by attach, returning `dst`.
 
 #[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
@@ -324,6 +325,51 @@ pub unsafe extern "C" fn refcounted_ptr_assign(
     }
     dst
 }
+///
+/// refcounted_ptr_assign_owned — original: `FUN_0839f1b0` @ 0x0839f1b0
+/// (48 bytes; 13 `bl` call sites, all unconditional — verified by decoding
+/// every ARM B/BL word in osos.dec: no `b` sites, no predicated forms, and
+/// no data-word references). The next separately linked function starts at
+/// 0x0839f1e0.
+///
+/// The owning copy-assignment operator for a refcounted handle slot:
+///
+/// ```text
+/// if (dst != src) {
+///     refcounted_body_release_owned(dst);
+///     refcounted_body_attach(dst, *src);
+/// }
+/// return dst;
+/// ```
+///
+/// The guard compares slot pointers, not bodies. Its source load follows the
+/// release, exactly as the ARM's `ldr r1,[r4]` does, so a source slot that
+/// aliases storage altered by the release is observed after that alteration.
+/// Unlike [`refcounted_ptr_copy_assign`], the discarded body is released by
+/// the owning variant, which disposes and frees its implementation on the
+/// final reference. The original calls separately linked copies of the
+/// release and attach helpers at 0x0839d2c0 and 0x0839d284; this port uses
+/// their already-ported equivalent helpers. LLVM may emit different helper
+/// displacements, but retains the release/load/attach sequence.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL
+/// bodies must satisfy the safety requirements of
+/// [`refcounted_body_release_owned`] and [`refcounted_body_attach`]. As in
+/// the original, neither slot pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_assign_owned(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_owned(dst);
+        refcounted_body_attach(dst, src.read());
+    }
+    dst
+}
+
 
 /// refcounted_body_attach — original: `FUN_0839d370` @ 0x0839d370
 /// (60 bytes; 6 `bl` call sites — 3 unconditional (0x081f0dbc,
@@ -1267,6 +1313,74 @@ mod tests {
             assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, 8);
+        }
+    }
+
+    /// Distinct slots release the old owned body first, then attach the
+    /// source body's current value. Non-final release keeps the old fixture
+    /// live, making both count transitions observable.
+    #[test]
+    fn owned_assign_releases_then_attaches() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut replacement = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut destination: *mut RefcountedBody = &mut old;
+            let source: *mut RefcountedBody = &mut replacement;
+
+            let ret = refcounted_ptr_assign_owned(&mut destination, &source);
+
+            assert_eq!(ret, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut replacement as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1);
+            assert_eq!(replacement.refcount, 8);
+        }
+    }
+
+    /// A NULL source is loaded after the release and unconditionally stored
+    /// by the attach helper, leaving the destination NULL.
+    #[test]
+    fn owned_assign_null_source_releases_then_stores_null() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut destination: *mut RefcountedBody = &mut old;
+            let source: *mut RefcountedBody = core::ptr::null_mut();
+
+            let ret = refcounted_ptr_assign_owned(&mut destination, &source);
+
+            assert_eq!(ret, &mut destination as *mut *mut RefcountedBody);
+            assert!(destination.is_null());
+            assert_eq!(old.refcount, 1);
+        }
+    }
+
+    /// Equal slot pointers skip both the owning release and attach.
+    #[test]
+    fn owned_assign_self_assignment_preserves_body_and_count() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_ptr_assign_owned(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
         }
     }
 
