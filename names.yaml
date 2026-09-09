@@ -182,6 +182,44 @@ functions:
       word count at +0x30, logical-left-shifts it by two and stores the
       resulting byte capacity at +0x1c, clears +0x20, and returns zero.
 
+  # --- RAM stream-buffer lazy initialization ---
+  - address: 0x08006e88
+    ghidra: FUN_08006e88
+    name: initialize_stream_buffer
+    size: 136
+    sig: "void *initialize_stream_buffer(void)"
+    module: kernel/stream_buffer_initializer
+    status: ported
+    renames:
+      DAT_08006ef8: stream_buffer_guard_state (target RAM @ 0x22008c8c)
+      DAT_08006efc: stream_buffer_guard (target RAM @ 0x22008c90)
+      DAT_08006f00: stream_buffer (target RAM @ 0x22010398)
+      DAT_08006f04: dso_handle
+      DAT_08006f08: stream_buffer_destructor (IRAM mirror @ 0x22007454)
+      DAT_08006f0c: stream_buffer_pages_ready (target RAM @ 0x2200aed5)
+      FUN_080036e0: cxa_guard_acquire_veneer
+      FUN_080036e8: cxa_atexit_veneer
+      FUN_080036f0: cxa_guard_release_veneer
+      FUN_080072cc: stream_buffer_page_initialize
+      FUN_080073f0: stream_buffer_construct
+    notes: >-
+      Raw ARM is 112 bytes of code ending with `pop {r4,pc}` at 0x08006ef4
+      plus a 24-byte literal pool at 0x08006ef8..0x08006f0c; the next
+      independently linked leaf starts at 0x08006f10, so the true extent is
+      136 bytes rather than a code-only count. Decoding every ARM B/BL word
+      in osos.dec found 16 direct callers: all are unconditional bl, with
+      zero predicated forms. It tests guard bit 0 at 0x22008c90, then on
+      cxa_guard_acquire success calls the unported stream-buffer constructor
+      0x080073f0 for fixed object 0x22010398, registers its returned `this`
+      with cxa_atexit using IRAM destructor 0x22007454 and __dso_handle
+      0x089ca09c, and releases the guard. Independently, it calls unported
+      page initializer 0x080072cc(object, 1, 0) under byte flag 0x2200aed5,
+      then returns the fixed object on every path. Port calls the already
+      ported cxa guard and shutdown-chain functions directly; constructor and
+      page initialization remain target-only seams, while host tests use
+      private fixed-state backing and recording seams. The IRAM destructor
+      target is valid: relocator 0x080046e0 mirrors the 0x08007454 body.
+
   # --- RAM stream-buffer page contexts ---
   - address: 0x080071b0
     ghidra: FUN_080071b0
