@@ -50125,6 +50125,63 @@ functions:
       holds 0x0814d2e0. Host test poisons every field, proves all three
       links clear, all other fields survive, and the input pointer returns.
 
+  - address: 0x0820c8a0
+    ghidra: FUN_0820c8a0
+    name: mov_chain_table_next
+    size: 56
+    sig: "i32 mov_chain_table_next(const MovChainTable *table, u32 index, u32 *out)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      param_3/r2: out
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x0820c8a0..0x0820c8d8
+      (14 instructions, no literal pool): the separately linked sibling
+      setter opens at 0x0820c8d8 with cmp r1,#128 / addcc, so Ghidra's
+      56 is exact for once. Decoding every ARM B/BL word in osos.dec
+      finds 16 direct call sites, all unconditional plain bl
+      (0x081e39cc, 0x081e3b28, 0x081e4004, 0x081e4ad0, 0x081e4c04,
+      0x081e4f50, 0x081e4fbc, 0x081e5358, 0x0820c838, 0x0820c928,
+      0x0820ca10, 0x0820cb54, 0x0829e3e8, 0x0829e458, 0x0829e468,
+      0x0829e480), zero predicated forms, zero tail branches; no DATA
+      word references the address, so it is never dispatched virtually.
+      The zero predicated count is behavioural: no caller NULL-guards the
+      table or pre-checks the index, every caller relies on this
+      function's own bounds check.
+      The function is the next-link accessor of a chained slot table
+      embedded at the head of the MOV playback manager object: 128
+      entries of 20 bytes (mutex at this+0xa00 = exactly 128*20, lock
+      service at +0xa08; outer callers reach the table via
+      *(obj+0x1060)). Entry word +0x0c is the next-slot link: < 0x80
+      continues the chain, 0xffffffff ends it, anything else is corrupt.
+      The chain walkers @ 0x0820c8f4 and 0x0820c9ec feed each returned
+      link back in as the next index, making both sentinels observable
+      contract; the predicated twin @ 0x0820c8d8 (strcc r2,[r0,#12]) is
+      the matching setter, and the scan @ 0x0820c86c finds entries by
+      the tag byte at +0x08. The atom-path string
+      moov/udta/meta/ilst sits at 0x0820c7e8 directly above the cluster.
+      Observable subtleties preserved: the *out store is UNCONDITIONAL
+      (str r0,[r2] precedes the validity branches), so a corrupt link is
+      still reported through *out alongside the error return, while an
+      out-of-range index skips the store entirely. No NULL guards, no
+      other deviations. Return codes are bare 0/2 as in stock.
+      match.py structural: LLVM emits an extra push {fp,lr} frame and
+      folds the two validity tests (next < 128 || next == 0xffffffff)
+      into one unsigned range check (next+1 <u 129), which is provably
+      equivalent; block order, the *5*4 entry addressing, the +0x0c
+      load, and the store-before-check sequence all match. Own
+      link_section guards against identical-code folding (none
+      occurred; symbol resolves in librustypod.a).
+      Host tests (6): valid link read, all-entries distinct-word field
+      and index selection plus table immutability, the 0xffffffff end
+      marker succeeding verbatim at slots 0 and 127, the 0x7f/0x80
+      link boundary with the corrupt values still stored on the error
+      path, out-of-range indexes (128, 129, 0x80000000, 0xffffffff)
+      storing nothing, and a full 10->20->30->40->end chain walk as
+      the 0x0820c9ec caller performs it.
+
   - address: 0x0835206c
     ghidra: FUN_0835206c
     name: xor_f6_in_place
