@@ -14241,6 +14241,41 @@ functions:
       per-class accessors; no siblings remain identified.
     renames: {}
 
+  - address: 0x081d2408
+    ghidra: FUN_081d2408
+    name: framework_root_post_message
+    size: 44
+    sig: "u32 framework_root_post_message(u32 message_code)"
+    module: app/framework_root_message_post
+    status: ported
+    renames:
+      param_1/r4: message_code
+      FUN_08103400: message_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08103464: queued_message_construct
+      FUN_081d1ff4: framework_root_queued_message_post_wrapper
+      FUN_08110fdc: queued_message_post
+      DAT_081d2014: FRAMEWORK_ROOT_HOLDER_ADDRESS (0x089cc858)
+    notes: >-
+      True extent is 44 bytes, 0x081d2408..0x081d2433: eleven ARM
+      instructions from push {r4,lr} through the tail b 0x081d1ff4.
+      Ghidra's reported 76-byte extent is wrong; raw bytes at 0x081d2434
+      begin the next function's push {r3,lr}. A binary-wide decode of every
+      B/BL word in osos.dec finds 14 unconditional bl call sites, zero
+      predicated bl, and eleven tail entries (nine unconditional b plus two
+      bne); no aligned data word contains this address. Algorithm: allocate
+      12 bytes from message_arena_pool through fixed_block_pool_alloc,
+      build a queued_message with message_code, NULL bytes, and byte_count
+      zero, then tail through the 28-byte sibling wrapper @ 0x081d1ff4 to
+      queued_message_post(message, framework_root_instance(), 1, 0, 0).
+      The wrapper's raw ldr r1,[pc,#24]; ldr r1,[r1,#4] reads the +4 slot of
+      the framework-root holder @ 0x089cc858 before posting. The post result
+      remains in r0 despite Ghidra's void declaration, so the port exposes
+      u32. All dependencies are already ported and called directly. Host
+      tests cover the 12-byte allocation, NULL/zero payload, exact
+      fire-and-forget post arguments, returned status, zero message code,
+      and a high-bit message code.
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
