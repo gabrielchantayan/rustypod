@@ -56137,3 +56137,32 @@ functions:
       match.py structural (exit 1, diff expected): LLVM uses its standard
       frame-pointer prologue/epilogue, allocates r2 for the zero literal, and
       otherwise preserves the retail store order and receiver return.
+
+  # --- Q16.16 point-coordinate store ---
+  - address: 0x08280184
+    ghidra: FUN_08280184
+    name: fixed_point_set
+    size: 8
+    sig: "void fixed_point_set(FixedPoint *point, i32 x, i32 y)"
+    module: app/fixed_point
+    status: ported
+    renames:
+      param_1/r0: point
+      param_2/r1: x
+      param_3/r2: y
+    notes: >-
+      Raw ARM confirms the exact extent 0x08280184..0x0828018c: `stm
+      r0,{r1,r2}; bx lr`; 0x0828018c is the separately linked three-word
+      sibling. It writes the x and y Q16.16 coordinate words in ascending
+      order with no reads, NULL check, or alignment guard. Decoding every ARM
+      B/BL immediate in osos.dec finds exactly 12 direct calls, all plain
+      unconditional bl: 0x08142e64, 0x08142e78, 0x08142e88, 0x08142e98,
+      0x0828c8f8, 0x0828c934, 0x0828c970, 0x0828c9a8, 0x0828c9c4,
+      0x0828c9d8, 0x0828c9e8, and 0x0828c9f8; none are predicated and there
+      are no tail branches. The first caller builds the unit-square corners;
+      the second builds two Q16.16 quads. No aligned image word contains
+      0x08280184, so it is statically called, not vtable-dispatched. No
+      deliberate behavioral deviations: the port uses the same two ordered
+      field stores and its target-only text section keeps this tiny hook
+      boundary distinct. Host tests cover signed/high-bit coordinate words,
+      overwrite behavior, and untouched neighboring words.
