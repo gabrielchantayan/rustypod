@@ -212,6 +212,10 @@ pub mod hints {
     // raw-u32 reference/vtable/target fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const ELEMENT_REFERENCE_CONSTRUCT_STRING: usize = 0xc900_0000;
+    // 0xe600_0000: dedicated to app/strided_buffer_entry's raw-u32 table
+    // and layout fixture; fixture mappings never unmap, so no other user may
+    // share this hint.
+    pub const STRIDED_BUFFER_ENTRY: usize = 0xe600_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

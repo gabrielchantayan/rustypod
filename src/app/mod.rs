@@ -109,3 +109,4 @@ pub mod volume_controller_byte_at_90;
 pub mod vtable_set;
 pub mod view_event;
 pub mod view_timer;
+pub mod strided_buffer_entry;

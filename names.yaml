@@ -52960,3 +52960,30 @@ functions:
       address rather than a Rust vtable because the decrypted static page is
       not trustworthy; the original's unguarded aligned str is modeled as an
       unguarded aligned u32 store.
+
+  # --- Strided buffer entry address accessor ---
+  - address: 0x08209768
+    ghidra: FUN_08209768
+    name: strided_buffer_entry_at
+    size: 32
+    sig: "u32 strided_buffer_entry_at(const StridedBuffer *table, u32 index)"
+    module: app/strided_buffer_entry
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      FUN_081d8614: layout_entry_size_dispatch
+      field_+0x04: entry_buffer
+      field_+0x0c: layout
+    notes: >-
+      Raw extent is exactly 32 bytes, 0x08209768..0x08209788: it calls
+      FUN_081d8614, then returns table->entry_buffer + (index + 1) * stride
+      through add/mla word arithmetic. The next separately linked function
+      starts at 0x08209788. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly 14 inbound direct calls, all unconditional bl, with zero
+      predicated bl and zero tail b; scanning aligned words finds no DATA
+      reference. FUN_081d8614 is an unported three-load virtual dispatcher:
+      table+0x0c -> layout, layout->vtable slot +0x2c -> stride. The port
+      performs that decoded vtable dispatch directly rather than inventing a
+      callee identity or adding a redundant seam. Host coverage checks index
+      0, a later entry, and index 0xffffffff's modulo-32-bit header result.
