@@ -41,6 +41,7 @@ pub mod global_observer_unregister;
 pub mod framework_root_message_post;
 pub mod liti_class_check;
 pub mod h264_decode_forwarder;
+pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
 pub mod image_format;
