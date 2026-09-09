@@ -167,6 +167,10 @@ pub mod hints {
     // fixture (the record's +0x1c stores the surface identity as a raw u32);
     // mappings never unmap, so no other user may share this hint.
     pub const SURFACE_ATTACH: usize = 0x8100_0000;
+    // 0x8200_0000: dedicated to cxx/list_cursor_index's raw-u32
+    // list/cursor fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LIST_CURSOR_INDEX: usize = 0x8200_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

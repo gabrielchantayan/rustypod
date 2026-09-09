@@ -50371,3 +50371,47 @@ functions:
       ldr/blx seam calls standing in for bl 0x0812468c / bl 0x082722a0,
       plus the inlined CURRENT_TASK_CTX_BLOCK slot for bl 0x0827233c -
       all documented deviations.
+
+  # --- Block-backed list cursor current-index reader ---
+  - address: 0x081f0354
+    ghidra: FUN_081f0354
+    name: list_cursor_index
+    size: 24
+    sig: "i32 list_cursor_index(const void *list)"
+    module: cxx/list_cursor_index
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x30": cursor (u32 target pointer)
+      "cursor+0x2b4": current_index (signed, -1 = no position)
+    notes: >-
+      True raw extent is exactly 24 bytes, 0x081f0354..0x081f036c: `mov
+      r1,r0; ldr r1,[r1,#0x30]; mvn r0,#0; cmp r1,#0; ldrne r0,[r1,#0x2b4];
+      bx lr`. 0x081f036c opens the next separately linked function's push
+      {r4,r5,r6,lr} prologue, confirming the extent. Decoding every ARM B/BL
+      word in osos.dec finds exactly 16 direct inbound calls, all plain
+      unconditional BL (0x0821aa00, 0x0821aa28, 0x0821add8, 0x0821b140,
+      0x0821b15c, 0x0821b17c, 0x0821b51c, 0x0821b620, 0x0821b6b4,
+      0x0821b7b0, 0x0821b7e4, 0x0821b83c, 0x0821b8a4, 0x0821b8bc,
+      0x0821b904, 0x0821b91c); no predicated forms and no tail-branch
+      transfers. Algorithm: read the cursor pointer at list+0x30; NULL
+      returns the mvn r0,#0 sentinel (-1) with no further dereference,
+      otherwise return the signed word at cursor+0x2b4. Field identities are
+      sibling-grounded: the cursor's setter 0x081fcc64 treats +0x2b4 as a
+      signed current index clamped against the count at +0x2b8, the element
+      accessor 0x081f0700 forwards (cursor, index) to the cursor's indexed
+      lookup 0x081fcab0, and the adjacent getter 0x081f0a84 reads +0x2b8
+      with a 0 default. The list object is constructed by 0x081f13b8 with
+      the cursor word born NULL; writers 0x081f07bc/0x081f0bb8/0x081f10c4/
+      0x081f1430 attach it later. All 16 callers (the 0x0821a9e0 family of
+      list widgets) consume the result as a signed position. Deviation: the
+      result is typed i32, bit-identical to the original r0 including the
+      0xFFFFFFFF sentinel. No dispatch seam: the function is a leaf. Host
+      tests (4): NULL cursor returns -1 without touching the record region,
+      index words 0/1/42/399/0x7fffffff come back verbatim, negative index
+      words (0xffffffff/0xfffffffe/0x80000000) pass through ungated, and a
+      detach/reattach transition re-reads the cursor word. match.py
+      structural: same two loads (+0x30, +0x2b4), NULL guard, mvn sentinel;
+      the diff is LLVM rotating the NULL path into a mvneq/bxeq early-out
+      plus the crate fp frame — the accepted ADS-vs-LLVM noise. The symbol
+      resolves standalone in librustypod.a (no LLVM body fold observed).
