@@ -52902,3 +52902,34 @@ functions:
       predicated BL forms or tail branches. The body has no callee or dispatch
       seam; its only deliberate Rust choice is to expose the otherwise
       untyped r0 result as u32.
+
+
+  # --- Silver controller secondary-interface base constructor ---
+  - address: 0x0821599c
+    ghidra: FUN_0821599c
+    name: controller_secondary_interface_construct
+    size: 12
+    sig: "u32 *controller_secondary_interface_construct(u32 *secondary_interface)"
+    module: app/controller_secondary_interface
+    status: ported
+    renames:
+      param_1/r0: secondary_interface
+      DAT_082159a8: controller_secondary_interface_vtable (0x08993258)
+    notes: >-
+      Raw extent is exactly 12 bytes, 0x0821599c..0x082159a8: ldr r1,[pc,#4];
+      str r1,[r0]; bx lr; literal 0x08993258. The next separately linked
+      function starts at 0x082159ac with bx lr, so Ghidra's 12-byte size is
+      correct and includes the literal-pool word. Decoding every ARM B/BL
+      immediate in osos.dec finds exactly 14 inbound direct calls: all are
+      unconditional bl, with zero predicated bl and zero tail b; scanning
+      aligned words finds no data reference to 0x0821599c, so it is never
+      virtually dispatched. This is the base constructor for the secondary
+      interface subobject at +0xd0 in the kinded-controller leaves: it plants
+      vtable word 0x08993258 and returns the unchanged input pointer because
+      r0 is not overwritten. Each caller immediately replaces that word with
+      its leaf-specific secondary vtable (for example, 0x0822519c stores
+      this + 0x164), but the base store is still the function's behavior.
+      Deliberate Rust deviation: the runtime vtable remains a raw u32 target
+      address rather than a Rust vtable because the decrypted static page is
+      not trustworthy; the original's unguarded aligned str is modeled as an
+      unguarded aligned u32 store.
