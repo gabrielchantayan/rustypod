@@ -48,6 +48,7 @@ pub mod release;
 pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;
+pub mod selector_item_base;
 pub mod shared_cell;
 pub mod slot_reset;
 pub mod state_object_destroy;
