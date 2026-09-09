@@ -54,18 +54,18 @@
 //! 0x08296ec0, which waits out a NULL `interface->field_8` and returns
 //! that field — the facade object.
 //!
-//! ## The callees are retailOS boundaries
+//! ## RetailOS boundaries
 //!
-//! All three callees (0x08206e40 / 0x0818a0bc / 0x08206e6c) remain in
-//! retailOS, so — the ui/object_state.rs `firmware_clock_sample`
-//! precedent — the seams' wired defaults call their fixed firmware load
-//! addresses on `target_os = "none"` and this symbol IS hook-ready.
-//! Host builds cannot call retailOS: the guard ctor/dtor defaults are
-//! no-ops and the fetch default fails closed with a stand-in facade
-//! whose slot +0x50 answers 0 ("does not exist" — the vtable_set.rs
-//! `store_ctor_unported` fail-closed policy), so the default chain is
-//! total on host and returns the same 0 every call site treats as
-//! absent.
+//! The constructor (0x08206e40) and facade accessor (0x0818a0bc) remain
+//! retailOS boundaries, so their wired defaults call their fixed firmware
+//! addresses on `target_os = "none"`. The destructor @ 0x08206e6c is
+//! ported below: its device default reaches this port, which calls the
+//! still-retail base teardown @ 0x0818a0fc. Host builds cannot call
+//! retailOS: the guard ctor/dtor defaults are no-ops and the fetch default
+//! fails closed with a stand-in facade whose slot +0x50 answers 0 ("does
+//! not exist" — the vtable_set.rs `store_ctor_unported` policy), so the
+//! default chain is total on host and returns the same 0 every call site
+//! treats as absent.
 //!
 //! ## Call-site census
 //!
@@ -93,17 +93,20 @@
 //!   the slot is read before the unlock — the probe runs inside the
 //!   critical section.
 //!
-//! ## Deviations
-//!
-//! - The three unported callees ride the [`PATH_PROBE_GUARD_CTOR`] /
-//!   [`PATH_PROBE_FACADE_FETCH`] / [`PATH_PROBE_GUARD_DTOR`] seams
+//! - The unported guard constructor and facade accessor ride the
+//!   [`PATH_PROBE_GUARD_CTOR`] / [`PATH_PROBE_FACADE_FETCH`] seams
 //!   (read_volatile dispatch; host tests install recording mocks). On
-//!   `target_os = "none"` the defaults call the fixed retailOS
-//!   addresses; on host they fail closed (see above).
+//!   `target_os = "none"` their defaults call their fixed retailOS
+//!   addresses; on host they fail closed (see above). The guard destructor
+//!   seam reaches [`path_probe_guard_destroy`] on device and remains a
+//!   no-op host boundary because the host default constructor does not
+//!   establish a real counted lock.
 
 use core::mem::MaybeUninit;
 
 use crate::cxx::string_object::StringObject;
+
+use crate::kernel::sync_mutex::{mutex_unlock_counted, CountedMutex};
 
 /// Firmware load address of the interface-guard constructor (the `bl`
 /// @ 0x080f4ae4). Kept as an identity constant for the boundary
@@ -117,6 +120,14 @@ pub const FACADE_FETCH_ADDRESS: usize = 0x0818_a0bc;
 /// Firmware load address of the interface-guard destructor (the `bl`
 /// @ 0x080f4b0c).
 pub const GUARD_DTOR_ADDRESS: usize = 0x0820_6e6c;
+
+/// Guard-class vtable written by both the constructor literal @
+/// 0x08206e68 and the destructor literal @ 0x08206e88.
+pub const INTERFACE_GUARD_VTABLE_ADDRESS: u32 = 0x0899_1978;
+
+/// Firmware load address of the base guard teardown reached by the
+/// destructor's tail branch.
+pub const GUARD_BASE_DESTROY_ADDRESS: usize = 0x0818_a0fc;
 
 /// The selector immediate the original hands the facade accessor
 /// (`mov r1, #0x1` @ 0x080f4ae8).
@@ -181,9 +192,9 @@ pub type FacadeFetch =
     unsafe extern "C" fn(guard: *mut InterfaceGuard, selector: u32) -> *mut FacadeObject;
 
 /// The interface-guard destructor @ 0x08206e6c: unlocks and tears the
-/// guard down (the original returns `this` via the 0x0818a0fc tail;
-/// the caller discards it — `mov r0, r4` restores the status).
-pub type GuardDestroy = unsafe extern "C" fn(this: *mut InterfaceGuard);
+/// guard down, returning `this` via the 0x0818a0fc base-destructor tail.
+pub type GuardDestroy =
+    unsafe extern "C" fn(this: *mut InterfaceGuard) -> *mut InterfaceGuard;
 
 /// Boundary default for the guard constructor: calls the stock
 /// 0x08206e40, which remains in retailOS (the ui/object_state.rs
@@ -255,19 +266,18 @@ unsafe extern "C" fn firmware_facade_fetch(
     }
 }
 
-/// Boundary default for the guard destructor: calls the stock
-/// 0x08206e6c, which remains in retailOS. The host default is a no-op
-/// (the fail-closed chain never locked anything).
-unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) {
+/// Device boundary for the guard destructor: reaches the port at
+/// 0x08206e6c. The host default is a no-op because the fail-closed
+/// constructor does not establish a real counted lock.
+unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
     #[cfg(target_os = "none")]
     {
-        let destroy: GuardDestroy = core::mem::transmute(GUARD_DTOR_ADDRESS);
-        destroy(this)
+        path_probe_guard_destroy(this)
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        let _ = this;
+        this
     }
 }
 
@@ -299,6 +309,48 @@ unsafe fn facade_fetch_fn() -> FacadeFetch {
 #[inline(always)]
 unsafe fn guard_dtor_fn() -> GuardDestroy {
     core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_DTOR))
+}
+
+/// Calls the still-retail base guard teardown @ 0x0818a0fc. It installs
+/// the base vtable, deregisters the guard from its interface, and returns
+/// `this`; raw decoding establishes that it is the target of this
+/// destructor's final tail branch. Host builds have no retailOS object
+/// graph, so retaining `this` is the deliberate boundary no-op.
+#[inline(always)]
+unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
+    #[cfg(target_os = "none")]
+    {
+        let destroy: GuardDestroy = core::mem::transmute(GUARD_BASE_DESTROY_ADDRESS);
+        destroy(this)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        this
+    }
+}
+
+/// path_probe_guard_destroy — original: `FUN_08206e6c` @ 0x08206e6c (28
+/// instruction bytes plus its 4-byte literal pool; **14 direct `bl` call
+/// sites**, every one unconditional; no predicated `bl` forms).
+///
+/// Re-plants the interface-guard vtable, releases the counted mutex whose
+/// raw pointer is the guard's word at +0x0c, then tail-runs the base
+/// teardown @ 0x0818a0fc and returns its `this` result. The raw extent ends
+/// at 0x08206e88 (literal 0x08991978); the next distinct function begins
+/// at 0x08206e8c. The 0x0818a164 release veneer is inlined through the
+/// already-ported [`mutex_unlock_counted`]. Deliberate deviation: on host
+/// the unported base teardown is a no-op that returns `this`; on device it
+/// is called at its verified retailOS address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_probe_guard_destroy(
+    guard: *mut InterfaceGuard,
+) -> *mut InterfaceGuard {
+    (*guard).words[0] = INTERFACE_GUARD_VTABLE_ADDRESS;
+    let lock = (*guard).words[3] as usize as *mut CountedMutex;
+    mutex_unlock_counted(lock);
+    interface_guard_base_destroy(guard)
 }
 
 /// path_probe_via_facade — original: `FUN_080f4ad8` @ 0x080f4ad8 (68
@@ -442,9 +494,12 @@ pub(crate) mod tests {
         0xdead_beef
     }
 
-    unsafe extern "C" fn recording_guard_dtor(this: *mut InterfaceGuard) {
+    unsafe extern "C" fn recording_guard_dtor(
+        this: *mut InterfaceGuard,
+    ) -> *mut InterfaceGuard {
         record(EVENT_GUARD_DTOR);
         DTOR_THIS = this;
+        this
     }
 
     /// Resets the recording state, installs the recording mocks, and
@@ -589,6 +644,50 @@ pub(crate) mod tests {
                 "the host boundary chain is total and fails closed"
             );
             assert_eq!(EVENT_COUNT, 0, "no recording mock is installed");
+        }
+    }
+
+    #[test]
+    fn guard_destroy_replants_vtable_releases_and_returns_this() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::PATH_PROBE_GUARD_DESTROY,
+            core::mem::size_of::<CountedMutex>(),
+        ) else {
+            return;
+        };
+        unsafe {
+            let lock = slab as *mut CountedMutex;
+            lock.write(CountedMutex {
+                mutex: crate::kernel::sync_mutex::Mutex {
+                    sem_cell: core::ptr::null_mut(),
+                    unused: 0,
+                },
+                hold_count: 1,
+            });
+            let mut guard = InterfaceGuard {
+                words: [0, 0, 0, lock as usize as u32],
+            };
+
+            assert_eq!(
+                path_probe_guard_destroy(&mut guard),
+                core::ptr::addr_of_mut!(guard),
+                "the base-teardown tail returns this"
+            );
+            assert_eq!(
+                guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS,
+                "str r1,[r0],#12 re-plants the guard vtable before unlock"
+            );
+            assert_eq!((*lock).hold_count, 0, "a held lock is released");
+
+            (*lock).hold_count = 0;
+            guard.words[0] = 0;
+            path_probe_guard_destroy(&mut guard);
+            assert_eq!(
+                (*lock).hold_count,
+                u32::MAX,
+                "unlocking a free counted mutex wraps, as the raw sub does"
+            );
+            assert_eq!(guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS);
         }
     }
 }
