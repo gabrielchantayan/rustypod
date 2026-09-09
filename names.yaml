@@ -56,6 +56,31 @@ functions:
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
 
+  - address: 0x082c4f38
+    ghidra: FUN_082c4f38
+    name: forward_byte_copy
+    size: 24
+    sig: "void forward_byte_copy(void *dst, const void *src, u32 len)"
+    module: libc/forward_byte_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: len
+      r3: byte
+    notes: >-
+      Raw osos.dec extent is exactly 24 bytes: six ARM words from
+      0x082c4f38 through bx lr at 0x082c4f4c; the next separately linked
+      function starts at 0x082c4f50. Decoding every ARM B/BL word finds 13
+      direct call sites, all unconditional bl (zero predicated forms).
+      sub r2,#1; cmn r2,#1 skips the post-increment ldrb/strb pair exactly
+      when len is zero, otherwise copying forward one byte per iteration.
+      This has void return and deliberately retains forward overlap
+      propagation rather than memmove behavior. The target-only unique Rust
+      text section distinguishes this byte-identical body from byte_copy at
+      0x080005fc; volatile accesses prevent LLVM replacing the retail loop
+      with a memcpy intrinsic.
+
   - address: 0x080e7ebc
     ghidra: FUN_080e7ebc
     name: byte_copy_signed
