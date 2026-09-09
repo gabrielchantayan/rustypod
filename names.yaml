@@ -54715,3 +54715,36 @@ functions:
       r0 result. No deliberate deviations: volatile stores only prevent LLVM
       from lowering the freestanding byte loop to an unavailable memset
       libcall.
+
+  # --- StringObject concatenation helper ---
+  - address: 0x082aade4
+    ghidra: FUN_082aade4
+    name: string_object_concatenate
+    size: 56
+    sig: "void string_object_concatenate(StringObject *out, const StringObject *first, const StringObject *second)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: first
+      param_3/r2: second
+      local_stack: temporary
+      FUN_082773e0: string_object_copy_construct
+      FUN_082774c8: string_object_append
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM confirms the exact 56-byte extent from the push at 0x082aade4
+      through the pop at 0x082aae18; 0x082aae1c is the next separately
+      linked function and there is no literal pool. Decoding every B/BL
+      instruction in osos.dec finds exactly 13 direct callers, all
+      unconditional bl (zero predicated forms) and no tail branches:
+      0x081041bc, 0x081041f4, 0x08104354, 0x08104634, 0x08104718,
+      0x08104728, 0x08118038, 0x08118690, 0x0815e558, 0x08173c64,
+      0x08173c74, 0x081d12b4, 0x081d12c4. It copy-constructs an 8-byte
+      stack StringObject from first, appends second, copy-constructs out
+      from that temporary, then destroys the temporary. The nominal return
+      is void; callers ignore r0, which happens to retain the destructor's
+      temporary pointer. All three direct callees are already ported, so
+      there is no dispatch seam or deliberate deviation. Host tests prove
+      the left-plus-right result, preserving-allocation shape, source
+      immutability, output construction, and exactly one temporary destroy.
