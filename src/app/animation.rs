@@ -69,10 +69,10 @@
 //!
 //! # Deviations
 //!
-//! - **Two callees remain unported** and dispatch through
-//!   [`ANIMATION_INIT_OPS`] (the `app/pending_event_take.rs` pattern):
-//!   target builds transmute the ROM addresses 0x082738e0/0x08273898; host
-//!   defaults are inert stubs and every test installs recording wheel models.
+//! - Timing-wheel remove 0x082738e0 is a direct port. Wheel insert remains
+//!   unported and dispatches through [`ANIMATION_INIT_OPS`] (the
+//!   `app/pending_event_take.rs` pattern): target builds transmute ROM address
+//!   0x08273898; host defaults are inert and tests install a recording model.
 //!   Retain 0x08273a14 and release 0x082739e0 are direct
 //!   [`crate::app::refcounted_value`] ports.
 //! - The shared base constructor
@@ -101,9 +101,8 @@ pub const ANIMATION_VTABLE: u32 = 0x0898_7f00;
 /// both wheel calls).
 pub const SCHEDULER_SINGLETON_GLOBAL: usize = 0x089c_c7e0;
 
-/// Firmware load addresses of the two unported wheel callees, kept beside
-/// the transmutes below.
-pub const WHEEL_REMOVE_ADDRESS: usize = 0x0827_38e0;
+/// Firmware load address of the unported wheel insertion callee, kept beside
+/// the transmute below.
 pub const WHEEL_INSERT_ADDRESS: usize = 0x0827_3898;
 
 /// One bucket head per unit of rank: the lazy allocator @ 0x082739a0
@@ -149,14 +148,11 @@ const _: () = assert!(core::mem::offset_of!(Animation, from_value) == 0x18);
 const _: () = assert!(core::mem::offset_of!(Animation, to_value) == 0x1c);
 const _: () = assert!(core::mem::offset_of!(Animation, current_value) == 0x20);
 
-/// Indirect dispatch for the two unported wheel callees (see the module
-/// header). Host tests install recording models; a later port of either
-/// replaces its default without touching this caller.
+/// Indirect dispatch for the unported wheel insertion callee (see the module
+/// header). Host tests install recording models; a later port replaces its
+/// default without touching these callers.
 #[derive(Clone, Copy)]
 pub struct AnimationInitOps {
-    /// Timing-wheel remove 0x082738e0 `(table, node)`: unlink `node`
-    /// from bucket `node->rank - 1` iff the linked flag is set.
-    pub wheel_remove: unsafe extern "C" fn(table: *mut u8, node: *mut Animation),
     /// Timing-wheel insert 0x08273898 `(table, node)`: push `node` at the
     /// head of bucket `node->rank - 1` and set the linked flag.
     pub wheel_insert: unsafe extern "C" fn(table: *mut u8, node: *mut Animation),
@@ -164,12 +160,6 @@ pub struct AnimationInitOps {
 
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_wheel_remove(table: *mut u8, node: *mut Animation) {
-    let f: unsafe extern "C" fn(*mut u8, *mut Animation) =
-        core::mem::transmute(WHEEL_REMOVE_ADDRESS);
-    f(table, node)
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut Animation) {
@@ -179,18 +169,13 @@ unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut Animation)
 }
 
 
-/// Host default: inert.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_wheel_remove(_table: *mut u8, _node: *mut Animation) {}
 
 /// Host default: inert.
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn firmware_wheel_insert(_table: *mut u8, _node: *mut Animation) {}
 
-/// Wired defaults: ROM wheel addresses on target and documented inert wheel
-/// stubs on host.
+/// Wired default: the ROM insert address on target and an inert stub on host.
 pub const DEFAULT_ANIMATION_INIT_OPS: AnimationInitOps = AnimationInitOps {
-    wheel_remove: firmware_wheel_remove,
     wheel_insert: firmware_wheel_insert,
 };
 
@@ -218,6 +203,52 @@ static mut HOST_SCHEDULER_BUCKETS: [u32; TIMING_WHEEL_BUCKETS] = [0; TIMING_WHEE
 #[cfg(not(target_os = "none"))]
 fn scheduler_table() -> *mut u8 {
     unsafe { core::ptr::addr_of_mut!(HOST_SCHEDULER_BUCKETS).cast::<u8>() }
+}
+/// timing_wheel_remove — original: `FUN_082738e0` @ 0x082738e0 (96 bytes).
+///
+/// Binary decoding of every ARM B/BL word in osos.dec finds 15 direct
+/// call sites, all plain unconditional `bl`; there are no predicated `bl`
+/// forms. One additional unconditional `b` tail caller at 0x08273a38 loads
+/// the scheduler singleton then branches here; no raw DATA word references
+/// this address.
+///
+/// Unlinks a timing-wheel node only when flag bit 0 of its `+0x14` word is
+/// set. It selects `table[node->rank - 1]`; if that head is the node, it
+/// advances the bucket head to `node->next` when non-NULL. Otherwise, it
+/// repairs `node->prev->next` when the predecessor exists. It then repairs
+/// `node->next->prev` when the successor exists and clears only flag bit 0.
+/// There is deliberately no NULL guard for either argument and no bounds
+/// check for `rank - 1`, exactly as the ARM body. The word-index API preserves
+/// the shared wheel-prefix layout used by Animation and TimedTransition;
+/// there are no deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timing_wheel_remove(table: *mut u32, node: *mut u32) {
+    const RANK: usize = 2;
+    const PREV: usize = 3;
+    const NEXT: usize = 4;
+    const FLAGS: usize = 5;
+
+    let flags = node.add(FLAGS).cast::<u8>();
+    if *flags & 1 == 0 {
+        return;
+    }
+
+    let bucket = (*node.add(RANK)).wrapping_sub(1) as usize;
+    let next = *node.add(NEXT);
+    if *table.add(bucket) == node as usize as u32 {
+        *table.add(bucket) = next;
+    } else {
+        let prev = *node.add(PREV);
+        if prev != 0 {
+            *((prev as usize as *mut u32).add(NEXT)) = next;
+        }
+    }
+
+    if next != 0 {
+        *((next as usize as *mut u32).add(PREV)) = *node.add(PREV);
+    }
+    *flags &= !1;
 }
 
 /// animation_init — original: `FUN_08166b88` @ 0x08166b88 (212 bytes
@@ -252,9 +283,9 @@ pub unsafe extern "C" fn animation_init(
     let ops = animation_init_ops();
     let table = scheduler_table();
 
-    // 08166bc4: defensive unlink — byte +0x14 just cleared means the
-    // firmware body returns on its first flag test; kept for parity.
-    (ops.wheel_remove)(table, this);
+    // 08166bc4: defensive unlink — +0x14 just cleared means the firmware
+    // body returns on its first flag test; kept for parity.
+    timing_wheel_remove(table.cast(), this.cast());
 
     // 08166bcc..08166bdc: retain(current), retain(from), retain(to).
     retain_value(current_value.cast());
@@ -324,10 +355,10 @@ pub unsafe extern "C" fn animation_init(
 /// with wrapping addition, and relink it. The three slot writes are
 /// `from/to/current`, not argument order.
 ///
-/// Deliberate deviation: the unported wheel callees use the existing
-/// [`ANIMATION_INIT_OPS`] volatile seam; retain and release remain direct
-/// ports. The stock code reloads the scheduler-global word for insertion,
-/// which this function also does.
+/// Deliberate deviation: unported wheel insertion uses the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam; retain, release, and wheel removal
+/// are direct ports. The stock code reloads the scheduler-global word for
+/// insertion, which this function also does.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn animation_set_values(
@@ -339,7 +370,7 @@ pub unsafe extern "C" fn animation_set_values(
     let ops = animation_init_ops();
 
     // 08166a54..08166a60: unlink before changing endpoint slots or rank.
-    (ops.wheel_remove)(scheduler_table(), this);
+    timing_wheel_remove(scheduler_table().cast(), this.cast());
 
     // 08166a64..08166a78: retain current, from, then to.
     retain_value(current_value.cast());
@@ -401,11 +432,10 @@ pub unsafe extern "C" fn animation_set_values(
 /// addition, then reinserts the node. `value` has no NULL guard because
 /// the stock body dereferences `value + 8` unconditionally.
 ///
-/// Deliberate deviation: the two unported wheel callees use the existing
-/// [`ANIMATION_INIT_OPS`] volatile seam. Retain and release are called through
-/// their direct [`crate::app::refcounted_value`] ports. The scheduler-global
-/// word is read separately for remove and insert, as in the two stock `ldr [r5]`
-/// sites.
+/// Deliberate deviation: unported wheel insertion uses the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam. Retain, release, and wheel removal
+/// are direct ports. The scheduler-global word is read separately for remove
+/// and insert, as in the two stock `ldr [r5]` sites.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn animation_set_current_value(
@@ -415,7 +445,7 @@ pub unsafe extern "C" fn animation_set_current_value(
     let ops = animation_init_ops();
 
     // 08166b40..08166b44: unlink before changing rank or the slot.
-    (ops.wheel_remove)(scheduler_table(), this);
+    timing_wheel_remove(scheduler_table().cast(), this.cast());
     // 08166b48..08166b4c: retain the incoming value before releasing old.
     retain_value(value.cast());
 
@@ -434,8 +464,6 @@ pub unsafe extern "C" fn animation_set_current_value(
         (*this).rank = candidate_rank;
     }
 
-    // 08166b74..08166b80: reload the scheduler word and tail-branch to
-    // wheel_insert(table, this). Its return value is discarded by callers.
     (ops.wheel_insert)(scheduler_table(), this);
 }
 
@@ -445,7 +473,7 @@ mod tests {
 
     use super::*;
     use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 
     /// Serializes swaps of [`ANIMATION_INIT_OPS`] and the shared fixture
     /// slab across this module's tests.
@@ -462,7 +490,6 @@ mod tests {
         }
     }
 
-    const EVENT_WHEEL_REMOVE: u32 = 3;
     const EVENT_WHEEL_INSERT: u32 = 4;
 
     /// One observed seam call: (kind, argument, extra). For wheel events
@@ -503,14 +530,6 @@ mod tests {
 
 
 
-    unsafe extern "C" fn recording_wheel_remove(table: *mut u8, node: *mut Animation) {
-        record(Event {
-            kind: EVENT_WHEEL_REMOVE,
-            argument: node as usize,
-            extra: table as usize,
-            rank_at_insert: Some((*node).rank),
-        });
-    }
 
     unsafe extern "C" fn recording_wheel_insert(table: *mut u8, node: *mut Animation) {
         record(Event {
@@ -530,7 +549,6 @@ mod tests {
 
     unsafe fn install_recording_ops() {
         core::ptr::addr_of_mut!(ANIMATION_INIT_OPS).write_volatile(AnimationInitOps {
-            wheel_remove: recording_wheel_remove,
             wheel_insert: recording_wheel_insert,
         });
     }
@@ -590,7 +608,8 @@ mod tests {
     }
 
     /// Dirty storage so every write the constructor performs (and every
-    /// field it must NOT touch) is observable.
+    /// field it must NOT touch) is observable. Clear the linked flag: these
+    /// caller tests do not construct a real wheel chain.
     fn dirty_animation(at: *mut Animation) {
         unsafe {
             core::ptr::write(
@@ -601,12 +620,128 @@ mod tests {
                     rank: 0xcafe_babe,
                     wheel_prev: 0x2222_2222,
                     wheel_next: 0x3333_3333,
-                    flags: 0xffff_ffff,
+                    flags: 0xffff_fffe,
                     from_value: 0x4444_4444,
                     to_value: 0x5555_5555,
                     current_value: 0x6666_6666,
                 },
             );
+        }
+    }
+
+    static WHEEL_REMOVE_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(crate::testing::hints::TIMING_WHEEL_REMOVE, 0x1000)
+            .map(|p| p as usize)
+    });
+
+    fn wheel_remove_fixture() -> Option<[*mut Animation; 3]> {
+        let base = *WHEEL_REMOVE_FIXTURE;
+        let base = base? as *mut u8;
+        Some(unsafe {
+            [
+                base.cast::<Animation>(),
+                base.add(0x24).cast::<Animation>(),
+                base.add(0x48).cast::<Animation>(),
+            ]
+        })
+    }
+
+    unsafe fn wheel_node(at: *mut Animation, rank: u32, prev: u32, next: u32, flags: u32) {
+        core::ptr::write(
+            at,
+            Animation {
+                vtable: 0,
+                opaque_04: 0,
+                rank,
+                wheel_prev: prev,
+                wheel_next: next,
+                flags,
+                from_value: 0,
+                to_value: 0,
+                current_value: 0,
+            },
+        );
+    }
+
+    #[test]
+    fn wheel_remove_leaves_unlinked_node_and_table_untouched() {
+        let _lock = take_lock();
+        let Some([node, _, _]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_remove");
+            return;
+        };
+        let mut table = [0xface_cafe; TIMING_WHEEL_BUCKETS];
+        unsafe {
+            wheel_node(node, 0, 0x1111_1111, 0x2222_2222, 0b110);
+            timing_wheel_remove(table.as_mut_ptr(), node.cast());
+            assert_eq!((*node).wheel_prev, 0x1111_1111);
+            assert_eq!((*node).wheel_next, 0x2222_2222);
+            assert_eq!((*node).flags, 0b110);
+            assert!(table.iter().all(|word| *word == 0xface_cafe));
+        }
+    }
+
+    #[test]
+    fn wheel_remove_replaces_head_and_repairs_successor() {
+        let _lock = take_lock();
+        let Some([node, next, _]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_remove");
+            return;
+        };
+        let mut table = [0; TIMING_WHEEL_BUCKETS];
+        unsafe {
+            wheel_node(node, 1, 0x1234_5678, next as usize as u32, 0b111);
+            wheel_node(next, 1, node as usize as u32, 0, 0b111);
+            table[0] = node as usize as u32;
+
+            timing_wheel_remove(table.as_mut_ptr(), node.cast());
+
+            assert_eq!(table[0], next as usize as u32);
+            assert_eq!((*next).wheel_prev, 0x1234_5678);
+            assert_eq!((*node).wheel_next, next as usize as u32);
+            assert_eq!((*node).flags, 0b110);
+        }
+    }
+
+    #[test]
+    fn wheel_remove_clears_terminal_bucket_head() {
+        let _lock = take_lock();
+        let Some([node, _, _]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_remove");
+            return;
+        };
+        let mut table = [0; TIMING_WHEEL_BUCKETS];
+        unsafe {
+            wheel_node(node, 1, 0, 0, 0b111);
+            table[0] = node as usize as u32;
+
+            timing_wheel_remove(table.as_mut_ptr(), node.cast());
+
+            assert_eq!(table[0], 0);
+            assert_eq!((*node).flags, 0b110);
+        }
+    }
+
+    #[test]
+    fn wheel_remove_splices_interior_node_without_changing_head() {
+        let _lock = take_lock();
+        let Some([head, node, next]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_remove");
+            return;
+        };
+        let mut table = [0; TIMING_WHEEL_BUCKETS];
+        unsafe {
+            wheel_node(head, 1, 0, node as usize as u32, 0b111);
+            wheel_node(node, 1, head as usize as u32, next as usize as u32, 0b111);
+            wheel_node(next, 1, node as usize as u32, 0, 0b111);
+            table[0] = head as usize as u32;
+
+            timing_wheel_remove(table.as_mut_ptr(), node.cast());
+
+            assert_eq!(table[0], head as usize as u32);
+            assert_eq!((*head).wheel_next, next as usize as u32);
+            assert_eq!((*next).wheel_prev, head as usize as u32);
+            assert_eq!((*node).flags, 0b110);
         }
     }
 
@@ -733,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_retain_calls_are_bracketed_by_wheel_calls() {
+    fn direct_retain_calls_precede_wheel_insertion() {
         let _lock = take_lock();
         let _restore = SeamGuard;
         let Some(f) = fixture() else {
@@ -751,23 +886,15 @@ mod tests {
             animation_init(f.animation, f.current, f.from, f.to);
 
             let seen = log();
-            assert_eq!(
-                seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
-                "the two unported wheel calls bracket direct retains"
-            );
-            assert_eq!(seen[0].argument, f.animation as usize, "remove targets this");
-            assert_eq!(seen[1].argument, f.animation as usize, "insert targets this");
+            assert_eq!(seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
+                std::vec![EVENT_WHEEL_INSERT]);
+            assert_eq!(seen[0].argument, f.animation as usize, "insert targets this");
             assert_eq!(
                 [(*f.current).flags, (*f.from).flags, (*f.to).flags],
                 [0b1010; 3],
                 "the direct retain port receives current, from, then to"
             );
-            assert_eq!(
-                [seen[0].extra, seen[1].extra],
-                [f.table as usize; 2],
-                "both wheel calls receive the scheduler-table word"
-            );
+            assert_eq!(seen[0].extra, f.table as usize, "insert receives the scheduler-table word");
         }
     }
 
@@ -916,22 +1043,20 @@ mod tests {
             (*f.animation).to_value = f.to as usize as u32;
 
             animation_set_values(f.animation, f.to, f.current, f.from);
+            let seen = log();
 
             assert_eq!((*f.animation).from_value, f.current as usize as u32);
             assert_eq!((*f.animation).to_value, f.from as usize as u32);
             assert_eq!((*f.animation).current_value, f.to as usize as u32);
             assert_eq!((*f.animation).rank, 0, "u32::MAX aux wraps after +1");
             assert_eq!([(*f.current).flags, (*f.from).flags, (*f.to).flags], [0b1010; 3]);
-            let seen = log();
             assert_eq!(
                 seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
+                std::vec![EVENT_WHEEL_INSERT],
             );
             assert_eq!(seen[0].argument, f.animation as usize);
-            assert_eq!(seen[1].argument, f.animation as usize);
             assert_eq!(seen[0].extra, f.table as usize);
-            assert_eq!(seen[1].extra, f.table as usize);
-            assert_eq!(seen[1].rank_at_insert, Some(0));
+            assert_eq!(seen[0].rank_at_insert, Some(0));
             assert_eq!((*f.animation).opaque_04, 0x1111_1111);
             assert_eq!((*f.animation).wheel_prev, 0x2222_2222);
             assert_eq!((*f.animation).wheel_next, 0x3333_3333);
@@ -988,14 +1113,12 @@ mod tests {
             let seen = log();
             assert_eq!(
                 seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
-                "the unported wheel calls bracket direct retain and release"
+                std::vec![EVENT_WHEEL_INSERT],
+                "direct removal precedes retain and release"
             );
             assert_eq!(seen[0].argument, f.animation as usize);
-            assert_eq!(seen[1].argument, f.animation as usize);
             assert_eq!(seen[0].extra, f.table as usize);
-            assert_eq!(seen[1].extra, f.table as usize);
-            assert_eq!(seen[1].rank_at_insert, Some(10));
+            assert_eq!(seen[0].rank_at_insert, Some(10));
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 10);
             assert_eq!((*f.current).flags, 0b110, "old value loses one reference");
@@ -1059,8 +1182,8 @@ mod tests {
 
             assert_eq!(
                 log().iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
-                "the unported wheel calls bracket the direct retain"
+                std::vec![EVENT_WHEEL_INSERT],
+                "direct removal precedes the direct retain"
             );
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 1);

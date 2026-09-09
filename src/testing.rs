@@ -185,6 +185,9 @@ pub mod hints {
     // 0xa900_0000: dedicated to fs/resource_reader_read_exact's raw-u32
     // file-handle fixture; mappings never unmap, so no other user may share it.
     pub const RESOURCE_READER_READ_EXACT: usize = 0xa900_0000;
+    // 0xb700_0000: dedicated to app/animation timing-wheel unlink fixtures;
+    // mappings never unmap, so no other user may share this hint.
+    pub const TIMING_WHEEL_REMOVE: usize = 0xb700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
