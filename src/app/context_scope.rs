@@ -346,6 +346,69 @@ pub unsafe extern "C" fn context_scope_drop(scope: *mut u8) -> *mut u8 {
     scope
 }
 
+/// context_scope_subject_matches_context_field_f40 — original:
+/// `FUN_082a65e4` @ **0x082a65e4** (60 bytes exactly; **14 direct `bl` call
+/// sites**, all plain unconditional, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// ```text
+/// 082a65e4  push    {r4,lr}
+/// 082a65e8  mov     r4,r0
+/// 082a65ec  ldr     r0,[r0]          ; scope vtable
+/// 082a65f0  ldr     r1,[r0,#0xc]     ; slot 3: resolve
+/// 082a65f4  mov     r0,r4
+/// 082a65f8  blx     r1
+/// 082a65fc  cmp     r0,#0
+/// 082a6600  beq     0x082a6618
+/// 082a6604  ldmib   r4,{r0,r1}       ; scope +4/+8
+/// 082a6608  ldr     r1,[r1,#0xf40]
+/// 082a660c  cmp     r0,r1
+/// 082a6610  moveq   r0,#1
+/// 082a6614  popeq   {r4,pc}
+/// 082a6618  mov     r0,#0
+/// 082a661c  pop     {r4,pc}
+/// ```
+///
+/// Calls the scope vtable's +0x0c resolve slot first. A zero result returns
+/// zero without reading either the subject or context. Any nonzero result
+/// compares the subject word at +0x04 against the word at context +0xf40 and
+/// returns an exact 0/1 predicate. The context field's semantic identity is
+/// not established, so the symbol names its verified storage location rather
+/// than inventing an "active" or "current" role.
+///
+/// Deliberate host deviation: test vtables store the +0x0c slot as a
+/// native-width function pointer, while scope and context links remain
+/// firmware `u32` words. The static descriptor's +0x0c word is the unresolved
+/// 0x0826acd8 selector/implementation data pair, not a decodable entry; this
+/// port preserves raw vtable dispatch and does not invent a callee.
+///
+/// # Safety
+///
+/// `scope` must be readable through +0x08 and its vtable through +0x0c. When
+/// its resolve slot returns nonzero, `scope + 0x08` must name a context
+/// readable through +0xf43. As in retailOS, neither `scope` nor the resolved
+/// context is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_subject_matches_context_field_f40(
+    scope: *const u8,
+) -> u32 {
+    type ResolveSlot = unsafe extern "C" fn(*const u8) -> u32;
+
+    // ldr r0,[r0]; ldr r1,[r0,#0xc]; mov r0,r4; blx r1.
+    let vtable = scope.cast::<u32>().read() as usize as *const u8;
+    let resolve = vtable.add(0x0c).cast::<ResolveSlot>().read();
+    // cmp r0,#0; beq — no scope/context field reads after a failed resolve.
+    if resolve(scope) == 0 {
+        return 0;
+    }
+    // ldmib r4,{r0,r1}; ldr r1,[r1,#0xf40]; cmp; moveq.
+    let subject = scope.add(0x04).cast::<u32>().read();
+    let context = scope.add(0x08).cast::<u32>().read() as usize as *const u8;
+    u32::from(subject == context.add(0x0f40).cast::<u32>().read())
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -354,6 +417,8 @@ mod tests {
     use crate::testing::{
         hints, note_missing_u32_fixture, try_map_u32_slab, APP_ROOT_TEST_LOCK,
     };
+    use std::sync::{LazyLock, Mutex};
+
 
 
     const FILL: u8 = 0xa5;
@@ -700,4 +765,131 @@ mod tests {
             "NULL is safe: nothing is dereferenced"
         );
     }
+    static SUBJECT_MATCH_LOCK: Mutex<()> = Mutex::new(());
+    static mut SUBJECT_MATCH_RESOLVE_RESULT: u32 = 0;
+    static mut SUBJECT_MATCH_RESOLVE_SCOPE: *const u8 = core::ptr::null();
+    static mut SUBJECT_MATCH_RESOLVE_CALLS: u32 = 0;
+    static mut SUBJECT_MATCH_WRONG_SLOT_CALLS: u32 = 0;
+
+    const SUBJECT_MATCH_VTABLE_AT: usize = 0x100;
+    const SUBJECT_MATCH_CONTEXT_AT: usize = 0x400;
+    const SUBJECT_MATCH_FIXTURE_LEN: usize = 0x2000;
+
+    unsafe extern "C" fn subject_match_resolve(scope: *const u8) -> u32 {
+        SUBJECT_MATCH_RESOLVE_SCOPE = scope;
+        SUBJECT_MATCH_RESOLVE_CALLS += 1;
+        SUBJECT_MATCH_RESOLVE_RESULT
+    }
+
+    unsafe extern "C" fn subject_match_wrong_slot(_scope: *const u8) -> u32 {
+        SUBJECT_MATCH_WRONG_SLOT_CALLS += 1;
+        1
+    }
+
+    fn subject_match_slab() -> Option<*mut u8> {
+        static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+            try_map_u32_slab(
+                hints::CONTEXT_SCOPE_SUBJECT_MATCHES_CONTEXT_FIELD_F40,
+                SUBJECT_MATCH_FIXTURE_LEN,
+            )
+            .map(|p| p as usize)
+        });
+        SLAB.map(|p| p as *mut u8)
+    }
+
+    unsafe fn subject_match_write_word(record: *mut u8, offset: usize, value: u32) {
+        record.add(offset).cast::<u32>().write(value);
+    }
+
+    unsafe fn prepare_subject_match(resolve_result: u32, subject: u32, current: u32) -> *mut u8 {
+        let slab = subject_match_slab().expect("fixture slab checked by caller");
+        core::ptr::write_bytes(slab, 0, SUBJECT_MATCH_FIXTURE_LEN);
+        let vtable = slab.add(SUBJECT_MATCH_VTABLE_AT);
+        let context = slab.add(SUBJECT_MATCH_CONTEXT_AT);
+        SUBJECT_MATCH_RESOLVE_RESULT = resolve_result;
+        SUBJECT_MATCH_RESOLVE_SCOPE = core::ptr::null();
+        SUBJECT_MATCH_RESOLVE_CALLS = 0;
+        SUBJECT_MATCH_WRONG_SLOT_CALLS = 0;
+        subject_match_write_word(slab, 0, vtable as u32);
+        subject_match_write_word(slab, 4, subject);
+        subject_match_write_word(slab, 8, context as u32);
+        subject_match_write_word(vtable, 0, subject_match_wrong_slot as usize as u32);
+        subject_match_write_word(vtable, 4, subject_match_wrong_slot as usize as u32);
+        vtable
+            .add(0x0c)
+            .cast::<unsafe extern "C" fn(*const u8) -> u32>()
+            .write(subject_match_resolve);
+        subject_match_write_word(context, 0x0f40, current);
+        slab
+    }
+
+    #[test]
+    fn subject_match_failed_resolve_does_not_read_scope_or_context_fields() {
+        let _lock = SUBJECT_MATCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if subject_match_slab().is_none() {
+            assert!(note_missing_u32_fixture(
+                "app::context_scope_subject_matches_context_field_f40"
+            ));
+            return;
+        }
+        unsafe {
+            let scope = prepare_subject_match(0, 0xdead_beef, 0);
+            // Either post-resolve load would fault, proving the short circuit.
+            subject_match_write_word(scope, 4, 1);
+            subject_match_write_word(scope, 8, 1);
+
+            assert_eq!(context_scope_subject_matches_context_field_f40(scope), 0);
+            assert_eq!(SUBJECT_MATCH_RESOLVE_CALLS, 1);
+            assert_eq!(SUBJECT_MATCH_RESOLVE_SCOPE, scope);
+            assert_eq!(SUBJECT_MATCH_WRONG_SLOT_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn subject_match_uses_slot_three_and_accepts_any_nonzero_resolve() {
+        let _lock = SUBJECT_MATCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if subject_match_slab().is_none() {
+            assert!(note_missing_u32_fixture(
+                "app::context_scope_subject_matches_context_field_f40"
+            ));
+            return;
+        }
+        unsafe {
+            let scope = prepare_subject_match(0xffff_ffff, 0xa5c3_1e7f, 0xa5c3_1e7f);
+
+            assert_eq!(context_scope_subject_matches_context_field_f40(scope), 1);
+            assert_eq!(SUBJECT_MATCH_RESOLVE_CALLS, 1);
+            assert_eq!(SUBJECT_MATCH_RESOLVE_SCOPE, scope);
+            assert_eq!(SUBJECT_MATCH_WRONG_SLOT_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn subject_match_is_an_exact_u32_equality_predicate() {
+        let _lock = SUBJECT_MATCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if subject_match_slab().is_none() {
+            assert!(note_missing_u32_fixture(
+                "app::context_scope_subject_matches_context_field_f40"
+            ));
+            return;
+        }
+        unsafe {
+            let scope = prepare_subject_match(1, 0, 0);
+            assert_eq!(
+                context_scope_subject_matches_context_field_f40(scope),
+                1,
+                "two zero words compare equal"
+            );
+
+            let scope = prepare_subject_match(1, 0, 1);
+            assert_eq!(
+                context_scope_subject_matches_context_field_f40(scope),
+                0,
+                "one-bit mismatch compares unequal"
+            );
+            assert_eq!(SUBJECT_MATCH_RESOLVE_CALLS, 1);
+            assert_eq!(SUBJECT_MATCH_WRONG_SLOT_CALLS, 0);
+        }
+    }
+
 }
