@@ -68,7 +68,10 @@ unsafe extern "C" fn current_task_ctx_block_stub() -> *mut u8 {
 /// `INNER_MATERIALIZE_COUNT` pattern). Host tests install a recording
 /// mock; the default stub models the real callee's known prefix (see
 /// the module header) and can be swapped for the ported
-/// `current_task_ctx_block` once cross-module wiring is wanted.
+/// `current_task_ctx_block` once cross-module wiring is wanted. Tests
+/// that swap the slot serialize on
+/// [`crate::testing::TASK_CTX_BLOCK_TEST_LOCK`] — the slot is also
+/// consumed by `app::resource_chain`'s task-local front-end tests.
 pub static mut CURRENT_TASK_CTX_BLOCK: unsafe extern "C" fn() -> *mut u8 =
     current_task_ctx_block_stub;
 
@@ -119,14 +122,12 @@ pub unsafe extern "C" fn task_ctx_set_field_0x30(value: u32) {
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    // Shared with app::resource_chain's front-end tests, which swap the
+    // same slot.
+    use crate::testing::TASK_CTX_BLOCK_TEST_LOCK as SLOT_TEST_LOCK;
 
     const CTX_LEN: usize = FIELD + 4;
     const SENTINEL: u8 = 0xa5;
-
-    /// Serializes the tests that swap `CURRENT_TASK_CTX_BLOCK` (the
-    /// inner_state.rs `SLOT_TEST_LOCK` precedent).
-    static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     static mut MOCK_CALLS: u32 = 0;
     static mut MOCK_CTX: *mut u8 = core::ptr::null_mut();

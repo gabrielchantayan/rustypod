@@ -58,12 +58,12 @@
 //! NUL-terminated C string and kind "BMap" to a bitmap.
 //!
 //! The chain head is task-local: the 17-call-site wrapper @ 0x08272360
-//! is `head = task_ctx_field_0x30(); if (head) return
-//! resource_chain_find(head, kind, id);` — i.e. field +0x30 of the
-//! current task's context block (ported in `util/context_field.rs`) is
-//! the head of this provider chain. The `next` link at +0x14 is
-//! refcounted: its setter @ 0x082722a0 releases the old link and
-//! retains the new one.
+//! (ported below as [`resource_chain_find_on_current_task`]) inlines the
+//! `task_ctx_field_0x30` getter and tail-calls [`resource_chain_find`]
+//! when the head is non-NULL — i.e. field +0x30 of the current task's
+//! context block (ported in `util/context_field.rs`) is the head of this
+//! provider chain. The `next` link at +0x14 is refcounted: its setter @
+//! 0x082722a0 releases the old link and retains the new one.
 //!
 //! ## Deviations
 //!
@@ -86,6 +86,7 @@
 
 use core::ptr;
 use crate::app::registry::{object_cast_to_class, FrameworkObject};
+use crate::util::context_field::CURRENT_TASK_CTX_BLOCK;
 
 
 /// A resource type tag: four characters packed big-endian into a word,
@@ -414,6 +415,70 @@ pub unsafe extern "C" fn resource_chain_find_string(
     id: u32,
 ) -> *const u8 {
     resource_chain_find(head, ResourceKind::STRING, id) as *const u8
+}
+
+/// Byte offset of the provider-chain head inside the current task's
+/// context block — the field `util/context_field.rs` exposes as
+/// `task_ctx_field_0x30`.
+const CHAIN_HEAD_FIELD: usize = 0x30;
+
+/// resource_chain_find_on_current_task — original: `FUN_08272360` @
+/// 0x08272360 (44 bytes; **17 `bl` call sites**, binary-scanned over
+/// the whole decrypted image by decoding every B/BL word — all
+/// unconditional, no predicated form and no tail `b`; no DATA word in
+/// the image holds 0x08272360, so it is never dispatched virtually).
+///
+/// The task-local front-end of [`resource_chain_find`]: the chain head
+/// is the word at +0x30 of the current task's context block (see the
+/// module header). Raw ARM:
+///
+/// ```text
+/// 08272360  push {r4, r5, r6, lr}
+/// 08272364  mov  r5, r1              @ id
+/// 08272368  mov  r4, r0              @ kind
+/// 0827236c  bl   0x80cb828           @ ctx = current_task_ctx_block()
+/// 08272370  ldr  r0, [r0, #0x30]     @ head = ctx->+0x30
+/// 08272374  cmp  r0, #0
+/// 08272378  movne r2, r5
+/// 0827237c  movne r1, r4
+/// 08272380  popne {r4, r5, r6, lr}
+/// 08272384  bne  0x827216c           @ tail: resource_chain_find(head, kind, id)
+/// 08272388  pop  {r4, r5, r6, pc}    @ head was NULL: r0 is already 0
+/// ```
+///
+/// Two NULL-handling details are the original's and are kept. The
+/// context-block pointer itself is NOT checked: with no current task
+/// the `ldr [r0, #0x30]` reads from 0x30 and takes a data abort,
+/// exactly like the `task_ctx_field_0x30` getter it inlines (the
+/// wrapper calls 0x080cb828 directly rather than the getter @
+/// 0x0827233c). The chain head IS checked: a task with no provider
+/// chain gets NULL without the walk. Callers pass `(kind, id)` — the
+/// call site @ 0x08140cdc shows r1 arriving already loaded with the id
+/// (Ghidra drops that argument from its C, e.g.
+/// `FUN_08272360(DAT_0826de68)`).
+///
+/// Deviations: the getter sits behind the
+/// [`CURRENT_TASK_CTX_BLOCK`] dispatch slot instead of a direct
+/// `bl 0x080cb828` — the same documented deviation as
+/// `util/context_field.rs`, whose default stub models the callee's
+/// known prefix exactly. The original's predicated tail `b` is a call
+/// here; observationally identical.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_chain_find_on_current_task(
+    kind: ResourceKind,
+    id: u32,
+) -> *mut u8 {
+    // Volatile slot read — see util/context_field.rs: the slot is meant
+    // to be swapped at runtime and must not constant-fold the default.
+    let ctx_block =
+        ptr::read_volatile(ptr::addr_of!(CURRENT_TASK_CTX_BLOCK))();
+    let head =
+        (ctx_block.add(CHAIN_HEAD_FIELD) as *const u32).read() as usize as *mut ResourceProvider;
+    if head.is_null() {
+        return ptr::null_mut();
+    }
+    resource_chain_find(head, kind, id)
 }
 
 #[cfg(test)]
@@ -1381,5 +1446,189 @@ mod tests {
             "selector chain link +0x14"
         );
         assert_eq!(core::mem::offset_of!(ResourceSelectorProvider, vtable), 0, "selector vtable +0x00");
+    }
+
+    // ---- resource_chain_find_on_current_task @ 0x08272360 ----
+
+    use crate::testing::{
+        note_missing_u32_fixture, try_map_u32_slab, TASK_CTX_BLOCK_TEST_LOCK,
+    };
+    use std::sync::LazyLock;
+
+    /// Base of the below-4-GiB fixture mapping: the context block
+    /// carries the chain head as a raw u32 word, exactly like the
+    /// device, so the chain nodes must round-trip through u32 on the
+    /// host (the `try_map_u32_slab` contract).
+    static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(crate::testing::hints::RESOURCE_CHAIN_ON_CURRENT_TASK, 0x1000)
+            .map(|p| p as usize)
+    });
+
+    fn slab() -> Option<*mut u8> {
+        (*SLAB).map(|p| p as *mut u8)
+    }
+
+    /// Word count of the fake context block: the chain-head word at
+    /// +0x30 plus one, so the block is exactly big enough to contain
+    /// what it claims to hold. A u32 array keeps the field load aligned.
+    const CTX_WORDS: usize = CHAIN_HEAD_FIELD / 4 + 1;
+
+    /// Records how often the installed context-block getter ran.
+    static mut GETTER_CALLS: u32 = 0;
+    /// What the installed getter returns.
+    static mut GETTER_CTX: *mut u8 = ptr::null_mut();
+
+    unsafe extern "C" fn recording_ctx_block() -> *mut u8 {
+        GETTER_CALLS += 1;
+        GETTER_CTX
+    }
+
+    /// Installs the recording getter into [`CURRENT_TASK_CTX_BLOCK`] and
+    /// restores the slot's prior value on drop, even when a test panics.
+    struct SlotGuard {
+        prior: unsafe extern "C" fn() -> *mut u8,
+    }
+
+    impl SlotGuard {
+        fn install(ctx: *mut u8) -> SlotGuard {
+            unsafe {
+                GETTER_CALLS = 0;
+                GETTER_CTX = ctx;
+                let slot = ptr::addr_of_mut!(CURRENT_TASK_CTX_BLOCK);
+                let prior = ptr::read_volatile(slot);
+                ptr::write_volatile(slot, recording_ctx_block);
+                SlotGuard { prior }
+            }
+        }
+    }
+
+    impl Drop for SlotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(CURRENT_TASK_CTX_BLOCK), self.prior);
+            }
+        }
+    }
+
+    /// Builds a scripted chain inside the slab (nodes 0x40 apart — the
+    /// host `ResourceProvider` is 48 bytes) and returns the head as the
+    /// u32 word the context block will carry. Resets the recorder.
+    unsafe fn slab_chain(scripts: &[Script]) -> Option<u32> {
+        let base = slab()?;
+        CALLS = Vec::new();
+        SCRIPTS = scripts.to_vec();
+        let mut prev: *mut ResourceProvider = ptr::null_mut();
+        for i in (0..scripts.len()).rev() {
+            let node = base.add(i * 0x40) as *mut ResourceProvider;
+            ptr::write(
+                node,
+                ResourceProvider {
+                    vtable: &VTABLE,
+                    state_below_next: [ptr::null_mut(); 4],
+                    next: prev,
+                },
+            );
+            prev = node;
+        }
+        Some(prev as usize as u32)
+    }
+
+    #[test]
+    fn walks_the_current_tasks_chain_from_the_ctx_head() {
+        let _lock = TEST_LOCK.lock();
+        let _slot = TASK_CTX_BLOCK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(head) =
+            (unsafe { slab_chain(&[Script::passes(), Script::answers(0xabc0)]) })
+        else {
+            note_missing_u32_fixture("app/resource_chain");
+            return;
+        };
+        let mut ctx = [0u32; CTX_WORDS];
+        ctx[CHAIN_HEAD_FIELD / 4] = head;
+        let _restore = SlotGuard::install(ctx.as_mut_ptr() as *mut u8);
+
+        let found = unsafe { resource_chain_find_on_current_task(ResourceKind::STRING, 7) };
+
+        assert_eq!(found, 0xabc0 as *mut u8);
+        unsafe {
+            assert_eq!(GETTER_CALLS, 1, "exactly one getter call");
+        }
+        let calls = unsafe { CALLS.clone() };
+        assert_eq!(calls.len(), 2, "the first provider passes, the second answers");
+        for call in &calls {
+            assert_eq!(call.kind, ResourceKind::STRING, "kind forwarded verbatim");
+            assert_eq!(call.id, 7, "id forwarded verbatim");
+        }
+    }
+
+    #[test]
+    fn null_chain_head_returns_null_without_walking() {
+        let _lock = TEST_LOCK.lock();
+        let _slot = TASK_CTX_BLOCK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            CALLS = Vec::new();
+            SCRIPTS = Vec::new();
+        }
+        // Head word 0: no slab needed — the cmp/bne guard must return
+        // before any provider is dereferenced.
+        let mut ctx = [0u32; CTX_WORDS];
+        let _restore = SlotGuard::install(ctx.as_mut_ptr() as *mut u8);
+
+        let found =
+            unsafe { resource_chain_find_on_current_task(ResourceKind::BITMAP, u32::MAX) };
+
+        assert!(found.is_null());
+        unsafe {
+            assert_eq!(GETTER_CALLS, 1, "exactly one getter call");
+            assert!(CALLS.is_empty(), "the walk is skipped entirely");
+        }
+    }
+
+    #[test]
+    fn returns_null_when_no_provider_answers() {
+        let _lock = TEST_LOCK.lock();
+        let _slot = TASK_CTX_BLOCK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(head) =
+            (unsafe { slab_chain(&[Script::passes(), Script::passes()]) })
+        else {
+            note_missing_u32_fixture("app/resource_chain");
+            return;
+        };
+        let mut ctx = [0u32; CTX_WORDS];
+        ctx[CHAIN_HEAD_FIELD / 4] = head;
+        let _restore = SlotGuard::install(ctx.as_mut_ptr() as *mut u8);
+
+        let found = unsafe { resource_chain_find_on_current_task(ResourceKind::STRING, 3) };
+
+        assert!(found.is_null());
+        let calls = unsafe { CALLS.clone() };
+        assert_eq!(calls.len(), 2, "every provider in the chain was asked");
+    }
+
+    #[test]
+    fn reads_only_the_chain_head_word_of_the_ctx_block() {
+        let _lock = TEST_LOCK.lock();
+        let _slot = TASK_CTX_BLOCK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(head) = (unsafe { slab_chain(&[Script::answers(0x5ea1)]) }) else {
+            note_missing_u32_fixture("app/resource_chain");
+            return;
+        };
+        let mut ctx = [0xa5a5_a5a5u32; CTX_WORDS];
+        ctx[CHAIN_HEAD_FIELD / 4] = head;
+        let before = ctx;
+        let _restore = SlotGuard::install(ctx.as_mut_ptr() as *mut u8);
+
+        let found = unsafe { resource_chain_find_on_current_task(ResourceKind::BITMAP, 1) };
+
+        assert_eq!(found, 0x5ea1 as *mut u8);
+        assert_eq!(ctx, before, "the front-end is read-only on the ctx block");
     }
 }

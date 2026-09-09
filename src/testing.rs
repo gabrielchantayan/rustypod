@@ -142,6 +142,11 @@ pub mod hints {
     // fixture; fixture mappings never unmap, so no other user may share
     // this hint.
     pub const SQLITE_FIND_TABLE: usize = 0x7500_0000;
+    // 0x7600_0000: dedicated to app/resource_chain's
+    // resource_chain_find_on_current_task chain fixture (the context
+    // block carries the chain head as a raw u32 word); mappings never
+    // unmap, so no other user may share this hint.
+    pub const RESOURCE_CHAIN_ON_CURRENT_TASK: usize = 0x7600_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
@@ -256,3 +261,11 @@ pub static STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK: std::sync::Mutex<()> =
 /// stream-read-core seam. The word reader and zeroing wrapper both install
 /// recorders into that mutable global.
 pub static STREAM_READ_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps
+/// `util::context_field::CURRENT_TASK_CTX_BLOCK`. That slot is one shared
+/// mutable global: the accessor's own tests and the `app::resource_chain`
+/// task-local front-end tests both install recording mocks into it, and
+/// `cargo test` runs test functions on parallel threads, so a
+/// module-private lock would race teardown across modules.
+pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
