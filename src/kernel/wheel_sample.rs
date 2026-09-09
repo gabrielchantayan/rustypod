@@ -224,6 +224,27 @@ pub unsafe extern "C" fn wheel_sample_capture(sample: *mut u8) -> i32 {
     ((elapsed << 16) as i32) >> 16
 }
 
+/// `wheel_sample_is_touched` — original: `FUN_08292a70` @ 0x08292a70
+/// (24 bytes exactly, 0x08292a70..0x08292a88; 13 direct `bl` call sites,
+/// all unconditional, binary-scanned).
+///
+/// Lazily captures `sample` through [`wheel_sample_capture`], then returns
+/// the state word's `WHEEL_TOUCHED_BIT` unchanged (`0` or `0x40000000`).
+/// Raw ARM is `push {r4,lr}; mov r4,r0; bl 0x08292a88; ldr r0,[r4,#0x10];
+/// and r0,r0,#0x40000000; pop {r4,pc}`. It has no NULL guard. Deliberate
+/// deviations: none.
+///
+/// # Safety
+///
+/// `sample` must point into a writable allocation covering
+/// `sample..sample+0x18`; it is dereferenced unchecked, as in the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn wheel_sample_is_touched(sample: *mut u8) -> u32 {
+    unsafe { wheel_sample_capture(sample) };
+    (unsafe { (sample.add(SAMPLE_STATE) as *const u32).read_volatile() }) & WHEEL_TOUCHED_BIT
+}
+
 /// `wheel_sample_get_rate` — original: `FUN_08292adc` @ 0x08292adc
 /// (20 bytes exactly, 0x08292adc..0x08292af0; 19 direct `bl` call sites,
 /// all unconditional, binary-scanned).
@@ -414,6 +435,36 @@ mod tests {
             (sample().add(SAMPLE_RATE) as *mut u32).write_volatile(0xffff_fffe);
             assert_eq!(wheel_sample_get_rate(sample()), 0xffff_fffe);
             assert!((*addr_of!(CALLS)).is_empty(), "captured sample skips all helpers");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn touched_query_captures_then_returns_only_the_touch_bit() {
+        let guard = mock(0, WHEEL_TOUCHED_BIT | 0x8000_0001, 0);
+        unsafe {
+            assert_eq!(wheel_sample_is_touched(sample()), WHEEL_TOUCHED_BIT);
+            assert_eq!(*addr_of!(CALLS), std::vec!["capture", "tick_elapsed"]);
+            assert_eq!(word(SAMPLE_STATE), WHEEL_TOUCHED_BIT | 0x8000_0001);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn touched_query_uses_a_precaptured_state_without_helpers() {
+        let guard = mock(0, WHEEL_TOUCHED_BIT, 0);
+        unsafe {
+            sample().add(SAMPLE_CAPTURED).write_volatile(1);
+            for (state, expected) in [
+                (0u32, 0u32),
+                (0x8000_0001, 0),
+                (WHEEL_TOUCHED_BIT, WHEEL_TOUCHED_BIT),
+                (WHEEL_TOUCHED_BIT | 0x8000_0001, WHEEL_TOUCHED_BIT),
+            ] {
+                (sample().add(SAMPLE_STATE) as *mut u32).write_volatile(state);
+                assert_eq!(wheel_sample_is_touched(sample()), expected);
+            }
+            assert!((*addr_of!(CALLS)).is_empty(), "precaptured sample skips all helpers");
         }
         restore(guard);
     }

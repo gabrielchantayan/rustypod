@@ -19027,6 +19027,30 @@ functions:
       is the crate fp frame, the ops-table blx indirections and LLVM
       inlining timer_schedule_shim's argument rotation.
 
+  - address: 0x08292a70
+    ghidra: FUN_08292a70
+    name: wheel_sample_is_touched
+    size: 24
+    sig: "u32 wheel_sample_is_touched(u8 *sample)"
+    module: kernel/wheel_sample
+    status: ported
+    renames:
+      param_1: sample
+      FUN_08292a88: wheel_sample_capture
+    notes: >-
+      Raw ARM verifies 24 bytes exactly, 0x08292a70..0x08292a88, with no
+      literal pool: `push {r4,lr}; mov r4,r0; bl 0x08292a88; ldr
+      r0,[r4,#0x10]; and r0,r0,#0x40000000; pop {r4,pc}`. Binary scanning
+      every ARM B/BL encoding found 13 direct BL call sites, all
+      unconditional (no predicated BL); no image word points at this
+      function, so there is no virtual-dispatch seam. Algorithm: lazily
+      fill the wheel event sample, then return the state word's
+      0x40000000 finger-on-wheel bit unchanged (zero or 0x40000000).
+      The function has no NULL guard; callers branch on its bitmask result
+      before acting on an active wheel. Deliberate deviations: none. Host
+      tests cover first-use capture, masking unrelated state bits, and
+      pre-captured touched and untouched states without helper calls.
+
   - address: 0x08292a88
     ghidra: FUN_08292a88
     name: wheel_sample_capture
