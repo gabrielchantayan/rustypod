@@ -1,17 +1,18 @@
 //! The **service-manager singleton** — the framework object that owns
-//! retailOS's per-hardware subsystem handlers — and the two entry
-//! points that hand it out.
+//! retailOS's per-hardware subsystem handlers — plus entry points that hand
+//! it out and read its handler records.
 //!
 //! | address | name | size | `bl` sites |
 //! |---|---|---|---|
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
+//! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
 //!
-//! Both counts are binary-scanned out of `work/firmware/osos.dec` by
-//! decoding every ARM `B`/`BL` word in the image (load base
-//! 0x08000000) and resolving its target: 17 `BL` reach 0x08165520
-//! directly, 213 `BL` reach the veneer, and the *only* plain `B` at
-//! 0x08165520 is the veneer itself — 230 call sites in total, which is
+//! The instance and veneer counts are binary-scanned out of
+//! `work/firmware/osos.dec` by decoding every ARM `B`/`BL` word in the image
+//! (load base 0x08000000) and resolving its target: 17 `BL` reach
+//! 0x08165520 directly, 213 `BL` reach the veneer, and the *only* plain `B`
+//! at 0x08165520 is the veneer itself — 230 call sites in total, which is
 //! what makes a 24-byte accessor worth porting.
 //!
 //! ## The holder global
@@ -145,6 +146,49 @@ pub unsafe extern "C" fn service_manager_instance_veneer() -> *mut u8 {
     service_manager_instance()
 }
 
+/// service_manager_secondary_handler_code_get — original: `FUN_08193e84` @
+/// 0x08193e84 (20 bytes; 17 direct, unconditional `bl` call sites).
+///
+/// Reads the low halfword at `+0x1c` from one of the service manager's three
+/// secondary 0x20-byte handler records. Raw ARM is `cmp r1,#3; blge
+/// 0x08030f44; add r0,r0,r1,lsl #5; ldrh r0,[r0,#28]; bx lr`: signed slots
+/// below three, including negative values, pass the original's bounds check
+/// and therefore retain its unchecked addressing behavior. Slots three and
+/// above terminate through [`heap_panic`]. The field is called a code because
+/// callers feed its u16 result to a code-keyed lookup table; no concrete
+/// handler-code identity is established.
+///
+/// Decoding every ARM `B`/`BL` instruction in `osos.dec` found exactly 17
+/// direct callers, all unconditional plain `BL`; no predicated direct calls
+/// or tail branches target this address. The next distinct function begins at
+/// 0x08193e98, confirming the five-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_code_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> u16 {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(
+        slot_table
+            .wrapping_offset(slot.wrapping_shl(3) as isize)
+            .add(7)
+            .cast::<u16>(),
+    )
+}
+
 /// service_manager_secondary_handler_get — original: `FUN_08193ec0` @
 /// 0x08193ec0 (20 bytes; 27 direct, unconditional `bl` call sites).
 ///
@@ -267,6 +311,45 @@ mod secondary_handler_get_tests {
                 service_manager_secondary_handler_get(table, 0),
                 replacement,
                 "the ARM ldr reloads the handler word on every call"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod secondary_handler_code_get_tests {
+    use super::*;
+
+    #[test]
+    fn reads_each_handler_code_low_halfword_and_reloads() {
+        let mut table = [0u32; 24];
+        table[7] = 0xaaaa_1234;
+        table[15] = 0xbbbb_0000;
+        table[23] = 0xcccc_d000;
+
+        unsafe {
+            assert_eq!(service_manager_secondary_handler_code_get(table.as_ptr(), 0), 0x1234);
+            assert_eq!(service_manager_secondary_handler_code_get(table.as_ptr(), 1), 0);
+            assert_eq!(service_manager_secondary_handler_code_get(table.as_ptr(), 2), 0xd000);
+
+            table[15] = 0xdddd_0046;
+            assert_eq!(
+                service_manager_secondary_handler_code_get(table.as_ptr(), 1),
+                0x0046,
+                "the ARM ldrh reloads the code halfword on every call"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[7] = 0xffff_beef;
+
+        unsafe {
+            assert_eq!(
+                service_manager_secondary_handler_code_get(table.as_ptr().add(8), -1),
+                0xbeef,
             );
         }
     }
