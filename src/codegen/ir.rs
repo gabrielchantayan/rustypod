@@ -558,6 +558,8 @@ pub const CG_INST_OPCODE_PHI: u32 = 0x2f;
 pub const CG_INST_OPCODE_LDI: u32 = 40;
 /// Word-load opcode: read 32 bits through an address register.
 pub const CG_INST_OPCODE_LDW: u32 = 41;
+/// Word-store opcode: write 32 bits through an address register.
+pub const CG_INST_OPCODE_STW: u32 = 44;
 /// Integer-add opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_ADD: u32 = 1;
 /// Integer-subtract opcode of the binary instruction kind.

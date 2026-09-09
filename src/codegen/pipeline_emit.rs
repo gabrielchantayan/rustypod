@@ -8,10 +8,10 @@
 //! library's (0x082cxxxx); this module collects those.
 
 use super::ir::{
-    cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed,
-    cg_virtual_reg_create, CgBlock, CgProc, CgVirtualReg, CG_BLOCK_PROC,
-    CG_INST_OPCODE_ADD, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW, CG_INST_OPCODE_SUB,
-    CG_REG_TYPE_GENERAL,
+    cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed, cg_create_inst_store,
+    cg_virtual_reg_create, CgBlock, CgInst, CgProc, CgVirtualReg, CG_BLOCK_PROC,
+    CG_INST_OPCODE_ADD, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW, CG_INST_OPCODE_STW,
+    CG_INST_OPCODE_SUB, CG_REG_TYPE_GENERAL,
 };
 
 /// The procedure owning `block` (`cg_block_t + 0x04`).
@@ -68,6 +68,59 @@ pub unsafe extern "C" fn cg_emit_load_word_at_offset(
     cg_create_inst_load(block, CG_INST_OPCODE_LDW, value_reg, address_reg);
 
     value_reg
+}
+
+/// cg_emit_store_word_at_offset — original: `FUN_08260678` @ 0x08260678
+/// (124 bytes: 31 instruction words 0x08260678-0x082606f0, no literal
+/// pool; the last word is a tail `b` to `cg_create_inst_store`, and the
+/// next function's own `stmdb sp!,{r3,r4,r5,r6,r7,r8,r9,lr}` starts at
+/// 0x082606f4 — Ghidra's 124-byte extent is exact).
+///
+/// 17 call sites: 16 unconditional `bl` plus one tail `b` at 0x08246fa8,
+/// no predicated forms, binary-scanned by decoding every branch word in
+/// osos.dec. They sit in one run inside the pipeline generators,
+/// 0x08246f2c-0x08248538 — the same generator group that calls
+/// [`cg_emit_load_matrix4x4_word`].
+///
+/// The store twin of [`cg_emit_load_word_at_offset`]: emits the
+/// three-instruction "store `value` to the word at `base + offset`"
+/// idiom into `block` and returns the appended store instruction:
+///
+/// ```text
+/// LDI  offset_reg, offset
+/// ADD  address_reg, base, offset_reg
+/// STW  [address_reg], value
+/// ```
+///
+/// Only two virtual registers are created — the value arrives as an
+/// argument rather than being loaded, so there is no `value_reg`.
+/// Both are general-purpose and are created up front, before any
+/// instruction is appended (two back-to-back `cg_virtual_reg_create`
+/// calls into r6/r7), so they are numbered in creation order rather
+/// than in use order. The final store is a tail call, so the factory's
+/// return value reaches the caller directly.
+///
+/// # Deviations
+///
+/// The original reloads `block->proc` from `block + 4` before each of
+/// the two register creations; the port reads it once. The field is not
+/// written in between, so the observable call sequence is identical
+/// (same deviation as the load sibling).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_store_word_at_offset(
+    block: *mut CgBlock,
+    base: *mut CgVirtualReg,
+    offset: usize,
+    value: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let proc = block_proc(block);
+    let offset_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let address_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, offset_reg, offset);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, address_reg, base, offset_reg);
+    cg_create_inst_store(block, CG_INST_OPCODE_STW, value, address_reg)
 }
 
 /// cg_emit_load_matrix4x4_word — original: `FUN_082469b8` @ 0x082469b8
@@ -172,8 +225,10 @@ mod tests {
     use super::super::ir::{
         CG_BLOCK_INSTS, CG_INST_BINARY_DEST, CG_INST_BINARY_SOURCE0, CG_INST_BINARY_SOURCE1,
         CG_INST_KIND, CG_INST_KIND_BINARY, CG_INST_KIND_LOAD, CG_INST_KIND_LOAD_IMMED,
+        CG_INST_KIND_STORE,
         CG_INST_LOAD_ADDRESS, CG_INST_LOAD_DEST, CG_INST_LOAD_IMMED_DEST,
-        CG_INST_LOAD_IMMED_VALUE, CG_INST_NEXT, CG_MODULE_HEAP, CG_PROC_MODULE, CG_PROC_NEXT,
+        CG_INST_LOAD_IMMED_VALUE, CG_INST_NEXT, CG_INST_STORE_ADDRESS, CG_INST_STORE_VALUE,
+        CG_MODULE_HEAP, CG_PROC_MODULE, CG_PROC_NEXT,
         CG_PROC_NUM_REGISTERS, CG_VREG_NEXT, CG_VREG_NO, CG_VREG_TYPE,
     };
     use super::*;
@@ -406,6 +461,167 @@ mod tests {
         }
 
         assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 6);
+        assert_eq!(
+            f.proc[CG_PROC_NEXT], 0,
+            "the helper never touches the procedure's list link"
+        );
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut values = std::vec::Vec::new();
+            while !inst.is_null() {
+                if inst_kind(inst) == CG_INST_KIND_LOAD_IMMED as u8 {
+                    values.push(field(inst, CG_INST_LOAD_IMMED_VALUE));
+                }
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert_eq!(
+                values,
+                std::vec![0x1c, usize::MAX],
+                "both offsets reached their load-immediate in call order"
+            );
+        }
+    }
+
+    #[test]
+    fn store_emits_ldi_add_stw_wired_through_fresh_registers() {
+        const BASE: usize = 0xdead_be00;
+        const OFFSET: usize = 0x2c;
+        const VALUE: usize = 0xc0ffee;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let store = unsafe {
+            cg_emit_store_word_at_offset(
+                block,
+                BASE as *mut CgVirtualReg,
+                OFFSET,
+                VALUE as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let [ldi, add, stw] = emitted(&mut f);
+
+            assert_eq!(inst_kind(ldi), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(ldi, CG_INST_LOAD_IMMED_VALUE), OFFSET);
+
+            assert_eq!(inst_kind(add), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(add), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(
+                field(add, CG_INST_BINARY_SOURCE0),
+                BASE,
+                "the caller's base register is source0"
+            );
+            assert_eq!(
+                field(add, CG_INST_BINARY_SOURCE1),
+                field(ldi, CG_INST_LOAD_IMMED_DEST),
+                "the materialized offset is source1"
+            );
+
+            assert_eq!(inst_kind(stw), CG_INST_KIND_STORE as u8);
+            assert_eq!(inst_opcode(stw), CG_INST_OPCODE_STW as u8);
+            assert_eq!(
+                field(stw, CG_INST_STORE_VALUE),
+                VALUE,
+                "the caller's value register is stored without dereferencing it"
+            );
+            assert_eq!(
+                field(stw, CG_INST_STORE_ADDRESS),
+                field(add, CG_INST_BINARY_DEST),
+                "the store writes through the sum"
+            );
+            assert_eq!(
+                store as *mut u8, stw,
+                "the tail-called factory's instruction is returned"
+            );
+        }
+    }
+
+    #[test]
+    fn store_creates_two_general_registers_numbered_in_creation_order() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_store_word_at_offset(
+                block,
+                core::ptr::null_mut(),
+                0,
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(
+            f.proc[CG_PROC_NUM_REGISTERS], 2,
+            "exactly two registers were created — the value is an argument"
+        );
+
+        unsafe {
+            let [ldi, add, _] = emitted(&mut f);
+            let offset_reg = field(ldi, CG_INST_LOAD_IMMED_DEST) as *mut u8;
+            let address_reg = field(add, CG_INST_BINARY_DEST) as *mut u8;
+
+            for (index, reg) in [offset_reg, address_reg].iter().enumerate() {
+                assert_eq!(field(*reg, CG_VREG_NO), index, "register numbered by creation");
+                assert_eq!(
+                    reg.add(CG_VREG_TYPE * WORD).read(),
+                    CG_REG_TYPE_GENERAL as u8,
+                    "general-purpose register class"
+                );
+            }
+            assert_eq!(
+                field(offset_reg, CG_VREG_NEXT) as *mut u8,
+                address_reg,
+                "the offset register is created before the address register"
+            );
+        }
+    }
+
+    #[test]
+    fn store_with_zero_offset_and_null_operands_still_emits_all_three() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_store_word_at_offset(
+                block,
+                core::ptr::null_mut(),
+                0,
+                core::ptr::null_mut(),
+            )
+        };
+
+        unsafe {
+            let [ldi, add, stw] = emitted(&mut f);
+            assert_eq!(field(ldi, CG_INST_LOAD_IMMED_VALUE), 0);
+            assert_eq!(
+                field(add, CG_INST_BINARY_SOURCE0),
+                0,
+                "a NULL base is passed through unexamined"
+            );
+            assert_eq!(
+                field(stw, CG_INST_STORE_VALUE),
+                0,
+                "a NULL value is passed through unexamined"
+            );
+        }
+    }
+
+    #[test]
+    fn successive_store_calls_append_and_keep_numbering_running() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_store_word_at_offset(block, core::ptr::null_mut(), 0x1c, 1 as *mut CgVirtualReg);
+            cg_emit_store_word_at_offset(
+                block,
+                core::ptr::null_mut(),
+                usize::MAX,
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 4);
         assert_eq!(
             f.proc[CG_PROC_NEXT], 0,
             "the helper never touches the procedure's list link"
