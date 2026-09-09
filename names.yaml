@@ -50464,6 +50464,52 @@ functions:
       A selector word with the sign bit set passes the signed ARM `bge`
       guard and is deliberately forwarded unchanged, as host coverage proves.
 
+  - address: 0x08195214
+    ghidra: FUN_08195214
+    name: schedule_iap_packet_event
+    size: 196
+    sig: "u32 schedule_iap_packet_event(void *unused_context, IapPacket *packet, u32 completion_state, u32 delay_ms)"
+    module: app/iap_packet_event_schedule
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: packet
+      param_3/r2: completion_state
+      param_4/r3: delay_ms
+      DAT_081952d0: active_service_handler_context_slot (0x089ccb5c)
+      DAT_081952d4: active_context_pending_event_sequence_offset (0x2fa)
+      param_2_plus_0x10: packet_command_tag
+      active_context_plus_0x2f4: pending_event_timestamp_ms
+      active_context_plus_0x2f8: pending_event_active
+      active_context_plus_0x2fa: pending_event_sequence
+    notes: >-
+      Raw extent is 196 bytes, not Ghidra's code-only 188: the 47
+      instructions end with pop {r4-r8,pc} at 0x081952cc, followed by
+      literal words 0x089ccb5c and 0x000002fa at 0x081952d0/0x081952d4;
+      0x081952d8 begins the next separate function. Decoding every ARM B/BL
+      word in osos.dec found exactly 13 inbound direct calls, all
+      unconditional plain BL (0x081942e8, 0x08194948, 0x081949c0,
+      0x08194a50, 0x08194b2c, 0x08194bd4, 0x08194c50, 0x08194edc,
+      0x08194f58, 0x08194fe4, 0x0819507c, 0x081950fc, 0x08195178);
+      no predicated BL targets it. It obtains packet owner mode, snapshots
+      the packet command halfword, then calls unported 0x081d7f14 with the
+      packet and completion state. Only when that returns zero does it insert
+      a zero-payload pending event into the active context: key=owner mode,
+      tag_a=the pre-increment context +0x2fa halfword, tag_b=packet command,
+      delay=param_4. A successful insert alone constructs a kind-1 clock,
+      reads it through vtable +0x0c, writes its milliseconds to +0x2f4,
+      sets +0x2f8 to 1, and increments the sequence with u16 wrapping.
+      The first ABI word is stacked then overwritten with zero before the
+      clock output path and is otherwise unused. The unported 0x081d7f14
+      is left as a volatile target/host seam: its decoded body changes packet
+      +0x1a and submits a worker request, but that worker protocol is not
+      recovered, so no stronger callee identity is invented. The existing
+      pending-event clock-read seam also models this function's runtime
+      vtable dispatch. Host tests prove completion-error short-circuiting,
+      successful event tags/clock/state including sequence wrap, and
+      queue-exhaustion preservation of the timestamp, active byte and
+      sequence.
+
 
   # --- AppMotor fixed singleton accessor ---
   - address: 0x08295be0
