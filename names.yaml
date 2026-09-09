@@ -20718,6 +20718,31 @@ functions:
       db->mallocFailed. The `mov r0,#20; mul r2,r0,r1` is the literal
       sizeof(VdbeOp) that pins the 20-byte record size.
 
+  - address: 0x08386a14
+    ghidra: FUN_08386a14
+    name: vdbe_change_p1
+    size: 48
+    sig: "void vdbe_change_p1(Vdbe *p, int addr, int value)"
+    module: sqlite/vdbe
+    status: ported
+    renames:
+      param_1: p
+      param_2: addr
+      param_3: value
+    notes: >-
+      SQLite's sqlite3VdbeChangeP1 - patches the first operand of the op
+      at addr. 14 bl call sites (verified by decoding every B/BL word in
+      osos.dec), none predicated. Byte-identical guard/store skeleton to
+      vdbe_change_p2 @ 0x08386a44 - the two originals differ only in the
+      store offset (+4 vs +8): four guards in order (NULL p via
+      cmp/bxeq, addr < 0 and nOp <= addr via the ldrge/cmpge/bxle
+      predicated chain, NULL aOp via predicated addne/strne), then
+      aOp[addr].p1 = value at stride 20 (`add r1,r1,r1 lsl#2` then
+      `lsl#2`). Ghidra's 48-byte extent is exactly right; the next
+      function starts at 0x08386a44. match.py structural: LLVM emits
+      branches instead of predication and keeps a frame, guards and
+      store identical.
+
   - address: 0x08386a44
     ghidra: FUN_08386a44
     name: vdbe_change_p2

@@ -24,6 +24,8 @@
 //!   operand to an already-emitted op, releasing the old one.
 //! - `vdbe_resize_op_array` — `FUN_08367f88` @ 0x08367f88 (48 bytes;
 //!   2 `bl`). SQLite's `resizeOpArray`.
+//! - `vdbe_change_p1` — `FUN_08386a14` @ 0x08386a14 (48 bytes; 14 `bl`).
+//!   `sqlite3VdbeChangeP1`: patch the first operand of an emitted op.
 //! - `vdbe_change_p2` — `FUN_08386a44` @ 0x08386a44 (48 bytes; 66 `bl` +
 //!   2 tail `b`). `sqlite3VdbeChangeP2`: back-patch a jump target.
 //! - `vdbe_change_p5` — `FUN_08386bd4` @ 0x08386bd4 (32 bytes; 19 `bl` +
@@ -467,6 +469,31 @@ pub unsafe extern "C" fn vdbe_change_p4(p: *mut Vdbe, addr: i32, value: *const u
     (*op).p4type = P4_DYNAMIC as i8;
 }
 
+/// vdbe_change_p1 — original: `FUN_08386a14` @ 0x08386a14 (48 bytes;
+/// 14 `bl` call sites, none predicated, verified by decoding every
+/// B/BL word in osos.dec).
+///
+/// `sqlite3VdbeChangeP1`: patch the P1 operand of the op at `addr`.
+/// Byte-identical guard/store skeleton to [`vdbe_change_p2`] (the two
+/// originals differ only in the store offset, +4 vs +8): silently does
+/// nothing for a NULL statement, a negative address, an address at or
+/// past `nOp`, or an unallocated op array — all four guards are in the
+/// original, in that order (`cmp r0,#0` / `bxeq lr`, `cmp r1,#0` gating
+/// `ldrge nOp` / `cmpge` / `bxle lr`, then a NULL `aOp` check via
+/// predicated `addne`/`strne`).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_change_p1(p: *mut Vdbe, addr: i32, value: i32) {
+    if p.is_null() || addr < 0 || (*p).n_op <= addr {
+        return;
+    }
+    let a_op = (*p).a_op;
+    if a_op.is_null() {
+        return;
+    }
+    (*a_op.offset(addr as isize)).p1 = value;
+}
+
 /// vdbe_change_p2 — original: `FUN_08386a44` @ 0x08386a44 (48 bytes;
 /// 66 `bl` + 2 tail `b`).
 ///
@@ -760,6 +787,38 @@ mod tests {
         assert_eq!(slab[2].p4type, -2, "a negative tag is stored verbatim");
         // The fresh op holds nothing, so release is a (0, NULL) call.
         assert_eq!(frees(), std::vec![(0, 0)]);
+    }
+
+    #[test]
+    fn change_p1_patches_only_within_the_emitted_range() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        for i in 0..3 {
+            unsafe { vdbe_add_op3(stmt.ptr(), 1, 0, i, 0) };
+        }
+
+        unsafe { vdbe_change_p1(stmt.ptr(), 1, 0x1234) };
+        assert_eq!(slab[1].p1, 0x1234);
+        assert_eq!(slab[1].p2, 1, "the neighbouring P2 operand is untouched");
+
+        // Out of range in both directions, and the guards' order.
+        unsafe { vdbe_change_p1(stmt.ptr(), -1, 0x999) };
+        unsafe { vdbe_change_p1(stmt.ptr(), 3, 0x999) };
+        unsafe { vdbe_change_p1(stmt.ptr(), i32::MAX, 0x999) };
+        unsafe { vdbe_change_p1(core::ptr::null_mut(), 0, 0x999) };
+        assert_eq!(slab[0].p1, 0);
+        assert_eq!(slab[2].p1, 0);
+        assert_eq!(slab[3].p1, -1, "slot beyond nOp is never written");
+    }
+
+    #[test]
+    fn change_p1_ignores_a_statement_with_no_op_array() {
+        let _guard = quiet();
+        let mut stmt = Statement::new(Connection::healthy());
+        stmt.vdbe.n_op = 4;
+        // No aOp: must return without dereferencing it.
+        unsafe { vdbe_change_p1(stmt.ptr(), 0, 7) };
     }
 
     #[test]
