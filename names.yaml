@@ -50031,3 +50031,32 @@ functions:
       stock faults on the first store. No aligned data word in osos.dec
       holds 0x0814d2e0. Host test poisons every field, proves all three
       links clear, all other fields survive, and the input pointer returns.
+
+  - address: 0x0835206c
+    ghidra: FUN_0835206c
+    name: xor_f6_in_place
+    size: 48
+    sig: "void xor_f6_in_place(u8 *bytes, i32 len)"
+    module: crypto/xor_f6_in_place
+    status: ported
+    renames:
+      param_1/r0: bytes
+      param_2/r1: len
+      iVar1/r2: index
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent
+      0x0835206c..0x0835209c: the next separately entered function begins
+      at 0x0835209c. It starts index at zero; while signed index < signed
+      len, it loads bytes[index], XORs it with 0xf6, stores it back, and
+      increments index. Non-positive lengths perform no dereference; for a
+      positive length there is no NULL guard. Decoding every ARM B/BL word
+      in osos.dec finds exactly 16 direct call sites, all unconditional
+      plain bl instructions at 0x0804b264..0x0804b31c; there are zero
+      predicated BL forms and no tail branches. Those sixteen calls decode
+      consecutive 0x100-byte pages of a lookup table before
+      FUN_0804b220 indexes it. Deliberate deviations: none. Host tests
+      cover lengths 0..64 at byte alignments 0..3, boundary preservation,
+      and zero/negative lengths including a NULL pointer. match.py
+      structural review (exit 1 expected) finds the same signed
+      non-positive early return and bytewise XOR-F6 loop; LLVM differs only
+      by counting down len and post-incrementing the pointer.
