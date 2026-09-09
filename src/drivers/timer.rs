@@ -224,6 +224,38 @@ pub unsafe extern "C" fn read_usec_timer_into(out: *mut u32) {
     }
 }
 
+/// read_usec_timer_into_2 — original: `FUN_08086e38` @ 0x08086e38 (20
+/// bytes, 0x08086e38..0x08086e4c, binary-decoded; the next function starts
+/// with its own `push {r3, lr}` at 0x08086e4c).
+///
+/// **15 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 0 tail `b` call sites**, verified by decoding every ARM `B`/`BL`
+/// word in `work/firmware/osos.dec`. (Ghidra's 15-call count is exact.)
+///
+/// Instruction-identical twin of [`read_usec_timer_into`] @ 0x08086e24:
+/// `push {r4,lr}; mov r4,r0; bl 0x08056658; str r0,[r4]; pop {r4,pc}` — the
+/// `bl` immediate differs only because the PC-relative offset to the same
+/// thunk target shifts with the address. It takes one raw Timer E `TECNT`
+/// sample through the branch thunk @ 0x08056658 (-> 0x0836af80, the three-
+/// word read of 0x3c70_00b4) and stores it through the unguarded `out`
+/// pointer. Its callers use it for the same elapsed-time instrumentation as
+/// the twin's; there is deliberately no NULL guard.
+///
+/// Deviations: calls the already-ported [`usec_timer_read`] directly rather
+/// than creating a dispatch seam for the branch thunk (same single volatile
+/// sample, same word store). A dedicated `link_section` keeps LLVM's
+/// identical-code folding from collapsing this independently hookable copy
+/// onto the byte-identical [`read_usec_timer_into`] body — the 0x08086e38
+/// hook seam is the point of the separate export.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.read_usec_timer_into_2")]
+#[inline(never)]
+pub unsafe extern "C" fn read_usec_timer_into_2(out: *mut u32) {
+    unsafe {
+        out.write_volatile(usec_timer_read());
+    }
+}
+
 /// usec_timer_read_seconds — original: `FUN_0826c5e8` @ 0x0826c5e8
 /// (**28 bytes**, 0x0826c5e8..0x0826c604, binary-decoded).
 ///
@@ -543,6 +575,31 @@ mod usec_timer_tests {
             let mut words = [0xaaaa_aaaa, old_destination, 0x5555_5555];
 
             unsafe { read_usec_timer_into(&mut words[1]) };
+
+            assert_eq!(words, [0xaaaa_aaaa, counter, 0x5555_5555]);
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed),
+                counter.wrapping_add(1)
+            );
+        }
+    }
+
+    #[test]
+    fn timer_read_into_2_stores_one_sample_without_touching_neighboring_words() {
+        let _guard = configure_usec_timer(0, 1);
+
+        for (counter, old_destination) in [
+            (0, u32::MAX),
+            (1, 0),
+            (0x1234_5678, 0xdead_beef),
+            (u32::MAX, 0xfeed_face),
+        ] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            let mut words = [0xaaaa_aaaa, old_destination, 0x5555_5555];
+
+            unsafe { read_usec_timer_into_2(&mut words[1]) };
 
             assert_eq!(words, [0xaaaa_aaaa, counter, 0x5555_5555]);
             assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
