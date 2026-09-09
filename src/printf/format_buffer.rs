@@ -1,6 +1,6 @@
 //! Growable byte sink used by the legacy format-conversion family.
 //!
-//! Port:
+//! Ports:
 //! - `format_buffer_append_char` — `FUN_08077bcc` @ 0x08077bcc (200 bytes,
 //!   0x08077bcc..0x08077c94). Binary decoding finds exactly 20 inbound `bl`
 //!   call sites, all unconditional (no predicated `bl` forms): 0x080e7b0c,
@@ -8,6 +8,12 @@
 //!   0x080e81e4, 0x080e8204, 0x080e8238, 0x080e8258, 0x080e82b4,
 //!   0x080e9124, 0x080e9148, 0x080e915c, 0x080e9188, 0x080e91a8,
 //!   0x080e91c8, 0x080e9280, 0x080e92b8, and 0x080e92ec.
+//! - `retail_sprintf` — `FUN_080edc2c` @ 0x080edc2c (28 bytes), the legacy
+//!   family's `sprintf` veneer. Binary decoding finds exactly 15 inbound
+//!   `bl` call sites, all unconditional (no predicated forms, no tail `b`):
+//!   0x0806e0cc, 0x080beed8, 0x080d34d0, 0x08112234, 0x081125cc,
+//!   0x08112850, 0x08116864, 0x081168bc, 0x0812bacc, 0x081cb0ac,
+//!   0x081cb0f4, 0x081eb48c, 0x081ebb5c, 0x081ef4d0, and 0x0828b73c.
 //!
 //! The sink writes `value` at `length` when `length < capacity`, then advances
 //! the length. With an optional heap-pointer slot, it first grows exhausted
@@ -23,6 +29,7 @@
 
 use crate::drivers::ata_cmd::traced_alloc;
 use crate::libc::rt_memcpy::__rt_memcpy;
+use crate::printf::printf_api::{vsprintf, VaList};
 
 /// Unported `FUN_08043f3c`: traced reallocation of a formatter heap buffer.
 pub type FormatBufferRealloc =
@@ -114,6 +121,70 @@ pub unsafe extern "C" fn format_buffer_append_char(
     length.write(current_length.wrapping_add(1));
     let output = if inline.is_null() { heap_buffer.read() } else { inline };
     output.add(current_length as usize).write(value as u8);
+}
+
+/// The legacy family's unbounded `vsprintf` veneer @ 0x080f3c24 —
+/// `retail_sprintf`'s only callee. It is NOT ported: decoded from the raw
+/// ARM it spills r2/r3, initializes a cursor at `buf`, calls conversion
+/// core 0x08077c94 as `(sink descriptor 0x0807ca58, &cursor, 0xffffffff,
+/// format, args)`, NUL-terminates at the final cursor, and returns the
+/// core's count untouched. Same (buf, format, args) contract as the ported
+/// [`vsprintf`] @ 0x0802f654, differing only in the conversion engine.
+pub type RetailVsprintfFn =
+    unsafe extern "C" fn(buf: *mut u8, format: *const u8, args: VaList) -> i32;
+
+/// Active `retail_vsprintf` for [`retail_sprintf`]. The original callee @
+/// 0x080f3c24 is unported, so the wired default is the ported [`vsprintf`]
+/// @ 0x0802f654 — unbounded, NUL-terminating, count-returning, differing
+/// only in the conversion engine (0x08034374 family instead of the
+/// unported 0x08077c94 core). Host tests replace the seam to observe the
+/// forwarding contract.
+pub static mut RETAIL_VSPRINTF: RetailVsprintfFn = vsprintf;
+
+#[inline(always)]
+unsafe fn retail_vsprintf() -> RetailVsprintfFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSPRINTF))
+}
+
+/// `retail_sprintf` — original: `FUN_080edc2c` @ 0x080edc2c (28 bytes,
+/// 0x080edc2c..0x080edc48; the distinct next function begins at
+/// 0x080edc48, confirming Ghidra's extent for once). 15 `bl` call sites,
+/// binary-scanned (see the module docs).
+///
+/// The legacy format-conversion family's `sprintf`: an ADS variadic
+/// adapter that captures the arguments after `format` into a va_list and
+/// tail-dispatches the unbounded `vsprintf` veneer @ 0x080f3c24. Raw ARM:
+///
+/// ```text
+/// push {r0, r1, r2, r3}   ; ADS variadic spill: buf, format, arg, arg
+/// push {r4, lr}
+/// ldr  r1, [sp, #12]      ; r1 = the spilled `format`
+/// add  r2, sp, #16        ; r2 = &spilled arg 2 — the va_list
+/// bl   0x080f3c24         ; retail_vsprintf(buf, format, va)
+/// pop  {r4}
+/// ldr  pc, [sp], #20      ; return, dropping the variadic spill
+/// ```
+///
+/// r0 (`buf`) passes through untouched; the callee's count survives in r0
+/// across the epilogue, so the veneer returns it unchanged. There is no
+/// NULL guard on any argument — the original dereferences nothing itself
+/// and neither does the port. Call sites pin the shape: @ 0x0806e0a4 the
+/// format literal is `"%d.%d.%d"` formatting a packed word into four
+/// version bytes (three register args, one stack arg — exactly what the
+/// spill plus `sp + #16` va_list models).
+///
+/// Deviations:
+/// - The variadic `...` becomes an explicit [`VaList`] (house convention,
+///   see `printf/printf_api.rs`): stable Rust cannot define C-variadic
+///   functions, and `args` IS the pointer the original's spill builds.
+/// - The callee @ 0x080f3c24 is not ported; the call dispatches through
+///   the [`RETAIL_VSPRINTF`] seam, whose wired default is the ported
+///   [`vsprintf`] @ 0x0802f654 — same unbounded, NUL-terminating,
+///   count-returning contract, differing only in the conversion engine.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn retail_sprintf(buf: *mut u8, format: *const u8, args: VaList) -> i32 {
+    retail_vsprintf()(buf, format, args)
 }
 
 #[cfg(test)]
@@ -301,5 +372,101 @@ mod tests {
         assert_eq!(length, 2);
         assert_eq!(capacity, 0x402);
         assert_eq!(fixture.storage[2], 0xa5);
+    }
+
+    /// Serializes tests that swap the RETAIL_VSPRINTF seam.
+    static VSPRINTF_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    static mut RECORDED_BUF: *mut u8 = core::ptr::null_mut();
+    static mut RECORDED_FORMAT: *const u8 = core::ptr::null();
+    static mut RECORDED_ARGS: VaList = core::ptr::null();
+    static mut RECORDED_CALLS: u32 = 0;
+
+    unsafe extern "C" fn recording_vsprintf(
+        buf: *mut u8,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        RECORDED_BUF = buf;
+        RECORDED_FORMAT = format;
+        RECORDED_ARGS = args;
+        RECORDED_CALLS += 1;
+        -7
+    }
+
+    struct VsprintfSeam {
+        _guard: MutexGuard<'static, ()>,
+        old: RetailVsprintfFn,
+    }
+
+    impl VsprintfSeam {
+        fn install(stub: RetailVsprintfFn) -> Self {
+            let guard = VSPRINTF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                RECORDED_CALLS = 0;
+                RECORDED_BUF = core::ptr::null_mut();
+                RECORDED_FORMAT = core::ptr::null();
+                RECORDED_ARGS = core::ptr::null();
+                let old = core::ptr::read(core::ptr::addr_of!(RETAIL_VSPRINTF));
+                *core::ptr::addr_of_mut!(RETAIL_VSPRINTF) = stub;
+                Self { _guard: guard, old }
+            }
+        }
+    }
+
+    impl Drop for VsprintfSeam {
+        fn drop(&mut self) {
+            unsafe {
+                *core::ptr::addr_of_mut!(RETAIL_VSPRINTF) = self.old;
+            }
+        }
+    }
+
+    #[test]
+    fn forwards_arguments_verbatim_and_propagates_the_count() {
+        let _seam = VsprintfSeam::install(recording_vsprintf);
+        let mut buf = [0xa5u8; 4];
+        let format = b"%d.%d.%d\0".as_ptr();
+        let args = [9u32, 0, 35, 4];
+
+        let count = unsafe { retail_sprintf(buf.as_mut_ptr(), format, args.as_ptr()) };
+
+        assert_eq!(count, -7);
+        unsafe {
+            assert_eq!(RECORDED_CALLS, 1);
+            assert_eq!(RECORDED_BUF, buf.as_mut_ptr());
+            assert_eq!(RECORDED_FORMAT, format);
+            assert_eq!(RECORDED_ARGS, args.as_ptr());
+        }
+        // The veneer writes nothing itself; emission is the callee's job.
+        assert_eq!(buf, [0xa5; 4]);
+    }
+
+    #[test]
+    fn null_arguments_pass_through_without_a_guard() {
+        let _seam = VsprintfSeam::install(recording_vsprintf);
+
+        let count = unsafe {
+            retail_sprintf(core::ptr::null_mut(), core::ptr::null(), core::ptr::null())
+        };
+
+        assert_eq!(count, -7);
+        unsafe {
+            assert_eq!(RECORDED_CALLS, 1);
+            assert!(RECORDED_BUF.is_null());
+            assert!(RECORDED_FORMAT.is_null());
+            assert!(RECORDED_ARGS.is_null());
+        }
+    }
+
+    #[test]
+    fn wired_default_is_the_ported_vsprintf() {
+        let _guard = VSPRINTF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            assert_eq!(
+                core::ptr::read(core::ptr::addr_of!(RETAIL_VSPRINTF)) as usize,
+                vsprintf as usize
+            );
+        }
     }
 }
