@@ -21,3 +21,5 @@ pub mod hfs_btree_get_node;
 pub mod error_status;
 /// Mapped allocation-bitmap block completion @ 0x0806448c.
 pub mod block_window;
+/// Mounted-volume table slot lookup @ 0x082e0e1c.
+pub mod volume_table;

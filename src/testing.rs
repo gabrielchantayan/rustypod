@@ -274,6 +274,9 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_POSITION: usize = 0xd300_0000;
+    // 0xf300_0000: dedicated to fs/volume_table's raw-u32 descriptor-table
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const VOLUME_TABLE_LOOKUP: usize = 0xf300_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
