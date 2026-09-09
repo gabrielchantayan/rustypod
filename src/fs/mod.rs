@@ -23,3 +23,5 @@ pub mod error_status;
 pub mod block_window;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
+/// Four-slot filesystem drive lookup @ 0x082e06f4.
+pub mod drive_slot;
