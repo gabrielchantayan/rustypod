@@ -46724,6 +46724,42 @@ functions:
       slot; deltas are the fp prologue and the seam indirection, the
       accepted animation.rs deviation classes. 24 instructions vs 16.
 
+  # --- trivial twelve-byte vector destructor ---
+  - address: 0x0816cc20
+    ghidra: FUN_0816cc20
+    name: trivial_vector12_destruct
+    size: 72
+    sig: "TrivialVector12 *trivial_vector12_destruct(TrivialVector12 *vector)"
+    module: cxx/trivial_vector12_destruct
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_1_plus_0x00: begin
+      param_1_plus_0x04: end
+      param_1_plus_0x08: capacity
+      iVar1/r5: begin
+      iVar2/r0: current
+      uVar3/r0: capacity_element_count
+      return/r0: vector
+    notes: >-
+      Raw ARM is exactly 72 bytes: its last instruction is pop {r4, r5, r6,
+      pc} at 0x0816cc64, immediately before the next independent code. A
+      complete decode of every ARM B/BL immediate in osos.dec finds exactly
+      15 direct callers, all unconditional bl and zero predicated forms. It
+      walks the half-open [begin, end) range by 12 bytes with an empty body
+      because the element destructor is trivial; then it computes the signed
+      quotient (capacity - begin) / 12 through __rt_sdiv, passes begin,
+      quotient, and zero to cxx_array_dealloc (0x08266f2c), and returns the
+      descriptor unchanged. cxx_array_dealloc is already ported and tail
+      branches to operator_delete, so its count and element arguments are
+      dead but retained by this port. Host tests cover empty, one-, two-, and
+      three-element walks with spare capacity; a recording deallocator proves
+      the count/zero argument tuple and guard words prove no descriptor write.
+      Source: decomp/c/015/0816cc20_FUN_0816cc20.c; raw disassembly:
+      osos.dec 0x0816cc20. Deliberate codegen-only deviation: black_box keeps
+      the original signed divide live although its result is dead in the
+      ported deallocator; LLVM may lower that retained arithmetic differently.
+
   - address: 0x08257b60
     ghidra: FUN_08257b60
     name: event_hub_broadcast
