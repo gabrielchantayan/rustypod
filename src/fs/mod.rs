@@ -25,3 +25,5 @@ pub mod block_window;
 pub mod volume_table;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.
 pub mod drive_slot;
+/// Path prefix drive-index resolver @ 0x082c3000.
+pub mod path_drive_index;

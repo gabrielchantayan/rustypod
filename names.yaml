@@ -50227,6 +50227,43 @@ functions:
       calculation, first-word liveness check, and conditional NULL result;
       LLVM makes the condition branch-based instead of predicated and adds
       its frame setup.
+  - address: 0x082c3000
+    ghidra: FUN_082c3000
+    name: resolve_path_drive_index
+    size: 116
+    sig: "i32 resolve_path_drive_index(const u8 *path)"
+    module: fs/path_drive_index
+    status: ported
+    renames:
+      param_1/r0: path
+      local_10/[sp]: drive_index
+      FUN_083690a8: ata_report_error
+      FUN_082e377c: drive_prefix_parse_resident
+      FUN_082d7934: ata_semaphore_wait
+      FUN_082c3168: drive_ready_check_resident_wrapper
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082d7954: ata_semaphore_signal
+    notes: >-
+      Raw extent is exact: 0x082c3000..0x082c3070 is 116 bytes and the
+      next separately entered body opens push {r4,r5,r6,r7,r8,lr} at
+      0x082c3074. It clears the ATA error record with error 0, asks the
+      resident parser at 0x082e377c to store a drive index, then only on
+      parse success acquires that index's ATA semaphore. While held, it
+      invokes 0x082c3168 (a 12-byte argument-setting wrapper which branches
+      into the separately entered body at 0x082c3074) and the ported
+      drive_slot_lookup. It always signals after a successful parse; a null
+      parser result, failed ready check, or null slot reports ATA error 31
+      and returns -1. All 12 decoded branch callers are unconditional bl
+      (0x082e0600, 0x082e173c, 0x082e1d40, 0x082e22a4, 0x082e30f8,
+      0x082e3458, 0x082e4094, 0x082e458c, 0x082e462c, 0x082e46d4,
+      0x082e47b4, 0x082e6338); zero predicated forms and zero tail b forms.
+      The parser and ready checker remain resident boundaries rather than
+      invented ports. Target builds call them at verified addresses; host
+      tests install volatile recorders and prove success, parser failure,
+      failed readiness, missing-slot failure, lock bracketing, error order,
+      and forwarding a null path unchanged. Deviation: the original's direct
+      bl calls become typed resident boundary calls so host tests can observe
+      the unrecovered entries.
   - address: 0x082e0e1c
     ghidra: FUN_082e0e1c
     name: volume_table_lookup
