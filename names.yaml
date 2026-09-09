@@ -3928,6 +3928,30 @@ functions:
       and routes the tail dispatch through the pre-existing POOL_OPS
       heap_free seam; both preserve target-visible behavior.
 
+  - address: 0x0826f780
+    ghidra: FUN_0826f780
+    name: pool_alloc_v1
+    size: 28
+    sig: "void *pool_alloc_v1(PoolControl *pool, size_t size, size_t align_class, size_t uncached)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: size
+      param_3/r2: align_class
+      param_4/r3: uncached
+    notes: >-
+      Binary extent is exactly 28 bytes, 0x0826f780..0x0826f79c. The
+      veneer preserves uncached in ip over its prologue, writes stack
+      argument variant = 1, restores uncached to r3, and bl-calls
+      pool_alloc 0x0826f6a0; it returns that result unchanged. Call count
+      verified by decoding every ARM B/BL word in osos.dec: exactly 12
+      plain unconditional bl sites and no predicated bl sites. The Rust
+      veneer delegates to the existing pool_alloc port, whose plain heap
+      allocation dispatches through POOL_OPS.heap_alloc for host tests;
+      this is the deliberate indirect-dispatch deviation from the direct
+      binary call.
+
   - address: 0x082141bc
     ghidra: FUN_082141bc
     name: pool_base_construct

@@ -454,6 +454,7 @@ pub unsafe extern "C" fn pool_seed_regions(pool: *mut PoolControl, size: usize) 
 /// the heap is exhausted (and, as an original quirk, when the alignment
 /// delta would be 0 — dead with this table).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_alloc(
     pool: *mut PoolControl,
     size: usize,
@@ -504,9 +505,17 @@ pub unsafe extern "C" fn pool_alloc_v0(
     pool_alloc(pool, size, align_class, uncached, 0)
 }
 
-/// pool_alloc_v1 veneer — original @ 0x0826f780 (28 bytes): `pool_alloc`
-/// with variant 1 (plain heap entry @ 0x0819d67c).
+/// pool_alloc_v1 veneer — original: `FUN_0826f780` @ 0x0826f780 (28 bytes).
+///
+/// Verified call count: 12 plain unconditional `bl` sites and no predicated
+/// `bl` sites. Preserves the caller's `uncached` fourth argument, supplies
+/// stack argument `variant = 1`, and calls `pool_alloc`, selecting the plain
+/// tagged heap entry @ 0x0819d67c. Deliberate deviation: this direct veneer
+/// calls the existing Rust `pool_alloc`, whose heap call reaches the
+/// swappable `POOL_OPS.heap_alloc` seam for host testing.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pool_alloc_v1")]
+#[inline(never)]
 pub unsafe extern "C" fn pool_alloc_v1(
     pool: *mut PoolControl,
     size: usize,
@@ -1007,13 +1016,15 @@ mod tests {
     }
 
     #[test]
-    fn alloc_v1_uses_plain_heap_entry() {
+    fn alloc_v1_preserves_uncached_and_uses_plain_heap_entry() {
         let _lock = mock_pool();
         unsafe {
             let pool = ready_pool();
             BUMP = 8;
-            let ptr = pool_alloc_v1(pool, 0x40, 1, 0);
+            let ptr = pool_alloc_v1(pool, 0x40, 2, 1);
             assert!(!ptr.is_null());
+            assert_eq!(ptr as usize & UNCACHED_MARK, UNCACHED_MARK);
+            assert_eq!(FLUSH_CALLS, 1, "veneer preserves uncached == 1");
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(ALLOC_ALT_CALLS, 0);
         }
