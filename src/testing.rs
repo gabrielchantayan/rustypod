@@ -149,6 +149,10 @@ pub mod hints {
     // fixture; fixture mappings never unmap, so no other user may share
     // this hint.
     pub const SQLITE_FIND_TABLE: usize = 0x7500_0000;
+    // 0x7700_0000: dedicated to sqlite/find_collation_encoding's raw-u32
+    // sqlite3/default-collation fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const SQLITE_FIND_COLLATION_ENCODING: usize = 0x7700_0000;
     // 0x7600_0000: dedicated to app/resource_chain's
     // resource_chain_find_on_current_task chain fixture (the context
     // block carries the chain head as a raw u32 word); mappings never

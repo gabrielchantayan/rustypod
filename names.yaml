@@ -24468,6 +24468,33 @@ functions:
       frame, register shuffling, and ALLOC_DENY_TOTAL addressed
       directly (no +0x18, documented deviation).
 
+  - address: 0x08378ad0
+    ghidra: FUN_08378ad0
+    name: find_collation_encoding
+    size: 52
+    sig: "CollSeq *find_collation_encoding(sqlite3 *db, unsigned encoding, const char *name, int name_len, int create)"
+    module: sqlite/find_collation_encoding
+    status: ported
+    vars: {param_1: db, param_2: encoding, param_3: name, param_4: name_len,
+      param_5: create, iVar1: collation_set, iVar2: selected_collation}
+    notes: >-
+      Exact raw extent 0x08378ad0..0x08378b04 (the next body starts at
+      0x08378b04). 13 bl call sites, binary-scanned over every ARM B/BL word
+      in osos.dec, all unconditional with no predicated forms: 0x082c5274,
+      0x082c5340, 0x082d87fc, 0x082d89cc, 0x082dbf3c, 0x082dbf80,
+      0x08378e54, 0x0837a1b4, 0x0837a1fc, 0x0837a244, 0x0837b7c0,
+      0x0837d1c0, 0x08381e78. The movs on name selects either sqlite3 word
+      11 (+0x2c) or the result of direct helper 0x082ce220(db, name,
+      name_len, create); NULL remains NULL, otherwise the add/add-shift/sub
+      tail returns collation_set + (encoding - 1) * 20. The helper is not
+      independently ported or named in this ledger, so the port deliberately
+      uses a volatile seam: target builds call its verified retail address and
+      host tests record its four arguments. The 20-byte record stride and
+      1-based encoding follow raw address arithmetic; valid encodings are
+      SQLite's 1..3. Host tests cover NULL-name bypass/default selection,
+      named forwarding and third-record selection, lookup failure, and all
+      three record positions.
+
   - address: 0x082ce2e8
     ghidra: FUN_082ce2e8
     name: find_element_given_hash
