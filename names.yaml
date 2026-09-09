@@ -15046,6 +15046,38 @@ functions:
       r1 remains caller-saved scratch. The port calls the direct region
       form rather than tail-branching, preserving the returned element.
 
+  - address: 0x082a5e48
+    ghidra: FUN_082a5e48
+    name: ui_element_reference_target_item_count
+    size: 52
+    sig: "u32 ui_element_reference_target_item_count(const UiElementReference *reference)"
+    module: ui/element_reference_item_count
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x40": collection, "collection+0x2e": item_count}
+    notes: >-
+      Raw extent is exactly 52 bytes, 0x082a5e48 through 0x082a5e78:
+      push/mov, vtable slot-3 (+0xc) blx resolve, cmp, conditional target
+      load and NULL check, target+0x40 load, then ldrh at collection+0x2e;
+      the next separately linked function opens push {r4,r5,lr} at
+      0x082a5e7c. Decoding every ARM B/BL word in osos.dec finds 16 direct
+      call sites, all plain unconditional BL, with no predicated BL. One
+      non-call BNE tail transfer at 0x0812c718 is a NULL-guarding wrapper:
+      it passes reference+0x14 here only when present, otherwise returns zero.
+      Resolve result zero returns zero without reading target; a nonzero result
+      with a NULL target also returns zero. Otherwise target+0x40 is followed
+      without a NULL guard and its +0x2e halfword is returned zero-extended.
+      Callers ground this as an item count: 0x0816ebe0 accepts an index only
+      when it is below this value before resolving it, while 0x0816ecd8 and
+      0x0816eefc compare selection positions against it. The descriptor
+      0x089a6600 slot +0xc is the unresolved 0x0826acd8
+      selector/implementation data pair rather than a decodable entry; the
+      port preserves raw vtable dispatch and does not invent a callee.
+      Deliberate host deviation: fixtures hold the slot as a native-width
+      function pointer while reference, target, and collection links remain
+      target u32 words. Host tests prove resolve short-circuiting, NULL target
+      handling, exact zero-extended halfword extraction, arbitrary nonzero
+      resolve truthiness, and slot selection.
+
   - address: 0x082a6524
     ghidra: FUN_082a6524
     name: ui_element_reference_target_persistent_id
