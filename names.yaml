@@ -21452,6 +21452,50 @@ functions:
       the unported release, LLVM inlines tracked_free's stats-update
       prologue and tail-calls free_tag57 instead of b sqlite3_free.
 
+  - address: 0x0838b5c4
+    ghidra: FUN_0838b5c4
+    name: vdbe_int_value
+    size: 128
+    sig: "i64 vdbe_int_value(Mem *p_mem)"
+    module: sqlite/vdbe_int_value
+    status: ported
+    renames:
+      param_1: p_mem
+      uVar2: flags
+      FUN_082c67f4: f64_to_i64
+      FUN_083869f4: sqlite3VdbeChangeEncoding
+      FUN_0838bfb0: sqlite3VdbeMemNulTerminate
+      FUN_0836f82c: sqlite3Atoi64
+    notes: >-
+      SQLite 3.5.9's sqlite3VdbeIntValue (vdbemem.c), the signed
+      64-bit projection of a Mem. Raw extent is 0x0838b5c4..0x0838b644:
+      the 32 instructions end at the return @ 0x0838b640 and the next
+      function starts with stmdb @ 0x0838b644; no literal pool. Flags at
+      +0x1c are sampled once. MEM_Int (0x4) returns the signed i64 union
+      at +0x00; else MEM_Real (0x8) tail-branches to FUN_082c67f4 after
+      loading the f64 at +0x08. MEM_Str|MEM_Blob (0x12) adds MEM_Str,
+      calls sqlite3VdbeChangeEncoding(pMem, SQLITE_UTF8), calls
+      sqlite3VdbeMemNulTerminate, and calls sqlite3Atoi64(z, &value)
+      only when both status results are SQLITE_OK; the parser status is
+      ignored and all other paths return i64 zero. 13 `bl` call sites,
+      all unconditional, binary-scanned from osos.dec: 0x083653f4,
+      0x08368280, 0x08387b7c, 0x08387b8c, 0x08387fc8, 0x08387ff8,
+      0x08389064, 0x0838a250, 0x0838a380, 0x0838bf58, 0x0838fa80,
+      0x08392730, and 0x08392758; two unconditional tail b entries are
+      0x08391778 and 0x0839177c. Deviations: unported
+      sqlite3VdbeChangeEncoding @ 0x083869f4, sqlite3Atoi64 @
+      0x0836f82c, and the identified f64-to-i64 ABI FUN_082c67f4 use a
+      volatile local dispatch seam whose target defaults call retailOS
+      and whose host tests record calls. The already ported
+      vdbe_mem_nul_terminate @ 0x0838bfb0 is called directly rather
+      than re-stubbed. Host tests cover integer precedence and signed
+      extremes, the REAL conversion ABI including a NaN payload,
+      text/blob promotion and ordered recode/terminate/parse calls,
+      recode failure, and nonnumeric flags. match.py structural review:
+      the original's three direct bl instructions and a tail b become
+      volatile slot loads plus blx calls, while the flag-priority and
+      short-circuit skeleton is preserved.
+
   - address: 0x0838bdb0
     ghidra: FUN_0838bdb0
     name: vdbe_mem_grow

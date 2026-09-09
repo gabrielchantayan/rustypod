@@ -139,6 +139,7 @@ pub mod vdbe_mem_set_double;
 pub mod vdbe_mem_grow;
 pub mod vdbe_mem_nul_terminate;
 pub mod vdbe_mem_realify;
+pub mod vdbe_int_value;
 pub mod vdbe_mem_set_int64;
 pub mod vdbe_mem_set_null;
 pub mod vdbe_mem_set_str;
