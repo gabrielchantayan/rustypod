@@ -21222,6 +21222,21 @@ functions:
       explicitly sets db->mallocFailed (+0x1e) even though
       sqlite3DbRealloc has set it too.
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
+  - address: 0x083867f8
+    ghidra: FUN_083867f8
+    name: vdbe_add_op0
+    size: 24
+    sig: "int vdbe_add_op0(Vdbe *p, int opcode)"
+    module: sqlite/vdbe
+    status: ported
+    vars: {param_1: p, param_2: opcode}
+    notes: >-
+      SQLite's sqlite3VdbeAddOp0: a 24-byte wrapper around vdbe_add_op3
+      @ 0x08386840 that passes zero for p1, p2, and p3. Raw ARM decoding
+      verifies 13 BL call sites: 8 unconditional, 3 BLNE, 1 BLEQ, and 1
+      BLHI; the wrapper itself has no NULL guard, so predicated callers
+      gate the call. Port preserves that direct delegation exactly.
+
   - address: 0x08386824
     ghidra: FUN_08386824
     name: vdbe_add_op2
