@@ -1,3 +1,10 @@
+//! Methods of the registry-class-0x8c00 singleton object (the
+//! `app/singletons.rs` 0xdc-byte object: ready bytes +0x69/+0x6a,
+//! embedded timers at +0x6c/+0x98, mode word +0xd8). Two live here:
+//! `class_8c00_commit_mode` below, and `class_8c00_rearm_timer_post_0x11`
+//! further down (its own doc header carries the address/extent/call-site
+//! evidence).
+//!
 //! `class_8c00_commit_mode` — original: `default` @ `0x081a53c8`
 //! (120 bytes of code per Ghidra; true extent 124, `0x081a53c8..0x081a5444`,
 //! because the trailing literal-pool word @ `0x081a5440` — the app-root
@@ -74,6 +81,10 @@
 //! deviation (the image's `0x089cxxxx` page holds stale bytes).
 
 use crate::app::context_scope::app_root_object;
+use crate::app::event_code_queue::{event_code_queue_post, EventCodeQueue};
+use crate::drivers::timer::{
+    timer_is_running, timer_restart, timer_start_after, timer_stop,
+};
 use core::ptr;
 
 /// Byte offset of the mode word the class-0x8c00 ctor zeroes last
@@ -220,6 +231,92 @@ pub unsafe extern "C" fn class_8c00_commit_mode(
     };
     seam!(commit_global_mode)(tail_mode)
 }
+
+/// Byte offset of the object's second embedded timer. The class ctor @
+/// 0x081a71fc builds it with `timer_schedule_shim(this + 0x48, this +
+/// 0x98, 0, 0)`; the first embedded timer lives at +0x6c and is armed
+/// to 30000 ms at construction.
+const REARM_TIMER_OFFSET: usize = 0x98;
+
+/// Byte offset of the flag byte that suppresses the event post when
+/// nonzero. The ctor zeroes it; the sibling methods @ 0x081a60bc and
+/// 0x081a60cc set it to 1 / 0 while posting event codes 9 / 0xa to the
+/// same queue, so it reads as a suspend/resume marker.
+const POST_SUPPRESS_FLAG_OFFSET: usize = 0xcc;
+
+/// The event code tail-posted to the object's own queue
+/// (`mov r1, #17`).
+const REARM_EVENT_CODE: u32 = 0x11;
+
+/// class_8c00_rearm_timer_post_0x11 — original: `FUN_081a6368` @
+/// 0x081a6368 (84 bytes exactly, 0x081a6368..0x081a63bc — Ghidra's 84
+/// is right for once: the sibling method opens `push {r4, lr}` at
+/// 0x081a63bc and there is no literal pool). **21 call sites, verified
+/// by decoding every B/BL word in osos.dec**: 16 `bl` + 5 tail `b`
+/// (@ 0x08112bf0, 0x081a6698, 0x0825b8d4, 0x08294a88, 0x08294b94), all
+/// unconditional — no predicated forms. No data word anywhere in the
+/// image holds the address, so the method is never dispatched
+/// virtually. Every one of the 21 sites loads the same delay literal,
+/// 120000 ms (0x1d4c0 — binary-verified at each site), so in practice
+/// this is the class's two-minute timeout refresh.
+///
+/// Algorithm (raw ARM):
+///
+/// ```text
+/// if timer_is_running(&this->timer_98) {   // 0x0812c3b0, ported in drivers/timer
+///     timer_stop(&this->timer_98);         // 0x0812c6b0
+///     timer_start_after(&this->timer_98, delay);  // 0x0812c63c
+///     timer_restart(&this->timer_98);      // 0x0812bf4c — re-arms
+/// }
+/// if this->flag_cc == 0 {
+///     tail event_code_queue_post(this, 0x11);  // 0x081de270
+/// }
+/// ```
+///
+/// The timer sequence is the stop/reprogram/restart triple verbatim —
+/// `timer_start_after` and `timer_restart` each stop the timer again
+/// internally; the redundancy is the original's. The +0x98 timer is an
+/// EMBEDDED timer (interior pointer, `add r0, r4, #0x98`), unlike the
+/// view class's pointer field. The queue post targets the object itself:
+/// the class-0x8c00 object derives from the event-code-queue base at
+/// offset 0 (queue at +0x08, mutex at +0x34), which is why the tail
+/// branch passes `this` unoffset.
+///
+/// Ghidra's signature `void (int, undefined4)` is right: when the flag
+/// suppresses the post the original returns the flag byte in r0
+/// (`ldrb r0, [r4, #0xcc]` left live), and both sampled callers discard
+/// r0 — it is garbage, not a result (the `timer_restart` precedent).
+/// Ghidra's C shows the tail INLINED (`FUN_0807f5c4(param_1 + 0x34)` /
+/// `FUN_083dfeb8(param_1 + 8, ...)` / `FUN_0807f6a0(param_1 + 0x34)`) —
+/// that is `event_code_queue_post`'s body; the real tail is
+/// `moveq r1, #17; beq 0x081de270`.
+///
+/// Deviations: the predicated tail branch is spelled as a conditional
+/// call (no caller observes the difference); all five callees are
+/// ported and called directly. The post inherits
+/// `event_code_queue_post`'s NOT-hook-ready caveat: with the default
+/// `EVENT_CODE_QUEUE_HOOKS` table the enqueue is dropped.
+///
+/// # Safety
+///
+/// `this` must point at a live class-0x8c00 object (0xdc bytes,
+/// word-aligned) whose embedded timer at +0x98 and queue base at +0x00
+/// were constructed by the class ctor, and the installed
+/// `EVENT_CODE_QUEUE_HOOKS.enqueue` slot must be callable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class_8c00_rearm_timer_post_0x11(this: *mut u8, delay: u32) {
+    let timer = unsafe { this.add(REARM_TIMER_OFFSET) };
+    if unsafe { timer_is_running(timer) } != 0 {
+        unsafe { timer_stop(timer) };
+        unsafe { timer_start_after(timer, delay) };
+        unsafe { timer_restart(timer) };
+    }
+    if unsafe { this.add(POST_SUPPRESS_FLAG_OFFSET).read_volatile() } == 0 {
+        unsafe { event_code_queue_post(this as *mut EventCodeQueue, REARM_EVENT_CODE) };
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -489,5 +586,252 @@ mod tests {
         let result = unsafe { class_8c00_commit_mode(object.as_ptr(), 4, 1) };
         assert_eq!(result, TAIL_MODE_REFRESHED);
         restore(guard);
+    }
+
+    // ---- class_8c00_rearm_timer_post_0x11 --------------------------
+
+    use crate::app::event_code_queue::{EventCodeQueueHooks, EVENT_CODE_QUEUE_HOOKS};
+    use crate::drivers::timer::{
+        TimerOps, TIMER_OPS, TIMER_STATE_RUNNING, TIMER_STATE_STOPPED,
+    };
+    use crate::testing::{EVENT_CODE_QUEUE_TEST_LOCK, TIMER_OPS_TEST_LOCK};
+
+    /// One recorded timer/queue invocation, in call order.
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    enum RearmCall {
+        Trace(*mut u8),
+        Cancel(usize, usize, *mut u8),
+        Arm(*mut u8),
+        Enqueue(*mut u8, u32),
+    }
+
+    static mut REARM_CALLS: Vec<RearmCall> = Vec::new();
+
+    unsafe extern "C" fn rearm_trace(timer: *mut u8) {
+        (*ptr::addr_of_mut!(REARM_CALLS)).push(RearmCall::Trace(timer));
+    }
+    unsafe extern "C" fn rearm_cancel(handle: usize, id: usize, timer: *mut u8) -> u32 {
+        (*ptr::addr_of_mut!(REARM_CALLS)).push(RearmCall::Cancel(handle, id, timer));
+        0
+    }
+    unsafe extern "C" fn rearm_arm(timer: *mut u8) {
+        (*ptr::addr_of_mut!(REARM_CALLS)).push(RearmCall::Arm(timer));
+    }
+    unsafe extern "C" fn rearm_construct(_t: *mut u8, _a: u32, _c: u32, _h: usize) {}
+    unsafe extern "C" fn rearm_validate(_t: *mut u8) {}
+    unsafe extern "C" fn rearm_tick() -> u32 {
+        0
+    }
+    unsafe extern "C" fn rearm_compare(_a: *const u32, _b: *const u32) -> u32 {
+        0
+    }
+    unsafe extern "C" fn rearm_notify(_c: *const u32) {}
+    unsafe extern "C" fn rearm_enqueue(queue: *mut u8, code: *const u32) {
+        unsafe { (*ptr::addr_of_mut!(REARM_CALLS)).push(RearmCall::Enqueue(queue, *code)) };
+    }
+
+    /// Restores both swapped tables on drop.
+    struct RearmGuard {
+        saved_timer_ops: TimerOps,
+        saved_hooks: EventCodeQueueHooks,
+        // Held last-first: the event-queue lock is taken before the
+        // timer lock everywhere in the crate, so drop order is the
+        // reverse and there is no lock-order inversion.
+        _event: MutexGuard<'static, ()>,
+        _timer: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for RearmGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(TIMER_OPS).write_volatile(self.saved_timer_ops);
+                ptr::addr_of_mut!(EVENT_CODE_QUEUE_HOOKS).write_volatile(self.saved_hooks);
+                (*ptr::addr_of_mut!(REARM_CALLS)).clear();
+            }
+        }
+    }
+
+    /// Installs the recording tables and takes both shared locks in the
+    /// crate-wide order (event queue before timer ops).
+    fn rearm_env() -> RearmGuard {
+        let event = EVENT_CODE_QUEUE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let timer = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved_timer_ops = unsafe { ptr::addr_of!(TIMER_OPS).read_volatile() };
+        let saved_hooks = unsafe { ptr::addr_of!(EVENT_CODE_QUEUE_HOOKS).read_volatile() };
+        unsafe {
+            ptr::addr_of_mut!(TIMER_OPS).write_volatile(TimerOps {
+                trace_assert: rearm_trace,
+                cancel_callback: rearm_cancel,
+                arm_timer: rearm_arm,
+                trace_validate: rearm_validate,
+                tick: rearm_tick,
+                compare_deadlines: rearm_compare,
+                notify_pending: rearm_notify,
+                construct_timer: rearm_construct,
+            });
+            ptr::addr_of_mut!(EVENT_CODE_QUEUE_HOOKS).write_volatile(EventCodeQueueHooks {
+                enqueue: rearm_enqueue,
+            });
+            (*ptr::addr_of_mut!(REARM_CALLS)).clear();
+        }
+        RearmGuard {
+            saved_timer_ops,
+            saved_hooks,
+            _event: event,
+            _timer: timer,
+        }
+    }
+
+    fn rearm_calls() -> Vec<RearmCall> {
+        unsafe { (*ptr::addr_of!(REARM_CALLS)).clone() }
+    }
+
+    /// A fake class-0x8c00 object for the rearm method: 0x100 bytes
+    /// cover the +0x98 embedded timer (out through its +0x28 handle
+    /// word), the +0xcc flag, and the queue base — including the
+    /// host-layout `EventCodeQueue` mutex, which sits at +0x38 on a
+    /// 64-bit host rather than +0x34. Zeroed, so every mutex cell is
+    /// NULL and the ROM sema ops never run.
+    #[repr(align(8))]
+    struct RearmObject([u8; 0x100]);
+
+    /// The embedded timer's state-word and period offsets, measured
+    /// from the object base.
+    const TIMER_STATE_AT: usize = REARM_TIMER_OFFSET + 0x20;
+    const TIMER_PERIOD_AT: usize = REARM_TIMER_OFFSET + 0x04;
+
+    impl RearmObject {
+        fn new(timer_state: u32, flag: u8) -> Self {
+            let mut object = RearmObject([0; 0x100]);
+            object.set_word(TIMER_STATE_AT, timer_state);
+            object.0[POST_SUPPRESS_FLAG_OFFSET] = flag;
+            object
+        }
+        fn as_ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.0[offset..offset + 4].try_into().unwrap())
+        }
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.0[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        fn state(&self) -> u32 {
+            self.word(TIMER_STATE_AT)
+        }
+        fn period(&self) -> u32 {
+            self.word(TIMER_PERIOD_AT)
+        }
+    }
+
+    /// Running timer, flag clear: the full stop/reprogram/restart
+    /// triple runs on the embedded timer at +0x98 (four traces — stop,
+    /// stop inside start_after, set_delay's trace, stop inside restart
+    /// — then the arm), the delay lands in the period word, the state
+    /// ends 'run ', and event 0x11 posts to the object's own queue.
+    #[test]
+    fn running_timer_rearms_with_delay_then_posts_0x11() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(TIMER_STATE_RUNNING, 0);
+        let this = object.as_ptr();
+        let timer = unsafe { this.add(REARM_TIMER_OFFSET) };
+        let queue =
+            unsafe { ptr::addr_of_mut!((*(this as *mut EventCodeQueue)).queue) as *mut u8 };
+
+        unsafe { class_8c00_rearm_timer_post_0x11(this, 120_000) };
+
+        assert_eq!(
+            rearm_calls(),
+            [
+                RearmCall::Trace(timer),
+                RearmCall::Trace(timer),
+                RearmCall::Trace(timer),
+                RearmCall::Trace(timer),
+                RearmCall::Arm(timer),
+                RearmCall::Enqueue(queue, REARM_EVENT_CODE),
+            ],
+            "stop -> start_after -> restart -> post, all on this+0x98"
+        );
+        assert_eq!(object.period(), 120_000, "the delay reaches +0x98+0x04");
+        assert_eq!(object.state(), TIMER_STATE_RUNNING);
+    }
+
+    /// A stopped timer is not rearmed or reprogrammed, but the event
+    /// still posts.
+    #[test]
+    fn stopped_timer_skips_the_rearm_but_posts() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(TIMER_STATE_STOPPED, 0);
+        let this = object.as_ptr();
+        let queue =
+            unsafe { ptr::addr_of_mut!((*(this as *mut EventCodeQueue)).queue) as *mut u8 };
+
+        unsafe { class_8c00_rearm_timer_post_0x11(this, 120_000) };
+
+        assert_eq!(
+            rearm_calls(),
+            [RearmCall::Enqueue(queue, REARM_EVENT_CODE)],
+            "only the queue post fires"
+        );
+        assert_eq!(object.state(), TIMER_STATE_STOPPED);
+        assert_eq!(object.period(), 0, "the period word is untouched");
+    }
+
+    /// 'expi' is not 'run ': no rearm, and in particular no cancel —
+    /// timer_stop never runs, so the expired callback survives.
+    #[test]
+    fn expired_state_is_not_running() {
+        let _env = rearm_env();
+        let mut object =
+            RearmObject::new(crate::drivers::timer::TIMER_STATE_EXPIRED, 0);
+        let this = object.as_ptr();
+
+        unsafe { class_8c00_rearm_timer_post_0x11(this, 120_000) };
+
+        assert!(
+            rearm_calls()
+                .iter()
+                .all(|c| matches!(c, RearmCall::Enqueue(..))),
+            "no timer op fires for a non-'run ' state"
+        );
+        assert_eq!(object.state(), crate::drivers::timer::TIMER_STATE_EXPIRED);
+    }
+
+    /// Flag set: the rearm still runs, the post is suppressed. Any
+    /// nonzero value suppresses (the original tests the byte against 0).
+    #[test]
+    fn set_flag_suppresses_the_post_but_not_the_rearm() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(TIMER_STATE_RUNNING, 7);
+        let this = object.as_ptr();
+        let timer = unsafe { this.add(REARM_TIMER_OFFSET) };
+
+        unsafe { class_8c00_rearm_timer_post_0x11(this, 120_000) };
+
+        let recorded = rearm_calls();
+        assert!(
+            recorded.iter().all(|c| !matches!(c, RearmCall::Enqueue(..))),
+            "no post while the flag is set"
+        );
+        assert_eq!(recorded.len(), 5, "four traces and the arm");
+        assert_eq!(recorded[4], RearmCall::Arm(timer));
+        assert_eq!(object.period(), 120_000);
+    }
+
+    /// Stopped timer with the flag set: nothing fires at all.
+    #[test]
+    fn stopped_timer_and_set_flag_do_nothing() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(TIMER_STATE_STOPPED, 1);
+        let this = object.as_ptr();
+
+        unsafe { class_8c00_rearm_timer_post_0x11(this, 120_000) };
+
+        assert_eq!(rearm_calls(), []);
+        assert_eq!(object.state(), TIMER_STATE_STOPPED);
     }
 }

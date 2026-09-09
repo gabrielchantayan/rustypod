@@ -12,6 +12,11 @@
 //!   FourCC `TIMER_STATE_STOPPED` ('stop') to +0x20 and tail-branches to
 //!   `mutex_unlock` @ 0x0807f6a0 on the same global mutex.
 //!
+//! - `timer_is_running` — original: `FUN_0812c3b0` @ 0x0812c3b0 (52
+//!   bytes of code + 8-byte literal pool; 6 unconditional `bl` sites,
+//!   binary-scanned). Under the timer-class mutex @ 0x089cb294, returns
+//!   1 when the state word at +0x20 is 'run ', else 0.
+//!
 //! - `timer_set_delay` — original: `FUN_080744c0` @ 0x080744c0 (24
 //!   bytes). Runs the trace/assert helper @ 0x08076954 on the timer
 //!   (the same `TimerOps::trace_assert` dispatch `timer_stop` uses),
@@ -1030,6 +1035,33 @@ pub unsafe extern "C" fn timer_stop(timer: *mut u8) {
     mutex_unlock(&mut class_mutex);
 }
 
+/// timer_is_running — original: `FUN_0812c3b0` @ 0x0812c3b0 (52 bytes
+/// of code plus an 8-byte literal pool = 60 bytes true extent,
+/// 0x0812c3b0..0x0812c3ec; the next function opens `push {r4, r5, r6,
+/// lr}` at 0x0812c3ec, binary-verified. 6 call sites, all unconditional
+/// `bl` — 0 predicated, 0 tail `b` — counted by decoding every ARM
+/// B/BL word in osos.dec).
+///
+/// The timer family's running-state predicate: under the timer-class
+/// mutex @ 0x089cb294 (the `TIMER_CLASS_MUTEX` static) it reads the
+/// state word at +0x20 and returns 1 when it holds
+/// `TIMER_STATE_RUNNING` ('run '), 0 otherwise — 'expi' and 'stop'
+/// both answer 0. Ghidra emits no C file for this function at all; the
+/// signature is recovered from the raw words (`movne r4, #0` /
+/// `moveq r4, #1` on the compare result). The `timer` argument is not
+/// NULL-checked, as in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timer_is_running(timer: *mut u8) -> u32 {
+    // Same volatile-read rationale as timer_stop: without it LLVM folds
+    // the null-initialized mutex cell and deletes the lock/unlock pair.
+    let mut class_mutex = core::ptr::addr_of!(TIMER_CLASS_MUTEX).read_volatile();
+    mutex_lock(&mut class_mutex);
+    let running = u32::from(word(timer, STATE) == TIMER_STATE_RUNNING);
+    mutex_unlock(&mut class_mutex);
+    running
+}
+
 /// timer_stop_then_trace — original: `FUN_0812bf84` @ 0x0812bf84 (24
 /// bytes; 26 direct call sites, all unconditional `bl`, binary-scanned).
 ///
@@ -1451,6 +1483,37 @@ mod tests {
             calls().iter().all(|c| !matches!(c, Call::Cancel(..))),
             "already-stopped timer must not cancel"
         );
+    }
+
+    /// 'run ' answers 1, and the state-word read is bracketed by the
+    /// class-mutex wait/signal pair — nothing else fires.
+    #[test]
+    fn running_state_answers_one_under_the_class_mutex() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0);
+        let timer_ptr = timer.ptr();
+        let result = unsafe { timer_is_running(timer_ptr) };
+        assert_eq!(result, 1);
+        assert_eq!(
+            calls(),
+            vec![Call::Wait(MOCK_HANDLE), Call::Signal(MOCK_HANDLE)],
+            "only the lock/unlock pair wraps the state read"
+        );
+        assert_eq!(timer.state(), TIMER_STATE_RUNNING, "read-only");
+    }
+
+    /// 'stop' and 'expi' both answer 0: only 'run ' is "running".
+    #[test]
+    fn stopped_and_expired_states_answer_zero() {
+        let _lock = mock_env();
+        let mut stopped = MockTimer::new(TIMER_STATE_STOPPED, 0);
+        let mut expired = MockTimer::new(TIMER_STATE_EXPIRED, 0);
+        unsafe {
+            assert_eq!(timer_is_running(stopped.ptr()), 0);
+            assert_eq!(timer_is_running(expired.ptr()), 0);
+        }
+        assert_eq!(stopped.state(), TIMER_STATE_STOPPED);
+        assert_eq!(expired.state(), TIMER_STATE_EXPIRED);
     }
 
     /// The 24-byte wrapper stops first, then tail-branches to the same
