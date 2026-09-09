@@ -23466,6 +23466,44 @@ functions:
       LLVM inlines the strlen and tracked_free bodies and the explicit
       args pointer removes the home-area spill.
 
+  - address: 0x082c2438
+    ghidra: FUN_082c2438
+    name: integrity_check_append_msg
+    size: 176
+    sig: "void integrity_check_append_msg(IntegrityCheck *check, const char *prefix, const char *format, ...)"
+    module: sqlite/integrity_check_append_msg
+    status: ported
+    renames:
+      param_1/r4: check
+      param_2/r5: prefix
+      param_3: format
+      param_4: "variadic word 0 (args[0])"
+      r6: old_message
+      r7: formatted_message
+    notes: >-
+      SQLite 3.5.9's checkAppendMsg. 14 direct bl call sites verified by
+      decoding every ARM B/BL word in osos.dec: 11 unconditional (0x082c25fc,
+      0x082c2680, 0x082c283c, 0x082c2970, 0x082c2a48, 0x082c2a7c,
+      0x082c2e04, 0x082c2e90, 0x082c2f1c, 0x082c2f54, 0x08371a34) and
+      three blne (0x082c2bec, 0x08371a74, 0x08371abc), whose caller-side
+      mismatch predicates gate diagnostic production. Extent verified from
+      the raw bytes: code begins 0x082c2438, the next function prologue is
+      0x082c24f0, and the two-word literal pool at 0x082c24e8 contains the
+      default empty prefix and "\n". If check->mxErr is zero, return without
+      touching anything. Otherwise decrement mxErr (+0x10), increment nErr
+      (+0x18) with ARM wrapping arithmetic, format through sqlite3VMPrintf
+      @ 0x08386454 using NULL db and &spilled-r3, then replace zErrMsg
+      (+0x14). A NULL prefix becomes the empty literal. The no-old path joins
+      prefix and formatted text; the old path first NULLs zErrMsg, joins old,
+      newline, prefix, and formatted text, then frees old followed by the
+      formatter result through sqlite3_free @ 0x083906f4. NULL formatter
+      results terminate sqlite3SetString's list, retaining prior pieces.
+      Deliberate deviations: explicit VaList replaces C varargs and the
+      unported formatter uses the existing SQLITE_VM_PRINTF dispatch seam;
+      sqlite3SetString and tracked_free are direct ports. Host tests map the
+      target-width string-list fixture below 4 GiB so u32 vararg pointers
+      cannot silently truncate.
+
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
     name: parse_expr
