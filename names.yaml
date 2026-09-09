@@ -56,6 +56,37 @@ functions:
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
 
+  - address: 0x080e7ebc
+    ghidra: FUN_080e7ebc
+    name: byte_copy_signed
+    size: 24
+    sig: "void byte_copy_signed(const u8 *src, u8 *dst, i32 len)"
+    module: libc/byte_copy_signed
+    status: ported
+    vars: {param_1: src, param_2: dst, param_3: len}
+    notes: >-
+      Forward byte-at-a-time copy leaf whose argument order is (src, dst,
+      len) - reversed relative to byte_copy (0x080005fc) and the libc
+      convention - and whose loop guard is SIGNED: `subs r3,r2,#0` then
+      predicated ldrbgt/strbgt and bgt, so len <= 0 touches neither pointer
+      (the unconditional r2 decrement is caller-saved and unobservable).
+      Extent binary-verified at 24 bytes: the next function
+      (jpeg_source_read_byte @ 0x080e7ed4) opens with `ldr r3,[pc,#84]`.
+      Call count verified by decoding every BL word in osos.dec: exactly 15
+      sites, all plain unconditional bl, none predicated; callers include
+      the Finder/System/Desktop-DB/Desktop-DF record writers near
+      0x080aab00/0x080b4550 and the counted-string copies in 0x080cab5c,
+      none of which need a callee NULL guard. Void return; the advanced
+      src/dst left in r0/r1 are not a defined result. Overlap retains
+      forward-copy (not memmove) behavior. Distinct from byte_copy: that
+      one takes (dst, src, u32) with a `len != 0` guard, under which a
+      negative length would copy ~4 GiB instead of nothing. match.py diff
+      is the expected LLVM shape shared with byte_copy (hoisted cmp/bxlt
+      guard, fp frame, do-while) - structure and loop body match. Host
+      tests prove the signed guard (0/-1/INT_MIN are no-ops on null
+      pointers), guard-byte integrity across len 0..64 against an
+      independent slice reference model, and forward-overlap behavior.
+
   # --- stack-sensitive literal tail dispatch ---
   - address: 0x08003818
     ghidra: FUN_08003818
