@@ -122,6 +122,9 @@ pub unsafe extern "C" fn stream_write(
 }
 
 #[cfg(test)]
+pub(crate) static STREAM_WRITE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
@@ -139,7 +142,6 @@ mod tests {
         status: u32,
     }
 
-    static LOCK: Mutex<()> = Mutex::new(());
     static RECORDER: Mutex<Recorder> = Mutex::new(Recorder {
         calls: 0,
         stream: 0,
@@ -168,7 +170,7 @@ mod tests {
     }
 
     fn install(status: u32) -> (MutexGuard<'static, ()>, StreamWriteCoreOps) {
-        let lock = LOCK.lock();
+        let lock = STREAM_WRITE_TEST_LOCK.lock();
         *RECORDER.lock() = Recorder {
             status,
             ..Recorder::default()
@@ -250,7 +252,7 @@ mod tests {
 
     #[test]
     fn the_unwired_default_reports_nothing_written_and_error_status() {
-        let lock = LOCK.lock();
+        let lock = STREAM_WRITE_TEST_LOCK.lock();
         let previous = unsafe { STREAM_WRITE_CORE_OPS };
         unsafe { STREAM_WRITE_CORE_OPS = DEFAULT_STREAM_WRITE_CORE_OPS };
         let mut written = 99u32;

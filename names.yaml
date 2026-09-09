@@ -46789,6 +46789,38 @@ functions:
       in place of the direct bl 0x082789b8 - same shape, inflated by
       the volatile dispatch.
 
+  # --- Stream-owner exact-write status adapter ---
+  - address: 0x081f53e0
+    ghidra: FUN_081f53e0
+    name: stream_write_exact
+    size: 76
+    sig: "u32 stream_write_exact(StreamWriteOwner *owner, const u8 *data, u32 *length)"
+    module: cxx/stream_write_exact
+    status: ported
+    renames:
+      param_1: owner
+      param_2: data
+      param_3: length
+      local_10: completed
+      FUN_0827899c: stream_write
+    notes: >-
+      Raw osos.dec decoding confirms nineteen instruction words at
+      0x081f53e0..0x081f5428, no literal pool; the next word at
+      0x081f542c starts the separately linked stream-owner constructor.
+      Binary decoding of every ARM B/BL immediate finds twelve callers,
+      all unconditional bl (0x081615b4, 0x081615f4, 0x08161624,
+      0x08161650, 0x08161684, 0x081616c4, 0x081616fc, 0x08161728,
+      0x08161760, 0x0816180c, 0x08161854, 0x081619b0); no predicated or
+      tail-branch caller. Algorithm: load requested from length and the
+      stream pointer at owner+8, call ported stream_write with a stack
+      completed out-word, replace length with completed, then return 0
+      when requested equals completed, otherwise 1 for stream_write
+      status 0x11 or 3 for any other status. The ARM prologue pushes its
+      ABI-dead incoming r3 as the out-word; retailOS stream_write's core
+      overwrites it before return. Deviation: the Rust stack word starts
+      as zero, preventing an incomplete replacement core from exposing
+      scratch-register contents; a conforming core has identical output.
+
   - address: 0x08134db4
     ghidra: FUN_08134db4
     name: silver_controller_construct
