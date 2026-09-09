@@ -49648,6 +49648,35 @@ functions:
       prove exact-success, short-success, and complete-error outcomes and
       verify every forwarded body argument.
 
+  # --- Absolute resource-reader file seek (fs/resource_reader_seek_absolute) ---
+  - address: 0x082a6ad8
+    ghidra: FUN_082a6ad8
+    name: resource_reader_seek_absolute
+    size: 44
+    sig: "u32 resource_reader_seek_absolute(const ResourceReader *reader, u32 offset)"
+    module: fs/resource_reader_seek_absolute
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_2/r1: offset
+      param_1_plus_0x8c: file_handle
+      callee_param_2/r1: duplicate_offset
+      callee_param_3/r2: offset_low
+      callee_param_4/r3: offset_high
+      callee_param_5/stack: origin
+    notes: >-
+      Raw ARM fixes the extent at exactly 44 bytes,
+      0x082a6ad8..0x082a6b04: the next separately linked function opens at
+      0x082a6b04. It copies offset from r1 to r2, supplies zero for the
+      otherwise unused duplicate-offset r1, high offset r3, and stacked
+      origin, then loads reader+0x8c and calls 0x082787b8. Status zero
+      becomes 1; every nonzero status becomes 0. Decoding every ARM B/BL
+      word in osos.dec found exactly 12 inbound direct calls, all
+      unconditional bl (0x0828fd4c, 0x0828fddc, 0x0828ff30, 0x08290000,
+      0x08290084, 0x082900d0, 0x082901ac, 0x08290228, 0x082a6d10,
+      0x082a6f28, 0x082a6f78, 0x082a6fd8); zero predicated forms and no
+      plain B branches. The port directly calls the existing
+      ft_platform_file_seek port rather than duplicating a dispatch seam.
   # --- Platform C++ file seek (ft/system) ---
   - address: 0x082787b8
     ghidra: FUN_082787b8
