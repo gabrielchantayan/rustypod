@@ -11471,6 +11471,41 @@ functions:
       unconditional - a NULL cell or zero handle skips the ROM op but
       still decrements, and unlocking a free lock wraps to 0xffffffff.
 
+  - address: 0x08206e6c
+    ghidra: FUN_08206e6c
+    name: path_probe_guard_destroy
+    size: 28
+    sig: "InterfaceGuard *path_probe_guard_destroy(InterfaceGuard *guard)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: guard (16-byte scoped interface guard; its +0x0c word is
+        the raw CountedMutex pointer)
+      DAT_08206e88: INTERFACE_GUARD_VTABLE_ADDRESS (0x08991978)
+      FUN_0818a164: counted-mutex release veneer (inlined through the
+        ported mutex_unlock_counted)
+      FUN_0818a0fc: interface_guard_base_destroy (retailOS boundary)
+    notes: >-
+      Raw ARM proves the 28-byte instruction extent: ldr literal, push,
+      str r1,[r0],#0xc, bl 0x0818a164, pop, sub r0,#0xc, and tail b
+      0x0818a0fc. The 4-byte literal pool at 0x08206e88 is 0x08991978;
+      the next distinct function begins at 0x08206e8c. Decoding every
+      ARM B/BL word in osos.dec finds exactly 14 direct references, all
+      unconditional BLs (no predicated forms and no tail B): 0x08084d8c,
+      0x08089144, 0x080891cc, 0x08089254, 0x080892a4, 0x08089308,
+      0x08090bac, 0x08090c38, 0x0809b630, 0x0809b6d4, 0x080a8f14,
+      0x080b6b94, 0x080f4b0c and 0x080f4bac. No word-aligned literal in
+      osos.dec equals this address. The destructor re-plants the guard
+      vtable, releases the CountedMutex pointer in guard word +0x0c
+      through the 0x0818a164 veneer, then tail-runs the base teardown and
+      returns this. The release veneer only loads that pointer and calls
+      already-ported mutex_unlock_counted, so the port inlines it. The
+      base teardown at 0x0818a0fc remains a retailOS boundary: target
+      builds call its fixed address, while host tests deliberately treat
+      it as a no-op returning this because no host interface graph exists.
+      Host test path_probe::tests::guard_destroy_replants_vtable_releases_and_returns_this
+      proves vtable replacement, release-to-zero, free-lock wrapping, and
+      the returned guard address using a dedicated below-4-GiB fixture.
   - address: 0x08206e9c
     ghidra: FUN_08206e9c
     name: counted_mutex_guard_release
