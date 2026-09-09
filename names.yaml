@@ -4235,6 +4235,28 @@ functions:
       deliberately serves it directly rather than adding an
       indistinguishable second Rust body.
 
+  - address: 0x083da240
+    ghidra: FUN_083da240
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Alias of the existing deque_seg_capacity Rust export: raw ARM is
+      `mov r0, #0x20; bx lr` (words 0xe3a00020 0xe12fff1e, byte-identical
+      to canonical 0x083d9ec0), returning 0x20 elements per deque segment.
+      Decoding every ARM B/BL word in osos.dec finds exactly 12
+      unconditional plain bl call sites and no predicated calls:
+      0x081da704, 0x081da718, 0x081da720, 0x081da75c, 0x081da76c,
+      0x083da290, 0x083dec18, 0x083dec78, 0x083decac, 0x083dedd0,
+      0x083dedf4, and 0x083def30. Ghidra's 12-call count is exact. This
+      is one of the 17 byte-identical per-template copies (callers scale
+      the result by 4, the pointer-sized element stride of this
+      instantiation), so the canonical export deliberately serves it
+      directly rather than adding an indistinguishable second Rust body.
+
   - address: 0x083d9eec
     ghidra: FUN_083d9eec
     name: deque_iter_init
