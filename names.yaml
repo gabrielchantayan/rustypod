@@ -49757,6 +49757,67 @@ functions:
       the same two loads and the same `bx r3` tail branch, with a
       `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
       pointers add around them; the dispatch structure is identical.
+
+  # --- vendored OpenSSL: the EVP_PKEY wrapper lifecycle @ 0x0804ae6c..0x0804af2f ---
+  # The p_lib.c cluster: EVP_PKEY_free @ 0x0804ae6c (below), the 8-byte
+  # return-0 stub @ 0x0804aeac, EVP_PKEY_new @ 0x0804aeb4 (traced_alloc(24),
+  # stamps {type=0, references=1, pkey=NULL, save_parameters=1,
+  # attributes=NULL} - the 0.9.6-era evp_pkey_st - and reports failure with
+  # 0x08049a84(ERR_LIB_EVP=6, EVP_F_EVP_PKEY_NEW=106, ERR_R_MALLOC_FAILURE=
+  # 65)), EVP_PKEY_size @ 0x0804af10 (type==EVP_PKEY_RSA ? RSA_size : 0, the
+  # callee 0x08063040 being (BN_num_bits(rsa->n @ +0x10) + 7) / 8) and
+  # EVP_PKEY_type @ 0x0804af30 ({6,19}->6, 28 kept, {66,67,70,113,116}->116,
+  # else 0 - EVP_PKEY_RSA/RSA2, EVP_PKEY_DH, EVP_PKEY_DSA1..4/DSA, NID_undef).
+  - address: 0x0804ae6c
+    ghidra: FUN_0804ae6c
+    name: evp_pkey_free
+    size: 64
+    sig: "void evp_pkey_free(EvpPkey *pkey)"
+    module: crypto/evp_pkey
+    status: ported
+    renames:
+      param_1/r0: pkey
+      FUN_08043828: crypto_add_lock (unported; EVP_PKEY_OPS.add_lock seam)
+      FUN_08093cbc: evp_pkey_free_it (unported; EVP_PKEY_OPS.free_it seam)
+      FUN_08043994: traced_free (ported, called directly - OPENSSL_free)
+      FUN_0804aeb4: evp_pkey_new (unported; constructor sibling)
+      FUN_0804af10: evp_pkey_size (unported)
+      FUN_0804af30: evp_pkey_type (unported)
+      FUN_08062374: rsa_free (unported; the tag-6/19 payload release)
+    notes: >-
+      OpenSSL's `EVP_PKEY_free` from crypto/evp/p_lib.c, sixteen
+      instruction words with no literal pool; the next separately linked
+      function (the 8-byte `mov r0,#0; bx lr` stub) starts at 0x0804aeac,
+      so Ghidra's 64-byte extent is exactly right. Algorithm: NULL returns
+      untouched; otherwise CRYPTO_add_lock(&x->references @ +0x08, -1,
+      CRYPTO_LOCK_EVP_PKEY=10, NULL, 0); a decremented count still > 0
+      (signed bgt) returns; the final drop runs EVP_PKEY_free_it @
+      0x08093cbc (tags 6/19 only: RSA_free(x->pkey.rsa) @ 0x08062374,
+      whose layout checks out - references @ +0x38 under CRYPTO_LOCK_RSA=
+      9, rsa_meth_st.finish @ meth+0x20, CRYPTO_free_ex_data class 6, eight
+      BN_frees of n..iqmp @ +0x10..+0x2c) and hands the 24-byte wrapper to
+      traced_free. Call count binary-verified by decoding every B/BL word
+      in osos.dec: exactly 15 sites - 12 unconditional `bl`, 2 `bleq`
+      (0x080e8424, 0x080f4f68) and 1 `blne` (0x082d4938) - no tail `b`, no
+      data word holds the address, so it is never dispatched virtually. The
+      predicated sites are caller-side error-path gates, NOT NULL guards:
+      the body carries its own `movs r4,r0 / beq`. Deviations:
+      CRYPTO_add_lock @ 0x08043828 (itself the op-9/op-10
+      resource_op_dispatch bracket around *pointer += amount, with a
+      whole-operation override through the stock-NULL descriptor slot +0x0c
+      of 0x08a0e93c) and EVP_PKEY_free_it are unported, so they ride the
+      EVP_PKEY_OPS seam (the crypto/bn_num_bits.rs shape) - target defaults
+      call the stock bodies in place, host defaults panic until a test
+      installs recorders. Host tests: NULL is a no-op; a shared key only
+      decrements under lock class 10 with amount -1 and NULL/0 debug
+      coordinates; the last reference runs free_it BEFORE traced_free on
+      the same pointer; nonpositive counts (0 -> -1, -7 -> -8) still take
+      the teardown path, proving the signed gate; and the reference word is
+      passed by address (the mock's store lands in the object). match.py
+      against the worktree archive: same NULL guard, same signed >0 gate,
+      same three-call teardown sequence; the diff is the seam's indirect
+      `blx` calls and LLVM's frame-pointer setup. #[inline(never)] for the
+      15 `bl` targets.
   # --- Obfuscated table transform, fixed-selector adapter ---
   - address: 0x0802b488
     ghidra: FUN_0802b488
