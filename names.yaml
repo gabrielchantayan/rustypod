@@ -49760,6 +49760,66 @@ functions:
       operations where the original bl's the helpers; match.py shows the
       same guard, decrement, dispatch and delete structure in a larger
       body.
+  # --- "crts" string-pool entry copy between pools (util/string_pool) ---
+  - address: 0x080be830
+    ghidra: FUN_080be830
+    name: string_pool_copy_entry
+    size: 176
+    sig: "int string_pool_copy_entry(StringPool *src, int src_id, StringPool *dst, int *dst_id_out)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0-r5: src
+      param_2/r1-r6: src_id
+      param_3/r2-r7: dst
+      param_4/r3-r8: dst_id_out
+      FUN_080b4318: string_pool_read seam (pool blob reader, unported)
+      FUN_080c5a94: string_pool_intern seam (pool interning writer, unported)
+      FUN_0805d1d4: malloc_tag4
+      FUN_0805d070: free_tag4
+      "sp+4..sp+0x204": 512-byte stack scratch blob
+      "sp+0x204": len
+      "0xffffff94": MEM_FULL_ERR (-108, Mac OS memFullErr)
+    notes: >-
+      Copies one entry between two "crts" pools: queries the payload
+      length of entry src_id in src through the unported reader
+      0x080b4318 (dst NULL, max_len 0x7fffffff), stages the payload
+      through a 512-byte stack buffer when it fits (unsigned cmp, so
+      exactly 512 stays on the stack) or a malloc_tag4 allocation
+      otherwise, reads it for real with max_len = the queried length,
+      then hands the buffer to the unported interning writer 0x080c5a94
+      which stores the new 1-based id through dst_id_out; a failed
+      allocation returns -108 (mvn r0, #107) and a heap buffer is freed
+      on every path past allocation. Extent self-verified from raw bytes:
+      the body runs 0x080be830 (push r4-r8,lr) through the pop at
+      0x080be8dc, and the next separately linked function (an in-place
+      word byte-swap loop) starts with push r4,r5,lr at 0x080be8e0; both
+      constants are mvn immediates so there is no trailing literal pool
+      and Ghidra's 176 bytes is exact. Call census by decoding every ARM
+      B/BL word in osos.dec: exactly 15 direct bl sites, all
+      unconditional (fourteen back to back in the slot-copy chain of
+      0x0806ad74, whose final +0x8a8 slot open-codes this exact sequence
+      inline and confirms the semantics, plus one in 0x080d189c), and
+      one tail b at 0x0806b03c; the address occurs in no data word, so
+      it is never dispatched virtually. Deliberate deviations: the two
+      unported pool callees dispatch through the volatile STRING_POOL_READ
+      / STRING_POOL_INTERN seams whose target defaults transmute the
+      retail addresses (the util/crts_object.rs precedent — no identity
+      beyond the verified behaviour is invented for either), while the
+      already-ported malloc_tag4/free_tag4 are called directly per
+      util/inner_state.rs; the scratch buffer is MaybeUninit so no memset
+      appears where the original has none, and the free condition
+      (blob != stack blob) is computed from the allocation choice, which
+      is equivalent. match.py structural (exit-1 diff expected): same
+      query/allocate/copy/intern/free shape with the same mvn #107
+      failure path; differs by the crate fp frame and blx dispatch
+      through the volatile seams. Eight host tests through recording
+      read/intern seams and the shared mock heap prove query-failure
+      short-circuit, stack staging at 5 and exactly 512 bytes, the 513
+      byte heap round trip with tag-4 alloc and free, memFullErr on
+      allocation failure, copy-read and intern failure propagation with
+      the heap buffer still freed, and the zero-length blob.
+
   # --- "crts" string-pool entry release (util/string_pool) ---
   - address: 0x080c5efc
     ghidra: FUN_080c5efc
