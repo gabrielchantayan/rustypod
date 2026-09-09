@@ -65,6 +65,7 @@ pub mod utoa;
 pub mod video_engine;
 pub mod validator;
 pub mod vtable_query;
+pub mod wang_hash;
 pub mod word_list;
 pub mod word_list_modular_multiply;
 pub mod wstr_casecmp;
