@@ -296,3 +296,10 @@ pub static STREAM_READ_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// `cargo test` runs test functions on parallel threads, so a
 /// module-private lock would race teardown across modules.
 pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps
+/// `app::event_code_queue::EVENT_CODE_QUEUE_HOOKS`. The queue module's own
+/// tests and the `app::class_8c00` timer-rearm tests both install
+/// recording enqueues into that one mutable global, so a module-private
+/// lock would race teardown across modules.
+pub static EVENT_CODE_QUEUE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

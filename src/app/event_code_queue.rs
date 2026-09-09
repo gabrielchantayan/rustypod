@@ -145,6 +145,22 @@ mod tests {
     /// threads).
     static ROM_LOCK: HostMutex<()> = HostMutex::new(());
 
+    /// Takes both serializing locks in a fixed order (shared table lock
+    /// first, then this module's ROM_LOCK) so the
+    /// `app::class_8c00` timer-rearm tests — which swap
+    /// EVENT_CODE_QUEUE_HOOKS under the shared lock — cannot race these
+    /// tests' table swaps.
+    fn lock_tables() -> (
+        std::sync::MutexGuard<'static, ()>,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        let shared = crate::testing::EVENT_CODE_QUEUE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let rom = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        (shared, rom)
+    }
+
     const MAX_EVENTS: usize = 8;
     static EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
     /// Tag in the top byte: 0x01 = sema_wait, 0x02 = sema_signal,
@@ -223,7 +239,7 @@ mod tests {
 
     #[test]
     fn posts_code_with_mutex_held() {
-        let _guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guards = lock_tables();
         let _tables = install_mocks();
         let mut handle = 0x42u32;
         let mut object = fixture(&mut handle);
@@ -244,7 +260,7 @@ mod tests {
 
     #[test]
     fn null_mutex_cell_still_enqueues() {
-        let _guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guards = lock_tables();
         let _tables = install_mocks();
         let mut object = fixture(core::ptr::null_mut());
 
@@ -259,7 +275,7 @@ mod tests {
 
     #[test]
     fn zero_handle_cell_skips_rom_but_enqueues() {
-        let _guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guards = lock_tables();
         let _tables = install_mocks();
         let mut handle = 0u32;
         let mut object = fixture(&mut handle);
@@ -275,7 +291,7 @@ mod tests {
 
     #[test]
     fn default_enqueue_drops_without_touching_queue() {
-        let _guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guards = lock_tables();
         let saved_rom = unsafe { core::ptr::addr_of!(ROM_KERNEL).read_volatile() };
         let patched = RomKernelOps {
             sema_wait: record_wait,
