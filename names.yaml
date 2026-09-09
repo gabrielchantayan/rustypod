@@ -55996,3 +55996,27 @@ functions:
       subs+adc instead of mvn#0+adds+mvn (carry-equivalent: borrow of r2-1
       == no-carry of 0xffffffff+r2), and umull for the *9 where ADS
       shift-adds; all mixing blocks and xor-shift pairs line up.
+  - address: 0x082b4964
+    ghidra: FUN_082b4964
+    name: cg_two_bit_code_or_zero
+    size: 40
+    sig: "u32 cg_two_bit_code_or_zero(u32 code)"
+    module: codegen/two_bit_code
+    status: ported
+    renames:
+      param_1/r0: code
+    notes: >-
+      Leaf normalizer for a code-generator field subsequently packed into
+      bits 5..6: preserve exactly the nonzero two-bit codes 1, 2, and 3;
+      return zero for zero and every other u32 representation. Raw ARM
+      decoding confirms Ghidra's 40-byte extent: the next function begins
+      at 0x082b498c. Decoding every ARM B/BL word in osos.dec finds exactly
+      12 incoming plain bl calls, all unconditional (cond=e), at
+      0x082cb61c, 0x082cb6ac, 0x082cb868, 0x082cb940, 0x082cb998,
+      0x082cb9f0, 0x082cbd00, 0x082cbde4, 0x082cc684, 0x082cc718,
+      0x082cc758, and 0x082cc79c; no predicated calls. The original
+      compares in the sequence zero, one, two, three and returns early for
+      each valid nonzero code. Rust's inclusive unsigned bound has identical
+      C-ABI input/output behavior; no deliberate deviations. Host tests
+      cover every u8 input plus u32::MAX, including the sign-extended -1
+      representation passed by byte-field callers.
