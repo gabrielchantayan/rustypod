@@ -22958,6 +22958,38 @@ functions:
       routes the copy through __aeabi_memmove; the p==0 path stays a
       tail call (bx) through the malloc slot.
 
+  - address: 0x0837d38c
+    ghidra: FUN_0837d38c
+    name: sqlite3_malloc_zero
+    size: 36
+    sig: "void *sqlite3_malloc_zero(int n)"
+    module: sqlite/mem
+    status: ported
+    vars: {param_1: n, r5: n, r4: "NULL, then block"}
+    notes: >-
+      SQLite's sqlite3MallocZero: p = sqlite3_malloc(n) (bl 0x08390b14,
+      the ported entry); if p != NULL, zero-fill the whole request
+      through the IRAM thunk 0x08037dc8 -> memzero @ 0x220002d4 (mirror
+      of osos memzero @ 0x080002d4) via blne - so a failed allocation
+      is never zeroed (it would fill from address 0); return p either
+      way. 14 bl call sites, all plain (no predicated forms),
+      binary-scanned from osos.dec. Extent verified against osos.dec:
+      the body is 9 instructions ending @ 0x0837d3ac, the next function
+      (push {r4-r8,lr}) starts @ 0x0837d3b0 - exactly Ghidra's 36
+      bytes. n <= 0 never reaches the fill: the malloc entry returns
+      NULL for those before touching the heap, so the blne guard
+      trips. Deviations: the malloc dispatches through the
+      DB_MEM_OPS.malloc slot (house ops-slot pattern, same as
+      db_malloc_raw and the realloc NULL branch; the wired default IS
+      the ported sqlite3_malloc the original bl's), and the fill is
+      the ported memzero called directly (per the porting rules) -
+      LLVM inlines it and recognizes the body back into
+      __aeabi_memclr/__aeabi_memclr4 chains, the db_malloc_zero
+      precedent (same bytes written, different shape in the match.py
+      diff). Host tests: exactly-n-bytes zeroed with the tail
+      untouched, NULL result leaving memory alone, and n forwarded
+      unchanged (0 and -16 reach the allocator and come back NULL).
+
   - address: 0x08374a14
     ghidra: FUN_08374a14
     name: db_str_dup
