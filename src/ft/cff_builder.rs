@@ -33,8 +33,14 @@
 //!   }
 //!
 //!   outline->n_points++;
-//! }
+//! }}
 //! ```
+//!
+//! The sibling capacity gate [`cff_check_points`] (cffgload.c
+//! `check_points`, 0x0807ba0c) lives here too: it is the interpreter's
+//! `will `count` more points fit?` pre-check, an inlined fast path of
+//! `FT_GlyphLoader_CheckPoints` (unported @ 0x0804c638) over
+//! `builder->loader`.
 
 use crate::ft::types::{FtOutline, FtVector};
 
@@ -45,18 +51,21 @@ pub const FT_CURVE_TAG_ON: u8 = 1;
 pub const FT_CURVE_TAG_CUBIC: u8 = 2;
 
 /// `CFF_Builder` (cffgload.h `CFF_Builder_Rec`) sliced down to the
-/// members [`cff_builder_add_point`] touches, at their firmware
-/// offsets: the five head words (memory, face, glyph, loader, base)
-/// at +0x00..+0x13, `current` @ +0x14, `last` @ +0x18/+0x1c and the
-/// `load_points` bool @ +0x51. The +0x20..+0x50 span (left_bearing,
-/// advance, bbox, no_recurse, ...) is opaque to this port.
+/// members the ported functions touch, at their firmware offsets: the
+/// three head words (memory, face, glyph) at +0x00..+0x0b, `loader`
+/// @ +0x0c, one more head word @ +0x10, `current` @ +0x14, `last` @
+/// +0x18/+0x1c and the `load_points` bool @ +0x51. The +0x20..+0x50
+/// span (left_bearing, advance, bbox, no_recurse, ...) is opaque to
+/// this port.
 ///
-/// `current` is a native pointer like the pointer fields of
-/// ft/types.rs structs: exact on the 32-bit target, wider on 64-bit
+/// `loader` and `current` are native pointers like the pointer fields
+/// of ft/types.rs structs: exact on the 32-bit target, wider on 64-bit
 /// hosts — all accesses are by field name, never by raw offset.
 #[repr(C)]
 pub struct CffBuilder {
-    _reserved_00: [u32; 5],
+    _reserved_00: [u32; 3],
+    pub loader: *mut FtGlyphLoader,
+    _reserved_10: u32,
     pub current: *mut FtOutline,
     pub last: FtVector,
     _reserved_20: [u32; 12],
@@ -65,6 +74,8 @@ pub struct CffBuilder {
 }
 
 // Firmware layout: exact only where pointers are 32-bit.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(CffBuilder, loader)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x14] = [0; core::mem::offset_of!(CffBuilder, current)];
 #[cfg(target_pointer_width = "32")]
@@ -127,6 +138,142 @@ pub unsafe extern "C" fn cff_builder_add_point(
     (*outline).n_points = (*outline).n_points.wrapping_add(1);
 }
 
+/// `FT_GlyphLoaderRec` (internal/ftgloadr.h) sliced to the members
+/// [`cff_check_points`] reads, at their firmware offsets: `memory` @
+/// +0x00, `max_points` @ +0x04, then the two embedded glyph-load
+/// records: `base` @ +0x14 (its `outline.n_points` @ +0x16) and
+/// `current` @ +0x34 (its `outline.n_points` @ +0x36). The +0x08..+0x13
+/// span (max_contours, max_subglyphs, use_extra) and each record's tail
+/// (extra_points, num_subglyphs, subglyphs) are opaque to this port.
+///
+/// The outlines are inline [`FtOutline`]s (this is the loader RECORD,
+/// not the pointer typedef), so the firmware layout is exact only on
+/// the 32-bit target; host accesses are by field name.
+#[repr(C)]
+pub struct FtGlyphLoader {
+    _reserved_00: u32,
+    pub max_points: u32,
+    _reserved_08: [u32; 3],
+    pub base: FtOutline,
+    _reserved_28: [u32; 3],
+    pub current: FtOutline,
+}
+
+// Firmware layout: exact only where pointers are 32-bit.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(FtGlyphLoader, max_points)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x14] = [0; core::mem::offset_of!(FtGlyphLoader, base)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x34] = [0; core::mem::offset_of!(FtGlyphLoader, current)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x48] = [0; core::mem::size_of::<FtGlyphLoader>()];
+
+/// Firmware load address of the unported glyph-loader grow path
+/// `FT_GlyphLoader_CheckPoints` @ 0x0804c638, which [`cff_check_points`]
+/// tail-branches when the inlined head finds the outlines need to grow.
+pub const FT_GLYPH_LOADER_CHECK_POINTS_ADDRESS: usize = 0x0804_c638;
+
+/// Target default for [`GLYPH_LOADER_CHECK_POINTS`]: the stock
+/// `FT_GlyphLoader_CheckPoints` @ 0x0804c638.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_glyph_loader_check_points(
+    loader: *mut FtGlyphLoader,
+    count: i32,
+    new_contours: i32,
+) -> i32 {
+    let check: unsafe extern "C" fn(*mut FtGlyphLoader, i32, i32) -> i32 =
+        core::mem::transmute(FT_GLYPH_LOADER_CHECK_POINTS_ADDRESS);
+    check(loader, count, new_contours)
+}
+
+/// Host default for [`GLYPH_LOADER_CHECK_POINTS`]: the grow path remains
+/// unported.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_glyph_loader_check_points(
+    _loader: *mut FtGlyphLoader,
+    _count: i32,
+    _new_contours: i32,
+) -> i32 {
+    panic!("cff_check_points overflow requires FT_GlyphLoader_CheckPoints 0x0804c638")
+}
+
+/// Direct-call boundary for the unported `FT_GlyphLoader_CheckPoints`
+/// @ 0x0804c638. Its head (which [`cff_check_points`] inlines) is
+/// verified from raw ARM; the growth body reallocates the base and
+/// current outline arrays. A later port replaces this seam without
+/// changing this caller.
+#[cfg(target_os = "none")]
+pub static mut GLYPH_LOADER_CHECK_POINTS: unsafe extern "C" fn(
+    loader: *mut FtGlyphLoader,
+    count: i32,
+    new_contours: i32,
+) -> i32 = firmware_glyph_loader_check_points;
+
+#[cfg(not(target_os = "none"))]
+pub static mut GLYPH_LOADER_CHECK_POINTS: unsafe extern "C" fn(
+    loader: *mut FtGlyphLoader,
+    count: i32,
+    new_contours: i32,
+) -> i32 = missing_glyph_loader_check_points;
+
+/// cff_check_points (FreeType `check_points`, cffgload.c) — original:
+/// `FUN_0807ba0c` @ 0x0807ba0c (52 bytes, 0x0807ba0c..0x0807ba40; the
+/// next function's `mov r3, r0 / push {lr}` prologue confirms the
+/// extent — Ghidra's 52-byte report is exactly right here). 13 call
+/// sites verified by decoding every B/BL word in osos.dec: all
+/// unconditional `bl` (@ 0x080c8a3c, 0x080e0170, 0x080e0218,
+/// 0x080e0354, 0x080e0448, 0x080e0528, 0x080e0614, 0x080e0794,
+/// 0x080e088c, 0x080e0968, 0x080e0a60, 0x080e0b90, 0x080e0c94 — the
+/// cff charstring interpreter and its scaled siblings); no `b` tails
+/// and no DATA word holds the address, so it is never virtually
+/// dispatched.
+///
+/// The Type 2 interpreter's "will `count` more points fit?" gate,
+/// called before recording points (e.g. the 0x080c8a28 wrapper calls
+/// [`cff_builder_add_point`] with on_curve=1 only when this returns 0).
+/// It is `FT_GlyphLoader_CheckPoints(builder->loader, count, 0)` with
+/// the loader head partially inlined by the ADS compiler:
+///
+/// - `count == 0` returns 0 IMMEDIATELY, before `builder` is
+///   dereferenced (`cmp r1,#0 / beq`), so a NULL builder with a zero
+///   count is safe;
+/// - otherwise `need = base.n_points + current.n_points + count` with
+///   both counts sign-extended (`ldrsh` @ loader+0x16 and +0x36 —
+///   NEGATIVE counts subtract) and wrapping 32-bit adds;
+/// - if `need > loader->max_points` (SIGNED `bgt`), zero r2 and
+///   tail-branch the out-of-line `FT_GlyphLoader_CheckPoints` @
+///   0x0804c638, whose return value becomes ours;
+/// - else return 0 (FT_Err_Ok). Equal-to-capacity fits: the original
+///   uses `bgt`, not `bge`.
+///
+/// Deliberate deviation: the tail `bgt` (which reuses the caller's
+/// return address and leaves r2=0 as the third argument) is a plain
+/// `return` of the seam call's value in Rust; the unported callee sits
+/// behind [`GLYPH_LOADER_CHECK_POINTS`], wired to 0x0804c638 on target
+/// and a test model on host.
+///
+/// # Safety
+/// When `count != 0`, `builder` must point to a valid [`CffBuilder`]
+/// whose `loader` points to a valid [`FtGlyphLoader`]. No NULL guards,
+/// matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_check_points(builder: *mut CffBuilder, count: i32) -> i32 {
+    if count == 0 {
+        return 0;
+    }
+    let loader: *mut FtGlyphLoader = (*builder).loader;
+    let need = ((*loader).base.n_points as i32)
+        .wrapping_add((*loader).current.n_points as i32)
+        .wrapping_add(count);
+    if need > (*loader).max_points as i32 {
+        let check = core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile();
+        return check(loader, count, 0);
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -157,7 +304,9 @@ mod tests {
                     flags: 0,
                 },
                 builder: CffBuilder {
-                    _reserved_00: [0xdeadbeef; 5],
+                    _reserved_00: [0xdeadbeef; 3],
+                    loader: core::ptr::null_mut(),
+                    _reserved_10: 0xdeadbeef,
                     current: core::ptr::null_mut(),
                     last: FtVector { x: -1, y: -1 },
                     _reserved_20: [0xdeadbeef; 12],
@@ -250,8 +399,165 @@ mod tests {
         let mut fx = Fixture::new(0, 1);
         unsafe { cff_builder_add_point(&mut fx.builder, 0x0001_0000, 0x0002_0000, 1) };
         assert!(fx.builder._reserved_00.iter().all(|w| *w == 0xdeadbeef));
+        assert_eq!(fx.builder._reserved_10, 0xdeadbeef);
         assert!(fx.builder._reserved_20.iter().all(|w| *w == 0xdeadbeef));
         assert_eq!(fx.builder._reserved_50, 0xde);
         assert_eq!(fx.builder.load_points, 1);
+    }
+
+    // --- cff_check_points ---
+
+    use parking_lot::Mutex;
+
+    /// Serializes the tests that override [`GLYPH_LOADER_CHECK_POINTS`].
+    static CHECK_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Recorded arguments of the most recent seam call.
+    static SEAM_CALLS: Mutex<std::vec::Vec<(usize, i32, i32)>> =
+        Mutex::new(std::vec::Vec::new());
+
+    unsafe extern "C" fn record_check_points(
+        loader: *mut FtGlyphLoader,
+        count: i32,
+        new_contours: i32,
+    ) -> i32 {
+        SEAM_CALLS.lock().push((loader as usize, count, new_contours));
+        7 // a distinguishable FT_Error value
+    }
+
+    /// A builder + glyph loader, boxed for a stable address; the
+    /// builder's `loader` points at the loader record.
+    struct CheckFixture {
+        loader: FtGlyphLoader,
+        builder: CffBuilder,
+    }
+
+    impl CheckFixture {
+        fn new(base_points: i16, current_points: i16, max_points: u32) -> std::boxed::Box<Self> {
+            let blank_outline = FtOutline {
+                n_contours: 0,
+                n_points: 0,
+                points: core::ptr::null_mut(),
+                tags: core::ptr::null_mut(),
+                contours: core::ptr::null_mut(),
+                flags: 0,
+            };
+            let mut fx = std::boxed::Box::new(CheckFixture {
+                loader: FtGlyphLoader {
+                    _reserved_00: 0xdeadbeef,
+                    max_points,
+                    _reserved_08: [0xdeadbeef; 3],
+                    base: FtOutline {
+                        n_points: base_points,
+                        ..blank_outline
+                    },
+                    _reserved_28: [0xdeadbeef; 3],
+                    current: FtOutline {
+                        n_points: current_points,
+                        ..blank_outline
+                    },
+                },
+                builder: CffBuilder {
+                    _reserved_00: [0xdeadbeef; 3],
+                    loader: core::ptr::null_mut(),
+                    _reserved_10: 0xdeadbeef,
+                    current: core::ptr::null_mut(),
+                    last: FtVector { x: -1, y: -1 },
+                    _reserved_20: [0xdeadbeef; 12],
+                    _reserved_50: 0xde,
+                    load_points: 0,
+                },
+            });
+            fx.builder.loader = &mut fx.loader;
+            fx
+        }
+    }
+
+    /// Installs the recording seam for the duration of `body`.
+    fn with_seam(body: impl FnOnce()) {
+        let _lock = CHECK_LOCK.lock();
+        SEAM_CALLS.lock().clear();
+        let saved = unsafe { core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile() };
+        unsafe {
+            core::ptr::addr_of_mut!(GLYPH_LOADER_CHECK_POINTS).write_volatile(record_check_points)
+        };
+        body();
+        unsafe { core::ptr::addr_of_mut!(GLYPH_LOADER_CHECK_POINTS).write_volatile(saved) };
+    }
+
+    #[test]
+    fn zero_count_returns_ok_without_touching_builder() {
+        // `cmp r1,#0 / beq` runs BEFORE the loader load: even a NULL
+        // builder is never dereferenced.
+        let rc = unsafe { cff_check_points(core::ptr::null_mut(), 0) };
+        assert_eq!(rc, 0);
+    }
+
+    #[test]
+    fn fits_within_capacity_returns_ok() {
+        let mut fx = CheckFixture::new(10, 5, 100);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, 20) };
+            assert_eq!(rc, 0);
+            assert!(SEAM_CALLS.lock().is_empty());
+        });
+    }
+
+    #[test]
+    fn exactly_at_capacity_fits() {
+        // need == max_points: the original uses `bgt`, not `bge`.
+        let mut fx = CheckFixture::new(10, 5, 35);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, 20) };
+            assert_eq!(rc, 0);
+            assert!(SEAM_CALLS.lock().is_empty());
+        });
+    }
+
+    #[test]
+    fn overflow_tail_calls_grow_path_with_zero_contours() {
+        let mut fx = CheckFixture::new(10, 5, 35);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, 21) };
+            assert_eq!(rc, 7); // the seam's return propagates
+            let calls = SEAM_CALLS.lock();
+            assert_eq!(
+                calls.as_slice(),
+                [(&mut fx.loader as *mut _ as usize, 21, 0)]
+            );
+        });
+    }
+
+    #[test]
+    fn n_points_are_sign_extended() {
+        // base.n_points == -1: signed need = -1 + 0 + 1 = 0, which is
+        // NOT > max_points == 0, so no grow. A zero-extending (u16)
+        // reader would compute 0x10000 > 0 and grow.
+        let mut fx = CheckFixture::new(-1, 0, 0);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, 1) };
+            assert_eq!(rc, 0);
+            assert!(SEAM_CALLS.lock().is_empty());
+        });
+    }
+
+    #[test]
+    fn negative_current_n_points_subtracts() {
+        let mut fx = CheckFixture::new(0, -4, 0);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, 3) };
+            assert_eq!(rc, 0);
+            assert!(SEAM_CALLS.lock().is_empty());
+        });
+    }
+
+    #[test]
+    fn negative_count_never_grows() {
+        let mut fx = CheckFixture::new(10, 5, 0);
+        with_seam(|| {
+            let rc = unsafe { cff_check_points(&mut fx.builder, -20) };
+            assert_eq!(rc, 0);
+            assert!(SEAM_CALLS.lock().is_empty());
+        });
     }
 }

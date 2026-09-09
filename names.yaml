@@ -8996,6 +8996,51 @@ functions:
       differs only in the crate frame-pointer prologue and register
       allocation.
 
+  - address: 0x0807ba0c
+    ghidra: FUN_0807ba0c
+    name: cff_check_points
+    size: 52
+    sig: "i32 cff_check_points(CffBuilder *builder, i32 count)"
+    module: ft/cff_builder
+    status: ported
+    vars: {param_1: builder, param_2: count}
+    notes: >-
+      FreeType cffgload.c check_points - the Type 2 charstring
+      interpreter's "will count more points fit?" gate, i.e.
+      FT_GlyphLoader_CheckPoints(builder->loader, count, 0) with the
+      loader head partially inlined by the ADS compiler. Extent is
+      EXACTLY Ghidra's 52 bytes (0x0807ba0c..0x0807ba40): the next
+      function starts at 0x0807ba40 with `mov r3,r0 / push {lr}`. Body
+      verified against raw ARM: `cmp r1,#0 / beq ret` (count==0 returns
+      0 BEFORE builder is dereferenced - a NULL builder with count 0 is
+      safe), `ldr r0,[r0,#0xc]` (builder->loader), `ldrsh` of
+      base.outline.n_points @ loader+0x16 and current.outline.n_points
+      @ +0x36 (sign-extended: negative counts SUBTRACT), wrapping adds
+      with count, then a SIGNED `cmp/bgt` against max_points @ +0x04
+      (equal-to-capacity FITS). On overflow: `movgt r2,#0` and
+      tail-branch the out-of-line FT_GlyphLoader_CheckPoints @
+      0x0804c638 (unported), whose return value becomes ours. 13 call
+      sites verified by decoding every B/BL word in osos.dec: all
+      unconditional `bl` @ 0x080c8a3c, 0x080e0170, 0x080e0218,
+      0x080e0354, 0x080e0448, 0x080e0528, 0x080e0614, 0x080e0794,
+      0x080e088c, 0x080e0968, 0x080e0a60, 0x080e0b90, 0x080e0c94 (the
+      cff_parse_charstrings interpreter and its scaled siblings); no `b`
+      tails, no DATA word holds the address - not virtually dispatched.
+      The unported grow path sits behind the GLYPH_LOADER_CHECK_POINTS
+      seam (observable_array precedent), wired to 0x0804c638 on target
+      and a panicking default on host. match.py structural: same head
+      (count guard, loader deref, ldrsh pair, adds, signed cmp); LLVM
+      adds the crate frame-pointer prologue, inverts the branch, and
+      resolves the seam through a literal-pool static load into an
+      indirect `bx` tail where the original direct-branches 0x0804c638.
+      CffBuilder gained the named `loader` field @ +0x0c (was inside
+      the reserved head words). Host tests (7) prove the count==0 early
+      return on a NULL builder, the fits/exactly-at-capacity paths,
+      sign-extension of both n_points (a u16 reader would wrongly
+      grow), negative-count and negative-current-count subtraction, and
+      that overflow calls the seam with (loader, count, 0) and
+      propagates its return.
+
   # --- FreeType 2 ftoutln outline helpers ---
   - address: 0x0804fe08
     ghidra: FUN_0804fe08
