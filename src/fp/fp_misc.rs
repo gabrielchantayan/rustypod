@@ -1836,6 +1836,134 @@ const _: [u8; 0x24] = [0; core::mem::offset_of!(PlistNode, kind)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x28] = [0; core::mem::size_of::<PlistNode>()];
 
+/// Keeps the source constructor's `bl` boundary to `cxx_string_copy_ctor`.
+#[inline(never)]
+unsafe fn plist_node_copy_tag(
+    dst: *mut *mut u8,
+    src: *const *mut u8,
+) -> *mut *mut u8 {
+    unsafe { crate::cxx::string::cxx_string_copy_ctor(dst, src) }
+}
+
+/// plist_node_ctor — original: `FUN_0825c750` @ 0x0825c750 (64 bytes).
+///
+/// Raw bytes are exactly sixteen ARM instructions at 0x0825c750..0x0825c78c;
+/// the distinct `FUN_0825c790` begins immediately afterward, with no literal
+/// pool. A complete `osos.dec` ARM B/BL-word decode finds 15 incoming `bl`
+/// sites, all unconditional; there are no predicated calls or tail branches.
+///
+/// Constructs a plist/XML tree node from its tag string: COW-copies `tag`,
+/// empties its attribute vector, default-constructs the value string, and
+/// empties the child vector, processing-instruction companion, and kind. It
+/// returns `node`, as the final default-string constructor result is adjusted
+/// back by 16 bytes in the original.
+///
+/// Deliberate deviation: the COW copy travels through private
+/// [`plist_node_copy_tag`] so LLVM retains the source `bl` boundary; that
+/// front-end calls the established string port directly. Named `#[repr(C)]`
+/// fields preserve the target's 32-bit word offsets on the 64-bit host.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_ctor(
+    node: *mut PlistNode,
+    tag: *const *mut u8,
+) -> *mut PlistNode {
+    unsafe { plist_node_copy_tag(core::ptr::addr_of_mut!((*node).tag), tag) };
+    unsafe {
+        (*node).attributes.begin = core::ptr::null_mut();
+        (*node).attributes.end = core::ptr::null_mut();
+        (*node).attributes.capacity = core::ptr::null_mut();
+        crate::cxx::string::cxx_string_default_ctor(core::ptr::addr_of_mut!((*node).value));
+        (*node).children.begin = core::ptr::null_mut();
+        (*node).children.end = core::ptr::null_mut();
+        (*node).children.capacity = core::ptr::null_mut();
+        (*node).companion = core::ptr::null_mut();
+        (*node).kind = 0;
+    }
+    node
+}
+
+#[cfg(test)]
+#[repr(C)]
+struct PlistNodeCtorStringStorage {
+    rep: crate::cxx::string::StringRep,
+    data: [u8; 8],
+}
+
+#[cfg(test)]
+impl PlistNodeCtorStringStorage {
+    fn data(&mut self) -> *mut u8 {
+        self.data.as_mut_ptr()
+    }
+}
+
+#[cfg(test)]
+fn poisoned_plist_node() -> PlistNode {
+    let poison = 0xa5a5_a5a5usize as *mut u8;
+    PlistNode {
+        tag: poison,
+        attributes: PlistNodeAttributeVector {
+            begin: poison.cast(),
+            end: poison.cast(),
+            capacity: poison.cast(),
+        },
+        value: poison,
+        children: PlistNodeChildVector {
+            begin: poison.cast(),
+            end: poison.cast(),
+            capacity: poison.cast(),
+        },
+        companion: poison.cast(),
+        kind: 0xa5,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn plist_node_ctor_copies_tag_and_initializes_every_other_field() {
+    let mut source_storage = PlistNodeCtorStringStorage {
+        rep: crate::cxx::string::StringRep { refcount: 0, capacity: 7, length: 7 },
+        data: *b"element\0",
+    };
+    let source_tag = source_storage.data();
+    let mut node = poisoned_plist_node();
+
+    assert!(core::ptr::eq(
+        unsafe { plist_node_ctor(&mut node, &source_tag) },
+        &mut node,
+    ));
+    assert_eq!(node.tag, source_tag, "tag is COW-shared from the source");
+    assert_eq!(source_storage.rep.refcount, 1, "copy constructor acquired the tag rep");
+    assert!(node.attributes.begin.is_null());
+    assert!(node.attributes.end.is_null());
+    assert!(node.attributes.capacity.is_null());
+    assert_eq!(node.value, crate::cxx::string::empty_rep_data());
+    assert!(node.children.begin.is_null());
+    assert!(node.children.end.is_null());
+    assert!(node.children.capacity.is_null());
+    assert!(node.companion.is_null());
+    assert_eq!(node.kind, 0);
+}
+
+#[cfg(test)]
+#[test]
+fn plist_node_ctor_empty_tag_preserves_empty_rep_and_clears_poisoned_state() {
+    let source_tag = crate::cxx::string::empty_rep_data();
+    let mut node = poisoned_plist_node();
+
+    unsafe { plist_node_ctor(&mut node, &source_tag) };
+
+    assert_eq!(node.tag, source_tag);
+    assert_eq!(node.value, source_tag);
+    assert!(node.attributes.begin.is_null() && node.attributes.end.is_null());
+    assert!(node.attributes.capacity.is_null());
+    assert!(node.children.begin.is_null() && node.children.end.is_null());
+    assert!(node.children.capacity.is_null());
+    assert!(node.companion.is_null());
+    assert_eq!(node.kind, 0);
+}
+
+
 /// The unported recursive child-range destructor `FUN_083e3284`.
 pub type PlistNodeChildRangeDestroyFn =
     unsafe extern "C" fn(*mut u8, *mut PlistNode, *mut PlistNode);
