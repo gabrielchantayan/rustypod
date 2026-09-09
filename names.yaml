@@ -7917,6 +7917,30 @@ functions:
       calls the wake indirectly through the ROM_KERNEL table — the
       documented ROM-thunk dispatch deviation; same structure.
 
+  # --- RTC context dirty marker (time/rtc) ---
+  - address: 0x0805e66c
+    ghidra: FUN_0805e66c
+    name: rtc_context_mark_dirty
+    size: 12
+    sig: "void rtc_context_mark_dirty(RtcContext *context)"
+    module: time/rtc
+    renames: {param_1: context}
+    status: ported
+    notes: >-
+      Raw-binary extent is exactly 12 bytes: `mov r1,#1; strb
+      r1,[r0,#0xb90]; bx lr`; the separately linked next function begins
+      at 0x0805e678. This marks the nested RTC context's +0xb90 dirty
+      byte true without reading it or guarding context against NULL.
+      Decoding every ARM B/BL word in osos.dec found 16 direct bl sites:
+      8 unconditional and 8 blne; there are also 34 direct b sites, 2
+      unconditional tail branches and 32 bne. The predicated branches
+      establish that their callers guard the context pointer themselves;
+      unconditional callers require a valid context. Callers first write
+      one of several configuration fields in this context, then invoke
+      this marker. Deviation: none. Host test verifies that a prior 0xff
+      dirty value becomes 1 while the adjacent modeled context regions
+      and status byte remain untouched.
+
   # --- RTC context handle (time/rtc) ---
   - address: 0x08056124
     ghidra: FUN_08056124

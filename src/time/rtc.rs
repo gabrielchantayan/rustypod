@@ -66,12 +66,16 @@ pub struct RtcContext {
     handle: u32,
     reserved_to_status: [u8; 0xb14],
     status: u8,
+    reserved_to_dirty: [u8; 0x6b],
+    dirty: u8,
 }
 
 const _: [u8; 0xf00] = [0; core::mem::offset_of!(RtcContextOwner, rtc_context)];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(RtcContext, handle)];
 const _: [u8; 0x10] = [0; core::mem::offset_of!(RtcContext, reserved_to_status)];
 const _: [u8; 0xb24] = [0; core::mem::offset_of!(RtcContext, status)];
+const _: [u8; 0xb25] = [0; core::mem::offset_of!(RtcContext, reserved_to_dirty)];
+const _: [u8; 0xb90] = [0; core::mem::offset_of!(RtcContext, dirty)];
 
 /// rtc_context_handle — original: `FUN_08056124` @ 0x08056124 (12 bytes).
 ///
@@ -96,6 +100,21 @@ pub unsafe extern "C" fn rtc_context_handle(owner: *const RtcContextOwner) -> u3
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rtc_context_status(owner: *const RtcContextOwner) -> u8 {
     unsafe { (*(*owner).rtc_context).status }
+}
+
+/// rtc_context_mark_dirty — original: `FUN_0805e66c` @ 0x0805e66c (12 bytes;
+/// 16 verified direct `bl` call sites: 8 unconditional, 8 `blne`; plus 34
+/// direct `b` sites: 2 unconditional tail branches, 32 `bne`).
+///
+/// Write one to the nested RTC context's dirty byte at +0xb90. The raw ARM
+/// body is `mov r1,#1; strb r1,[r0,#0xb90]; bx lr`: it has no null guard and
+/// does not read the prior byte. Its callers update one of the context's
+/// configuration fields first; predicated branches guard the context pointer
+/// before invoking it. Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_mark_dirty(context: *mut RtcContext) {
+    unsafe { (*context).dirty = 1 };
 }
 
 /// Byte offset of the opaque eight-byte context field returned by the stock
@@ -461,12 +480,16 @@ mod tests {
         let first = RtcContext {
             reserved: [0x11; 0x0c],
             handle: 0x1122_3344,
+            reserved_to_dirty: [0x11; 0x6b],
+            dirty: 0x11,
             reserved_to_status: [0x11; 0xb14],
             status: 0x11,
         };
         let second = RtcContext {
             reserved: [0x22; 0x0c],
             handle: 0xaabb_ccdd,
+            reserved_to_dirty: [0x22; 0x6b],
+            dirty: 0x22,
             reserved_to_status: [0x22; 0xb14],
             status: 0x22,
         };
@@ -485,6 +508,8 @@ mod tests {
         let nested = RtcContext {
             reserved: [0x3c; 0x0c],
             handle: 0xfeed_beef,
+            reserved_to_dirty: [0x3c; 0x6b],
+            dirty: 0x3c,
             reserved_to_status: [0x3c; 0xb14],
             status: 0x3c,
         };
@@ -510,12 +535,16 @@ mod tests {
         let first = RtcContext {
             reserved: [0x11; 0x0c],
             handle: 0x1122_3344,
+            reserved_to_dirty: [0x11; 0x6b],
+            dirty: 0x11,
             reserved_to_status: [0x11; 0xb14],
             status: 0x19,
         };
         let second = RtcContext {
             reserved: [0x22; 0x0c],
             handle: 0xaabb_ccdd,
+            reserved_to_dirty: [0x22; 0x6b],
+            dirty: 0x22,
             reserved_to_status: [0x22; 0xb14],
             status: 0x81,
         };
@@ -534,6 +563,8 @@ mod tests {
         let nested = RtcContext {
             reserved: [0x3c; 0x0c],
             handle: 0xfeed_beef,
+            reserved_to_dirty: [0x3c; 0x6b],
+            dirty: 0x3c,
             reserved_to_status: [0x3c; 0xb14],
             status: 0x7f,
         };
@@ -541,18 +572,44 @@ mod tests {
             reserved: [0x5a; 0xf00],
             rtc_context: &nested,
         };
+        let owner_reserved = owner.reserved;
         let nested_reserved = nested.reserved;
         let nested_handle = nested.handle;
+        let nested_to_dirty = nested.reserved_to_dirty;
+        let nested_dirty = nested.dirty;
         let nested_to_status = nested.reserved_to_status;
-        let owner_reserved = owner.reserved;
 
         assert_eq!(unsafe { rtc_context_status(&owner) }, nested.status);
         assert_eq!(nested.reserved, nested_reserved);
         assert_eq!(nested.handle, nested_handle);
+        assert_eq!(nested.reserved_to_dirty, nested_to_dirty);
+        assert_eq!(nested.dirty, nested_dirty);
         assert_eq!(nested.reserved_to_status, nested_to_status);
         assert_eq!(nested.status, 0x7f);
         assert_eq!(owner.reserved, owner_reserved);
         assert!(core::ptr::eq(owner.rtc_context, &nested));
+    }
+
+    #[test]
+    fn rtc_context_mark_dirty_writes_only_the_dirty_byte() {
+        assert_eq!(core::mem::offset_of!(RtcContext, dirty), 0xb90);
+        let mut context = RtcContext {
+            reserved: [0x5a; 0x0c],
+            handle: 0xfeed_beef,
+            reserved_to_dirty: [0x3c; 0x6b],
+            dirty: 0xff,
+            reserved_to_status: [0xa5; 0xb14],
+            status: 0x7f,
+        };
+
+        unsafe { rtc_context_mark_dirty(&mut context) };
+
+        assert_eq!(context.dirty, 1);
+        assert_eq!(context.reserved, [0x5a; 0x0c]);
+        assert_eq!(context.handle, 0xfeed_beef);
+        assert_eq!(context.reserved_to_dirty, [0x3c; 0x6b]);
+        assert_eq!(context.reserved_to_status, [0xa5; 0xb14]);
+        assert_eq!(context.status, 0x7f);
     }
 
     #[test]
