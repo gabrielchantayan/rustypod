@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// FAT directory-entry start-cluster extraction @ 0x082e1378.
+pub mod fat_dirent;
 pub mod path_limits;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
