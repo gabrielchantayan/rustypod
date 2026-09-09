@@ -208,6 +208,10 @@ pub mod hints {
     // predicate fixture; it carries raw-u32 scope and context links, and
     // fixture mappings never unmap, so no other user may share this hint.
     pub const CONTEXT_SCOPE_SUBJECT_MATCHES_CONTEXT_FIELD_F40: usize = 0xc800_0000;
+    // 0xc900_0000: dedicated to ui/element_reference_construct_string's
+    // raw-u32 reference/vtable/target fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const ELEMENT_REFERENCE_CONSTRUCT_STRING: usize = 0xc900_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
