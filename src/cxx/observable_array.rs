@@ -88,10 +88,15 @@
 //!   0x08271cf0, 0x08275cd8) immediately follow it with their own
 //!   `ldr r1, [pc, #N]; str r1, [r0]`, i.e. all nine are derived-class
 //!   constructors overwriting the root vtable with their own. Its matching
-//!   destructor @ 0x08275bc8 is a bare `bx lr`. So this is the abstract
-//!   root of a class hierarchy, ported here because the array's
-//!   constructor is its only interesting caller in this crate and a
-//!   dispatch seam for three instructions would be pure ceremony.
+//!   destructor @ 0x08275bc8 is a bare `bx lr`. Together these identify the
+//!   abstract root of this class hierarchy: the constructor plants its
+//!   vtable, while the destructor preserves `r0` without touching memory.
+//!
+//! - `framework_object_destruct` — original: `FUN_08275bc8` @ 0x08275bc8
+//!   (4 bytes; **12 `bl` and 10 tail `b` call sites, all unconditional**,
+//!   binary-scanned by decoding every B/BL word in the image). `bx lr`
+//!   leaves `r0` untouched; this port makes that return-value contract
+//!   explicit for deleting destructors that pass it to `operator delete`.
 //!
 //! **r0 passes through both.** `FUN_08275bb8` never touches r0, and
 //! `FUN_08271cec` addresses its four stores off the base constructor's
@@ -283,6 +288,30 @@ pub unsafe extern "C" fn framework_object_construct(
     this: *mut FrameworkObject,
 ) -> *mut FrameworkObject {
     core::ptr::addr_of_mut!((*this).vtable).write_volatile(FRAMEWORK_OBJECT_VTABLE);
+    this
+}
+
+/// framework_object_destruct — original: `FUN_08275bc8` @ 0x08275bc8
+/// (4 bytes; 12 unconditional `bl` and 10 unconditional tail `b` call
+/// sites, no predicated forms, binary-scanned).
+///
+/// A bare `bx lr`: reads and writes no memory, and returns `this` in `r0`.
+/// The direct caller at 0x08275b80 forwards that unchanged return into its
+/// operator-delete path, so the return type is intentional despite Ghidra's
+/// `void` signature.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// The original dereferences nothing, so `this` may be NULL, unaligned, or
+/// dangling.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.framework_object_destruct")]
+pub unsafe extern "C" fn framework_object_destruct(
+    this: *mut FrameworkObject,
+) -> *mut FrameworkObject {
     this
 }
 
@@ -798,6 +827,41 @@ mod tests {
         core::ptr::addr_of_mut!(COPY_DESTINATION_STORAGE).write(destination_storage);
         core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_GROW).write_volatile(record_copy_grow);
         CopyGrowGuard
+    }
+
+    #[test]
+    fn root_destruction_returns_all_pointers_without_touching_memory() {
+        let mut words = [0xa5a5_a5a5u32; 3];
+        let object = unsafe { words.as_mut_ptr().add(1).cast::<FrameworkObject>() };
+
+        unsafe {
+            assert_eq!(framework_object_destruct(object), object);
+            assert_eq!(
+                framework_object_destruct(core::ptr::null_mut()),
+                core::ptr::null_mut(),
+                "the bare bx lr accepts NULL"
+            );
+
+            let unaligned = 1usize as *mut FrameworkObject;
+            assert_eq!(
+                framework_object_destruct(unaligned),
+                unaligned,
+                "the original does not dereference an unaligned pointer"
+            );
+
+            let extreme = usize::MAX as *mut FrameworkObject;
+            assert_eq!(
+                framework_object_destruct(extreme),
+                extreme,
+                "the original preserves even an otherwise invalid pointer"
+            );
+        }
+
+        assert_eq!(
+            words,
+            [0xa5a5_a5a5; 3],
+            "the empty destructor must not read or write its object"
+        );
     }
 
     #[test]
