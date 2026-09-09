@@ -3894,6 +3894,38 @@ functions:
       frame, a popne early-out for the success path, and intra-archive
       bl relocations — the accepted ADS-vs-LLVM noise.
 
+  - address: 0x0826f3bc
+    ghidra: FUN_0826f3bc
+    name: stack_frame_binary_search_tail
+    size: 24
+    sig: "u32 stack_frame_binary_search_tail(u32 key, i32 remaining_count, const u32 *cursor, const u32 *end)"
+    module: ui/view_base
+    status: identified
+    renames:
+      r0: key
+      r1: remaining_count
+      r3: cursor
+      r4: end
+    notes: >-
+      Raw extent is 0x0826f3bc..0x0826f3d4, not Ghidra's 88-byte
+      0x0826f3bc..0x0826f414 extent. These six instructions are an interior
+      tail of the 0x0826f340..0x0826f3d8 routine: while remaining_count is
+      positive, it branches backward to the midpoint/comparison block at
+      0x0826f398; when done it substitutes end-4 for cursor == end, loads the
+      selected word, and executes the enclosing routine's
+      `pop {r1,r2,r3,r4,pc}`. Therefore 0x0826f3bc has no independently
+      callable ARM ABI: it requires r4 and a 16-byte callee stack frame
+      established before 0x0826f3bc. A standalone Rust export would return
+      through lr and cannot reproduce that stack-frame-dependent continuation.
+      Decoding every ARM B/BL word in osos.dec finds 12 direct, unconditional
+      BL instructions targeting this interior address (0x08269250, 0x08269ac4,
+      0x083d217c, 0x083d235c, 0x083d23c0, 0x083d23dc, 0x083d26e8,
+      0x083d2704, 0x083d2a10, 0x083d2a2c, 0x083d2d38, 0x083d2d54), no
+      predicated BLs, no tail B references, and no aligned image data word
+      holding the address. The direct calls do not establish that required
+      frame (for example 0x083d217c follows a callee that explicitly clears
+      r1), an unresolved binary/source anomaly. Status remains identified
+      rather than inventing a callable function or a callee identity.
   - address: 0x0826f580
     name: aligned_pool
     size: 612
