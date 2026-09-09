@@ -85,3 +85,4 @@ pub mod transition_addon;
 pub mod typed_allocation_release;
 pub mod value_compare;
 pub mod vtable;
+pub mod vtable_object_base_construct;
