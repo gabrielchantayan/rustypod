@@ -210,6 +210,39 @@ pub unsafe extern "C" fn fixed_value_default_init(this: *mut FixedValue) -> *mut
     this
 }
 
+/// value_aux_max — original: `FUN_08273a40` @ 0x08273a40 (20 bytes:
+/// five ARM instruction words; the next separately linked function
+/// begins at 0x08273a54, so Ghidra's extent is exact and there is no
+/// literal pool).
+///
+/// Decoding every ARM B/BL word in osos.dec finds **5 direct call
+/// sites** — 0x081679d8, 0x08167adc, 0x8181060, 0x8197744, 0x8197834 —
+/// all plain unconditional `bl`; there are no predicated forms, tail
+/// branches, or DATA-word references. Every caller is one of the
+/// two-value wheel-node constructors (`timer_step_value_init` @
+/// 0x08167a6c and its vtable-siblings), which feed the result + 1 into
+/// the node's wheel rank.
+///
+/// ```text
+/// 08273a40  ldr r0, [r0, #8]   ; a->aux
+/// 08273a44  ldr r1, [r1, #8]   ; b->aux
+/// 08273a48  cmp r0, r1
+/// 08273a4c  movls r0, r1       ; unsigned: a_aux <= b_aux -> take b
+/// 08273a50  bx  lr
+/// ```
+///
+/// Returns the larger of the two `+0x08` aux words under unsigned
+/// comparison. The callee has no NULL guard, matching its callers,
+/// which always pass live value objects. There are no deliberate
+/// deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn value_aux_max(a: *mut FixedValue, b: *mut FixedValue) -> u32 {
+    let a_aux = (*a).aux;
+    let b_aux = (*b).aux;
+    if a_aux <= b_aux { b_aux } else { a_aux }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -441,6 +474,55 @@ mod tests {
         assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32, "+0x04 is not written");
         assert_eq!(object.aux, 0xcafe_babe, "+0x08 is not written");
         assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    fn aux_max_returns_the_unsigned_larger_of_the_two_aux_words() {
+        // Plain scalars, ties, and high-bit values proving the compare
+        // is unsigned (movls), plus the top-of-range word.
+        for (a_aux, b_aux) in [
+            (0u32, 0u32),
+            (5, 3),
+            (3, 5),
+            (7, 7),
+            (0x8000_0000, 1),
+            (1, 0x8000_0000),
+            (0xffff_ffff, 0xffff_fffe),
+            (0xffff_fffe, 0xffff_ffff),
+            (0xffff_ffff, 0xffff_ffff),
+        ] {
+            let mut a = dirty();
+            let mut b = dirty();
+            a.aux = a_aux;
+            b.aux = b_aux;
+            let result = unsafe {
+                value_aux_max(core::ptr::addr_of_mut!(a), core::ptr::addr_of_mut!(b))
+            };
+            assert_eq!(result, a_aux.max(b_aux), "aux ({a_aux:#x}, {b_aux:#x})");
+        }
+    }
+
+    #[test]
+    fn aux_max_reads_only_the_aux_words() {
+        let mut a = dirty();
+        let mut b = dirty();
+        a.aux = 0x1111_1111;
+        b.aux = 0x2222_2222;
+        let a_raw = unsafe {
+            core::slice::from_raw_parts(
+                core::ptr::addr_of!(a).cast::<u8>(),
+                core::mem::size_of::<FixedValue>(),
+            )
+        };
+        unsafe { value_aux_max(core::ptr::addr_of_mut!(a), core::ptr::addr_of_mut!(b)) };
+        let a_after = unsafe {
+            core::slice::from_raw_parts(
+                core::ptr::addr_of!(a).cast::<u8>(),
+                core::mem::size_of::<FixedValue>(),
+            )
+        };
+        assert_eq!(a_raw, a_after, "pure leaf: no writes");
+        assert_eq!(b.vtable, 0xdead_beef, "+0x00 is not read or written");
     }
 
     #[test]

@@ -103,6 +103,7 @@ pub mod tick_accumulator;
 pub mod timed_transition;
 pub mod progress_layout_transition;
 pub mod timer_reset;
+pub mod timer_step_value;
 pub mod task_registry;
 pub mod template_binding;
 pub mod tracker_record;
