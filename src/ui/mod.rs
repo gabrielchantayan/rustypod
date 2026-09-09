@@ -30,6 +30,7 @@ pub mod plst_slot_item;
 pub mod tdat_class_check;
 pub mod tdat_first_plst;
 pub mod element_reference;
+pub mod element_reference_item_count;
 pub mod element_reference_cookie;
 pub mod element_reference_persistent_id;
 pub mod font_handle;

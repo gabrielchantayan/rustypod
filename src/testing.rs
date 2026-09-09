@@ -157,6 +157,10 @@ pub mod hints {
     // 0x6d00_0000: dedicated to ui/string_view_array's derived-view
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const STRING_VIEW_ARRAY: usize = 0x6d00_0000;
+    // 0x7900_0000: dedicated to ui/element_reference_item_count's raw-u32
+    // reference/target/collection fixtures; mappings never unmap, so no other
+    // user may share this hint.
+    pub const ELEMENT_REFERENCE_ITEM_COUNT: usize = 0x7900_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
