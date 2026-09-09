@@ -53077,3 +53077,27 @@ functions:
       original is an unguarded leaf with no callees. No deliberate Rust
       deviations: the port keeps the exact element store order with volatile
       aligned accesses and leaves the three trailing ABI-padding bytes alone.
+
+  - address: 0x081d6380
+    ghidra: FUN_081d6380
+    name: vtable_object_base_construct
+    size: 40
+    sig: "void *vtable_object_base_construct(void *this, u32 input_at_8, u32 input_at_12)"
+    module: cxx/vtable_object_base_construct
+    status: ported
+    renames:
+      param_1/r0: this (aligned writable 28-byte base object)
+      param_2/r1: input_at_8 (copied to this +0x08)
+      param_3/r2: input_at_12 (copied to this +0x0c)
+      r3: zero (clears object fields)
+    notes: >-
+      Raw extent is exactly 40 bytes, 0x081d6380..0x081d63a8: the literal
+      vtable word at 0x081d63a8 is part of the function and the next
+      separately linked function starts at 0x081d63ac. The unguarded leaf
+      installs vtable 0x0898e004, copies r1 and r2 to +0x08 and +0x0c,
+      clears the word at +0x04, byte at +0x10, and words at +0x14 and +0x18,
+      then returns this in r0; bytes +0x11..+0x13 are preserved. Decoding
+      every ARM B/BL immediate in osos.dec found exactly 14 inbound direct
+      bl sites, all unconditional, with zero predicated bl and zero tail b.
+      An aligned whole-image word scan found no data reference, so callers
+      statically bind this base constructor. No deliberate Rust deviations.
