@@ -10803,6 +10803,29 @@ functions:
       less than 32 can never reach. Always zero, so the port drops them;
       returned value unchanged.
 
+  - address: 0x0807439c
+    ghidra: FUN_0807439c
+    name: read_u16_be
+    size: 28
+    sig: "u32 read_u16_be(const u8 *p)"
+    module: util/be_read
+    status: ported
+    renames:
+      param_1/r0: p
+      r1: first_byte
+      r0_after_load: assembled_value
+    notes: >-
+      Unaligned big-endian u16 load: `ldrb r1,[r0],#1; ldrb r0,[r0];
+      orr r0,r1,r0,lsl #8; lsl r1,r0,#8; orr r0,r1,r0,lsr #8; bic
+      r0,r0,#0xff0000; bx lr`, yielding p[0]<<8 | p[1] zero-extended in
+      r0. Its raw extent is exactly 28 bytes: next sibling starts at
+      0x080743b8. Decoding every ARM B/BL word in osos.dec finds 18 direct
+      `bl` callers and no predicated calls (0x080ac42c/440/454, 0x080daf3c,
+      0x081542d4/e0/ec, 0x081550a0, 0x08155104, and
+      0x082024ec/2500/2554/2568/257c/2590/25a4/25b8/25cc). It has no NULL
+      or bounds guard; no deliberate deviations. `unpack_be16`
+      (0x08261750) has the same observable load but is a distinct function,
+      so this export has a dedicated text section.
   - address: 0x080743b8
     ghidra: FUN_080743b8
     name: read_u32_be
