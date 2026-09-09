@@ -107,6 +107,7 @@ pub mod nested_parse;
 pub mod parse;
 pub mod parse_cell;
 pub mod parse_expr;
+pub mod ptrmap_pageno;
 pub mod read_schema;
 pub mod release_mem_array;
 pub mod schema_to_index;

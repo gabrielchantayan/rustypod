@@ -21714,6 +21714,49 @@ functions:
       rowid read now writes the hi word at CellInfo+0x0c exactly like
       the original's callee.
 
+  # ---- Auto-vacuum pointer-map page locator (src/sqlite/ptrmap_pageno.rs) ----
+  - address: 0x082e866c
+    ghidra: FUN_082e866c
+    name: ptrmap_pageno
+    size: 80
+    sig: "u32 ptrmap_pageno(const BtShared *bt, u32 pgno)"
+    module: sqlite/ptrmap_pageno
+    status: ported
+    renames:
+      param_1: bt
+      param_2: pgno
+    notes: >-
+      SQLite 3.5.x ptrmapPageno (btree.c): locate the pointer-map page
+      whose 5-byte entries (type byte + big-endian u32, cf. ptrmapGet @
+      0x082e85d8 and ptrmapPut @ 0x082e86bc) cover database page pgno
+      of the auto-vacuum b-tree. Ghidra's 80-byte extent is exact —
+      FUN_082e86bc begins with its own push {r3-r9,lr} at +0x50, no
+      swallowed sibling, no literal pool. 16 genuine bl call sites
+      (binary-scanned, 0 predicated): 0x082b3834, 0x082b58f0,
+      0x082b5944, 0x082b5994, 0x082bd9d8, 0x082bde48, 0x082ce068,
+      0x082d088c, 0x082d4cdc, 0x082d4e70, 0x082e85ec, 0x082e861c,
+      0x082e86e0, 0x082e8710, 0x08371a0c, 0x08371a50; a 17th decode at
+      0x088f9b78 is a blge false positive in a data region (ASCII iPod
+      adjacent). Algorithm (raw words; Ghidra's C agrees): per_map =
+      BtShared.usableSize(+0x1e u16)/5 + 1 via __rt_udiv @ 0x08036f14;
+      map_index = (pgno - 2 wrapping)/per_map; ret = per_map*map_index
+      + 2 (the map page HEADS its own group); if ret ==
+      PENDING_BYTE(0x40000000)/BtShared.pageSize(+0x1c u16) + 1 then
+      ret++. All three divides are unsigned __rt_udiv, quotient only,
+      called directly per house precedent (its inline(never) keeps the
+      three bl boundaries for match.py); mul/sub/add wrap mod 2^32
+      exactly like the ARM. No NULL guard and no pgno < 2 early-out —
+      the upstream check is absent in this build. Deviations: none
+      structural; aligned halfword reads match the original's ldrh.
+      match.py structural: same three bl __rt_udiv, mul, +2, compare
+      and conditional bump; LLVM folds the mul+add into mla and the
+      bump into moveq r1,#3 / mla. Host tests (5): small-page group
+      boundaries (map page heads its group), reserved-region span
+      shrink, pending-byte-page bump (exact divisor geometry:
+      pageSize 0x8000 / usable 1080 / map index 151), wrapping pgno
+      below 2, reference-model sweep over span boundaries and u32
+      extremes.
+
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
     ghidra: FUN_0837ac30
