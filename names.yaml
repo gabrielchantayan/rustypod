@@ -48890,3 +48890,50 @@ functions:
       remain accepted. The raw literal says 0x088faa4b, whose table is at
       image 0x08905923 under the SQLite +0xaed8 image/runtime skew documented
       in sqlite/mod.rs; its 64 recovered bytes exactly match upstream.
+  - address: 0x08379024
+    ghidra: FUN_08379024
+    name: find_table
+    size: 148
+    sig: "Table *find_table(sqlite3 *db, const char *name, const char *database)"
+    module: sqlite/find_table
+    status: ported
+    vars: {param_1: db, param_2: name, param_3: database, uVar2: i, uVar3: j,
+      iVar4: result}
+    notes: >-
+      SQLite 3.4.x/3.5.x util.c's sqlite3FindTable, identified by the
+      (i<2) ? i^1 : i index swap (cmp #2 / movge / eorlt #1) that searches
+      TEMP before MAIN, the str_icmp schema-name filter, and the
+      strlen(zName)+1 key into hash_find. Ghidra's 148-byte extent is
+      exact: the next function starts at 0x083790b8. 17 bl call sites,
+      binary-scanned over every B/BL word in osos.dec, matching Ghidra's
+      count; all unconditional, no predicated forms (0x082dc140,
+      0x0836ec3c, 0x0836ef30, 0x0836f0f4, 0x0836f2bc, 0x08373f10,
+      0x0837560c, 0x08375970, 0x0837b678, 0x0837d280, 0x0837fd10,
+      0x0838017c, 0x08380534, 0x08381ee8, 0x0838474c, 0x0838a914,
+      0x0838a9a8 - the parser/resolver half of the SQLite unit; the
+      hash_find notes already list this function's own probe at
+      0x08379094). Body: for i in 0..nDb (signed bgt guard, nDb reloaded
+      per iteration), j = i<2 ? i^1 : i; skip aDb[j] when database is
+      non-NULL and str_icmp(database, aDb[j].zName) != 0 (database is the
+      LEFT argument); else hash_find(aDb[j].pSchema + 4, name,
+      strlen(name)+1) - Schema.schema_cookie at +0x00, tblHash at +0x04,
+      the layout hash_init/hash_clear pin - and return the first non-NULL
+      hit. Db layout is schema_to_index's: 24-byte stride, zName @ +0x00,
+      pSchema @ +0x14. All three callees were already ported (strlen @
+      0x08392478, str_icmp @ 0x08384f14, hash_find @ 0x0837ad88).
+      Deviations: str_icmp and hash_find go through this module's own
+      volatile FIND_TABLE_HOOKS seam (defaults are the real ports), so
+      the shipped image's indirect blx replaces two direct bls - a
+      module-local seam, not hash_find's HASH_FIND_HOOKS, because
+      concurrent test threads swapping one static would race; strlen is
+      called directly (the strdup/set_string precedent) and LLVM inlines
+      it into a byte loop. match.py structural: same loop shape, same
+      i^1 swap (LLVM emits eorcc where ADS emits eorlt after cmp #2 -
+      identical for the reachable i >= 0), same reloads of db->nDb/aDb,
+      same +0x14/+4 addressing. Host tests (7): TEMP-before-MAIN probe
+      order, full 1,0,2,3 scan order on miss, database filter argument
+      order and skip behaviour, filter rejecting every schema (hash never
+      probed), the real ported str_icmp folding "MAIN" onto "main",
+      nDb==0 and nDb<0 finding nothing, and the default hooks resolving
+      to the real ports. Fixture: u32-word slab via
+      testing::hints::SQLITE_FIND_TABLE.
