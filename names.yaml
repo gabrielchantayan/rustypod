@@ -37056,6 +37056,67 @@ functions:
       structural review is expected to differ in address materialization and
       volatile accesses, while retaining the load/zero-test/conditional-store/
       final-load sequence.
+
+  # --- retailOS lazily cached board-version word (sysinfo) ---
+  - address: 0x080e624c
+    ghidra: FUN_080e624c
+    name: board_version
+    size: 48
+    sig: "u32 board_version(void)"
+    module: sysinfo
+    status: ported
+    renames:
+      FUN_08369bec: shared_context (the lazy shared-context getter, already
+        ported in ui/object_state; the refresh source)
+      DAT_089caaac: system_info_base (the literal-pool word at 0x080e6278,
+        binary-verified bytes ac aa 9c 08; its field +0x8 is the lazily
+        cached board-version word; binary scan finds the base address only
+        here and in the literal pools at 0x082bc7c0 / 0x082bc9e8 of the
+        0x082bcxxx diagnostics cluster)
+      thunk_FUN_080e624c: board_version_veneer (the 4-byte bare
+        `b 0x080e624c` @ 0x080515e4, word 0xea025318, that the ported
+        board_version_halves @ 0x082a1a70 calls through)
+    notes: >-
+      Ghidra reports 44 bytes; the true occupied range is 48: 11 code words
+      0x080e624c-0x080e6277 plus the literal-pool word at 0x080e6278
+      (0x089caaac) that Ghidra's extent excludes - the next function's
+      stmdb sp!,{r0-r11,lr} prologue starts at 0x080e627c. Binary decoding
+      verifies 13 direct bl callers, ALL unconditional (cond=e; no
+      predicated forms), plus the b-veneer @ 0x080515e4; no word in
+      osos.dec holds 0x080e624c, so it is never dispatched virtually.
+      Body: stmdb sp!,{r4,lr}; ldr r4,[0x080e6278]; ldr r0,[r4,#0x8]; cmn
+      r0,#0x80000001; bne out; bl 0x08369bec; cmp r0,#0; ldrne
+      r0,[r0,#0x84]; strne r0,[r4,#0x8]; out: ldr r0,[r4,#0x8]; ldmia
+      sp!,{r4,pc}. Answers the lazily cached board/firmware revision word
+      at system_info+0x8: while it holds the 0x7fffffff sentinel (the cmn
+      spelling of a 0x7fffffff compare) the authoritative word is fetched
+      from +0x84 of the shared_context object and republished into the
+      cache, but only when the getter returned non-NULL (the cmp/ldrne/
+      strne guard; a NULL context leaves the sentinel in place and it is
+      returned as-is). Once cached the context is never consulted again;
+      the final ldr reloads the cache rather than keeping a register copy,
+      which the port reproduces with volatile accesses. The word's HIGH
+      halfword 0x10 with LOW halfword >= 6 selects timer channel 3 in
+      cg_timer_wait @ 0x082bc4fc. Deviations: the {r4,lr} frame (keeps
+      the struct base alive across the bl) is an ADS artifact - the port
+      rematerializes the address; the refresh callee is the already-ported
+      shared_context, called directly (no seam - on target the link
+      resolves it to the Rust port, verified R_ARM_CALL shared_context in
+      the archive); host builds substitute a static for the fixed RAM
+      field, with object_state's new pub(crate) SHARED_CONTEXT_TEST_LOCK
+      and host_install_shared_context hook serializing the cross-module
+      fixture (the fp_misc CURRENT_DATETIME_QUERY_TEST_LOCK pattern).
+      board_version_halves (fp_misc) still reaches this function through
+      its pre-existing BOARD_VERSION usize seam - untouched, the seam's
+      target-side transmute of 0x080e624c now lands on this port once
+      hooked. match.py structural (exit-1 diff expected): identical
+      ldr-literal/ldr-cache/cmn-sentinel/bne/bl/cmp/ldrne/strne/reload
+      sequence; the diffs are the crate push {r4,sl,fp,lr} frame, LLVM
+      folding base+8 into one literal 0x089caab4, and the in-archive
+      shared_context relocation. Host tests (sysinfo::tests): cached word
+      returned without a context, sentinel kept on NULL context, one-shot
+      refresh from context+0x84 that then sticks, and a zero context word
+      cached as a valid value (not mistaken for the sentinel).
   # --- retailOS object counted-text install from the shared context's dotted-triple word ---
   - address: 0x08055f50
     ghidra: FUN_08055f50
