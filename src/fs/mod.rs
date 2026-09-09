@@ -11,6 +11,8 @@ pub mod cache_entry;
 pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
 pub mod file_read;
+/// Exact-length resource-reader transfer @ 0x082a6aa4.
+pub mod resource_reader_read_exact;
 /// HFS B-tree node fetch and validation @ 0x08053d6c.
 pub mod hfs_btree_get_node;
 /// File-path layer failure-status accessor @ 0x0829dcf8.

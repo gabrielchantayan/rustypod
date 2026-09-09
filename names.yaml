@@ -46998,6 +46998,42 @@ functions:
       resident target through a volatile typed boundary so host tests can
       record it; target builds dispatch to its fixed 0x082784d4 address.
 
+  # --- Exact resource-reader transfer (fs/resource_reader_read_exact) ---
+  - address: 0x082a6aa4
+    ghidra: FUN_082a6aa4
+    name: resource_reader_read_exact
+    size: 52
+    sig: "u32 resource_reader_read_exact(const ResourceReader *reader, u8 *buffer, u32 count, u32 transferred_initial)"
+    module: fs/resource_reader_read_exact
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_2/r1: buffer
+      param_3/r2: count
+      param_4/r3: transferred_initial
+      param_1_plus_0x8c: file_handle
+      local_stack_word: transferred
+    notes: >-
+      Raw ARM fixes the extent at exactly 52 bytes,
+      0x082a6aa4..0x082a6ad8: the next separately linked function opens at
+      0x082a6ad8. It loads reader+0x8c, preserves count in r4, pushes the
+      incoming r3 as the initial transferred word, and calls
+      0x08277c74(handle, count, buffer, &transferred). That 28-byte wrapper
+      calls the unrecovered 0x082784d4 body with fifth argument 2. Status
+      zero then transferred == count returns 1; every other combination
+      returns 0. Decoding every ARM B/BL word in osos.dec found exactly 15
+      inbound direct calls, all unconditional bl (0x0828fc24, 0x0828fcac,
+      0x0828fd68, 0x0828fdf8, 0x0828ff4c, 0x0829001c, 0x082900a0,
+      0x082900ec, 0x08290120, 0x082901c8, 0x08290244, 0x082a6d28,
+      0x082a6f40, 0x082a6f90, 0x082a6ff0); zero predicated forms and no
+      plain B branches. The callers leave r3 as live state, so the port
+      exposes it as transferred_initial rather than inventing a fourth
+      semantic input. Deliberate deviation: it reuses fs/file_read's existing
+      volatile typed 0x082784d4 body seam with control word 2 instead of
+      creating a duplicate seam for the thin 0x08277c74 wrapper. Host tests
+      prove exact-success, short-success, and complete-error outcomes and
+      verify every forwarded body argument.
+
   # --- Platform C++ file seek (ft/system) ---
   - address: 0x082787b8
     ghidra: FUN_082787b8
