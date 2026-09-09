@@ -140,6 +140,26 @@ pub unsafe extern "C" fn class_8900_cached_property_6031(this: *mut Class8900) -
     read(store, PROPERTY_KEY_6031, CLASS_ID_6000)
 }
 
+/// class_8900_set_cached_property_6031 — original: `FUN_081ed86c` @
+/// `0x081ed86c` (8 bytes; **14 `bl` call sites**, binary-verified by
+/// decoding every B/BL word in osos.dec — all plain `bl`, no predicated
+/// forms). The next function begins at `0x081ed874`.
+///
+/// Writes `value` verbatim to the class-0x8900 cached state-property word
+/// at +0x30. This is the cache read by
+/// [`class_8900_cached_property_6031`]; zero deliberately marks it cold.
+/// No deliberate deviations: this is the decoded `str r1, [r0, #0x30];
+/// bx lr` assignment over the existing `#[repr(C)]` receiver layout.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class_8900_set_cached_property_6031(
+    this: *mut Class8900,
+    value: u32,
+) {
+    (*this).cached_6031 = value;
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -192,6 +212,23 @@ mod tests {
             store: store_ptr,
         });
         (this, store)
+    }
+
+    /// The setter is an unguarded, verbatim word write: zero restores the
+    /// cold-cache sentinel and nonzero values become immediately visible
+    /// to the warm getter without dereferencing its store.
+    #[test]
+    fn setter_replaces_cache_with_zero_and_arbitrary_words() {
+        let (mut this, _store) = fixture(0x6038);
+        this.store = core::ptr::null_mut();
+
+        for value in [0, 0x603b, u32::MAX] {
+            unsafe { class_8900_set_cached_property_6031(&mut *this, value) };
+            assert_eq!(this.cached_6031, value);
+            if value != 0 {
+                assert_eq!(unsafe { class_8900_cached_property_6031(&mut *this) }, value);
+            }
+        }
     }
 
     /// Warm cache: the word at +0x30 is returned verbatim and the store

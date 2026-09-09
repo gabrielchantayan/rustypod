@@ -14645,6 +14645,34 @@ functions:
       {fp,lr} frame and LLVM's branchy form plus mov/orr synthesis of
       0x6031 standing in for the original's fully predicated eq
       sequence and addeq key formation.
+  - address: 0x081ed86c
+    ghidra: FUN_081ed86c
+    name: class_8900_set_cached_property_6031
+    size: 8
+    sig: "void class_8900_set_cached_property_6031(Class8900 *this, u32 value)"
+    module: app/class_8900
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: value
+      "[this + 0x30]": cached_6031
+    notes: >-
+      14 bl call sites, binary-verified by decoding every B/BL word in
+      osos.dec: all 14 are plain bl, with no predicated forms and no
+      tail-b sites. Ghidra's 8-byte extent is exact: raw bytes are
+      `str r1, [r0, #0x30]; bx lr`, and the next function begins at
+      0x081ed874. The receiver is the registry-class-0x8900 singleton:
+      its ctor zeroes +0x30 and the adjacent port
+      class_8900_cached_property_6031 identifies it as the cached
+      class-0x6000 state-property 0x6031, where zero deliberately means
+      cold. Port writes value verbatim through Class8900's existing
+      repr(C) field, with no NULL guard or other deviation. Host test
+      covers zero plus 0x603b and u32::MAX, and confirms nonzero writes
+      immediately take the getter's warm path without dereferencing a
+      NULL store. match.py structural review of the worktree archive
+      finds the same +0x30 str; LLVM adds only a conventional fp/lr
+      frame around it.
+
 
   - address: 0x0810a7b8
     ghidra: FUN_0810a7b8
