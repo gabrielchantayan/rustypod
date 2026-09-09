@@ -78,6 +78,7 @@ pub mod registration_handle_wrapper;
 pub mod record_manager;
 pub mod refcounted_value;
 pub mod resource;
+pub mod root_context_f9c_bound;
 pub mod resource_chain;
 pub mod scoped_context;
 pub mod service_manager;
