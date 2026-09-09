@@ -50799,3 +50799,47 @@ functions:
       list_pop_empty_returns_null, list_push_pop_fifo_order (FIFO order
       + next zeroed + anchors cleared), list_single_element_clears_
       both_anchors.
+
+  # --- Named attribute-record lookup (util/attr_record) ---
+  - address: 0x080bfb8c
+    ghidra: FUN_080bfb8c
+    name: attr_record_lookup
+    size: 72
+    sig: "u8 *attr_record_lookup(const NamedAttributeTable *attribute_table, const u8 *attribute_name)"
+    module: util/attr_record
+    status: ported
+    renames:
+      param_1/r4: attribute_table
+      param_2/r0: attribute_name
+      attribute_table_plus_0x48/r1: nonzero_guard
+      attribute_table_plus_0x50/r1: attribute_records
+      attribute_table_plus_0x80/r1: global_state_table
+      FUN_080781b0: global_state_get
+      iVar1/r0: state_record
+      state_record_plus_0x04/r0: attribute_record_index
+    notes: >-
+      EXTENT: raw osos.dec is exactly 72 bytes, 0x080bfb8c..0x080bfbd3
+      (18 instruction words, no literal pool); the distinct next function
+      starts with push {r4,lr} at 0x080bfbd4, confirming Ghidra's size. CALL
+      COUNT: decoding every B/BL word in osos.dec found exactly 16 direct
+      references: 0x0803c9d0, 0x0803ca1c, 0x0803cafc, 0x0803cb2c,
+      0x0803cb60, 0x0803cb84, 0x0803cba0, 0x0803cd6c, 0x0803cd7c,
+      0x080ae140, 0x080ae1b8, 0x080ae214, 0x080ae260, 0x080b674c,
+      0x080befb4, and 0x080bf02c. Every reference is a plain unconditional
+      bl; there are no predicated calls or tail b branches. ALGORITHM: return
+      NULL unless attribute_table, its +0x48 guard, attribute_name, and
+      attribute_name[0] are nonzero; call the already-ported
+      global_state_get(attribute_name, attribute_table +0x80); return NULL
+      for a NULL state record; otherwise return attribute_table +0x50 plus
+      state_record[1] << 4. The +0x48 field's identity is unknown and is
+      named only for its verified nonzero-guard role; the state-record index
+      is intentionally unchecked and u32-wrapping. Host tests cover a
+      low-u32 mapped object with exact name/table forwarding and record
+      address, all four early-out conditions without calling the seam, a
+      NULL returned state record, and u32::MAX index wrapping. The shared
+      GLOBAL_STATE_SLOT_FIND test lock serializes this port and
+      global_state_get's existing mock tests. match.py against this
+      worktree's ARM archive reports the same field loads (+0x48, +0x80,
+      +0x50), global_state_get call, state-record +0x4 load, and lsl #4
+      address calculation; its extra frame and register moves are
+      ADS-versus-LLVM codegen differences. Deliberate deviations: none.

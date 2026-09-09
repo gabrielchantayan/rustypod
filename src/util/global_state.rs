@@ -49,9 +49,9 @@ unsafe extern "C" fn missing_global_state_slot_find(
 }
 
 #[cfg(target_os = "none")]
-const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = firmware_global_state_slot_find;
+pub(crate) const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = firmware_global_state_slot_find;
 #[cfg(not(target_os = "none"))]
-const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = missing_global_state_slot_find;
+pub(crate) const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = missing_global_state_slot_find;
 
 /// Unported `FUN_08077ff0` table-slot search. Target builds dispatch to its
 /// retailOS address; host tests install a recording mock through this seam.
@@ -77,9 +77,7 @@ pub unsafe extern "C" fn global_state_get(
 mod tests {
     use super::*;
     extern crate std;
-    use std::sync::{Mutex, MutexGuard};
-
-    static SLOT_FIND_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut RECORDED_NAME: *const u8 = core::ptr::null();
     static mut RECORDED_TABLE: *const u8 = core::ptr::null();
     static mut RETURNED_SLOT: *const *mut u8 = core::ptr::null();
@@ -107,7 +105,7 @@ mod tests {
     }
 
     fn install_recording_slot_find() -> MutexGuard<'static, ()> {
-        let guard = SLOT_FIND_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = crate::testing::GLOBAL_STATE_SLOT_FIND_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             RECORDED_NAME = core::ptr::null();
             RECORDED_TABLE = core::ptr::null_mut();
