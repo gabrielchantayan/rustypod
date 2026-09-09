@@ -162,6 +162,81 @@ const _: [u8; 0x90] = [0; core::mem::offset_of!(ViewBase, word_90)];
 const _: [u8; 0x94] = [0; core::mem::offset_of!(ViewBase, byte_94)];
 const _: [u8; 0x98] = [0; core::mem::offset_of!(ViewBase, word_98)];
 const _: [u8; 0xa0] = [0; core::mem::offset_of!(ViewBase, byte_a0)];
+/// The decoded portion of a view's runtime vtable used by
+/// [`view_base_set_word_44`].
+///
+/// The dynamic target at slot `+0xd4` has no statically recoverable
+/// identity; it is invoked only through the object-provided vtable.
+#[repr(C)]
+pub struct ViewBaseVtable {
+    /// Slots `+0x00..+0xd0`, not decoded by this setter.
+    pub unresolved_00_d0: [usize; 53],
+    /// Slot `+0xd4`: called after `word_44` changes.
+    pub word_44_changed: unsafe extern "C" fn(*mut ViewBase),
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0xd4] = [0; core::mem::offset_of!(ViewBaseVtable, word_44_changed)];
+
+/// ABI of the runtime vtable slot `+0xd4`.
+pub type ViewBaseWord44Changed = unsafe extern "C" fn(*mut ViewBase);
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_view_base_word_44_changed(_view: *mut ViewBase) {
+    panic!("view_base_set_word_44 requires a vtable slot +0xd4 handler")
+}
+
+/// Host replacement for the view's dynamic vtable slot `+0xd4`.
+///
+/// Target builds call the object's actual vtable directly. The `u32`
+/// firmware vtable word cannot represent a host-width function pointer, so
+/// host tests install the observed slot ABI here instead.
+#[cfg(not(target_os = "none"))]
+pub static mut VIEW_BASE_WORD_44_CHANGED: ViewBaseWord44Changed =
+    missing_view_base_word_44_changed;
+
+/// Dispatches the target's runtime vtable slot `+0xd4`.
+#[cfg(target_os = "none")]
+unsafe fn view_base_dispatch_word_44_changed(view: *mut ViewBase) {
+    let vtable = (*view).vtable as usize as *const ViewBaseVtable;
+    let changed = core::ptr::addr_of!((*vtable).word_44_changed).read_volatile();
+    changed(view);
+}
+
+/// Dispatches the host model of the target's runtime vtable slot `+0xd4`.
+#[cfg(not(target_os = "none"))]
+unsafe fn view_base_dispatch_word_44_changed(view: *mut ViewBase) {
+    let changed = core::ptr::addr_of!(VIEW_BASE_WORD_44_CHANGED).read_volatile();
+    changed(view);
+}
+
+/// view_base_set_word_44 — original: `FUN_0826d834` @ `0x0826d834`
+/// (24 bytes, `0x0826d834..0x0826d84c`; the distinct sibling
+/// `FUN_0826d850` starts with `push {r4,r5,r6,lr}` at `0x0826d850`).
+///
+/// Raw ARM loads view `+0x44`, returns unchanged when it equals `word_44`,
+/// otherwise stores the new word then tail-dispatches its vtable slot
+/// `+0xd4` with `view` in r0. A full-image ARM B/BL-word decode finds
+/// **15 direct `bl` call sites, all unconditional**; no predicated call or
+/// direct tail `b` reaches this entry.
+///
+/// Deliberate host deviation: target builds dispatch the object's actual
+/// runtime vtable. Host pointers are wider than the target's `u32` vtable
+/// word, so host tests model the same slot ABI through
+/// [`VIEW_BASE_WORD_44_CHANGED`].
+///
+/// # Safety
+///
+/// `view` must point to a writable [`ViewBase`] whose vtable's `+0xd4` slot
+/// is a valid `void (*)(ViewBase *)` when `word_44` differs.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn view_base_set_word_44(view: *mut ViewBase, word_44: u32) {
+    if core::ptr::addr_of!((*view).word_44).read_volatile() != word_44 {
+        core::ptr::addr_of_mut!((*view).word_44).write_volatile(word_44);
+        view_base_dispatch_word_44_changed(view);
+    }
+}
 
 /// Indirect dispatch for this constructor's two unported callees (the
 /// `StringViewOps` precedent in `ui/string_view.rs`).
@@ -422,6 +497,31 @@ mod tests {
     static mut INITIALIZE_ARGS: (*mut ViewBase, *mut u8, *const ViewSpec) =
         (ptr::null_mut(), ptr::null_mut(), ptr::null());
 
+    static mut WORD_44_CHANGE_COUNT: u32 = 0;
+    static mut WORD_44_CHANGED_VIEW: *mut ViewBase = ptr::null_mut();
+    static mut WORD_44_CHANGED_VALUE: u32 = 0;
+
+    unsafe extern "C" fn recording_word_44_changed(view: *mut ViewBase) {
+        unsafe {
+            *(&raw mut WORD_44_CHANGE_COUNT) += 1;
+            *(&raw mut WORD_44_CHANGED_VIEW) = view;
+            *(&raw mut WORD_44_CHANGED_VALUE) =
+                ptr::addr_of!((*view).word_44).read_volatile();
+        }
+    }
+
+    struct Word44ChangedRestore {
+        previous: ViewBaseWord44Changed,
+    }
+
+    impl Drop for Word44ChangedRestore {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(VIEW_BASE_WORD_44_CHANGED).write_volatile(self.previous);
+            }
+        }
+    }
+
     unsafe extern "C" fn recording_construct_linkage_base(
         view: *mut ViewBase,
         parent: *mut u8,
@@ -669,6 +769,54 @@ mod tests {
             assert_eq!(
                 ptr::addr_of!((*fixture.view()).vtable).read_volatile(),
                 VIEW_BASE_VTABLE_ADDRESS
+            );
+        }
+    }
+    #[test]
+    fn word_44_changes_notify_once_after_the_store() {
+        let _guard = TEST_LOCK.lock();
+        let previous = unsafe {
+            ptr::addr_of!(VIEW_BASE_WORD_44_CHANGED).read_volatile()
+        };
+        let _restore = Word44ChangedRestore { previous };
+        let mut view: ViewBase = unsafe { core::mem::zeroed() };
+
+        unsafe {
+            ptr::addr_of_mut!(VIEW_BASE_WORD_44_CHANGED)
+                .write_volatile(recording_word_44_changed);
+            *(&raw mut WORD_44_CHANGE_COUNT) = 0;
+            *(&raw mut WORD_44_CHANGED_VIEW) = ptr::null_mut();
+            *(&raw mut WORD_44_CHANGED_VALUE) = 0;
+            ptr::addr_of_mut!(view.word_44).write_volatile(0);
+            ptr::addr_of_mut!(view.word_4c).write_volatile(0xa5a5_a5a5);
+
+            view_base_set_word_44(ptr::addr_of_mut!(view), 0);
+            assert_eq!(*(&raw const WORD_44_CHANGE_COUNT), 0);
+
+            view_base_set_word_44(ptr::addr_of_mut!(view), u32::MAX);
+            assert_eq!(
+                ptr::addr_of!(view.word_44).read_volatile(),
+                u32::MAX,
+                "the callback sees the replacement value"
+            );
+            assert_eq!(*(&raw const WORD_44_CHANGE_COUNT), 1);
+            assert_eq!(*(&raw const WORD_44_CHANGED_VIEW), ptr::addr_of_mut!(view));
+            assert_eq!(*(&raw const WORD_44_CHANGED_VALUE), u32::MAX);
+
+            view_base_set_word_44(ptr::addr_of_mut!(view), u32::MAX);
+            assert_eq!(
+                *(&raw const WORD_44_CHANGE_COUNT),
+                1,
+                "equal values return without dispatch"
+            );
+
+            view_base_set_word_44(ptr::addr_of_mut!(view), 0);
+            assert_eq!(*(&raw const WORD_44_CHANGE_COUNT), 2);
+            assert_eq!(*(&raw const WORD_44_CHANGED_VALUE), 0);
+            assert_eq!(
+                ptr::addr_of!(view.word_4c).read_volatile(),
+                0xa5a5_a5a5,
+                "the setter touches only +0x44"
             );
         }
     }
