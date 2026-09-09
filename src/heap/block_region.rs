@@ -11,6 +11,11 @@
 //!   (20 bytes; 10 `bl` + 1 tail `b` call sites): identical shape,
 //!   tail-branching to the mutex unlock @ 0x082e83d8 (thunk @
 //!   0x082621ac).
+//! - `region_elem_copy_construct` — original: `FUN_08280464` @
+//!   0x08280464 (80 bytes including one vtable literal; 15 `bl` call
+//!   sites: 11 unconditional and 4 `blne`): initializes the embedded
+//!   recursive mutex, then locks the source region while copying and
+//!   retaining its two reference fields.
 //! - `block_to_region_start` — original: `FUN_08280430` @ 0x08280430
 //!   (48 bytes; 9 `bl` call sites, binary-verified — osos.asm drops
 //!   one): locks the element's region, reads the region start address
@@ -40,6 +45,9 @@
 //! pointer; `elem + 0x8` = one more region-ref word (copied by the
 //! copy ctor, NULLed by the release); `elem + 0xc..+0x28` = the C++
 //! recursive-mutex member (ctor 0x082621b0, dtor thunk 0x082621dc).
+//! Pointer-bearing element fields use word indices so their host layout
+//! stays disjoint; the mutex member follows those three words (index 3,
+//! or +0xc on ARM) for the same reason.
 //! `region + 0x0` = refcount; `region + 0x4` = region start address
 //! (freed with tag 43 on final release); `region + 0x8` = mutex
 //! object pointer.
@@ -67,14 +75,11 @@
 //!   carry the "no mutual exclusion before the kernel" contract the old
 //!   no-op stubs used to fake wholesale. Host tests install recording
 //!   mocks and prove the lock -> read -> unlock protocol, not exclusion.
-//! - Pointer fields are addressed by WORD INDEX, not by the literal
-//!   target byte offset: on the 32-bit target `index * WORD` reproduces
-//!   the original offsets exactly (0x4, 0x8), while on a 64-bit host the
-//!   fields stay disjoint. Using the literal byte offsets on a 64-bit
-//!   host would make `region + 0x4` and `region + 0x8` overlap by four
-//!   bytes, so a start-address read would return
-//!   `(mutex << 32) | start`. Reads stay unaligned-safe because the test
-//!   fixtures are plain `u8` arrays with no pointer alignment guarantee.
+//! - Pointer fields and the embedded mutex are addressed by WORD INDEX,
+//!   not literal target byte offsets: on the 32-bit target `index * WORD`
+//!   reproduces the original offsets exactly (0x4, 0x8, 0xc), while on a
+//!   64-bit host all element members stay disjoint. A literal +0xc mutex
+//!   offset would overlap the host-sized region reference field.
 //! - The destructor's two unported callees dispatch through
 //!   [`REGION_ELEM_OPS`] (house ops-slot pattern, indirect `blx` in
 //!   place of `bl`; client_populate.rs's `region_destroy` slot now
@@ -98,6 +103,14 @@
 //!     the original.
 
 use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock};
+#[cfg(not(target_os = "none"))]
+use crate::cxx::mutex::CXX_MUTEX_STATUS_OFFSET;
+#[cfg(not(target_os = "none"))]
+use crate::cxx::mutex_attr_init::{cxx_mutexattr_init, MUTEXATTR_MAGIC};
+#[cfg(not(target_os = "none"))]
+use crate::cxx::mutex_settype_init::{
+    CXX_MUTEX_SETTYPE_INIT_OPS, MUTEX_KIND_MAX,
+};
 
 /// Width of a pointer field: 4 on the ARMv5TE target (matching the
 /// original layout), 8 on a 64-bit test host.
@@ -133,12 +146,15 @@ pub static mut REGION_START_FALLBACK: u32 = 0;
 /// precedent.
 pub const REGION_ELEM_VTABLE_ADDRESS: u32 = 0x089a_6444;
 
-/// Byte offset of the recursive-mutex member inside the element
-/// (original: `add r0, r4, #12`). A BYTE offset, not a word index:
-/// the member is opaque — only ever passed to the `member_destroy`
-/// slot — so it needs no disjoint host layout, and the destructor's
-/// closing `sub r0, r0, #12` mirrors the same constant.
-pub const ELEM_MUTEX_OFFSET: usize = 0xc;
+/// Word index of the recursive-mutex member inside the element (byte
+/// offset 0xc on the 32-bit target). It is an index rather than a literal
+/// byte offset so the host representation cannot overlap the preceding
+/// pointer fields.
+pub const ELEM_MUTEX_INDEX: usize = 3;
+
+/// Offset of the recursive-mutex member inside the element: +0xc on target,
+/// and after all three pointer-width element words on the host.
+pub const ELEM_MUTEX_OFFSET: usize = ELEM_MUTEX_INDEX * WORD;
 
 /// Indirect dispatch table for the element destructor's unported
 /// callees (see the module header for each default's contract).
@@ -232,11 +248,61 @@ macro_rules! mutex_op {
     };
 }
 
-/// Reads the pointer field at `base + offset` (unaligned — see the
-/// module header's host deviation).
+/// Reads a pointer field addressed by word index. The C++ elements are
+/// word-aligned on target; host tests deliberately permit byte fixtures.
 #[inline(always)]
 unsafe fn ptr_field(base: *const u8, index: usize) -> *mut u8 {
-    (base.add(index * WORD) as *const *mut u8).read_unaligned()
+    #[cfg(target_os = "none")]
+    {
+        base.add(index * WORD).cast::<*mut u8>().read()
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        (base.add(index * WORD) as *const *mut u8).read_unaligned()
+    }
+}
+
+/// Reads a target-width scalar field addressed by word index. Element
+/// instances are naturally word-aligned C++ objects, as required by the
+/// original `ldr`/`str` instructions.
+#[inline(always)]
+unsafe fn u32_field(base: *mut u8, index: usize) -> *mut u32 {
+    base.add(index * WORD).cast()
+}
+
+/// Runs the unported recursive-mutex constructor @ 0x082621b0 on device.
+/// On hosts, composes the already ported attribute initializer with the
+/// decoded kind-2 settype/PosixMutex initialization sequence so tests can
+/// observe the copied element's resulting mutex.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn construct_recursive_mutex(member: *mut u8) {
+    let construct: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        core::mem::transmute(0x0826_21b0usize);
+    construct(member);
+}
+
+/// Host model of the unported recursive-mutex constructor @ 0x082621b0.
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn construct_recursive_mutex(member: *mut u8) {
+    let mut attr = [0usize; 2];
+    cxx_mutexattr_init(attr.as_mut_ptr());
+    let status = core::ptr::read_volatile(core::ptr::addr_of!(
+        CXX_MUTEX_SETTYPE_INIT_OPS.pthread_mutexattr_settype
+    ))(attr.as_mut_ptr(), MUTEX_KIND_MAX);
+    member.add(CXX_MUTEX_STATUS_OFFSET).cast::<u32>().write(status);
+    if status == 0 {
+        let status = core::ptr::read_volatile(core::ptr::addr_of!(
+            CXX_MUTEX_SETTYPE_INIT_OPS.posix_mutex_init
+        ))(member, attr.as_mut_ptr());
+        member.add(CXX_MUTEX_STATUS_OFFSET).cast::<u32>().write(status);
+    }
+    // pthread_mutexattr_destroy @ 0x082e8474 clears a valid attr's magic;
+    // this transient stack object is otherwise unobservable.
+    if attr[0] as u32 == MUTEXATTR_MAGIC {
+        attr[0] = 0;
+    }
 }
 
 /// region_ref_lock — original: `FUN_082801f8` @ 0x082801f8 (20 bytes).
@@ -245,6 +311,7 @@ unsafe fn ptr_field(base: *const u8, index: usize) -> *mut u8 {
 /// touching the mutex (exactly the original's early `bx lr` with the
 /// NULL load in r0); otherwise returns the mutex lock result.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn region_ref_lock(elem: *const u8) -> u32 {
     let region = ptr_field(elem, ELEM_REGION_INDEX);
     if region.is_null() {
@@ -257,12 +324,66 @@ pub unsafe extern "C" fn region_ref_lock(elem: *const u8) -> u32 {
 ///
 /// Unlock twin of [`region_ref_lock`].
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn region_ref_unlock(elem: *const u8) -> u32 {
     let region = ptr_field(elem, ELEM_REGION_INDEX);
     if region.is_null() {
         return 0;
     }
     (mutex_op!(unlock))(ptr_field(region, REGION_MUTEX_INDEX))
+}
+
+/// region_elem_copy_construct — original: `FUN_08280464` @ 0x08280464
+/// (80 bytes: 76 bytes of code and its vtable literal at 0x082804b4).
+///
+/// Binary-scanned call count: 15 `bl` sites — 11 unconditional and four
+/// `blne` (0x0814b988, 0x081a85a8, 0x081fc39c, 0x083e9f14); no tail `b`
+/// sites. The predicated callers provide the NULL guard, so this function
+/// deliberately dereferences both arguments unconditionally. It plants the
+/// element vtable, constructs its embedded recursive mutex, then locks the
+/// source's region while copying its region pointer and companion word,
+/// increments a non-NULL region's u32 refcount, unlocks the source, and
+/// returns `dst`.
+///
+/// Deliberate host-only deviation: recursive-mutex construction is modeled
+/// from the raw 0x082621b0 body by composing its already ported dependencies;
+/// device builds call that unported body directly. The modeled
+/// pthread_mutexattr_destroy only clears a transient stack attribute's magic,
+/// exactly its observable effect here.
+///
+/// Original listing:
+/// ```text
+/// 08280464  push {r4,r5,r6,lr}
+/// 0828046c  ldr  r1,[pc,#64]       ; 0x089a6444
+/// 08280470  str  r1,[r0],#12
+/// 08280474  bl   0x082621b0        ; recursive mutex ctor
+/// 08280480  bl   0x082801f8        ; source region lock
+/// 08280484  ldr  r0,[r5,#4]
+/// 08280488  str  r0,[r4,#4]
+/// 0828048c  ldr  r1,[r5,#8]
+/// 08280494  str  r1,[r4,#8]
+/// 08280498  ldrne/addne/strne [r0] ; retain non-NULL region
+/// 082804a8  bl   0x082802cc        ; source region unlock
+/// ```
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_elem_copy_construct(dst: *mut u8, src: *const u8) -> *mut u8 {
+    (dst as *mut usize).write(REGION_ELEM_VTABLE_ADDRESS as usize);
+    construct_recursive_mutex(dst.add(ELEM_MUTEX_OFFSET));
+
+    region_ref_lock(src);
+    let region = ptr_field(src, ELEM_REGION_INDEX);
+    #[cfg(target_os = "none")]
+    dst.add(ELEM_REGION_INDEX * WORD).cast::<*mut u8>().write(region);
+    #[cfg(not(target_os = "none"))]
+    (dst.add(ELEM_REGION_INDEX * WORD) as *mut *mut u8).write_unaligned(region);
+    u32_field(dst, 2).write((src.add(2 * WORD).cast::<u32>()).read());
+    if !region.is_null() {
+        let refs = region.cast::<u32>().read();
+        region.cast::<u32>().write(refs.wrapping_add(1));
+    }
+    region_ref_unlock(src);
+    dst
 }
 
 /// block_to_region_start — original: `FUN_08280430` @ 0x08280430
@@ -454,6 +575,80 @@ mod tests {
         restore_mutex();
     }
 
+
+    // ---- region_elem_copy_construct -------------------------------
+
+    /// The copy constructor preserves both reference fields while holding
+    /// the source's lock, initializes a recursive destination mutex, and
+    /// increments the region refcount with the original's u32 wrapping.
+    #[test]
+    fn copy_construct_retains_live_region_and_initializes_recursive_mutex() {
+        use crate::kernel::posix_mutex::PosixMutex;
+
+        let _guard = mock_mutex();
+        let mut src = [0usize; 5];
+        let mut dst = [0usize; 8];
+        let mut region = [0usize; 3];
+        let src_ptr = src.as_mut_ptr().cast::<u8>();
+        let dst_ptr = dst.as_mut_ptr().cast::<u8>();
+        let region_ptr = region.as_mut_ptr().cast::<u8>();
+        unsafe {
+            write_ptr_field(region_ptr, REGION_MUTEX_INDEX, 0x5000usize as *mut u8);
+            region_ptr.cast::<u32>().write(u32::MAX);
+            write_ptr_field(src_ptr, ELEM_REGION_INDEX, region_ptr);
+            u32_field(src_ptr, 2).write(0xa5a5_5a5a);
+
+            assert_eq!(region_elem_copy_construct(dst_ptr, src_ptr), dst_ptr);
+            assert_eq!(dst[0], REGION_ELEM_VTABLE_ADDRESS as usize);
+            assert_eq!(ptr_field(dst_ptr, ELEM_REGION_INDEX), region_ptr);
+            assert_eq!(u32_field(dst_ptr, 2).read(), 0xa5a5_5a5a);
+            assert_eq!(region_ptr.cast::<u32>().read(), 0, "u32 refcount wraps");
+
+            let mutex = &*dst_ptr.add(ELEM_MUTEX_OFFSET).cast::<PosixMutex>();
+            assert_eq!(mutex.magic, crate::cxx::mutex_settype_init::MUTEX_LIVE_MAGIC);
+            assert_eq!(
+                mutex.attr_flags & 0x0030_0000,
+                0x0020_0000,
+                "kind 2 (recursive) occupies attr bits 4..5"
+            );
+            assert_eq!(
+                dst_ptr
+                    .add(ELEM_MUTEX_OFFSET + crate::cxx::mutex::CXX_MUTEX_STATUS_OFFSET)
+                    .cast::<u32>()
+                    .read(),
+                0,
+                "the initializer status replaces the successful settype status"
+            );
+        }
+        assert_eq!(
+            events(),
+            std::vec![(true, 0x5000), (false, 0x5000)],
+            "source region remains locked across copy and retain"
+        );
+        restore_mutex();
+    }
+
+    /// A NULL source region is still copied and unlocked through the
+    /// helper's early return, but no mutex operation or refcount access runs.
+    #[test]
+    fn copy_construct_preserves_null_region_without_mutex_traffic() {
+        let _guard = mock_mutex();
+        let mut src = [0usize; 5];
+        let mut dst = [0usize; 8];
+        let src_ptr = src.as_mut_ptr().cast::<u8>();
+        let dst_ptr = dst.as_mut_ptr().cast::<u8>();
+        unsafe {
+            write_ptr_field(src_ptr, ELEM_REGION_INDEX, core::ptr::null_mut());
+            u32_field(src_ptr, 2).write(0x1020_3040);
+
+            assert_eq!(region_elem_copy_construct(dst_ptr, src_ptr), dst_ptr);
+            assert_eq!(dst[0], REGION_ELEM_VTABLE_ADDRESS as usize);
+            assert!(ptr_field(dst_ptr, ELEM_REGION_INDEX).is_null());
+            assert_eq!(u32_field(dst_ptr, 2).read(), 0x1020_3040);
+        }
+        assert!(events().is_empty(), "NULL region short-circuits both helpers");
+        restore_mutex();
+    }
     /// The shipped defaults are the real mutex pair: the seed walk runs
     /// a genuine acquire/release on the region's mutex object and the
     /// mapping comes out unchanged.
