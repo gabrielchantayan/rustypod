@@ -276,10 +276,18 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn replacement_permits(
+        _provider: *mut ResourceProvider,
+        _replacement: *mut ResourceProvider,
+    ) -> u32 {
+        1
+    }
+
     static PROVIDER_VTABLE: ResourceProviderVTable = ResourceProviderVTable {
         slots_below: [None; 22],
         read: unused_read as ResourceReadFn,
-        slots_between: [None; 2],
+        slot_5c: None,
+        replacement_allowed: replacement_permits,
         find: find_stub as ResourceFindFn,
         write: unused_write as ResourceWriteFn,
     };

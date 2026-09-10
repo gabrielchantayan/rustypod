@@ -126,6 +126,15 @@ pub type ResourceReadFn = unsafe extern "C" fn(
     id: u32,
 ) -> u32;
 
+/// Vtable slot +0x60: may this provider be replaced by `replacement`?
+///
+/// [`crate::ui::view_base::view_base_set_resource_provider`] leaves the
+/// owning view unchanged when this returns zero.
+pub type ResourceProviderReplacementAllowedFn = unsafe extern "C" fn(
+    provider: *mut ResourceProvider,
+    replacement: *mut ResourceProvider,
+) -> u32;
+
 /// Vtable slot +0x68: "take this write".
 ///
 /// Returns non-zero when the provider accepted the write of `value`
@@ -148,8 +157,10 @@ pub struct ResourceProviderVTable {
     pub slots_below: [Option<unsafe extern "C" fn()>; 22],
     /// Slot +0x58.
     pub read: ResourceReadFn,
-    /// Slots +0x5c..+0x60, not decoded by this port.
-    pub slots_between: [Option<unsafe extern "C" fn()>; 2],
+    /// Slot +0x5c, not decoded by this port.
+    pub slot_5c: Option<unsafe extern "C" fn()>,
+    /// Slot +0x60: decides whether a view may replace this provider.
+    pub replacement_allowed: ResourceProviderReplacementAllowedFn,
     /// Slot +0x64.
     pub find: ResourceFindFn,
     /// Slot +0x68.
@@ -169,6 +180,9 @@ pub struct ResourceProvider {
     /// @ 0x082722a0.
     pub next: *mut ResourceProvider,
 }
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x60] = [0; core::mem::offset_of!(ResourceProviderVTable, replacement_allowed)];
 
 /// resource_chain_find — original: `FUN_0827216c` @ 0x0827216c
 /// (84 bytes).
@@ -558,10 +572,18 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn replacement_permits(
+        _provider: *mut ResourceProvider,
+        _replacement: *mut ResourceProvider,
+    ) -> u32 {
+        1
+    }
+
     const VTABLE: ResourceProviderVTable = ResourceProviderVTable {
         slots_below: [None; 22],
         read: read_not_called,
-        slots_between: [None; 2],
+        slot_5c: None,
+        replacement_allowed: replacement_permits,
         find: scripted_find,
         write: write_not_called,
     };
@@ -726,7 +748,8 @@ mod tests {
         static OTHER: ResourceProviderVTable = ResourceProviderVTable {
             slots_below: [None; 22],
             read: read_not_called,
-            slots_between: [None; 2],
+            slot_5c: None,
+            replacement_allowed: replacement_permits,
             find: always_answers,
             write: write_not_called,
         };
@@ -900,7 +923,8 @@ mod tests {
     const WRITE_VTABLE: ResourceProviderVTable = ResourceProviderVTable {
         slots_below: [None; 22],
         read: scripted_read,
-        slots_between: [None; 2],
+        slot_5c: None,
+        replacement_allowed: replacement_permits,
         find: find_not_called,
         write: scripted_write,
     };
@@ -1090,7 +1114,8 @@ mod tests {
         static OTHER_WRITE: ResourceProviderVTable = ResourceProviderVTable {
             slots_below: [None; 22],
             read: answers_0x4242,
-            slots_between: [None; 2],
+            slot_5c: None,
+            replacement_allowed: replacement_permits,
             find: find_not_called,
             write: always_accepts,
         };

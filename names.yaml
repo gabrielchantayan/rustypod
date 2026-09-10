@@ -16745,6 +16745,42 @@ functions:
       r1 remains caller-saved scratch. The port calls the direct region
       form rather than tail-branching, preserving the returned element.
 
+  - address: 0x0826ef88
+    ghidra: FUN_0826ef88
+    name: view_base_set_resource_provider
+    size: 100
+    sig: "ViewBase *view_base_set_resource_provider(ViewBase *view, ResourceProvider *replacement)"
+    module: ui/view_base
+    status: ported
+    renames:
+      param_1/r4: view
+      param_2/r5: replacement
+      "view+0x38": resource_provider
+      "resource_provider vtable+0x60": replacement_allowed
+      FUN_08124dbc: resource_provider_detach_view (unported)
+      FUN_08124af4: resource_provider_attach_view (unported)
+      FUN_0826ec9c: ui_element_invalidate
+    notes: >-
+      Raw extent is exactly 100 bytes: push {r4,r5,r6,lr} begins at
+      0x0826ef88, the pop and tail b to 0x0826ec14 end at 0x0826efec,
+      and the distinct following function begins at 0x0826efec. The
+      function asks the existing provider through vtable slot +0x60 whether
+      replacement is allowed. A non-zero result detaches the provider
+      re-read from view+0x38 through 0x08124dbc with (provider, view, 0),
+      stores the requested provider, then invokes 0x08124af4 with
+      (replacement, view) and invalidates the whole view. A zero result
+      preserves view+0x38 and skips the detach, but still invokes
+      0x08124af4 with the requested provider before invalidating. A NULL
+      current provider stores the requested provider without a virtual call;
+      the requested provider itself is never NULL-guarded. Decoding every
+      ARM B/BL word in osos.dec finds exactly 10 direct call sites, all
+      unconditional bl (0x0811dc60, 0x08142eec, 0x081806d8, 0x081a76dc,
+      0x081dd9d8, 0x081dda30, 0x081dda7c, 0x081ddac8, 0x081ddae0,
+      0x081ddaf8); there are no predicated bl forms, tail b references, or
+      image-word references. The two unported fixed helpers remain behind a
+      target-address/host-recorder seam; the now-named shared provider-vtable
+      slot models +0x60 directly on both host and target. Host tests cover
+      no-current, accepted, rejected, and NULL-replacement paths.
   - address: 0x082a5e48
     ghidra: FUN_082a5e48
     name: ui_element_reference_target_item_count
