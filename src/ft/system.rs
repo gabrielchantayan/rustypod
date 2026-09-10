@@ -37,6 +37,9 @@
 //! synchronization owner (+4), rejects a nonzero state byte with error 2,
 //! and otherwise returns the open-status word when the directory-entry
 //! index is -1 or writes the cached entry length.
+//! The adjacent cursor query [`ft_platform_file_tell`] @ 0x082a539c shares
+//! that lock/error path and returns the cursor at +0x34.
+
 //!
 //! [`ft_platform_stream_read`] @ 0x082d3d7c is ported too. Its C++ file
 //! seek body [`ft_platform_file_seek`] @ 0x082787b8 now directly owns the
@@ -54,7 +57,9 @@
 
 use crate::ft::stream::FtStream;
 use crate::heap::veneers::operator_new;
-use crate::kernel::sync_mutex::{mutex_lock_counted, mutex_unlock_counted, CountedMutex};
+use crate::kernel::sync_mutex::{
+    counted_mutex_guard_acquire, mutex_lock_counted, mutex_unlock_counted, CountedMutex,
+};
 
 /// The opener's `moveq r0, #9` @ 0x082d3de4 — a null `FT_Stream`. These
 /// two codes are the firmware's own numbering, not FreeType's;
@@ -480,6 +485,61 @@ pub unsafe extern "C" fn ft_platform_file_length(
     result
 }
 
+/// ft_platform_file_tell — original: `FUN_082a539c` @ `0x082a539c`
+/// (116 bytes; 11 direct `bl` call sites, binary-scanned from `osos.dec`;
+/// no predicated direct calls).
+///
+/// Acquires the counted mutex at `handle->synchronization_owner + 0x44`,
+/// rejects a nonzero state byte with error 2, and returns the open-status
+/// word without touching `position` when the directory-entry index is -1.
+/// For every other index it writes the file cursor at +0x34 through
+/// `position`, releases the lock, and returns 0. Every exit releases the
+/// same lock; the counted unlock decrements its hold counter before it
+/// signals the ROM semaphore.
+///
+/// The target ABI is exactly `(void *handle, u32 *position) -> i32`:
+/// Ghidra's two trailing phantom parameters do not correspond to any raw ARM
+/// register reads. On the target it uses the original one-word scope guard.
+/// The host model locks the named native-pointer field directly because the
+/// raw guard's fixed +0x44 address arithmetic would target host padding.
+///
+/// # Safety
+///
+/// `handle` must point to an initialized [`FtPlatformFile`] whose
+/// synchronization owner is non-null and has an initialized counted mutex.
+/// `position` must be a valid writable `u32` on the success path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_platform_file_tell(
+    handle: *mut core::ffi::c_void,
+    position: *mut u32,
+) -> i32 {
+    let file = handle.cast::<FtPlatformFile>();
+    #[cfg(target_os = "none")]
+    let mut counted_lock = core::ptr::null_mut();
+    #[cfg(target_os = "none")]
+    counted_mutex_guard_acquire(core::ptr::addr_of_mut!(counted_lock), file.cast());
+    #[cfg(not(target_os = "none"))]
+    let lock = core::ptr::addr_of_mut!((*(*file).synchronization_owner).length_query_lock);
+    #[cfg(not(target_os = "none"))]
+    mutex_lock_counted(lock);
+
+    let result = if (*file).length_query_state != 0 {
+        2
+    } else if (*file).directory_entry_index == -1 {
+        (*file).open_status
+    } else {
+        position.write((*file).cursor);
+        0
+    };
+
+    #[cfg(target_os = "none")]
+    mutex_unlock_counted(counted_lock);
+    #[cfg(not(target_os = "none"))]
+    mutex_unlock_counted(lock);
+    result
+}
+
 /// ft_platform_stream_close (the firmware's `FT_Stream_CloseFunc`) —
 /// original: `FUN_082d3d40` @ 0x082d3d40 (60 bytes; no direct `bl` call
 /// site — planted in `stream->close` by [`ft_platform_stream_open`] @
@@ -897,6 +957,47 @@ mod tests {
             let handle = prepare_length_query(0, -1, -37, 42);
             assert_eq!(ft_platform_file_length(handle, &mut size), -37);
             assert_eq!(size, 0xdead_beef, "missing entry does not write size");
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // ft_platform_file_tell.
+
+    #[test]
+    fn file_tell_writes_the_cursor_for_every_non_sentinel_entry() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            for (entry, cursor) in [(0, 0), (8, 0x1234_5678), (-2, u32::MAX)] {
+                let handle = prepare_length_query(0, entry, -99, 0);
+                (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = cursor;
+                let mut position = 0xdead_beef;
+                assert_eq!(ft_platform_file_tell(handle, &mut position), 0);
+                assert_eq!(position, cursor, "entry {entry}");
+                assert_eq!(
+                    (*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count,
+                    0x51,
+                    "the acquire/release pair balances on success"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn file_tell_preserves_the_output_on_state_and_missing_entry_errors() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            let mut position = 0xdead_beef;
+            let handle = prepare_length_query(1, 4, -99, 42);
+            (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 91;
+            assert_eq!(ft_platform_file_tell(handle, &mut position), 2);
+            assert_eq!(position, 0xdead_beef, "state error does not write position");
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+
+            let handle = prepare_length_query(0, -1, -37, 42);
+            (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 17;
+            assert_eq!(ft_platform_file_tell(handle, &mut position), -37);
+            assert_eq!(position, 0xdead_beef, "missing entry does not write position");
             assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
         }
     }
