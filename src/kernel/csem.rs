@@ -52,11 +52,10 @@
 //!   original's `adds r0, r0, #1` + EQ — old exactly -1, a single
 //!   sleeper may be parked) it tail-branches thunk 0x08037e78 -> ROM
 //!   0x220041cc with the waiter id. BINARY-VERIFIED CORRECTION to the
-//!   scouting notes: the wake target is kobj's waiter-signal entry
 //!   (ported as `kobj::waiter_wake` @ 0x080567f8, the bare alias of
-//!   the same thunk), NOT thunk 0x08037ea8 / ROM 0x22004368
-//!   (CSEM_ROM_WAKE, which only csem_signal/csem_wake use), and the
-//!   wake condition is equality with -1, not a signed < 0.
+//!   the same thunk), NOT thunk 0x08037ea8 / ROM 0x22004368, whose
+//!   selector-1 record is now built by `gateway_wake_object`; the wake
+//!   condition is equality with -1, not a signed < 0.
 //! - `csem_post_deferred` — (no Ghidra name; absent from functions.csv,
 //!   extent verified from osos.asm) @ 0x080567d0 (40 bytes; 1 call
 //!   site: the tail `b` @ 0x080c692c of the deref wrapper
@@ -94,13 +93,13 @@
 //!   zero->1 timeout clamp and returns 1 exactly on RTXC code 5, which is
 //!   the exact comparison csem_wait makes, so behavior is unchanged and
 //!   the ROM boundary stays the single `KOBJ_HOOKS.rom_waiter_wait` slot.
-//! - ROM 0x22004368 (the wake) is a genuinely new ROM entry point (it is
-//!   NOT kobj's rom_waiter_signal @ 0x220041cc), so it gets its own
-//!   dispatch slot `CSEM_ROM_WAKE` (default: no-op, like kobj's missing
-//!   wake stub; volatile read so LLVM cannot fold the stub in).
+//! - The 0x22004368 wake body is ported as
+//!   `gateway_wake::gateway_wake_object`, which builds the raw selector-1
+//!   request and uses the established message-dispatch seam.
 //! - The original reads `*ptr` twice back to back (`ldr r0; ldr r1`);
 //!   with interrupts masked both loads see the same value, so the port
 //!   reads once.
+use crate::kernel::gateway_wake::gateway_wake_object;
 
 use crate::kernel::kobj::{waiter_wait, waiter_wake};
 
@@ -254,21 +253,6 @@ pub unsafe extern "C" fn atomic_sub_irqsafe(amount: i32, ptr: *mut i32) -> i32 {
 // The counting semaphore.
 // ---------------------------------------------------------------------------
 
-/// ROM wake @ 0x22004368 (thunk 0x08037ea8): wakes the sleeper of the
-/// waiter object `id`. A different ROM entry from kobj's rom_waiter_signal
-/// (0x220041cc); its exact RTXC service is unidentified beyond "wake" —
-/// pairing with the 0x220043c0 sleep is what the call sites record.
-pub static mut CSEM_ROM_WAKE: unsafe extern "C" fn(id: u32) = missing_rom_csem_wake;
-
-/// Default stub: waking into a nonexistent kernel is a harmless no-op
-/// (same contract as kobj's missing wake stub).
-unsafe extern "C" fn missing_rom_csem_wake(_id: u32) {}
-
-/// Reads the wake slot (volatile — see the module header).
-#[inline(always)]
-fn rom_wake() -> unsafe extern "C" fn(id: u32) {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CSEM_ROM_WAKE)) }
-}
 
 /// csem_wait — original: `FUN_08056904` @ 0x08056904 (88 bytes).
 ///
@@ -299,7 +283,7 @@ pub unsafe extern "C" fn csem_wait(csem: *mut CountingSem, timeout: u32) -> u32 
 pub unsafe extern "C" fn csem_signal(csem: *mut CountingSem) {
     let old = atomic_sub_irqsafe(1, core::ptr::addr_of_mut!((*csem).count));
     if old.wrapping_sub(1) < 0 {
-        (rom_wake())((*csem).waiter_id);
+        gateway_wake_object((*csem).waiter_id);
     }
 }
 
@@ -309,7 +293,7 @@ pub unsafe extern "C" fn csem_signal(csem: *mut CountingSem) {
 /// bookkeeping.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn csem_wake(id: u32) {
-    (rom_wake())(id);
+    gateway_wake_object(id);
 }
 
 /// csem_post — original: `FUN_080567a8` @ 0x080567a8 (40 bytes).
@@ -318,9 +302,9 @@ pub unsafe extern "C" fn csem_wake(id: u32) {
 /// [`atomic_add_irqsafe`] and, when the count was exactly -1 (the
 /// original's `adds r0, r0, #1` + EQ — one sleeper may be parked),
 /// wakes the waiter object via thunk 0x08037e78 -> ROM 0x220041cc.
-/// The wake goes through the ported [`waiter_wake`] (kobj's waiter
-/// signal), NOT the [`CSEM_ROM_WAKE`] slot — binary-verified, see the
-/// module header's correction note.
+/// The wake goes through the ported [`waiter_wake`] (kobj's selector-2
+/// signal), not [`gateway_wake_object`]'s selector-1 path; binary-verified
+/// in the module header.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn csem_post(csem: *mut CountingSem) {
     let old = atomic_add_irqsafe(1, core::ptr::addr_of_mut!((*csem).count));
@@ -355,8 +339,13 @@ mod tests {
     use super::*;
     use crate::kernel::kobj::{KobjHooks, DEFAULT_KOBJ_HOOKS, KOBJ_HOOKS};
     use crate::kernel::task_lock::{self, RomThunkOps};
+    use crate::runtime::message_dispatch_veneer::tests::DISPATCH_OPS_LOCK;
+    use crate::runtime::message_dispatch_veneer::{
+        MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
+    };
     use core::ptr::{addr_of, addr_of_mut};
     use std::sync::MutexGuard;
+    use parking_lot::MutexGuard as ParkingMutexGuard;
     use std::vec;
     use std::vec::Vec;
 
@@ -379,6 +368,11 @@ mod tests {
         (*addr_of_mut!(WAKE_LOG)).push(id);
     }
 
+    unsafe extern "C" fn mock_gateway_wake(request: *mut u32) {
+        assert_eq!(request.read(), 1, "csem reaches gateway selector 1");
+        mock_wake(request.add(2).read());
+    }
+
     unsafe extern "C" fn mock_deferred_wake(id: usize) -> usize {
         (*addr_of_mut!(DEFERRED_WAKE_LOG)).push(id as u32);
         0
@@ -389,18 +383,23 @@ mod tests {
     /// Any non-5 code — the sleeper was woken.
     const RC_WOKEN: u32 = 0;
 
-    /// Installs the cpsr simulation + mock ROM sleep/wake under kobj's
-    /// hook lock, plus the deferred-wake mock in task_lock's ROM_KERNEL
-    /// under its OPS_LOCK, and returns both guards with the saved table.
-    /// Lock order is always HOOKS_LOCK then OPS_LOCK (no other module
-    /// takes both, so no cycle).
+    /// Installs the cpsr simulation, ROM sleep/wake hooks, and the selector-1
+    /// gateway dispatcher. Lock order is KOBJ_HOOKS, dispatcher, then
+    /// task_lock's ROM table; no other test holds more than one of them.
     fn install(
         initial_cpsr: u32,
         sleep_rc: u32,
-    ) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, RomThunkOps) {
+    ) -> (
+        MutexGuard<'static, ()>,
+        ParkingMutexGuard<'static, ()>,
+        MutexGuard<'static, ()>,
+        RomThunkOps,
+        MessageDispatchVeneerOps,
+    ) {
         let guard = crate::kernel::kobj::tests::HOOKS_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        let dispatch_guard = DISPATCH_OPS_LOCK.lock();
         let task_lock_guard = crate::kernel::task_lock::tests::OPS_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -416,22 +415,33 @@ mod tests {
                 rom_waiter_signal: mock_wake,
                 ..DEFAULT_KOBJ_HOOKS
             });
-            *addr_of_mut!(CSEM_ROM_WAKE) = mock_wake;
+            let dispatch_saved = MESSAGE_DISPATCH_VENEER_OPS;
+            MESSAGE_DISPATCH_VENEER_OPS = MessageDispatchVeneerOps {
+                dispatch: mock_gateway_wake,
+            };
             let saved = core::ptr::read_volatile(addr_of!(task_lock::ROM_KERNEL));
             let mut patched = saved;
             patched.rom_svc_22001cbc = mock_deferred_wake;
             addr_of_mut!(task_lock::ROM_KERNEL).write(patched);
-            (guard, task_lock_guard, saved)
+            (guard, dispatch_guard, task_lock_guard, saved, dispatch_saved)
         }
     }
 
     /// Restores the defaults; takes the guards by value so they drop last
     /// (house pattern, see stdio/seek_core.rs).
-    fn restore(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>, RomThunkOps)) {
+    fn restore(
+        guards: (
+            MutexGuard<'static, ()>,
+            ParkingMutexGuard<'static, ()>,
+            MutexGuard<'static, ()>,
+            RomThunkOps,
+            MessageDispatchVeneerOps,
+        ),
+    ) {
         unsafe {
             addr_of_mut!(KOBJ_HOOKS).write(DEFAULT_KOBJ_HOOKS);
-            *addr_of_mut!(CSEM_ROM_WAKE) = missing_rom_csem_wake;
-            addr_of_mut!(task_lock::ROM_KERNEL).write(guards.2);
+            MESSAGE_DISPATCH_VENEER_OPS = guards.4;
+            addr_of_mut!(task_lock::ROM_KERNEL).write(guards.3);
         }
         drop(guards);
     }
@@ -812,8 +822,8 @@ mod tests {
     #[test]
     fn post_deferred_at_minus_one_wakes_via_rom_22001cbc() {
         // The EQ boundary: old = -1 -> old+1 = 0. The wake rides the
-        // rom_svc_22001cbc slot of task_lock's ROM_KERNEL, NOT the
-        // waiter_wake / CSEM_ROM_WAKE paths of the sibling ops.
+        // rom_svc_22001cbc slot of task_lock's ROM_KERNEL, not either
+        // selector-1 gateway wake or the selector-2 waiter_wake path.
         let guard = install(0x13, 0);
         let mut sem = csem(-1, 0x1234);
         unsafe {

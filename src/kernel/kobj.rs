@@ -351,7 +351,12 @@ pub unsafe extern "C" fn mailbox_slot_signal(slot: *mut *mut Mailbox) {
 pub(crate) mod tests {
     extern crate std;
     use super::*;
+    use crate::runtime::message_dispatch_veneer::tests::DISPATCH_OPS_LOCK;
+    use crate::runtime::message_dispatch_veneer::{
+        MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
+    };
     use std::sync::{Mutex, MutexGuard};
+    use parking_lot::MutexGuard as ParkingMutexGuard;
     use std::vec;
     use std::vec::Vec;
 
@@ -626,29 +631,42 @@ pub(crate) mod tests {
         }
     }
 
-    /// Installs the recording wake over `CSEM_ROM_WAKE` (the ROM entry
-    /// `csem_signal` reaches on the negative-count path) for as long as
-    /// the returned guard lives. Ordering with the csem tests, which mock
-    /// the same slot, comes from `HOOKS_LOCK`.
-    struct CsemWakeGuard(MutexGuard<'static, ()>);
+    /// Installs a selector-1 gateway recorder for `csem_signal`'s
+    /// negative-count path. It follows the csem test lock order:
+    /// KOBJ_HOOKS before the shared message-dispatch seam.
+    struct CsemWakeGuard {
+        _hooks: MutexGuard<'static, ()>,
+        _dispatch: ParkingMutexGuard<'static, ()>,
+        saved: MessageDispatchVeneerOps,
+    }
 
     impl Drop for CsemWakeGuard {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(crate::kernel::csem::CSEM_ROM_WAKE).write(no_wake);
+                MESSAGE_DISPATCH_VENEER_OPS = self.saved;
             }
         }
     }
 
-    /// Stand-in for the crate default while the mock is uninstalled.
-    unsafe extern "C" fn no_wake(_id: u32) {}
+    unsafe extern "C" fn mock_gateway_wake(request: *mut u32) {
+        assert_eq!(request.read(), 1, "csem reaches gateway selector 1");
+        mock_wake(request.add(2).read());
+    }
 
     fn mock_csem_wake() -> CsemWakeGuard {
-        let guard = mock_hooks();
+        let hooks = mock_hooks();
+        let dispatch = DISPATCH_OPS_LOCK.lock();
+        let saved = unsafe { MESSAGE_DISPATCH_VENEER_OPS };
         unsafe {
-            core::ptr::addr_of_mut!(crate::kernel::csem::CSEM_ROM_WAKE).write(mock_wake);
+            MESSAGE_DISPATCH_VENEER_OPS = MessageDispatchVeneerOps {
+                dispatch: mock_gateway_wake,
+            };
         }
-        CsemWakeGuard(guard)
+        CsemWakeGuard {
+            _hooks: hooks,
+            _dispatch: dispatch,
+            saved,
+        }
     }
 
     /// A mailbox block seeded with a token count and a waiter id.
