@@ -61108,3 +61108,30 @@ functions:
       0x6c-byte callback-queue object. Target builds load the runtime-owned
       global word directly; host builds use a native-width static pointer
       because the firmware's 32-bit global cannot hold a 64-bit host pointer.
+
+  # --- UI indexed-element selection ---
+  - address: 0x081ea758
+    ghidra: FUN_081ea758
+    name: ui_element_set_selection_index
+    size: 16
+    sig: "void *ui_element_set_selection_index(void *element, u32 selection_index)"
+    module: ui/selection_index
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: selection_index
+      FUN_0826ec9c: ui_element_invalidate
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent from 0x081ea758
+      through the tail b to ui_element_invalidate at 0x081ea764; the next
+      separately linked function opens at 0x081ea768 with mov r3,#0. The
+      body stores selection_index to element+0x124, sets the element+0x120
+      change byte to one, then invalidates its whole bounds and returns that
+      function's restored element pointer. Decoding every ARM B/BL word finds
+      exactly 10 direct call sites: two unconditional bl, seven blne, and one
+      blcs; no direct b reaches this entry. The seven blne callers guard
+      nullable lookup results, while the blcs caller at 0x081ea7c4 clamps the
+      new selection index to its element-owned count. Ghidra's purported body
+      includes the independently entered 0x081ea768 sibling; the port follows
+      raw ARM instead. No deviations: the existing ui_element_invalidate port
+      is the verified target of the retail tail branch.
