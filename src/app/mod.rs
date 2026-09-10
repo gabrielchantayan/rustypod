@@ -104,6 +104,7 @@ pub mod silver_controller;
 pub mod silver_list_table;
 pub mod stage_progress;
 pub mod singletons;
+pub mod showcase_queue_has_pending_entry;
 pub mod screen_base;
 pub mod screen_layout;
 pub mod singleton_state;
