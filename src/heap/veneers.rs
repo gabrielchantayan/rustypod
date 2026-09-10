@@ -522,6 +522,32 @@ pub unsafe extern "C" fn free_tag4(ptr: *mut u8) {
     free_wrapper(ptr, TAG_MEM_BUFFER);
 }
 
+/// free_tag4_if_nonnull — original: `FUN_0804938c` @ 0x0804938c (12 bytes;
+/// 8 unconditional `bl` + 3 `blne` call sites, binary-verified by decoding
+/// every ARM B/BL word in osos.dec). Whole body:
+///
+/// ```text
+/// 0804938c:  cmp r0, #0
+/// 08049390:  bne 0x0805d070    ; free_tag4(ptr)
+/// 08049394:  bx  lr
+/// ```
+///
+/// Releases a non-NULL MemH/tag-4 allocation; NULL returns before the heap
+/// lazy-init/free path. The 3 predicated callers (`blne`) add an outer guard,
+/// so their pointers are checked twice; the 8 unconditional callers rely on
+/// this guard. `0x08049398` starts the distinct `b 0x082aad24` function.
+///
+/// Deviation: the original conditional tail branch is a guarded call because
+/// Rust does not guarantee tail calls. The callee is the existing
+/// [`free_tag4`], preserving its tag-4 heap dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn free_tag4_if_nonnull(ptr: *mut u8) {
+    if !ptr.is_null() {
+        free_tag4(ptr);
+    }
+}
+
 /// calloc_tag4 — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes; 23 `bl`
 /// call sites, binary-verified by decoding every B/BL word in osos.dec —
 /// none predicated, no tail `b`). Ghidra's 8-byte extent is exactly
@@ -1218,6 +1244,27 @@ pub(crate) mod tests {
             free_tag4(core::ptr::null_mut());
             assert_eq!(FREE_CALLS, 1, "NULL still reaches the heap");
             assert!(LAST_FREE_PTR.is_null());
+            assert_eq!(LAST_FREE_TAG, 4);
+        }
+    }
+
+    #[test]
+    fn free_tag4_if_nonnull_guards_before_the_tag4_veneer() {
+        let _lock = mock_heap();
+        unsafe {
+            // The target's `cmp; bne; bx lr` avoids both lazy init and free
+            // for NULL, unlike free_tag4 itself.
+            free_tag4_if_nonnull(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0);
+            assert_eq!(CREATE_CALLS, 0);
+
+            // A concrete non-NULL pointer reaches the existing tag-4 veneer
+            // unchanged, including its lazy-default-heap initialization.
+            free_tag4_if_nonnull(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 4);
         }
     }
