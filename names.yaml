@@ -58732,3 +58732,37 @@ functions:
       directly dispatched virtually. No behavioral deviations. Host tests
       cover NULL, exact and adjacent non-matching tags, preservation of the
       second word, and absence of mutation.
+
+  # --- recursive tree flag-bit propagation ---
+  - address: 0x08157ea0
+    ghidra: FUN_08157ea0
+    name: propagate_tree_flag_bit_3
+    size: 120
+    sig: "void propagate_tree_flag_bit_3(TreeNode *node, u32 mode)"
+    module: app/tree_flag_propagation
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: mode
+      param_1_plus_0x48: flags
+      param_1_plus_0xa8: children
+      "vtable_plus_0x14": child_walk_mode_query
+      FUN_0826d80c: set_tree_node_flag_bit_3
+    notes: >-
+      Raw osos.dec confirms the 120-byte body from 0x08157ea0 through
+      0x08157f18, where the separately linked next function begins. It updates
+      bit 3 (0x08) in node+0x48 via 0x0826d80c, then cursor-walks the
+      collection at node+0xa8. Each child gets vtable+0x14(child, 0x1100);
+      a zero result applies the bit directly, while any nonzero result recurses.
+      Whole-image ARM B/BL-immediate decoding finds 11 direct bl callers: ten
+      unconditional and blne at 0x081412c8; the recursive bl at 0x08157ee8 is
+      included. There is also bne tail caller 0x081412f4 and no aligned image
+      word containing the entry address. The child vtable query is not assigned
+      a stronger identity. The original has no guard before helper calls, so a
+      null yielded child reaches the helper's flag load just as in retailOS.
+      Deliberate deviation: the helper is an unported 40-byte leaf, but its
+      raw body is exactly the recovered compare-and-set bit operation; it is
+      private inline code here rather than a second port or dispatch seam.
+      Host tests cover nonzero (including 7) and zero mode, leaf and recursive
+      children, preservation of unrelated flag bits, query selector, cursor
+      indices, and an empty collection.
