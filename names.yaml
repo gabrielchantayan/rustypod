@@ -57063,3 +57063,40 @@ functions:
       its returned pointer, calls already ported tag-2 operator_delete, then
       returns zero. The generic owner name deliberately records only this
       verified member-ownership relation; no class identity is invented.
+
+  # --- Default UTF-16 trim-and-compare wrapper ---
+  - address: 0x0804544c
+    ghidra: FUN_0804544c
+    name: wstr_default_trim_compare
+    size: 60
+    sig: "i32 wstr_default_trim_compare(void *context, const u16 *left, u32 left_len, const u16 *right, u32 right_len)"
+    module: util/wstr_default_trim_compare
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: left
+      param_3/r2: left_len
+      param_4/r3: right
+      param_5/[sp]: right_len
+      DAT_08045488: default_collation_flags
+      FUN_0804548c: trim_compare_helper
+    notes: >-
+      Raw ARM establishes a 60-byte instruction extent from 0x0804544c
+      through pop {r2,r3,r4,pc} at 0x08045484; the following word at
+      0x08045488 is its literal-pool pointer 0x089cb1a4, and the separately
+      linked helper FUN_0804548c begins at 0x0804548c. The wrapper reads the
+      live word at 0x089cb1a4, stores 29 only when it was zero, then calls
+      FUN_0804548c(context, left, left_len, right, right_len, flags) and
+      preserves its i32 tri-state in r0. Ghidra incorrectly reports void.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly 12 inbound
+      calls: all unconditional bl at 0x080456f0, 0x0808d218, 0x080d1aec,
+      0x080d1bfc, 0x080dc650, 0x080e2994, 0x080e2a04, 0x080e2a60,
+      0x080e2abc, 0x080e2bd4, 0x080e2cb4, and 0x08229068; zero predicated
+      forms. The helper's raw body trims leading u16 elements <= 0x20 from
+      both ranges and calls unported counted compare FUN_0804529c with this
+      default word. Deliberate deviation: FUN_0804548c is not ported, so the
+      port has a volatile WSTR_DEFAULT_TRIM_COMPARE dispatch seam; target
+      builds transmute its retail address and host tests install a recorder.
+      The host-only flags word models the live target word. Host tests prove
+      zero-to-29 initialization, nonzero preservation, exact forwarding of
+      null and maximum-length inputs, and unchanged negative return values.

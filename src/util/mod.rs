@@ -75,6 +75,7 @@ pub mod word_list;
 pub mod word_list_modular_multiply;
 pub mod word_list_modular_square;
 pub mod wstr_casecmp;
+pub mod wstr_default_trim_compare;
 pub mod value_predicate;
 pub mod xor_transposed_block;
 pub mod xor_c6_in_place;
