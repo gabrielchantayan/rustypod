@@ -8052,6 +8052,30 @@ functions:
       byte-identical 0x08276214 port. Host tests cover NUL/ASCII, malformed
       two- and three-byte continuation payloads, and invalid/four-byte leads.
 
+  - address: 0x0807a13c
+    ghidra: FUN_0807a13c
+    name: singly_linked_list_count
+    size: 28
+    sig: "u32 singly_linked_list_count(SinglyLinkedNode **head_link)"
+    module: util/linked_list_count
+    status: ported
+    renames:
+      param_1/r0: head_link
+      iVar1/r0: count
+      param_1/r1: node
+    notes: >-
+      Raw ARM spans 0x0807a13c..0x0807a158 (7 instructions); 0x0807a15c
+      starts the separately linked next function, despite Ghidra's 32-byte
+      extent. It counts the non-NULL nodes reached by following the first
+      word from the supplied head-link address. The head-link itself has no
+      NULL guard. Decoding every ARM B/BL word in osos.dec finds 11 direct
+      inbound calls, all plain unconditional BL; no predicated calls or tail
+      branches target it. Host tests cover empty, single-node, and four-node
+      chains. match.py review against the verified 28-byte extent finds the
+      same load/follow/increment/NULL-test loop; LLVM folds the initial zero
+      and branch into an all-ones counter plus increment after the first
+      load.
+
   - address: 0x0809eab8
     ghidra: FUN_0809eab8
     name: queue_pool_init
