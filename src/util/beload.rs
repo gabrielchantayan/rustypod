@@ -30,6 +30,7 @@
 
 /// Big-endian, alignment-free 32-bit load from `p`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn load_be32(p: *const u8) -> u32 {
     (p.read() as u32) << 24
         | (p.add(1).read() as u32) << 16
@@ -43,6 +44,7 @@ pub unsafe extern "C" fn load_be32(p: *const u8) -> u32 {
 /// Big-endian, alignment-free 32-bit store of `value` at `p`. Writes
 /// exactly four bytes and nothing else.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn store_be32(p: *mut u8, value: u32) {
     p.write((value >> 24) as u8);
     p.add(1).write((value >> 16) as u8);
