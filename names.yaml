@@ -58,7 +58,6 @@ functions:
 
   - address: 0x082c4f38
     ghidra: FUN_082c4f38
-    name: forward_byte_copy
     size: 24
     sig: "void forward_byte_copy(void *dst, const void *src, u32 len)"
     module: libc/forward_byte_copy
@@ -25532,6 +25531,43 @@ functions:
       defaults); VMPrintf uses the existing SQLITE_VM_PRINTF seam. Host
       tests cover NULL db, cached/create/OOM pErr paths, clear versus
       formatted results, xDel, and the reload.
+  - address: 0x082c43f0
+    ghidra: FUN_082c43f0
+    name: column_mem
+    size: 88
+    sig: "Mem *column_mem(Vdbe *statement, i32 column)"
+    module: sqlite/column_mem
+    status: ported
+    renames:
+      param_1/r0: statement
+      param_2/r1: column
+      param_1_plus_0xec: n_res_column
+      param_1_plus_0xf8: result_set
+      FUN_083900c4: sqlite_data_count
+      FUN_083766f4: sqlite_error
+      DAT_082c4448: fallback_null_mem
+    notes: >-
+      SQLite's private columnMem helper behind the sqlite3_column_* wrappers.
+      Raw extent is exactly 88 bytes: code starts at 0x082c43f0, the
+      literal fallback-Mem pointer 0x088fce20 is at 0x082c4448, and the next separately linked
+      function starts at 0x082c444c. Decoding every ARM B/BL word in
+      osos.dec finds 10 direct callers, all unconditional bl and none
+      predicated: 0x0838f9b8, 0x0838f9dc, 0x0838fa00, 0x0838fa50,
+      0x0838fa7c, 0x0838faa0, 0x0838faec, 0x0838fb10, 0x0838fb34, and
+      0x0838fb54. Returns result_set + column*40 only for a non-NULL
+      result_set, signed column >= 0, and signed column < n_res_column;
+      otherwise calls the ported sqlite_error(statement->db, SQLITE_RANGE
+      (25), NULL) when db is non-NULL and returns the shared SQL-NULL Mem
+      at runtime address 0x088fce20 (flags = MEM_Null, type = SQLITE_NULL,
+      z = the empty string at 0x089c4850). The successful ARM
+      path calls 0x083900c4, a 24-byte unported sqlite3_data_count leaf
+      that merely reloads pResultSet/nResColumn and returns the count; r0
+      is overwritten before return, so its ignored pure result has no
+      observable effect and the Rust port deliberately omits the call
+      rather than adding a dispatch seam. The named repr(C) p_result_set
+      field preserves the target's +0xf8 pointer slot without host pointer
+      field overlap. Host tests cover first/middle/last records, negative,
+      endpoint, and INT_MAX indices, and an unallocated result set.
   - address: 0x083767a0
     ghidra: FUN_083767a0
     name: sqlite_error_msg

@@ -247,7 +247,9 @@ mod tests {
                     a_col_name: core::ptr::null_mut(),
                     _gap_2c: [0; 0xec - 0x2c],
                     n_res_column: 0,
-                    _gap_f0: [0; 0xff - 0xf0],
+                    _gap_f0: [0; 8],
+                    p_result_set: core::ptr::null_mut(),
+                    _gap_fc: [0; 3],
                     expired: 1,
                 },
             }

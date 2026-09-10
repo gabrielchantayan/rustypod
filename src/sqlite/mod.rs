@@ -72,6 +72,7 @@ pub mod begin_write_operation;
 pub mod blob_to_hex;
 pub mod btree_lock;
 pub mod cell_size;
+pub mod column_mem;
 pub mod data_size;
 pub mod dequote;
 pub mod ephemeral_fn;
