@@ -97,10 +97,54 @@ pub unsafe extern "C" fn toupper(c: i32) -> i32 {
     }
 }
 
+/// isdigit — original: `FUN_082d731c` @ 0x082d731c (36 bytes).
+///
+/// Verified by decoding every ARM B/BL word in osos.dec: 10 plain,
+/// unconditional `bl` call sites and no predicated forms. Calls
+/// `__rt_ctype_table_addr`, loads the current LC_CTYPE table pointer, then
+/// returns one exactly when `table[c] == 0x20`. There is deliberately no
+/// NULL or bounds guard: as in retailOS, the caller must supply an installed
+/// table and an index it can read.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn isdigit(c: i32) -> i32 {
+    let table = core::ptr::read_volatile(crate::runtime::errno::__rt_ctype_table_addr())
+        as usize as *const u8;
+    if core::ptr::read_volatile(table.wrapping_offset(c as isize)) == 0x20 {
+        1
+    } else {
+        0
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
+    use crate::runtime::errno::__rt_ctype_table_addr;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use core::ptr;
+    use std::sync::{LazyLock, Mutex};
+
+    const ISDIGIT_FIXTURE_LEN: usize = 0x1000;
+    static ISDIGIT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static ISDIGIT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::CTYPE_ISDIGIT, ISDIGIT_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+
+    struct CtypeTableSlotReset {
+        slot: *mut u32,
+        saved: u32,
+    }
+
+    impl Drop for CtypeTableSlotReset {
+        fn drop(&mut self) {
+            unsafe { self.slot.write_volatile(self.saved) };
+        }
+    }
+
 
     /// Independent reference: in this table only ASCII letters carry the
     /// case bits, so plain ASCII rules must agree exactly.
@@ -163,6 +207,35 @@ mod tests {
             assert_eq!(flags & CTYPE_LOWER != 0, (0x61..=0x7a).contains(&c));
             // No entry carries both case bits.
             assert_eq!(flags & (CTYPE_UPPER | CTYPE_LOWER) == (CTYPE_UPPER | CTYPE_LOWER), false);
+        }
+    }
+
+    #[test]
+    fn isdigit_reads_the_installed_table_and_requires_exact_digit_class() {
+        let _guard = ISDIGIT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = *ISDIGIT_FIXTURE else {
+            assert!(note_missing_u32_fixture("runtime::ctype::isdigit"));
+            return;
+        };
+        unsafe {
+            let table = (base as *mut u8).add(1);
+            ptr::write_bytes(base as *mut u8, 0, ISDIGIT_FIXTURE_LEN);
+            ptr::copy_nonoverlapping(CTYPE_FLAGS.as_ptr(), table, CTYPE_FLAGS.len());
+
+            let slot = __rt_ctype_table_addr();
+            let _reset = CtypeTableSlotReset { slot, saved: slot.read_volatile() };
+            slot.write_volatile(table as usize as u32);
+
+            for c in -1..=255 {
+                let expected = i32::from((b'0' as i32..=b'9' as i32).contains(&c));
+                assert_eq!(isdigit(c), expected, "isdigit({c:#x})");
+            }
+
+            // The instruction is `cmp table[c], #0x20`, not a range or bit test.
+            table.add(b'A' as usize).write(0x20);
+            table.add(b'0' as usize).write(0x21);
+            assert_eq!(isdigit(b'A' as i32), 1);
+            assert_eq!(isdigit(b'0' as i32), 0);
         }
     }
 }

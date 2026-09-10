@@ -1949,6 +1949,25 @@ functions:
     status: ported
     notes: bit 0x08 = lowercase (subtracts 0x20); 0xdf guard (dead under C locale).
 
+  - address: 0x082d731c
+    ghidra: FUN_082d731c
+    name: isdigit
+    size: 36
+    sig: "i32 isdigit(i32 c)"
+    module: ctype
+    status: ported
+    renames:
+      param_1: c
+      piVar1: ctype_table_slot
+    notes: >-
+      Raw extent is exactly 36 bytes at 0x082d731c..0x082d733c; the distinct
+      following function begins at 0x082d7340. Calls the already ported
+      __rt_ctype_table_addr @ 0x0802eca0, loads its LC_CTYPE table word, and
+      returns 1 exactly when unchecked table[c] is 0x20, else 0. Decoding
+      every ARM B/BL word in osos.dec verified 10 plain unconditional bl call
+      sites (0 predicated forms, 0 tail b); callers therefore do not gate this
+      classifier. No NULL or bounds guard exists in retailOS or this port.
+
   - address: 0x08032fec
     ghidra: FUN_08032fec
     name: _chval

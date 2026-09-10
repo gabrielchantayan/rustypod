@@ -146,6 +146,10 @@ pub mod hints {
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const ARTWORK_SLOT_AVAILABILITY: usize = 0x7e00_0000;
+    // 0x7d00_0000: dedicated to runtime/ctype isdigit's raw-u32 LC_CTYPE
+    // table fixture; mappings never unmap, so no other user may share this
+    // hint.
+    pub const CTYPE_ISDIGIT: usize = 0x7d00_0000;
     // 0x7100_0000: dedicated to ui/coordinate_origin's raw-u32 display
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const COORDINATE_OWNER_DISPLAY_LAYER: usize = 0x7100_0000;
