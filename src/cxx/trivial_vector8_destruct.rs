@@ -1,23 +1,28 @@
-//! `trivial_vector8_destruct` — original: `FUN_083e1ae4` @ 0x083e1ae4 (64 bytes).
+//! `trivial_vector8_destruct` — originals: `FUN_083e1ae4` @ 0x083e1ae4 and
+//! `FUN_083e717c` @ 0x083e717c (64 bytes each).
 //!
-//! Source: `ipod-decomp/decomp/c/038/083e1ae4_FUN_083e1ae4.c`.
+//! Source: `ipod-decomp/decomp/c/038/083e1ae4_FUN_083e1ae4.c` and
+//! `ipod-decomp/decomp/c/038/083e717c_FUN_083e717c.c`.
 //!
-//! The destructor walks the half-open `[begin, end)` range in eight-byte
-//! increments. Its element destructor was optimized away because the elements
-//! are trivial; the walk is nevertheless retained exactly. It then releases
-//! the backing allocation and returns the vector.
+//! The destructors walk the half-open `[begin, end)` range in eight-byte
+//! increments. Their element destructors were optimized away because the
+//! elements are trivial; the walks are nevertheless retained exactly. They
+//! then release the backing allocation and return the vector.
 //!
-//! Raw ARM confirms the body is 64 bytes, not the stale 20-byte size reported
-//! for this address in the assignment metadata: it performs the walk, computes
-//! `(capacity - begin) >> 3`, clears r2, then calls `FUN_08266f2c`. That
-//! cleanup routine's recovered C signature has only its first argument, so
-//! r1/r2 are dead auxiliary registers. The port retains the descriptor reads
-//! and calculation while reaching the existing allocator `free` seam with the
-//! sole live cleanup argument. The vector descriptor is never written.
+//! Raw ARM confirms both are semantically identical 64-byte spans: they perform
+//! the walk, compute `(capacity - begin) >> 3`, clear r2, then call
+//! `FUN_08266f2c`. The 0x083e717c instance has ten direct ARM `bl` callers,
+//! all unconditional; decoding every ARM B/BL word finds no predicated `bl`
+//! or tail `b` callers. That cleanup routine's recovered C signature has only
+//! its first argument, so r1/r2 are dead auxiliary registers. The port retains
+//! the descriptor reads and calculation while reaching the existing allocator
+//! `free` seam with the sole live cleanup argument. The vector descriptor is
+//! never written.
 
 type StorageFree = unsafe extern "C" fn(*mut u8);
 
 /// Routes the original cleanup call through the ported allocator seam.
+#[inline(never)]
 unsafe extern "C" fn free_storage(storage: *mut u8) {
     crate::runtime::malloc_rt::free(storage);
 }
@@ -45,9 +50,11 @@ unsafe fn trivial_vector8_destruct_with(vector: *mut *mut u8, release: StorageFr
         let mut current = begin;
         while current != end {
             current = current.wrapping_add(8);
+            core::hint::black_box(current);
         }
 
-        let _capacity_slots = (capacity as usize).wrapping_sub(begin as usize) >> 3;
+        let capacity_slots = (capacity as usize).wrapping_sub(begin as usize) >> 3;
+        core::hint::black_box(capacity_slots);
         release(begin);
         vector
     }
@@ -99,5 +106,28 @@ mod tests {
         assert_eq!(vector.after, before.after, "suffix guard");
         assert_eq!(FREE_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(FREED_STORAGE.load(Ordering::SeqCst), before.begin as usize);
+
+        let mut empty_allocation = [0u8; 8];
+        let mut empty_vector = VectorStorage {
+            before: 0x1020_3040_5060_7080,
+            begin: empty_allocation.as_mut_ptr(),
+            end: empty_allocation.as_mut_ptr(),
+            capacity: unsafe { empty_allocation.as_mut_ptr().add(8) },
+            after: 0x8070_6050_4030_2010,
+        };
+        let empty_before = empty_vector;
+        FREE_CALLS.store(0, Ordering::SeqCst);
+        FREED_STORAGE.store(0, Ordering::SeqCst);
+
+        let empty_result = unsafe { trivial_vector8_destruct_with(&mut empty_vector.begin, record_free) };
+
+        assert_eq!(empty_result, core::ptr::addr_of_mut!(empty_vector.begin));
+        assert_eq!(empty_vector.before, empty_before.before, "empty prefix guard");
+        assert_eq!(empty_vector.begin, empty_before.begin, "empty begin");
+        assert_eq!(empty_vector.end, empty_before.end, "empty end");
+        assert_eq!(empty_vector.capacity, empty_before.capacity, "empty capacity");
+        assert_eq!(empty_vector.after, empty_before.after, "empty suffix guard");
+        assert_eq!(FREE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(FREED_STORAGE.load(Ordering::SeqCst), empty_before.begin as usize);
     }
 }
