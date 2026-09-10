@@ -59,6 +59,12 @@ unsafe fn ops() -> XmlCodepointDecoderOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(XML_CODEPOINT_DECODER_OPS)) }
 }
 
+#[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub(crate) static XML_CODEPOINT_DECODER_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `xml_decode_codepoint_and_reset` — original: `FUN_0825d7c4` @ `0x0825d7c4`
 /// (24 bytes; 11 binary-verified unconditional `bl` call sites).
 ///
@@ -79,9 +85,9 @@ mod tests {
 
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    use super::XML_CODEPOINT_DECODER_OPS_LOCK;
     static mut RETURN_VALUE: u32 = 0;
     static mut SEEN_READER: *mut XmlUtf8Decoder = ptr::null_mut();
 
@@ -93,7 +99,7 @@ mod tests {
     }
 
     fn install(return_value: u32) -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = XML_CODEPOINT_DECODER_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             XML_CODEPOINT_DECODER_OPS = XmlCodepointDecoderOps {
                 decode_codepoint: controlled_decode,
