@@ -56725,3 +56725,34 @@ functions:
       target defaults still re-resolve vtable +0x0c. The global has a host
       fixture. Host tests prove timestamp/active stores occur before both a
       successful and failing completion, including sub-millisecond truncation.
+
+  # --- Signed three-way clamp (util/signed_clamp_i32) ---
+  - address: 0x080f0f84
+    ghidra: FUN_080f0f84
+    name: signed_clamp_i32
+    size: 32
+    sig: "i32 signed_clamp_i32(i32 value, i32 lower, i32 upper)"
+    module: util/signed_clamp_i32
+    status: ported
+    renames:
+      param_1/r0/r3: value
+      param_2/r1: lower
+      param_3/r2: upper
+    notes: >-
+      Raw ARM establishes the exact 32-byte extent
+      0x080f0f84..0x080f0fa4: mov r3,r0; cmp r3,r1; movlt r0,r1; bxlt lr;
+      cmp r3,r2; movle r0,r3; movgt r0,r2; bx lr. The separately linked
+      predecessors at 0x080f0f44 and 0x080f0f64 are byte-identical
+      signed-clamp siblings, while smull at 0x080f0fa4 begins the next
+      function. The lower compare happens first: value < lower returns lower;
+      otherwise value <= upper returns value, and only then does value > upper
+      return upper. Thus inverted bounds are observable (value below lower
+      returns lower; values at or above it return upper). Full-image decoding
+      of every ARM B/BL immediate finds exactly twelve inbound calls, all
+      unconditional plain bl (zero predicated): 0x082485f0, 0x08248604,
+      0x08248618, 0x0824862c, 0x08248650, 0x08248664, 0x08248678,
+      0x0824868c, 0x08253ec4, 0x08253edc, 0x08253ef4, 0x08253f0c. One
+      unconditional direct B at 0x082a05d0 tail-calls this body. No deliberate
+      deviations; the Rust branch order exactly preserves signed comparisons
+      and invalid-interval behavior. Host tests cover signed extremes,
+      sign-boundary comparisons, inclusive endpoints, and inverted bounds.
