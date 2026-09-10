@@ -165,6 +165,39 @@ pub unsafe extern "C" fn message_kind_destruct(this: *mut MessageKind) -> *mut M
     this
 }
 
+/// message_handler_unhandled — original: `FUN_0811a4d0` @ `0x0811a4d0`
+/// (8 bytes; **11 plain `bl` call sites, 0 predicated `bl` sites, and one
+/// tail `b`**, binary-scanned over every ARM B/BL word in `osos.dec`).
+///
+/// The default message-handler result: it does not inspect either the
+/// receiver or the [`MessageKind`] argument and returns false (`r0 = 0`).
+/// Raw ARM is exactly `mov r0, #0; bx lr`; `0x0811a4d8` opens a separate,
+/// same-shaped function returning one, so the reported 8-byte extent is
+/// exact. There are no data-word references to this entry, so it is bound
+/// directly rather than dispatched through a vtable.
+///
+/// Every call is unconditional. The callers use its zero result as an
+/// unhandled/declined status (for example, the event checks at
+/// `0x081d1a70`, `0x081d24d8`, and `0x081d251c`); the other calls use it as
+/// the default callback while cleaning up a temporary `MessageKind`.
+///
+/// Deliberate deviations: none. The two arguments remain opaque because the
+/// original neither reads nor writes them.
+///
+/// # Safety
+///
+/// Both arguments may be NULL, unaligned, or dangling: the original
+/// dereferences neither.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.message_handler_unhandled")]
+pub unsafe extern "C" fn message_handler_unhandled(
+    _receiver: *mut core::ffi::c_void,
+    _message: *mut MessageKind,
+) -> u32 {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +267,32 @@ mod tests {
 
         assert_eq!(returned, object, "r0 passes through");
         assert_eq!(storage.words, before, "the empty body performs no stores");
+    }
+
+    #[test]
+    fn handler_unhandled_returns_false_without_touching_either_argument() {
+        let mut receiver = [0xa5u8; 13];
+        let mut message = GuardedStorage::poisoned();
+        let receiver_before = receiver;
+        let message_before = message.words;
+
+        for (receiver_address, message_address) in [
+            (0usize, 0usize),
+            (1, 3),
+            (receiver.as_mut_ptr() as usize, message.object() as usize),
+            (usize::MAX, 0x0800_0001),
+        ] {
+            let result = unsafe {
+                message_handler_unhandled(
+                    receiver_address as *mut core::ffi::c_void,
+                    message_address as *mut MessageKind,
+                )
+            };
+
+            assert_eq!(result, 0, "{receiver_address:#x}, {message_address:#x}");
+        }
+
+        assert_eq!(receiver, receiver_before, "receiver is never read or written");
+        assert_eq!(message.words, message_before, "message is never read or written");
     }
 }

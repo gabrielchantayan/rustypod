@@ -14442,6 +14442,7 @@ functions:
       bit-0-set short-circuit, the whole-word acquire refusal of a
       bit-0-clear nonzero guard, the reloaded-object-literal return vs
       the ctor's return going to the registration, the real
+
       shutdown-chain registration running the no-op destructor, and
       the stock geometry/dso literals. match.py structural: the
       guard-test / acquire / ctor(8, 256) / register / return-object
@@ -14451,6 +14452,28 @@ functions:
       outcome-identical in every guard state - and the empty
       cxa_guard_release call deleted; the node_list_get precedent) and
       LLVM's register allocation.
+  - address: 0x0811a4d0
+    ghidra: FUN_0811a4d0
+    name: message_handler_unhandled
+    size: 8
+    sig: "u32 message_handler_unhandled(void *receiver, MessageKind *message)"
+    module: app/message_kind
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: message
+    notes: >-
+      Exact 8-byte leaf body: mov r0,#0; bx lr. The next entry begins
+      at 0x0811a4d8 with mov r0,#1, so no Ghidra extent was lost. A
+      binary scan of every ARM B/BL word in osos.dec found 11
+      unconditional plain bl callers, no predicated bl callers, and
+      one tail b at 0x082988a4; no word in the image equals
+      0x0811a4d0, so it is never vtable-dispatched. Callers provide a
+      receiver in r0 and a MessageKind-derived event/message in r1,
+      then interpret zero as unhandled or declined
+      (0x081d1a70/0x081d24d8/0x081d251c) or discard it in the default
+      callback teardown shape. The port preserves this false result
+      and intentionally does not inspect either opaque argument.
 
   - address: 0x08266a48
     ghidra: FUN_08266a48
