@@ -59969,3 +59969,56 @@ functions:
       owns the 8-byte wrapper. No semantic deviation: Rust calls the ported
       mutex_unlock instead of reproducing the final ARM tail branch, and
       discards its scratch return.
+
+  # --- Mounted-volume descriptor cursor seek wrapper ---
+  - address: 0x082e628c
+    ghidra: FUN_082e628c
+    name: volume_seek
+    size: 128
+    sig: "u64 volume_seek(i32 index, u32 unused, u32 offset_low, i32 offset_high, u32 origin)"
+    module: fs/volume_seek
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: unused
+      param_3/r2: offset_low
+      param_4/r3: offset_high
+      param_5/[sp]: origin
+      r4: descriptor
+      r5: ata_device
+      r6: ata_error
+      r7: result_high
+      r8: saved_offset_high
+      r9: saved_origin
+      FUN_082e0e1c: volume_table_lookup (ported, fs/volume_table)
+      FUN_082d7934: ata_semaphore_wait (ported, drivers/ata_semaphore)
+      FUN_082b2014: resident cursor synchronizer (unrecovered)
+      FUN_082b1784: resident cursor seek (unrecovered)
+      FUN_082d7954: ata_semaphore_signal (ported, drivers/ata_semaphore)
+      FUN_083690a8: ata_report_error (ported, drivers/ata_cmd)
+    notes: >-
+      Raw ARM extent is exactly 128 bytes, 0x082e628c..0x082e630c: 32
+      instruction words, ending in `mov r0,r4; mov r1,r7; pop
+      {r3-r9,pc}`. The next independently entered entry begins at
+      0x082e630c (`mvn r3,#0; mov r0,r0`) before its shared body at
+      0x082e6314. The wrapper overwrites r1 with zero for
+      volume_table_lookup(index, 0); on NULL it forms the full -1 r0/r1
+      result and reports ATA error 9. Otherwise it follows descriptor+0
+      then that object's +0 word to load the ATA u16 semaphore index at
+      +0x78, waits, calls the unrecovered state synchronizer
+      FUN_082b2014(descriptor), and calls unrecovered FUN_082b1784 with
+      descriptor, r2/r3 offset, and stack origin. It always signals after
+      a successful lookup, reports error 0, then restores the cursor
+      seek's r0/r1 result pair. A decode of every ARM B/BL-immediate word
+      in osos.dec finds 10 direct inbound branches: nine unconditional BL
+      at 0x081bca9c, 0x081bcb40, 0x081bd24c, 0x081bd2b8, 0x081be02c,
+      0x081be168, 0x082e5c44, 0x082e5c74, and 0x082e5dc8; plus predicated
+      BLLT at 0x082e5cf4. That conditional reach is gated by its caller's
+      signed comparison; this wrapper has no added guard. No tail B branch
+      and no aligned data word in the full decrypted image targets this
+      address. Target builds call the existing volume-table, ATA semaphore,
+      and ATA error ports; the two unrecovered entries remain typed fixed
+      address boundaries. Host tests install volatile recorders and use a
+      dedicated below-4-GiB raw-u32 fixture to prove the nested +0/+0/+0x78
+      selection, lock/sync/seek/unlock/status order, complete seek argument
+      forwarding, and the missing-descriptor early failure.

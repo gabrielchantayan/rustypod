@@ -297,6 +297,10 @@ pub mod hints {
     // 0xf300_0000: dedicated to fs/volume_table's raw-u32 descriptor-table
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const VOLUME_TABLE_LOOKUP: usize = 0xf300_0000;
+    // 0xf700_0000: dedicated to fs/volume_seek's raw-u32 descriptor,
+    // owner, and ATA-device fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const VOLUME_SEEK: usize = 0xf700_0000;
     // 0xf400_0000: dedicated to fs/drive_slot's raw-u32 drive-slot table
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const DRIVE_SLOT_LOOKUP: usize = 0xf400_0000;
