@@ -58687,3 +58687,24 @@ functions:
       retained scope call; the latter is a volatile function-pointer read and
       `blx` only because LLVM would otherwise remove the direct call to its
       proven-empty body.
+
+  - address: 0x080d8f64
+    ghidra: FUN_080d8f64
+    name: magic_tagged_object_validate
+    size: 36
+    sig: "i32 magic_tagged_object_validate(const MagicTaggedObject *object)"
+    module: cxx/magic_tagged_object
+    status: ported
+    renames:
+      param_1/r0: object
+      DAT_080d8f88: MAGIC_TAGGED_OBJECT_TAG
+    notes: >-
+      Raw osos.dec confirms the 36-byte code extent at 0x080d8f64..0x080d8f84,
+      followed by literal-pool word 0x534c7374 at 0x080d8f88; the next
+      separately linked function starts at 0x080d8f8c. The function returns
+      zero only when object is non-NULL and its first word matches that opaque
+      tag; NULL or any other first word returns -0x32. Whole-image ARM
+      B/BL-immediate decoding found exactly 11 inbound direct callers, all
+      unconditional plain bl, with no predicated forms or tail branches. The
+      tag does not recover a class identity, so the port uses a structural name
+      and introduces no dispatch seam. No behavioral deviations.
