@@ -22174,6 +22174,38 @@ functions:
       .text.refcounted_ptr_construct_variant section prevents LLVM folding
       this separately hookable export into the canonical template instance.
 
+  - address: 0x0839f1e0
+    ghidra: FUN_0839f1e0
+    name: refcounted_ptr_construct_secondary_variant
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_secondary_variant(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      Raw ARM establishes the exact 104-byte body 0x0839f1e0..0x0839f248,
+      where a separately linked sibling begins. Decoding every ARM B/BL word
+      in osos.dec finds exactly 10 direct BL callers, all unconditional:
+      0x0810ce24, 0x0810d040, 0x0814aeb8, 0x0814b29c, 0x081cc6e0,
+      0x081cc784, 0x081f0c6c, 0x081f0dac, 0x081fcb88, and 0x081fcbb8.
+      There are no tail B sites, predicated forms, or image words equal to
+      this address, so it is not virtually dispatched. This C++ template
+      instantiation is byte-identical to refcounted_ptr_construct @
+      0x0839ed38 and refcounted_ptr_construct_variant @ 0x0839f148 after
+      normalizing the three direct BL displacements. It clears slot first;
+      with a non-NULL implementation, tag-2 operator_new(12) creates
+      RefcountedBody { implementation, 1, NULL }; want_mutex allocates and
+      zeroes tag-2 operator_new(8), stores it at body+8, then calls
+      mutex_create before publishing body. Returns slot. The dedicated target
+      section prevents LLVM from folding this separately hookable template
+      copy into its byte-identical siblings; host tests cover null,
+      unguarded, and mutex-backed construction.
+
   - address: 0x0839f1b0
     ghidra: FUN_0839f1b0
     name: refcounted_ptr_assign_owned
