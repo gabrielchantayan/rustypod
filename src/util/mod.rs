@@ -39,6 +39,7 @@ pub mod linked_list_count;
 pub mod list_find;
 pub mod ptr_vector;
 pub mod object_masked_word_refresh;
+pub mod object_word_payload_resolve;
 pub mod resource_list;
 pub mod pascal_string;
 pub mod plane_cursor;
