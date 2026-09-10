@@ -51,6 +51,7 @@ pub mod raster_profile;
 pub mod range_state;
 pub mod service_manager_get;
 pub mod selector_record_address;
+pub mod scheduler_label_lookup;
 pub mod state_flags;
 pub mod signed_clamp_i32;
 pub mod skip_ascii_whitespace_and_comments;
