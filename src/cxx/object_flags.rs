@@ -1049,33 +1049,36 @@ pub unsafe extern "C" fn namespace_provider_push(
 /// the original invokes it with `blxne r6` on every non-NULL table entry.
 pub type NamespaceProviderTeardown = unsafe extern "C" fn(entry: usize);
 
-/// `FUN_08369618` (unported, 36 bytes: `stmdb sp!,{r4,lr}; movs r4,r0;
-/// popeq; ldr r0,[r4,#4]; cmp; blne traced_free; mov r0,r4; ldmia
-/// sp!,{r4,lr}; b traced_free`): the namespace-providers object destroy —
-/// frees the table at +0x04 when non-NULL, then the object itself, both
-/// through [`traced_free`](crate::drivers::ata_cmd::traced_free). 12 `bl`
-/// + 1 inbound tail `b` besides the one from
-/// [`namespace_provider_each_then_destroy`], counted by decoding every ARM
-/// B/BL word in osos.dec. Returns traced_free's (void) result.
-pub type NamespaceProviderDestroy = unsafe extern "C" fn(providers: *mut usize) -> u32;
-
-/// Leaks the object and returns 0: without the unported `FUN_08369618`
-/// there is nothing to free with, and 0 mirrors the family's NULL-path
-/// return convention. Target integration must install retailOS
-/// `FUN_08369618` until it is ported.
-unsafe extern "C" fn missing_namespace_provider_destroy(_providers: *mut usize) -> u32 {
-    0
-}
-
-/// RetailOS dependency of [`namespace_provider_each_then_destroy`]'s tail
-/// call. Target integration must install the real `FUN_08369618`; focused
-/// host tests replace it with a recording seam.
-pub static mut NAMESPACE_PROVIDER_DESTROY: NamespaceProviderDestroy =
-    missing_namespace_provider_destroy;
-
-#[inline(always)]
-unsafe fn namespace_provider_destroy() -> NamespaceProviderDestroy {
-    core::ptr::read_volatile(core::ptr::addr_of!(NAMESPACE_PROVIDER_DESTROY))
+/// namespace_provider_destroy — original: `FUN_08369618` @ `0x08369618`
+/// (36 bytes, `0x08369618..0x0836963c`; the independently linked
+/// [`namespace_provider_insert_at`] starts at `0x0836963c`). Verified
+/// inbound branches: 11 `bl` calls — 8 unconditional and 3 `blne` — plus
+/// two unconditional tail `b` calls, counted by decoding every ARM B/BL word
+/// in osos.dec.
+///
+/// Releases a namespace-providers object. The internal `movs`/`popeq` guard
+/// makes NULL a no-op. For a non-NULL object, it loads the table word at
+/// target offset `+0x04` and calls
+/// [`traced_free`](crate::drivers::ata_cmd::traced_free) only when that word
+/// is non-NULL; it then tail-branches to traced_free for the object itself.
+/// `traced_free` deliberately has no NULL guard, so the object guard and
+/// conditional table call are material.
+///
+/// Deviation: the final tail branch is an ordinary returning call because the
+/// Rust callee returns normally; both functions have void ABI results. Object
+/// fields use pointer-sized word indices: target words are +0x00/+0x04, while
+/// their host slots stay disjoint.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_destroy(providers: *mut usize) {
+    if providers.is_null() {
+        return;
+    }
+    let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut u8;
+    if !table.is_null() {
+        crate::drivers::ata_cmd::traced_free(table);
+    }
+    crate::drivers::ata_cmd::traced_free(providers.cast());
 }
 
 /// namespace_provider_each_then_destroy — original: `FUN_083697ac` @
@@ -1091,35 +1094,32 @@ unsafe fn namespace_provider_destroy() -> NamespaceProviderDestroy {
 ///
 /// Applies a per-entry teardown callback to every live entry of a
 /// namespace-providers object {count @ +0x00, table @ +0x04, ...}, then
-/// destroys the object. Algorithm: NULL `providers` returns 0 (the
-/// `movs r5,r0; popeq` guard leaves r0 = 0). Otherwise
-/// `for index in 0.. { reload count; if !(count >s index) break; entry =
-/// table[index]; if entry != 0 { teardown(entry) } }` — the count at +0x00
-/// AND the table pointer at +0x04 are reloaded on EVERY iteration and the
-/// loop gate is the signed `bgt`, so a teardown callback that mutates the
-/// object (appends, shrinks, swaps the table) genuinely redirects the
-/// remaining iteration, a faithful quirk. The entry NULL check is the
-/// predicated `blxne r6`; the callback itself has no NULL guard — every
-/// one of the 17 callers passes a real per-site teardown (release a
-/// provider's name, drop a reference, ...), so a NULL callback with a
-/// live entry jumps to 0 exactly as in retailOS. Finally r0 = providers
-/// and the function tail-branches (`b 0x08369618`) to the object destroy,
-/// returning its result.
+/// destroys the object. Algorithm: NULL `providers` returns through the
+/// `movs r5,r0; popeq` guard. Otherwise `for index in 0.. { reload count;
+/// if !(count >s index) break; entry = table[index]; if entry != 0 {
+/// teardown(entry) } }` — the count at +0x00 AND the table pointer at +0x04
+/// are reloaded on EVERY iteration and the loop gate is the signed `bgt`, so
+/// a teardown callback that mutates the object (appends, shrinks, swaps the
+/// table) genuinely redirects the remaining iteration, a faithful quirk. The
+/// entry NULL check is the predicated `blxne r6`; the callback itself has no
+/// NULL guard — every one of the 17 callers passes a real per-site teardown
+/// (release a provider's name, drop a reference, ...), so a NULL callback with
+/// a live entry jumps to 0 exactly as in retailOS. Finally r0 = providers and
+/// the function tail-branches (`b 0x08369618`) to the object destroy.
 ///
-/// Deviations: the unported destroy `FUN_08369618` rides the
-/// [`NAMESPACE_PROVIDER_DESTROY`] seam (house pattern — see
-/// [`NAMESPACE_PROVIDER_REALLOC`]; the default stub leaks and returns 0)
-/// instead of a direct tail `b`, and the object words are addressed by
-/// pointer-sized word index (byte-exact +0x00/+0x04 on the 32-bit target,
-/// disjoint slots on a 64-bit host — the registry_key_hash key model).
+/// Deviation: the target tail branch to the now-ported
+/// [`namespace_provider_destroy`] is an ordinary returning call; both
+/// functions have void ABI results. Object words are addressed by pointer-sized
+/// word index (byte-exact +0x00/+0x04 on the 32-bit target, disjoint slots on a
+/// 64-bit host — the registry_key_hash key model).
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn namespace_provider_each_then_destroy(
     providers: *mut usize,
     teardown: NamespaceProviderTeardown,
-) -> u32 {
+) {
     if providers.is_null() {
-        return 0;
+        return;
     }
     let mut index: u32 = 0;
     loop {
@@ -1134,7 +1134,7 @@ pub unsafe extern "C" fn namespace_provider_each_then_destroy(
         }
         index = index.wrapping_add(1);
     }
-    namespace_provider_destroy()(providers)
+    namespace_provider_destroy(providers);
 }
 
 /// Registry fallback name hash — original: `FUN_082d7e54` @ `0x082d7e54`
@@ -3190,10 +3190,11 @@ mod tests {
         uninstall_recording_realloc();
     }
 
-    /// Serializes the namespace_provider_each_then_destroy tests: each
-    /// swaps the NAMESPACE_PROVIDER_DESTROY seam and the recording
-    /// statics below.
-    static PROVIDER_DRAIN_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+    /// Calls recorded by the allocator descriptor's underlying-free slot.
+    /// Its shared test lock serializes every crate test that swaps this global
+    /// hook table.
+    static mut DESTROY_FREE_BLOCKS: [usize; 4] = [0; 4];
+    static mut DESTROY_FREE_CALL_COUNT: usize = 0;
 
     static mut TEARDOWN_ENTRIES: [usize; 8] = [0; 8];
     static mut TEARDOWN_CALL_COUNT: usize = 0;
@@ -3203,11 +3204,13 @@ mod tests {
     /// retail `ldr [r5]` / `ldr [r5,#4]` at the loop gate.
     static mut TEARDOWN_APPEND_TARGET: *mut usize = core::ptr::null_mut();
     static mut TEARDOWN_APPEND_VALUE: usize = 0;
-    static mut DESTROY_CALLS: [(*mut usize, u32); 4] = [(core::ptr::null_mut(), 0); 4];
-    static mut DESTROY_CALL_COUNT: usize = 0;
-    /// Result the recording destroy returns, standing in for the retail
-    /// destroy's (void) r0.
-    static mut DESTROY_RESULT: u32 = 0;
+
+    unsafe extern "C" fn recording_destroy_free(block: *mut u8) {
+        let count = DESTROY_FREE_CALL_COUNT;
+        assert!(count < 4, "destroy freed more than four blocks");
+        DESTROY_FREE_BLOCKS[count] = block as usize;
+        DESTROY_FREE_CALL_COUNT = count + 1;
+    }
 
     unsafe extern "C" fn recording_teardown(entry: usize) {
         let count = TEARDOWN_CALL_COUNT;
@@ -3223,128 +3226,144 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn recording_destroy(providers: *mut usize) -> u32 {
-        let count = DESTROY_CALL_COUNT;
-        assert!(count < 4, "destroy seam called more than 4 times");
-        DESTROY_CALLS[count] = (providers, 1);
-        DESTROY_CALL_COUNT = count + 1;
-        DESTROY_RESULT
-    }
-
-    /// Installs the recording seams and returns the serializing guard.
-    fn install_recording_drain() -> StdMutexGuard<'static, ()> {
-        let guard = PROVIDER_DRAIN_TEST_LOCK.lock().unwrap();
+    /// Installs the recorded underlying-free callback and returns its
+    /// serializing guard plus the hook table to restore after the test.
+    fn install_recording_destroy() -> (
+        parking_lot::MutexGuard<'static, ()>,
+        crate::drivers::ata_cmd::TracedFreeHooks,
+    ) {
+        let guard = crate::drivers::ata_cmd::TRACED_FREE_TEST_LOCK.lock();
+        let previous = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(
+                crate::drivers::ata_cmd::TRACED_FREE_HOOKS
+            ))
+        };
         unsafe {
+            crate::drivers::ata_cmd::TRACED_FREE_HOOKS =
+                crate::drivers::ata_cmd::TracedFreeHooks {
+                    free: recording_destroy_free,
+                    trace: None,
+                };
+            DESTROY_FREE_CALL_COUNT = 0;
             TEARDOWN_CALL_COUNT = 0;
             TEARDOWN_APPEND_TARGET = core::ptr::null_mut();
-            DESTROY_CALL_COUNT = 0;
-            DESTROY_RESULT = 0;
-            NAMESPACE_PROVIDER_DESTROY = recording_destroy;
         }
-        guard
+        (guard, previous)
     }
 
-    fn uninstall_recording_drain() {
-        unsafe { NAMESPACE_PROVIDER_DESTROY = missing_namespace_provider_destroy };
+    fn uninstall_recording_destroy(previous: crate::drivers::ata_cmd::TracedFreeHooks) {
+        unsafe { crate::drivers::ata_cmd::TRACED_FREE_HOOKS = previous };
+    }
+
+    fn recorded_destroy_frees() -> (usize, [usize; 4]) {
+        unsafe { (DESTROY_FREE_CALL_COUNT, DESTROY_FREE_BLOCKS) }
     }
 
     fn recorded_teardown_entries() -> (usize, [usize; 8]) {
         unsafe { (TEARDOWN_CALL_COUNT, TEARDOWN_ENTRIES) }
     }
 
-    fn recorded_destroy_calls() -> (usize, [(*mut usize, u32); 4]) {
-        unsafe { (DESTROY_CALL_COUNT, DESTROY_CALLS) }
+    #[test]
+    fn namespace_provider_destroy_null_is_a_no_op() {
+        let (_guard, previous) = install_recording_destroy();
+
+        unsafe { namespace_provider_destroy(core::ptr::null_mut()) };
+
+        assert_eq!(recorded_destroy_frees().0, 0, "the movs/popeq guard skips both frees");
+        uninstall_recording_destroy(previous);
     }
 
     #[test]
-    fn each_then_destroy_null_providers_returns_zero_and_calls_nothing() {
-        let _guard = install_recording_drain();
-        let returned =
-            unsafe { namespace_provider_each_then_destroy(core::ptr::null_mut(), recording_teardown) };
-        assert_eq!(returned, 0, "the movs/popeq guard leaves r0 = 0");
+    fn namespace_provider_destroy_frees_table_before_object() {
+        let (_guard, previous) = install_recording_destroy();
+        let mut providers = ProvidersFixture::new(0, 4, std::vec![0; 6], 0);
+        let object = providers.ptr();
+        let table = providers.words[PROVIDER_TABLE_WORD];
+
+        unsafe { namespace_provider_destroy(object) };
+
+        let (count, freed) = recorded_destroy_frees();
+        assert_eq!(count, 2);
+        assert_eq!(freed[..2], [table, object as usize], "table then owner");
+        uninstall_recording_destroy(previous);
+    }
+
+    #[test]
+    fn namespace_provider_destroy_null_table_frees_only_object() {
+        let (_guard, previous) = install_recording_destroy();
+        let mut providers = ProvidersFixture::new(0, 4, std::vec![0; 6], 0);
+        providers.words[PROVIDER_TABLE_WORD] = 0;
+        let object = providers.ptr();
+
+        unsafe { namespace_provider_destroy(object) };
+
+        let (count, freed) = recorded_destroy_frees();
+        assert_eq!(count, 1);
+        assert_eq!(freed[0], object as usize);
+        uninstall_recording_destroy(previous);
+    }
+
+    #[test]
+    fn each_then_destroy_null_providers_calls_nothing() {
+        let (_guard, previous) = install_recording_destroy();
+        unsafe { namespace_provider_each_then_destroy(core::ptr::null_mut(), recording_teardown) };
         assert_eq!(recorded_teardown_entries().0, 0, "no entry is visited");
-        assert_eq!(recorded_destroy_calls().0, 0, "the destroy tail call is skipped");
-        uninstall_recording_drain();
+        assert_eq!(recorded_destroy_frees().0, 0, "the destroy tail call is skipped");
+        uninstall_recording_destroy(previous);
     }
 
     #[test]
-    fn each_then_destroy_visits_live_entries_in_order_skipping_nulls() {
-        let _guard = install_recording_drain();
+    fn each_then_destroy_visits_live_entries_then_frees_table_and_object() {
+        let (_guard, previous) = install_recording_destroy();
         let mut providers = ProvidersFixture::new(4, 4, std::vec![0xe1, 0, 0xe3, 0xe4, 0, 0], 0);
-        let providers_ptr = providers.ptr();
-        unsafe { DESTROY_RESULT = 0xdead_0001 };
+        let object = providers.ptr();
+        let table = providers.words[PROVIDER_TABLE_WORD];
 
-        let returned =
-            unsafe { namespace_provider_each_then_destroy(providers_ptr, recording_teardown) };
+        unsafe { namespace_provider_each_then_destroy(object, recording_teardown) };
 
-        assert_eq!(returned, 0xdead_0001, "the destroy tail result is returned");
         let (count, entries) = recorded_teardown_entries();
         assert_eq!(count, 3, "the NULL slot is skipped (predicated blxne)");
         assert_eq!(&entries[..3], &[0xe1, 0xe3, 0xe4], "live entries in table order");
-        let (destroy_count, destroy_calls) = recorded_destroy_calls();
-        assert_eq!(destroy_count, 1);
-        assert_eq!(destroy_calls[0].0, providers_ptr, "destroy receives the object");
-        uninstall_recording_drain();
+        let (free_count, freed) = recorded_destroy_frees();
+        assert_eq!(free_count, 2);
+        assert_eq!(freed[..2], [table, object as usize], "destroy follows all teardown calls");
+        uninstall_recording_destroy(previous);
     }
 
     #[test]
     fn each_then_destroy_reloads_count_and_table_each_iteration() {
-        let _guard = install_recording_drain();
+        let (_guard, previous) = install_recording_destroy();
         let mut providers = ProvidersFixture::new(1, 4, std::vec![0xf1, 0, 0, 0, 0, 0], 0);
         unsafe {
             TEARDOWN_APPEND_TARGET = providers.ptr();
             TEARDOWN_APPEND_VALUE = 0xf2;
         }
 
-        let returned =
-            unsafe { namespace_provider_each_then_destroy(providers.ptr(), recording_teardown) };
+        unsafe { namespace_provider_each_then_destroy(providers.ptr(), recording_teardown) };
 
-        assert_eq!(returned, 0);
         let (count, entries) = recorded_teardown_entries();
         assert_eq!(
             count, 2,
             "the teardown's append is picked up: count is reloaded at the loop gate"
         );
         assert_eq!(&entries[..2], &[0xf1, 0xf2]);
-        assert_eq!(recorded_destroy_calls().0, 1);
-        uninstall_recording_drain();
+        assert_eq!(recorded_destroy_frees().0, 2);
+        uninstall_recording_destroy(previous);
     }
 
     #[test]
     fn each_then_destroy_negative_count_skips_loop_but_still_destroys() {
-        let _guard = install_recording_drain();
+        let (_guard, previous) = install_recording_destroy();
         // 0xffff_ffff as the count word is -1 signed: the `bgt` loop gate
         // is false on the first test, so no entry is visited — but the
         // destroy tail call still runs.
         let mut providers = ProvidersFixture::new(0xffff_ffff, 4, std::vec![0xc1, 0, 0, 0, 0, 0], 0);
 
-        let returned =
-            unsafe { namespace_provider_each_then_destroy(providers.ptr(), recording_teardown) };
+        unsafe { namespace_provider_each_then_destroy(providers.ptr(), recording_teardown) };
 
-        assert_eq!(returned, 0);
         assert_eq!(recorded_teardown_entries().0, 0, "signed count gate stays closed");
-        assert_eq!(recorded_destroy_calls().0, 1, "destroy runs even for an empty drain");
-        uninstall_recording_drain();
-    }
-
-    #[test]
-    fn each_then_destroy_default_destroy_seam_leaks_and_returns_zero() {
-        let _guard = PROVIDER_DRAIN_TEST_LOCK.lock().unwrap();
-        let mut providers = ProvidersFixture::new(2, 4, std::vec![0xd1, 0xd2, 0, 0, 0, 0], 0);
-        unsafe {
-            TEARDOWN_CALL_COUNT = 0;
-            TEARDOWN_APPEND_TARGET = core::ptr::null_mut();
-        }
-
-        let returned =
-            unsafe { namespace_provider_each_then_destroy(providers.ptr(), recording_teardown) };
-
-        assert_eq!(returned, 0, "the default seam returns 0");
-        let (count, entries) = recorded_teardown_entries();
-        assert_eq!(count, 2, "draining does not depend on the destroy seam");
-        assert_eq!(&entries[..2], &[0xd1, 0xd2]);
-        assert_eq!(providers.words[PROVIDER_COUNT_WORD], 2, "the object is untouched (leak)");
-        assert!(providers.words[PROVIDER_TABLE_WORD] != 0);
+        assert_eq!(recorded_destroy_frees().0, 2, "destroy runs even for an empty drain");
+        uninstall_recording_destroy(previous);
     }
 
     #[test]
