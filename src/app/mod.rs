@@ -91,6 +91,7 @@ pub mod playlist_pointer_marker;
 pub mod pending_event_take;
 pub mod pending_event_insert;
 pub mod queued_message;
+pub mod pointer_queue;
 pub mod query_param_list;
 pub mod registry;
 pub mod registration_handle;
