@@ -45,6 +45,34 @@ pub struct TaggedWordBufferPool {
     /// +0x2bc: one-shot overflow diagnostic latch.
     pub overflow_reported: u32,
 }
+/// tagged_word_buffer_pool_push — original: `FUN_0803dec8` @ 0x0803dec8
+/// (36 bytes; 11 direct `bl` call sites).
+///
+/// Raw bytes span 0x0803dec8..0x0803deec; the independent
+/// `three_buffer_owner_release` starts at 0x0803deec. Decoding every ARM
+/// B/BL immediate in `osos.dec` found ten unconditional `bl` callers and
+/// one `bleq` at 0x0803dd9c. The predicated caller invokes this only when
+/// its current nesting depth is zero; this body itself has no NULL guard.
+///
+/// Saves the current slot cursor at nesting depths 0 through 11, then
+/// increments the depth. The signed ARM `lt` condition deliberately also
+/// admits values with bit 31 set, preserving the firmware's unchecked raw
+/// pointer arithmetic. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tagged_word_buffer_pool_push(pool: *mut TaggedWordBufferPool) {
+    let nesting_depth = (*pool).nesting_depth;
+
+    if (nesting_depth as i32) < 12 {
+        let saved_slot_count = core::ptr::addr_of_mut!((*pool).saved_slot_counts)
+            .cast::<u32>()
+            .wrapping_add(nesting_depth as usize);
+        saved_slot_count.write((*pool).slot_count);
+    }
+
+    (*pool).nesting_depth = nesting_depth.wrapping_add(1);
+}
+
 
 /// tagged_word_buffer_pool_take — original: `FUN_0803de0c` @ 0x0803de0c
 /// (100 bytes; 22 `bl` call sites).
@@ -84,6 +112,35 @@ mod tests {
     #[test]
     fn pool_layout_matches_the_recovered_extent() {
         assert_eq!(size_of::<TaggedWordBufferPool>(), 0x2c0);
+    }
+
+    #[test]
+    fn push_saves_slot_cursor_at_first_nesting_depth() {
+        let mut pool = unsafe { zeroed::<TaggedWordBufferPool>() };
+        pool.slot_count = 0x1234_5678;
+
+        unsafe { tagged_word_buffer_pool_push(&mut pool) };
+
+        assert_eq!(pool.saved_slot_counts[0], 0x1234_5678);
+        assert_eq!(pool.nesting_depth, 1);
+    }
+
+    #[test]
+    fn push_saves_last_slot_then_stops_at_depth_twelve() {
+        let mut pool = unsafe { zeroed::<TaggedWordBufferPool>() };
+        pool.slot_count = 9;
+        pool.nesting_depth = 11;
+
+        unsafe { tagged_word_buffer_pool_push(&mut pool) };
+
+        assert_eq!(pool.saved_slot_counts[11], 9);
+        assert_eq!(pool.nesting_depth, 12);
+
+        pool.slot_count = 13;
+        unsafe { tagged_word_buffer_pool_push(&mut pool) };
+
+        assert_eq!(pool.saved_slot_counts[11], 9);
+        assert_eq!(pool.nesting_depth, 13);
     }
 
     #[test]
