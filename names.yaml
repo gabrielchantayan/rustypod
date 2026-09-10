@@ -22836,6 +22836,48 @@ functions:
       sqlite3_realloc finds the old payload INSIDE the new raw
       block, which the veneers recording realloc does not model).
 
+  - address: 0x0838ee8c
+    ghidra: FUN_0838ee8c
+    name: aggregate_context
+    size: 120
+    sig: "*mut u8 aggregate_context(SqliteContext *context, i32 n_byte)"
+    module: sqlite/aggregate_context
+    status: ported
+    renames:
+      param_1: context
+      param_2: n_byte
+      puVar1: p_mem
+      FUN_0838c074: vdbeMemClearExternAndSetNull
+      FUN_0838bdb0: sqlite3VdbeMemGrow
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3_aggregate_context. Raw extent
+      0x0838ee8c..0x0838ef04 is exact: the closing ldmia is at
+      0x0838ef00 and 0x0838ef04 begins the next leaf accessor; no literal
+      pool. The context's pMem sits at +0x30. A pre-existing MEM_Agg
+      (0x400) returns pMem->z untouched. A zero first request calls
+      vdbeMemClearExternAndSetNull @ 0x0838c074, assigns flags = MEM_Null
+      (1), and NULLs z. A nonzero request calls sqlite3VdbeMemGrow
+      @ 0x0838bdb0 with preserve = 0; irrespective of grow status it
+      assigns flags = MEM_Agg, stores context.pFunc into the low 32-bit
+      word of Mem.u, then, only with a non-NULL z, clears exactly nByte
+      bytes through the ported IRAM memzero veneer @ 0x08037dc8. It returns
+      z on every path. 10 direct bl call sites, decoded from every ARM
+      B/BL word in osos.dec: 0x082b5a64, 0x082c5014, 0x082c5044,
+      0x082d2660, 0x082d26dc, 0x082d9700, 0x082d97d0, 0x083928d4,
+      0x08392958, and 0x083943dc; all are unconditional, confirming that
+      the callee's MEM_Agg test owns one-time initialization. Deviation:
+      the recovered repr(C) SqliteContext uses named fields so host pointers
+      do not overlap; the low Mem.u word is explicitly written, preserving
+      its upper word as the stock str does. The target directly calls the
+      ported extern-release, grow, and memzero functions without a dispatch
+      seam; its raw-layout extern-release has an exactly equivalent typed
+      host-only MEM_Dyn/xDel path. Host tests cover the pre-existing
+      aggregate no-op, dynamic external release plus the zero-sized NULL
+      transition, and a real sufficient-capacity grow that proves the
+      MEM_Agg stamp, low-word FuncDef store, exact zero span, and untouched
+      tail.
+
   - address: 0x0838bfb0
     ghidra: FUN_0838bfb0
     name: vdbe_mem_nul_terminate
