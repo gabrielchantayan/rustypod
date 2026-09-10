@@ -56756,3 +56756,29 @@ functions:
       deviations; the Rust branch order exactly preserves signed comparisons
       and invalid-interval behavior. Host tests cover signed extremes,
       sign-boundary comparisons, inclusive endpoints, and inverted bounds.
+
+  # --- XOR two-word exchange helper ---
+  - address: 0x080e75ac
+    ghidra: FUN_080e75ac
+    name: swap_u32_words
+    size: 44
+    sig: "void swap_u32_words(u32 *first, u32 *second)"
+    module: util/u32_word_swap
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      r2: xor
+      r3: second_word
+    notes: >-
+      Raw osos.dec confirms ten operational instructions from 0x080e75ac
+      through 0x080e75d0, followed by `bx lr` at 0x080e75d4; the separately linked next function
+      starts at 0x080e75d8 (`cmp r0,#0`). The function reads both aligned
+      words, stores their XOR through first, rereads second, then uses two
+      XOR stores to exchange them. It has no NULL guard. Decoding every ARM
+      B/BL word in osos.dec finds exactly 12 direct calls, all unconditional
+      bl and no predicated bl: 0x080ea524, 0x080ea530, 0x080eabb4,
+      0x080eabd8, 0x080eabfc, 0x080eac24, 0x080eac4c, 0x080eb3ac,
+      0x080eb3d0, 0x080eb3f4, 0x080eb41c, and 0x080eb444. Aliased pointers
+      deliberately clear the word, as required by the original XOR sequence;
+      this is intentionally unlike a conventional swap. Deviations: none.
