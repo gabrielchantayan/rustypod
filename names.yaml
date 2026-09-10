@@ -7858,6 +7858,35 @@ functions:
       core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc] sequence
       matches verbatim.
 
+  - address: 0x08061378
+    ghidra: FUN_08061378
+    name: plst_element_notify_teardown
+    size: 60
+    sig: "void plst_element_notify_teardown(u8 *element)"
+    module: ui/plst_element_teardown
+    status: ported
+    renames:
+      param_1/r0: element
+      DAT_080613b0: teardown_notify_tag
+    notes: >-
+      'plst' element teardown notifier. Raw ARM begins at 0x08061378 and
+      ends with literal event key 0x63706c64 at 0x080613b0; the next
+      function starts at 0x080613b4, so the true extent is 60 bytes
+      although Ghidra reports 56. It calls the already ported
+      ui_element_is_plst_class at 0x080613e0; on success it calls the
+      unported tagged-handler walker 0x08066bb8 with list element+0x48,
+      that raw event key, element context, and two zero arguments. The
+      final call at 0x080613a8 targets 0x0806715c, verified from raw bytes
+      to be the standalone `bx lr` no-op: it ignores element+8 and has no
+      aligned data-word reference in osos.dec, so is deliberately elided
+      rather than given an invented callee identity. Call
+      count verified by decoding every B/BL word in osos.dec: 11 direct
+      bl calls, 6 unconditional, 4 blne, and 1 bleq. The predicated
+      callers gate their own state; the port relies on its internal class
+      check. The unported walker is exposed through the
+      PLST_ELEMENT_TEARDOWN_OPS seam (stock address on target, recorder
+      seam on host).
+
   - address: 0x08052728
     ghidra: FUN_08052728
     name: ui_plst_slot_item_at
