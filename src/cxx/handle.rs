@@ -375,6 +375,58 @@ pub unsafe extern "C" fn refcounted_ptr_construct_variant(
     slot
 }
 
+/// refcounted_ptr_construct_secondary_variant — original: `FUN_0839f1e0` @
+/// 0x0839f1e0 (104 bytes; 10 direct `bl` call sites, all unconditional:
+/// 0x0810ce24, 0x0810d040, 0x0814aeb8, 0x0814b29c, 0x081cc6e0,
+/// 0x081cc784, 0x081f0c6c, 0x081f0dac, 0x081fcb88, and 0x081fcbb8).
+/// Decoding every ARM B/BL word in osos.dec found no tail `b`, no predicated
+/// calls, and no image word equal to the address, so it is not virtually
+/// dispatched. Raw instructions establish the exact extent: the separately
+/// linked sibling begins at 0x0839f248.
+///
+/// A separately linked C++ template instantiation of
+/// [`refcounted_ptr_construct`]. It clears `slot`, then when
+/// `implementation` is non-NULL creates a tag-2 12-byte [`RefcountedBody`]
+/// containing `{ implementation, 1, NULL }`. A nonzero `want_mutex` adds a
+/// tag-2 8-byte zeroed [`Mutex`], stores it in the body, and calls
+/// [`mutex_create`] before publishing the completed body into `slot`.
+/// Returns `slot`; a NULL implementation performs no allocations.
+///
+/// Deliberate codegen deviation: LLVM may inline the ported
+/// [`mutex_create`] instead of retaining its original `bl`. A dedicated
+/// target section prevents this hookable template instance from being folded
+/// into its byte-identical siblings.
+///
+/// # Safety
+/// `slot` must be a valid, aligned pointer slot. `implementation` is opaque;
+/// allocation failures are unchecked, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_construct_secondary_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct_secondary_variant(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
+}
+
+
 
 /// refcounted_ptr_assign — original: `FUN_0839eda0` @ 0x0839eda0
 /// (68 bytes; 78 `bl` call sites).
@@ -3218,7 +3270,7 @@ mod tests {
             let mut slot = 0xdead_beefusize as *mut RefcountedBody;
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_handle_construct(slot_ptr, 0, 1) };
+            let returned = unsafe { refcounted_ptr_construct_secondary_variant(slot_ptr, 0, 1) };
 
             assert_eq!(returned, slot_ptr, "construct-and-return-this");
             assert!(slot.is_null(), "the unconditional first store wins");
@@ -3234,7 +3286,7 @@ mod tests {
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_handle_construct(slot_ptr, 0x1122_3344, 0) };
+            let returned = unsafe { refcounted_ptr_construct_secondary_variant(slot_ptr, 0x1122_3344, 0) };
 
             assert_eq!(returned, slot_ptr);
             assert_eq!(slot as usize, body_arena);
@@ -3263,7 +3315,7 @@ mod tests {
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_handle_construct(slot_ptr, 0xaabb_ccdd, 1) };
+            let returned = unsafe { refcounted_ptr_construct_secondary_variant(slot_ptr, 0xaabb_ccdd, 1) };
 
             assert_eq!(returned, slot_ptr);
             assert_eq!(slot as usize, body_arena);
