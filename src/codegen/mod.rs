@@ -19,6 +19,9 @@ pub mod block_ref;
 /// address block (0x082c5dxx), one function away from `se(v)` @
 /// 0x082c5dcc, and is ported under the same `cg_*` roof.
 pub mod exp_golomb;
+/// `cg_expression_dependency_mask` @ 0x082cda48 — recursively combines
+/// an opaque expression node's two child and two collection dependency masks.
+pub mod expression_dependency_mask;
 /// `file_has_directory_entry` @ 0x082a548c — platform-file directory-entry
 /// sentinel predicate in the JIT address block.
 pub mod file_directory_entry;

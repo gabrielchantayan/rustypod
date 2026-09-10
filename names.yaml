@@ -57866,3 +57866,35 @@ functions:
       deviations. Host tests cover reserved-cluster short-circuiting, shifted
       data-cluster mapping, strict limit rejection, addition wraparound, and
       the >=32 shift rule.
+
+  - address: 0x082cda48
+    ghidra: FUN_082cda48
+    name: cg_expression_dependency_mask
+    size: 128
+    sig: "u64 cg_expression_dependency_mask(const u32 *context, const u8 *node)"
+    module: codegen/expression_dependency_mask
+    status: ported
+    renames:
+      param_1/r0/r5: context
+      param_2/r1/r4: node
+      r6:r7: accumulated_mask
+      "node+0x08": second_child
+      "node+0x0c": first_child
+      "node+0x10": field_10_collection
+      "node+0x24": leaf_identifier
+      "node+0x38": field_38_collection
+    notes: >-
+      Raw osos.dec extent is exactly 128 code bytes from 0x082cda48 through
+      pop {r4-r8,pc} at 0x082cdac4; the next separately linked function
+      begins at 0x082cdac8. Decoding every ARM B/BL immediate finds 11 direct
+      call sites, all unconditional bl (0x082ccfec, 0x082cd048, 0x082cd058,
+      0x082cd7a0, 0x082cd7b4, 0x082cd8f4, 0x082cda10, 0x082cda24,
+      0x082cda7c, 0x082cda90, 0x08367324), with zero predicated forms.
+      NULL returns zero. Tag 0x95 tail-calls FUN_082d07f8(context,
+      node+0x24); every other tag recursively combines node+0x0c then
+      node+0x08, then ORs FUN_082cd8c4(context,node+0x10) and
+      FUN_082cd9b4(context,node+0x38). The three unported callees retain
+      their literal device addresses on ARM and use the documented host ops
+      seam; their identities are intentionally not invented. Tests prove the
+      NULL path, leaf short-circuit, 32-bit node links, recursive call order,
+      and low/high-half mask OR.

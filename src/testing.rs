@@ -291,6 +291,10 @@ pub mod hints {
     // 0xf400_0000: dedicated to fs/drive_slot's raw-u32 drive-slot table
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const DRIVE_SLOT_LOOKUP: usize = 0xf400_0000;
+    // 0xd400_0000: dedicated to codegen/expression_dependency_mask's raw-u32
+    // expression-node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const CG_EXPRESSION_DEPENDENCY_MASK: usize = 0xd400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
