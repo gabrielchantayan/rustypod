@@ -54625,6 +54625,47 @@ functions:
       CountedMutex layouts diverge at 64-bit pointer width; target builds
       directly invoke the ported condvar and counted-mutex functions.
 
+  - address: 0x0814a130
+    ghidra: FUN_0814a130
+    name: trace_buffer_slot_acquire
+    size: 144
+    sig: "TraceBufferEntry *trace_buffer_slot_acquire(TraceBuffer *buffer, u32 selector, CountedMutex **entry_guard)"
+    module: app/trace_buffer
+    status: ported
+    renames:
+      param_1/r0/r4: buffer (0x40-byte trace-buffer registry)
+      param_2/r1/r6: selector (unsigned entry slot)
+      param_3/r2/r7: entry_guard (one-word output counted-mutex guard)
+      r5: initialized_mutex (buffer+0x2c)
+      FUN_0807f5c4: mutex_lock
+      FUN_080ed9dc: condvar_wait_forever
+      FUN_0807f6a0: mutex_unlock
+      FUN_0818a128: unported counted-mutex scope-guard acquire helper
+      FUN_08149f68: unported selector-and-presence validator
+      FUN_0814a030: default registry-root accessor
+      FUN_08206e8c: unported entry-lock scope-guard acquire helper
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM establishes the exact 144-byte instruction extent
+      0x0814a130..0x0814a1c0; the separately linked next function begins at
+      0x0814a1c0. Decoding every ARM B/BL word in osos.dec finds exactly 11
+      direct BL call sites, all unconditional (no predicated forms):
+      0x08086988, 0x08086a08, 0x0808e100, 0x0809b660, 0x080a28c4,
+      0x080ab06c, 0x080ab258, 0x080b5678, 0x080c6854, 0x080d9030 and
+      0x0818a08c. One additional unconditional tail B at 0x08149f64 is the
+      forwarding wrapper; no aligned data word equals 0x0814a130, so the
+      resolver is not a virtual-dispatch target. It locks buffer+0x2c and
+      waits on buffer+0x34 while byte buffer+0x28 is zero, then takes the
+      counted table mutex at +0x1c. Selectors >= 7 and NULL slots call the
+      default-root ADS accessor 0x0814a030 without modifying entry_guard.
+      A live slot stores entry+0x44 into entry_guard, locks it, unlocks the
+      table mutex, and returns the entry; the caller owns the returned lock.
+      The two unported one-word scope-guard helpers 0x0818a128 and
+      0x08206e8c are inlined through the existing counted-mutex ports. The
+      unported default-root accessor remains a target fixed-address boundary
+      with a host-test seam. Host tests cover selectors 0 and 6, NULL slots,
+      u32::MAX, output-guard preservation, and lock ownership/balancing.
+
   # --- Legacy printf growable byte sink ---
   - address: 0x08077bcc
     ghidra: FUN_08077bcc

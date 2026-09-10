@@ -43,8 +43,11 @@
 use core::ffi::c_void;
 
 use crate::heap::veneers::operator_new;
-use crate::kernel::condvar::{condvar_init, CondVar};
-use crate::kernel::sync_mutex::{mutex_lock_counted, mutex_unlock_counted, CountedMutex};
+use crate::app::facade_registry_walk::DEFAULT_ROOT_ACCESSOR_ADDRESS;
+use crate::kernel::condvar::{condvar_init, condvar_wait_forever, CondVar};
+use crate::kernel::sync_mutex::{
+    mutex_lock, mutex_lock_counted, mutex_unlock, mutex_unlock_counted, CountedMutex, Mutex,
+};
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
 
@@ -131,6 +134,67 @@ unsafe fn unlock_trace_static_words() {
     }
 }
 
+/// One registry entry returned through a trace-buffer slot.
+///
+/// The resolver only needs the counted mutex at +0x44. The first 17 target
+/// words are deliberately opaque: different call sites use different
+/// interface views over them.
+#[repr(C)]
+pub struct TraceBufferEntry {
+    /// +0x00..+0x40 — opaque interface/root fields.
+    pub opaque_00: [u32; 17],
+    /// +0x44 — held by the caller through the output scope guard.
+    pub access_lock: CountedMutex,
+}
+
+/// The 0x40-byte target registry built by the trace-buffer constructor.
+///
+/// Pointer-bearing fields are native-width on host; `repr(C)` gives every
+/// documented offset on the 32-bit firmware target.
+#[repr(C)]
+pub struct TraceBuffer {
+    /// +0x00..+0x18 — selector-indexed entry pointers.
+    pub entries: [*mut TraceBufferEntry; 7],
+    /// +0x1c — guards the entry table during selection.
+    pub entries_lock: CountedMutex,
+    /// +0x28 — nonzero after the constructor has published the table.
+    pub initialized: u8,
+    /// +0x29..+0x2b — aligns the condition mutex.
+    pub initialized_padding: [u8; 3],
+    /// +0x2c — condition-variable mutex.
+    pub initialized_mutex: Mutex,
+    /// +0x34 — waited on until `initialized` becomes nonzero.
+    pub initialized_condvar: CondVar,
+}
+
+/// ABI of the unported ADS local-static accessor `FUN_0814a030`.
+pub type TraceBufferDefaultEntryAccessor = unsafe extern "C" fn() -> *mut TraceBufferEntry;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn default_trace_buffer_entry() -> *mut TraceBufferEntry {
+    let accessor: TraceBufferDefaultEntryAccessor =
+        core::mem::transmute(DEFAULT_ROOT_ACCESSOR_ADDRESS);
+    accessor()
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn default_trace_buffer_entry() -> *mut TraceBufferEntry {
+    core::ptr::null_mut()
+}
+
+/// Boundary for the registry's default-root accessor at `0x0814a030`.
+///
+/// That ADS local-static accessor is not yet ported. Device builds call its
+/// verified fixed address; host tests install a concrete root to observe the
+/// invalid-slot path.
+pub static mut TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR: TraceBufferDefaultEntryAccessor =
+    default_trace_buffer_entry;
+
+#[inline(always)]
+unsafe fn default_entry_accessor() -> TraceBufferDefaultEntryAccessor {
+    core::ptr::read_volatile(core::ptr::addr_of!(TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR))
+}
+
 /// trace_buffer_get — original: `FUN_0814a08c` @ `0x0814a08c` (144-byte raw
 /// extent: 128 code bytes plus a 16-byte literal pool).
 ///
@@ -168,6 +232,62 @@ pub unsafe extern "C" fn trace_buffer_get() -> *mut u8 {
     result
 }
 
+/// trace_buffer_slot_acquire — original: `FUN_0814a130` @ `0x0814a130`
+/// (144 bytes, next distinct function at `0x0814a1c0`).
+///
+/// The raw ARM holds the condition mutex at +0x2c until the byte at +0x28
+/// becomes nonzero, takes the counted table mutex at +0x1c, and accepts only
+/// selectors 0..6 with a non-NULL entry. A valid entry's counted mutex at
+/// +0x44 is stored into `entry_guard` and acquired before the table mutex is
+/// released; the caller owns that returned lock. An invalid selector or NULL
+/// slot leaves `entry_guard` untouched and returns the default entry from the
+/// ADS accessor `FUN_0814a030`.
+///
+/// Decoding every ARM B/BL word in `osos.dec` finds 11 unconditional `bl`
+/// callers (0x08086988, 0x08086a08, 0x0808e100, 0x0809b660, 0x080a28c4,
+/// 0x080ab06c, 0x080ab258, 0x080b5678, 0x080c6854, 0x080d9030, and
+/// 0x0818a08c), no predicated forms, and one unconditional tail branch from
+/// the forwarding wrapper at 0x08149f64. No aligned data word references this
+/// address, so it is not a virtual dispatch target.
+///
+/// Deliberate deviations: the two unported one-word counted-lock guard
+/// helpers (0x0818a128 and 0x08206e8c) are inlined through the existing
+/// `mutex_lock_counted`/`mutex_unlock_counted` ports. The unported default
+/// accessor remains a fixed-address device boundary with a host test seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.trace_buffer_slot_acquire")]
+pub unsafe extern "C" fn trace_buffer_slot_acquire(
+    buffer: *mut TraceBuffer,
+    selector: u32,
+    entry_guard: *mut *mut CountedMutex,
+) -> *mut TraceBufferEntry {
+    mutex_lock(core::ptr::addr_of_mut!((*buffer).initialized_mutex));
+    while (*buffer).initialized == 0 {
+        condvar_wait_forever(core::ptr::addr_of_mut!((*buffer).initialized_condvar));
+    }
+    mutex_unlock(core::ptr::addr_of_mut!((*buffer).initialized_mutex));
+
+    mutex_lock_counted(core::ptr::addr_of_mut!((*buffer).entries_lock));
+    let entry = if selector < 7 {
+        (*buffer).entries[selector as usize]
+    } else {
+        core::ptr::null_mut()
+    };
+
+    let result = if entry.is_null() {
+        default_entry_accessor()()
+    } else {
+        let lock = core::ptr::addr_of_mut!((*entry).access_lock);
+        entry_guard.write(lock);
+        mutex_lock_counted(lock);
+        entry
+    };
+
+    mutex_unlock_counted(core::ptr::addr_of_mut!((*buffer).entries_lock));
+    result
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -187,6 +307,136 @@ mod tests {
     static mut ALLOCATED_BLOCKS: Vec<*mut u8> = Vec::new();
     static mut CONSTRUCTED_BLOCKS: Vec<*mut u8> = Vec::new();
     static mut CTOR_RETURNS_NULL: bool = false;
+    static mut DEFAULT_ENTRY_RESULT: *mut TraceBufferEntry = ptr::null_mut();
+    static mut DEFAULT_ENTRY_CALLS: u32 = 0;
+
+    unsafe extern "C" fn recording_default_entry() -> *mut TraceBufferEntry {
+        DEFAULT_ENTRY_CALLS += 1;
+        DEFAULT_ENTRY_RESULT
+    }
+
+    fn unlocked_counted_mutex() -> CountedMutex {
+        CountedMutex {
+            mutex: crate::kernel::sync_mutex::Mutex {
+                sem_cell: ptr::null_mut(),
+                unused: 0,
+            },
+            hold_count: 0,
+        }
+    }
+
+    fn initialized_trace_buffer() -> TraceBuffer {
+        TraceBuffer {
+            entries: [ptr::null_mut(); 7],
+            entries_lock: unlocked_counted_mutex(),
+            initialized: 1,
+            initialized_padding: [0; 3],
+            initialized_mutex: crate::kernel::sync_mutex::Mutex {
+                sem_cell: ptr::null_mut(),
+                unused: 0,
+            },
+            initialized_condvar: unsafe { core::mem::zeroed() },
+        }
+    }
+
+    fn trace_buffer_entry() -> TraceBufferEntry {
+        TraceBufferEntry {
+            opaque_00: [0; 17],
+            access_lock: unlocked_counted_mutex(),
+        }
+    }
+
+    fn default_entry_reset() {
+        unsafe {
+            DEFAULT_ENTRY_RESULT = ptr::null_mut();
+            DEFAULT_ENTRY_CALLS = 0;
+            TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR = default_trace_buffer_entry;
+        }
+    }
+
+    fn default_entry_restore() {
+        unsafe {
+            TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR = default_trace_buffer_entry;
+        }
+    }
+
+    #[test]
+    fn slot_acquire_locks_selected_edge_entries_and_hands_out_their_guards() {
+        let guard = reset();
+        unsafe {
+            let mut first = trace_buffer_entry();
+            let mut last = trace_buffer_entry();
+            let mut buffer = initialized_trace_buffer();
+            buffer.entries[0] = ptr::addr_of_mut!(first);
+            buffer.entries[6] = ptr::addr_of_mut!(last);
+            let mut entry_guard = ptr::null_mut();
+
+            assert_eq!(
+                trace_buffer_slot_acquire(
+                    ptr::addr_of_mut!(buffer),
+                    0,
+                    ptr::addr_of_mut!(entry_guard),
+                ),
+                ptr::addr_of_mut!(first),
+            );
+            assert_eq!(entry_guard, ptr::addr_of_mut!(first.access_lock));
+            assert_eq!(first.access_lock.hold_count, 1, "returned guard remains acquired");
+            assert_eq!(buffer.entries_lock.hold_count, 0, "table lock is released first");
+            mutex_unlock_counted(entry_guard);
+
+            assert_eq!(
+                trace_buffer_slot_acquire(
+                    ptr::addr_of_mut!(buffer),
+                    6,
+                    ptr::addr_of_mut!(entry_guard),
+                ),
+                ptr::addr_of_mut!(last),
+            );
+            assert_eq!(entry_guard, ptr::addr_of_mut!(last.access_lock));
+            assert_eq!(last.access_lock.hold_count, 1, "selector six is in range");
+            assert_eq!(buffer.entries_lock.hold_count, 0, "each lookup balances the table lock");
+            mutex_unlock_counted(entry_guard);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn slot_acquire_uses_default_for_null_and_out_of_range_slots_without_touching_guard() {
+        let guard = reset();
+        unsafe {
+            let mut fallback = trace_buffer_entry();
+            let mut preserved_lock = unlocked_counted_mutex();
+            let mut buffer = initialized_trace_buffer();
+            DEFAULT_ENTRY_RESULT = ptr::addr_of_mut!(fallback);
+            TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR = recording_default_entry;
+            let mut entry_guard = ptr::addr_of_mut!(preserved_lock);
+
+            assert_eq!(
+                trace_buffer_slot_acquire(
+                    ptr::addr_of_mut!(buffer),
+                    3,
+                    ptr::addr_of_mut!(entry_guard),
+                ),
+                ptr::addr_of_mut!(fallback),
+                "a NULL in-range slot falls back",
+            );
+            assert_eq!(entry_guard, ptr::addr_of_mut!(preserved_lock));
+            assert_eq!(
+                trace_buffer_slot_acquire(
+                    ptr::addr_of_mut!(buffer),
+                    u32::MAX,
+                    ptr::addr_of_mut!(entry_guard),
+                ),
+                ptr::addr_of_mut!(fallback),
+                "unsigned bounds reject the largest selector",
+            );
+            assert_eq!(entry_guard, ptr::addr_of_mut!(preserved_lock));
+            assert_eq!(DEFAULT_ENTRY_CALLS, 2);
+            assert_eq!(buffer.entries_lock.hold_count, 0, "fallback releases the table lock");
+        }
+        restore(guard);
+    }
+
 
     unsafe extern "C" fn trace_alloc(
         _heap: *mut HeapDescriptorDescriptor,
@@ -283,6 +533,7 @@ mod tests {
             SHUTDOWN_ALLOC = shutdown_alloc;
             SHUTDOWN_FREE = shutdown_free;
             *shutdown_chain_head() = ptr::null_mut();
+            default_entry_reset();
         }
         guard
     }
@@ -299,6 +550,7 @@ mod tests {
             TRACE_BUFFER_CTOR = zero_trace_buffer;
             TRACE_STATIC_GUARD = 0;
             TRACE_BUFFER_CACHE = ptr::null_mut();
+            default_entry_restore();
         }
         drop(guard);
     }
