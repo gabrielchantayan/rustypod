@@ -49828,6 +49828,41 @@ functions:
       raw disassembly: osos.dec 0x083e717c. match.py structural review is
       recorded with this port.
 
+  # --- COW string vector destructor ---
+  - address: 0x083e5b88
+    ghidra: FUN_083e5b88
+    name: cxx_string_vector_destruct
+    size: 48
+    sig: "CxxStringVector * cxx_string_vector_destruct(CxxStringVector *vector)"
+    module: cxx/string_vector_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: vector
+      param_1_plus_0x00/r1/r0: begin
+      param_1_plus_0x04/r2: end
+      param_1_plus_0x08/r1: capacity
+      FUN_083e5950: cxx_string_range_destroy
+      FUN_083d8b04: cxx_string_release
+      FUN_08266f2c: cxx_array_dealloc
+      return/r0: vector
+    notes: >-
+      Raw ARM extent is exactly 0x083e5b88..0x083e5bb8: 12 instruction words,
+      with the separately linked next function beginning at 0x083e5bb8. Loads
+      `{begin,end}`, calls the unported range walker 0x083e5950 (which walks
+      four-byte COW string slots and calls cxx_string_release @ 0x083d8b04),
+      computes `(capacity - begin) >> 2`, clears r2, calls cxx_array_dealloc
+      @ 0x08266f2c, and returns vector without descriptor writes. The port
+      deliberately inlines the verified behavior of the unported range walker
+      to the already ported cxx_string_release seam; its separate call boundary
+      is absent. Decoding every ARM B/BL word in osos.dec verifies exactly ten
+      direct, unconditional bl callers, no predicated bl calls, and no direct
+      tail b calls: 0x08197b74, 0x082aae7c, 0x082aaf74, 0x082ab064,
+      0x082ab074, 0x082ab08c, 0x083c4e00, 0x083db3b8, 0x083e2244, and
+      0x083e256c. Focused host tests prove ordered releases for a three-element
+      vector, empty-range behavior, deallocation arguments, return value, and
+      an unchanged descriptor/guard footprint. Raw disassembly:
+      osos.dec 0x083e5b88; match.py structural review recorded.
+
   # --- pending-event queue take ---
   - address: 0x08138f14
     ghidra: FUN_08138f14
