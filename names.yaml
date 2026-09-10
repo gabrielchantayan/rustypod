@@ -51950,6 +51950,43 @@ functions:
       allocation size/tag, all eleven generic-array-helper arguments, cached
       constructor return, and the no-NULL-guard path.
 
+  - address: 0x08257aec
+    ghidra: FUN_08257aec
+    name: event_hub_subscribe
+    size: 96
+    sig: "u32 event_hub_subscribe(EventHub *hub, void *listener, u32 kind)"
+    module: app/event_hub
+    status: ported
+    renames:
+      param_1/r0: hub
+      param_2/r1: listener
+      param_3/r2: kind (listener-list selector; no range check)
+      puVar4/r4: hub.listener_lists[kind] ({begin, end, end_of_storage})
+      local_14/[sp,#4]: listener_slot (address passed to insertion)
+      thunk_FUN_083ea6dc: pointer-range equality scan veneer (tail-branches
+        to FUN_083ea6dc)
+      FUN_083e52dc: unported vector pointer insertion/reallocation helper
+    notes: >-
+      Raw ARM is exactly 96 bytes: push {r0,r1,r2,r4,r5,lr} at 0x08257aec
+      through pop {r1,r2,r3,r4,r5,pc} at 0x08257b48; the independent
+      16-byte array-construction adapter starts at 0x08257b4c. A complete
+      decode of every ARM B/BL immediate in work/firmware/osos.dec finds
+      exactly 10 direct callers, all unconditional plain bl, with zero
+      predicated bl forms and zero plain-B tail callers. It indexes thirteen
+      12-byte listener vectors by kind, calls the 4-byte veneer at
+      0x083ea6d4 to scan [begin,end) for the exact listener pointer, and
+      returns 0 if present. On absence it passes the vector, its original
+      end pointer, and a stack copy of listener to FUN_083e52dc, then returns
+      1. It has no NULL, kind-range, or capacity guard before its raw reads.
+      Deliberate deviation: the port inlines the verified pointer-equality
+      scan instead of calling the unported veneer; its target build retains
+      the real insertion/reallocation call at 0x083e52dc through a volatile
+      seam, while host tests install a concrete insertion model. Host tests
+      prove duplicate suppression, selected-list/end-pointer forwarding,
+      append placement, return values, and NULL-listener forwarding from an
+      empty list. match.py structural review is expected to differ in the
+      inlined scan and indirect seam call.
+
   - address: 0x08257b60
     ghidra: FUN_08257b60
     name: event_hub_broadcast

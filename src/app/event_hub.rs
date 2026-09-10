@@ -21,8 +21,8 @@
 //! invented callee identity. One list exists per event kind. A broadcast
 //! walks list `kind` and invokes each listener's vtable slot +0x04 with
 //! `(listener, kind, arg, payload, payload_len)` — that walk is
-//! `FUN_082579d0`, not ported here. Listeners are registered by the sibling
-//! `FUN_08257aec` (a vector `push_back` into list `kind`).
+//! `FUN_082579d0`, not ported here. Listeners are registered by
+//! [`event_hub_subscribe`], which de-duplicates each kind's listener list.
 //!
 //! # Algorithm
 //!
@@ -63,6 +63,7 @@
 //!   [`EVENT_HUB_OPS`]. Its default is inert, so this symbol cannot deliver
 //!   events until that list walk is ported.
 
+use crate::cxx::templates::VectorStorage;
 use crate::heap::veneers::operator_new;
 use crate::runtime::cpp_array_construct::cpp_array_construct;
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
@@ -92,6 +93,65 @@ const EVENT_HUB_LIST_STORAGE_SIZE: usize = 0x9c;
 const EVENT_HUB_LIST_CONSTRUCTOR_WORD: u32 = 0x0802_df58;
 const EVENT_HUB_LIST_SIZE: u32 = 12;
 const EVENT_HUB_LIST_COUNT: u32 = 13;
+
+/// The thirteen `{begin, end, end_of_storage}` listener vectors allocated by
+/// [`event_hub_instance_get`]. On ARMv5 this is exactly 0x9c bytes; typed
+/// fields keep its pointers non-overlapping in 64-bit host fixtures.
+#[repr(C)]
+pub struct EventHub {
+    pub listener_lists: [VectorStorage; EVENT_HUB_LIST_COUNT as usize],
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x9c] = [0; core::mem::size_of::<EventHub>()];
+
+/// ABI of `FUN_083e52dc`, the unported vector insertion/reallocation helper
+/// reached after the listener-absence scan.
+type EventHubListenerListInsert =
+    unsafe extern "C" fn(*mut VectorStorage, *mut *mut u8, *const *mut u8);
+
+#[derive(Clone, Copy)]
+struct EventHubListenerListOps {
+    insert: EventHubListenerListInsert,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_event_hub_listener_list_insert(
+    list: *mut VectorStorage,
+    end: *mut *mut u8,
+    listener: *const *mut u8,
+) {
+    let insert: EventHubListenerListInsert = unsafe { core::mem::transmute(0x083e_52dcusize) };
+    unsafe { insert(list, end, listener) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_event_hub_listener_list_insert(
+    _list: *mut VectorStorage,
+    _end: *mut *mut u8,
+    _listener: *const *mut u8,
+) {
+    panic!("event_hub_subscribe requires vector insertion helper 0x083e52dc")
+}
+
+#[cfg(target_os = "none")]
+const DEFAULT_EVENT_HUB_LIST_OPS: EventHubListenerListOps = EventHubListenerListOps {
+    insert: retail_event_hub_listener_list_insert,
+};
+
+#[cfg(not(target_os = "none"))]
+const DEFAULT_EVENT_HUB_LIST_OPS: EventHubListenerListOps = EventHubListenerListOps {
+    insert: missing_event_hub_listener_list_insert,
+};
+
+/// The target calls the retail vector helper directly; host tests install a
+/// concrete model of its allocation path.
+static mut EVENT_HUB_LIST_OPS: EventHubListenerListOps = DEFAULT_EVENT_HUB_LIST_OPS;
+
+#[inline(always)]
+unsafe fn listener_list_ops() -> EventHubListenerListOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_HUB_LIST_OPS)) }
+}
 
 /// The list walk — original: `FUN_082579d0` @ 0x082579d0. Its fifth
 /// argument rides the stack on the target (the original's
@@ -169,6 +229,44 @@ pub unsafe extern "C" fn event_hub_instance_get() -> *mut u8 {
     cache.read_volatile()
 }
 
+/// event_hub_subscribe — original: `FUN_08257aec` @ 0x08257aec (96 bytes).
+/// The next independently linked function starts at 0x08257b4c. **10 `bl`
+/// call sites, all unconditional, and no predicated `bl` or plain-`b` tail
+/// callers**, verified by decoding every ARM B/BL immediate in `osos.dec`.
+///
+/// Selects `hub.listener_lists[kind]`, linearly scans its half-open pointer
+/// range for `listener`, and inserts one copied pointer only when absent.
+/// It returns 0 when already subscribed and 1 after delegating insertion.
+/// There are no NULL, `kind`, or capacity guards before the raw accesses.
+///
+/// Deliberate deviation: the original calls the four-byte
+/// `thunk_FUN_083ea6dc` veneer to perform the pointer scan; this port inlines
+/// that verified scan. The grow path still calls its actual unported target
+/// `FUN_083e52dc` at 0x083e52dc on device through a volatile seam, while host
+/// tests install a concrete model.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn event_hub_subscribe(
+    hub: *mut EventHub,
+    listener: *mut u8,
+    kind: u32,
+) -> u32 {
+    let list = unsafe { (*hub).listener_lists.as_mut_ptr().add(kind as usize) };
+    let end = unsafe { (*list).end.cast::<*mut u8>() };
+    let mut current = unsafe { (*list).begin.cast::<*mut u8>() };
+
+    while current != end {
+        if unsafe { current.read() } == listener {
+            return 0;
+        }
+        current = unsafe { current.add(1) };
+    }
+
+    let listener_slot = listener;
+    unsafe { (listener_list_ops().insert)(list, end, &listener_slot) };
+    1
+}
+
 /// event_hub_broadcast — original: `FUN_08257b60` @ 0x08257b60
 /// (100 bytes with the pool word; 42 `bl` call sites, binary-verified).
 ///
@@ -226,6 +324,39 @@ mod tests {
         Vec::new();
     static mut ARRAY_RETURN: *mut u32 = ptr::null_mut();
     static mut DISPATCHED: Vec<(*mut u8, u32, u32, usize, u32)> = Vec::new();
+    static mut LIST_INSERT_CALLS: Vec<(usize, usize, usize)> = Vec::new();
+
+    unsafe extern "C" fn recording_listener_list_insert(
+        list: *mut VectorStorage,
+        end: *mut *mut u8,
+        listener: *const *mut u8,
+    ) {
+        unsafe {
+            (*ptr::addr_of_mut!(LIST_INSERT_CALLS)).push((list as usize, end as usize, listener.read() as usize));
+            end.write(listener.read());
+            (*list).end = end.add(1).cast();
+        }
+    }
+
+    const RECORDING_EVENT_HUB_LIST_OPS: EventHubListenerListOps = EventHubListenerListOps {
+        insert: recording_listener_list_insert,
+    };
+
+    fn empty_listener_list() -> VectorStorage {
+        VectorStorage {
+            begin: ptr::null_mut(),
+            end: ptr::null_mut(),
+            end_of_storage: ptr::null_mut(),
+        }
+    }
+
+    fn listener_list(storage: &mut [*mut u8; 2], len: usize) -> VectorStorage {
+        VectorStorage {
+            begin: storage.as_mut_ptr().cast(),
+            end: unsafe { storage.as_mut_ptr().add(len).cast() },
+            end_of_storage: unsafe { storage.as_mut_ptr().add(storage.len()).cast() },
+        }
+    }
 
     unsafe extern "C" fn recording_array_reset(
         this: *mut u32,
@@ -279,7 +410,9 @@ mod tests {
         EVENT_HUB_INSTANCE = ptr::null_mut();
         EVENT_HUB_SINGLETON_CACHE = ptr::null_mut();
         EVENT_HUB_OPS = DEFAULT_EVENT_HUB_OPS;
+        EVENT_HUB_LIST_OPS = DEFAULT_EVENT_HUB_LIST_OPS;
         (*ptr::addr_of_mut!(DISPATCHED)).clear();
+        (*ptr::addr_of_mut!(LIST_INSERT_CALLS)).clear();
     }
 
     #[test]
@@ -331,6 +464,61 @@ mod tests {
         }
         drop(heap_guard);
         drop(array_guard);
+        drop(hub_guard);
+    }
+
+    #[test]
+    fn subscribe_deduplicates_then_inserts_at_the_selected_list_end() {
+        let hub_guard = lock_hub();
+        let existing = 0x1234_5000usize as *mut u8;
+        let added = 0x2468_a000usize as *mut u8;
+        let mut storage = [existing, ptr::null_mut()];
+        let mut hub = EventHub {
+            listener_lists: core::array::from_fn(|_| empty_listener_list()),
+        };
+
+        unsafe {
+            reset_hub_state();
+            EVENT_HUB_LIST_OPS = RECORDING_EVENT_HUB_LIST_OPS;
+            hub.listener_lists[6] = listener_list(&mut storage, 1);
+
+            assert_eq!(event_hub_subscribe(&mut hub, existing, 6), 0);
+            assert!((*ptr::addr_of!(LIST_INSERT_CALLS)).is_empty(), "existing listener never grows");
+
+            assert_eq!(event_hub_subscribe(&mut hub, added, 6), 1);
+            assert_eq!(storage, [existing, added]);
+            assert_eq!(
+                (*ptr::addr_of!(LIST_INSERT_CALLS)).as_slice(),
+                [(
+                    ptr::addr_of_mut!(hub.listener_lists[6]) as usize,
+                    storage.as_mut_ptr().add(1) as usize,
+                    added as usize,
+                )],
+                "only the selected kind's end pointer and copied listener reach growth"
+            );
+            reset_hub_state();
+        }
+        drop(hub_guard);
+    }
+
+    #[test]
+    fn subscribe_forwards_a_null_listener_from_an_empty_list() {
+        let hub_guard = lock_hub();
+        let mut storage = [0xaaaa_5000usize as *mut u8, ptr::null_mut()];
+        let mut hub = EventHub {
+            listener_lists: core::array::from_fn(|_| empty_listener_list()),
+        };
+
+        unsafe {
+            reset_hub_state();
+            EVENT_HUB_LIST_OPS = RECORDING_EVENT_HUB_LIST_OPS;
+            hub.listener_lists[0] = listener_list(&mut storage, 0);
+
+            assert_eq!(event_hub_subscribe(&mut hub, ptr::null_mut(), 0), 1);
+            assert_eq!(storage[0], ptr::null_mut(), "no NULL listener guard");
+            assert_eq!((&*ptr::addr_of!(LIST_INSERT_CALLS))[0].2, 0);
+            reset_hub_state();
+        }
         drop(hub_guard);
     }
 
