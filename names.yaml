@@ -42030,6 +42030,35 @@ functions:
       capacity-10 empty temporary contract, preservation of a high product
       limb until reduction, and that word_list_copy preserves accumulator
       buffer/capacity while assigning only the reduced count/limbs.
+  - address: 0x082cdac8
+    ghidra: FUN_082cdac8
+    name: word_list_modular_add_assign
+    size: 36
+    sig: "void word_list_modular_add_assign(const WordList *addend, WordList *accumulator, const ModularReductionContext *modulus)"
+    module: util/word_list_modular_add
+    status: ported
+    renames:
+      param_1: addend
+      param_2: accumulator
+      param_3: modulus
+    notes: >-
+      Modular addition assignment for the small counted-u32 WordList type:
+      add addend into accumulator through FUN_082daec8, then tail-call
+      FUN_082cdb04 with r2 = 0 to reduce accumulator in place. Raw extent
+      verified: the next distinct function starts exactly at 0x082cdaec
+      with cmp r0, #0, so Ghidra's 9-instruction / 36-byte extent is
+      correct. All 11 decoded B/BL references are plain unconditional BLs
+      (0 predicated); the tail branch to FUN_082cdb04 is internal control
+      flow, not an incoming call. FUN_082daec8 and FUN_082cdb04 have no
+      ported names.yaml entries, so the Rust port uses a volatile
+      operation-table seam that transmutes their exact retail addresses on
+      target and test-installed reference models on host. Host tests prove
+      addition -> mode-zero reduction ordering, carry into a high limb
+      before reduction, zero-count output, and retention of accumulator
+      buffer/capacity.
+      match.py: same add/reduce call order and mode-zero tail dispatch; the
+      diff is the crate frame, separate volatile operation-table slot loads,
+      and indirect blx/bx seams for the two unported cores.
   - address: 0x080f4aa8
     ghidra: FUN_080f4aa8
     name: path_exists
