@@ -29,6 +29,8 @@ pub mod block_window;
 pub mod storage_transfer;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
+/// Mounted-volume descriptor cursor seek wrapper @ 0x082e628c.
+pub mod volume_seek;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.
 pub mod drive_slot;
 /// Path prefix drive-index resolver @ 0x082c3000.
