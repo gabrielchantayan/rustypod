@@ -104,9 +104,9 @@ pub struct VdbeOp {
     pub p4: *mut u8,
 }
 
-/// A prepared statement under construction. Only the fields this cluster
-/// touches are modeled; `_gap*` spans stand for the rest of the original
-/// struct and exist to place `expired` at +0xff.
+/// A prepared statement. Only the fields touched by the ported VDBE and
+/// result-column helpers are modeled; `_gap*` spans place the named fields
+/// at their target offsets.
 #[repr(C)]
 pub struct Vdbe {
     /// +0x00: the owning connection (`sqlite3 *`).
@@ -135,8 +135,12 @@ pub struct Vdbe {
     /// +0xec: number of result columns the statement produces
     /// (`nResColumn`), the stride between the two `a_col_name` planes.
     pub n_res_column: i32,
-    /// +0xf0..+0xff: unmodeled.
-    pub _gap_f0: [u8; 0xff - 0xf0],
+    /// +0xf0..+0xf8: unmodeled.
+    pub _gap_f0: [u8; 8],
+    /// +0xf8: the current row's result-column values (`pResultSet`).
+    pub p_result_set: *mut Mem,
+    /// +0xfc..+0xff: unmodeled.
+    pub _gap_fc: [u8; 3],
     /// +0xff: set when the schema changed under this statement; every
     /// emitted op clears it.
     pub expired: u8,
@@ -210,6 +214,8 @@ const _VDBE_A_LABEL_OFFSET: [u8; 0x20] = [0; core::mem::offset_of!(Vdbe, a_label
 const _VDBE_A_COL_NAME_OFFSET: [u8; 0x28] = [0; core::mem::offset_of!(Vdbe, a_col_name)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_N_RES_COLUMN_OFFSET: [u8; 0xec] = [0; core::mem::offset_of!(Vdbe, n_res_column)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_P_RESULT_SET_OFFSET: [u8; 0xf8] = [0; core::mem::offset_of!(Vdbe, p_result_set)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_EXPIRED_OFFSET: [u8; 0xff] = [0; core::mem::offset_of!(Vdbe, expired)];
 #[cfg(target_pointer_width = "32")]
@@ -633,7 +639,9 @@ mod tests {
                 a_col_name: core::ptr::null_mut(),
                 _gap_2c: [0; 0xec - 0x2c],
                 n_res_column: 0,
-                _gap_f0: [0; 0xff - 0xf0],
+                _gap_f0: [0; 8],
+                p_result_set: core::ptr::null_mut(),
+                _gap_fc: [0; 3],
                 expired: EXPIRED,
             };
             Statement { vdbe, db }
