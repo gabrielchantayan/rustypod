@@ -19,14 +19,11 @@
 //! - invokes the real descriptor-field mapper four times for source triples
 //!   in the original order `(1, 0, 2, 3)`.
 //!
-//! The nested triple format is not yet identified. `FUN_08270f84` is a real,
-//! separate function entry (not a guessed identity), but is not ported, so
-//! the target default calls it at its fixed firmware address and host tests
-//! install a recorder. This is the only deliberate deviation: the four calls
-//! dispatch through the mapper seam rather than directly encoding the helper
-//! address; LLVM retains the fourth as an indirect tail branch.
+//! The nested triple format remains opaque, but its real mapper
+//! [`crate::app::descriptor_field::descriptor_field_map`] is ported. The four
+//! calls therefore reach that symbol directly; there is no remaining mapper
+//! dispatch seam.
 
-use core::ptr::addr_of_mut;
 
 /// The word written at layout word 1 by `ldr r0,[pc,#160]`.
 pub const NONE_TOKEN: u32 = 0x4e6f_6e65;
@@ -54,38 +51,6 @@ const LAYOUT_OPTIONAL_STATE: usize = 19;
 const LAYOUT_OPTIONAL_METADATA: usize = 20;
 const LAYOUT_OPTIONAL_VALUE: usize = 21;
 
-/// The unported triple mapper `FUN_08270f84` @ `0x08270f84`.
-#[derive(Clone, Copy)]
-pub struct DescriptorLayoutOps {
-    /// Maps one three-word source field into its three-word layout field.
-    pub copy_field: unsafe extern "C" fn(source: *const u32, destination: *mut u32),
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_copy_descriptor_field(source: *const u32, destination: *mut u32) {
-    let copy: unsafe extern "C" fn(*const u32, *mut u32) = unsafe {
-        core::mem::transmute(0x0827_0f84usize)
-    };
-    unsafe { copy(source, destination) };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_copy_descriptor_field(_source: *const u32, _destination: *mut u32) {
-    panic!("descriptor_layout_initialize requires descriptor mapper 0x08270f84")
-}
-
-/// Active mapper. The device calls the stock mapper until it receives its own
-/// port; host tests substitute a deterministic recorder.
-#[cfg(target_os = "none")]
-pub static mut DESCRIPTOR_LAYOUT_OPS: DescriptorLayoutOps = DescriptorLayoutOps {
-    copy_field: firmware_copy_descriptor_field,
-};
-
-/// Host default rejects accidental calls that have not installed a mapper.
-#[cfg(not(target_os = "none"))]
-pub static mut DESCRIPTOR_LAYOUT_OPS: DescriptorLayoutOps = DescriptorLayoutOps {
-    copy_field: missing_copy_descriptor_field,
-};
 
 /// Initializes a command-builder descriptor layout from its source record.
 ///
@@ -126,11 +91,10 @@ pub unsafe extern "C" fn descriptor_layout_initialize(source: *const u32, layout
             optional_state_ptr.write_volatile(optional_state_ptr.read_volatile() | 2);
         }
 
-        let copy = addr_of_mut!(DESCRIPTOR_LAYOUT_OPS.copy_field).read_volatile();
-        copy(source.add(3), layout.add(LAYOUT_FIRST_FIELD));
-        copy(source, layout.add(LAYOUT_SECOND_FIELD));
-        copy(source.add(6), layout.add(LAYOUT_THIRD_FIELD));
-        copy(source.add(9), layout.add(LAYOUT_FOURTH_FIELD));
+        crate::app::descriptor_field::descriptor_field_map(source.add(3), layout.add(LAYOUT_FIRST_FIELD));
+        crate::app::descriptor_field::descriptor_field_map(source, layout.add(LAYOUT_SECOND_FIELD));
+        crate::app::descriptor_field::descriptor_field_map(source.add(6), layout.add(LAYOUT_THIRD_FIELD));
+        crate::app::descriptor_field::descriptor_field_map(source.add(9), layout.add(LAYOUT_FOURTH_FIELD));
     }
 }
 
@@ -141,40 +105,18 @@ mod tests {
     use super::*;
     use core::ptr::{addr_of, addr_of_mut};
     use std::sync::{Mutex, MutexGuard};
-    use std::vec::Vec;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut COPY_CALLS: Vec<(usize, usize)> = Vec::new();
     static mut SOURCE: [u32; DESCRIPTOR_SOURCE_WORDS] = [0; DESCRIPTOR_SOURCE_WORDS];
     static mut LAYOUT: [u32; DESCRIPTOR_LAYOUT_WORDS] = [0; DESCRIPTOR_LAYOUT_WORDS];
 
-    unsafe extern "C" fn recording_copy(source: *const u32, destination: *mut u32) {
-        unsafe {
-            (*addr_of_mut!(COPY_CALLS)).push((source as usize, destination as usize));
-            for word in 0..3 {
-                destination.add(word).write_volatile(source.add(word).read_volatile());
-            }
-        }
-    }
-
-    fn install_mapper() -> MutexGuard<'static, ()> {
+    fn install_fixtures() -> MutexGuard<'static, ()> {
         let guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
-            DESCRIPTOR_LAYOUT_OPS = DescriptorLayoutOps { copy_field: recording_copy };
-            (*addr_of_mut!(COPY_CALLS)).clear();
             (*addr_of_mut!(SOURCE)).fill(0);
             (*addr_of_mut!(LAYOUT)).fill(0xdead_beef);
         }
         guard
-    }
-
-    fn restore_mapper(guard: MutexGuard<'static, ()>) {
-        unsafe {
-            DESCRIPTOR_LAYOUT_OPS = DescriptorLayoutOps {
-                copy_field: missing_copy_descriptor_field,
-            };
-        }
-        drop(guard);
     }
 
     fn source() -> *const u32 {
@@ -187,11 +129,11 @@ mod tests {
 
     fn seed_fields() {
         unsafe {
-            for field in 0..4 {
-                for word in 0..3 {
-                    (*addr_of_mut!(SOURCE))[field * 3 + word] =
-                        0x1000_0000 | ((field as u32) << 8) | word as u32;
-                }
+            for (field, tag) in [7u32, 1, 5, 10].into_iter().enumerate() {
+                (*addr_of_mut!(SOURCE))[field * 3] = 0x1000_0000 | ((field as u32) << 8);
+                (*addr_of_mut!(SOURCE))[field * 3 + 1] =
+                    0x1000_0001 | ((field as u32) << 8);
+                (*addr_of_mut!(SOURCE))[field * 3 + 2] = tag;
             }
             (*addr_of_mut!(SOURCE))[SOURCE_CURRENT_VALUE] = 0x0bad_c0de;
         }
@@ -199,7 +141,7 @@ mod tests {
 
     #[test]
     fn initializes_required_words_and_maps_fields_in_retail_order() {
-        let guard = install_mapper();
+        let _guard = install_fixtures();
         seed_fields();
         unsafe {
             (*addr_of_mut!(SOURCE))[SOURCE_FLAGS] = 6;
@@ -214,37 +156,21 @@ mod tests {
             assert_eq!((*addr_of!(LAYOUT))[LAYOUT_OPTIONAL_STATE] & 0xff, 0);
             assert_eq!((*addr_of!(LAYOUT))[LAYOUT_OPTIONAL_METADATA], 0);
             assert_eq!((*addr_of!(LAYOUT))[LAYOUT_OPTIONAL_VALUE], 0);
-
-            for (field, layout_word) in [
-                (1, LAYOUT_FIRST_FIELD),
-                (0, LAYOUT_SECOND_FIELD),
-                (2, LAYOUT_THIRD_FIELD),
-                (3, LAYOUT_FOURTH_FIELD),
-            ] {
-                for word in 0..3 {
-                    assert_eq!(
-                        (*addr_of!(LAYOUT))[layout_word + word],
-                        (*addr_of!(SOURCE))[field * 3 + word],
-                    );
-                }
-            }
-            assert_eq!(
-                *addr_of!(COPY_CALLS),
-                std::vec![
-                    (source().add(3) as usize, layout().add(LAYOUT_FIRST_FIELD) as usize),
-                    (source() as usize, layout().add(LAYOUT_SECOND_FIELD) as usize),
-                    (source().add(6) as usize, layout().add(LAYOUT_THIRD_FIELD) as usize),
-                    (source().add(9) as usize, layout().add(LAYOUT_FOURTH_FIELD) as usize),
-                ],
-                "the final retail tail branch maps source field three last",
-            );
+            let layout_words: &[u32; DESCRIPTOR_LAYOUT_WORDS] = &*addr_of!(LAYOUT);
+            assert_eq!(&layout_words[LAYOUT_FIRST_FIELD..LAYOUT_FIRST_FIELD + 3],
+                &[0x1000_0101, 0x8000_0110, 0x1000_0100]);
+            assert_eq!(&layout_words[LAYOUT_SECOND_FIELD..LAYOUT_SECOND_FIELD + 3],
+                &[0x0000_0087, 0xe5a8_83e9, 0x89e7_b1bd]);
+            assert_eq!(&layout_words[LAYOUT_THIRD_FIELD..LAYOUT_THIRD_FIELD + 3],
+                &[0x20a0_bce5, 0x2077_6152, 0x1000_0200]);
+            assert_eq!(&layout_words[LAYOUT_FOURTH_FIELD..LAYOUT_FOURTH_FIELD + 3],
+                &[0xefb7_8de5, 0x85e5_88bc, 0x6425_20b1]);
         }
-        restore_mapper(guard);
     }
 
     #[test]
     fn optional_metadata_and_state_byte_follow_the_low_three_source_flags() {
-        let guard = install_mapper();
+        let _guard = install_fixtures();
         seed_fields();
         unsafe {
             (*addr_of_mut!(SOURCE))[SOURCE_OPTIONAL_VALUE] = 0x1234_5678;
@@ -257,6 +183,5 @@ mod tests {
             assert_eq!((*addr_of!(LAYOUT))[LAYOUT_OPTIONAL_METADATA], 0x89ab_cdef);
             assert_eq!((*addr_of!(LAYOUT))[LAYOUT_OPTIONAL_VALUE], 0x1234_5678);
         }
-        restore_mapper(guard);
     }
 }
