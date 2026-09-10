@@ -37219,6 +37219,45 @@ functions:
       0xff, copies while the destination vtable remains unchanged, and
       that source == destination is safe.
 
+  - address: 0x08270f84
+    ghidra: FUN_08270f84
+    name: descriptor_field_map
+    size: 160
+    sig: "void descriptor_field_map(const u32 *source, u32 *destination)"
+    module: app/descriptor_field
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      r3: field_tag
+      DAT_08271024: tag_0_prefix
+      DAT_08271028: tag_5_prefix
+      DAT_0827102c: tag_6_prefix
+      DAT_08271030: tag_7_field
+      DAT_08271034: tag_8_field
+      DAT_08271038: tag_9_field
+      DAT_0827103c: tag_10_field
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM extent is exactly 0x08270f84..0x08271040: code through bx lr
+      at 0x08271020 plus the seven literal-pool words at
+      0x08271024..0x0827103c; the next separately linked function starts
+      at 0x08271040. Decoding every ARM B/BL word in osos.dec finds 10
+      direct BL callers, all unconditional plain BL, and one unconditional
+      plain-B tail caller at 0x082a472c; there are no predicated forms.
+      The low byte at source+8 selects an opaque three-word descriptor-field
+      transformation. Tags 0, 5, and 6 select a two-word literal prefix and
+      preserve source word zero as destination word two. Tags 1..4 place
+      source word one, 0x80000010+(tag<<8), and source word zero. Tags 7..10
+      select literal three-word fields. Other tag values call heap_panic
+      (0x08030f44), which does not return. The source/destination format has
+      no recoverable higher-level identity, so the port names its observed
+      transformation rather than inventing one. The Rust port directly calls
+      the existing heap_panic port on the fatal path; this is the only
+      code-generation deviation from the original direct BL. Host tests cover
+      every valid tag with high tag-word bits set and source/destination
+      aliasing; descriptor_layout_initialize now calls this port directly,
+      replacing its former fixed-address mapper seam.
   - address: 0x082a3dcc
     ghidra: FUN_082a3dcc
     name: scoped_context_is_valid
@@ -54140,7 +54179,7 @@ functions:
       param_1/r0: source
       param_2/r1: layout
       DAT_082a4730: NONE_TOKEN (0x4e6f6e65)
-      FUN_08270f84: descriptor-field mapper (unported seam)
+      FUN_08270f84: descriptor_field_map (ported direct call)
     notes: >-
       Raw extent is 0x082a4680..0x082a4734: Ghidra's reported 176 bytes
       covers the 44 ARM instructions but drops its final literal-pool word
@@ -54151,17 +54190,16 @@ functions:
       command-builder descriptor layout with the None token, its source
       current-value word twice, a -1 sentinel, fixed 0x200 and source-bit
       derived flags, then optional source metadata and state. It maps four
-      source triples through the real separate function entry 0x08270f84 in
-      source order 1, 0, 2, 3; the fourth is a tail branch. The nested triple
-      format is not identified, so neither it nor the callee receives an
-      invented identity. Deliberate deviation: the Rust port invokes the
-      unported mapper through a target-default fixed-address seam; structural
-      review confirms LLVM retains the fourth mapper invocation as an
-      indirect tail branch. Host tests install a recording mapper and cover
-      zero/nonzero optional metadata, all three source flag bits, output
-      word-zero preservation, and field destination contents,
-      the exact four-call order. match.py structural diff reviewed after the
-      ARM release build.
+      source triples through descriptor_field_map (0x08270f84) in source
+      order 1, 0, 2, 3; the retail fourth transfer is a tail branch. The
+      nested triple format remains opaque, so the field mapper is named for
+      its observed transformation rather than an invented type. Deliberate
+      deviation: the Rust port now calls descriptor_field_map directly, while
+      the former version dispatched through a fixed-address mapper seam for
+      host tests. Host tests cover zero/nonzero optional metadata, all three
+      source flag bits, output word-zero preservation, and each mapped field's
+      expected retail triple. match.py structural diff reviewed after the ARM
+      release build.
 
   # --- opaque tagged record initializer ---
   - address: 0x0826fc2c
