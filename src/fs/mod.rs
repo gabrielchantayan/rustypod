@@ -7,6 +7,8 @@ pub mod fat_cluster_to_block;
 pub mod path_limits;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
+/// Path-resolution child lookup with default continuation state @ 0x082e2004.
+pub mod path_node_lookup;
 /// Cache-entry reference release @ 0x082e18bc.
 pub mod cache_entry;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.

@@ -10745,6 +10745,38 @@ functions:
       early return, same ldr of node +4, same call order, same
       pass-through return of the pool result.
 
+  - address: 0x082e2004
+    ghidra: FUN_082e2004
+    name: path_node_lookup_component
+    size: 40
+    sig: "u8 *path_node_lookup_component(u8 *node, u8 *parent, u8 *component, u8 *component_state, u32 flags)"
+    module: fs/path_node_lookup
+    status: ported
+    renames:
+      param_1: node
+      param_2: parent
+      param_3: component
+      param_4: component_state
+      param_5: flags
+    notes: >-
+      Raw extent is exactly 40 bytes, 0x082e2004..0x082e202b: the next
+      separately linked function begins with push {r4-r10,lr} at
+      0x082e202c. Every ARM B/BL word in osos.dec was decoded: 10 direct
+      call sites, all plain bl at 0x082e16a8, 0x082e2344, 0x082e23fc,
+      0x082e2e70, 0x082e3190, 0x082e3520, 0x082e4110, 0x082e415c,
+      0x082e41b0 and 0x082e4840; there are no predicated calls or tail
+      branches. The wrapper preserves all five ABI arguments, supplies
+      -1 as the sixth stack argument to unported 0x082e202c, and returns
+      that helper's r0 unchanged. Callers use the non-NULL return as a
+      child path node while processing components, so the name describes
+      the wrapper's observed role; the exact identity of 0x082e202c and
+      its sixth argument's field meaning are deliberately not invented.
+      Ghidra incorrectly declares this wrapper void; raw ARM and every
+      caller demonstrate its pointer return. Target builds call the
+      unported helper through its retailOS load address; host tests use a
+      recording boundary to prove all argument pass-through, the -1
+      default and return propagation.
+
   - address: 0x0812120c
     ghidra: (absent from functions.csv)
     name: ata_cmd_reset
