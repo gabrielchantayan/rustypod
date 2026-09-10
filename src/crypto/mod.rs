@@ -26,6 +26,9 @@
 //! [`evp_digest_update`] IS OpenSSL: the three-word `EVP_DigestUpdate`
 //! @ 0x0804a728, one of four EVP entry points sharing the assertion
 //! string `"ctx->digest->md_size <= EVP_MAX_MD_SIZE"` @ 0x0804a694.
+//! [`evp_md_ctx_cleanup`] ports `EVP_MD_CTX_cleanup` @ 0x0804ac2c: it
+//! dispatches descriptor teardown, conditionally releases `md_data`, and
+//! clears the 16-byte context.
 //! [`evp_pkey`] ports `EVP_PKEY_free` @ 0x0804ae6c, the reference-
 //! counted destructor of the p_lib.c `EVP_PKEY` wrapper (its
 //! constructor/type-normalizer/size siblings sit at 0x0804aeb4 /
@@ -46,6 +49,7 @@ pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
 pub mod evp_digest_update;
+pub mod evp_md_ctx_cleanup;
 pub mod evp_sha1;
 pub mod evp_pkey;
 pub mod obj_dat;

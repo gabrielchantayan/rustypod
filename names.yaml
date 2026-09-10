@@ -54101,7 +54101,7 @@ functions:
       r2: count
       FUN_0804a6bc: evp_digest_init_ex (not ported)
       FUN_0804a604: evp_digest_final_ex (not ported)
-      FUN_0804ac2c: evp_md_ctx_cleanup (not ported)
+      FUN_0804ac2c: evp_md_ctx_cleanup (ported)
       FUN_0804b214: evp_sha1 (the EVP_MD getter; not ported)
     notes: >-
       OpenSSL's `EVP_DigestUpdate` from crypto/evp/digest.c, three words
@@ -54126,18 +54126,57 @@ functions:
       arrive is still forwarded to the algorithm, and this port keeps
       that. The EVP_MD slots the port declares are the ones the four
       sibling entry points actually load - md_size +0x08, init +0x10,
-      update +0x14, final +0x18, cleanup +0x20 - and +0x1c is left as an
-      untyped word because nothing in the cluster reads it, so its ABI is
-      unobserved and is not invented here. Deviation - host only - host
-      pointers are twice the target's 32-bit width, so EvpMd and EvpMdCtx
-      place their slots as `#[repr(C)]` named fields instead of addressing
-      raw bytes; on armv5te-none-eabi the fields land on the original
-      offsets, and the pinned body words plus the decoded `#0x14`
-      immediate are asserted in a host test so the declared slot stays
-      tied to the encoding. match.py against the worktree archive shows
+      update +0x14, final +0x18, cleanup +0x20, and ctx_size +0x44;
+      +0x1c and the eight words through +0x40 remain opaque because this
+      cluster does not inspect them. Deviation - host only - host pointers
+      are twice the target's 32-bit width, so EvpMd and EvpMdCtx place their
+      slots as `#[repr(C)]` named fields instead of addressing raw bytes; on
+      armv5te-none-eabi the fields land on the original offsets, and the
+      pinned body words plus the decoded `#0x14` immediate are asserted in a
+      host test so the declared slot stays tied to the encoding.
+      match.py against the worktree archive shows
       the same two loads and the same `bx r3` tail branch, with a
       `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
       pointers add around them; the dispatch structure is identical.
+  # --- vendored OpenSSL: EVP_MD_CTX teardown ---
+  - address: 0x0804ac2c
+    ghidra: FUN_0804ac2c
+    name: evp_md_ctx_cleanup
+    size: 136
+    sig: "int evp_md_ctx_cleanup(EvpMdCtx *ctx)"
+    module: crypto/evp_md_ctx_cleanup
+    status: ported
+    renames:
+      param_1/r0: ctx
+      iVar1/r0: digest
+      pcVar2/r1: cleanup
+      FUN_0805f440: heap_poison
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 0x0804ac2c..0x0804acb4 (34 instruction
+      words): the preceding 0x0804ac0c..0x0804ac28 are the tail of a string
+      literal, and the next independently linked function starts at
+      0x0804acb4 with `push {r3,r4,r5,r6,r7,lr}`. A complete raw-image
+      decode of every ARM B/BL immediate finds exactly 11 inbound sites, all
+      unconditional `bl` (0x0803b598, 0x0804a5f4, 0x0804ad0c, 0x0804adb4,
+      0x0804afc8, 0x0804b104, 0x0805fed0, 0x08060870, 0x08092738,
+      0x080a41ec, and 0x080e7504), with no predicated calls and no direct
+      tail `b`; no image word equals this entry address, so no indirect
+      dispatch is discovered. Algorithm: ctx itself is dereferenced
+      unconditionally; if ctx->digest is non-NULL, its optional cleanup slot
+      (+0x20) runs unless ctx->flags bit 1 is set. The code RELOADS digest
+      after that arbitrary callback, then if its ctx_size (+0x44) and
+      ctx->md_data are nonzero and flags bit 2 is clear, calls heap_poison
+      (ctx->md_data, ctx_size) followed by traced_free on a RELOADED md_data
+      pointer. It finally stores zero to all four context words and returns
+      1. Host tests prove callback replacement of digest/md_data is honored,
+      poison precedes free, the bit-1 and bit-2 gates affect their distinct
+      actions, and a NULL digest still clears every word. Deliberate
+      host/codegen deviation: target offsets use `#[repr(C)]` named fields
+      because host pointers are 8 bytes; the final stores are volatile to
+      retain the ARM word clears and avoid a memclear helper, with identical
+      memory effects. Both callees are already ported and are called
+      directly.
 
   # --- vendored OpenSSL: the SHA-1 EVP_MD descriptor getter ---
   - address: 0x0804b214
