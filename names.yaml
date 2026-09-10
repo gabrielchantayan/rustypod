@@ -55401,6 +55401,35 @@ functions:
       boundary; host tests install a recording seam and use a dedicated
       below-4-GiB raw-u32 root/context fixture. The runtime root global uses
       app/context_scope.rs's existing APP_ROOT_OBJECT model of 0x089ca674.
+
+  - address: 0x08168ae4
+    ghidra: thunk_FUN_0825a028
+    name: root_context_f9c_bound_destruct
+    size: 4
+    sig: "RootContextF9cBound *root_context_f9c_bound_destruct(RootContextF9cBound *this)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r0: this (root-context +0xf9c bound object; forwarded without a NULL guard)
+      thunk_FUN_0813eabc: root_context_f9c_bound_destruct_first_veneer
+      FUN_0825a028: root_context_f9c_bound_destruct_target (unported)
+    notes: >-
+      Raw ARM confirms Ghidra's 4-byte extent: 0x08168ae4 is the lone
+      `b 0x0813eabc`; the next separately linked body starts at 0x08168ae8.
+      That first veneer is itself the lone `b 0x0825a028`, so this port
+      forwards this and the final target return unchanged through a volatile
+      seam. The preceding 0x08168acc deleting-destructor path tests this for
+      NULL, calls 0x0813eabc, then tail-branches to operator_delete
+      (0x082aad24), identifying this as the non-deleting counterpart for the
+      adjacent root_context_f9c_bound constructor. Full-image ARM B/BL decode
+      finds exactly 12 inbound direct calls, all unconditional bl:
+      0x0812fa24, 0x081425f8, 0x08142614, 0x081b58b4, 0x081b5d8c,
+      0x081f8aa0, 0x081f8b78, 0x081f8e90, 0x081f8ed8, 0x081f8fe4,
+      0x08210b4c, and 0x08211870. There are no predicated forms and aligned
+      whole-image word scans find no DATA reference to either veneer or the
+      unported body. Device builds call the fixed 0x0825a028 address; host
+      tests replace that boundary with a recorder and prove both NULL
+      forwarding and return propagation.
   - address: 0x08139dec
     ghidra: FUN_08139dec
     name: iap_incoming_client_base_construct

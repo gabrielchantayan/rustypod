@@ -131,6 +131,88 @@ pub unsafe extern "C" fn root_context_f9c_bound_construct(
     bound
 }
 
+/// RetailOS entry address of the unported destructor body reached by the
+/// two stock tail veneers.
+pub const ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS: usize = 0x0825_a028;
+
+/// ABI of the unported destructor body at
+/// [`ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS`].
+pub type RootContextF9cBoundDestruct =
+    unsafe extern "C" fn(*mut RootContextF9cBound) -> *mut RootContextF9cBound;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_root_context_f9c_bound_destruct(
+    this: *mut RootContextF9cBound,
+) -> *mut RootContextF9cBound {
+    let destruct: RootContextF9cBoundDestruct =
+        core::mem::transmute(ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS);
+    destruct(this)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_root_context_f9c_bound_destruct(
+    _this: *mut RootContextF9cBound,
+) -> *mut RootContextF9cBound {
+    panic!("root_context_f9c_bound_destruct requires destructor body 0x0825a028")
+}
+
+/// Active boundary for the unported destructor body.
+#[cfg(target_os = "none")]
+pub static mut ROOT_CONTEXT_F9C_BOUND_DESTRUCT: RootContextF9cBoundDestruct =
+    retail_root_context_f9c_bound_destruct;
+
+/// Active host boundary for the unported destructor body.
+#[cfg(not(target_os = "none"))]
+pub static mut ROOT_CONTEXT_F9C_BOUND_DESTRUCT: RootContextF9cBoundDestruct =
+    missing_root_context_f9c_bound_destruct;
+
+#[inline(always)]
+unsafe fn root_context_f9c_bound_destruct_target() -> RootContextF9cBoundDestruct {
+    core::ptr::read_volatile(core::ptr::addr_of!(ROOT_CONTEXT_F9C_BOUND_DESTRUCT))
+}
+
+/// root_context_f9c_bound_destruct — original: `thunk_FUN_0825a028` @
+/// `0x08168ae4` (4 bytes; **12** verified direct `bl` callers).
+///
+/// Raw ARM is exactly `b 0x0813eabc`; that first tail veneer is exactly
+/// `b 0x0825a028`, the unported destructor body. The separately linked next
+/// function starts at `0x08168ae8`, proving that the extent is the one branch
+/// word Ghidra reports. The preceding `0x08168acc` deleting destructor
+/// NULL-checks this same object, calls the first veneer, and branches to
+/// `operator_delete`; this is its non-deleting counterpart.
+///
+/// The algorithm therefore forwards `this` and propagates the target's
+/// return unchanged. A complete decode of every ARM B/BL immediate in
+/// `osos.dec` finds 12 inbound calls, all unconditional `bl` (no predicated
+/// forms): `0x0812fa24`, `0x081425f8`, `0x08142614`, `0x081b58b4`,
+/// `0x081b5d8c`, `0x081f8aa0`, `0x081f8b78`, `0x081f8e90`, `0x081f8ed8`,
+/// `0x081f8fe4`, `0x08210b4c`, and `0x08211870`. No aligned image data word
+/// equals either veneer or body address, so this is not data-dispatched.
+///
+/// # Deliberate deviation
+///
+/// The two stock tail branches become a volatile injectable call boundary.
+/// `FUN_0825a028` is unported: device builds call its fixed retailOS address,
+/// while host tests install a recorder. The wrapper deliberately retains no
+/// NULL guard; the target owns that behavior.
+///
+/// # Safety
+///
+/// `this` must satisfy the unported destructor body's requirements. It is
+/// forwarded even when NULL, exactly as the ARM veneer does.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.root_context_f9c_bound_destruct"
+)]
+pub unsafe extern "C" fn root_context_f9c_bound_destruct(
+    this: *mut RootContextF9cBound,
+) -> *mut RootContextF9cBound {
+    root_context_f9c_bound_destruct_target()(this)
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -141,6 +223,37 @@ mod tests {
         hints, note_missing_u32_fixture, try_map_u32_slab, APP_ROOT_TEST_LOCK,
     };
     use core::ptr;
+    use std::sync::Mutex;
+
+    static DESTRUCT_LOCK: Mutex<()> = Mutex::new(());
+    static mut DESTRUCT_CALLS: u32 = 0;
+    static mut DESTRUCT_INPUTS: [*mut RootContextF9cBound; 2] = [ptr::null_mut(); 2];
+    static mut DESTRUCT_RETURN: *mut RootContextF9cBound = ptr::null_mut();
+
+    unsafe extern "C" fn recording_destruct(
+        this: *mut RootContextF9cBound,
+    ) -> *mut RootContextF9cBound {
+        let call = DESTRUCT_CALLS as usize;
+        DESTRUCT_INPUTS[call] = this;
+        DESTRUCT_CALLS += 1;
+        DESTRUCT_RETURN
+    }
+
+    struct DestructRestore {
+        destruct: RootContextF9cBoundDestruct,
+    }
+
+    impl Drop for DestructRestore {
+        fn drop(&mut self) {
+            unsafe {
+                ROOT_CONTEXT_F9C_BOUND_DESTRUCT = self.destruct;
+                DESTRUCT_CALLS = 0;
+                DESTRUCT_INPUTS = [ptr::null_mut(); 2];
+                DESTRUCT_RETURN = ptr::null_mut();
+            }
+        }
+    }
+
 
     static mut BASE_CALLS: u32 = 0;
     static mut BASE_INPUTS: [*mut RootContextF9cBound; 2] = [ptr::null_mut(); 2];
@@ -235,6 +348,39 @@ mod tests {
             assert_eq!(input.root_context_f9c, 0);
             assert_eq!(input.mode, 0);
             assert_eq!(input.trailing, [0x44; 3], "the byte store preserves trailing padding");
+        }
+
+        drop(restore);
+    }
+
+    #[test]
+    fn destruct_forwards_null_and_non_null_without_rewriting_the_target_result() {
+        let _guard = DESTRUCT_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut input = object(0x1111_1111, 0x2222_2222, 0x33, [0x44; 3]);
+        let mut returned = object(0x5555_5555, 0x6666_6666, 0x77, [0x88; 3]);
+        let restore = unsafe {
+            let restore = DestructRestore {
+                destruct: ROOT_CONTEXT_F9C_BOUND_DESTRUCT,
+            };
+            ROOT_CONTEXT_F9C_BOUND_DESTRUCT = recording_destruct;
+            DESTRUCT_RETURN = ptr::addr_of_mut!(returned);
+            restore
+        };
+
+        unsafe {
+            assert_eq!(
+                root_context_f9c_bound_destruct(ptr::null_mut()),
+                ptr::addr_of_mut!(returned)
+            );
+            assert_eq!(DESTRUCT_CALLS, 1);
+            assert!(DESTRUCT_INPUTS[0].is_null(), "the veneer has no NULL guard");
+
+            assert_eq!(
+                root_context_f9c_bound_destruct(ptr::addr_of_mut!(input)),
+                ptr::addr_of_mut!(returned)
+            );
+            assert_eq!(DESTRUCT_CALLS, 2);
+            assert_eq!(DESTRUCT_INPUTS[1], ptr::addr_of_mut!(input));
         }
 
         drop(restore);
