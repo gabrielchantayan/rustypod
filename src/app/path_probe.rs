@@ -5,6 +5,9 @@
 //! Port:
 //! - [`path_probe_via_facade`] — original: `FUN_080f4ad8` @ 0x080f4ad8
 //!   (68 bytes; **18 `bl` call sites**, grep on `decomp/osos.asm`).
+//! - [`path_facade_slot_5c`] — original: `FUN_08084d58` @ `0x08084d58`
+//!   (68 bytes; **12 direct `bl` call sites**: 8 unconditional and 4
+//!   `blne`).
 //!
 //! ## What it is
 //!
@@ -150,11 +153,18 @@ pub const FACADE_PATH_PROBE_SLOT: usize = 0x50;
 /// [`FACADE_PATH_PROBE_SLOT`] as a vtable word index.
 pub const FACADE_PATH_PROBE_SLOT_INDEX: usize = FACADE_PATH_PROBE_SLOT / 4;
 
-/// The modeled facade vtable extent: every slot up to and including
-/// the path probe. Only slot [`FACADE_PATH_PROBE_SLOT_INDEX`] is
-/// decoded; the rest are held as raw words (the StringIdRecordVtable
-/// serialized-slots precedent).
-pub const FACADE_VTABLE_SLOTS: usize = FACADE_PATH_PROBE_SLOT_INDEX + 1;
+/// Byte offset of the path operation slot this module's
+/// [`path_facade_slot_5c`] loads (`ldr r2, [r1, #0x5c]` @ 0x08084d78).
+pub const FACADE_PATH_SLOT_5C: usize = 0x5c;
+
+/// [`FACADE_PATH_SLOT_5C`] as a vtable word index.
+pub const FACADE_PATH_SLOT_5C_INDEX: usize = FACADE_PATH_SLOT_5C / 4;
+
+/// The modeled facade vtable extent: every slot up to and including the
+/// path operation slot at +0x5c. Only slots [`FACADE_PATH_PROBE_SLOT_INDEX`]
+/// and [`FACADE_PATH_SLOT_5C_INDEX`] are decoded; the rest are held as raw
+/// words (the StringIdRecordVtable serialized-slots precedent).
+pub const FACADE_VTABLE_SLOTS: usize = FACADE_PATH_SLOT_5C_INDEX + 1;
 
 /// The 16-byte scoped interface guard — exactly the original's r0-r3
 /// spill frame. Layout (from the constructor/destructor bodies):
@@ -166,15 +176,12 @@ pub struct InterfaceGuard {
     pub words: [u32; 4],
 }
 
-/// The facade class vtable, modeled down to its twenty-one serialized
-/// slots. Only slot [`FACADE_PATH_PROBE_SLOT_INDEX`] (+0x50, the path
-/// probe) is decoded; the owning class is unidentified (the accessor
-/// returns `interface->field_8` of an object the guard subsystem
-/// fetches from a registry via 0x0814a130).
+/// The facade class vtable, modeled down to its twenty-four serialized
+/// slots. Slot 20 is a [`PathProbeQuery`] code pointer; slot 23 is a
+/// [`PathFacadeSlot5c`] code pointer.
 #[repr(C)]
 pub struct FacadeVtable {
-    /// The raw slot words; slot 20 is a [`PathProbeQuery`] code
-    /// pointer.
+    /// The raw slot words.
     pub slots: [usize; FACADE_VTABLE_SLOTS],
 }
 
@@ -190,6 +197,13 @@ pub struct FacadeObject {
 /// in r0 and the path object in r1, returns the query status.
 pub type PathProbeQuery =
     unsafe extern "C" fn(facade: *mut FacadeObject, path_object: *mut StringObject) -> u32;
+
+/// The facade's vtable-slot-+0x5c path operation: takes the facade object
+/// in r0 and the path pointer in r1, returning its status. The operation's
+/// semantic identity is not established; observed callers use it before
+/// recreation and as a conditional cleanup.
+pub type PathFacadeSlot5c =
+    unsafe extern "C" fn(facade: *mut FacadeObject, path: *const u8) -> u32;
 
 /// The interface-guard constructor @ 0x08206e40. It forwards `base_hint` to
 /// the shared base constructor and returns the constructed guard.
@@ -282,12 +296,21 @@ unsafe extern "C" fn stub_path_probe_query(
     0
 }
 
+/// The fail-closed slot-+0x5c stand-in. Its real operation is not identified,
+/// so the host boundary reports the same zero status as the +0x50 stand-in.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn stub_path_facade_slot_5c(
+    _facade: *mut FacadeObject,
+    _path: *const u8,
+) -> u32 {
+    0
+}
+
 /// Boundary default for the facade accessor: calls the stock
 /// 0x0818a0bc, which remains in retailOS. The host default fails
 /// closed (the vtable_set.rs `store_ctor_unported` policy): it returns
-/// a stand-in facade whose slot +0x50 answers 0, keeping the ported
-/// probe total on host with the same observable result the fail-closed
-/// policy promises.
+/// a stand-in facade whose +0x50 and +0x5c slots answer 0, keeping both
+/// ported facade operations total on host.
 unsafe extern "C" fn firmware_facade_fetch(
     guard: *mut InterfaceGuard,
     selector: u32,
@@ -304,6 +327,7 @@ unsafe extern "C" fn firmware_facade_fetch(
         let _ = selector;
         let vtable = core::ptr::addr_of_mut!(STUB_FACADE_VTABLE);
         (*vtable).slots[FACADE_PATH_PROBE_SLOT_INDEX] = stub_path_probe_query as usize;
+        (*vtable).slots[FACADE_PATH_SLOT_5C_INDEX] = stub_path_facade_slot_5c as usize;
         let facade = core::ptr::addr_of_mut!(STUB_FACADE);
         (*facade).vtable = vtable as *const FacadeVtable;
         facade
@@ -483,6 +507,42 @@ pub unsafe extern "C" fn path_probe_via_facade(
     status
 }
 
+/// path_facade_slot_5c — original: `FUN_08084d58` @ `0x08084d58` (68
+/// bytes; **12 direct `bl` call sites**, verified by decoding every ARM
+/// B/BL word in `osos.dec`: 8 unconditional at 0x08084d40, 0x0811d744,
+/// 0x0812fc50, 0x0813a554, 0x0813a610, 0x081ef29c, 0x082737dc and
+/// 0x082dcfc8; 4 `blne` at 0x0827ef74, 0x0827ef90, 0x0827f7a8 and
+/// 0x0827f7c4).
+///
+/// Constructs a scoped interface guard over its r0-r3 spill frame, fetches
+/// facade selector 1, invokes that facade's vtable slot +0x5c with `path`,
+/// destroys the guard, and returns the slot status verbatim. `base_hint`
+/// remains live through `mov r0, sp` into the guard constructor, but the
+/// slot receives only `(facade, path)`. The operation behind +0x5c has no
+/// established semantic identity: write-mode file-open callers use it before
+/// recreation, while four callers conditionally invoke it (`blne`).
+///
+/// # Deliberate deviations
+///
+/// This reuses the existing [`PATH_PROBE_GUARD_CTOR`],
+/// [`PATH_PROBE_FACADE_FETCH`], and [`PATH_PROBE_GUARD_DTOR`] seams. Their
+/// device defaults retain the exact ported/retailOS boundary chain; their
+/// host defaults make the unported interface graph fail closed. The indirect
+/// slot remains a raw function pointer exactly as the original's `blx r2`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_5c(path: *const u8, base_hint: u32) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let slot = (*(*facade).vtable).slots[FACADE_PATH_SLOT_5C_INDEX];
+    let operation: PathFacadeSlot5c = core::mem::transmute(slot);
+    let status = operation(facade, path);
+    guard_dtor_fn()(guard);
+    status
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
@@ -546,11 +606,12 @@ pub(crate) mod tests {
     static mut DTOR_THIS: *mut InterfaceGuard = core::ptr::null_mut();
     /// The status the recording query hands back.
     static mut QUERY_RESULT: u32 = 0;
+    static mut QUERY_PATH: *const u8 = core::ptr::null();
 
-    /// The mock facade and its vtable; every slot but +0x50 is the
-    /// wrong-slot trap. Laid out at install time (static initializers
-    /// cannot hold function pointers — the STUB_STORE_VTABLE
-    /// precedent).
+    /// The mock facade and its vtable; every slot begins as the wrong-slot
+    /// trap. Individual tests install their expected query slot. Laid out at
+    /// install time (static initializers cannot hold function pointers — the
+    /// STUB_STORE_VTABLE precedent).
     static mut MOCK_VTABLE: FacadeVtable = FacadeVtable {
         slots: [0; FACADE_VTABLE_SLOTS],
     };
@@ -605,6 +666,16 @@ pub(crate) mod tests {
         QUERY_RESULT
     }
 
+    unsafe extern "C" fn recording_path_facade_slot_5c(
+        facade: *mut FacadeObject,
+        path: *const u8,
+    ) -> u32 {
+        record(EVENT_QUERY);
+        QUERY_FACADE = facade;
+        QUERY_PATH = path;
+        QUERY_RESULT
+    }
+
     unsafe extern "C" fn recording_wrong_slot(
         _facade: *mut FacadeObject,
         _path_object: *mut StringObject,
@@ -621,9 +692,9 @@ pub(crate) mod tests {
         this
     }
 
-    /// Resets the recording state, installs the recording mocks, and
-    /// lays out the mock facade with the wrong-slot trap in every
-    /// slot but +0x50.
+    /// Resets the recording state, installs the recording mocks, and lays
+    /// out the mock facade with the wrong-slot trap in every slot except
+    /// +0x50.
     unsafe fn install_recording() {
         EVENTS = [0; 16];
         EVENT_COUNT = 0;
@@ -638,6 +709,7 @@ pub(crate) mod tests {
         QUERY_FACADE = core::ptr::null_mut();
         QUERY_PATH_OBJECT = core::ptr::null_mut();
         DTOR_THIS = core::ptr::null_mut();
+        QUERY_PATH = core::ptr::null();
         QUERY_RESULT = 0;
         let vtable = core::ptr::addr_of_mut!(MOCK_VTABLE);
         for slot in 0..FACADE_VTABLE_SLOTS {
@@ -773,6 +845,47 @@ pub(crate) mod tests {
                 "the host boundary chain is total and fails closed"
             );
             assert_eq!(EVENT_COUNT, 0, "no recording mock is installed");
+        }
+    }
+
+    #[test]
+    fn slot_5c_keeps_the_guarded_path_operation_contract() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        let path = b"iPod_Control/Device/PlayCounts";
+        unsafe {
+            for (base_hint, status) in [(0u32, 0u32), (1, 7), (0x5a5a_f00d, 0xdead_beef)] {
+                install_recording();
+                (*core::ptr::addr_of_mut!(MOCK_VTABLE)).slots[FACADE_PATH_SLOT_5C_INDEX] =
+                    recording_path_facade_slot_5c as usize;
+                QUERY_RESULT = status;
+
+                assert_eq!(path_facade_slot_5c(path.as_ptr(), base_hint), status);
+                assert_eq!(EVENT_COUNT, 4, "no wrong-slot trap fired");
+                assert_eq!(EVENTS[0], EVENT_GUARD_CTOR, "the guard is constructed first");
+                assert_eq!(EVENTS[1], EVENT_FETCH, "the facade is fetched inside the guard");
+                assert_eq!(EVENTS[2], EVENT_QUERY, "slot +0x5c is invoked");
+                assert_eq!(EVENTS[3], EVENT_GUARD_DTOR, "the guard is destroyed last");
+                assert_eq!(CTOR_HINT, base_hint, "r1 stays live for the constructor");
+                assert_eq!(FETCH_SELECTOR, FACADE_SELECTOR, "selector is the #1 immediate");
+                assert_eq!(FETCH_GUARD, CTOR_THIS, "fetch receives the r0-r3 guard frame");
+                assert_eq!(DTOR_THIS, CTOR_THIS, "destruction receives that same frame");
+                assert_eq!(
+                    QUERY_FACADE,
+                    core::ptr::addr_of_mut!(MOCK_FACADE),
+                    "the operation receives the fetched facade"
+                );
+                assert_eq!(QUERY_PATH, path.as_ptr(), "r4 restores the path into r1");
+            }
+        }
+    }
+
+    #[test]
+    fn slot_5c_default_chain_fails_closed_on_host() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            assert_eq!(path_facade_slot_5c(b"unused".as_ptr(), 0), 0);
         }
     }
 
