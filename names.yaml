@@ -6062,6 +6062,36 @@ functions:
       cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc]
       sequence matches verbatim.
 
+  - address: 0x0805c220
+    ghidra: FUN_0805c220
+    name: tdat_element_addref_counters
+    size: 180
+    sig: "void tdat_element_addref_counters(u8 *element)"
+    module: ui/tdat_counter_addrefs
+    status: ported
+    renames:
+      param_1/r0: element
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_0808e16c: tagged_counter_try_increment
+    notes: >-
+      Raw ARM extent is exactly 0x0805c220..0x0805c2d0; the next separately
+      entered function begins at 0x0805c2d4. It first invokes the NULL-safe
+      ported 'tdat' class predicate and immediately returns if it fails.
+      On success it calls the ported tagged_counter_try_increment on the
+      element's counters at +0xc0, +0x118, +0x170, +0x1c8, +0x220, +0x278,
+      +0x2d0, +0x328, +0x380, +0x3d8, +0x7a0, +0x7f8, +0x8a8, and +0x850,
+      then loops ten times over +0x430 + index*0x58. Every increment result
+      is ignored, so invalid tagged counters remain unchanged independently.
+      Decoding every ARM B/BL-immediate word in osos.dec verifies 11 inbound
+      plain bl calls (0x080461b8, 0x08046e80, 0x08052b54, 0x08055b2c,
+      0x0805cd70, 0x0808677c, 0x0808d148, 0x0809dc54, 0x0809dfe0,
+      0x0809efc0, 0x080aa4d0), zero predicated forms, and no tail b callers.
+      The Rust port directly invokes the already-ported predicate and counter
+      increment rather than branching into stock code; otherwise no deliberate
+      deviations. match.py structural review shows Rust's direct calls rather
+      than retail bl targets and LLVM unrolling the fixed ten-counter group;
+      both retain the same 24 attempted increments and ignored results.
+
   - address: 0x080522d4
     ghidra: FUN_080522d4
     name: ui_tdat_first_plst
