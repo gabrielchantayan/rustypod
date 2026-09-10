@@ -211,6 +211,120 @@ pub unsafe extern "C" fn string_table_has_string(table: *mut u8, key: *const u32
         && (ops.string_empty)((node as usize + NODE_VALUE_OFFSET) as *const u32) == 0)
         as u32
 }
+/// The unported string-table value lookup called by
+/// [`string_table_parse_i32`]. `FUN_08101c14` selects a non-empty current
+/// table value or the fallback table value, then returns the address of its
+/// COW-string data-pointer word.
+#[derive(Clone, Copy)]
+pub struct StringTableParseOps {
+    /// `FUN_08101c14` @ 0x08101c14 — resolves `key` in `table` and returns
+    /// the address of the selected mapped COW string's data-pointer word.
+    pub lookup: unsafe extern "C" fn(table: *mut u8, key: *const u32) -> *const u32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_value(
+    table: *mut u8,
+    key: *const u32,
+) -> *const u32 {
+    let lookup: unsafe extern "C" fn(*mut u8, *const u32) -> *const u32 =
+        unsafe { core::mem::transmute(0x0810_1c14usize) };
+    unsafe { lookup(table, key) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_value(
+    _table: *mut u8,
+    _key: *const u32,
+) -> *const u32 {
+    panic!("string_table_parse_i32 requires string-table lookup 0x08101c14")
+}
+
+/// Active model of the unported `FUN_08101c14` lookup. Target builds retain
+/// the verified firmware call boundary; host tests install a low-address
+/// target-word fixture.
+#[cfg(target_os = "none")]
+pub static mut STRING_TABLE_PARSE_OPS: StringTableParseOps = StringTableParseOps {
+    lookup: firmware_string_table_value,
+};
+
+/// Active model of the unported `FUN_08101c14` lookup. The host default
+/// rejects accidental traversal into the unported COW string-table lookup.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_TABLE_PARSE_OPS: StringTableParseOps = StringTableParseOps {
+    lookup: missing_string_table_value,
+};
+
+#[inline(always)]
+unsafe fn string_table_parse_ops() -> StringTableParseOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_PARSE_OPS))
+}
+
+/// Parses the exact single `"%d"` conversion used by the original wrapper.
+///
+/// The scanf integer worker skips C whitespace, accepts one sign, collects
+/// base-10 digits with modulo-2^32 arithmetic, and leaves the caller's
+/// pre-zeroed output unchanged when no digit is present.
+#[inline(always)]
+unsafe fn scan_signed_decimal(input: *const u8) -> u32 {
+    let mut cursor = input;
+    while matches!(cursor.read(), b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r') {
+        cursor = cursor.add(1);
+    }
+
+    let negative = match cursor.read() {
+        b'+' => {
+            cursor = cursor.add(1);
+            false
+        }
+        b'-' => {
+            cursor = cursor.add(1);
+            true
+        }
+        _ => false,
+    };
+
+    let mut value = 0u32;
+    let mut saw_digit = false;
+    loop {
+        let digit = cursor.read().wrapping_sub(b'0');
+        if digit > 9 {
+            break;
+        }
+        saw_digit = true;
+        value = value.wrapping_mul(10).wrapping_add(digit as u32);
+        cursor = cursor.add(1);
+    }
+    if saw_digit && negative {
+        value.wrapping_neg()
+    } else {
+        value
+    }
+}
+
+/// `string_table_parse_i32` — original: `FUN_08102168` @ **0x08102168**
+/// (40 bytes, 0x08102168..0x08102190; the trailing `"%d\0"` literal occupies
+/// 0x08102190..0x08102193 and the sibling function starts at 0x08102194).
+///
+/// Decoding every aligned ARM B/BL word in `osos.dec` finds **11 direct `bl`
+/// call sites**, all unconditional; there are no predicated forms. Resolves
+/// `key` through `FUN_08101c14`, scans the resulting COW-string data as one
+/// signed decimal `"%d"` conversion into a zero-initialized local, and returns
+/// that local as the 32-bit result. There is no NULL guard on either input or
+/// on the returned COW data pointer.
+///
+/// Deliberate deviation: the existing Rust `sscanf` veneer cannot consume its
+/// C-varargs destination (the original passes the local in r2), so this port
+/// inlines the already-ported scanf integer worker's `%d` behavior. The
+/// unported lookup remains a `read_volatile` ops seam at its verified target
+/// address 0x08101c14.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_parse_i32(table: *mut u8, key: *const u32) -> u32 {
+    let value = unsafe { (string_table_parse_ops().lookup)(table, key).read() };
+    unsafe { scan_signed_decimal(value as usize as *const u8) }
+}
+
 
 /// The unported string-table assignment helper used by
 /// [`string_table_set_decimal`](crate::app::string_table::string_table_set_decimal).
@@ -747,6 +861,12 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_OPS), DEFAULT_STRING_TABLE_OPS);
+                ptr::write_volatile(
+                    ptr::addr_of_mut!(STRING_TABLE_PARSE_OPS),
+                    StringTableParseOps {
+                        lookup: missing_string_table_value,
+                    },
+                );
             }
         }
     }
@@ -833,6 +953,21 @@ mod tests {
     static mut FIND_RESULTS: Vec<u32> = Vec::new();
     /// When set, the find mock rewrites the table index word mid-call.
     static mut FIND_SETS_INDEX: Option<(*mut u8, u32)> = None;
+
+    const PARSE_SLAB_SIZE: usize = 0x1000;
+    const PARSE_TEXT_OFFSET: usize = 0x100;
+    static mut PARSE_VALUE_WORD: *const u32 = ptr::null();
+    static mut PARSE_LOOKUP_CALLS: u32 = 0;
+    static mut PARSE_LOOKUP_ARGUMENTS: Option<(usize, usize)> = None;
+
+    unsafe extern "C" fn mock_parse_value(
+        table: *mut u8,
+        key: *const u32,
+    ) -> *const u32 {
+        PARSE_LOOKUP_CALLS += 1;
+        PARSE_LOOKUP_ARGUMENTS = Some((table as usize, key as usize));
+        PARSE_VALUE_WORD
+    }
 
     fn find_calls() -> &'static mut Vec<(u32, u32)> {
         unsafe { &mut *ptr::addr_of_mut!(FIND_CALLS) }
@@ -1060,6 +1195,47 @@ mod tests {
         // One probe total: the fallback hit. The current-table miss
         // must not have probed.
         unsafe { assert_eq!(EMPTY_CALLS, 1) };
+    }
+
+    #[test]
+    fn parses_signed_decimal_value_from_lookup_result() {
+        let (_guard, _seam) = lock();
+        let Some(base) = try_map_u32_slab(hints::STRING_TABLE_PARSE_I32, PARSE_SLAB_SIZE) else {
+            assert!(note_missing_u32_fixture("app/string_table"));
+            return;
+        };
+        let value_word = base.cast::<u32>();
+        let text = unsafe { base.add(PARSE_TEXT_OFFSET) };
+        let table = 0x1234usize as *mut u8;
+        let key = 0x5678usize as *const u32;
+        unsafe {
+            ptr::write_bytes(base, 0, PARSE_SLAB_SIZE);
+            value_word.write(text as usize as u32);
+            PARSE_VALUE_WORD = value_word;
+            PARSE_LOOKUP_CALLS = 0;
+            PARSE_LOOKUP_ARGUMENTS = None;
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_PARSE_OPS),
+                StringTableParseOps {
+                    lookup: mock_parse_value,
+                },
+            );
+
+            for (input, expected) in [
+                (&b"42\0"[..], 42u32),
+                (&b" \t+123 trailing\0"[..], 123),
+                (&b"-2147483648\0"[..], 0x8000_0000),
+                (&b"4294967296\0"[..], 0),
+                (&b"0x10\0"[..], 0),
+                (&b"nonnumeric\0"[..], 0),
+            ] {
+                ptr::write_bytes(text, 0, PARSE_SLAB_SIZE - PARSE_TEXT_OFFSET);
+                ptr::copy_nonoverlapping(input.as_ptr(), text, input.len());
+                assert_eq!(string_table_parse_i32(table, key), expected, "{input:?}");
+            }
+            assert_eq!(PARSE_LOOKUP_CALLS, 6);
+            assert_eq!(PARSE_LOOKUP_ARGUMENTS, Some((table as usize, key as usize)));
+        }
     }
 
 }

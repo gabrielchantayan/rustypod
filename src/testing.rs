@@ -312,6 +312,10 @@ pub mod hints {
     // provider/registry fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const APPLICATION_STRING_REGISTRY: usize = 0xf500_0000;
+    // 0xf600_0000: dedicated to app/string_table's raw-u32 COW value
+    // fixture for the signed-decimal getter; mappings never unmap, so no
+    // other user may share this hint.
+    pub const STRING_TABLE_PARSE_I32: usize = 0xf600_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

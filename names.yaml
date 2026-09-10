@@ -33306,6 +33306,40 @@ functions:
       blx, LLVM's fp frame, and a clz/lsr booleanize tail (exit 1, the
       expected ADS-vs-LLVM noise).
 
+  - address: 0x08102168
+    ghidra: FUN_08102168
+    name: string_table_parse_i32
+    size: 40
+    sig: "u32 string_table_parse_i32(u8 *table, const u32 *key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_08101c14: string_table_value
+      FUN_0802f92c: sscanf
+      local_8: parsed_value
+    notes: >-
+      Resolves key through the unported string-table lookup FUN_08101c14,
+      reads the selected COW string's data-pointer word, scans one signed
+      decimal "%d" conversion into a pre-zeroed local, and returns its u32
+      bit pattern. Raw extent is 0x08102168..0x08102193: code ends at
+      0x0810218c, the literal "%d\0" is the final word at 0x08102190, and
+      the sibling function starts at 0x08102194, so Ghidra's 40-byte size is
+      exact. Decoding every aligned ARM B/BL word in osos.dec finds 11 direct
+      bl call sites, all unconditional, zero predicated forms. FUN_08101c14
+      remains a volatile lookup seam whose device default transmutes the
+      verified target address; it returns the address of the mapped COW
+      string's target-width data-pointer word. The direct Rust sscanf veneer
+      cannot consume the original C-varargs output destination in r2, so this
+      port inlines the ported scanf integer worker's "%d" semantics: C
+      whitespace, optional sign, base-10 digit run, modulo-2^32 accumulation,
+      and zero on a matching failure. A dedicated low-u32 host fixture proves
+      lookup argument forwarding plus positive, signed, overflow-wrapping,
+      prefix-stopping, and nonnumeric inputs. match.py structural diff is
+      expected because LLVM emits the inlined scanner and volatile seam
+      dispatch instead of the original sscanf bl.
+
   - address: 0x08003e00
     ghidra: FUN_08003e00
     name: rom_task_start
