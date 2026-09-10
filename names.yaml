@@ -54147,6 +54147,49 @@ functions:
   # EVP_MD_CTX. This is the SSLeay-era 0.9.x layout - update hangs off
   # ctx->digest, not off the context - and is a different animal from the
   # proprietary MBA-obfuscated digest ported as crypto/digest_init.
+  - address: 0x0804a604
+    ghidra: FUN_0804a604
+    name: evp_digest_final_ex
+    size: 144
+    sig: "int evp_digest_final_ex(EvpMdCtx *ctx, u8 *md, u32 *size)"
+    module: crypto/evp_digest_final_ex
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: md
+      param_3/r2: size
+      uVar1/r6: finish_result
+      pcVar2/r2: finish
+      pcVar3/r1: cleanup
+      FUN_0805f500: heap_panic_entry
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      OpenSSL EVP_DigestFinal_ex from crypto/evp/digest.c. Raw ARM code
+      spans exactly 0x0804a604..0x0804a694 (36 words); its following bytes
+      0x0804a694..0x0804a6bc are the assertion string
+      "ctx->digest->md_size <= EVP_MAX_MD_SIZE", referenced by the
+      predicated fatal call, and the next independently linked function,
+      EVP_DigestInit_ex, starts at 0x0804a6bc. A complete raw-image decode
+      of every ARM B/BL word finds exactly 11 inbound calls, all
+      unconditional bl at 0x0804a5dc, 0x0804afc0, 0x0804b0fc, 0x0805fd50,
+      0x0806077c, 0x080926dc, 0x080a4148, 0x080a41e4, 0x080e74c4,
+      0x080e74dc, and 0x080ebf88, with no predicated calls and no tail b
+      calls. No aligned word in osos.dec equals this entry address, so no
+      indirect dispatch is discovered. The function dereferences ctx and
+      digest without guards; signed md_size values through 36, including
+      negative values, proceed while values above 36 enter heap_panic_entry.
+      It calls digest->finish (+0x18), returns that value unchanged, reloads
+      ctx->digest for optional size output (+0x08), reloads again for the
+      optional cleanup (+0x20), sets flags bit 1 only after cleanup, then
+      reloads digest and md_data before clearing ctx_size (+0x44) bytes via
+      the IRAM memzero veneer 0x08037dc8 -> 0x220002d4. Callback-driven
+      replacements of descriptor or state therefore affect later steps.
+      Host tests prove return propagation, optional size and cleanup paths,
+      signed raw size storage, flag gating, state clearing, and a finish
+      callback that changes the descriptor and md_data before the reloads.
+      Deliberate host deviation: shared #[repr(C)] named fields preserve the
+      target offsets only on ARM where pointers are four bytes. The port
+      otherwise calls the already-ported IRAM memzero veneer directly.
   - address: 0x0804a728
     ghidra: FUN_0804a728
     name: evp_digest_update
