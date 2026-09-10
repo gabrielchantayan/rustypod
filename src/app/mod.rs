@@ -4,6 +4,7 @@ pub mod app_motor;
 pub mod app_boot_metrics_submit;
 pub mod active_service_handler_readiness;
 pub mod application_resource_provider;
+pub mod application_string_registry;
 pub mod animation;
 pub mod artwork_slot_available;
 pub mod class_6800;

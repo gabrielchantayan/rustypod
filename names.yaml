@@ -55148,6 +55148,39 @@ functions:
       decomp/c/021/081fa044_FUN_081fa044.c; raw assembly:
       osos.dec 0x081fa044.
 
+  # --- Global application tagged-string registry getter ---
+  - address: 0x0819fdb0
+    ghidra: FUN_0819fdb0
+    name: application_string_registry
+    size: 36
+    sig: "void *application_string_registry(void)"
+    module: app/application_string_registry
+    status: ported
+    renames:
+      FUN_0819fe10: application_resource_provider
+      DAT_0819fdd0: application_resource_provider_global (0x089d0188)
+      r0_after_call: application_resource_provider
+      r0_return: application_string_registry
+      application_resource_provider_plus_4: tagged_string_registry
+    notes: >-
+      Raw ARM establishes the true 36-byte extent: `push {lr}; bl
+      0x0819fe10; cmp r0,#0; ldrne r0,[pc,#12]; ldrne r0,[r0]; ldrne
+      r0,[r0,#4]; moveq r0,#0; pop {pc}` at 0x0819fdb0..0x0819fdd0,
+      plus its 0x089d0188 literal-pool word at 0x0819fdd0; the separately
+      linked next function opens with `push {r4,r5,r6,lr}` at 0x0819fdd4.
+      Ghidra's reported 32-byte size omits that owned literal-pool word.
+      It obtains the global application resource provider through
+      application_resource_provider, returns NULL when that provider is NULL,
+      and otherwise reloads the global provider word before returning its raw
+      32-bit +0x04 tagged-string-registry field; the field itself may be NULL
+      and is not validated. Decoding every ARM B/BL word in osos.dec finds
+      exactly 11 inbound calls, all unconditional BL at 0x0814745c,
+      0x08184e5c, 0x0819f410, 0x0819fddc, 0x081b9888, 0x081b9b14,
+      0x081b9e28, 0x081cdb74, 0x081d22ac, 0x081e028c, and 0x0829a4b0;
+      there are no predicated BL forms or direct B tail callers. No deliberate
+      deviations. Host tests cover an absent provider, a NULL registry field,
+      and replacing the live target-width +0x04 field.
+
   # --- Global application resource-provider getter ---
   - address: 0x0819fe10
     ghidra: FUN_0819fe10
