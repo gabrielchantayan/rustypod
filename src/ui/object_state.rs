@@ -174,13 +174,15 @@ pub unsafe extern "C" fn object_sequence_id_assign(object: *mut u8) {
     object.add(0x0c).cast::<u32>().write_volatile(sequence_id);
 }
 
-/// The three words inspected by [`indexed_object_offset`], followed by the
-/// pointer slot consumed by [`indexed_object_storage_base`].
+/// The header words inspected by the indexed-object element helpers,
+/// followed by the storage-base pointer slot consumed by
+/// [`indexed_object_storage_base`].
 ///
 /// Call sites at 0x08066bb8, 0x080e2d70, and 0x080e2dc8 pass this header and
 /// use a one-based index to address fixed-size records. The base helper at
-/// 0x080aa828 verifies the same tag, loads this slot at byte offset 24, and
-/// returns the pointer stored in that slot.
+/// 0x080aa828 verifies the same tag, loads the slot at byte offset 24, and
+/// returns the pointer stored in that slot. `indexed_object_element` also
+/// requires the observed nonzero word at byte offset 20 before that lookup.
 #[repr(C)]
 pub struct IndexedObject {
     /// Fixed object-format tag: the literal at 0x08055f20 is `0x6172_6179`.
@@ -189,8 +191,10 @@ pub struct IndexedObject {
     pub element_size: u32,
     /// Number of addressable records.
     pub element_count: u32,
-    /// Header words not inspected by this helper.
-    pub reserved: [u32; 3],
+    /// Header words not inspected by the recovered helpers.
+    pub reserved: [u32; 2],
+    /// Nonzero gate required by `indexed_object_element` before base lookup.
+    pub storage_ready: u32,
     /// Pointer to the word holding the records' storage base.
     pub storage_pointer_slot: *const *mut u8,
 }
@@ -275,6 +279,48 @@ pub unsafe extern "C" fn indexed_object_offset(
             .wrapping_mul(index.wrapping_sub(1)) as usize,
     )
 }
+/// indexed_object_element — original: `FUN_080512cc` @ `0x080512cc`
+/// (92 bytes; 11 direct `bl` call sites, all unconditional).
+///
+/// Raw ARM spans `0x080512cc..0x08051324`; the following word at
+/// `0x08051328` is the `0x6172_6179` tag literal, and the next function
+/// begins at `0x0805132c`. It accepts a one-based element index only when
+/// the object tag matches, `storage_ready` is nonzero, and the index is
+/// within `1..=element_count`. It then directly calls
+/// [`indexed_object_storage_base`] and returns `storage_base + element_size *
+/// (index - 1)`. The 11 verified direct call sites contain no predicated
+/// `bl` forms.
+///
+/// Deliberate deviation: host builds use a native pointer for the target's
+/// 32-bit storage-pointer slot; `#[repr(C)]` preserves the slot's byte offset
+/// of 24.
+///
+/// # Safety
+///
+/// `object` must be readable as an aligned [`IndexedObject`]. As with the
+/// original entry `ldr`, null and misaligned pointers are not guarded.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_object_element(
+    object: *const IndexedObject,
+    index: u32,
+) -> *mut u8 {
+    if (*object).type_tag != INDEXED_OBJECT_TAG
+        || index == 0
+        || index > (*object).element_count
+        || (*object).storage_ready == 0
+    {
+        return core::ptr::null_mut();
+    }
+
+    let storage_base = indexed_object_storage_base(object);
+    storage_base.wrapping_add(
+        (*object)
+            .element_size
+            .wrapping_mul(index.wrapping_sub(1)) as usize,
+    )
+}
+
 
 /// Function-pointer signature shared by [`scaled_field_total`] and the
 /// host-test interception slot used by its two stock thunks.
@@ -1378,7 +1424,8 @@ mod tests {
             type_tag,
             element_size,
             element_count,
-            reserved: [0; 3],
+            reserved: [0; 2],
+            storage_ready: 0,
             storage_pointer_slot: core::ptr::null(),
         }
     }
@@ -1547,7 +1594,8 @@ mod tests {
             type_tag: INDEXED_OBJECT_TAG,
             element_size: 0,
             element_count: 0,
-            reserved: [0; 3],
+            reserved: [0; 2],
+            storage_ready: 0,
             storage_pointer_slot: &storage_pointer,
         };
 
@@ -1619,6 +1667,51 @@ mod tests {
         assert_eq!(unsafe { STORAGE_BASE_CALLS }, 2);
         assert_eq!(unsafe { STORAGE_BASE_OBJECT }, &object as *const IndexedObject as usize);
     }
+    #[test]
+    fn indexed_object_element_rejects_every_invalid_index_before_storage_lookup() {
+        let wrong_tag = indexed_object(INDEXED_OBJECT_TAG ^ 1, 12, 3);
+        let zero_index = indexed_object(INDEXED_OBJECT_TAG, 12, 3);
+        let above_count = indexed_object(INDEXED_OBJECT_TAG, 12, 3);
+        let storage_not_ready = indexed_object(INDEXED_OBJECT_TAG, 12, 3);
+
+        assert_eq!(
+            unsafe { indexed_object_element(&wrong_tag, 1) },
+            core::ptr::null_mut(),
+            "a tag mismatch must not dereference the null storage-pointer slot"
+        );
+        assert_eq!(unsafe { indexed_object_element(&zero_index, 0) }, core::ptr::null_mut());
+        assert_eq!(
+            unsafe { indexed_object_element(&above_count, 4) },
+            core::ptr::null_mut()
+        );
+        assert_eq!(
+            unsafe { indexed_object_element(&storage_not_ready, 1) },
+            core::ptr::null_mut(),
+            "the nonzero word at +0x14 gates a valid element lookup"
+        );
+    }
+
+    #[test]
+    fn indexed_object_element_uses_real_storage_base_for_one_based_indices() {
+        let mut storage = [0u8; 36];
+        let storage_pointer = storage.as_mut_ptr();
+        let object = IndexedObject {
+            type_tag: INDEXED_OBJECT_TAG,
+            element_size: 12,
+            element_count: 3,
+            reserved: [0; 2],
+            storage_ready: 1,
+            storage_pointer_slot: &storage_pointer,
+        };
+
+        assert_eq!(unsafe { indexed_object_element(&object, 1) }, storage.as_mut_ptr());
+        assert_eq!(
+            unsafe { indexed_object_element(&object, 3) },
+            unsafe { storage.as_mut_ptr().add(24) },
+            "the inclusive final index uses stride * (index - 1)"
+        );
+    }
+
 
     #[test]
     fn null_object_returns_zero_without_querying_the_field_triple() {
