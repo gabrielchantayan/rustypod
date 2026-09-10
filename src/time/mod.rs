@@ -5,6 +5,7 @@ pub mod datetime;
 pub mod day_number;
 pub mod leap_year;
 pub mod localtime;
+pub mod mac_epoch_to_datetime;
 pub mod mktime;
 pub mod month_length;
 pub mod rtc;

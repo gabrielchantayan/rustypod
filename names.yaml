@@ -47753,6 +47753,37 @@ functions:
       for 1970-01-01, Rata Die 719163, and the converter's final write.
 
 
+  # --- Macintosh epoch timestamp to local packed calendar record ---
+  - address: 0x080aa95c
+    ghidra: FUN_080aa95c
+    name: mac_epoch_seconds_to_datetime
+    size: 80
+    sig: "void mac_epoch_seconds_to_datetime(u32 mac_epoch_seconds, DateTime *out, i32 apply_utc_offset)"
+    module: time/mac_epoch_to_datetime
+    status: ported
+    renames:
+      param_1/r0/r4: mac_epoch_seconds
+      param_2/r1/r5: out
+      param_3/r2: apply_utc_offset
+      FUN_080ab558: current_utc_offset_query
+      FUN_080964cc: unix_seconds_to_datetime
+      DAT_080aa9a8: mac_to_unix_epoch_seconds
+    notes: >-
+      Raw ARM has a 76-byte executable body from 0x080aa95c through the
+      tail branch at 0x080aa9a4, then its 0x83da4f80 literal at 0x080aa9a8;
+      the next separately linked function begins at 0x080aa9ac, making the
+      complete extent 80 bytes. Decoding every ARM B/BL word in osos.dec
+      finds 12 unconditional plain BL callers, no predicated BL callers, and
+      no B tail callers. When r2 is nonzero, it queries the ported
+      current_utc_offset_query with stack i16/u8 outputs. Only a nonzero
+      result adds (signed i16 base offset plus signed i8 daylight adjustment)
+      * 60 to the input; all additions wrap as ARM u32 arithmetic. It then
+      adds the negative Macintosh-to-Unix epoch delta 0x83da4f80 and
+      tail-calls the ported unix_seconds_to_datetime. The target calls both
+      existing Rust ports directly. A private host-test seam only replaces
+      current_utc_offset_query to exercise successful, failed, and skipped
+      queries; it creates no target dispatch seam.
+
   # --- Proleptic-Gregorian leap-year test (time/leap_year) ---
   - address: 0x080aabac
     ghidra: FUN_080aabac
