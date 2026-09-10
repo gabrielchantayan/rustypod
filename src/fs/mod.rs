@@ -25,6 +25,8 @@ pub mod hfs_btree_get_node;
 pub mod error_status;
 /// Mapped allocation-bitmap block completion @ 0x0806448c.
 pub mod block_window;
+/// Block-size alignment check and opaque storage-backend transfer @ 0x08077444.
+pub mod storage_transfer;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.

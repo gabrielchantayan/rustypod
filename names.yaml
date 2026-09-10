@@ -58921,3 +58921,46 @@ functions:
       Host tests cover whitespace and signs, empty and non-digit text,
       mid-text termination, wrapping overflow, exact range forwarding,
       copied C-string input, allocation size, and both destructor calls.
+
+  # --- aligned opaque storage transfer ---
+  - address: 0x08077444
+    ghidra: FUN_08077444
+    name: storage_transfer_aligned_blocks
+    size: 76
+    sig: "i32 storage_transfer_aligned_blocks(const StorageTransferGeometry *geometry, u32 unused, u32 relative_block, u32 relative_block_high, u32 byte_count, void *buffer)"
+    module: fs/storage_transfer
+    status: ported
+    renames:
+      param_1/r0: geometry
+      param_2/r1: unused
+      param_3/r2: relative_block
+      param_4/r3: relative_block_high
+      param_5/stack: byte_count
+      param_6/stack: buffer
+      param_1_plus_0x0: block_size
+      param_1_plus_0x4: base_block
+      FUN_08036f14: __rt_udiv
+      FUN_0807dd68: opaque_storage_block_transfer
+      DAT_0807dda0: opaque_storage_object
+      FUN_08149e10: storage_vtable_dispatch_thunk
+    notes: >-
+      Raw osos.dec confirms exactly 76 code bytes (19 ARM words) at
+      0x08077444..0x0807748c; 0x08077490 is the independently linked next
+      function, so Ghidra's 132-byte extent is wrong. Whole-image ARM
+      B/BL-immediate decoding finds exactly 11 inbound sites, all plain
+      unconditional bl (cond=e) at 0x080773e8, 0x08077438, 0x0807cdf8,
+      0x0807ce40, 0x0807cfac, 0x0807cfd8, 0x08081a84, 0x08098230,
+      0x0809851c, 0x080985c0, and 0x080f08dc; there are no predicated
+      forms. The body divides byte_count by geometry->block_size through
+      __rt_udiv and returns 0x50 when its r1 remainder is nonzero. On an
+      exact multiple it adds geometry->base_block to relative_block, then
+      tail-branches to 0x0807dd68 with (absolute_block, quotient, buffer).
+      That recovered 52-byte helper loads its opaque object from
+      0x089cfd04, returns 2 when absent, otherwise invokes the virtual thunk
+      0x08149e10 with (absolute_block, block_count, buffer, 0). No stronger
+      backend identity is inferred. The original also calculates the high
+      half of base_block + relative_block but overwrites it before the tail
+      branch; the port preserves the ABI input but deliberately omits this
+      dead arithmetic. Host tests prove misaligned-byte rejection without a
+      dispatch, zero and multi-block dispatch, wrapping base addition,
+      return-status forwarding, and the ignored high word.
