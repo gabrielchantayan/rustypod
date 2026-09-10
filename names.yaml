@@ -32411,6 +32411,38 @@ functions:
       `str r1,[r0,#0xe38]`; the only diff is the crate-standard
       push-fp-lr/pop-fp-pc frame.
 
+  - address: 0x08059644
+    ghidra: FUN_08059644
+    name: inner_reset_transient_state
+    size: 184
+    sig: "void inner_reset_transient_state(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Verified against osos.dec at load address 0x08059644: 45 ARM
+      instructions occupy 180 bytes through the pop at 0x080596f8, followed
+      by the 0x0000062c literal at 0x080596fc; the next independent function
+      starts at 0x08059700, making the extent 184 bytes. Decoding every ARM
+      immediate B/BL word finds exactly 11 direct call sites, all plain bl
+      (0x08054020, 0x080664ac, 0x080664d8, 0x0806655c, 0x080665f4,
+      0x080667a8, 0x080668d4, 0x08066a40, 0x08066b70, 0x08068ec0,
+      0x0813d020); none are predicated. It releases nonzero tag-4 transient
+      pointers at inner+0xe7c, +0xe84, +0xe80 in that order and clears each,
+      clears +0xe88, logically clears the 24-byte-record vector at
+      +0xeb0/+0xeb4, stores -1 at +0x18, clears the u16 at +0x62c and bytes
+      +0xe8c/+0xef9. The raw vector helper at 0x083e9b68 receives the empty
+      source range end..end, so its copy loop has no iterations and returns
+      begin; the following no-op iterator walk and ADS signed division yield
+      end - ((end - begin) / 24) * 24. The port directly retains that
+      arithmetic through the existing __rt_sdiv and calls existing free_tag4;
+      it deliberately does not invent a seam or identity for 0x083e9b68.
+      Host tests cover three releases and all writes, NULL releases with an
+      empty vector, and the raw signed-division result for a partial span.
+
   - address: 0x08059a98
     ghidra: FUN_08059a98
     name: inner_clear_cached_results

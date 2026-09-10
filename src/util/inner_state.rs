@@ -104,6 +104,18 @@ const CACHED_RESULTS: usize = 0xeec;
 /// Byte offset of the auxiliary allocation paired with [`CACHED_RESULTS`].
 const CACHED_AUXILIARY: usize = 0xef0;
 
+/// Byte offsets of the transient resource pointers reset by
+/// [`inner_reset_transient_state`].
+const TRANSIENT_PRIMARY: usize = 0xe7c;
+const TRANSIENT_SECONDARY: usize = 0xe80;
+const TRANSIENT_TERTIARY: usize = 0xe84;
+const TRANSIENT_MARKER: usize = 0xe88;
+const TRANSIENT_RECORD_BEGIN: usize = 0xeb0;
+const TRANSIENT_RECORD_END: usize = 0xeb4;
+const TRANSIENT_SELECTION: usize = 0x62c;
+const TRANSIENT_STATUS: usize = 0xe8c;
+const TRANSIENT_ACTIVE: usize = 0xef9;
+
 
 /// query_object_create — original: `FUN_082597a0` @ 0x082597a0 (32 bytes;
 /// 25 verified `bl` call sites, all unconditional).
@@ -174,6 +186,75 @@ pub unsafe extern "C" fn inner_clear_cached_results(inner: *mut u8) {
         }
     }
     (inner.add(RESULT_COUNT) as *mut u32).write(0);
+}
+
+/// inner_reset_transient_state — original: `FUN_08059644` @ `0x08059644`
+/// (184 bytes: 180 instruction bytes plus the literal at `0x080596fc`; the
+/// next function starts at `0x08059700`).
+///
+/// Raw decoding of every ARM immediate B/BL word in `osos.dec` finds 11
+/// direct callers, all plain `bl` (no predicated call forms): `0x08054020`,
+/// `0x080664ac`, `0x080664d8`, `0x0806655c`, `0x080665f4`, `0x080667a8`,
+/// `0x080668d4`, `0x08066a40`, `0x08066b70`, `0x08068ec0`, and
+/// `0x0813d020`.
+///
+/// Releases and clears three tag-4 transient allocations, clears their
+/// marker, then erases the logical contents of the 24-byte-record vector at
+/// `+0xeb0`. It stores -1 at `+0x18`, clears the u16 selection at `+0x62c`,
+/// and clears the `+0xe8c` and `+0xef9` status bytes. The raw vector path
+/// invokes `0x083e9b68` with an empty source range (`end..end`), receives
+/// `begin`, then walks that result to `end` without an element action. Its
+/// resulting end value is `end - ((end - begin) / 24) * 24`, using the
+/// existing signed ADS divide port.
+///
+/// Deliberate deviation: the empty copy and no-op iterator walk are expressed
+/// as their resulting arithmetic, rather than adding a seam for the
+/// unported helper at `0x083e9b68`; the observed memory effects are identical.
+/// The existing direct `free_tag4` callee preserves the three release calls.
+///
+/// # Safety
+///
+/// `inner` must address writable, suitably aligned inner-object storage
+/// through byte `+0xef9`. Its nonzero transient words must be valid tag-4
+/// allocations. The vector bounds must be target 32-bit addresses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_reset_transient_state(inner: *mut u8) {
+    let primary = (inner.add(TRANSIENT_PRIMARY) as *const u32).read();
+    if primary != 0 {
+        crate::heap::veneers::free_tag4(primary as usize as *mut u8);
+        (inner.add(TRANSIENT_PRIMARY) as *mut u32).write(0);
+    }
+
+    let tertiary = (inner.add(TRANSIENT_TERTIARY) as *const u32).read();
+    if tertiary != 0 {
+        crate::heap::veneers::free_tag4(tertiary as usize as *mut u8);
+        (inner.add(TRANSIENT_TERTIARY) as *mut u32).write(0);
+    }
+
+    let secondary = (inner.add(TRANSIENT_SECONDARY) as *const u32).read();
+    if secondary != 0 {
+        crate::heap::veneers::free_tag4(secondary as usize as *mut u8);
+        (inner.add(TRANSIENT_SECONDARY) as *mut u32).write(0);
+    }
+
+    (inner.add(TRANSIENT_MARKER) as *mut u32).write(0);
+
+    let begin = (inner.add(TRANSIENT_RECORD_BEGIN) as *const u32).read();
+    let end = (inner.add(TRANSIENT_RECORD_END) as *const u32).read();
+    if begin != end {
+        let element_count = crate::runtime::rt_div::__rt_sdiv(
+            end.wrapping_sub(begin) as i32,
+            24,
+        ) as u32;
+        (inner.add(TRANSIENT_RECORD_END) as *mut u32)
+            .write(end.wrapping_sub(element_count.wrapping_mul(24)));
+    }
+
+    (inner.add(0x18) as *mut u32).write(u32::MAX);
+    (inner.add(TRANSIENT_SELECTION) as *mut u16).write(0);
+    inner.add(TRANSIENT_STATUS).write(0);
+    inner.add(TRANSIENT_ACTIVE).write(0);
 }
 
 /// The callback-root field of an inner query resource. `repr(C)` preserves
@@ -629,6 +710,110 @@ mod tests {
         assert_eq!(fixture.word(CACHED_RESULTS), 0);
         assert_eq!(fixture.word(CACHED_AUXILIARY), 0x7777_8888);
         assert_eq!(fixture.word(RESULT_COUNT), 0);
+    }
+
+    // ---- inner_reset_transient_state ------------------------------------
+
+    const INNER_RESET_LEN: usize = TRANSIENT_ACTIVE + 1;
+
+    #[repr(align(4))]
+    struct ResetFixture {
+        bytes: [u8; INNER_RESET_LEN],
+    }
+
+    impl ResetFixture {
+        fn new() -> Self {
+            ResetFixture { bytes: [SENTINEL; INNER_RESET_LEN] }
+        }
+
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
+        }
+
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn halfword(&self, offset: usize) -> u16 {
+            u16::from_le_bytes(self.bytes[offset..offset + 2].try_into().unwrap())
+        }
+
+        fn set_halfword(&mut self, offset: usize, value: u16) {
+            self.bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn reset(&mut self) {
+            unsafe { inner_reset_transient_state(self.bytes.as_mut_ptr()) };
+        }
+    }
+
+    #[test]
+    fn transient_reset_releases_all_three_allocations_and_only_resets_its_fields() {
+        let _heap_guard = mock_heap();
+        let mut fixture = ResetFixture::new();
+        fixture.set_word(TRANSIENT_PRIMARY, 0x1111_2222);
+        fixture.set_word(TRANSIENT_TERTIARY, 0x3333_4444);
+        fixture.set_word(TRANSIENT_SECONDARY, 0x5555_6666);
+        fixture.set_word(TRANSIENT_MARKER, 0x7777_8888);
+        fixture.set_word(TRANSIENT_RECORD_BEGIN, 0x1000);
+        fixture.set_word(TRANSIENT_RECORD_END, 0x1048);
+        fixture.set_word(0x18, 7);
+        fixture.set_halfword(TRANSIENT_SELECTION, 0x1234);
+        fixture.bytes[TRANSIENT_STATUS] = 0x56;
+        fixture.bytes[TRANSIENT_ACTIVE] = 0x78;
+        let mut expected = fixture.bytes;
+        for offset in [TRANSIENT_PRIMARY, TRANSIENT_TERTIARY, TRANSIENT_SECONDARY, TRANSIENT_MARKER] {
+            expected[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes());
+        }
+        expected[TRANSIENT_RECORD_END..TRANSIENT_RECORD_END + 4]
+            .copy_from_slice(&0x1000u32.to_le_bytes());
+        expected[0x18..0x1c].copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[TRANSIENT_SELECTION..TRANSIENT_SELECTION + 2].copy_from_slice(&0u16.to_le_bytes());
+        expected[TRANSIENT_STATUS] = 0;
+        expected[TRANSIENT_ACTIVE] = 0;
+
+        fixture.reset();
+
+        assert_eq!(free_log(), (3, 0x5555_6666usize as *mut u8, 4));
+        assert_eq!(fixture.word(TRANSIENT_RECORD_BEGIN), 0x1000);
+        assert_eq!(fixture.bytes, expected);
+    }
+
+    #[test]
+    fn transient_reset_skips_null_allocations_and_preserves_an_empty_vector_end() {
+        let _heap_guard = mock_heap();
+        let mut fixture = ResetFixture::new();
+        fixture.set_word(TRANSIENT_PRIMARY, 0);
+        fixture.set_word(TRANSIENT_TERTIARY, 0);
+        fixture.set_word(TRANSIENT_SECONDARY, 0);
+        fixture.set_word(TRANSIENT_RECORD_BEGIN, 0x2000);
+        fixture.set_word(TRANSIENT_RECORD_END, 0x2000);
+        fixture.set_halfword(TRANSIENT_SELECTION, u16::MAX);
+
+        fixture.reset();
+
+        assert_eq!(free_log().0, 0);
+        assert_eq!(fixture.word(TRANSIENT_RECORD_END), 0x2000);
+        assert_eq!(fixture.word(0x18), u32::MAX);
+        assert_eq!(fixture.halfword(TRANSIENT_SELECTION), 0);
+        assert_eq!(fixture.bytes[TRANSIENT_STATUS], 0);
+        assert_eq!(fixture.bytes[TRANSIENT_ACTIVE], 0);
+    }
+
+    #[test]
+    fn transient_reset_uses_signed_division_to_rewind_a_partial_record_span() {
+        let _heap_guard = mock_heap();
+        let mut fixture = ResetFixture::new();
+        fixture.set_word(TRANSIENT_PRIMARY, 0);
+        fixture.set_word(TRANSIENT_TERTIARY, 0);
+        fixture.set_word(TRANSIENT_SECONDARY, 0);
+        fixture.set_word(TRANSIENT_RECORD_BEGIN, 0x1000);
+        fixture.set_word(TRANSIENT_RECORD_END, 0x1019);
+
+        fixture.reset();
+
+        assert_eq!(free_log().0, 0);
+        assert_eq!(fixture.word(TRANSIENT_RECORD_END), 0x1001);
     }
 
     // ---- inner_dispatch_selected_resource -----------------------------
