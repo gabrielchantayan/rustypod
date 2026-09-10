@@ -295,6 +295,9 @@ pub mod hints {
     // expression-node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CG_EXPRESSION_DEPENDENCY_MASK: usize = 0xd400_0000;
+    // 0x8400_0000: dedicated to util/fixed_matrix_cursor's raw-u32 base
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const FIXED_MATRIX_CURSOR: usize = 0x8400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

@@ -21,6 +21,7 @@ pub mod error_latch;
 pub mod drive;
 pub mod fixed;
 pub mod fixed_matrix_identity;
+pub mod fixed_matrix_cursor;
 pub mod field_access;
 pub mod four_word_record;
 pub mod four_word_sentinel_init;

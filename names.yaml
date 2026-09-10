@@ -57963,3 +57963,29 @@ functions:
       seam; their identities are intentionally not invented. Tests prove the
       NULL path, leaf short-circuit, 32-bit node links, recursive call order,
       and low/high-half mask OR.
+
+  - address: 0x08242ec4
+    ghidra: FUN_08242ec4
+    name: fixed_matrix_cursor_current
+    size: 20
+    sig: "FixedMatrix4x4 *fixed_matrix_cursor_current(const FixedMatrixCursor *cursor)"
+    module: util/fixed_matrix_cursor
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "[cursor+0x00]": matrix_base
+      "[cursor+0x04]": index
+      r0: current_matrix
+    notes: >-
+      Raw ARM extent is exactly five instruction words from 0x08242ec4 through
+      0x08242ed4; the next separately linked function starts at 0x08242ed8.
+      Decoding every ARM B/BL immediate in osos.dec found exactly 11 inbound
+      direct bl calls, all unconditional and none predicated: 0x0824faf8,
+      0x08252144, 0x08252168, 0x08252198, 0x082521a4, 0x082521ec,
+      0x08252590, 0x082527bc, 0x082527dc, 0x082527ec, and 0x08253838.
+      No direct tail branch or aligned DATA word targets this entry. It loads
+      cursor->matrix_base and cursor->index, then returns matrix_base +
+      index * 0x44, the target-width size of FixedMatrix4x4; both add
+      instructions wrap modulo 2^32. There is no NULL, bounds, or alignment
+      guard and no callee. No deliberate deviations. Host tests cover the
+      first entry, a later entry, and 32-bit address wraparound.
