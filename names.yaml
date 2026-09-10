@@ -43809,6 +43809,47 @@ functions:
       list: no calls, pending anchor and published block untouched)
       and ::block_bind_registers_seams_stay_wired_to_the_defaults.
 
+  - address: 0x082b3c34
+    ghidra: FUN_082b3c34
+    name: cg_binding_acquire
+    size: 204
+    sig: "CgBinding *cg_binding_acquire(CgCodegen *codegen, CgVirtualReg *reg, u32 mask)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r5: codegen (binding-pool owner)
+      param_2/r1->r3: reg, then its phi-web parent
+      param_3/r2: mask (zero expands to all resource bits)
+      r4: binding candidate
+      r1: binding resource index, then candidate's bound register
+      FUN_08367390: binding_promote seam (refreshes a reused binding in its anchor)
+      FUN_082c5c58: binding_release seam (releases an eligible active binding)
+      FUN_083673b0: cg_binding_unlink (ported direct default)
+      FUN_08367358: binding_push seam (inserts the selected binding at active-head)
+    notes: >-
+      Verified call count: 11 plain bl sites, 0 predicated bl sites:
+      0x082c10a8, 0x082c1148, 0x082c11f0, 0x082c1620, 0x082c1678,
+      0x082cb754, 0x082cbc88, 0x082cc8c0, 0x082cc8e8, 0x082d78e0,
+      0x082d814c. No aligned osos.dec data word references 0x082b3c34,
+      so there is no discovered indirect dispatch. Selects a binding with
+      mask bit (binding +0x0c) set. Zero mask becomes 0xffffffff. First
+      accepts and promotes the requested register's phi-web parent's
+      binding only when its bound register points back to that same parent.
+      Otherwise walks the free anchor {head +0x1f0, tail +0x1f4} from tail
+      to head, then walks the active anchor {head +0x1f8, tail +0x1fc};
+      an active match is released before the normal free-unlink then
+      active-push transfer. The raw body is exactly 204 bytes:
+      0x082b3c34..0x082b3cfc, followed by distinct FUN_082b3d00.
+      Deliberate deviation: unported FUN_08367390/FUN_082c5c58/
+      FUN_08367358 use the CG_BINDING_ACQUIRE_OPS seam's documented no-op
+      defaults; ported FUN_083673b0 is the unlink default. This matches the
+      existing incomplete binding-machine seam policy and avoids inventing
+      a callee port. Host tests cover a zero-mask bit-31 parent reuse, an
+      out-of-range bit-32 free-tail skip before bit-31 selection, active-list
+      release fallback, call order and seam defaults. match.py exit 1 diff
+      dispatch replaces stock direct bl calls, while LLVM may merge the
+      two tail-to-head filter loops.
+
   - address: 0x082b5234
     ghidra: FUN_082b5234
     name: cg_binding_rebind

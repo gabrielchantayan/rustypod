@@ -3075,6 +3075,9 @@ pub const CG_BINDING_LIST_HEAD: usize = 0x00 / 4;
 /// block-exit flush `FUN_082ccae4` drains from (`ldr r4,[r5,#0x204]`
 /// over the +0x200 pending-bindings anchor).
 pub const CG_BINDING_LIST_TAIL: usize = 0x04 / 4;
+/// `cg_binding_t + 0x0c` — hardware-resource index, used as the bit
+/// position in a binding-acquisition eligibility mask.
+pub const CG_BINDING_RESOURCE: usize = 0x0c / 4;
 /// `cg_binding_t + 0x10` — the register the binding is currently
 /// bound to (written by the rebind helper's `str r2,[r1,#0x10]`,
 /// read by its back-pointer guard `ldr r0,[r0,#0x10]`).
@@ -3101,6 +3104,13 @@ pub const CG_BINDING_FLAG_BLOCK_ENTRY: usize = 0x200;
 /// (`add r0,r7,#0x200`), drained from its +0x204 tail word by the
 /// block-exit flush `FUN_082ccae4` (`ldr r4,[r5,#0x204]`).
 pub const CG_CODEGEN_PENDING_BINDINGS: usize = 0x200 / 4;
+/// `cg_codegen_t + 0x1f0` — `{head, tail}` anchor of bindings available
+/// for acquisition. The allocator walks its tail word at +0x1f4.
+pub const CG_CODEGEN_FREE_BINDINGS: usize = 0x1f0 / 4;
+/// `cg_codegen_t + 0x1f8` — `{head, tail}` anchor of bindings currently
+/// allocated to the register-binding machine. The fallback walks its tail
+/// word at +0x1fc to find a binding it can release and reuse.
+pub const CG_CODEGEN_ACTIVE_BINDINGS: usize = 0x1f8 / 4;
 
 /// `cg_binding_t` — one register↔hardware-resource binding of the
 /// register-binding machine: an intrusive doubly-linked-list node
@@ -3317,6 +3327,117 @@ pub unsafe extern "C" fn cg_binding_rebind(
     if current.is_null() || slot(current, CG_BINDING_REG).read() != reg {
         slot(reg, CG_VREG_BINDING).write(binding);
     }
+}
+
+/// ARM `1 << resource` produces zero for resource indices at least 32;
+/// retain that edge behavior instead of allowing LLVM's masked shift.
+#[inline(always)]
+unsafe fn cg_binding_mask_allows(binding: *mut u8, mask: u32) -> bool {
+    let resource = word(binding, CG_BINDING_RESOURCE).read();
+    resource < u32::BITS as usize && mask & (1u32 << resource) != 0
+}
+
+/// The direct callees of [`cg_binding_acquire`] which are still unported.
+/// [`cg_binding_unlink`] is ported and remains the default unlink operation;
+/// the other defaults deliberately do no work until their stock bodies are
+/// ported and the complete binding machine can be wired.
+#[derive(Clone, Copy)]
+pub struct CgBindingAcquireOps {
+    /// `FUN_08367390` @ 0x08367390: unlink then push a binding at the
+    /// head of its existing anchor, refreshing its position.
+    pub binding_promote: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
+    /// `FUN_082c5c58` @ 0x082c5c58: release a selected active binding.
+    pub binding_release: unsafe extern "C" fn(codegen: *mut CgCodegen, node: *mut CgBinding),
+    /// `FUN_083673b0` @ 0x083673b0: remove a free binding from its anchor.
+    pub binding_unlink: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
+    /// `FUN_08367358` @ 0x08367358: push a binding onto the active anchor.
+    pub binding_push: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
+}
+
+unsafe extern "C" fn default_cg_binding_promote(_anchor: *mut u8, _node: *mut CgBinding) {}
+unsafe extern "C" fn default_cg_binding_release(_codegen: *mut CgCodegen, _node: *mut CgBinding) {}
+
+/// The default preserves the one ported direct callee; the remaining stock
+/// helpers are represented by no-op seams until their own ports land.
+pub const DEFAULT_CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = CgBindingAcquireOps {
+    binding_promote: default_cg_binding_promote,
+    binding_release: default_cg_binding_release,
+    binding_unlink: cg_binding_unlink,
+    binding_push: default_cg_binding_push,
+};
+
+/// Active direct-callee table for [`cg_binding_acquire`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = DEFAULT_CG_BINDING_ACQUIRE_OPS;
+
+/// cg_binding_acquire — original: `FUN_082b3c34` @ 0x082b3c34 (204
+/// bytes; **11 `bl` call sites**, all plain `bl`, no predicated calls:
+/// 0x082c10a8/0x082c1148/0x082c11f0/0x082c1620/0x082c1678/0x082cb754/
+/// 0x082cbc88/0x082cc8c0/0x082cc8e8/0x082d78e0/0x082d814c).
+///
+/// Selects a binding whose [`CG_BINDING_RESOURCE`] bit is allowed by
+/// `mask`. A zero mask becomes all ones. It first reuses the binding of the
+/// requested virtual register's phi-web parent when that binding points back
+/// at the same parent, promoting it in its current list. Otherwise it walks
+/// the free-binding anchor from tail to head; if none is eligible it walks
+/// the active anchor the same way, releases the first eligible binding, then
+/// moves the selected binding from the free to the active anchor. As in the
+/// original, no eligible binding reaches the release/unlink path as NULL.
+///
+/// Deliberate deviation: `FUN_08367390`, `FUN_082c5c58`, and
+/// `FUN_08367358` are unported and route through
+/// [`CG_BINDING_ACQUIRE_OPS`] with documented no-op defaults; the already
+/// ported `FUN_083673b0` calls [`cg_binding_unlink`] directly by default.
+/// The raw branch census found no data word referencing 0x082b3c34.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_acquire(
+    codegen: *mut CgCodegen,
+    reg: *mut CgVirtualReg,
+    mut mask: u32,
+) -> *mut CgBinding {
+    let codegen = codegen as *mut u8;
+    let reg = reg as *mut u8;
+    if mask == 0 {
+        mask = !0;
+    }
+    let parent = slot(reg, CG_VREG_PARENT).read();
+    let mut binding = if parent.is_null() {
+        slot(reg, CG_VREG_BINDING).read()
+    } else {
+        slot(parent, CG_VREG_BINDING).read()
+    };
+    let ops = CG_BINDING_ACQUIRE_OPS;
+    if !binding.is_null() {
+        let bound_reg = slot(binding, CG_BINDING_REG).read();
+        if !bound_reg.is_null()
+            && slot(bound_reg, CG_VREG_PARENT).read() == parent
+            && cg_binding_mask_allows(binding, mask)
+        {
+            (ops.binding_promote)(slot(binding, CG_BINDING_ANCHOR).read(), binding as *mut CgBinding);
+            return binding as *mut CgBinding;
+        }
+    }
+
+    let free_anchor = slot(codegen, CG_CODEGEN_FREE_BINDINGS) as *mut u8;
+    binding = slot(free_anchor, CG_BINDING_LIST_TAIL).read();
+    while !binding.is_null() && !cg_binding_mask_allows(binding, mask) {
+        binding = slot(binding, CG_BINDING_NEXT).read();
+    }
+    if binding.is_null() {
+        let active_anchor = slot(codegen, CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8;
+        binding = slot(active_anchor, CG_BINDING_LIST_TAIL).read();
+        while !binding.is_null() && !cg_binding_mask_allows(binding, mask) {
+            binding = slot(binding, CG_BINDING_NEXT).read();
+        }
+        (ops.binding_release)(codegen as *mut CgCodegen, binding as *mut CgBinding);
+    }
+    (ops.binding_unlink)(free_anchor, binding as *mut CgBinding);
+    (ops.binding_push)(
+        slot(codegen, CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8,
+        binding as *mut CgBinding,
+    );
+    binding as *mut CgBinding
 }
 
 /// cg_block_bind_registers — original: `FUN_082b3b5c` @ 0x082b3b5c
@@ -8776,6 +8897,191 @@ mod tests {
             );
         }
         drop(f);
+        teardown();
+    }
+
+    // --- cg_binding_acquire -----------------------------------------
+
+    #[derive(Debug, PartialEq)]
+    enum AcquireStage {
+        Promote(*mut u8, *mut CgBinding),
+        Release(*mut CgCodegen, *mut CgBinding),
+        Unlink(*mut u8, *mut CgBinding),
+        Push(*mut u8, *mut CgBinding),
+    }
+
+    static mut ACQUIRE_LOG: std::vec::Vec<AcquireStage> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_binding_promote(anchor: *mut u8, node: *mut CgBinding) {
+        ACQUIRE_LOG.push(AcquireStage::Promote(anchor, node));
+    }
+
+    unsafe extern "C" fn recording_binding_release(codegen: *mut CgCodegen, node: *mut CgBinding) {
+        ACQUIRE_LOG.push(AcquireStage::Release(codegen, node));
+    }
+
+    unsafe extern "C" fn recording_acquire_unlink(anchor: *mut u8, node: *mut CgBinding) {
+        ACQUIRE_LOG.push(AcquireStage::Unlink(anchor, node));
+    }
+
+    unsafe extern "C" fn recording_acquire_push(anchor: *mut u8, node: *mut CgBinding) {
+        ACQUIRE_LOG.push(AcquireStage::Push(anchor, node));
+    }
+
+    unsafe fn install_acquire_ops() -> CgBindingAcquireOps {
+        let saved = hook(core::ptr::addr_of!(CG_BINDING_ACQUIRE_OPS));
+        *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = CgBindingAcquireOps {
+            binding_promote: recording_binding_promote,
+            binding_release: recording_binding_release,
+            binding_unlink: recording_acquire_unlink,
+            binding_push: recording_acquire_push,
+        };
+        ACQUIRE_LOG.clear();
+        saved
+    }
+
+    struct AcquireFixture {
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        reg: [usize; 5],
+        parent: [usize; 5],
+        bound_reg: [usize; 5],
+        bindings: [[usize; 7]; 3],
+        anchor: [usize; 2],
+    }
+
+    impl AcquireFixture {
+        fn new() -> std::boxed::Box<AcquireFixture> {
+            std::boxed::Box::new(AcquireFixture {
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                reg: [0; 5],
+                parent: [0; 5],
+                bound_reg: [0; 5],
+                bindings: [[0; 7]; 3],
+                anchor: [0; 2],
+            })
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        fn reg_ptr(&mut self) -> *mut CgVirtualReg {
+            self.reg.as_mut_ptr() as *mut CgVirtualReg
+        }
+
+        fn free_anchor(&mut self) -> *mut u8 {
+            unsafe { self.codegen.as_mut_ptr().add(CG_CODEGEN_FREE_BINDINGS) as *mut u8 }
+        }
+
+        fn active_anchor(&mut self) -> *mut u8 {
+            unsafe { self.codegen.as_mut_ptr().add(CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8 }
+        }
+    }
+
+    #[test]
+    fn binding_acquire_reuses_parent_binding_and_expands_a_zero_mask() {
+        let _g = setup();
+        let mut f = AcquireFixture::new();
+        unsafe {
+            let saved = install_acquire_ops();
+            f.reg[CG_VREG_PARENT] = f.parent.as_mut_ptr() as usize;
+            f.parent[CG_VREG_BINDING] = f.bindings[0].as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_REG] = f.bound_reg.as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_ANCHOR] = f.anchor.as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_RESOURCE] = 31;
+            f.bound_reg[CG_VREG_PARENT] = f.parent.as_mut_ptr() as usize;
+            let binding = f.bindings[0].as_mut_ptr() as *mut CgBinding;
+            let anchor = f.anchor.as_mut_ptr() as *mut u8;
+
+            assert_eq!(
+                cg_binding_acquire(f.codegen_ptr(), f.reg_ptr(), 0),
+                binding,
+                "a zero mask becomes all ones, admitting resource bit 31"
+            );
+            assert_eq!(
+                ACQUIRE_LOG,
+                std::vec![AcquireStage::Promote(anchor, binding)],
+                "a valid parent-web binding is promoted, never reallocated"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_acquire_skips_out_of_range_and_ineligible_free_tail_nodes() {
+        let _g = setup();
+        let mut f = AcquireFixture::new();
+        unsafe {
+            let saved = install_acquire_ops();
+            f.codegen[CG_CODEGEN_FREE_BINDINGS + CG_BINDING_LIST_TAIL] =
+                f.bindings[0].as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_RESOURCE] = 32;
+            f.bindings[0][CG_BINDING_NEXT] = f.bindings[1].as_mut_ptr() as usize;
+            f.bindings[1][CG_BINDING_RESOURCE] = 31;
+            let binding = f.bindings[1].as_mut_ptr() as *mut CgBinding;
+            let free = f.free_anchor();
+            let active = f.active_anchor();
+
+            assert_eq!(cg_binding_acquire(f.codegen_ptr(), f.reg_ptr(), 0), binding);
+            assert_eq!(
+                ACQUIRE_LOG,
+                std::vec![
+                    AcquireStage::Unlink(free, binding),
+                    AcquireStage::Push(active, binding),
+                ],
+                "the tail-to-head scan skips an out-of-range resource before transferring bit 31"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_acquire_releases_an_eligible_active_binding_when_free_is_empty() {
+        let _g = setup();
+        let mut f = AcquireFixture::new();
+        unsafe {
+            let saved = install_acquire_ops();
+            f.codegen[CG_CODEGEN_ACTIVE_BINDINGS + CG_BINDING_LIST_TAIL] =
+                f.bindings[2].as_mut_ptr() as usize;
+            f.bindings[2][CG_BINDING_RESOURCE] = 2;
+            let codegen = f.codegen_ptr();
+            let binding = f.bindings[2].as_mut_ptr() as *mut CgBinding;
+            let free = f.free_anchor();
+            let active = f.active_anchor();
+
+            assert_eq!(cg_binding_acquire(codegen, f.reg_ptr(), 1 << 2), binding);
+            assert_eq!(
+                ACQUIRE_LOG,
+                std::vec![
+                    AcquireStage::Release(codegen, binding),
+                    AcquireStage::Unlink(free, binding),
+                    AcquireStage::Push(active, binding),
+                ],
+                "an empty free list releases the eligible active tail before its transfer"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_acquire_seams_keep_unported_helpers_inert() {
+        let _g = setup();
+        unsafe {
+            let ops = hook(core::ptr::addr_of!(CG_BINDING_ACQUIRE_OPS));
+            assert_eq!(ops.binding_promote as usize, default_cg_binding_promote as usize);
+            assert_eq!(ops.binding_release as usize, default_cg_binding_release as usize);
+            assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
+            assert_eq!(ops.binding_push as usize, default_cg_binding_push as usize);
+        }
         teardown();
     }
 }
