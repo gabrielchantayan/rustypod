@@ -3655,6 +3655,34 @@ functions:
       init plus the ops-slot free tail call, matching the shape already
       accepted for the tag-2 operator_delete @ 0x082aad24.
 
+  - address: 0x0804938c
+    ghidra: FUN_0804938c
+    name: free_tag4_if_nonnull
+    size: 12
+    sig: "void free_tag4_if_nonnull(void *ptr)"
+    module: heap/veneers
+    vars: {param_1: ptr}
+    status: ported
+    notes: >-
+      NULL-guarded front-end of the existing tag-4 MemH deallocator
+      free_tag4 @ 0x0805d070. Whole body verified against osos.dec:
+      e3500000 1a004f36 e12fff1e (`cmp r0,#0; bne 0x0805d070; bx lr`).
+      Ghidra's 12-byte extent is right: 0x08049398 begins the distinct
+      `b 0x082aad24` function. Scanning every ARM B/BL word found 11
+      callsites: 8 plain `bl` and 3 `blne` (at 0x0806d254, 0x0806d27c,
+      and 0x0806d740). Thus NULL normally reaches this wrapper only from
+      its eight unconditional callers; the three predicated callers add a
+      redundant outer guard. The port keeps the guard and invokes the
+      already-ported free_tag4 for non-NULL pointers. Deliberate deviation:
+      Rust emits a guarded call rather than the original conditional tail
+      branch, and free_tag4 dispatches through HEAP_OPS.free. Host tests
+      prove NULL avoids lazy initialization and freeing, while a non-NULL
+      value is forwarded unchanged with tag 4. #[inline(never)] preserves
+      a real device-call target. match.py structural review against this
+      worktree's ARM archive reports the same `cmp r0,#0` guard, conditional
+      early return, and tail branch; Rust adds an ABI frame, so it is 6
+      instructions rather than the original 3.
+
   - address: 0x0805d070
     ghidra: FUN_0805d070
     name: free_tag4
