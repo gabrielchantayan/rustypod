@@ -60689,3 +60689,35 @@ functions:
       returns destination by restoring r0 from its saved register set.
       The 0x0829b804 call remains an explicit target-only dispatch seam
       because no names.yaml entry ports that callee; host tests model it.
+
+  # --- four-entry runtime key-table index ---
+  - address: 0x08293048
+    ghidra: FUN_08293048
+    name: four_slot_key_index
+    size: 48
+    sig: "i32 four_slot_key_index(void *context, u32 key)"
+    module: app/four_slot_key_index
+    status: ported
+    renames:
+      param_1/r0: context (unused)
+      param_2/r1: key
+      DAT_08293074: slot_key_table
+      iVar1/r0: index
+    notes: >-
+      Raw osos.dec establishes a 48-byte extent: 44 bytes of ARM code from
+      0x08293048 through the `bx lr` at 0x08293070, then its PC-relative
+      table-address literal 0x089d04c4 at 0x08293074; the separately linked
+      next function starts at 0x08293078. Decoding every ARM B/BL-immediate
+      word found exactly 10 inbound direct call sites — 0x08292fb8,
+      0x08293208, 0x08293328, 0x082933a0, 0x08293408, 0x082937dc,
+      0x08293984, 0x08293bb8, 0x08293d50, and 0x08294dc0 — all unconditional
+      plain `bl`, with no predicated forms or direct tail branches. Algorithm:
+      ignore context, search the leading byte of four 24-byte runtime table
+      records for a key equal to the full r1 value, and return its first index;
+      return -1 after the fourth mismatch. Since ARM `ldrb` zero-extends
+      before `cmp r3,r1`, keys above 0xff never match. The table's concrete
+      record meaning is unrecovered and is not claimed. Deliberate deviation:
+      ARM reads the original fixed runtime table at 0x089d04c4; host tests use
+      equivalent private backing storage. The Rust read is volatile to retain
+      the table's runtime-mutability across calls. Host tests cover first,
+      middle duplicate, final, absent, and full-width nonmatching keys.
