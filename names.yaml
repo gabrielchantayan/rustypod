@@ -56782,3 +56782,34 @@ functions:
       0x080eb3d0, 0x080eb3f4, 0x080eb41c, and 0x080eb444. Aliased pointers
       deliberately clear the word, as required by the original XOR sequence;
       this is intentionally unlike a conventional swap. Deviations: none.
+
+  # --- LCD controller register write ---
+  - address: 0x080d4b14
+    ghidra: FUN_080d4b14
+    name: lcd_write_register
+    size: 24
+    sig: "void lcd_write_register(u32 register_index, u32 value)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      param_1/r0: register_index
+      param_2/r1/r4: value
+    notes: >-
+      Raw ARM has six instructions from 0x080d4b14 through 0x080d4b28:
+      preserve r1 in r4, bl 0x080d7b60 with r0 intact, restore r0 = r4,
+      then tail-b 0x080bb5f4. The next separately linked function starts at
+      0x080d4b2c, so Ghidra's 24-byte extent is correct and there is no
+      literal pool. The two helpers each poll 0x3830001c until busy bit 4
+      clears; the first stores its input at 0x38300004, and the second stores
+      its input at 0x38300040. Full-image decoding of every ARM B/BL immediate
+      finds exactly 12 inbound calls: all are unconditional bl, at
+      0x080ddd50, 0x080ddd68, 0x080ddd7c, 0x080ddd94, 0x080ddda0,
+      0x080dddac, 0x080e3364, 0x080e3370, 0x080e337c, 0x080e3398,
+      0x080e33a4, and 0x080e33b0; there are zero predicated bl and zero direct
+      B call sites. No osos data word equals the entry address, so it is not
+      a virtual-dispatch target. The 0x0200..0x0213 register-index sequences
+      at 0x080ddd24 and the 0x0002/0x000b/0x0010 sequences at 0x080e3338
+      identify this as the LCD register writer. Deliberate deviation: inlines
+      unported helper bodies 0x080d7b60/0x080bb5f4 rather than adding seams;
+      device loads/stores are volatile and host builds use atomic MMIO models.
+      Reference C: decomp/c/007/080d4b14_FUN_080d4b14.c.
