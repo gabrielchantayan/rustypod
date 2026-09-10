@@ -6,6 +6,7 @@
 //! |---|---|---|---|
 //! | 0x081d71c0 | [`iap_incoming_process_thread_instance`] | 24 | 8 direct |
 //! | 0x08139210 | [`iap_incoming_process_thread_instance_veneer`] | 4 | **65** |
+//! | 0x081d6e38 | [`iap_incoming_process_thread_register_client`] | 48 | **11** |
 //! | 0x081d66b8 | [`iap_incoming_process_thread_slot_wait`] | 68 | **17** |
 //! | 0x081d7270 | [`iap_incoming_process_thread_slot_poll`] | 68 | **36** + 1 tail `b` |
 //!
@@ -189,6 +190,7 @@ pub unsafe extern "C" fn iap_incoming_process_thread_instance_veneer() -> *mut u
 }
 
 use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock, PosixMutex};
+use crate::runtime::rt_div::__rt_sdivmod;
 
 /// Offset of the registration-table mutex inside the 0x240-byte
 /// context object (original `add r4, r0, #0x114`). A C++ mutex wrapper
@@ -207,6 +209,116 @@ pub const SLOT_COUNT: u32 = 29;
 
 /// Bytes per registration slot (original `add r0, r5, r6, lsl #3`).
 pub const SLOT_STRIDE: usize = 8;
+
+/// A relative registration timeout converted to the 32-bit `{ seconds,
+/// nanos }` pair the registration object keeps at +0x1c. This is the
+/// wrapper's exact eight-byte stack object.
+#[repr(C)]
+pub struct IapThreadRegistrationDeadline {
+    pub seconds: i32,
+    pub nanos: i32,
+}
+
+/// Indirect dispatch for the unported registry body @ 0x081d6dbc. The
+/// wrapper itself is ported; this preserves a hook-ready target path while
+/// allowing host tests to inspect the ephemeral deadline object.
+#[derive(Clone, Copy)]
+pub struct IapThreadRegistrationOps {
+    /// Registry body `(thread, deadline, client, unread_seed)` -> slot index
+    /// or -1. Raw ARM carries `unread_seed` into r3 although the body never
+    /// reads it.
+    pub register_client: unsafe extern "C" fn(
+        thread: *mut u8,
+        deadline: *const IapThreadRegistrationDeadline,
+        client: *mut u8,
+        unread_seed: u32,
+    ) -> i32,
+}
+
+/// Target default: the original, still-unported registry body.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_register_client(
+    thread: *mut u8,
+    deadline: *const IapThreadRegistrationDeadline,
+    client: *mut u8,
+    unread_seed: u32,
+) -> i32 {
+    let f: unsafe extern "C" fn(
+        *mut u8,
+        *const IapThreadRegistrationDeadline,
+        *mut u8,
+        u32,
+    ) -> i32 = core::mem::transmute(0x081d_6dbcusize);
+    f(thread, deadline, client, unread_seed)
+}
+
+/// Host default: an inert successful registration. Tests install a recorder.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_register_client(
+    _thread: *mut u8,
+    _deadline: *const IapThreadRegistrationDeadline,
+    _client: *mut u8,
+    _unread_seed: u32,
+) -> i32 {
+    0
+}
+
+pub const DEFAULT_IAP_THREAD_REGISTER_CLIENT_OPS: IapThreadRegistrationOps =
+    IapThreadRegistrationOps {
+        register_client: firmware_register_client,
+    };
+
+/// Active registry body, loaded volatile to preserve the target seam.
+pub static mut IAP_THREAD_REGISTER_CLIENT_OPS: IapThreadRegistrationOps =
+    DEFAULT_IAP_THREAD_REGISTER_CLIENT_OPS;
+
+#[inline(always)]
+fn iap_thread_register_client_ops() -> IapThreadRegistrationOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_REGISTER_CLIENT_OPS)) }
+}
+
+/// iap_incoming_process_thread_register_client — original:
+/// `FUN_081d6e38` @ 0x081d6e38 (**48 bytes**, 0x081d6e38..0x081d6e68).
+/// A complete ARM B/BL immediate decode of osos.dec verifies **11
+/// unconditional `bl` sites** (0x08139e54, 0x0816428c, 0x081649e0,
+/// 0x08193d40, 0x08196f7c, 0x081af2cc, 0x081f2654, 0x081f2684,
+/// 0x081f3920, 0x08200e54, 0x08201268), zero predicated `bl`, zero tail
+/// `b`, and zero aligned data-word references.
+///
+/// Converts `timeout_millis` into a signed `{seconds, nanos}` deadline using
+/// the ADS signed quotient/remainder pair (`seconds = ms / 1000`,
+/// `nanos = (ms % 1000) * 1_000_000`), then registers `client` through the
+/// thread context's locked 29-slot registry body. Returns its slot index, or
+/// -1. The raw wrapper carries `unread_seed` into r3 even though that body
+/// never reads it; this port forwards it unchanged.
+///
+/// Deliberate deviation: the original calls the unported eight-byte
+/// conversion helper @ 0x08261e94. Its verified body is reproduced inline
+/// using the already-ported [`__rt_sdivmod`], while its unported registry
+/// body @ 0x081d6dbc remains behind [`IAP_THREAD_REGISTER_CLIENT_OPS`]:
+/// target builds reach the stock body; host tests install a recorder.
+///
+/// # Safety
+///
+/// `thread` and `client` must satisfy the registry body's contracts. The
+/// deadline pointer is valid only for that call, matching the original stack
+/// object.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_register_client(
+    thread: *mut u8,
+    timeout_millis: i32,
+    client: *mut u8,
+    unread_seed: u32,
+) -> i32 {
+    let mut remainder = 0;
+    let seconds = __rt_sdivmod(timeout_millis, 1000, &mut remainder);
+    let deadline = IapThreadRegistrationDeadline {
+        seconds,
+        nanos: remainder.wrapping_mul(1_000_000),
+    };
+    (iap_thread_register_client_ops().register_client)(thread, &deadline, client, unread_seed)
+}
 
 /// Indirect dispatch for the one unported callee (see the function's
 /// deviation note). Host tests install a recording model; a later port

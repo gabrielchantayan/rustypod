@@ -36079,6 +36079,47 @@ functions:
       original's tail branch plus the target's mandatory non-leaf frame
       pointer.
 
+  - address: 0x081d6e38
+    ghidra: FUN_081d6e38
+    name: iap_incoming_process_thread_register_client
+    size: 48
+    sig: "i32 iap_incoming_process_thread_register_client(u8 *thread, i32 timeout_millis, u8 *client, u32 unread_seed)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0/r4: thread (the 0x240-byte CIapIncomingProcessThread context)
+      param_2/r1: timeout_millis (signed relative timeout converted to {seconds,nanos})
+      param_3/r2/r5: client (registered at the slot's +4 context word)
+      param_4/r3/r6: unread_seed (carried to the registry body but never read there)
+      FUN_08261e94: milliseconds_to_timespec (unported eight-byte stack-object helper;
+        reproduced inline with ported __rt_sdivmod)
+      FUN_081d6dbc: iap_incoming_process_thread_register_client_body (unported;
+        target default through IAP_THREAD_REGISTER_CLIENT_OPS)
+    notes: >-
+      Raw ARM confirms Ghidra's 48-byte extent exactly: the code starts with
+      push {r2,r3,r4,r5,r6,lr} at 0x081d6e38 and returns with
+      pop {r2,r3,r4,r5,r6,pc} at 0x081d6e64; the distinct sibling starts at
+      0x081d6e68 with push {r4,r5,r6,r7,r8,lr}, no literal pool. It preserves
+      thread, client, and r3 across a local eight-byte deadline, calls
+      0x08261e94(deadline, timeout_millis), then calls
+      0x081d6dbc(thread, deadline, client, unread_seed) and returns the
+      registry body's slot index or -1 unchanged. The conversion helper calls
+      the ported ADS signed quotient/remainder core __rt_sdiv with divisor
+      1000, stores quotient at +0 and remainder*1000000 at +4: signed
+      {seconds,nanos} with truncation toward zero. The port reproduces that
+      helper inline through __rt_sdivmod; the unported registry body remains
+      behind IAP_THREAD_REGISTER_CLIENT_OPS (target default transmuting
+      0x081d6dbc, host recorder) rather than inventing its allocation and
+      lock behavior. A whole-image ARM B/BL-immediate decode finds exactly 11
+      direct inbound bl sites, all unconditional (0x08139e54, 0x0816428c,
+      0x081649e0, 0x08193d40, 0x08196f7c, 0x081af2cc, 0x081f2654,
+      0x081f2684, 0x081f3920, 0x08200e54, 0x08201268), zero predicated bl,
+      zero tail b, and zero aligned data-word references. The host tests in
+      app::iap_incoming_client_base prove the normal 1ms deadline becomes
+      {0,1000000}, client/seed forwarding, slot propagation, and the
+      signed -1001ms edge becomes {-1,-1000000}. match.py structural
+      review is expected to differ at the intentionally inlined helper and
+      the registry-body seam.
   - address: 0x081d7270
     ghidra: FUN_081d7270
     name: iap_incoming_process_thread_slot_poll
