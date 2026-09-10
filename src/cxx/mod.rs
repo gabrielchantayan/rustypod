@@ -45,6 +45,7 @@ pub mod recursive_mutex;
 pub mod observable_array;
 pub mod pending_event;
 pub mod null_pointer_status;
+pub mod nested_object_value;
 pub mod mode;
 pub mod object_flags;
 mod object_state;
