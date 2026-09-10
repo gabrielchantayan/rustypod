@@ -90,4 +90,5 @@ pub mod value_predicate;
 pub mod xor_transposed_block;
 pub mod xor_c6_in_place;
 pub mod xml_decode_codepoint_and_reset;
+pub mod xml_decode_skip_whitespace;
 pub mod xml_skip_whitespace;

@@ -93,13 +93,11 @@ mod tests {
     use super::*;
     use super::super::xml_decode_codepoint_and_reset::{
         XmlCodepointDecoderOps, XmlUtf8Decoder, DEFAULT_XML_CODEPOINT_DECODER_OPS,
-        XML_CODEPOINT_DECODER_OPS,
+        XML_CODEPOINT_DECODER_OPS, XML_CODEPOINT_DECODER_OPS_LOCK,
     };
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut DECODED: Vec<u32> = Vec::new();
     static mut DECODE_INDEX: usize = 0;
     static mut PREDICATE_CALLS: Vec<(*mut *mut u8, u32, u32)> = Vec::new();
@@ -123,7 +121,7 @@ mod tests {
     }
 
     fn install(decoded: &[u32]) -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = XML_CODEPOINT_DECODER_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             XML_CODEPOINT_DECODER_OPS = XmlCodepointDecoderOps {
                 decode_codepoint: queued_next_codepoint,

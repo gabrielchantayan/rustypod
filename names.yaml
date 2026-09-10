@@ -18487,6 +18487,32 @@ functions:
       stores only +0, +1, +3, +4; destination[2] is untouched instead
       of receiving a third continuation byte. The function returns void.
 
+  - address: 0x0825d318
+    ghidra: FUN_0825d318
+    name: xml_decode_skip_whitespace
+    size: 60
+    sig: "unsigned int xml_decode_skip_whitespace(void **reader_slot)"
+    module: util/xml_decode_skip_whitespace
+    status: ported
+    renames:
+      param_1/r0/r4: reader_slot
+      uVar1/r2/r0: codepoint
+      FUN_0825d5dc: xml_decode_codepoint (unported seam)
+      FUN_0825d7c4: xml_decode_codepoint_and_reset (ported)
+      FUN_0825d2fc: xml_codepoint_is_whitespace (unported seam)
+    notes: >-
+      Raw ARM is exactly 0x0825d318..0x0825d353: it loads *reader_slot and
+      calls 0x0825d5dc once without clearing decoder state, duplicates the
+      returned codepoint into r1/r2 for 0x0825d2fc, and on a nonzero predicate
+      calls 0x0825d7c4 before reclassifying. Thus an initially non-whitespace
+      codepoint leaves the decoder state as the raw decoder left it, whereas a
+      terminal codepoint reached after whitespace is reset. The error/EOF
+      sentinel 0xffffffff is tested by the predicate and returned normally.
+      The next function begins at 0x0825d354. Decoding every B/BL word in
+      osos.dec finds 10 static bl call sites, all unconditional. The two
+      unported direct callees use their existing volatile seams: fixed raw
+      firmware addresses on target and test-installed host callbacks.
+
   - address: 0x0825d354
     ghidra: FUN_0825d354
     name: xml_skip_whitespace
