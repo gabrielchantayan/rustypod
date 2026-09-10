@@ -29952,6 +29952,29 @@ functions:
       LLVM's fp frame, register scheduling and branch layout (the
       expected ADS-vs-LLVM noise).
 
+  - address: 0x083d71d8
+    ghidra: FUN_083d71d8
+    name: byte_key_tree_is_empty
+    size: 16
+    sig: "u32 byte_key_tree_is_empty(const ByteKeyTree *tree)"
+    module: cxx/byte_key_map
+    status: ported
+    renames:
+      param_1/r0: tree
+      r0_after_ldr: node_count
+      r0_after_rsbs: is_empty
+    notes: >-
+      Byte-keyed red-black-tree empty() leaf. Loads the live node count
+      from tree+0x14 and returns 1 exactly when it is zero, else 0;
+      `rsbs r0,r0,#1; movcc r0,#0` gives canonical boolean output for
+      every unsigned nonzero count. 10 direct bl call sites, all
+      unconditional, verified by decoding every ARM B/BL immediate in
+      osos.dec; no NULL guard in stock or port. The byte-key map callers
+      pass their tree at object+0x48. Host test covers 0, 1, 2, and
+      0xffffffff counts. match.py structural: the same count load and
+      canonical zero test; LLVM uses clz/lsr where ADS uses rsbs/movcc,
+      with a frame prologue/epilogue around the leaf.
+
   - address: 0x083db038
     ghidra: FUN_083db038
     name: byte_key_map_find

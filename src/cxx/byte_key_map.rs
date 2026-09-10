@@ -232,6 +232,23 @@ pub struct ByteKeyTree {
     /// +0x19: key-comparator object (stateless `less<u8>`; never read).
     pub comparator: u8,
 }
+/// byte_key_tree_is_empty — original: `FUN_083d71d8` @ 0x083d71d8
+/// (16 bytes; 10 direct `bl` call sites, binary-scanned; none predicated).
+///
+/// Returns one exactly when the red-black tree's live-node count at `this +
+/// 0x14` is zero, otherwise zero. This is the `empty()` instantiation used by
+/// the byte-key map callers. Deliberate deviations: none; like the original,
+/// this has no NULL guard.
+///
+/// # Safety
+/// `tree` must point to a live [`ByteKeyTree`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.byte_key_tree_is_empty")]
+#[inline(never)]
+pub unsafe extern "C" fn byte_key_tree_is_empty(tree: *const ByteKeyTree) -> u32 {
+    if (*tree).node_count == 0 { 1 } else { 0 }
+}
+
 
 // Target-exact layout; on a 64-bit host the pointer fields widen and
 // the offsets shift — harmless, all access goes through the structs.
@@ -888,6 +905,25 @@ mod tests {
                     },
                 );
             }
+        }
+    }
+
+    /// The 16-byte leaf reads only the live-node count and returns a canonical
+    /// one for zero, including the full unsigned nonzero range.
+    #[test]
+    fn empty_reads_live_node_count() {
+        let mut tree: ByteKeyTree = unsafe { core::mem::zeroed() };
+        unsafe {
+            assert_eq!(byte_key_tree_is_empty(&tree), 1);
+
+            tree.node_count = 1;
+            assert_eq!(byte_key_tree_is_empty(&tree), 0);
+
+            tree.node_count = 2;
+            assert_eq!(byte_key_tree_is_empty(&tree), 0);
+
+            tree.node_count = u32::MAX;
+            assert_eq!(byte_key_tree_is_empty(&tree), 0);
         }
     }
 
