@@ -60351,3 +60351,34 @@ functions:
       override precedence at every embedded index, zero override fallback
       including a zero fallback byte, NULL override fallback, and the
       all-NULL embedded-byte path.
+
+  # --- opaque object masked-word refresh ---
+  - address: 0x082c43d0
+    ghidra: FUN_082c43d0
+    name: object_masked_word_refresh
+    size: 32
+    sig: "void object_masked_word_refresh(u32 *object)"
+    module: util/object_masked_word_refresh
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x00": helper_source
+      "object+0x74": masked_word
+      FUN_0836f468: unported_masked_word_update
+    notes: >-
+      Raw osos.dec confirms the 32-byte extent, eight ARM words from
+      0x082c43d0 through pop {r4,pc} at 0x082c43ec; the next separately
+      linked function starts at 0x082c43f0. Decoding every ARM B/BL-immediate
+      word finds exactly 10 direct inbound call sites, all unconditional plain
+      bl (none predicated): 0x0838f9c8, 0x0838f9ec, 0x0838fa10, 0x0838fa64,
+      0x0838fa8c, 0x0838fab4, 0x0838fafc, 0x0838fb20, 0x0838fb40, and
+      0x0838fb60. The body returns immediately when object is NULL. Otherwise
+      it passes the raw pointer in object word zero and object word 29 (+0x74)
+      to the separately linked helper at 0x0836f468, then replaces word 29
+      with that result. The helper's concrete identity is unrecovered and no
+      identity was invented; target builds retain the fixed retail-address
+      call while host tests install a recorder. Deliberate deviation: host
+      fixtures and accesses use target-width u32 words so +0x74 remains word
+      29 despite 64-bit host pointers. Host tests prove NULL suppression,
+      raw source/mask forwarding, result replacement, NULL source forwarding,
+      and a zero helper result.
