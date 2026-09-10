@@ -125,6 +125,37 @@ unsafe fn service_handler_lifecycle_records() -> *const ServiceHandlerLifecycleR
     }
 }
 
+/// service_handler_lifecycle_state — original: `FUN_08138b84` @
+/// **0x08138b84** (36 raw bytes: eight ARM instructions plus the trailing
+/// table literal @ 0x08138ba4; 0x08138ba8 begins the distinct next function).
+/// Ghidra reports only the 32 instruction bytes. A complete decode of every
+/// ARM `B`/`BL` word in `osos.dec` finds **12 direct, unconditional `bl` call
+/// sites**, with no predicated `bl` or tail-branch callers.
+///
+/// Algorithm: reject signed selectors three and above through [`heap_panic`],
+/// then ignore `manager` and return the sign-extended state byte at the start
+/// of selector's 0x114-byte lifecycle record in the table @ 0x08ad0f34.
+///
+/// Deliberate deviation: host builds replace the firmware RAM table with five
+/// records and make its second record selector zero, so tests can safely
+/// observe selector -1 as well as the three documented records.
+///
+/// # Safety
+///
+/// `selector` must name a readable lifecycle record at 0x08ad0f34. The
+/// original's signed range check admits negative selectors, which therefore
+/// address records before that table.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_lifecycle_state(_manager: *mut u8, selector: i32) -> i32 {
+    if selector >= SERVICE_HANDLER_LIFECYCLE_RECORD_COUNT {
+        heap_panic();
+    }
+
+    let record = service_handler_lifecycle_records().wrapping_offset(selector as isize);
+    ptr::read_volatile(ptr::addr_of!((*record).state)) as i32
+}
+
 /// # Safety
 ///
 /// `selector` must name a readable lifecycle record at 0x08ad0f34. The
@@ -288,6 +319,23 @@ mod tests {
             assert_eq!(
                 unsafe { service_handler_state_is_ready(ptr::null_mut(), selector) },
                 expected,
+                "selector {selector}, state {state}",
+            );
+            unsafe {
+                replace_service_handler_lifecycle_state(selector, previous);
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_state_returns_the_signed_byte_for_each_admitted_selector() {
+        let _guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        for (selector, state) in [(-1, -2), (0, 0), (1, 6), (2, 127)] {
+            let previous = unsafe { replace_service_handler_lifecycle_state(selector, state) };
+            assert_eq!(
+                unsafe { service_handler_lifecycle_state(ptr::null_mut(), selector) },
+                state as i32,
                 "selector {selector}, state {state}",
             );
             unsafe {

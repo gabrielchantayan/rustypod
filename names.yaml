@@ -35207,6 +35207,34 @@ functions:
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  - address: 0x08138b84
+    ghidra: FUN_08138b84
+    name: service_handler_lifecycle_state
+    size: 36
+    sig: "i32 service_handler_lifecycle_state(void *manager, i32 selector)"
+    module: app/service_handler_availability
+    renames:
+      param_1/r0: manager (ignored)
+      param_2/r1: selector
+      DAT_08138ba4: service_handler_lifecycle_records (0x08ad0f34; 0x114-byte records)
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is 36 bytes, 0x08138b84..0x08138ba8: eight ARM
+      instructions plus literal 0x08ad0f34 at 0x08138ba4. Ghidra's
+      reported 32 bytes omits that literal; 0x08138ba8 (`sub r2,r1,#1`)
+      begins the distinct next function. The signed selector comparison
+      admits negative selectors and terminates selectors >=3 via heap_panic;
+      the normal path ignores r0 and returns the sign-extended state byte at
+      table + selector*0x114. Decoding every ARM B/BL word in osos.dec finds
+      12 direct unconditional bl call sites, no predicated bl and no tail
+      branches. The port shares service_handler_state_is_ready's five-record
+      host fixture centred on selector zero, so tests safely exercise selector
+      -1; firmware reads 0x08ad0f34 directly. match.py structural review:
+      LLVM uses `cmp r1,#2` plus a conditional normal return and out-of-line
+      heap_panic path, equivalent to the retail `cmp r1,#3; blge heap_panic`
+      path.
+
   - address: 0x08138d8c
     ghidra: FUN_08138d8c
     name: service_handler_state_is_ready
