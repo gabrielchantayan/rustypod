@@ -48,6 +48,7 @@ pub mod element_reference_persistent_id;
 pub mod element_reference_construct_string;
 pub mod font_handle;
 pub mod invalidate;
+pub mod resource_value;
 pub mod draw_state_setup;
 pub mod shown_state;
 pub mod default_navigation_request;

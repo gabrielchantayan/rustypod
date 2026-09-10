@@ -60986,3 +60986,41 @@ functions:
       byte widening of flags (including high bytes discarded by ldrb), and
       forwarding of a null text pointer without inventing a guard. match.py
       structurally differs only at the Rust boundary and frame, as expected.
+
+  # --- UI resource C-string value adapter ---
+  - address: 0x08290450
+    ghidra: FUN_08290450
+    name: ui_resource_value_from_cstr
+    size: 44
+    sig: "u32 ui_resource_value_from_cstr(const u8 *resource_name)"
+    module: ui/resource_value
+    status: ported
+    renames:
+      param_1/r0: resource_name
+      uStack_c: temporary_cow_string
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent
+      0x08290450..0x0829047c: push {r2,r3,r4,lr}; move resource_name from r0
+      into r1; place the one-word COW-string temporary at sp+4; call
+      cxx_string_from_cstr @ 0x083d8b5c; call the separately entered helper at
+      0x0829047c; retain its r0 return in r4; release the temporary through
+      cxx_string_release @ 0x083d8b04; and return the saved word. The next
+      function begins at 0x0829047c with `mov r1,r0; push {r4,lr}`, so Ghidra's
+      44-byte extent has no literal-pool tail or swallowed sibling. Decoding
+      every ARM B/BL immediate in osos.dec finds exactly 10 inbound direct bl
+      sites, all unconditional with no predicated bl or direct b: 0x08159318,
+      0x0815ea04, 0x0815ea10, 0x0815ea1c, 0x081a3324, 0x081a3434,
+      0x081a3460, 0x081a3470, 0x081a34a4, and 0x081a4a54. Callers pass UI
+      resource names (including Stopwatch and Voice Memo image names) and
+      consume the mapped word. The 0x0829047c helper is deliberately retained
+      as a fixed-address target boundary: raw code loads its map global from
+      0x08ad7c6c and calls the separately unported 0x083db75c, whose exact map
+      class is not established. The Rust port uses the existing COW-string
+      constructor/release ports and reaches 0x0829047c through a typed
+      fixed-address boundary on ARM; host tests install the same boundary.
+      Tests cover exact non-empty byte forwarding through the temporary, its
+      heap release, and the empty name with a zero lookup result. match.py
+      structurally differs in the boundary call and Rust frame but retains
+      construct/call/release order.
