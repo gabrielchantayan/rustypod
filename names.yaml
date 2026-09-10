@@ -44822,6 +44822,45 @@ functions:
       dispatch replaces stock direct bl calls, while LLVM may merge the
       two tail-to-head filter loops.
 
+
+  - address: 0x082d817c
+    ghidra: FUN_082d817c
+    name: cg_consume_register_use
+    size: 76
+    sig: "CgBinding *cg_consume_register_use(CgCodegen *codegen, CgVirtualReg *reg, u32 resource, CgInst *inst)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: codegen (owner of the per-register use-list heads at +0x21c)
+      param_2/r1: reg (virtual register; +0x10 is its use-list index)
+      param_3/r2: resource (hardware-resource index, converted to 1 << resource)
+      param_4/r3: inst (instruction record to remove from the use list)
+      r12: link (address of the head slot, then each preceding record's next slot)
+      lr: use record (the `{next, inst}` cursor)
+      r4: candidate instruction (use record +0x04)
+      FUN_082d8140: unported tail helper (binding acquisition/rebind and materialization)
+    notes: >-
+      Verified call count: 10 plain bl sites, 0 predicated bl sites:
+      0x082c0fa0, 0x082c0fb4, 0x082c1018, 0x082c1048, 0x082c1078,
+      0x082c10ec, 0x082c1100, 0x082c1194, 0x082c11a8, 0x082cbc28.
+      Raw extent is exactly 76 bytes, 0x082d817c..0x082d81c4, followed
+      by distinct FUN_082d81c8. It computes the ARM-register-shift mask
+      `1 << resource` (zero when resource >= 32), walks codegen +0x21c
+      at index reg +0x10, and bypasses only the FIRST `{next, inst}`
+      record whose inst word equals r3. The detached record is not
+      cleared; a missing record leaves the chain unchanged. It always
+      tail-branches to FUN_082d8140 with (codegen, reg, mask). The raw
+      tail's observed operations are acquisition, rebind and required
+      materialization, but its identity is not invented. Deliberate
+      deviation: that unported tail dispatches through
+      CG_CONSUME_REGISTER_USE_OPS with an inert default after the exact
+      unlink. Host tests
+      cg_consume_register_use_unlinks_the_first_matching_record_then_binds,
+      cg_consume_register_use_preserves_a_missing_record_and_zeroes_large_shift_masks,
+      and cg_consume_register_use_seam_keeps_its_unported_tail_inert
+      prove middle-chain bypass, first-match behavior, missing-record
+      preservation, ARM large-shift semantics, forwarded tail result and
+      the documented default.
   - address: 0x082b5234
     ghidra: FUN_082b5234
     name: cg_binding_rebind

@@ -139,6 +139,11 @@
 //!   per-instruction emitter, then releases block-boundary bindings.
 //!   Its unported callees and malloc/free boundary sit behind the
 //!   [`CG_BLOCK_EMIT_OPS`] ops-table seam.
+//! - `cg_consume_register_use` — original: `FUN_082d817c` @
+//!   0x082d817c (76 bytes; 10 plain `bl` call sites). Removes one
+//!   instruction's matching record from a virtual register's in-block
+//!   use list, then hands the register and its requested hardware-resource
+//!   mask to the following allocation/emission helper.
 //! - `cg_block_bind_registers` — original: `FUN_082b3b5c` @
 //!   0x082b3b5c (216 bytes; 1 `bl` call site — inside
 //!   [`cg_block_emit`], right after the use-list build). The JIT's
@@ -3442,6 +3447,80 @@ pub unsafe extern "C" fn cg_binding_acquire(
         binding as *mut CgBinding,
     );
     binding as *mut CgBinding
+}
+
+/// The unported tail callee of [`cg_consume_register_use`]. The raw tail
+/// target `FUN_082d8140` acquires a binding, rebinds it to the virtual
+/// register, and emits any required register materialization. Its identity
+/// beyond those observed operations is not yet recovered.
+#[derive(Clone, Copy)]
+pub struct CgConsumeRegisterUseOps {
+    pub bind_for_emit:
+        unsafe extern "C" fn(codegen: *mut CgCodegen, reg: *mut CgVirtualReg, mask: u32) -> *mut CgBinding,
+}
+
+unsafe extern "C" fn default_cg_bind_register_for_emit(
+    _codegen: *mut CgCodegen,
+    _reg: *mut CgVirtualReg,
+    _mask: u32,
+) -> *mut CgBinding {
+    core::ptr::null_mut()
+}
+
+/// Default preserves the recovered unlink and leaves the unported
+/// allocation/emission tail inert.
+pub const DEFAULT_CG_CONSUME_REGISTER_USE_OPS: CgConsumeRegisterUseOps = CgConsumeRegisterUseOps {
+    bind_for_emit: default_cg_bind_register_for_emit,
+};
+
+/// Active tail dispatch for [`cg_consume_register_use`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_CONSUME_REGISTER_USE_OPS: CgConsumeRegisterUseOps = DEFAULT_CG_CONSUME_REGISTER_USE_OPS;
+
+/// cg_consume_register_use — original: `FUN_082d817c` @ 0x082d817c
+/// (76 bytes; **10 plain `bl` call sites**, no predicated calls:
+/// 0x082c0fa0/0x082c0fb4/0x082c1018/0x082c1048/0x082c1078/0x082c10ec/
+/// 0x082c1100/0x082c1194/0x082c11a8/0x082cbc28).
+///
+/// Finds the first `{next, inst}` record on `reg_no`'s use list whose
+/// instruction pointer equals `inst`, then removes it by rewriting its
+/// predecessor link. The record itself is left unchanged. Whether or not a
+/// match was found, tail-calls the binding/allocation helper with a mask
+/// containing `resource`; an ARM register shift of 32 or more produces zero.
+///
+/// Deliberate deviation: the raw tail target `FUN_082d8140` is unported, so
+/// [`CG_CONSUME_REGISTER_USE_OPS`] defaults to an inert dispatch after the
+/// exact use-list unlink. No callee identity is invented.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_consume_register_use(
+    codegen: *mut CgCodegen,
+    reg: *mut CgVirtualReg,
+    resource: u32,
+    inst: *mut CgInst,
+) -> *mut CgBinding {
+    let codegen = codegen as *mut u8;
+    let reg = reg as *mut u8;
+    let heads = slot(codegen, CG_CODEGEN_REG_USES).read();
+    let mut link = slot(heads, word(reg, CG_VREG_NO).read());
+    loop {
+        let record = link.read();
+        if record.is_null() {
+            break;
+        }
+        if slot(record, CG_REG_USE_INST).read() == inst as *mut u8 {
+            link.write(slot(record, CG_REG_USE_NEXT).read());
+            break;
+        }
+        link = slot(record, CG_REG_USE_NEXT);
+    }
+
+    let mask = 1u32.checked_shl(resource).unwrap_or(0);
+    (hook(core::ptr::addr_of!(CG_CONSUME_REGISTER_USE_OPS)).bind_for_emit)(
+        codegen as *mut CgCodegen,
+        reg as *mut CgVirtualReg,
+        mask,
+    )
 }
 
 /// cg_block_bind_registers — original: `FUN_082b3b5c` @ 0x082b3b5c
@@ -9085,6 +9164,161 @@ mod tests {
             assert_eq!(ops.binding_release as usize, default_cg_binding_release as usize);
             assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
             assert_eq!(ops.binding_push as usize, default_cg_binding_push as usize);
+        }
+        teardown();
+    }
+    // --- cg_consume_register_use -------------------------------------
+
+    static mut CONSUME_REGISTER_USE_LOG: std::vec::Vec<(usize, usize, u32)> = std::vec::Vec::new();
+    static mut CONSUME_REGISTER_USE_RETURN: *mut CgBinding = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_bind_register_for_emit(
+        codegen: *mut CgCodegen,
+        reg: *mut CgVirtualReg,
+        mask: u32,
+    ) -> *mut CgBinding {
+        CONSUME_REGISTER_USE_LOG.push((codegen as usize, reg as usize, mask));
+        CONSUME_REGISTER_USE_RETURN
+    }
+
+    unsafe fn install_consume_register_use_ops() -> CgConsumeRegisterUseOps {
+        let saved = hook(core::ptr::addr_of!(CG_CONSUME_REGISTER_USE_OPS));
+        *core::ptr::addr_of_mut!(CG_CONSUME_REGISTER_USE_OPS) = CgConsumeRegisterUseOps {
+            bind_for_emit: recording_bind_register_for_emit,
+        };
+        CONSUME_REGISTER_USE_LOG.clear();
+        saved
+    }
+
+    struct ConsumeRegisterUseFixture {
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        heads: [usize; 3],
+        reg: [usize; 5],
+        records: [[usize; 2]; 3],
+        insts: [[usize; 3]; 2],
+        binding: [usize; 7],
+    }
+
+    impl ConsumeRegisterUseFixture {
+        fn new() -> std::boxed::Box<ConsumeRegisterUseFixture> {
+            std::boxed::Box::new(ConsumeRegisterUseFixture {
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                heads: [0; 3],
+                reg: [0; 5],
+                records: [[0; 2]; 3],
+                insts: [[0; 3]; 2],
+                binding: [0; 7],
+            })
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        fn reg_ptr(&mut self) -> *mut CgVirtualReg {
+            self.reg.as_mut_ptr() as *mut CgVirtualReg
+        }
+
+        fn inst_ptr(&mut self, index: usize) -> *mut CgInst {
+            self.insts[index].as_mut_ptr() as *mut CgInst
+        }
+    }
+
+    #[test]
+    fn consume_register_use_unlinks_the_first_matching_record_then_binds() {
+        let _g = setup();
+        let mut f = ConsumeRegisterUseFixture::new();
+        unsafe {
+            let saved = install_consume_register_use_ops();
+            f.codegen[CG_CODEGEN_REG_USES] = f.heads.as_mut_ptr() as usize;
+            f.reg[CG_VREG_NO] = 1;
+            let record0 = f.records[0].as_mut_ptr() as *mut u8;
+            let record1 = f.records[1].as_mut_ptr() as *mut u8;
+            let record2 = f.records[2].as_mut_ptr() as *mut u8;
+            let other = f.inst_ptr(0);
+            let target = f.inst_ptr(1);
+            f.heads[1] = record0 as usize;
+            f.records[0][CG_REG_USE_NEXT] = record1 as usize;
+            f.records[0][CG_REG_USE_INST] = other as usize;
+            f.records[1][CG_REG_USE_NEXT] = record2 as usize;
+            f.records[1][CG_REG_USE_INST] = target as usize;
+            f.records[2][CG_REG_USE_INST] = target as usize;
+            let codegen = f.codegen_ptr();
+            let reg = f.reg_ptr();
+            let binding = f.binding.as_mut_ptr() as *mut CgBinding;
+            CONSUME_REGISTER_USE_RETURN = binding;
+
+            assert_eq!(
+                cg_consume_register_use(codegen, reg, 2, target),
+                binding,
+                "the tail binding result becomes this function's result"
+            );
+            assert_eq!(f.heads[1], record0 as usize, "the preceding record remains the head");
+            assert_eq!(
+                f.records[0][CG_REG_USE_NEXT],
+                record2 as usize,
+                "the first matching middle record is bypassed"
+            );
+            assert_eq!(
+                f.records[1][CG_REG_USE_NEXT],
+                record2 as usize,
+                "the detached record itself is not cleared"
+            );
+            assert_eq!(
+                CONSUME_REGISTER_USE_LOG,
+                std::vec![(codegen as usize, reg as usize, 1 << 2)],
+                "resource two is forwarded as its one-bit hardware mask"
+            );
+
+            *core::ptr::addr_of_mut!(CG_CONSUME_REGISTER_USE_OPS) = saved;
+        }
+        teardown();
+    }
+
+    #[test]
+    fn consume_register_use_preserves_a_missing_record_and_zeroes_large_shift_masks() {
+        let _g = setup();
+        let mut f = ConsumeRegisterUseFixture::new();
+        unsafe {
+            let saved = install_consume_register_use_ops();
+            f.codegen[CG_CODEGEN_REG_USES] = f.heads.as_mut_ptr() as usize;
+            f.reg[CG_VREG_NO] = 0;
+            let record0 = f.records[0].as_mut_ptr() as *mut u8;
+            let record1 = f.records[1].as_mut_ptr() as *mut u8;
+            let target = f.inst_ptr(0);
+            f.heads[0] = record0 as usize;
+            f.records[0][CG_REG_USE_NEXT] = record1 as usize;
+            f.records[0][CG_REG_USE_INST] = f.inst_ptr(1) as usize;
+            f.records[1][CG_REG_USE_INST] = f.inst_ptr(1) as usize;
+            let codegen = f.codegen_ptr();
+            let reg = f.reg_ptr();
+            let binding = f.binding.as_mut_ptr() as *mut CgBinding;
+            CONSUME_REGISTER_USE_RETURN = binding;
+
+            assert_eq!(cg_consume_register_use(codegen, reg, 32, target), binding);
+            assert_eq!(f.heads[0], record0 as usize, "a missing instruction leaves the head");
+            assert_eq!(
+                f.records[0][CG_REG_USE_NEXT],
+                record1 as usize,
+                "a missing instruction leaves all links intact"
+            );
+            assert_eq!(
+                CONSUME_REGISTER_USE_LOG,
+                std::vec![(codegen as usize, reg as usize, 0)],
+                "ARM's >=32-bit register shift produces a zero mask"
+            );
+
+            *core::ptr::addr_of_mut!(CG_CONSUME_REGISTER_USE_OPS) = saved;
+        }
+        teardown();
+    }
+
+    #[test]
+    fn consume_register_use_seam_keeps_its_unported_tail_inert() {
+        let _g = setup();
+        unsafe {
+            let ops = hook(core::ptr::addr_of!(CG_CONSUME_REGISTER_USE_OPS));
+            assert_eq!(ops.bind_for_emit as usize, default_cg_bind_register_for_emit as usize);
         }
         teardown();
     }
