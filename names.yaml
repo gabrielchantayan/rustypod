@@ -57100,3 +57100,40 @@ functions:
       The host-only flags word models the live target word. Host tests prove
       zero-to-29 initialization, nonzero preservation, exact forwarding of
       null and maximum-length inputs, and unchanged negative return values.
+
+  # --- Tagged object bidirectional link ---
+  - address: 0x0805bc34
+    ghidra: FUN_0805bc34
+    name: tagged_object_link
+    size: 196
+    sig: "i32 tagged_object_link(TaggedLinkSource *source, TaggedLinkTarget *target)"
+    module: ui/tagged_object_link
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: target
+      FUN_080b49a4: source_tag_guard
+      FUN_080c67b8: target_tag_and_storage_guard
+      FUN_080e2d70: source_contains_target
+      FUN_0803bbfc: list_insert
+      FUN_080646b8: list_remove
+    notes: >-
+      Raw ARM establishes a 196-byte extent, from 0x0805bc34 through pop
+      {r1,r2,r3,r4,r5,r6,r7,pc} at 0x0805bcf4; separately entered sibling
+      FUN_0805bcf8 starts at 0x0805bcf8. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly 12 inbound calls: 11 unconditional bl at
+      0x08047c80, 0x0805e4a8, 0x0805e4bc, 0x0806171c, 0x08063518,
+      0x0806360c, 0x08065ca8, 0x080b4a44, 0x0812cbe0, 0x0816ed80, and
+      0x0817c108 plus one blne at 0x080e5c24. That predicated caller checks
+      its optional target itself; this routine's own tag checks return -50.
+      It rejects a source without tag 0x4d536e64 or a target without tag
+      0x4d526376 and nonzero word +0x30, then skips an existing link. It
+      inserts {target,0} into the source list and {source} into the target
+      list; source failure returns -108, target failure rolls back the source
+      insertion and returns -108, while two successes increment both +0x0c
+      and +0x08 counters. The object-family and list identities remain
+      unknown. The source membership scan (0x080e2d70), insertion
+      (0x0803bbfc), and removal (0x080646b8) are volatile target-address
+      seams with host recorders. Rust initializes the two temporary records
+      directly rather than retaining the stock bzero calls that only clear
+      them before their pointer words are stored.
