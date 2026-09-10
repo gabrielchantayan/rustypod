@@ -410,11 +410,35 @@ pub unsafe extern "C" fn condvar_init(condvar: *mut CondVar) {
 /// lock word (`lock_obj` = a pointer to the slot holding the associated
 /// semaphore/lock handle) and empties the wait queue. Three plain
 /// stores, no calls.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_bind(condvar: *mut CondVar, lock_obj: *mut u32) {
     (*condvar).lock_obj = lock_obj;
     (*condvar).waiters.head = null_mut();
     (*condvar).waiters.tail = null_mut();
+}
+
+/// condvar_construct_with_lock — original: `FUN_082743dc` @ 0x082743dc
+/// (40 bytes; 11 verified unconditional `bl` call sites, no predicated
+/// forms).
+///
+/// Initializes a caller-owned condvar around `lock_obj`: clears all three
+/// words, then invokes `condvar_bind` (0x080ed9c8) with the original
+/// forwarded r1 lock-word argument, and returns `condvar`. The preliminary
+/// clears are observably redundant with `condvar_bind`'s stores but are kept
+/// to preserve the original operation order. Deliberate deviations: none;
+/// the existing direct port is called rather than adding a duplicate seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn condvar_construct_with_lock(
+    condvar: *mut CondVar,
+    lock_obj: *mut u32,
+) -> *mut CondVar {
+    (*condvar).lock_obj = null_mut();
+    (*condvar).waiters.head = null_mut();
+    (*condvar).waiters.tail = null_mut();
+    condvar_bind(condvar, lock_obj);
+    condvar
 }
 
 /// condvar_wait_forever — original: `FUN_080ed9dc` @ 0x080ed9dc (76 bytes;
@@ -950,6 +974,27 @@ mod tests {
             assert!(cv.waiters.tail.is_null());
         }
         assert!(take_events().is_empty(), "pure stores — no kernel calls");
+    }
+
+    #[test]
+    fn condvar_construct_with_lock_returns_receiver_and_replaces_stale_state() {
+        let _guard = install(MockState::default());
+        let mut lock_word = 0u32;
+        let mut cv = make_condvar();
+        let mut stale_lock = 0u32;
+        let mut stale = ListNode { next: null_mut() };
+        cv.lock_obj = &mut stale_lock;
+        cv.waiters.head = &mut stale;
+        cv.waiters.tail = &mut stale;
+
+        unsafe {
+            let result = condvar_construct_with_lock(&mut cv, &mut lock_word);
+            assert_eq!(result, &mut cv as *mut CondVar);
+            assert_eq!(cv.lock_obj, &mut lock_word as *mut u32);
+            assert!(cv.waiters.head.is_null());
+            assert!(cv.waiters.tail.is_null());
+        }
+        assert!(take_events().is_empty(), "only stores and condvar_bind");
     }
 
     #[test]
