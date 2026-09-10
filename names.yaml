@@ -59844,3 +59844,40 @@ functions:
       boundaries against LLVM inlining; host tests cover complete and dotted
       matches, continuation rejection, comparison-result forwarding, an
       empty prefix, and a prefix with trailing bytes after its NUL.
+
+  # --- Synchronized opaque-pointer FIFO enqueue ---
+  - address: 0x0839e5f8
+    ghidra: FUN_0839e5f8
+    name: pointer_queue_enqueue
+    size: 72
+    sig: "void pointer_queue_enqueue(PointerQueue *queue, void *value)"
+    module: app/pointer_queue
+    status: ported
+    renames:
+      param_1/r4: queue
+      param_2/r7: value
+      iVar2/r0: wrapper_node
+      "queue+0x4": pending_list
+      "queue+0xc": mutex
+      "queue+0x14": ready_condvar
+      FUN_082aadd4: operator_new
+      FUN_080f1158: list_push_back
+      FUN_080744d8: condvar_signal
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw ARM confirms the exact 72-byte extent 0x0839e5f8..0x0839e640:
+      eighteen instruction words end in `pop {r4-r8,lr}; b mutex_unlock`,
+      and the distinct next function begins at 0x0839e640 with
+      `push {r4,r5,r6,lr}`. Under queue+0xc it allocates 8 bytes through the
+      already ported operator_new, stores the incoming opaque value at node+4,
+      appends its node+0 link to the list at queue+4, signals the condvar at
+      queue+0x14, then unlocks. All ten direct inbound B/BL words are plain
+      unconditional BL at 0x081decfc, 0x081df084, 0x081df0bc, 0x081df10c,
+      0x081df14c, 0x081df184, 0x081df1bc, 0x081df1f4, 0x081df230, and
+      0x081df26c; no predicated direct calls or tail branches target it. A
+      full data-word scan finds no reference to 0x0839e5f8. The callers build
+      12-byte command records and pass their pointers, but this function only
+      owns the 8-byte wrapper. No semantic deviation: Rust calls the ported
+      mutex_unlock instead of reproducing the final ARM tail branch, and
+      discards its scratch return.
