@@ -5,7 +5,7 @@
 //! 0x083c0000-0x083dffff, differing only in address: the accessor in
 //! [`crate::cxx::handle`] (22 copies), `deque_seg_capacity`
 //! @ 0x083d9ec0 in [`crate::heap::block_deque`] (17 copies), and the
-//! three ported here. Each family needs exactly one port; `names.yaml`
+//! four ported here. Each family needs exactly one port; `names.yaml`
 //! carries the address lists so a hook can point every copy at it.
 //!
 //! - [`deque_iter_assign`] — the 16-byte deque-iterator copy, 17
@@ -13,6 +13,8 @@
 //!   immediately after that instantiation's `deque_seg_capacity`
 //!   (8 bytes + 36 bytes, adjacent), which is what identifies the pair
 //!   as the deque template's out-of-line members.
+//! - [`deque_iter_init_elem4`] — initializes the 4-byte-element deque
+//!   iterator's four fields, including a 128-byte segment end.
 //! - [`less_signed`] / [`less_unsigned`] / [`less_unsigned_byte`] —
 //!   `std::less`-shaped comparators taking their operands by
 //!   reference, 1, 12 and 2 copies, 45, 73 and 13 call sites.
@@ -89,6 +91,7 @@ use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{string_object_destroy, StringObject};
 use crate::libc::memcmp::memcmp;
 use crate::runtime::rt_div::__rt_sdiv;
+use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
 
 /// A 16-byte retailOS record containing two adjacent [`StringObject`]s.
 ///
@@ -281,6 +284,44 @@ pub unsafe extern "C" fn deque_iter_assign(dst: *mut u32, src: *const u32) -> *m
         dst.add(word).write(src.add(word).read());
     }
     dst
+}
+
+/// deque_iter_init_elem4 — original: `FUN_083da47c` @ 0x083da47c
+/// (64 bytes; 11 plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// Initializes a 4-byte-element deque iterator: stores `cur`, reads the
+/// segment base from `slot`, sets the segment end to `base + 0x80`, stores
+/// `slot`, and returns `iter`. A NULL `slot` zeroes both bounds; a non-NULL
+/// slot whose segment value is NULL still produces the raw address `0x80`.
+/// The 11 callers are 0x083df930, 0x083df970, 0x083dfa4c, 0x083dfa74,
+/// 0x083dfaa0, 0x083dfaf8, 0x083dfc78, 0x083dfcb0, 0x083dfdc4,
+/// 0x083dfe68, and 0x083dfea4.
+///
+/// Deliberate deviation: invokes the existing shared
+/// [`deque_seg_capacity`] port rather than duplicating this instantiation's
+/// adjacent 8-byte `mov r0,#0x20; bx lr` member at 0x083da450.
+///
+/// # Safety
+/// `iter` must be valid for a [`DequeIter`] write. A non-NULL `slot` must
+/// be a valid, aligned segment-pointer slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_init_elem4(
+    iter: *mut DequeIter,
+    cur: *mut u8,
+    slot: *mut *mut u8,
+) -> *mut DequeIter {
+    (*iter).cur = cur;
+    if slot.is_null() {
+        (*iter).seg_base = core::ptr::null_mut();
+        (*iter).seg_end = core::ptr::null_mut();
+    } else {
+        (*iter).seg_base = slot.read();
+        (*iter).seg_end = slot.read().wrapping_add(deque_seg_capacity() * 4);
+    }
+    (*iter).seg_slot = slot;
+    iter
 }
 
 /// deque_iter_assign_alias_9fd4 — original: `FUN_083d9fd4` @ 0x083d9fd4
@@ -2305,6 +2346,44 @@ mod tests {
             assert_eq!(ret, dst.as_mut_ptr());
             assert_eq!(&dst[..4], &src, "including zero and all-ones words");
             assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
+        }
+    }
+
+    #[test]
+    fn iter_init_elem4_anchors_on_the_slot_segment() {
+        let mut segment = [0u8; 0x80];
+        let mut slot = segment.as_mut_ptr();
+        let mut iter = DequeIter::NULL;
+        unsafe {
+            let ret = deque_iter_init_elem4(
+                &mut iter,
+                segment.as_mut_ptr().add(0x14),
+                &mut slot,
+            );
+            assert_eq!(ret, &mut iter as *mut DequeIter);
+            assert_eq!(iter.cur, segment.as_mut_ptr().add(0x14));
+            assert_eq!(iter.seg_base, segment.as_mut_ptr());
+            assert_eq!(iter.seg_end, segment.as_mut_ptr().add(0x80));
+            assert_eq!(iter.seg_slot, &mut slot as *mut *mut u8);
+        }
+    }
+
+    #[test]
+    fn iter_init_elem4_distinguishes_null_slot_from_null_segment() {
+        let mut null_segment = core::ptr::null_mut();
+        let mut iter = DequeIter::NULL;
+        unsafe {
+            deque_iter_init_elem4(&mut iter, 0x24 as *mut u8, &mut null_segment);
+            assert_eq!(iter.cur, 0x24 as *mut u8);
+            assert!(iter.seg_base.is_null());
+            assert_eq!(iter.seg_end, 0x80 as *mut u8);
+            assert_eq!(iter.seg_slot, &mut null_segment as *mut *mut u8);
+
+            deque_iter_init_elem4(&mut iter, core::ptr::null_mut(), core::ptr::null_mut());
+            assert!(iter.cur.is_null());
+            assert!(iter.seg_base.is_null());
+            assert!(iter.seg_end.is_null());
+            assert!(iter.seg_slot.is_null());
         }
     }
 
