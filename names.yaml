@@ -33148,6 +33148,43 @@ functions:
       frame and the dispatch-slot ldr/bx standing in for the direct
       `b 0x080542a0` - the documented deviation.
 
+  - address: 0x08259770
+    ghidra: FUN_08259770
+    name: event_listener_kind_10_get
+    size: 48
+    sig: "void *event_listener_kind_10_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0825979c: event_listener_kind_10_cache (pool literal holding 0x08a09f6c)
+      FUN_082aadd4: operator_new
+      FUN_0825939c: event_listener_kind_10_construct
+    notes: >-
+      Raw ARM establishes the 48-byte true extent: 44 instruction bytes from
+      0x08259770 through 0x08259798 plus pool word 0x08a09f6c at
+      0x0825979c; the separately linked sibling begins at 0x082597a0.
+      `push {r4,lr}; ldr r4,[pc,#32]; ldr r0,[r4]; cmp r0,#0; bne;
+      mov r0,#0x44; bl operator_new; bl FUN_0825939c; str r0,[r4];
+      ldr r0,[r4]; pop {r4,pc}` returns the cached 0x44-byte object,
+      allocating and constructing it only when the cache is NULL. The
+      post-construction reload is intentional: the constructor's return is
+      stored unconditionally, and a NULL return retries on the next call.
+      Full-image decoding of every ARM B/BL word found exactly 10 direct
+      call sites, all unconditional `bl` (zero predicated forms and zero
+      direct plain-B tails): 0x080f5a3c, 0x08104d58, 0x08104d74,
+      0x08104f34, 0x08104f94, 0x081e67cc, 0x081e67f0, 0x081e6944,
+      0x081e69e0, and 0x08258094. The unported constructor initializes
+      an event-listener object then passes its +0x40 interface to
+      event_hub_subscribe with kind 10, which establishes the name. No
+      aligned image word equals 0x08259770, so it is statically called, not
+      vtable-dispatched. Deliberate deviations: its unported constructor
+      rides the SINGLETON_CTORS.event_listener_kind_10 dispatch slot with
+      the established zeroing default, and the runtime cache word is
+      represented by the EVENT_LISTENER_KIND_10 crate static. It is not
+      hook-ready until FUN_0825939c is ported. Host tests prove exact
+      0x44 allocation, raw-block constructor argument, cache fast path, and
+      NULL-return retry behavior.
+
   - address: 0x082597a0
     ghidra: FUN_082597a0
     name: query_object_create

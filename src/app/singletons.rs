@@ -1,4 +1,4 @@
-//! The twenty-three lazily-constructed framework singletons. Every one is the
+//! The twenty-four lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -32,6 +32,7 @@
 //! | 0x081cbbb0 | [`photo_browse_slideshow_get`] | 0x8fc | 0x08a09e00 | 0x081cd5b8 | 18 |
 //! | 0x0825a6e8 | [`lazy_singleton_0x44`] | 0x44 | 0x08a09f64 | 0x0825aa58 | 14 |
 //! | 0x08259740 | [`lazy_singleton_0xa0`] | 0xa0 | 0x089cc958 | 0x08259278 | 12 |
+//! | 0x08259770 | [`event_listener_kind_10_get`] | 0x44 | 0x08a09f6c | 0x0825939c | 10 |
 
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
@@ -54,7 +55,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the twenty-three constructors is — they are large C++ constructors — so
+//! the twenty-four constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -338,7 +339,7 @@ pub type PhotoBrowseSlideshowConstructor =
     unsafe extern "C" fn(this: *mut u8, base: *mut u8) -> *mut u8;
 
 
-/// Indirect dispatch table for the twenty-three unported constructors (see the
+/// Indirect dispatch table for the twenty-four unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -388,6 +389,8 @@ pub struct SingletonCtors {
     pub photo_browse_slideshow: PhotoBrowseSlideshowConstructor,
     /// The 0xa0 object's ctor @ 0x08259278.
     pub singleton_0xa0: Constructor,
+    /// Event-kind-10 listener ctor @ 0x0825939c.
+    pub event_listener_kind_10: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -469,6 +472,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     app_boot_metrics_channel: zeroing_app_boot_metrics_channel_ctor,
     photo_browse_slideshow: zeroing_photo_browse_slideshow_ctor,
     singleton_0xa0: zeroing_singleton_0xa0_ctor,
+    event_listener_kind_10: zeroing_singleton_0x44_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -579,6 +583,10 @@ pub static mut PHOTO_BROWSE_SLIDESHOW: *mut u8 = core::ptr::null_mut();
 /// The unidentified 0xa0 singleton (original: the `+4` cache slot of the
 /// global @ 0x089cc954, addressed through the pool word @ 0x0825976c).
 pub static mut SINGLETON_0XA0: *mut u8 = core::ptr::null_mut();
+/// The event-kind-10 listener singleton (original cache word @ 0x08a09f6c,
+/// pool literal @ 0x0825979c).
+pub static mut EVENT_LISTENER_KIND_10: *mut u8 = core::ptr::null_mut();
+
 
 
 /// The body all getters share: test the cache, allocate, construct,
@@ -1400,6 +1408,36 @@ pub unsafe extern "C" fn lazy_singleton_0xa0() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(SINGLETON_0XA0);
     lazy_singleton(cache, SINGLETON_0XA0_SIZE, || unsafe { ctor!(singleton_0xa0) })
 }
+/// event_listener_kind_10_get — original: `FUN_08259770` @ **0x08259770**
+/// (44 code bytes plus pool word @ 0x0825979c = **48 bytes** true extent;
+/// **10 direct `bl` call sites, all unconditional — 0 predicated, 0 plain
+/// `b`**, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Loads cache word @ 0x08a09f6c. On NULL, allocates exactly 0x44 bytes with
+/// `operator_new`, calls `FUN_0825939c` over the raw block, stores that
+/// return, reloads the cache, and returns it. Raw bytes establish the next
+/// function at 0x082597a0 after the literal pool; Ghidra's 44-byte extent
+/// drops that word.
+///
+/// The constructor initializes an event-listener object and calls
+/// `event_hub_subscribe` with its +0x40 interface and kind 10, so the name
+/// records the verified subscription role. A NULL constructor result stays
+/// cached as NULL and retries allocation and construction on the next call.
+///
+/// Deviation: unported constructor `FUN_0825939c` uses the
+/// [`SINGLETON_CTORS`] `event_listener_kind_10` slot with the family's
+/// zeroing default; the cache is crate static [`EVENT_LISTENER_KIND_10`]
+/// rather than the runtime-initialized word at 0x08a09f6c. It is not
+/// hook-ready until that constructor is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn event_listener_kind_10_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(EVENT_LISTENER_KIND_10);
+    lazy_singleton(cache, SINGLETON_0X44_SIZE, || unsafe {
+        ctor!(event_listener_kind_10)
+    })
+}
+
 
 /// lazy_singleton_0x44 — original: `FUN_0825a6e8` @ **0x0825a6e8**
 /// (44 code bytes plus its pool word @ 0x0825a714 = **48 bytes** true
@@ -1623,6 +1661,7 @@ mod tests {
                 app_boot_metrics_channel: recording_ctor,
                 photo_browse_slideshow: recording_photo_browse_slideshow_ctor,
                 singleton_0xa0: recording_ctor,
+                event_listener_kind_10: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -1670,6 +1709,7 @@ mod tests {
         APP_BOOT_METRICS_CHANNEL = ptr::null_mut();
         PHOTO_BROWSE_SLIDESHOW = ptr::null_mut();
         SINGLETON_0XA0 = ptr::null_mut();
+        EVENT_LISTENER_KIND_10 = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -3066,6 +3106,34 @@ mod tests {
                 zeroing_photo_browse_slideshow_ctor(ptr::null_mut(), ptr::null_mut()).is_null(),
                 "the default is NULL-safe"
             );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn event_listener_kind_10_allocates_constructs_and_caches() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(event_listener_kind_10_get(), constructed());
+            assert_eq!(event_listener_kind_10_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![SINGLETON_0X44_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(EVENT_LISTENER_KIND_10)),
+                constructed()
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn event_listener_kind_10_retries_after_null_constructor_result() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(event_listener_kind_10_get().is_null());
+            assert!(event_listener_kind_10_get().is_null());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
         }
         restore(guard);
     }
