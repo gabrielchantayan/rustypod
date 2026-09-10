@@ -5908,7 +5908,7 @@ functions:
       per-function verification. ldr pc,[pc,#-4] (0xe51ff004) at
       0x08037e10 + target word 0x220042b4 at 0x08037e14: Ghidra reports
       4 bytes, the stub is 8 - the sibling veneer to ROM 0x2200418c
-      (rom_svc_2200418c) starts immediately after. A pure ADS literal
+      (mailbox_send_gateway_mode1) starts immediately after. A pure ADS literal
       veneer onto the RTXC kernel semaphore signal, r0 = kernel
       semaphore id, the r0 result word passing back untouched, lr never
       stored. The ROM body is recoverable through the boot-relocator
@@ -5940,6 +5940,36 @@ functions:
       instead of jumping into the mask ROM; match.py structural: an
       indirect call through the hook slot, not the 8-byte ldr pc
       veneer - expected, same family pattern as the other 31 wrappers.
+
+  - address: 0x08037e18
+    ghidra: thunk_EXT_FUN_2200418c
+    name: mailbox_send_gateway_mode1
+    size: 8
+    sig: "void mailbox_send_gateway_mode1(u32 mailbox, u32 message, u32 priority, u32 semaphore)"
+    module: kernel/mailbox_send_gateway_mode1
+    status: ported
+    renames:
+      thunk_EXT_FUN_2200418c: mailbox_send_gateway_mode1
+      DAT_08037e1c: mailbox_send_gateway_mode1_target
+    notes: >-
+      Raw words at 0x08037e18 are e51ff004 (ldr pc,[pc,#-4]) followed by
+      target 0x2200418c at 0x08037e1c, so Ghidra's 4-byte extent omits the
+      literal and the true veneer is 8 bytes; the next sibling veneer begins
+      at 0x08037e20. The boot relocator at 0x080046e0 mirrors the 64-byte
+      target body at osos 0x0800418c..0x080041cc. It writes the sparse
+      nine-word RTXC selector-4 record {4, uninitialized, semaphore=r3,
+      mailbox=r0, uninitialized, priority=r2, message=r1, 1, 0} and calls
+      the 0x08003660 message-dispatch veneer. Selector 4 is KS_send; the
+      meanings of trailing mode words {1,0} are not established, so the
+      port names only the documented mailbox-send operation and preserves
+      those values exactly. Every ARM B/BL word in osos.dec was decoded:
+      11 bl callers, all unconditional, at 0x08047ddc, 0x08047e3c,
+      0x08047e98, 0x08047f2c, 0x08047f94, 0x08047fec, 0x08048050,
+      0x0836b554, 0x083932a8, 0x083932e8, and 0x083933a8; there are no
+      predicated calls, tail branches, or data-word references. All callers
+      discard the post-dispatch r0, so the Rust ABI is void. Deviation: calls
+      the existing installable message_dispatch_veneer seam rather than
+      issuing the original PC-relative bl directly to its foreign dispatcher.
 
   - address: 0x08037e78
     ghidra: thunk_EXT_FUN_220041cc
@@ -6269,14 +6299,16 @@ functions:
     notes: >-
       Tag-2 member of the 4-helper request family @ 0x08047edc..0x0804805c
       (tags 3/2/4/0). Builds a 9-word stack frame {0,0,0,0, tag 2, payload,
-      timeout+1, pad, 0} and posts the declared 5-word head to the ROM
-      kernel gateway's service-4 stub (rom_svc_2200418c) as (1, &frame, 5),
-      bracketed by kernel semaphore 9 (rom_sem_wait/rom_sem_signal).
-      69 bl call sites; timeout is 0x3e8 at 53 of them (else 0xfa/0x1f4/
+      timeout+1, pad, 0} and sends it through the ported mode-1 mailbox-send
+      gateway body (thunk 0x08037e18 -> mirror 0x0800418c) as
+      (mailbox = 1, message = &frame, priority = 5, semaphore = 6),
+      bracketed by kernel semaphore 9 (rom_sem_wait/rom_sem_signal). 69 bl
+      call sites; timeout is 0x3e8 at 53 of them (else 0xfa/0x1f4/
       0x1f40/0/computed), payload an object pointer or small id. Deviations:
-      indirect dispatch through task_lock::ROM_KERNEL (family pattern); the
-      original's r3 = 6 (service-4 sub-op) cannot ride the 3-arg veneer;
-      the pad word is zeroed rather than left uninitialized.
+      semaphore calls use task_lock::ROM_KERNEL (family pattern), while the
+      ported send body preserves r3 = 6 in its sparse RTXC record through the
+      existing message_dispatch_veneer seam; the pad word is zeroed rather
+      than left uninitialized.
 
   - address: 0x08048000
     ghidra: FUN_08048000
@@ -6291,17 +6323,18 @@ functions:
       (tags 3/2/4/0), sibling of gateway_request_timed (0x08047f40). Calls
       the gateway-ready wait FUN_080c8304 first, then builds a 9-word stack
       frame {0,0,0,0, tag 0, payload, pad, pad, flag} (payload at sp+0x14,
-      tag byte at sp+0x10, flag at sp+0x20) and posts the declared 5-word
-      head to the ROM kernel gateway's service-4 stub (rom_svc_2200418c) as
-      (1, &frame, 5), bracketed by kernel semaphore 9 (rom_sem_wait/
+      tag byte at sp+0x10, flag at sp+0x20) and sends it through the ported
+      mode-1 mailbox-send gateway body (thunk 0x08037e18 -> mirror
+      0x0800418c) as (mailbox = 1, message = &frame, priority = 5,
+      semaphore = 6), bracketed by kernel semaphore 9 (rom_sem_wait/
       rom_sem_signal). 64 bl call sites: payload (r0) is a small id
       (0x1/0x8/0x10/0x23/0x30/0x33/0x37 observed) or an object pointer, flag
       (r1) is immediate 0/1 at every immediate site. Deviations: the ready
       wait rides the GATEWAY_READY_WAIT dispatch slot (documented spin
-      default) since FUN_080c8304's own callees are unported; indirect
-      dispatch through task_lock::ROM_KERNEL (family pattern); the
-      original's r3 = 6 (service-4 sub-op) cannot ride the 3-arg veneer;
-      pad words 6/7 zeroed rather than left uninitialized.
+      default) since FUN_080c8304's own callees are unported; semaphore calls
+      dispatch through task_lock::ROM_KERNEL, while the ported mailbox-send
+      body preserves r3 = 6 through the existing message_dispatch_veneer
+      seam; pad words 6/7 zeroed rather than left uninitialized.
 
   - address: 0x080c8304
     ghidra: FUN_080c8304
