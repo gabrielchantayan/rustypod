@@ -120,6 +120,7 @@ pub mod tag_handler_registry;
 pub mod stream_context_reset_notify;
 pub mod stream_cache_mass_storage_manager;
 pub mod string_owner_init;
+pub mod utf8_clear_tail_character;
 pub mod triple_scaled_cursor_advance;
 pub mod tick_accumulator;
 pub mod timed_transition;

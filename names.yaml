@@ -58561,3 +58561,32 @@ functions:
       return contracts are unrecovered indirect targets, so target Rust reads
       their verified 32-bit vtable slots while host tests use a slot-index
       dispatch seam rather than inventing callee identities.
+
+  # --- UTF-8 tail character clear ---
+  - address: 0x08139b90
+    ghidra: FUN_08139b90
+    name: utf8_clear_tail_character
+    size: 88
+    sig: "void utf8_clear_tail_character(void *context, u8 *bytes, u32 length)"
+    module: app/utf8_clear_tail_character
+    status: ported
+    renames:
+      param_1/r0: context (dead)
+      param_2/r1: bytes
+      param_3/r2: length
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec confirms the 88-byte, all-code extent from 0x08139b90
+      through bx lr at 0x08139be4; the separately linked next function starts
+      at 0x08139be8. The body panics when bytes is NULL or length is zero,
+      then starts at (length - 1) & 0xffff. It clears backward through bytes
+      0x80..0xbf and 0xf8..0xff, stopping after clearing the first ASCII byte
+      or UTF-8 lead byte in 0xc0..0xf7; if no such byte occurs, it clears
+      index zero too. Ghidra incorrectly omits that final index-zero clear.
+      Whole-image ARM B/BL-immediate decoding found exactly 11 inbound plain,
+      unconditional bl sites (0x081aceb8, 0x081ad3b4, 0x081ade14, 0x081ae528,
+      0x081ae948, 0x081aec28, 0x081aee30, 0x081af088, 0x081e2ac8,
+      0x081fd914, and 0x081fe174), with no predicated calls, tail branches,
+      or direct data-word references. Every caller overwrites r0 immediately,
+      so the incidental ARM index return is deliberately not exposed. No
+      behavioral deviations.
