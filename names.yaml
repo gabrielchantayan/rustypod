@@ -50423,6 +50423,43 @@ functions:
       the original signed divide live although its result is dead in the
       ported deallocator; LLVM may lower that retained arithmetic differently.
 
+  - address: 0x082579a0
+    ghidra: FUN_082579a0
+    name: event_hub_instance_get
+    size: 48
+    sig: "void *event_hub_instance_get(void)"
+    module: app/event_hub
+    status: ported
+    renames:
+      DAT_082579cc: EVENT_HUB_SINGLETON_CACHE (literal-pool word holding
+        0x089cca00)
+      DAT_089cca00: event_hub singleton pointer cache
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_08257b4c: event_hub listener-list construction adapter (unported
+        local tail adapter to cpp_array_construct)
+      FUN_082ab234: cpp_array_construct (direct, ported in
+        runtime/cpp_array_construct)
+      DAT_0802df58: raw element-constructor callback word (not a verified
+        function entry)
+    notes: >-
+      Raw ARM is 48 bytes: 44 instruction bytes from 0x082579a0 through the
+      pop {r4, pc} at 0x082579c8, followed by the 0x089cca00 literal-pool
+      word at 0x082579cc; the next independent function starts at
+      0x082579d0. A complete decode of every ARM B/BL immediate in osos.dec
+      finds exactly 11 incoming calls, all unconditional bl, with zero
+      predicated bl forms and zero tail branches. It loads the cache at
+      0x089cca00; if NULL, it calls operator_new(0x9c), calls the local
+      adapter 0x08257b4c, stores that call's return to the cache, then
+      reloads and returns it. The local adapter tail-branches to the ported
+      cpp_array_construct with raw arguments (storage, 0x0802df58, 12, 13).
+      Raw decoding proves 0x0802df58 lies within code rather than at a
+      verified function entry, so this port carries it as data and does not
+      invent a callee identity. Deliberate deviation: it invokes the already
+      ported cpp_array_construct directly rather than reproducing the local
+      adapter's argument shuffles and tail branch. Host tests prove the
+      allocation size/tag, all eleven generic-array-helper arguments, cached
+      constructor return, and the no-NULL-guard path.
+
   - address: 0x08257b60
     ghidra: FUN_08257b60
     name: event_hub_broadcast
@@ -50443,8 +50480,7 @@ functions:
         EVENT_HUB_INSTANCE, the media_command_facade.rs deviation)
       FUN_082ab31c: cxa_guard_acquire (direct, ported in runtime/cxa_guard)
       FUN_082ab338: cxa_guard_release (direct, ported in runtime/cxa_guard)
-      FUN_082579a0: event_hub_instance_get (EVENT_HUB_OPS.instance_get
-        seam - not yet ported)
+      FUN_082579a0: event_hub_instance_get (direct, ported in app/event_hub)
       FUN_082579d0: event_hub_dispatch (EVENT_HUB_OPS.dispatch seam - not
         yet ported)
     notes: >-
@@ -50453,9 +50489,9 @@ functions:
       static over a CACHED POINTER: guard @ 0x089cca04, instance copy @
       0x089cca08, while the getter 0x082579a0 keeps its own cache @
       0x089cca00 (it allocates 0x9c = 13*12 bytes - thirteen
-      begin/end/capacity vector triplets - via the ported operator_new
-      and constructs them through the array-ctor adapter 0x082ab234 with
-      dtor 0x0802df58). Algorithm: tst guard,#1 fast path;
+      begin/end/capacity vector triplets - via the ported operator_new and
+      its local adapter 0x08257b4c, which tail-branches to the ported
+      cpp_array_construct with raw callback word 0x0802df58).
       cxa_guard_acquire; instance = getter(); store; cxa_guard_release;
       then ALWAYS reload the cache (ldr r0,[r4,#8] @ 0x08257ba8, never
       the init return) and tail-call the dispatch 0x082579d0(hub, kind,
