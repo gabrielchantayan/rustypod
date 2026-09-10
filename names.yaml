@@ -56917,3 +56917,39 @@ functions:
       to 0 on host. Host tests prove construction/query/destruction ordering,
       argument forwarding for 0, 1, and 0x5a5af00d, derived/base vtable
       transitions, and verbatim statuses 0, 13, and 53.
+
+  # --- Scoped facade path slot +0x5c operation ---
+  - address: 0x08084d58
+    ghidra: FUN_08084d58
+    name: path_facade_slot_5c
+    size: 68
+    sig: "u32 path_facade_slot_5c(const u8 *path, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0/r4: path (passed unchanged to facade vtable slot +0x5c)
+      param_2/r1: base_hint (live through mov r0,sp into guard construction)
+      r0 after 0x0818a0bc: facade
+      r2: facade vtable slot +0x5c operation
+      r4 after blx: operation status preserved across guard destruction
+    notes: >-
+      Raw osos.dec decoding confirms the 68-byte extent: seventeen ARM
+      instructions from 0x08084d58 through 0x08084d98, followed immediately
+      by a distinct function at 0x08084d9c. Full-image decoding of every ARM
+      B/BL immediate finds exactly 12 inbound direct calls: eight
+      unconditional bl at 0x08084d40, 0x0811d744, 0x0812fc50, 0x0813a554,
+      0x0813a610, 0x081ef29c, 0x082737dc and 0x082dcfc8; four predicated
+      blne at 0x0827ef74, 0x0827ef90, 0x0827f7a8 and 0x0827f7c4; no direct
+      B tail calls. The r0-r3 spill is a 16-byte InterfaceGuard: construct
+      it through path_probe_guard_construct @ 0x08206e40 with the live r1
+      base_hint, fetch facade selector 1 through facade_for_selector @
+      0x0818a0bc, invoke its raw vtable slot +0x5c with the saved path in r1,
+      preserve r0 in r4, then destroy the guard through
+      path_probe_guard_destroy @ 0x08206e6c and return the saved status.
+      Write-mode file-open invokes it before recreation; four callers gate it
+      on nonzero status. The precise semantic identity of slot +0x5c is not
+      established, so the name records only the verified dispatch role.
+      Deliberate host deviation: reuses the existing path-probe guard/facade
+      seams, whose host defaults fail closed because the shared interface
+      graph remains a retailOS boundary. Host tests prove base-hint forwarding,
+      slot selection, path identity, guard ordering, and verbatim statuses.
