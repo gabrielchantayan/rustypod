@@ -243,8 +243,14 @@ pub struct TaskCtx {
     pub _x18: u32,
     /// +0x1c: queue pool installed by `task_notify`.
     pub queue_pool: *mut u8,
-    /// +0x20..+0x38: zeroed by the allocator, untouched here.
-    pub _x20: [u32; 6],
+    /// +0x20: zeroed by the allocator, untouched here.
+    pub _x20: u32,
+    /// +0x24: forwarded as the initial target by
+    /// `framework_base_construct_with_task_target` (0x0811113c). Its
+    /// wider task-framework role is not recovered.
+    pub framework_base_initial_target: *mut u8,
+    /// +0x28..+0x34: zeroed by the allocator, untouched here.
+    pub _x28: [u32; 4],
     /// +0x38: the task's own class registry, lazily constructed and
     /// installed by `task_registry_register` (app/task_registry.rs —
     /// the original's `ldr r4, [r0, #0x38]` @ 0x0826d65c and
@@ -271,7 +277,9 @@ impl TaskCtx {
         _x14: 0,
         _x18: 0,
         queue_pool: core::ptr::null_mut(),
-        _x20: [0; 6],
+        _x20: 0,
+        framework_base_initial_target: core::ptr::null_mut(),
+        _x28: [0; 4],
         registry: core::ptr::null_mut(),
         _x3c: [0; 6],
     };
@@ -719,6 +727,7 @@ pub unsafe extern "C" fn current_task_context_word() -> usize {
 /// when the kernel reports no task. This is the block `task_notify`
 /// installs the queue pool into. (`TASK_HOOKS.current_task_ctx` defaults
 /// to this port.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn current_task_ctx_block() -> *mut TaskCtx {
     let node = (hooks().kernel_running_node)();
@@ -789,7 +798,9 @@ pub unsafe extern "C" fn name_node_alloc() -> *mut NameNode {
     (*ctx)._x08 = 0;
     (*ctx).node = node;
     (*ctx).queue_pool = core::ptr::null_mut();
-    (*ctx)._x20 = [0; 6];
+    (*ctx)._x20 = 0;
+    (*ctx).framework_base_initial_target = core::ptr::null_mut();
+    (*ctx)._x28 = [0; 4];
     (*ctx).registry = core::ptr::null_mut();
     (*ctx)._x0c = 0;
     (*ctx)._x10 = 0;
@@ -1337,7 +1348,8 @@ mod tests {
         RUNNING_NODE_RET
     }
 
-    fn mock_hooks() -> MutexGuard<'static, ()> {
+    fn mock_hooks() -> (parking_lot::MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
+        let shared_guard = crate::testing::TASK_HOOKS_TEST_LOCK.lock();
         let guard = HOOKS_LOCK.lock().unwrap();
         unsafe {
             NEXT_ALLOC_IS_STACK = true;
@@ -1389,7 +1401,7 @@ mod tests {
             });
         }
         CALLS.lock().unwrap().clear();
-        guard
+        (shared_guard, guard)
     }
 
     fn drain() -> Vec<Call> {

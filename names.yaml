@@ -34299,6 +34299,44 @@ functions:
       parent. match.py structural: parent bl, vtable store, base-init bl,
       and r4 return forwarding; expected diff is the parent seam call.
 
+  # --- Silver UI framework: task-target base constructor ---
+
+  - address: 0x0811113c
+    ghidra: FUN_0811113c
+    name: framework_base_construct_with_task_target
+    size: 56
+    sig: "Class6800 *framework_base_construct_with_task_target(Class6800 *storage, u32 create_link)"
+    module: app/class_6800
+    status: ported
+    vars:
+      param_1: storage
+      param_2: create_link
+      puVar1: this
+      iVar2: task_context
+      FUN_08125234: framework_linkage_parent_construct
+      DAT_08111174: FRAMEWORK_BASE_VTABLE_ADDRESS
+      FUN_080cb828: current_task_ctx_block
+      field_0x24: framework_base_initial_target
+      FUN_081108b4: framework_base_initialize
+    notes: >-
+      Raw ARM is `push {r4,r5,r6,lr}; mov r5,r1; bl 0x08125234; ldr
+      r1,[pc,#36]; mov r4,r0; str r1,[r0]; bl 0x080cb828; ldr r1,[r0,#36];
+      mov r0,r4; mov r3,#0; mov r2,r5; bl 0x081108b4; mov r0,r4; pop
+      {r4,r5,r6,pc}`. The 56-byte code is followed by its vtable literal
+      0x08981958 at 0x08111174, so the true image extent is 60 bytes. It
+      directly chains the ported linkage parent, replaces the vtable, reads
+      the current TaskCtx +0x24 word as framework_base_initial_target, then
+      initializes with owner NULL and returns the parent's r0. It has no
+      NULL checks after either direct call. Binary scanning every ARM B/BL
+      word found 12 call sites, all plain BL (0 predicated): 0x0813ec1c,
+      0x0816053c, 0x08167200, 0x081681ac, 0x08184804, 0x081a2348,
+      0x081c92fc, 0x081d2834, 0x081fbd6c, 0x08201de8, 0x0820a40c, and
+      0x08272478. No dispatch seam is added because all three direct
+      callees are already ported. Host coverage installs a synthetic
+      running NameNode and verifies one context read, the direct parent
+      path, vtable replacement, link allocation, and exact +0x24 target
+      forwarding to the base vtable's set-target call.
+
   # --- Silver UI framework: link and owner initializer ---
 
   - address: 0x081108b4
