@@ -16,3 +16,4 @@
 //!
 //! [`source`] ports the consumer end of the double buffer.
 pub mod source;
+pub mod stream_read_byte;

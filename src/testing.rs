@@ -216,6 +216,9 @@ pub mod hints {
     // 0xaa00_0000: dedicated to fs/resource_reader_seek_absolute's raw-u32
     // file-handle fixture; mappings never unmap, so no other user may share it.
     pub const RESOURCE_READER_SEEK_ABSOLUTE: usize = 0xaa00_0000;
+    // 0xab00_0000: dedicated to jpeg/stream_read_byte's raw-u32 stream and
+    // file-handle fixture; mappings never unmap, so no other user may share it.
+    pub const JPEG_STREAM_READ_BYTE: usize = 0xab00_0000;
     // 0xb700_0000: dedicated to app/animation timing-wheel unlink fixtures;
     // mappings never unmap, so no other user may share this hint.
     pub const TIMING_WHEEL_REMOVE: usize = 0xb700_0000;
