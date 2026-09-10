@@ -122,6 +122,7 @@ pub mod read_schema;
 pub mod release_mem_array;
 pub mod schema_to_index;
 pub mod select_height;
+pub mod select_dest_init;
 pub mod select_delete;
 pub mod set_string;
 pub mod set_string_formatted;

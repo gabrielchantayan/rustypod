@@ -25823,6 +25823,33 @@ functions:
       duplication and dequoting, full-list resize, two-NULL no-op,
       new-list OOM latching, and resize-OOM teardown.
 
+  - address: 0x08383ca8
+    ghidra: FUN_08383ca8
+    name: select_dest_init
+    size: 28
+    sig: "void select_dest_init(SelectDest *destination, u8 destination_kind, int parameter)"
+    module: sqlite/select_dest_init
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: destination_kind
+      param_3/r2: parameter
+      "destination+0x00": e_dest
+      "destination+0x01": aff_sdst
+      "destination+0x04": i_sd_parm
+      "destination+0x08": i_sdst
+      "destination+0x0c": n_sdst
+    notes: >-
+      SQLite 3.5.x's sqlite3SelectDestInit. Raw ARM confirms the exact
+      28-byte extent: strb r1,[r0]; mov r1,#0; str r2,[r0,#4]; strb
+      r1,[r0,#1]; str r1,[r0,#8]; str r1,[r0,#12]; bx lr. A complete
+      osos.dec ARM B/BL decode finds 10 direct bl call sites, all
+      unconditional (no predicated blne/bleq forms). It initializes the
+      16-byte SelectDest: destination mode at +0x00, parameter at +0x04,
+      and zeroes affinity/+0x01 plus the +0x08/+0x0c bookkeeping words;
+      padding +0x02..+0x03 remains untouched. No dispatch seam: this
+      function is a leaf with no direct callees. Rust preserves that
+      store-only behavior and the unguarded destination dereference.
   - address: 0x08383c88
     ghidra: FUN_08383c88
     name: select_delete
