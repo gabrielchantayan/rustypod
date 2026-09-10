@@ -734,6 +734,32 @@ functions:
       are not recovered; the port deliberately retains the raw load with no
       NULL or bounds checks.
 
+  # --- retailOS one-based indexed object element ---
+  - address: 0x080512cc
+    ghidra: FUN_080512cc
+    name: indexed_object_element
+    size: 92
+    sig: "void *indexed_object_element(const IndexedObject *object, u32 index)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: indexed_object
+      param_2: index
+      iVar1: storage_base
+      param_1[5]: storage_ready
+      DAT_08051328: indexed_object_tag
+      FUN_080aa828: indexed_object_storage_base
+    notes: >-
+      Raw ARM is 0x080512cc..0x08051324 followed by the 0x61726179 tag
+      literal at 0x08051328; 0x0805132c begins the next function. It rejects
+      a mismatched tag, zero index, an unsigned index greater than word +8,
+      or a zero word +20 storage_ready gate; it then directly calls
+      0x080aa828 and returns storage_base + word(+4) * (index - 1). Decoding
+      every ARM B/BL word in osos.dec finds 11 direct BL call sites, all
+      unconditional, and no B tail calls. This is a
+      separately linked, register-allocation-different implementation of
+      indexed_object_offset at 0x08055ed0.
+
 
   # --- opaque FreeType service metadata flag-word accessor ---
   - address: 0x080514e0
