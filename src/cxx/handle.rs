@@ -58,9 +58,11 @@
 //! owning sibling whose implementation disposer remains an unported direct call.
 //! [`refcounted_body_attach`] @ 0x0839d370 is the store-and-bump half of
 //! the copy-assignment operators (the assign minus its `*src` load).
-//! [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines the owning
-//! release with that attach; [`refcounted_ptr_copy_assign`] @ 0x0839f28c
-//! is the C++ copy-assignment operator itself: slot-pointer-guarded
+//! [`refcounted_body_release_retain_count`] @ 0x0839d498 is a final-drop
+//! sibling that passes its just-zeroed count to a direct disposer before
+//! freeing the body. [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines
+//! the owning release with that attach; [`refcounted_ptr_copy_assign`] @
+//! 0x0839f28c is the C++ copy-assignment operator itself: slot-pointer-guarded
 //! slot-1 release followed by attach, returning `dst`.
 
 #[cfg(not(target_os = "none"))]
@@ -874,6 +876,39 @@ unsafe fn firmware_refcounted_implementation_dispose(implementation: *mut u8) ->
     disposer(implementation)
 }
 
+/// ABI of the direct two-argument disposer at 0x081f7328.
+type RefcountedRetainCountDisposer = unsafe extern "C" fn(*mut u8, i32);
+
+/// Calls the unported direct disposer used only by
+/// [`refcounted_body_release_retain_count`] on device.
+///
+/// The raw ARM enters it with the implementation pointer in r0 and the
+/// just-decremented body refcount in r1. On a final release that count is
+/// necessarily zero, but the direct call remains observable and is retained.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn firmware_refcounted_retain_count_dispose(implementation: *mut u8, refcount: i32) {
+    let disposer: RefcountedRetainCountDisposer = core::mem::transmute(0x081f_7328usize);
+    disposer(implementation, refcount)
+}
+
+/// Host default for the unported direct 0x081f7328 disposal call.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_refcounted_retain_count_dispose(_implementation: *mut u8, _refcount: i32) {}
+
+/// Host-only test injection for the raw direct 0x081f7328 call.
+#[cfg(not(target_os = "none"))]
+static mut REFCOUNTED_RETAIN_COUNT_DISPOSE: RefcountedRetainCountDisposer =
+    missing_refcounted_retain_count_dispose;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn firmware_refcounted_retain_count_dispose(implementation: *mut u8, refcount: i32) {
+    let disposer =
+        core::ptr::read_volatile(core::ptr::addr_of!(REFCOUNTED_RETAIN_COUNT_DISPOSE));
+    disposer(implementation, refcount)
+}
+
 /// refcounted_body_release_owned_variant — original: `FUN_0839cf4c` @
 /// 0x0839cf4c (144 bytes — Ghidra's 136-byte extent omits the trailing
 /// `str r6,[r4]` / `pop {r4,r5,r6,pc}`; the next separately linked
@@ -1223,6 +1258,81 @@ pub unsafe extern "C" fn refcounted_body_release_dtor_variant(
                 mutex_delete(mutex);
                 // Reloaded between the delete and the tag-2 free, exactly
                 // as the ARM does, then cleared after that free.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
+/// refcounted_body_release_retain_count — original: `FUN_0839d498` @
+/// 0x0839d498 (152 bytes — Ghidra reports 144 but omits the final
+/// `str r6,[r4]` / `pop {r4,r5,r6,pc}`; raw ARM ends at 0x0839d530, where
+/// the separately linked mutex-lock helper begins). Decoding every ARM B/BL
+/// word in osos.dec finds 11 direct `bl` callers, all unconditional: no
+/// predicated forms and no tail `b` sites.
+///
+/// A refcounted-handle release over [`RefcountedBody`] (+0 implementation,
+/// +4 signed refcount, +8 optional [`Mutex`]). A NULL body leaves `slot`
+/// untouched. Otherwise it locks the optional mutex, wrapping-decrements
+/// the count, then clears `slot`. Non-final releases unlock only. The final
+/// release NULL-guardedly calls the direct, unported 0x081f7328 with the
+/// implementation and the count just stored as zero, then unlocks, destroys
+/// and tag-2-deletes the mutex, clears body+8, and tag-2-deletes the body.
+///
+/// Deliberate host deviation: 0x081f7328 is unported and no identity is
+/// inferred for it. Target builds call that address directly; host tests use
+/// a recording seam. LLVM may inline the ported mutex and heap helpers, while
+/// retaining the guard/decrement/dispose/unlock/teardown sequence.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, its mutex,
+/// and its implementation must be live for each operation encoded by the
+/// original. As in retailOS, `slot` itself is never NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_release_retain_count")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_retain_count(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            // `ldmia r5,{r0,r1}` passes the just-zeroed count in r1.
+            firmware_refcounted_retain_count_dispose(implementation, (*body).refcount);
+        }
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
                 let mutex = (*body).mutex;
                 operator_delete(mutex.cast());
                 (*body).mutex = core::ptr::null_mut();
@@ -1815,6 +1925,7 @@ mod tests {
             CallbackRelease(usize),
             Slot1Release(usize),
             OwnedVariantDispose(usize),
+            RetainCountDispose(usize, i32),
             Signal(u32),
             Delete(u32),
             MutexCellFree(usize),
@@ -1861,10 +1972,19 @@ mod tests {
             implementation
         }
 
+        unsafe extern "C" fn recording_retain_count_dispose(
+            implementation: *mut u8,
+            refcount: i32,
+        ) {
+            (*core::ptr::addr_of_mut!(EVENTS))
+                .push(Event::RetainCountDispose(implementation as usize, refcount));
+        }
+
         struct Bench {
             old_kernel: RomKernelOps,
             old_heap: HeapVeneerOps,
             old_owned_variant_dispose: RefcountedImplementationDisposer,
+            old_retain_count_dispose: RefcountedRetainCountDisposer,
         }
 
         fn bench() -> Bench {
@@ -1880,6 +2000,9 @@ mod tests {
                 let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
                 let old_owned_variant_dispose = core::ptr::read_volatile(
                     core::ptr::addr_of!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
+                );
+                let old_retain_count_dispose = core::ptr::read_volatile(
+                    core::ptr::addr_of!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
                 );
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(ROM_KERNEL),
@@ -1902,10 +2025,15 @@ mod tests {
                     core::ptr::addr_of_mut!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
                     recording_owned_variant_dispose,
                 );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
+                    recording_retain_count_dispose,
+                );
                 Bench {
                     old_kernel,
                     old_heap,
                     old_owned_variant_dispose,
+                    old_retain_count_dispose,
                 }
             }
         }
@@ -1918,6 +2046,10 @@ mod tests {
                     core::ptr::write_volatile(
                         core::ptr::addr_of_mut!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
                         self.old_owned_variant_dispose,
+                    );
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
+                        self.old_retain_count_dispose,
                     );
                 }
                 OPS_LOCK.store(false, Ordering::Release);
@@ -2276,6 +2408,104 @@ mod tests {
             unsafe { refcounted_body_release_owned_variant(&mut slot) };
 
             assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// A final release calls 0x081f7328 with the implementation and the
+        /// just-stored zero count, then unlocks and frees body resources in
+        /// the same order as the ARM.
+        #[test]
+        fn retain_count_final_reference_calls_disposer_with_zero_then_cleans_up() {
+            let _bench = bench();
+            let mut semaphore = 0x54;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut implementation = 0x5a_u8;
+            let mut body = RefcountedBody {
+                opaque0: &mut implementation as *mut u8 as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let implementation_ptr = &mut implementation as *mut u8;
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_retain_count(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(body.mutex.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x54),
+                    Event::RetainCountDispose(implementation_ptr as usize, 0),
+                    Event::Signal(0x54),
+                    Event::Delete(0x54),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        /// A zero refcount wraps to -1 and follows the non-final path, so
+        /// neither the direct disposer nor the heap teardown is reached.
+        #[test]
+        fn retain_count_zero_refcount_wraps_without_disposal() {
+            let _bench = bench();
+            let mut implementation = 0x5a_u8;
+            let mut body = RefcountedBody {
+                opaque0: &mut implementation as *mut u8 as usize,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_retain_count(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// A normal shared release decrements, unlocks, and clears the slot
+        /// without reaching the direct disposer or either free.
+        #[test]
+        fn retain_count_shared_reference_decrements_unlocks_and_nulls_slot() {
+            let _bench = bench();
+            let mut semaphore = 0x55;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0xdead_0000,
+                refcount: 2,
+                mutex: &mut mutex,
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_retain_count(&mut slot) };
+
+            assert_eq!(body.refcount, 1);
+            assert!(slot.is_null());
+            assert_eq!(events(), std::vec![Event::Wait(0x55), Event::Signal(0x55)]);
+        }
+
+        /// NULL body is the original early-out: the slot is left untouched
+        /// and none of the lock, direct-disposer, or heap paths run.
+        #[test]
+        fn retain_count_null_body_leaves_slot_untouched() {
+            let _bench = bench();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            unsafe { refcounted_body_release_retain_count(&mut slot) };
+
             assert!(slot.is_null());
             assert!(events().is_empty());
         }

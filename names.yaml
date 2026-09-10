@@ -21417,6 +21417,39 @@ functions:
       body with the same store/guard/bump/guard structure; the symbol
       resolves in librustypod.a (no folding).
 
+
+  - address: 0x0839d498
+    ghidra: FUN_0839d498
+    name: refcounted_body_release_retain_count
+    size: 152
+    sig: "void refcounted_body_release_retain_count(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_081f7328: direct_retain_count_disposer
+    notes: >-
+      Raw ARM establishes the true 152-byte extent
+      0x0839d498..0x0839d530: Ghidra's 144-byte extent omits the final
+      `str r6,[r4]` / `pop {r4,r5,r6,pc}`, and a separately linked
+      16-byte mutex-lock helper begins immediately at 0x0839d530 (the
+      matching unlock helper starts at 0x0839d540). Decoding every ARM B/BL
+      word in osos.dec finds 11 direct bl callers, all unconditional: no
+      predicated forms and no tail b sites. NULL body leaves the slot
+      untouched; otherwise the optional mutex is locked, body+4 is
+      wrapping-decremented, and the slot is NULLed. Non-final releases only
+      unlock. On exactly zero, the NULL-guarded implementation is passed with
+      the just-stored zero refcount to unported direct callee 0x081f7328,
+      then the mutex is unlocked, destroyed and tag-2-deleted, body+8 is
+      cleared, and the body is tag-2-deleted. The direct callee has a
+      separately decoded 104-byte body but no inferred identity; target code
+      calls it directly and host tests use a recording seam. LLVM may inline
+      ported mutex and heap helpers while preserving the
+      guard/decrement/dispose/unlock/teardown order.
   - address: 0x0839d3ac
     ghidra: FUN_0839d3ac
     name: refcounted_body_release_dtor_variant
