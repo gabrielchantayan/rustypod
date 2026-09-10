@@ -12,6 +12,7 @@ pub mod character_class;
 pub mod clock_source_construct;
 pub mod clock_source_destroy;
 pub mod color_copy;
+pub mod color_pack;
 pub mod context_activity;
 pub mod context_child_handle;
 pub mod context_record_resolve;

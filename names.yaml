@@ -46596,6 +46596,38 @@ functions:
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
 
+  # --- RGBA component to packed pixel conversion ---
+  - address: 0x08272018
+    ghidra: FUN_08272018
+    name: color_pack_for_format
+    size: 120
+    sig: "u32 color_pack_for_format(u32 format, u32 red, u32 green, u32 blue, u32 alpha)"
+    module: cxx/color_pack
+    status: ported
+    renames:
+      param_1/r0: format
+      param_2/r1: red
+      param_3/r2: green
+      param_4/r3: blue
+      param_5/[sp,#12]: alpha
+    notes: >-
+      Packs the RGBA8 components into a 16-bit pixel according to the exact
+      full-width format tag. Raw ARM decoding fixes the extent at
+      0x08272018..0x08272090 (30 words, 120 bytes): push {r4,r5,lr} starts
+      it, pop {r4,r5,pc} at 0x0827208c ends it, and the next word at
+      0x08272090 begins the distinct bare RGB565 packer. There is no literal
+      pool. The three subtract/subs comparisons select 0x0565 and 0x2565 for
+      RGB565 ((R&0xf8)<<8 | (G&0xfc)<<3 | (B&0xf8)>>3), 0x1444 for RGBA4444
+      ((A&0xf0)<<8 | (R&0xf0)<<4 | (G&0xf0) | (B&0xf0)>>4), and RGB555
+      ((R&0xf8)<<7 | (G&0xf8)<<2 | (B&0xf8)>>3) for every other tag,
+      including 0x0555. The tag is not masked: e.g. 0x00010565 takes the
+      RGB555 fallback. Binary-scanning every aligned ARM B/BL word in
+      osos.dec finds exactly 10 unconditional bl call sites
+      (0x08079cc4, 0x0807e458, 0x0807e4c8, 0x0807e6e8, 0x0807e744,
+      0x080f1ea4, 0x080f1f08, 0x080f1f6c, 0x080f250c, 0x080f2700), with no
+      predicated or tail branches. The port keeps the u32 ARM return
+      register representation and adds no range or format validation.
+
   # --- the second 4-byte colour value copy ---
   - address: 0x082720ac
     ghidra: FUN_082720ac
