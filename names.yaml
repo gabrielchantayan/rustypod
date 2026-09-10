@@ -58826,3 +58826,39 @@ functions:
       Host tests cover nonzero (including 7) and zero mode, leaf and recursive
       children, preservation of unrelated flag bits, query selector, cursor
       indices, and an empty collection.
+
+  # --- UTF-16 range signed-decimal parse wrapper ---
+  - address: 0x080f01c4
+    ghidra: FUN_080f01c4
+    name: parse_i32_utf16_range
+    size: 72
+    sig: "i32 parse_i32_utf16_range(const u8 *range)"
+    module: strto/range_i32
+    status: ported
+    renames:
+      param_1/r0: range
+      local_sp_plus_8: converted
+      local_sp: text
+      FUN_080f020c: string_from_range
+      FUN_082773e0: string_object_copy_construct
+      FUN_08277484: string_object_destroy
+      FUN_082a50b0: string_object_c_str
+      FUN_080e7904: parse_decimal
+    notes: >-
+      Raw osos.dec confirms exactly 72 code bytes from 0x080f01c4 through the
+      pop at 0x080f0208; the separately linked string-from-range converter
+      begins at 0x080f020c. Whole-image ARM B/BL-immediate decoding found 11
+      inbound call sites, all unconditional plain bl with zero predicated
+      forms: 0x080e28bc, 0x081baa20, 0x081baa54, 0x081baa8c, 0x081dca6c,
+      0x081fa8b0, 0x081fac44, 0x081fac68, 0x0820b464, 0x0820b4ac, and
+      0x0820b6a4. The raw sequence converts range into a StringObject at
+      sp+8, copy-constructs a second object at sp, destroys the conversion
+      temporary, passes the copy's C string to the signed decimal parser
+      0x080e7904, saves that return, destroys the copy, and returns the saved
+      i32. The converter and decimal parser remain unported and are the two
+      volatile RANGE_I32_OPS defaults, which transmute their retail addresses
+      on target and are injected by host tests. The copy constructor, C-string
+      accessor, and destructors are direct calls to their existing ports.
+      Host tests cover whitespace and signs, empty and non-digit text,
+      mid-text termination, wrapping overflow, exact range forwarding,
+      copied C-string input, allocation size, and both destructor calls.
