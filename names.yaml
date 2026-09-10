@@ -79,6 +79,8 @@ functions:
       This has void return and deliberately retains forward overlap
       propagation rather than memmove behavior. The target-only unique Rust
       text section distinguishes this byte-identical body from byte_copy at
+
+
       0x080005fc; volatile accesses prevent LLVM replacing the retail loop
       with a memcpy intrinsic.
 
@@ -54079,6 +54081,35 @@ functions:
       the same two loads and the same `bx r3` tail branch, with a
       `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
       pointers add around them; the dispatch structure is identical.
+
+  # --- vendored OpenSSL: the SHA-1 EVP_MD descriptor getter ---
+  - address: 0x0804b214
+    ghidra: FUN_0804b214
+    name: evp_sha1
+    size: 8
+    sig: "const EvpMd *evp_sha1(void)"
+    module: crypto/evp_sha1
+    status: ported
+    renames:
+      r0: sha1_descriptor
+      DAT_0804b21c: evp_sha1_descriptor
+      FUN_0804a6bc: evp_digest_init_ex (not ported)
+      FUN_0804a728: evp_digest_update (ported)
+    notes: >-
+      OpenSSL's `EVP_sha1` getter: exactly two instruction words
+      (`ldr r0,[pc]` / `bx lr`) return the EVP_MD descriptor literal
+      0x08906620. The immediate successor begins at 0x0804b220, so this
+      getter's true extent is eight instruction bytes plus its four-byte
+      literal pool at 0x0804b21c; Ghidra's eight-byte code size is exact.
+      A complete raw-image scan decoding every ARM B/BL word found exactly
+      11 direct callers, all unconditional `bl` at 0x0805f540,
+      0x080625f0, 0x08062a2c, 0x08078938, 0x08092650, 0x080a40c0,
+      0x080a4194, 0x080ce234, 0x080e7478, 0x082d4268, and 0x082d4360;
+      it has no predicated callers and no tail `b` sites. No word in the
+      image equals 0x0804b214, so it has no discovered indirect dispatch
+      reference. The descriptor address is firmware RAM and cannot be
+      dereferenced by a host test; this port deliberately returns the
+      same numeric pointer on every target, preserving the firmware ABI.
 
   # --- vendored OpenSSL: the EVP_PKEY wrapper lifecycle @ 0x0804ae6c..0x0804af2f ---
   # The p_lib.c cluster: EVP_PKEY_free @ 0x0804ae6c (below), the 8-byte
