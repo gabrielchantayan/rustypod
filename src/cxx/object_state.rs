@@ -20,6 +20,31 @@ pub unsafe extern "C" fn object_byte2_is_nonzero(object: *const u8) -> u32 {
     u32::from(object.add(2).read_volatile() != 0)
 }
 
+/// object_byte_at_8 — original: `FUN_0829d0b4` @ `0x0829d0b4`
+/// (8 bytes; 11 verified direct `bl` call sites, all unconditional).
+///
+/// Loads and returns the raw unsigned byte at `object + 0x08`. Raw
+/// disassembly is `ldrb r0,[r0,#8]; bx lr`; the binary-wide ARM B/BL scan
+/// found calls at 0x081ef5fc, 0x08202774, 0x08277a0c, 0x08277ac8,
+/// 0x08277c10, 0x0827826c, 0x0827850c, 0x082787e0, 0x08278d40,
+/// 0x082a53b8, and 0x082a5434, with no predicated call or DATA-word
+/// reference. Callers use the byte as a state/error gate after acquiring a
+/// counted mutex, but establish neither the concrete object type nor the
+/// field's domain meaning. The offset-based name intentionally preserves
+/// only the verified behavior.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `object` must designate at least nine readable bytes. It is not
+/// null-checked, matching the original byte load.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_byte_at_8(object: *const u8) -> u8 {
+    object.add(8).read()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -50,5 +75,32 @@ mod tests {
         assert_eq!(storage[4], before[4]);
         assert_eq!(storage[5], before[5]);
         assert_eq!(storage[6], before[6]);
+    }
+
+    #[test]
+    fn returns_every_byte_value_at_offset_eight_without_mutating_object() {
+        let mut object = [0xa5u8; 10];
+
+        for value in 0u8..=u8::MAX {
+            object[8] = value;
+            let before = object;
+
+            assert_eq!(unsafe { object_byte_at_8(object.as_ptr()) }, value, "byte={value:#04x}");
+            assert_eq!(object, before, "read changed object for byte={value:#04x}");
+        }
+    }
+
+    #[test]
+    fn ignores_every_other_byte_of_a_minimally_sized_object() {
+        let mut object = [0x5au8; 9];
+        object[8] = 0xc3;
+
+        for offset in 0..8 {
+            for replacement in [0u8, 0xff] {
+                object[offset] = replacement;
+                assert_eq!(unsafe { object_byte_at_8(object.as_ptr()) }, 0xc3, "object +{offset:#x} = {replacement:#04x}");
+            }
+            object[offset] = 0x5a;
+        }
     }
 }

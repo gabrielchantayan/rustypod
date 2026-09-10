@@ -48394,6 +48394,34 @@ functions:
       values, the exact three-byte minimum object, a nonzero base offset,
       and preservation of all surrounding bytes.
 
+
+  # --- Raw object byte accessor (cxx/object_state) ---
+  - address: 0x0829d0b4
+    ghidra: FUN_0829d0b4
+    name: object_byte_at_8
+    size: 8
+    sig: "u8 object_byte_at_8(const u8 *object)"
+    module: cxx/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0x08: byte_at_8
+      r0: byte_result
+    notes: >-
+      Raw ARM is exactly `ldrb r0,[r0,#8]; bx lr`, an unguarded,
+      non-mutating byte load. The true extent is 8 bytes at
+      0x0829d0b4..0x0829d0bc, where the sibling accessor
+      FUN_0829d0bc begins. Decoding every ARM B/BL word in osos.dec found
+      exactly 11 inbound branches, all unconditional `bl` (condition 0xe)
+      at 0x081ef5fc, 0x08202774, 0x08277a0c, 0x08277ac8, 0x08277c10,
+      0x0827826c, 0x0827850c, 0x082787e0, 0x08278d40, 0x082a53b8, and
+      0x082a5434; there are no predicated calls, tail branches, or DATA-word
+      references. The callers use the result as a state/error gate after
+      counted-mutex acquisition, but do not establish the object's concrete
+      type or the byte's domain meaning, so this deliberately remains an
+      offset-based accessor. No deliberate deviation. Host tests exhaust all
+      256 return values, prove the load does not mutate the object, and vary
+      every unrelated byte in a minimally sized nine-byte object.
   # --- Resource callback cache refresh/getter (app/resource/cache) ---
   - address: 0x08047020
     ghidra: FUN_08047020
