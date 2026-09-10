@@ -13,6 +13,8 @@ pub mod path_node_lookup;
 pub mod cache_entry;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
+/// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
+pub mod cache_page;
 /// Cache lock semaphore release @ 0x082d7944.
 pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
