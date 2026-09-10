@@ -60,10 +60,9 @@
 //!
 //! 1. `body = *body_slot` (`ldr r1, [r1]` @ 0x08260a5c) — the caller's
 //!    handle slot is only READ, never written.
-//! 2. `refcounted_body_acquire(&local, body)` @ 0x0839cd5c (seam — the
-//!    acquire counterpart of the ported `refcounted_body_release` @
-//!    0x0839cd98: store body into the slot; when non-NULL, bump its
-//!    refcount at +4 under the optional mutex at +8). The local slot is
+//! 2. `refcounted_body_acquire(&local, body)` @ 0x0839cd5c (ported):
+//!    store body into the slot; when non-NULL, bump its refcount at +4
+//!    under the optional mutex at +8. The local slot is
 //!    the pushed-r3 scratch word, so it holds the incoming r3 until the
 //!    acquire's first store overwrites it; the port keeps an initialized
 //!    local instead (the garbage is never read in either version).
@@ -106,12 +105,11 @@
 //! - The name argument is a crate static of four NUL bytes where the
 //!   original passes the address of its own zero literal-pool word;
 //!   both point at an empty C string, which is all the base reads.
-//! - The two unported callees ride the [`KINDED_CONTROLLER_OPS`]
-//!   `read_volatile` seam (house pattern): firmware transmutes of the
-//!   retail addresses on target (hook-ready), a faithful model of the
-//!   60-byte acquire and a return-`this` base stub on host. The ported
-//!   `refcounted_body_release` and `string_default_construct` are
-//!   called directly.
+//! - The unported base constructor rides the [`KINDED_CONTROLLER_OPS`]
+//!   `read_volatile` seam (house pattern): firmware transmutes of its retail
+//!   address on target and a return-`this` base stub on host. The ported
+//!   `refcounted_body_acquire`, `refcounted_body_release`, and
+//!   `string_default_construct` are called directly.
 //! - On a 64-bit host the ported `string_default_construct` writes two
 //!   HOST-width pointers at +0xbc, so its payload store covers
 //!   +0xc4..+0xcc and is in turn overwritten by the flag-byte stores
@@ -124,10 +122,8 @@
 //!   written with aligned `u32` stores, so host fixtures must sit
 //!   below 4 GiB (`crate::testing::try_map_u32_slab`).
 
-use crate::cxx::handle::{refcounted_body_release, RefcountedBody};
+use crate::cxx::handle::{refcounted_body_acquire, refcounted_body_release, RefcountedBody};
 use crate::cxx::string_object::string_default_construct;
-#[cfg(not(target_os = "none"))]
-use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock};
 
 /// The vtable this constructor installs at +0x00 — the literal pool
 /// word @ 0x08260ad0, binary-verified against `osos.dec` and
@@ -168,20 +164,9 @@ unsafe fn write_word(at: *mut u8, value: u32) {
     unsafe { at.cast::<u32>().write(value) }
 }
 
-/// The two callees of [`kinded_controller_construct`] that have no port
-/// yet.
+/// The direct base constructor is the constructor's only unported callee.
 #[derive(Clone, Copy)]
 pub struct KindedControllerOps {
-    /// Original 0x0839cd5c (60 bytes, extent binary-verified: the ported
-    /// release @ 0x0839cd98 starts immediately after): the acquire half
-    /// of the refcounted-body pair. `*slot = body`, then when `body` is
-    /// non-NULL bump its refcount at +4 under the optional mutex at +8
-    /// (each mutex load NULL-checked separately), `blne` mutex_lock
-    /// 0x0807f5c4 / mutex_unlock 0x0807f6a0.
-    pub body_acquire: unsafe extern "C" fn(
-        slot: *mut *mut RefcountedBody,
-        body: *mut RefcountedBody,
-    ),
     /// Original 0x0821a180: the direct base constructor. Chains
     /// `silver_controller_construct` @ 0x08134db4 (ported) with
     /// `(this, name)`, plants vtable 0x08993c90, clears the flag bytes
@@ -196,43 +181,6 @@ pub struct KindedControllerOps {
     ) -> *mut u8,
 }
 
-/// Target default: the retail acquire @ 0x0839cd5c.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_body_acquire(
-    slot: *mut *mut RefcountedBody,
-    body: *mut RefcountedBody,
-) {
-    let acquire: unsafe extern "C" fn(*mut *mut RefcountedBody, *mut RefcountedBody) =
-        core::mem::transmute(0x0839_cd5cusize);
-    acquire(slot, body)
-}
-
-/// Host model of the 0x0839cd5c acquire — faithful, not inert: every
-/// callee on its path is either data-driven or ported (the
-/// kernel/sync_mutex lock pair), so the model reproduces it exactly,
-/// including the two separately NULL-checked mutex loads and the
-/// unconditional slot store.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn model_body_acquire(
-    slot: *mut *mut RefcountedBody,
-    body: *mut RefcountedBody,
-) {
-    unsafe {
-        slot.write(body);
-        if body.is_null() {
-            return;
-        }
-        let mutex = (*body).mutex;
-        if !mutex.is_null() {
-            mutex_lock(mutex);
-        }
-        (*body).refcount += 1;
-        let mutex = (*body).mutex;
-        if !mutex.is_null() {
-            mutex_unlock(mutex);
-        }
-    }
-}
 
 /// Target default: the retail base constructor @ 0x0821a180.
 #[cfg(target_os = "none")]
@@ -262,20 +210,15 @@ unsafe extern "C" fn missing_construct_base(
     this
 }
 
-/// Active model of the constructor's unported callees. Host tests
-/// install recording mocks; real ports of 0x0839cd5c / 0x0821a180
-/// replace the defaults when they land.
+/// Active target default for the constructor's unported base constructor.
 #[cfg(target_os = "none")]
 pub static mut KINDED_CONTROLLER_OPS: KindedControllerOps = KindedControllerOps {
-    body_acquire: firmware_body_acquire,
     construct_base: firmware_construct_base,
 };
 
-/// Active model of the constructor's unported callees — host defaults
-/// (see above).
+/// Host default for the unported base constructor (see above).
 #[cfg(not(target_os = "none"))]
 pub static mut KINDED_CONTROLLER_OPS: KindedControllerOps = KindedControllerOps {
-    body_acquire: model_body_acquire,
     construct_base: missing_construct_base,
 };
 
@@ -299,12 +242,11 @@ unsafe fn ops() -> KindedControllerOps {
 ///
 /// # Safety
 ///
-/// `this` must satisfy the installed [`KindedControllerOps`]
-/// `construct_base` and point at a writable object of at least
-/// `EXTRA_WORD_OFFSET + 4` bytes; `body_slot` must be a readable,
-/// aligned handle slot. The object must be 8-byte-alignment-compatible
-/// with `string_default_construct` at +0xbc on the host (see the
-/// module header's host-widening deviation).
+/// `this` must satisfy the installed [`KindedControllerOps`] `construct_base`
+/// and point at a writable object of at least `EXTRA_WORD_OFFSET + 4` bytes;
+/// `body_slot` must be a readable, aligned handle slot. The object must be
+/// 8-byte-alignment-compatible with `string_default_construct` at +0xbc on
+/// the host (see the module header's host-widening deviation).
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kinded_controller_construct(
@@ -320,7 +262,7 @@ pub unsafe extern "C" fn kinded_controller_construct(
         // The original's local slot is the pushed-r3 scratch word; the
         // acquire overwrites it before any read on every path.
         let mut local: *mut RefcountedBody = core::ptr::null_mut();
-        (ops.body_acquire)(&mut local, body_slot.read());
+        refcounted_body_acquire(&mut local, body_slot.read());
         let object = (ops.construct_base)(this, &mut local, EMPTY_NAME.as_ptr());
         refcounted_body_release(&mut local);
         write_word(object, VTABLE_ADDRESS);
@@ -372,10 +314,9 @@ mod tests {
         SEAM_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// One observed seam call, in order.
+    /// The one remaining unported-call seam, recorded in call order.
     #[derive(Clone, Copy, PartialEq, Debug)]
     enum Call {
-        Acquire(*mut RefcountedBody),
         Base(*mut u8, *mut RefcountedBody),
     }
 
@@ -383,17 +324,6 @@ mod tests {
     /// What the base mock returns; defaults to its `this`.
     static mut BASE_RETURN: *mut u8 = ptr::null_mut();
 
-    unsafe extern "C" fn recording_acquire(
-        slot: *mut *mut RefcountedBody,
-        body: *mut RefcountedBody,
-    ) {
-        unsafe {
-            (*ptr::addr_of_mut!(CALLS)).push(Call::Acquire(body));
-            // Behave like the real acquire: the base must see the body
-            // in the slot, and the refcount bumps around the base call.
-            model_body_acquire(slot, body);
-        }
-    }
 
     unsafe extern "C" fn recording_base(
         this: *mut u8,
@@ -401,8 +331,8 @@ mod tests {
         name: *const u8,
     ) -> *mut u8 {
         unsafe {
-            // Ordering evidence: the acquire ran first.
-            assert_eq!((*ptr::addr_of!(CALLS)).len(), 1);
+            // The direct acquire completed before this remaining seam.
+            assert_eq!((*ptr::addr_of!(CALLS)).len(), 0);
             // The empty-name deviation: four NUL bytes.
             assert_eq!((0..4).map(|i| name.add(i).read()).collect::<Vec<_>>(), [0; 4]);
             (*ptr::addr_of_mut!(CALLS)).push(Call::Base(this, body_slot.read()));
@@ -419,7 +349,6 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 ptr::addr_of_mut!(KINDED_CONTROLLER_OPS).write_volatile(KindedControllerOps {
-                    body_acquire: model_body_acquire,
                     construct_base: missing_construct_base,
                 });
                 (*ptr::addr_of_mut!(CALLS)).clear();
@@ -438,7 +367,6 @@ mod tests {
             (*ptr::addr_of_mut!(CALLS)).clear();
             ptr::addr_of_mut!(BASE_RETURN).write(ptr::null_mut());
             ptr::addr_of_mut!(KINDED_CONTROLLER_OPS).write_volatile(KindedControllerOps {
-                body_acquire: recording_acquire,
                 construct_base: recording_base,
             });
             let object = slab.add(OBJECT_OFFSET);
@@ -483,11 +411,8 @@ mod tests {
             assert_eq!(object.add(FLAG_OFFSET).read(), 1);
             assert_eq!(object.add(EXTRA_BYTE_OFFSET).read(), 0xab);
             assert_eq!(word(object.add(EXTRA_WORD_OFFSET)), 0xdead_beef);
-            // Call order and content: acquire(body) then base(this, body).
-            assert_eq!(
-                *ptr::addr_of!(CALLS),
-                Vec::from([Call::Acquire(body), Call::Base(object, body)]),
-            );
+            // The direct acquire gives the base the body slot.
+            assert_eq!(*ptr::addr_of!(CALLS), Vec::from([Call::Base(object, body)]));
             // Net refcount: acquire +1, release -1 — back to the entry
             // value, and the caller's slot is never written.
             assert_eq!((*body).refcount, 7);
@@ -537,10 +462,7 @@ mod tests {
             let result = kinded_controller_construct(object, caller_slot, 4, 1, 0, 0);
 
             assert_eq!(result, object);
-            assert_eq!(
-                *ptr::addr_of!(CALLS),
-                Vec::from([Call::Acquire(ptr::null_mut()), Call::Base(object, ptr::null_mut())]),
-            );
+            assert_eq!(*ptr::addr_of!(CALLS), Vec::from([Call::Base(object, ptr::null_mut())]));
             // The release's NULL-body early-out leaves the caller slot
             // alone; the object is still fully initialized.
             assert_eq!(caller_slot.read(), ptr::null_mut());
@@ -558,9 +480,8 @@ mod tests {
             return;
         };
         unsafe {
-            // Restore the wired host defaults over the recording mocks.
+            // Restore the wired host default over the recording mock.
             ptr::addr_of_mut!(KINDED_CONTROLLER_OPS).write_volatile(KindedControllerOps {
-                body_acquire: model_body_acquire,
                 construct_base: missing_construct_base,
             });
             (*body).opaque0 = 0;

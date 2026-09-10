@@ -56,8 +56,10 @@
 //! @ 0x0839d3ac is a further copy, byte-identical modulo direct-call
 //! displacements. [`refcounted_body_release_owned_variant`] @ 0x0839cf4c is an
 //! owning sibling whose implementation disposer remains an unported direct call.
-//! [`refcounted_body_attach`] @ 0x0839d370 is the store-and-bump half of
-//! the copy-assignment operators (the assign minus its `*src` load).
+//! [`refcounted_body_acquire`] @ 0x0839cd5c and
+//! [`refcounted_body_attach`] @ 0x0839d370 are separately linked
+//! store-and-bump copies used by refcounted-handle constructors and
+//! copy-assignment operators respectively.
 //! [`refcounted_body_release_retain_count`] @ 0x0839d498 is a final-drop
 //! sibling that passes its just-zeroed count to a direct disposer before
 //! freeing the body. [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines
@@ -561,6 +563,54 @@ pub unsafe extern "C" fn refcounted_ptr_assign_owned(
     dst
 }
 
+
+/// refcounted_body_acquire — original: `FUN_0839cd5c` @ 0x0839cd5c
+/// (60 bytes; **10 `bl` call sites**, all unconditional, plus 2
+/// unconditional tail `b` sites at 0x08131fbc and 0x08218e08). Decoding
+/// every ARM B/BL word in osos.dec found no predicated sites and no image
+/// word equals this address, so it is never virtually dispatched. Ghidra's
+/// extent is exact: [`refcounted_body_release`] starts immediately after at
+/// 0x0839cd98.
+///
+/// Stores `body` into `dst` unconditionally, then when `body` is non-NULL
+/// increments its signed refcount at +4 with ARM's wrapping `add`. The
+/// optional mutex at +8 is loaded and NULL-checked separately before each
+/// lock and unlock; a NULL mutex therefore leaves the increment unguarded.
+/// This is a separately linked copy of [`refcounted_body_attach`] with the
+/// same algorithm. It has its own target text section so LLVM cannot fold
+/// away the hookable firmware entry.
+///
+/// Deliberate deviation: the Rust port calls the already ported mutex
+/// helpers directly; LLVM may inline them rather than retaining the ARM
+/// `blne`/tail-`bne` pair, but the store/guard/increment/guard order is
+/// unchanged.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned pointer slot; when `body` is non-NULL it
+/// must point at a readable/writable [`RefcountedBody`]. Neither pointer is
+/// NULL-checked by the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_acquire")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_acquire(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
 
 /// refcounted_body_attach — original: `FUN_0839d370` @ 0x0839d370
 /// (60 bytes; 6 `bl` call sites — 3 unconditional (0x081f0dbc,
@@ -1854,13 +1904,13 @@ mod tests {
         }
     }
 
-    /// attach with a NULL body: the store is unconditional, so the slot
+    /// Acquire with a NULL body: the store is unconditional, so the slot
     /// is overwritten with NULL and nothing else is touched.
     #[test]
-    fn attach_null_body_stores_null() {
+    fn acquire_null_body_stores_null() {
         unsafe {
             let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
-            refcounted_body_attach(&mut slot, core::ptr::null_mut());
+            refcounted_body_acquire(&mut slot, core::ptr::null_mut());
             assert!(slot.is_null());
         }
     }
@@ -1885,9 +1935,9 @@ mod tests {
 
     /// Guarded body whose mutex cell is absent: lock/unlock take the
     /// NULL-cell early-out inside `mutex_lock`/`mutex_unlock`, so the
-    /// bump still happens with no ROM_KERNEL table installed.
+    /// acquire bump still happens with no ROM_KERNEL table installed.
     #[test]
-    fn attach_bumps_refcount_with_empty_mutex_cell() {
+    fn acquire_bumps_refcount_with_empty_mutex_cell() {
         unsafe {
             let mut mutex = Mutex {
                 sem_cell: core::ptr::null_mut(),
@@ -1899,15 +1949,15 @@ mod tests {
                 mutex: &mut mutex,
             };
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
-            refcounted_body_attach(&mut slot, &mut body);
+            refcounted_body_acquire(&mut slot, &mut body);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, 1);
         }
     }
 
-    /// The attach increment is the same plain ARM `add` — it wraps.
+    /// The acquire increment is the plain ARM `add`, so it wraps.
     #[test]
-    fn attach_refcount_increment_wraps() {
+    fn acquire_refcount_increment_wraps() {
         unsafe {
             let mut body = RefcountedBody {
                 opaque0: 0,
@@ -1915,7 +1965,8 @@ mod tests {
                 mutex: core::ptr::null_mut(),
             };
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
-            refcounted_body_attach(&mut slot, &mut body);
+            refcounted_body_acquire(&mut slot, &mut body);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, i32::MIN);
         }
     }

@@ -21841,6 +21841,35 @@ functions:
       match.py shows a larger body with the same
       guard/decrement/vtable[1]/unlock/teardown structure.
 
+  - address: 0x0839cd5c
+    ghidra: FUN_0839cd5c
+    name: refcounted_body_acquire
+    size: 60
+    sig: "void refcounted_body_acquire(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1/r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+    notes: >-
+      Raw ARM is exactly 60 bytes, 0x0839cd5c..0x0839cd98; the separately
+      linked refcounted_body_release starts immediately at 0x0839cd98.
+      Decoding every ARM B/BL word in osos.dec finds 10 direct bl callers,
+      all unconditional, plus two unconditional tail b sites at 0x08131fbc
+      and 0x08218e08; no predicated sites and no image word equal to this
+      address, so it is never virtually dispatched. The unconditional
+      `str r1,[r0]` stores body before the NULL early-out. Non-NULL body
+      loads mutex at +8 and NULL-checks before mutex_lock, wrapping-increments
+      signed refcount at +4, then reloads and NULL-checks mutex before
+      mutex_unlock. A NULL mutex leaves the increment unguarded. This is a
+      separately linked copy of refcounted_body_attach @ 0x0839d370; Rust
+      preserves the dedicated target section to prevent folding and calls the
+      already ported mutex helpers directly, which LLVM may inline while
+      retaining the store/guard/increment/guard sequence. Host tests cover
+      NULL overwrite, wrapping increment, and the non-NULL mutex path.
+
   - address: 0x0839cd98
     ghidra: FUN_0839cd98
     name: refcounted_body_release
