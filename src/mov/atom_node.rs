@@ -191,6 +191,34 @@ pub unsafe extern "C" fn mov_atom_node_new(fourcc: u32) -> *mut MovAtomNode {
     let block = unsafe { crate::heap::veneers::operator_new(MOV_ATOM_NODE_SIZE) };
     unsafe { atom_node_init(block.cast(), fourcc) }
 }
+/// MOV atom node payload-offset getter — original: `FUN_0814d230` @
+/// 0x0814d230 (16 bytes, 0x0814d230..0x0814d240, 4 instructions, no
+/// literal pool). The next separately linked function starts at 0x0814d240.
+/// All 11 direct call sites are unconditional `bl` instructions (none
+/// predicated), verified by decoding every ARM B/BL word in osos.dec; no
+/// aligned data word references this address.
+///
+/// Loads and returns the node's 64-bit payload offset from `+0x10`:
+/// `ldr r1, [r0, #20]; ldr r0, [r0, #16]; bx lr`. The high word is loaded
+/// first and the low word second, then returned in AAPCS `r0:r1` order.
+/// No NULL guard: the first load faults for NULL, matching stock.
+///
+/// # Deviations
+///
+/// None.
+///
+/// # Safety
+///
+/// `node` must point to one readable [`MovAtomNode`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_get_offset")]
+pub unsafe extern "C" fn mov_atom_node_get_offset(node: *const MovAtomNode) -> u64 {
+    let offset_hi = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).offset_hi)) };
+    let offset_lo = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).offset_lo)) };
+    (u64::from(offset_hi) << 32) | u64::from(offset_lo)
+}
+
 
 /// MOV atom node link reset — original: `FUN_0814d2e0` @ 0x0814d2e0
 /// (20 bytes, 0x0814d2e0..0x0814d2f4, 5 instructions, no literal pool).
@@ -418,5 +446,41 @@ mod tests {
             1,
             "NULL child path never dereferences node",
         );
+    }
+
+    #[test]
+    fn gets_payload_offset_from_target_width_words_without_writing() {
+        for (offset_lo, offset_hi) in [
+            (0, 0),
+            (0xffff_ffff, 0xffff_ffff),
+            (0x5566_7788, 0x1122_3344),
+        ] {
+            let node = MovAtomNode {
+                child_a: 0x1111_1111,
+                child_b: 0x2222_2222,
+                dup_chain: 0x3333_3333,
+                unused_0c: 0x4444_4444,
+                offset_lo,
+                offset_hi,
+                size_lo: 0x8888_8888,
+                size_hi: 0x9999_9999,
+                flag: 0xaa,
+                kind: 0xbb,
+                pad_22: [0xcc, 0xdd],
+                fourcc: 0xeeee_eeee,
+            };
+            let node_ptr = core::ptr::addr_of!(node);
+
+            let offset = unsafe { mov_atom_node_get_offset(node_ptr) };
+
+            assert_eq!(offset, (u64::from(offset_hi) << 32) | u64::from(offset_lo));
+            assert_eq!(node.child_a, 0x1111_1111);
+            assert_eq!(node.child_b, 0x2222_2222);
+            assert_eq!(node.dup_chain, 0x3333_3333);
+            assert_eq!(node.unused_0c, 0x4444_4444);
+            assert_eq!((node.offset_lo, node.offset_hi), (offset_lo, offset_hi));
+            assert_eq!((node.size_lo, node.size_hi), (0x8888_8888, 0x9999_9999));
+            assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0xaa, 0xbb, [0xcc, 0xdd], 0xeeee_eeee));
+        }
     }
 }

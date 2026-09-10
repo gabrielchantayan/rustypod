@@ -10806,11 +10806,10 @@ functions:
       Node layout from getters/setters/init 0x0814d2b0: +0x00/+0x04
       child links, +0x08 duplicate-fourcc chain, +0x21 kind byte 0..5,
       +0x24 fourcc key; offset setter rejects < 0, size setter
-      rejects < 8, both fields born -1. All five callees unported -
-      port dispatches them through MOV_ATOM_INFO_OPS; target defaults
-      transmute the ROM addresses (hook-ready on device), host
-      defaults inert. Ghidra C faithful here (mvneq r0,#0 is
-      move-NOT, i.e. -1).
+      rejects < 8, both fields born -1. The payload-offset getter
+      0x0814d230 is now ported directly as mov_atom_node_get_offset;
+      the remaining four callees dispatch through MOV_ATOM_INFO_OPS.
+      Ghidra C is faithful here (mvneq r0,#0 is move-NOT, i.e. -1).
 
   - address: 0x081c83b4
     ghidra: FUN_081c83b4
@@ -55745,6 +55744,35 @@ functions:
       test records the base constructor, nested array construction, resource
       resolve, both timers, empty-string clear, derived array ABI, returned
       this, copied words, the underflow clamp, and untouched padding.
+
+  - address: 0x0814d230
+    ghidra: FUN_0814d230
+    name: mov_atom_node_get_offset
+    size: 16
+    sig: "u64 mov_atom_node_get_offset(const MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_1_plus_0x10: offset_lo
+      param_1_plus_0x14: offset_hi
+    notes: >-
+      Raw ARM establishes the exact 16-byte extent
+      0x0814d230..0x0814d240: mov r1,r0; ldr r1,[r1,#20];
+      ldr r0,[r0,#16]; bx lr. The separately linked next function begins
+      at 0x0814d240. Decoding every ARM B/BL word in osos.dec finds 11
+      direct call sites, all unconditional plain bl: 0x08121144,
+      0x08121174, 0x081c21a8, 0x081c3f50, 0x081c7e38, 0x081c807c,
+      0x081e6014, 0x081e6054, 0x081f3ab4, 0x0820c71c, 0x0820c77c;
+      zero predicated BL forms and no aligned DATA word reference this
+      address. Returns the MOV atom node's payload offset as the low
+      word at +0x10 and high word at +0x14, loaded high then low and
+      returned in AAPCS r0:r1. No NULL guard: stock faults on the first
+      load. No deliberate deviations: Rust performs the two volatile
+      target-width word reads in the same order. mov_atom_info now calls
+      this direct port rather than its former ROM dispatch seam. Host
+      tests cover zero, all-ones, and distinct high/low halves while
+      proving every node field is preserved.
 
   - address: 0x0814d21c
     ghidra: FUN_0814d21c
