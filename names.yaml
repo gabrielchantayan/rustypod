@@ -27538,6 +27538,25 @@ functions:
       the usual push {fp,lr}/pop {fp,pc} frame - the same accepted
       deviation as fixed16_eq_indirect.
 
+  - address: 0x083cf848
+    ghidra: FUN_083cf848
+    name: iterator_equal
+    size: 24
+    sig: "u32 iterator_equal(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Iterator equality, `*a == *b`, returning 1 or 0. Raw bytes decode
+      ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1;
+      next function starts at 0x083cf860, confirming the 24-byte extent.
+      11 direct bl sites, all unconditional (zero predicated), verified by
+      decoding every ARM B/BL word in osos.dec: 0x08101c60, 0x08101e54,
+      0x08101f1c, 0x08101f60, 0x083c4258, 0x083c46c8, 0x083c46e4,
+      0x083c4768, 0x083c4848, 0x083c4938, 0x083db5bc. This body is
+      byte-identical to equal_deref @ 0x083cf968 but exported separately
+      in `.text.iterator_equal` to retain the independently hookable label.
+
   - address: 0x083d76f8
     ghidra: FUN_083d76f8
     name: vector_size_elem12

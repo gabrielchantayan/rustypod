@@ -58,10 +58,8 @@
 //!   the header node on a miss — through its first argument. **Not
 //!   ported**; Ghidra's C for our function mis-renders this call as a
 //!   buffer copy, which it is not.
-//! - `FUN_083cf848` @ 0x083cf848 — iterator equality: `*a == *b` (the
-//!   equal twin of the ported `not_equal_deref` family @ 0x083d6f40
-//!   and the one-word compare @ 0x083cf818 `cxx/string_map.rs`
-//!   inlines). **Not ported.**
+//! - [`crate::cxx::templates::iterator_equal`] @ 0x083cf848 — iterator
+//!   equality: `*a == *b`, directly ported as the header-node miss test.
 //! - `FUN_083d6f0c` @ 0x083d6f0c — `basic_string::empty`: reads the
 //!   size word at `(*string) - 4`, returns 1 iff it is 0
 //!   (`rsbs r0, r0, #1; movcc r0, #0` — 1 for size 0, 0 for any
@@ -69,11 +67,11 @@
 //!
 //! # Deviations
 //!
-//! - The three unported callees ride the [`STRING_TABLE_OPS`]
-//!   `read_volatile` dispatch table (house pattern). The target
-//!   defaults transmute the real firmware addresses 0x083db55c /
-//!   0x083cf848 / 0x083d6f0c, so the port **is hook-ready on device**;
-//!   the host defaults panic until a test installs mocks.
+//! - The two unported callees ride the [`STRING_TABLE_OPS`]
+//!   `read_volatile` dispatch table (house pattern). Iterator equality
+//!   directly calls the Rust port; target defaults transmute the real
+//!   firmware addresses 0x083db55c / 0x083d6f0c, while host defaults panic
+//!   until a test installs the remaining mocks.
 //! - The original spills r0..r3 on entry and reuses those stack slots
 //!   as the two `find` out-slots and the header-temporary; the port
 //!   uses ordinary locals.
@@ -135,17 +133,6 @@ unsafe extern "C" fn missing_string_map_find(_out: *mut u32, _map: *mut u8, _key
     panic!("string_table_has_string requires string-map find 0x083db55c")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_iter_eq(a: *const u32, b: *const u32) -> u32 {
-    let eq: unsafe extern "C" fn(*const u32, *const u32) -> u32 =
-        unsafe { core::mem::transmute(0x083c_f848usize) };
-    unsafe { eq(a, b) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_iter_eq(_a: *const u32, _b: *const u32) -> u32 {
-    panic!("string_table_has_string requires iterator equality 0x083cf848")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_string_empty(string: *const u32) -> u32 {
@@ -159,26 +146,27 @@ unsafe extern "C" fn missing_string_empty(_string: *const u32) -> u32 {
     panic!("string_table_has_string requires basic_string::empty 0x083d6f0c")
 }
 
-/// Wired defaults for [`STRING_TABLE_OPS`]: the retail firmware bodies.
+/// Wired defaults for [`STRING_TABLE_OPS`]: iterator equality is ported;
+/// target calls retain the two unported retailOS dependencies.
 #[cfg(target_os = "none")]
 pub const DEFAULT_STRING_TABLE_OPS: StringTableOps = StringTableOps {
     find: firmware_string_map_find,
-    iter_eq: firmware_iter_eq,
+    iter_eq: crate::cxx::templates::iterator_equal,
     string_empty: firmware_string_empty,
 };
 
-/// Wired defaults for [`STRING_TABLE_OPS`]: unported on host, so panic
-/// until a test installs faithful mocks.
+/// Wired defaults for [`STRING_TABLE_OPS`]: iterator equality is ported;
+/// the remaining unported dependencies panic on host until mocked.
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_STRING_TABLE_OPS: StringTableOps = StringTableOps {
     find: missing_string_map_find,
-    iter_eq: missing_iter_eq,
+    iter_eq: crate::cxx::templates::iterator_equal,
     string_empty: missing_string_empty,
 };
 
-/// Active model of the unported retailOS dependencies. Target
-/// integration may replace the slots as 0x083db55c / 0x083cf848 /
-/// 0x083d6f0c are ported; host tests install mocks.
+/// Active model of the retailOS dependencies still unported in this module.
+/// Target integration may replace `find` / `string_empty` as 0x083db55c /
+/// 0x083d6f0c are ported; iterator equality calls its Rust port directly.
 pub static mut STRING_TABLE_OPS: StringTableOps = DEFAULT_STRING_TABLE_OPS;
 
 #[inline(always)]
