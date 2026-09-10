@@ -49657,6 +49657,33 @@ functions:
       offset-based accessor. No deliberate deviation. Host tests exhaust all
       256 return values, prove the load does not mutate the object, and vary
       every unrelated byte in a minimally sized nine-byte object.
+
+  # --- Raw object dispatch-code accessor (cxx/object_state) ---
+  - address: 0x0829f184
+    ghidra: FUN_0829f184
+    name: object_dispatch_code_at_8
+    size: 12
+    sig: "u32 object_dispatch_code_at_8(const u8 *object)"
+    module: cxx/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0x08: dispatch_word
+      r0: dispatch_code
+    notes: >-
+      Raw ARM is exactly `ldr r0,[r0,#8]; and r0,r0,#0xff; bx lr`: an
+      unguarded, non-mutating aligned word load followed by low-byte masking.
+      The true extent is 12 bytes at 0x0829f184..0x0829f190, where the
+      byte-identical sibling FUN_0829f190 begins. Decoding every ARM B/BL
+      word in osos.dec found exactly 10 inbound branches, all unconditional
+      `bl` (condition 0xe) at 0x0814bddc, 0x08167cd0, 0x0818aa00,
+      0x081a7c18, 0x081ba2a4, 0x081efdc8, 0x0821411c, 0x08223604,
+      0x08235ebc, and 0x0828b354; there are no predicated calls or direct
+      tail branches. Callers compare the result to dispatch/action codes
+      6 through 10 but do not establish a concrete object type, so the name
+      preserves only that verified role and offset. No deliberate deviations.
+      Host tests cover zero, all-low-byte-set, observed dispatch codes with
+      unrelated high bits, the aligned +8 word position, and no mutation.
   # --- Resource callback cache refresh/getter (app/resource/cache) ---
   - address: 0x08047020
     ghidra: FUN_08047020

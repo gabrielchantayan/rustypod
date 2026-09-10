@@ -45,6 +45,27 @@ pub unsafe extern "C" fn object_byte_at_8(object: *const u8) -> u8 {
     object.add(8).read()
 }
 
+/// object_dispatch_code_at_8 — original: `FUN_0829f184` @ `0x0829f184`
+/// (12 bytes; 10 verified direct `bl` call sites, all unconditional).
+///
+/// Loads the aligned 32-bit word at `object + 0x08` and returns its low byte
+/// zero-extended as a dispatch code. Raw ARM is
+/// `ldr r0,[r0,#8]; and r0,r0,#0xff; bx lr`; the next separately linked
+/// function begins at `0x0829f190`. Callers compare the result against action
+/// codes 6 through 10, but do not establish a concrete object type.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `object` must be non-null, 4-byte aligned, and designate a readable word
+/// at byte offset `0x08`, matching the original aligned word load.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn object_dispatch_code_at_8(object: *const u8) -> u32 {
+    core::ptr::read_volatile(object.add(8) as *const u32) & 0xff
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -101,6 +122,32 @@ mod tests {
                 assert_eq!(unsafe { object_byte_at_8(object.as_ptr()) }, 0xc3, "object +{offset:#x} = {replacement:#04x}");
             }
             object[offset] = 0x5a;
+        }
+    }
+    #[test]
+    fn reads_the_low_byte_of_the_aligned_word_at_offset_eight() {
+        #[repr(C)]
+        struct ObjectWords {
+            word_0: u32,
+            word_4: u32,
+            dispatch_word: u32,
+        }
+
+        let mut object = ObjectWords {
+            word_0: 0x0123_4567,
+            word_4: 0x89ab_cdef,
+            dispatch_word: 0,
+        };
+        for word in [0x0000_0000u32, 0xffff_ffff, 0x1234_5606, 0x7fff_ff07, 0x8000_0009, 0xdead_be0a] {
+            object.dispatch_word = word;
+            let before = [object.word_0, object.word_4, object.dispatch_word];
+
+            assert_eq!(unsafe { object_dispatch_code_at_8((&object as *const ObjectWords).cast()) }, word & 0xff);
+            assert_eq!(
+                [object.word_0, object.word_4, object.dispatch_word],
+                before,
+                "the word accessor is read-only"
+            );
         }
     }
 }
