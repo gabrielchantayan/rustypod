@@ -57165,3 +57165,35 @@ functions:
       seams with host recorders. Rust initializes the two temporary records
       directly rather than retaining the stock bzero calls that only clear
       them before their pointer words are stored.
+
+  # --- Halfword-aligned little-endian word load ---
+  - address: 0x080539d4
+    ghidra: FUN_080539d4
+    name: load_u32_halfword_aligned
+    size: 28
+    sig: "u32 load_u32_halfword_aligned(const u8 *p)"
+    module: libc/halfword_load
+    status: ported
+    renames:
+      param_1/r0: p (two-byte-aligned source)
+      r1: low_halfword
+      r0(after second ldrh): high_halfword
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: seven ARM words
+      from 0x080539d4 through pop {ip,pc} at 0x080539ec; the separately
+      linked next function starts at 0x080539f0. Ghidra's body is
+      semantically correct but its undefined4 * signature conceals the
+      two-byte alignment contract. Decoding every ARM B/BL immediate finds
+      exactly 12 inbound calls, all unconditional bl at 0x080450e8,
+      0x080450f4, 0x08045114, 0x08045120, 0x08045134, 0x08045140,
+      0x08045164, 0x0804761c, 0x08050330, 0x08066090, 0x0806c958, and
+      0x0806c968; no predicated forms or direct B entries. No image data
+      word equals this address. The ARM reads ldrh [p] and ldrh [p,#2],
+      spills the halves adjacently, then ldr reloads their little-endian
+      u32 composition. The port retains two aligned u16 loads rather than
+      read_unaligned, matching the original's accepted two-byte alignment
+      and avoiding its four-ldrb ARMv5 sequence. match.py confirms that LLVM
+      retains the paired ldrh/orr algorithm while folding the temporary stack
+      word and reordering the independent loads. No NULL or bounds guard is
+      added; p must point to four readable bytes at a two-byte-aligned
+      address.
