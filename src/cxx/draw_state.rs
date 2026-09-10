@@ -79,6 +79,12 @@
 //! NULL guard on `this`, matching the original's unconditional
 //! `add r0, r0, #0x20`.
 
+use crate::cxx::draw_state_color::{
+    DRAW_STATE_BACKGROUND_COLOR_OFFSET,
+    DRAW_STATE_FOREGROUND_COLOR_OFFSET,
+    DRAW_STATE_STYLE_OFFSET,
+};
+
 /// Byte size of the draw-state record (the +0x40 word is the highest
 /// field `body_init` writes; call-site stack frames confirm — see the
 /// module header).
@@ -91,6 +97,10 @@ pub const DRAW_STATE_EMBEDDED_PAIR_OFFSET: usize = 0x20;
 /// Byte offset of the draw-target surface pointer (`surface_attach`'s
 /// store; the setter 0x08264550 writes the same offset).
 pub const DRAW_STATE_SURFACE_OFFSET: usize = 0x1c;
+
+/// Word index of the byte field copied from +0x28 by the copy constructor.
+/// The field's semantic identity remains unknown.
+const DRAW_STATE_AUXILIARY_BYTE_WORD_INDEX: usize = 10;
 
 /// The default draw-target surface descriptor: the literal-pool word @
 /// 0x082646a8 holds 0x08a77c3c (binary-verified against osos.dec). An
@@ -223,6 +233,86 @@ pub unsafe extern "C" fn draw_state_construct_with_surface(
     this
 }
 
+/// draw_state_copy_construct — original: `FUN_082645e8` @ 0x082645e8
+/// (148 bytes, 0x082645e8..0x0826467c; 11 unconditional `bl` call sites,
+/// no predicated calls or `b`, binary-scanned).
+///
+/// Source: `ipod-decomp/decomp/c/025/082645e8_FUN_082645e8.c`. The next
+/// sibling starts at 0x0826467c, so the reported 148-byte extent has no
+/// swallowed code or literal pool.
+///
+/// Copy-constructs the scoped draw-state record at `this` from `source`.
+/// It first constructs the embedded pair at +0x20 and derives the destination
+/// from that call's return minus 0x20. It then copies the scalar words,
+/// two-word members, style byte, two unaligned colours, and four-word clip
+/// rectangle in the ARM instruction order. There is no NULL or alignment
+/// guard on either input, matching the original's unconditional accesses.
+///
+/// Deliberate deviations: the existing [`DRAW_STATE_CONSTRUCT_OPS`] embedded
+/// pair seam is shared rather than duplicated; its device default is the
+/// faithful two-word initializer. The unported two-word leaf @ 0x082724b4 is
+/// expanded here, retaining each pair's load/store order. The already-ported
+/// [`crate::cxx::color_copy::color_copy`] retains the original byte-wise
+/// unaligned colour copies. The four-word clip is loaded completely before
+/// its first store, as the original `ldm`/`stm` pair does.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_copy_construct(
+    this: *mut u8,
+    source: *const u8,
+) -> *mut u8 {
+    let member = embedded_pair_construct_op()(this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET));
+    let this = member.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET);
+
+    unsafe fn copy_word_at(destination: *mut u8, source: *const u8, word_index: usize) {
+        let destination = destination.add(word_index * core::mem::size_of::<u32>()) as *mut u32;
+        let source = source.add(word_index * core::mem::size_of::<u32>()) as *const u32;
+        destination.write_volatile(source.read_volatile());
+    }
+
+    copy_word_at(this, source, 0);
+    copy_word_at(this, source, 1);
+    copy_word_at(this, source, 2);
+    copy_word_at(this, source, 3);
+
+    this.add(DRAW_STATE_STYLE_OFFSET)
+        .write_volatile(source.add(DRAW_STATE_STYLE_OFFSET).read_volatile());
+    crate::cxx::color_copy::color_copy(
+        this.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET),
+        source.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET),
+    );
+    crate::cxx::color_copy::color_copy(
+        this.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET),
+        source.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET),
+    );
+
+    copy_word_at(this, source, 7);
+    let word8 = (source.add(8 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    let word9 = (source.add(9 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    (this.add(8 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(word8);
+    (this.add(9 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(word9);
+    this.add(DRAW_STATE_AUXILIARY_BYTE_WORD_INDEX * core::mem::size_of::<u32>())
+        .write_volatile(
+            source
+                .add(DRAW_STATE_AUXILIARY_BYTE_WORD_INDEX * core::mem::size_of::<u32>())
+                .read_volatile(),
+        );
+
+    copy_word_at(this, source, 11);
+    copy_word_at(this, source, 12);
+
+    let clip0 = (source.add(13 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    let clip1 = (source.add(14 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    let clip2 = (source.add(15 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    let clip3 = (source.add(16 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
+    (this.add(13 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(clip0);
+    (this.add(14 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(clip1);
+    (this.add(15 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(clip2);
+    (this.add(16 * core::mem::size_of::<u32>()) as *mut u32).write_volatile(clip3);
+
+    this
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -242,6 +332,12 @@ mod tests {
     unsafe extern "C" fn recording_pair_construct(member: *mut u8) -> *mut u8 {
         (*core::ptr::addr_of_mut!(INIT_CALLS)).push(("pair", member as usize, 0));
         core::ptr::read_volatile(core::ptr::addr_of!(PAIR_RESULT))
+    }
+
+    unsafe extern "C" fn faithful_pair_construct(member: *mut u8) -> *mut u8 {
+        (member as *mut u32).write_volatile(0);
+        (member as *mut u32).add(1).write_volatile(0);
+        member
     }
 
     unsafe extern "C" fn recording_body_init(this: *mut u8) {
@@ -276,6 +372,20 @@ mod tests {
                     embedded_pair_construct: recording_pair_construct,
                     body_init: recording_body_init,
                     surface_attach: recording_surface_attach,
+                },
+            );
+        }
+        DrawStateOpsGuard { _lock: lock }
+    }
+
+    fn draw_state_copy_bench() -> DrawStateOpsGuard {
+        let lock = DRAW_STATE_OPS_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(DRAW_STATE_CONSTRUCT_OPS).write_volatile(
+                DrawStateConstructOps {
+                    embedded_pair_construct: faithful_pair_construct,
+                    body_init: DEFAULT_DRAW_STATE_CONSTRUCT_OPS.body_init,
+                    surface_attach: DEFAULT_DRAW_STATE_CONSTRUCT_OPS.surface_attach,
                 },
             );
         }
@@ -417,5 +527,70 @@ mod tests {
             .copy_from_slice(&surface.to_ne_bytes());
         expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
         assert_eq!(record, expected);
+    }
+    #[test]
+    fn copy_construct_copies_fields_and_preserves_record_padding_and_guard() {
+        let mut source_words = [0u32; DRAW_STATE_SIZE / core::mem::size_of::<u32>()];
+        let source = source_words.as_mut_ptr().cast::<u8>();
+        let source_bytes = unsafe { core::slice::from_raw_parts_mut(source, DRAW_STATE_SIZE) };
+        for (index, byte) in source_bytes.iter_mut().enumerate() {
+            *byte = (index as u8).wrapping_mul(17).wrapping_add(3);
+        }
+
+        let mut destination_words =
+            [0xa5a5_a5a5u32; DRAW_STATE_SIZE / core::mem::size_of::<u32>() + 1];
+        let destination = destination_words.as_mut_ptr().cast::<u8>();
+        let destination_bytes =
+            unsafe { core::slice::from_raw_parts_mut(destination, DRAW_STATE_SIZE + 4) };
+        let source_before = source_bytes.to_vec();
+
+        let _bench = draw_state_copy_bench();
+        let returned = unsafe { draw_state_copy_construct(destination, source) };
+
+        let mut expected = [0xa5u8; DRAW_STATE_SIZE + 4];
+        expected[..0x19].copy_from_slice(&source_before[..0x19]);
+        expected[0x1c..0x29].copy_from_slice(&source_before[0x1c..0x29]);
+        expected[0x2c..DRAW_STATE_SIZE].copy_from_slice(&source_before[0x2c..]);
+        assert_eq!(returned, destination);
+        assert_eq!(source_bytes, source_before.as_slice(), "source remains unchanged");
+        assert_eq!(
+            destination_bytes, expected,
+            "copies all fields but leaves the three-byte padding ranges and guard untouched"
+        );
+    }
+
+    #[test]
+    fn copy_construct_derives_destination_from_pair_constructor_return() {
+        let mut source_words = [0x5a5a_5a5au32; DRAW_STATE_SIZE / core::mem::size_of::<u32>()];
+        let source = source_words.as_mut_ptr().cast::<u8>();
+        let mut destination_words =
+            [0xa5a5_a5a5u32; DRAW_STATE_SIZE / core::mem::size_of::<u32>() + 1];
+        let entry_this = destination_words.as_mut_ptr().cast::<u8>();
+        let member_result = unsafe { entry_this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET + 4) };
+        let expected_this = unsafe { member_result.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET) };
+        let _bench = draw_state_bench(member_result);
+
+        let returned = unsafe { draw_state_copy_construct(entry_this, source) };
+
+        assert_eq!(returned, expected_this);
+        assert_eq!(
+            init_calls(),
+            std::vec![(
+                "pair",
+                unsafe { entry_this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET) } as usize,
+                0,
+            )],
+            "only the embedded pair constructor runs before the return-derived copy target"
+        );
+        assert_eq!(
+            unsafe { core::slice::from_raw_parts(expected_this, 0x19) },
+            unsafe { core::slice::from_raw_parts(source, 0x19) },
+            "the field copy starts at the callee-return-derived base"
+        );
+        assert_eq!(
+            unsafe { core::slice::from_raw_parts(entry_this, 4) },
+            &[0xa5; 4],
+            "bytes before the return-derived base are untouched"
+        );
     }
 }

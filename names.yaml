@@ -37094,6 +37094,47 @@ functions:
       initializer order with the supplied surface, r0-return-derived base
       propagation, and the current default stubs' exact record and guard
       bytes.
+
+  - address: 0x082645e8
+    ghidra: FUN_082645e8
+    name: draw_state_copy_construct
+    size: 148
+    sig: "u8 *draw_state_copy_construct(u8 *this, const u8 *source)"
+    module: cxx/draw_state
+    status: ported
+    renames:
+      param_1/r0: this (destination scoped draw-state record)
+      param_2/r1: source (source scoped draw-state record)
+      r4: this (embedded pair constructor return minus 0x20)
+      r5: source (preserved across member and colour copy calls)
+      FUN_081598a4: embedded_pair_construct
+      FUN_082720e8: color_copy
+      FUN_082724b4: unnamed two-word copy leaf
+    notes: >-
+      Whole 148-byte function binary-verified: 0x082645e8 begins `push
+      {r4,r5,r6,lr}` and 0x0826467c begins the distinct default-surface
+      constructor; no literal pool lies between. Decoding every ARM B/BL
+      word in osos.dec found exactly 11 unconditional bl call sites
+      (0x081416c4, 0x0814170c, 0x081418cc, 0x08141930, 0x08141984,
+      0x081419e0, 0x08141a24, 0x08143104, 0x0820dd8c, 0x0820fa18,
+      0x08213508), zero predicated bl and zero b. No aligned DATA word in
+      the image holds 0x082645e8, so callers bind it statically rather than
+      dispatching it virtually. This copy constructor first constructs the
+      embedded two-word member at this+0x20, derives this from its r0 return
+      minus 0x20, then copies the scalar words, two two-word members, style
+      byte, two unaligned RGBA colours, and four-word clip rectangle from
+      source. The clip's four source words are all loaded before any clip
+      destination store, exactly matching `ldm` then `stm`. The 12-byte
+      unported helper at 0x082724b4 is only a raw-decoded two-word copy
+      leaf, so it is expanded inline without assigning it an identity; the
+      independently ported color_copy preserves the unaligned byte-copy
+      calls. Deliberate deviation: the existing DRAW_STATE_CONSTRUCT_OPS
+      embedded-pair seam is shared instead of duplicated. Its device
+      default is faithful; the host tests install a u32-word faithful
+      fixture to avoid the existing constructor stub's pointer-width model.
+      Host tests (2) prove exact field copies with both padding ranges and
+      a post-record guard preserved, source non-mutation, and propagation
+      of a shifted member-constructor return into the copy destination.
   - address: 0x0826467c
     ghidra: FUN_0826467c
     name: draw_state_construct
