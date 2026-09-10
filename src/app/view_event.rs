@@ -213,8 +213,8 @@ pub unsafe extern "C" fn view_event_apply_mapped_staged_flags(this: *mut u8) -> 
 const VIEW_LOCALIZED_FLAG_A: usize = 0xb0;
 const VIEW_LOCALIZED_FLAG_B: usize = 0xb1;
 
-/// Resolves retailOS global inputs and the still-unported integer getter
-/// needed by [`view_event_apply_localized_flags`].
+/// Resolves retailOS global inputs needed by
+/// [`view_event_apply_localized_flags`].
 #[derive(Clone, Copy)]
 pub struct ViewLocalizedFlagOps {
     /// Loads a NUL-terminated key from the configuration object at word 3
@@ -252,35 +252,24 @@ unsafe extern "C" fn missing_localized_string_table() -> *mut u8 {
     panic!("view_event_apply_localized_flags requires string table 0x08a79c10")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_table_parse_i32(table: *mut u8, key: *const u32) -> u32 {
-    let parse: unsafe extern "C" fn(*mut u8, *const u32) -> u32 =
-        unsafe { core::mem::transmute(0x0810_2168usize) };
-    unsafe { parse(table, key) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_table_parse_i32(_table: *mut u8, _key: *const u32) -> u32 {
-    panic!("view_event_apply_localized_flags requires string getter 0x08102168")
-}
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = ViewLocalizedFlagOps {
     configuration_key: firmware_configuration_key,
     string_table: firmware_localized_string_table,
-    string_table_parse_i32: firmware_string_table_parse_i32,
+    string_table_parse_i32: crate::app::string_table::string_table_parse_i32,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = ViewLocalizedFlagOps {
     configuration_key: missing_configuration_key,
     string_table: missing_localized_string_table,
-    string_table_parse_i32: missing_string_table_parse_i32,
+    string_table_parse_i32: crate::app::string_table::string_table_parse_i32,
 };
 
 /// Active dependencies of [`view_event_apply_localized_flags`]. Target
-/// defaults read the real globals and tail into the remaining retail parser;
-/// host tests install fixtures.
+/// defaults read the real globals and call the ported integer parser; host
+/// tests install fixtures.
 pub static mut VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = DEFAULT_VIEW_LOCALIZED_FLAG_OPS;
 
 /// view_event_apply_localized_flags — original: `FUN_0826087c` @
@@ -299,10 +288,9 @@ pub static mut VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = DEFAULT_VIEW_LOCA
 /// [`view_event_apply_mapped_staged_flags`] and returns that handled verdict.
 ///
 /// Deliberate deviations: host-safe key/global access uses an ops table
-/// because retail pointers are 32-bit words, and unported `FUN_08102168`
-/// remains a volatile dispatch seam. The COW constructors/releases and
-/// membership test are direct Rust ports. Rust represents the final tail
-/// branch as a call.
+/// because retail pointers are 32-bit words. The COW constructors/releases,
+/// membership test, and integer parser are direct Rust ports. Rust represents
+/// the final tail branch as a call.
 ///
 /// # Safety
 ///
