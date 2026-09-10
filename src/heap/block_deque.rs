@@ -16,12 +16,12 @@
 //!   three-argument shape.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 //!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
-//!   `FUN_083da1a8` @ 0x083da1a8,
-//!   `FUN_083da240` @ 0x083da240, and `FUN_083da344` @ 0x083da344
-//!   (8 bytes each: `mov r0, #0x20; bx lr`; 7, 12, 18, 12, 12, and 13 direct `bl`
-//!   call sites respectively, binary-verified). Elements per deque segment:
-//!   0x20 elements of 0x28 bytes = the 0x500-byte segment stride of the
-//!   seed walk.
+//!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
+//!   `FUN_083da344` @ 0x083da344, and `FUN_083da450` @ 0x083da450
+//!   (8 bytes each: `mov r0, #0x20; bx lr`; respectively 7, 12, 18, 12,
+//!   12, 13, and 11 direct plain `bl` call sites; no predicated calls,
+//!   binary-verified). Elements per deque segment: 0x20 elements of 0x28
+//!   bytes = the 0x500-byte segment stride of the seed walk.
 //! - `deque_iter_init` — original: `FUN_083d9eec` @ 0x083d9eec
 //!   (68 bytes; 9 bl call sites, binary-verified). Builds an iterator:
 //!   `cur` as given; `seg_base`/`seg_end` from the segment-map slot
@@ -431,21 +431,23 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
 
 /// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 /// `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
-/// `FUN_083da1a8` @ 0x083da1a8,
-/// `FUN_083da240` @ 0x083da240, and `FUN_083da344` @ 0x083da344
+/// `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
+/// `FUN_083da344` @ 0x083da344, and `FUN_083da450` @ 0x083da450
 /// (8 bytes each).
 ///
 /// The raw ARM body is `mov r0, #0x20; bx lr`: return the 0x20 elements
-/// per deque segment. `FUN_083da240` has 12 unconditional `bl` call sites
-/// and no predicated calls, binary-verified; `FUN_083da344` has 13;
-/// `FUN_083da1a8` has 12 (callers scale the result by 4, the pointer-sized
-/// element stride of that instantiation); `FUN_083d9f5c` has 12 (callers
-/// scale the result by 0xc, the 12-byte element stride of that
-/// instantiation — e.g. the iterator ctor at 0x083d9f88 builds
-/// `seg_end = seg_base + 0x20 * 0xc`, and the pop path frees a spent
-/// segment via `cxx_array_dealloc(seg, 0x20, 0)`). Deliberate deviation: this one
-/// export serves these byte-identical template copies rather than duplicating
-/// an indistinguishable Rust body.
+/// per deque segment. Decoding every ARM B/BL word in `osos.dec` finds
+/// 11 unconditional plain `bl` call sites for `FUN_083da450` and no
+/// predicated calls or tail branches. `FUN_083da240` has 12 unconditional
+/// `bl` call sites and no predicated calls, binary-verified;
+/// `FUN_083da344` has 13; `FUN_083da1a8` has 12 (callers scale the result
+/// by 4, the pointer-sized element stride of that instantiation);
+/// `FUN_083d9f5c` has 12 (callers scale the result by 0xc, the 12-byte
+/// element stride of that instantiation — e.g. the iterator ctor at
+/// 0x083d9f88 builds `seg_end = seg_base + 0x20 * 0xc`, and the pop path
+/// frees a spent segment via `cxx_array_dealloc(seg, 0x20, 0)`).
+/// Deliberate deviation: this one export serves these byte-identical
+/// template copies rather than duplicating an indistinguishable Rust body.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {
