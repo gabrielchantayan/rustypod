@@ -24013,6 +24013,46 @@ functions:
       below 2, reference-model sweep over span boundaries and u32
       extremes.
 
+  # ---- Auto-vacuum pointer-map writer (src/sqlite/ptrmap_put.rs) ----
+  - address: 0x082e86bc
+    ghidra: FUN_082e86bc
+    name: ptrmap_put
+    size: 184
+    sig: "u32 ptrmap_put(BtShared *bt, u32 pgno, u32 map_type, u32 parent_pgno)"
+    module: sqlite/ptrmap_put
+    status: ported
+    renames:
+      param_1: bt
+      param_2: pgno
+      param_3: map_type
+      param_4: parent_pgno
+      local_20: map_page
+      iVar1: status
+      iVar3: ptrmap_page
+      iVar4: stored_parent_pgno
+      iVar5: entry_offset
+    notes: >-
+      SQLite 3.5.x ptrmapPut (btree.c). Raw extent is exactly 184 bytes:
+      `push {r3-r9,lr}` at 0x082e86bc through the branch at 0x082e8770;
+      an independent `push {r4,lr}` begins sibling FUN_082e8774. Binary
+      decoding finds 11 genuine direct callers, all plain unconditional bl
+      (0 predicated): 0x082b5c64, 0x082b69bc, 0x082bdb20, 0x082ce0dc,
+      0x082cf48c, 0x082d6978, 0x082e8804, 0x083677f4, 0x0836783c,
+      0x08368eec, 0x08368f34. Return SQLITE_CORRUPT (11) if pgno is zero;
+      otherwise resolve the pointer-map page at ptrmap_pageno(bt, pgno),
+      map entry (pgno - ptrmap_page - 1) * 5, and only dirty/write it if
+      its byte type or big-endian parent differs. The raw bleq at 0x082e8764
+      gates both stores on the zero return from FUN_0837ef64, but release at
+      0x0837ee98 follows unconditionally after every successful resolve.
+      Ported callees: ptrmap_pageno (0x082e866c), load_be32 (0x0837a158),
+      store_be32 (0x083816cc), release_object (0x0837ee98), and the leased
+      resolver (0x0837dc38). FUN_0837ef64 remains retailOS-owned and is
+      called directly only on target; host tests inject it and the resolver
+      as test boundaries. Host tests: zero page early return, resolver
+      failure avoids release, equal entry skips write, dirty failure preserves
+      data but releases, and an eType above 255 proves ldrb compares all 32
+      input bits before strb truncates.
+
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
     ghidra: FUN_0837ac30

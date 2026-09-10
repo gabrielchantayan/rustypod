@@ -115,6 +115,7 @@ pub mod os_write;
 pub mod parse_cell;
 pub mod parse_expr;
 pub mod ptrmap_pageno;
+pub mod ptrmap_put;
 pub mod read_schema;
 pub mod release_mem_array;
 pub mod schema_to_index;
