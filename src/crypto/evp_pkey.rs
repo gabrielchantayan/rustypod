@@ -74,16 +74,16 @@
 //!
 //! # Deviations
 //!
-//! - `CRYPTO_add_lock` @ 0x08043828 and `EVP_PKEY_free_it` @
-//!   0x08093cbc are not ported yet, so they ride the [`EVP_PKEY_OPS`]
-//!   seam (the crypto/bn_num_bits.rs shape): on target the defaults
-//!   call the stock bodies in place (the original `bl`s become volatile
-//!   slot loads plus `blx`); on host the defaults panic until a test
-//!   installs recorders.
+//! - `EVP_PKEY_free_it` @ 0x08093cbc is unported, so it rides the
+//!   remaining [`EVP_PKEY_OPS`] seam: on target its default calls the
+//!   stock body in place, while host tests install a recorder.
+//! - `CRYPTO_add_lock` @ 0x08043828 is ported in [`super::add_lock`] and
+//!   called directly, as in the original.
 //! - `OPENSSL_free` is the ported [`traced_free`] @ 0x08043994, called
 //!   directly like the original's `bl`.
 
 use crate::drivers::ata_cmd::traced_free;
+use crate::crypto::add_lock::crypto_add_lock;
 
 /// `CRYPTO_LOCK_EVP_PKEY` — the lock class the reference decrement runs
 /// under (the original's `mov r2, #10`).
@@ -117,40 +117,17 @@ pub struct EvpPkey {
     pub attributes: *mut u8,
 }
 
-/// `CRYPTO_add_lock` ABI @ 0x08043828: atomically (under the lock
-/// class) add `amount` to `*pointer` and return the new value;
-/// `file`/`line` are the caller's debug coordinates (NULL/0 here). The
-/// stock descriptor's `add_lock_callback` (slot +0x0c of 0x08a0e93c)
-/// can replace the whole operation and is NULL in the shipping image.
-pub type CryptoAddLockFn =
-    unsafe extern "C" fn(pointer: *mut i32, amount: i32, lock_type: i32, file: *const u8, line: i32) -> i32;
 
-/// Indirect dispatch for this destructor's two unported callees. On
-/// target both slots default to the stock bodies called in place; host
-/// tests install recorders.
+/// Indirect dispatch for this destructor's unported `EVP_PKEY_free_it`
+/// callee. On target the slot defaults to the stock body called in place;
+/// host tests install a recorder.
 #[derive(Copy, Clone)]
 pub struct EvpPkeyOps {
-    /// `CRYPTO_add_lock` @ 0x08043828 (unported).
-    pub add_lock: CryptoAddLockFn,
-    /// `EVP_PKEY_free_it` @ 0x08093cbc (unported): releases the payload
-    /// for types 6/19 (`RSA_free` @ 0x08062374) and is a no-op for
-    /// every other type.
+    /// `EVP_PKEY_free_it` @ 0x08093cbc: releases the payload for types
+    /// 6/19 (`RSA_free` @ 0x08062374) and is a no-op for every other type.
     pub free_it: unsafe extern "C" fn(pkey: *mut EvpPkey),
 }
 
-/// Target default: the stock `CRYPTO_add_lock` @ 0x08043828, called in
-/// place until it is ported.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_crypto_add_lock(
-    pointer: *mut i32,
-    amount: i32,
-    lock_type: i32,
-    file: *const u8,
-    line: i32,
-) -> i32 {
-    let worker: CryptoAddLockFn = unsafe { core::mem::transmute(0x0804_3828usize) };
-    unsafe { worker(pointer, amount, lock_type, file, line) }
-}
 
 /// Target default: the stock `EVP_PKEY_free_it` @ 0x08093cbc, called in
 /// place until it is ported.
@@ -161,19 +138,6 @@ unsafe extern "C" fn firmware_evp_pkey_free_it(pkey: *mut EvpPkey) {
     unsafe { worker(pkey) }
 }
 
-/// Host default: nothing to forward to, and silently returning a
-/// positive count would make a missing install look like a live
-/// reference (suppressing teardown — the dangerous direction).
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_crypto_add_lock(
-    _pointer: *mut i32,
-    _amount: i32,
-    _lock_type: i32,
-    _file: *const u8,
-    _line: i32,
-) -> i32 {
-    panic!("evp_pkey_free requires the CRYPTO_add_lock worker 0x08043828")
-}
 
 /// Host default: nothing to forward to, and a silent no-op would hide a
 /// missing install by leaking the payload.
@@ -182,23 +146,21 @@ unsafe extern "C" fn missing_evp_pkey_free_it(_pkey: *mut EvpPkey) {
     panic!("evp_pkey_free requires the EVP_PKEY_free_it worker 0x08093cbc")
 }
 
-/// The active callees. Host tests install recording mocks.
+/// The active unported callee. Host tests install a recording mock.
 #[cfg(target_os = "none")]
 pub static mut EVP_PKEY_OPS: EvpPkeyOps = EvpPkeyOps {
-    add_lock: firmware_crypto_add_lock,
     free_it: firmware_evp_pkey_free_it,
 };
 
 /// See the target definition.
 #[cfg(not(target_os = "none"))]
 pub static mut EVP_PKEY_OPS: EvpPkeyOps = EvpPkeyOps {
-    add_lock: missing_crypto_add_lock,
     free_it: missing_evp_pkey_free_it,
 };
 
-/// Reads the ops table. Volatile so a build in which nothing rewrites
-/// the table cannot constant-fold the defaults in and delete the
-/// dispatch (house rule, see crypto/bn_num_bits.rs).
+/// Reads the remaining unported callee. Volatile so a build in which
+/// nothing rewrites the table cannot constant-fold the default in and
+/// delete the dispatch (house rule, see crypto/bn_num_bits.rs).
 #[inline(always)]
 fn evp_pkey_ops() -> EvpPkeyOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVP_PKEY_OPS)) }
@@ -218,17 +180,17 @@ fn evp_pkey_ops() -> EvpPkeyOps {
 ///
 /// # Safety
 ///
-/// `pkey` is either NULL or names a live [`EvpPkey`] whose `pkey`
-/// payload is owned by it. [`EVP_PKEY_OPS`] must be installed on host.
+/// payload is owned by it. The `EVP_PKEY_free_it` slot in
+/// [`EVP_PKEY_OPS`] must be installed on host.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn evp_pkey_free(pkey: *mut EvpPkey) {
     if pkey.is_null() {
         return;
     }
-    let ops = evp_pkey_ops();
     let remaining =
-        (ops.add_lock)(core::ptr::addr_of_mut!((*pkey).references), -1, CRYPTO_LOCK_EVP_PKEY, core::ptr::null(), 0);
+        crypto_add_lock(core::ptr::addr_of_mut!((*pkey).references), -1, CRYPTO_LOCK_EVP_PKEY, core::ptr::null(), 0);
+    let ops = evp_pkey_ops();
     if remaining > 0 {
         return;
     }
@@ -242,17 +204,17 @@ mod tests {
 
     use super::*;
     use crate::drivers::ata_cmd::{TRACED_FREE_HOOKS, TRACED_FREE_TEST_LOCK, TracedFreeHooks};
-    use std::sync::{Mutex, MutexGuard};
+    use crate::kernel::resource_op::RESOURCE_OP_HOOKS_TEST_LOCK;
+    use parking_lot::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes swaps of [`EVP_PKEY_OPS`] and [`TRACED_FREE_HOOKS`].
+    /// Serializes swaps of [`EVP_PKEY_OPS`], [`TRACED_FREE_HOOKS`], and
+    /// the shared resource-operation table `crypto_add_lock` reads.
     static OPS_LOCK: Mutex<()> = Mutex::new(());
 
-    /// One recorded callee invocation, in call order.
+    /// One recorded teardown callee invocation, in call order.
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Event {
-        /// `add_lock(pointer, amount, lock_type, file, line)`.
-        AddLock(usize, i32, i32, usize, i32),
         /// `EVP_PKEY_free_it(pkey)`.
         FreeIt(usize),
         /// The free slot inside `traced_free` running on the wrapper.
@@ -265,23 +227,6 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
     }
 
-    /// The recording `CRYPTO_add_lock`: performs the real decrement,
-    /// like the stock fallback path (`*pointer += amount` between the
-    /// lock-class brackets), and returns the new count.
-    unsafe extern "C" fn recording_add_lock(
-        pointer: *mut i32,
-        amount: i32,
-        lock_type: i32,
-        file: *const u8,
-        line: i32,
-    ) -> i32 {
-        unsafe {
-            (*core::ptr::addr_of_mut!(EVENTS))
-                .push(Event::AddLock(pointer as usize, amount, lock_type, file as usize, line));
-            *pointer = (*pointer).wrapping_add(amount);
-            *pointer
-        }
-    }
 
     unsafe extern "C" fn recording_free_it(pkey: *mut EvpPkey) {
         unsafe { (*core::ptr::addr_of_mut!(EVENTS)).push(Event::FreeIt(pkey as usize)) };
@@ -295,6 +240,8 @@ mod tests {
     struct OpsGuard {
         #[allow(dead_code)]
         ops: MutexGuard<'static, ()>,
+        #[allow(dead_code)]
+        resource: MutexGuard<'static, ()>,
         #[allow(dead_code)]
         free: parking_lot::MutexGuard<'static, ()>,
         saved_ops: EvpPkeyOps,
@@ -312,10 +259,12 @@ mod tests {
     }
 
     fn install() -> OpsGuard {
-        let ops = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let resource = RESOURCE_OP_HOOKS_TEST_LOCK.lock();
+        let ops = OPS_LOCK.lock();
         let free = TRACED_FREE_TEST_LOCK.lock();
         let guard = OpsGuard {
             ops,
+            resource,
             free,
             saved_ops: unsafe { core::ptr::addr_of!(EVP_PKEY_OPS).read() },
             saved_free: unsafe { core::ptr::addr_of!(TRACED_FREE_HOOKS).read() },
@@ -323,7 +272,6 @@ mod tests {
         unsafe {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             core::ptr::addr_of_mut!(EVP_PKEY_OPS).write(EvpPkeyOps {
-                add_lock: recording_add_lock,
                 free_it: recording_free_it,
             });
             core::ptr::addr_of_mut!(TRACED_FREE_HOOKS).write(TracedFreeHooks {
@@ -357,20 +305,14 @@ mod tests {
     }
 
     #[test]
-    fn shared_key_only_drops_the_reference_under_lock_class_10() {
+    fn shared_key_only_drops_one_reference() {
         let _guard = install();
         let mut k = key(6, 2, core::ptr::null_mut());
-        let at = core::ptr::addr_of_mut!(k) as usize;
-        let count = core::ptr::addr_of_mut!(k.references) as usize;
 
         unsafe { evp_pkey_free(core::ptr::addr_of_mut!(k)) };
+        assert_eq!(k.references, 1, "one reference dropped under lock class 10");
 
-        assert_eq!(k.references, 1, "one reference dropped");
-        assert_eq!(
-            events(),
-            std::vec![Event::AddLock(count, -1, CRYPTO_LOCK_EVP_PKEY, 0, 0)],
-            "exactly CRYPTO_add_lock(&references, -1, CRYPTO_LOCK_EVP_PKEY, NULL, 0) at {at:#x}"
-        );
+        assert!(events().is_empty(), "the shared key takes no teardown callee");
     }
 
     #[test]
@@ -378,7 +320,6 @@ mod tests {
         let _guard = install();
         let mut k = key(6, 1, 0xdead_beefusize as *mut u8);
         let at = core::ptr::addr_of_mut!(k) as usize;
-        let count = core::ptr::addr_of_mut!(k.references) as usize;
 
         unsafe { evp_pkey_free(core::ptr::addr_of_mut!(k)) };
 
@@ -386,7 +327,6 @@ mod tests {
         assert_eq!(
             events(),
             std::vec![
-                Event::AddLock(count, -1, CRYPTO_LOCK_EVP_PKEY, 0, 0),
                 Event::FreeIt(at),
                 Event::Freed(at),
             ],
@@ -403,7 +343,6 @@ mod tests {
             unsafe { (*core::ptr::addr_of_mut!(EVENTS)).clear() };
             let mut k = key(19, start, core::ptr::null_mut());
             let at = core::ptr::addr_of_mut!(k) as usize;
-            let count = core::ptr::addr_of_mut!(k.references) as usize;
 
             unsafe { evp_pkey_free(core::ptr::addr_of_mut!(k)) };
 
@@ -411,7 +350,6 @@ mod tests {
             assert_eq!(
                 events(),
                 std::vec![
-                    Event::AddLock(count, -1, CRYPTO_LOCK_EVP_PKEY, 0, 0),
                     Event::FreeIt(at),
                     Event::Freed(at),
                 ],
@@ -420,22 +358,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_reference_word_is_passed_by_address_not_value() {
-        // The original computes r0 = x + 8 (&x->references) before the
-        // call; the callee performs the store. Prove the mock's store
-        // landed in the object, not in a copy.
-        let _guard = install();
-        let mut k = key(116, 3, core::ptr::null_mut());
-
-        unsafe { evp_pkey_free(core::ptr::addr_of_mut!(k)) };
-
-        assert_eq!(k.references, 2);
-        match &events()[..] {
-            [Event::AddLock(pointer, ..)] => {
-                assert_eq!(*pointer, core::ptr::addr_of_mut!(k.references) as usize)
-            }
-            other => panic!("unexpected event stream: {other:?}"),
-        }
-    }
 }

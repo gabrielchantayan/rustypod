@@ -40,11 +40,16 @@
 
 /// Function-pointer services this dispatcher reads out of the descriptor
 /// @ 0x08043b94's literal pool points at (0x08a0e93c, the word @
-/// 0x08043c14). Only two of the descriptor's slots are consulted by the
-/// dispatcher itself, plus slot +0x10 by `current_context_id`;
-/// the port keeps them — plus the two registry entry points the negative
-/// path branches to — in one hook table, the
+/// 0x08043c14). Its static-resource slot (+0x08), the OpenSSL
+/// `CRYPTO_add_lock` override (+0x0c), and current-context-id slot (+0x10)
+/// share this table; it also keeps the two registry entry points the
+/// negative path branches to, following the
 /// [`crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS`] pattern.
+/// Services-descriptor slot +0x0c: the optional whole-operation override
+/// for `CRYPTO_add_lock` @ 0x08043828.
+pub type AddLockCallback =
+    unsafe extern "C" fn(pointer: *mut i32, amount: i32, lock_type: i32, file: *const u8, line: i32) -> i32;
+
 #[derive(Copy, Clone)]
 pub struct ResourceOpHooks {
     /// Descriptor slot +0x08: the handler for static resources
@@ -52,6 +57,9 @@ pub struct ResourceOpHooks {
     /// arg1)`. `None` = the stock image's NULL slot, which makes the
     /// whole call a no-op.
     pub static_op: Option<unsafe extern "C" fn(op: u32, resource: i32, arg0: u32, arg1: u32)>,
+    /// Descriptor slot +0x0c: the `CRYPTO_add_lock` replacement. `None`
+    /// takes the normal resource-op bracket and word-add path.
+    pub add_lock_callback: Option<AddLockCallback>,
     /// Descriptor slot +0x10: the current-context-id hook, tail-called
     /// with no arguments by `current_context_id` @ 0x08044174. `None` =
     /// the stock image's NULL slot, which makes `current_context_id`
@@ -92,10 +100,15 @@ pub unsafe extern "C" fn missing_registry_release(_resource: i32) {}
 pub static mut RESOURCE_OP_HOOKS: ResourceOpHooks = ResourceOpHooks {
     static_op: None,
     context_id: None,
+    add_lock_callback: None,
     object_op: None,
     acquire: missing_registry_acquire,
     release: missing_registry_release,
 };
+
+/// Serializes host tests that replace [`RESOURCE_OP_HOOKS`].
+#[cfg(test)]
+pub(crate) static RESOURCE_OP_HOOKS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// Reads the hook table. Volatile so LLVM cannot constant-fold the load
 /// to the default stubs, and so the second read below is a real re-read —
@@ -217,10 +230,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
-
-    /// Serializes the tests that swap the global hook table.
-    static HOOKS_LOCK: Mutex<()> = Mutex::new(());
+    use parking_lot::MutexGuard;
 
     static mut STATIC_CALLS: usize = 0;
     static mut LAST_STATIC_ARGS: (u32, i32, u32, u32) = (0, 0, 0, 0);
@@ -305,8 +315,8 @@ mod tests {
         static_op: Option<unsafe extern "C" fn(u32, i32, u32, u32)>,
         object_op: Option<unsafe extern "C" fn(u32, *mut u8, u32, u32)>,
         acquire: unsafe extern "C" fn(i32) -> *mut u8,
-    ) -> std::sync::MutexGuard<'static, ()> {
-        let guard = HOOKS_LOCK.lock().unwrap();
+    ) -> MutexGuard<'static, ()> {
+        let guard = RESOURCE_OP_HOOKS_TEST_LOCK.lock();
         unsafe {
             STATIC_CALLS = 0;
             LAST_STATIC_ARGS = (0, 0, 0, 0);
@@ -322,6 +332,7 @@ mod tests {
             TRACE_LEN = 0;
             core::ptr::addr_of_mut!(RESOURCE_OP_HOOKS).write(ResourceOpHooks {
                 static_op,
+                add_lock_callback: None,
                 context_id: None,
                 object_op,
                 acquire,
@@ -487,13 +498,14 @@ mod tests {
 
     #[test]
     fn default_hooks_make_every_call_a_no_op() {
-        let guard = HOOKS_LOCK.lock().unwrap();
+        let guard = RESOURCE_OP_HOOKS_TEST_LOCK.lock();
         unsafe {
             let saved = hooks();
             core::ptr::addr_of_mut!(RESOURCE_OP_HOOKS).write(ResourceOpHooks {
                 static_op: None,
                 context_id: None,
                 object_op: None,
+                add_lock_callback: None,
                 acquire: missing_registry_acquire,
                 release: missing_registry_release,
             });
