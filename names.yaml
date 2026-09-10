@@ -18031,7 +18031,7 @@ functions:
     renames:
       param_1/r0/r4: reader_slot
       uVar1/r2/r0: codepoint
-      FUN_0825d7c4: xml_decode_codepoint_and_reset (unported seam)
+      FUN_0825d7c4: xml_decode_codepoint_and_reset (ported)
       FUN_0825d2fc: xml_codepoint_is_whitespace (unported seam)
     notes: >-
       Raw ARM is exactly 0x0825d354..0x0825d383: save reader_slot,
@@ -18041,9 +18041,29 @@ functions:
       including the 0xffffffff decoder error/EOF sentinel. The confirmed
       extent ends before 0x0825d384. Decoding every B/BL word in osos.dec
       finds 26 static bl call sites: 25 unconditional plus one blne at
-      0x0825d180. Neither direct callee was already ported (checked in
-      this ledger), so util/xml_skip_whitespace.rs uses a volatile seam:
-      fixed raw addresses on target and test-installed host callbacks.
+      0x0825d180. The decode-and-reset callee is ported in
+      util/xml_decode_codepoint_and_reset.rs. The remaining direct callee
+      uses a volatile seam: its fixed raw address on target and a
+      test-installed host callback.
+  - address: 0x0825d7c4
+    ghidra: FUN_0825d7c4
+    name: xml_decode_codepoint_and_reset
+    size: 24
+    sig: "unsigned int xml_decode_codepoint_and_reset(struct XmlUtf8Decoder *reader)"
+    module: util/xml_decode_codepoint_and_reset
+    status: ported
+    renames:
+      param_1/r0/r4: reader
+      FUN_0825d5dc: xml_decode_codepoint (unported seam)
+      param_1+4: reader.state
+    notes: >-
+      Raw ARM is exactly 0x0825d7c4..0x0825d7db: save reader, bl
+      0x0825d5dc, set reader.state (+4) to zero, and return the decoder's
+      unchanged r0 result. The following function starts at 0x0825d7dc.
+      Decoding every B/BL word in osos.dec finds 11 static bl call sites:
+      all 11 are unconditional, with no predicated direct calls. The decoder
+      at 0x0825d5dc is not yet ported; this port reaches its fixed firmware
+      address on target and uses a volatile callback seam in host tests.
   - address: 0x08276d64
     ghidra: FUN_08276d64
     name: utf8_strcmp_safe
