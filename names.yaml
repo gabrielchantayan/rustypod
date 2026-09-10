@@ -37219,6 +37219,43 @@ functions:
       0xff, copies while the destination vtable remains unchanged, and
       that source == destination is safe.
 
+  - address: 0x082a3dcc
+    ghidra: FUN_082a3dcc
+    name: scoped_context_is_valid
+    size: 72
+    sig: "u32 scoped_context_is_valid(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_0806b410: scoped_context_owner_validity
+      iVar1: owner_validity
+      iVar2: registry
+    notes: >-
+      Raw extent is exactly 72 bytes, 0x082a3dcc through 0x082a3e10:
+      the following word, 0x082a3e14, begins a separately linked
+      push {r4,r5,lr} function, so there is no literal pool. Decoding
+      every ARM B/BL word in osos.dec finds ten direct calls, all plain
+      unconditional BL (0x080aa544, 0x0813d794, 0x0817c224,
+      0x0817dfc4, 0x081b5df0, 0x081fd158, 0x081fd1cc, 0x08208b3c,
+      0x08208bb4, and 0x08226bc0), with zero predicated forms and no
+      direct tail B sites. It always calls the unported 0x0806b410
+      owner predicate first. When that returns nonzero, it reads the
+      ScopedContext service_context +0xf60 registry slot and, if that
+      registry exists, returns 1 immediately when its +0x18 word equals
+      this->registry_token. Every other path returns whether the full
+      owner_valid word is nonzero. The Rust port keeps the existing
+      repr(C) ScopedContext model and aligned word-indexed service and
+      registry accesses, avoiding host pointer-width overlap. The
+      0x0806b410 callee has no existing ledger entry, so its target
+      default dispatches to the ROM address while host tests install a
+      recording seam; no callee identity is invented. The helper's raw
+      code rejects NULL, then checks a dereferenced object's +0x04 word
+      against the literal tdat tag, but it remains unported. Host tests
+      prove the helper runs before every fallback, matching live registry
+      token succeeds, and absent or mismatched registry tokens fail when
+      owner_valid is zero.
+
   - address: 0x082a3fc4
     ghidra: FUN_082a3fc4
     name: scoped_context_owner_flags_bit_3
