@@ -41,9 +41,9 @@
 //! - 0x08037e10 -> 0x220042b4 `rom_sem_signal` — kernel semaphore signal
 //!   (sem_signal @ 0x08056710 tail-branches here). 25 bl callers
 //!   (binary-verified), r0 = id.
-//! - 0x08037e18 -> 0x2200418c — gateway stub, service 4 (r0 arg plus r1/r2
-//!   at call sites, e.g. (1, ptr, 5) from the alarm/timer create path
-//!   @ 0x08047dd0). 11 callers.
+//! - 0x08037e18 -> 0x2200418c `mailbox_send_gateway_mode1` — RTXC
+//!   mailbox-send service-4 body, ported in
+//!   `kernel/mailbox_send_gateway_mode1.rs`. 11 callers.
 //! - 0x08037e20 -> 0x22001edc `kernel_ticks` — returns the kernel tick
 //!   counter (`ldr r0, =anchor; ldr r0, [r0, #0xb4]; bx lr`). 47 callers,
 //!   several adding the result to a duration (deadline arithmetic).
@@ -124,24 +124,25 @@
 //!
 //! ## ROM-dispatch design (deviation, by necessity — same as sync_sem.rs)
 //!
-//! The original thunks tail-jump straight into the mask ROM. The port
-//! cannot do that and stay testable/linkable, so every wrapper dispatches
-//! indirectly through the `ROM_KERNEL` fn-pointer table (the ROM_KERNEL
-//! hook pattern of sync_sem.rs / malloc_rt.rs). The table defaults to
-//! documented stubs that spin: a ROM call made before the table is
-//! installed can produce neither a value nor a side effect, and hanging
-//! surfaces the misconfiguration (same philosophy as `missing_wait` in
-//! sync_sem.rs). Host tests swap in a mock kernel. Consequences:
+//! The remaining original thunks tail-jump straight into the mask ROM. The
+//! ports cannot do that and stay testable/linkable, so those wrappers dispatch
+//! indirectly through the `ROM_KERNEL` fn-pointer table (the ROM_KERNEL hook
+//! pattern of sync_sem.rs / malloc_rt.rs). The table defaults to documented
+//! stubs that spin: a ROM call made before the table is installed can produce
+//! neither a value nor a side effect, and hanging surfaces the
+//! misconfiguration (same philosophy as `missing_wait` in sync_sem.rs). Host
+//! tests swap in a mock kernel. The directly ported
+//! `mailbox_send_gateway_mode1` target at slot 3 instead calls the existing
+//! message-dispatch seam; it is intentionally absent from this table.
 //!
-//! - Codegen deviates from the original on purpose: an indirect call
-//!   through the table instead of the 8-byte `ldr pc` veneer. match.py
-//!   diffs are expected and structural, as with the heap veneers.
-//! - The original veneer forwards ALL of r0-r3 to the ROM untouched; the
-//!   port forwards only the documented arguments of each service. Where a
-//!   ROM stub reads a stacked fifth argument (0x22003c98, 0x22003be8) the
-//!   port models it as a fifth Rust argument, which the ARM ABI also
-//!   passes on the stack.
-//! - Every wrapper returns the r0 result word (`usize`) even where no
+//! - Codegen for foreign targets deviates on purpose: an indirect call
+//!   through the table instead of the 8-byte `ldr pc` veneer. match.py diffs
+//!   are expected and structural, as with the heap veneers.
+//! - The original veneer forwards ALL of r0-r3 to the ROM untouched; foreign
+//!   wrappers forward only their documented arguments. Where a ROM stub reads
+//!   a stacked fifth argument (0x22003c98, 0x22003be8) the port models it as
+//!   a fifth Rust argument, which the ARM ABI also passes on the stack.
+//! - Every foreign wrapper returns the r0 result word (`usize`) even where no
 //!   caller consumes it — the veneer physically passes r0 back.
 //! - Symbol exports (`#[no_mangle]`) are gated to the firmware target (`target_os = "none"`)
 //!   (sync_sem.rs precedent: avoids dyld interposition surprises when the
@@ -160,13 +161,16 @@ pub const THUNK_STRIDE: u32 = 8;
 /// Number of thunk wrappers in the span (and in ROM_KERNEL / THUNK_CATALOG).
 pub const WRAPPER_COUNT: usize = 32;
 
+/// Number of still-foreign ROM entries represented by [`RomThunkOps`].
+const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 1;
+
 /// The full span catalog: (thunk address, ROM target, exported symbol),
 /// in address order. Verified word-for-word against osos.dec.
 pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037e00, 0x220000d4, "rom_memmove"),
     (0x08037e08, 0x22003fd0, "rom_sem_wait"),
     (0x08037e10, 0x220042b4, "rom_sem_signal"),
-    (0x08037e18, 0x2200418c, "rom_svc_2200418c"),
+    (0x08037e18, 0x2200418c, "mailbox_send_gateway_mode1"),
     (0x08037e20, 0x22001edc, "kernel_ticks"),
     (0x08037e28, 0x22003b6c, "rom_svc_22003b6c"),
     (0x08037e30, 0x22003c98, "rom_svc_22003c98"),
@@ -197,9 +201,9 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037ef8, 0x22003b08, "rom_svc_22003b08"),
 ];
 
-/// Indirect dispatch table for the 32 ROM services of this span (see the
-/// module header for the design and the default-stub behavior). Field order
-/// matches THUNK_CATALOG.
+/// Indirect dispatch table for the remaining foreign ROM services in this
+/// span. The directly ported mailbox-send target at thunk slot 3 is not a
+/// table entry.
 #[derive(Clone, Copy)]
 pub struct RomThunkOps {
     /// ROM memmove @ 0x220000d4: (dst, src, len) -> dst.
@@ -208,8 +212,6 @@ pub struct RomThunkOps {
     pub rom_sem_wait: unsafe extern "C" fn(sem: usize) -> usize,
     /// ROM semaphore signal @ 0x220042b4: kernel semaphore id in r0.
     pub rom_sem_signal: unsafe extern "C" fn(sem: usize) -> usize,
-    /// ROM gateway service 4 @ 0x2200418c.
-    pub rom_svc_2200418c: unsafe extern "C" fn(a0: usize, a1: usize, a2: usize) -> usize,
     /// Kernel tick counter @ 0x22001edc (anchor + 0xb4).
     pub kernel_ticks: unsafe extern "C" fn() -> usize,
     /// ROM gateway service 23 @ 0x22003b6c.
@@ -315,7 +317,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     rom_memmove: missing3,
     rom_sem_wait: missing1,
     rom_sem_signal: missing1,
-    rom_svc_2200418c: missing3,
     kernel_ticks: missing0,
     rom_svc_22003b6c: missing0,
     rom_svc_22003c98: missing5,
@@ -549,14 +550,6 @@ pub unsafe extern "C" fn kernel_sem17_wait() -> usize {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_sem17_signal() -> usize {
     rom_sem_signal(0x11)
-}
-
-/// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
-/// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
-/// @ 0x08047dd0.
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn rom_svc_2200418c(a0: usize, a1: usize, a2: usize) -> usize {
-    (hook!(rom_svc_2200418c))(a0, a1, a2)
 }
 
 /// kernel_ticks — original: thunk @ 0x08037e20 -> ROM 0x22001edc. Returns
@@ -911,7 +904,6 @@ pub(crate) mod tests {
     mock3!(m00, 0); // rom_memmove
     mock1!(m01, 1); // rom_sem_wait
     mock1!(m02, 2); // rom_sem_signal
-    mock3!(m03, 3); // rom_svc_2200418c
     mock0!(m04, 4); // kernel_ticks
     mock0!(m05, 5); // rom_svc_22003b6c
     mock5!(m06, 6); // rom_svc_22003c98
@@ -945,7 +937,6 @@ pub(crate) mod tests {
         rom_memmove: m00,
         rom_sem_wait: m01,
         rom_sem_signal: m02,
-        rom_svc_2200418c: m03,
         kernel_ticks: m04,
         rom_svc_22003b6c: m05,
         rom_svc_22003c98: m06,
@@ -1044,12 +1035,13 @@ pub(crate) mod tests {
         }
     }
 
-    /// The table really holds 32 independent fn pointers.
+    /// The table holds one independent fn pointer for each foreign thunk
+    /// target; mailbox_send_gateway_mode1 is directly ported instead.
     #[test]
-    fn ops_table_has_32_slots() {
+    fn ops_table_excludes_directly_ported_mailbox_send() {
         assert_eq!(
             core::mem::size_of::<RomThunkOps>(),
-            WRAPPER_COUNT * core::mem::size_of::<usize>()
+            ROM_HOOK_COUNT * core::mem::size_of::<usize>()
         );
     }
 
@@ -1170,7 +1162,6 @@ pub(crate) mod tests {
             check(0, rom_memmove(0x1000, 0x2000, 0x40), &[0x1000, 0x2000, 0x40]);
             check(1, rom_sem_wait(0x11), &[0x11]);
             check(2, rom_sem_signal(0x12), &[0x12]);
-            check(3, rom_svc_2200418c(1, 0x3000, 5), &[1, 0x3000, 5]);
             check(4, kernel_ticks(), &[]);
             check(5, rom_svc_22003b6c(), &[]);
             check(6, rom_svc_22003c98(1, 2, 3, 4, 5), &[1, 2, 3, 4, 5]);
@@ -1202,13 +1193,14 @@ pub(crate) mod tests {
         }
     }
 
-    /// The catalog's slot order matches the RomThunkOps field order: the
-    /// name in slot i is the wrapper that calls hook i (spot-checked here
-    /// against the semantic anchors; the mock table construction covers the
-    /// rest at compile time).
+    /// The catalog includes the directly ported mailbox-send target and its
+    /// remaining names still identify the corresponding foreign wrappers.
     #[test]
     fn catalog_names_match_exported_wrappers() {
-        assert_eq!(THUNK_CATALOG[9], (0x08037e48, 0x22003ea0, "task_lock"));
+        assert_eq!(
+            THUNK_CATALOG[3],
+            (0x08037e18, 0x2200418c, "mailbox_send_gateway_mode1")
+        );
         assert_eq!(THUNK_CATALOG[10], (0x08037e50, 0x2200408c, "task_unlock"));
         assert_eq!(THUNK_CATALOG[4], (0x08037e20, 0x22001edc, "kernel_ticks"));
         assert_eq!(THUNK_CATALOG[23], (0x08037eb8, 0x22001ee8, "tick_elapsed"));

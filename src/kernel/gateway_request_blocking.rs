@@ -2,11 +2,12 @@
 //! 64 `bl` call sites in osos 2.0.4) — the tag-0 member of the four-helper
 //! request family @ 0x08047edc..0x0804805c (tags 3/2/4/0), sibling of
 //! kernel/gateway_request.rs's gateway_request_timed. Like the rest of the
-//! family it posts a 5-word request frame to the ROM kernel gateway's
-//! service-4 stub (`rom_svc_2200418c`, thunk 0x08037e18 -> ROM 0x2200418c)
-//! serialized by kernel semaphore 9 (`rom_sem_wait`/`rom_sem_signal`, thunks
-//! 0x08037e08 / 0x08037e10 -> ROM 0x22003fd0 / 0x220042b4 — the ported veneer
-//! family in kernel/task_lock.rs).
+//! family it posts a 5-word request frame through the ported mode-1
+//! mailbox-send gateway body (`mailbox_send_gateway_mode1`, thunk
+//! 0x08037e18 -> ROM 0x2200418c) serialized by kernel semaphore 9
+//! (`rom_sem_wait`/`rom_sem_signal`, thunks 0x08037e08 / 0x08037e10 ->
+//! ROM 0x22003fd0 / 0x220042b4 — the ported veneer family in
+//! kernel/task_lock.rs).
 //!
 //! Algorithm (verified against osos.asm @ 0x08048000..0x08048064): first call
 //! the gateway-ready wait FUN_080c8304 (see GATEWAY_READY_WAIT below), then
@@ -14,33 +15,35 @@
 //! `stmia` pairs), tag byte 0 stored at word 4 (frame layout matches Ghidra's
 //! {local_30..local_10}), word 5 = the payload argument, words 6 and 7
 //! untouched padding, word 8 = the flag argument. Then, holding kernel
-//! semaphore 9, call the service-4 gateway stub with (kind = 1, &frame,
-//! FRAME_WORDS = 5) and release the semaphore. The payload/flag words sit
-//! past the declared frame — the ROM service reads them through the same
-//! pointer beyond the announced count. Call-site survey (all 64 `bl` sites):
+//! semaphore 9, call the mode-1 mailbox-send gateway body with (mailbox = 1,
+//! message = &frame, priority = 5, semaphore = 6) and release the semaphore.
+//! The body preserves the fourth argument as the RTXC request's semaphore
+//! word. The payload/flag words sit immediately past the declared frame — the
+//! ROM service reads them through the same pointer beyond the announced count.
+//! Call-site survey (all 64 `bl` sites):
 //! r0 (payload) is a small id (0x1, 0x8, 0x10, 0x23, 0x30, 0x33, 0x37
 //! observed) or an object pointer; r1 (flag) is an immediate 0 or 1 at every
 //! immediate site (a handful pass a register).
 //!
-//! Deviations from the original (the task_lock.rs ROM-dispatch design, same
-//! as gateway_request.rs):
+//! Deviations from the original:
 //! - The leading ready wait FUN_080c8304 is ported below as
 //!   gateway_wait_ready, but the call still dispatches through the
 //!   GATEWAY_READY_WAIT slot below, whose documented spin default stays
 //!   installed until gateway_wait_ready (or the stock function) is wired
 //!   in — the observable_set_observer dispatch-boundary precedent.
-//! - The three ROM calls dispatch indirectly through task_lock::ROM_KERNEL
+//! - The semaphore calls dispatch indirectly through task_lock::ROM_KERNEL
 //!   instead of `bl` to the 8-byte thunk veneers; match.py diffs are
 //!   structural, as with the rest of the family.
-//! - The original loads r3 = 6 (the service-4 sub-op) before the gateway
-//!   call; the ported veneer `rom_svc_2200418c` forwards only r0-r2, so
-//!   the sub-op cannot ride along — visible to match.py as a missing
-//!   `mov r3, #6`. Same caveat as every client of that veneer.
+//! - The ported mode-1 mailbox-send body calls the existing
+//!   message_dispatch_veneer seam rather than the original direct PC-relative
+//!   `bl`; unlike the stale task_lock veneer, it preserves the raw `r3 = 6`
+//!   as its fourth argument.
 //! - The padding words 6 and 7 (sp+0x18/sp+0x1c in the original) are zeroed
 //!   rather than left uninitialized; nothing declared reads them.
 //! - The original leaves the semaphore-signal result in r0; no caller
 //!   consumes it, so the port returns nothing.
 
+use crate::kernel::mailbox_send_gateway_mode1::mailbox_send_gateway_mode1;
 use crate::kernel::task;
 use crate::kernel::task_lock;
 
@@ -51,11 +54,14 @@ const REQUEST_LOCK: usize = 9;
 /// Tag byte identifying this helper's request flavor (frame word 4).
 const REQUEST_TAG: usize = 0;
 
-/// First argument to the service-4 gateway stub (`mov r0, #1`).
-const SERVICE4_KIND: usize = 1;
+/// Mailbox passed to the mode-1 mailbox-send gateway body (`mov r0, #1`).
+const GATEWAY_MAILBOX: u32 = 1;
 
-/// Declared frame length in words, the stub's third argument (`mov r2, #5`).
-const FRAME_WORDS: usize = 5;
+/// Priority passed to the mode-1 mailbox-send gateway body (`mov r2, #5`).
+const GATEWAY_PRIORITY: u32 = 5;
+
+/// Semaphore passed to the mode-1 mailbox-send gateway body (`mov r3, #6`).
+const GATEWAY_SEMAPHORE: u32 = 6;
 
 /// Total stack words the original writes/addresses: the declared frame,
 /// the payload word past it, two padding words, and the trailing flag.
@@ -141,9 +147,9 @@ pub unsafe extern "C" fn gateway_wait_ready() {
 
 /// gateway_request_blocking — original: FUN_08048000 @ 0x08048000 (100
 /// bytes). Waits for the ROM gateway to report ready, then posts a tag-0
-/// request frame carrying `payload` and `flag` to the ROM kernel gateway's
-/// service-4 stub, serialized by kernel semaphore 9. See the module header
-/// for the frame layout and deviations.
+/// request frame carrying `payload` and `flag` through the ROM kernel's
+/// mode-1 mailbox-send gateway body, serialized by kernel semaphore 9. See
+/// the module header for the frame layout and deviations.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn gateway_request_blocking(payload: usize, flag: usize) {
     (ready_wait())();
@@ -159,7 +165,12 @@ pub unsafe extern "C" fn gateway_request_blocking(payload: usize, flag: usize) {
         flag,
     ];
     task_lock::rom_sem_wait(REQUEST_LOCK);
-    task_lock::rom_svc_2200418c(SERVICE4_KIND, frame.as_ptr() as usize, FRAME_WORDS);
+    mailbox_send_gateway_mode1(
+        GATEWAY_MAILBOX,
+        frame.as_ptr() as usize as u32,
+        GATEWAY_PRIORITY,
+        GATEWAY_SEMAPHORE,
+    );
     task_lock::rom_sem_signal(REQUEST_LOCK);
 }
 
@@ -168,19 +179,23 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::kernel::task_lock::tests::OPS_LOCK;
+    use crate::runtime::message_dispatch_veneer::tests::DISPATCH_OPS_LOCK;
+    use crate::runtime::message_dispatch_veneer::{
+        MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
+    };
     use core::ptr::{addr_of, addr_of_mut};
+    use parking_lot::MutexGuard as ParkingLotMutexGuard;
     use std::sync::MutexGuard;
     use std::vec::Vec;
     use task_lock::RomThunkOps;
 
-    /// Ordered log of the calls the helper makes (ready wait plus the ROM
-    /// calls), plus the frame contents the service-4 mock reads back
-    /// through the frame pointer.
+    /// Ordered log of the ready wait, semaphore calls, and actual dispatch.
+    /// The RTXC request's deliberately uninitialized words are never read.
     static mut CALL_LOG: Vec<&'static str> = Vec::new();
     static mut WAIT_ARG: usize = 0;
     static mut SIGNAL_ARG: usize = 0;
-    static mut SVC_ARGS: [usize; 3] = [0; 3];
-    static mut FRAME_READ: [usize; FRAME_SLOTS] = [0; FRAME_SLOTS];
+    static mut DISPATCH_COUNT: usize = 0;
+    static mut DISPATCH_REQUEST: [u32; 9] = [0; 9];
 
     unsafe extern "C" fn mock_ready_wait() {
         (*addr_of_mut!(CALL_LOG)).push("ready");
@@ -192,15 +207,12 @@ mod tests {
         0
     }
 
-    unsafe extern "C" fn mock_svc4(a0: usize, a1: usize, a2: usize) -> usize {
-        (*addr_of_mut!(CALL_LOG)).push("svc4");
-        *addr_of_mut!(SVC_ARGS) = [a0, a1, a2];
-        // The ROM service reads the request through the frame pointer;
-        // capture everything the original wrote around it.
-        for (i, slot) in (*addr_of_mut!(FRAME_READ)).iter_mut().enumerate() {
-            *slot = (a1 as *const usize).add(i).read_volatile();
+    unsafe extern "C" fn mock_dispatch(request: *mut u32) {
+        (*addr_of_mut!(CALL_LOG)).push("dispatch");
+        *addr_of_mut!(DISPATCH_COUNT) += 1;
+        for word in [0, 2, 3, 5, 6, 7, 8] {
+            (*addr_of_mut!(DISPATCH_REQUEST))[word] = request.add(word).read();
         }
-        0
     }
 
     unsafe extern "C" fn mock_sem_signal(sem: usize) -> usize {
@@ -209,87 +221,104 @@ mod tests {
         0
     }
 
-    /// Installs the mocks in task_lock's ROM_KERNEL and the ready-wait slot
-    /// (OPS_LOCK serializes the swap against task_lock's, csem's and
-    /// gateway_request's tests), returns the guard and the saved state.
-    fn install() -> (MutexGuard<'static, ()>, RomThunkOps, unsafe extern "C" fn()) {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    /// Restores the ready-wait, semaphore, and dispatch seams and releases
+    /// their shared test locks.
+    struct Installed {
+        _dispatch_lock: ParkingLotMutexGuard<'static, ()>,
+        _kernel_lock: MutexGuard<'static, ()>,
+        saved_kernel: RomThunkOps,
+        saved_dispatch: MessageDispatchVeneerOps,
+        saved_ready_wait: unsafe extern "C" fn(),
+    }
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            unsafe {
+                addr_of_mut!(task_lock::ROM_KERNEL).write(self.saved_kernel);
+                MESSAGE_DISPATCH_VENEER_OPS = self.saved_dispatch;
+                addr_of_mut!(GATEWAY_READY_WAIT).write(self.saved_ready_wait);
+            }
+        }
+    }
+
+    /// Installs ready-wait and semaphore mocks plus a recorder at the
+    /// established message-dispatch veneer seam.
+    fn install() -> Installed {
+        let dispatch_lock = DISPATCH_OPS_LOCK.lock();
+        let kernel_lock = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*addr_of_mut!(CALL_LOG)).clear();
             *addr_of_mut!(WAIT_ARG) = 0;
             *addr_of_mut!(SIGNAL_ARG) = 0;
-            *addr_of_mut!(SVC_ARGS) = [0; 3];
-            *addr_of_mut!(FRAME_READ) = [0; FRAME_SLOTS];
-            let saved_ops = core::ptr::read_volatile(addr_of!(task_lock::ROM_KERNEL));
-            let mut patched = saved_ops;
-            patched.rom_sem_wait = mock_sem_wait;
-            patched.rom_svc_2200418c = mock_svc4;
-            patched.rom_sem_signal = mock_sem_signal;
-            addr_of_mut!(task_lock::ROM_KERNEL).write(patched);
-            let saved_wait = core::ptr::read_volatile(addr_of!(GATEWAY_READY_WAIT));
+            *addr_of_mut!(DISPATCH_COUNT) = 0;
+            *addr_of_mut!(DISPATCH_REQUEST) = [0; 9];
+
+            let saved_kernel = core::ptr::read_volatile(addr_of!(task_lock::ROM_KERNEL));
+            let mut patched_kernel = saved_kernel;
+            patched_kernel.rom_sem_wait = mock_sem_wait;
+            patched_kernel.rom_sem_signal = mock_sem_signal;
+            addr_of_mut!(task_lock::ROM_KERNEL).write(patched_kernel);
+
+            let saved_dispatch = MESSAGE_DISPATCH_VENEER_OPS;
+            MESSAGE_DISPATCH_VENEER_OPS = MessageDispatchVeneerOps {
+                dispatch: mock_dispatch,
+            };
+            let saved_ready_wait = core::ptr::read_volatile(addr_of!(GATEWAY_READY_WAIT));
             addr_of_mut!(GATEWAY_READY_WAIT).write(mock_ready_wait);
-            (guard, saved_ops, saved_wait)
+            Installed {
+                _dispatch_lock: dispatch_lock,
+                _kernel_lock: kernel_lock,
+                saved_kernel,
+                saved_dispatch,
+                saved_ready_wait,
+            }
         }
     }
 
-    fn restore(state: (MutexGuard<'static, ()>, RomThunkOps, unsafe extern "C" fn())) {
-        unsafe {
-            addr_of_mut!(task_lock::ROM_KERNEL).write(state.1);
-            addr_of_mut!(GATEWAY_READY_WAIT).write(state.2);
-        }
-        drop(state);
-    }
-
-    /// The full contract: the ready wait runs first, then semaphore 9
-    /// brackets the service-4 call, the stub gets (1, &frame, 5), and the
-    /// stack frame carries {0,0,0,0, tag 0, payload, pad, pad, flag}.
+    /// The ready wait runs first, then semaphore 9 brackets exactly one
+    /// mode-1 mailbox-send dispatch. Its sparse RTXC request preserves the
+    /// raw fourth argument as word 2: `{4, _, 6, 1, _, 5, frame, 1, 0}`.
     #[test]
-    fn posts_tag0_frame_under_semaphore_9_after_ready_wait() {
-        let state = install();
+    fn posts_tag0_frame_through_mode1_gateway_under_semaphore_9_after_ready_wait() {
+        let _installed = install();
         unsafe {
             gateway_request_blocking(0x080c_1234, 1);
-            assert_eq!(*addr_of!(CALL_LOG), ["ready", "wait", "svc4", "signal"]);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["ready", "wait", "dispatch", "signal"]
+            );
             assert_eq!(*addr_of!(WAIT_ARG), 9);
             assert_eq!(*addr_of!(SIGNAL_ARG), 9);
-            let svc = *addr_of!(SVC_ARGS);
-            assert_eq!(svc[0], 1, "service-4 kind");
-            assert_ne!(svc[1], 0, "frame pointer");
-            assert_eq!(svc[2], 5, "declared frame words");
-            assert_eq!(
-                *addr_of!(FRAME_READ),
-                [0, 0, 0, 0, 0, 0x080c_1234, 0, 0, 1],
-                "frame layout"
-            );
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 1, "exactly one dispatch");
+            let request = *addr_of!(DISPATCH_REQUEST);
+            assert_eq!(request[0], 4, "mailbox-send selector");
+            assert_eq!(request[2], 6, "preserved r3 semaphore");
+            assert_eq!(request[3], 1, "mailbox");
+            assert_eq!(request[5], 5, "priority");
+            assert_ne!(request[6], 0, "frame pointer");
+            assert_eq!(request[7], 1, "mode");
+            assert_eq!(request[8], 0, "trailing mode word");
         }
-        restore(state);
     }
 
-    /// The payload lands at frame word 5 and the flag at word 8 with the
-    /// pad words zeroed; each call re-runs the ready wait and re-brackets
-    /// the semaphore.
+    /// Each request reruns the ready wait and independently brackets one
+    /// actual dispatcher call.
     #[test]
-    fn payload_and_flag_land_in_their_frame_words() {
-        let state = install();
+    fn every_blocking_request_rebrackets_the_dispatcher() {
+        let _installed = install();
         unsafe {
             gateway_request_blocking(0, 0);
-            assert_eq!(*addr_of!(FRAME_READ), [0; FRAME_SLOTS]);
             gateway_request_blocking(0x33, 0);
-            assert_eq!((*addr_of!(FRAME_READ))[5], 0x33);
-            assert_eq!((*addr_of!(FRAME_READ))[8], 0);
             gateway_request_blocking(0xdead_beef, 1);
-            assert_eq!((*addr_of!(FRAME_READ))[5], 0xdead_beef);
-            assert_eq!((*addr_of!(FRAME_READ))[8], 1);
-            assert_eq!((*addr_of!(FRAME_READ))[6], 0, "pad word 6");
-            assert_eq!((*addr_of!(FRAME_READ))[7], 0, "pad word 7");
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 3);
             assert_eq!(
                 *addr_of!(CALL_LOG),
                 [
-                    "ready", "wait", "svc4", "signal", "ready", "wait", "svc4", "signal", "ready",
-                    "wait", "svc4", "signal"
+                    "ready", "wait", "dispatch", "signal", "ready", "wait", "dispatch", "signal",
+                    "ready", "wait", "dispatch", "signal"
                 ]
             );
         }
-        restore(state);
     }
 
     // --- gateway_wait_ready (FUN_080c8304) -------------------------------

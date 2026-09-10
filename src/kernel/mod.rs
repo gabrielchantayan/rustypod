@@ -11,6 +11,7 @@ pub mod gateway_request_blocking;
 pub mod irq;
 pub mod irq_binding;
 pub mod kobj;
+pub mod mailbox_send_gateway_mode1;
 pub mod mqueue;
 pub mod os_heap;
 pub mod mutex_handoff;
