@@ -143,6 +143,9 @@ pub mod hints {
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const ARTWORK_SLOT_AVAILABILITY: usize = 0x7e00_0000;
+    // 0x7100_0000: dedicated to ui/coordinate_origin's raw-u32 display
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const COORDINATE_OWNER_DISPLAY_LAYER: usize = 0x7100_0000;
     // 0x7300_0000: dedicated to crypto/bio_ctrl's raw-u32 BIO/method
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BIO_CTRL: usize = 0x7300_0000;
