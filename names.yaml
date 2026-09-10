@@ -60946,3 +60946,43 @@ functions:
       wraparound. match.py reports the same null-handle branch, one-byte
       read setup/call, post-call counter increment, byte load, and return;
       its larger Rust frame and different local-byte alignment are expected.
+
+  # --- draw-state text-width adapter ---
+  - address: 0x08263384
+    ghidra: FUN_08263384
+    name: draw_state_text_width
+    size: 20
+    sig: "u32 draw_state_text_width(DrawStateTextMeasureFields *draw_state, const u8 *text)"
+    module: cxx/draw_state_text_width
+    status: ported
+    renames:
+      param_1/r0: draw_state
+      param_2/r1: text
+      "*(u32 *)(draw_state + 0x1c)": renderer
+      "draw_state + 0x20": layout_state
+      "*(u8 *)(draw_state + 0x28)": layout_flags
+      FUN_080878d8: text_width_accumulator
+    notes: >-
+      Raw ARM establishes the complete five-word extent:
+      mov r2,r0; ldrb r3,[r0,#0x28]; ldr r0,[r0,#0x1c];
+      add r2,r2,#0x20; b 0x080878d8. The next separately linked entry begins
+      at 0x08263398, so Ghidra's 20-byte extent has neither a trailing literal
+      nor swallowed sibling. This is a draw-state adapter, not a veneer: it
+      preserves the caller's NUL-terminated text pointer in r1 while selecting
+      the draw-state renderer word, embedded two-word layout state, and
+      zero-extended layout-flags byte before tail-calling the shared text-width
+      accumulator. The unported 0x080878d8 accumulator initializes its layout
+      iterator, decodes permissive UTF-8 codepoints through the already ported
+      0x0807a0c8 decoder, and sums their glyph widths through 0x08080f18.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly 10 inbound
+      direct bl instructions, all unconditional and no plain B:
+      0x08140f48, 0x081b2f84, 0x081b3028, 0x081ea820, 0x081f42f0,
+      0x0820d71c, 0x08263a80, 0x08263a90, 0x08290cb8, and 0x082911ac.
+      No DATA word references 0x08263384, so this adapter is not virtually
+      dispatched. Deliberate implementation deviation: the tail branch becomes
+      a volatile typed boundary to the resident unported accumulator
+      (0x080878d8), which keeps the production ABI and permits host recording.
+      Tests prove the renderer/text/layout-state forwarding, returned width,
+      byte widening of flags (including high bytes discarded by ldrb), and
+      forwarding of a null text pointer without inventing a guard. match.py
+      structurally differs only at the Rust boundary and frame, as expected.
