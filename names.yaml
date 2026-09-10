@@ -44006,6 +44006,36 @@ functions:
       expected): same spill-block / loader-call / flag-test /
       zero-or-query structure; the crate fp frame and LLVM outlining
       the zero path account for the diff.
+  # --- Tagged payload signed-field sum ---
+  - address: 0x082a1d7c
+    ghidra: FUN_082a1d7c
+    name: tagged_payload_signed_field_sum
+    size: 44
+    sig: "i32 tagged_payload_signed_field_sum(const u32 *object)"
+    module: util/tagged_payload_signed_field_sum
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x20: tagged_payload
+      uVar2/r0: untagged_payload
+      sVar1/r0: signed_field_sum
+    notes: >-
+      Raw ARM extent is exactly 44 bytes, from 0x082a1d7c through bx lr at
+      0x082a1da4; the next separately linked function begins at 0x082a1da8.
+      A binary scan of every ARM B/BL word in osos.dec found 10 direct call
+      sites, all unconditional bl (zero predicated forms): 0x08140d00,
+      0x081a1458, 0x081a1474, 0x081ea9a4, 0x081ea9c0, 0x08262e0c,
+      0x08263be4, 0x08263eac, 0x08291158, and 0x0829133c. The callee has no
+      guard for object itself: it loads the target-width word at object+0x20,
+      clears its low tag bit, and returns zero if that produces NULL (so raw
+      words 0 and 1 both return zero). Otherwise it sign-extends and sums the
+      three i16 fields at payload+0x52, +0x54, and +0x56, then truncates the
+      result back to signed i16 via lsl/asr #16. The concrete object and
+      payload types are unrecovered, so the name records only this observed
+      operation. The Rust port deliberately models object pointer fields as
+      u32 target words, retaining the exact +0x20 layout on 64-bit hosts;
+      host tests use a dedicated low-4-GiB fixture and cover tag clearing,
+      signed reads, zero/one payload words, and i16 truncation.
   - address: 0x082a1dbc
     ghidra: FUN_082a1dbc
     name: bitmap_object_read_bounds

@@ -346,6 +346,9 @@ pub mod hints {
     // vector-head and entry fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const OPAQUE_KEYED_COLLECTION_ITEM_AT: usize = 0xfd00_0000;
+    // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
+    // object/payload fixture; mappings never unmap, so no other user may share it.
+    pub const TAGGED_PAYLOAD_SIGNED_FIELD_SUM: usize = 0xfe00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
