@@ -101,6 +101,7 @@ pub mod resource;
 pub mod root_context_f9c_bound;
 pub mod resource_chain;
 pub mod scoped_context;
+pub mod scoped_string_id_record_set;
 pub mod service_manager;
 pub mod service_handler_availability;
 pub mod service_handler_slot_bit_update;
