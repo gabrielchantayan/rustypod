@@ -54,6 +54,8 @@
 
 use core::ptr::addr_of_mut;
 
+use crate::cxx::string::{cxx_string_from_cstr, cxx_string_release};
+use crate::app::string_table::string_table_has_string;
 use crate::drivers::timer::timer_stop;
 
 /// Byte offset of the view's optional timer pointer (`ldr r0, [r0,
@@ -206,14 +208,149 @@ pub unsafe extern "C" fn view_event_apply_mapped_staged_flags(this: *mut u8) -> 
     EVENT_HANDLED
 }
 
+/// Byte offsets of the two localized integer flags written by
+/// [`view_event_apply_localized_flags`].
+const VIEW_LOCALIZED_FLAG_A: usize = 0xb0;
+const VIEW_LOCALIZED_FLAG_B: usize = 0xb1;
+
+/// Resolves retailOS global inputs and the still-unported integer getter
+/// needed by [`view_event_apply_localized_flags`].
+#[derive(Clone, Copy)]
+pub struct ViewLocalizedFlagOps {
+    /// Loads a NUL-terminated key from the configuration object at word 3
+    /// (`+0x0c`) or word 4 (`+0x10`).
+    pub configuration_key: unsafe extern "C" fn(word_index: usize) -> *const u8,
+    /// Loads the localized string-table singleton.
+    pub string_table: unsafe extern "C" fn() -> *mut u8,
+    /// `FUN_08102168`: resolves `key` in `table` then parses its value as
+    /// signed decimal (`"%d"`), returning the resulting 32-bit bit pattern.
+    pub string_table_parse_i32: unsafe extern "C" fn(table: *mut u8, key: *const u32) -> u32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_configuration_key(word_index: usize) -> *const u8 {
+    // `DAT_08219380` appears in the body as literal 0x089cfe4c. Its
+    // pointer fields are target words, so index rather than host byte
+    // offsets preserves the retail 32-bit layout.
+    let configuration = unsafe { (0x089c_fe4c as *const u32).read_volatile() as *const u32 };
+    unsafe { configuration.add(word_index).read() as usize as *const u8 }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_configuration_key(_word_index: usize) -> *const u8 {
+    panic!("view_event_apply_localized_flags requires configuration 0x089cfe4c")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_localized_string_table() -> *mut u8 {
+    // Literal 0x08a79c10 at 0x08219384 is the string-table singleton word.
+    unsafe { (0x08a7_9c10 as *const u32).read_volatile() as usize as *mut u8 }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_localized_string_table() -> *mut u8 {
+    panic!("view_event_apply_localized_flags requires string table 0x08a79c10")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_parse_i32(table: *mut u8, key: *const u32) -> u32 {
+    let parse: unsafe extern "C" fn(*mut u8, *const u32) -> u32 =
+        unsafe { core::mem::transmute(0x0810_2168usize) };
+    unsafe { parse(table, key) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_parse_i32(_table: *mut u8, _key: *const u32) -> u32 {
+    panic!("view_event_apply_localized_flags requires string getter 0x08102168")
+}
+
+#[cfg(target_os = "none")]
+pub const DEFAULT_VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = ViewLocalizedFlagOps {
+    configuration_key: firmware_configuration_key,
+    string_table: firmware_localized_string_table,
+    string_table_parse_i32: firmware_string_table_parse_i32,
+};
+
+#[cfg(not(target_os = "none"))]
+pub const DEFAULT_VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = ViewLocalizedFlagOps {
+    configuration_key: missing_configuration_key,
+    string_table: missing_localized_string_table,
+    string_table_parse_i32: missing_string_table_parse_i32,
+};
+
+/// Active dependencies of [`view_event_apply_localized_flags`]. Target
+/// defaults read the real globals and tail into the remaining retail parser;
+/// host tests install fixtures.
+pub static mut VIEW_LOCALIZED_FLAG_OPS: ViewLocalizedFlagOps = DEFAULT_VIEW_LOCALIZED_FLAG_OPS;
+
+/// view_event_apply_localized_flags — original: `FUN_0826087c` @
+/// **0x0826087c** (a 4-byte `b 0x082192a0` entry veneer; its 224-byte
+/// reached body is 0x082192a0..0x0821937c, followed by two literal words).
+///
+/// Decoding every aligned ARM B/BL word in `osos.dec` finds **11 direct
+/// `bl` call sites**, all unconditional, no predicated forms, and one
+/// data-word reference at 0x089b06cc (a virtual-method table entry).
+///
+/// When `event` is non-NULL, builds temporary COW strings from configuration
+/// keys at `DAT_08219380 + 0x0c` and `+0x10`; for each key present in the
+/// `DAT_08219384` localization table, resolves/parses its `"%d"` value and
+/// stores its low byte at `this + 0xb0` or `+0xb1`, then releases the
+/// temporary. It finally delegates to
+/// [`view_event_apply_mapped_staged_flags`] and returns that handled verdict.
+///
+/// Deliberate deviations: host-safe key/global access uses an ops table
+/// because retail pointers are 32-bit words, and unported `FUN_08102168`
+/// remains a volatile dispatch seam. The COW constructors/releases and
+/// membership test are direct Rust ports. Rust represents the final tail
+/// branch as a call.
+///
+/// # Safety
+///
+/// `this` must be valid through `+0xb1`; when `event` is non-NULL, every
+/// configured key and the string table must satisfy the called helpers'
+/// unchecked-pointer contracts, exactly as in retailOS.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_event_apply_localized_flags(
+    this: *mut u8,
+    event: *mut u8,
+) -> u32 {
+    if !event.is_null() {
+        let ops = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VIEW_LOCALIZED_FLAG_OPS)) };
+        let table = unsafe { (ops.string_table)() };
+
+        let mut first_key = core::ptr::null_mut();
+        unsafe { cxx_string_from_cstr(&mut first_key, (ops.configuration_key)(3)) };
+        if unsafe { string_table_has_string(table, (&first_key as *const *mut u8).cast()) } != 0 {
+            unsafe {
+                this.add(VIEW_LOCALIZED_FLAG_A)
+                    .write((ops.string_table_parse_i32)(table, (&first_key as *const *mut u8).cast()) as u8);
+            }
+        }
+        unsafe { cxx_string_release(&mut first_key) };
+
+        let mut second_key = core::ptr::null_mut();
+        unsafe { cxx_string_from_cstr(&mut second_key, (ops.configuration_key)(4)) };
+        if unsafe { string_table_has_string(table, (&second_key as *const *mut u8).cast()) } != 0 {
+            unsafe {
+                this.add(VIEW_LOCALIZED_FLAG_B)
+                    .write((ops.string_table_parse_i32)(table, (&second_key as *const *mut u8).cast()) as u8);
+            }
+        }
+        unsafe { cxx_string_release(&mut second_key) };
+    }
+    unsafe { view_event_apply_mapped_staged_flags(this) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
+    use crate::app::string_table::{StringTableOps, STRING_TABLE_OPS};
     use crate::drivers::timer::{TimerOps, TIMER_OPS, TIMER_STATE_RUNNING, TIMER_STATE_STOPPED};
     use crate::testing::{
-        hints, note_missing_u32_fixture, try_map_u32_slab, TIMER_OPS_TEST_LOCK,
-        VIEW_EVENT_OPS_TEST_LOCK as VIEW_LOCK,
+        hints, note_missing_u32_fixture, try_map_u32_slab, STRING_TABLE_OPS_TEST_LOCK,
+        TIMER_OPS_TEST_LOCK, VIEW_EVENT_OPS_TEST_LOCK as VIEW_LOCK,
     };
     use std::ptr::{addr_of, addr_of_mut};
     use std::sync::{LazyLock, MutexGuard};
@@ -483,6 +620,169 @@ mod tests {
                 std::vec![view()],
                 "the original view pointer reaches the helper"
             );
+        }
+        restore(guard);
+    }
+
+    const LOCALIZED_SLAB_LEN: usize = 0x1000;
+    const LOCALIZED_HEADER_CURRENT: usize = 0x100;
+    const LOCALIZED_HEADER_FALLBACK: usize = 0x120;
+    const LOCALIZED_NODE: usize = 0x200;
+    const LOCALIZED_REP_SIZE: usize = 0x300;
+
+    static LOCALIZED_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::VIEW_EVENT_LOCALIZED_FLAGS, LOCALIZED_SLAB_LEN)
+            .map(|pointer| pointer as usize)
+    });
+    static mut LOCALIZED_TABLE: usize = 0;
+    static mut LOCALIZED_FIND_INDEX: usize = 0;
+    static mut LOCALIZED_FIND_RESULTS: [u32; 3] = [0; 3];
+    static mut LOCALIZED_PARSE_CALLS: u32 = 0;
+
+    static FIRST_LOCALIZED_KEY: &[u8] = b"\0";
+    static SECOND_LOCALIZED_KEY: &[u8] = b"\0";
+
+    #[repr(align(4))]
+    struct LocalizedView([u8; VIEW_LOCALIZED_FLAG_B + 1]);
+
+    unsafe extern "C" fn localized_configuration_key(word_index: usize) -> *const u8 {
+        match word_index {
+            3 => FIRST_LOCALIZED_KEY.as_ptr(),
+            4 => SECOND_LOCALIZED_KEY.as_ptr(),
+            _ => core::ptr::null(),
+        }
+    }
+
+    unsafe extern "C" fn localized_string_table() -> *mut u8 {
+        unsafe { *addr_of!(LOCALIZED_TABLE) as *mut u8 }
+    }
+
+    unsafe extern "C" fn localized_find(out: *mut u32, _map: *mut u8, _key: *const u32) {
+        unsafe {
+            out.write((*addr_of!(LOCALIZED_FIND_RESULTS))[*addr_of!(LOCALIZED_FIND_INDEX)]);
+            *addr_of_mut!(LOCALIZED_FIND_INDEX) += 1;
+        }
+    }
+
+    unsafe extern "C" fn localized_string_empty(string: *const u32) -> u32 {
+        unsafe {
+            (((string.read() as usize - 4) as *const u32).read() == 0) as u32
+        }
+    }
+
+    unsafe extern "C" fn localized_parse_i32(_table: *mut u8, _key: *const u32) -> u32 {
+        unsafe {
+            *addr_of_mut!(LOCALIZED_PARSE_CALLS) += 1;
+        }
+        0x1234
+    }
+
+    struct LocalizedSeamRestore {
+        localized_flags: ViewLocalizedFlagOps,
+        string_table: StringTableOps,
+        view_event: ViewEventOps,
+    }
+
+    impl Drop for LocalizedSeamRestore {
+        fn drop(&mut self) {
+            unsafe {
+                addr_of_mut!(VIEW_LOCALIZED_FLAG_OPS).write_volatile(self.localized_flags);
+                addr_of_mut!(STRING_TABLE_OPS).write_volatile(self.string_table);
+                addr_of_mut!(VIEW_EVENT_OPS).write_volatile(self.view_event);
+            }
+        }
+    }
+
+    unsafe fn install_localized_seams(table: *mut u8) -> LocalizedSeamRestore {
+        let restore = LocalizedSeamRestore {
+            localized_flags: addr_of!(VIEW_LOCALIZED_FLAG_OPS).read_volatile(),
+            string_table: addr_of!(STRING_TABLE_OPS).read_volatile(),
+            view_event: addr_of!(VIEW_EVENT_OPS).read_volatile(),
+        };
+        *addr_of_mut!(LOCALIZED_TABLE) = table as usize;
+        *addr_of_mut!(LOCALIZED_FIND_INDEX) = 0;
+        *addr_of_mut!(LOCALIZED_PARSE_CALLS) = 0;
+        addr_of_mut!(VIEW_LOCALIZED_FLAG_OPS).write_volatile(ViewLocalizedFlagOps {
+            configuration_key: localized_configuration_key,
+            string_table: localized_string_table,
+            string_table_parse_i32: localized_parse_i32,
+        });
+        addr_of_mut!(STRING_TABLE_OPS).write_volatile(StringTableOps {
+            find: localized_find,
+            iter_eq: crate::cxx::templates::iterator_equal,
+            string_empty: localized_string_empty,
+        });
+        let mut event_ops = restore.view_event;
+        event_ops.apply_mapped_staged_flags = recording_mapped_apply;
+        addr_of_mut!(VIEW_EVENT_OPS).write_volatile(event_ops);
+        restore
+    }
+
+    fn localized_table_fixture() -> Option<*mut u8> {
+        let table = (*LOCALIZED_SLAB)? as *mut u8;
+        unsafe {
+            table.write_bytes(0, LOCALIZED_SLAB_LEN);
+            let word = |offset: usize| table.add(offset).cast::<u32>();
+            word(0x10).write(table.add(LOCALIZED_HEADER_CURRENT) as usize as u32);
+            word(0x48).write(table.add(LOCALIZED_HEADER_FALLBACK) as usize as u32);
+            word(LOCALIZED_NODE + 0x14).write(table.add(LOCALIZED_REP_SIZE + 4) as usize as u32);
+            word(LOCALIZED_REP_SIZE).write(1);
+            *addr_of_mut!(LOCALIZED_FIND_RESULTS) = [
+                table.add(LOCALIZED_NODE) as usize as u32,
+                table.add(LOCALIZED_HEADER_CURRENT) as usize as u32,
+                table.add(LOCALIZED_HEADER_FALLBACK) as usize as u32,
+            ];
+        }
+        Some(table)
+    }
+
+    #[test]
+    fn localized_flags_only_parse_present_keys_then_apply_mapped_flags() {
+        let _view_lock = VIEW_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _string_table_lock = STRING_TABLE_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(table) = localized_table_fixture() else {
+            assert!(note_missing_u32_fixture("app::view_event::localized_flags"));
+            return;
+        };
+        let _restore = unsafe { install_localized_seams(table) };
+        let mut view = LocalizedView([0; VIEW_LOCALIZED_FLAG_B + 1]);
+        view.0[VIEW_LOCALIZED_FLAG_B] = 0xa5;
+        unsafe {
+            (*addr_of_mut!(CALLS)).clear();
+            (*addr_of_mut!(SEEN)).clear();
+            assert_eq!(
+                view_event_apply_localized_flags(view.0.as_mut_ptr(), 1usize as *mut u8),
+                EVENT_HANDLED
+            );
+            assert_eq!(view.0[VIEW_LOCALIZED_FLAG_A], 0x34, "low byte of parsed value");
+            assert_eq!(
+                view.0[VIEW_LOCALIZED_FLAG_B], 0xa5,
+                "the missing second key leaves its flag unchanged"
+            );
+            assert_eq!(*addr_of!(LOCALIZED_PARSE_CALLS), 1);
+            assert_eq!(*addr_of!(LOCALIZED_FIND_INDEX), 3, "hit then miss/fallback");
+            assert_eq!(*addr_of!(CALLS), std::vec!["mapped apply"]);
+            assert_eq!(*addr_of!(SEEN), std::vec![view.0.as_mut_ptr()]);
+        }
+    }
+
+    #[test]
+    fn localized_flags_skip_configuration_for_a_null_event() {
+        let guard = mock(0);
+        let mut view = LocalizedView([0; VIEW_LOCALIZED_FLAG_B + 1]);
+        view.0[VIEW_LOCALIZED_FLAG_A] = 0x5a;
+        view.0[VIEW_LOCALIZED_FLAG_B] = 0xa5;
+        unsafe {
+            assert_eq!(
+                view_event_apply_localized_flags(view.0.as_mut_ptr(), core::ptr::null_mut()),
+                EVENT_HANDLED
+            );
+            assert_eq!(view.0[VIEW_LOCALIZED_FLAG_A], 0x5a);
+            assert_eq!(view.0[VIEW_LOCALIZED_FLAG_B], 0xa5);
+            assert_eq!(*addr_of!(CALLS), std::vec!["mapped apply"]);
+            assert_eq!(*addr_of!(SEEN), std::vec![view.0.as_mut_ptr()]);
         }
         restore(guard);
     }

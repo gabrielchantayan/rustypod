@@ -732,12 +732,13 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, STRING_TABLE_OPS_TEST_LOCK,
+    };
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     /// Restores the seam table even if a test panics mid-run.
     struct SeamGuard;
@@ -751,7 +752,7 @@ mod tests {
     }
 
     fn lock() -> (MutexGuard<'static, ()>, SeamGuard) {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = STRING_TABLE_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         (guard, SeamGuard)
     }
 
