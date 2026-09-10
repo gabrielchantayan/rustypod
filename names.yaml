@@ -20193,6 +20193,29 @@ functions:
       a slot; the neighboring copy/release helpers 0x083b50e4 / 0x083b524c
       retain and release that cell. Direct application callers compare member
       slot +0x894 with a temporary slot before replacing or forwarding it.
+  # --- shared-cell handle slot comparison, secondary call-site cluster ---
+  - address: 0x083b51a8
+    ghidra: FUN_083b51a8
+    name: shared_cell_slot_ne_secondary
+    size: 20
+    sig: "bool shared_cell_slot_ne_secondary(const SharedCellSlot *left, const SharedCellSlot *right)"
+    module: cxx/value_compare
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+    notes: >-
+      Raw ARM extent is 20 bytes, from 0x083b51a8 through 0x083b51b8, ending
+      immediately before the distinct sibling at 0x083b51bc. It loads each
+      shared-cell handle's 32-bit cell-pointer word and returns false for
+      equal words or true for unequal words. It does not check either slot
+      pointer for NULL, write either slot, or dereference either cell. A full
+      decode of every ARM B/BL word in osos.dec found exactly 11 incoming
+      calls: all are unconditional BL, with zero predicated BL forms and zero
+      direct tail branches. It is semantically identical to
+      shared_cell_slot_ne at 0x083b5120 but retained as a distinct callable
+      Rust symbol in a target-only text section; that linker-preservation
+      detail is the only implementation deviation.
   # --- shared-cell handle constructor sibling ---
   - address: 0x083b5134
     ghidra: FUN_083b5134
