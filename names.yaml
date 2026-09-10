@@ -35207,6 +35207,32 @@ functions:
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  - address: 0x08138d8c
+    ghidra: FUN_08138d8c
+    name: service_handler_state_is_ready
+    size: 52
+    sig: "u32 service_handler_state_is_ready(void *manager, i32 selector)"
+    module: app/service_handler_availability
+    renames:
+      param_1/r0: manager (ignored on the normal path)
+      param_2/r1: selector
+      DAT_08138dbc: service_handler_lifecycle_records (0x08ad0f34; 0x114-byte records)
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is 52 bytes, 0x08138d8c..0x08138dc0: twelve ARM
+      instructions plus literal 0x08ad0f34 at 0x08138dbc. Ghidra's
+      reported 48 bytes omits that literal; 0x08138dc0 (`sub r2,r1,#1`)
+      begins the distinct next function. The signed selector comparison
+      admits negative selectors and terminates selectors >=3 via heap_panic;
+      the normal path ignores r0, reads the signed byte at
+      table + selector*0x114, then returns the unsigned test
+      `(state - 4) <= 2`, so only states 4..=6 are ready. Decoding every ARM
+      B/BL word in osos.dec finds 12 direct unconditional bl call sites, no
+      predicated bl and no tail branches. Host builds use a five-record
+      fixture centred on selector zero so tests can safely exercise selector
+      -1; firmware reads 0x08ad0f34 directly.
+
   - address: 0x0818e624
     ghidra: FUN_0818e624
     name: service_handler_is_available
