@@ -58590,3 +58590,36 @@ functions:
       or direct data-word references. Every caller overwrites r0 immediately,
       so the incidental ARM index return is deliberately not exposed. No
       behavioral deviations.
+
+  - address: 0x08197a30
+    ghidra: FUN_08197a30
+    name: scoped_string_id_record_set_destroy
+    size: 68
+    sig: "ScopedStringIdRecordSet *scoped_string_id_record_set_destroy(ScopedStringIdRecordSet *this)"
+    module: app/scoped_string_id_record_set
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08197a70: SCOPED_STRING_ID_RECORD_SET_DESCRIPTOR_ADDRESS
+    notes: >-
+      Raw osos.dec extent is 68 bytes: sixteen code words at
+      0x08197a30..0x08197a6c plus the literal-pool word at 0x08197a70
+      (= 0x08989b60); the next separately linked function starts at
+      0x08197a74. Decoding every ARM B/BL word finds 11 direct call sites,
+      all unconditional BL, with no predicated forms. This is the plain
+      non-deleting destructor of an otherwise unidentified 0x6c-byte
+      aggregate: it stores the descriptor literal at +0x00, destroys five
+      StringIdRecord members in reverse order at +0x58, +0x48, +0x38, +0x28,
+      and +0x18 through the already ported string_id_record_destroy
+      (0x08258c80), drops the 20-byte ContextScope member at +0x04 through
+      the already ported context_scope_drop (0x08284188), then returns this.
+      The +0x68 trailing word is not touched. The raw descriptor target is
+      the NUL-terminated string
+      TransitionAddonI28TSilverMediaListCntlr_GeniusE; it does not establish
+      a semantic class identity, so the port uses a structural name and models
+      that string with a static rather than storing an absolute host pointer.
+      No replaceable dispatch seam was introduced. match.py structural review
+      found reverse member calls at +0x58/+0x48/+0x38/+0x28/+0x18 and the
+      retained scope call; the latter is a volatile function-pointer read and
+      `blx` only because LLVM would otherwise remove the direct call to its
+      proven-empty body.
