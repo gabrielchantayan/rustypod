@@ -78,6 +78,7 @@ pub mod own_target_notification_post;
 pub mod pair_header_destruct;
 pub mod parse_result;
 pub mod path_exists;
+pub mod path_component_query;
 pub mod path_object_construct;
 pub mod path_probe;
 pub mod pending_event_take;
