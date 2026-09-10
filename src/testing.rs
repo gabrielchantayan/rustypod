@@ -308,6 +308,10 @@ pub mod hints {
     // raw-u32 dispatcher and command-record fixture; mappings never unmap,
     // so no other user may share this hint.
     pub const COMMAND_DISPATCH_BY_NAME_SINGLE_ARG: usize = 0x9600_0000;
+    // 0xf500_0000: dedicated to app/application_string_registry's raw-u32
+    // provider/registry fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const APPLICATION_STRING_REGISTRY: usize = 0xf500_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

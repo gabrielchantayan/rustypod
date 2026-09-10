@@ -27,8 +27,21 @@ const APPLICATION_RESOURCE_PROVIDER_ADDRESS: *const *mut u8 =
 #[cfg(not(target_os = "none"))]
 static mut HOST_APPLICATION_RESOURCE_PROVIDER: *mut u8 = ptr::null_mut();
 
+/// Serializes host tests that replace the global provider word.
+#[cfg(test)]
+pub(crate) static APPLICATION_RESOURCE_PROVIDER_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+/// Installs a host test's replacement for the runtime provider word.
+#[cfg(test)]
+pub(crate) unsafe fn install_application_resource_provider_for_test(provider: *mut u8) {
+    unsafe {
+        ptr::addr_of_mut!(HOST_APPLICATION_RESOURCE_PROVIDER).write(provider);
+    }
+}
+
 #[inline(always)]
-unsafe fn application_resource_provider_word() -> *mut u8 {
+pub(crate) unsafe fn application_resource_provider_word() -> *mut u8 {
     #[cfg(target_os = "none")]
     {
         ptr::read_volatile(APPLICATION_RESOURCE_PROVIDER_ADDRESS)
@@ -57,27 +70,33 @@ pub unsafe extern "C" fn application_resource_provider() -> *mut u8 {
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::MutexGuard;
 
-    static PROVIDER_LOCK: Mutex<()> = Mutex::new(());
+    fn install_provider() -> MutexGuard<'static, ()> {
+        let guard = APPLICATION_RESOURCE_PROVIDER_TEST_LOCK.lock();
+        unsafe {
+            install_application_resource_provider_for_test(ptr::null_mut());
+        }
+        guard
+    }
 
     #[test]
     fn returns_null_before_provider_initialization() {
-        let _guard = PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = install_provider();
         unsafe {
-            HOST_APPLICATION_RESOURCE_PROVIDER = ptr::null_mut();
             assert!(application_resource_provider().is_null());
         }
     }
 
     #[test]
     fn returns_the_provider_word_verbatim_without_dereferencing_it() {
-        let _guard = PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = install_provider();
         let provider = 0x2468_ace0usize as *mut u8;
         unsafe {
-            HOST_APPLICATION_RESOURCE_PROVIDER = provider;
+            install_application_resource_provider_for_test(provider);
             assert_eq!(application_resource_provider(), provider);
-            HOST_APPLICATION_RESOURCE_PROVIDER = ptr::null_mut();
+            install_application_resource_provider_for_test(ptr::null_mut());
         }
     }
 }
+
