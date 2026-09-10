@@ -81,11 +81,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! - The four-instruction tag guard at 0x080a7714 (returns one iff `pool`
-//!   is non-NULL and its first word is [`CRTS_TAG`]) is inlined rather
-//!   than given a dispatch seam, following `util/tagged_counter.rs` and
-//!   `util/crts_object.rs`; that callee has no port and no identity is
-//!   invented for it.
+//! - The separately linked 0x080a7714 tag guard is ported as
+//!   [`crate::util::crts_tag::crts_has_tag`] and called directly, without a
+//!   replaceable dispatch seam.
 //! - The two handle fields are typed as native double pointers instead of
 //!   the `u32` words `util/crts_object.rs` uses. That module only compares
 //!   and forwards them; this one dereferences them, and a native pointer
@@ -98,11 +96,11 @@
 
 use core::mem::{offset_of, MaybeUninit};
 use core::ptr;
+use crate::util::crts_tag::crts_has_tag;
+#[cfg(test)]
+use crate::util::crts_tag::CRTS_TAG;
 
-/// First word required of a pool, checked by the inlined 0x080a7714 guard.
-/// The ARM literal is the character constant `'strc'`; in memory its bytes
-/// read `"crts"`.
-pub const CRTS_TAG: u32 = 0x7374_7263;
+
 
 /// Failure status of every rejected release (`mvn r0, #0x31`). This is
 /// classic Mac OS `paramErr`.
@@ -197,7 +195,7 @@ const _: () = {
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_pool_release(pool: *mut StringPool, id: i32) -> i32 {
-    if pool.is_null() || (*pool).tag != CRTS_TAG {
+    if crts_has_tag(pool.cast()) == 0 {
         return PARAM_ERR;
     }
     if (*pool).lock_depth != 0 {

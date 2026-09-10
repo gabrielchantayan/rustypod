@@ -14,12 +14,13 @@
 //! conditional call is flag-gated by its caller, while this function's own
 //! tag guard accepts NULL.
 //!
-//! Deliberate deviation: 0x080a7714 is not independently ported, so its
-//! four-instruction observable tag guard is inlined here rather than exposed
-//! through a dispatch seam. No identity is assigned to that callee or tag.
+//! The tag guard at 0x080a7714 is ported as
+//! [`crate::util::crts_tag::crts_has_tag`] and called directly. It needs no
+//! replaceable dispatch seam.
 
-/// First word accepted by the unported guard at 0x080a7714.
-const CRTS_TAG: u32 = 0x7374_7263;
+use crate::util::crts_tag::crts_has_tag;
+#[cfg(test)]
+use crate::util::crts_tag::CRTS_TAG;
 
 /// The verified prefix used by `tagged_counter_try_decrement`.
 ///
@@ -41,7 +42,7 @@ pub struct TaggedCounter {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn tagged_counter_try_decrement(counter: *mut TaggedCounter) -> i32 {
-    if counter.is_null() || (*counter).tag != CRTS_TAG {
+    if crts_has_tag(counter.cast()) == 0 {
         return -0x32;
     }
 
@@ -63,13 +64,13 @@ pub unsafe extern "C" fn tagged_counter_try_decrement(counter: *mut TaggedCounte
 /// Invalid tags and NULL return -50 without touching the object.
 ///
 /// The raw function ends at 0x0808e190, before the separately entered
-/// function at 0x0808e194. Deliberate deviation: the unported guard at
-/// 0x080a7714 is inlined rather than assigned an invented identity or given
-/// a dispatch seam.
+/// function at 0x0808e194. The shared tag check calls the ported
+/// [`crate::util::crts_tag::crts_has_tag`] directly; it has no replaceable
+/// dispatch seam.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn tagged_counter_try_increment(counter: *mut TaggedCounter) -> i32 {
-    if counter.is_null() || (*counter).tag != CRTS_TAG {
+    if crts_has_tag(counter.cast()) == 0 {
         return -0x32;
     }
 

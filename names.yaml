@@ -52191,17 +52191,15 @@ functions:
       DAT_080a7738: crts_tag
     notes: >-
       Raw ARM extent is exactly 0x0809f744..0x0809f76c; the next separately
-      entered function starts at 0x0809f770. The call to the unported
-      0x080a7714 is a NULL-safe first-word equality guard against
-      0x73747263 (in-memory bytes "crts"); its semantic identity is not
-      established. On a valid object, the signed word at +0x30 decrements
-      only when strictly positive, returning 0; invalid tag, NULL, zero, and
-      negative all return -50 unchanged. Decoding every ARM B/BL word in
-      osos.dec finds 28 direct call sites: 27 plain bl and one bleq at
-      0x0806c074, with no tail branches. Deliberate deviation: the verified
-      four-instruction observable guard is inlined because 0x080a7714 has no
-      port; no dispatch seam or callee identity is invented. Host tests cover
-      NULL, wrong tag, zero, negative, one, and i32::MAX counters.
+      entered function starts at 0x0809f770. The call to 0x080a7714 is a
+      NULL-safe first-word equality guard against 0x73747263 (in-memory bytes
+      "crts"); its semantic identity is not established. On a valid object,
+      the signed word at +0x30 decrements only when strictly positive,
+      returning 0; invalid tag, NULL, zero, and negative all return -50
+      unchanged. Decoding every ARM B/BL word in osos.dec finds 28 direct call
+      sites: 27 plain bl and one bleq at 0x0806c074, with no tail branches.
+      The port calls crts_has_tag directly without a dispatch seam. Host tests
+      cover NULL, wrong tag, zero, negative, one, and i32::MAX counters.
 
   # --- retailOS flag-gated opaque payload accessor ---
   - address: 0x08054454
@@ -53401,7 +53399,7 @@ functions:
     status: ported
     renames:
       param_1/r0: this
-      FUN_080a7714: inlined "crts" tag guard
+      FUN_080a7714: crts_has_tag
       FUN_0805d028: MEMH_HANDLE_DESTROY seam
       FUN_080d86b0: CRTS_TABLE_TEARDOWN seam
       FUN_0805cfb4: bzero (ported, via CRTS_OBJECT_ZERO slot)
@@ -54239,7 +54237,7 @@ functions:
       param_2/r1: counted (u16-length-prefixed UTF-16 string)
       param_3/r2: id_out
       FUN_080b4e60: string_pool_store seam (replace-and-intern wrapper, unported)
-      FUN_080a7714: '"crts" tag guard (runs inside the tail target)'
+      FUN_080a7714: crts_has_tag (called by the unported tail target)
       FUN_080c5efc: string_pool_release (runs inside the tail target)
       FUN_080c5a94: string_pool_intern seam (the tail target's own tail target, unported)
     notes: >-
@@ -54302,7 +54300,7 @@ functions:
     renames:
       param_1/r0-r4: pool
       param_2/r1-r5: id
-      FUN_080a7714: inlined "crts" tag guard
+      FUN_080a7714: crts_has_tag
       "*(pool+0x04)": flags (bit 0 FLAG_REFCOUNTED, bit 6 FLAG_IMMUTABLE)
       "*(pool+0x08)": entries (Handle to PoolEntry[])
       "*(pool+0x0c)": refcounts (Handle to i32[])
@@ -54347,10 +54345,8 @@ functions:
       so a released entry is not returned to the free list here - the
       compaction pass 0x080a64bc that the allocator runs before its next
       allocation consumes reclaimable_bytes instead. Deliberate deviations
-      - the four-instruction tag guard at 0x080a7714 is inlined rather
-      than stubbed behind a dispatch seam, following the
-      util/tagged_counter.rs and util/crts_object.rs precedent, and no
-      identity is invented for that callee; the two handle fields are
+      - the four-instruction tag guard at 0x080a7714 calls the ported
+      crts_has_tag directly, without a dispatch seam; the two handle fields are
       typed as native double pointers rather than the u32 words
       util/crts_object.rs uses, because that module only compares and
       forwards them while this one dereferences them - native pointers
@@ -58708,3 +58704,31 @@ functions:
       unconditional plain bl, with no predicated forms or tail branches. The
       tag does not recover a class identity, so the port uses a structural name
       and introduces no dispatch seam. No behavioral deviations.
+
+  # --- "crts" first-word tag guard ---
+  - address: 0x080a7714
+    ghidra: FUN_080a7714
+    name: crts_has_tag
+    size: 36
+    sig: "u32 crts_has_tag(const u32 *object)"
+    module: util/crts_tag
+    status: ported
+    renames:
+      param_1/r0: object
+      DAT_080a7738: CRTS_TAG (0x73747263, in-memory bytes "crts")
+      r0: is_crts_tag
+    notes: >-
+      Raw osos.dec confirms the 36-byte code body: nine code words from
+      0x080a7714 through bx lr at 0x080a7734, followed by the owned 4-byte
+      0x73747263 literal-pool word at 0x080a7738; the separately linked next
+      function starts at 0x080a773c. It returns one only when object is
+      non-NULL and its first aligned word equals the literal, otherwise zero;
+      neither path writes object. Whole-image ARM B/BL-immediate decoding
+      found exactly 11 inbound direct call sites, all unconditional plain bl:
+      0x080760b4, 0x0808e174, 0x0809e168, 0x0809f74c, 0x080b4340,
+      0x080b4e74, 0x080c5ab4, 0x080c5f08, 0x080d6dc8, 0x080d86bc, and
+      0x080e27f0. There are no predicated BL forms or direct B tail callers,
+      and no aligned image word equals the entry address, so it is not
+      directly dispatched virtually. No behavioral deviations. Host tests
+      cover NULL, exact and adjacent non-matching tags, preservation of the
+      second word, and absence of mutation.

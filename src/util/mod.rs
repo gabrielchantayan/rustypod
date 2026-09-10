@@ -14,6 +14,7 @@ pub mod counted_wstr_eq;
 pub mod clock_pair;
 pub mod crc32;
 pub mod crts_object;
+pub mod crts_tag;
 pub mod cursor;
 pub mod encoded_word_block;
 pub mod encoded_word_block_shift;

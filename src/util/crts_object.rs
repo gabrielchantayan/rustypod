@@ -41,9 +41,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! - The verified four-instruction tag guard of 0x080a7714 is inlined
-//!   rather than given a dispatch seam (the util/tagged_counter.rs
-//!   precedent); no identity is invented for it.
+//! - The verified tag guard at 0x080a7714 is ported as
+//!   [`crate::util::crts_tag::crts_has_tag`] and called directly; it needs no
+//!   replaceable dispatch seam.
 //! - The two unported non-trivial callees dispatch through the volatile
 //!   seams [`MEMH_HANDLE_DESTROY`] and [`CRTS_TABLE_TEARDOWN`]; their
 //!   target defaults transmute the retail addresses 0x0805d028 and
@@ -58,9 +58,11 @@
 //!   4-byte field spacing on both the 32-bit target and 64-bit hosts.
 
 use core::ptr;
+use crate::util::crts_tag::crts_has_tag;
+#[cfg(test)]
+use crate::util::crts_tag::CRTS_TAG;
 
-/// First word required by the inlined 0x080a7714 guard (`"crts"` bytes).
-pub const CRTS_TAG: u32 = 0x7374_7263;
+
 
 /// Failure status (`mvn r0, #0x31` in the original): invalid tag or NULL.
 pub const ERR_INVALID_OBJECT: i32 = -50;
@@ -177,7 +179,7 @@ unsafe fn crts_object_zero() -> unsafe extern "C" fn(*mut u8, i32) {
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn crts_object_destroy(this: *mut CrtsObject) -> i32 {
-    if this.is_null() || (*this).tag != CRTS_TAG {
+    if crts_has_tag(this.cast()) == 0 {
         return ERR_INVALID_OBJECT;
     }
     let handle = (*this).handle_08;
