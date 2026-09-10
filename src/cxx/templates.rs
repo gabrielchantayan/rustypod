@@ -470,6 +470,29 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 pub unsafe extern "C" fn equal_deref(a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() == b.read())
 }
+/// iterator_equal — original: `FUN_083cf848` @ 0x083cf848 (24 bytes;
+/// 11 `bl` call sites, all unconditional, binary-verified: 0x08101c60,
+/// 0x08101e54, 0x08101f1c, 0x08101f60, 0x083c4258, 0x083c46c8,
+/// 0x083c46e4, 0x083c4768, 0x083c4848, 0x083c4938, 0x083db5bc).
+///
+/// Returns 1 when the current-node words in two checked iterators are
+/// equal, otherwise 0. The raw body performs exactly two aligned loads,
+/// compares them, and materializes the equality result:
+/// `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1`.
+/// The string-table callers use this as the header-node miss test.
+///
+/// This is byte-identical to [`equal_deref`] @ 0x083cf968, but remains a
+/// distinct export because 0x083cf848 is independently hookable. Its
+/// dedicated section prevents LLVM from folding their bodies together.
+///
+/// # Safety
+/// `a` and `b` must be valid, aligned `u32` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iterator_equal")]
+#[inline(never)]
+pub unsafe extern "C" fn iterator_equal(a: *const u32, b: *const u32) -> u32 {
+    u32::from(a.read() == b.read())
+}
 
 /// container_is_empty — original: `FUN_083d75e0` @ 0x083d75e0
 /// (16 bytes; 15 `bl` call sites there, 92 across all 9 byte-identical
@@ -2442,6 +2465,23 @@ mod tests {
             assert_eq!(equal_deref(cursor.as_ptr(), end.as_ptr()), 1,
                 "trailing words are never read");
             assert_eq!(equal_deref(cursor.as_ptr(), other.as_ptr()), 0);
+        }
+    }
+
+    #[test]
+    fn iterator_equal_compares_only_iterator_words() {
+        unsafe {
+            let cursor = [0x083d_0000u32, 0xaaaa_aaaa];
+            let same_node = [0x083d_0000u32, 0xbbbb_bbbb];
+            let next_node = [0x083d_0004u32, 0xaaaa_aaaa];
+            let zero: u32 = 0;
+            let max: u32 = u32::MAX;
+
+            assert_eq!(iterator_equal(cursor.as_ptr(), same_node.as_ptr()), 1,
+                "equal values compare equal even at distinct addresses");
+            assert_eq!(iterator_equal(cursor.as_ptr(), next_node.as_ptr()), 0);
+            assert_eq!(iterator_equal(&zero, &max), 0);
+            assert_eq!(iterator_equal(&max, &max), 1, "all word bits are compared");
         }
     }
 
