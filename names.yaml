@@ -26178,6 +26178,38 @@ functions:
       str r4, [r0, #4]; mvn r0, #0`), only the LLVM frame prologue
       differs - the same shape as ata_handle_first_word_or_minus1.
 
+  - address: 0x08043828
+    ghidra: FUN_08043828
+    name: crypto_add_lock
+    size: 132
+    sig: "i32 crypto_add_lock(i32 *pointer, i32 amount, i32 lock_type, const u8 *file, i32 line)"
+    module: crypto/add_lock
+    status: ported
+    vars: {param_1: pointer, param_2: amount, param_3: lock_type, param_4: file, param_5: line, DAT_080438ac: services_descriptor}
+    renames:
+      FUN_08043b94: resource_op_dispatch
+      DAT_080438ac: services_descriptor
+    notes: >-
+      SIZE VERIFIED - 128 bytes of code at 0x08043828..0x080438a7 plus the
+      trailing services-descriptor literal 0x08a0e93c @ 0x080438ac; the
+      separately linked resource_registry_release starts at 0x080438b0, so
+      Ghidra's 132-byte extent is exact. All 12 call sites are unconditional
+      `bl` forms (0x0803d3e8, 0x0804ae8c, 0x0805f758, 0x0805f860,
+      0x08062394, 0x0806fce8, 0x0806fd1c, 0x0806fda8, 0x08070f28,
+      0x08071008, 0x080a8f4c, 0x082b4c1c), with zero predicated `bl` forms
+      and zero tail `b` sites, counted by decoding every ARM B/BL word in
+      osos.dec. No image data word holds 0x08043828, so it is not dispatched
+      virtually. The services-descriptor slot +0x0c is a whole-operation
+      callback: when non-NULL it receives (pointer, amount, lock_type, file,
+      line) and its return value passes through. The shipping slot is NULL,
+      so the fallback calls resource_op_dispatch(9, lock_type, file, line),
+      stores `*pointer + amount` with ARM's wrapping 32-bit arithmetic,
+      calls resource_op_dispatch(10, lock_type, file, line), and returns the
+      stored value. Deviation: descriptor slot +0x0c is
+      RESOURCE_OP_HOOKS.add_lock_callback and the direct resource calls are
+      ordinary Rust calls; host tests prove both fallback lock arguments and
+      order, i32 wrapping, and callback replacement without fallback writes.
+
   - address: 0x08043c18
     ghidra: FUN_08043c18
     name: traced_alloc
@@ -52943,7 +52975,7 @@ functions:
     status: ported
     renames:
       param_1/r0: pkey
-      FUN_08043828: crypto_add_lock (unported; EVP_PKEY_OPS.add_lock seam)
+      FUN_08043828: crypto_add_lock (ported, called directly)
       FUN_08093cbc: evp_pkey_free_it (unported; EVP_PKEY_OPS.free_it seam)
       FUN_08043994: traced_free (ported, called directly - OPENSSL_free)
       FUN_0804aeb4: evp_pkey_new (unported; constructor sibling)
@@ -52967,23 +52999,19 @@ functions:
       (0x080e8424, 0x080f4f68) and 1 `blne` (0x082d4938) - no tail `b`, no
       data word holds the address, so it is never dispatched virtually. The
       predicated sites are caller-side error-path gates, NOT NULL guards:
-      the body carries its own `movs r4,r0 / beq`. Deviations:
-      CRYPTO_add_lock @ 0x08043828 (itself the op-9/op-10
-      resource_op_dispatch bracket around *pointer += amount, with a
-      whole-operation override through the stock-NULL descriptor slot +0x0c
-      of 0x08a0e93c) and EVP_PKEY_free_it are unported, so they ride the
-      EVP_PKEY_OPS seam (the crypto/bn_num_bits.rs shape) - target defaults
-      call the stock bodies in place, host defaults panic until a test
-      installs recorders. Host tests: NULL is a no-op; a shared key only
-      decrements under lock class 10 with amount -1 and NULL/0 debug
-      coordinates; the last reference runs free_it BEFORE traced_free on
-      the same pointer; nonpositive counts (0 -> -1, -7 -> -8) still take
-      the teardown path, proving the signed gate; and the reference word is
-      passed by address (the mock's store lands in the object). match.py
-      against the worktree archive: same NULL guard, same signed >0 gate,
-      same three-call teardown sequence; the diff is the seam's indirect
-      `blx` calls and LLVM's frame-pointer setup. #[inline(never)] for the
-      15 `bl` targets.
+      the body carries its own `movs r4,r0 / beq`. Deviation:
+      EVP_PKEY_free_it remains on the EVP_PKEY_OPS seam (the
+      crypto/bn_num_bits.rs shape) - target calls its stock body in place
+      while host tests install a recorder. CRYPTO_add_lock is now the direct
+      port at 0x08043828, whose shared resource-operation hook table stays
+      at its stock NULL defaults during these tests. Host tests: NULL is a
+      no-op; a shared key drops its reference without teardown; the last
+      reference runs free_it BEFORE traced_free on the same pointer; and
+      nonpositive counts (0 -> -1, -7 -> -8) still take the teardown path,
+      proving the signed gate. match.py against the worktree archive: same
+      NULL guard, same signed >0 gate, same three-call teardown sequence;
+      the diff is the remaining free_it seam and LLVM's frame-pointer setup.
+      #[inline(never)] for the 15 `bl` targets.
   # --- Obfuscated table transform, fixed-selector adapter ---
   - address: 0x0802b488
     ghidra: FUN_0802b488
