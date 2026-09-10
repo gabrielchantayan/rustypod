@@ -58306,3 +58306,34 @@ functions:
       it, so it is intentionally not assigned a semantic role. The string
       table object at 0x08a79c10 is outside the decrypted body and is passed
       unchanged; no identity beyond its observed marker write is inferred.
+
+  # --- Range-state constructor ---
+  - address: 0x081f7278
+    ghidra: FUN_081f7278
+    name: range_state_construct
+    size: 88
+    sig: "RangeState *range_state_construct(RangeState *state, const u32 *initial_value, u32 resolution)"
+    module: util/range_state
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: initial_value
+      param_3/r2: resolution
+      FUN_080fffcc: pair_zero_initialize
+      FUN_081f7194: range_state_configure
+    notes: >-
+      Raw osos.dec confirms the exact 88-byte extent, sixteen ARM words from
+      0x081f7278 through bx lr at 0x081f72cc; the separately linked sibling
+      constructor opens at 0x081f72d0. Ghidra omitted the live r2 argument:
+      after the four pair-zero calls the nonzero path passes it unchanged as
+      the third argument to FUN_081f7194. Decoding every ARM B/BL immediate
+      finds exactly 11 direct callers, all plain unconditional bl and none
+      predicated or tail branches: 0x081272d8, 0x08140390, 0x08140570,
+      0x0817e588, 0x081b4e58, 0x081bb1e0, 0x081bb204, 0x081dc5b0,
+      0x0827dfac, 0x0829b574, and 0x0829b59c. The constructor sets words
+      0 and 1 to zero and u32::MAX respectively, clears four two-word
+      records at words 5..12, leaves words 2..4 and 13..15 intact, and
+      configures only when *initial_value is nonzero. The configuration
+      callee remains stock on firmware; host builds deliberately use an
+      inert test seam because FUN_081f7194 is not ported. No identity beyond
+      the observed range-state initialization is inferred.

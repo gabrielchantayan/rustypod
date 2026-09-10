@@ -45,6 +45,7 @@ pub mod field_query_result_release;
 pub mod record_body_size;
 pub mod record_fields_configure;
 pub mod raster_profile;
+pub mod range_state;
 pub mod service_manager_get;
 pub mod selector_record_address;
 pub mod state_flags;
