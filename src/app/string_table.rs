@@ -418,6 +418,204 @@ pub unsafe extern "C" fn string_table_set_decimal(
         crate::cxx::string::cxx_string_release(value);
     }
 }
+/// `string_table_set_current_hex` — original: `FUN_08101cfc` @
+/// **0x08101cfc** (76 bytes, 0x08101cfc..0x08101d48: code ends with
+/// `pop {r4,r5,pc}` @ 0x08101d44, followed by the `"%lx\0"` literal; the
+/// distinct sibling entry starts at 0x08101d4c). Decoding every aligned ARM
+/// B/BL word in `osos.dec` finds **11 direct `bl` call sites**, all
+/// unconditional; there are zero predicated forms, `b` references, and
+/// data-word references.
+///
+/// Renders `value` through `sprintf(buffer, "%lx", value)` into the
+/// original's 512-byte stack buffer, constructs a temporary COW string from
+/// that text with `cxx_string_from_cstr` @ 0x083d8b5c, assigns it to `key`
+/// in the current string table through `FUN_08101da0`, and releases the
+/// temporary with `cxx_string_release` @ 0x083d8b04. There is no NULL guard
+/// on any argument.
+///
+/// Deliberate deviation: the Rust `sprintf` veneer accepts an explicit
+/// va-list pointer, so `&value` replaces the original variadic r2 word.
+/// `FUN_08101da0` remains the existing volatile assignment seam: its target
+/// default is the verified firmware load address and its host default
+/// requires a test-installed recorder.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_current_hex(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: u32,
+) {
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let arguments = &value as *const u32;
+    unsafe {
+        crate::printf::printf_api::sprintf(buffer, b"%lx\0".as_ptr(), arguments);
+    }
+
+    let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
+    unsafe {
+        (string_table_assign_ops().assign)(table, key, text);
+        crate::cxx::string::cxx_string_release(text);
+    }
+}
+
+#[cfg(test)]
+mod set_current_hex_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::printf::printf_api::{PrintfEngineFn, PRINTF_ENGINE};
+    use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+    use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+    use core::ffi::c_void;
+    use core::ptr;
+    use std::ffi::CStr;
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut ASSIGNMENT: Option<(usize, Vec<u8>, Vec<u8>)> = None;
+
+    const ARENA_SIZE: usize = 1024;
+
+    #[repr(C, align(8))]
+    struct Arena([u8; ARENA_SIZE]);
+
+    static mut ARENA: Arena = Arena([0; ARENA_SIZE]);
+    static mut ARENA_USED: usize = 0;
+
+    struct OpsGuard {
+        assign: StringTableAssignOps,
+        engine: PrintfEngineFn,
+    }
+
+    impl Drop for OpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS), self.assign);
+                ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
+            }
+        }
+    }
+
+    struct ArenaGuard {
+        ops: HeapVeneerOps,
+    }
+
+    impl Drop for ArenaGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), self.ops);
+            }
+        }
+    }
+
+    unsafe extern "C" fn hex_engine(
+        fmt: *const u8,
+        putc: unsafe extern "C" fn(u8, *mut c_void),
+        context: *mut c_void,
+        arguments: *const u32,
+    ) -> i32 {
+        assert_eq!(unsafe { CStr::from_ptr(fmt.cast()).to_bytes() }, b"%lx");
+        let text = std::format!("{:x}", unsafe { arguments.read() });
+        for byte in text.bytes() {
+            unsafe { putc(byte, context) };
+        }
+        text.len() as i32
+    }
+
+    unsafe extern "C" fn record_assign(
+        table: *mut u8,
+        key: *mut *mut u8,
+        value: *mut *mut u8,
+    ) {
+        let key = unsafe { CStr::from_ptr((*key).cast()).to_bytes().to_vec() };
+        let value = unsafe { CStr::from_ptr((*value).cast()).to_bytes().to_vec() };
+        unsafe { ASSIGNMENT = Some((table as usize, key, value)) };
+    }
+
+    unsafe extern "C" fn arena_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let used = unsafe { ARENA_USED };
+        let aligned = (size + 7) & !7;
+        if used + aligned > ARENA_SIZE {
+            return ptr::null_mut();
+        }
+        unsafe {
+            ARENA_USED = used + aligned;
+            ptr::addr_of_mut!(ARENA.0).cast::<u8>().add(used)
+        }
+    }
+
+    unsafe extern "C" fn arena_free(
+        _heap: *mut HeapDescriptorDescriptor,
+        _ptr: *mut u8,
+        _tag: usize,
+    ) {
+    }
+
+    unsafe extern "C" fn arena_create(
+        descriptor: *mut HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        descriptor.cast()
+    }
+
+    fn install() -> (MutexGuard<'static, ()>, OpsGuard) {
+        let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            let guard = OpsGuard {
+                assign: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_OPS)),
+                engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
+            };
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS),
+                StringTableAssignOps { assign: record_assign },
+            );
+            ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), hex_engine);
+            ASSIGNMENT = None;
+            (lock, guard)
+        }
+    }
+
+    #[test]
+    fn formats_unsigned_hex_and_assigns_current_table_value() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            ArenaGuard { ops: previous }
+        };
+        let mut key_data = *b"CurrentTableHex\0";
+        let mut key = key_data.as_mut_ptr();
+
+        for value in [0u32, 0x2a, 0xdead_beef, 0xffff_ffff] {
+            unsafe {
+                string_table_set_current_hex(0x1234usize as *mut u8, &mut key, value);
+                assert_eq!(
+                    ASSIGNMENT,
+                    Some((
+                        0x1234,
+                        b"CurrentTableHex".to_vec(),
+                        std::format!("{value:x}").into_bytes(),
+                    )),
+                );
+            }
+        }
+    }
+}
+
 
 /// The unported fallback-table value-slot lookup used by
 /// [`string_table_set_hex`]. `FUN_083db69c` copy-constructs a (key,
