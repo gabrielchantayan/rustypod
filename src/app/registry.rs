@@ -615,17 +615,22 @@ pub unsafe extern "C" fn demo_mode_instance() -> *mut u8 {
     instance_of_class(CLASS_ID_DEMO_MODE)
 }
 
-/// The `TCDemoMode` vtable, modeled down to the one slot
-/// [`demo_mode_keyed_object`] dispatches (+0x100, index 64). The image's
-/// copy of the vtable page (the ctor @ 0x081889c0 installs pointer
-/// 0x08989718) holds the C++ mangled-name blob instead of the runtime
-/// vtable, so the slot's target is not recoverable from the image —
-/// dispatch goes through the object's own vtable pointer and host tests
-/// install a native callback (the `cxx/vtable.rs` precedent).
+/// The `TCDemoMode` vtable, modeled down to the two slots its ported
+/// callers dispatch: +0xec and +0x100. The image's copy of the vtable page
+/// (the ctor @ 0x081889c0 installs pointer 0x08989718) holds the C++ mangled-
+/// name blob instead of the runtime vtable, so the slot targets are not
+/// recoverable from the image — dispatch goes through the object's own vtable
+/// pointer and host tests install native callbacks (the `cxx/vtable.rs`
+/// precedent).
 #[repr(C)]
 pub struct DemoModeVtable {
-    /// Slots +0x00..+0xfc: not dispatched here.
-    pub unresolved_00: [usize; 64],
+    /// Slots +0x00..+0xe8: not dispatched here.
+    pub unresolved_00: [usize; 59],
+    /// +0xec: resolves an object registered for a caller-provided key.
+    pub fallback_keyed_object:
+        unsafe extern "C" fn(this: *mut DemoMode, key: u32) -> *mut FrameworkObject,
+    /// Slots +0xf0..+0xfc: not dispatched here.
+    pub unresolved_f0: [usize; 4],
     /// +0x100: the keyed lookup — `resolve(this, keyed_registry, key)`.
     pub keyed_object: unsafe extern "C" fn(
         this: *mut DemoMode,
@@ -1824,12 +1829,24 @@ mod tests {
         ptr::null_mut()
     }
 
+    unsafe extern "C" fn ignored_fallback_keyed_object(
+        _this: *mut DemoMode,
+        _key: u32,
+    ) -> *mut FrameworkObject {
+        ptr::null_mut()
+    }
+
     /// A vtable whose 64 undispatched slots all trip the sentinel, with
     /// `resolve` installed at +0x100.
     fn keyed_vtable(
         resolve: unsafe extern "C" fn(*mut DemoMode, *mut u8, u32) -> *mut u8,
     ) -> DemoModeVtable {
-        DemoModeVtable { unresolved_00: [wrong_keyed_slot as usize; 64], keyed_object: resolve }
+        DemoModeVtable {
+            unresolved_00: [wrong_keyed_slot as usize; 59],
+            fallback_keyed_object: ignored_fallback_keyed_object,
+            unresolved_f0: [wrong_keyed_slot as usize; 4],
+            keyed_object: resolve,
+        }
     }
 
     struct KeyedBench {
