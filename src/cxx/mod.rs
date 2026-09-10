@@ -37,6 +37,7 @@ pub mod handle;
 pub mod heap_string;
 pub mod list_splice;
 pub mod list_item_count;
+pub mod identified_vtable_object_construct;
 pub mod list_cursor_index;
 pub mod magic_tagged_object;
 pub mod mutex;

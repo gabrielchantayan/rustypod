@@ -61135,3 +61135,46 @@ functions:
       includes the independently entered 0x081ea768 sibling; the port follows
       raw ARM instead. No deviations: the existing ui_element_invalidate port
       is the verified target of the retail tail branch.
+
+  # --- Identified vtable-object constructor ---
+  - address: 0x081f6080
+    ghidra: FUN_081f6080
+    name: identified_vtable_object_construct
+    size: 68
+    sig: "void *identified_vtable_object_construct(void *this, u32 input_at_16, u32 input_at_20, u8 flag_at_48, u8 flag_at_49)"
+    module: cxx/identified_vtable_object_construct
+    status: ported
+    renames:
+      param_1/r0: this (aligned writable derived-object prefix, returned through base r0)
+      param_2/r1: input_at_16
+      param_3/r2: input_at_20
+      param_4/r3: flag_at_48
+      param_5/stack: flag_at_49
+      DAT_081f60c0: derived_vtable_08990364
+      FUN_08274f10: identified_vtable_base_construct (unported exact default behind ops seam)
+      DAT_08274f3c: base_vtable_089a5f98
+      DAT_08274f40: base_id_counter_08a09f00
+    notes: >-
+      Raw osos.dec establishes a 68-byte extent: sixteen instruction words at
+      0x081f6080..0x081f60bc followed by the derived-vtable literal
+      0x08990364 at 0x081f60c0; the next separately linked function begins
+      at 0x081f60c4 with cmp r0,#0. Ghidra's reported 64 bytes omit only that
+      literal-pool word. Decoding every ARM B/BL immediate finds exactly ten
+      inbound direct calls, all unconditional bl (0x0810dd8c, 0x0810ed58,
+      0x0811029c, 0x0811e7f0, 0x081307a0, 0x081443b8, 0x08158b24,
+      0x0816df30, 0x081df6f8, 0x08205d5c), with zero predicated forms, zero
+      direct tail b, and zero aligned data-word references. The unguarded
+      constructor calls 0x08274f10, then addresses every derived write from
+      its r0 return: it installs 0x08990364, clears +0x40/+0x44, stores r3
+      and the fifth stack byte at +0x48/+0x49, and copies r1/r2 to
+      +0x10/+0x14. The fully decoded but independently unported base installs
+      0x089a5f98, clears +8/+12, assigns this+4 from 0x08a09f00, and
+      increments that counter. The port's default ops-seam callee reproduces
+      that sequence exactly; the seam is the deliberate deviation required
+      until 0x08274f10 is ported. The ten callers are derived constructors
+      that overwrite the vtable again and initialize fields beginning at
+      +0x50, so no class identity beyond this verified base behavior is
+      invented. Host tests cover all stores, preserved gaps, counter wrapping,
+      and the base-return-derived write target. match.py reports the expected
+      dispatch-seam frame/call diff while retaining the base call followed by
+      the same derived store order.
