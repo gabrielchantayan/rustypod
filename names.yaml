@@ -59414,6 +59414,32 @@ functions:
       structure; LLVM emits the independent stores in descending component
       order after all loads.
 
+  # --- Fixed four-byte copy helper (util/copy_four_bytes) ---
+  - address: 0x0824bf8c
+    ghidra: FUN_0824bf8c
+    name: copy_four_bytes
+    size: 36
+    sig: "void copy_four_bytes(u8 *dst, const u8 *src)"
+    module: util/copy_four_bytes
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r2: copied_byte
+    notes: >-
+      Raw ARM is exactly nine instructions at 0x0824bf8c..0x0824bfac; the
+      next separately linked four-word copy helper begins at 0x0824bfb0. It
+      performs four ordered ldrb/strb pairs from src (r1) to dst (r0), so each
+      later source load observes the preceding destination stores for
+      overlapping ranges. Decoding every ARM B/BL immediate in osos.dec finds
+      exactly ten inbound direct bl sites, all unconditional, at 0x08249420,
+      0x082494e8, 0x082495c8, 0x0824974c, 0x0825519c, 0x0826031c,
+      0x08260354, 0x0826038c, 0x082603c4, and 0x082603fc; there are no
+      predicated BL forms or direct plain-B tails. The function has no callee
+      or dispatch seam. match.py against this worktree archive (exit 1,
+      structural diff expected) preserves the four ldrb/strb pairs, with only
+      LLVM's prologue and epilogue differing. Deliberate deviations: none.
+
   # --- Conditional member release (app/member_release) ---
   - address: 0x082201f4
     ghidra: thunk_FUN_08214348
