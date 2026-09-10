@@ -237,6 +237,94 @@ pub unsafe extern "C" fn iap_packet_destruct(packet: *mut u8) -> *mut u8 {
     packet
 }
 
+/// iap_packet_init_with_compact_payload — original: `FUN_080f6c58` @
+/// 0x080f6c58 (**220 bytes, 0x080f6c58..0x080f6d34** — 55 instructions,
+/// no literal pool; the next function begins with `push {r2,r3,r4,lr}` at
+/// 0x080f6d34). **12 `bl` and 0 `b` call sites, all unconditional**,
+/// counted by decoding every branch word in `osos.dec`; no predicated call
+/// forms and no matching data word occur in the image.
+///
+/// Builds the compact payload used by iAP replies, then gives it to the
+/// packet initializer:
+///
+/// ```text
+/// payload[0] = header_kind as u8
+/// payload[1..] = lingo_word == 4  ? be16(header_value as u16)
+///               :                    [header_value as u8]
+/// if lingo_word == 12: payload.push(extra_byte)
+/// if header_kind == 6: payload.extend(be32(header_data))
+/// iap_packet_init(packet, owner, context, lingo_word as u8,
+///                 command_word as u16, payload)
+/// ```
+///
+/// The two layout selectors intentionally stay full-width words. The ARM
+/// code compares `lingo_word` with 4/12 and `header_kind` with 6 before
+/// truncating their stored bytes; for example, `lingo_word = 0x104` passes
+/// lingo 4 to the initializer but takes the one-byte layout. The helper
+/// neither NULL-checks nor interprets the packet, owner, or context; all 12
+/// callers are unconditional reply paths.
+///
+/// # Deviations
+///
+/// The initializer @ 0x080f73a0 is still unported, so this calls its
+/// existing [`IAP_PACKET_OPS`] dispatch seam. The original discards the
+/// initializer's result; this `void` hook does too.
+///
+/// # Safety
+///
+/// Same as the initializer: `packet` must be a live packet object and the
+/// owner/context pointers must satisfy its contract. No additional guards
+/// exist here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn iap_packet_init_with_compact_payload(
+    packet: *mut u8,
+    owner: *mut u8,
+    context: *mut u8,
+    lingo_word: u32,
+    command_word: u32,
+    header_kind: u32,
+    header_value: u32,
+    header_data: u32,
+    extra_byte: u8,
+) {
+    let mut payload = [0u8; 7];
+    payload[0] = header_kind as u8;
+
+    let mut payload_len = if lingo_word == LINGO_EXTENDED_INTERFACE as u32 {
+        payload[1] = (header_value >> 8) as u8;
+        payload[2] = header_value as u8;
+        3
+    } else {
+        payload[1] = header_value as u8;
+        if lingo_word == 12 {
+            payload[2] = extra_byte;
+            3
+        } else {
+            2
+        }
+    };
+
+    if header_kind == 6 {
+        payload[payload_len] = (header_data >> 24) as u8;
+        payload[payload_len + 1] = (header_data >> 16) as u8;
+        payload[payload_len + 2] = (header_data >> 8) as u8;
+        payload[payload_len + 3] = header_data as u8;
+        payload_len += 4;
+    }
+
+    (iap_packet_ops().init)(
+        packet,
+        owner,
+        context,
+        lingo_word as u8,
+        command_word as u16,
+        payload.as_ptr(),
+        payload_len as u32,
+    );
+}
+
 /// iap_packet_create — original: `FUN_080f6da0` @ 0x080f6da0
 /// (**104 bytes, 0x080f6da0..0x080f6e08** — 26 instructions, no literal
 /// pool. Ghidra's `functions.csv` says 100; it is one word short. The next
@@ -478,6 +566,9 @@ mod tests {
     static mut LAST_PAYLOAD: *const u8 = core::ptr::null();
     static mut LAST_PAYLOAD_LEN: u32 = 0;
     static mut INIT_RESULT: u32 = 1;
+    static mut CAPTURED_PAYLOAD: [u8; 7] = [0; 7];
+    static mut CAPTURED_PAYLOAD_LEN: u32 = 0;
+
 
     static mut RELEASE_CALLS: usize = 0;
     static mut LAST_RELEASE_PACKET: *mut u8 = core::ptr::null_mut();
@@ -509,6 +600,30 @@ mod tests {
         LAST_PAYLOAD_LEN = payload_len;
         INIT_RESULT
     }
+    /// A synchronous initializer that owns a snapshot of the compact
+    /// helper's stack payload before that helper returns.
+    #[allow(clippy::too_many_arguments)]
+    unsafe extern "C" fn capturing_init(
+        packet: *mut u8,
+        owner: *mut u8,
+        context: *mut u8,
+        lingo: u8,
+        command: u16,
+        payload: *const u8,
+        payload_len: u32,
+    ) -> u32 {
+        let result = recording_init(packet, owner, context, lingo, command, payload, payload_len);
+        let captured_len = core::cmp::min(payload_len as usize, 7);
+        CAPTURED_PAYLOAD = [0; 7];
+        core::ptr::copy_nonoverlapping(
+            payload,
+            core::ptr::addr_of_mut!(CAPTURED_PAYLOAD).cast::<u8>(),
+            captured_len,
+        );
+        CAPTURED_PAYLOAD_LEN = captured_len as u32;
+        result
+    }
+
 
     unsafe extern "C" fn recording_release(packet: *mut u8) {
         RELEASE_CALLS += 1;
@@ -553,6 +668,23 @@ mod tests {
         unsafe { IAP_PACKET_OPS = DEFAULT_IAP_PACKET_OPS };
         drop(guards);
     }
+    unsafe fn capture_compact_payloads() {
+        IAP_PACKET_OPS = IapPacketOps {
+            construct: recording_construct,
+            init: capturing_init,
+            release: recording_release,
+        };
+        CAPTURED_PAYLOAD = [0; 7];
+        CAPTURED_PAYLOAD_LEN = 0;
+    }
+
+    unsafe fn captured_compact_payload() -> &'static [u8] {
+        core::slice::from_raw_parts(
+            core::ptr::addr_of!(CAPTURED_PAYLOAD).cast::<u8>(),
+            CAPTURED_PAYLOAD_LEN as usize,
+        )
+    }
+
 
     #[test]
     fn threads_every_argument_into_the_initializer_in_order() {
@@ -727,6 +859,97 @@ mod tests {
             assert_eq!(INIT_CALLS, 0, "and the initializer never runs");
             assert_eq!(RELEASE_CALLS, 0, "nor the destructor's release helper");
             assert_eq!(free_log().0, 0, "nor operator_delete");
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn compact_payload_uses_extended_lingo_and_big_endian_data() {
+        let guards = install_mocks();
+        let packet = 0x0BEE_F000usize as *mut u8;
+        let owner = 0x0111_1000usize as *mut u8;
+        let context = 0x0222_2000usize as *mut u8;
+
+        unsafe {
+            capture_compact_payloads();
+            iap_packet_init_with_compact_payload(
+                packet, owner, context, 4, 0xdead_beef, 6, 0xa1b2_c3d4, 0x1122_3344, 0xff,
+            );
+
+            assert_eq!(INIT_CALLS, 1, "the initializer is always called once");
+            assert_eq!(LAST_INIT_PACKET, packet);
+            assert_eq!(LAST_OWNER, owner);
+            assert_eq!(LAST_CONTEXT, context);
+            assert_eq!(LAST_LINGO, 4);
+            assert_eq!(LAST_COMMAND, 0xbeef, "the initializer receives the low command halfword");
+            assert_eq!(LAST_PAYLOAD_LEN, 7);
+            assert_eq!(
+                captured_compact_payload(),
+                &[6, 0xc3, 0xd4, 0x11, 0x22, 0x33, 0x44],
+                "lingo 4 gets be16(value), and kind 6 appends be32(data)"
+            );
+            assert_eq!(CONSTRUCT_CALLS, 0);
+            assert_eq!(RELEASE_CALLS, 0);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn compact_payload_appends_the_lingo_twelve_extra_byte_before_data() {
+        let guards = install_mocks();
+
+        unsafe {
+            capture_compact_payloads();
+            iap_packet_init_with_compact_payload(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                12,
+                0x1234,
+                6,
+                0x56,
+                0x89ab_cdef,
+                0xa5,
+            );
+
+            assert_eq!(LAST_LINGO, 12);
+            assert_eq!(LAST_COMMAND, 0x1234);
+            assert_eq!(LAST_PAYLOAD_LEN, 7);
+            assert_eq!(
+                captured_compact_payload(),
+                &[6, 0x56, 0xa5, 0x89, 0xab, 0xcd, 0xef],
+                "the lingo-12 byte precedes the kind-6 data"
+            );
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn compact_payload_compares_layout_selectors_before_truncating_them() {
+        let guards = install_mocks();
+
+        unsafe {
+            capture_compact_payloads();
+            iap_packet_init_with_compact_payload(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                0x104,
+                0x1234_beef,
+                0x106,
+                0x7c,
+                0x1122_3344,
+                0xa5,
+            );
+
+            assert_eq!(LAST_LINGO, 4, "the initializer sees the truncated lingo byte");
+            assert_eq!(LAST_COMMAND, 0xbeef);
+            assert_eq!(LAST_PAYLOAD_LEN, 2, "0x104 and 0x106 do not match full-word selectors");
+            assert_eq!(
+                captured_compact_payload(),
+                &[6, 0x7c],
+                "stored bytes truncate even though the full-word comparisons fail"
+            );
         }
         restore_mocks(guards);
     }
