@@ -49840,6 +49840,39 @@ functions:
       0x30 = the thirteenth SingletonCtors field), an fp prologue and
       the inverted branch LLVM chose for the cold path.
 
+  # --- Stage progress increment ---
+  - address: 0x081fa36c
+    ghidra: FUN_081fa36c
+    name: stage_progress_increment
+    size: 12
+    sig: "void stage_progress_increment(StageProgressTracker *tracker, uint stage)"
+    module: app/stage_progress
+    status: ported
+    renames:
+      param_1: tracker
+      param_2: stage
+      iVar1: next_progress
+      FUN_081fa378: stage_progress_set
+      thunk_FUN_0815940c: set_running_deadline
+    notes: >-
+      EXTENT: the assigned 12 bytes are exact for this entry
+      (0x081fa36c..0x081fa378): `ldr r2,[r0,#4]; add r2,r2,#1; nop`.
+      The nop falls through deliberately into separately linked sibling
+      FUN_081fa378, which performs the stage/budget checks and deadline
+      update; the Rust port includes that complete fall-through path. CALL
+      COUNT: exactly 11 unconditional bl call sites, 0 predicated forms and
+      0 plain b, verified by decoding every ARM B/BL word in
+      work/firmware/osos.dec; Ghidra's 11 confirmed. ALGORITHM: compute
+      next_progress = tracker+0x04 + 1; return unless byte tracker+0x00
+      equals stage, stage's u32 budget at tracker+0x10+stage*4 is at least
+      next_progress, and the unsigned increment did not wrap; then store
+      next_progress and call veneer 0x081b9154 with tracker+0x08 +
+      next_progress. The veneer reaches unported FUN_0815940c, which writes
+      the running-deadline word only when its global deadline keeper exists.
+      All callers use an unconditional bl, so the port deliberately retains
+      no NULL guard for tracker. Deviation: the unported setter is called at
+      its retail veneer on target; host tests use the StageProgressOps seam.
+
   # --- Stage progress tracker lazy singleton ---
   - address: 0x081fa3b0
     ghidra: FUN_081fa3b0
