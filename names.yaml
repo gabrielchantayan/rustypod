@@ -60146,3 +60146,37 @@ functions:
       dedicated below-4-GiB raw-u32 fixture to prove the nested +0/+0/+0x78
       selection, lock/sync/seek/unlock/status order, complete seek argument
       forwarding, and the missing-descriptor early failure.
+
+  # --- Opaque descriptor lookup veneer ---
+  - address: 0x082c5814
+    ghidra: FUN_082c5814
+    name: lookup_opaque_descriptor
+    size: 12
+    sig: "void *lookup_opaque_descriptor(void **output, void *lookup_context, usize lookup_key)"
+    module: cxx/opaque_descriptor_lookup
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: lookup_context
+      param_3/r2: lookup_key
+      DAT_082c581c/r3: opaque_descriptor_0x0890b608
+      FUN_0803a7f0: generic_descriptor_lookup_helper
+    notes: >-
+      EXTENT: raw osos.dec is 12 bytes, not Ghidra's reported 8:
+      ldr r3,[pc]; b 0x0803a7f0; literal 0x0890b608. The next separately
+      linked function starts at 0x082c5820 (mov r2,r1), proving the literal
+      belongs here. CALL COUNT: decoding every ARM B/BL word in osos.dec
+      found exactly 10 direct inbound calls, all unconditional plain bl at
+      0x080aef00, 0x080aefa4, 0x080af034, 0x080af0f8, 0x080af20c,
+      0x08272a28, 0x082d42c8, 0x082d462c, 0x082d48e0, and 0x082d49f0;
+      there are no predicated calls or direct tail branches. ALGORITHM:
+      retain r0-r2, load the fixed opaque descriptor in r3, and tail-branch
+      to 0x0803a7f0. Its raw entry delegates to 0x0803a99c and returns its
+      output pointer only when that call is positive, otherwise NULL. The
+      descriptor has no recoverable concrete identity, despite other wrappers
+      also loading 0x0890b608, so no type was invented. A complete aligned
+      data-word scan finds no reference to 0x082c5814, ruling out virtual
+      dispatch. ARM global assembly preserves the raw tail transfer. Host
+      tests install a recording seam and prove NULL output forwarding,
+      non-NULL argument forwarding, the fixed descriptor, and result
+      forwarding. Deliberate deviations: none.
