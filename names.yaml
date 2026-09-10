@@ -52470,6 +52470,39 @@ functions:
       The port calls crts_has_tag directly without a dispatch seam. Host tests
       cover NULL, wrong tag, zero, negative, one, and i32::MAX counters.
 
+  # --- linked 'plst' item-count accessor ---
+  - address: 0x08054214
+    ghidra: FUN_08054214
+    name: ui_plst_linked_item_count
+    size: 24
+    sig: "u32 ui_plst_linked_item_count(const u8 *owner)"
+    module: ui/plst_linked_item_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0xf50": plst_element
+      "plst_element+0x40": collection_header
+      "collection_header+0x2e": item_count
+    notes: >-
+      Raw ARM extent is exactly 0x08054214..0x0805422c: ldr
+      r0,[r0,#0xf50]; cmp r0,#0; ldrne r0,[r0,#0x40]; ldrhne
+      r0,[r0,#0x2e]; moveq r0,#0; bx lr. The next separately linked
+      function begins with push {r3,r4,r5,lr} at 0x0805422c, confirming
+      Ghidra's 24-byte extent. The owner points at a linked 'plst' element
+      because the same owner+0xf50 word goes to ui_plst_slot_item_at
+      (0x08052728) in callers 0x08053170, 0x0806465c, and 0x0806705c;
+      that already ported function reads its header at element+0x40 and
+      range-checks its slots against the u16 at header+0x2e. This leaf
+      returns that count zero-extended, or zero when owner+0xf50 is NULL.
+      It deliberately has neither an owner NULL guard nor a header NULL
+      guard. Decoding every ARM B/BL word in osos.dec finds 11 direct
+      call sites, all plain unconditional bl and no predicated forms:
+      0x0805318c, 0x08064670, 0x08067078, 0x081a330c, 0x081a33b8,
+      0x081a3490, 0x081a3f7c, 0x081a4000, 0x081a4238, 0x081a4ad4,
+      and 0x081a4c74. No deliberate deviations; Rust retains aligned
+      u32/u16 loads and the exact one-link NULL gate. Host tests cover
+      the NULL link plus zero, representative, and u16::MAX counts.
+
   # --- retailOS flag-gated opaque payload accessor ---
   - address: 0x08054454
     ghidra: FUN_08054454
