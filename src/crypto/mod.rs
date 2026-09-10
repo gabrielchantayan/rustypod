@@ -46,6 +46,7 @@ pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
 pub mod evp_digest_update;
+pub mod evp_sha1;
 pub mod evp_pkey;
 pub mod obj_dat;
 pub mod xor_f6_in_place;
