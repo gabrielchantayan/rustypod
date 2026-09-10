@@ -69,6 +69,7 @@ functions:
       param_3/r2: len
       r3: byte
     notes: >-
+
       Raw osos.dec extent is exactly 24 bytes: six ARM words from
       0x082c4f38 through bx lr at 0x082c4f4c; the next separately linked
       function starts at 0x082c4f50. Decoding every ARM B/BL word finds 13
@@ -54910,6 +54911,32 @@ functions:
       host deviation: slot pointers remain u32 words and subsequent fields use
       raw offsets because the host's embedded Mutex is wider than its 8-byte
       ARM layout.
+
+  # --- Showcase slot queue pending-entry predicate ---
+  - address: 0x081b7f9c
+    ghidra: FUN_081b7f9c
+    name: showcase_queue_has_pending_entry
+    size: 28
+    sig: "u32 showcase_queue_has_pending_entry(const u32 *queue)"
+    module: app/showcase_queue_has_pending_entry
+    status: ported
+    renames:
+      param_1/r0: queue
+      r1: first_cursor
+      r0 (after load): second_cursor_or_result
+    notes: >-
+      Raw extent is exactly 28 bytes, 0x081b7f9c..0x081b7fb8: the following
+      `mov r2,#0` at 0x081b7fb8 begins a separately entered initializer, so
+      the predicate has no literal pool. Decoding every ARM B/BL word in
+      osos.dec finds exactly 11 direct inbound call sites, all unconditional
+      BL with no predicated forms: 0x081b6d70, 0x081b6fcc, 0x081b755c,
+      0x081b7720, 0x081b7858, 0x081b78d8, 0x081b7ba0, 0x081b7c20,
+      0x081b7d44, 0x081b7e8c, and 0x081b7f4c. It returns one precisely when
+      the aligned words at queue+4 and queue+8 differ, otherwise zero.
+      Showcase initialization and all callers establish that these queues are
+      embedded in its four slots. The equality-only predicate cannot establish
+      which cursor is producer versus consumer, so the port deliberately uses
+      neutral names and preserves the opaque u32-word layout on 64-bit hosts.
 
   # --- Callback helper forwarding and release ---
   - address: 0x08124c60
