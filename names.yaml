@@ -58031,3 +58031,33 @@ functions:
       instructions wrap modulo 2^32. There is no NULL, bounds, or alignment
       guard and no callee. No deliberate deviations. Host tests cover the
       first entry, a later entry, and 32-bit address wraparound.
+
+  # --- Mode-selected stream position ---
+  - address: 0x0822aecc
+    ghidra: FUN_0822aecc
+    name: mode_selected_position
+    size: 20
+    sig: "u32 mode_selected_position(const void *state)"
+    module: app/mode_selected_position
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x2ec": mode_position
+      "state+0x5e4": default_position
+      "state+0x5f8": mode_flags
+    notes: >-
+      Raw osos.dec confirms the exact five-instruction, 20-byte extent:
+      ldrb r1,[r0,#0x5f8]; tst r1,#1; ldreq r0,[r0,#0x5e4]; ldrne
+      r0,[r0,#0x2ec]; bx lr from 0x0822aecc through 0x0822aedc. The next
+      separately linked function opens at 0x0822aee0. It returns the
+      +0x5e4 position for flags with bit 0 clear and the +0x2ec position
+      when bit 0 is set; no NULL, bounds, or alignment guard exists. The
+      state class and other flag bits remain unidentified. Decoding every
+      ARM B/BL immediate finds exactly 11 direct bl callers, all
+      unconditional and no predicated forms: 0x081cbc30, 0x081cc090,
+      0x081cc5e4, 0x081cd0c4, 0x081cd0d8, 0x08220330, 0x082203c8,
+      0x0822b43c, 0x0822b524, 0x0822b618, and 0x0822b62c. The separately
+      linked thunk at 0x0820a49c reaches this entry through an unconditional
+      tail b, not a call. No deliberate deviations. Host tests cover both
+      selected words, every meaningful flag-bit state, full-width values,
+      and read-only behavior.
