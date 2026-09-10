@@ -22214,6 +22214,34 @@ functions:
       original's bl pair - match.py shows the same guard/bump/guard
       structure inside a larger body.
 
+  - address: 0x0839ef3c
+    ghidra: FUN_0839ef3c
+    name: refcounted_ptr_copy_construct
+    size: 24
+    sig: "RefcountedBody **refcounted_ptr_copy_construct(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1: src
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x0839ef3c..0x0839ef54;
+      a separately linked copy-assignment function begins at 0x0839ef54.
+      Decoding every ARM B/BL word in osos.dec found exactly 10 direct BL
+      callers: nine unconditional (0x08132d28, 0x08132ef4, 0x08133290,
+      0x0813332c, 0x081333d0, 0x081334b4, 0x08133510, 0x08133584, and
+      0x081336c8) and one blne at 0x083dc2fc; no tail B transfers and no
+      image data word references, so it is not virtually dispatched. The
+      predicated caller supplies the destination-slot guard. This C++ copy
+      constructor loads *src, calls separately linked helper 0x0839cf10 to
+      store the body in dst and increase its signed +4 refcount under the
+      optional +8 mutex, then returns dst. Helper 0x0839cf10 is behaviorally
+      byte-identical to ported refcounted_body_attach @ 0x0839d370, so the
+      Rust port calls that canonical helper; its store, optional lock,
+      wrapping increment, and freshly reloaded optional unlock preserve the
+      stock ordering. The target section prevents linker folding with a
+      byte-identical constructor sibling.
+
   - address: 0x0839f148
     ghidra: FUN_0839f148
     name: refcounted_ptr_construct_variant

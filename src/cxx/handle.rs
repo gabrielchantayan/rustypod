@@ -478,6 +478,45 @@ pub unsafe extern "C" fn refcounted_ptr_assign(
     dst
 }
 ///
+/// refcounted_ptr_copy_construct — original: `FUN_0839ef3c` @ `0x0839ef3c`
+/// (24 bytes). Raw decoding establishes the exact extent: the next separately
+/// linked function begins at `0x0839ef54`. Decoding every ARM `B`/`BL` word
+/// in `osos.dec` finds 10 direct `bl` callers: nine unconditional
+/// (`0x08132d28`, `0x08132ef4`, `0x08133290`, `0x0813332c`, `0x081333d0`,
+/// `0x081334b4`, `0x08133510`, `0x08133584`, and `0x081336c8`) plus one
+/// `blne` at `0x083dc2fc`; there are no tail `b` transfers and no image
+/// data-word references, so it is not virtually dispatched. The sole
+/// predicated caller guards its own destination slot.
+///
+/// C++ copy-constructor for a refcounted handle: loads `*src`, installs that
+/// body in `dst`, and adds one to its signed refcount under its optional
+/// mutex. It returns `dst`; neither slot pointer is NULL-checked.
+///
+/// Deliberate deviation: stock calls the separately linked attach helper
+/// `FUN_0839cf10`. Its decoded body is byte-identical in behavior to the
+/// already ported [`refcounted_body_attach`] @ `0x0839d370` (store, optional
+/// mutex lock, wrapping increment, fresh optional mutex unlock), so this
+/// port calls that canonical implementation. The dedicated target section
+/// keeps this small separately hookable constructor from folding with a
+/// byte-identical Rust sibling.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. When `*src` is
+/// non-NULL, it must point at a writable [`RefcountedBody`] whose optional
+/// mutex satisfies [`refcounted_body_attach`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_construct(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    refcounted_body_attach(dst, src.read());
+    dst
+}
+
+///
 /// refcounted_ptr_assign_owned — original: `FUN_0839f1b0` @ 0x0839f1b0
 /// (48 bytes; 13 `bl` call sites, all unconditional — verified by decoding
 /// every ARM B/BL word in osos.dec: no `b` sites, no predicated forms, and
@@ -1775,6 +1814,43 @@ mod tests {
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
             refcounted_ptr_assign(&mut slot, &src);
             assert_eq!(body.refcount, i32::MIN);
+        }
+    }
+
+    /// The copy constructor's NULL source still overwrites initialized-looking
+    /// destination storage and returns that destination slot.
+    #[test]
+    fn copy_construct_null_source_stores_null_and_returns_destination() {
+        unsafe {
+            let source: *mut RefcountedBody = core::ptr::null_mut();
+            let mut destination = 0xdead_beefusize as *mut RefcountedBody;
+
+            let result = refcounted_ptr_copy_construct(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert!(destination.is_null());
+        }
+    }
+
+    /// The source is read once, then the signed count receives the raw ARM
+    /// wrapping increment while the copied pointer becomes the destination.
+    #[test]
+    fn copy_construct_copies_body_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let source: *mut RefcountedBody = &mut body;
+            let mut destination: *mut RefcountedBody = core::ptr::null_mut();
+
+            let result = refcounted_ptr_copy_construct(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
         }
     }
 
