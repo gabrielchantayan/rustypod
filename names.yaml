@@ -8648,6 +8648,30 @@ functions:
        asr/lsr/asr idiom, -0x7d2d, 0xe10, rsb *60, seven decode calls,
        one udiv, three sdivs).
 
+  # --- Binary -> packed BCD helper (time/civil) ---
+  - address: 0x080e88a4
+    ghidra: FUN_080e88a4
+    name: bin_to_bcd_clamped
+    size: 44
+    sig: "u32 bin_to_bcd_clamped(u32 value)"
+    module: time/civil
+    status: ported
+    renames:
+      param_1/r0/r4: value
+      iVar1/r0: quotient
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw ARM extent is exactly 44 bytes, 0x080e88a4..0x080e88d0: it
+      clamps unsigned values above 99 to 0x99, otherwise calls
+      __rt_udiv(value, 10) and returns value + 6*quotient, yielding packed
+      BCD. Decoding every ARM B/BL word in osos.dec finds exactly twelve
+      direct unconditional bl call sites (@ 0x0806e7fc, 0x0806e808,
+      0x0806e814, 0x0806e820, 0x0806e82c, 0x0806e838, 0x0809e870,
+      0x0809e87c, 0x0809e888, 0x0809e8a4, 0x0809e8c8, 0x0809e8d8), with
+      no predicated calls. The Rust port preserves the division call to the
+      existing __rt_udiv port; no deviations. Host tests exhaustively cover
+      0..=99 plus the 100/101 and u32::MAX clamp edges. match.py structural
+      review requested.
   # --- BCD byte -> binary decode helper (time/civil) ---
   - address: 0x080ed424
     ghidra: FUN_080ed424

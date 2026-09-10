@@ -33,6 +33,24 @@
 //! [`bcd_to_bin`] (FUN_080ed424, below), likewise kept out-of-line so
 //! the seven decode calls remain visible.
 
+/// bin_to_bcd_clamped @ 0x080e88a4 — 44 bytes. Converts an unsigned binary
+/// value in 0..=99 to packed BCD, clamping every larger value to `0x99`.
+/// Raw ARM first compares `value` with 99 and returns the clamp under `hi`;
+/// otherwise it calls `__rt_udiv(value, 10)`, then returns
+/// `value + 6 * quotient`, which is the same packed-BCD value. Decoding
+/// every ARM B/BL word in osos.dec finds 12 direct `bl` call sites, all
+/// unconditional; there are no predicated direct calls. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn bin_to_bcd_clamped(value: u32) -> u32 {
+    if value > 99 {
+        0x99
+    } else {
+        let quotient = unsafe { crate::runtime::rt_div::__rt_udiv(value, 10) };
+        value.wrapping_add(quotient.wrapping_mul(6))
+    }
+}
+
 /// bcd_to_bin @ 0x080ed424 — 24 bytes. BCD byte to binary decode:
 /// `v - 6*(v>>4)` for `v <= 0x99` (unsigned), else clamped to 99.
 /// The original computes the correction branchlessly under the `ls`
@@ -271,6 +289,17 @@ mod tests {
         // still decode arithmetically, e.g. 0x0f -> 15, 0x1a -> 20.
         assert_eq!(bcd_to_bin(0x0f), 15);
         assert_eq!(bcd_to_bin(0x1a), 20);
+    }
+
+    #[test]
+    fn bin_to_bcd_clamps_and_encodes_every_valid_value() {
+        for value in 0..=99u32 {
+            let expected = ((value / 10) << 4) | (value % 10);
+            assert_eq!(bin_to_bcd_clamped(value), expected, "value {value}");
+        }
+        for value in [100, 101, u32::MAX] {
+            assert_eq!(bin_to_bcd_clamped(value), 0x99, "value {value}");
+        }
     }
 
     #[test]
