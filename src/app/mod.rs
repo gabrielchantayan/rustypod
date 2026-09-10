@@ -119,6 +119,7 @@ pub mod screen_base;
 pub mod screen_layout;
 pub mod singleton_state;
 pub mod slot_table;
+pub mod four_slot_key_index;
 pub mod string_owner;
 pub mod string_resolve;
 pub mod string_table;
