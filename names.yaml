@@ -58601,6 +58601,38 @@ functions:
       exclusive-limit rejection, cache-hit bypass, miss read arguments, and
       failed-miss detach/release.
 
+  # --- Filesystem cache-page halfword transfer ---
+  - address: 0x082e1a34
+    ghidra: FUN_082e1a34
+    name: cache_position_halfword_access
+    size: 68
+    sig: "u32 cache_position_halfword_access(CacheContext *cache, u32 position, u16 *value, u32 write)"
+    module: fs/cache_page
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: position
+      param_3/r2: value
+      param_4/r3: write
+      FUN_082e3d78: cache_page_resolve
+    notes: >-
+      Raw ARM confirms the 68-byte extent from 0x082e1a34 through
+      0x082e1a74; the next separately linked function begins at 0x082e1a78.
+      Every ARM B/BL word in osos.dec was decoded: exactly 10 direct call
+      sites, all unconditional plain bl at 0x082e0cf0, 0x082e0d40,
+      0x082e0d74, 0x082e0dec, 0x082e3a34, 0x082e3aac, 0x082e3ac8,
+      0x082e3ae0, 0x082e3b0c, and 0x082e3b28; there are no predicated forms
+      or tail branches. It preserves value and write across a call to the
+      unported cache-page resolver at 0x082e3d78 as (cache, position, write).
+      A NULL result returns zero without dereferencing value. Otherwise,
+      position & 0xff indexes an aligned u16 within the returned 512-byte
+      page; write == 0 reads that halfword to value and any nonzero write
+      stores value into it, returning one. The resolver is not present in
+      names.yaml as ported, so target builds call its retailOS load address
+      directly and host tests install a recording resolver seam. This is the
+      sole deliberate deviation; caching and dirty-page bookkeeping remain
+      resolver-owned rather than inferred by this wrapper.
+
   # --- Path-resolution utility byte fill ---
   - address: 0x082e2ef0
     ghidra: FUN_082e2ef0
