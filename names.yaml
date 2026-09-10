@@ -23006,6 +23006,38 @@ functions:
       MEM_Agg stamp, low-word FuncDef store, exact zero span, and untouched
       tail.
 
+  - address: 0x0838bf50
+    ghidra: FUN_0838bf50
+    name: vdbe_mem_integerify
+    size: 40
+    sig: "i32 vdbe_mem_integerify(Mem *p_mem)"
+    module: sqlite/vdbe_mem_integerify
+    status: ported
+    renames:
+      param_1: p_mem
+      uVar1: integer_value
+      FUN_0838b5c4: vdbe_int_value
+    notes: >-
+      SQLite 3.5.9's sqlite3VdbeMemIntegerify (vdbemem.c). Raw extent is
+      0x0838bf50..0x0838bf78: the closing pop {r4,pc} is at 0x0838bf74
+      and the following word is the separate sqlite3VdbeMemSetNull entry;
+      no literal pool. It calls the already ported sqlite3VdbeIntValue at
+      0x0838b5c4, writes its signed i64 result to Mem.u (+0x00), then
+      reloads flags at +0x1c and replaces only the five type bits
+      (0x1f) with MEM_Int (0x4), returning SQLITE_OK (0). The 10 direct
+      bl callers were decoded from every B/BL word in osos.dec:
+      0x08387bf0, 0x08387ddc, 0x0838805c, 0x08388090, 0x08388ab8,
+      0x08388c38, 0x0838927c, 0x0838952c, 0x0838a570, 0x0838a578.
+      Every entry is unconditional; no predicated calls or tail branches.
+      Deviation: named repr(C) Mem fields replace the raw offsets so host
+      pointers stay disjoint; the shipped vdbe_int_value port is called
+      directly rather than re-stubbing it. Host tests cover signed i64
+      boundary values, every reachable old type-bit pattern, preserved
+      attribute bits, return value, and untouched unrelated fields.
+      match.py structural: LLVM adds a frame, but retains the helper call,
+      strd result store, flags reload, flag stamp, and zero return; its
+      orr #4 / bic #27 pair is equivalent to bic #31 / orr #4.
+
   - address: 0x0838bfb0
     ghidra: FUN_0838bfb0
     name: vdbe_mem_nul_terminate
