@@ -91,6 +91,7 @@ pub mod expr_new;
 pub mod expr_span;
 pub mod walk_expr;
 pub mod find_element_given_hash;
+pub mod finalize;
 pub mod find_collation_encoding;
 pub mod find_table;
 pub mod free_p4;
