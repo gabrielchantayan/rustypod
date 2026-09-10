@@ -242,6 +242,9 @@ pub struct EventListOps {
     /// Original 0x083c1f10: post-order tree destruction, including the
     /// allocator/value cleanup performed by 0x083c1648 for each node.
     pub destroy_subtree: unsafe extern "C" fn(tree: *mut u8, root: u32),
+    /// Original 0x083c1e9c: recursively allocates and clones a source
+    /// subtree below `destination_header`, returning its new root.
+    pub copy_subtree: unsafe extern "C" fn(tree: *mut u8, source_root: u32, destination_header: u32) -> u32,
 }
 
 /// Defaults for lower tree-runtime dependencies. They deliberately do no
@@ -251,12 +254,14 @@ unsafe extern "C" fn missing_erase_node(out: *mut u32, _tree: *mut u8, _node: *m
     unsafe { out.write(0) };
 }
 unsafe extern "C" fn missing_destroy_subtree(_tree: *mut u8, _root: u32) {}
+unsafe extern "C" fn missing_copy_subtree(_tree: *mut u8, _source_root: u32, _destination_header: u32) -> u32 { 0 }
 
 /// Wired defaults for [`EVENT_LIST_OPS`].
 pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
     advance_iterator: missing_advance_iterator,
     erase_node: missing_erase_node,
     destroy_subtree: missing_destroy_subtree,
+    copy_subtree: missing_copy_subtree,
 };
 
 /// Active model for the erase port's lower runtime dependencies. Tests
@@ -276,6 +281,25 @@ unsafe fn erase_node_op() -> unsafe extern "C" fn(*mut u32, *mut u8, *mut u32) {
 #[inline(always)]
 unsafe fn destroy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.destroy_subtree)) }
+}
+
+#[inline(always)]
+unsafe fn copy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32, u32) -> u32 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.copy_subtree)) }
+}
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe fn copy_subtree(tree: *mut u8, source_root: u32, destination_header: u32) -> u32 {
+    let retail_copy_subtree: unsafe extern "C" fn(*mut u8, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(0x083c1e9cusize) };
+    unsafe { retail_copy_subtree(tree, source_root, destination_header) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn copy_subtree(tree: *mut u8, source_root: u32, destination_header: u32) -> u32 {
+    unsafe { (copy_subtree_op())(tree, source_root, destination_header) }
 }
 
 /// event_list_populate_from_registry — original: `FUN_081e0280` @
@@ -430,6 +454,86 @@ pub unsafe extern "C" fn event_list_tree_erase_range(
     out
 }
 
+/// event_list_tree_assign — original: `FUN_083c2130` @ 0x083c2130
+/// (164 bytes, 11 unpredicated `bl` call sites verified by decoding every
+/// ARM branch-with-link word in `osos.dec`).
+///
+/// Assigns one event-list libstdc++ red-black tree to another. Distinct trees
+/// first erase the complete destination range, clone the source root under
+/// the destination header, restore the root/leftmost/rightmost header links,
+/// and copy the source node count. Self-assignment does nothing and returns
+/// the destination tree.
+///
+/// RetailOS calls the still-unported recursive node allocation/value-copy
+/// runtime at 0x083c1e9c directly on ARM; host tests replace that boundary
+/// through `EVENT_LIST_OPS.copy_subtree`. The ARM's two five-instruction
+/// leftmost/rightmost helpers (0x083b6a80/0x083b6a6c) are inlined here; their
+/// unchecked child-link traversal is otherwise preserved.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_list_tree_assign(
+    destination: *mut u8,
+    source: *mut u8,
+) -> *mut u8 {
+    if destination == source {
+        return destination;
+    }
+
+    let destination_header = unsafe { word(destination.add(TREE_HEADER_OFFSET)) };
+    let mut first = unsafe {
+        word((destination_header as usize as *const u8).add(TREE_LEFTMOST_OFFSET))
+    };
+    let mut last = destination_header;
+    let mut erased = 0;
+    unsafe {
+        event_list_tree_erase_range(&mut erased, destination, &mut first, &mut last);
+    }
+
+    let source_header = unsafe { word(source.add(TREE_HEADER_OFFSET)) };
+    let source_root = unsafe {
+        word((source_header as usize as *const u8).add(TREE_ROOT_OFFSET))
+    };
+    let root = unsafe { copy_subtree(destination, source_root, destination_header) };
+    unsafe {
+        (destination_header as usize as *mut u8)
+            .add(TREE_ROOT_OFFSET)
+            .cast::<u32>()
+            .write(root);
+        let header = destination_header as usize as *mut u8;
+        if root == 0 {
+            header
+                .add(TREE_LEFTMOST_OFFSET)
+                .cast::<u32>()
+                .write(destination_header);
+            header
+                .add(TREE_RIGHTMOST_OFFSET)
+                .cast::<u32>()
+                .write(destination_header);
+        } else {
+            let mut leftmost = root;
+            while word((leftmost as usize as *const u8).add(TREE_LEFTMOST_OFFSET)) != 0 {
+                leftmost = word((leftmost as usize as *const u8).add(TREE_LEFTMOST_OFFSET));
+            }
+            let mut rightmost = root;
+            while word((rightmost as usize as *const u8).add(TREE_RIGHTMOST_OFFSET)) != 0 {
+                rightmost = word((rightmost as usize as *const u8).add(TREE_RIGHTMOST_OFFSET));
+            }
+            header
+                .add(TREE_LEFTMOST_OFFSET)
+                .cast::<u32>()
+                .write(leftmost);
+            header
+                .add(TREE_RIGHTMOST_OFFSET)
+                .cast::<u32>()
+                .write(rightmost);
+        }
+        destination
+            .add(TREE_NODE_COUNT_OFFSET)
+            .cast::<u32>()
+            .write(word(source.add(TREE_NODE_COUNT_OFFSET)));
+    }
+    destination
+}
 /// event_list_release — original: `FUN_081e054c` @ 0x081e054c (80 bytes,
 /// 125 `bl` call sites).
 ///
@@ -463,6 +567,7 @@ mod tests {
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut EVENTS: Vec<Call> = Vec::new();
     static mut FAIL_VALUE: u32 = 0;
+    static mut COPY_RESULT: u32 = 0;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
@@ -473,6 +578,7 @@ mod tests {
         Advance(u32),
         Erase { tree: usize, node: u32 },
         Destroy { tree: usize, root: u32 },
+        Copy { tree: usize, source_root: u32, destination_header: u32 },
     }
 
     unsafe extern "C" fn recording_registry() -> *mut u8 {
@@ -546,6 +652,21 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn recording_copy_subtree(
+        tree: *mut u8,
+        source_root: u32,
+        destination_header: u32,
+    ) -> u32 {
+        unsafe {
+            EVENTS.push(Call::Copy {
+                tree: tree as usize,
+                source_root,
+                destination_header,
+            });
+            COPY_RESULT
+        }
+    }
+
     struct Bench {
         _lock: MutexGuard<'static, ()>,
     }
@@ -568,6 +689,7 @@ mod tests {
         let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             FAIL_VALUE = u32::MAX;
+            COPY_RESULT = 0;
             EVENTS.clear();
             EVENT_LIST_BUILD_OPS = EventListBuildOps {
                 registry: recording_registry,
@@ -579,6 +701,7 @@ mod tests {
                 advance_iterator: recording_advance_iterator,
                 erase_node: recording_erase_node,
                 destroy_subtree: recording_destroy_subtree,
+                copy_subtree: recording_copy_subtree,
             };
         }
         Bench { _lock: lock }
@@ -808,6 +931,137 @@ mod tests {
         );
     }
 
+    unsafe fn install_assignment_source(slab: *mut u8, count: u32, root: u32) -> *mut u8 {
+        unsafe {
+            let source = slab.add(0x700);
+            let header = slab.add(0x800);
+            put_word(source.add(TREE_HEADER_OFFSET), header as usize as u32);
+            put_word(source.add(TREE_NODE_COUNT_OFFSET), count);
+            put_word(header.add(TREE_ROOT_OFFSET), root);
+            source
+        }
+    }
+
+    #[test]
+    fn tree_assign_self_is_a_noop() {
+        let _bench = bench();
+        let Some(slab) = fixture(1) else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        let tree = unsafe { slab.add(EVENT_LIST_OFFSET) };
+        let header = unsafe { tree_header(slab) };
+
+        let returned = unsafe { event_list_tree_assign(tree, tree) };
+
+        assert_eq!(returned, tree);
+        assert!(events().is_empty());
+        assert_eq!(unsafe { word(tree.add(TREE_NODE_COUNT_OFFSET)) }, 1);
+        assert_eq!(unsafe { word((header as usize as *const u8).add(TREE_ROOT_OFFSET)) }, unsafe { node(slab, 0) });
+    }
+
+    #[test]
+    fn tree_assign_clears_destination_clones_and_rebuilds_boundaries() {
+        let _bench = bench();
+        let Some(slab) = fixture(1) else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        let destination = unsafe { slab.add(EVENT_LIST_OFFSET) };
+        let destination_header = unsafe { tree_header(slab) };
+        let copied_root = unsafe { slab.add(0xa00) } as usize as u32;
+        let copied_leftmost = unsafe { slab.add(0xb00) } as usize as u32;
+        let copied_rightmost = unsafe { slab.add(0xc00) } as usize as u32;
+        unsafe {
+            put_word(
+                (copied_root as usize as *mut u8).add(TREE_LEFTMOST_OFFSET),
+                copied_leftmost,
+            );
+            put_word(
+                (copied_root as usize as *mut u8).add(TREE_RIGHTMOST_OFFSET),
+                copied_rightmost,
+            );
+            put_word(
+                (copied_leftmost as usize as *mut u8).add(TREE_LEFTMOST_OFFSET),
+                0,
+            );
+            put_word(
+                (copied_rightmost as usize as *mut u8).add(TREE_RIGHTMOST_OFFSET),
+                0,
+            );
+            let source_root = slab.add(0x900) as usize as u32;
+            let source = install_assignment_source(slab, 3, source_root);
+            COPY_RESULT = copied_root;
+
+            assert_eq!(event_list_tree_assign(destination, source), destination);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Call::Destroy {
+                        tree: destination as usize,
+                        root: node(slab, 0),
+                    },
+                    Call::Copy {
+                        tree: destination as usize,
+                        source_root,
+                        destination_header,
+                    },
+                ]
+            );
+        }
+        assert_eq!(
+            unsafe { word((destination_header as usize as *const u8).add(TREE_ROOT_OFFSET)) },
+            copied_root
+        );
+        assert_eq!(
+            unsafe { word((destination_header as usize as *const u8).add(TREE_LEFTMOST_OFFSET)) },
+            copied_leftmost
+        );
+        assert_eq!(
+            unsafe { word((destination_header as usize as *const u8).add(TREE_RIGHTMOST_OFFSET)) },
+            copied_rightmost
+        );
+        assert_eq!(unsafe { word(destination.add(TREE_NODE_COUNT_OFFSET)) }, 3);
+    }
+
+    #[test]
+    fn tree_assign_empty_copy_restores_empty_header() {
+        let _bench = bench();
+        let Some(slab) = fixture(1) else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        let destination = unsafe { slab.add(EVENT_LIST_OFFSET) };
+        let destination_header = unsafe { tree_header(slab) };
+        let source = unsafe { install_assignment_source(slab, 0, 0) };
+
+        unsafe { event_list_tree_assign(destination, source) };
+
+        assert_eq!(
+            events(),
+            std::vec![
+                Call::Destroy {
+                    tree: destination as usize,
+                    root: unsafe { node(slab, 0) },
+                },
+                Call::Copy {
+                    tree: destination as usize,
+                    source_root: 0,
+                    destination_header,
+                },
+            ]
+        );
+        assert_eq!(unsafe { word((destination_header as usize as *const u8).add(TREE_ROOT_OFFSET)) }, 0);
+        assert_eq!(
+            unsafe { word((destination_header as usize as *const u8).add(TREE_LEFTMOST_OFFSET)) },
+            destination_header
+        );
+        assert_eq!(
+            unsafe { word((destination_header as usize as *const u8).add(TREE_RIGHTMOST_OFFSET)) },
+            destination_header
+        );
+        assert_eq!(unsafe { word(destination.add(TREE_NODE_COUNT_OFFSET)) }, 0);
+    }
     #[test]
     fn erase_empty_range_returns_header_without_runtime_calls() {
         let _bench = bench();
