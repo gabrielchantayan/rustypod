@@ -327,6 +327,10 @@ pub mod hints {
     // element, and collection-header fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const PLST_LINKED_ITEM_COUNT: usize = 0xfa00_0000;
+    // 0xfb00_0000: dedicated to ui/tdat_message_dispatch's raw-u32 virtual
+    // handler and context fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const TDAT_MESSAGE_DISPATCH: usize = 0xfb00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

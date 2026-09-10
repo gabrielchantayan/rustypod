@@ -4986,6 +4986,32 @@ functions:
       the result in unsigned comparisons. This supports u32 but not a
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
+
+  - address: 0x080442a0
+    ghidra: FUN_080442a0
+    name: tdat_dispatch_message
+    size: 52
+    sig: "u32 tdat_dispatch_message(u8 *element, u32 message, u8 *arguments)"
+    module: ui/tdat_message_dispatch
+    vars:
+      param_1/r0: element
+      param_2/r1: message
+      param_3/r2: arguments
+      param_1_plus_0x4c: handler_address
+      param_1_plus_0x50: context
+      FUN_0806aa3c: ui_element_is_tdat_class
+    status: ported
+    notes: >-
+      Raw ARM extent is exactly 0x080442a0..0x080442d4: push {r4, r5, r6,
+      lr}; call ui_element_is_tdat_class at 0x0806aa3c; on success load the
+      virtual handler and its context from element+0x4c/+0x50 and tail-call
+      handler(element, message, arguments, context). A rejected class,
+      including NULL, returns 0xffffffce. Decoding every B/BL word in
+      osos.dec verifies 11 direct unconditional bl callers and one predicated
+      beq tail branch at 0x0806aaa0; the branch is the refcount transition
+      path. The stored handler is a target-width dynamic function address, so
+      the port's TDAT_MESSAGE_OPS seam transmutes it only on target builds;
+      host tests record the raw handler word and all forwarded arguments.
   - address: 0x08045f14
     ghidra: FUN_08045f14
     name: cstr_to_counted_u8
