@@ -54,9 +54,9 @@ pub const FT_CURVE_TAG_CUBIC: u8 = 2;
 /// members the ported functions touch, at their firmware offsets: the
 /// three head words (memory, face, glyph) at +0x00..+0x0b, `loader`
 /// @ +0x0c, one more head word @ +0x10, `current` @ +0x14, `last` @
-/// +0x18/+0x1c and the `load_points` bool @ +0x51. The +0x20..+0x50
-/// span (left_bearing, advance, bbox, no_recurse, ...) is opaque to
-/// this port.
+/// +0x18/+0x1c, `path_begun` @ +0x50 and `load_points` @ +0x51. The
+/// +0x20..+0x4f span (left_bearing, advance, bbox, no_recurse, ...) is
+/// opaque to this port.
 ///
 /// `loader` and `current` are native pointers like the pointer fields
 /// of ft/types.rs structs: exact on the 32-bit target, wider on 64-bit
@@ -69,7 +69,7 @@ pub struct CffBuilder {
     pub current: *mut FtOutline,
     pub last: FtVector,
     _reserved_20: [u32; 12],
-    _reserved_50: u8,
+    pub path_begun: u8,
     pub load_points: u8,
 }
 
@@ -80,6 +80,8 @@ const _: [u8; 0x0c] = [0; core::mem::offset_of!(CffBuilder, loader)];
 const _: [u8; 0x14] = [0; core::mem::offset_of!(CffBuilder, current)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x18] = [0; core::mem::offset_of!(CffBuilder, last)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x50] = [0; core::mem::offset_of!(CffBuilder, path_begun)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x51] = [0; core::mem::offset_of!(CffBuilder, load_points)];
 #[cfg(target_pointer_width = "32")]
@@ -274,6 +276,82 @@ pub unsafe extern "C" fn cff_check_points(builder: *mut CffBuilder, count: i32) 
     0
 }
 
+/// Firmware load address of the unported `cff_builder_add_contour`
+/// (0x080cc9d8), which [`cff_builder_start_point`] invokes before
+/// recording its first point.
+pub const CFF_BUILDER_ADD_CONTOUR_ADDRESS: usize = 0x080c_c9d8;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_cff_builder_add_contour(builder: *mut CffBuilder) -> i32 {
+    let add_contour: unsafe extern "C" fn(*mut CffBuilder) -> i32 =
+        core::mem::transmute(CFF_BUILDER_ADD_CONTOUR_ADDRESS);
+    add_contour(builder)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_cff_builder_add_contour(_builder: *mut CffBuilder) -> i32 {
+    panic!("cff_builder_start_point requires cff_builder_add_contour 0x080cc9d8")
+}
+
+/// Direct-call boundary for the unported `cff_builder_add_contour` @
+/// 0x080cc9d8. It records the preceding contour and grows its storage when
+/// needed; a later port can replace this seam without changing the start
+/// point logic.
+#[cfg(target_os = "none")]
+pub static mut CFF_BUILDER_ADD_CONTOUR: unsafe extern "C" fn(*mut CffBuilder) -> i32 =
+    firmware_cff_builder_add_contour;
+
+#[cfg(not(target_os = "none"))]
+pub static mut CFF_BUILDER_ADD_CONTOUR: unsafe extern "C" fn(*mut CffBuilder) -> i32 =
+    missing_cff_builder_add_contour;
+
+/// cff_builder_start_point (FreeType `cff_builder_start_point`, cffgload.c)
+/// — original: `FUN_080cca60` @ 0x080cca60 (76 bytes,
+/// 0x080cca60..0x080ccaac; the next function starts with `ldr r0,[r0,#0x8c]`).
+/// 12 call sites verified by decoding every B/BL word in osos.dec: all are
+/// unconditional `bl` (0x080e0158, 0x080e0204, 0x080e033c, 0x080e040c,
+/// 0x080e04ec, 0x080e05d8, 0x080e0780, 0x080e0874, 0x080e0954,
+/// 0x080e0a4c, 0x080e0b7c, 0x080e0c80); no `b` tails and no DATA word holds
+/// the address, so it is not virtually dispatched.
+///
+/// Starts an outline path exactly once: a pre-existing `path_begun` returns
+/// success untouched; otherwise marks it begun, records the preceding
+/// contour through the stock `cff_builder_add_contour` seam, then checks
+/// capacity for one point and appends `(x,y)` as on-curve if it fits.
+/// Contour and capacity errors propagate; the capacity error leaves the new
+/// path begun but writes no point.
+///
+/// Deliberate deviation: the ARM tail-branches to unported
+/// `FUN_080c8a28`, whose verified body is the same `cff_check_points(...,1)`
+/// followed by `cff_builder_add_point(...,1)` sequence expressed directly
+/// here. The preceding unported 0x080cc9d8 call remains a direct seam.
+///
+/// # Safety
+/// `builder` must point to a valid [`CffBuilder`], and its members must meet
+/// the safety requirements of the called contour, capacity, and point paths.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_builder_start_point(
+    builder: *mut CffBuilder,
+    x: i32,
+    y: i32,
+) -> i32 {
+    if (*builder).path_begun != 0 {
+        return 0;
+    }
+    (*builder).path_begun = 1;
+    let add_contour = core::ptr::addr_of!(CFF_BUILDER_ADD_CONTOUR).read_volatile();
+    let error = add_contour(builder);
+    if error != 0 {
+        return error;
+    }
+    let error = cff_check_points(builder, 1);
+    if error == 0 {
+        cff_builder_add_point(builder, x, y, 1);
+    }
+    error
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -310,7 +388,7 @@ mod tests {
                     current: core::ptr::null_mut(),
                     last: FtVector { x: -1, y: -1 },
                     _reserved_20: [0xdeadbeef; 12],
-                    _reserved_50: 0xde,
+                    path_begun: 0xde,
                     load_points,
                 },
             });
@@ -401,7 +479,7 @@ mod tests {
         assert!(fx.builder._reserved_00.iter().all(|w| *w == 0xdeadbeef));
         assert_eq!(fx.builder._reserved_10, 0xdeadbeef);
         assert!(fx.builder._reserved_20.iter().all(|w| *w == 0xdeadbeef));
-        assert_eq!(fx.builder._reserved_50, 0xde);
+        assert_eq!(fx.builder.path_begun, 0xde);
         assert_eq!(fx.builder.load_points, 1);
     }
 
@@ -464,7 +542,7 @@ mod tests {
                     current: core::ptr::null_mut(),
                     last: FtVector { x: -1, y: -1 },
                     _reserved_20: [0xdeadbeef; 12],
-                    _reserved_50: 0xde,
+                    path_begun: 0xde,
                     load_points: 0,
                 },
             });
@@ -483,6 +561,93 @@ mod tests {
         };
         body();
         unsafe { core::ptr::addr_of_mut!(GLYPH_LOADER_CHECK_POINTS).write_volatile(saved) };
+    }
+
+    static CONTOUR_LOCK: Mutex<()> = Mutex::new(());
+    static CONTOUR_CALLS: Mutex<std::vec::Vec<usize>> = Mutex::new(std::vec::Vec::new());
+
+    unsafe extern "C" fn record_add_contour(builder: *mut CffBuilder) -> i32 {
+        CONTOUR_CALLS.lock().push(builder as usize);
+        0
+    }
+
+    unsafe extern "C" fn fail_add_contour(builder: *mut CffBuilder) -> i32 {
+        CONTOUR_CALLS.lock().push(builder as usize);
+        9
+    }
+
+    fn with_contour_seam(
+        seam: unsafe extern "C" fn(*mut CffBuilder) -> i32,
+        body: impl FnOnce(),
+    ) {
+        let _lock = CONTOUR_LOCK.lock();
+        CONTOUR_CALLS.lock().clear();
+        let saved = unsafe { core::ptr::addr_of!(CFF_BUILDER_ADD_CONTOUR).read_volatile() };
+        unsafe { core::ptr::addr_of_mut!(CFF_BUILDER_ADD_CONTOUR).write_volatile(seam) };
+        body();
+        unsafe { core::ptr::addr_of_mut!(CFF_BUILDER_ADD_CONTOUR).write_volatile(saved) };
+    }
+
+    struct StartPointFixture {
+        points: [FtVector; 2],
+        tags: [u8; 2],
+        outline: FtOutline,
+        loader: FtGlyphLoader,
+        builder: CffBuilder,
+    }
+
+    impl StartPointFixture {
+        fn new(max_points: u32, load_points: u8) -> std::boxed::Box<Self> {
+            let mut fx = std::boxed::Box::new(StartPointFixture {
+                points: [FtVector { x: -777, y: 888 }; 2],
+                tags: [0xaa; 2],
+                outline: FtOutline {
+                    n_contours: 0,
+                    n_points: 0,
+                    points: core::ptr::null_mut(),
+                    tags: core::ptr::null_mut(),
+                    contours: core::ptr::null_mut(),
+                    flags: 0,
+                },
+                loader: FtGlyphLoader {
+                    _reserved_00: 0xdeadbeef,
+                    max_points,
+                    _reserved_08: [0xdeadbeef; 3],
+                    base: FtOutline {
+                        n_contours: 0,
+                        n_points: 0,
+                        points: core::ptr::null_mut(),
+                        tags: core::ptr::null_mut(),
+                        contours: core::ptr::null_mut(),
+                        flags: 0,
+                    },
+                    _reserved_28: [0xdeadbeef; 3],
+                    current: FtOutline {
+                        n_contours: 0,
+                        n_points: 0,
+                        points: core::ptr::null_mut(),
+                        tags: core::ptr::null_mut(),
+                        contours: core::ptr::null_mut(),
+                        flags: 0,
+                    },
+                },
+                builder: CffBuilder {
+                    _reserved_00: [0xdeadbeef; 3],
+                    loader: core::ptr::null_mut(),
+                    _reserved_10: 0xdeadbeef,
+                    current: core::ptr::null_mut(),
+                    last: FtVector { x: -1, y: -1 },
+                    _reserved_20: [0xdeadbeef; 12],
+                    path_begun: 0,
+                    load_points,
+                },
+            });
+            fx.outline.points = fx.points.as_mut_ptr();
+            fx.outline.tags = fx.tags.as_mut_ptr();
+            fx.builder.current = &mut fx.outline;
+            fx.builder.loader = &mut fx.loader;
+            fx
+        }
     }
 
     #[test]
@@ -559,5 +724,69 @@ mod tests {
             assert_eq!(rc, 0);
             assert!(SEAM_CALLS.lock().is_empty());
         });
+    }
+
+    // --- cff_builder_start_point ---
+
+    #[test]
+    fn started_path_returns_ok_without_calling_contour_seam() {
+        let mut fx = StartPointFixture::new(1, 1);
+        fx.builder.path_begun = 0xff;
+        let rc = unsafe { cff_builder_start_point(&mut fx.builder, 0x0001_0000, 0x0002_0000) };
+        assert_eq!(rc, 0);
+        assert_eq!(fx.builder.path_begun, 0xff);
+        assert_eq!(fx.outline.n_points, 0);
+        assert_eq!(fx.points[0], FtVector { x: -777, y: 888 });
+        assert_eq!(fx.tags[0], 0xaa);
+    }
+
+    #[test]
+    fn contour_error_starts_path_and_propagates_without_adding_point() {
+        let mut fx = StartPointFixture::new(1, 1);
+        let builder = &mut fx.builder as *mut CffBuilder as usize;
+        with_contour_seam(fail_add_contour, || {
+            let rc = unsafe { cff_builder_start_point(&mut fx.builder, 0x0001_0000, 0x0002_0000) };
+            assert_eq!(rc, 9);
+            assert_eq!(CONTOUR_CALLS.lock().as_slice(), [builder]);
+        });
+        assert_eq!(fx.builder.path_begun, 1);
+        assert_eq!(fx.outline.n_points, 0);
+        assert_eq!(fx.points[0], FtVector { x: -777, y: 888 });
+        assert_eq!(fx.tags[0], 0xaa);
+    }
+
+    #[test]
+    fn starts_path_then_records_one_on_curve_point() {
+        let mut fx = StartPointFixture::new(1, 1);
+        let builder = &mut fx.builder as *mut CffBuilder as usize;
+        with_contour_seam(record_add_contour, || {
+            let rc = unsafe { cff_builder_start_point(&mut fx.builder, 0x0002_8000, -0x0001_8000) };
+            assert_eq!(rc, 0);
+            assert_eq!(CONTOUR_CALLS.lock().as_slice(), [builder]);
+        });
+        assert_eq!(fx.builder.path_begun, 1);
+        assert_eq!(fx.points[0], FtVector { x: 2, y: -2 });
+        assert_eq!(fx.tags[0], FT_CURVE_TAG_ON);
+        assert_eq!(fx.builder.last, FtVector { x: 2, y: -2 });
+        assert_eq!(fx.outline.n_points, 1);
+    }
+
+    #[test]
+    fn capacity_error_starts_path_but_does_not_add_point() {
+        let mut fx = StartPointFixture::new(0, 1);
+        with_contour_seam(record_add_contour, || {
+            with_seam(|| {
+                let rc = unsafe {
+                    cff_builder_start_point(&mut fx.builder, 0x0001_0000, 0x0002_0000)
+                };
+                assert_eq!(rc, 7);
+                assert_eq!(CONTOUR_CALLS.lock().as_slice(), [&mut fx.builder as *mut _ as usize]);
+                assert_eq!(SEAM_CALLS.lock().as_slice(), [(&mut fx.loader as *mut _ as usize, 1, 0)]);
+            });
+        });
+        assert_eq!(fx.builder.path_begun, 1);
+        assert_eq!(fx.outline.n_points, 0);
+        assert_eq!(fx.points[0], FtVector { x: -777, y: 888 });
+        assert_eq!(fx.tags[0], 0xaa);
     }
 }
