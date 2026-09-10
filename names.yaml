@@ -49751,6 +49751,29 @@ functions:
       the product overflows at the (-0x8000)^2 corner and arithmetic-shifts
       to -32768 rather than +32768, matching the original `mul r0,r1,r0;
       mov r0,r0,lsl #1; mov r0,r0,asr #0x10; bx lr`. 12 bl call sites.
+  - address: 0x080789a8
+    ghidra: FUN_080789a8
+    name: skip_ascii_whitespace_and_comments
+    size: 100
+    sig: "void skip_ascii_whitespace_and_comments(u8 **cursor, const u8 *end)"
+    module: util/skip_ascii_whitespace_and_comments
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: end
+      pcVar2/r2: current
+      cVar1/r3: byte
+    notes: >-
+      Advances *cursor past ASCII space, CR, LF, tab, form feed, NUL, and
+      percent-introduced comment lines. The comment scan stops at CR or LF,
+      whose following outer-loop increment discards the terminator. A comment
+      without either terminator deliberately leaves the cursor one byte beyond
+      end: the decoded ARM executes add r2,r2,#1 after its inner end comparison.
+      The function has no NULL guard. Every B/BL word in osos.dec was decoded:
+      12 direct bl call sites, all unconditional (0x0809149c, 0x0809c370,
+      0x080a938c, 0x080a9494, 0x080a94cc, 0x080a95a0, 0x080b8050,
+      0x080cdab8, 0x080cdb48, 0x080d46d4, 0x080d472c, and 0x080d47b4);
+      no predicated forms.
   - address: 0x083913b4
     ghidra: FUN_083913b4
     name: sqlite_snprintf
