@@ -3792,6 +3792,26 @@ functions:
     module: heap/veneers
     status: ported
     notes: raise(1,0) -> exit -> terminate @ 0x82b20a0 (non-returning).
+
+  - address: 0x0805f500
+    ghidra: thunk_FUN_08030f44
+    name: heap_panic_entry
+    size: 8
+    sig: "noreturn heap_panic_entry(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      FUN_08030f44: heap_panic
+    notes: >-
+      Ghidra's reported four-byte extent omits the following `bx lr`: raw
+      ARM is `bl 0x08030f44; bx lr`, so this separately linked entry is
+      eight bytes and the return is unreachable because heap_panic is
+      non-returning. Decoding every ARM B/BL word in osos.dec found 11
+      direct calls, all predicated: blne; six blhi; two blcs; blgt; and
+      blle. There are no tail-branch calls or data-word references. The
+      Rust entry directly invokes heap_panic rather than branching to its
+      retailOS address; its isolated host test verifies the resulting
+      raise(1,0) -> exit -> terminate(1) sequence.
   - address: 0x080edb74
     ghidra: FUN_080edb74
     name: allocation_construct_guard

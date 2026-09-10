@@ -86,6 +86,10 @@
 //!   exit path @ 0x08035878 (`_rt_exit`-ish: runs atexit handlers and
 //!   flushes stdio), then tail-branches to the final terminate stub @
 //!   0x082b20a0 with r0 = 1 (a semihosting SWI 0x123456 + spin).
+//! - `heap_panic_entry` — original: `thunk_FUN_08030f44` @ 0x0805f500
+//!   (8 bytes; Ghidra's 4-byte extent omits its unreachable `bx lr`; 11
+//!   predicated `bl` call sites). Calls `heap_panic` @ 0x08030f44, whose
+//!   terminate path does not return.
 //!
 //! Heap-dispatch design (deviation, by necessity): instead of the
 //! originals' tail branches, these veneers dispatch indirectly through
@@ -702,10 +706,32 @@ pub unsafe extern "C" fn heap_panic() -> ! {
     loop {}
 }
 
+/// heap_panic_entry — original: `thunk_FUN_08030f44` @ 0x0805f500 (8 bytes,
+/// not Ghidra's 4-byte extent). Verified by decoding every ARM B/BL word in
+/// osos.dec: 11 call sites, all predicated (`blne`, six `blhi`, two `blcs`,
+/// `blgt`, and `blle`); there are no tail branches or data-word references.
+///
+/// Calls the fatal heap-invariant path at 0x08030f44. The raw body is `bl
+/// 0x08030f44; bx lr`; the return instruction is unreachable because
+/// [`heap_panic`] does not return. Thus the callers, rather than this entry,
+/// gate when termination occurs; this no-argument entry has no guard.
+///
+/// Deliberate deviation: invokes the ported [`heap_panic`] symbol rather
+/// than encoding a branch to its retailOS address.
+#[cfg_attr(target_os = "none", link_section = ".text.heap_panic_entry")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_panic_entry() -> ! {
+    heap_panic()
+}
+
+
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
     use super::*;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
     /// Serializes tests that swap the global ops table / DEFAULT_HEAP.
@@ -744,6 +770,10 @@ pub(crate) mod tests {
     static mut LAST_NEW_HANDLER_CODE: usize = 0;
 
     const BLOCK_A: usize = 0xA110_0000;
+
+    /// Fatal-path state for the isolated `heap_panic_entry` child process:
+    /// 0 before raise, 1 after raise, 2 after exit.
+    static PANIC_ENTRY_STEP: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" fn mock_create(
         desc: *mut HeapDescriptor,
@@ -786,6 +816,7 @@ pub(crate) mod tests {
         ptr: *mut u8,
         tag: usize,
     ) {
+
         FREE_CALLS += 1;
         LAST_FREE_HEAP = heap;
         LAST_FREE_PTR = ptr;
@@ -811,6 +842,36 @@ pub(crate) mod tests {
     unsafe extern "C" fn mock_new_handler(code: usize) {
         NEW_HANDLER_CALLS += 1;
         LAST_NEW_HANDLER_CODE = code;
+    }
+    unsafe extern "C" fn panic_entry_raise(sig: i32, code: i32) -> i32 {
+        if sig != 1 || code != 0
+            || PANIC_ENTRY_STEP
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+        {
+            std::process::exit(2);
+        }
+        0
+    }
+
+    unsafe extern "C" fn panic_entry_exit() {
+        if PANIC_ENTRY_STEP
+            .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            std::process::exit(3);
+        }
+    }
+
+    unsafe extern "C" fn panic_entry_terminate(code: i32) {
+        if code == 1
+            && PANIC_ENTRY_STEP
+                .compare_exchange(2, 3, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            std::process::exit(0);
+        }
+        std::process::exit(4);
     }
 
     const MOCK_OPS: HeapVeneerOps = HeapVeneerOps {
@@ -1355,5 +1416,34 @@ pub(crate) mod tests {
             assert_eq!(DTOR_CALLS, 0);
             assert_eq!(FREE_CALLS, 0, "NULL flows into the guarded delete");
         }
+    }
+
+    #[test]
+    fn heap_panic_entry_runs_the_complete_fatal_path() {
+        const CHILD_ENV: &str = "RUSTYPOD_HEAP_PANIC_ENTRY_CHILD";
+
+        if std::env::var_os(CHILD_ENV).is_some() {
+            PANIC_ENTRY_STEP.store(0, Ordering::SeqCst);
+            unsafe {
+                core::ptr::addr_of_mut!(HEAP_OPS).write(HeapVeneerOps {
+                    raise: panic_entry_raise,
+                    exit: panic_entry_exit,
+                    terminate: panic_entry_terminate,
+                    ..MOCK_OPS
+                });
+                heap_panic_entry();
+            }
+        }
+
+        let status = Command::new(std::env::current_exe().expect("test executable path"))
+            .args([
+                "--exact",
+                "heap::veneers::tests::heap_panic_entry_runs_the_complete_fatal_path",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .status()
+            .expect("spawn fatal-path test child");
+        assert!(status.success(), "fatal path completed out of order: {status}");
     }
 }
