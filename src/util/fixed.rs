@@ -13,6 +13,7 @@
 //! `b`/`bl` word in osos.dec (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
+//! - `mul_shift_i32` — `FUN_08079a44` @ 0x08079a44 (20 bytes; 12 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
@@ -58,6 +59,39 @@
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_mul(a: i32, b: i32) -> i32 {
     (((a as i64) * (b as i64)) >> 16) as i32
+}
+
+/// mul_shift_i32 — original: `FUN_08079a44` @ 0x08079a44 (20 bytes).
+///
+/// Multiplies signed 32-bit `a` and `b` with `smull`, then returns the low
+/// 32 bits of the resulting signed 64-bit bit pattern shifted right by
+/// `shift`. The ARM body forms this funnel explicitly as
+/// `(hi << (32 - shift)) | (lo >> shift)`, so negative products retain their
+/// sign bits through `hi` and the result wraps rather than clamps.
+///
+/// Raw `osos.dec` confirms the exact extent 0x08079a44..0x08079a58; the
+/// `push` at 0x08079a58 begins the next function. Decoding every ARM B/BL
+/// word finds 12 direct `bl` call sites, all unconditional (none predicated):
+/// 0x08240f70, 0x08240f84, 0x08241008, 0x08241020, 0x08241110,
+/// 0x0824156c, 0x08241ea4, 0x08241eb8, 0x08241f44, 0x08241f5c,
+/// 0x08242068, and 0x082422a4. They pass shift 4 or 7 in r2.
+///
+/// Deliberate deviations: none. Beyond the callers' 4/7 range, this keeps
+/// ARMv5 register-shift semantics: both shift counts use only their low byte,
+/// and a count of 32 or more produces zero for that half of the funnel.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mul_shift_i32")]
+pub extern "C" fn mul_shift_i32(a: i32, b: i32, shift: u32) -> i32 {
+    let product = (a as i64 * b as i64) as u64;
+    let lo = product as u32;
+    let hi = (product >> 32) as u32;
+    let lo_shift = shift & 0xff;
+    let hi_shift = 32u32.wrapping_sub(shift) & 0xff;
+    let lo_part = if lo_shift < 32 { lo >> lo_shift } else { 0 };
+    let hi_part = if hi_shift < 32 { hi << hi_shift } else { 0 };
+
+    (hi_part | lo_part) as i32
 }
 
 /// clz_31 — original: `FUN_0824980c` @ 0x0824980c (68 bytes).
@@ -423,6 +457,53 @@ mod tests {
         let want = (((a as i64) * (a as i64)) >> 16) as i32;
         assert_eq!(fixed16_mul(a, a), want);
         assert_ne!(fixed16_mul(a, a), i32::MAX, "no saturation, unlike ft_muldiv");
+    }
+
+    #[test]
+    fn mul_shift_i32_matches_signed_product_for_callsite_shifts() {
+        let values = [
+            i32::MIN,
+            -0x1234_5678,
+            -1,
+            0,
+            1,
+            0x0001_0000,
+            0x1234_5678,
+            i32::MAX,
+        ];
+
+        for &shift in &[4, 7] {
+            for &a in &values {
+                for &b in &values {
+                    let want = (((a as i64) * (b as i64)) >> shift) as i32;
+                    assert_eq!(mul_shift_i32(a, b, shift), want, "a={a:#x} b={b:#x} shift={shift}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mul_shift_i32_preserves_arm_register_shift_edges() {
+        fn lsl_reg(value: u32, amount: u32) -> u32 {
+            let amount = amount & 0xff;
+            if amount < 32 { value << amount } else { 0 }
+        }
+
+        fn lsr_reg(value: u32, amount: u32) -> u32 {
+            let amount = amount & 0xff;
+            if amount < 32 { value >> amount } else { 0 }
+        }
+
+        let a = -0x1234_5678i32;
+        let b = 0x2468_ace0i32;
+        let product = (a as i64 * b as i64) as u64;
+        let lo = product as u32;
+        let hi = (product >> 32) as u32;
+
+        for shift in [0, 1, 31, 32, 33, 255, 256, u32::MAX] {
+            let want = (lsl_reg(hi, 32u32.wrapping_sub(shift)) | lsr_reg(lo, shift)) as i32;
+            assert_eq!(mul_shift_i32(a, b, shift), want, "shift={shift:#x}");
+        }
     }
 
     #[test]
