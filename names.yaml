@@ -49738,6 +49738,44 @@ functions:
       osos.dec 0x083e1ae4. match.py: structural match reviewed.
       absence of mutation.
 
+  - address: 0x083e717c
+    ghidra: FUN_083e717c
+    name: trivial_vector8_destruct
+    size: 64
+    sig: "u8 ** trivial_vector8_destruct(u8 **vector)"
+    module: cxx/trivial_vector8_destruct
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_1_plus_0x00: begin
+      param_1_plus_0x04: end
+      param_1_plus_0x08: capacity
+      iVar1/r2: begin
+      iVar2/r0: current
+      return/r0: vector
+    notes: >-
+      Raw extent is exactly 0x083e717c..0x083e71bc; 0x083e71bc begins the
+      separate 24-byte FUN_083e71bc. The body is structurally identical to
+      the canonical trivial_vector8_destruct @ 0x083e1ae4: it walks
+      [begin,end) in eight-byte increments with an optimized-away trivial
+      element destructor, calculates (capacity - begin) >> 3, clears r2,
+      calls cxx_array_dealloc (FUN_08266f2c), and returns vector without
+      writing the descriptor. The relative BL encoding naturally differs
+      because this copy is at a different address, but both targets are
+      0x08266f2c and all other instruction words agree. Decoding every ARM
+      B/BL word in osos.dec verifies ten direct, unconditional bl call sites,
+      no predicated bl forms, and no tail b forms: 0x08269c74, 0x08269d68,
+      0x08269e34, 0x0826a1d8, 0x0826a2b0, 0x0826a76c, 0x0826a7a8,
+      0x0826a7cc, 0x082caafc, and 0x082cab08. The canonical Rust export
+      serves this semantically indistinguishable copy instead of adding a
+      redundant body. Deliberate deviation: it reaches the existing free seam
+      with cxx_array_dealloc's sole live argument, while retaining the raw
+      descriptor reads and capacity calculation. Host tests cover non-empty
+      and empty descriptors, cleanup pointer, return value, and a no-write
+      guard footprint. Reference C: decomp/c/038/083e717c_FUN_083e717c.c;
+      raw disassembly: osos.dec 0x083e717c. match.py structural review is
+      recorded with this port.
+
   # --- pending-event queue take ---
   - address: 0x08138f14
     ghidra: FUN_08138f14
