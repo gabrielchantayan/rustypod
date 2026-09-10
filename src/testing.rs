@@ -65,6 +65,9 @@ pub mod hints {
     pub const VIEW_TIMER: usize = 0x2000_0000;
     pub const STRING_TABLE: usize = 0x2100_0000;
     pub const VIEW_EVENT_TIMER_STOP: usize = 0x5b00_0000;
+    // 0x6000_0000 is reserved for app::view_event's localized-flag
+    // fixture; mappings never unmap, so no other test may reuse it.
+    pub const VIEW_EVENT_LOCALIZED_FLAGS: usize = 0x6000_0000;
     // 0x2500_0000, not the sequential 0x2200_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
@@ -398,6 +401,11 @@ pub static DIAG_RING_STRING_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mut
 /// The view-event epilogue and `app::view_timer` both invoke the unported
 /// view-timer-stop wrapper through this one dispatch table.
 pub static VIEW_EVENT_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps `app::string_table::STRING_TABLE_OPS`.
+/// Derived view-event handlers use the real membership port through this
+/// seam, so they share this lock with string-table's own tests.
+pub static STRING_TABLE_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that swaps `drivers::timer::TIMER_OPS`.
 /// The timer module and view-timer callers both drive the ported timer

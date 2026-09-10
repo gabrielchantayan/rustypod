@@ -47582,6 +47582,46 @@ functions:
       the factor-8 immediate, the returned final add register, and all seven
       general-register sequence numbers.
 
+  - address: 0x0826087c
+    ghidra: FUN_0826087c
+    name: view_event_apply_localized_flags
+    size: 4
+    sig: "u32 view_event_apply_localized_flags(u8 *this, void *event)"
+    module: app/view_event
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_2/r1/r9: event
+      DAT_08219380: localized flag-key configuration
+      DAT_08219384: localization string-table singleton
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_08101edc: string_table_has_string
+      FUN_08102168: string_table_parse_i32
+      FUN_083d8b04: cxx_string_release
+      FUN_0810de48: view_event_apply_mapped_staged_flags
+    notes: >-
+      Ghidra's four-byte extent is mechanically right but semantically
+      incomplete: 0x0826087c is `b 0x082192a0`; the reached body runs from
+      0x082192a0 through its tail `b 0x0810de48` at 0x0821937c, followed
+      by literal words at 0x08219380/0x08219384. Decoding every aligned ARM
+      B/BL word in osos.dec finds 11 direct callers, all unconditional bl
+      (zero predicated), at 0x08222858, 0x08225538, 0x082291e0,
+      0x08229b00, 0x0822a4c0, 0x08230db8, 0x082324f4, 0x08234430,
+      0x08236ddc, 0x08239ec8, and 0x0823a224. A data word at 0x089b06cc
+      also names the veneer, proving this is a virtual-method entry.
+      When event is non-NULL, it builds temporary COW strings from the
+      configuration keys at +0x0c and +0x10; each present localization-table
+      key is fetched/parsed through FUN_08102168 (`"%d"`) and its low byte
+      is written at this+0xb0 or this+0xb1. Both temporaries are released,
+      then the function tail-branches to the ported mapped-staged-flag
+      wrapper and returns its handled verdict. r2/r3 are only stack
+      scratch/register residue at the two-argument string constructor.
+      The unported integer getter is a volatile target seam at 0x08102168;
+      target global-pointer reads are callbacks so host tests never
+      reinterpret 32-bit firmware fields as 64-bit host pointers. Host tests
+      prove the NULL-event skip, present-first/missing-second sequence,
+      low-byte store, releases through real COW ports, and final delegation.
+
   # --- Silver framework: the kind-tagged mid-hierarchy controller ---
   - address: 0x08260a50
     ghidra: FUN_08260a50
