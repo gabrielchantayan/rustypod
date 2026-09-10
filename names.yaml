@@ -55372,6 +55372,47 @@ functions:
       call, NULL data releases only owner, and non-NULL data releases data
       before owner.
 
+  # --- Four-word owned buffer assignment ---
+  - address: 0x0803a3cc
+    ghidra: FUN_0803a3cc
+    name: owned_buffer_assign
+    size: 188
+    sig: "u32 owned_buffer_assign(OwnedBuffer *owner, const u8 *source, i32 requested_length)"
+    module: heap/owned_buffer
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1/r6: source
+      param_3/r2/r5: requested_length
+      owner_plus_0x00/r0: length
+      owner_plus_0x08/r0/r7: data
+      FUN_08392478: strlen
+      FUN_08043c18: traced_alloc
+      FUN_08043f3c: traced_realloc
+      FUN_08037db0: __rt_memcpy
+    notes: >-
+      Raw ARM extent is exactly 188 bytes, 0x0803a3cc..0x0803a488; the next
+      separately linked function begins with push {r3,r4,r5,lr} at
+      0x0803a488. Decoding every ARM B/BL immediate in osos.dec finds 12
+      inbound BL-form calls, all unconditional: 0x0803a2c8, 0x0805fd68,
+      0x0805fdf4, 0x08060254, 0x08065ad0, 0x08078964, 0x0808a248,
+      0x0808a974, 0x080a96ac, 0x082b4f54, 0x08396bf4, and 0x08396d50.
+      There are no predicated forms; a separate unconditional tail b at
+      0x0803a258 is thunk_FUN_0803a3cc. Negative requested_length returns 0
+      for NULL source or measures a NUL-terminated source through strlen.
+      Signed length < requested_length or NULL data requests requested_length
+      + 1 bytes, wrapped, from traced_alloc or traced_realloc. Failure restores
+      the old data word and leaves length unchanged. Success stores the length;
+      non-NULL source is copied through __rt_memcpy and receives a NUL at
+      data[length], while NULL source deliberately skips both writes. The
+      signed compare makes a high-bit length force a grow even for requested
+      length zero. Deliberate deviation: unported traced_realloc
+      FUN_08043f3c dispatches through OWNED_BUFFER_REALLOC, whose default
+      returns NULL like the original's allocation-failure path. Host tests
+      cover NUL-measured allocation/copy, negative NULL rejection,
+      realloc failure preservation, signed high-bit grow, and NULL-source
+      no-terminator behavior.
+
   # --- I2C slave 0x39 one-byte register read ---
   - address: 0x0836e36c
     ghidra: FUN_0836e36c
