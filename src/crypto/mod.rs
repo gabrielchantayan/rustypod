@@ -48,6 +48,7 @@ pub mod bn_num_bits;
 pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
+pub mod evp_digest_final_ex;
 pub mod evp_digest_update;
 pub mod evp_md_ctx_cleanup;
 pub mod evp_sha1;
