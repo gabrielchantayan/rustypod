@@ -26276,6 +26276,36 @@ functions:
       semantically vdbe_add_op3(v, op, 0, 0, 0), so the ported
       vdbe_add_op3 is called directly.
 
+  - address: 0x0837d918
+    ghidra: FUN_0837d918
+    name: open_table
+    size: 132
+    sig: "void open_table(Parse *parse, int cursor, int database_index, Table *table, int opcode)"
+    module: sqlite/open_table
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: cursor
+      param_3/r2: database_index
+      param_4/r3: table
+      param_5/[sp]: opcode
+      r5: vdbe
+    notes: >-
+      SQLite 3.5.9's sqlite3OpenTable. Raw ARM has exactly 132 bytes
+      (0x0837d918..0x0837d998; next function 0x0837d99c) and 10 direct
+      BL sites, all unconditional: 0x082b56b8, 0x082b57f8, 0x08374dfc,
+      0x08378db8, 0x0837d9f0, 0x0838193c, 0x08385aac, 0x0838df14,
+      0x08399060, 0x083990e0. Virtual tables (Table.isVirtual at +0x39)
+      return before touching the Parse state. Otherwise, record the
+      shared-cache lock with table.tnum (+0x14), write flag (opcode == 9),
+      and borrowed table name, then emit OP_SetNumColumns 0, table.nCol
+      (literal 0x62) and the supplied open opcode cursor, table.tnum, iDb.
+      The direct sqlite3GetVdbe call at 0x0837acf4 cannot target a Rust
+      symbol: its ledger entry says ported but the tree has none, as
+      begin_write_operation documents. This port reads Parse.pVdbe directly,
+      matching that module's configured stand-in and the unported
+      constructor's NULL/OOM end state.
+
   - address: 0x0837ad2c
     ghidra: FUN_0837ad2c
     name: hash_clear
