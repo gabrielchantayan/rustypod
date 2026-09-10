@@ -48,6 +48,7 @@ pub mod evp_pkey;
 pub mod obj_dat;
 pub mod xor_f6_in_place;
 pub mod standard_cipher_table_three;
+pub mod x509v3_add_value;
 pub mod standard_cipher_table_four;
 pub mod standard_cipher_table_five;
 pub mod standard_cipher_table_six;

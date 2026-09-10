@@ -56978,3 +56978,35 @@ functions:
       seams, whose host defaults fail closed because the shared interface
       graph remains a retailOS boundary. Host tests prove base-hint forwarding,
       slot selection, path identity, guard ordering, and verbatim statuses.
+
+  - address: 0x0806ea5c
+    ghidra: FUN_0806ea5c
+    name: x509v3_add_value
+    size: 220
+    sig: "u32 x509v3_add_value(const char *name, const char *value, usize **values)"
+    module: crypto/x509v3_add_value
+    status: ported
+    renames:
+      param_1/r0: name
+      param_2/r1: value
+      param_3/r2: values
+      r4: entry
+      r5: name_copy
+      r7: value_copy
+    notes: >-
+      Raw extent is exactly 220 bytes, 0x0806ea5c..0x0806eb38: the immediate
+      sibling FUN_0806eb38 starts at 0x0806eb38. Decoding every ARM B/BL word
+      in osos.dec finds 12 direct call sites: 9 unconditional bl and 3 blne;
+      the predicated callers gate their configuration assembly themselves.
+      This is OpenSSL X509V3_add_value: duplicate non-NULL name/value through
+      unported BUF_strdup (0x08042220), allocate the 12-byte
+      {section=NULL,name,value} CONF_VALUE record through ported traced_alloc,
+      lazily create the stack through ported ata_call_with_zero, then append
+      through ported namespace_provider_push. A zero append, duplication,
+      allocation, or factory result logs (0x22,0x69,0x41,0,0), frees entry,
+      name copy, and value copy in that order, and returns 0; append success
+      transfers ownership and returns 1. Deliberate deviation: BUF_strdup is
+      the CSTR_DUPLICATE volatile seam, defaulting to NULL until ported; the
+      existing ata_call_with_zero factory seam likewise defaults to NULL until
+      FUN_083696f4 is ported. Host tests use usize word indices to retain the
+      target's 12-byte record layout without overlapping 64-bit host pointers.
