@@ -323,6 +323,10 @@ pub mod hints {
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
     pub const NESTED_OBJECT_VALUE: usize = 0xb300_0000;
+    // 0xfa00_0000: dedicated to ui/plst_linked_item_count's raw-u32 owner,
+    // element, and collection-header fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const PLST_LINKED_ITEM_COUNT: usize = 0xfa00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
