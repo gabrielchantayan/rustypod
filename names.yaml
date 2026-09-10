@@ -26463,6 +26463,39 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083da47c
+    ghidra: FUN_083da47c
+    name: deque_iter_init_elem4
+    size: 64
+    sig: "DequeIter *deque_iter_init_elem4(DequeIter *iter, u8 *cur, u8 **slot)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, param_2: cur, param_3: slot, iVar1: seg_base}
+    renames:
+      FUN_083da450: deque_seg_capacity
+      param_1: iter
+      param_2: cur
+      param_3: slot
+      iVar1: seg_base
+    notes: >-
+      Raw ARM confirms Ghidra's 64-byte extent: the entry at 0x083da47c
+      runs through `pop {r4,r5,pc}` at 0x083da4b8 and the sibling deque
+      iterator function begins at 0x083da4bc. 11 plain `bl` call sites
+      (0x083df930, 0x083df970, 0x083dfa4c, 0x083dfa74, 0x083dfaa0,
+      0x083dfaf8, 0x083dfc78, 0x083dfcb0, 0x083dfdc4, 0x083dfe68, and
+      0x083dfea4), zero predicated `bl` forms, and zero tail `b` sites
+      were counted by decoding every ARM B/BL word in osos.dec. This
+      4-byte-element deque-iterator constructor writes cur; for a NULL
+      segment-slot pointer writes NULL base/end; otherwise loads the
+      slot's base, calls the adjacent `mov r0,#0x20; bx lr` capacity member
+      at 0x083da450, reloads the slot, writes base + 0x20 * 4 as end, and
+      stores the slot. A non-NULL slot containing NULL therefore yields
+      end 0x80, not NULL. The port uses the existing
+      heap/block_deque::deque_seg_capacity export rather than a redundant
+      wrapper for the byte-identical capacity member; `wrapping_add`
+      deliberately preserves the raw NULL-base + 0x80 result without
+      Rust's in-bounds pointer-arithmetic requirement.
+
   - address: 0x083d9fd4
     ghidra: FUN_083d9fd4
     name: deque_iter_assign_alias_9fd4
