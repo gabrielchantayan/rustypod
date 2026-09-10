@@ -54,6 +54,7 @@ pub mod iap_packet_completion;
 pub mod iap_packet_event_schedule;
 pub mod image_format;
 pub mod kinded_controller;
+pub mod image_format_descriptor_slot;
 pub mod lock_service;
 pub mod managed_entry;
 pub mod lazy_handle_manager;
