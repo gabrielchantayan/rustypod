@@ -58503,3 +58503,33 @@ functions:
       bounds, or alignment checks. Slot 17 has its descriptor bytes overlap
       the sequence word, so the later copy overwrites the incremented word;
       this port preserves that instruction order. No deliberate deviations.
+
+  # --- iAP packet event callback dispatch (app/iap_packet_event_dispatch) ---
+  - address: 0x081a9728
+    ghidra: FUN_081a9728
+    name: dispatch_iap_packet_event
+    size: 176
+    sig: "IapPacket *dispatch_iap_packet_event(void *context, IapPacket *packet, u32 event)"
+    module: app/iap_packet_event_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: packet
+      param_3/r2: event
+      "*packet": packet_vtable
+      packet_vtable+0xd8..+0xfc: unrecovered_iap_packet_event_callbacks
+    notes: >-
+      Raw osos.dec confirms the 176-byte extent: compare event with 9,
+      move packet into r0, jump-table branches, and ten vtable loads through
+      bx r1 at 0x081a97d4; the separately linked next function begins at
+      0x081a97d8. The event-to-slot map is {0:+0xe0, 1:+0xd8, 2:+0xe4,
+      3:+0xdc, 4:+0xec, 5:+0xf0, 6:+0xfc, 7:+0xf8, 8:+0xf4, 9:+0xe8}.
+      An event above 9 returns packet directly without dereference. Decoding
+      every ARM B/BL immediate in osos.dec finds exactly 11 direct inbound
+      calls: ten predicated blne at 0x081aa964, 0x081aa98c, 0x081aa9c8,
+      0x081aa9f0, 0x081aaa18, 0x081aaa44, 0x081aaa6c, 0x081aaa94,
+      0x081aaabc, and 0x081abc1c, plus one unconditional bl at 0x081ac090;
+      there are no direct plain-B tails. The ten callback identities and
+      return contracts are unrecovered indirect targets, so target Rust reads
+      their verified 32-bit vtable slots while host tests use a slot-index
+      dispatch seam rather than inventing callee identities.

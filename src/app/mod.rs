@@ -53,6 +53,7 @@ pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
 pub mod iap_packet_completion;
+pub mod iap_packet_event_dispatch;
 pub mod iap_packet_event_schedule;
 pub mod image_format;
 pub mod kinded_controller;
