@@ -21498,6 +21498,34 @@ functions:
       siblings; host tests use oversized arenas because the host structs are
       wider than the target's 12/8-byte layouts.
 
+
+  - address: 0x0839ec70
+    ghidra: FUN_0839ec70
+    name: refcounted_handle_copy_assign
+    size: 48
+    sig: "RefcountedBody **refcounted_handle_copy_assign(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+    notes: >-
+      Raw ARM establishes the exact 48-byte body 0x0839ec70..0x0839eca0,
+      where a separately linked constructor begins. Decoding every ARM B/BL
+      word in osos.dec finds exactly 11 direct BL callers, all unconditional
+      (0x0812f6d4, 0x0812f940, 0x0812f99c, 0x081304d4, 0x081b5888,
+      0x081b5d00, 0x081f79e8, 0x081f80c8, 0x081f8a4c, 0x081f8b2c, and
+      0x081f8f78): no tail B sites, no predicated forms, and no image word
+      equals the address, so it is never virtually dispatched. It compares
+      slot addresses, and when distinct calls the ported slot-1 release
+      refcounted_body_release_dtor @ 0x0839cbc0 before loading *src, then
+      calls the separately linked attach helper @ 0x0839cb84. That helper is
+      byte-identical to ported refcounted_body_attach @ 0x0839d370 modulo
+      direct-branch displacements, so this port uses the already ported
+      canonical helper. It returns dst unconditionally; host tests cover
+      self-assignment and a non-final release followed by source attach. A
+      dedicated target section prevents this hookable copy from folding with a
+      sibling.
   - address: 0x0839eca0
     ghidra: FUN_0839eca0
     name: refcounted_handle_construct_variant

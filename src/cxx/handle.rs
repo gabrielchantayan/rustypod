@@ -590,6 +590,43 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign(
     dst
 }
 
+/// refcounted_handle_copy_assign — original: `FUN_0839ec70` @ 0x0839ec70
+/// (48 bytes; 11 `bl` call sites, all unconditional — verified by decoding
+/// every ARM B/BL word in osos.dec: no `b` sites, no predicated forms, and no
+/// image word references, so it is never virtually dispatched. The next
+/// separately linked function starts at 0x0839eca0).
+///
+/// Copy-assigns a refcounted handle slot. Distinct slot addresses first release
+/// `*dst` through the slot-1 destructor at 0x0839cbc0, then load `*src` and
+/// attach it, which stores it in `dst` and increases its signed refcount under
+/// its optional mutex. The source load deliberately follows the release, and
+/// the function returns `dst` even for self-assignment.
+///
+/// The ARM body calls the separately linked attach helper at 0x0839cb84. That
+/// 60-byte helper is byte-identical to [`refcounted_body_attach`] at
+/// 0x0839d370 modulo direct-branch displacements, so this port calls the
+/// already ported canonical helper. A dedicated target section preserves this
+/// separately hookable export; LLVM may otherwise fold it with a sibling.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots; their non-NULL bodies
+/// and associated mutexes, implementations, and vtables must meet the safety
+/// requirements of [`refcounted_body_release_dtor`] and
+/// [`refcounted_body_attach`]. The original does not NULL-check either slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_handle_copy_assign")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_handle_copy_assign(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_dtor(dst);
+        refcounted_body_attach(dst, src.read());
+    }
+    dst
+}
+
 /// refcounted_body_release — original: `FUN_0839cd98` @ 0x0839cd98
 /// (144 bytes; called by the refcounted-handle release wrappers).
 ///
@@ -1704,6 +1741,55 @@ mod tests {
             assert_eq!(new.refcount, 2);
         }
     }
+
+    /// The target's slot-address guard skips both body operations on
+    /// self-assignment and returns the destination slot unchanged.
+    #[test]
+    fn handle_copy_assign_same_slot_is_a_no_op() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_handle_copy_assign(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
+        }
+    }
+
+    /// A distinct source is loaded only after the old body loses its reference:
+    /// the non-final old body survives, while the replacement is attached and
+    /// increments from one to two.
+    #[test]
+    fn handle_copy_assign_releases_then_attaches_source() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut dst: *mut RefcountedBody = &mut old;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = refcounted_handle_copy_assign(&mut dst, &src);
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1, "non-final drop leaves the old body live");
+            assert_eq!(new.refcount, 2);
+        }
+    }
+
 
     /// Direct tests of the body release use the ported mutex and heap
     /// surfaces with recording kernel/heap hooks. The crate's test
