@@ -40,7 +40,7 @@ const ENCODED_WORD_MULTIPLIER: u32 = 0xd561_a67f;
 // decodes a stored limb back to its plain value. Being odd it is
 // invertible, so `word * key == 0` iff `word == 0` — the limb-zero scan
 // at 0x082fc770 relies on exactly that.
-const ENCODED_WORD_DECODE_MULTIPLIER: u32 = 0x76b4_197f;
+static ENCODED_WORD_DECODE_MULTIPLIER: u32 = 0x76b4_197f;
 
 /// A one-word firmware header for an encoded-count word block with INLINE
 /// storage: the word payload follows the header immediately at offset +4,
@@ -278,45 +278,33 @@ pub unsafe extern "C" fn encoded_word_block_set_int(
     0
 }
 
-/// Fixed retailOS address of the limb-zero scan [`encoded_word_block_sign`]
-/// delegates to: `FUN_082fc770` @ 0x082fc770 (unported).
-#[cfg(target_os = "none")]
-const RETAIL_ENCODED_WORD_BLOCK_IS_ZERO: usize = 0x082f_c770;
-
-/// ABI of the unported limb-zero scan at 0x082fc770: 1 when the block's
-/// decoded limbs are all zero or its decoded count is not positive,
-/// else 0.
-pub type EncodedWordBlockIsZero = unsafe extern "C" fn(*const EncodedWordBlock) -> u32;
-
-/// Target dispatch: calls the retail limb-zero scan at 0x082fc770.
-#[cfg(target_os = "none")]
-unsafe fn encoded_word_block_is_zero(block: *const EncodedWordBlock) -> u32 {
-    let scan: EncodedWordBlockIsZero =
-        core::mem::transmute(RETAIL_ENCODED_WORD_BLOCK_IS_ZERO);
-    scan(block)
-}
-
-/// Host dispatch: calls through [`ENCODED_WORD_BLOCK_IS_ZERO_FN`].
-#[cfg(not(target_os = "none"))]
-unsafe fn encoded_word_block_is_zero(block: *const EncodedWordBlock) -> u32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(ENCODED_WORD_BLOCK_IS_ZERO_FN))(block)
-}
-
-/// Host seam for the unported limb-zero scan at 0x082fc770. The default
-/// [`host_encoded_word_block_is_zero`] models the callee's decoded 84-byte
-/// algorithm faithfully; tests may replace it to prove the call boundary.
-/// Target builds never read this static.
-#[cfg(not(target_os = "none"))]
-pub static mut ENCODED_WORD_BLOCK_IS_ZERO_FN: EncodedWordBlockIsZero =
-    host_encoded_word_block_is_zero;
-
-/// Faithful host model of the unported limb-zero scan @ 0x082fc770 (see
-/// [`encoded_word_block_sign`]'s header for the algorithm). Not a port: it
-/// exists so host tests exercise the real zero-scan behavior.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_encoded_word_block_is_zero(
-    block: *const EncodedWordBlock,
-) -> u32 {
+/// Returns 1 when every decoded limb is zero, otherwise 0.
+///
+/// Original: `FUN_082fc770` @ 0x082fc770 (84-byte instruction body,
+/// 0x082fc770..0x082fc7c4; trailing literal-pool words
+/// `0x0a7e377f`/`0x76b4197f` at 0x082fc7c4..0x082fc7cc; next separately
+/// linked function starts at 0x082fc7cc, for a 92-byte full extent).
+/// Decoding every ARM B/BL word in osos.dec finds exactly 11 direct inbound
+/// call sites, all unconditional `bl` and zero predicated forms; there are no
+/// direct tail branches or aligned DATA-word references to this entry.
+///
+/// It decodes the signed word count with `0x0a7e377f`, takes its wrapping
+/// absolute value, and examines words from the highest index down. A decoded
+/// word is tested by multiplying it with `0x76b4197f`; that odd key is
+/// invertible modulo 2^32, so this is equivalent to a raw nonzero test.
+/// A zero decoded count and `i32::MIN` return 1 without reading `words`;
+/// negative non-minimum counts are scanned by their absolute value.
+///
+/// Deliberate deviation: none.
+///
+/// # Safety
+/// `block` must point to a readable [`EncodedWordBlock`]. If its decoded
+/// count has a positive wrapping absolute value, `block.words` must name at
+/// least that many readable words. RetailOS has no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.encoded_word_block_is_zero")]
+pub unsafe extern "C" fn encoded_word_block_is_zero(block: *const EncodedWordBlock) -> u32 {
     let decoded_count = (*block).encoded_count.wrapping_mul(ENCODED_COUNT_MULTIPLIER);
     let mut remaining = if decoded_count < 0 {
         decoded_count.wrapping_neg()
@@ -328,8 +316,9 @@ unsafe extern "C" fn host_encoded_word_block_is_zero(
             return 1;
         }
         remaining -= 1;
+        let decoded_word = core::ptr::read_volatile(&ENCODED_WORD_DECODE_MULTIPLIER);
         if (*(*block).words.add(remaining as usize))
-            .wrapping_mul(ENCODED_WORD_DECODE_MULTIPLIER)
+            .wrapping_mul(decoded_word)
             != 0
         {
             return 0;
@@ -355,7 +344,7 @@ unsafe extern "C" fn host_encoded_word_block_is_zero(
 /// push  {r4, r5, lr}
 /// mov   r5, r0             @ block
 /// mov   r4, #0
-/// bl    0x082fc770         @ limb-zero scan (unported)
+/// bl    0x082fc770         @ limb-zero scan
 /// cmp   r0, #0 / movne r0, #1 / cmp r0, #0
 /// bne   0x08354500         @ ANY nonzero scan result -> return 0
 /// ldr   r0, [r5]           @ encoded_count, reloaded after the call
@@ -368,31 +357,15 @@ unsafe extern "C" fn host_encoded_word_block_is_zero(
 /// pop   {r4, r5, pc}
 /// ```
 ///
-/// The callee `FUN_082fc770` @ 0x082fc770 (84 bytes; 11 unconditional `bl`
-/// sites, this function's among them; a leaf) is the family's
-/// all-limbs-zero scan: it takes the wrapping absolute value of the decoded
-/// header count, then scans `words[count-1 ..= 0]` from high to low,
-/// returning 0 at the first word whose product with `0x76b4197f` is
-/// nonzero — that multiplier is odd, hence invertible modulo 2^32, so the
-/// product is nonzero exactly when the stored word is. It returns 1 when
-/// no nonzero word is found, including the non-positive decoded-count
-/// cases (zero, and `i32::MIN`, whose wrapping absolute value stays
-/// negative), never reading `words` in those cases. Here ANY nonzero scan
-/// answer selects the 0 result, so a zero-valued block reports sign 0
-/// regardless of its header.
+/// The callee [`encoded_word_block_is_zero`] is the family's all-limbs-zero
+/// scan. It is a direct Rust call on both host and target; the header is
+/// re-read after it returns, exactly like the original's post-call
+/// `ldr r0, [r5]`.
 ///
-/// Deliberate deviation: the limb-zero scan is unported and rides a
-/// dispatch seam. Target builds transmute the retail address 0x082fc770;
-/// host builds default [`ENCODED_WORD_BLOCK_IS_ZERO_FN`] to a faithful
-/// model of the decoded 84-byte algorithm, and tests may replace it to
-/// prove the call boundary. The header is re-read after the scan returns,
-/// exactly like the original's post-call `ldr r0, [r5]`.
-///
-/// # Safety
 /// `block` must point to a readable [`EncodedWordBlock`]. When the scan
-/// reads limbs (decoded count >= 1), the `words` array must contain at
-/// least the decoded number of readable words; retailOS has no NULL guard
-/// on either field.
+/// reads limbs (the decoded count's wrapping absolute value is at least 1),
+/// the `words` array must contain at least that many readable words; retailOS
+/// has no NULL guard on either field.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn encoded_word_block_sign(block: *const EncodedWordBlock) -> i32 {
@@ -558,8 +531,9 @@ mod tests {
 
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
-        copy_inline_encoded_word_block, encoded_word_block_set_int, encoded_word_block_sign,
-        inline_encoded_word_block_compare, EncodedWordBlock, InlineEncodedWordBlock,
+        copy_inline_encoded_word_block, encoded_word_block_is_zero, encoded_word_block_set_int,
+        encoded_word_block_sign, inline_encoded_word_block_compare, EncodedWordBlock,
+        InlineEncodedWordBlock,
     };
 
 
@@ -989,10 +963,6 @@ mod tests {
         );
     }
 
-    // The sign tests share the replaceable zero-scan seam, so they
-    // serialize against each other; the rest of the module never
-    // touches that seam.
-    static SIGN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn sign_of(block: &EncodedWordBlock) -> i32 {
         unsafe { encoded_word_block_sign(block) }
@@ -1000,7 +970,6 @@ mod tests {
 
     #[test]
     fn sign_of_zero_count_is_zero_without_reading_words() {
-        let _guard = SIGN_TEST_LOCK.lock();
         // Decoded count 0: the limb scan returns 1 before touching
         // `words`, so a NULL words pointer must be safe.
         let block = EncodedWordBlock {
@@ -1012,7 +981,6 @@ mod tests {
 
     #[test]
     fn sign_of_all_zero_limbs_is_zero_regardless_of_header() {
-        let _guard = SIGN_TEST_LOCK.lock();
         // Nonzero decoded counts, but every stored limb is raw zero; the
         // decode multiplier is invertible, so zero limbs decode to zero
         // and the block reads as the value 0 under either header sign.
@@ -1028,7 +996,6 @@ mod tests {
 
     #[test]
     fn sign_follows_the_header_of_a_nonzero_block() {
-        let _guard = SIGN_TEST_LOCK.lock();
         for (value, expected) in [
             (1, 1),
             (7, 1),
@@ -1051,7 +1018,6 @@ mod tests {
 
     #[test]
     fn sign_scans_limbs_high_to_low_and_stops_at_the_first_nonzero() {
-        let _guard = SIGN_TEST_LOCK.lock();
         // A nonzero limb at ANY scanned index makes the block nonzero;
         // the header's sign then decides, not the limb's position.
         let mut words = [0u32; 3];
@@ -1074,7 +1040,6 @@ mod tests {
 
     #[test]
     fn sign_of_min_decoded_count_is_zero_without_reading_words() {
-        let _guard = SIGN_TEST_LOCK.lock();
         // Header chosen so encoded_count * 0x0a7e377f == i32::MIN: its
         // wrapping absolute value stays negative, the scan returns 1 and
         // `words` is never read.
@@ -1089,77 +1054,40 @@ mod tests {
         };
         assert_eq!(sign_of(&block), 0);
     }
-
-    static mut SCAN_CALLS: Vec<*const EncodedWordBlock> = Vec::new();
-    static mut SCAN_SCRIPTED: Option<u32> = None;
-
-    unsafe extern "C" fn recording_scan(block: *const EncodedWordBlock) -> u32 {
-        SCAN_CALLS.push(block);
-        match SCAN_SCRIPTED {
-            Some(result) => result,
-            None => super::host_encoded_word_block_is_zero(block),
-        }
-    }
-
-    /// Restores the default seam even if a test panics mid-run.
-    struct ScanSeamGuard;
-
-    impl Drop for ScanSeamGuard {
-        fn drop(&mut self) {
-            unsafe {
-                super::ENCODED_WORD_BLOCK_IS_ZERO_FN =
-                    super::host_encoded_word_block_is_zero;
-                SCAN_SCRIPTED = None;
-                SCAN_CALLS.clear();
-            }
+    #[test]
+    fn zero_scan_handles_zero_and_minimum_counts_without_reading_words() {
+        let minimum_header =
+            (i32::MIN as u32).wrapping_mul(ENCODED_COUNT_INVERSE) as i32;
+        for encoded_count in [0, minimum_header] {
+            let block = EncodedWordBlock {
+                encoded_count,
+                words: core::ptr::null_mut(),
+            };
+            assert_eq!(unsafe { encoded_word_block_is_zero(&block) }, 1);
         }
     }
 
     #[test]
-    fn sign_returns_zero_for_any_nonzero_scan_result() {
-        let _guard = SIGN_TEST_LOCK.lock();
-        let _seam = ScanSeamGuard;
-        unsafe {
-            SCAN_CALLS.clear();
-            SCAN_SCRIPTED = Some(7);
-            super::ENCODED_WORD_BLOCK_IS_ZERO_FN = recording_scan;
-        }
-        // A block whose limb is NONZERO: the stock scan would say "not
-        // zero", but any nonzero scan answer still yields sign 0.
-        let mut words = [0x2au32];
-        let block = EncodedWordBlock {
-            encoded_count: encoded_count(1),
-            words: words.as_mut_ptr(),
-        };
-        assert_eq!(sign_of(&block), 0);
-        unsafe {
-            assert_eq!(SCAN_CALLS.as_slice(), &[&block as *const _]);
-        }
-    }
-
-    #[test]
-    fn sign_reads_the_header_after_a_zero_scan_result() {
-        let _guard = SIGN_TEST_LOCK.lock();
-        let _seam = ScanSeamGuard;
-        unsafe {
-            SCAN_CALLS.clear();
-            SCAN_SCRIPTED = Some(0);
-            super::ENCODED_WORD_BLOCK_IS_ZERO_FN = recording_scan;
-        }
-        // The scan says "not zero"; the sign then comes from the decoded
-        // header alone — even for zero limbs, and even for decoded count
-        // 0, which the original's movle path maps to -1.
-        let mut words = [0u32; 1];
-        for (decoded_count, expected) in [(1, 1), (-1, -1), (5, 1), (-5, -1), (0, -1)] {
+    fn zero_scan_checks_absolute_count_descending_and_ignores_trailing_words() {
+        for decoded_count in [3, -3] {
+            let mut words = [0u32, 0, 0, 0xfeed_face];
             let block = EncodedWordBlock {
                 encoded_count: encoded_count(decoded_count),
                 words: words.as_mut_ptr(),
             };
-            assert_eq!(sign_of(&block), expected, "decoded_count {decoded_count}");
-        }
-        unsafe {
-            assert_eq!(SCAN_CALLS.len(), 5);
+            assert_eq!(unsafe { encoded_word_block_is_zero(&block) }, 1);
+
+            for index in 0..3 {
+                words = [0, 0, 0, 0xfeed_face];
+                words[index] = 9u32.wrapping_mul(ENCODED_WORD_MULTIPLIER);
+                assert_eq!(
+                    unsafe { encoded_word_block_is_zero(&block) },
+                    0,
+                    "decoded_count {decoded_count}, nonzero index {index}"
+                );
+            }
         }
     }
+
 
 }

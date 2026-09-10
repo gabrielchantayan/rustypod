@@ -19931,22 +19931,19 @@ functions:
       decoding every ARM B/BL word in osos.dec: exactly 12 direct call
       sites, all unconditional bl, 0 predicated forms; the address
       occurs in no data word, so it is not dispatched virtually.
-      Algorithm: call the limb-zero scan FUN_082fc770 and return 0 for
-      ANY nonzero answer; otherwise reload the header and return the
-      sign of encoded_count * 0x0a7e377f (signed; a non-positive
-      product maps to -1). The callee FUN_082fc770 @ 0x082fc770
-      (84 bytes, 11 unconditional bl sites, a leaf) is unported and
-      rides a dispatch seam: target builds transmute the retail
-      address, host builds default ENCODED_WORD_BLOCK_IS_ZERO_FN to a
-      faithful model of its decoded algorithm (wrapping-abs decoded
-      count; scan words high-to-low; a word is nonzero iff
-      word * 0x76b4197f != 0, that key being odd hence invertible
-      mod 2^32; a non-positive decoded count, i32::MIN included,
-      returns 1 without reading words). match.py is structurally
-      equivalent (seam call, header reload, multiply, sign select;
-      LLVM's blx-via-pool to 0x082fc770 reaches the same callee and
-      its cmp/mvnlt sign select matches the original's movle/movgt
-      semantics); its exit-1 mnemonic diff is expected.
+      Algorithm: call ported limb-zero scan encoded_word_block_is_zero and
+      return 0 for ANY nonzero answer; otherwise reload the header and return
+      the sign of encoded_count * 0x0a7e377f (signed; a non-positive product
+      maps to -1). The 0x082fc770 scan decodes the count with wrapping
+      absolute value, scans words high-to-low, and treats a word as nonzero
+      iff word * 0x76b4197f != 0; that key is odd and therefore invertible
+      modulo 2^32. A zero decoded count and i32::MIN return 1 without reading
+      words; other negative decoded counts scan their absolute count. The
+      port now calls that Rust export directly on host and target, retaining
+      the post-call header reload. match.py is structurally equivalent
+      (direct call, header reload, multiply, sign select; the zero scan's
+      target-side volatile multiplier load preserves its mul/cmp loop);
+      its exit-1 mnemonic diff is expected.
 
   - address: 0x08322bcc
     ghidra: FUN_08322bcc
@@ -52696,6 +52693,37 @@ functions:
       address: 21 direct call sites, all unconditional bl, 0 predicated
       forms. Host tests cover header precedence, descending payload compare,
       the negative-sign flip, and zero-count early return.
+
+  - address: 0x082fc770
+    ghidra: FUN_082fc770
+    name: encoded_word_block_is_zero
+    size: 84
+    sig: "u32 encoded_word_block_is_zero(const EncodedWordBlock *block)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      iVar1/r0: decoded_count then remaining_count
+      DAT_082fc7c4: ENCODED_COUNT_MULTIPLIER (0x0a7e377f)
+      DAT_082fc7c8: ENCODED_WORD_DECODE_MULTIPLIER (0x76b4197f)
+    notes: >-
+      Raw ARM has an 84-byte instruction body at 0x082fc770..0x082fc7c4
+      followed by the two multiplier literal-pool words at
+      0x082fc7c4/0x082fc7c8; the next separately linked function begins at
+      0x082fc7cc, so the full extent is 92 bytes. Every ARM B/BL word in
+      osos.dec was decoded: exactly 11 inbound direct calls, all
+      unconditional bl and zero predicated forms; no direct B or aligned
+      DATA-word reference targets this address. It multiplies the encoded
+      count by 0x0a7e377f, takes a wrapping absolute value, then scans the
+      separate payload pointer from index count-1 to 0. A word is nonzero
+      when its product with 0x76b4197f is nonzero; the odd multiplier is
+      invertible modulo 2^32, so this is exactly a raw nonzero test. It
+      returns 0 at the first nonzero word and 1 when all examined words are
+      zero. Zero and i32::MIN decoded counts return 1 before reading the
+      words pointer, while other negative decoded counts scan their absolute
+      count. Deliberate deviations: none. Host tests cover null pointers on
+      both no-read cases, positive and negative counts, every payload
+      position, all-zero blocks, and an ignored trailing nonzero word.
 
   - address: 0x080da15c
     ghidra: FUN_080da15c
