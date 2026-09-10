@@ -63,6 +63,7 @@ pub mod image_format_descriptor_slot;
 pub mod lock_service;
 pub mod managed_entry;
 pub mod lazy_handle_manager;
+pub mod matched_entry;
 pub mod media_command_facade;
 pub mod media_ext;
 pub mod mode_selected_position;

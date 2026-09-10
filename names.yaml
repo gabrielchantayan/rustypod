@@ -54201,6 +54201,50 @@ functions:
       expected retail triple. match.py structural diff reviewed after the ARM
       release build.
 
+  # --- matched opaque entry selection ---
+  - address: 0x0826fb4c
+    ghidra: FUN_0826fb4c
+    name: matched_entry_select_nth
+    size: 200
+    sig: "void matched_entry_select_nth(RefcountedBody **out, const EntryMatchSource *source, u32 match_key, u32 ensure_ready, i32 occurrence)"
+    module: app/matched_entry
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      param_3/r2: match_key
+      param_4/r3: ensure_ready
+      param_5/[sp+40]: occurrence
+      r4: matched_entry
+      r5: found_count
+      FUN_08053b14: entry_match_next (unported target-default seam)
+      FUN_080fe500: entry_result_construct (unported target-default seam)
+      FUN_080fe1c4: entry_result_ensure_ready (unported target-default seam)
+      FUN_0839ebc4: refcounted_handle_construct
+      FUN_083d6180: handle_deref_or_null alias
+      FUN_0839ec2c: refcounted_body_attach equivalent
+      FUN_0816ccb0: refcounted_body_release_dtor wrapper
+    notes: >-
+      Raw ARM establishes the exact 200-byte extent
+      0x0826fb4c..0x0826fc14; the next separately linked function begins at
+      0x0826fc14. Decoding every ARM B/BL word in osos.dec finds exactly ten
+      incoming direct BL calls, all unconditional plain BL: no predicated BL
+      forms or plain-B tail callers. No aligned image word equals this address,
+      so it is not statically dispatched through a data pointer. The body
+      reads source+4 without a source NULL guard, rejects a NULL collection or
+      signed-negative occurrence, and otherwise calls the matcher from NULL
+      then from each prior match until it has the requested zero-based match.
+      It allocates 28 bytes through ported operator_new, constructs a result
+      around that match and source+8 byte, wraps it in a ported refcounted
+      handle, optionally makes the result ready with mode 0, assigns the
+      temporary body to out, then drops the temporary reference. Its no-result
+      path constructs out from NULL without releasing its prior body. The
+      matcher, result constructor, and readiness helper are unported and use
+      target-default retail-address seams with host recording replacements;
+      all other helpers use their existing canonical ports. Host tests cover
+      selecting the second match, exact matcher successor chaining, 28-byte
+      allocation and constructor arguments, optional readiness, signed
+      negative occurrence, missing collection, and exhausted matches.
   # --- opaque tagged record initializer ---
   - address: 0x0826fc2c
     ghidra: FUN_0826fc2c
