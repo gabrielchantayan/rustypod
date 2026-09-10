@@ -35073,6 +35073,38 @@ functions:
       original 56 instructions vs Rust 55; same initial header sret,
       full-range predicate/destruction/reset, and advance-then-erase loop.
 
+  - address: 0x083c2130
+    ghidra: FUN_083c2130
+    name: event_list_tree_assign
+    size: 164
+    sig: "void *event_list_tree_assign(void *destination, const void *source)"
+    module: app/event_list
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      param_1_plus_0x10: destination_header
+      param_2_plus_0x10: source_header
+      iVar1/r0: copied_root
+    notes: >-
+      Binary-verified extent is 0x083c2130 through 0x083c21d0; the next
+      function begins at 0x083c21d4. Every ARM B/BL word in osos.dec yields
+      exactly 11 incoming calls, all unconditional bl instructions (no
+      predicated call sites). This libstdc++ red-black tree operator= returns
+      destination unchanged for self-assignment; otherwise it erases
+      destination's complete [begin,end) range through the ported
+      event_list_tree_erase_range, clones source_header->root beneath the
+      destination header, resets root/leftmost/rightmost as appropriate, and
+      copies source's +0x14 node count. The recursive clone at 0x083c1e9c
+      is still unported: ARM builds call its retailOS entry directly, while
+      host tests use EVENT_LIST_OPS.copy_subtree as a volatile seam receiving
+      destination, source root, and destination header. The original calls
+      0x083b6a80 and 0x083b6a6c to find leftmost and rightmost; their unchecked
+      loops are inlined in the
+      port. Host tests cover self-assignment, nonempty replacement and
+      leftmost/rightmost reconstruction, and an empty source. match.py
+      structural review is expected to differ at the retail clone call and
+      the Rust frame.
   - address: 0x082769d4
     ghidra: FUN_082769d4
     name: string_object_format
