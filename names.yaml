@@ -47498,6 +47498,48 @@ functions:
       safely, stamps a general register numbered zero and appends exactly
       one opcode-13 binary instruction with the returned destination.
 
+  - address: 0x08240738
+    ghidra: FUN_08240738
+    name: cg_emit_lerp_u8
+    size: 112
+    sig: "cg_virtual_reg_t *cg_emit_lerp_u8(void *ctx, cg_block_t *block, cg_virtual_reg_t *start, cg_virtual_reg_t *end, cg_virtual_reg_t *factor)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r6: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/r7: start
+      param_4/r3/r8: end
+      param_5/stack0/r9: factor
+      uVar1/r5: delta (end - start)
+      FUN_08240658: unported normalized signed multiply helper
+      FUN_0824031c: unported add emitter
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18ec: cg_create_inst_load_immed
+    notes: >-
+      Raw ARM confirms 28 instruction words from 0x08240738 through
+      0x082407a4: `push {r3-r9,lr}` to the tail `b 0x0824031c`; the next
+      function starts at 0x082407a8 with its own push. Decoding every ARM
+      B/BL word in osos.dec found 11 callers, all unconditional BL (zero
+      predicated, zero tail B): 0x0823e038, 0x0823e180, 0x0823e1a0,
+      0x0823e1c0, 0x0823e79c, 0x0823e7bc, 0x0823e7dc, 0x0823e968,
+      0x0823e984, 0x0823e9a0 and the wrapper call at 0x082407f8.
+      Algorithm: emit delta = end - start (opcode 13); pass it with factor
+      to 0x08240658, which emits product = delta * factor (opcode 9), then
+      `(product + (product ASR 8)) ASR 8` through opcode-3 arithmetic
+      shifts, the signed divide-by-255 idiom; tail-emit start + scaled
+      (opcode 1) and return that virtual register. The leading ctx is saved
+      in r6 but never read. Deviation: 0x08240658 and 0x0824031c are
+      unported, so the Rust function emits their exact register creations
+      and IR records inline rather than adding a dispatch seam; register
+      and instruction creation order remains delta, product, shift,
+      product_shifted, rounded_product, scaled, result. Host coverage
+      proves opaque input registers and garbage ctx pass through without
+      dereference, the seven precise IR records and their operands/opcodes,
+      the factor-8 immediate, the returned final add register, and all seven
+      general-register sequence numbers.
+
   # --- Silver framework: the kind-tagged mid-hierarchy controller ---
   - address: 0x08260a50
     ghidra: FUN_08260a50

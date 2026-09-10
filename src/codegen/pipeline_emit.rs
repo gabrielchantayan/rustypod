@@ -10,8 +10,8 @@
 use super::ir::{
     cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed, cg_create_inst_store,
     cg_virtual_reg_create, CgBlock, CgInst, CgProc, CgVirtualReg, CG_BLOCK_PROC,
-    CG_INST_OPCODE_ADD, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW, CG_INST_OPCODE_STW,
-    CG_INST_OPCODE_SUB, CG_REG_TYPE_GENERAL,
+    CG_INST_OPCODE_ADD, CG_INST_OPCODE_ASR, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW,
+    CG_INST_OPCODE_MUL, CG_INST_OPCODE_STW, CG_INST_OPCODE_SUB, CG_REG_TYPE_GENERAL,
 };
 
 /// The procedure owning `block` (`cg_block_t + 0x04`).
@@ -224,6 +224,71 @@ pub unsafe extern "C" fn cg_emit_subtract(
     let dest = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
     cg_create_inst_binary(block, CG_INST_OPCODE_SUB, dest, lhs, rhs);
     dest
+}
+
+/// cg_emit_lerp_u8 — original: `FUN_08240738` @ 0x08240738
+/// (112 bytes: 28 instruction words, 0x08240738-0x082407a4; the next
+/// function starts at 0x082407a8 with its own `push`).
+///
+/// 11 call sites, all unconditional `bl` (no predicated forms or tail
+/// branches), verified by decoding every ARM B/BL word in osos.dec:
+/// 0x0823e038, 0x0823e180, 0x0823e1a0, 0x0823e1c0, 0x0823e79c,
+/// 0x0823e7bc, 0x0823e7dc, 0x0823e968, 0x0823e984, 0x0823e9a0 and
+/// 0x082407f8. The ten pipeline-generator sites interpolate values, while
+/// 0x082407f8 is the sibling wrapper `FUN_082407a8`.
+///
+/// Emits `start + (end - start) * factor / 255`. The signed product uses
+/// the retailOS divide-by-255 idiom: `product + (product >> 8)`, then
+/// another arithmetic shift right by 8. This is not division by 256:
+/// it yields `floor(product * 257 / 65536)`, including the original's
+/// signed-rounding behavior.
+///
+/// # Deviations
+///
+/// The original emits the normalized multiply through its unported helper
+/// `FUN_08240658`; this port writes that helper's five register creations
+/// and five instruction emissions inline, in their original order. The
+/// observable IR is identical and avoids adding an unverified dispatch seam.
+/// The leading context argument is dead on arrival (saved into r6 but never
+/// read); it is retained for ABI parity and deliberately ignored.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_lerp_u8(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    start: *mut CgVirtualReg,
+    end: *mut CgVirtualReg,
+    factor: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let delta = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_SUB, delta, end, start);
+
+    let product = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    let shift = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, shift, 8);
+    let product_shifted = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    let rounded_product = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    let scaled = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_MUL, product, delta, factor);
+    cg_create_inst_binary(
+        block,
+        CG_INST_OPCODE_ASR,
+        product_shifted,
+        product,
+        shift,
+    );
+    cg_create_inst_binary(
+        block,
+        CG_INST_OPCODE_ADD,
+        rounded_product,
+        product,
+        product_shifted,
+    );
+    cg_create_inst_binary(block, CG_INST_OPCODE_ASR, scaled, rounded_product, shift);
+
+    let result = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, result, start, scaled);
+    result
 }
 
 #[cfg(test)]
@@ -767,5 +832,89 @@ mod tests {
             }
             assert_eq!(immediates, std::vec![20, 20]);
         }
+    }
+    #[test]
+    fn emits_u8_lerp_with_signed_divide_by_255_sequence() {
+        const START: usize = 0x1111_0000;
+        const END: usize = 0x2222_0000;
+        const FACTOR: usize = 0x3333_0000;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let result = unsafe {
+            cg_emit_lerp_u8(
+                usize::MAX as *mut u8,
+                block,
+                START as *mut CgVirtualReg,
+                END as *mut CgVirtualReg,
+                FACTOR as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut instructions = [core::ptr::null_mut(); 7];
+            for slot in instructions.iter_mut() {
+                assert!(!inst.is_null(), "the seven-step interpolation was appended");
+                *slot = inst;
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert!(inst.is_null(), "no extra IR instruction was appended");
+
+            let [subtract, shift_constant, multiply, product_shift, rounded_sum, scaled_shift, add] =
+                instructions;
+            let delta = field(subtract, CG_INST_BINARY_DEST);
+            let product = field(multiply, CG_INST_BINARY_DEST);
+            let shift = field(shift_constant, CG_INST_LOAD_IMMED_DEST);
+            let product_shifted = field(product_shift, CG_INST_BINARY_DEST);
+            let rounded_product = field(rounded_sum, CG_INST_BINARY_DEST);
+            let scaled = field(scaled_shift, CG_INST_BINARY_DEST);
+
+            assert_eq!(inst_kind(subtract), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(subtract), CG_INST_OPCODE_SUB as u8);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE0), END);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE1), START);
+
+            assert_eq!(inst_kind(shift_constant), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(shift_constant), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(shift_constant, CG_INST_LOAD_IMMED_VALUE), 8);
+
+            assert_eq!(inst_opcode(multiply), CG_INST_OPCODE_MUL as u8);
+            assert_eq!(field(multiply, CG_INST_BINARY_SOURCE0), delta);
+            assert_eq!(field(multiply, CG_INST_BINARY_SOURCE1), FACTOR);
+            assert_eq!(inst_opcode(product_shift), CG_INST_OPCODE_ASR as u8);
+            assert_eq!(field(product_shift, CG_INST_BINARY_SOURCE0), product);
+            assert_eq!(field(product_shift, CG_INST_BINARY_SOURCE1), shift);
+            assert_eq!(inst_opcode(rounded_sum), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(rounded_sum, CG_INST_BINARY_SOURCE0), product);
+            assert_eq!(field(rounded_sum, CG_INST_BINARY_SOURCE1), product_shifted);
+            assert_eq!(inst_opcode(scaled_shift), CG_INST_OPCODE_ASR as u8);
+            assert_eq!(field(scaled_shift, CG_INST_BINARY_SOURCE0), rounded_product);
+            assert_eq!(field(scaled_shift, CG_INST_BINARY_SOURCE1), shift);
+            assert_eq!(inst_opcode(add), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE0), START);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE1), scaled);
+            assert_eq!(field(add, CG_INST_BINARY_DEST), result as usize);
+
+            for (number, register) in [
+                delta,
+                product,
+                shift,
+                product_shifted,
+                rounded_product,
+                scaled,
+                result as usize,
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert_eq!(field(*register as *mut u8, CG_VREG_NO), number);
+                assert_eq!(
+                    (*register as *mut u8).add(CG_VREG_TYPE * WORD).read(),
+                    CG_REG_TYPE_GENERAL as u8
+                );
+            }
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 7);
     }
 }

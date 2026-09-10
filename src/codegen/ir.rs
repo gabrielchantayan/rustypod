@@ -564,6 +564,10 @@ pub const CG_INST_OPCODE_STW: u32 = 44;
 pub const CG_INST_OPCODE_ADD: u32 = 1;
 /// Integer-subtract opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_SUB: u32 = 13;
+/// Signed arithmetic-right-shift opcode of the binary instruction kind.
+pub const CG_INST_OPCODE_ASR: u32 = 3;
+/// Integer-multiply opcode of the binary instruction kind.
+pub const CG_INST_OPCODE_MUL: u32 = 9;
 
 /// `cg_virtual_reg_type_t` — the general-purpose value class, passed by
 /// 792 of the 835 `cg_virtual_reg_create` call sites (42 pass 1, the
