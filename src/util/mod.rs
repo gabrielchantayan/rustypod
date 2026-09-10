@@ -47,6 +47,7 @@ pub mod raster_profile;
 pub mod service_manager_get;
 pub mod selector_record_address;
 pub mod state_flags;
+pub mod signed_clamp_i32;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
 pub mod stream_read_be32_or_zero;
