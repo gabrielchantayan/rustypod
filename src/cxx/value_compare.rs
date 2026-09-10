@@ -32,6 +32,31 @@ pub unsafe extern "C" fn shared_cell_slot_ne(
     left.read().0 != right.read().0
 }
 
+/// shared_cell_slot_ne_secondary — original: `FUN_083b51a8` @ `0x083b51a8`
+/// (20 bytes; source: `ipod-decomp/decomp/c/035/083b51a8_FUN_083b51a8.c`).
+///
+/// Loads the 32-bit shared-cell pointer from each slot and returns true exactly
+/// when those words differ. The raw ARM body is the five instructions `ldr`,
+/// `ldr`, `subs`, `movne`, and `bx lr`; it has no NULL guard, writes, or cell
+/// dereference. A full `osos.dec` ARM B/BL decode found exactly 11 incoming
+/// calls: all are unconditional `bl`, with no predicated BL forms or direct
+/// tail branches. This is a separately linked sibling of
+/// [`shared_cell_slot_ne`], so it uses its own target text section to preserve
+/// a distinct device-callable symbol despite identical behavior.
+///
+/// # Safety
+/// `left` and `right` must each point to a readable, aligned retailOS
+/// [`SharedCellSlot`]. As in the original, neither slot pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_slot_ne_secondary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_slot_ne_secondary(
+    left: *const SharedCellSlot,
+    right: *const SharedCellSlot,
+) -> bool {
+    left.read().0 != right.read().0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +92,28 @@ mod tests {
 
         assert!(unsafe { shared_cell_slot_ne(&left, &right) });
         assert_eq!((left.0, right.0), before);
+    }
+
+    #[test]
+    fn secondary_comparison_matches_shared_cell_pointer_inequality() {
+        let cases = [
+            (0, 0, false),
+            (0, 1, true),
+            (0x1234_5678, 0x1234_5678, false),
+            (0x89ab_cdef, 0x7654_3210, true),
+            (u32::MAX, 0, true),
+        ];
+
+        for (left_word, right_word, expected) in cases {
+            let left = SharedCellSlot(left_word);
+            let right = SharedCellSlot(right_word);
+            let before = (left.0, right.0);
+
+            assert_eq!(
+                unsafe { shared_cell_slot_ne_secondary(&left, &right) },
+                expected
+            );
+            assert_eq!((left.0, right.0), before);
+        }
     }
 }
