@@ -61,6 +61,13 @@ unsafe fn block_proc(block: *mut CgBlock) -> *mut CgProc {
 /// unconditional `bl` (no predicated calls or tail branches), all within
 /// `FUN_082465bc` at 0x08246624-0x08246944. The one exported implementation
 /// deliberately serves both hook seams: duplicate code would add no behavior.
+///
+/// `FUN_0826b198` @ 0x0826b198 is a third separately linked copy (136
+/// bytes, 34 words, no literal pool) with 10 unconditional `bl` callers:
+/// 0x08249b04, 0x08249b18, 0x08249b2c, 0x08249b50, 0x08249d04,
+/// 0x08249d1c, 0x0824a250, 0x0824a264, 0x0824a278 and 0x0824a28c. Raw
+/// word comparison against 0x082605f0 differs only in the six relative
+/// call encodings; it shares this implementation and its host tests.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_emit_load_word_at_offset(
