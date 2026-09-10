@@ -52760,6 +52760,37 @@ functions:
       `FUN_0803dd84` maintain nesting_depth and saved_slot_counts on the same
       object; this port keeps the same unchecked raw pointer arithmetic and a
       direct call to the already-ported diagnostic logger.
+  # --- three-buffer owner destructor ---
+  - address: 0x0803deec
+    ghidra: FUN_0803deec
+    name: three_buffer_owner_release
+    size: 60
+    sig: "void three_buffer_owner_release(ThreeBufferOwner *this)"
+    module: heap/three_buffer_owner
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x04: first
+      param_1_plus_0x18: second
+      param_1_plus_0x2c: third
+      param_1_plus_0x44: flags
+      FUN_0803eee4: releasable_buffer_release
+      FUN_08043994: traced_free
+    notes: >-
+      Raw extent is exactly 0x0803deec..0x0803df28 (15 ARM instructions);
+      the independently linked sibling at 0x0803df28 follows immediately,
+      with no trailing literal pool. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly 11 direct callers: eight unconditional BL
+      (0x0803f940, 0x0808e6b8, 0x0808e6f0, 0x0808e748, 0x080c6eac,
+      0x080c6f04, 0x080c7184, and 0x080c71dc) and three BLNE
+      (0x0808777c, 0x08087788, and 0x08087794). The three BLNE call sites
+      independently gate destruction on owner words, while this function
+      still returns on NULL. It calls ported releasable_buffer_release in
+      order for embedded buffers at +0x04, +0x18, and +0x2c, then tests
+      outer flags +0x44 bit 0 and frees this through ported traced_free when
+      set. Deliberate deviation: the retail final tail branch to traced_free
+      is an ordinary returning Rust call; traced_free returns, so behavior is
+      unchanged.
   # --- heap debug-fill helper ---
   - address: 0x0805f440
     ghidra: FUN_0805f440

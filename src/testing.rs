@@ -175,6 +175,9 @@ pub mod hints {
     // 0x7800_0000: dedicated to heap/releasable_buffer's raw-u32 data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const RELEASABLE_BUFFER: usize = 0x7800_0000;
+    // 0xb400_0000: dedicated to heap/three_buffer_owner's raw-u32 data
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const THREE_BUFFER_OWNER_RELEASE: usize = 0xb400_0000;
     // 0x6d00_0000: dedicated to ui/string_view_array's derived-view
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const STRING_VIEW_ARRAY: usize = 0x6d00_0000;
