@@ -45733,6 +45733,50 @@ functions:
       pop {fp,pc} frame around the body.
 
   # --- iAP (iPod Accessory Protocol): the packet class ---
+  - address: 0x080f6c58
+    ghidra: FUN_080f6c58
+    name: iap_packet_init_with_compact_payload
+    size: 220
+    sig: "void iap_packet_init_with_compact_payload(u8 *packet, u8 *owner, u8 *context, u32 lingo_word, u32 command_word, u32 header_kind, u32 header_value, u32 header_data, u8 extra_byte)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      param_2/r1: owner
+      param_3/r2: context
+      param_4/r3: lingo_word
+      param_5: command_word
+      param_6: header_kind
+      param_7: header_value
+      param_8: header_data
+      param_9: extra_byte
+      local_20: payload[0]
+      puVar2/r3: payload_end
+    notes: >-
+      Builds a compact iAP reply payload on the stack, then calls the
+      unported packet initializer at 0x080f73a0. EXTENT - 220 bytes,
+      0x080f6c58..0x080f6d34, 55 instructions and no literal pool. Ghidra's
+      220-byte extent is exact: 0x080f6d30 is this function's `pop
+      {r4-r8,pc}`, and the next sibling opens at 0x080f6d34 with `push
+      {r2,r3,r4,lr}`. Decoding every branch word in osos.dec found 12 `bl`
+      and 0 `b` call sites, all unconditional (zero predicated forms):
+      0x080f6f7c, 0x0813a254, 0x0818e5c8, 0x08192cc0, 0x08193aa8,
+      0x08195cf0, 0x081a9330, 0x081d6d2c, 0x081f1df8, 0x081f1eac,
+      0x081f2d70, and 0x081fddd0. No image word equals 0x080f6c58, so it
+      is not a direct virtual-dispatch target.
+      ALGORITHM - store header_kind's low byte first. For lingo_word == 4,
+      append header_value's low u16 as big-endian; otherwise append its low byte,
+      with extra_byte appended only when lingo_word == 12. If header_kind
+      equals the full word 6, append header_data as big-endian u32. Forward
+      the packet/owner/context unchanged; lingo_word and command_word become
+      the initializer's u8/u16 lingo/command. The full-word selector tests
+      happen before truncation, exactly as the ARM `cmp` instructions do.
+      DEVIATION - 0x080f73a0 remains unported; the port uses the existing
+      volatile IAP_PACKET_OPS.init seam. Its return is deliberately
+      discarded, matching the original's void wrapper. Host tests cover the
+      lingo-4 big-endian u16 plus kind-6 big-endian u32 case, the lingo-12
+      extra-byte order, and high-word selector values that must not select
+      the truncated-byte layout. match.py structural review (`--lib` worktree archive) - 53 Rust instructions versus 55 original; both select the same lingo-4/lingo-12 layouts, conditionally append four big-endian data bytes, marshal the three trailing initializer arguments on the stack, and call once. LLVM zeroes the seven-byte local buffer and dispatches through the volatile ops table with `blx`, rather than the original's direct `bl 0x080f73a0`; its different frame/register allocation yields no common textual prefix.
   - address: 0x080f6da0
     ghidra: FUN_080f6da0
     name: iap_packet_create
