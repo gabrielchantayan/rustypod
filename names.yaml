@@ -32205,6 +32205,43 @@ functions:
       original relies on the base constructor preserving r0) - the
       accepted house deviations.
 
+  - address: 0x08067300
+    ghidra: FUN_08067300
+    name: set_navigation_mode
+    size: 100
+    sig: "void set_navigation_mode(u8 *element, u32 mode)"
+    module: ui/navigation_mode
+    status: ported
+    renames:
+      param_1/r0/r5: element
+      param_2/r1/r4: mode
+      local_halfword: previous_mode
+      param_1_plus_0x184: navigation_mode
+      param_1_plus_0x48: tagged_handler_list
+      DAT_08067360: MODE_CHANGED_TAG
+      FUN_08054568: query_mode_change
+      FUN_0805d31c: apply_mode_change
+      FUN_08066bb8: notify_mode_change
+    notes: >-
+      Raw ARM begins at 0x08067300 and has 96 instruction bytes through
+      `pop {r2,r3,r4,r5,r6,pc}` at 0x0806735c, followed by its referenced
+      literal-pool word 0x6370726d at 0x08067360; the next independently
+      linked function starts at 0x08067364. Thus the true extent is 100
+      bytes, despite Ghidra's 96-byte code-only report. Decoding every ARM
+      B/BL word in osos.dec finds 11 direct callers, all plain unconditional
+      bl and zero predicated forms. The unported 0x08054568 reports whether
+      the element may change modes and stores the prior halfword through its
+      out-pointer. A permitted request only proceeds when mode is in 0..=2
+      and differs from that reported halfword: the port stores mode at +0x184,
+      calls unported 0x0805d31c, then invokes unported 0x08066bb8 on the
+      handler list at +0x48 with literal tag 0x6370726d, context element,
+      old mode in r3, and new mode in the stack word. The tag's semantic
+      identity is not recovered. Deliberate deviation: the three unported
+      callees dispatch through NAVIGATION_MODE_OPS; target defaults call
+      their stock addresses, while host recorders prove denied, out-of-range,
+      reported-equal, and accepted-change behavior plus the exact notification
+      tuple.
+
   - address: 0x08067b4c
     ghidra: FUN_08067b4c
     name: tdat_element_set_flag_20_bit_2
