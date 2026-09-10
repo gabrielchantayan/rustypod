@@ -82,6 +82,7 @@ pub mod path_exists;
 pub mod path_component_query;
 pub mod path_object_construct;
 pub mod path_probe;
+pub mod playlist_pointer_marker;
 pub mod pending_event_take;
 pub mod pending_event_insert;
 pub mod queued_message;

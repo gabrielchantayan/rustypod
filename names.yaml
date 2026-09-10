@@ -58163,3 +58163,37 @@ functions:
       tail b, not a call. No deliberate deviations. Host tests cover both
       selected words, every meaningful flag-bit state, full-width values,
       and read-only behavior.
+
+  # --- Playlist-pointer selection marker ---
+  - address: 0x08219eec
+    ghidra: FUN_08219eec
+    name: set_playlist_pointer_marker_if
+    size: 72
+    sig: "u32 set_playlist_pointer_marker_if(void *ignored_r0, void *ignored_r1, u32 enabled, void *unobserved_r3)"
+    module: app/playlist_pointer_marker
+    status: ported
+    renames:
+      r0: ignored_r0
+      r1: ignored_r1
+      r2: enabled
+      r3: unobserved_r3
+      DAT_08219f34: playlist_pointer_key_bundle
+      DAT_08219f38: playlist_pointer_string_table
+    notes: >-
+      Raw osos.dec confirms the exact 72-byte extent from 0x08219eec through
+      the two literal words at 0x08219f34 and 0x08219f38; the next separately
+      linked function opens at 0x08219f3c. Decoding every ARM B/BL immediate
+      finds exactly 11 direct bl callers, all unconditional and none
+      predicated: 0x0822584c, 0x0822703c, 0x082294fc, 0x0822a208, 0x0822a768,
+      0x08231060, 0x08232050, 0x08232fe4, 0x0823420c, 0x08236fdc, and
+      0x0823904c. Three additional unconditional b tail transfers enter at
+      0x08130fc8, 0x08232998, and 0x08239c14; no aligned DATA word targets
+      this entry. When r2 is nonzero, it builds a temporary COW string for
+      the literal at DAT_08219f34 + 8, "PlaylistPtr", writes decimal 1 through
+      string_table_set_decimal(DAT_08219f38, key, &1), releases the temporary,
+      and returns 1. A zero r2 bypasses all calls but still returns 1. r0 and
+      r1 are saved only to stack slots later overwritten by the decimal value;
+      r3 is saved into the COW result slot but direct callers do not establish
+      it, so it is intentionally not assigned a semantic role. The string
+      table object at 0x08a79c10 is outside the decrypted body and is passed
+      unchanged; no identity beyond its observed marker write is inferred.
