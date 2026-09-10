@@ -20997,6 +20997,35 @@ functions:
       has its own target text section so linker identical-code folding cannot
       erase this device-callable sibling symbol.
 
+  # --- shared-cell handle release, direct payload teardown ---
+  - address: 0x08262b84
+    ghidra: FUN_08262b84
+    name: shared_cell_release_direct
+    size: 88
+    sig: "void shared_cell_release_direct(SharedCell **slot)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: slot
+      iVar1: cell
+      iVar2: remaining
+      FUN_081fc930: direct_payload_teardown
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw ARM is exactly 22 words, 0x08262b84..0x08262bd8; the distinct next
+      function starts at 0x08262bdc. A full decode of every B/BL word in
+      osos.dec found exactly 10 incoming BL calls: all unconditional, with no
+      predicated BL forms. The empty slot path returns untouched. A non-empty
+      slot decrements its signed {payload, refcount} cell with wrapping SUBS
+      and clears the slot even for a non-final or underflowed count. At the
+      1 -> 0 transition, non-NULL payload takes the direct call to unported
+      0x081fc930; its return feeds tag-2 operator_delete @ 0x082aad24, then
+      the reloaded non-NULL cell is tag-2 deleted and the slot cleared. This
+      is byte-identical in behavior to 0x083b52f4 except for direct-call
+      displacement. The identity of 0x081fc930 is not inferred; host builds
+      use an injectable return-preserving seam and target builds call it
+      directly.
+
   # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
   # String object = one word, the char data pointer. 12-byte _Rep header
   # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}

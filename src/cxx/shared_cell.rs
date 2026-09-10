@@ -347,6 +347,81 @@ pub unsafe extern "C" fn shared_cell_release_secondary(slot: *mut *mut SharedCel
     slot.write(core::ptr::null_mut());
 }
 
+/// ABI of the direct payload teardown at 0x081fc930.
+///
+/// Raw bytes show its return value feeds the immediately following
+/// `operator_delete`, so this is deliberately not modeled as a `void`
+/// destructor. Its class identity remains unestablished.
+type DirectPayloadDispose = unsafe extern "C" fn(*mut u8) -> *mut u8;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn direct_payload_dispose(payload: *mut u8) -> *mut u8 {
+    let dispose: DirectPayloadDispose = core::mem::transmute(0x081f_c930usize);
+    dispose(payload)
+}
+
+/// Host default for the unported direct payload teardown at 0x081fc930.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_direct_payload_dispose(payload: *mut u8) -> *mut u8 {
+    payload
+}
+
+#[cfg(not(target_os = "none"))]
+static mut DIRECT_PAYLOAD_DISPOSE: DirectPayloadDispose = missing_direct_payload_dispose;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn direct_payload_dispose(payload: *mut u8) -> *mut u8 {
+    let dispose = core::ptr::read_volatile(core::ptr::addr_of!(DIRECT_PAYLOAD_DISPOSE));
+    dispose(payload)
+}
+
+/// shared_cell_release_direct — retailOS `FUN_08262b84` @ `0x08262b84`
+/// (88 bytes; 10 incoming `bl` call sites, all unconditional).
+///
+/// Raw ARM extent is exactly 22 words from 0x08262b84 through 0x08262bd8;
+/// 0x08262bdc begins a distinct function. An empty cell pointer returns with
+/// the slot unchanged. Otherwise, decrement the signed intrusive count with
+/// ARM wrapping semantics. Every non-empty path clears the slot. On the
+/// 1 -> 0 transition, a non-NULL payload goes to direct unported teardown
+/// 0x081fc930 and that return value is tag-2 `operator_delete`d; then the
+/// reloaded non-NULL cell itself is tag-2 deleted.
+///
+/// Deliberate host deviation: 0x081fc930 is unported, so host builds use an
+/// injectable return-preserving seam. Target builds call its firmware address
+/// directly. The direct callee's class identity is not inferred.
+///
+/// # Safety
+/// `slot` must be a valid, aligned shared-cell pointer slot. A non-NULL cell
+/// must be valid for its two target words. On the final path, non-NULL payload
+/// and its teardown return must satisfy the firmware teardown/delete contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_release_direct")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_release_direct(slot: *mut *mut SharedCell) {
+    let cell = slot.read();
+    if cell.is_null() {
+        return;
+    }
+
+    let remaining = (*cell).refcount.wrapping_sub(1);
+    (*cell).refcount = remaining;
+    if remaining == 0 {
+        let payload = (*slot.read()).value as *mut u8;
+        if !payload.is_null() {
+            operator_delete(direct_payload_dispose(payload));
+        }
+
+        let cell = slot.read();
+        if !cell.is_null() {
+            operator_delete(cell.cast());
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -367,6 +442,8 @@ mod tests {
     static mut SLOT_ALIAS: *mut *mut SharedCell = core::ptr::null_mut();
     /// The next allocation returned by the mocked tag-2 allocator.
     static mut NEXT_ALLOCATION: *mut u8 = core::ptr::null_mut();
+    /// Return value supplied by the direct 0x081fc930 host seam.
+    static mut DIRECT_DISPOSE_RETURN: *mut u8 = core::ptr::null_mut();
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Event {
@@ -377,6 +454,11 @@ mod tests {
 
     unsafe extern "C" fn recording_destructor(value: *mut u8) {
         (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Destructor(value as usize));
+    }
+
+    unsafe extern "C" fn recording_direct_payload_dispose(value: *mut u8) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Destructor(value as usize));
+        core::ptr::read_volatile(core::ptr::addr_of!(DIRECT_DISPOSE_RETURN))
     }
 
     unsafe extern "C" fn slot_clearing_destructor(value: *mut u8) {
@@ -403,6 +485,7 @@ mod tests {
 
     struct Bench {
         old_heap: HeapVeneerOps,
+        old_direct_payload_dispose: DirectPayloadDispose,
     }
 
     fn bench() -> Bench {
@@ -416,7 +499,10 @@ mod tests {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             (*core::ptr::addr_of_mut!(SLOT_ALIAS)) = core::ptr::null_mut();
             (*core::ptr::addr_of_mut!(NEXT_ALLOCATION)) = core::ptr::null_mut();
+            (*core::ptr::addr_of_mut!(DIRECT_DISPOSE_RETURN)) = core::ptr::null_mut();
             let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
+            let old_direct_payload_dispose =
+                core::ptr::read_volatile(core::ptr::addr_of!(DIRECT_PAYLOAD_DISPOSE));
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(HEAP_OPS),
                 HeapVeneerOps {
@@ -425,7 +511,10 @@ mod tests {
                     ..old_heap
                 },
             );
-            Bench { old_heap }
+            Bench {
+                old_heap,
+                old_direct_payload_dispose,
+            }
         }
     }
 
@@ -433,6 +522,10 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(HEAP_OPS), self.old_heap);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(DIRECT_PAYLOAD_DISPOSE),
+                    self.old_direct_payload_dispose,
+                );
             }
             OPS_LOCK.store(false, Ordering::Release);
         }
@@ -702,5 +795,69 @@ mod tests {
         assert_eq!(dst, source_cell_ptr);
         assert_eq!(source_cell.refcount, i32::MIN);
         assert!(events().is_empty());
+    }
+    /// The direct specialization keeps a NULL slot untouched and does not
+    /// invoke its teardown or heap paths.
+    #[test]
+    fn direct_release_leaves_an_empty_slot_untouched() {
+        let _bench = bench();
+        let mut slot: *mut SharedCell = core::ptr::null_mut();
+
+        unsafe { shared_cell_release_direct(&mut slot) };
+
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    /// A non-final direct-specialization release only decrements and clears
+    /// its slot; no direct teardown or free is reached.
+    #[test]
+    fn direct_release_nonfinal_drop_only_decrements_and_clears() {
+        let _bench = bench();
+        let mut cell = SharedCell {
+            value: 0x1111_2222,
+            refcount: 2,
+        };
+        let mut slot = core::ptr::addr_of_mut!(cell);
+
+        unsafe { shared_cell_release_direct(&mut slot) };
+
+        assert_eq!(cell.refcount, 1);
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    /// The direct teardown receives the payload, and its returned header
+    /// pointer—not the payload—is the first tag-2 delete target.
+    #[test]
+    fn direct_release_deletes_the_teardown_return_then_the_cell() {
+        let _bench = bench();
+        let payload = 0x1234_5678usize as *mut u8;
+        let teardown_return = 0x1234_5670usize as *mut u8;
+        let mut cell = SharedCell {
+            value: payload as usize,
+            refcount: 1,
+        };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        let mut slot = cell_ptr;
+        unsafe {
+            (*core::ptr::addr_of_mut!(DIRECT_DISPOSE_RETURN)) = teardown_return;
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(DIRECT_PAYLOAD_DISPOSE),
+                recording_direct_payload_dispose,
+            );
+            shared_cell_release_direct(&mut slot);
+        }
+
+        assert_eq!(cell.refcount, 0);
+        assert!(slot.is_null());
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::Destructor(payload as usize),
+                Event::HeapFree(teardown_return as usize, 2),
+                Event::HeapFree(cell_ptr as *mut u8 as usize, 2),
+            ],
+        );
     }
 }
