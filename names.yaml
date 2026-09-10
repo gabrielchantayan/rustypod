@@ -48648,6 +48648,47 @@ functions:
       offsets, NULL bases, instruction wiring, append order, and virtual
       register creation order.
 
+  - address: 0x0826b198
+    ghidra: FUN_0826b198
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1/r5: base
+      param_3/r2/r6: offset
+      uVar1/r7: offset_reg
+      uVar2/r8: address_reg
+      uVar3/r9/r0: value_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18c4: cg_create_inst_load
+    notes: >-
+      136 bytes, 34 instruction words, no literal pool: `push
+      {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0826b198 through `pop
+      {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x0826b21c. The next function begins
+      at 0x0826b220 with its own `push {r3,r4,r5,r6,r7,r8,r9,lr}`, so
+      Ghidra's extent is exact. Decoding every ARM B/BL word in osos.dec
+      finds 10 call sites, all unconditional `bl` (zero predicated, zero
+      tail `b`): 0x08249b04, 0x08249b18, 0x08249b2c, 0x08249b50,
+      0x08249d04, 0x08249d1c, 0x0824a250, 0x0824a264, 0x0824a278 and
+      0x0824a28c, all in FUN_082498d4. Its incoming r0/r1/r2 are block,
+      base and offset. The body creates three general virtual registers
+      from block->proc, then appends LDI offset_reg, offset / ADD
+      address_reg, base, offset_reg / LDW value_reg, [address_reg], and
+      returns value_reg. A word-by-word raw comparison with
+      cg_emit_load_word_at_offset @ 0x082605f0 finds exactly six differing
+      words: the relative `bl` encodings to the same three
+      cg_virtual_reg_create calls and the load-immediate, binary and load
+      factories. Deliberate deviation: no duplicate Rust body or export
+      exists; the established cg_emit_load_word_at_offset seam is
+      behaviorally identical and serves a hook at this address. Its host
+      tests cover zero and usize::MAX offsets, NULL bases, instruction
+      wiring, append order and virtual-register creation order.
+
   - address: 0x0826077c
     ghidra: FUN_0826077c
     ghidra: FUN_0826077c
