@@ -8,6 +8,7 @@ pub mod forward_byte_copy;
 pub mod counted_copy;
 pub mod bounded_copy;
 pub mod bzero;
+pub mod zero_unwritten_suffix;
 pub mod halfword_load;
 pub mod iram_veneers;
 pub mod memchr;

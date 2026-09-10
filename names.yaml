@@ -8966,6 +8966,32 @@ functions:
       binary-scanned. Port uses write_volatile against memset idiom
       recognition; LLVM unrolls the 3-step alignment prologue.
 
+  - address: 0x080a63e4
+    ghidra: FUN_080a63e4
+    name: zero_unwritten_suffix
+    size: 20
+    sig: "void zero_unwritten_suffix(u8 *dst, u32 total, u32 initialized)"
+    module: libc/zero_unwritten_suffix
+    status: ported
+    vars: {param_1: dst, param_2: total, param_3: initialized}
+    notes: >-
+      Raw osos.dec confirms five ARM instructions from 0x080a63e4 through
+      0x080a63f4; the next separately entered function begins at 0x080a63f8.
+      If initialized is less than total by an unsigned comparison, advances
+      dst by initialized and tail-branches to bzero (0x0805cfb4) for
+      total-initialized bytes; otherwise it returns without touching memory.
+      There are exactly 11 direct plain bl call sites
+      (0x08063b9c, 0x08063d48, 0x080946b8, 0x08094764, 0x080949bc,
+      0x08094dfc, 0x08094fb8, 0x0809510c, 0x080953c8, 0x08095488,
+      0x08095b84), verified by decoding every ARM B/BL word in osos.dec;
+      no predicated forms or direct tail-B sites target it. Calls construct
+      variable-size on-stack records and clear the tail after their initialized
+      prefix. The Rust port reaches the existing bzero port through a volatile
+      function-pointer load so LLVM cannot inline the callee and remove this
+      device hook target; unlike stock's direct tail branch. A difference with
+      bit 31 set remains a no-op because bzero's signed-length guard returns
+      first.
+
 
   # --- FreeType 2 character-map API ---
   - address: 0x0804c4d0
