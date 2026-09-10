@@ -11717,6 +11717,31 @@ functions:
       with rsb r1,r1,#0x30000 as the literal 3.0 in Q16.16; it open-codes
       this same smull/lsl/orr idiom inline twice before calling out.
 
+  - address: 0x08079a44
+    ghidra: FUN_08079a44
+    name: mul_shift_i32
+    size: 20
+    sig: "i32 mul_shift_i32(i32 a, i32 b, u32 shift)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      param_3/r2: shift
+      r12: product_high
+    notes: >-
+      Raw osos.dec is exactly five ARM instructions from 0x08079a44 through
+      0x08079a54; the push at 0x08079a58 begins the distinct next function.
+      smull forms the signed 64-bit a*b product in r0 (low) and r12 (high);
+      lsl high by 32-shift and orr with low lsr shift returns product bits
+      [shift+31:shift], with signed-product extension entering through high.
+      Decoding every ARM B/BL word finds 12 direct bl call sites, all
+      unconditional and none predicated: 0x08240f70, 0x08240f84, 0x08241008,
+      0x08241020, 0x08241110, 0x0824156c, 0x08241ea4, 0x08241eb8,
+      0x08241f44, 0x08241f5c, 0x08242068, 0x082422a4. Their r2 values are
+      4 or 7 in the 0x08240a5c/0x08241acc rasterization routines. The Rust
+      port deliberately has no semantic deviation, including ARMv5
+      register-shift low-byte and >=32-zero behavior outside that caller range.
   - address: 0x080f0fa4
     ghidra: FUN_080f0fa4
     name: mul_wide_i64
