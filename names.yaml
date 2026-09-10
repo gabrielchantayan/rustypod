@@ -16103,6 +16103,48 @@ functions:
       cover active old-bounds invalidation, inactive/contextless skips,
       flag stores, the -1 suppression branch, and a live refresh.
 
+  - address: 0x0828cccc
+    ghidra: FUN_0828cccc
+    name: coordinate_owner_select_display_layer
+    size: 132
+    sig: "void coordinate_owner_select_display_layer(CoordinateOwner *owner, u32 selection, u32 refresh_hint)"
+    module: ui/coordinate_origin
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r6: selection
+      param_3/r7: refresh_hint
+      "owner+0x54": presentation
+      "owner+0xf4": display
+      "owner+0xfc": layer_selector
+      "owner+0x100": selection
+      "owner+0x110": mutex
+      DAT_0828cd50: layer_selector_table (0x083ecb28)
+      FUN_0828d5f4: coordinate_owner_flush_pending
+      FUN_081204a0: layer_commit_pending_state
+      FUN_0828d110: coordinate_owner_refresh
+    notes: >-
+      EXTENT verified from raw osos.dec: 132 code bytes at
+      0x0828cccc..0x0828cd50, followed by its literal-pool word
+      0x083ecb28 at 0x0828cd50; the separate next function opens at
+      0x0828cd54. Decoding every ARM B/BL word in the image finds 11
+      direct calls, all unconditional bl; no predicated calls or tail
+      branches. The live-presentation gate (+0x54) encloses the entire
+      body. Under the recursive mutex at +0x110, it completes the pending
+      handoff at 0x0828d5f4, accepts only selection values 0..4, loads one
+      opaque u32 from the 20-byte table at 0x083ecb28, writes it to +0xfc
+      and the original selection to +0x100, obtains a layer from the +0xf4
+      display using the selector's low byte, commits that layer's pending
+      state at 0x081204a0, then refreshes the owner at 0x0828d110. The
+      latter ignores r1 entirely, so refresh_hint is ABI-preserved but has
+      no behavior. The two unported callees use verified-address volatile
+      seams; display_get_layer and the mutex pair are existing direct ports.
+      Host tests cover the raw selector (including low byte 0xff), ordering
+      of flush/commit/refresh, invalid selection, and the presentation gate.
+      Deviation: the immutable 20-byte table is indexed directly instead of
+      being copied through the ROM memcpy veneer into a private stack image;
+      the original never exposes or mutates that scratch image.
+
   - address: 0x082a26c8
     ghidra: FUN_082a26c8
     name: ui_element_is_shown
