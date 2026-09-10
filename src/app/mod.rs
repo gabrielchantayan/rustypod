@@ -11,6 +11,7 @@ pub mod class_6800;
 pub mod class_8900;
 pub mod class_8c00;
 pub mod buffer_refill_request;
+pub mod byte_source;
 pub mod buffer_transition_controller;
 pub mod byte_flag_at_d_is_one;
 pub mod category_is_below_three;

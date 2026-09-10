@@ -60318,3 +60318,36 @@ functions:
       unlink-then-finalize ordering and status forwarding. No mutex operation
       exists in the verified retail body and none is added. Host verification:
       cargo test --target x86_64-unknown-linux-gnu (6435 passed).
+
+  # --- application byte source priority accessor ---
+  - address: 0x082725c0
+    ghidra: FUN_082725c0
+    name: byte_source_at
+    size: 44
+    sig: "u8 byte_source_at(const ByteSource *source, usize index)"
+    module: app/byte_source
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: index
+      "source+0x00..+0x04": inline_bytes
+      "source+0x08": fallback_bytes
+      "source+0x0c": override_bytes
+      cVar1/r2: override_byte
+    notes: >-
+      Raw binary confirms the 44-byte extent, eleven ARM words from
+      0x082725c0 through 0x082725e8; the next separately linked function
+      starts with push {r4,r5,lr} at 0x082725ec. Decoding every ARM
+      B/BL-immediate word in osos.dec finds exactly 10 inbound call sites,
+      all unconditional bl: 0x08103204, 0x08117f20, 0x08118fc8, 0x08119178,
+      0x081198b0, 0x08119bb4, 0x0827261c, 0x0828a3c0, 0x0828a3dc, and
+      0x0828b304. No predicated or tail calls occur; the callee has no
+      receiver, bounds, or alignment guard beyond checking the two optional
+      pointer fields. It reads override_bytes[index] first and returns it
+      only when nonzero; a zero override defers to fallback_bytes[index] when
+      fallback_bytes is non-NULL, otherwise to inline_bytes[index]. A complete
+      aligned data-word scan finds no 0x082725c0 reference, so no virtual
+      dispatch seam is needed. Deviation: none. Host tests prove nonzero
+      override precedence at every embedded index, zero override fallback
+      including a zero fallback byte, NULL override fallback, and the
+      all-NULL embedded-byte path.
