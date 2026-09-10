@@ -44,8 +44,8 @@
 //! not land (OOM inside a callee) leaves the byte stale and the
 //! function returns NULL instead of a mis-encoded buffer.
 //!
-//! Callee map (all unported, seam-modeled below; identities verified
-//! against the 3.5.9 source and their Ghidra decompiles):
+//! Callee map (ExpandBlob ported; remaining callees use the seams below;
+//! identities verified against the 3.5.9 source and their Ghidra decompiles):
 //!
 //! - 0x0838bbb4 — `sqlite3VdbeMemExpandBlob`: `n += i`, grows via
 //!   0x0838bdb0, zero-fills the tail, clears `MEM_Zero|MEM_Term`
@@ -89,12 +89,11 @@
 //! +0x1f enc     u8        SQLITE_UTF8 1 / UTF16LE 2 / UTF16BE 3
 //! ```
 //!
-//! Deviations:
-//! - All five callees are unported: each call goes through a dispatch
-//!   static whose default slot is a documented stub reproducing the
-//!   original's failure/no-op end state (the house seam pattern,
-//!   `sqlite/value_set_str.rs`). The real ports should replace the
-//!   defaults when they land.
+//! - `sqlite3VdbeMemExpandBlob` is now ported and is the wired default of
+//!   the existing expansion seam; its slot remains replaceable for the
+//!   value-text recorder tests. The four still-unported callees each use a
+//!   dispatch static whose default reproduces the original's failure/no-op
+//!   end state (the house seam pattern, `sqlite/value_set_str.rs`).
 //! - `enc` is typed `u8` like upstream (the firmware's full-width
 //!   `bic`/`cmp` on r1 are identical for the zero-extended arguments
 //!   every observed call site passes — `mov r1,#1`, `ldrb` of
@@ -103,6 +102,7 @@
 use super::error::SQLITE_UTF8;
 use super::value_new::{MEM_FLAGS_OFFSET, MEM_NULL};
 use super::value_set_str::SQLITE_NOMEM;
+use super::vdbe_mem_expand_blob::vdbe_mem_expand_blob;
 
 /// The original's `SQLITE_OK` return (`mov r0,#0x0` in the callees'
 /// success paths).
@@ -156,13 +156,10 @@ pub type VdbeMemNulTerminateFn = unsafe extern "C" fn(mem: *mut u8) -> i32;
 /// all), `SQLITE_OK`/`SQLITE_NOMEM` (discarded).
 pub type VdbeMemStringifyFn = unsafe extern "C" fn(mem: *mut u8, enc: u8) -> i32;
 
-/// The default for an unported `sqlite3VdbeMemExpandBlob`. The
-/// `expandBlob(P)` macro discards the return code and the original
-/// leaves the `Mem` untouched when its grow fails — so a no-op
-/// claiming success reproduces both the original's OOM end state and
-/// its behavior on any value that needs no expansion.
-pub(crate) unsafe extern "C" fn missing_vdbe_mem_expand_blob(_mem: *mut u8) -> i32 {
-    SQLITE_OK
+/// ABI adapter from this older raw-pointer seam to the typed `Mem` port.
+/// The seam remains so value-text tests can record callee order.
+unsafe extern "C" fn wired_vdbe_mem_expand_blob(mem: *mut u8) -> i32 {
+    vdbe_mem_expand_blob(mem.cast())
 }
 
 /// The default for an unported `sqlite3VdbeChangeEncoding`: no-op
@@ -198,11 +195,10 @@ pub(crate) unsafe extern "C" fn missing_vdbe_mem_stringify(_mem: *mut u8, _enc: 
     SQLITE_NOMEM
 }
 
-/// Active `sqlite3VdbeMemExpandBlob` dispatch slot. Host tests install
-/// a recording replacement; the real port should replace this default
-/// when it lands.
+/// Active `sqlite3VdbeMemExpandBlob` dispatch slot. Its default is the
+/// ported implementation; host value-text tests install a recorder.
 pub static mut SQLITE_VDBE_MEM_EXPAND_BLOB: VdbeMemExpandBlobFn =
-    missing_vdbe_mem_expand_blob;
+    wired_vdbe_mem_expand_blob;
 
 /// Active `sqlite3VdbeChangeEncoding` dispatch slot (same pattern as
 /// [`SQLITE_VDBE_MEM_EXPAND_BLOB`]).
@@ -473,7 +469,7 @@ mod tests {
         body();
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_MEM_EXPAND_BLOB),
-            missing_vdbe_mem_expand_blob,
+            wired_vdbe_mem_expand_blob,
         );
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_CHANGE_ENCODING),
@@ -753,11 +749,11 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_defaults_are_the_documented_stubs() {
+    fn the_shipped_defaults_wire_the_expansion_port_and_documented_stubs() {
         unsafe {
             assert_eq!(
                 expand_blob_op() as usize,
-                missing_vdbe_mem_expand_blob as usize,
+                wired_vdbe_mem_expand_blob as usize,
             );
             assert_eq!(
                 change_encoding_op() as usize,

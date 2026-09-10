@@ -22223,6 +22223,41 @@ functions:
       volatile slot loads plus blx calls, while the flag-priority and
       short-circuit skeleton is preserved.
 
+  - address: 0x0838bbb4
+    ghidra: FUN_0838bbb4
+    name: vdbe_mem_expand_blob
+    size: 132
+    sig: "i32 vdbe_mem_expand_blob(Mem *p_mem)"
+    module: sqlite/vdbe_mem_expand_blob
+    status: ported
+    renames:
+      param_1: p_mem
+      iVar1: request
+      FUN_0838bdb0: sqlite3VdbeMemGrow
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeMemExpandBlob (vdbemem.c):
+      materialize a MEM_Zero (0x800) cell. Raw extent
+      0x0838bbb4..0x0838bc38 is confirmed by the closing
+      ldmia sp!, {r4,pc} at 0x0838bc34 and the next function's stmdb
+      at 0x0838bc38; no literal pool. The initial flags test returns
+      SQLITE_OK untouched when MEM_Zero is clear. Otherwise the low
+      word of Mem.u plus n yields a signed request with a one-byte
+      minimum, sqlite3VdbeMemGrow @ 0x0838bdb0 runs with preserve = 1,
+      nonzero maps to SQLITE_NOMEM (7), and success zeroes u's low-word
+      count at z + old n through the ported IRAM memzero veneer
+      @ 0x08037dc8, stores wrapped n + u, and clears MEM_Zero|MEM_Term
+      (bic #0x820). 11 direct bl call sites decoded from every ARM B/BL
+      word in osos.dec: 3 unconditional at 0x08387d58, 0x08389ca0,
+      0x08391734; 7 blne at 0x08386748, 0x0838761c, 0x08387650,
+      0x08387ec4, 0x08387ed8, 0x083885a8, 0x0838bb44; and 1 blgt at
+      0x08386674. The predominant predication confirms callers normally
+      gate expansion by MEM_Zero, while the callee retains its own
+      unguarded flag check. Deliberate deviation: typed repr(C) Mem
+      fields replace raw offsets, preventing 64-bit host pointer overlap;
+      its target offsets are asserted in sqlite/vdbe.rs. The pre-existing
+      raw-pointer value_text dispatch seam now defaults to this port and
+      remains only for its recorder tests.
   - address: 0x0838bdb0
     ghidra: FUN_0838bdb0
     name: vdbe_mem_grow
