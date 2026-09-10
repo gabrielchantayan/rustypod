@@ -57033,3 +57033,33 @@ functions:
       existing ata_call_with_zero factory seam likewise defaults to NULL until
       FUN_083696f4 is ported. Host tests use usize word indices to retain the
       target's 12-byte record layout without overlapping 64-bit host pointers.
+
+  # --- StringObject owner destruction ---
+  - address: 0x0804bd88
+    ghidra: FUN_0804bd88
+    name: string_object_owner_destroy
+    size: 40
+    sig: "i32 string_object_owner_destroy(StringObjectOwner *owner)"
+    module: cxx/string_object_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_word_1: embedded StringObject member
+      thunk_FUN_082792fc: string_object_destroy_veneer
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw ARM establishes a 40-byte extent: ten words from 0x0804bd88 through
+      pop {r4,pc} at 0x0804bdac, then the separately linked sibling
+      FUN_0804bdb0 begins at 0x0804bdb0. Ghidra's 32-byte extent omits the
+      leading cmp/mvneq null-status pair. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly 12 inbound calls, all unconditional bl at
+      0x0806da90, 0x0806dad4, 0x0806dbfc, 0x0806dc10, 0x0806dd04,
+      0x0806dda0, 0x080718b4, 0x080718c4, 0x080718d0, 0x080718dc,
+      0x080718e8, and 0x080718f4; no predicated forms, direct B calls, or
+      image data words target this entry. NULL returns 0xffffffce (-50) with
+      no calls. Non-NULL input denotes an allocation with an opaque first word
+      and a StringObject member at +4: it calls the already ported
+      string_object_destroy_veneer with that member, subtracts one word from
+      its returned pointer, calls already ported tag-2 operator_delete, then
+      returns zero. The generic owner name deliberately records only this
+      verified member-ownership relation; no class identity is invented.
