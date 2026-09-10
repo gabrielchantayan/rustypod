@@ -58405,3 +58405,36 @@ functions:
       callee remains stock on firmware; host builds deliberately use an
       inert test seam because FUN_081f7194 is not ported. No identity beyond
       the observed range-state initialization is inferred.
+
+  # --- Image-format descriptor slot update ---
+  - address: 0x081d5f98
+    ghidra: FUN_081d5f98
+    name: image_format_descriptor_slot_set
+    size: 60
+    sig: "u32 image_format_descriptor_slot_set(u32 *slots, u32 slot, const u8 *descriptor)"
+    module: app/image_format_descriptor_slot
+    status: ported
+    renames:
+      param_1/r0: slots
+      param_2/r1: slot
+      param_3/r2: descriptor
+      "slots+0x290": sequence
+      "slots+(slot+1)*0x24": record
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec confirms the exact 60-byte extent from 0x081d5f98 through
+      bx lr at 0x081d5fd0; the next separately linked function begins at
+      0x081d5fd4. The body calculates slots + (slot + 1) * 0x24, stores the
+      current sequence word at record + 0, increments the sequence word at
+      slots + 0x290, then calls the IRAM memcpy veneer at 0x08037df8 to copy
+      the aligned 32-byte descriptor to record + 4, and returns 1. Decoding
+      every ARM B/BL immediate finds exactly 11 direct callers, all
+      unconditional plain bl and none predicated: 0x081b7d98, 0x081cd228,
+      0x081cd244, 0x081cd260, 0x081cd27c, 0x081cd298, 0x0820a4fc,
+      0x0820a518, 0x0820a534, 0x08220228, and 0x08220244. No tail b or
+      aligned DATA word targets this entry. The callers build a 32-byte
+      descriptor with image_format_descriptor_for_kind before this call,
+      establishing the descriptor's image-format role. There are no NULL,
+      bounds, or alignment checks. Slot 17 has its descriptor bytes overlap
+      the sequence word, so the later copy overwrites the incremented word;
+      this port preserves that instruction order. No deliberate deviations.
