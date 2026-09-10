@@ -45468,6 +45468,30 @@ functions:
   # vtable+0x08, num_write byte counter at bio+0x34; failures log
   # through diag_ring_record with facility 32 = ERR_LIB_BIO and
   # bio_lib.c line numbers 113/120/121).
+  - address: 0x0803d270
+    ghidra: FUN_0803d270
+    name: bio_copy_next_retry
+    size: 36
+    sig: "void bio_copy_next_retry(BIO *bio)"
+    module: crypto/bio_copy_next_retry
+    status: ported
+    renames:
+      param_1/r0: bio
+      r1: bio->next_bio
+      r2: bio->flags
+      r3: bio->next_bio->flags
+    notes: >-
+      OpenSSL BIO retry propagation helper. Raw ARM confirms the exact
+      36-byte extent (0x0803d270..0x0803d294): the next instruction is the
+      separately linked BIO_ctrl at 0x0803d294, with no literal pool. Binary
+      decoding every B/BL word in osos.dec finds exactly 12 direct call
+      sites, all unconditional bl, no predicated calls, no tail branches, and
+      no raw image data word holding the address. The unguarded body loads
+      bio->next_bio, ORs its flags & 0x0f into bio->flags without clearing
+      existing bits, and copies its retry_reason word to bio->retry_reason.
+      The port preserves those unguarded reads and all-word behavior; host
+      tests map a two-BIO raw-u32 chain below 4 GiB to preserve target pointer
+      layout.
   - address: 0x0803d294
     ghidra: FUN_0803d294
     name: bio_ctrl
