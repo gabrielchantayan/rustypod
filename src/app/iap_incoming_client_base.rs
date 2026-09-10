@@ -108,13 +108,11 @@
 //!
 //! ## Deviations
 //!
-//! - The registration wrapper 0x081d6e38 is unported and dispatches
-//!   through [`IAP_INCOMING_CLIENT_BASE_OPS`] (the
-//!   `app/pending_event_take` pattern): target builds transmute the
-//!   verified ROM address, the host default is inert and returns slot
-//!   0, and every test installs a recording model. **Not hook-ready
-//!   for the registration call** until 0x081d6e38 is ported — with the
-//!   target default it reaches the stock body, which is the intent.
+//! - The registration wrapper 0x081d6e38 is ported as
+//!   [`iap_incoming_process_thread_register_client`]. Its unported registry
+//!   body @ 0x081d6dbc remains behind that function's
+//!   `IAP_THREAD_REGISTER_CLIENT_OPS` seam, whose target default reaches the
+//!   stock body and whose host model records the deadline.
 //! - The pool-zeroing veneer 0x08037db8 resolves to the IRAM copy of
 //!   `memzero_aligned` (names.yaml alias resolution); the port calls
 //!   the ported [`memzero_aligned`] through a `read_volatile` callee
@@ -140,7 +138,8 @@ use crate::heap::veneers::heap_panic;
 use crate::libc::memzero::memzero_aligned;
 
 use super::iap_incoming_process_thread::{
-    iap_incoming_process_thread_instance, iap_incoming_process_thread_slot_poll,
+    iap_incoming_process_thread_instance, iap_incoming_process_thread_register_client,
+    iap_incoming_process_thread_slot_poll,
 };
 
 /// The base-class vtable address planted at this+0x00 (the literal @
@@ -181,71 +180,6 @@ pub const ZERO_FILL_OFFSET: usize = 4;
 /// before the threading loop runs.
 pub const ZERO_FILL_LEN: usize = 0x2a8;
 
-/// Indirect dispatch for the one unported callee, the registration
-/// wrapper @ 0x081d6e38 (see the module header's deviation note).
-/// Host tests install a recording model; a later port of 0x081d6e38
-/// replaces the default without touching this caller.
-#[derive(Clone, Copy)]
-pub struct IapIncomingClientBaseOps {
-    /// Callee 0x081d6e38 `(thread, scope_seed, client, unread_seed)`
-    /// -> slot index or -1. Registers `client` in a free slot of the
-    /// thread context's 29-slot table: takes the registry mutex,
-    /// builds the slot's 0x24-byte wait-registration object, stores
-    /// `client` as the slot's context word, returns the index.
-    /// `scope_seed` (always 1 here) initializes the scoped object the
-    /// wrapper builds on its own frame; `unread_seed` (always 1) is
-    /// carried into the registry body 0x081d6dbc, which never reads
-    /// its r3.
-    pub register_client: unsafe extern "C" fn(
-        thread: *mut u8,
-        scope_seed: u32,
-        client: *mut u8,
-        unread_seed: u32,
-    ) -> i32,
-}
-
-/// Target default: the ROM registration wrapper.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_register_client(
-    thread: *mut u8,
-    scope_seed: u32,
-    client: *mut u8,
-    unread_seed: u32,
-) -> i32 {
-    let f: unsafe extern "C" fn(*mut u8, u32, *mut u8, u32) -> i32 =
-        core::mem::transmute(0x081d_6e38usize);
-    f(thread, scope_seed, client, unread_seed)
-}
-
-/// Host default: inert, reporting slot 0 (a valid index — -1 would
-/// fall into the non-returning `heap_panic`). The tests install their
-/// own recording model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_register_client(
-    _thread: *mut u8,
-    _scope_seed: u32,
-    _client: *mut u8,
-    _unread_seed: u32,
-) -> i32 {
-    0
-}
-
-/// Wired default: the ROM address on target, a documented inert
-/// success on host.
-pub const DEFAULT_IAP_INCOMING_CLIENT_BASE_OPS: IapIncomingClientBaseOps =
-    IapIncomingClientBaseOps {
-        register_client: firmware_register_client,
-    };
-
-/// The active callee set, read through `read_volatile` so LLVM cannot
-/// fold the indirect call to the default.
-pub static mut IAP_INCOMING_CLIENT_BASE_OPS: IapIncomingClientBaseOps =
-    DEFAULT_IAP_INCOMING_CLIENT_BASE_OPS;
-
-#[inline(always)]
-fn iap_incoming_client_base_ops() -> IapIncomingClientBaseOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IAP_INCOMING_CLIENT_BASE_OPS)) }
-}
 
 #[inline(always)]
 unsafe fn read_word(base: *mut u8, offset: usize) -> u32 {
@@ -317,7 +251,7 @@ pub unsafe extern "C" fn iap_incoming_client_base_construct(
         node = node.wrapping_add(POOL_NODE_STRIDE);
     }
     let thread = iap_incoming_process_thread_instance();
-    let slot = (iap_incoming_client_base_ops().register_client)(thread, 1, this, 1);
+    let slot = iap_incoming_process_thread_register_client(thread, 1, this, 1);
     write_word(this, SLOT_INDEX_OFFSET, slot as u32);
     if slot == -1 {
         heap_panic();
@@ -333,7 +267,8 @@ mod tests {
 
     use super::*;
     use super::super::iap_incoming_process_thread::{
-        IapThreadSlotPollOps, IAP_INCOMING_PROCESS_THREAD_INSTANCE,
+        IapThreadRegistrationDeadline, IapThreadRegistrationOps, IapThreadSlotPollOps,
+        IAP_INCOMING_PROCESS_THREAD_INSTANCE, IAP_THREAD_REGISTER_CLIENT_OPS,
         IAP_THREAD_SLOT_POLL_OPS, SLOT_STRIDE, SLOT_TABLE_OFFSET,
     };
     use crate::cxx::mutex::CXX_MUTEX_STATUS_OFFSET;
@@ -355,8 +290,8 @@ mod tests {
     const THREAD_B_OFF: usize = 0x800;
 
     /// The registration calls observed by the mock, in order:
-    /// (thread, scope_seed, client, unread_seed).
-    static mut REGISTERED: Vec<(usize, u32, usize, u32)> = Vec::new();
+    /// (thread, deadline seconds, deadline nanos, client, unread seed).
+    static mut REGISTERED: Vec<(usize, i32, i32, usize, u32)> = Vec::new();
     /// The slot-object pointers the poll mock has received, in order.
     static mut POLLED: Vec<usize> = Vec::new();
     /// Slot index the register mock returns.
@@ -367,7 +302,7 @@ mod tests {
 
     struct Bench {
         _lock: MutexGuard<'static, ()>,
-        previous_register_ops: IapIncomingClientBaseOps,
+        previous_register_ops: IapThreadRegistrationOps,
         previous_poll_ops: IapThreadSlotPollOps,
         previous_instance: *mut u8,
         available: bool,
@@ -416,7 +351,7 @@ mod tests {
         let available = unsafe { !slab().is_null() };
         let (previous_register_ops, previous_poll_ops, previous_instance) = unsafe {
             (
-                ptr::read_volatile(ptr::addr_of!(IAP_INCOMING_CLIENT_BASE_OPS)),
+                ptr::read_volatile(ptr::addr_of!(IAP_THREAD_REGISTER_CLIENT_OPS)),
                 ptr::read_volatile(ptr::addr_of!(IAP_THREAD_SLOT_POLL_OPS)),
                 ptr::read_volatile(ptr::addr_of!(IAP_INCOMING_PROCESS_THREAD_INSTANCE)),
             )
@@ -431,8 +366,8 @@ mod tests {
                 MOCK_SLOT = slot;
                 REPUBLISH_B = false;
                 ptr::write_volatile(
-                    ptr::addr_of_mut!(IAP_INCOMING_CLIENT_BASE_OPS),
-                    IapIncomingClientBaseOps {
+                    ptr::addr_of_mut!(IAP_THREAD_REGISTER_CLIENT_OPS),
+                    IapThreadRegistrationOps {
                         register_client: mock_register_client,
                     },
                 );
@@ -462,7 +397,7 @@ mod tests {
             if self.available {
                 unsafe {
                     ptr::write_volatile(
-                        ptr::addr_of_mut!(IAP_INCOMING_CLIENT_BASE_OPS),
+                        ptr::addr_of_mut!(IAP_THREAD_REGISTER_CLIENT_OPS),
                         self.previous_register_ops,
                     );
                     ptr::write_volatile(
@@ -480,11 +415,17 @@ mod tests {
 
     unsafe extern "C" fn mock_register_client(
         thread: *mut u8,
-        scope_seed: u32,
+        deadline: *const IapThreadRegistrationDeadline,
         client: *mut u8,
         unread_seed: u32,
     ) -> i32 {
-        REGISTERED.push((thread as usize, scope_seed, client as usize, unread_seed));
+        REGISTERED.push((
+            thread as usize,
+            (*deadline).seconds,
+            (*deadline).nanos,
+            client as usize,
+            unread_seed,
+        ));
         if REPUBLISH_B {
             ptr::write_volatile(
                 ptr::addr_of_mut!(IAP_INCOMING_PROCESS_THREAD_INSTANCE),
@@ -565,8 +506,8 @@ mod tests {
 
             assert_eq!(
                 REGISTERED.as_slice(),
-                &[(thread_a() as usize, 1, this as usize, 1)],
-                "one registration with the original's constant 1 arguments"
+                &[(thread_a() as usize, 0, 1_000_000, this as usize, 1)],
+                "one registration receives the original's one-millisecond deadline"
             );
             assert_eq!(
                 POLLED.as_slice(),
@@ -590,13 +531,29 @@ mod tests {
             iap_incoming_client_base_construct(this, 0, 0, 0);
             assert_eq!(
                 REGISTERED.as_slice(),
-                &[(thread_a() as usize, 1, this as usize, 1)],
+                &[(thread_a() as usize, 0, 1_000_000, this as usize, 1)],
                 "the registration went to the instance published at entry"
             );
             assert_eq!(
                 POLLED.as_slice(),
                 &[object_b as usize],
                 "the poll followed the SECOND accessor read, not a cached one"
+            );
+        }
+    }
+
+    #[test]
+    fn register_client_preserves_signed_timeout_remainder() {
+        let bench = bench(0);
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            iap_incoming_process_thread_register_client(thread_a(), -1001, client(), 0xfeed_beef);
+            assert_eq!(
+                REGISTERED.as_slice(),
+                &[(thread_a() as usize, -1, -1_000_000, client() as usize, 0xfeed_beef)],
+                "the wrapper stores signed division's quotient and remainder as a timespec"
             );
         }
     }
