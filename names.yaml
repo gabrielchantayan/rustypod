@@ -19872,6 +19872,41 @@ functions:
       (multiply/range guard, backwards copy loop); its exit-1 mnemonic
       diff is expected.
 
+  - address: 0x0833e83c
+    ghidra: FUN_0833e83c
+    name: copy_encoded_word_block_checked
+    size: 124
+    sig: "u32 copy_encoded_word_block_checked(EncodedWordBlock *destination, const EncodedWordBlock *source)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_2_plus_0: encoded_count
+      param_2_plus_4: words
+      DAT_0833e8b4: encoded_count_multiplier
+      iVar1/r2: decoded_count
+      iVar2/r3: word_count
+    notes: >-
+      Raw ARM confirms a 120-byte instruction body at
+      0x0833e83c..0x0833e8b4, followed by the literal-pool multiplier
+      0x0a7e377f at 0x0833e8b4; the next separately linked function starts
+      at 0x0833e8b8, for a 124-byte full extent. Decoding every ARM B/BL
+      word in osos.dec finds exactly 11 direct inbound calls, all
+      unconditional bl and zero predicated forms; no plain B or DATA-word
+      reference targets this entry. It is the same bounded EncodedWordBlock
+      copy algorithm as copy_encoded_word_block @ 0x0835443c: multiply the
+      source encoded_count by 0x0a7e377f, reject when its signed wrapping
+      magnitude exceeds 28 before touching destination, otherwise copy the
+      raw header and payload words from high index to low. The range guard
+      precedes the alias check, so an aliased out-of-range block returns 1;
+      i32::MIN retains the ARM wrapping-negation corner case. The target-only
+      unique Rust section prevents coalescing this separately linked,
+      byte-identical sibling with copy_encoded_word_block. Host tests cover
+      positive and negative decoded counts, both range edges, rejection
+      without writes, descending overlapping copies, and the i32::MIN
+      self-copy. match.py structural diff (exit 1 expected) was reviewed.
+
   - address: 0x083544bc
     ghidra: FUN_083544bc
     name: encoded_word_block_sign

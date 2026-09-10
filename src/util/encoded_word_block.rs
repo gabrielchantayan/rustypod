@@ -102,6 +102,62 @@ pub unsafe extern "C" fn copy_encoded_word_block(
 
     0
 }
+/// Copies a bounded encoded-count word block, returning 0 on success or 1
+/// when the decoded count exceeds 28.
+///
+/// Original: `FUN_0833e83c` @ 0x0833e83c (124-byte full extent:
+/// 120-byte instruction body at 0x0833e83c..0x0833e8b4, trailing literal-pool
+/// multiplier `0x0a7e377f` at 0x0833e8b4, and the next separately linked
+/// function beginning at 0x0833e8b8). A complete decode of every ARM B/BL
+/// word in osos.dec finds exactly 11 direct call sites, all unconditional
+/// `bl`; no predicated forms, tail branches, or DATA-word references to this
+/// address exist.
+///
+/// The signed low word of `source->encoded_count * 0x0a7e377f` supplies the
+/// decoded count. Its wrapping absolute value must be at most 28 before the
+/// destination is touched. A distinct destination then receives the raw
+/// header and the decoded word count copied in descending-index order; an
+/// identical block pointer instead returns success without writes.
+///
+/// Deliberate deviation: none. This separately linked sibling has the same
+/// behavior and ABI as [`copy_encoded_word_block`] but keeps a target-only
+/// unique section so LLVM cannot coalesce the two required firmware symbols.
+///
+/// # Safety
+/// `source` must point to a readable [`EncodedWordBlock`]. When it differs
+/// from `destination` and its decoded count is accepted, `destination` must
+/// be writable and both word arrays must contain that many readable/writable
+/// elements. As in the firmware, words are copied in descending-index order.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.copy_encoded_word_block_checked")]
+pub unsafe extern "C" fn copy_encoded_word_block_checked(
+    destination: *mut EncodedWordBlock,
+    source: *const EncodedWordBlock,
+) -> u32 {
+    let decoded_count = (*source).encoded_count.wrapping_mul(ENCODED_COUNT_MULTIPLIER);
+    let word_count = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+
+    if word_count > MAX_DECODED_WORD_COUNT {
+        return 1;
+    }
+
+    if !core::ptr::eq(destination.cast_const(), source) {
+        (*destination).encoded_count = (*source).encoded_count;
+        let mut remaining = (word_count as u32) as usize;
+        while remaining != 0 {
+            remaining -= 1;
+            *(*destination).words.add(remaining) = *(*source).words.add(remaining);
+        }
+    }
+
+    0
+}
+
 
 /// Copies a bounded encoded-count word block with the source in the first
 /// argument, returning 0 on success or 1 when the decoded count exceeds 28.
@@ -501,9 +557,9 @@ mod tests {
     use std::vec::Vec;
 
     use super::{
-        copy_encoded_word_block, copy_encoded_word_block_from, copy_inline_encoded_word_block,
-        encoded_word_block_set_int, encoded_word_block_sign, inline_encoded_word_block_compare,
-        EncodedWordBlock, InlineEncodedWordBlock,
+        copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
+        copy_inline_encoded_word_block, encoded_word_block_set_int, encoded_word_block_sign,
+        inline_encoded_word_block_compare, EncodedWordBlock, InlineEncodedWordBlock,
     };
 
 
@@ -550,6 +606,86 @@ mod tests {
             assert_eq!(&destination_words[..3], &source_words[..3]);
             assert_eq!(destination_words[3], 0xdead_beef);
         }
+    }
+
+    #[test]
+    fn checked_copies_positive_and_negative_decoded_counts() {
+        for decoded_count in [3, -3] {
+            let mut source_words = [0x11, 0x22, 0x33, 0x44];
+            let mut destination_words = [0xdead_beef; 4];
+            let source = EncodedWordBlock {
+                encoded_count: encoded_count(decoded_count),
+                words: source_words.as_mut_ptr(),
+            };
+            let mut destination = EncodedWordBlock {
+                encoded_count: encoded_count(1),
+                words: destination_words.as_mut_ptr(),
+            };
+
+            assert_eq!(unsafe { copy_encoded_word_block_checked(&mut destination, &source) }, 0);
+            assert_eq!(destination.encoded_count, source.encoded_count);
+            assert_eq!(&destination_words[..3], &source_words[..3]);
+            assert_eq!(destination_words[3], 0xdead_beef);
+        }
+    }
+
+    #[test]
+    fn checked_accepts_28_and_rejects_29_before_destination_writes() {
+        for (decoded_count, expected) in [(28, 0), (-28, 0), (29, 1), (-29, 1)] {
+            let mut source_words = [0x55; 29];
+            let mut destination_words = [0xdead_beef; 29];
+            let source = EncodedWordBlock {
+                encoded_count: encoded_count(decoded_count),
+                words: source_words.as_mut_ptr(),
+            };
+            let mut destination = EncodedWordBlock {
+                encoded_count: encoded_count(2),
+                words: destination_words.as_mut_ptr(),
+            };
+            let original_header = destination.encoded_count;
+
+            assert_eq!(
+                unsafe { copy_encoded_word_block_checked(&mut destination, &source) },
+                expected
+            );
+            if expected == 0 {
+                assert_eq!(destination.encoded_count, source.encoded_count);
+                assert_eq!(&destination_words[..28], &[0x55; 28]);
+                assert_eq!(destination_words[28], 0xdead_beef);
+            } else {
+                assert_eq!(destination.encoded_count, original_header);
+                assert_eq!(destination_words, [0xdead_beef; 29]);
+            }
+        }
+    }
+
+    #[test]
+    fn checked_copies_overlapping_words_in_descending_index_order() {
+        let mut words = [10, 20, 30, 0];
+        let source = EncodedWordBlock {
+            encoded_count: encoded_count(3),
+            words: words.as_mut_ptr(),
+        };
+        let mut destination = EncodedWordBlock {
+            encoded_count: encoded_count(1),
+            words: unsafe { words.as_mut_ptr().add(1) },
+        };
+
+        assert_eq!(unsafe { copy_encoded_word_block_checked(&mut destination, &source) }, 0);
+        assert_eq!(words, [10, 10, 20, 30]);
+        assert_eq!(destination.encoded_count, source.encoded_count);
+    }
+
+    #[test]
+    fn checked_self_copy_preserves_wrapping_minimum_count_behavior() {
+        let mut block = EncodedWordBlock {
+            encoded_count: i32::MIN,
+            words: core::ptr::null_mut(),
+        };
+        let block_ptr = &mut block as *mut EncodedWordBlock;
+
+        assert_eq!(unsafe { copy_encoded_word_block_checked(block_ptr, block_ptr) }, 0);
+        assert_eq!(block.encoded_count, i32::MIN);
     }
 
     #[test]
