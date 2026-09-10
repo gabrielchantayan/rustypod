@@ -57764,3 +57764,38 @@ functions:
       word and reordering the independent loads. No NULL or bounds guard is
       added; p must point to four readable bytes at a two-byte-aligned
       address.
+
+  # --- FAT data-cluster to cache-block-index conversion ---
+  - address: 0x082e01cc
+    ghidra: FUN_082e01cc
+    name: fat_cluster_to_block_index
+    size: 56
+    sig: "u32 fat_cluster_to_block_index(const FatVolume *volume, u32 cluster)"
+    module: fs/fat_cluster_to_block
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: cluster
+      "volume+0x74": first_data_block
+      "volume+0x1ce": blocks_per_cluster_shift
+      "volume+0x1d8": cache_block_limit
+    notes: >-
+      Raw osos.dec confirms the 56-byte code extent from 0x082e01cc through
+      bxhi lr at 0x082e01f8 and the zero-return mov/bx pair at
+      0x082e01fc..0x082e0200. The next separately entered function starts
+      at 0x082e0208; the intervening word at 0x082e0204 is the
+      PC-relative literal 0x000001ce used to address the shift halfword.
+      Decoding every ARM B/BL immediate finds 11 direct callers, all plain
+      unconditional bl (0x082b18dc, 0x082b1b94, 0x082b1d88, 0x082b1f34,
+      0x082b2050, 0x082b2090, 0x082e0454, 0x082e2130, 0x082e2994,
+      0x082e3314, 0x082e66fc), with zero predicated bl forms. Two further
+      entries are tail branches: unconditional b at 0x082e1480 and bne at
+      0x082e2bb4. For cluster >= 2, it calculates first_data_block +
+      ((cluster - 2) << (blocks_per_cluster_shift & 0xff)) with ARM u32
+      wraparound, returning the candidate only when it is strictly less than
+      cache_block_limit. ARM register LSL amounts >= 32 yield zero; the port
+      retains that rule. Clusters 0 and 1 return zero before dereferencing
+      volume; all other paths have no NULL or bounds guard. No deliberate
+      deviations. Host tests cover reserved-cluster short-circuiting, shifted
+      data-cluster mapping, strict limit rejection, addition wraparound, and
+      the >=32 shift rule.
