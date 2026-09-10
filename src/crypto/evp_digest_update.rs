@@ -89,10 +89,10 @@ pub const EVP_DIGEST_UPDATE_BODY: [u32; 3] = [0xe590_3000, 0xe593_3014, 0xe12f_f
 pub const EVP_MD_UPDATE_SLOT: u32 = EVP_DIGEST_UPDATE_BODY[1] & 0xfff;
 
 /// The digest algorithm descriptor (`EVP_MD`), as far as the four
-/// binary-verified EVP entry points at 0x0804a564..0x0804a734 pin it.
-/// Fields past `cleanup` — including `ctx_size` at +0x44, which
-/// `EVP_DigestInit_ex` allocates and `EVP_DigestFinal_ex` cleanses — are
-/// not reachable from this function and are left undeclared.
+/// binary-verified EVP entry points at 0x0804a564..0x0804acb4 pin it.
+/// Besides the dispatch slots, `EVP_MD_CTX_cleanup` reads `ctx_size` at
+/// +0x44; the eight intervening opaque words retain that target offset
+/// without inventing meanings for fields this cluster never reaches.
 #[repr(C)]
 pub struct EvpMd {
     /// +0x00: algorithm NID. Read by neither of the ported entry points.
@@ -114,8 +114,13 @@ pub struct EvpMd {
     /// +0x1c: never loaded by any of the four ported entry points, so
     /// its ABI is unobserved and it stays an untyped word.
     pub slot_1c: usize,
-    /// +0x20: called by `EVP_DigestFinal_ex` with `r0=ctx` when non-NULL.
-    pub cleanup: unsafe extern "C" fn(ctx: *mut EvpMdCtx) -> i32,
+    /// +0x20: called by `EVP_DigestFinal_ex` and
+    /// `EVP_MD_CTX_cleanup` with `r0=ctx` when non-NULL.
+    pub cleanup: Option<unsafe extern "C" fn(ctx: *mut EvpMdCtx) -> i32>,
+    /// +0x24..+0x40: descriptor fields not inspected by this EVP cluster.
+    pub opaque_24_to_40: [u32; 8],
+    /// +0x44: size in bytes of `EvpMdCtx::md_data`.
+    pub ctx_size: u32,
 }
 
 /// The digest context (`EVP_MD_CTX`). Sixteen bytes on the target — the
@@ -204,7 +209,9 @@ mod tests {
         update: record_update,
         finish: record_other_two_arg,
         slot_1c: 0,
-        cleanup: record_other_one_arg,
+        cleanup: Some(record_other_one_arg),
+        opaque_24_to_40: [0; 8],
+        ctx_size: 0,
     };
 
     struct Fixture {
@@ -338,7 +345,9 @@ mod tests {
             update: second_update,
             finish: record_other_two_arg,
             slot_1c: 0,
-            cleanup: record_other_one_arg,
+            cleanup: Some(record_other_one_arg),
+            opaque_24_to_40: [0; 8],
+            ctx_size: 0,
         };
 
         let mut f = Fixture::new(1);
