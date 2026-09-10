@@ -9194,6 +9194,41 @@ functions:
       that overflow calls the seam with (loader, count, 0) and
       propagates its return.
 
+  - address: 0x080cca60
+    ghidra: FUN_080cca60
+    name: cff_builder_start_point
+    size: 76
+    sig: "i32 cff_builder_start_point(CffBuilder *builder, i32 x, i32 y)"
+    module: ft/cff_builder
+    status: ported
+    renames:
+      param_1/r0/r4: builder
+      param_2/r1/r5: x
+      param_3/r2/r6: y
+      "builder+0x50": path_begun
+      FUN_080cc9d8: cff_builder_add_contour (unported seam)
+      FUN_080c8a28: cff_builder_add_point_on_curve (inlined wrapper)
+    notes: >-
+      FreeType cffgload.c cff_builder_start_point. Raw ARM extent is
+      0x080cca60..0x080ccaac (76 bytes): the next function starts at
+      0x080ccaac with ldr r0,[r0,#0x8c]. It returns 0 immediately if the
+      builder's path_begun byte at +0x50 is nonzero. Otherwise it sets that
+      byte to 1, calls the unported cff_builder_add_contour @ 0x080cc9d8,
+      and returns that error unchanged when nonzero. On success it restores
+      builder/x/y and tail-branches to 0x080c8a28. Raw decoding verifies
+      that wrapper runs cff_check_points(builder,1) and, only on success,
+      cff_builder_add_point(builder,x,y,1); the Rust port expresses that
+      wrapper directly while retaining 0x080cc9d8 as a target direct-call
+      seam. CffBuilder gained the named path_begun field at +0x50 (the
+      existing load_points remains +0x51). 12 call sites verified by
+      decoding every B/BL word in osos.dec: all unconditional bl at
+      0x080e0158, 0x080e0204, 0x080e033c, 0x080e040c, 0x080e04ec,
+      0x080e05d8, 0x080e0780, 0x080e0874, 0x080e0954, 0x080e0a4c,
+      0x080e0b7c, and 0x080e0c80; no tail B or DATA word holds the address,
+      so it is not virtually dispatched. Host tests (4) prove the begun
+      early return, contour-error propagation, successful on-curve 16.16
+      point append, and capacity-error no-append behavior.
+
   # --- FreeType 2 ftoutln outline helpers ---
   - address: 0x0804fe08
     ghidra: FUN_0804fe08
