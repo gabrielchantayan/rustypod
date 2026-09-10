@@ -49720,6 +49720,33 @@ functions:
       256 return values, prove the load does not mutate the object, and vary
       every unrelated byte in a minimally sized nine-byte object.
 
+  # --- Raw object byte accessor (cxx/object_state) ---
+  - address: 0x0829d0bc
+    ghidra: FUN_0829d0bc
+    name: object_byte_at_4
+    size: 8
+    sig: "u8 object_byte_at_4(const u8 *object)"
+    module: cxx/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0x04: byte_at_4
+      r0: byte_result
+    notes: >-
+      Raw ARM is exactly `ldrb r0,[r0,#4]; bx lr`, an unguarded,
+      non-mutating byte load. The true extent is 8 bytes at
+      0x0829d0bc..0x0829d0c4, where the next separately linked function
+      FUN_0829d0c4 begins. Decoding every ARM B/BL word in osos.dec found
+      exactly 10 inbound branches, all unconditional `bl` (condition 0xe)
+      at 0x0814bd50, 0x08167ca0, 0x0818b220, 0x081a7be0, 0x081ba274,
+      0x081efd8c, 0x082140f0, 0x082235d8, 0x08235e8c, and 0x0828b324;
+      there are no predicated calls, tail branches, or DATA-word references.
+      Callers use the result to select object-dispatch paths but do not
+      establish the concrete object type or field domain, so this deliberately
+      remains an offset-based accessor. No deliberate deviation. Host tests
+      exhaust all 256 return values and verify neighboring bytes and object
+      storage remain unchanged.
+
   # --- Raw object dispatch-code accessor (cxx/object_state) ---
   - address: 0x0829f184
     ghidra: FUN_0829f184

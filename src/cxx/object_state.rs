@@ -45,6 +45,30 @@ pub unsafe extern "C" fn object_byte_at_8(object: *const u8) -> u8 {
     object.add(8).read()
 }
 
+/// object_byte_at_4 — original: `FUN_0829d0bc` @ `0x0829d0bc`
+/// (8 bytes; 10 verified direct `bl` call sites, all unconditional).
+///
+/// Loads and returns the raw unsigned byte at `object + 0x04`. Raw
+/// disassembly is `ldrb r0,[r0,#4]; bx lr`; the binary-wide ARM B/BL scan
+/// found calls at 0x0814bd50, 0x08167ca0, 0x0818b220, 0x081a7be0,
+/// 0x081ba274, 0x081efd8c, 0x082140f0, 0x082235d8, 0x08235e8c, and
+/// 0x0828b324, with no predicated call or DATA-word reference. Callers use
+/// the byte to select object-dispatch paths, but establish neither the
+/// concrete object type nor the field's domain meaning. The offset-based
+/// name intentionally preserves only the verified behavior.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `object` must designate at least five readable bytes. It is not
+/// null-checked, matching the original byte load.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn object_byte_at_4(object: *const u8) -> u8 {
+    object.add(4).read()
+}
+
 /// object_dispatch_code_at_8 — original: `FUN_0829f184` @ `0x0829f184`
 /// (12 bytes; 10 verified direct `bl` call sites, all unconditional).
 ///
@@ -120,6 +144,33 @@ mod tests {
             for replacement in [0u8, 0xff] {
                 object[offset] = replacement;
                 assert_eq!(unsafe { object_byte_at_8(object.as_ptr()) }, 0xc3, "object +{offset:#x} = {replacement:#04x}");
+            }
+            object[offset] = 0x5a;
+        }
+    }
+
+    #[test]
+    fn returns_every_byte_value_at_offset_four_without_mutating_object() {
+        let mut object = [0xa5u8; 6];
+
+        for value in 0u8..=u8::MAX {
+            object[4] = value;
+            let before = object;
+
+            assert_eq!(unsafe { object_byte_at_4(object.as_ptr()) }, value, "byte={value:#04x}");
+            assert_eq!(object, before, "read changed object for byte={value:#04x}");
+        }
+    }
+
+    #[test]
+    fn ignores_every_other_byte_of_a_minimally_sized_object_at_offset_four() {
+        let mut object = [0x5au8; 5];
+        object[4] = 0xc3;
+
+        for offset in 0..4 {
+            for replacement in [0u8, 0xff] {
+                object[offset] = replacement;
+                assert_eq!(unsafe { object_byte_at_4(object.as_ptr()) }, 0xc3, "object +{offset:#x} = {replacement:#04x}");
             }
             object[offset] = 0x5a;
         }
