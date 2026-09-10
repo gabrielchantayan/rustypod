@@ -49009,6 +49009,39 @@ functions:
       and the release seam shipping the ported releaseMemArray as its
       default.
 
+  # --- sqlite: VDBE b-tree use tracking ---
+  - address: 0x0838d100
+    ghidra: FUN_0838d100
+    name: vdbe_uses_btree
+    size: 192
+    sig: "void vdbe_uses_btree(Vdbe *p, int database_index)"
+    module: sqlite/vdbe_uses_btree
+    status: ported
+    vars: {param_1: p, param_2: database_index, uVar1/r2: database_bit, iVar3/r1: btree, iVar5/r0: insert_index, piVar4/r2: mutex_array}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeUsesBtree. Extent 0x0838d100..0x0838d1c0
+      verified from raw osos.dec: 0x0838d1bc is ldr pc,[sp],#4 and
+      0x0838d1c0 starts the next stmdb function. 10 bl call sites, all
+      unconditional, decoded from every ARM B/BL word in osos.dec:
+      0x0836fd24, 0x08378d6c, 0x08378ebc, 0x0837913c, 0x0837d72c,
+      0x0837f374, 0x0837f938, 0x08381058, 0x083848bc, 0x0838f378; no
+      predicated calls or tail branches.
+      Algorithm - form 1 << (database_index & 0xff) with ARM's zero result
+      for shifts >= 32; return when that bit is already set in Vdbe.btreeMask
+      (+0x110), otherwise set it. Load db->aDb[database_index].pBt (Db stride
+      0x18); a NULL or non-sharable (+0x09 zero) Btree stops there. For a
+      sharable handle, insert the Btree into Vdbe.aMutex after every existing
+      entry whose BtShared pointer (+0x04) is <= the candidate's, shifting
+      higher entries right, then increment nMutex (+0x114). The list is
+      therefore ascending by BtShared pointer and equal keys preserve insertion
+      order. No callee is reached.
+      Deviations - VdbeBtreeUse is a repr(C) target-layout facade with named
+      fields and ARM-only offset assertions, rather than guessing the shared
+      Vdbe's unmodeled intermediate fields; 64-bit host fixtures consequently
+      retain distinct pointer fields. Host tests (4) cover the already-marked
+      no-dereference return, NULL and non-sharable handles, sorted insertion
+      with stable equal keys, and ARM's shift-32 zero-bit path.
+
   # --- Packed-record month length (time/month_length) ---
   - address: 0x08076074
     ghidra: FUN_08076074
