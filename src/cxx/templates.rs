@@ -601,6 +601,39 @@ pub unsafe extern "C" fn container_element_at(this: *mut u8, index: usize) -> *m
     let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
     element_slot(this, index).read()
 }
+/// container_element_at_alias_5f14 — original: `FUN_083d5f14` @ 0x083d5f14
+/// (24 bytes; 11 plain `bl` call sites — 0x081002e4, 0x08100408,
+/// 0x08100624, 0x0810070c, 0x081008f4, 0x08100930, 0x081010a4,
+/// 0x08101538, 0x08101550, 0x0839c004 and 0x0839c048; no predicated
+/// calls).
+///
+/// A byte-identical instantiation of [`container_element_at`] @
+/// 0x083d5efc: `T *operator[](size_t index)`. It dispatches through the
+/// container's own vtable slot 0x40 for an element-slot address, then
+/// loads that slot's element pointer. `push {r4, lr}` is pure stack
+/// alignment: r4 is never touched. The raw body has no NULL guard for
+/// either the virtual result or its element slot.
+///
+/// Its callers pass an index in r1 and use the result as an element pointer:
+/// the 0x0839bffc caller advances an index until a non-NULL element appears,
+/// while the UI callers test and consume returned records. The dedicated
+/// link section deliberately keeps this independently hookable export from
+/// being folded into a byte-identical body; otherwise the implementation
+/// has no deliberate deviations from the ARM algorithm.
+///
+/// # Safety
+/// Same contract as [`container_element_at`]: `this` must point at an
+/// object whose first word is a vtable with at least
+/// [`ELEMENT_SLOT_VTABLE_INDEX`] + 1 slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_5f14")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_alias_5f14(this: *mut u8, index: usize) -> *mut u8 {
+    let vtable = (this as *const *const ElementSlotFn).read();
+    let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
+    element_slot(this, index).read()
+}
+
 
 /// container_element_at_alias_6908 — original: `FUN_083d6908` @ 0x083d6908
 /// (24 bytes; 5 `bl` call sites — 0x08123ff8, 0x08298b84, 0x08298cb4,
@@ -2625,6 +2658,24 @@ mod tests {
             assert!(container_element_at(this, 2).is_null(), "NULL element, not NULL slot");
         }
     }
+    #[test]
+    fn element_at_alias_5f14_dispatches_through_slot_0x40_and_derefs() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            assert_eq!(container_element_at_alias_5f14(this, 0), &mut a as *mut u8);
+            assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
+            assert_eq!(container_element_at_alias_5f14(this, 1), &mut b as *mut u8);
+            assert!(container_element_at_alias_5f14(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
 
     /// The vtable comes out of the object, so a different one takes
     /// over — the property `heap/block_deque` relies on for element
