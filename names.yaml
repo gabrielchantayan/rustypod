@@ -56660,6 +56660,37 @@ functions:
       seam and prove both NULL (no accidental guard) and non-NULL allocation
       forwarding with the exact descriptor. match.py reviewed.
 
+  # --- Opaque allocation release ---
+  - address: 0x08070c04
+    ghidra: FUN_08070c04
+    name: release_opaque_allocation
+    size: 12
+    sig: "void release_opaque_allocation(void *allocation)"
+    module: cxx/opaque_allocation_release
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_08070c0c/r1: opaque_allocation_descriptor_0x089063e8
+      FUN_0803b3a4: typed_allocation_release_helper
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      EXTENT: raw osos.dec is 12 bytes, not Ghidra's reported 8:
+      ldr r1,[pc]; b 0x0803b3a4; literal 0x089063e8. The next separate
+      function begins at 0x08070c10 (ldr r0,[r0]), proving the trailing
+      literal belongs here. CALL COUNT: decoding every ARM B/BL word in
+      osos.dec found 12 direct references: 11 bl calls (6 unconditional bl,
+      2 bleq, and 3 blne) and one beq tail transfer at 0x0806fb60. The five
+      predicated bl calls establish their own gates; this wrapper has no NULL
+      guard and forwards NULL into 0x0803b3a4. ALGORITHM: load the fixed
+      opaque descriptor in r1 and tail-branch to 0x0803b3a4; that helper
+      makes a temporary {allocation, descriptor} frame and calls the
+      unported type-erased release engine 0x080c85bc with r2=0. The
+      descriptor's concrete type is not recoverable, so no identity was
+      invented. ARM global assembly preserves the three raw words and tail
+      return edge exactly. Host tests share the existing helper seam and
+      prove NULL and non-NULL allocation forwarding with the exact
+      descriptor. match.py reviewed. Deliberate deviations: none.
+
   # --- opaque object packed two-bit field accessor ---
   - address: 0x08054468
     ghidra: FUN_08054468

@@ -55,6 +55,10 @@ unsafe extern "C" fn missing_typed_allocation_release(_allocation: *mut u8, _des
 #[cfg(not(target_arch = "arm"))]
 pub static mut TYPED_ALLOCATION_RELEASE: TypedAllocationRelease = missing_typed_allocation_release;
 
+/// Serializes host tests that replace the shared release-engine seam.
+#[cfg(test)]
+pub(crate) static TYPED_ALLOCATION_RELEASE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Host representation of the raw tail branch.
 ///
 /// It forwards even NULL unchanged; retail callers choose whether to guard the
@@ -91,9 +95,6 @@ mod tests {
 
     use super::*;
     use core::sync::atomic::{AtomicUsize, Ordering};
-    use parking_lot::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RECORDED_ALLOCATION: AtomicUsize = AtomicUsize::new(usize::MAX);
     static RECORDED_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
@@ -122,7 +123,7 @@ mod tests {
 
     #[test]
     fn null_allocation_is_forwarded_without_a_wrapper_guard() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
         let _reset = install_recorder();
 
         unsafe { release_typed_allocation(core::ptr::null_mut()) };
@@ -134,7 +135,7 @@ mod tests {
 
     #[test]
     fn nonnull_allocation_and_fixed_descriptor_reach_release_helper() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
         let _reset = install_recorder();
         let allocation = 0x1234_5000usize as *mut u8;
 
