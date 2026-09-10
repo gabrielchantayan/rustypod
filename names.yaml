@@ -60180,3 +60180,36 @@ functions:
       tests install a recording seam and prove NULL output forwarding,
       non-NULL argument forwarding, the fixed descriptor, and result
       forwarding. Deliberate deviations: none.
+
+  # --- SQLite prepared statement finalizer ---
+  - address: 0x083906d4
+    ghidra: FUN_083906d4
+    name: sqlite3_finalize
+    size: 32
+    sig: "i32 sqlite3_finalize(Vdbe *statement)"
+    module: sqlite/finalize
+    status: ported
+    renames:
+      param_1/r0/r4: statement
+      FUN_08391d64: stmt_lru_remove
+      FUN_0838af84: sqlite3VdbeFinalize
+    notes: >-
+      Raw ARM confirms the exact 32-byte extent 0x083906d4..0x083906f4:
+      cmp r0,#0; push {r4,lr}; popeq {r4,pc}; mov r4,r0; bl 0x08391d64;
+      mov r0,r4; pop {r4,lr}; b 0x0838af84. The next separately linked
+      function begins at 0x083906f4. SQLite 3.5.9's vdbeapi.c identifies this
+      composition as sqlite3_finalize: NULL returns SQLITE_OK (zero); otherwise
+      stmtLruRemove detaches the Vdbe from the statement-memory LRU, then
+      sqlite3VdbeFinalize halts/destroys it and supplies the result code. The
+      LRU helper's raw +0x150/+0x154 prev/next unlink verifies that identity.
+      Decoding every ARM B/BL-immediate word in osos.dec finds 10 direct
+      inbound BL sites: eight unconditional at 0x082ccf10, 0x082ccf30,
+      0x082ccf8c, 0x08381544, 0x0838f170, 0x0838f440, 0x083901d8, and
+      0x083904e0; two BLNE at 0x0838f648 and 0x08390558. The predicated sites
+      prove non-NULL before the call; the remaining eight depend on this
+      function's own guard. Neither callee is ported, so target builds retain
+      exact typed retail-address calls through volatile seams and host tests
+      install recorders to prove NULL suppression plus non-NULL
+      unlink-then-finalize ordering and status forwarding. No mutex operation
+      exists in the verified retail body and none is added. Host verification:
+      cargo test --target x86_64-unknown-linux-gnu (6435 passed).
