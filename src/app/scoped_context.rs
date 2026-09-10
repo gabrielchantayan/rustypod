@@ -11,6 +11,8 @@
 //! - [`scoped_context_copy_fields`] — `FUN_08270418` @ 0x08270418.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
+//! - [`scoped_context_is_valid`] — `FUN_082a3dcc` @ 0x082a3dcc, an
+//!   owner-and-registry consistency predicate.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
 //!   a validity-gated predicate over the token owner's flags word.
 //! - [`scoped_context_owner_byte_8f_bit_0`] — `FUN_082a4574` @ 0x082a4574,
@@ -181,9 +183,10 @@ pub static SCOPED_CONTEXT_VTABLE: ScopedContextVtable = ScopedContextVtable {
 pub struct ScopedContext {
     /// +0x00 — the class vtable (original literal 0x089a5b30).
     pub vtable: *const ScopedContextVtable,
-    /// +0x04 — cleared by every constructor. Only its low byte is read,
-    /// and only by `FUN_0826fd24`, which uses it to decide whether a
-    /// *source* token's owner may be adopted.
+    /// +0x04 — cleared by every constructor. Its low byte lets
+    /// `FUN_0826fd24` decide whether a *source* token's owner may be
+    /// adopted; the full word also forces
+    /// [`scoped_context_is_valid`] to accept the token when nonzero.
     pub owner_valid: u32,
     /// +0x08 — the object this token speaks for; NULL is the common case.
     pub owner: *mut u8,
@@ -346,6 +349,77 @@ pub unsafe extern "C" fn scoped_context_copy_fields(
     (*destination).service_context = (*source).service_context;
     (*destination).registry_token = (*source).registry_token;
     (*destination).mode = (*source).mode;
+}
+
+/// Firmware load address of the unported owner predicate
+/// `FUN_0806b410`, called directly by [`scoped_context_is_valid`].
+pub const SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS: usize = 0x0806_b410;
+
+/// Target default for [`SCOPED_CONTEXT_OWNER_VALIDITY`]: the stock owner
+/// predicate at [`SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS`].
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_scoped_context_owner_validity(owner: *mut u8) -> u32 {
+    let predicate: unsafe extern "C" fn(*mut u8) -> u32 =
+        core::mem::transmute(SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS);
+    predicate(owner)
+}
+
+/// Host default for [`SCOPED_CONTEXT_OWNER_VALIDITY`]: the owner predicate
+/// remains unported, so an unswapped call is a test-setup error.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_scoped_context_owner_validity(_owner: *mut u8) -> u32 {
+    panic!("scoped_context_is_valid requires owner predicate 0x0806b410")
+}
+
+/// Dispatch seam for `FUN_0806b410` @ 0x0806b410. Target builds invoke the
+/// stock predicate; host tests install a recording mock. The helper first
+/// rejects a NULL owner, then follows its first word and accepts only an
+/// object carrying the `tdat` tag, but remains a seam because it is not
+/// itself ported.
+#[cfg(target_os = "none")]
+pub static mut SCOPED_CONTEXT_OWNER_VALIDITY: unsafe extern "C" fn(*mut u8) -> u32 =
+    firmware_scoped_context_owner_validity;
+
+/// Host wired default (panics; see [`missing_scoped_context_owner_validity`]).
+#[cfg(not(target_os = "none"))]
+pub static mut SCOPED_CONTEXT_OWNER_VALIDITY: unsafe extern "C" fn(*mut u8) -> u32 =
+    missing_scoped_context_owner_validity;
+
+/// scoped_context_is_valid — original: `FUN_082a3dcc` @ 0x082a3dcc
+/// (72 bytes, exact: the next separately linked function starts at
+/// 0x082a3e14; **10 `bl` call sites, 0 predicated forms and 0 tail `b`
+/// sites**, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Calls the owner predicate, then when it accepts the owner, compares this
+/// token's cached registry word with the current registry +0x18 word reached
+/// through its service context +0xf60 slot. A match returns 1. Otherwise the
+/// token's nonzero `owner_valid` word returns 1; only a failed owner predicate
+/// or missing/mismatched registry together with a zero `owner_valid` returns
+/// 0. The owner predicate runs before the `owner_valid` fallback on every
+/// path, exactly as the ARM `bl` precedes all conditional loads.
+///
+/// Deliberate deviations: [`ScopedContext`] models pointer fields with
+/// `#[repr(C)]` Rust pointers, and the service/registry offsets are their
+/// word indices so they remain 4-byte-spaced on target and host-consistent.
+/// The unported owner predicate is a target ROM dispatch seam; host callers
+/// must install it before testing.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_is_valid(this: *const ScopedContext) -> u32 {
+    let owner_validity =
+        core::ptr::read_volatile(core::ptr::addr_of!(SCOPED_CONTEXT_OWNER_VALIDITY));
+    if owner_validity((*this).owner) != 0 {
+        let registry = ((*this).service_context as *const *mut u8)
+            .add(SERVICE_CONTEXT_REGISTRY_SLOT)
+            .read();
+        if !registry.is_null()
+            && (registry as *const *mut u8).add(REGISTRY_TOKEN_SLOT).read()
+                == (*this).registry_token
+        {
+            return 1;
+        }
+    }
+    ((*this).owner_valid != 0) as u32
 }
 
 /// Vtable-slot index of the token validity query (the original's
@@ -683,8 +757,8 @@ mod tests {
     use std::vec;
     use std::vec::Vec;
 
-    /// Serializes every test that swaps [`CAPTURE_CONTEXT_FIELDS`] or
-    /// installs a fixture root. The root lives in `app::context_scope`
+    /// Serializes every test that swaps one of this module's dispatch seams
+    /// or installs a fixture root. The root lives in `app::context_scope`
     /// and that module's tests write it too, so the lock is the crate-wide
     /// [`APP_ROOT_TEST_LOCK`] rather than a private one.
     use crate::testing::APP_ROOT_TEST_LOCK as SLOT_TEST_LOCK;
@@ -709,6 +783,40 @@ mod tests {
                 ptr::addr_of_mut!(CAPTURE_CONTEXT_FIELDS).write_volatile(capture_context_fields);
                 ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(ptr::null_mut());
                 CAPTURE_ROOT_READS = 0;
+            }
+        }
+    }
+
+    static mut OWNER_VALIDITY_CALLS: u32 = 0;
+    static mut OWNER_VALIDITY_OWNER: *mut u8 = ptr::null_mut();
+    static mut OWNER_VALIDITY_RESULT: u32 = 0;
+
+    unsafe extern "C" fn recording_owner_validity(owner: *mut u8) -> u32 {
+        OWNER_VALIDITY_CALLS += 1;
+        OWNER_VALIDITY_OWNER = owner;
+        OWNER_VALIDITY_RESULT
+    }
+
+    /// Restores the owner-predicate seam after a validity-predicate test.
+    struct OwnerValidityGuard {
+        original: unsafe extern "C" fn(*mut u8) -> u32,
+    }
+
+    impl OwnerValidityGuard {
+        unsafe fn install(result: u32) -> Self {
+            let original = ptr::addr_of!(SCOPED_CONTEXT_OWNER_VALIDITY).read_volatile();
+            OWNER_VALIDITY_CALLS = 0;
+            OWNER_VALIDITY_OWNER = ptr::null_mut();
+            OWNER_VALIDITY_RESULT = result;
+            ptr::addr_of_mut!(SCOPED_CONTEXT_OWNER_VALIDITY).write_volatile(recording_owner_validity);
+            Self { original }
+        }
+    }
+
+    impl Drop for OwnerValidityGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(SCOPED_CONTEXT_OWNER_VALIDITY).write_volatile(self.original);
             }
         }
     }
@@ -1238,6 +1346,104 @@ mod tests {
         assert_eq!(result, 1);
     }
 
+
+    fn context_validity_token(
+        owner_valid: u32,
+        owner: *mut u8,
+        service_context: *mut u8,
+        registry_token: *mut u8,
+    ) -> ScopedContext {
+        ScopedContext {
+            vtable: ptr::null(),
+            owner_valid,
+            owner,
+            service_context,
+            registry_token,
+            mode: 0,
+        }
+    }
+
+    #[test]
+    fn context_validity_runs_the_owner_predicate_before_a_zero_fallback() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _seam = unsafe { OwnerValidityGuard::install(0) };
+        let owner = 0x0102_0304usize as *mut u8;
+        // A non-NULL invalid address proves the failed helper prevents the
+        // service-context load, while owner_valid == 0 chooses the fallback.
+        let token = context_validity_token(0, owner, 1usize as *mut u8, ptr::null_mut());
+
+        assert_eq!(unsafe { scoped_context_is_valid(&token) }, 0);
+        unsafe {
+            assert_eq!(OWNER_VALIDITY_CALLS, 1);
+            assert_eq!(OWNER_VALIDITY_OWNER, owner);
+        }
+    }
+
+    #[test]
+    fn context_validity_nonzero_owner_valid_overrides_a_failed_owner_predicate() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _seam = unsafe { OwnerValidityGuard::install(0) };
+        let owner = 0x0506_0708usize as *mut u8;
+        let token = context_validity_token(0x8000_0000, owner, 1usize as *mut u8, ptr::null_mut());
+
+        assert_eq!(unsafe { scoped_context_is_valid(&token) }, 1);
+        unsafe {
+            assert_eq!(OWNER_VALIDITY_CALLS, 1);
+            assert_eq!(OWNER_VALIDITY_OWNER, owner);
+        }
+    }
+
+    #[test]
+    fn context_validity_accepts_matching_live_registry_token() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _seam = unsafe { OwnerValidityGuard::install(0xffff_ffff) };
+        let current = 0x1011_1213usize as *mut u8;
+        let mut registry = registry_with_token(current);
+        let mut service_context: Vec<*mut u8> =
+            vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
+        let token = context_validity_token(
+            0,
+            0x1415_1617usize as *mut u8,
+            service_context.as_mut_ptr() as *mut u8,
+            current,
+        );
+
+        assert_eq!(unsafe { scoped_context_is_valid(&token) }, 1);
+        unsafe {
+            assert_eq!(OWNER_VALIDITY_CALLS, 1);
+            assert_eq!(OWNER_VALIDITY_OWNER, token.owner);
+        }
+    }
+
+    #[test]
+    fn context_validity_rejects_missing_or_mismatched_registry_token() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _seam = unsafe { OwnerValidityGuard::install(1) };
+        let mut service_context: Vec<*mut u8> =
+            vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        let missing = context_validity_token(
+            0,
+            0x1819_1a1busize as *mut u8,
+            service_context.as_mut_ptr() as *mut u8,
+            0x1c1d_1e1fusize as *mut u8,
+        );
+        assert_eq!(unsafe { scoped_context_is_valid(&missing) }, 0);
+
+        let mut registry = registry_with_token(0x2021_2223usize as *mut u8);
+        service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
+        let mismatched = context_validity_token(
+            0,
+            0x2425_2627usize as *mut u8,
+            service_context.as_mut_ptr() as *mut u8,
+            0x2829_2a2busize as *mut u8,
+        );
+        assert_eq!(unsafe { scoped_context_is_valid(&mismatched) }, 0);
+        unsafe {
+            assert_eq!(OWNER_VALIDITY_CALLS, 2);
+            assert_eq!(OWNER_VALIDITY_OWNER, mismatched.owner);
+        }
+    }
     /// Token + owner fixture for the u64 getter: the owner buffer runs
     /// one word past the pair's high word so the reads cannot drift out
     /// of bounds. Self-referential like PredicateFixture: call
