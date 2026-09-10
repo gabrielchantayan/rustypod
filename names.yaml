@@ -52829,6 +52829,33 @@ functions:
       stores len, zeroes target data[0] iff len is zero and data is non-NULL,
       then copies marker (+0x0c). Deliberate deviations: none.
 
+  # --- tagged word buffer pool nesting pop ---
+  - address: 0x0803dd84
+    ghidra: FUN_0803dd84
+    name: tagged_word_buffer_pool_pop
+    size: 68
+    sig: "void tagged_word_buffer_pool_pop(TaggedWordBufferPool *pool)"
+    module: heap/tagged_word_buffer_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      iVar1/r0: nesting_depth
+      param_1_plus_0x0: slot_count
+      param_1_plus_0x288: nesting_depth
+      param_1_plus_0x28c: saved_slot_counts
+      FUN_0803dec8: tagged_word_buffer_pool_push
+    notes: >-
+      Raw ARM confirms the 68-byte extent 0x0803dd84..0x0803ddc8, followed
+      by separately linked three_buffer_owner_release at 0x0803ddc8.
+      Decoding every ARM B/BL immediate in osos.dec found 11 direct callers,
+      all unconditional BL. It returns immediately for NULL. Otherwise, when
+      nesting_depth is zero it calls the ported tagged_word_buffer_pool_push,
+      clears overflow_reported, decrements nesting_depth with u32 wraparound,
+      and restores saved_slot_counts[depth] only when that decremented depth is
+      signed less than 12. This preserves the ARM signed condition and its
+      unchecked raw pointer arithmetic for bit-31-set depths. Deliberate
+      deviations: none.
+
   # --- tagged word buffer pool nesting push ---
   - address: 0x0803dec8
     ghidra: FUN_0803dec8
@@ -52881,11 +52908,11 @@ functions:
       chosen index is below 32, it stores index + 1 back to slot_count and
       returns the embedded slot. On overflow it records
       diag_ring_record(3, 0x74, 0x6d, 0, 0) once, latches overflow_reported,
-      and returns NULL. The ported tagged_word_buffer_pool_push and the
-      unported 0x0803dd84 pop helper maintain nesting_depth and
-      saved_slot_counts on the same object; this port keeps the same
-      unchecked raw pointer arithmetic and a direct call to the already-ported
-      diagnostic logger.
+      and returns NULL. The ported tagged_word_buffer_pool_push and
+      tagged_word_buffer_pool_pop helpers maintain nesting_depth and
+      saved_slot_counts on the same object; this port keeps the same unchecked
+      raw pointer arithmetic and a direct call to the already-ported diagnostic
+      logger.
   # --- three-buffer owner destructor ---
   - address: 0x0803deec
     ghidra: FUN_0803deec
