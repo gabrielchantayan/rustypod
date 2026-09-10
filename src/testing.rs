@@ -352,6 +352,10 @@ pub mod hints {
     // 0xff00_0000: dedicated to ui/view_base's raw-u32 resource-provider
     // setter fixture; mappings never unmap, so no other user may share it.
     pub const VIEW_BASE_RESOURCE_PROVIDER: usize = 0xff00_0000;
+    // 0xac00_0000: dedicated to app/global_callback_unregister's raw-u32
+    // circular-list fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const GLOBAL_CALLBACK_UNREGISTER: usize = 0xac00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

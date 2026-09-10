@@ -60791,3 +60791,43 @@ functions:
       equivalent private backing storage. The Rust read is volatile to retain
       the table's runtime-mutability across calls. Host tests cover first,
       middle duplicate, final, absent, and full-width nonmatching keys.
+
+  # --- global callback unregistration ---
+  - address: 0x082928d8
+    ghidra: FUN_082928d8
+    name: global_callback_unregister
+    size: 172
+    sig: "void global_callback_unregister(u32 callback)"
+    module: app/global_callback_unregister
+    status: ported
+    renames:
+      param_1/r0: callback
+      DAT_08292984: callback_list_mutex
+      DAT_08292988: callback_dispatch_active
+      DAT_0829298c: callback_list
+      DAT_08292990: deferred_callback_removals
+      local_1c: cursor
+      local_14: end
+    notes: >-
+      Raw osos.dec establishes 172 bytes of code from 0x082928d8 through
+      pop {r4,r5,pc} at 0x08292880, followed by the four-word literal pool
+      at 0x08292884..0x08292990; the next independently linked function
+      starts at 0x08292994. It locks the C++ mutex at 0x08ad2c4c through the
+      already ported 0x082621a8 alias, then branches on byte 0x089cfd54.
+      A clear byte walks the circular std::list headed by the sentinel word
+      at 0x08ad2c68 + 0x10 and erases only the first node whose +0x08 callback
+      word equals r0; a set byte does not read that list and appends the raw
+      callback word, including zero, to the deferred-removal list at
+      0x08ad2c80. It always unlocks through the ported 0x082621ac alias and
+      ignores both mutex statuses. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly 10 direct inbound bl sites: six unconditional
+      (0x081426b8, 0x0816e49c, 0x081b8954, 0x081dae74, 0x081dbfd4,
+      0x08292734), two bleq (0x08198f04, 0x081b8d44), and two blne
+      (0x081a13d4, 0x081eaa7c). Thus the two caller-side predicates gate
+      invocation; this helper carries no NULL guard. List erase
+      0x083dd5f4 and append 0x083dd660 have no ported ledger entries, so
+      target builds retain direct fixed-address calls and host tests use a
+      recording seam. Tests cover first-match-only removal with duplicates,
+      absent callback preservation, zero callback deferral without touching
+      a poisoned main-list sentinel, and lock/unlock completion. match.py
+      structurally differs at the host-test seam indirection, as expected.
