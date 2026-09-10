@@ -48680,6 +48680,40 @@ functions:
       cg_emit_load_word_at_offset directly - the bodies are
       instruction-identical.
 
+  - address: 0x0823c0dc
+    ghidra: FUN_0823c0dc
+    name: cg_emit_negated_sum
+    size: 144
+    sig: "cg_virtual_reg_t *cg_emit_negated_sum(void *ctx, cg_block_t *block, cg_virtual_reg_t *lhs, cg_virtual_reg_t *rhs)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/r9: lhs
+      param_4/r3/r8: rhs
+      uVar1/r6: sum_reg
+      uVar2/r7: mask_reg
+      uVar3/r5/r0: result
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM confirms 36 instruction words from 0x0823c0dc through
+      0x0823c168: `push {r3-r9,lr}` to `pop {r3-r9,pc}`. The next
+      function begins at 0x0823c16c with its own push, so Ghidra's
+      144-byte extent is exact. Decoding every ARM B/BL word in osos.dec
+      finds 10 callers, all unconditional BL (zero predicated, zero tail
+      B): 0x0823e6d0, 0x0823e6e8, 0x0823e700, 0x0823e864, 0x0823e87c,
+      0x0823e894, 0x0823f4dc, 0x0823f4f4, 0x0823f50c and 0x0823f524.
+      Creates sum_reg and mask_reg through cg_virtual_reg_create, emits
+      LDI mask_reg,0xff, creates result, then emits ADD sum_reg,lhs,rhs
+      and opcode-15 RSB result,sum_reg,mask_reg before returning result.
+      The backend's opcode-15 path emits `rsb result,sum_reg,#0`, so it
+      ignores the binary record's source1 mask_reg even though this helper
+      deliberately creates and records it. ctx is dead: the first
+      non-prologue instruction overwrites r0 from block+4. No dispatch seam:
+      all three direct callees are already ported.
   - address: 0x0824035c
     ghidra: FUN_0824035c
     name: cg_emit_subtract

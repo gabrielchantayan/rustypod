@@ -11,7 +11,8 @@ use super::ir::{
     cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed, cg_create_inst_store,
     cg_virtual_reg_create, CgBlock, CgInst, CgProc, CgVirtualReg, CG_BLOCK_PROC,
     CG_INST_OPCODE_ADD, CG_INST_OPCODE_ASR, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW,
-    CG_INST_OPCODE_MUL, CG_INST_OPCODE_STW, CG_INST_OPCODE_SUB, CG_REG_TYPE_GENERAL,
+    CG_INST_OPCODE_MUL, CG_INST_OPCODE_RSB, CG_INST_OPCODE_STW, CG_INST_OPCODE_SUB,
+    CG_REG_TYPE_GENERAL,
 };
 
 /// The procedure owning `block` (`cg_block_t + 0x04`).
@@ -226,6 +227,46 @@ pub unsafe extern "C" fn cg_emit_subtract(
     dest
 }
 
+/// cg_emit_negated_sum — original: `FUN_0823c0dc` @ 0x0823c0dc
+/// (144 bytes: 36 instruction words, 0x0823c0dc-0x0823c168; raw bytes
+/// verified — the next function begins at 0x0823c16c with its own `push`).
+///
+/// 10 call sites, all unconditional `bl` (no predicated forms and no tail
+/// `b`), verified by decoding every ARM B/BL word in osos.dec:
+/// 0x0823e6d0, 0x0823e6e8, 0x0823e700, 0x0823e864, 0x0823e87c,
+/// 0x0823e894, 0x0823f4dc, 0x0823f4f4, 0x0823f50c and 0x0823f524.
+///
+/// Creates three general-purpose virtual registers, then appends
+/// `LDI mask_reg, 0xff`, `ADD sum_reg, lhs, rhs`, and
+/// `RSB result, sum_reg, mask_reg`, returning `result`. The opcode-15
+/// backend emits `rsb result, sum_reg, #0`, so its binary record's
+/// `mask_reg` source is intentionally ignored; the original nevertheless
+/// creates and records the 0xff source exactly as above.
+///
+/// # Deviations
+///
+/// The leading context argument is dead on arrival: the first non-prologue
+/// instruction reads `block->proc` into r5 before r0 is ever read. The port
+/// keeps the ABI parameter and intentionally never dereferences it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_negated_sum(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    lhs: *mut CgVirtualReg,
+    rhs: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let proc = block_proc(block);
+    let sum_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let mask_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, mask_reg, 0xff);
+
+    let result = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, sum_reg, lhs, rhs);
+    cg_create_inst_binary(block, CG_INST_OPCODE_RSB, result, sum_reg, mask_reg);
+    result
+}
+
 /// cg_emit_lerp_u8 — original: `FUN_08240738` @ 0x08240738
 /// (112 bytes: 28 instruction words, 0x08240738-0x082407a4; the next
 /// function starts at 0x082407a8 with its own `push`).
@@ -421,6 +462,48 @@ mod tests {
             );
         }
         assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 1);
+    }
+
+    #[test]
+    fn emits_negated_sum_with_dead_mask_source() {
+        const LHS: usize = 0x1234_0000;
+        const RHS: usize = 0x5678_0000;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let result = unsafe {
+            cg_emit_negated_sum(
+                usize::MAX as *mut u8,
+                block,
+                LHS as *mut CgVirtualReg,
+                RHS as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let [ldi, add, rsb] = emitted(&mut f);
+
+            assert_eq!(inst_kind(ldi), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(ldi), CG_INST_OPCODE_LDI as u8);
+            let mask_reg = field(ldi, CG_INST_LOAD_IMMED_DEST);
+            assert_eq!(field(ldi, CG_INST_LOAD_IMMED_VALUE), 0xff);
+            assert_eq!(field(mask_reg as *mut u8, CG_VREG_NO), 1);
+
+            assert_eq!(inst_kind(add), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(add), CG_INST_OPCODE_ADD as u8);
+            let sum_reg = field(add, CG_INST_BINARY_DEST);
+            assert_eq!(field(sum_reg as *mut u8, CG_VREG_NO), 0);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE0), LHS);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE1), RHS);
+
+            assert_eq!(inst_kind(rsb), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(rsb), CG_INST_OPCODE_RSB as u8);
+            assert_eq!(field(rsb, CG_INST_BINARY_DEST), result as usize);
+            assert_eq!(field(result as *mut u8, CG_VREG_NO), 2);
+            assert_eq!(field(rsb, CG_INST_BINARY_SOURCE0), sum_reg);
+            assert_eq!(field(rsb, CG_INST_BINARY_SOURCE1), mask_reg);
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 3);
     }
 
 

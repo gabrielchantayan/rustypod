@@ -569,6 +569,9 @@ pub const CG_INST_OPCODE_STW: u32 = 44;
 pub const CG_INST_OPCODE_ADD: u32 = 1;
 /// Integer-subtract opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_SUB: u32 = 13;
+/// Reverse-subtract opcode: `dest = 0 - source0`; the binary record's
+/// source1 field is ignored by the ARM backend for this opcode.
+pub const CG_INST_OPCODE_RSB: u32 = 15;
 /// Signed arithmetic-right-shift opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_ASR: u32 = 3;
 /// Integer-multiply opcode of the binary instruction kind.
