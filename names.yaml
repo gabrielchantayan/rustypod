@@ -51487,6 +51487,36 @@ functions:
       otherwise clears marker (+0x0c), resets length (+0x04), writes value
       through data (+0x00), and sets length to one iff value is nonzero.
 
+  - address: 0x0803e6e8
+    ghidra: FUN_0803e6e8
+    name: marked_word_buffer_assign
+    size: 212
+    sig: "MarkedWordBuffer *marked_word_buffer_assign(MarkedWordBuffer *target, const MarkedWordBuffer *source)"
+    module: heap/word_buffer
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1: source
+      piVar1/r0: reserved_target
+      puVar2/r0: target_words
+      puVar4/r1: source_words
+      iVar3/r2: remaining_blocks
+      uVar5/r2: trailing_words
+      FUN_082b8174: word_buffer_reserve
+    notes: >-
+      Raw extent is exactly 0x0803e6e8..0x0803e7bc (53 ARM instructions);
+      the separately linked parsing function at 0x0803e7bc follows
+      immediately. Decoding every ARM B/BL immediate in osos.dec found 12
+      direct callers: 10 unconditional BL plus BLNE at 0x08040330 and
+      0x08040a18. Both BLNE callers gate the call on NE; aside from the
+      pointer-equality fast path the body has no NULL guard. It returns target
+      unchanged for self-assignment; otherwise it reserves source len (+0x04)
+      through ported word_buffer_reserve when target capacity (+0x08) is too
+      small, returns NULL unchanged on reserve failure, forward-copies len
+      u32 data words in four-word blocks plus a tail, retains target capacity,
+      stores len, zeroes target data[0] iff len is zero and data is non-NULL,
+      then copies marker (+0x0c). Deliberate deviations: none.
+
   # --- tagged word buffer pool slot allocator ---
   - address: 0x0803de0c
     ghidra: FUN_0803de0c
