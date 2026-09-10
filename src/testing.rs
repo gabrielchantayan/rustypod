@@ -419,6 +419,11 @@ pub static STREAM_READ_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// module-private lock would race teardown across modules.
 pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes every host test that replaces `kernel::task::TASK_HOOKS`.
+/// The task module's own tests and callers that exercise a port through
+/// `current_task_ctx_block` both need to install a synthetic running node.
+pub static TASK_HOOKS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Serializes every host test that swaps
 /// `app::event_code_queue::EVENT_CODE_QUEUE_HOOKS`. The queue module's own
 /// tests and the `app::class_8c00` timer-rearm tests both install

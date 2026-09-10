@@ -109,6 +109,7 @@
 
 use crate::heap::veneers::malloc_wrapper;
 use crate::app::registry::demo_mode_instance;
+use crate::kernel::task::current_task_ctx_block;
 
 /// Runtime class id of the object built here. It is both the registry
 /// key space value and the `cast_to_class` answer at 0x08177e08.
@@ -693,6 +694,37 @@ pub unsafe extern "C" fn framework_base_construct(
     this
 }
 
+/// framework_base_construct_with_task_target — original: `FUN_0811113c` @
+/// 0x0811113c (56 bytes of code plus the literal-pool word at 0x08111174;
+/// **12 plain `bl` call sites and 0 predicated calls**, binary-scanned from
+/// `work/firmware/osos.dec`).
+///
+/// Constructs the framework linkage base in `storage`, but obtains its
+/// initial target from the current task context's +0x24 word. It directly
+/// calls the linkage parent constructor, plants the base vtable, then calls
+/// `framework_base_initialize(this, ctx->framework_base_initial_target,
+/// create_link, NULL)` and returns the parent's result. The current task
+/// context and its target field are deliberately not NULL-checked: the raw
+/// ARM loads `[r0, #0x24]` immediately after `current_task_ctx_block()`.
+///
+/// No deviations: the three direct calls remain direct ports; no dispatch
+/// seam is introduced.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_construct_with_task_target(
+    storage: *mut Class6800,
+    create_link: u32,
+) -> *mut Class6800 {
+    let this = framework_linkage_parent_construct(storage);
+    core::ptr::addr_of_mut!((*this).vtable)
+        .write_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
+    let task_context = current_task_ctx_block();
+    let initial_target =
+        core::ptr::read_volatile(core::ptr::addr_of!((*task_context).framework_base_initial_target));
+    framework_base_initialize(this, initial_target, create_link, core::ptr::null_mut());
+    this
+}
+
 /// class_6800_new — original: `FUN_08177e84` @ 0x08177e84
 /// (72 bytes of code + the 4-byte vtable literal @ 0x08177ecc;
 /// **128 `bl` call sites**, binary-scanned).
@@ -736,7 +768,8 @@ mod tests {
         FrameworkObject, FrameworkObjectVtable, Registry, RegistryEntry, RegistryVtable,
         CLASS_ID_DEMO_MODE, CLASS_REGISTRY,
     };
-    use crate::testing::CLASS_REGISTRY_TEST_LOCK as OPS_LOCK;
+    use crate::kernel::task::{NameNode, TaskCtx, TASK_HOOKS};
+    use crate::testing::{CLASS_REGISTRY_TEST_LOCK as OPS_LOCK, TASK_HOOKS_TEST_LOCK};
     use core::ptr;
     use std::sync::MutexGuard;
 
@@ -856,6 +889,8 @@ mod tests {
     static mut APPLY_ARGS: [(*mut Class6800, *mut u8); 2] =
         [(ptr::null_mut(), ptr::null_mut()); 2];
     static mut APPLY_COUNT: usize = 0;
+    static mut RUNNING_TASK_NODE: *mut NameNode = ptr::null_mut();
+    static mut RUNNING_TASK_NODE_CALLS: usize = 0;
 
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
@@ -880,6 +915,11 @@ mod tests {
         PARENT_CALLS += 1;
         PARENT_STORAGE = storage;
         if PARENT_RESULT.is_null() { storage } else { PARENT_RESULT }
+    }
+
+    unsafe extern "C" fn record_running_task_node() -> *mut NameNode {
+        RUNNING_TASK_NODE_CALLS += 1;
+        RUNNING_TASK_NODE
     }
 
     unsafe extern "C" fn record_alloc(
@@ -1043,6 +1083,12 @@ mod tests {
         CLASS_REGISTRY.vtable = ptr::null();
     }
 
+    unsafe fn restore_task_hooks(saved_hooks: crate::kernel::task::TaskHooks) {
+        ptr::addr_of_mut!(TASK_HOOKS).write_volatile(saved_hooks);
+        RUNNING_TASK_NODE = ptr::null_mut();
+        RUNNING_TASK_NODE_CALLS = 0;
+    }
+
     fn poisoned() -> Class6800 {
         Class6800 {
             vtable: 0xa5a5_a5a5usize as *const Class6800Vtable,
@@ -1125,6 +1171,43 @@ mod tests {
             restore();
             drop(guard);
         }
+    }
+
+    #[test]
+    fn task_target_constructor_forwards_context_target_through_base_initialization() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(object);
+        let target = 0x2468usize as *mut u8;
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            let guard = install_mocks();
+            task_context.framework_base_initial_target = target;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            let result = framework_base_construct_with_task_target(storage, 1);
+
+            assert_eq!(result, storage, "the direct parent result is returned");
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "context is fetched once");
+            assert_eq!(PARENT_CALLS, 0, "the direct parent call bypasses the seam");
+            assert_eq!(object.vtable, ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
+            assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
+            assert_eq!(SET_TARGET_ARGS[0], (storage, target));
+            assert_eq!(object.link_owner, ptr::addr_of_mut!(ACTIVE_OWNER));
+
+            restore_task_hooks(saved_hooks);
+            restore();
+            drop(guard);
+        }
+        drop(task_hooks_guard);
     }
 
     #[test]
