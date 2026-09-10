@@ -15,6 +15,7 @@ pub mod clock_pair;
 pub mod crc32;
 pub mod crts_object;
 pub mod crts_tag;
+pub mod cstr_dotted_prefix_compare;
 pub mod cursor;
 pub mod encoded_word_block;
 pub mod encoded_word_block_shift;

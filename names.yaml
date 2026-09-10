@@ -59813,3 +59813,34 @@ functions:
       access rather than inventing an object identity. Host tests use a
       dedicated below-4-GiB fixture and prove both the +0x0c word selection
       and following a changed owner pointer.
+
+  # --- C string dotted-prefix comparison ---
+  - address: 0x082dacdc
+    ghidra: FUN_082dacdc
+    name: cstr_dotted_prefix_compare
+    size: 72
+    sig: "i32 cstr_dotted_prefix_compare(const char *candidate, const char *prefix)"
+    module: util/cstr_dotted_prefix_compare
+    status: ported
+    renames:
+      param_1/r0/r4: candidate
+      param_2/r1/r5: prefix
+      iVar1/r0/r6: prefix_len
+      uVar2/r0: comparison_result
+      FUN_08392478: strlen
+      FUN_0803105c: strncmp
+    notes: >-
+      Raw ARM extent is exactly 72 bytes, 0x082dacdc..0x082dad24: the next
+      separately linked function starts with `push {r4,r5,lr}` at 0x082dad24.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly 10
+      direct inbound calls, all unconditional plain BL at 0x0808a904,
+      0x0808a984, 0x0808cc20, 0x080934bc, 0x080934f0, 0x08396b8c,
+      0x08396ba4, 0x08396bbc, 0x08396c24, and 0x08396c64; there are no
+      predicated forms. It measures prefix through the unguarded strlen,
+      bounded-compares candidate against it, forwards a nonzero strncmp
+      difference, and otherwise accepts only NUL or '.' immediately after
+      the prefix. Neither input has a NULL guard. Rust uses volatile
+      function-pointer loads solely to retain the two original call
+      boundaries against LLVM inlining; host tests cover complete and dotted
+      matches, continuation rejection, comparison-result forwarding, an
+      empty prefix, and a prefix with trailing bytes after its NUL.
