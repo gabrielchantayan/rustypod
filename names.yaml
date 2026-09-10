@@ -60614,3 +60614,26 @@ functions:
       selector forwarding, no selector normalization, and that end is neither
       consulted nor written. match.py structural review is expected to differ:
       Rust loads the seam through a static rather than issuing the retail bl.
+
+  - address: 0x0829b490
+    ghidra: FUN_0829b490
+    name: object_word_payload_resolve
+    size: 48
+    sig: "u32 *object_word_payload_resolve(u32 *destination, u32 *object)"
+    module: util/object_word_payload_resolve
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: object
+      local_20: words
+    notes: >-
+      Raw osos.dec extent is 48 bytes: 12 ARM words from 0x0829b490 through
+      the pop {...,pc} at 0x0829b4c0; the next separately linked function
+      begins at 0x0829b4c4. Decoding every ARM B/BL word finds exactly 10
+      direct inbound call sites, all unconditional bl (zero predicated forms
+      and zero direct tail branches). It copies the four-word payload at
+      object + 0x1c to a stack record, calls the unported object payload
+      processor at 0x0829b804, then copies that record to destination and
+      returns destination by restoring r0 from its saved register set.
+      The 0x0829b804 call remains an explicit target-only dispatch seam
+      because no names.yaml entry ports that callee; host tests model it.
