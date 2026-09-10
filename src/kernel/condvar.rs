@@ -525,11 +525,15 @@ pub unsafe extern "C" fn condvar_wait(condvar: *mut CondVar, timeout: u32) -> i3
 mod tests {
     extern crate std;
     use super::*;
-    use crate::kernel::csem::CSEM_ROM_WAKE;
     use crate::kernel::kobj::{KobjHooks, KOBJ_HOOKS};
     use crate::kernel::sync_sem::{RomKernel, ROM_KERNEL};
+    use crate::runtime::message_dispatch_veneer::tests::DISPATCH_OPS_LOCK;
+    use crate::runtime::message_dispatch_veneer::{
+        MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
+    };
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::boxed::Box;
+    use parking_lot::MutexGuard as ParkingMutexGuard;
     use std::format;
     use std::string::String;
     use std::sync::{Mutex, MutexGuard};
@@ -650,7 +654,8 @@ mod tests {
     struct DirectKernelGuard {
         kobj: KobjHooks,
         sem: RomKernel,
-        csem_wake: unsafe extern "C" fn(u32),
+        dispatch: MessageDispatchVeneerOps,
+        _dispatch_lock: ParkingMutexGuard<'static, ()>,
     }
 
     impl Drop for DirectKernelGuard {
@@ -658,7 +663,10 @@ mod tests {
             unsafe {
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(KOBJ_HOOKS), self.kobj);
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(ROM_KERNEL), self.sem);
-                core::ptr::write_volatile(core::ptr::addr_of_mut!(CSEM_ROM_WAKE), self.csem_wake);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(MESSAGE_DISPATCH_VENEER_OPS),
+                    self.dispatch,
+                );
             }
         }
     }
@@ -734,7 +742,9 @@ mod tests {
 
     unsafe extern "C" fn direct_sem_free(_ptr: *mut u32) {}
 
-    unsafe extern "C" fn direct_csem_wake(id: u32) {
+    unsafe extern "C" fn direct_gateway_wake(request: *mut u32) {
+        assert_eq!(request.read(), 1, "condvar wake posts selector 1");
+        let id = request.add(2).read();
         let condvar = state().as_ref().unwrap().wait_condvar;
         let node = if condvar.is_null() {
             null_mut()
@@ -748,10 +758,12 @@ mod tests {
     }
 
     unsafe fn install_direct_kernel_mocks() -> DirectKernelGuard {
+        let dispatch_lock = DISPATCH_OPS_LOCK.lock();
         let guard = DirectKernelGuard {
             kobj: core::ptr::read_volatile(core::ptr::addr_of!(KOBJ_HOOKS)),
             sem: core::ptr::read_volatile(core::ptr::addr_of!(ROM_KERNEL)),
-            csem_wake: core::ptr::read_volatile(core::ptr::addr_of!(CSEM_ROM_WAKE)),
+            dispatch: core::ptr::read_volatile(core::ptr::addr_of!(MESSAGE_DISPATCH_VENEER_OPS)),
+            _dispatch_lock: dispatch_lock,
         };
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(KOBJ_HOOKS),
@@ -778,7 +790,12 @@ mod tests {
                 heap_free: direct_sem_free,
             },
         );
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(CSEM_ROM_WAKE), direct_csem_wake);
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(MESSAGE_DISPATCH_VENEER_OPS),
+            MessageDispatchVeneerOps {
+                dispatch: direct_gateway_wake,
+            },
+        );
         guard
     }
 

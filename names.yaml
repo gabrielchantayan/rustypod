@@ -5984,6 +5984,38 @@ functions:
       the hook slot, not the 8-byte ldr pc veneer - same family pattern as
       the other 31 wrappers.
 
+  - address: 0x08037ea8
+    ghidra: thunk_EXT_FUN_22004368
+    name: gateway_wake_object
+    size: 8
+    sig: "u32 gateway_wake_object(u32 object)"
+    module: kernel/gateway_wake
+    status: ported
+    renames:
+      thunk_EXT_FUN_22004368: gateway_wake_object
+      DAT_08037eac: gateway_wake_rom_entry
+      FUN_08003660: message_dispatch_veneer
+    notes: >-
+      Raw words prove the full veneer is e51ff004 (ldr pc,[pc,#-4]) at
+      0x08037ea8 plus target literal 0x22004368 at 0x08037eac; Ghidra's
+      4-byte extent drops the literal, and the sibling veneer begins at
+      0x08037eb0. The relocator at 0x080046e0 mirrors this target to
+      0x08004368, whose 52-byte body builds {1, 0, object, 0, _}, calls
+      the 0x08003660 message-dispatch veneer, and returns the dispatcher
+      status word. Every ARM B/BL word in osos.dec was decoded: 11 bl
+      callers, 10 unconditional (0x0806a59c, 0x0806b9e8, 0x080860f8,
+      0x080c9b98, 0x080cb730, 0x080e4404, 0x08368324, 0x0839346c,
+      0x083939a0, 0x083939c0) and one blne at 0x081a595c. That caller
+      gates the call with tst r5,#4 and supplies object 18; the stub has
+      no guard. Two tails also reach it: bmi at 0x0805699c and the bare
+      csem_wake alias at 0x080569a4. The only data word equal to
+      0x22004368 is this veneer literal, so it is not virtual. "Wake" is
+      call-site evidence from the csem paths; selector 1's RTXC service
+      identity remains unproven. The port uses the existing installable
+      message_dispatch_veneer seam instead of branching into IRAM; tests
+      cover record construction, status propagation, unguarded u32 ids,
+      and the thunk-table target.
+
   - address: 0x080041cc
     ghidra: null
     name: gateway_signal_object
@@ -7779,8 +7811,9 @@ functions:
       csem_signal's mrs/msr critical section and its conditional wake
       into the wrapper instead of tail-branching, so the port is the
       same deref followed by the callee's body verbatim (decrement,
-      cmn #1 / popgt early return, ROM wake through CSEM_ROM_WAKE) —
-      the documented ROM-thunk dispatch deviation, same structure.
+      cmn #1 / popgt early return, selector-1 gateway wake through
+      gateway_wake_object) — the documented dispatcher-seam deviation,
+      same structure.
 
   - address: 0x08056788
     ghidra: FUN_08056788
@@ -8499,7 +8532,8 @@ functions:
       (word ebfffe74 @ 0x0805698c = bl 0x08056364; an earlier note here
       claimed atomic_add — wrong). If old-1 < 0 (a sleeper may be
       parked) tail-branches thunk 0x08037ea8 -> ROM 0x22004368 with
-      csem[1] (wake; CSEM_ROM_WAKE slot in the port). Both halves
+      csem[1] (wake via gateway_wake_object's selector-1 record). Both
+      halves
       decrementing still works as a wait/notify event - positive counts
       are a ROM-skipping fast path, and once drifted negative every
       wait parks and every signal wakes (ROM keeps the signaled state).
@@ -8534,8 +8568,9 @@ functions:
       with the waiter id. CORRECTION to the earlier scouting note:
       the wake target is kobj's waiter-signal entry (ported as
       kobj::waiter_wake @ 0x080567f8, alias of the same thunk), NOT
-      thunk 0x08037ea8 / ROM 0x22004368 (csem.rs's CSEM_ROM_WAKE),
-      and the condition is equality with -1, not a signed < 0.
+      thunk 0x08037ea8 / ROM 0x22004368 (now ported as
+      gateway_wake_object's selector-1 record), and the condition is
+      equality with -1, not a signed < 0.
       2 call sites: tail `b` @ 0x0808e2ac (deref wrapper
       FUN_0808e2a8, ported as kobj::mailbox_slot_post), bl @ 0x080b26b8. Twin 0x080567d0 (same shape,
       wakes via thunk 0x08037e80) ported as csem_post_deferred.

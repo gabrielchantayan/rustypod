@@ -179,7 +179,7 @@ mod tests {
     use crate::runtime::message_dispatch_veneer::{
         MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
     };
-    use std::sync::MutexGuard;
+    use parking_lot::MutexGuard;
     use std::vec::Vec;
 
     static mut OBSERVED: Vec<[u32; 3]> = Vec::new();
@@ -203,9 +203,7 @@ mod tests {
     }
 
     fn install(status: u32) -> Recorder {
-        let lock = DISPATCH_OPS_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = DISPATCH_OPS_LOCK.lock();
         let saved = unsafe { MESSAGE_DISPATCH_VENEER_OPS };
         unsafe {
             OBSERVED = Vec::new();

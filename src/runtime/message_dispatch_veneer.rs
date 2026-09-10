@@ -120,7 +120,7 @@ pub(crate) mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::{Mutex, MutexGuard};
 
     /// Serializes every test that swaps MESSAGE_DISPATCH_VENEER_OPS.
     /// `pub(crate)` so kernel/gateway_signal.rs — whose original calls
@@ -150,7 +150,7 @@ pub(crate) mod tests {
     }
 
     fn install_recorder() -> TestOps {
-        let lock = DISPATCH_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let lock = DISPATCH_OPS_LOCK.lock();
         let saved = unsafe { MESSAGE_DISPATCH_VENEER_OPS };
         unsafe {
             CALL_COUNT = 0;
