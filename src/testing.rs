@@ -342,6 +342,10 @@ pub mod hints {
     // 0xfc00_0000: dedicated to util/object_masked_word_refresh's raw-u32
     // owner fixture; mappings never unmap, so no other user may share it.
     pub const OBJECT_MASKED_WORD_REFRESH: usize = 0xfc00_0000;
+    // 0xfd00_0000: dedicated to app/opaque_keyed_collection_item_at's raw-u32
+    // vector-head and entry fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const OPAQUE_KEYED_COLLECTION_ITEM_AT: usize = 0xfd00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

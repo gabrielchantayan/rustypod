@@ -60441,3 +60441,37 @@ functions:
       29 despite 64-bit host pointers. Host tests prove NULL suppression,
       raw source/mask forwarding, result replacement, NULL source forwarding,
       and a zero helper result.
+
+  # --- opaque keyed collection indexed accessor ---
+  - address: 0x0829e2f8
+    ghidra: FUN_0829e2f8
+    name: opaque_keyed_collection_item_at
+    size: 24
+    sig: "u32 opaque_keyed_collection_item_at(const void *collection, u32 selector, u32 index)"
+    module: app/opaque_keyed_collection_item_at
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: selector
+      param_3/r2/r4: index
+      FUN_0829e310: opaque_keyed_collection_vector_select
+      "vector+0x00": begin
+      "begin+index*4": entry
+    notes: >-
+      Raw osos.dec confirms the 24-byte extent: push {r4,lr}; mov r4,r2; bl
+      0x0829e310; ldr r0,[r0]; ldr r0,[r0,r4,lsl #2]; pop {r4,pc}, from
+      0x0829e2f8 through 0x0829e30c. The next separately entered function
+      begins at 0x0829e310; no literal-pool word belongs to this body.
+      Decoding every ARM B/BL immediate in osos.dec found exactly 10 direct,
+      unconditional plain bl callers — 0x0817eaf8, 0x0817ec2c, 0x0817fb68,
+      0x0817fe48, 0x0817fec0, 0x0817ff48, 0x0817ffec, 0x08180070,
+      0x08182280, and 0x08183650 — with no predicated calls. The wrapper
+      passes collection and selector unchanged to unported FUN_0829e310,
+      then reads the returned vector head's begin word and the unchecked
+      indexed entry. No concrete collection or selector identity is claimed.
+      Deliberate deviation: the unported selector is a target retail-address
+      call behind a recording host seam, not a new stub; names.yaml had no
+      existing port for 0x0829e310. Host tests prove index scaling, raw
+      selector forwarding, no selector normalization, and that end is neither
+      consulted nor written. match.py structural review is expected to differ:
+      Rust loads the seam through a static rather than issuing the retail bl.
