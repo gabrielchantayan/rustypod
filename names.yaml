@@ -10900,6 +10900,38 @@ functions:
       default hands out a zeroed block with no vtable, so branching
       stock code at 0x0817ee04 would break it.
 
+  - address: 0x0817ee34
+    ghidra: FUN_0817ee34
+    name: primary_or_demo_mode_keyed_object
+    size: 92
+    sig: "void *primary_or_demo_mode_keyed_object(FallbackKeyedObjectContext *context, u32 key, u8 *used_demo_mode)"
+    module: app/fallback_keyed_object
+    status: ported
+    vars:
+      param_1: context
+      param_2: key
+      param_3: used_demo_mode
+      iVar1: primary_or_fallback
+      piVar2: demo_mode
+      uVar3: fallback_candidate
+    notes: >-
+      True extent is 0x0817ee34..0x0817ee90: raw ARM starts with
+      `push {r4,r5,r6,lr}`, ends in `pop {r4,r5,r6,pc}`, and the next
+      separately entered function begins at 0x0817ee90. 11 direct BL
+      call sites, all unconditional (0x0817eb0c, 0x0817ec40, 0x08181170,
+      0x08181afc, 0x08182294, 0x081823c0, 0x08183664, 0x08183c7c,
+      0x08183f44, 0x08184334, 0x08184670); no predicated or tail-B
+      references. Clears a non-NULL output flag, returns the non-NULL
+      result from the +0x38 primary resolver (FUN_081b9a68), otherwise
+      calls the ported TCDemoMode accessor (0x081883fc), dispatches its
+      +0xec slot with key, casts the candidate through ported
+      object_cast_to_class (0x08275b9c) for class 0x3b80, and marks the
+      flag only after a successful fallback cast. Target calls the
+      unported primary resolver at its verified address; host tests use
+      a volatile seam. No NULL guards were added for framework inputs or
+      vtables. Ghidra incorrectly declared this pointer-returning body
+      void.
+
   - address: 0x08173848
     ghidra: FUN_08173848
     name: app_screen_get

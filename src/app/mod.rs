@@ -29,6 +29,7 @@ pub mod controller_history_select;
 pub mod context_scope;
 pub mod context_scope_selector;
 pub mod demo_mode_datetime;
+pub mod fallback_keyed_object;
 pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod element_registry;
