@@ -162,6 +162,143 @@ const _: [u8; 0x90] = [0; core::mem::offset_of!(ViewBase, word_90)];
 const _: [u8; 0x94] = [0; core::mem::offset_of!(ViewBase, byte_94)];
 const _: [u8; 0x98] = [0; core::mem::offset_of!(ViewBase, word_98)];
 const _: [u8; 0xa0] = [0; core::mem::offset_of!(ViewBase, byte_a0)];
+
+/// Calls that bind or unbind a view from its resource provider.
+///
+/// These are the two fixed retailOS targets reached by
+/// [`view_base_set_resource_provider`]. They are not independently ported.
+#[derive(Clone, Copy)]
+pub struct ViewBaseResourceOps {
+    /// `FUN_08124af4(provider, view)`.
+    pub attach_view: unsafe extern "C" fn(*mut ResourceProvider, *mut ViewBase),
+    /// `FUN_08124dbc(provider, view, 0)`.
+    pub detach_view: unsafe extern "C" fn(*mut ResourceProvider, *mut ViewBase, u32),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_attach_view(provider: *mut ResourceProvider, view: *mut ViewBase) {
+    let attach: unsafe extern "C" fn(*mut ResourceProvider, *mut ViewBase) =
+        unsafe { core::mem::transmute(0x0812_4af4usize) };
+    unsafe { attach(provider, view) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_detach_view(
+    provider: *mut ResourceProvider,
+    view: *mut ViewBase,
+    flags: u32,
+) {
+    let detach: unsafe extern "C" fn(*mut ResourceProvider, *mut ViewBase, u32) =
+        unsafe { core::mem::transmute(0x0812_4dbcusize) };
+    unsafe { detach(provider, view, flags) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_attach_view(_provider: *mut ResourceProvider, _view: *mut ViewBase) {
+    panic!("view_base_set_resource_provider requires FUN_08124af4")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_detach_view(
+    _provider: *mut ResourceProvider,
+    _view: *mut ViewBase,
+    _flags: u32,
+) {
+    panic!("view_base_set_resource_provider requires FUN_08124dbc")
+}
+
+/// Fixed retailOS calls used by [`view_base_set_resource_provider`].
+pub const DEFAULT_VIEW_BASE_RESOURCE_OPS: ViewBaseResourceOps = ViewBaseResourceOps {
+    #[cfg(target_os = "none")]
+    attach_view: firmware_attach_view,
+    #[cfg(not(target_os = "none"))]
+    attach_view: missing_attach_view,
+    #[cfg(target_os = "none")]
+    detach_view: firmware_detach_view,
+    #[cfg(not(target_os = "none"))]
+    detach_view: missing_detach_view,
+};
+
+/// The active binding operations. Host tests replace this with recorders.
+pub static mut VIEW_BASE_RESOURCE_OPS: ViewBaseResourceOps = DEFAULT_VIEW_BASE_RESOURCE_OPS;
+
+#[inline(always)]
+unsafe fn view_resource_provider(view: *mut ViewBase) -> *mut ResourceProvider {
+    core::ptr::addr_of!((*view).resources).read_volatile() as usize as *mut ResourceProvider
+}
+
+#[inline(always)]
+unsafe fn resource_provider_replacement_allowed(
+    provider: *mut ResourceProvider,
+    replacement: *mut ResourceProvider,
+) -> u32 {
+    let vtable = core::ptr::addr_of!((*provider).vtable).read_volatile();
+    let allowed = core::ptr::addr_of!((*vtable).replacement_allowed).read_volatile();
+    allowed(provider, replacement)
+}
+
+/// view_base_set_resource_provider — original: `FUN_0826ef88` @
+/// **0x0826ef88** (100 bytes, `0x0826ef88..0x0826efec`; the separately
+/// linked `FUN_0826efec` starts at the next word).
+///
+/// If an old provider exists, calls its vtable slot `+0x60` with the
+/// replacement. A non-zero response detaches the currently installed
+/// provider through `FUN_08124dbc(provider, view, 0)` and stores the
+/// replacement. A zero response leaves the field unchanged. In both cases
+/// (and when there was no old provider), it attaches the requested provider
+/// through `FUN_08124af4(provider, view)`, then invalidates the complete view
+/// bounds through [`crate::ui::invalidate::ui_element_invalidate`], returning
+/// that function's restored view pointer.
+///
+/// Decoding every ARM B/BL word in `osos.dec` verifies **10 direct call
+/// sites: all 10 are unconditional `bl`; there are no predicated `bl` forms,
+/// no direct tail `b` references, and no image-word references. The absent
+/// predicate agrees with the unguarded `view + 0x38` and provider-vtable
+/// accesses in this body.
+///
+/// Deliberate deviations: the two unported fixed helper entries remain behind
+/// [`VIEW_BASE_RESOURCE_OPS`] (firmware addresses on target, recorders on
+/// host). The dynamic `+0x60` slot is dispatched from the shared
+/// [`ResourceProvider`](crate::app::resource_chain::ResourceProvider) vtable
+/// model on both targets; no second host-only virtual seam is added. The raw
+/// epilogue tail-branches directly to the region form at `0x0826ec14`; this
+/// port calls its already-ported whole-bounds wrapper instead, preserving the
+/// same rectangle and returned view.
+///
+/// # Safety
+///
+/// `view` must be writable and its non-NULL provider words must reference
+/// valid provider objects with a valid `+0x60` vtable slot.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_base_set_resource_provider(
+    view: *mut ViewBase,
+    replacement: *mut ResourceProvider,
+) -> *mut ViewBase {
+    let current = unsafe { view_resource_provider(view) };
+    if current.is_null() {
+        unsafe {
+            core::ptr::addr_of_mut!((*view).resources)
+                .write_volatile(replacement as usize as u32);
+        }
+    } else if unsafe { resource_provider_replacement_allowed(current, replacement) } != 0 {
+        let installed = unsafe { view_resource_provider(view) };
+        if !installed.is_null() {
+            let detach = unsafe {
+                core::ptr::addr_of!(VIEW_BASE_RESOURCE_OPS.detach_view).read_volatile()
+            };
+            unsafe { detach(installed, view, 0) };
+        }
+        unsafe {
+            core::ptr::addr_of_mut!((*view).resources)
+                .write_volatile(replacement as usize as u32);
+        }
+    }
+
+    let attach = unsafe { core::ptr::addr_of!(VIEW_BASE_RESOURCE_OPS.attach_view).read_volatile() };
+    unsafe { attach(replacement, view) };
+    unsafe { crate::ui::invalidate::ui_element_invalidate(view.cast()) }.cast()
+}
 /// The decoded portion of a view's runtime vtable used by
 /// [`view_base_set_word_44`].
 ///
@@ -386,6 +523,7 @@ pub unsafe extern "C" fn view_base_construct(
         core::ptr::addr_of!(VIEW_BASE_OPS.construct_linkage_base).read_volatile();
     let initialize = core::ptr::addr_of!(VIEW_BASE_OPS.initialize).read_volatile();
 
+
     construct_linkage_base(view, parent, (*spec).flags & 1);
     core::ptr::addr_of_mut!((*view).resources).write_volatile(resources as usize as u32);
     core::ptr::addr_of_mut!((*view).vtable).write_volatile(VIEW_BASE_VTABLE_ADDRESS);
@@ -420,6 +558,7 @@ pub unsafe extern "C" fn view_base_construct(
 mod tests {
     extern crate std;
     use super::*;
+    use crate::app::resource_chain::ResourceProviderVTable;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
     use parking_lot::{Mutex, MutexGuard};
@@ -818,6 +957,178 @@ mod tests {
                 0xa5a5_a5a5,
                 "the setter touches only +0x44"
             );
+        }
+    }
+    struct ResourceOpsRestore {
+        previous: ViewBaseResourceOps,
+    }
+
+    impl Drop for ResourceOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(VIEW_BASE_RESOURCE_OPS).write_volatile(self.previous);
+            }
+        }
+    }
+
+    static mut RESOURCE_ALLOW_RESULT: u32 = 0;
+    static mut RESOURCE_ALLOW_ARGS: (*mut ResourceProvider, *mut ResourceProvider) =
+        (ptr::null_mut(), ptr::null_mut());
+    static mut RESOURCE_ATTACH_ARGS: (*mut ResourceProvider, *mut ViewBase) =
+        (ptr::null_mut(), ptr::null_mut());
+    static mut RESOURCE_DETACH_ARGS: (*mut ResourceProvider, *mut ViewBase, u32) =
+        (ptr::null_mut(), ptr::null_mut(), u32::MAX);
+    static mut RESOURCE_CALLS: Vec<&'static str> = Vec::new();
+
+    unsafe extern "C" fn resource_replacement_allowed(
+        provider: *mut ResourceProvider,
+        replacement: *mut ResourceProvider,
+    ) -> u32 {
+        unsafe {
+            *(&raw mut RESOURCE_ALLOW_ARGS) = (provider, replacement);
+            (*(&raw mut RESOURCE_CALLS)).push("allow");
+            ptr::read_volatile(ptr::addr_of!(RESOURCE_ALLOW_RESULT))
+        }
+    }
+
+    unsafe extern "C" fn resource_read_unused(
+        _provider: *mut ResourceProvider,
+        _kind: crate::app::resource_chain::ResourceKind,
+        _id: u32,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn resource_find_unused(
+        _provider: *mut ResourceProvider,
+        _kind: crate::app::resource_chain::ResourceKind,
+        _id: u32,
+        _found: *mut *mut u8,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn resource_write_unused(
+        _provider: *mut ResourceProvider,
+        _kind: crate::app::resource_chain::ResourceKind,
+        _id: u32,
+        _value: u32,
+        _flags: u32,
+    ) -> u32 {
+        0
+    }
+
+    static RESOURCE_VTABLE: ResourceProviderVTable = ResourceProviderVTable {
+        slots_below: [None; 22],
+        read: resource_read_unused,
+        slot_5c: None,
+        replacement_allowed: resource_replacement_allowed,
+        find: resource_find_unused,
+        write: resource_write_unused,
+    };
+
+    unsafe extern "C" fn recording_attach(
+        provider: *mut ResourceProvider,
+        view: *mut ViewBase,
+    ) {
+        unsafe {
+            *(&raw mut RESOURCE_ATTACH_ARGS) = (provider, view);
+            (*(&raw mut RESOURCE_CALLS)).push("attach");
+        }
+    }
+
+    unsafe extern "C" fn recording_detach(
+        provider: *mut ResourceProvider,
+        view: *mut ViewBase,
+        flags: u32,
+    ) {
+        unsafe {
+            *(&raw mut RESOURCE_DETACH_ARGS) = (provider, view, flags);
+            (*(&raw mut RESOURCE_CALLS)).push("detach");
+        }
+    }
+
+    const RECORDING_RESOURCE_OPS: ViewBaseResourceOps = ViewBaseResourceOps {
+        attach_view: recording_attach,
+        detach_view: recording_detach,
+    };
+
+    #[test]
+    fn resource_provider_setter_preserves_the_retail_acceptance_paths() {
+        let _guard = TEST_LOCK.lock();
+        let Some(slab) = try_map_u32_slab(hints::VIEW_BASE_RESOURCE_PROVIDER, SLAB_LEN) else {
+            assert!(note_missing_u32_fixture("ui/view_base resource provider"));
+            return;
+        };
+
+        let previous = unsafe { ptr::addr_of!(VIEW_BASE_RESOURCE_OPS).read_volatile() };
+        let _restore = ResourceOpsRestore { previous };
+        unsafe {
+            ptr::addr_of_mut!(VIEW_BASE_RESOURCE_OPS).write_volatile(RECORDING_RESOURCE_OPS);
+        }
+
+        let view = slab.cast::<ViewBase>();
+        let old = unsafe { slab.add(0x200).cast::<ResourceProvider>() };
+        let replacement = unsafe { slab.add(0x280).cast::<ResourceProvider>() };
+
+        unsafe fn reset(
+            slab: *mut u8,
+            old: *mut ResourceProvider,
+            replacement: *mut ResourceProvider,
+        ) {
+            unsafe {
+                ptr::write_bytes(slab, 0, SLAB_LEN);
+                ptr::addr_of_mut!((*old).vtable).write(&RESOURCE_VTABLE);
+                ptr::addr_of_mut!((*replacement).vtable).write(&RESOURCE_VTABLE);
+                *(&raw mut RESOURCE_ALLOW_RESULT) = 0;
+                *(&raw mut RESOURCE_ALLOW_ARGS) = (ptr::null_mut(), ptr::null_mut());
+                *(&raw mut RESOURCE_ATTACH_ARGS) = (ptr::null_mut(), ptr::null_mut());
+                *(&raw mut RESOURCE_DETACH_ARGS) = (ptr::null_mut(), ptr::null_mut(), u32::MAX);
+                (*(&raw mut RESOURCE_CALLS)).clear();
+            }
+        }
+
+        unsafe {
+            // No installed provider: store first, attach once, and do not
+            // touch a virtual slot.
+            reset(slab, old, replacement);
+            assert_eq!(view_base_set_resource_provider(view, replacement), view);
+            assert_eq!(ptr::addr_of!((*view).resources).read_volatile(), replacement as usize as u32);
+            assert_eq!(*(&raw const RESOURCE_CALLS), ["attach"]);
+            assert_eq!(*(&raw const RESOURCE_ATTACH_ARGS), (replacement, view));
+
+            // A non-zero +0x60 response detaches the provider re-read from
+            // +0x38, then replaces it before attaching the requested one.
+            reset(slab, old, replacement);
+            ptr::addr_of_mut!((*view).resources).write_volatile(old as usize as u32);
+            *(&raw mut RESOURCE_ALLOW_RESULT) = 7;
+            assert_eq!(view_base_set_resource_provider(view, replacement), view);
+            assert_eq!(ptr::addr_of!((*view).resources).read_volatile(), replacement as usize as u32);
+            assert_eq!(*(&raw const RESOURCE_CALLS), ["allow", "detach", "attach"]);
+            assert_eq!(*(&raw const RESOURCE_ALLOW_ARGS), (old, replacement));
+            assert_eq!(*(&raw const RESOURCE_DETACH_ARGS), (old, view, 0));
+            assert_eq!(*(&raw const RESOURCE_ATTACH_ARGS), (replacement, view));
+
+            // A zero response deliberately does not replace or detach the
+            // current provider, but the raw epilogue still attaches the
+            // requested provider before invalidating the view.
+            reset(slab, old, replacement);
+            ptr::addr_of_mut!((*view).resources).write_volatile(old as usize as u32);
+            assert_eq!(view_base_set_resource_provider(view, replacement), view);
+            assert_eq!(ptr::addr_of!((*view).resources).read_volatile(), old as usize as u32);
+            assert_eq!(*(&raw const RESOURCE_CALLS), ["allow", "attach"]);
+            assert_eq!((*(&raw const RESOURCE_DETACH_ARGS)).0, ptr::null_mut());
+            assert_eq!(*(&raw const RESOURCE_ATTACH_ARGS), (replacement, view));
+
+            // Neither the entry store nor the attach call guards a NULL
+            // replacement; the recorder makes that ABI-visible path safe to
+            // exercise on the host.
+            reset(slab, old, replacement);
+            assert_eq!(view_base_set_resource_provider(view, ptr::null_mut()), view);
+            assert_eq!(ptr::addr_of!((*view).resources).read_volatile(), 0);
+            assert_eq!(*(&raw const RESOURCE_CALLS), ["attach"]);
+            assert_eq!((*(&raw const RESOURCE_ATTACH_ARGS)).0, ptr::null_mut());
+            assert_eq!((*(&raw const RESOURCE_ATTACH_ARGS)).1, view);
         }
     }
 }

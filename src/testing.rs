@@ -349,6 +349,9 @@ pub mod hints {
     // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
     // object/payload fixture; mappings never unmap, so no other user may share it.
     pub const TAGGED_PAYLOAD_SIGNED_FIELD_SUM: usize = 0xfe00_0000;
+    // 0xff00_0000: dedicated to ui/view_base's raw-u32 resource-provider
+    // setter fixture; mappings never unmap, so no other user may share it.
+    pub const VIEW_BASE_RESOURCE_PROVIDER: usize = 0xff00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
