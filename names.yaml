@@ -21509,6 +21509,34 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839eb8c
+    ghidra: FUN_0839eb8c
+    name: vtable_word_callback
+    size: 24
+    sig: "usize vtable_word_callback(void *receiver, u32 word, usize discarded_r2, usize forwarded_r3)"
+    module: cxx/vtable_word_callback
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: word
+      param_3/r2: discarded_r2
+      param_4/r3: forwarded_r3
+      uStack_8: spilled_word
+      piVar1: vtable
+      uVar2: callback
+    notes: >-
+      Raw osos.dec extent is exactly 24 bytes: six ARM instruction words from
+      0x0839eb8c through pop {r2,r3,r4,pc} at 0x0839eba0; the next separately
+      linked sibling starts at 0x0839eba4. It spills incoming r1, loads
+      receiver->vtable and slot +0x1c, then blx calls
+      callback(receiver, &spilled_word, callback, forwarded_r3). The virtual
+      method return remains in r0; mutation of the spilled word is discarded
+      by the pop. Decoding every immediate ARM B/BL word finds exactly 11
+      direct call sites: ten unconditional bl and one blcc at 0x08147fc8;
+      there are no tail b sites. The predicated caller gates this deliberately
+      NULL-unguarded wrapper. The Rust local models the ARM spill and a normal
+      return models the final virtual result propagation; both deviations are
+      ABI-observable equivalent.
   - address: 0x0839ebc4
     ghidra: FUN_0839ebc4
     name: refcounted_handle_construct
