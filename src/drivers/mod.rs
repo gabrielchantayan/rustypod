@@ -21,6 +21,7 @@ pub mod gpio_pin_write;
 pub mod gpioic;
 pub mod i2c;
 pub mod interrupts;
+pub mod lcd_write_register;
 pub mod piezo;
 pub mod pwrcon;
 pub mod pmu;
