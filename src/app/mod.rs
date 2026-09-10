@@ -130,6 +130,7 @@ pub mod timer_reset;
 pub mod timer_step_value;
 pub mod task_registry;
 pub mod template_binding;
+pub mod tree_flag_propagation;
 pub mod tracker_record;
 pub mod update_dispatch;
 pub mod trace_buffer;
