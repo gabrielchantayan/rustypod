@@ -34,6 +34,7 @@ pub mod plst_slot_item;
 pub mod plst_linked_item_count;
 pub mod plst_slot_position;
 pub mod tdat_class_check;
+pub mod tdat_message_dispatch;
 pub mod tdat_counter_addrefs;
 pub mod tdat_flag_20_bit_2;
 pub mod navigation_mode;
