@@ -56848,3 +56848,41 @@ functions:
       unported helper bodies 0x080d7b60/0x080bb5f4 rather than adding seams;
       device loads/stores are volatile and host builds use atomic MMIO models.
       Reference C: decomp/c/007/080d4b14_FUN_080d4b14.c.
+
+  # --- Scoped path-component query wrapper ---
+  - address: 0x0809b678
+    ghidra: FUN_0809b678
+    name: path_component_query
+    size: 48
+    sig: "u32 path_component_query(const u8 *path, u32 unused)"
+    module: app/path_component_query
+    status: ported
+    renames:
+      param_1/r0: path (NUL-terminated path C string)
+      param_2/r1/r4: unused (forwarded to 0x0809b6a8, then discarded)
+      r4: query status across path-object destruction
+      r2/r3 spill: StringObject stack storage
+    notes: >-
+      Raw osos.dec decoding confirms Ghidra's 48-byte extent: twelve
+      instructions occupy 0x0809b678..0x0809b6a4, and the separately linked
+      0x0809b6a8 helper begins immediately afterward. The wrapper constructs
+      the derived path object at its r2/r3 spill storage through ported
+      path_object_construct @ 0x08279284, calls the 0x0809b6a8 component
+      helper with the constructor return and arg2, preserves its status in r4,
+      then destroys the original stack storage through ported
+      string_object_destroy_veneer @ 0x082792fc. Full-image decoding of every
+      ARM B/BL immediate finds exactly 12 inbound direct calls, all
+      unconditional plain bl at 0x08047464, 0x080474a4, 0x08047588,
+      0x0809db88, 0x080b3d68, 0x080b5384, 0x080bd678, 0x0811c59c,
+      0x08195754, 0x081967ac, 0x081b0004, and 0x0826631c; there are zero
+      predicated bl and zero direct B tail calls. Every recovered caller passes
+      a path string and zero as arg2, and branches on the returned status.
+      Raw decoding of helper 0x0809b6a8 shows it overwrites saved r4 from r0
+      and never reads r1, so arg2 is dead in the complete retail composition.
+      Its 0x08149e38 callee's exact facade-slot identity is not established;
+      the port therefore names only the observed component-query role.
+      Deliberate deviation: that unresolved helper is a volatile dispatch
+      boundary, calling its fixed retailOS address on device and failing closed
+      to 0 on host. Host tests prove construction/query/destruction ordering,
+      argument forwarding for 0, 1, and 0x5a5af00d, derived/base vtable
+      transitions, and verbatim statuses 0, 13, and 53.
