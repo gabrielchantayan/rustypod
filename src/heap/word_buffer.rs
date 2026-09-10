@@ -114,6 +114,88 @@ pub unsafe extern "C" fn word_buffer_reserve(
     }
     buffer
 }
+/// marked_word_buffer_assign — original: `FUN_0803e6e8` @ 0x0803e6e8
+/// (212 bytes exactly, 0x0803e6e8..0x0803e7bc; 12 direct call sites:
+/// 10 unconditional `bl` and two `blne` at 0x08040330 and 0x08040a18).
+///
+/// Assigns the source's `len` target words and marker into `target`. It
+/// returns `target` unchanged on self-assignment; otherwise, it reserves
+/// source length through [`word_buffer_reserve`] when necessary, returning
+/// NULL without mutation if that reserve fails. It copies full four-word
+/// blocks then a one-to-three word tail, retains the target's capacity, stores
+/// source length, clears the first target word for an empty source, and stores
+/// the source marker. The two predicated calls are caller-side NE gates; this
+/// body has no NULL guard after its pointer-equality fast path.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `target` and `source` must point to aligned, valid `MarkedWordBuffer`
+/// headers. Their nonzero data words must be valid for `len` aligned u32
+/// accesses. Source and target data ranges must not overlap incompatibly with
+/// this forward copy.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn marked_word_buffer_assign(
+    target: *mut MarkedWordBuffer,
+    source: *const MarkedWordBuffer,
+) -> *mut MarkedWordBuffer {
+    if core::ptr::eq(target, source.cast_mut()) {
+        return target;
+    }
+
+    let requested_len = unsafe { core::ptr::addr_of!((*source).len).read_volatile() };
+    let target_capacity = unsafe { core::ptr::addr_of!((*target).capacity).read_volatile() };
+    if target_capacity < requested_len
+        && unsafe { word_buffer_reserve(target.cast::<WordBuffer>(), requested_len) }.is_null()
+    {
+        return core::ptr::null_mut();
+    }
+
+    let source_data = unsafe { core::ptr::addr_of!((*source).data).read_volatile() as usize as *const u32 };
+    let source_len = unsafe { core::ptr::addr_of!((*source).len).read_volatile() };
+    let target_data = unsafe { core::ptr::addr_of!((*target).data).read_volatile() as usize as *mut u32 };
+    let mut remaining_blocks = source_len >> 2;
+    let mut source_words = source_data;
+    let mut target_words = target_data;
+    while remaining_blocks != 0 {
+        unsafe {
+            target_words.write_volatile(source_words.read_volatile());
+            target_words.add(1).write_volatile(source_words.add(1).read_volatile());
+            target_words.add(2).write_volatile(source_words.add(2).read_volatile());
+            target_words.add(3).write_volatile(source_words.add(3).read_volatile());
+            source_words = source_words.add(4);
+            target_words = target_words.add(4);
+        }
+        remaining_blocks -= 1;
+    }
+
+    match source_len & 3 {
+        3 => unsafe {
+            target_words.add(2).write_volatile(source_words.add(2).read_volatile());
+            target_words.add(1).write_volatile(source_words.add(1).read_volatile());
+            target_words.write_volatile(source_words.read_volatile());
+        },
+        2 => unsafe {
+            target_words.add(1).write_volatile(source_words.add(1).read_volatile());
+            target_words.write_volatile(source_words.read_volatile());
+        },
+        1 => unsafe { target_words.write_volatile(source_words.read_volatile()) },
+        _ => {}
+    }
+
+    unsafe {
+        core::ptr::addr_of_mut!((*target).len).write_volatile(source_len);
+        if source_len == 0 && !target_data.is_null() {
+            target_data.write_volatile(0);
+        }
+        let source_marker = core::ptr::addr_of!((*source).marker).read_volatile();
+        core::ptr::addr_of_mut!((*target).marker).write_volatile(source_marker);
+    }
+    target
+}
+
 
 /// word_buffer_reset_optional_singleton — original: `FUN_0804082c` @
 /// 0x0804082c (88 bytes exactly; 18 unconditional `bl` plus one `blne`
@@ -255,6 +337,93 @@ mod tests {
         assert_eq!(buffer.data, replacement.as_mut_ptr() as usize as u32);
         assert_eq!((buffer.len, buffer.capacity), (2, 8));
         unsafe { restore(guard, old_grow, old_free) };
+    }
+
+    #[test]
+    fn assign_preserves_self_capacity_and_failed_growth_then_copies_after_growth() {
+        let (guard, old_grow, old_free) = install();
+        let Some(slab) = try_map_u32_slab(hints::MARKED_WORD_BUFFER_ASSIGN, 0x100) else {
+            unsafe { restore(guard, old_grow, old_free) };
+            assert!(note_missing_u32_fixture("heap::word_buffer::marked_word_buffer_assign"));
+            return;
+        };
+        let source_data = slab.cast::<u32>();
+        let destination_data = unsafe { source_data.add(16) };
+        let grown_data = unsafe { source_data.add(32) };
+
+        unsafe {
+            for (index, value) in [0x11, 0x22, 0x33, 0x44, 0x55].iter().enumerate() {
+                source_data.add(index).write(*value);
+            }
+            destination_data.write(0xaaaa_aaaa);
+            let mut source = MarkedWordBuffer {
+                data: source_data as usize as u32,
+                len: 5,
+                capacity: 9,
+                marker: 0x1234_5678,
+            };
+            let mut destination = MarkedWordBuffer {
+                data: destination_data as usize as u32,
+                len: 4,
+                capacity: 5,
+                marker: 0xfeed_face,
+            };
+
+            let destination_ptr = &mut destination as *mut MarkedWordBuffer;
+            let self_before = (destination.data, destination.len, destination.capacity, destination.marker);
+            assert_eq!(marked_word_buffer_assign(destination_ptr, destination_ptr), destination_ptr);
+            assert_eq!(
+                (destination.data, destination.len, destination.capacity, destination.marker),
+                self_before,
+            );
+
+            assert_eq!(marked_word_buffer_assign(destination_ptr, &source), destination_ptr);
+            assert_eq!(
+                [
+                    destination_data.read(),
+                    destination_data.add(1).read(),
+                    destination_data.add(2).read(),
+                    destination_data.add(3).read(),
+                    destination_data.add(4).read(),
+                ],
+                [0x11, 0x22, 0x33, 0x44, 0x55],
+            );
+            assert_eq!((destination.len, destination.capacity, destination.marker), (5, 5, 0x1234_5678));
+
+            source.len = 0;
+            source.marker = 0xcafe_babe;
+            destination_data.write(0xffff_ffff);
+            assert_eq!(marked_word_buffer_assign(destination_ptr, &source), destination_ptr);
+            assert_eq!(destination_data.read(), 0);
+            assert_eq!((destination.len, destination.capacity, destination.marker), (0, 5, 0xcafe_babe));
+
+            source.len = 5;
+            destination.capacity = 2;
+            let failed_before = (destination.data, destination.len, destination.capacity, destination.marker);
+            assert!(marked_word_buffer_assign(destination_ptr, &source).is_null());
+            assert_eq!(GROW_ARGS, (destination_ptr.cast::<WordBuffer>(), 5));
+            assert_eq!(
+                (destination.data, destination.len, destination.capacity, destination.marker),
+                failed_before,
+            );
+
+            GROW_RESULT = grown_data;
+            assert_eq!(marked_word_buffer_assign(destination_ptr, &source), destination_ptr);
+            assert_eq!(FREED, destination_data.cast::<u8>());
+            assert_eq!(destination.data, grown_data as usize as u32);
+            assert_eq!(
+                [
+                    grown_data.read(),
+                    grown_data.add(1).read(),
+                    grown_data.add(2).read(),
+                    grown_data.add(3).read(),
+                    grown_data.add(4).read(),
+                ],
+                [0x11, 0x22, 0x33, 0x44, 0x55],
+            );
+            assert_eq!((destination.len, destination.capacity, destination.marker), (5, 5, 0xcafe_babe));
+            restore(guard, old_grow, old_free);
+        }
     }
 
     #[test]
