@@ -39,14 +39,30 @@ pub const BIO_CB_RETURN: u32 = 0x80;
 /// The callback operation after a control method runs.
 pub const BIO_CB_CTRL_RETURN: u32 = BIO_CB_CTRL | BIO_CB_RETURN;
 
-/// The first two target words of an OpenSSL BIO. Both are four-byte target
-/// pointers even on hosts, so this representation must not use Rust pointers.
+/// The target's 32-bit `BIO` layout through `prev_bio`. Pointer members stay
+/// `u32` even on hosts so their offsets match the firmware structure.
 #[repr(C)]
 pub struct Bio {
     /// +0x00 — `BIO_METHOD *`.
     pub method: u32,
     /// +0x04 — `BIO_callback_fn *`.
     pub callback: u32,
+    /// +0x08 — callback argument.
+    pub _callback_arg: u32,
+    /// +0x0c..+0x10 — initialization and shutdown flags.
+    pub _init: u32,
+    pub _shutdown: u32,
+    /// +0x14 — `BIO` retry flags.
+    pub flags: u32,
+    /// +0x18 — retry reason propagated from the next BIO.
+    pub retry_reason: u32,
+    /// +0x1c..+0x20 — method-private fields.
+    pub _num: u32,
+    pub _ptr: u32,
+    /// +0x24 — `next_bio`.
+    pub next_bio: u32,
+    /// +0x28 — `prev_bio`.
+    pub _prev_bio: u32,
 }
 
 /// The portion of an OpenSSL BIO method used by [`bio_ctrl`].
