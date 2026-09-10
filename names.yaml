@@ -9837,6 +9837,45 @@ functions:
       the host model uses native pointers while exercising the same named
       fields. 20 bl call sites, binary-scanned.
 
+  - address: 0x082a539c
+    ghidra: FUN_082a539c
+    name: ft_platform_file_tell
+    size: 116
+    sig: "i32 ft_platform_file_tell(void *handle, u32 *position)"
+    module: ft/system
+    status: ported
+    vars: {param_1: handle, param_2: position, local_10: counted_lock, iVar1: query_result, uVar2: result}
+    renames:
+      param_1/r0/r4: handle
+      param_2/r1/r5: position
+      local_10: counted_lock
+      "handle+0x08": length_query_state
+      "handle+0x18": directory_entry_index
+      "handle+0x1c": open_status
+      "handle+0x34": cursor
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_0809449c: mutex_unlock_counted
+      FUN_082a548c: file_has_directory_entry
+    notes: >-
+      Platform C++ file cursor query. Raw ARM establishes the true 116-byte
+      instruction extent from 0x082a539c through 0x082a540c; the next
+      function starts at 0x082a5410. It receives only r0=handle and
+      r1=position despite Ghidra retaining two phantom parameters, builds a
+      counted-lock guard from *(handle+4)+0x44, and acquires it. A nonzero
+      state byte at +0x08 returns 2 after unlock. Otherwise, the
+      file_has_directory_entry predicate checks the signed +0x18 index for
+      -1: on -1, position is untouched and the +0x1c open-status word is
+      returned; every other index writes the +0x34 cursor to position before
+      unlock and return 0. Raw decoding of every ARM B/BL word in osos.dec
+      found 11 direct call sites, all unconditional bl: 0x0805a610,
+      0x080e53d4, 0x080e5414, 0x080e5480, 0x080e5504, 0x080e5574,
+      0x080e55d8, 0x080e5750, 0x080e579c, 0x080e58a4, and 0x081f51f4.
+      Target code has no deliberate deviations. The native-pointer host
+      model locks its named mutex field directly because the target guard's
+      fixed +0x44 arithmetic would address host padding; tests cover cursor
+      extremes, every non-sentinel index class, error output preservation,
+      and balanced counted-lock release.
+
   - address: 0x082a548c
     ghidra: FUN_082a548c
     name: file_has_directory_entry
