@@ -26044,7 +26044,7 @@ functions:
     ghidra: FUN_083697ac
     name: namespace_provider_each_then_destroy
     size: 68
-    sig: "u32 namespace_provider_each_then_destroy(usize *providers, NamespaceProviderTeardown teardown)"
+    sig: "void namespace_provider_each_then_destroy(usize *providers, NamespaceProviderTeardown teardown)"
     module: cxx/object_flags
     status: ported
     vars: {param_1: providers, param_2: teardown}
@@ -26059,32 +26059,58 @@ functions:
       function is the ported namespace_provider_push veneer @
       0x083697f0. Ghidra's C is wrong in its usual ways: it inlines the
       tail callee's body (the traced_free descriptor dance belongs to
-      FUN_08369618) and invents param_3/param_4. Algorithm: NULL
-      providers returns 0 (r0 was 0 at the popeq). Otherwise `for
-      (index = 0; count >s index; index++) { entry = table[index]; if
-      (entry != 0) teardown(entry); }` - the count at +0x00 AND the
-      table pointer at +0x04 are reloaded on EVERY iteration (volatile
-      in the port) and the gate is the signed `bgt`, so a teardown that
-      mutates the object genuinely redirects the remaining iteration
-      (host test appends an entry mid-drain and sees it visited). The
-      entry NULL check is the predicated `blxne r6`; the callback
-      itself has no NULL guard - all 17 callers pass a real per-site
-      teardown, so a NULL callback with a live entry jumps to 0 as in
-      retail. Finally r0 = providers and the function tail-branches (`b
-      0x08369618`) to the object destroy, returning its (void) result.
-      The tail callee FUN_08369618 (36 bytes: NULL guard, traced_free
-      the +0x04 table if non-NULL, then traced_free the object; 12 `bl`
-      + 1 other inbound tail `b`) is UNPORTED, so it rides the
-      NAMESPACE_PROVIDER_DESTROY seam (house pattern; the default stub
-      leaks and returns 0, the family's NULL-path convention) instead
-      of a direct tail `b`. Object words are addressed by pointer-sized
-      word index (byte-exact +0x00/+0x04 on the 32-bit target,
-      disjoint slots on a 64-bit host - the registry_key_hash key
-      model). match.py: same structure - null-guard return 0, signed
-      count gate, per-iteration count/table reloads, `lsl #2` indexed
-      entry load, NULL-entry-skip around `blx`, seam tail branch
-      (`ldr`/`bx r1` through the hook static); LLVM peeled the first
-      loop-gate test and grew the frame.
+      FUN_08369618) and invents param_3/param_4. Algorithm: `for index
+      in 0.. { reload count; if !(count >s index) break; entry =
+      table[index]; if entry != 0 { teardown(entry) } }` - the count at
+      +0x00 AND the table pointer at +0x04 are reloaded on EVERY
+      iteration (volatile in the port) and the gate is the signed `bgt`,
+      so a teardown that mutates the object genuinely redirects the
+      remaining iteration (host test appends an entry mid-drain and sees
+      it visited). The entry NULL check is the predicated `blxne r6`; the
+      callback itself has no NULL guard - all 17 callers pass a real
+      per-site teardown, so a NULL callback with a live entry jumps to 0
+      as in retail. Finally r0 = providers and the function
+      tail-branches (`b 0x08369618`) to the ported object destroy. Both
+      functions have void ABI results; deviation: Rust makes that tail
+      transfer an ordinary returning direct call. Object words are
+      addressed by pointer-sized word index (byte-exact +0x00/+0x04 on
+      the 32-bit target, disjoint slots on a 64-bit host - the
+      registry_key_hash key model). match.py: same structure -
+      null-guard, signed count gate, per-iteration count/table reloads,
+      `lsl #2` indexed entry load, NULL-entry-skip around `blx`, then
+      direct destroy call; LLVM peeled the first loop-gate test and grew
+      the frame.
+
+  - address: 0x08369618
+    ghidra: FUN_08369618
+    name: namespace_provider_destroy
+    size: 36
+    sig: "void namespace_provider_destroy(usize *providers)"
+    module: cxx/object_flags
+    status: ported
+    vars: {param_1: providers}
+    renames:
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 36 bytes, 0x08369618..0x0836963c: the
+      next independently linked function, namespace_provider_insert_at,
+      starts with `push {r4,r5,r6,lr}` at 0x0836963c. Inbound branch scan
+      of every ARM B/BL word in osos.dec found 11 `bl` calls (8
+      unconditional, 3 `blne`) and two unconditional tail `b` calls.
+      The mixed caller guards do not replace this function's own
+      `movs r4,r0; popeq` NULL guard. Algorithm: for non-NULL providers,
+      load the +0x04 table word, conditionally `bl traced_free` for a
+      non-NULL table, reload providers into r0, then tail-branch to
+      traced_free for the object. traced_free itself has no NULL guard,
+      so both checks are material. Ghidra incorrectly ascribes
+      traced_free's descriptor calls to this function and fabricates
+      extra parameters. Deviation: the Rust port expresses the final
+      tail branch as an ordinary direct returning call; both ABIs are
+      void. Pointer-sized word indices retain target offsets +0x00/+0x04
+      while avoiding host-pointer overlap. Host tests cover NULL object,
+      NULL table, and table-before-object release order; match.py reports
+      the same two conditional paths and two frees, with LLVM's frame
+      setup replacing the retail tail branch.
 
   - address: 0x0836963c
     ghidra: FUN_0836963c
