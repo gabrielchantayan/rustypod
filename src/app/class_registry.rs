@@ -5,6 +5,7 @@
 //! |---|---|---:|---:|
 //! | 0x0810dddc | [`registry_observer_base_construct`] | 20 | 24 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
+//! | 0x0810e6b0 | [`registry_container_destruct`] | 4 | 10 `bl` + 1 tail `b` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
@@ -80,9 +81,12 @@
 //!   adding one would be a behavior change.
 //!
 
-use crate::app::registry::{observable_set_notify_enabled, Registry};
+use crate::app::registry::{observable_set_notify_enabled, Registry, RegistryVtable};
 use crate::cxx::observable_array::{observable_array_construct, ObservableArray};
+#[cfg(not(test))]
+use crate::cxx::observable_array::observable_array_destruct;
 use crate::heap::veneers::operator_new;
+use crate::runtime::malloc_rt::free;
 
 /// The container's initial capacity (`mov r1, #0x8` @ 0x0810e654).
 pub const REGISTRY_INITIAL_CAPACITY: u32 = 8;
@@ -374,6 +378,77 @@ pub unsafe extern "C" fn registry_container_construct_default(
     registry
 }
 
+/// Host-only substitute for the direct tail branch to
+/// [`observable_array_destruct`]. `Registry` has host-width pointers whereas
+/// the target's tail callee expects its 32-bit [`ObservableArray`] base.
+/// Firmware builds take the direct call below; tests replace this only to
+/// observe the preceding concrete-container teardown without aliasing those
+/// incompatible host layouts.
+#[cfg(test)]
+unsafe extern "C" fn host_registry_container_base_destruct(registry: *mut Registry) -> *mut Registry {
+    registry
+}
+
+#[cfg(test)]
+static mut REGISTRY_CONTAINER_BASE_DESTRUCT: unsafe extern "C" fn(*mut Registry) -> *mut Registry =
+    host_registry_container_base_destruct;
+
+/// registry_container_destruct — original: `thunk_FUN_08135380` @
+/// **0x0810e6b0** (4 bytes; 10 plain `bl` and one tail `b` call sites,
+/// binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+///
+/// The four-byte entry is `b 0x08135380`; its 72-byte destination
+/// (`0x08135380..0x081353c8`, including the vtable literal) implements this
+/// concrete registry-container destructor. It first installs
+/// `0x08984770`, dispatches `observer->vtable[+0x1c]` for the observer at
+/// `this+0x24`, frees the owned auxiliary allocation at `this+0x1c` only
+/// when non-NULL, then clears both words. Finally it tail-branches to the
+/// already ported [`observable_array_destruct`] (`0x08271d2c`) for the base
+/// subobject and returns its original `this`.
+///
+/// Raw ARM has no NULL guard for `this`, its observer, or the observer's
+/// vtable; this is intentionally the same contract. The auxiliary-allocation
+/// free is direct (`bl 0x0802edc8`), as in stock. Deliberate host-test
+/// deviation: the final direct tail call is replaced by a test-only function
+/// pointer because `Registry` uses host-width vtable/observer pointers while
+/// `ObservableArray` is deliberately a target-width `u32` layout.
+///
+/// # Safety
+///
+/// `registry` and its non-NULL observer must be writable and valid,
+/// respectively; its `container[6]` is either NULL or an allocation accepted
+/// by the retailOS `free` port.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_container_destruct(registry: *mut Registry) -> *mut Registry {
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*registry).vtable),
+        REGISTRY_CONTAINER_VTABLE_ADDRESS as *const RegistryVtable,
+    );
+
+    let observer = core::ptr::read_volatile(core::ptr::addr_of!((*registry).observer))
+        .cast::<RegistryObserver>();
+    let observer_vtable = core::ptr::read_volatile(core::ptr::addr_of!((*observer).vtable));
+    ((*observer_vtable).detach)(observer);
+
+    let allocation = core::ptr::read_volatile(core::ptr::addr_of!((*registry).container[6])) as *mut u8;
+    if !allocation.is_null() {
+        free(allocation);
+    }
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*registry).container[6]), 0);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*registry).observer), core::ptr::null_mut());
+
+    #[cfg(test)]
+    {
+        let destruct =
+            core::ptr::read_volatile(core::ptr::addr_of!(REGISTRY_CONTAINER_BASE_DESTRUCT));
+        return destruct(registry);
+    }
+
+    #[cfg(not(test))]
+    observable_array_destruct(registry.cast::<ObservableArray>()).cast::<Registry>()
+}
+
 /// registry_observer_base_construct — original: `FUN_0810dddc` @
 /// 0x0810dddc (20 bytes; 24 `bl` call sites).
 ///
@@ -572,6 +647,7 @@ mod tests {
     use crate::app::registry::RegistryVtable;
     use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor, DEFAULT_HEAP};
     use crate::heap::veneers::HEAP_OPS;
+    use crate::runtime::malloc_rt::{DEFAULT_MALLOC_RT_OPS, HEAP_OPS as MALLOC_RT_OPS};
     use core::ptr;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
@@ -593,6 +669,21 @@ mod tests {
 
     /// Ordered trace of the mock calls.
     static mut TRACE: Vec<&'static str> = Vec::new();
+
+    static mut TEARDOWN_REGISTRY: *mut Registry = ptr::null_mut();
+    static mut TEARDOWN_BASE_ARG: *mut Registry = ptr::null_mut();
+    static mut TEARDOWN_FREED: *mut u8 = ptr::null_mut();
+
+    unsafe extern "C" fn record_free(allocation: *mut u8) {
+        trace().push("free");
+        TEARDOWN_FREED = allocation;
+    }
+
+    unsafe extern "C" fn record_base_destruct(registry: *mut Registry) -> *mut Registry {
+        trace().push("base_destruct");
+        TEARDOWN_BASE_ARG = registry;
+        registry
+    }
 
 
     /// Vtable literals selected by direct container-initializer tests.
@@ -683,6 +774,22 @@ mod tests {
     unsafe extern "C" fn mock_detach(_this: *mut RegistryObserver) -> *mut u8 {
         ptr::null_mut()
     }
+
+    unsafe extern "C" fn teardown_detach(_this: *mut RegistryObserver) -> *mut u8 {
+        assert_eq!(
+            ptr::read_volatile(ptr::addr_of!((*TEARDOWN_REGISTRY).vtable)) as usize,
+            REGISTRY_CONTAINER_VTABLE_ADDRESS,
+            "the concrete vtable is planted before the +0x1c dispatch"
+        );
+        trace().push("detach");
+        ptr::null_mut()
+    }
+
+    static TEARDOWN_OBSERVER_VTABLE: RegistryObserverVtable = RegistryObserverVtable {
+        unresolved_00: [0; 6],
+        attach: mock_attach,
+        detach: teardown_detach,
+    };
 
     unsafe extern "C" fn mock_set_observer(
         observable: *mut Registry,
@@ -864,6 +971,9 @@ mod tests {
             heap.alloc = stub_alloc;
             heap.create = stub_create;
             HEAP_OPS = heap;
+            let mut runtime_heap = ptr::read_volatile(ptr::addr_of!(MALLOC_RT_OPS));
+            runtime_heap.free = record_free;
+            MALLOC_RT_OPS = runtime_heap;
             DEFAULT_HEAP = ptr::addr_of_mut!(FAKE_HEAP) as *mut HeapDescriptorDescriptor;
             CLASS_REGISTRY_OPS = ClassRegistryOps {
                 container_initialize: mock_container_initialize,
@@ -887,6 +997,10 @@ mod tests {
             (*ptr::addr_of_mut!(OBSERVER_ARGS)).clear();
             (*ptr::addr_of_mut!(ATTACHED)).clear();
             (*ptr::addr_of_mut!(CONTAINER_OBSERVER_VTABLE_LITERALS)).clear();
+            TEARDOWN_REGISTRY = ptr::null_mut();
+            TEARDOWN_BASE_ARG = ptr::null_mut();
+            TEARDOWN_FREED = ptr::null_mut();
+            REGISTRY_CONTAINER_BASE_DESTRUCT = host_registry_container_base_destruct;
             trace().clear();
             SWAP_OBSERVABLE = ptr::null_mut();
             SWAP_PENDING = ptr::null_mut();
@@ -901,12 +1015,14 @@ mod tests {
     fn restore(guard: MutexGuard<'static, ()>) {
         unsafe {
             HEAP_OPS = crate::heap::veneers::DEFAULT_HEAP_OPS;
+            MALLOC_RT_OPS = DEFAULT_MALLOC_RT_OPS;
             DEFAULT_HEAP = ptr::null_mut();
             CLASS_REGISTRY_OPS = DEFAULT_CLASS_REGISTRY_OPS;
             REGISTRY_OBSERVER = ptr::null_mut();
             CAPACITY_FOUR_CONTAINER_OBSERVER = ptr::null_mut();
             OTHER_CONTAINER_OBSERVER = ptr::null_mut();
             CONTAINER_OBSERVER_CONSTRUCT = construct_container_observer;
+            REGISTRY_CONTAINER_BASE_DESTRUCT = host_registry_container_base_destruct;
             ptr::addr_of_mut!(CONSTRUCTED_REGISTRY).write(Registry {
                 vtable: ptr::null(),
                 container: [0; 7],
@@ -1303,6 +1419,80 @@ mod tests {
                 std::vec!["attach", "has_pending_changes"],
                 "a NULL +0x60 result skips both old detach and +0x68 notification"
             );
+        }
+        restore(guard);
+    }
+
+    // ---- the concrete container destructor @ 0x0810e6b0 --------------
+
+    #[test]
+    fn registry_container_destructor_detaches_frees_and_chains_to_base() {
+        let guard = mock();
+        unsafe {
+            let owned_allocation = 0x1234_5000usize as *mut u8;
+            let mut observer = RegistryObserver {
+                vtable: ptr::addr_of!(TEARDOWN_OBSERVER_VTABLE),
+                state: 0,
+            };
+            let mut registry = Registry {
+                vtable: ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+                container: [0, 0, 0, 0, 0, 0, owned_allocation as usize],
+                changed: 1,
+                notify_enabled: 1,
+                reserved: [0; 2],
+                observer: ptr::addr_of_mut!(observer).cast(),
+            };
+            let this = ptr::addr_of_mut!(registry);
+            TEARDOWN_REGISTRY = this;
+            REGISTRY_CONTAINER_BASE_DESTRUCT = record_base_destruct;
+
+            assert_eq!(registry_container_destruct(this), this);
+            assert_eq!(
+                *trace(),
+                std::vec!["detach", "free", "base_destruct"],
+                "stock dispatches, conditionally frees, then tail-branches to the base"
+            );
+            assert_eq!(TEARDOWN_FREED, owned_allocation);
+            assert_eq!(TEARDOWN_BASE_ARG, this);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(registry.container[6])),
+                0,
+                "the owned +0x1c word is cleared after free"
+            );
+            assert!(ptr::read_volatile(ptr::addr_of!(registry.observer)).is_null());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn registry_container_destructor_skips_null_auxiliary_free() {
+        let guard = mock();
+        unsafe {
+            let mut observer = RegistryObserver {
+                vtable: ptr::addr_of!(TEARDOWN_OBSERVER_VTABLE),
+                state: 0,
+            };
+            let mut registry = Registry {
+                vtable: ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+                container: [0; 7],
+                changed: 0,
+                notify_enabled: 0,
+                reserved: [0; 2],
+                observer: ptr::addr_of_mut!(observer).cast(),
+            };
+            let this = ptr::addr_of_mut!(registry);
+            TEARDOWN_REGISTRY = this;
+            REGISTRY_CONTAINER_BASE_DESTRUCT = record_base_destruct;
+
+            assert_eq!(registry_container_destruct(this), this);
+            assert_eq!(
+                *trace(),
+                std::vec!["detach", "base_destruct"],
+                "the `blne free` is skipped for a NULL +0x1c allocation"
+            );
+            assert!(TEARDOWN_FREED.is_null());
+            assert_eq!(TEARDOWN_BASE_ARG, this);
+            assert!(ptr::read_volatile(ptr::addr_of!(registry.observer)).is_null());
         }
         restore(guard);
     }
