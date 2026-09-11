@@ -50223,6 +50223,44 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x0823a830
+    ghidra: FUN_0823a830
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1/r5: base
+      param_3/r2/r6: offset
+      uVar1/r7: offset_reg
+      uVar2/r8: address_reg
+      uVar3/r9/r0: value_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18c4: cg_create_inst_load
+    notes: >-
+      Raw ARM confirms the 136-byte, 34-word extent from the `push
+      {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0823a830 through the `pop
+      {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x0823a8b4; the next sibling starts
+      at 0x0823a8b8, and there is no literal pool. Decoding every ARM B/BL
+      word in osos.dec finds nine direct callers, ALL unconditional bl
+      (zero predicated, zero tail b): 0x0823d180, 0x0823d194, 0x0823d244,
+      0x0823d2b0, 0x0823d308, 0x0823d7dc, 0x0823db10, 0x0823eb3c, and
+      0x0823fcac. The body creates three general-purpose virtual registers
+      from block->proc, then emits LDI offset_reg, offset / ADD address_reg,
+      base, offset_reg / LDW value_reg, [address_reg], returning value_reg.
+      A raw word-by-word comparison with the already ported
+      cg_emit_load_word_at_offset @ 0x082605f0 finds exactly six differing
+      words, all relative bl encodings to the same three register creations
+      and three instruction factories. Deliberate deviation: no duplicate
+      Rust export exists; the established codegen/pipeline_emit seam is
+      behaviorally identical and serves this hook address. Its host tests
+      prove zero and usize::MAX offsets, NULL bases, exact instruction
+      wiring and append order, and virtual-register creation order.
+
   - address: 0x08260678
     ghidra: FUN_08260678
     name: cg_emit_store_word_at_offset

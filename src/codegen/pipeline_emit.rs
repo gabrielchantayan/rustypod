@@ -59,10 +59,21 @@ unsafe fn block_proc(block: *mut CgBlock) -> *mut CgProc {
 /// this body only by their relative displacement and reach the same six
 /// callees in the same order. Raw decoding finds 12 call sites, all
 /// unconditional `bl` (no predicated calls or tail branches), all within
-/// `FUN_082465bc` at 0x08246624-0x08246944. The one exported implementation
-/// deliberately serves both hook seams: duplicate code would add no behavior.
+/// `FUN_082465bc` at 0x08246624-0x08246944.
 ///
-/// `FUN_0826b198` @ 0x0826b198 is a third separately linked copy (136
+/// `FUN_0823a830` @ 0x0823a830 is a third 136-byte (34-word), separately
+/// linked emission. Its last instruction is the `pop` at 0x0823a8b4; the
+/// next sibling starts at 0x0823a8b8. A word-by-word comparison finds six
+/// differences, all relative `bl` encodings to the same three
+/// `cg_virtual_reg_create` calls and the same three instruction factories.
+/// Decoding every ARM B/BL word in osos.dec finds nine direct call sites,
+/// all unconditional `bl` (no predicated calls or tail branches):
+/// 0x0823d180, 0x0823d194, 0x0823d244, 0x0823d2b0, 0x0823d308, 0x0823d7dc,
+/// 0x0823db10, 0x0823eb3c, and 0x0823fcac. It therefore shares this
+/// implementation and its host coverage; a duplicate export would add no
+/// behavior.
+///
+/// `FUN_0826b198` @ 0x0826b198 is a fourth separately linked copy (136
 /// bytes, 34 words, no literal pool) with 10 unconditional `bl` callers:
 /// 0x08249b04, 0x08249b18, 0x08249b2c, 0x08249b50, 0x08249d04,
 /// 0x08249d1c, 0x0824a250, 0x0824a264, 0x0824a278 and 0x0824a28c. Raw
