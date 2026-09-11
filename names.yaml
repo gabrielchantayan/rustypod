@@ -63913,3 +63913,27 @@ functions:
       predicated callers or tail branches. Firmware builds retain the original
       RAM addresses and direct initializer call; host builds model those
       runtime objects and inject the unported initializer through a seam.
+
+  # --- tagged payload address helper ---
+  - address: 0x082b513c
+    ghidra: FUN_082b513c
+    name: tagged_payload_address
+    size: 24
+    sig: "u8 *tagged_payload_address(u8 **context_slot, const TaggedPayloadDescriptor *descriptor)"
+    module: util/tagged_payload_address
+    status: ported
+    renames:
+      param_1/r0: context_slot
+      param_2/r1: descriptor
+      r2: descriptor_flags
+    notes: >-
+      Raw osos.dec fixes the extent at 0x082b513c..0x082b5154: ldr r2,[r1];
+      tst r2,#0x400; ldreq r0,[r0]; ldreq r1,[r1,#8]; addeq r0,r0,r1; bx
+      lr. Bit 0x400 returns context_slot itself without dereferencing it;
+      otherwise it returns *context_slot + descriptor +0x08's u32 offset.
+      9 direct inbound calls, all plain unconditional bl: 0x0803ac8c,
+      0x0803ae54, 0x0803afc0, 0x0803b19c, 0x0803b2b4, 0x0803b348,
+      0x080c86b0, 0x080c879c, and 0x080d3c30. No predicated calls and no
+      aligned osos.dec data-word references. The distinct sibling begins at
+      0x082b5154. No deliberate deviations; repr(C) u32 descriptor fields
+      preserve its +0x00 flags and +0x08 offset layout on hosts.
