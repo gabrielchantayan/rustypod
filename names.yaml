@@ -15468,6 +15468,35 @@ functions:
       per-class accessors; no siblings remain identified.
     renames: {}
 
+  - address: 0x0828a700
+    ghidra: FUN_0828a700
+    name: notes_dispatcher_prepare_and_read_status
+    size: 44
+    sig: "u32 notes_dispatcher_prepare_and_read_status(void)"
+    module: app/notes_dispatcher_status
+    status: ported
+    renames:
+      FUN_0828ae68: instance_of_class_4180
+      FUN_081178cc: notes_dispatcher_request_start
+      FUN_082724e8: status_byte_read
+      "[notes_dispatcher + 0x4fc]": request
+      "[request + 0x39]": request_active
+    notes: >-
+      Raw osos.dec extent is exactly 44 bytes: eleven ARM instructions from
+      0x0828a700 through tail `b 0x082724e8` at 0x0828a728; the next
+      separately linked function begins at 0x0828a72c. Decoding every ARM
+      B/BL word finds exactly nine direct callers, all unconditional bl
+      (0x0810c204, 0x0810c4e8, 0x081561a8, 0x08156304, 0x0821d810,
+      0x0821dc54, 0x0821eb34, 0x08230694, 0x0828be80), with no predicated
+      or tail-branch callers. It gets the already ported TCNotesDispatcher
+      singleton, skips both field access and call when it is NULL, otherwise
+      reads its request byte at +0x535 and calls 0x081178cc with the
+      request subobject at +0x4fc only while that byte is zero. It then
+      tail-calls 0x082724e8, which zero-extends the global byte at
+      0x089cffac. The 0x081178cc callee is not ported: its stronger identity
+      is deliberately not invented; target Rust calls its address directly
+      while host tests pass a recorder to the shared gate body.
+
   - address: 0x0828b1d4
     ghidra: FUN_0828b1d4
     name: field_dc_as_class_4a80
