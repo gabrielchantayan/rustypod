@@ -52342,6 +52342,44 @@ functions:
       pointer aliasing, and absence of mutation. Reference C:
       decomp/c/012/0813b0a4_FUN_0813b0a4.c; assembly: osos.asm 0x0813b0a4.
 
+  # --- Class8900 queued-work constructor ---
+  - address: 0x0813b05c
+    ghidra: FUN_0813b05c
+    name: class_8900_queued_work_construct
+    size: 60
+    sig: "Class8900QueuedWork *class_8900_queued_work_construct(Class8900QueuedWork *this, void *request_context)"
+    module: app/class_8900_queued_work_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: request_context
+      param_1_plus_0x04: primary_name
+      param_1_plus_0x0c: state
+      param_1_plus_0x0d: flags
+      param_1_plus_0x0e: option
+      param_1_plus_0x10: secondary_name
+      param_1_plus_0x18: next
+      param_1_plus_0x1c: trailing
+      FUN_08277440: string_default_construct
+    notes: >-
+      Raw ARM is exactly 60 code bytes from 0x0813b05c through the
+      `pop {r4,pc}` at 0x0813b094; the separate sibling starts `ldr r2,[r0]`
+      at 0x0813b098. Decoding every ARM B/BL immediate in osos.dec finds
+      nine direct calls, all plain unconditional bl at 0x081ee574, 0x081ee624,
+      0x081ee97c, 0x081eeb6c, 0x081eec24, 0x081eecc0, 0x081eed68,
+      0x081eee44, and 0x081eef24; there are no predicated BL forms, direct
+      tail branches, or aligned data words containing this address. It stores
+      the opaque request-context pointer, default-constructs embedded
+      StringObjects at +0x04 and +0x10, writes state = 0xff and flags/option
+      = 0, then clears the +0x18 FIFO link and +0x1c trailing word. Byte
+      +0x0f is deliberately untouched. All nine callers allocate a 0x20-byte
+      record and populate command-specific fields before handing it to
+      class_8900_work_queue_enqueue. No deviations: both nested calls use the
+      already ported string_default_construct directly, so no dispatch seam
+      was added. Host tests prove constructor return identity, non-NULL and
+      NULL context propagation, string reset, the 0xff sentinel, zeroed
+      owned fields, repeat construction, and preserved padding.
+
   # --- unsigned stride-20 index arithmetic ---
   - address: 0x083e0298
     ghidra: FUN_083e0298
