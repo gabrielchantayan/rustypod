@@ -17,9 +17,9 @@
 //!    strings are skipped; otherwise add their unguarded [`strlen`] to the
 //!    signed running length.
 //! 3. When that length exceeds the signed capacity, set capacity to
-//!    `length + 20`, then call the unported traced realloc
-//!    `FUN_08043f3c` @ 0x08043f3c with `capacity + 1`. A NULL result frees
-//!    the original buffer through ported [`traced_free`] and returns.
+//!    `length + 20`, then call ported [`traced_realloc`] with `capacity + 1`.
+//!    A NULL result frees the original buffer through ported [`traced_free`]
+//!    and returns.
 //! 4. Append every accepted string with the bounded `strlcat` algorithm of
 //!    `FUN_0804228c` @ 0x0804228c, then hand the completed owned buffer to
 //!    `FUN_08049bbc` @ 0x08049bbc with flag word 3.
@@ -30,12 +30,11 @@
 //!   assembly export spills r1-r3 beside the caller's stack arguments and
 //!   calls the typed implementation; host tests pass that contiguous
 //!   pointer list explicitly. This is ABI-equivalent for all arities.
-//! - The realloc and attachment callees are unported and dispatch through
-//!   [`DIAG_RING_STRING_OPS`]. Their defaults reproduce the useful failure
-//!   behavior: realloc fails and attachment is inert. The bounded strlcat
-//!   call is reproduced locally because its return value is discarded.
+//! - The attachment callee is unported and dispatches through
+//!   [`DIAG_RING_STRING_OPS`]. Its default is inert. The bounded strlcat call
+//!   is reproduced locally because its return value is discarded.
 
-use crate::drivers::ata_cmd::{traced_alloc, traced_free};
+use crate::drivers::ata_cmd::{traced_alloc, traced_free, traced_realloc};
 use crate::libc::strlen::strlen;
 
 // Target ABI entry point for the C-varargs original. Saving only r1-r3
@@ -71,41 +70,21 @@ pub unsafe extern "C" fn diag_ring_attach_strings(count: i32, strings: *const *c
     diag_ring_attach_strings_impl(count, strings);
 }
 
-/// Unported `FUN_08043f3c` @ 0x08043f3c: reallocates `block` to `size`,
-/// passing the two trace tags through unchanged.
-pub type DiagStringRealloc = unsafe extern "C" fn(
-    block: *mut u8,
-    size: i32,
-    tag1: u32,
-    tag2: u32,
-) -> *mut u8;
-
 /// Unported `FUN_08049bbc` @ 0x08049bbc: attaches an owned string to the
 /// current diagnostic-ring slot with `flags` describing its ownership.
 pub type DiagStringAttach = unsafe extern "C" fn(block: *mut u8, flags: u32);
 
-/// Dispatches for the two unported services reached by this function.
+/// Dispatch for the unported attachment service reached by this function.
 #[derive(Copy, Clone)]
 pub struct DiagRingStringOps {
-    pub realloc: DiagStringRealloc,
     pub attach: DiagStringAttach,
-}
-
-unsafe extern "C" fn missing_realloc(
-    _block: *mut u8,
-    _size: i32,
-    _tag1: u32,
-    _tag2: u32,
-) -> *mut u8 {
-    core::ptr::null_mut()
 }
 
 unsafe extern "C" fn missing_attach(_block: *mut u8, _flags: u32) {}
 
-/// Active models of the two unported callees. Volatile reads preserve the
-/// mutable firmware-service slots instead of letting LLVM fold the defaults.
+/// Active model of the unported callee. Volatile reads preserve the mutable
+/// firmware-service slot instead of letting LLVM fold the default.
 pub static mut DIAG_RING_STRING_OPS: DiagRingStringOps = DiagRingStringOps {
-    realloc: missing_realloc,
     attach: missing_attach,
 };
 
@@ -161,7 +140,7 @@ pub unsafe extern "C" fn diag_ring_attach_strings_impl(count: i32, strings: *con
             total_len = total_len.wrapping_add(strlen(string) as u32 as i32);
             if total_len > capacity {
                 capacity = total_len.wrapping_add(0x14);
-                let resized = (string_ops().realloc)(buffer, capacity.wrapping_add(1), 0, 0);
+                let resized = traced_realloc(buffer, capacity.wrapping_add(1), 0, 0);
                 if resized.is_null() {
                     traced_free(buffer);
                     return;
@@ -182,7 +161,8 @@ mod tests {
 
     use super::*;
     use crate::drivers::ata_cmd::{
-        TracedAllocHooks, TracedFreeHooks, TRACED_ALLOC_HOOKS, TRACED_FREE_HOOKS,
+        TracedAllocHooks, TracedFreeHooks, TracedReallocHooks, TRACED_ALLOC_HOOKS,
+        TRACED_FREE_HOOKS, TRACED_REALLOC_HOOKS, TRACED_REALLOC_TEST_LOCK,
     };
     use crate::testing::{DIAG_RING_STRING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
     use std::boxed::Box;
@@ -257,23 +237,30 @@ mod tests {
     struct Fixture {
         _string_guard: MutexGuard<'static, ()>,
         _alloc_guard: StdMutexGuard<'static, ()>,
+        _realloc_guard: MutexGuard<'static, ()>,
         saved_alloc: TracedAllocHooks,
         saved_free: TracedFreeHooks,
+        saved_realloc: TracedReallocHooks,
         saved_ops: DiagRingStringOps,
     }
 
     impl Fixture {
         fn new() -> Self {
             let string_guard = DIAG_RING_STRING_TEST_LOCK.lock();
-            let alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let alloc_guard =
+                TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let realloc_guard = TRACED_REALLOC_TEST_LOCK.lock();
             BLOCKS.lock().clear();
             REALLOC_SIZES.lock().clear();
             ATTACHES.lock().clear();
             *FAIL_REALLOC.lock() = false;
 
-            let (saved_alloc, saved_free, saved_ops) = unsafe {
+            let (saved_alloc, saved_free, saved_realloc, saved_ops) = unsafe {
                 let saved_alloc = core::ptr::read(core::ptr::addr_of!(TRACED_ALLOC_HOOKS));
                 let saved_free = core::ptr::read(core::ptr::addr_of!(TRACED_FREE_HOOKS));
+                let saved_realloc = core::ptr::read_volatile(
+                    core::ptr::addr_of!(TRACED_REALLOC_HOOKS),
+                );
                 let saved_ops = core::ptr::read(core::ptr::addr_of!(DIAG_RING_STRING_OPS));
                 core::ptr::write(
                     core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
@@ -284,12 +271,24 @@ mod tests {
                     TracedFreeHooks { free: test_free, trace: None },
                 );
                 core::ptr::write_volatile(
-                    core::ptr::addr_of_mut!(DIAG_RING_STRING_OPS),
-                    DiagRingStringOps { realloc: test_realloc, attach: test_attach },
+                    core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS),
+                    TracedReallocHooks { realloc: test_realloc, trace: None },
                 );
-                (saved_alloc, saved_free, saved_ops)
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(DIAG_RING_STRING_OPS),
+                    DiagRingStringOps { attach: test_attach },
+                );
+                (saved_alloc, saved_free, saved_realloc, saved_ops)
             };
-            Fixture { _string_guard: string_guard, _alloc_guard: alloc_guard, saved_alloc, saved_free, saved_ops }
+            Fixture {
+                _string_guard: string_guard,
+                _alloc_guard: alloc_guard,
+                _realloc_guard: realloc_guard,
+                saved_alloc,
+                saved_free,
+                saved_realloc,
+                saved_ops,
+            }
         }
 
         fn attachments(&self) -> Vec<(Vec<u8>, u32)> {
@@ -319,6 +318,10 @@ mod tests {
                 core::ptr::write(
                     core::ptr::addr_of_mut!(TRACED_FREE_HOOKS),
                     self.saved_free,
+                );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS),
+                    self.saved_realloc,
                 );
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(DIAG_RING_STRING_OPS),

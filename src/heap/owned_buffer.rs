@@ -8,8 +8,7 @@
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
 
-use crate::drivers::ata_cmd::traced_free;
-use crate::drivers::ata_cmd::traced_alloc;
+use crate::drivers::ata_cmd::{traced_alloc, traced_free, traced_realloc};
 
 /// Target-layout owner allocated by the sibling factory @ 0x0803a488.
 ///
@@ -28,34 +27,6 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(OwnedBuffer, data)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x10] = [0; core::mem::size_of::<OwnedBuffer>()];
 
-/// `FUN_08043f3c` (unported): traced reallocation over the same allocator
-/// family as [`traced_alloc`]. This caller passes the existing allocation,
-/// `requested_length + 1` with u32 wraparound, and two zero tags.
-pub type OwnedBufferRealloc =
-    unsafe extern "C" fn(block: *mut u8, new_size: u32, tag1: u32, tag2: u32) -> *mut u8;
-
-/// Fails a grow request, matching retailOS allocation failure until target
-/// integration installs the still-unported `FUN_08043f3c`.
-unsafe extern "C" fn missing_owned_buffer_realloc(
-    _block: *mut u8,
-    _new_size: u32,
-    _tag1: u32,
-    _tag2: u32,
-) -> *mut u8 {
-    core::ptr::null_mut()
-}
-
-/// RetailOS reallocation dependency of [`owned_buffer_assign`].
-///
-/// A volatile load keeps the target hook mutable and lets host tests install
-/// the real grow path without adding a second implementation of the unported
-/// allocator front-end.
-pub static mut OWNED_BUFFER_REALLOC: OwnedBufferRealloc = missing_owned_buffer_realloc;
-
-#[inline(always)]
-unsafe fn owned_buffer_realloc() -> OwnedBufferRealloc {
-    core::ptr::read_volatile(core::ptr::addr_of!(OWNED_BUFFER_REALLOC))
-}
 
 /// owned_buffer_destroy — original: `FUN_0803a2ec` @ 0x0803a2ec (36 bytes;
 /// 15 `bl` + 1 `blne` direct call sites, plus one tail `b`).
@@ -97,10 +68,9 @@ pub unsafe extern "C" fn owned_buffer_destroy(owner: *mut OwnedBuffer) {
 /// length, then a non-NULL source is copied verbatim and followed by a NUL.
 /// A NULL source deliberately skips both copy and terminator store.
 ///
-/// Deliberate deviation: the still-unported traced realloc `FUN_08043f3c`
-/// dispatches through [`OWNED_BUFFER_REALLOC`]; its default failure is the
-/// original allocation-failure result. The port directly calls already ported
-/// `traced_alloc`, `strlen`, and `__rt_memcpy`.
+/// The traced reallocator `FUN_08043f3c` is ported directly as
+/// [`traced_realloc`], so the growth path preserves its signed positive-size
+/// guard and optional pre/post trace callbacks.
 ///
 /// # Safety
 /// `owner` must point to a writable, aligned [`OwnedBuffer`]. A non-NULL
@@ -129,7 +99,7 @@ pub unsafe extern "C" fn owned_buffer_assign(
         let data = if old_data.is_null() {
             traced_alloc(length.wrapping_add(1), 0, 0)
         } else {
-            owned_buffer_realloc()(old_data, length.wrapping_add(1) as u32, 0, 0)
+            traced_realloc(old_data, length.wrapping_add(1), 0, 0)
         };
         (*owner).data = data;
         if data.is_null() {
@@ -151,8 +121,9 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::drivers::ata_cmd::{
-        TracedAllocHooks, TracedFreeHooks, TRACED_ALLOC_HOOKS, TRACED_FREE_HOOKS,
-        TRACED_FREE_TEST_LOCK,
+        TracedAllocHooks, TracedFreeHooks, TracedReallocHooks, TRACED_ALLOC_HOOKS,
+        TRACED_FREE_HOOKS, TRACED_FREE_TEST_LOCK, TRACED_REALLOC_HOOKS,
+        TRACED_REALLOC_TEST_LOCK,
     };
     use crate::testing::TRACED_ALLOC_TEST_LOCK;
     use parking_lot::{Mutex, MutexGuard};
@@ -161,7 +132,7 @@ mod tests {
 
     static ASSIGN_TEST_LOCK: Mutex<()> = Mutex::new(());
     static ALLOC_CALLS: Mutex<std::vec::Vec<(i32, u32, u32)>> = Mutex::new(std::vec::Vec::new());
-    static REALLOC_CALLS: Mutex<std::vec::Vec<(usize, u32, u32, u32)>> = Mutex::new(std::vec::Vec::new());
+    static REALLOC_CALLS: Mutex<std::vec::Vec<(usize, i32, u32, u32)>> = Mutex::new(std::vec::Vec::new());
     static mut ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
     static mut REALLOC_RESULT: *mut u8 = core::ptr::null_mut();
 
@@ -172,7 +143,7 @@ mod tests {
 
     unsafe extern "C" fn record_realloc(
         block: *mut u8,
-        new_size: u32,
+        new_size: i32,
         tag1: u32,
         tag2: u32,
     ) -> *mut u8 {
@@ -183,15 +154,16 @@ mod tests {
     struct AssignHooksReset {
         _assign_guard: MutexGuard<'static, ()>,
         _alloc_guard: StdMutexGuard<'static, ()>,
+        _realloc_guard: MutexGuard<'static, ()>,
         old_alloc: TracedAllocHooks,
-        old_realloc: OwnedBufferRealloc,
+        old_realloc: TracedReallocHooks,
     }
 
     impl Drop for AssignHooksReset {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS), self.old_alloc);
-                core::ptr::write_volatile(core::ptr::addr_of_mut!(OWNED_BUFFER_REALLOC), self.old_realloc);
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS), self.old_realloc);
                 ALLOC_RESULT = core::ptr::null_mut();
                 REALLOC_RESULT = core::ptr::null_mut();
             }
@@ -201,9 +173,10 @@ mod tests {
     fn install_assign_hooks(alloc_result: *mut u8, realloc_result: *mut u8) -> AssignHooksReset {
         let assign_guard = ASSIGN_TEST_LOCK.lock();
         let alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let realloc_guard = TRACED_REALLOC_TEST_LOCK.lock();
         unsafe {
             let old_alloc = core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS));
-            let old_realloc = core::ptr::read_volatile(core::ptr::addr_of!(OWNED_BUFFER_REALLOC));
+            let old_realloc = core::ptr::read_volatile(core::ptr::addr_of!(TRACED_REALLOC_HOOKS));
             ALLOC_CALLS.lock().clear();
             REALLOC_CALLS.lock().clear();
             ALLOC_RESULT = alloc_result;
@@ -212,8 +185,17 @@ mod tests {
                 core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
                 TracedAllocHooks { alloc: record_alloc, trace: None },
             );
-            core::ptr::write_volatile(core::ptr::addr_of_mut!(OWNED_BUFFER_REALLOC), record_realloc);
-            AssignHooksReset { _assign_guard: assign_guard, _alloc_guard: alloc_guard, old_alloc, old_realloc }
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS),
+                TracedReallocHooks { realloc: record_realloc, trace: None },
+            );
+            AssignHooksReset {
+                _assign_guard: assign_guard,
+                _alloc_guard: alloc_guard,
+                _realloc_guard: realloc_guard,
+                old_alloc,
+                old_realloc,
+            }
         }
     }
 

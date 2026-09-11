@@ -770,6 +770,111 @@ pub unsafe extern "C" fn traced_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u
     }
     block
 }
+ 
+/// Allocator-descriptor services for [`traced_realloc`]. The stock
+/// descriptor is the same RAM table @ 0x08a0c2a4 that
+/// [`traced_alloc`] reaches, but reallocation uses slots +0x14 and
+/// +0x2c rather than allocation's +0x0c and +0x28.
+#[derive(Copy, Clone)]
+pub struct TracedReallocHooks {
+    /// Descriptor slot +0x14: the underlying realloc, called as
+    /// `realloc(block, new_size, tag1, tag2)`; returns the replacement
+    /// block or NULL.
+    pub realloc: unsafe extern "C" fn(block: *mut u8, new_size: i32, tag1: u32, tag2: u32) -> *mut u8,
+    /// Descriptor slot +0x2c: optional trace hook (`None` = the stock
+    /// image's NULL slot). Called before reallocation as
+    /// `trace(old, NULL, size, tag1, tag2, 0)` and after as
+    /// `trace(old, replacement, size, tag1, tag2, 1)`; tag2 and phase
+    /// are the fifth and sixth arguments on the stack in the original.
+    pub trace: Option<
+        unsafe extern "C" fn(
+            old_block: *mut u8,
+            replacement: *mut u8,
+            size: i32,
+            tag1: u32,
+            tag2: u32,
+            phase: u32,
+        ),
+    >,
+}
+
+/// Default stub: no heap wired in — fail the way the underlying allocator
+/// does when it cannot serve the reallocation.
+unsafe extern "C" fn missing_reallocator(
+    _block: *mut u8,
+    _new_size: i32,
+    _tag1: u32,
+    _tag2: u32,
+) -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+/// Hook table for [`traced_realloc`]'s descriptor slots. Replace before first
+/// use on target; host tests install mocks through raw static pointers.
+pub static mut TRACED_REALLOC_HOOKS: TracedReallocHooks = TracedReallocHooks {
+    realloc: missing_reallocator,
+    trace: None,
+};
+
+/// Reads the hook table. Volatile so LLVM cannot constant-fold the default
+/// reallocator, and so the post-reallocation trace slot is genuinely re-read
+/// like the original's second `ldr ip, [r5, #44]`.
+#[inline(always)]
+fn realloc_hooks() -> TracedReallocHooks {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TRACED_REALLOC_HOOKS)) }
+}
+
+/// Serializes host tests that replace [`TRACED_REALLOC_HOOKS`].
+#[cfg(test)]
+pub(crate) static TRACED_REALLOC_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+/// traced_realloc — original: `FUN_08043f3c` @ 0x08043f3c (188 bytes,
+/// exactly 0x08043f3c..0x08043ff8; the next independently linked body starts
+/// at 0x08043ff8).
+///
+/// Raw decoding of every ARM B/BL word in `osos.dec` finds 9 direct inbound
+/// calls, all unconditional `bl` (at 0x0803a444, 0x08040c74, 0x080420cc,
+/// 0x08049640, 0x08077c48, 0x080e8f94, 0x080eed4c, 0x083694f4, and
+/// 0x08369674). There are no predicated inbound forms or direct tail branches.
+///
+/// The firmware-wide traced reallocator front-end over the RAM descriptor
+/// @ 0x08a0c2a4 (pointer literal @ 0x08043ff4). If `block` is NULL, it
+/// tail-branches to [`traced_alloc`] with `size`, `tag1`, and `tag2`.
+/// Otherwise `size <= 0` (signed `cmp`/`ble`) returns NULL without reaching
+/// either descriptor slot. A positive-size reallocation calls the optional
+/// trace hook (+0x2c) before and after the underlying realloc (+0x14); the
+/// hook observes `(old, NULL, size, tag1, tag2, 0)` then
+/// `(old, replacement, size, tag1, tag2, 1)`, including after a NULL result.
+///
+/// Deliberate deviations: descriptor slots are
+/// [`TRACED_REALLOC_HOOKS`] (the [`TRACED_ALLOC_HOOKS`] pattern), whose
+/// default underlying allocator returns NULL. The NULL-block tail branch is
+/// an ordinary direct Rust call to [`traced_alloc`], with identical observable
+/// result.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn traced_realloc(
+    block: *mut u8,
+    size: i32,
+    tag1: u32,
+    tag2: u32,
+) -> *mut u8 {
+    if block.is_null() {
+        return traced_alloc(size, tag1, tag2);
+    }
+    if size <= 0 {
+        return core::ptr::null_mut();
+    }
+    if let Some(trace) = realloc_hooks().trace {
+        trace(block, core::ptr::null_mut(), size, tag1, tag2, 0);
+    }
+    let replacement = (realloc_hooks().realloc)(block, size, tag1, tag2);
+    if let Some(trace) = realloc_hooks().trace {
+        trace(block, replacement, size, tag1, tag2, 1);
+    }
+    replacement
+}
+
 
 // ---------------------------------------------------------------------------
 // The traced free — traced_alloc's twin over the same descriptor.
@@ -2083,6 +2188,161 @@ mod tests {
             0xdead_beef,
             "no trace hook installed: +0x04 untouched"
         );
+    }
+
+    // ---- the traced reallocator --------------------------------------
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum ReallocEvent {
+        Trace {
+            old_block: usize,
+            replacement: usize,
+            size: i32,
+            tag1: u32,
+            tag2: u32,
+            phase: u32,
+        },
+        Realloc { old_block: usize, size: i32, tag1: u32, tag2: u32 },
+    }
+
+    static REALLOC_EVENTS: parking_lot::Mutex<std::vec::Vec<ReallocEvent>> =
+        parking_lot::Mutex::new(std::vec::Vec::new());
+    static mut REALLOC_OLD: [u8; 1] = [0];
+    static mut REALLOC_REPLACEMENT: [u8; 1] = [0];
+    static mut REALLOC_FAIL: bool = false;
+
+    unsafe extern "C" fn mock_realloc(
+        old_block: *mut u8,
+        size: i32,
+        tag1: u32,
+        tag2: u32,
+    ) -> *mut u8 {
+        REALLOC_EVENTS.lock().push(ReallocEvent::Realloc {
+            old_block: old_block as usize,
+            size,
+            tag1,
+            tag2,
+        });
+        if REALLOC_FAIL {
+            core::ptr::null_mut()
+        } else {
+            core::ptr::addr_of_mut!(REALLOC_REPLACEMENT).cast()
+        }
+    }
+
+    unsafe extern "C" fn mock_realloc_trace(
+        old_block: *mut u8,
+        replacement: *mut u8,
+        size: i32,
+        tag1: u32,
+        tag2: u32,
+        phase: u32,
+    ) {
+        REALLOC_EVENTS.lock().push(ReallocEvent::Trace {
+            old_block: old_block as usize,
+            replacement: replacement as usize,
+            size,
+            tag1,
+            tag2,
+            phase,
+        });
+    }
+
+    struct ReallocHookReset(TracedReallocHooks);
+    impl Drop for ReallocHookReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS), self.0);
+                REALLOC_FAIL = false;
+            }
+        }
+    }
+
+    fn install_realloc_hooks(with_trace: bool, fail: bool) -> ReallocHookReset {
+        let old_hooks = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TRACED_REALLOC_HOOKS)) };
+        REALLOC_EVENTS.lock().clear();
+        unsafe {
+            REALLOC_FAIL = fail;
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS),
+                TracedReallocHooks {
+                    realloc: mock_realloc,
+                    trace: if with_trace { Some(mock_realloc_trace) } else { None },
+                },
+            );
+        }
+        ReallocHookReset(old_hooks)
+    }
+
+    #[test]
+    fn positive_realloc_traces_before_and_after_including_failure() {
+        let _guard = TRACED_REALLOC_TEST_LOCK.lock();
+        for fail in [false, true] {
+            let _reset = install_realloc_hooks(true, fail);
+            let old = core::ptr::addr_of_mut!(REALLOC_OLD).cast::<u8>();
+            let replacement = unsafe { traced_realloc(old, 0x801, 0x1111_2222, 0x3333_4444) };
+            let replacement_address = if fail {
+                0
+            } else {
+                core::ptr::addr_of_mut!(REALLOC_REPLACEMENT).cast::<u8>() as usize
+            };
+            assert_eq!(replacement as usize, replacement_address);
+            assert_eq!(
+                *REALLOC_EVENTS.lock(),
+                [
+                    ReallocEvent::Trace {
+                        old_block: old as usize,
+                        replacement: 0,
+                        size: 0x801,
+                        tag1: 0x1111_2222,
+                        tag2: 0x3333_4444,
+                        phase: 0,
+                    },
+                    ReallocEvent::Realloc {
+                        old_block: old as usize,
+                        size: 0x801,
+                        tag1: 0x1111_2222,
+                        tag2: 0x3333_4444,
+                    },
+                    ReallocEvent::Trace {
+                        old_block: old as usize,
+                        replacement: replacement_address,
+                        size: 0x801,
+                        tag1: 0x1111_2222,
+                        tag2: 0x3333_4444,
+                        phase: 1,
+                    },
+                ],
+                "failure {fail}: the post trace still runs with the returned pointer"
+            );
+        }
+    }
+
+    #[test]
+    fn nonpositive_realloc_size_skips_both_descriptor_slots() {
+        let _guard = TRACED_REALLOC_TEST_LOCK.lock();
+        for size in [0, -1, i32::MIN] {
+            let _reset = install_realloc_hooks(true, false);
+            let old = core::ptr::addr_of_mut!(REALLOC_OLD).cast::<u8>();
+            assert!(unsafe { traced_realloc(old, size, 0, 0) }.is_null());
+            assert!(REALLOC_EVENTS.lock().is_empty(), "size {size}: no trace or realloc");
+        }
+    }
+
+    #[test]
+    fn null_block_delegates_to_the_traced_allocator() {
+        let _alloc_guard = ALLOC_TEST_LOCK.lock().unwrap();
+        let _realloc_guard = TRACED_REALLOC_TEST_LOCK.lock();
+        let _alloc_reset = AllocHookReset;
+        let _realloc_reset = install_realloc_hooks(true, false);
+        unsafe {
+            ALLOC_FAIL = false;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = mock_alloc;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace = None;
+        }
+        let block = unsafe { traced_realloc(core::ptr::null_mut(), 7, 0x55, 0xaa) };
+        assert_eq!(block, core::ptr::addr_of_mut!(ALLOC_BUFFER).cast());
+        assert!(REALLOC_EVENTS.lock().is_empty(), "NULL takes the allocation tail path");
     }
 
     // ---- the traced free --------------------------------------------
