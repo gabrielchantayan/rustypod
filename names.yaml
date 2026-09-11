@@ -65189,3 +65189,27 @@ functions:
       already ported and called directly. Focused host tests cover deep
       payload copying and self-construction, including the embedded
       constructor's address-based no-allocation path.
+
+  # --- paired four-word copy helper ---
+  - address: 0x08158c94
+    ghidra: FUN_08158c94
+    name: copy_four_words_paired
+    size: 28
+    sig: "u32 *copy_four_words_paired(u32 *destination, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      uVar1/r2/r3: word
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent from 0x08158c94
+      through bx lr at 0x08158cac; the separately linked next function
+      begins at 0x08158cb0. Decoding every ARM B/BL immediate finds exactly
+      nine direct inbound call sites, all unconditional bl at 0x0829b208,
+      0x0829b398, 0x0829b3b0, 0x0829b4a4, 0x0829b63c, 0x0829b670,
+      0x0829b750, 0x0829b8a0, and 0x0829b8b8; there are no predicated forms
+      or direct tail branches. It loads words 0 and 1 before storing either,
+      then loads word 3 before word 2 and stores word 2 before word 3.
+      r0 is unchanged and returned as destination. No deliberate deviations;
+      host tests cover all relative four-word overlaps and the return pointer.
