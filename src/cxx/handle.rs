@@ -786,6 +786,47 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign(
     }
     dst
 }
+///
+/// refcounted_ptr_copy_assign_slot1 — original: `FUN_0839f118` @
+/// `0x0839f118` (48 bytes). Raw decoding establishes the exact extent:
+/// [`refcounted_ptr_construct_variant`] starts at `0x0839f148`. Decoding every
+/// ARM `B`/`BL` word in `osos.dec` finds nine direct callers, all
+/// unconditional `bl` instructions (`0x0813763c`, `0x081377b8`, `0x081623f4`,
+/// `0x081c03a8`, `0x081c03f4`, `0x081c046c`, `0x081c0534`, `0x081c05a4`, and
+/// `0x083e0b5c`), plus an unconditional tail `b` at `0x083e0b74`; there are
+/// no predicated calls and no image word equal to this address.
+///
+/// C++ copy-assignment for a refcounted handle slot. Different slot addresses
+/// first release the old body via the slot-1 virtual-destructor instantiation
+/// at `0x0839d1d4`, then load `*src`, attach it to `dst`, and return `dst`.
+/// The source load intentionally follows the release, as in the ARM.
+///
+/// Deliberate deviation: the source calls the separately entered attach helper
+/// at `0x0839d198`; raw bytes show it is byte-identical to the already ported
+/// [`refcounted_body_attach`] at `0x0839d370` modulo branch displacements, so
+/// this port uses that canonical helper. The target-only section preserves
+/// this hookable template instance independently.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL bodies
+/// and associated mutexes, implementations, and vtables must meet
+/// [`refcounted_body_release_slot1`]'s and [`refcounted_body_attach`]'s safety
+/// requirements. The firmware does not NULL-check either slot pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_assign_slot1")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign_slot1(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_slot1(dst);
+        refcounted_body_attach(dst, src.read());
+    }
+    dst
+}
+
 
 /// refcounted_handle_copy_assign — original: `FUN_0839ec70` @ 0x0839ec70
 /// (48 bytes; 11 `bl` call sites, all unconditional — verified by decoding
@@ -2129,6 +2170,53 @@ mod tests {
             assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
             assert_eq!(dst, &mut new as *mut RefcountedBody);
             assert_eq!(old.refcount, 1, "non-final drop leaves the old body live");
+            assert_eq!(new.refcount, 2);
+        }
+    }
+
+    /// The slot-address guard skips both the slot-1 release and attach on
+    /// self-assignment, preserving the body's count and returning `dst`.
+    #[test]
+    fn slot1_copy_assign_same_slot_is_a_no_op() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_ptr_copy_assign_slot1(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
+        }
+    }
+
+    /// A distinct source is read only after the slot-1 release. A non-final
+    /// old reference survives while the new body is attached and retained.
+    #[test]
+    fn slot1_copy_assign_releases_then_attaches_source() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut dst: *mut RefcountedBody = &mut old;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = refcounted_ptr_copy_assign_slot1(&mut dst, &src);
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1, "non-final release leaves old body live");
             assert_eq!(new.refcount, 2);
         }
     }
