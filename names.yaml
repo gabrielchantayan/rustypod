@@ -61794,3 +61794,31 @@ functions:
       inventing its callee identity. Host tests cover both short-circuit gates,
       the zero boundary of the signed state, the embedded-handle argument, and
       returned-word propagation. match.py is structural review only.
+
+  # --- UI element nonzero flag-word query ---
+  - address: 0x0815d7d4
+    ghidra: FUN_0815d7d4
+    name: ui_element_has_nonzero_flags
+    size: 16
+    sig: "u32 ui_element_has_nonzero_flags(const void *element)"
+    module: ui/nonzero_flags
+    status: ported
+    renames:
+      param_1: element
+      DAT_48: flags
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent:
+      0x0815d7d4..0x0815d7e4. Its four instructions load the aligned UI
+      element flag word at element+0x48, compare it with zero, and return
+      1 for every nonzero word or 0 for zero. Whole-image decoding of every
+      ARM B/BL immediate finds exactly ten inbound direct calls, all
+      unconditional plain bl at 0x08125e90, 0x0815cae8, 0x0815d074,
+      0x0815d19c, 0x0815d230, 0x0815d4f0, 0x0815dcd4, 0x0819ab4c,
+      0x0819ab60, and 0x0819ac70; there are no predicated bl forms or
+      direct tail-b transfers. A whole-image aligned-word scan finds no
+      data-word reference to this address. The helper dereferences its
+      argument immediately and therefore has no NULL or alignment guard.
+      No dispatch seam is needed because it is a pure leaf. Deliberate
+      deviations: none. Host tests cover zero, representative low/high-bit
+      nonzero words, and isolation of the +0x48 field. match.py is
+      structural review only.
