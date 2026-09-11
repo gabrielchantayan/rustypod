@@ -65972,3 +65972,31 @@ functions:
       class is not recovered; callers use the result as a selected item with
       a +0x40 subobject. No deliberate Rust deviations: raw u32 pointer-word
       reads preserve the target's 4-byte field spacing on 64-bit hosts.
+
+  - address: 0x0804202c
+    ghidra: FUN_0804202c
+    name: zeroing_buffer_destroy
+    size: 52
+    sig: "void zeroing_buffer_destroy(ZeroingBuffer *buffer)"
+    module: heap/zeroing_buffer
+    status: ported
+    vars:
+      param_1/r0: buffer
+      param_1_plus_0x4: data
+      param_1_plus_0x8: byte_len
+      FUN_08037dc8: iram_memzero_veneer
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 0x0804202c..0x08042060; the independently
+      linked sibling begins at 0x08042060 with push {r3,r4-r7,lr}. For a
+      NULL buffer movs/popeq returns without a free. Otherwise a non-NULL
+      data word (+0x04) is zeroed for byte_len (+0x08) through the ported
+      IRAM veneer 0x08037dc8 -> 0x220002d4, then released through
+      traced_free; the record is always released last through a tail b to
+      traced_free. Decoding every ARM B/BL word in osos.dec finds nine
+      direct inbound bl calls: four unconditional (0x0807c258, 0x080a53f8,
+      0x080ef850, 0x080effb8) and five blne (0x0803a8ac, 0x0805fedc,
+      0x0806f914, 0x0807c230, 0x080a1410); no tail branch or data word
+      targets this destructor. ARM release compilation retains the final tail
+      branch to traced_free; its extra prologue only preserves the record
+      across the payload release.
