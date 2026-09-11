@@ -61935,9 +61935,9 @@ functions:
     status: ported
     renames:
       param_1/r0/r4: object
-      "object+0x00": helper_source
-      "object+0x74": masked_word
-      FUN_0836f468: unported_masked_word_update
+      "object+0x00": sqlite_connection
+      "object+0x74": result_code
+      FUN_0836f468: sqlite_api_exit
     notes: >-
       Raw osos.dec confirms the 32-byte extent, eight ARM words from
       0x082c43d0 through pop {r4,pc} at 0x082c43ec; the next separately
@@ -61945,16 +61945,16 @@ functions:
       word finds exactly 10 direct inbound call sites, all unconditional plain
       bl (none predicated): 0x0838f9c8, 0x0838f9ec, 0x0838fa10, 0x0838fa64,
       0x0838fa8c, 0x0838fab4, 0x0838fafc, 0x0838fb20, 0x0838fb40, and
-      0x0838fb60. The body returns immediately when object is NULL. Otherwise
-      it passes the raw pointer in object word zero and object word 29 (+0x74)
-      to the separately linked helper at 0x0836f468, then replaces word 29
-      with that result. The helper's concrete identity is unrecovered and no
-      identity was invented; target builds retain the fixed retail-address
-      call while host tests install a recorder. Deliberate deviation: host
-      fixtures and accesses use target-width u32 words so +0x74 remains word
-      29 despite 64-bit host pointers. Host tests prove NULL suppression,
-      raw source/mask forwarding, result replacement, NULL source forwarding,
-      and a zero helper result.
+      0x0838fb60. NULL returns immediately. Otherwise it passes the raw SQLite
+      connection pointer in object word zero and object word 29 (+0x74) to the
+      directly ported `sqlite_api_exit`, then replaces word 29 with its result.
+      Both the direct callee at 0x0836f468 and its `sqlite_error` dependency at
+      0x083766f4 are ported, so target and host builds call the Rust
+      implementation without a retail-address seam. Deliberate deviation: host
+      fixtures and accesses use target-width u32 words so +0x74 remains word 29
+      despite 64-bit host pointers. Host tests prove NULL suppression, raw
+      connection forwarding, healthy result masking, and the `mallocFailed`
+      result replacement.
 
   # --- opaque keyed collection indexed accessor ---
   - address: 0x0829e2f8
@@ -63073,3 +63073,36 @@ functions:
       1. The two direct callees are already ported as strlen @ 0x08392478
       and memcmp @ 0x08030f64; no new dispatch seam is introduced. Deliberate
       deviations: none.
+
+  # --- SQLite API-boundary result-code filter (sqlite/api_exit) ---
+  - address: 0x0836f468
+    ghidra: FUN_0836f468
+    name: sqlite_api_exit
+    size: 68
+    sig: "i32 sqlite_api_exit(*mut u8 db, i32 result_code)"
+    module: sqlite/api_exit
+    status: ported
+    renames:
+      param_1/r0/r4: db
+      param_2/r1: result_code
+      "db+0x18": err_mask
+      "db+0x1e": malloc_failed
+      FUN_083766f4: sqlite_error
+      uVar1/r0: selected_result_code
+    notes: >-
+      Raw osos.dec confirms the exact 68-byte extent: push {r4,lr} at
+      0x0836f468 through pop {r4,pc} at 0x0836f4a8; the separately linked
+      next function begins with push {r4-r11,lr} at 0x0836f4ac. Decoding every
+      ARM B/BL-immediate word in osos.dec finds exactly nine direct inbound
+      plain bl calls, all unconditional, at 0x082b795c, 0x082c43e4,
+      0x08381604, 0x083816c4, 0x08384c90, 0x0838f668, 0x083901f0,
+      0x08390334, and 0x08390570. There are no predicated bl calls; 13
+      additional unconditional plain-B tail transfers target this entry. NULL
+      db preserves the incoming result code only through the default 0xff
+      errMask. A non-NULL db with mallocFailed nonzero calls ported
+      sqlite_error(db, SQLITE_NOMEM, NULL), clears the sticky byte, selects
+      SQLITE_NOMEM, then masks the selected code with db->errMask. Rust passes
+      an explicit NULL variadic-home pointer to sqlite_error; its NULL format
+      makes that otherwise-unused ABI argument unobservable. Host tests prove
+      NULL default masking, healthy masking without writes, and nonzero
+      mallocFailed reporting, clearing, SQLITE_NOMEM replacement, and masking.
