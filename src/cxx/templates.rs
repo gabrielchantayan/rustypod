@@ -324,6 +324,46 @@ pub unsafe extern "C" fn deque_iter_init_elem4(
     iter
 }
 
+/// deque_iter_init_elem4_alias_a3e4 — original: `FUN_083da3e4` @
+/// 0x083da3e4 (64 bytes; 9 plain `bl` call sites, no predicated forms,
+/// verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// The byte-identical twin of [`deque_iter_init_elem4`] @ 0x083da47c:
+/// initializes a 4-byte-element deque iterator by writing `cur`, loading
+/// `seg_base` from `slot`, writing `seg_end = seg_base + 0x80`, storing the
+/// slot, and returning `iter`. A NULL `slot` writes NULL bounds; a non-NULL
+/// slot containing NULL still produces the raw address 0x80 for `seg_end`.
+/// The 9 callers are 0x083df5c0, 0x083df600, 0x083df6dc, 0x083df704,
+/// 0x083df730, 0x083df788, 0x083df7bc, 0x083df86c, and 0x083df8a4.
+///
+/// Deliberate deviation: calls the established [`deque_seg_capacity`] export
+/// rather than adding a redundant Rust wrapper for this copy's adjacent
+/// `mov r0,#0x20; bx lr` capacity member at 0x083da3dc.
+///
+/// # Safety
+/// `iter` must be valid for a [`DequeIter`] write. A non-NULL `slot` must
+/// be a valid, aligned segment-pointer slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_init_elem4_alias_a3e4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_init_elem4_alias_a3e4(
+    iter: *mut DequeIter,
+    cur: *mut u8,
+    slot: *mut *mut u8,
+) -> *mut DequeIter {
+    (*iter).cur = cur;
+    if slot.is_null() {
+        (*iter).seg_base = core::ptr::null_mut();
+        (*iter).seg_end = core::ptr::null_mut();
+    } else {
+        (*iter).seg_base = slot.read();
+        (*iter).seg_end = slot.read().wrapping_add(deque_seg_capacity() * 4);
+    }
+    (*iter).seg_slot = slot;
+    iter
+}
+
+
 /// deque_iter_assign_alias_9fd4 — original: `FUN_083d9fd4` @ 0x083d9fd4
 /// (36 bytes; 22 `bl` call sites, all plain, none predicated — verified
 /// by decoding every BL word in osos.dec).
@@ -2437,6 +2477,40 @@ mod tests {
 
             deque_iter_init_elem4(&mut iter, core::ptr::null_mut(), core::ptr::null_mut());
             assert!(iter.cur.is_null());
+            assert!(iter.seg_base.is_null());
+            assert!(iter.seg_end.is_null());
+            assert!(iter.seg_slot.is_null());
+        }
+    }
+
+    #[test]
+    fn iter_init_elem4_alias_a3e4_preserves_null_slot_and_segment_edges() {
+        let mut segment = [0u8; 0x80];
+        let mut slot = segment.as_mut_ptr();
+        let mut iter = DequeIter::NULL;
+        unsafe {
+            let ret = deque_iter_init_elem4_alias_a3e4(
+                &mut iter,
+                segment.as_mut_ptr().add(0x2c),
+                &mut slot,
+            );
+            assert_eq!(ret, &mut iter as *mut DequeIter);
+            assert_eq!(iter.cur, segment.as_mut_ptr().add(0x2c));
+            assert_eq!(iter.seg_base, segment.as_mut_ptr());
+            assert_eq!(iter.seg_end, segment.as_mut_ptr().add(0x80));
+            assert_eq!(iter.seg_slot, &mut slot as *mut *mut u8);
+
+            let mut null_segment = core::ptr::null_mut();
+            deque_iter_init_elem4_alias_a3e4(
+                &mut iter,
+                core::ptr::null_mut(),
+                &mut null_segment,
+            );
+            assert!(iter.seg_base.is_null());
+            assert_eq!(iter.seg_end, 0x80 as *mut u8);
+
+            deque_iter_init_elem4_alias_a3e4(&mut iter, 0x4 as *mut u8, core::ptr::null_mut());
+            assert_eq!(iter.cur, 0x4 as *mut u8);
             assert!(iter.seg_base.is_null());
             assert!(iter.seg_end.is_null());
             assert!(iter.seg_slot.is_null());
