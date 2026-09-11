@@ -77,6 +77,7 @@
 //! | 0x08284e2c | [`instance_of_class_6180`] | 28 | 15 `bl` |
 //! | 0x08289690 | [`instance_of_class_3280`] | 24 | 37 `bl` |
 //! | 0x0828ae68 | [`instance_of_class_4180`] | 28 | 23 `bl` |
+//! | 0x0828b1d4 | [`field_dc_as_class_4a80`] | 12 | 9 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -1006,12 +1007,44 @@ pub unsafe extern "C" fn instance_of_class_4180() -> *mut u8 {
     instance_of_class(CLASS_ID_NOTES_DISPATCHER)
 }
 
+/// The class id carried by the literal pool word @ 0x0828b1e0.
+pub const CLASS_ID_4A80: u32 = 0x4a80;
+
+/// field_dc_as_class_4a80 — original: `FUN_0828b1d4` @ 0x0828b1d4
+/// (12 bytes of instructions plus a 4-byte literal-pool word; **9 `bl`**
+/// call sites, binary-scanned over osos.dec; no predicated forms or tail
+/// branches).
+///
+/// ```text
+/// ldr r1, =0x4a80
+/// ldr r0, [r0, #0xdc]
+/// b   0x08275b9c
+/// ```
+///
+/// Reads the target-width pointer at an otherwise unidentified owner's
+/// +0xdc field and passes it to the framework's checked cast for class
+/// 0x4a80. The raw branch has no NULL guard for either owner or its field;
+/// this port deliberately preserves that behavior. The target object's class
+/// remains unidentified: no constructor registration paired with a class-name
+/// factory call has been recovered, so this function names only its observed
+/// field access and class id.
+///
+/// Deviation: Rust calls [`object_cast_to_class`] rather than tail-branching;
+/// LLVM may still select a tail call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn field_dc_as_class_4a80(owner: *mut u8) -> *mut u8 {
+    let object = owner.cast::<u32>().add(0xdc / 4).read() as usize as *mut FrameworkObject;
+    object_cast_to_class(object, CLASS_ID_4A80)
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::{LazyLock, Mutex, MutexGuard};
     use std::vec::Vec;
 
     /// Serializes every test that touches the global registry — shared
@@ -1477,6 +1510,38 @@ mod tests {
 
     fn object_accepting(id: u32) -> TestObject {
         TestObject { vtable: &TEST_OBJECT_VTABLE, accepts: id }
+    }
+
+    const FIELD_DC_CAST_FIXTURE_LEN: usize = 0x1000;
+    static FIELD_DC_CAST_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::FIELD_DC_AS_CLASS_4A80,
+            FIELD_DC_CAST_FIXTURE_LEN,
+        )
+        .map(|pointer| pointer as usize)
+    });
+
+    #[test]
+    fn field_dc_as_class_4a80_reads_the_target_width_field_and_checks_its_class() {
+        let Some(base) = *FIELD_DC_CAST_FIXTURE else {
+            assert!(crate::testing::note_missing_u32_fixture("app/registry::field_dc_as_class_4a80"));
+            return;
+        };
+        unsafe {
+            let owner = base as *mut u8;
+            ptr::write_bytes(owner, 0, FIELD_DC_CAST_FIXTURE_LEN);
+            let target = owner.add(0x400).cast::<TestObject>();
+            target.write(object_accepting(CLASS_ID_4A80));
+            owner.cast::<u32>().add(0xdc / 4).write(target as usize as u32);
+
+            assert_eq!(field_dc_as_class_4a80(owner), target.cast::<u8>());
+
+            (*target).accepts = 0x4a00;
+            assert!(
+                field_dc_as_class_4a80(owner).is_null(),
+                "the fixed class id rejects a target that accepts another class"
+            );
+        }
     }
 
     #[test]
