@@ -21803,6 +21803,33 @@ functions:
       Host SharedCell uses usize for the payload word so host pointer fixtures
       remain representable; the allocation request remains the target's
       8-byte cell size.
+  # --- shared-cell handle copy constructor ---
+  - address: 0x083b51f4
+    ghidra: FUN_083b51f4
+    name: shared_cell_copy_construct
+    size: 28
+    sig: "SharedCell **shared_cell_copy_construct(SharedCell **dst, SharedCell **src)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar1/r1: cell
+      iVar2/r2: refcount
+    notes: >-
+      Raw ARM extent is exactly 28 bytes, 0x083b51f4..0x083b520c; the next
+      separately linked sibling begins at 0x083b5210. It loads src's cell,
+      stores it into dst, and increments the non-NULL cell's signed refcount
+      with wrapping ADD. Although Ghidra declares void, raw execution leaves
+      r0 (dst) unchanged, so the port returns dst. Raw decoding of every ARM
+      B/BL word in osos.dec found eight incoming BL calls: seven
+      unconditional at 0x0818a8e0, 0x081ba43c, 0x081f149c, 0x081f14a8,
+      0x081f7454, 0x081f7480, and 0x081f748c, plus BLNE at 0x0818a704.
+      There are no direct tail branches. The predicated caller is responsible
+      for gating its call; the copy constructor itself does not NULL-check
+      either slot pointer. Host SharedCell uses usize for the payload field,
+      while the copied slot and 32-bit signed refcount retain target
+      semantics.
   # --- shared-cell handle release ---
   - address: 0x083b524c
     ghidra: FUN_083b524c

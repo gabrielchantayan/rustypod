@@ -12,6 +12,7 @@
 //! | 0x083b5120   | slot word compare (ported as `cxx::value_compare`)           |
 //! | 0x083b5134   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
 //! | 0x083b51bc   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
+//! | 0x083b51f4   | copy-construct: copy the cell pointer, `refcount += 1`       |
 //! | 0x083b524c   | release — this module                                        |
 //! | 0x083b52a0   | release, byte-identical save the `bl` displacement (19 sites)|
 //! | 0x083b52f4   | release variant with a direct `bl 0x081fc930` value destroy  |
@@ -172,6 +173,53 @@ pub unsafe extern "C" fn shared_cell_construct_tertiary(
     }
     slot
 }
+///
+/// `shared_cell_copy_construct` — retailOS `FUN_083b51f4` @ `0x083b51f4`
+/// (28 bytes; 8 incoming `bl` call sites: seven unconditional and one
+/// `blne` at `0x0818a704`, verified by decoding every ARM B/BL word in
+/// `osos.dec`). Its raw extent ends immediately before the distinct sibling
+/// at `0x083b5210`.
+///
+/// ```text
+/// 083b51f4: ldr   r1, [r1]          @ cell = *src
+/// 083b51f8: cmp   r1, #0
+/// 083b51fc: str   r1, [r0]          @ *dst = cell
+/// 083b5200: ldrne r2, [r1, #4]
+/// 083b5204: addne r2, r2, #1
+/// 083b5208: strne r2, [r1, #4]
+/// 083b520c: bx    lr
+/// ```
+///
+/// Copy-constructs `dst` from `src`: copies the shared-cell pointer, then
+/// increments the non-NULL cell's signed intrusive refcount with 32-bit
+/// wrapping arithmetic. The raw body leaves `r0` unchanged, so it returns
+/// `dst`; Ghidra's `void` prototype loses that ABI-visible result.
+///
+/// Deliberate deviation: [`SharedCell::value`] is `usize` on hosts to retain
+/// host pointers. This routine only reads the target-width pointer slot and
+/// the signed 32-bit refcount. Its own text section prevents folding with a
+/// byte-identical sibling and retains a device-callable symbol.
+///
+/// # Safety
+/// `dst` must be a valid, aligned writable shared-cell slot and `src` must be
+/// a valid, aligned readable slot. A non-NULL source cell must be writable
+/// through its signed refcount word; neither slot pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_copy_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_copy_construct(
+    dst: *mut *mut SharedCell,
+    src: *const *mut SharedCell,
+) -> *mut *mut SharedCell {
+    let cell = src.read();
+    dst.write(cell);
+    if !cell.is_null() {
+        let refcount = core::ptr::addr_of!((*cell).refcount).read_volatile();
+        core::ptr::addr_of_mut!((*cell).refcount).write_volatile(refcount.wrapping_add(1));
+    }
+    dst
+}
+
 
 ///
 /// shared_cell_assign — original: `FUN_083b50e4` @ `0x083b50e4`
@@ -662,6 +710,40 @@ mod tests {
         assert_eq!(cell.value, payload as usize);
         assert_eq!(cell.refcount, 1);
         assert_eq!(events(), std::vec![Event::HeapAlloc(8, 2)]);
+    }
+
+    /// A NULL source cell overwrites the destination with NULL and preserves
+    /// the ABI result without attempting a refcount access.
+    #[test]
+    fn copy_construct_null_cell_replaces_destination() {
+        let source: *mut SharedCell = core::ptr::null_mut();
+        let mut destination = 0xfeed_faceusize as *mut SharedCell;
+
+        let result = unsafe { shared_cell_copy_construct(&mut destination, &source) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(destination));
+        assert!(destination.is_null());
+        assert!(source.is_null());
+    }
+
+    /// The ARM ADD wraps the signed count and the source slot remains a
+    /// shared owner of the copied cell.
+    #[test]
+    fn copy_construct_retains_cell_with_wrapping_refcount() {
+        let mut cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: i32::MAX,
+        };
+        let source = core::ptr::addr_of_mut!(cell);
+        let mut destination = core::ptr::null_mut();
+
+        let result = unsafe { shared_cell_copy_construct(&mut destination, &source) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(destination));
+        assert_eq!(destination, source);
+        assert_eq!(source, core::ptr::addr_of_mut!(cell));
+        assert_eq!(cell.refcount, i32::MIN);
+        assert_eq!(cell.value, 0x1234_5678);
     }
 
     /// NULL cell: the original returns before touching anything, and the
