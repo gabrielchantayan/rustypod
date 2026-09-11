@@ -50869,6 +50869,44 @@ functions:
       the difference being only the crate's fp frame
       (push {fp,lr} / mov fp,sp / pop {fp,pc}) around an empty body
       that returns r0 unchanged.
+  - address: 0x0826291c
+    ghidra: FUN_0826291c
+    name: initialize_opaque_context
+    size: 40
+    sig: "u32 *initialize_opaque_context(u32 *context)"
+    module: cxx/opaque_context_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      "context+0x18": initialization_status
+      FUN_082e7e54: opaque_context_initialize (unported host/target seam)
+      r1: null_selector
+      uVar1/r0: initialization_status
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte instruction extent
+      0x0826291c..0x08262940: push {r4,lr}; mov r4,r0; mov r0,#0;
+      str r0,[r4,#0x18]; mov r0,r4; mov r1,#0; bl 0x082e7e54;
+      str r0,[r4,#0x18]; mov r0,r4; pop {r4,pc}. The following
+      separately linked prologue at 0x08262944 pins the end; no literal
+      pool is present. Whole-image decoding of every ARM B/BL immediate
+      finds exactly 9 direct unconditional bl callers at 0x0818a298,
+      0x0818b3c4, 0x081d6990, 0x081d7d34, 0x08261b64, 0x08261b80,
+      0x08262868, 0x08262a54, and 0x08262a70: 0 predicated calls and
+      0 tail b calls. It clears the sixth u32 word, invokes
+      FUN_082e7e54 with a NULL second argument, stores that returned
+      status at the same word, and returns the original r0 preserved in
+      r4. The opaque context type and the callee's semantic identity are
+      unrecovered and intentionally not invented. Deviation: the
+      unported callee is an indirect fixed-address call on target and a
+      test seam on host, preserving argument order and the two stores
+      around it. Host tests verify the clear-before-call observation,
+      NULL selector, returned status including zero, unchanged neighbour
+      words, and original-pointer return.
+      match.py against this worktree archive preserves the move/clear,
+      call, second store, and return sequence; LLVM adds its fp frame,
+      loads the fixed retail address from a literal, and uses blx for the
+      deliberate unported-callee boundary.
+
 
   - address: 0x08262958
     ghidra: FUN_08262958

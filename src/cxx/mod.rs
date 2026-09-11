@@ -53,6 +53,7 @@ pub mod nested_object_value;
 pub mod mode;
 pub mod object_flags;
 mod object_state;
+pub mod opaque_context_initialize;
 pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
