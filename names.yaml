@@ -27494,6 +27494,44 @@ functions:
       named forwarding and third-record selection, lookup failure, and all
       three record positions.
 
+  - address: 0x0837b2f4
+    ghidra: FUN_0837b2f4
+    name: index_key_info
+    size: 160
+    sig: "KeyInfo *index_key_info(Parse *parse, const Index *index)"
+    module: sqlite/index_key_info
+    status: ported
+    renames:
+      param_1/r8: parse
+      param_2/r7: index
+      iVar4/r6: n_column
+      puVar1/r5: key_info
+      iVar3/r4: column
+      FUN_08374998: db_malloc_zero
+      FUN_0837d18c: sqlite3LocateCollSeq
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec fixes the exact extent at 0x0837b2f4..0x0837b394: 40
+      ARM words ending in pop {r4-r8,pc}, followed immediately by the next
+      separately linked stmdb at 0x0837b394; no literal pool. Decoding every
+      ARM B/BL immediate in the image finds exactly 8 inbound direct calls,
+      all unconditional bl (no predicated call): 0x082b41cc, 0x08378e9c,
+      0x0837da08, 0x083818f0, 0x08385b20, 0x0838dfb0, 0x083992b0, and
+      0x083992e0. This is SQLite 3.5.9's sqlite3IndexKeyinfo: it loads db
+      from parse + 0x00, requests 5*nColumn+16 zeroed bytes from the ported
+      db_malloc_zero, stores db, nField and aSortOrder = aColl+nField,
+      resolves every azColl[i] through sqlite3LocateCollSeq(parse, name, -1),
+      and copies aSortOrder[i]. The nColumn loop uses signed blt and completes
+      even if lookup records parse->nErr; only after the loop does the
+      original check its +0x40 error word, free the fresh KeyInfo through
+      ported tracked_free, and return NULL. sqlite3LocateCollSeq
+      @ 0x0837d18c has no ported ledger entry, so the deliberate volatile
+      INDEX_KEY_INFO_HOOKS seam calls that verified retail address on target
+      and a recording hook on host. Target-width pointers are read and written
+      as u32 words, avoiding host pointer-width field overlap. Host tests
+      cover multi-column layout and arguments, allocation failure, completion
+      of all lookups before cleanup after a latched failure, and nColumn=0.
+
   - address: 0x082ce2e8
     ghidra: FUN_082ce2e8
     name: find_element_given_hash
