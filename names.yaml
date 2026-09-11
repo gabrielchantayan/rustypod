@@ -16155,6 +16155,30 @@ functions:
       constructor-return caching, cache-hit no-allocation, and NULL
       result retry. match.py structural review confirms the
       test/allocate/construct/store/reload shape.
+  - address: 0x081ded74
+    ghidra: FUN_081ded74
+    name: initialize_once
+    size: 68
+    sig: "void initialize_once(OnceInitializationState *state)"
+    module: app/once_initializer
+    status: ported
+    renames:
+      FUN_080e9cbc: fixed_once_initializer_dispatch (unported host/target seam)
+      DAT_081dedb8: opaque_initializer_argument_1 (0x081d41fc)
+      DAT_081dedbc: opaque_initializer_argument_0 (0x083ec9d0)
+    notes: >-
+      Raw ARM is a 68-byte flag guard with an eight-byte trailing literal
+      pool; the next separately linked function starts at 0x081dedc0. It
+      reads state byte +0x25 without a NULL guard, calls
+      FUN_080e9cbc(0x083ec9d0, 0x081d41fc, 0, 0x20, 0x8000, 1, 0x32) only
+      when that byte is zero, and stores one afterward. A full decoded
+      B/BL scan finds exactly 10 incoming BL callers, all unconditional;
+      there are no predicated BL forms. The first fixed argument does not
+      decode as a valid function entry: its initial BMI depends on incoming
+      flags, so it remains an opaque argument rather than an invented
+      callee. Deviation: unported FUN_080e9cbc is a fixed retailOS call on
+      target and a replaceable inert seam on host. Host tests prove the
+      zero/nonzero gates, argument sequence, and post-call byte store.
   - address: 0x081df9ac
     ghidra: FUN_081df9ac
     name: command_dispatch_by_name_single_arg
