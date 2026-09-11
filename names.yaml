@@ -56041,6 +56041,37 @@ functions:
       selecting the second match, exact matcher successor chaining, 28-byte
       allocation and constructor arguments, optional readiness, signed
       negative occurrence, missing collection, and exhausted matches.
+  # --- tagged record nested liti class check ---
+  - address: 0x0826fc14
+    ghidra: FUN_0826fc14
+    name: tagged_record_payload_is_liti_class
+    size: 24
+    sig: "u32 tagged_record_payload_is_liti_class(const TaggedRecord *record)"
+    module: cxx/tagged_record
+    status: ported
+    renames:
+      param_1/r0: record
+      record_payload/r0: payload
+      FUN_08057bdc: nested_liti_class_check (unported target-default seam)
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x0826fc14..0x0826fc2c;
+      the next separately linked function, tagged_record_init, starts at
+      0x0826fc2c. Decoding every ARM B/BL word in osos.dec finds exactly nine
+      direct inbound calls, all unconditional plain BL, with zero predicated
+      BL forms and no plain-B tail callers. The wrapper loads the target-width
+      payload word at record+4, calls the unported 0x08057bdc nested 'liti'
+      class check, then canonicalizes its result to strict 0 or 1. It has no
+      record NULL guard and deliberately still calls the nested check when the
+      payload is NULL; that callee itself guards NULL and follows its +8 field
+      to ported image_library_is_liti_class. The enclosing record and nested
+      object identities beyond these observed fields remain opaque, so the
+      port names only the verified relationship. Rust represents the
+      unported direct call with a target-default replaceable seam at
+      0x08057bdc, enabling host recording tests; target code consequently
+      makes an indirect call rather than the retail direct BL. Host tests
+      cover forwarding a nonzero target-width payload, strict normalization of
+      a nonzero callee result, and the zero-payload call-through. Reference C:
+      decomp/c/026/0826fc14_FUN_0826fc14.c.
   # --- opaque tagged record initializer ---
   - address: 0x0826fc2c
     ghidra: FUN_0826fc2c

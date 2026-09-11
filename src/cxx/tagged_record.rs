@@ -61,9 +61,153 @@ pub unsafe extern "C" fn tagged_record_init(
     this
 }
 
+/// Observed ABI of the unported nested `'liti'` class check at
+/// `0x08057bdc`. It returns zero for no match and a nonzero word for a match.
+pub type NestedLitiClassCheck = unsafe extern "C" fn(*const u8) -> u32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_nested_liti_class_check(target: *const u8) -> u32 {
+    let check: NestedLitiClassCheck = unsafe { core::mem::transmute(0x0805_7bdcusize) };
+    unsafe { check(target) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_nested_liti_class_check(_target: *const u8) -> u32 {
+    panic!("tagged_record_payload_is_liti_class requires core 0x08057bdc")
+}
+
+#[cfg(target_os = "none")]
+const DEFAULT_NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = firmware_nested_liti_class_check;
+#[cfg(not(target_os = "none"))]
+const DEFAULT_NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = missing_nested_liti_class_check;
+
+/// The unported nested `'liti'` class check. Target builds invoke its retailOS
+/// entry; host tests replace this seam to observe the exact payload forwarded.
+pub static mut NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = DEFAULT_NESTED_LITI_CLASS_CHECK;
+
+/// tagged_record_payload_is_liti_class — original: `FUN_0826fc14` @
+/// 0x0826fc14 (24 bytes).
+///
+/// Raw ARM extent is exactly 0x0826fc14..0x0826fc2c: the next separately
+/// linked function, `tagged_record_init`, starts at 0x0826fc2c. Decoding
+/// every ARM B/BL word in osos.dec finds nine incoming direct calls, all
+/// unconditional plain `bl`; there are no predicated BL forms or plain-B tail
+/// callers.
+///
+/// Algorithm: load the target-width payload word at record +0x04, call the
+/// unported nested `'liti'` class check at 0x08057bdc with that value, then
+/// return strict 0 or 1 according to whether the callee result is zero. The
+/// callee itself NULL-guards the payload and follows its +0x08 field to the
+/// ported `'liti'` tag predicate; this wrapper deliberately makes no
+/// pre-call NULL check. The record and nested-object identities beyond those
+/// observed fields are unknown, so no stronger type claim is made.
+///
+/// Deliberate deviation: the fixed retailOS call is represented by the
+/// replaceable `NESTED_LITI_CLASS_CHECK` seam so host tests can observe its
+/// argument; target builds default that seam to 0x08057bdc. The original
+/// direct `bl` therefore becomes an indirect target-default call.
+///
+/// # Safety
+///
+/// `record` must be non-NULL, four-byte aligned, and readable through +0x07.
+/// Its payload is a target-width pointer expected by the unported callee.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_record_payload_is_liti_class")]
+pub unsafe extern "C" fn tagged_record_payload_is_liti_class(record: *const TaggedRecord) -> u32 {
+    let payload = unsafe { core::ptr::addr_of!((*record).payload).read() };
+    let check = unsafe {
+        core::ptr::addr_of_mut!(NESTED_LITI_CLASS_CHECK).read_volatile()
+    };
+    u32::from(unsafe { check(payload as usize as *const u8) } != 0)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
+
+    const FIXTURE_LEN: usize = 0x1000;
+    const RECORD_OFFSET: usize = 0x100;
+
+    static PAYLOAD_CHECK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static PAYLOAD_CHECK_FIXTURE: std::sync::LazyLock<Option<usize>> = std::sync::LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::TAGGED_RECORD_PAYLOAD_LITI_CLASS_CHECK,
+            FIXTURE_LEN,
+        )
+        .map(|pointer| pointer as usize)
+    });
+    static mut CALLEE_RESULT: u32 = 0;
+    static mut FORWARDED_PAYLOAD: usize = 0;
+
+    unsafe extern "C" fn record_nested_liti_class_check(target: *const u8) -> u32 {
+        unsafe {
+            FORWARDED_PAYLOAD = target as usize;
+            CALLEE_RESULT
+        }
+    }
+
+    struct CheckSeamRestore(NestedLitiClassCheck);
+
+    impl Drop for CheckSeamRestore {
+        fn drop(&mut self) {
+            unsafe {
+                NESTED_LITI_CLASS_CHECK = self.0;
+            }
+        }
+    }
+
+    fn mapped_record(payload: u32) -> Option<*mut TaggedRecord> {
+        let base = (*PAYLOAD_CHECK_FIXTURE)? as *mut u8;
+        unsafe {
+            core::ptr::write_bytes(base, 0, FIXTURE_LEN);
+            let record = base.add(RECORD_OFFSET).cast::<TaggedRecord>();
+            (*record).descriptor = 0xfeed_face;
+            (*record).payload = payload;
+            (*record).flag = 0xa5;
+            Some(record)
+        }
+    }
+
+    #[test]
+    fn forwards_target_width_payload_and_normalizes_nonzero_result() {
+        let _guard = PAYLOAD_CHECK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(record) = mapped_record(0x1234_5678) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx::tagged_record"));
+            return;
+        };
+
+        unsafe {
+            let _restore = CheckSeamRestore(NESTED_LITI_CLASS_CHECK);
+            NESTED_LITI_CLASS_CHECK = record_nested_liti_class_check;
+            CALLEE_RESULT = 0xfeed_face;
+            FORWARDED_PAYLOAD = 0;
+
+            assert_eq!(tagged_record_payload_is_liti_class(record), 1);
+            assert_eq!(FORWARDED_PAYLOAD, 0x1234_5678);
+        }
+    }
+
+    #[test]
+    fn null_payload_is_still_forwarded_to_callee() {
+        let _guard = PAYLOAD_CHECK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(record) = mapped_record(0) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx::tagged_record"));
+            return;
+        };
+
+        unsafe {
+            let _restore = CheckSeamRestore(NESTED_LITI_CLASS_CHECK);
+            NESTED_LITI_CLASS_CHECK = record_nested_liti_class_check;
+            CALLEE_RESULT = 0;
+            FORWARDED_PAYLOAD = usize::MAX;
+
+            assert_eq!(tagged_record_payload_is_liti_class(record), 0);
+            assert_eq!(FORWARDED_PAYLOAD, 0);
+        }
+    }
 
     #[test]
     fn installs_descriptor_payload_and_low_flag_byte_in_store_order() {
