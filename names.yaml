@@ -63855,3 +63855,30 @@ functions:
       preserving no NULL guard and no returned status. Its own text section
       prevents LLVM from folding it with ata_report_error, which has the
       same store but returns 0xffffffff.
+  - address: 0x082bcb40
+    ghidra: FUN_082bcb40
+    name: storage_device_operations_get
+    size: 36
+    sig: "u32 *storage_device_operations_get(void)"
+    module: drivers/storage_device_operations
+    status: ported
+    renames:
+      DAT_082bcb5c: storage_device_operations_guard
+      DAT_082bcb60: storage_device_operations
+      FUN_082bca98: initialize_storage_device_operations
+    notes: >-
+      Raw osos.dec fixes the true 36-byte extent at 0x082bcb40..0x082bcb63:
+      seven instruction words through pop {r4,pc} at 0x082bcb58 plus the two
+      literal-pool words at 0x082bcb5c and 0x082bcb60; 0x082bcb64 is the
+      next separately entered function. Ghidra's 28-byte extent omits that
+      pool. It volatile-loads the guard at 0x08a09f70, calls 0x082bca98 only
+      when the whole guard word is zero, then returns the fixed four-word
+      table at 0x08ae54f0. The initializer fills that table with raw function
+      entries 0x080c8b68, 0x080cc700, 0x080cea0c, and 0x080c17e0; their
+      identities are intentionally not inferred here. Decoding every ARM B/BL
+      word finds exactly nine direct inbound calls, all unconditional bl:
+      0x080c88b8, 0x080d9938, 0x080dd2ec, 0x080e3b18, 0x082bd074,
+      0x082bd0d8, 0x082bd17c, 0x082bd238, and 0x082bd33c. There are no
+      predicated callers or tail branches. Firmware builds retain the original
+      RAM addresses and direct initializer call; host builds model those
+      runtime objects and inject the unported initializer through a seam.
