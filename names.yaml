@@ -5937,6 +5937,36 @@ functions:
       slot, not the 8-byte ldr pc veneer - expected, same family
       pattern as the other 31 wrappers.
 
+  - address: 0x08037e50
+    ghidra: thunk_EXT_FUN_2200408c
+    name: task_unlock
+    size: 8
+    sig: "u64 task_unlock(u32 task_id)"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      thunk_EXT_FUN_2200408c: task_unlock
+      DAT_08037e54: task_unlock_rom_target
+    notes: >-
+      Raw words prove the full veneer is e51ff004 (ldr pc,[pc,#-4]) at
+      0x08037e50 plus target literal 0x2200408c at 0x08037e54; Ghidra's
+      reported 4-byte extent drops that literal, and sibling veneer
+      0x08037e58 begins immediately after. It tail-dispatches the task id in
+      r0 to the IRAM mirror 0x0800408c, whose 32-byte service-3 gateway body
+      is already ported as heap/task_unlock_gateway.rs
+      task_unlock_gateway: it writes {3, uninitialized_output, task_id},
+      dispatches it, then returns the post-dispatch first two words in r0:r1
+      as a u64. Every ARM B/BL word in osos.dec was decoded: 10
+      unconditional bl callers at 0x080564c8, 0x080564fc, 0x0806450c,
+      0x08084c7c, 0x0809c7c8, 0x080c9c78, 0x080e43d4, 0x080e43f4,
+      0x08393690, and 0x08393730; zero predicated calls, tail branches, and
+      data-word references. Therefore the caller handles any sentinel and
+      the veneer has no guard. The port deliberately calls the already ported
+      mirror body, not the target-only ldr-pc literal; it exposes only the
+      documented r0 task id and r0:r1 return. Host test verifies delegation,
+      both result words, zero, and the 0xffffffff id. match.py has the
+      expected direct-call-vs-literal-veneer structural difference.
+
   - address: 0x08037e88
     ghidra: thunk_EXT_FUN_22003d44
     name: rom_task_delay
