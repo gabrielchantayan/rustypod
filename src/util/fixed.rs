@@ -483,6 +483,35 @@ pub extern "C" fn fixed28_lerp(start: i32, end: i32, factor: i32) -> i32 {
     start.wrapping_add(rounded)
 }
 
+/// fixed16_round_to_integer — original: `FUN_0804ea74` @ 0x0804ea74
+/// (28 bytes).
+///
+/// Rounds a signed Q16.16 value to its nearest integral Q16.16 multiple.
+/// Positive inputs add `0x8000`, clear the fractional word, and retain that
+/// result. Negative inputs subtract from `0x8000`, clear the fractional word,
+/// then negate it. Consequently values with a fractional part exactly 0.5
+/// round away from zero. Every addition, subtraction, and negation wraps at
+/// 32 bits as the original ARM registers do; e.g. both `i32::MAX` and
+/// `i32::MIN` produce `i32::MIN`.
+///
+/// Raw `osos.dec` confirms the exact extent 0x0804ea74..0x0804ea8c: `cmp
+/// r0,#0` starts this leaf and the following `cmp r0,#0` at 0x0804ea90 starts
+/// its separately linked sibling. Decoding every ARM B/BL-immediate word
+/// finds exactly nine direct inbound calls, all unconditional and
+/// unpredicated `bl`: 0x0809f4c0, 0x080ae484, 0x080ae498, 0x080ae4ac,
+/// 0x080ae4bc, 0x080b81d4, 0x080b81e0, 0x080b81ec, and 0x080b81f8. It is an
+/// unguarded leaf with no deliberate Rust deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_round_to_integer")]
+pub extern "C" fn fixed16_round_to_integer(value: i32) -> i32 {
+    if value < 0 {
+        (0x8000_i32.wrapping_sub(value) & !0xffff_i32).wrapping_neg()
+    } else {
+        value.wrapping_add(0x8000) & !0xffff_i32
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1370,5 +1399,35 @@ mod tests {
         assert_eq!(fixed28_lerp(0, 1, HALF), 1);
         assert_eq!(fixed28_lerp(1, 0, HALF), 1);
         assert_eq!(fixed28_lerp(i32::MAX, i32::MIN, ONE), i32::MIN);
+    }
+
+    #[test]
+    fn fixed16_round_to_integer_matches_arm_register_arithmetic() {
+        fn reference(value: i32) -> i32 {
+            if value < 0 {
+                (((0x8000_u32.wrapping_sub(value as u32)) & 0xffff_0000) as i32).wrapping_neg()
+            } else {
+                (value as u32).wrapping_add(0x8000) as i32 & !0xffff_i32
+            }
+        }
+
+        let values = [
+            i32::MIN, -0x7fff_ffff, -0x0001_8001, -0x0001_8000, -0x0001_7fff,
+            -0x0000_8001, -0x0000_8000, -1, 0, 1, 0x0000_7fff, 0x0000_8000,
+            0x0000_8001, 0x0001_7fff, 0x0001_8000, i32::MAX,
+        ];
+        for &value in &values {
+            assert_eq!(fixed16_round_to_integer(value), reference(value), "value={value:#x}");
+        }
+    }
+
+    #[test]
+    fn fixed16_round_to_integer_rounds_half_away_from_zero_and_wraps() {
+        assert_eq!(fixed16_round_to_integer(0x0000_7fff), 0);
+        assert_eq!(fixed16_round_to_integer(0x0000_8000), ONE);
+        assert_eq!(fixed16_round_to_integer(-0x0000_7fff), 0);
+        assert_eq!(fixed16_round_to_integer(-0x0000_8000), -ONE);
+        assert_eq!(fixed16_round_to_integer(i32::MAX), i32::MIN);
+        assert_eq!(fixed16_round_to_integer(i32::MIN), i32::MIN);
     }
 }
