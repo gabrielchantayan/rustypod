@@ -187,6 +187,131 @@ pub unsafe extern "C" fn video_engine_set_property(command: u32, key: u32, value
     property_dispatch(engine, command, key, value);
 }
 
+/// ABI of the frame-operation callback selected by the video engine.
+pub type VideoFrameOperationDispatch =
+    unsafe extern "C" fn(context: *mut u8, frame: *mut u8, operation: u32);
+
+/// Host-width table used when the engine selects a callback indirectly.
+///
+/// The target table consists of 32-bit callback words.  Native function
+/// pointers are wider on the host, so this representation preserves table-slot
+/// roles rather than target byte offsets.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct VideoFrameOperationDispatchTable {
+    pub entries: [VideoFrameOperationDispatch; 2],
+}
+
+/// Host-width prefix of the video-engine fields this operation needs.
+///
+/// On target the two words at `+0xa94` and `+0xa98` are `u32`.  The first is
+/// either a direct callback word or an indirect-table byte offset, selected by
+/// the low tag bit of the second.  The host representation widens the callback
+/// word while retaining its two roles and the signed-half context calculation.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct VideoFrameOperationEngine {
+    /// The table pointer read from the selected dispatch context in indirect mode.
+    pub dispatch_table: *const VideoFrameOperationDispatchTable,
+    _before_dispatch_target: [u8; 0xa94 - core::mem::size_of::<usize>()],
+    /// Direct callback, or byte offset into `dispatch_table` with low bits ignored.
+    pub dispatch_target_or_table_offset: usize,
+    /// Low bit selects indirect mode; arithmetic half is added to this engine.
+    pub dispatch_selector: i32,
+}
+/// Target-width prefix of a video frame's operation-state word.
+#[repr(C)]
+struct VideoFrameOperationState {
+    _before_pending_operations: [u8; 0x90],
+    pending_operations: u32,
+}
+
+/// Reads the operation callback selection and invokes its resulting callback.
+///
+/// `video_frame_dispatch_operation` — original: `FUN_0824f1e8` @
+/// **0x0824f1e8** (96 bytes, `0x0824f1e8..0x0824f248`; raw decode confirms
+/// the next separately linked function begins at `0x0824f248`). A complete
+/// decode of every ARM `B`/`BL` immediate in `osos.dec` finds **9 direct
+/// `bl` call sites, all unconditional**: 0x0824d720, 0x0824d768,
+/// 0x0824dc00, 0x0824dc1c, 0x0824dc2c, 0x0824dc3c, 0x08251b94,
+/// 0x08251bb0, and 0x08251bc0. No immediate `blx`, predicated call, direct
+/// tail branch, or aligned data word targets this entry.
+///
+/// If frame `+0x90` already shares either low operation bit with `operation`,
+/// it returns without dispatching. Otherwise it computes the callback context
+/// as `engine + (dispatch_selector as i32 >> 1)`. A clear selector tag calls
+/// the callback word at engine `+0xa94`; a set tag treats that word (with its
+/// low two bits cleared) as an offset into the table pointed to by the context's
+/// first word. It re-reads frame `+0x90` after the callback, then ORs
+/// `operation & 3` into that live value. The callback gets the complete,
+/// unmasked operation word.
+///
+/// # Safety
+///
+/// `engine`, `frame`, and every selected context/table/callback must meet the
+/// unguarded retailOS pointer contract. A callback may mutate either object;
+/// its frame `+0x90` mutation is preserved because the final OR starts from
+/// the post-callback reload.
+///
+/// # Deliberate deviation
+///
+/// Target builds read exactly the recovered 32-bit fields. Host builds use
+/// [`VideoFrameOperationEngine`] and
+/// [`VideoFrameOperationDispatchTable`] so native-width callback pointers are
+/// not truncated. A target byte offset is converted to a table word index on
+/// the host; the named fields retain the target's callback-selection roles and
+/// signed-half context rule.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_frame_dispatch_operation(
+    engine: *mut u8,
+    frame: *mut u8,
+    operation: u32,
+) {
+    let frame_state = frame.cast::<VideoFrameOperationState>();
+    let pending_operations = core::ptr::read_volatile(core::ptr::addr_of!((*frame_state).pending_operations));
+    if pending_operations & operation & 3 != 0 {
+        return;
+    }
+
+    #[cfg(target_arch = "arm")]
+    {
+        let dispatch_selector =
+            core::ptr::read_volatile(engine.byte_add(0xa98).cast::<u32>());
+        let context = engine.byte_offset((dispatch_selector as i32 >> 1) as isize);
+        let callback_address = if dispatch_selector & 1 != 0 {
+            let table_address = core::ptr::read_volatile(context.cast::<u32>());
+            let table_offset =
+                core::ptr::read_volatile(engine.byte_add(0xa94).cast::<u32>()) & !3;
+            core::ptr::read_volatile((table_address as *const u8).byte_add(table_offset as usize).cast::<u32>())
+        } else {
+            core::ptr::read_volatile(engine.byte_add(0xa94).cast::<u32>())
+        };
+        let callback: VideoFrameOperationDispatch = core::mem::transmute(callback_address as usize);
+        callback(context, frame, operation);
+    }
+
+    #[cfg(not(target_arch = "arm"))]
+    {
+        let host_engine = &*engine.cast::<VideoFrameOperationEngine>();
+        let context = engine.byte_offset((host_engine.dispatch_selector >> 1) as isize);
+        let callback = if host_engine.dispatch_selector & 1 != 0 {
+            let table = core::ptr::read_volatile(context.cast::<*const VideoFrameOperationDispatchTable>());
+            let table_index = (host_engine.dispatch_target_or_table_offset & !3) / 4;
+            core::ptr::read_volatile(core::ptr::addr_of!((*table).entries[table_index]))
+        } else {
+            core::mem::transmute(host_engine.dispatch_target_or_table_offset)
+        };
+        callback(context, frame, operation);
+    }
+
+    let pending_operations = core::ptr::read_volatile(core::ptr::addr_of!((*frame_state).pending_operations));
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*frame_state).pending_operations),
+        pending_operations | (operation & 3),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +458,173 @@ mod tests {
             *addr_of_mut!(RECORDED) = None;
             video_engine_set_property(0xde1, 0x2800, 0x2601);
             assert_eq!(recorded(), None, "teardown stops the dispatch");
+        }
+    }
+
+    // --- video_frame_dispatch_operation (FUN_0824f1e8) ---
+
+    static mut FRAME_OPERATION_RECORDED: Option<(*mut u8, *mut u8, u32)> = None;
+
+    unsafe extern "C" fn record_frame_operation(
+        context: *mut u8,
+        frame: *mut u8,
+        operation: u32,
+    ) {
+        *addr_of_mut!(FRAME_OPERATION_RECORDED) = Some((context, frame, operation));
+    }
+
+    unsafe extern "C" fn replace_pending_operations(
+        _context: *mut u8,
+        frame: *mut u8,
+        _operation: u32,
+    ) {
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*frame.cast::<VideoFrameOperationState>()).pending_operations),
+            0x80,
+        );
+    }
+
+    unsafe extern "C" fn unexpected_frame_operation(
+        _context: *mut u8,
+        _frame: *mut u8,
+        _operation: u32,
+    ) {
+        panic!("masked table offset selected the wrong operation callback");
+    }
+
+    fn operation_frame(pending_operations: u32) -> VideoFrameOperationState {
+        VideoFrameOperationState {
+            _before_pending_operations: [0; 0x90],
+            pending_operations,
+        }
+    }
+
+    #[test]
+    fn frame_operation_dispatches_direct_callback_and_latches_low_operation_bits() {
+        let _guard = LOCK.lock();
+        let mut frame = operation_frame(2);
+        let mut engine = VideoFrameOperationEngine {
+            dispatch_table: ptr::null(),
+            _before_dispatch_target: [0; 0xa94 - core::mem::size_of::<usize>()],
+            dispatch_target_or_table_offset: record_frame_operation as usize,
+            dispatch_selector: 0,
+        };
+
+        unsafe {
+            *addr_of_mut!(FRAME_OPERATION_RECORDED) = None;
+            video_frame_dispatch_operation(
+                (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                (&mut frame as *mut VideoFrameOperationState).cast(),
+                0x8000_0001,
+            );
+            assert_eq!(
+                FRAME_OPERATION_RECORDED,
+                Some((
+                    (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                    (&mut frame as *mut VideoFrameOperationState).cast(),
+                    0x8000_0001,
+                )),
+                "the callback receives context/frame and the full operation word"
+            );
+            assert_eq!(frame.pending_operations, 3, "only low operation bits latch");
+        }
+    }
+
+    #[test]
+    fn frame_operation_latches_against_callback_updated_pending_state() {
+        let _guard = LOCK.lock();
+        let mut frame = operation_frame(0);
+        let mut engine = VideoFrameOperationEngine {
+            dispatch_table: ptr::null(),
+            _before_dispatch_target: [0; 0xa94 - core::mem::size_of::<usize>()],
+            dispatch_target_or_table_offset: replace_pending_operations as usize,
+            dispatch_selector: 0,
+        };
+
+        unsafe {
+            video_frame_dispatch_operation(
+                (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                (&mut frame as *mut VideoFrameOperationState).cast(),
+                1,
+            );
+            assert_eq!(
+                frame.pending_operations, 0x81,
+                "the final latch reloads the callback-mutated pending word"
+            );
+        }
+    }
+
+    #[test]
+    fn frame_operation_uses_tagged_table_offset_and_skips_an_already_pending_operation() {
+        let _guard = LOCK.lock();
+        let table = VideoFrameOperationDispatchTable {
+            entries: [unexpected_frame_operation, record_frame_operation],
+        };
+        let mut engine = VideoFrameOperationEngine {
+            dispatch_table: &table,
+            _before_dispatch_target: [0; 0xa94 - core::mem::size_of::<usize>()],
+            dispatch_target_or_table_offset: 7,
+            dispatch_selector: 1,
+        };
+        let mut frame = operation_frame(0x40);
+
+        unsafe {
+            *addr_of_mut!(FRAME_OPERATION_RECORDED) = None;
+            video_frame_dispatch_operation(
+                (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                (&mut frame as *mut VideoFrameOperationState).cast(),
+                2,
+            );
+            assert_eq!(
+                FRAME_OPERATION_RECORDED,
+                Some((
+                    (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                    (&mut frame as *mut VideoFrameOperationState).cast(),
+                    2,
+                )),
+                "tagged indirect mode masks low table-offset bits"
+            );
+            assert_eq!(frame.pending_operations, 0x42);
+
+            *addr_of_mut!(FRAME_OPERATION_RECORDED) = None;
+            video_frame_dispatch_operation(
+                (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                (&mut frame as *mut VideoFrameOperationState).cast(),
+                2,
+            );
+            assert_eq!(
+                FRAME_OPERATION_RECORDED,
+                None,
+                "an overlapping low pending bit suppresses the callback"
+            );
+            assert_eq!(frame.pending_operations, 0x42);
+        }
+    }
+
+    #[test]
+    fn zero_operation_still_dispatches_without_changing_pending_bits() {
+        let _guard = LOCK.lock();
+        let mut frame = operation_frame(0xffff_fffc);
+        let mut engine = VideoFrameOperationEngine {
+            dispatch_table: ptr::null(),
+            _before_dispatch_target: [0; 0xa94 - core::mem::size_of::<usize>()],
+            dispatch_target_or_table_offset: record_frame_operation as usize,
+            dispatch_selector: 0,
+        };
+
+        unsafe {
+            *addr_of_mut!(FRAME_OPERATION_RECORDED) = None;
+            video_frame_dispatch_operation(
+                (&mut engine as *mut VideoFrameOperationEngine).cast(),
+                (&mut frame as *mut VideoFrameOperationState).cast(),
+                0,
+            );
+            assert_eq!(
+                FRAME_OPERATION_RECORDED.map(|record| record.2),
+                Some(0),
+                "zero has no low pending bits, so it is dispatched"
+            );
+            assert_eq!(frame.pending_operations, 0xffff_fffc);
         }
     }
 }
