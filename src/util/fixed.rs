@@ -6,6 +6,7 @@
 //! reciprocal body @ 0x080377e4 that it tail-branches to, the float entry
 //! point @ 0x082577bc that feeds Q16.16 values in from f32 literals, and a
 //! four-component Q16.16 unit-interval clamp @ 0x082485d8.
+//! - `fixed28_lerp` — `FUN_08242d60` @ 0x08242d60 (48 bytes; 9 call sites).
 //!
 //! Four pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
 //! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
@@ -430,6 +431,31 @@ pub unsafe extern "C" fn fixed16_clamp_unit4(destination: *mut i32, source: *con
     destination.add(2).write(clamped2);
     destination.add(3).write(clamped3);
 }
+
+/// fixed28_lerp — original: `FUN_08242d60` @ 0x08242d60 (48 bytes).
+///
+/// Linearly interpolates signed 32-bit `start` toward `end` by Q4.28
+/// `factor`: `start + round_half_up((end - start) * factor / 2^28)`.
+/// The `sub`, final `add`, and narrowed shifted product all wrap modulo
+/// 2^32, matching the ARM registers; neither inputs nor result are clamped.
+///
+/// Raw `osos.dec` confirms the exact 48-byte extent
+/// 0x08242d60..0x08242d8c: `push {r4,lr}` at the entry through
+/// `pop {r4,pc}`, followed by the separate `ldr r2,[r0]` body at
+/// 0x08242d90. Decoding every ARM B/BL immediate finds exactly nine inbound
+/// direct `bl` calls, all unconditional and unpredicated: 0x08242cd8,
+/// 0x08242cf0, 0x08242d08, 0x08242d20, 0x08242d44, 0x08249874,
+/// 0x08249888, 0x0824989c, and 0x082498b0. The unguarded leaf calls no
+/// other routine. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed28_lerp")]
+pub extern "C" fn fixed28_lerp(start: i32, end: i32, factor: i32) -> i32 {
+    let delta = end.wrapping_sub(start);
+    let rounded = ((delta as i64).wrapping_mul(factor as i64).wrapping_add(0x0800_0000) >> 28) as i32;
+    start.wrapping_add(rounded)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1257,5 +1283,39 @@ mod tests {
         }
 
         assert_eq!(words, [0x55, i32::MIN, 0, 0, ONE, ONE]);
+    }
+    #[test]
+    fn fixed28_lerp_matches_register_arithmetic_on_edges() {
+        fn reference(start: i32, end: i32, factor: i32) -> i32 {
+            let delta = end.wrapping_sub(start);
+            let product = (delta as i64).wrapping_mul(factor as i64) as u64;
+            let rounded = product.wrapping_add(0x0800_0000);
+            let lo = rounded as u32;
+            let hi = (rounded >> 32) as u32;
+            start.wrapping_add(((lo >> 28) | (hi << 4)) as i32)
+        }
+
+        let values = [i32::MIN, -0x4000_0000, -1, 0, 1, 0x4000_0000, i32::MAX];
+        let factors = [i32::MIN, -1, 0, 1, 0x0800_0000, 0x1000_0000, i32::MAX];
+        for &start in &values {
+            for &end in &values {
+                for &factor in &factors {
+                    assert_eq!(fixed28_lerp(start, end, factor), reference(start, end, factor),
+                        "start={start:#x} end={end:#x} factor={factor:#x}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed28_lerp_rounds_half_up_and_wraps() {
+        const ONE: i32 = 0x1000_0000;
+        const HALF: i32 = ONE / 2;
+
+        assert_eq!(fixed28_lerp(11, 19, 0), 11);
+        assert_eq!(fixed28_lerp(11, 19, ONE), 19);
+        assert_eq!(fixed28_lerp(0, 1, HALF), 1);
+        assert_eq!(fixed28_lerp(1, 0, HALF), 1);
+        assert_eq!(fixed28_lerp(i32::MAX, i32::MIN, ONE), i32::MIN);
     }
 }

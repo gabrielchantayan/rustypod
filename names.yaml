@@ -64398,3 +64398,37 @@ functions:
       data word containing the entry, so it is not dispatched virtually. No
       deliberate deviations. Host tests cover signed extremes, both Q16.16
       bounds, values immediately outside them, and an overlapping destination.
+
+  - address: 0x08242d60
+    ghidra: FUN_08242d60
+    name: fixed28_lerp
+    size: 48
+    sig: "i32 fixed28_lerp(i32 start, i32 end, i32 factor_q4_28)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0/r4: start
+      param_2/r1: end
+      param_3/r2: factor_q4_28
+      r12: product_low
+      r1: product_high
+    notes: >-
+      Raw ARM confirms the exact 48-byte extent, from push {r4,lr} at
+      0x08242d60 through pop {r4,pc} at 0x08242d8c; the ldr r2,[r0] at
+      0x08242d90 begins the separately linked next body. It forms the
+      wrapped signed delta end - start, multiplies it by the Q4.28 factor
+      with smull, adds 0x08000000 with adds/adc carry propagation, extracts
+      bits [59:28] through lsr#28/lsl#4/orr, and wraps that rounded result
+      into start. This is round-half-up (toward positive infinity), including
+      negative half ties, with no saturation or input guard. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly nine inbound direct bl
+      calls, all plain unconditional and none predicated: 0x08242cd8,
+      0x08242cf0, 0x08242d08, 0x08242d20, 0x08242d44, 0x08249874,
+      0x08249888, 0x0824989c, and 0x082498b0. It is an unguarded leaf.
+      No deliberate Rust deviations. Host tests compare the literal ARM
+      register funnel across signed extremes and Q4.28 edge factors, then
+      prove endpoint identity, positive/negative half ties, and final-add
+      wrap. match.py structural review finds the same wrapped subtraction,
+      signed widening multiply, half-ulp bias, Q4.28 funnel, and final
+      wrapping add; LLVM contracts adds/adc into smlal and uses fp rather
+      than r4 for its frame.
