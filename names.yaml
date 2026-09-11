@@ -61574,3 +61574,42 @@ functions:
       address on target and a host recorder. Host outer-mutex calls are no-ops
       because the target's 32-bit mutex at +0x74 is misaligned for Rust's
       64-bit-host Mutex representation.
+
+  # --- TTrackExtrasCache fixed-static accessor ---
+  - address: 0x081ba3ac
+    ghidra: FUN_081ba3ac
+    name: track_extras_cache_get
+    size: 192
+    sig: "TTrackExtrasCache *track_extras_cache_get(void)"
+    module: app/track_extras_cache
+    status: ported
+    renames:
+      DAT_081ba46c: track_extras_cache_guard (0x089cb1ac)
+      DAT_081ba470: track_extras_cache (0x08a77828)
+      DAT_081ba474: dso_handle (0x089ca09c)
+      DAT_081ba478: invalid_shutdown_target (0x081af920)
+      FUN_081ba710: track_extras_cache_constructor
+      "track_extras_cache+0x38": registration_node
+      "track_extras_cache+0x44": client_handle_slot
+      "track_extras_cache+0x48": cached_resource
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent: 44 instruction words
+      from 0x081ba3ac through the return at 0x081ba468, followed by the four
+      literal-pool words at 0x081ba46c..0x081ba478; the distinct next function
+      starts at 0x081ba47c. Whole-image decoding of every ARM B/BL immediate
+      found exactly ten inbound transfers, all unconditional plain bl at
+      0x08066d40, 0x08066d4c, 0x08068f5c, 0x08084e40, 0x08114c80,
+      0x08116378, 0x0817c928, 0x081df040, 0x08211444, and 0x08212124; there
+      are no predicated forms, tail branches, or aligned data-word references.
+      The accessor guard-initializes the fixed TTrackExtrasCache, registers its
+      constructor result, then when the two-level client slot at +0x44 resolves
+      NULL registers the +0x38 node, lazily caches a 24-byte resource at +0x48,
+      and attaches the cache to the root returned by 0x0814b460. Existing
+      cxa_guard, cxa_atexit, cxa_guard_release, operator_new, block_manager_get,
+      handle_deref_or_null, shared_cell_release_direct, and the existing
+      MANAGER_CLIENT_REGISTER seam are reused. The unresolved direct targets
+      0x081ba710, 0x083b51f4, 0x081f7450, 0x0814b460, and 0x08124af4 use
+      volatile fixed-address target calls and host recorders; no wider callee
+      identity is claimed. Literal 0x081af920 is demonstrably inside an extant
+      ARM frame (its first word is add sl, sp, #44), not a function entry, so
+      the port intentionally registers a no-op shutdown handler instead.
