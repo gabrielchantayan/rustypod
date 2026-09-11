@@ -47,14 +47,22 @@ pub struct SqliteIoMethods {
     /// `+0x04`: `xClose(file)`; dispatched by `sqlite_os_close`
     /// (`crate::sqlite::os_close`).
     pub close: SqliteCloseFn,
-    /// `+0x08`: `xRead`, not called by either ported wrapper.
-    pub unresolved_08: usize,
+    /// `+0x08`: `xRead(file, buffer, amount, offset)`.
+    pub read: SqliteReadFn,
     /// `+0x0c`: `xWrite(file, buffer, amount, offset)`.
     pub write: SqliteWriteFn,
 }
 
 /// ABI of SQLite's `sqlite3_io_methods::xClose` entry.
 pub type SqliteCloseFn = unsafe extern "C" fn(*mut SqliteFile) -> i32;
+
+/// ABI of SQLite's `sqlite3_io_methods::xRead` entry.
+pub type SqliteReadFn = unsafe extern "C" fn(
+    *mut SqliteFile,
+    *mut u8,
+    u32,
+    i64,
+) -> i32;
 
 /// ABI of SQLite's `sqlite3_io_methods::xWrite` entry.
 pub type SqliteWriteFn = unsafe extern "C" fn(
@@ -66,6 +74,9 @@ pub type SqliteWriteFn = unsafe extern "C" fn(
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x04] = [0; core::mem::offset_of!(SqliteIoMethods, close)];
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(SqliteIoMethods, read)];
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(SqliteIoMethods, write)];
@@ -136,6 +147,15 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_read(
+        _file: *mut SqliteFile,
+        _buffer: *mut u8,
+        _amount: u32,
+        _offset: i64,
+    ) -> i32 {
+        0
+    }
+
     #[test]
     fn forwards_buffer_amount_and_aligned_i64_offset_to_xwrite() {
         let _lock = LOCK.lock();
@@ -143,7 +163,7 @@ mod tests {
         let methods = SqliteIoMethods {
             version: 1,
             close: unused_close,
-            unresolved_08: 0,
+            read: unused_read,
             write: recording_write,
         };
         let mut file = SqliteFile { methods: &methods };
