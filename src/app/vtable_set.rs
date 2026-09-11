@@ -4598,7 +4598,7 @@ pub(crate) mod tests {
     pub(crate) static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Restores both seams on drop, even when a test panics.
-    struct SlotGuard;
+    pub(crate) struct SlotGuard;
     impl Drop for SlotGuard {
         fn drop(&mut self) {
             unsafe {

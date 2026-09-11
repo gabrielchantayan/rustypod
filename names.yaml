@@ -61729,3 +61729,39 @@ functions:
       word with a crate static. The dependent track_extras_cache port now calls
       this function directly instead of retaining its fixed-address seam.
       match.py is structural review only.
+
+  # --- UI first collection-item bounds accessor ---
+  - address: 0x08146c94
+    ghidra: FUN_08146c94
+    name: ui_element_copy_first_collection_item_bounds
+    size: 96
+    sig: "void ui_element_copy_first_collection_item_bounds(void *element, Rect *out)"
+    module: ui/first_collection_item_bounds
+    status: ported
+    renames:
+      param_1: element
+      param_2: out
+      local_20: first_collection_item
+      auStack_1c: iterator_state
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent:
+      0x08146c94..0x08146cf4, with the separately linked next function
+      beginning at 0x08146cf4. Whole-image decoding of every ARM B/BL
+      immediate finds exactly ten inbound branches, all unconditional plain
+      bl at 0x08146a58, 0x08146bd4, 0x0815c2ec, 0x0815c5ac, 0x08187ebc,
+      0x08187f3c, 0x081b8428, 0x081b8668, 0x081b87f0, and 0x081b890c;
+      there are no predicated calls or tail-b transfers. The function clears
+      all four output rectangle words, constructs the already-ported
+      iterator_state at element+0xa8 with start -2, advances it once, then
+      copies item+0x80..+0x8c to out only when the yielded pointer is nonzero,
+      and always releases the iterator. No dispatch seam was added: all three
+      direct callees are already ported in app/vtable_set. Deliberate safety
+      deviation: raw ARM leaves the yielded-item stack word uninitialized
+      before iterator_state_next; if an empty iterator does not write its out
+      pointer the subsequent non-NULL test is indeterminate. The Rust port
+      initializes it to NULL, preserving the cleared rectangle for that empty
+      case without undefined behavior. Host tests cover a non-NULL item's four
+      signed bounds words and an empty traversal that writes no item pointer.

@@ -363,6 +363,10 @@ pub mod hints {
     // raw-u32 node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const FILE_RECORD_TEARDOWN: usize = 0xb600_0000;
+    // 0xad00_0000: dedicated to ui/first_collection_item_bounds' raw-u32
+    // collection-owner fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const UI_FIRST_COLLECTION_ITEM_BOUNDS: usize = 0xad00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
