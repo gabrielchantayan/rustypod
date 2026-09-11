@@ -90,6 +90,7 @@
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{string_object_destroy, StringObject};
 use crate::libc::memcmp::memcmp;
+use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
 use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
 
@@ -2384,6 +2385,49 @@ pub unsafe extern "C" fn vector_pair_copy_into(
     }
     dst
 }
+/// vector_copy_range_elem24 — original: `FUN_083e8ba0` @ 0x083e8ba0
+/// (60 bytes, raw extent 0x083e8ba0..0x083e8bdc; 8 direct `bl` call
+/// sites, all unconditional and none predicated).
+///
+/// Copies the half-open `[first, last)` range of aligned 24-byte vector
+/// records into `output`, advancing both cursors by 24 bytes per record and
+/// returning the resulting output cursor. The ARM loop predicates each
+/// `memcpy` call on `output != NULL`; an initially NULL output skips the
+/// first record only, then advances to the non-NULL address `0x18`.
+///
+/// Deliberate deviation: the raw `bl 0x08037df8` reaches the IRAM memcpy
+/// veneer. This port calls its already-ported [`memcpy_forward_words`] body
+/// through a volatile function pointer so LLVM retains that call rather than
+/// replacing it with an inlined copy; its forward-copy semantics and 24-byte
+/// alignment precondition are identical at this call site.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a range whose length is a multiple of 24.
+/// When `output` is non-NULL, `first` must be readable and `output` writable
+/// for that many bytes; both must be word-aligned. The original has no
+/// overlap guard and performs forward copies. For exactly one record, a NULL
+/// `output` is supported and leaves `first` unread.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_elem24(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            let copy = core::ptr::read_volatile(
+                &(memcpy_forward_words as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+            );
+            copy(output, first, 24);
+        }
+        first = first.wrapping_add(24);
+        output = output.wrapping_add(24);
+    }
+    output
+}
+
 
 
 #[cfg(test)]
@@ -4945,5 +4989,65 @@ mod tests {
 
         assert_eq!(vector.end, 12usize as *mut u8, "NULL end still advances by 12");
         assert!(insert_aux_calls().is_empty(), "end != capacity: no grow");
+    }
+    #[repr(C)]
+    struct GuardedRecordRange {
+        before: u32,
+        records: [u32; 18],
+        after: u32,
+    }
+
+    #[test]
+    fn vector_copy_range_elem24_copies_records_and_returns_end() {
+        let source = [
+            0x0102_0304, 0x1112_1314, 0x2122_2324,
+            0x3132_3334, 0x4142_4344, 0x5152_5354,
+            0x6162_6364, 0x7172_7374, 0x8182_8384,
+            0x9192_9394, 0xa1a2_a3a4, 0xb1b2_b3b4,
+            0xc1c2_c3c4, 0xd1d2_d3d4, 0xe1e2_e3e4,
+            0xf1f2_f3f4, 0x0506_0708, 0x1516_1718,
+        ];
+        let mut destination = GuardedRecordRange {
+            before: 0xaaaa_aaaa,
+            records: [0xdddd_dddd; 18],
+            after: 0xbbbb_bbbb,
+        };
+        let first = source.as_ptr().cast::<u8>();
+        let output = destination.records.as_mut_ptr().cast::<u8>();
+
+        let returned = unsafe {
+            vector_copy_range_elem24(first, first.add(72), output)
+        };
+
+        assert_eq!(destination.records, source, "three complete 24-byte records");
+        assert_eq!(returned, unsafe { output.add(72) }, "output cursor advances per record");
+        assert_eq!(destination.before, 0xaaaa_aaaa, "prefix guard");
+        assert_eq!(destination.after, 0xbbbb_bbbb, "suffix guard");
+    }
+
+    #[test]
+    fn vector_copy_range_elem24_empty_range_leaves_output_unchanged() {
+        let source = [0x0102_0304u32; 6];
+        let mut destination = [0xaaaa_aaaau32; 6];
+        let first = source.as_ptr().cast::<u8>();
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        let returned = unsafe { vector_copy_range_elem24(first, first, output) };
+
+        assert_eq!(returned, output);
+        assert_eq!(destination, [0xaaaa_aaaa; 6]);
+    }
+
+    #[test]
+    fn vector_copy_range_elem24_null_output_skips_one_record_without_reading_source() {
+        let returned = unsafe {
+            vector_copy_range_elem24(
+                core::ptr::null(),
+                24usize as *const u8,
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(returned, 24usize as *mut u8, "skipped record still advances output");
     }
 }
