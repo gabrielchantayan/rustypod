@@ -48225,6 +48225,38 @@ functions:
       predicated or tail branches. The port keeps the u32 ARM return
       register representation and adds no range or format validation.
 
+  # --- packed RGBA4444 cursor reader ---
+  - address: 0x0825ecc8
+    ghidra: FUN_0825ecc8
+    name: rgba4444_cursor_read_rgba8
+    size: 20
+    sig: "void rgba4444_cursor_read_rgba8(u8 *destination, u32 unused, const u16 **source_cursor)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: unused (overwritten by the pixel load)
+      param_3/r2: source_cursor
+      "*source_cursor": packed_pixel_pointer
+      uVar1/r1: packed_rgba4444
+    notes: >-
+      Raw ARM decoding confirms the complete 20-byte wrapper:
+      `ldr r1,[r2]`, `add r3,r1,#2`, `str r3,[r2]`, `ldrh r1,[r1]`, then
+      `b 0x0824bed8`. The preceding sibling ends at 0x0825ecc4 with
+      `pop {r4,pc}`; 0x0825ecdc starts the next distinct cursor reader with
+      `ldr r1,[r2]`; no literal pool is present. The target leaf starts at
+      0x0824bed8, immediately after a predecessor's `bx lr`, and expands
+      packed bits 15..12, 11..8, 7..4, and 3..0 to R/G/B/A bytes by
+      duplicating each nibble. The port preserves the cursor-before-halfword
+      read and RGBA output order while inlining that unported decoded leaf
+      rather than adding a dispatch seam. Binary-scanning every aligned ARM
+      B/BL word in osos.dec finds exactly nine direct unconditional bl call
+      sites (0x0825f348, 0x0825f3fc, 0x0825f4b4, 0x0825f568, 0x0825f61c,
+      0x0825f6d0, 0x082603b8, 0x083b4de0, 0x083b4eb0), with no predicated or
+      direct-tail callers. The original has no NULL, alignment, or bounds
+      guard. Host tests exhaust all 65,536 packed values, retain guards around
+      the four-byte destination, and prove cursor advancement.
+
   # --- packed RGB555A1 cursor reader ---
   - address: 0x0825ecdc
     ghidra: FUN_0825ecdc
