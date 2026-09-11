@@ -120,6 +120,7 @@ pub mod service_handler_availability;
 pub mod service_handler_slot_bit_update;
 pub mod silver_controller;
 pub mod silver_list_table;
+pub mod silver_list_table_resource;
 pub mod stage_progress;
 pub mod singletons;
 pub mod showcase_queue_has_pending_entry;
