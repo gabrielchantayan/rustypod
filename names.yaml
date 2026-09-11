@@ -23423,6 +23423,37 @@ functions:
       stock ordering. The target section prevents linker folding with a
       byte-identical constructor sibling.
 
+  - address: 0x0839f098
+    ghidra: FUN_0839f098
+    name: refcounted_ptr_construct_slot1
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_slot1(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      Raw ARM establishes the exact 104-byte body 0x0839f098..0x0839f100:
+      a separately linked forwarding copy-constructor wrapper begins at
+      0x0839f100. Decoding every ARM B/BL word in osos.dec finds exactly
+      eight direct bl callers, all unconditional: 0x08137614, 0x081377ac,
+      0x081623d0, 0x081c0398, 0x081c03e8, 0x081c0460, 0x081c0520, and
+      0x081c0598. It also has one beq tail transfer at 0x081623ac plus
+      unconditional b transfers at 0x0820bd70, 0x0820bde8, 0x082104a8,
+      0x082104e4, 0x082151c4, 0x0821533c, 0x08223c10, and 0x08223d88;
+      no predicated bl forms or image data words equal the address. This
+      separately linked C++ template copy clears slot first; a non-NULL
+      implementation gets tag-2 operator_new(12) as RefcountedBody
+      { implementation, 1, NULL }, with want_mutex optionally adding a
+      zeroed tag-2 operator_new(8) Mutex initialized by mutex_create before
+      the body is published. It returns slot. The Rust port uses the already
+      ported direct callees and a dedicated target section to preserve this
+      hookable entry; LLVM may inline mutex_create rather than retaining its
+      stock direct bl.
   - address: 0x0839f148
     ghidra: FUN_0839f148
     name: refcounted_ptr_construct_variant

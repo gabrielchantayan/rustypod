@@ -342,6 +342,63 @@ pub unsafe extern "C" fn refcounted_handle_construct_variant(
     slot
 }
 
+/// refcounted_ptr_construct_slot1 — original: `FUN_0839f098` @ 0x0839f098
+/// (104 bytes; 8 direct `bl` call sites, all unconditional: 0x08137614,
+/// 0x081377ac, 0x081623d0, 0x081c0398, 0x081c03e8, 0x081c0460,
+/// 0x081c0520, and 0x081c0598). Decoding every ARM `B`/`BL` word in
+/// `osos.dec` also finds a `beq` tail transfer at 0x081623ac and eight
+/// unconditional tail `b` transfers (0x0820bd70, 0x0820bde8, 0x082104a8,
+/// 0x082104e4, 0x082151c4, 0x0821533c, 0x08223c10, and 0x08223d88);
+/// there are no predicated `bl` forms or image words equal to this address.
+/// Raw instructions end at 0x0839f100, where a separately linked
+/// copy-constructor forwarding wrapper begins.
+///
+/// A separately linked C++ template instantiation for the handle family
+/// released through virtual slot 1: it clears `slot`, then when
+/// `implementation` is non-NULL creates a tag-2 12-byte [`RefcountedBody`]
+/// containing `{ implementation, 1, NULL }`. A nonzero `want_mutex` adds a
+/// tag-2 8-byte zeroed [`Mutex`], stores it in the body, and calls
+/// [`mutex_create`] before publishing the completed body into `slot`.
+/// Returns `slot`; a NULL implementation performs no allocations. Its ARM
+/// sequence is the same template shape as [`refcounted_ptr_construct`] and
+/// the nearby separately linked copies at 0x0839f030 and 0x0839f148.
+///
+/// Deliberate codegen deviation: LLVM may inline the ported
+/// [`mutex_create`] rather than retaining the stock direct `bl`; the
+/// alloc/init/create/publish ordering remains unchanged. The dedicated target
+/// section prevents this hookable template instance from folding into an
+/// otherwise byte-identical sibling.
+///
+/// # Safety
+///
+/// `slot` must be a valid, aligned pointer slot. `implementation` is opaque;
+/// allocation failures are unchecked, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_construct_slot1")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct_slot1(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
+}
+
 /// refcounted_ptr_construct_variant — original: `FUN_0839f148` @
 /// 0x0839f148 (104 bytes; 29 `bl` call sites, all unconditional —
 /// verified by decoding every branch word in osos.dec: no `b` sites, no
@@ -3813,7 +3870,7 @@ mod tests {
             let mut slot = 0xdead_beefusize as *mut RefcountedBody;
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_ptr_construct_tertiary_variant(slot_ptr, 0, 1) };
+            let returned = unsafe { refcounted_ptr_construct_slot1(slot_ptr, 0, 1) };
 
             assert_eq!(returned, slot_ptr, "construct-and-return-this");
             assert!(slot.is_null(), "the unconditional first store wins");
@@ -3829,7 +3886,7 @@ mod tests {
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_ptr_construct_tertiary_variant(slot_ptr, 0x1122_3344, 0) };
+            let returned = unsafe { refcounted_ptr_construct_slot1(slot_ptr, 0x1122_3344, 0) };
 
             assert_eq!(returned, slot_ptr);
             assert_eq!(slot as usize, body_arena);
@@ -3858,7 +3915,7 @@ mod tests {
             let mut slot: *mut RefcountedBody = core::ptr::null_mut();
             let slot_ptr = &mut slot as *mut *mut RefcountedBody;
 
-            let returned = unsafe { refcounted_ptr_construct_tertiary_variant(slot_ptr, 0xaabb_ccdd, 1) };
+            let returned = unsafe { refcounted_ptr_construct_slot1(slot_ptr, 0xaabb_ccdd, 1) };
 
             assert_eq!(returned, slot_ptr);
             assert_eq!(slot as usize, body_arena);
