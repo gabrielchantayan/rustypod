@@ -82,6 +82,16 @@ const DEFAULT_WORD_LIST_MODULAR_ADD_OPS: WordListModularAddOps = WordListModular
 pub static mut WORD_LIST_MODULAR_ADD_OPS: WordListModularAddOps =
     DEFAULT_WORD_LIST_MODULAR_ADD_OPS;
 
+/// Serializes host tests that replace this module's operation table.
+#[cfg(test)]
+pub(crate) mod test_sync {
+    extern crate std;
+
+    use std::sync::Mutex;
+
+    pub static WORD_LIST_MODULAR_ADD_OPS_TEST_LOCK: Mutex<()> = Mutex::new(());
+}
+
 /// word_list_modular_add_assign — original: `FUN_082cdac8` @ 0x082cdac8
 /// (36 bytes).
 ///
@@ -107,10 +117,8 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use super::test_sync::WORD_LIST_MODULAR_ADD_OPS_TEST_LOCK as OPS_LOCK;
     use core::ptr::addr_of_mut;
-    use std::sync::Mutex;
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut TRACE: [u8; 2] = [0; 2];
     static mut TRACE_LEN: usize = 0;
     static mut VALUE_BEFORE_REDUCTION: u128 = 0;
