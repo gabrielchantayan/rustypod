@@ -186,9 +186,9 @@ pub extern "C" fn bswap32_guid_field(value: u32) -> u32 {
 /// cannot collide because each term occupies a distinct byte lane.
 ///
 /// The extent is byte-confirmed: the next function starts at 0x0802b538
-/// and is a byte-identical twin (52 equal bytes), the mode helper that
-/// `checked_word_block.rs` reproduces inline under this same name. This
-/// port is the standalone exported instance; the 22 callers are the
+/// and is a byte-identical twin (52 equal bytes), separately exported as
+/// [`transform_checked_word_for_mode`] for its checked-block callers. The
+/// 22 callers of this entry are the
 /// header-parsing family at 0x08028xxx..0x08029xxx (FUN_08028e4c,
 /// FUN_08028f14, FUN_08028ff4, FUN_08029144, FUN_08029630, FUN_0802974c,
 /// FUN_080298e0, ...), which read record fields and convert them only
@@ -199,6 +199,25 @@ pub extern "C" fn bswap32_guid_field(value: u32) -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub extern "C" fn transform_word_for_mode(mode: u32, word: u32) -> u32 {
+    if mode == 1 { word.swap_bytes() } else { word }
+}
+
+/// transform_checked_word_for_mode — original: `FUN_0802b538` @ 0x0802b538
+/// (52 bytes; 10 plain `bl` call sites, zero predicated forms, verified by
+/// decoding every ARM B/BL word in osos.dec).
+///
+/// Applies the checked-block format's selector-controlled endianness transform:
+/// exactly mode 1 returns `word` with all four byte lanes reversed; every other
+/// u32 mode leaves `word` unchanged. The raw body is byte-identical to
+/// [`transform_word_for_mode`] at 0x0802b504, but it has its own entry point
+/// and ten checked-block callers, so its distinct target-only text section
+/// prevents LLVM from folding the exported symbols together.
+///
+/// No deliberate deviations from the retail algorithm.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.transform_checked_word_for_mode")]
+#[inline(never)]
+pub extern "C" fn transform_checked_word_for_mode(mode: u32, word: u32) -> u32 {
     if mode == 1 { word.swap_bytes() } else { word }
 }
 
@@ -371,7 +390,7 @@ mod tests {
     /// Mode 1 (exactly) reverses all four byte lanes; the result equals
     /// the standalone bswap32 helpers for every tested word.
     #[test]
-    fn transform_word_for_mode_mode_one_byte_reverses() {
+    fn mode_one_transforms_byte_reverse() {
         for v in [
             0u32,
             1,
@@ -385,7 +404,8 @@ mod tests {
             0x8000_0001,
         ] {
             assert_eq!(transform_word_for_mode(1, v), v.swap_bytes(), "v={v:#010x}");
-            assert_eq!(transform_word_for_mode(1, v), bswap32(v), "v={v:#010x}");
+            assert_eq!(transform_checked_word_for_mode(1, v), v.swap_bytes(), "v={v:#010x}");
+            assert_eq!(transform_checked_word_for_mode(1, v), bswap32(v), "v={v:#010x}");
         }
     }
 
@@ -393,10 +413,11 @@ mod tests {
     /// value — 0, 2, and all the way to 0xffffffff — is the identity, with
     /// the word passed through bit-for-bit.
     #[test]
-    fn transform_word_for_mode_every_other_mode_is_identity() {
+    fn every_non_one_mode_is_identity() {
         for mode in [0u32, 2, 3, 0x100, 0x0001_0000, 0x8000_0000, 0xffff_fffe, 0xffff_ffff] {
             for v in [0u32, 0x1234_5678, 0xffff_ffff, 0x8000_0001] {
                 assert_eq!(transform_word_for_mode(mode, v), v, "mode={mode:#010x} v={v:#010x}");
+                assert_eq!(transform_checked_word_for_mode(mode, v), v, "mode={mode:#010x} v={v:#010x}");
             }
         }
     }
