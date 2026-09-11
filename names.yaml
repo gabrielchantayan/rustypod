@@ -63204,3 +63204,42 @@ functions:
       makes that otherwise-unused ABI argument unobservable. Host tests prove
       NULL default masking, healthy masking without writes, and nonzero
       mallocFailed reporting, clearing, SQLITE_NOMEM replacement, and masking.
+
+  - address: 0x0837d250
+    ghidra: FUN_0837d250
+    name: sqlite_locate_table
+    size: 120
+    sig: "Table *sqlite_locate_table(Parse *parse, u32 is_view, const char *name, const char *database)"
+    module: sqlite/locate_table
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: is_view
+      param_3/r2: name
+      param_4/r3: database
+      iVar1/r5: table
+    notes: >-
+      Raw ARM fixes the 120-byte code extent at
+      0x0837d250..0x0837d2c4: the following bytes
+      0x0837d2c8..0x0837d2f8 are the "no such table", "no such view",
+      "%s: %s", and "%s: %s.%s" literal pool, and the separately entered
+      next function starts at 0x0837d2fc. Decoding every ARM B/BL word in
+      osos.dec finds nine direct call sites — 0x082e6cec, 0x0836ea1c,
+      0x0836eee4, 0x0836f44c, 0x08373e08, 0x0837574c, 0x0838459c,
+      0x0838f1dc, and 0x08398e94 — all unconditional plain bl, with zero
+      predicated BL forms and no tail branches. No aligned data word in
+      osos.dec holds 0x0837d250. This is SQLite's sqlite3LocateTable
+      helper: sqlite_read_schema @ 0x083817ec gates all work; a successful
+      schema load calls find_table @ 0x08379024 with (parse->db, name,
+      database). A miss calls sqlite_error_msg @ 0x083767a0 using "no such
+      table" for is_view == 0 and "no such view" otherwise, with the
+      qualified format when database is non-NULL, then sets
+      parse->checkSchema at +0x12 to 1. The parse layout's formerly opaque
+      byte is now named check_schema. All three callees are already ported,
+      so the port adds no dispatch seam. Deliberate deviation: C variadic
+      arguments are an explicit three-word VaList stack array, the existing
+      sqlite_error_msg convention; its unused trailing word for an
+      unqualified name cannot be observed by the format parser. Host tests
+      cover unqualified table and qualified view misses, preservation of a
+      preexisting error result, ARM wrapping of nErr, checkSchema latching,
+      and exact literal/vararg selection.
