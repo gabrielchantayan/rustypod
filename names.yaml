@@ -66388,3 +66388,30 @@ functions:
       tests prove the exact call argument, transient base descriptor, retained
       shared-handle write, six-word clear, preserved prefix, ignored callee
       return, and returned storage. match.py structural review completed.
+
+  - address: 0x083d8008
+    ghidra: FUN_083d8008
+    name: empty_destructor_083d8008
+    size: 4
+    sig: "void *empty_destructor_083d8008(void *object)"
+    module: cxx/empty_destructor_083d8008
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: object
+    notes: >-
+      Raw osos.dec extent is exactly 0x083d8008..0x083d800c: the one word
+      is mov pc,lr (0xe1a0f00e), after a separately linked function ending at
+      0x083d8008 and before the next function beginning at 0x083d800c.
+      Decoding every immediate ARM B/BL word verifies exactly eight inbound
+      direct calls, all unconditional plain bl at 0x08038e6c, 0x08266dd4,
+      0x08266e10, 0x08266e78, 0x08266fcc, 0x082a7550, 0x082a7564, and
+      0x083d7c38; there are no predicated forms or direct B tail calls.
+      The direct callers pass stack objects and use r0 after the call, so
+      this is an empty non-deleting C++ destructor whose return is object,
+      not Ghidra's void prototype. The one occurrence as an image data word
+      at 0x0895e4bc has no established table or object identity. Rust
+      returns object unchanged, reads and writes nothing, and uses a distinct
+      text section to avoid identical-code folding. Host tests cover NULL,
+      odd, high, and maximal pointer values plus a writable object proving
+      no byte changes. match.py structural review completed.

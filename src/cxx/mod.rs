@@ -23,6 +23,7 @@ pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod empty_destructor;
 pub mod empty_destructor_166a3c;
+pub mod empty_destructor_083d8008;
 pub mod tagged_value;
 pub mod tagged_pointer_init;
 pub mod tagged_record;
