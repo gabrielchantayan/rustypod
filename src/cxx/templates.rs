@@ -725,11 +725,15 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() != b.read())
 }
 
-/// equal_deref — originals: `FUN_083cf8a8` @ 0x083cf8a8,
-/// `FUN_083cf8f0` @ 0x083cf8f0, `FUN_083cf908` @ 0x083cf908,
-/// `FUN_083cf950` @ 0x083cf950, `FUN_083cf968` @ 0x083cf968, and
-/// `FUN_083cf980` @ 0x083cf980 (24 bytes each). Raw bytes show all six are
-/// the same six-word leaf.
+/// equal_deref — originals: `FUN_083cf7b8` @ 0x083cf7b8,
+/// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8f0` @ 0x083cf8f0,
+/// `FUN_083cf908` @ 0x083cf908, `FUN_083cf950` @ 0x083cf950,
+/// `FUN_083cf968` @ 0x083cf968, and `FUN_083cf980` @ 0x083cf980
+/// (24 bytes each). Raw bytes show all seven are the same six-word leaf.
+/// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
+/// 0x083cf7b8 (0x0809dcf4, 0x0809e074, 0x083bcb08, 0x083bcf74,
+/// 0x083bcf90, 0x083bd014, 0x083bd0d8, and 0x083db1fc), with no predicated
+/// calls, tail branches, or aligned raw-word references.
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
 /// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
 /// 0x083c7480, 0x083c7504, 0x083c75c8, and 0x083db8ac), with no predicated
@@ -755,9 +759,9 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// The 0x083cf968 callers are container-iteration loops: they
 /// stack-materialize a cursor iterator and the list/deque end iterator and
 /// compare their FIRST words (the current-node pointer) through this helper,
-/// i.e. the ADS checked-iterator `operator==`. The 0x083cf908, 0x083cf950,
-/// and 0x083cf980 copies have the same raw body and ABI, so their ledger
-/// entries deliberately hook this established export instead of introducing
+/// i.e. the ADS checked-iterator `operator==`. The 0x083cf7b8, 0x083cf908,
+/// 0x083cf950, and 0x083cf980 copies have the same raw body and ABI, so their
+/// ledger entries deliberately hook this established export instead of introducing
 /// redundant dispatch seams.
 ///
 /// The body is byte-identical to `fixed16_eq_indirect` @ 0x082a1834
@@ -3065,7 +3069,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f8a8_f8f0_f908_f950_f968_f980_copies_compare_words_by_value() {
+    fn equal_deref_f7b8_f8a8_f8f0_f908_f950_f968_f980_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
