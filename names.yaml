@@ -65035,3 +65035,38 @@ functions:
       identity is established. Deliberate deviations: ARM calls the verified
       unported getter at 0x081cda30; host tests install a getter seam, and
       Rust performs the tail helper's indexed load directly.
+
+  # --- String-and-word record copy constructor ---
+  - address: 0x081f4ffc
+    ghidra: FUN_081f4ffc
+    name: string_word_record_copy_construct
+    size: 24
+    sig: "StringWordRecord *string_word_record_copy_construct(StringWordRecord *this, const StringWordRecord *source)"
+    module: cxx/string_word_record
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      iVar1/r0: constructed_string
+      "source+0x08": value
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw osos.dec confirms the six instructions from 0x081f4ffc through
+      pop {r4,pc} at 0x081f5010: it saves source in r4, calls the ported
+      StringObject copy constructor at 0x082773e0 on the embedded +0
+      subobject, then loads source+8 and stores it at result+8. The next
+      separately linked function begins with push {r4,r5,r6,lr} at
+      0x081f5014, confirming Ghidra's 24-byte extent. Decoding every ARM
+      B/BL immediate in osos.dec finds exactly nine direct inbound calls:
+      four unconditional bl at 0x083e82a4, 0x083e82f4, 0x083e97f8, and
+      0x083eaa10; five blne at 0x0817770c, 0x083e1870, 0x083e1900,
+      0x083e80b0, and 0x083e8b58. The callee has no NULL guard: the
+      predicated callers gate the construction before entry, while the four
+      remaining callers enter unconditionally. Callers at 0x08177604 and in
+      the 0x083eXXXX vector helpers establish only a StringObject plus an
+      opaque u32, not a concrete record identity. The Rust repr(C) record
+      uses named fields so the ARM +8 word does not overlap widened host
+      pointers. No deliberate deviations; the embedded constructor is
+      already ported and called directly. Focused host tests cover deep
+      payload copying and self-construction, including the embedded
+      constructor's address-based no-allocation path.
