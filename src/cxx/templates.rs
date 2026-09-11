@@ -522,6 +522,93 @@ pub unsafe extern "C" fn deque_iter_assign_alias_9fd4(dst: *mut u32, src: *const
     dst
 }
 
+/// Firmware load address of the unported 4-byte deque iterator advance
+/// member `FUN_083da088`, called by [`deque_iter_advance_copy_elem4`].
+pub const DEQUE_ITER_ADVANCE_ELEM4_ADDRESS: usize = 0x083d_a088;
+
+/// Indirect dispatch for the unported `DequeIter::operator+=` member.
+///
+/// The member takes its iterator by mutable pointer and a signed element
+/// distance, then returns that iterator. Host tests install a model; target
+/// builds call the surviving firmware member at
+/// [`DEQUE_ITER_ADVANCE_ELEM4_ADDRESS`].
+#[derive(Clone, Copy)]
+pub struct DequeIterAdvanceElem4Ops {
+    pub advance: unsafe extern "C" fn(*mut DequeIter, i32) -> *mut DequeIter,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_deque_iter_advance_elem4(
+    iter: *mut DequeIter,
+    distance: i32,
+) -> *mut DequeIter {
+    let f: unsafe extern "C" fn(*mut DequeIter, i32) -> *mut DequeIter =
+        core::mem::transmute(DEQUE_ITER_ADVANCE_ELEM4_ADDRESS);
+    f(iter, distance)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_deque_iter_advance_elem4(
+    _iter: *mut DequeIter,
+    _distance: i32,
+) -> *mut DequeIter {
+    panic!("deque_iter_advance_copy_elem4 requires iterator advance 0x083da088")
+}
+
+/// Target default and host-test replacement point for the unported advance
+/// member.
+pub const DEFAULT_DEQUE_ITER_ADVANCE_ELEM4_OPS: DequeIterAdvanceElem4Ops =
+    DequeIterAdvanceElem4Ops {
+        advance: firmware_deque_iter_advance_elem4,
+    };
+
+/// Active iterator-advance member, read volatile so the target call remains
+/// an indirect firmware boundary until 0x083da088 itself is ported.
+pub static mut DEQUE_ITER_ADVANCE_ELEM4_OPS: DequeIterAdvanceElem4Ops =
+    DEFAULT_DEQUE_ITER_ADVANCE_ELEM4_OPS;
+
+#[inline(always)]
+fn deque_iter_advance_elem4_ops() -> DequeIterAdvanceElem4Ops {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_OPS)) }
+}
+
+/// deque_iter_advance_copy_elem4 — original: `FUN_083d6fdc` @ 0x083d6fdc
+/// (44 bytes; 9 plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// The 4-byte-element deque iterator's non-mutating advance: copy `source`
+/// into a stack iterator, call its signed `operator+=` with `distance`, then
+/// copy the returned iterator into `dst` and return `dst`. Raw ARM places the
+/// 16-byte stack copy at `sp`, calls the copy member 0x083d9fd4 before and
+/// after `FUN_083da088`, and restores the original `r0`; the next sibling
+/// starts at 0x083d7008. The nine unconditional callers are 0x081cb444,
+/// 0x081cb480, 0x083de640, 0x083de65c, 0x083de66c, 0x083de688,
+/// 0x083de714, 0x083de7ac, and 0x083de7d4.
+///
+/// Deliberate deviation: 0x083da088 is unported, so its call crosses
+/// [`DEQUE_ITER_ADVANCE_ELEM4_OPS`]. The target default invokes that
+/// firmware address; host tests replace it with a behavioral model. Typed
+/// [`DequeIter`] copies retain four disjoint pointer fields on 64-bit hosts
+/// while preserving the target's four-word copy.
+///
+/// # Safety
+///
+/// `dst` must be writable and `source` readable as complete [`DequeIter`]
+/// values. The configured advance member must accept a writable iterator copy.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_advance_copy_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_advance_copy_elem4(
+    dst: *mut DequeIter,
+    source: *const DequeIter,
+    distance: i32,
+) -> *mut DequeIter {
+    let mut copy = source.read();
+    let advanced = (deque_iter_advance_elem4_ops().advance)(&mut copy, distance);
+    dst.write(advanced.read());
+    dst
+}
+
 /// less_signed — original: `FUN_083d7580` @ 0x083d7580
 /// (24 bytes, 45 `bl` call sites; the only copy of this body).
 ///
@@ -4459,6 +4546,153 @@ mod tests {
             assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 0);
             assert_eq!(out, sentinel);
         }
+    }
+
+    // ---- deque_iter_advance_copy_elem4 -------------------------------
+
+    /// Serializes swaps of [`DEQUE_ITER_ADVANCE_ELEM4_OPS`] across these
+    /// tests.
+    static DEQUE_ITER_ADVANCE_ELEM4_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct DequeIterAdvanceElem4Guard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for DequeIterAdvanceElem4Guard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_OPS)
+                    .write_volatile(DEFAULT_DEQUE_ITER_ADVANCE_ELEM4_OPS);
+            }
+        }
+    }
+
+    fn deque_iter_advance_elem4_guard() -> DequeIterAdvanceElem4Guard {
+        let lock = DEQUE_ITER_ADVANCE_ELEM4_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        DequeIterAdvanceElem4Guard { _lock: lock }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct DequeIterAdvanceCall {
+        iter: usize,
+        distance: i32,
+        source: [usize; 4],
+    }
+
+    static mut DEQUE_ITER_ADVANCE_ELEM4_CALLS: Vec<DequeIterAdvanceCall> = Vec::new();
+    static mut DEQUE_ITER_ADVANCE_ELEM4_RETURN: *mut DequeIter = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_deque_iter_advance_elem4(
+        iter: *mut DequeIter,
+        distance: i32,
+    ) -> *mut DequeIter {
+        (*core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_CALLS)).push(DequeIterAdvanceCall {
+            iter: iter as usize,
+            distance,
+            source: [
+                (*iter).cur as usize,
+                (*iter).seg_base as usize,
+                (*iter).seg_end as usize,
+                (*iter).seg_slot as usize,
+            ],
+        });
+        let returned = core::ptr::read_volatile(core::ptr::addr_of!(
+            DEQUE_ITER_ADVANCE_ELEM4_RETURN
+        ));
+        if returned.is_null() {
+            (*iter).cur = 0x1111usize as *mut u8;
+            (*iter).seg_base = 0x2222usize as *mut u8;
+            (*iter).seg_end = 0x3333usize as *mut u8;
+            (*iter).seg_slot = 0x4444usize as *mut *mut u8;
+            iter
+        } else {
+            returned
+        }
+    }
+
+    unsafe fn install_recording_deque_iter_advance_elem4() {
+        (*core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_CALLS)).clear();
+        core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_RETURN)
+            .write_volatile(core::ptr::null_mut());
+        core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_OPS)
+            .write_volatile(DequeIterAdvanceElem4Ops {
+                advance: recording_deque_iter_advance_elem4,
+            });
+    }
+
+    #[test]
+    fn deque_iter_advance_copy_elem4_advances_a_private_copy_by_a_negative_distance() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let source = DequeIter {
+            cur: 0x10usize as *mut u8,
+            seg_base: 0x20usize as *mut u8,
+            seg_end: 0x30usize as *mut u8,
+            seg_slot: 0x40usize as *mut *mut u8,
+        };
+        let mut dst = DequeIter::NULL;
+
+        let returned = unsafe { deque_iter_advance_copy_elem4(&mut dst, &source, -7) };
+
+        assert!(returned == &mut dst as *mut DequeIter);
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert_eq!(calls.len(), 1);
+        assert_ne!(calls[0].iter, &source as *const DequeIter as usize);
+        assert_ne!(calls[0].iter, &dst as *const DequeIter as usize);
+        assert_eq!(calls[0].distance, -7);
+        assert_eq!(
+            calls[0].source,
+            [0x10, 0x20, 0x30, 0x40],
+            "the helper receives a stack copy, with its signed distance untouched"
+        );
+        assert_eq!(source.cur as usize, 0x10, "source cur is not mutated");
+        assert_eq!(source.seg_base as usize, 0x20, "source base is not mutated");
+        assert_eq!(source.seg_end as usize, 0x30, "source end is not mutated");
+        assert_eq!(source.seg_slot as usize, 0x40, "source slot is not mutated");
+        assert_eq!(dst.cur as usize, 0x1111);
+        assert_eq!(dst.seg_base as usize, 0x2222);
+        assert_eq!(dst.seg_end as usize, 0x3333);
+        assert_eq!(dst.seg_slot as usize, 0x4444);
+    }
+
+    #[test]
+    fn deque_iter_advance_copy_elem4_copies_the_helper_return_for_minimum_distance() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let source = DequeIter {
+            cur: 0xa0usize as *mut u8,
+            seg_base: 0xb0usize as *mut u8,
+            seg_end: 0xc0usize as *mut u8,
+            seg_slot: 0xd0usize as *mut *mut u8,
+        };
+        let mut helper_result = DequeIter {
+            cur: 0xaaaausize as *mut u8,
+            seg_base: 0xbbbbusize as *mut u8,
+            seg_end: 0xccccusize as *mut u8,
+            seg_slot: 0xddddusize as *mut *mut u8,
+        };
+        let mut dst = DequeIter::NULL;
+        unsafe {
+            core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_RETURN)
+                .write_volatile(&mut helper_result);
+        }
+
+        let returned =
+            unsafe { deque_iter_advance_copy_elem4(&mut dst, &source, i32::MIN) };
+
+        assert!(returned == &mut dst as *mut DequeIter);
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert_eq!(calls.len(), 1);
+        assert_ne!(calls[0].iter, &source as *const DequeIter as usize);
+        assert_ne!(calls[0].iter, &dst as *const DequeIter as usize);
+        assert_eq!(calls[0].distance, i32::MIN);
+        assert_eq!(calls[0].source, [0xa0, 0xb0, 0xc0, 0xd0]);
+        assert_eq!(dst.cur as usize, 0xaaaa);
+        assert_eq!(dst.seg_base as usize, 0xbbbb);
+        assert_eq!(dst.seg_end as usize, 0xcccc);
+        assert_eq!(dst.seg_slot as usize, 0xdddd);
     }
 
     // ---- vector_push_back_elem12 --------------------------------------
