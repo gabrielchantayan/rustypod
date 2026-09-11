@@ -31,6 +31,7 @@ pub mod callback_dispatch_release;
 pub mod default_selector_dispatch;
 pub mod context;
 pub mod controller_layout_dispatch;
+pub mod controller_timer_pair;
 pub mod controller_secondary_interface;
 pub mod controller_history_select;
 pub mod context_scope;
