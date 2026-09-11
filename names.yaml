@@ -7087,6 +7087,42 @@ functions:
       the two volatile dispatch slots (house anti-const-fold pattern)
       and the vanished spill frame.
 
+  # --- retailOS diagnostic pager key reader (stdio/debug_pager) ---
+  - address: 0x082d997c
+    ghidra: FUN_082d997c
+    name: debug_pager_read_key
+    size: 72
+    sig: "int debug_pager_read_key(void)"
+    module: stdio/debug_pager
+    vars: {}
+    status: ported
+    renames:
+      DAT_082d99c4 + 4 (0x089ca3c4): DEBUG_PAGER_GATE_ADDR
+      DAT_082d99c8 (0x083e2484): DEBUG_PAGER_WRITE_BEFORE_READ
+      DAT_082d99cc (0x083e2480): DEBUG_PAGER_WRITE_AFTER_READ
+    notes: >-
+      Raw code extent is exactly 72 bytes, 0x082d997c..0x082d99c0,
+      followed by the three-word literal pool at 0x082d99c4..0x082d99cc;
+      the distinct next function starts at 0x082d99d0. The gate word at
+      0x089ca3c4 is read first: nonzero returns 0 before any SVC. A zero
+      gate issues Angel SYS_WRITE0 (r0=4) with raw r1 literal 0x083e2484,
+      calls SYS_READC (r0=7, r1=0), saves its r0, then issues a second
+      SYS_WRITE0 with 0x083e2480 and returns the saved character, ignoring
+      both write results. Decoding every ARM B/BL word in osos.dec finds
+      exactly 8 direct sites, all plain unconditional bl
+      (0x082beef0/0x082bf2fc/0x082bf454/0x082bf924/0x082bfcc4/
+      0x082bffb8/0x082c00b8/0x082c0310), zero predicated calls, and no
+      tail b site. Its callers page diagnostic table dumps and break on
+      X/x, hence debug_pager_read_key. No image data word holds this
+      address, so it is not virtually dispatched. The two SYS_WRITE0
+      literals decode to live code at 0x083e2480; their intended string
+      identity is not established and the port forwards them unchanged.
+      Deliberate deviation: the target reads the original gate address
+      volatile; host builds model only that word with a private static so
+      the skip branch can be proven. Host tests cover suppression without
+      SVC plus the exact op/pointer order and preservation of SYS_READC's
+      return over both ignored SYS_WRITE0 results.
+
   - address: 0x082dd3d8
     ghidra: FUN_082dd3d8
     name: context_activity_enter
