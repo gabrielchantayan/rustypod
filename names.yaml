@@ -27997,6 +27997,39 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083da26c
+    ghidra: FUN_083da26c
+    name: deque_iter_init_elem4_alias_a26c
+    size: 64
+    sig: "DequeIter *deque_iter_init_elem4_alias_a26c(DequeIter *iter, u8 *cur, u8 **slot)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, param_2: cur, param_3: slot, iVar1: seg_base}
+    renames:
+      FUN_083da240: deque_seg_capacity
+      param_1: iter
+      param_2: cur
+      param_3: slot
+      iVar1: seg_base
+    notes: >-
+      Raw ARM confirms Ghidra's 64-byte extent: the entry at 0x083da26c
+      runs through `pop {r4,r5,pc}` at 0x083da2a8, with the next sibling
+      capacity member beginning at 0x083da2ac. The body differs from the
+      0x083da3e4 iterator constructor only in its relative bl displacement:
+      it stores cur; for a NULL segment-slot pointer writes NULL base/end;
+      otherwise loads the slot base, calls the adjacent `mov r0,#0x20; bx lr`
+      capacity member at 0x083da240, reloads the slot, writes base +
+      0x20 * 4 as end, then stores the slot. A non-NULL slot containing NULL
+      therefore writes end 0x80, not NULL. Decoding every ARM B/BL word in
+      osos.dec finds exactly nine unconditional plain bl call sites
+      (0x083dec4c, 0x083dec8c, 0x083ded68, 0x083ded90, 0x083dedbc,
+      0x083dee14, 0x083dee48, 0x083def64, and 0x083def9c), zero predicated
+      bl forms, and zero tail b sites. The port deliberately calls the
+      existing deque_seg_capacity export rather than the local duplicate;
+      wrapping_add preserves the raw NULL-base + 0x80 result. Its dedicated
+      text section prevents LLVM from folding this independently hookable
+      copy into another deque template instance.
+
   - address: 0x083da3e4
     ghidra: FUN_083da3e4
     name: deque_iter_init_elem4_alias_a3e4
