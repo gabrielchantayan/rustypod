@@ -63668,3 +63668,35 @@ functions:
       reports the expected 19-vs-20 instruction structural diff: LLVM uses a
       larger frame and branchy bool normalization around the same ordered
       slot loads and two direct helper calls.
+
+  # --- SQLite adaptive Bitvec destructor ---
+  - address: 0x08370588
+    ghidra: FUN_08370588
+    name: sqlite3_bitvec_destroy
+    size: 64
+    sig: "void sqlite3BitvecDestroy(Bitvec *bitvec)"
+    module: sqlite/bitvec
+    status: ported
+    renames:
+      param_1/r0/r5: bitvec
+      iVar1/r4: child_index
+      "bitvec+0x08": i_divisor
+      "bitvec+0x0c": children
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec fixes the exact extent at 0x08370588..0x083705c8: 16 ARM
+      instructions ending in `b 0x083906f4` (the ported tracked_free), and the
+      separately linked sibling starts at 0x083705c8. Decoding every ARM B/BL
+      immediate in the image finds exactly 9 inbound direct bl call sites:
+      0x082dd7f0, 0x082ddb9c, 0x082ddeec, 0x082de870, 0x082de8ac,
+      0x083704a4, 0x083705ac, 0x0837de1c, and 0x0837ecdc. All are
+      unconditional; there are no predicated BL forms, tail branches, or
+      aligned data-word references to this entry. This is SQLite 3.5.9's
+      sqlite3BitvecDestroy: NULL returns immediately; iDivisor == 0 selects
+      the inline 500-byte bitmap, while nonzero selects 125 child pointers,
+      recursively destroyed in ascending slot order before the parent is freed.
+      The Rust port directly calls tracked_free rather than tail-branching and
+      uses named repr(C) fields for the target union, avoiding host pointer
+      width overlap. Host tests prove NULL handling, inline-bitmap child
+      suppression, and sparse child post-order destruction through tag-57
+      tracked-free recording.
