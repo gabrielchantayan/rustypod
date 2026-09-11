@@ -12,11 +12,11 @@
 //! vtable `+0x1c` callback. Its update sibling at `0x081bb2a0` consumes the
 //! tick deadlines, scale factor, remainder, input divisor, bound, and flags.
 //!
-//! The tick helper `0x081bb384`, mode query `0x080562ec`, and observer getter
-//! `0x080b43e8` are not yet ported (confirmed against `names.yaml`). Target
-//! builds invoke those retail entry points directly; host tests install the
-//! equivalent operation table. The observer's concrete identity is unknown,
-//! so this module deliberately names only its recovered registration role.
+//! The tick helper `0x081bb384` is now ported as
+//! [`crate::drivers::timer::tick_millis`]. The mode query `0x080562ec` and
+//! observer getter `0x080b43e8` are not yet ported (confirmed against
+//! `names.yaml`). Target builds invoke those retail entry points directly;
+//! host tests install the equivalent operation table.
 //!
 //! The module also carries the constructor's step sibling
 //! [`tick_accumulator_step`] (`0x081bb3a0`), which gates one call of the
@@ -58,8 +58,8 @@ pub type TickAccumulatorRegisterFn = unsafe extern "C" fn(*mut *mut TickAccumula
 pub type TickAccumulatorUpdateFn =
     unsafe extern "C" fn(*mut TickAccumulator, u32, u32) -> u32;
 
-/// Dependencies of [`tick_accumulator_construct`] and [`tick_accumulator_step`]
-/// that remain in retailOS.
+/// Remaining unported dependencies of [`tick_accumulator_construct`] and
+/// [`tick_accumulator_step`], plus a host clock fixture.
 #[derive(Clone, Copy)]
 pub struct TickAccumulatorOps {
     pub tick_millis: unsafe extern "C" fn() -> u32,
@@ -68,16 +68,10 @@ pub struct TickAccumulatorOps {
     pub update: TickAccumulatorUpdateFn,
 }
 
-const RETAIL_TICK_MILLIS: usize = 0x081b_b384;
 const RETAIL_SYSTEM_MODE_ENABLED: usize = 0x0805_62ec;
 const RETAIL_OBSERVER_GETTER: usize = 0x080b_43e8;
 const RETAIL_TICK_UPDATE: usize = 0x081b_b2a0;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_tick_millis() -> u32 {
-    let tick_millis: unsafe extern "C" fn() -> u32 = core::mem::transmute(RETAIL_TICK_MILLIS);
-    tick_millis()
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_system_mode_enabled() -> u32 {
@@ -119,7 +113,7 @@ unsafe extern "C" fn retail_update(
 
 #[cfg(target_os = "none")]
 const DEFAULT_TICK_ACCUMULATOR_OPS: TickAccumulatorOps = TickAccumulatorOps {
-    tick_millis: retail_tick_millis,
+    tick_millis: crate::drivers::timer::tick_millis,
     system_mode_enabled: retail_system_mode_enabled,
     register: retail_register,
     update: retail_update,
@@ -247,9 +241,10 @@ pub unsafe extern "C" fn tick_accumulator_construct(
 /// unconditional ARM load at `[r0]`; every one of the 23 call sites is an
 /// unconditional `bl`.
 ///
-/// Deviation: the update sibling `0x081bb2a0` and tick helper `0x081bb384`
-/// remain in retailOS, so both are reached through the module's operation
-/// table (direct retail entry calls on target, host fixtures in tests).
+/// Deviation: the update sibling `0x081bb2a0` remains in retailOS, so it is
+/// reached through the module's operation table (direct retail entry call on
+/// target, host fixture). The tick helper is the direct ported call
+/// [`crate::drivers::timer::tick_millis`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn tick_accumulator_step(

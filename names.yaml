@@ -55586,6 +55586,34 @@ functions:
       focused host tests cover every flag byte, a zero payload, and payload
       suppression when bit 0 is set.
 
+  # --- Timer E microsecond counter to millisecond tick ---
+  - address: 0x081bb384
+    ghidra: FUN_081bb384
+    name: tick_millis
+    size: 28
+    sig: "u32 tick_millis(void)"
+    module: drivers/timer
+    status: ported
+    renames:
+      stack0/sp: counter_usec
+      FUN_08086e38: read_usec_timer_into_2
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw ARM extent is exactly 28 bytes, 0x081bb384..0x081bb3a0: `push
+      {r3,lr}; mov r0,sp; bl 0x08086e38; ldr r0,[sp]; pop {ip,lr}; mov
+      r1,#1000; b 0x08036f14`. The separately linked next function starts
+      at 0x081bb3a0 with `push {r4,lr}` and there is no literal pool. Decoding
+      every ARM B/BL word in osos.dec finds nine direct call sites, all plain
+      unconditional bl, with zero predicated forms and zero tail b sites;
+      aligned-word scanning finds no data reference to this address. It takes
+      exactly one Timer E microsecond sample through read_usec_timer_into_2
+      and returns its unsigned truncating division by 1000, i.e. elapsed
+      milliseconds modulo 2^32. Ghidra's C falsely absorbs the tail branch
+      into a 64-bit division body; the raw 28-byte boundary establishes the
+      actual u32 result. Rust preserves the out-pointer helper and the ported
+      ADS divider call with no deviation. Host tests cover exact truncation
+      boundaries, u32::MAX, and the one-sample invariant.
+
   # --- adaptive tick accumulator step ---
   - address: 0x081bb3a0
     ghidra: FUN_081bb3a0
