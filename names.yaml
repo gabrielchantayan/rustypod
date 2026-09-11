@@ -11668,6 +11668,40 @@ functions:
       Sets the cursor index (slot 1) to -1, leaving the collection slot
       alone. Pairs with 0x081ee17c/0x081ee138. 129 bl call sites.
 
+  - address: 0x081ee660
+    ghidra: FUN_081ee660
+    name: class_8900_work_queue_enqueue
+    size: 68
+    sig: "void class_8900_work_queue_enqueue(Class8900WorkQueue *this, Class8900QueuedWork *work)"
+    module: app/class_8900_work_queue
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: work
+      param_1_plus_0x14: mutex
+      param_1_plus_0x1c: work_available
+      param_1_plus_0x28: head
+      param_1_plus_0x2c: tail
+      param_2_plus_0x18: next
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f5cc: condvar_broadcast
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw ARM extent is exactly 68 bytes: 17 instructions from 0x081ee660
+      through the tail branch to mutex_unlock at 0x081ee6a0; the next
+      separately linked function begins with push {r4, r5, r6, r7, r8, lr}
+      at 0x081ee6a4. A complete ARM B/BL word scan finds exactly nine direct
+      call sites (0x081ee5e0, 0x081ee640, 0x081ee998, 0x081eebdc, 0x081eec78,
+      0x081eed10, 0x081eedec, 0x081eeef0, and 0x081eef44), all plain
+      unconditional bl; no predicated BL, direct tail branch, or aligned
+      data word references this entry. The queue locks its +0x14 Mutex,
+      writes the incoming 32-byte work record into the empty FIFO head or
+      the old tail's +0x18 next link, records it as tail, broadcasts the
+      +0x1c CondVar, and tail-branches to mutex_unlock. It never clears the
+      incoming record's next link; callers' constructors own that setup.
+      Rust directly calls the already ported mutex/condvar functions; the
+      original tail-call's scratch return is not part of this void ABI.
+
   - address: 0x08120604
     ghidra: FUN_08120604
     name: surface_config_init
