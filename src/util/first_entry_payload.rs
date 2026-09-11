@@ -9,14 +9,15 @@
 //! empty marker 6 to byte +8, deliberately leaving bytes +9..+11 unchanged.
 //! The temporary is released through its vtable's +4 slot when non-NULL.
 //!
-//! `FUN_08184b24` remains unported, so the target default calls its verified
-//! load address. Host tests replace it and the dynamic release with recording
-//! callbacks. The payload's field meanings are not recovered; this port names
-//! only the observable first-entry copy operation.
+//! On device, the now-ported `load_cros_resource_list` calls directly into
+//! `FUN_08184b24`; the virtual release is still unported, so it remains a
+//! target/host seam. Host fixtures retain a factory callback because their
+//! vector links are host-width pointers rather than target-width `u32` words.
 
 use crate::cxx::templates::{vector_size_elem4_alias_78c4, VectorBounds};
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::util::ptr_vector::ptr_vector_at;
+use crate::util::resource_list::load_cros_resource_list;
 
 const VECTOR_OFFSET: usize = 0x14;
 const ENTRY_PAYLOAD_OFFSET: usize = 8;
@@ -38,23 +39,18 @@ pub struct FirstEntryPayload {
 /// runtime-copy helpers.
 #[derive(Clone, Copy)]
 pub struct FirstEntryPayloadOps {
-    /// `FUN_08184b24(owner_input)`: constructs the temporary vector owner.
+    /// Host-only fixture for the now-ported `FUN_08184b24` factory.
+    #[cfg(not(target_os = "none"))]
     pub create_owner: unsafe extern "C" fn(owner_input: *mut u8) -> *mut u8,
     /// The temporary owner's virtual destructor, loaded from vtable slot +4.
     pub release_owner: unsafe extern "C" fn(owner: *mut u8),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_create_owner(owner_input: *mut u8) -> *mut u8 {
-    let create: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        unsafe { core::mem::transmute(0x0818_4b24usize) };
-    unsafe { create(owner_input) }
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_create_owner(_owner_input: *mut u8) -> *mut u8 {
-    panic!("copy_first_entry_payload requires temporary-owner factory 0x08184b24")
+    panic!("copy_first_entry_payload requires a host temporary-owner fixture")
 }
+
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_release_owner(owner: *mut u8) {
@@ -71,7 +67,6 @@ unsafe extern "C" fn missing_release_owner(_owner: *mut u8) {
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_FIRST_ENTRY_PAYLOAD_OPS: FirstEntryPayloadOps = FirstEntryPayloadOps {
-    create_owner: firmware_create_owner,
     release_owner: firmware_release_owner,
 };
 
@@ -81,9 +76,9 @@ pub const DEFAULT_FIRST_ENTRY_PAYLOAD_OPS: FirstEntryPayloadOps = FirstEntryPayl
     release_owner: missing_release_owner,
 };
 
-/// Active boundary for the unported temporary-owner factory and its virtual
-/// release. The vector-size, vector-access, and runtime-copy calls are
-/// already-portable direct calls rather than re-stubbed seams.
+/// Active boundary for the unported temporary-owner virtual release. The
+/// factory calls the ported `load_cros_resource_list` directly on device;
+/// host builds retain a fixture callback for their host-width vector links.
 pub static mut FIRST_ENTRY_PAYLOAD_OPS: FirstEntryPayloadOps = DEFAULT_FIRST_ENTRY_PAYLOAD_OPS;
 
 #[inline(always)]
@@ -106,6 +101,10 @@ unsafe fn first_entry_payload_ops() -> FirstEntryPayloadOps {
 /// `owner_input` must be accepted by the temporary-owner factory, `output`
 /// must designate 12 writable bytes, and every object reached by the factory
 /// must satisfy the vector and release contracts above.
+///
+/// On device, `owner_input` is forwarded as the target-width `resource_data`
+/// word to the CROS resource-list factory. Host tests instead provide a
+/// host-width temporary owner through the fixture callback.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn copy_first_entry_payload(
@@ -113,6 +112,11 @@ pub unsafe extern "C" fn copy_first_entry_payload(
     output: *mut FirstEntryPayload,
 ) {
     let ops = unsafe { first_entry_payload_ops() };
+    #[cfg(target_os = "none")]
+    let temporary = unsafe {
+        load_cros_resource_list(owner_input as usize as u32).cast::<u8>()
+    };
+    #[cfg(not(target_os = "none"))]
     let temporary = unsafe { (ops.create_owner)(owner_input) };
     let vector = unsafe { temporary.add(VECTOR_OFFSET) as *const VectorBounds };
 

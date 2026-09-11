@@ -23,9 +23,14 @@
 //! `FUN_083e472c` are phantom: raw ARM passes only `this + 0x14` in r0.
 
 use crate::cxx::three_word_clear_seventh::three_word_clear_seventh;
+use crate::app::application_resource_provider::application_resource_provider;
+use crate::heap::veneers::operator_new;
 
 /// The vtable literal loaded from the pool word at `0x0818501c`.
 pub const RESOURCE_LIST_VTABLE_ADDRESS: u32 = 0x0898_9508;
+
+/// FourCC parser word loaded from `FUN_08184b24`'s literal pool.
+pub const CROS_RESOURCE_TAG: u32 = 0x534f_5243;
 
 /// A loaded resource list's complete 0x24-byte ARM layout.
 ///
@@ -266,11 +271,36 @@ pub unsafe extern "C" fn load_resource_list(
     list
 }
 
+/// load_cros_resource_list — original: `FUN_08184b24` @ `0x08184b24`
+/// (56 bytes: 52 instruction bytes plus the `0x534f5243` literal-pool word
+/// at `0x08184b58`; the next function begins at `0x08184b5c`).
+///
+/// A complete raw `osos.dec` ARM B/BL scan finds ten inbound calls, all
+/// unconditional `bl` (at 0x0811dbd8, 0x08180560, 0x08184bdc, 0x08184c4c,
+/// 0x081856cc, 0x0819ee4c, 0x081a10bc, 0x081ea6b8, 0x081eae74, and
+/// 0x08218630); there are no predicated call forms or direct tail branches.
+///
+/// Gets the global application resource provider, allocates a 0x24-byte
+/// [`ResourceList`], then initializes it for `resource_data` with parser
+/// FourCC `CROS` and zero options. Like the ARM body, it does not test the
+/// allocator result before forwarding it to [`load_resource_list`].
+///
+/// Deliberate deviation: none. The port calls all three already-ported
+/// callees directly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn load_cros_resource_list(resource_data: u32) -> *mut ResourceList {
+    let provider = unsafe { application_resource_provider() } as usize as u32;
+    let list = unsafe { operator_new(core::mem::size_of::<ResourceList>()) }.cast::<ResourceList>();
+    unsafe { load_resource_list(list, provider, resource_data, CROS_RESOURCE_TAG, 0) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+    use core::mem::MaybeUninit;
     use parking_lot::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -280,6 +310,9 @@ mod tests {
     static SEEN_RESOURCE_DATA: AtomicU32 = AtomicU32::new(0);
     static SEEN_PARSER: AtomicU32 = AtomicU32::new(0);
     static SEEN_OPTIONS: AtomicU32 = AtomicU32::new(0);
+    static CROS_ALLOCATION_SIZE: AtomicUsize = AtomicUsize::new(0);
+    static CROS_ALLOCATION_TAG: AtomicUsize = AtomicUsize::new(0);
+    static mut CROS_ALLOCATED_LIST: MaybeUninit<ResourceList> = MaybeUninit::uninit();
 
     unsafe extern "C" fn recording_initialize(
         list: *mut ResourceList,
@@ -307,6 +340,44 @@ mod tests {
             (*list).loading = 0;
             (*list).first_flag = options as u8;
             (*list).second_flag = options as u8;
+        }
+    }
+
+    unsafe extern "C" fn recording_cros_allocation(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        CROS_ALLOCATION_SIZE.store(size, Ordering::SeqCst);
+        CROS_ALLOCATION_TAG.store(tag, Ordering::SeqCst);
+        core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast::<ResourceList>().cast::<u8>()
+    }
+
+    struct CrosHeapOpsRestore {
+        heap: crate::heap::veneers::HeapVeneerOps,
+        default_heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+    }
+
+    impl Drop for CrosHeapOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                    .write_volatile(self.heap);
+                core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                    .write_volatile(self.default_heap);
+            }
+        }
+    }
+
+    struct CrosProviderRestore(*mut u8);
+
+    impl Drop for CrosProviderRestore {
+        fn drop(&mut self) {
+            unsafe {
+                crate::app::application_resource_provider::install_application_resource_provider_for_test(
+                    self.0,
+                );
+            }
         }
     }
 
@@ -388,6 +459,77 @@ mod tests {
         core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
             .write_volatile(1usize as *mut crate::heap::types::HeapDescriptorDescriptor);
         DestroyOpsRestore { before_destroy, state_destroy, heap, default_heap }
+    }
+
+    #[test]
+    fn allocates_and_initializes_cros_list_from_global_provider() {
+        let _provider_lock =
+            crate::app::application_resource_provider::APPLICATION_RESOURCE_PROVIDER_TEST_LOCK.lock();
+        let _list_lock = TEST_LOCK.lock();
+        let previous_provider = unsafe {
+            crate::app::application_resource_provider::application_resource_provider_word()
+        };
+        let _provider_restore = CrosProviderRestore(previous_provider);
+        let previous_initialize = unsafe {
+            core::ptr::addr_of!(RESOURCE_LIST_OPS).read_volatile()
+        };
+        let _initialize_restore = OpsRestore(previous_initialize);
+        let previous_heap = unsafe {
+            core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile()
+        };
+        let previous_default_heap = unsafe {
+            core::ptr::addr_of!(crate::heap::types::DEFAULT_HEAP).read_volatile()
+        };
+        let _heap_restore = CrosHeapOpsRestore {
+            heap: previous_heap,
+            default_heap: previous_default_heap,
+        };
+
+        unsafe {
+            core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).write(MaybeUninit::new(ResourceList {
+                vtable: 0xffff_ffff,
+                provider: 0xffff_ffff,
+                parser: 0xffff_ffff,
+                resource_data: 0xffff_ffff,
+                state: 0xffff_ffff,
+                vector_words: [0xffff_ffff; 3],
+                loading: 0xff,
+                first_flag: 0xff,
+                second_flag: 0xff,
+                unused_23: 0xff,
+            }));
+            core::ptr::addr_of_mut!(RESOURCE_LIST_OPS).write_volatile(recording_initialize);
+            let mut heap = previous_heap;
+            heap.alloc = recording_cros_allocation;
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(heap);
+            core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                .write_volatile(1usize as *mut crate::heap::types::HeapDescriptorDescriptor);
+        }
+        for (provider, resource_data) in [
+            (0xa1b2_c3d4usize as *mut u8, 0x1020_3040),
+            (core::ptr::null_mut(), 0),
+        ] {
+            unsafe {
+                crate::app::application_resource_provider::install_application_resource_provider_for_test(
+                    provider,
+                );
+            }
+            CROS_ALLOCATION_SIZE.store(0, Ordering::SeqCst);
+            CROS_ALLOCATION_TAG.store(0, Ordering::SeqCst);
+            INIT_CALLS.store(0, Ordering::SeqCst);
+
+            let result = unsafe { load_cros_resource_list(resource_data) };
+
+            assert_eq!(result, core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast::<ResourceList>());
+            assert_eq!(CROS_ALLOCATION_SIZE.load(Ordering::SeqCst), 0x24);
+            assert_eq!(CROS_ALLOCATION_TAG.load(Ordering::SeqCst), 2);
+            assert_eq!(INIT_CALLS.load(Ordering::SeqCst), 1);
+            assert_eq!(SEEN_LIST.load(Ordering::SeqCst), result as usize);
+            assert_eq!(SEEN_PROVIDER.load(Ordering::SeqCst), provider as usize as u32);
+            assert_eq!(SEEN_RESOURCE_DATA.load(Ordering::SeqCst), resource_data);
+            assert_eq!(SEEN_PARSER.load(Ordering::SeqCst), CROS_RESOURCE_TAG);
+            assert_eq!(SEEN_OPTIONS.load(Ordering::SeqCst), 0);
+        }
     }
 
     #[test]

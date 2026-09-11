@@ -13525,6 +13525,36 @@ functions:
       load/modify/store - no lock, no LDREX, no interrupt guard, exactly
       as in the original.
 
+  - address: 0x08184b24
+    ghidra: FUN_08184b24
+    name: load_cros_resource_list
+    size: 56
+    sig: "ResourceList *load_cros_resource_list(u32 resource_data)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: resource_data
+      uVar1/r0/r5: application_resource_provider
+      uVar2/r0: list
+      DAT_08184b58: CROS_RESOURCE_TAG (0x534f5243)
+      FUN_0819fe10: application_resource_provider
+      FUN_082aadd4: operator_new
+      FUN_08184fd4: load_resource_list
+    notes: >-
+      Raw extent is 0x08184b24..0x08184b5c: 52 instruction bytes followed
+      by literal-pool word 0x534f5243, with the separately linked next
+      function opening at 0x08184b5c. Ghidra's 52-byte size omits that pool
+      word. A complete ARM B/BL decode of osos.dec finds ten inbound sites,
+      all unconditional bl at 0x0811dbd8, 0x08180560, 0x08184bdc,
+      0x08184c4c, 0x081856cc, 0x0819ee4c, 0x081a10bc, 0x081ea6b8,
+      0x081eae74, and 0x08218630; there are no predicated forms or tail b
+      callers. It gets the global application resource provider, allocates
+      0x24 bytes through operator_new, and forwards the allocation plus
+      provider, resource_data, parser FourCC CROS, and zero options to
+      load_resource_list without checking the allocation. The port calls all
+      three ported callees directly; host tests prove the allocation size/tag
+      and every initializer argument.
+
   - address: 0x08184bd4
     ghidra: FUN_08184bd4
     name: copy_first_entry_payload
@@ -13537,7 +13567,7 @@ functions:
       param_2/r1/r4: output
       piVar1/r5: temporary_owner
       iVar2/r0: first_entry
-      FUN_08184b24: temporary_owner_create (unported)
+      FUN_08184b24: load_cros_resource_list (called directly)
       FUN_083d78c4: vector_size_elem4_alias_78c4
       FUN_08184f98: ptr_vector_at
       thunk_EXT_FUN_22000020: __rt_memcpy
@@ -13546,7 +13576,7 @@ functions:
       with push {r4-r9,sl,lr} at 0x08184c3c. Raw decoding of every ARM B/BL
       word in osos.dec finds 28 direct calls: 27 unconditional bl plus one
       blne at 0x0819ef48. It obtains a temporary vector owner through the
-      unported 0x08184b24, checks the elem4 vector at +0x14 through
+      ported load_cros_resource_list, checks the elem4 vector at +0x14 through
       0x083d78c4, then either copies 12 bytes from its first entry +8 to the
       output through the 0x08037db0 __rt_memcpy veneer or stores 0, 0, and
       byte 6 at output +0, +4, and +8. The empty path deliberately leaves
