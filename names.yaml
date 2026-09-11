@@ -64618,3 +64618,33 @@ functions:
       signed widening multiply, half-ulp bias, Q4.28 funnel, and final
       wrapping add; LLVM contracts adds/adc into smlal and uses fp rather
       than r4 for its frame.
+
+  # --- Default selector dispatcher (app/default_selector_dispatch) ---
+  - address: 0x0821a11c
+    ghidra: FUN_0821a11c
+    name: dispatch_default_selector
+    size: 12
+    sig: "void dispatch_default_selector(void *context, u32 notify)"
+    module: app/default_selector_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: notify
+      r2: notify_forwarded
+      r1: default_selector
+    notes: >-
+      Raw osos.dec confirms Ghidra's 12-byte extent: mov r2,r1 at
+      0x0821a11c, mvn r1,#0 at 0x0821a120, and the tail branch to unported
+      FUN_082193d8 at 0x0821a124; mov r0,#1 at 0x0821a128 begins the
+      separately linked next function. The wrapper forwards context and notify
+      unchanged to that dispatcher while fixing its signed selector argument
+      to -1. Decoding every ARM B/BL immediate finds exactly nine inbound
+      direct calls, all plain unconditional bl and none predicated:
+      0x08131368, 0x08225948, 0x082270ec, 0x0822962c, 0x0822a814,
+      0x0823110c, 0x0823213c, 0x08232ac0, and 0x082392b4. The retail callee
+      remains unported, so target builds call its fixed 0x082193d8 address and
+      host tests use a volatile seam. Tests prove the fixed -1 selector and
+      forwarding for zero and all-set notification values. match.py finds the
+      same argument move and sentinel write; LLVM materializes the absolute
+      target, restores its frame, and bx dispatches instead of using the
+      retail tail-branch encoding.
