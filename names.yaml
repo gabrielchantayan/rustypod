@@ -60481,6 +60481,36 @@ functions:
       exclusive-limit rejection, cache-hit bypass, miss read arguments, and
       failed-miss detach/release.
 
+  # --- Filesystem cache-entry writeback ---
+  - address: 0x082e4b4c
+    ghidra: FUN_082e4b4c
+    name: cache_entry_flush
+    size: 56
+    sig: "u32 cache_entry_flush(CacheEntry *entry)"
+    module: fs/cache_entry_flush
+    status: ported
+    renames:
+      param_1/r0: entry
+      iVar1/r0: context
+      FUN_082c62f0: disk_block_write
+    notes: >-
+      Raw ARM confirms the 56-byte extent from 0x082e4b4c through 0x082e4b80;
+      the separately entered next function begins at 0x082e4b84. The movs r2,
+      r0 NULL guard returns zero for a NULL entry. A non-NULL entry with a
+      NULL word +0x08 context link also returns zero. Otherwise it reads the
+      context +0x78 low halfword device selector, entry +0x0c block index, and
+      entry +0x18 payload, then calls the verified but unported
+      FUN_082c62f0(device, block_index, payload, 1, 0). The callee result
+      remains in r0 after bl, so this port returns it despite Ghidra's
+      incorrect void signature. Exactly nine direct B/BL words target this
+      entry: all are unconditional bl at 0x082b1e38, 0x082e048c, 0x082e0574,
+      0x082e05d4, 0x082e28b8, 0x082e33b8, 0x082e441c, 0x082e4494, and
+      0x082e4948; no predicated forms or tail branches exist. The disk writer
+      has no ported names.yaml entry, so target builds call its verified
+      retailOS address while host tests install a recording seam. Tests cover
+      both NULL exits, low-halfword device selection, argument forwarding, and
+      return propagation.
+
   # --- Filesystem cache-page halfword transfer ---
   - address: 0x082e1a34
     ghidra: FUN_082e1a34
