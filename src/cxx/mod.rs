@@ -70,6 +70,7 @@ pub mod string;
 pub mod string_vector_destruct;
 pub mod string_map;
 pub mod streambuf_slot_peek_equal;
+pub mod streambuf_slot_peek_byte;
 pub mod stream_write;
 pub mod stream_write_exact;
 pub mod stream_write_cstr;
