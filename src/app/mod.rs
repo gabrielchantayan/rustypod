@@ -49,6 +49,7 @@ pub mod fixed3_assign;
 pub mod fixed_point;
 pub mod fixed_value;
 pub mod global_flag_table;
+pub mod global_identifier_slot;
 pub mod global_observer_unregister;
 pub mod global_callback_unregister;
 pub mod handler_list_activate;
