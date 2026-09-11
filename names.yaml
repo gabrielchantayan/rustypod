@@ -62180,3 +62180,28 @@ functions:
       target transfer is an indirect payload-safe blx instead of stock's
       PC-relative bl; match.py confirms the final target transfer remains a
       tail bx, with arguments and result preserved.
+
+  # --- Little-endian word store with final-byte return (util/u32_le_store_last_byte) ---
+  - address: 0x080eda38
+    ghidra: FUN_080eda38
+    name: store_u32_le_last_byte
+    size: 28
+    sig: "u8 *store_u32_le_last_byte(u8 *dst, u32 value)"
+    module: util/u32_le_store_last_byte
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      r2: shifted_byte
+    notes: >-
+      Raw osos.dec confirms the exact 28-byte extent, seven ARM words from
+      0x080eda38 through bx lr at 0x080eda54; the separately linked next
+      function starts at 0x080eda58. Ghidra's 32-byte size incorrectly includes
+      that sibling's first word. Decoding every ARM B/BL immediate finds exactly
+      ten direct inbound calls, all unconditional plain bl and none predicated:
+      0x0805afc8, 0x0805b494, 0x0805b520, 0x0805b540, 0x0805b560, 0x0805b588,
+      0x0805b6a0, 0x0805b6b4, 0x0805b6c8, and 0x0809bed0. No direct plain-B
+      tail transfer targets this entry. The body uses strb with post-index +1
+      for the first three bytes, then a final strb, so it stores value in
+      little-endian order and returns dst+3 in r0. No NULL, alignment, or bounds
+      guard exists. Deliberate deviations: none.
