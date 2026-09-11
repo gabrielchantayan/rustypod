@@ -6039,6 +6039,36 @@ functions:
       slot, not the 8-byte ldr pc veneer - expected, same family
       pattern as the other 31 wrappers.
 
+  - address: 0x08037e40
+    ghidra: thunk_EXT_FUN_22003dc8
+    name: kernel_op_dispatch
+    size: 8
+    sig: "usize kernel_op_dispatch(usize op, usize arg)"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003dc8: kernel_op_dispatch
+      DAT_08037e44: kernel_op_dispatch_rom_target
+    notes: >-
+      Raw words establish the full ADS veneer: e51ff004 (`ldr pc,[pc,#-4]`)
+      at 0x08037e40 and literal 0x22003dc8 at 0x08037e44. Ghidra reports
+      only 4 bytes; the sibling task_lock veneer begins at 0x08037e48. The
+      relocator at 0x080046e0 makes 0x22003dc8 the IRAM mirror of the
+      56-byte osos body 0x08003dc8..0x08003dff. That body stores r0, r1,
+      and zero at sp+16..24, stores service words 12 and 6 at sp+4 and
+      sp+8, calls gateway 0x08003660 with r0 = sp+4, then returns the
+      post-dispatch sp+8 status word. Decoding every ARM B/BL word in
+      osos.dec finds exactly 9 unconditional bl callers at 0x08056488,
+      0x080564d4, 0x08056508, 0x080566c0, 0x080566e8, 0x080860a0,
+      0x0808b23c, 0x0809c7d4, and 0x080a3d1c; zero predicated calls, tail
+      branches, or data-word references. Callers use object classes 1, 2,
+      and 4; this veneer supplies no NULL or opcode guard. Deliberate
+      deviation: the target is foreign mask-ROM code, so the port reads the
+      volatile ROM_KERNEL hook instead of issuing the target-only ldr-pc
+      transfer. Host tests cover opcodes 1/2/4 with NULL, all-ones, and
+      ordinary slot words, and verify the hook's status result returns
+      unchanged. match.py shows the expected hook-call-vs-literal-veneer
+      structural difference.
   - address: 0x08037e50
     ghidra: thunk_EXT_FUN_2200408c
     name: task_unlock

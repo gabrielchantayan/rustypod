@@ -588,9 +588,26 @@ pub unsafe extern "C" fn rom_svc_22003d00(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003d00))(a0, a1)
 }
 
-/// kernel_op_dispatch — original: thunk @ 0x08037e40 -> ROM 0x22003dc8,
-/// the object-op dispatcher (mirror frame {12, 6, op, arg, 0}): r0 =
-/// object-class opcode (1 = semaphore, 2, 4 observed), r1 = handle slot.
+/// kernel_op_dispatch — original: `thunk_EXT_FUN_22003dc8` @ `0x08037e40`.
+/// Ghidra reports 4 bytes; raw words establish its full **8-byte** extent:
+/// `e51ff004` (`ldr pc, [pc, #-4]`) plus target literal `0x22003dc8`, with
+/// the next veneer beginning at `0x08037e48`.
+///
+/// Binary decoding finds **9 unconditional `bl` call sites**, at
+/// 0x08056488, 0x080564d4, 0x08056508, 0x080566c0, 0x080566e8, 0x080860a0,
+/// 0x0808b23c, 0x0809c7d4, and 0x080a3d1c; no predicated calls or tail
+/// branches. The thunk has no guard: it tail-dispatches `op` (r0) and `arg`
+/// (r1) unchanged to IRAM `0x22003dc8`, whose 56-byte osos mirror
+/// `0x08003dc8` builds a service-{12, 6} gateway frame, calls
+/// `0x08003660`, and returns the post-dispatch status word. Observed class
+/// opcodes are 1, 2, and 4.
+///
+/// Deliberate deviation: the target is mask-ROM code, so this Rust seam
+/// calls the volatile `ROM_KERNEL.kernel_op_dispatch` hook rather than
+/// loading PC from the ROM literal. It preserves the documented two input
+/// words and r0 status result; no Rust code dereferences `arg`.
+#[cfg_attr(target_os = "none", link_section = ".text.kernel_op_dispatch")]
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_op_dispatch(op: usize, arg: usize) -> usize {
     (hook!(kernel_op_dispatch))(op, arg)
@@ -1197,6 +1214,19 @@ pub(crate) mod tests {
         unsafe {
             check(17, rom_task_delay(0, 1), &[0, 1]);
             check(17, rom_task_delay(usize::MAX, usize::MAX), &[usize::MAX, usize::MAX]);
+        }
+    }
+
+    /// The literal veneer has no NULL or opcode guard: all observed object
+    /// classes (1, 2, 4), a NULL slot, and an all-ones slot pass verbatim to
+    /// the dispatcher hook and its status word returns unchanged.
+    #[test]
+    fn kernel_op_dispatch_forwards_observed_opcodes_and_edge_slots() {
+        let _lock = mock_kernel();
+        unsafe {
+            check(8, kernel_op_dispatch(1, 0), &[1, 0]);
+            check(8, kernel_op_dispatch(2, usize::MAX), &[2, usize::MAX]);
+            check(8, kernel_op_dispatch(4, 0x5000), &[4, 0x5000]);
         }
     }
 
