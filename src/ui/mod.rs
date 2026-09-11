@@ -14,6 +14,7 @@ pub mod nonzero_flags;
 pub mod startup_sequence;
 pub mod table_slot_allocate;
 pub mod render_context;
+pub mod render_context_suspend;
 pub mod rect;
 pub mod noop_f7f4;
 pub mod operation_unavailable;
