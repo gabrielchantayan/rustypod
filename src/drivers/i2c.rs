@@ -500,6 +500,60 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    /// Guard for an installed raw-I2C/RTXC-semaphore host fixture. Dropping
+    /// it restores both callback tables before releasing the shared lock.
+    pub(crate) struct RawI2cFixture {
+        saved_task_lock_rom: RomThunkOps,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for RawI2cFixture {
+        fn drop(&mut self) {
+            unsafe {
+                addr_of_mut!(I2C_WRITE).write(missing_i2c_write);
+                addr_of_mut!(I2C_READ).write(missing_i2c_read);
+                addr_of_mut!(TASK_LOCK_ROM_KERNEL).write(self.saved_task_lock_rom);
+            }
+        }
+    }
+
+    /// Installs recording raw-I2C callbacks and RTXC semaphore callbacks for
+    /// a PMU-caller host test.
+    pub(crate) fn install_raw_i2c_for_test(
+        write_status: i32,
+        read_status: i32,
+        read_value: u8,
+    ) -> RawI2cFixture {
+        let guard = install_raw(write_status, read_status);
+        unsafe {
+            (*addr_of_mut!(SEM_LOG)).clear();
+            *addr_of_mut!(RAW_READ_VALUE) = read_value;
+            let saved_task_lock_rom = addr_of!(TASK_LOCK_ROM_KERNEL).read_volatile();
+            let mut patched = saved_task_lock_rom;
+            patched.rom_sem_wait = mock_task_sem_wait;
+            patched.rom_sem_signal = mock_task_sem_signal;
+            addr_of_mut!(TASK_LOCK_ROM_KERNEL).write(patched);
+            RawI2cFixture {
+                saved_task_lock_rom,
+                _guard: guard,
+            }
+        }
+    }
+
+    /// Returns copies of raw calls and RTXC semaphore operations while a
+    /// [`RawI2cFixture`] holds [`OPS_LOCK`].
+    pub(crate) unsafe fn raw_i2c_calls_for_test() -> (
+        Vec<(u32, u32, u8)>,
+        Vec<(u32, u32, usize)>,
+        Vec<(u8, u32)>,
+    ) {
+        (
+            (*addr_of!(RAW_WRITE_LOG)).clone(),
+            (*addr_of!(RAW_READ_LOG)).clone(),
+            (*addr_of!(SEM_LOG)).clone(),
+        )
+    }
+
     fn install_0x39_read(write_status: i32, read_status: i32) -> (MutexGuard<'static, ()>, RomThunkOps) {
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {

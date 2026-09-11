@@ -13,6 +13,9 @@
 
 use crate::ui::object_state::shared_context;
 
+#[cfg(test)]
+extern crate std;
+
 /// System-info struct base the query's literal-pool word at 0x080e6278
 /// holds (binary-verified: `ac aa 9c 08`); field +0x8 is the lazily
 /// cached board-version word.
@@ -37,6 +40,41 @@ const BOARD_VERSION_SENTINEL: u32 = 0x7fff_ffff;
 /// tests can drive both cache states without mapping retailOS RAM.
 #[cfg(not(target_os = "none"))]
 static mut HOST_CACHED_BOARD_VERSION: u32 = BOARD_VERSION_SENTINEL;
+/// Serializes test-only writes to the host board-version cache so other
+/// modules can exercise callers of [`board_version`] without racing this
+/// module's cache tests.
+#[cfg(test)]
+pub(crate) static HOST_CACHED_BOARD_VERSION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Restores the host board-version cache to its sentinel on drop.
+#[cfg(test)]
+pub(crate) struct HostCachedBoardVersion {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for HostCachedBoardVersion {
+    fn drop(&mut self) {
+        unsafe {
+            core::ptr::addr_of_mut!(HOST_CACHED_BOARD_VERSION).write(BOARD_VERSION_SENTINEL);
+        }
+    }
+}
+
+/// Installs a non-sentinel board version for a host caller test.
+#[cfg(test)]
+pub(crate) fn install_host_cached_board_version(version: u32) -> HostCachedBoardVersion {
+    let guard = HOST_CACHED_BOARD_VERSION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        core::ptr::addr_of_mut!(HOST_CACHED_BOARD_VERSION).write(version);
+    }
+    HostCachedBoardVersion {
+        _guard: guard,
+    }
+}
+
 
 #[inline(always)]
 unsafe fn cached_board_version_slot() -> *mut u32 {
@@ -126,13 +164,12 @@ mod tests {
     use super::*;
     extern crate std;
 
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
     /// Serializes access to this module's host cache static; acquired
     /// before the shared-context lock so the two modules' lock order is
     /// consistent (object_state's own tests take VERSION_TEXT_LOCK, then
     /// SHARED_CONTEXT_TEST_LOCK, and never this one).
-    static CACHE_LOCK: Mutex<()> = Mutex::new(());
 
     /// Holds both locks for the fixture's lifetime and restores the
     /// sentinel cache / NULL context on drop.
@@ -143,7 +180,7 @@ mod tests {
 
     impl Fixture {
         fn install(cache: u32, context: *mut u8) -> Fixture {
-            let cache_guard = CACHE_LOCK
+            let cache_guard = HOST_CACHED_BOARD_VERSION_LOCK
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let context_guard = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK

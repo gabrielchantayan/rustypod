@@ -9048,6 +9048,45 @@ functions:
       at 0x08369bec; host tests inject its result. Port deviation: none on
       target.
 
+  # --- PMU board-version status bit (drivers/pmu) ---
+  - address: 0x082e5b64
+    ghidra: FUN_082e5b64
+    name: pmu_board_version_status_bit
+    size: 76
+    sig: "u32 pmu_board_version_status_bit(u32 incoming_r0, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      uVar1/r0: board_version
+      uVar2/r0: pmu_register
+      local_10/sp: status_byte_seeded_from_incoming_r3
+      FUN_080e624c: board_version
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d3b8: pmu_i2c_read
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM extent is exactly 76 bytes, 0x082e5b64..0x082e5bac: the
+      following push {r4,r5,r6,lr} at 0x082e5bb0 begins the next sibling.
+      Every B/BL word in osos.dec was decoded: 8 direct calls, all plain
+      unconditional bl (cond=e), at 0x080608a8, 0x08060958, 0x080609c0,
+      0x080c8898, 0x080d3ce8, 0x080e36a8, 0x082e5798, and 0x08392ff8;
+      zero predicated forms. The function saves incoming r3 in its stack
+      byte, reads board_version(), waits semaphores 17 then 5, reads one
+      PCF50635 byte through pmu_i2c_read, signals 5 then 17 unconditionally,
+      and returns bit 0 for high board-version halfword 0x11 (register 0x4b)
+      or bit 2 for every other version (register 0x12). It deliberately
+      ignores the I2C status, so a failed transfer returns the selected bit
+      of the saved incoming-r3 byte. The port explicitly declares the
+      otherwise-undeclared incoming r0-r3 ABI words so r3 preserves that
+      error-path behavior; its six direct callee edges resolve to the
+      already-ported Rust functions. Host tests cover both board branches and
+      the failed-write incoming-r3 result.
+      match.py structural review against the worktree archive retains the
+      board-version/read/5-then-17 release sequence; LLVM adds its frame and
+      uses a conditional move plus variable shift instead of ARM predicates.
+
   # --- Mutexed PMU I2C register-block read (drivers/i2c) ---
   - address: 0x082e58f0
     ghidra: FUN_082e58f0
