@@ -61343,3 +61343,41 @@ functions:
       SINGLETON_CTORS class_8e80 slot with its family zeroing default, and
       the runtime-initialized cache word is represented by the crate static
       CLASS_8E80_INSTANCE. It is not hook-ready until 0x0820416c is ported.
+
+  # --- Clamped mode-selected position ---
+  - address: 0x081cc5b8
+    ghidra: FUN_081cc5b8
+    name: set_clamped_mode_position
+    size: 96
+    sig: "void set_clamped_mode_position(void *state, u32 requested_position)"
+    module: app/clamped_mode_position
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: requested_position
+      "state+0x1c": mode_backend
+      "state+0x8b8": cached_position
+      "state+0x8bc": lower_position
+      "state+0x8c0": upper_position
+      FUN_0822aecc: mode_selected_position
+      FUN_0822ba50: mode_selected_position_set (unported fixed-address seam)
+      FUN_081cccac: mode_position_changed (unported fixed-address seam)
+    notes: >-
+      Raw osos.dec confirms the exact 96-byte extent: 24 ARM instruction
+      words from 0x081cc5b8 through bx lr at 0x081cc614; the next separately
+      linked function begins at 0x081cc618. The code applies signed ARM
+      comparisons to clamp r1 to state+0x8bc..state+0x8c0, reads the active
+      position with the already-ported mode_selected_position on state+0x1c,
+      calls unported 0x0822ba50 with r1=1 and r2=the clamped position only
+      when that active position differs, then updates state+0x8b8 and tail
+      calls unported 0x081cccac only when the cached position differs.
+      Decoding every ARM B/BL immediate finds exactly 10 direct bl callers:
+      nine unconditional at 0x0819dbb4, 0x0819dcac, 0x081cba70, 0x081cbc3c,
+      0x081cc944, 0x081cca64, 0x081cca78, 0x081cce74, and 0x081ccfec, plus
+      one predicated blne at 0x081cbfdc. Two unconditional tail b transfers
+      enter at 0x081cbbf0 and 0x081cd5b4; no aligned DATA word targets this
+      entry. Deliberate deviations: fixed-address stock continuations have
+      replaceable host seams, while ARM invokes their verified addresses.
+      Host tests cover signed lower and upper clamping, backend equality
+      suppression, cached-position update, and independent notification
+      suppression.
