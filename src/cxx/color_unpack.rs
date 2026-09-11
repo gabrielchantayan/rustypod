@@ -1,0 +1,101 @@
+//! `rgb555a1_cursor_read_rgba8` — original: `FUN_0825ecdc` @ 0x0825ecdc
+//! (20 bytes; **9 unconditional `bl` call sites**, no predicated or tail
+//! branches, binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+//!
+//! The complete raw body is five words: it loads the current `u16` from the
+//! cursor in `r2`, advances that cursor by one halfword before reading the
+//! pixel, then tail-branches to 0x0824bf18. That leaf expands the packed
+//! RGB555A1 value to the `{R, G, B, A}` RGBA8 record at `r0`: bits 15..11,
+//! 10..6, and 5..1 become five-bit R/G/B components expanded by repeating
+//! their high three bits; bit 0 becomes either transparent zero or opaque
+//! `0xff` alpha. The Ghidra `r1` parameter is unused and overwritten by the
+//! pixel load.
+//!
+//! The 20-byte extent is exact: 0x0825ecd8 is the preceding sibling's tail
+//! branch, and 0x0825ecf0 begins the next function (`cmn r0,#1`). There is no
+//! literal pool.
+//!
+//! # Deliberate deviations
+//!
+//! The original tail-calls the unported leaf at 0x0824bf18. This port inlines
+//! its fully decoded bit expansion rather than adding a second dispatch seam;
+//! the cursor update remains before the source halfword read and output stores
+//! remain in R/G/B/A order. Neither pointer has a NULL or bounds guard.
+
+/// Reads one packed RGB555A1 pixel through `source_cursor`, advances the
+/// cursor, and writes its expanded `{R, G, B, A}` bytes to `destination`.
+///
+/// # Safety
+///
+/// `source_cursor` must point to a writable aligned pointer to a readable
+/// aligned `u16`; `destination` must name four writable bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rgb555a1_cursor_read_rgba8(
+    destination: *mut u8,
+    _unused: u32,
+    source_cursor: *mut *const u16,
+) {
+    let source = source_cursor.read();
+    source_cursor.write(source.add(1));
+    let pixel = source.read();
+
+    let red = ((pixel & 0xf800) >> 8) as u8;
+    let green = ((pixel & 0x07c0) >> 3) as u8;
+    let blue = ((pixel & 0x003e) << 2) as u8;
+
+    destination.write_volatile(red | (red >> 5));
+    destination.add(1).write_volatile(green | (green >> 5));
+    destination.add(2).write_volatile(blue | (blue >> 5));
+    destination.add(3).write_volatile(if pixel & 1 == 0 { 0 } else { 0xff });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rgb555a1_cursor_read_rgba8;
+
+    fn reference_rgba8(pixel: u16) -> [u8; 4] {
+        let expand = |component: u8| (component << 3) | (component >> 2);
+        [
+            expand(((pixel >> 11) & 0x1f) as u8),
+            expand(((pixel >> 6) & 0x1f) as u8),
+            expand(((pixel >> 1) & 0x1f) as u8),
+            if pixel & 1 == 0 { 0 } else { 0xff },
+        ]
+    }
+
+    #[test]
+    fn expands_every_packed_value_and_advances_one_halfword() {
+        for pixel in 0..=u16::MAX {
+            let source = [pixel, !pixel];
+            let mut cursor = source.as_ptr();
+            let mut destination = [0xa5; 6];
+
+            unsafe {
+                rgb555a1_cursor_read_rgba8(destination.as_mut_ptr().add(1), 0, &mut cursor);
+            }
+
+            assert_eq!(&destination[1..5], &reference_rgba8(pixel), "pixel {pixel:#06x}");
+            assert_eq!(destination[0], 0xa5, "pixel {pixel:#06x} wrote before destination");
+            assert_eq!(destination[5], 0xa5, "pixel {pixel:#06x} wrote past destination");
+            assert_eq!(cursor, unsafe { source.as_ptr().add(1) }, "pixel {pixel:#06x}");
+        }
+    }
+
+    #[test]
+    fn preserves_cursor_progression_across_multiple_pixels() {
+        let source = [0x0000, 0xffff, 0x10c1];
+        let mut cursor = source.as_ptr();
+        let mut first = [0; 4];
+        let mut second = [0; 4];
+
+        unsafe {
+            rgb555a1_cursor_read_rgba8(first.as_mut_ptr(), 0xffff_ffff, &mut cursor);
+            rgb555a1_cursor_read_rgba8(second.as_mut_ptr(), 0, &mut cursor);
+        }
+
+        assert_eq!(first, [0, 0, 0, 0]);
+        assert_eq!(second, [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(cursor, unsafe { source.as_ptr().add(2) });
+    }
+}
