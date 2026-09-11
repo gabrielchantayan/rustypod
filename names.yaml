@@ -63583,3 +63583,41 @@ functions:
       defaults are inert solely to permit isolated recorder tests. match.py
       (worktree archive) reviewed the expected 9-vs-17 instruction diff:
       LLVM materializes volatile hook loads and indirect tail branches.
+
+  # --- Stream-buffer slot lookahead comparison ---
+  - address: 0x083d6504
+    ghidra: FUN_083d6504
+    name: streambuf_slot_peek_equal
+    size: 76
+    sig: "bool streambuf_slot_peek_equal(StreambufSlotPairContext *context)"
+    module: cxx/streambuf_slot_peek_equal
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x6c": left_slot
+      "context+0x70": right_slot
+      iVar2/r4: left_character
+      iVar1/r0: right_character
+      FUN_083da5a8: streambuf_sgetc_raw
+    notes: >-
+      Raw osos.dec fixes the exact extent at 0x083d6504..0x083d654c: the
+      final pop {r4,r5,r6,pc} is at 0x083d654c and a separately linked sibling
+      opens at 0x083d6550. Decoding every ARM B/BL-immediate word finds exactly
+      nine inbound calls, all unconditional plain bl (no predicated forms):
+      0x083b6450, 0x083b64a4, 0x083b6518, 0x083b6560, 0x083b6690,
+      0x083b6750, 0x083b67fc, 0x083b694c, and 0x083d7b5c. No aligned image
+      data word holds 0x083d6504. The body reads two non-NULL-REQUIRED slot
+      pointers from context +0x6c/+0x70, maps a NULL stream-buffer word in
+      either slot to -1, otherwise calls 0x083da5a8, and returns whether the
+      two i32 results match. Raw 0x083da5a8 confirms only its behavior here:
+      it returns the byte at streambuf +0x18 when that unsigned cursor is below
+      +0x1c, otherwise it dispatches through the vtable word at +0x20; no
+      callee identity is invented. The ARM bridge tail-branches directly to
+      that unported address. The host-only recorder models it because a
+      target-width vtable callback word cannot hold an x86-64 callback. Tests
+      prove both NULL slots compare as EOF without a helper call, equal
+      non-NULL lookaheads call left then right, and a NULL left vs non-EOF
+      right does not compare equal. match.py against the worktree archive
+      reports the expected 19-vs-20 instruction structural diff: LLVM uses a
+      larger frame and branchy bool normalization around the same ordered
+      slot loads and two direct helper calls.
