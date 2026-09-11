@@ -62205,3 +62205,30 @@ functions:
       for the first three bytes, then a final strb, so it stores value in
       little-endian order and returns dst+3 in r0. No NULL, alignment, or bounds
       guard exists. Deliberate deviations: none.
+
+  # --- Static descriptor word store (util/store_static_descriptor) ---
+  - address: 0x080f81ac
+    ghidra: FUN_080f81ac
+    name: store_static_descriptor
+    size: 12
+    sig: "u32 *store_static_descriptor(u32 *descriptor_slot)"
+    module: util/store_static_descriptor
+    status: ported
+    renames:
+      param_1/r0: descriptor_slot
+      DAT_080f81b8: static_descriptor
+    notes: >-
+      Raw osos.dec confirms the exact 12-byte instruction extent: ldr r1,
+      [pc,#4]; str r1,[r0]; bx lr at 0x080f81ac..0x080f81b4, followed by its
+      0x089800ac literal at 0x080f81b8. The separately linked next function
+      starts at 0x080f81bc. Decoding every ARM B/BL immediate finds exactly
+      ten direct inbound calls, all unconditional plain bl at 0x0812646c,
+      0x0819b3b4, 0x0819b4e0, 0x081b4b54, 0x081b4c58, 0x081e7e10,
+      0x081e7fd0, 0x081e8440, 0x0820abc8, and 0x0820ac54; no predicated bl
+      forms or direct plain-B tails target it. Callers apply it to the tail
+      word of freshly allocated objects. It stores the opaque static-data
+      address 0x089800ac and preserves descriptor_slot in r0; Ghidra's void
+      signature drops that return, though callers immediately recover their
+      enclosing object from it. The literal's target is not a function entry
+      and its semantic identity is not inferred. No NULL, alignment, or
+      bounds guard exists. Deliberate deviations: none.

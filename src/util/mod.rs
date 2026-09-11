@@ -61,6 +61,7 @@ pub mod skip_ascii_whitespace_and_comments;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
 pub mod stream_read_be32_or_zero;
+pub mod store_static_descriptor;
 pub mod stream_seek;
 pub mod string_pool;
 pub mod startup_relocation_offset;
