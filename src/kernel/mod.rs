@@ -7,6 +7,7 @@ pub mod diag_ring_strings;
 pub mod event_handler_source;
 pub mod gateway_request;
 pub mod gateway_signal;
+pub mod gateway_service19;
 pub mod gateway_wake;
 pub mod gateway_request_blocking;
 pub mod irq;
