@@ -178,6 +178,29 @@ pub unsafe extern "C" fn free_tag57(block: *mut u8) {
     free_wrapper(block, TAG_TRACKED)
 }
 
+/// tracked_stats_raise_peak — IRAM veneer @ 0x08003500 (8 bytes:
+/// `ldr pc,[pc,#-4]` and target word 0x08390bcc); its target fragment is
+/// 28 bytes from 0x08390bcc through the allocator epilogue at 0x08390be4.
+///
+/// The veneer has 10 unconditional `bl` call sites, binary-scanned from
+/// osos.dec (none predicated), plus one plain `b` tail branch at 0x08001d0c.
+/// Ghidra's 4-byte extent drops the veneer literal and labels the target's
+/// interior entry separately. The target loads `peak_bytes`, subtracts the
+/// supplied `current` i64 with `subs`/`sbcs`, and copies current into peak
+/// with `ldrdlt`/`strdlt` only when the signed result says peak < current.
+///
+/// Deviation: the raw entry obtains the stats block through ambient r7;
+/// this callable port uses the module's `ALLOC_STATS` static, and receives
+/// the r0:r1 current-counter pair as an i64 argument.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tracked_stats_raise_peak(current: i64) {
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    if (*stats).peak_bytes < current {
+        (*stats).peak_bytes = current;
+    }
+}
+
 /// tracked_alloc_tail — original @ 0x08390b8c (92 bytes).
 ///
 /// Tail of the tag-57 tracked allocator (entry @ 0x08390b14): the head
@@ -207,9 +230,7 @@ pub unsafe extern "C" fn tracked_alloc_tail(size: i32) -> *mut u8 {
     (data.sub(4) as *mut u32).write((data as usize - base as usize) as u32);
     let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
     (*stats).current_bytes = (*stats).current_bytes.wrapping_add(size as i64);
-    if (*stats).peak_bytes < (*stats).current_bytes {
-        (*stats).peak_bytes = (*stats).current_bytes;
-    }
+    tracked_stats_raise_peak((*stats).current_bytes);
     data
 }
 
@@ -771,6 +792,28 @@ mod tests {
             (base as *mut usize).write(1);
             tracked_free_pointer_array(base.add(1));
             assert_eq!(freed(), &[array_raw]);
+        }
+    }
+
+    // ---- tracked_stats_raise_peak (0x08003500) ------------------------
+
+    /// The target's `subs`/`sbcs` selects a signed i64 comparison: values
+    /// crossing the low-word boundary and negative counters retain their
+    /// full ordering, while equality and decreases leave peak unchanged.
+    #[test]
+    fn raises_only_for_a_signed_larger_current_counter() {
+        let _guard = arena();
+        unsafe {
+            for (peak, current, expected) in [
+                (0x0000_0000_ffff_ffffi64, 0x0000_0001_0000_0000, 0x0000_0001_0000_0000),
+                (-10, -9, -9),
+                (-7, -9, -7),
+                (42, 42, 42),
+            ] {
+                ALLOC_STATS.peak_bytes = peak;
+                tracked_stats_raise_peak(current);
+                assert_eq!(ALLOC_STATS.peak_bytes, expected, "peak={peak} current={current}");
+            }
         }
     }
 
