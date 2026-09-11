@@ -71,6 +71,7 @@ pub mod aggregate_context;
 pub mod auth_check;
 pub mod begin_write_operation;
 pub mod blob_to_hex;
+pub mod bitvec;
 pub mod btree_lock;
 pub mod cell_size;
 pub mod change_cookie;
