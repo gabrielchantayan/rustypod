@@ -66774,3 +66774,46 @@ functions:
       text section to avoid identical-code folding. Host tests cover NULL,
       odd, high, and maximal pointer values plus a writable object proving
       no byte changes. match.py structural review completed.
+
+  - address: 0x0836be8c
+    ghidra: FUN_0836be8c
+    name: ata_command_submit_wait
+    size: 156
+    sig: "u32 ata_command_submit_wait(AtaCommandDevice *device, u8 *command)"
+    module: drivers/ata_command_submit_wait
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: command
+      DAT_0836bf1c: ata_device_signature
+      DAT_0836bf20: ata_controller_base
+      DAT_0836bf24: ata_command_timeout_ms
+      FUN_080b1ae8: ata_command_prepare
+      FUN_0836c6c8: ata_taskfile_program
+      FUN_0836ce80: ata_operation_state_set
+      FUN_080d7b7c: ata_command_execute
+      return/r0: status
+    notes: >-
+      Raw osos.dec has 144 instruction bytes at 0x0836be8c..0x0836bf1b and
+      three literal-pool words through 0x0836bf27, for a 156-byte extent; the
+      separate next function begins at 0x0836bf28. It validates device != NULL,
+      device[0] == 0x31656449 ("Ide1"), device +0x44 != 0, and command != NULL,
+      returning 7 on failure. It propagates the 0x080b1ae8 preparation status,
+      performs a volatile-equivalent read/write of ATA MMIO 0x38700010, then
+      propagates task-file programming 0x0836c6c8(device, command, 0), ignores
+      0x0836ce80(device, 4), and maps 0x080d7b7c(device, 5000) status 3 to 0
+      and every other status to 0x59. All four callees are real direct function
+      entries but absent from the ledger; their names describe only their
+      verified local roles. Decoding every ARM B/BL immediate in osos.dec finds
+      exactly eight inbound direct calls, all unconditional plain bl at
+      0x0836bd58, 0x0836bdc8, 0x0836be58, 0x0836be74, 0x0836cd20, 0x0836cd98,
+      0x0836ce28, and 0x0836ce68, with no predicated form or direct tail
+      branch; a raw aligned word scan finds no DATA word containing this entry.
+      Target code calls the unported dependencies through literal fixed-address
+      veneers because patch-payload code cannot reach their stock PC-relative
+      bl targets; host tests supply volatile callback seams. Four host tests
+      cover all validation gates, propagated preparation/task-file errors,
+      operation ordering and the ignored state-set result, plus success and
+      non-3 execution-status mapping. match.py structural review (exit-1 diff
+      expected) retains the validation, early-return, MMIO read/write, four
+      call stages, and final status mapping.
