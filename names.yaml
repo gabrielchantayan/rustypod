@@ -28374,6 +28374,37 @@ functions:
       text section prevents LLVM from folding this independently hookable
       copy into another deque template instance.
 
+  - address: 0x083d6fdc
+    ghidra: FUN_083d6fdc
+    name: deque_iter_advance_copy_elem4
+    size: 44
+    sig: "DequeIter *deque_iter_advance_copy_elem4(DequeIter *dst, const DequeIter *source, i32 distance)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: source, param_3: distance, uStack_20: copy}
+    renames:
+      FUN_083d9fd4: deque_iter_assign_alias_9fd4
+      FUN_083da088: deque_iter_advance_elem4
+      param_1: dst
+      param_2: source
+      param_3: distance
+      uStack_20: copy
+    notes: >-
+      Raw ARM establishes the 44-byte extent from the push at 0x083d6fdc
+      through `pop {r0,r1,r2,r3,r4,r5,r6,pc}` at 0x083d7004; the next
+      sibling begins at 0x083d7008. This is the 4-byte-element deque
+      iterator non-mutating advance: it copies source to a 16-byte stack
+      iterator via FUN_083d9fd4, passes that copy and the signed distance to
+      FUN_083da088, then copies the returned iterator to dst and returns dst.
+      Decoding every ARM B/BL word in osos.dec found exactly nine
+      unconditional plain bl call sites (0x081cb444, 0x081cb480,
+      0x083de640, 0x083de65c, 0x083de66c, 0x083de688, 0x083de714,
+      0x083de7ac, and 0x083de7d4), zero predicated bl forms, and zero tail
+      b sites. FUN_083da088 is still unported; the target default calls its
+      surviving firmware address through DEQUE_ITER_ADVANCE_ELEM4_OPS, while
+      host tests install a recording model. Typed DequeIter copies preserve
+      the target four-word object while avoiding overlapping 64-bit host
+      pointer fields.
   - address: 0x083da3e4
     ghidra: FUN_083da3e4
     name: deque_iter_init_elem4_alias_a3e4
