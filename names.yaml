@@ -23197,6 +23197,31 @@ functions:
       deletes (ROM_KERNEL dispatch included), so match.py shows a larger
       body with the same guard/destruct/unlock/teardown structure.
 
+  - address: 0x0839d44c
+    ghidra: FUN_0839d44c
+    name: refcounted_body_mutex_unlock
+    size: 16
+    sig: "void refcounted_body_mutex_unlock(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839d44c..0x0839d45c: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_unlock @ 0x0807f6a0; bx lr. The next
+      separately linked function starts at 0x0839d45c. Decoding every ARM
+      B/BL word in osos.dec finds eight direct bl callers, all unconditional
+      at 0x0811ef44, 0x0811ef7c, 0x0816cf70, 0x0816cfa8, 0x08214520,
+      0x08214558, 0x0839d3f8, and 0x0839d430; no predicated calls or direct
+      tail b sites. No word-aligned image word equals this address, so it is
+      not virtually dispatched. It loads the RefcountedBody's optional mutex
+      at target +8 and tail-branches to the already ported mutex_unlock only
+      when non-NULL. No deliberate behavioral deviations: structural review
+      shows LLVM retains the tail branch after harmless frame setup, preserving
+      the load/guard/unlock behavior. Host test covers a live mutex signal and
+      the NULL-mutex early-out.
+
   - address: 0x0839e0e8
     ghidra: FUN_0839e0e8
     name: dma_aligned_byte_array_construct
