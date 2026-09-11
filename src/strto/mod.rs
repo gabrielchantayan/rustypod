@@ -8,3 +8,4 @@ pub mod strtod;
 pub mod strtol;
 pub mod strtoul;
 pub mod strtoull;
+pub mod wide_decimal_counted;
