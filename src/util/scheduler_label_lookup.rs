@@ -40,9 +40,9 @@ unsafe extern "C" fn missing_scheduler_label_find(_identifier: i32, _out_label: 
 }
 
 #[cfg(target_os = "none")]
-const DEFAULT_SCHEDULER_LABEL_FIND: SchedulerLabelFind = firmware_scheduler_label_find;
+pub(crate) const DEFAULT_SCHEDULER_LABEL_FIND: SchedulerLabelFind = firmware_scheduler_label_find;
 #[cfg(not(target_os = "none"))]
-const DEFAULT_SCHEDULER_LABEL_FIND: SchedulerLabelFind = missing_scheduler_label_find;
+pub(crate) const DEFAULT_SCHEDULER_LABEL_FIND: SchedulerLabelFind = missing_scheduler_label_find;
 
 /// The unported registered-label lookup. Target builds call retailOS directly;
 /// host tests replace this callback to model the success and fallback paths.
@@ -119,9 +119,8 @@ mod tests {
 
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::SCHEDULER_LABEL_FIND_TEST_LOCK;
+    use std::sync::MutexGuard;
     static mut LOOKUP_CALLS: u32 = 0;
     static mut LOOKUP_IDENTIFIER: i32 = 0;
     static mut LOOKUP_SUCCESS: u32 = 0;
@@ -152,7 +151,7 @@ mod tests {
     }
 
     fn install_lookup() -> (MutexGuard<'static, ()>, Reset) {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = SCHEDULER_LABEL_FIND_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             ptr::addr_of_mut!(SCHEDULER_LABEL_FIND).write(recording_scheduler_label_find);
             ptr::addr_of_mut!(LOOKUP_CALLS).write(0);

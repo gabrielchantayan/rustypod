@@ -27,4 +27,5 @@ pub mod stream_buffer_page_contexts;
 pub mod stream_buffer_initializer;
 pub mod task_message;
 pub mod thunks;
+pub mod debug_task_selector;
 pub mod wheel_sample;
