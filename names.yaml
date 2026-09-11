@@ -63399,3 +63399,35 @@ functions:
       cover unqualified table and qualified view misses, preservation of a
       preexisting error result, ARM wrapping of nErr, checkSchema latching,
       and exact literal/vararg selection.
+
+  # --- FPLib signed multi-limb shift wrapper ---
+  - address: 0x08340ee0
+    ghidra: FUN_08340ee0
+    name: bigint_shift_signed
+    size: 36
+    sig: "void bigint_shift_signed(u32 *value, i32 shift)"
+    module: fp/fp_bigint_shift
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: shift
+      FUN_0833bde8: bigint_right_shift_core
+      FUN_08360b88: bigint_left_shift_core
+    notes: >-
+      Raw osos.dec extent is exactly 36 bytes (0x08340ee0..0x08340f00):
+      nine ARM instructions ending in an unconditional tail branch; the next
+      separately linked function begins at 0x08340f04. Decoding every ARM
+      B/BL word finds exactly 9 direct call sites, all unconditional bl
+      (0x08314c6c, 0x0832857c, 0x0833d248, 0x08343318, 0x0834337c,
+      0x083433e8, 0x08343474, 0x083434e0, 0x0834354c), with zero predicated
+      calls and no aligned raw data-word reference. Signed shift > 0
+      tail-branches to the unported 0x08360b88 core as (shift, value);
+      shift <= 0 wraps its ARM rsb negation, then tail-branches to the
+      unported 0x0833bde8 core as (value, magnitude). Raw helper prologues
+      confirm their opposite argument orders and normalized multi-limb shift
+      behavior, but their semantic identities are not invented. The port
+      preserves the split and i32::MIN magnitude through volatile dispatch
+      slots; target defaults call the verified retailOS addresses, while host
+      defaults are inert solely to permit isolated recorder tests. match.py
+      (worktree archive) reviewed the expected 9-vs-17 instruction diff:
+      LLVM materializes volatile hook loads and indirect tail branches.
