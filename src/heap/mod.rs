@@ -31,6 +31,7 @@ pub mod new_handler;
 pub mod pool;
 pub mod releasable_buffer;
 pub mod owned_buffer;
+pub mod zeroing_buffer;
 pub mod three_buffer_owner;
 pub mod pool_client;
 pub mod queue_wait;
