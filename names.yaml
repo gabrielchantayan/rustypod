@@ -22405,6 +22405,39 @@ functions:
       LLVM may inline them, retaining the same operation order. Host tests
       cover NULL, non-final, and final slot-1 teardown paths.
 
+  - address: 0x0839ccac
+    ghidra: FUN_0839ccac
+    name: refcounted_body_release_dtor_copy
+    size: 144
+    sig: "void refcounted_body_release_dtor_copy(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      vtable_plus_0x4: virtual_destructor_slot_1
+    notes: >-
+      Raw ARM spans 0x0839ccac..0x0839cd3c (144 bytes); Ghidra's reported
+      136-byte extent omits the final slot NULL store and return. The
+      separately linked 16-byte mutex-lock and mutex-unlock helpers start
+      at 0x0839cd3c and 0x0839cd4c. Decoding every ARM B/BL word in
+      osos.dec finds exactly 9 direct bl callers, all unconditional:
+      0x08280908, 0x08280aa4, 0x08280c9c, 0x08280d24, 0x08280d50,
+      0x08280d68, 0x08280e38, 0x08280f68, and 0x0839ed20. No predicated
+      forms, tail b sites, or data-word references occur, so it is never
+      virtually dispatched. A separately linked copy of
+      refcounted_body_release_dtor @ 0x0839cbc0: NULL body leaves slot
+      untouched; otherwise optional mutex lock, wrapping refcount decrement,
+      final vtable word-1 destructor dispatch, unlock, mutex delete/free,
+      body free, then slot NULL. The implementation block is never freed.
+      Rust directly calls the already ported mutex and heap helpers; LLVM may
+      inline them rather than preserve the stock local helper calls, while
+      retaining the guard/decrement/slot-1-dispatch/teardown order. Host tests
+      cover NULL, non-final mutex, final dispatch/teardown, and wrapping-zero
+      paths.
   - address: 0x0839cbc0
     ghidra: FUN_0839cbc0
     name: refcounted_body_release_dtor
