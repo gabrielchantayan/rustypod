@@ -38194,6 +38194,33 @@ functions:
       heap_panic path, equivalent to the retail `cmp r1,#3; blge heap_panic`
       path.
 
+  - address: 0x08138c30
+    ghidra: FUN_08138c30
+    name: service_handler_lifecycle_select_default_descriptor
+    size: 80
+    sig: "u32 service_handler_lifecycle_select_default_descriptor(void *manager, i32 selector)"
+    module: app/service_handler_availability
+    renames:
+      param_1/r0: manager
+      param_2/r1: selector
+      DAT_08138c7c: service_handler_lifecycle_records (0x08ad0f34; 0x114-byte records)
+      FUN_08138bd0: registry_find_for_slot
+    status: ported
+    notes: >-
+      Raw extent is 80 bytes, 0x08138c30..0x08138c80: nineteen ARM
+      instructions plus literal 0x08ad0f34 at 0x08138c7c. Ghidra's reported
+      76 bytes omits that literal; 0x08138c80 begins the distinct next
+      function. Selector 0 and signed selectors >=3 return 9 without writes.
+      Every other signed selector calls registry_find_for_slot(manager,
+      selector, 0), stores its record pointer at lifecycle +4, clears +8 and
+      +0xc, and returns 0. Negative selectors are deliberately admitted:
+      their ARM register shift produces no slot bit, so the lookup returns
+      NULL but the pre-table lifecycle record is still cleared. Decoding every
+      ARM B/BL word in osos.dec finds 9 direct unconditional bl call sites,
+      no predicated bl, and no tail branches. The port shares the adjacent
+      five-record host fixture centered on selector zero; its descriptor field
+      remains u32 so host pointers truncate to the target representation.
+
   - address: 0x08138d8c
     ghidra: FUN_08138d8c
     name: service_handler_state_is_ready
