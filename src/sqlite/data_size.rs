@@ -33,14 +33,14 @@
 //!    +0x43: 0 = CURSOR_INVALID, 1 = CURSOR_VALID, 2 =
 //!    CURSOR_REQUIRESEEK, 3 = CURSOR_FAULT). Below CURSOR_REQUIRESEEK
 //!    (`cmp r0,#2; movcc r0,#0; bcc`) the restore is skipped and rc =
-//!    0; otherwise the cursor goes through the cursor-state validator
-//!    `sqlite3BtreeRestoreOrClearCursorPosition` @ 0x08372ae0
-//!    (UNPORTED — dispatched through the [`BTREE_CELL_OPS`]
-//!    `restore_cursor_position` slot, whose shipped default is the
-//!    documented success stand-in in `sqlite/cell_size.rs`).
-//! 2. rc != 0 (`movs r6,r0; bne`) — return the validator's code
+//!    0; otherwise the cursor calls the ported
+//!    [`btree_restore_cursor_position`] @ 0x08372ae0 directly. When it
+//!    needs to reposition, that port dispatches its still-unported movement
+//!    callee (`sqlite3BtreeMoveto` @ 0x08371e54) through
+//!    [`crate::sqlite::restore_cursor_position::BTREE_MOVETO_OPS`].
+//! 2. rc != 0 (`movs r6,r0; bne`) — return the restore routine's code
 //!    immediately; `*out` is NOT written.
-//! 3. The state byte is RE-READ (the validator may have moved the
+//! 3. The state byte is RE-READ (the restore routine may have moved the
 //!    cursor): CURSOR_INVALID means the cursor points at no entry —
 //!    `*out = 0` (the `beq` target stores the just-loaded zero byte).
 //! 4. Otherwise the cached `CellInfo` at cursor +0x20 is consulted:
@@ -73,12 +73,12 @@
 //! are equivalent. Nothing in the shipped firmware consumes this port
 //! yet (no hooks.yaml entry).
 
-use crate::sqlite::cell_size::restore_cursor_position_op;
+use crate::sqlite::restore_cursor_position::btree_restore_cursor_position;
 use crate::sqlite::parse_cell::btree_parse_cell;
 
 /// `BtCursor` byte offsets the original reads/writes (cross-checked
-/// against the validator @ 0x08372ae0 and the key-size sibling @
-/// 0x08371cc4, which share the layout).
+/// against the ported restore routine @ 0x08372ae0 and the key-size sibling
+/// @ 0x08371cc4, which share the layout).
 const CUR_P_PAGE: usize = 0x18;
 const CUR_IDX: usize = 0x1c;
 /// The cursor's cached `CellInfo` (0x20 bytes; layout in
@@ -122,9 +122,8 @@ unsafe fn rd_u32(base: *const u8, off: usize) -> u32 {
 /// SQLite's `sqlite3BtreeDataSize`: set `*out` to the number of bytes
 /// of data (payload) in the entry the cursor currently points at, 0
 /// when the cursor points at no entry. Returns a SQLite result code —
-/// the cursor-state validator's code when the cursor needed a restore
-/// and that restore failed, 0 otherwise; `*out` is only written on
-/// success.
+/// the cursor-state restore routine's code when the cursor needed a restore
+/// and that restore failed, 0 otherwise; `*out` is only written on success.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn btree_data_size(cursor: *mut u8, out: *mut u32) -> i32 {
@@ -134,10 +133,10 @@ pub unsafe extern "C" fn btree_data_size(cursor: *mut u8, out: *mut u32) -> i32 
     let rc = if rd_u8(cursor, CUR_E_STATE) < CURSOR_REQUIRESEEK {
         0
     } else {
-        restore_cursor_position_op()(cursor)
+        btree_restore_cursor_position(cursor)
     };
     if rc == 0 {
-        // The state byte is re-read: the validator may have moved the
+        // The state byte is re-read: the restore routine may have moved the
         // cursor (a failed seek leaves it CURSOR_INVALID).
         let size = if rd_u8(cursor, CUR_E_STATE) == CURSOR_INVALID {
             0
@@ -169,15 +168,15 @@ pub unsafe extern "C" fn btree_data_size(cursor: *mut u8, out: *mut u32) -> i32 
 /// r1; the original writes its low and high words with `strd`, so this
 /// port copies the two target-little-endian words separately rather than
 /// introducing a host alignment assumption. As with
-/// [`btree_data_size`], a nonzero cursor-state validator result is
-/// returned and leaves all eight output bytes untouched.
+/// [`btree_data_size`], a nonzero cursor-state restore result is returned and
+/// leaves all eight output bytes untouched.
 ///
-/// Algorithm: validate REQUIRESEEK/FAULT cursors, re-read `eState`,
-/// parse the cached `CellInfo` on an `nSize == 0` cache miss and set
-/// `validNKey`, then copy `CellInfo.nKey` (+0x08) to the out-parameter.
-/// The parser is the direct ported [`btree_parse_cell`] callee; the
-/// unported validator uses [`restore_cursor_position_op`]'s shared
-/// dispatch seam.
+/// Algorithm: restore REQUIRESEEK/FAULT cursors, re-read `eState`, parse the
+/// cached `CellInfo` on an `nSize == 0` cache miss and set `validNKey`, then
+/// copy `CellInfo.nKey` (+0x08) to the out-parameter. Both the parser and the
+/// cursor-state restore routine are direct ported callees; the restore
+/// routine's still-unported movement callee uses
+/// [`crate::sqlite::restore_cursor_position::BTREE_MOVETO_OPS`].
 ///
 /// Deviations: raw cursor fields use the same unaligned little-endian
 /// accessors as the neighboring data-size port. The two output-word
@@ -189,7 +188,7 @@ pub unsafe extern "C" fn btree_key_size(cursor: *mut u8, out: *mut i64) -> i32 {
     let rc = if rd_u8(cursor, CUR_E_STATE) < CURSOR_REQUIRESEEK {
         0
     } else {
-        restore_cursor_position_op()(cursor)
+        btree_restore_cursor_position(cursor)
     };
     if rc == 0 {
         let out = out.cast::<u32>();
@@ -217,7 +216,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::sqlite::cell_size::{BtreeCellOps, BTREE_CELL_OPS, DEFAULT_BTREE_CELL_OPS};
+    use crate::sqlite::restore_cursor_position::{
+        BTREE_MOVETO_OPS, DEFAULT_BTREE_MOVETO_OPS,
+    };
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, BTREE_CELL_TEST_LOCK};
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -270,28 +271,37 @@ mod tests {
     const CELL1_PAYLOAD: u8 = 0x22;
     const CELL1_NKEY: u8 = 0x07;
 
-    /// Arguments the mock validator saw, as raw cursor pointer values.
-    static RESTORE_SEEN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-    /// Result code the mock validator returns.
-    static RESTORE_RC: AtomicI32 = AtomicI32::new(0);
-    /// eState the mock validator plants before returning (-1 = leave).
-    static RESTORE_NEW_STATE: AtomicI32 = AtomicI32::new(-1);
+    /// Arguments the mock movement operation saw, as raw cursor pointer values.
+    static MOVETO_SEEN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+    /// Result code the mock movement operation returns.
+    static MOVETO_RC: AtomicI32 = AtomicI32::new(0);
+    /// eState the mock movement operation plants before returning.
+    static MOVETO_NEW_STATE: AtomicI32 = AtomicI32::new(1);
 
-    unsafe extern "C" fn mock_restore_cursor_position(cursor: *mut u8) -> i32 {
-        RESTORE_SEEN
+    unsafe extern "C" fn mock_btree_moveto(
+        cursor: *mut u8,
+        _saved_key: *mut u8,
+        _zero: u32,
+        _result: *mut i32,
+        _saved_n_key_lo: u32,
+        _saved_n_key_hi: u32,
+        _bias: u32,
+        _result_again: *mut i32,
+    ) -> i32 {
+        MOVETO_SEEN
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(cursor as usize);
-        let new_state = RESTORE_NEW_STATE.load(Ordering::Relaxed);
+        let new_state = MOVETO_NEW_STATE.load(Ordering::Relaxed);
         if new_state >= 0 {
             *cursor.add(CUR_E_STATE) = new_state as u8;
         }
-        RESTORE_RC.load(Ordering::Relaxed)
+        MOVETO_RC.load(Ordering::Relaxed)
     }
 
-    /// Maps the slab, installs the mock validator, and restores the
-    /// shipped default on drop. `None` (test skips) when this host
-    /// cannot place the fixture below 4 GiB.
+    /// Maps the slab, installs the mock movement operation, and restores its
+    /// shipped default on drop. `None` (test skips) when this host cannot
+    /// place the fixture below 4 GiB.
     struct Fixture {
         _guard: MutexGuard<'static, ()>,
         base: *mut u8,
@@ -309,15 +319,14 @@ mod tests {
                     return None;
                 }
             };
-            RESTORE_SEEN
+            MOVETO_SEEN
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clear();
-            RESTORE_RC.store(0, Ordering::Relaxed);
-            RESTORE_NEW_STATE.store(-1, Ordering::Relaxed);
+            MOVETO_RC.store(0, Ordering::Relaxed);
+            MOVETO_NEW_STATE.store(1, Ordering::Relaxed);
             unsafe {
-                (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).restore_cursor_position =
-                    mock_restore_cursor_position;
+                (*core::ptr::addr_of_mut!(BTREE_MOVETO_OPS)).moveto = mock_btree_moveto;
                 core::ptr::write_bytes(base, 0, SLAB_LEN);
             }
             let f = Fixture {
@@ -340,8 +349,8 @@ mod tests {
             unsafe { self.base.add(OFF_CURSOR) }
         }
 
-        fn restore_seen(&self) -> Vec<usize> {
-            RESTORE_SEEN
+        fn moveto_seen(&self) -> Vec<usize> {
+            MOVETO_SEEN
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
@@ -443,13 +452,13 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             unsafe {
-                (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).restore_cursor_position =
-                    DEFAULT_BTREE_CELL_OPS.restore_cursor_position;
+                (*core::ptr::addr_of_mut!(BTREE_MOVETO_OPS)).moveto =
+                    DEFAULT_BTREE_MOVETO_OPS.moveto;
             }
         }
     }
 
-    /// CURSOR_INVALID skips the validator entirely and stores 0
+    /// CURSOR_INVALID skips the restore routine entirely and stores 0
     /// (`movcc r0,#0x0; bcc`, then the `beq` stores the zeroed state
     /// byte). No parse either — the poisoned info must survive.
     #[test]
@@ -462,8 +471,8 @@ mod tests {
         assert_eq!(rc, 0);
         assert_eq!(out, 0);
         assert!(
-            f.restore_seen().is_empty(),
-            "state < 2 must not call the validator"
+            f.moveto_seen().is_empty(),
+            "state < 2 must not invoke movement through the restore routine"
         );
         assert_eq!(
             f.info_word(CUR_INFO_N_DATA - CUR_INFO),
@@ -472,7 +481,7 @@ mod tests {
         );
     }
 
-    /// CURSOR_VALID also skips the validator (`bcc` is a state < 2
+    /// CURSOR_VALID also skips the restore routine (`bcc` is a state < 2
     /// test, not a state == 0 test) and serves the primed cache.
     #[test]
     fn valid_state_skips_restore_too() {
@@ -484,48 +493,48 @@ mod tests {
         assert_eq!(rc, 0);
         assert_eq!(out, 0x1234_5678);
         assert!(
-            f.restore_seen().is_empty(),
-            "state < 2 must not call the validator"
+            f.moveto_seen().is_empty(),
+            "state < 2 must not invoke movement through the restore routine"
         );
     }
 
-    /// A failing validator propagates its code, is called with the
-    /// cursor verbatim, and leaves `*out`, the cache flag and
-    /// `validNKey` untouched (`movs r6,r0; bne` — straight to the
-    /// epilogue).
+    /// A failing movement operation propagates through the direct restore
+    /// routine, is called with the cursor verbatim, and leaves `*out`, the
+    /// cache flag and `validNKey` untouched (`movs r6,r0; bne` — straight to
+    /// the epilogue).
     #[test]
     fn restore_failure_propagates_and_leaves_out_untouched() {
         let Some(f) = Fixture::new() else { return };
         f.wire_cursor(2, 0, true);
         f.poison_info();
-        RESTORE_RC.store(6, Ordering::Relaxed);
+        MOVETO_RC.store(6, Ordering::Relaxed);
         let mut out = 0xdead_beefu32;
         let rc = unsafe { btree_data_size(f.cursor(), &mut out) };
-        assert_eq!(rc, 6, "the validator's code is the return value");
+        assert_eq!(rc, 6, "the movement result is the return value");
         assert_eq!(out, 0xdead_beef, "rc != 0 must not write *out");
         assert_eq!(
-            f.restore_seen(),
+            f.moveto_seen(),
             vec![f.cursor() as usize],
-            "the validator gets the cursor, once"
+            "movement receives the cursor, once"
         );
         assert_eq!(f.info_word(CUR_INFO_N_DATA - CUR_INFO), 0x1234_5678);
         assert_eq!(unsafe { *f.cursor().add(CUR_VALID_N_KEY) }, 0);
     }
 
-    /// The state byte is re-read after the validator: a restore that
-    /// leaves the cursor CURSOR_INVALID (the seek failed to find the
-    /// entry) stores 0, not the stale cached size.
+    /// The state byte is re-read after the direct restore routine: a movement
+    /// operation that leaves the cursor CURSOR_INVALID (the seek failed to
+    /// find the entry) stores 0, not the stale cached size.
     #[test]
     fn restore_leaving_state_invalid_writes_zero() {
         let Some(f) = Fixture::new() else { return };
         f.wire_cursor(2, 0, true);
         f.poison_info();
-        RESTORE_NEW_STATE.store(0, Ordering::Relaxed);
+        MOVETO_NEW_STATE.store(0, Ordering::Relaxed);
         let mut out = 0xdead_beefu32;
         let rc = unsafe { btree_data_size(f.cursor(), &mut out) };
         assert_eq!(rc, 0);
         assert_eq!(out, 0);
-        assert_eq!(f.restore_seen(), vec![f.cursor() as usize]);
+        assert_eq!(f.moveto_seen(), vec![f.cursor() as usize]);
         assert_eq!(
             f.info_word(CUR_INFO_N_DATA - CUR_INFO),
             0x1234_5678,
@@ -608,24 +617,21 @@ mod tests {
         assert_eq!(f.info_word(CI_P_CELL), expected_cell as usize as u32);
     }
 
-    /// The shipped default slot (success stand-in) lets a
-    /// REQUIRESEEK cursor proceed to the cache as if restored.
+    /// A REQUIRESEEK cursor reaches the direct restore port, whose successful
+    /// movement call restores a valid state before the cached size is read.
     #[test]
-    fn default_restore_stand_in_lets_requireseek_proceed() {
+    fn restore_success_via_movement_seam_proceeds_to_cache() {
         let Some(f) = Fixture::new() else { return };
-        unsafe {
-            (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).restore_cursor_position =
-                DEFAULT_BTREE_CELL_OPS.restore_cursor_position;
-        }
         f.wire_cursor(2, 0, true);
         f.poison_info();
         let mut out = 0;
         let rc = unsafe { btree_data_size(f.cursor(), &mut out) };
         assert_eq!(rc, 0);
         assert_eq!(out, 0x1234_5678);
-        assert!(
-            f.restore_seen().is_empty(),
-            "the default slot is not the mock"
+        assert_eq!(
+            f.moveto_seen(),
+            vec![f.cursor() as usize],
+            "the direct restore must reach the movement seam"
         );
     }
 
@@ -640,7 +646,7 @@ mod tests {
         let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
         assert_eq!(rc, 0);
         assert_eq!(out, 0);
-        assert!(f.restore_seen().is_empty());
+        assert!(f.moveto_seen().is_empty());
         assert_eq!(
             f.info_word(CI_N_KEY),
             0x1111_1111,
@@ -648,35 +654,35 @@ mod tests {
         );
     }
 
-    /// Validator failures reach the shared `BTREE_CELL_OPS` seam and
-    /// return before either word of the i64 out-parameter is written.
+    /// Movement failures propagate through the direct restore port and return
+    /// before either word of the i64 out-parameter is written.
     #[test]
     fn key_size_restore_failure_propagates_and_leaves_i64_untouched() {
         let Some(f) = Fixture::new() else { return };
         f.wire_cursor(2, 0, true);
         f.poison_info();
-        RESTORE_RC.store(6, Ordering::Relaxed);
+        MOVETO_RC.store(6, Ordering::Relaxed);
         let mut out = 0x7ead_beef_dead_cafeu64 as i64;
         let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
         assert_eq!(rc, 6);
         assert_eq!(out as u64, 0x7ead_beef_dead_cafe);
-        assert_eq!(f.restore_seen(), vec![f.cursor() as usize]);
+        assert_eq!(f.moveto_seen(), vec![f.cursor() as usize]);
         assert_eq!(unsafe { *f.cursor().add(CUR_VALID_N_KEY) }, 0);
     }
 
-    /// A successful restore can leave the cursor invalid; the re-read
-    /// state gate then writes an all-zero i64 without parsing stale info.
+    /// A successful movement operation can leave the cursor invalid; the
+    /// re-read state gate then writes an all-zero i64 without parsing stale info.
     #[test]
     fn key_size_restore_to_invalid_clears_i64_without_parsing() {
         let Some(f) = Fixture::new() else { return };
         f.wire_cursor(2, 0, true);
         f.poison_info();
-        RESTORE_NEW_STATE.store(0, Ordering::Relaxed);
+        MOVETO_NEW_STATE.store(0, Ordering::Relaxed);
         let mut out = -1i64;
         let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
         assert_eq!(rc, 0);
         assert_eq!(out, 0);
-        assert_eq!(f.restore_seen(), vec![f.cursor() as usize]);
+        assert_eq!(f.moveto_seen(), vec![f.cursor() as usize]);
         assert_eq!(f.info_word(CI_N_KEY), 0x1111_1111);
     }
 
@@ -716,23 +722,4 @@ mod tests {
         assert_ne!(f.info_word(CI_N_PAYLOAD), 0xa5a5_a5a5);
     }
 
-    /// The slot really is one of the shared cluster's ops (catches a
-    /// parallel-static regression).
-    #[test]
-    fn restore_slot_lives_on_btree_cell_ops() {
-        let _guard = BTREE_CELL_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let _ops: BtreeCellOps =
-            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS)) };
-        assert_eq!(
-            unsafe {
-                core::ptr::read_volatile(core::ptr::addr_of!(
-                    BTREE_CELL_OPS.restore_cursor_position
-                )) as usize
-            },
-            DEFAULT_BTREE_CELL_OPS.restore_cursor_position as usize,
-            "the shipped default is the documented success stand-in"
-        );
-    }
 }
