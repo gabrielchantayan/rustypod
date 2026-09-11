@@ -65009,3 +65009,29 @@ functions:
       The host test changes controller+0xb0 from the first stop's trace
       callback, proving the second pointer is loaded after the first call;
       it also proves that controller+0xb8 remains untouched.
+  - address: 0x081cda64
+    ghidra: FUN_081cda64
+    name: lazy_slot_table_entry
+    size: 24
+    sig: "void *lazy_slot_table_entry(u32 slot)"
+    module: util/lazy_slot_table_entry
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_081cda30: lazy_slot_table_getter (unported fixed-address target call)
+      FUN_081cd9b8: indexed_slot_word_load
+    notes: >-
+      Raw osos.dec confirms that Ghidra's 32-byte extent swallows the next
+      sibling: the six instructions at 0x081cda64..0x081cda78 are 24 bytes,
+      ending with b 0x081cd9b8; the next separately linked function begins
+      with push at 0x081cda7c. It saves slot across the lazy getter call,
+      then tail-branches to the two-instruction indexed word load, so it
+      returns table[slot] with neither bounds nor NULL checks. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly nine direct inbound calls,
+      all unconditional bl (0x0829c874, 0x0829c944, 0x0829da30, 0x0829da44,
+      0x0829da78, 0x0829da8c, 0x0829ee8c, 0x0829eeb4, 0x0829eecc), with no
+      predicated forms or direct tail branches. The callee initializes a
+      15-word table of 0x2000-byte-buffer records, but no concrete record
+      identity is established. Deliberate deviations: ARM calls the verified
+      unported getter at 0x081cda30; host tests install a getter seam, and
+      Rust performs the tail helper's indexed load directly.
