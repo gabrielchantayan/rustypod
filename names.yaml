@@ -65542,3 +65542,30 @@ functions:
       uses their implied C-locale ASCII digit sets (0..7, 0..9, and
       0..9/A..F/a..f). Host tests cover radix normalization, prefix/endptr
       placement, sign, null/empty input, and per-step 16-bit wrapping.
+
+  - address: 0x0807f1e8
+    ghidra: FUN_0807f1e8
+    name: keyed_record_pair_lookup
+    size: 76
+    sig: "u32 keyed_record_pair_lookup(const KeyedRecordPair *records, u32 record_count, u32 key, u32 *first_value_out, u32 *second_value_out)"
+    module: app/keyed_record_pair_lookup
+    status: ported
+    renames:
+      param_1/r0: records
+      param_2/r1: record_count
+      param_3/r2: key
+      param_4/r3: first_value_out
+      stack_0/r5: second_value_out
+      uVar1/r12: record_index
+      piVar2/lr: record
+    notes: >-
+      Raw ARM establishes the exact 76-byte extent
+      0x0807f1e8..0x0807f234: the next separately entered function starts
+      with cmp r0,#0 at 0x0807f234. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly nine direct inbound calls, all unconditional
+      plain bl in FUN_0828fbac at 0x0828fd2c, 0x0828fe84, 0x0828fea8,
+      0x0828fed0, 0x0828fef0, 0x0828ff10, 0x0828fff4, 0x08290050, and
+      0x08290078; no predicated calls or tail branches. The helper linearly
+      scans 16-byte records for the first matching u32 key, then copies
+      words +8 and +12 to its two outputs and returns 1; a miss returns 0
+      without modifying either output. The +4 word is not read.

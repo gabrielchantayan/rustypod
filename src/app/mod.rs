@@ -46,6 +46,7 @@ pub mod element_table;
 pub mod element_registry;
 pub mod event_code_queue;
 pub mod keyed_event_binding;
+pub mod keyed_record_pair_lookup;
 pub mod event_hub;
 pub mod event_list;
 pub mod event_source;
