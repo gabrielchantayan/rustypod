@@ -559,23 +559,25 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() != b.read())
 }
 
-/// equal_deref — original: `FUN_083cf968` @ 0x083cf968
-/// (24 bytes; 12 `bl` call sites there, all unpredicated,
-/// binary-verified: 0x081f04b8, 0x081f09b4, 0x081f0ae4, 0x081f0c08,
-/// 0x081f0f98, 0x081f11d0, 0x083ccdbc, 0x083cd22c, 0x083cd248,
-/// 0x083cd2cc, 0x083cd390, 0x083dbbbc — 241 direct `bl` plus 2
-/// predicated sites across all 41 byte-identical copies, listed in
-/// `names.yaml`).
+/// equal_deref — originals: `FUN_083cf968` @ 0x083cf968 and
+/// `FUN_083cf980` @ 0x083cf980 (24 bytes each). The canonical copy has
+/// 12 plain `bl` callers; the 0x083cf980 copy has 9 plain `bl` callers —
+/// 0x081e1518, 0x081e1568, 0x083cd808, 0x083cdc74, 0x083cdc90,
+/// 0x083cdd14, 0x083cddf4, 0x083cdee4 and 0x083dbcc4 — and no predicated
+/// forms. Counts were verified by decoding every ARM B/BL word in
+/// `osos.dec`; the two bodies are byte-identical.
 ///
 /// `*a == *b` as 0/1 over word-sized operands taken by reference:
 /// `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1`
-/// — the matching EQUALITY functor of [`not_equal_deref`], without
-/// that family's redundant final `eor`. The 0x083cf968 copy's callers
-/// are container-iteration loops: they stack-materialize a cursor
-/// iterator and the list/deque end iterator and compare their FIRST
-/// words (the current-node pointer) through this helper, i.e. the ADS
-/// checked-iterator `operator==`. Other copies serve other instantia-
-/// tions; the body is type-agnostic.
+/// — the matching EQUALITY functor of [`not_equal_deref`], without that
+/// family's redundant final `eor`.
+///
+/// The 0x083cf968 callers are container-iteration loops: they
+/// stack-materialize a cursor iterator and the list/deque end iterator and
+/// compare their FIRST words (the current-node pointer) through this helper,
+/// i.e. the ADS checked-iterator `operator==`. The 0x083cf980 copy has the
+/// same raw body and ABI, so its ledger entry deliberately hooks this
+/// established export instead of introducing a redundant dispatch seam.
 ///
 /// The body is byte-identical to `fixed16_eq_indirect` @ 0x082a1834
 /// ([`crate::fp::fp_misc`]) — a Q16.16 comparator that merely shares
@@ -2705,7 +2707,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_compares_words_by_value() {
+    fn equal_deref_f980_copy_compares_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
@@ -2718,7 +2720,7 @@ mod tests {
             let max: u32 = 0xffff_ffff;
             assert_eq!(equal_deref(&min, &max), 0);
             assert_eq!(equal_deref(&max, &max), 1, "sign bit is not special-cased");
-            // Iterator-shaped use, as the 0x083cf968 copy's callers do
+            // Iterator-shaped use, as the 0x083cf980 copy's callers do
             // it: compare the FIRST word of two wider records.
             let cursor = [0x083d_0000u32, 0xaaaa_aaaa];
             let end = [0x083d_0000u32, 0xbbbb_bbbb];

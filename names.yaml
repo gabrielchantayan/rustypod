@@ -29183,6 +29183,24 @@ functions:
       the usual push {fp,lr}/pop {fp,pc} frame - the same accepted
       deviation as fixed16_eq_indirect.
 
+  - address: 0x083cf980
+    ghidra: FUN_083cf980
+    name: equal_deref_f980_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Byte-identical to equal_deref @ 0x083cf968: `ldr r0,[r0]; ldr
+      r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1; bx lr`. The 9
+      direct calls are 0x081e1518, 0x081e1568, 0x083cd808, 0x083cdc74,
+      0x083cdc90, 0x083cdd14, 0x083cddf4, 0x083cdee4 and 0x083dbcc4;
+      all are plain `bl`, with no predicated forms, verified by decoding
+      every ARM B/BL word in osos.dec. This is ledger-only: hook this
+      physical copy to the established equal_deref export rather than add
+      a redundant dispatch seam.
+
   - address: 0x083cf848
     ghidra: FUN_083cf848
     name: iterator_equal
