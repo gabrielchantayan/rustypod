@@ -65451,3 +65451,34 @@ functions:
       file_store_destruct_releases_inner_resets_base_and_returns_this covers
       populated and NULL inner fields, order-visible intermediate vtable
       installation, ownership clearing, base reset, and the returned this.
+  # --- channel control enable state ---
+  - address: 0x081085d0
+    ghidra: FUN_081085d0
+    name: channel_control_apply_enable
+    size: 96
+    sig: "void channel_control_apply_enable(void *context, u32 selector, i32 enable)"
+    module: drivers/channel_control_enable
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: selector
+      param_3/r2: enable
+      FUN_081073f8: unported_channel_state_dispatch
+      DAT_38400900: secondary_channel_control_bank
+      DAT_38400b00: primary_channel_control_bank
+    notes: >-
+      Raw osos.dec establishes a 96-byte body from 0x081085d0 through the
+      return at 0x0810862c; the next independently linked function begins
+      at 0x08108630. Decoding every ARM B/BL immediate finds exactly nine
+      direct inbound calls, all unconditional bl at 0x08292fac, 0x08293ab0,
+      0x08293ac0, 0x08293be0, 0x08293c0c, 0x08293d34, 0x08294388,
+      0x082947b4, and 0x082947c4; no predicated call forms target this
+      entry. It is a no-op only when `(selector & 0x7f) == 0 && enable == 0`;
+      otherwise it calls the unported target at 0x081073f8, then updates
+      control word 0x38400b00 or 0x38400900 plus `(selector & 0x7f) * 0x20`.
+      The update clears bits 31..26 and 17; zero enable clears bit 21 and
+      sets bit 28, while nonzero enable sets bit 21. The target port reaches
+      0x081073f8 by its verified address without assigning that callee an
+      identity; host tests install a recorder that mutates the register
+      before the read, proving call-before-read ordering, both banks, all
+      nonzero enable values, and the two bank-zero no-op cases.
