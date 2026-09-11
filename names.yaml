@@ -60329,6 +60329,40 @@ functions:
       remain accepted. The raw literal says 0x088faa4b, whose table is at
       image 0x08905923 under the SQLite +0xaed8 image/runtime skew documented
       in sqlite/mod.rs; its 64 recovered bytes exactly match upstream.
+  - address: 0x08378f8c
+    ghidra: FUN_08378f8c
+    name: find_index
+    size: 152
+    sig: "Index *find_index(sqlite3 *db, const char *name, const char *database)"
+    module: sqlite/find_index
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: name
+      param_3/r2: database
+      uVar3/r4: i
+      uVar2/r1: j
+      iVar4/r5: schema
+      iVar5/r6: result
+      DAT_schema_plus_0x18: idx_hash
+    notes: >-
+      SQLite 3.4.x/3.5.x util.c's sqlite3FindIndex. Raw ARM confirms the
+      exact 152-byte extent 0x08378f8c..0x08379024; the separately linked
+      sqlite3FindTable starts immediately at 0x08379024. Decoding every ARM
+      B/BL word in osos.dec finds exactly 8 inbound direct call sites, all
+      unconditional BL (no predicated BL forms or tail-B references):
+      0x082b3d20, 0x0836ef48, 0x08373f3c, 0x083754e4, 0x0837b5c4,
+      0x0838002c, 0x08381f1c, and 0x0838477c. For i in 0..nDb using the
+      signed bgt loop guard, it probes entries in 1,0,2,3,... order; a
+      non-NULL database filters with str_icmp(database, aDb[j].zName), then
+      hash_find(aDb[j].pSchema + 0x18, name, strlen(name)+1) returns the first
+      Index hit. The three direct helper callees are already ported: str_icmp
+      @ 0x08384f14, strlen @ 0x08392478, and hash_find @ 0x0837ad88.
+      Deliberate deviations: str_icmp and hash_find use module-local volatile
+      hooks (defaulting to those real ports) so host fixtures observe their
+      arguments without sharing mutable state with another port; the original
+      direct BL instructions therefore become indirect calls. The raw u32
+      target-pointer layout is preserved rather than using host-width fields.
   - address: 0x08379024
     ghidra: FUN_08379024
     name: find_table
