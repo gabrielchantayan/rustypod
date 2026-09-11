@@ -38917,6 +38917,40 @@ functions:
       ldr r1,[r4,#8], same +0x110/+0x114 reads, same zero-both-halves
       invalid path; the diff is the crate fp frame and LLVM branching
       (beq) where ADS predicated (ldrne/moveq).
+  # --- Indexed source tagged-value construction (cxx/tagged_value) ---
+  - address: 0x0813da28
+    ghidra: FUN_0813da28
+    name: tagged_value_from_indexed_source
+    size: 48
+    sig: "TaggedValue *tagged_value_from_indexed_source(TaggedValue *this, void *source, u32 index)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: source
+      param_3/r2: index
+      r3: source_write_indexed_record
+      "source->vtable+0x27c": write_indexed_record
+      FUN_0828407c: tagged_value_from_optional_word4
+    notes: >-
+      Raw osos.dec confirms Ghidra's 48-byte extent: the twelve instructions
+      at 0x0813da28..0x0813da54 allocate a 20-byte temporary at sp+4, invoke
+      source->vtable slot +0x27c as (temporary, source, index), and convert
+      the temporary through the already ported tagged_value_from_optional_word4.
+      The next separately linked function begins with push at 0x0813da58;
+      there is no literal pool. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly nine inbound calls, all unconditional bl: 0x0810c92c,
+      0x08179f00, 0x08179f18, 0x08179f5c, 0x08179f78, 0x0817a09c,
+      0x0817a0b4, 0x0817a0f8, and 0x0817a114. No predicated bl or direct tail
+      b reaches this function. The virtual source class and slot target remain
+      unrecovered, so the port dispatches the raw slot rather than inventing a
+      fixed callee or seam. The temporary's word +0x04 is the only word the
+      following helper observes. Deliberate host deviation: the fixture vtable
+      holds a native-width function pointer at the structurally equivalent
+      slot, avoiding 64-bit function-pointer truncation. Host coverage proves
+      the virtual source and both index edge values (0 and u32::MAX) reach the
+      slot, and that its +0x04 output becomes the tagged payload.
+
 
   # --- Tagged value construction (cxx/tagged_value) ---
   - address: 0x0828407c
