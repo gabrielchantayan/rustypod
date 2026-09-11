@@ -10,6 +10,13 @@
 use crate::heap::rom_task_start::gateway_dispatch;
 use core::mem::MaybeUninit;
 
+#[cfg(test)]
+extern crate std;
+
+/// Serializes host tests that replace the shared foreign gateway binding.
+#[cfg(test)]
+pub(crate) static TASK_UNLOCK_GATEWAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Three-word request frame for RTXC gateway service 3.
 ///
 /// The assembly writes word 0 (selector 3) and word 2 (the task/kernel id),
@@ -54,9 +61,6 @@ mod tests {
         RomGatewayOps, DEFAULT_ROM_GATEWAY_OPS, ROM_GATEWAY_OPS,
     };
     use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::Mutex;
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: u32 = 0;
     static mut RECORDED_SELECTOR: u32 = 0;
     static mut RECORDED_TASK_ID: u32 = 0;
@@ -71,7 +75,7 @@ mod tests {
 
     #[test]
     fn builds_service_3_request_delegates_and_returns_gateway_pair() {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = TASK_UNLOCK_GATEWAY_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             addr_of_mut!(CALLS).write(0);
             addr_of_mut!(RECORDED_SELECTOR).write(0);

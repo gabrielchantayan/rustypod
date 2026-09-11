@@ -160,9 +160,10 @@ pub const THUNK_STRIDE: u32 = 8;
 
 /// Number of thunk wrappers in the span (and in ROM_KERNEL / THUNK_CATALOG).
 pub const WRAPPER_COUNT: usize = 32;
-
 /// Number of still-foreign ROM entries represented by [`RomThunkOps`].
-const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 1;
+///
+/// Slots 3 and 10 call their already ported mirror bodies directly.
+const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 2;
 
 /// The full span catalog: (thunk address, ROM target, exported symbol),
 /// in address order. Verified word-for-word against osos.dec.
@@ -202,8 +203,8 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
 ];
 
 /// Indirect dispatch table for the remaining foreign ROM services in this
-/// span. The directly ported mailbox-send target at thunk slot 3 is not a
-/// table entry.
+/// span. The directly ported mailbox-send and task-unlock targets are not
+/// table entries.
 #[derive(Clone, Copy)]
 pub struct RomThunkOps {
     /// ROM memmove @ 0x220000d4: (dst, src, len) -> dst.
@@ -230,8 +231,6 @@ pub struct RomThunkOps {
     pub kernel_op_dispatch: unsafe extern "C" fn(op: usize, arg: usize) -> usize,
     /// Kernel-id -> object lookup @ 0x22003ea0 (see module header).
     pub task_lock: unsafe extern "C" fn(id: usize) -> usize,
-    /// Kernel gateway service 3 @ 0x2200408c (see module header).
-    pub task_unlock: unsafe extern "C" fn(id: usize) -> usize,
     /// ROM gateway service 40 @ 0x22003ec4.
     pub rom_svc_22003ec4: unsafe extern "C" fn(a0: usize) -> usize,
     /// UNVERIFIED (thunks.rs): pointer chase @ 0x22003eb0.
@@ -323,7 +322,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     rom_svc_22003d00: missing2,
     kernel_op_dispatch: missing2,
     task_lock: missing1,
-    task_unlock: missing1,
     rom_svc_22003ec4: missing1,
     size_to_class: missing0,
     rom_svc_22003be8: missing4,
@@ -606,12 +604,32 @@ pub unsafe extern "C" fn task_lock(id: usize) -> usize {
     (hook!(task_lock))(id)
 }
 
-/// task_unlock — original: thunk @ 0x08037e50 -> ROM 0x2200408c, the
-/// kernel gateway's service-3 stub with `id` as its argument (see the
-/// module header for the naming caveat).
+/// task_unlock — original: `thunk_EXT_FUN_2200408c` @ `0x08037e50`
+/// (Ghidra reports 4 bytes; verified extent 8 bytes).
+///
+/// Raw words are `e51ff004` (`ldr pc, [pc, #-4]`) at `0x08037e50` and
+/// target literal `2200408c` at `0x08037e54`; the sibling veneer starts at
+/// `0x08037e58`. This ADS literal veneer tail-dispatches to the ROM's IRAM
+/// mirror `0x0800408c`, preserving its `u32` task id in r0 and the target's
+/// ARM-EABI `u64` result in r0:r1. That 32-byte mirror body is already ported
+/// as [`crate::heap::task_unlock_gateway::task_unlock_gateway`]: it builds
+/// RTXC gateway service-3 frame `{ 3, uninitialized_output, task_id }`.
+///
+/// Verified reach: every ARM B/BL word in osos.dec decodes to 10 call sites,
+/// all unconditional `bl` (`0x080564c8`, `0x080564fc`, `0x0806450c`,
+/// `0x08084c7c`, `0x0809c7c8`, `0x080c9c78`, `0x080e43d4`, `0x080e43f4`,
+/// `0x08393690`, `0x08393730`); zero predicated calls, tail branches, or
+/// data-word references. Callers therefore supply any sentinel handling; the
+/// veneer has no guard.
+///
+/// Deliberate deviation: invokes the ported osos mirror directly instead of
+/// loading PC from the target-only ROM literal. The Rust ABI represents only
+/// the target's documented r0 input and r0:r1 return, not otherwise
+/// transparent r1-r3 veneer registers.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn task_unlock(id: usize) -> usize {
-    (hook!(task_unlock))(id)
+pub unsafe extern "C" fn task_unlock(task_id: u32) -> u64 {
+    crate::heap::task_unlock_gateway::task_unlock_gateway(task_id)
 }
 
 /// rom_svc_22003ec4 — original: thunk @ 0x08037e58 -> ROM gateway stub,
@@ -910,7 +928,6 @@ pub(crate) mod tests {
     mock2!(m07, 7); // rom_svc_22003d00
     mock2!(m08, 8); // kernel_op_dispatch
     mock1!(m09, 9); // task_lock
-    mock1!(m10, 10); // task_unlock
     mock1!(m11, 11); // rom_svc_22003ec4
     mock0!(m12, 12); // size_to_class
     mock4!(m13, 13); // rom_svc_22003be8
@@ -943,7 +960,6 @@ pub(crate) mod tests {
         rom_svc_22003d00: m07,
         kernel_op_dispatch: m08,
         task_lock: m09,
-        task_unlock: m10,
         rom_svc_22003ec4: m11,
         size_to_class: m12,
         rom_svc_22003be8: m13,
@@ -1036,9 +1052,9 @@ pub(crate) mod tests {
     }
 
     /// The table holds one independent fn pointer for each foreign thunk
-    /// target; mailbox_send_gateway_mode1 is directly ported instead.
+    /// target; mailbox-send and task-unlock are directly ported instead.
     #[test]
-    fn ops_table_excludes_directly_ported_mailbox_send() {
+    fn ops_table_excludes_directly_ported_targets() {
         assert_eq!(
             core::mem::size_of::<RomThunkOps>(),
             ROM_HOOK_COUNT * core::mem::size_of::<usize>()
@@ -1058,16 +1074,47 @@ pub(crate) mod tests {
         }
     }
 
-    /// task_unlock (thunk 0x08037e50 -> ROM 0x2200408c): same contract.
+    /// task_unlock (thunk 0x08037e50 -> ROM 0x2200408c) delegates to the
+    /// ported mirror body, preserving both gateway result words for zero and
+    /// the 0xffffffff sentinel task id.
     #[test]
-    fn task_unlock_passes_id_through() {
-        let _lock = mock_kernel();
-        unsafe {
-            let ret = task_unlock(0x3f);
-            check(10, ret, &[0x3f]);
-            let ret = task_unlock(usize::MAX); // the -1 sentinel seen at 0x0809c7b8
-            check(10, ret, &[usize::MAX]);
+    fn task_unlock_delegates_to_ported_gateway() {
+        use crate::heap::rom_task_start::{
+            RomGatewayOps, DEFAULT_ROM_GATEWAY_OPS, ROM_GATEWAY_OPS,
+        };
+        use crate::heap::task_unlock_gateway::TASK_UNLOCK_GATEWAY_LOCK;
+        use core::ptr::{addr_of, addr_of_mut};
+
+        static mut CALLS: u32 = 0;
+        static mut LAST_TASK_ID: u32 = 0;
+
+        unsafe extern "C" fn record_and_reply(request: *mut u32) {
+            addr_of_mut!(CALLS).write(addr_of!(CALLS).read() + 1);
+            assert_eq!(request.read(), 3);
+            addr_of_mut!(LAST_TASK_ID).write(request.add(2).read());
+            request.write(0xfeed_cafe);
+            request.add(1).write(0x1234_5678);
         }
+
+        let guard = TASK_UNLOCK_GATEWAY_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            addr_of_mut!(CALLS).write(0);
+            addr_of_mut!(LAST_TASK_ID).write(0);
+            addr_of_mut!(ROM_GATEWAY_OPS).write(RomGatewayOps {
+                dispatch: record_and_reply,
+            });
+
+            assert_eq!(task_unlock(0), 0x1234_5678_feed_cafe);
+            assert_eq!(addr_of!(LAST_TASK_ID).read(), 0);
+            assert_eq!(task_unlock(u32::MAX), 0x1234_5678_feed_cafe);
+            assert_eq!(addr_of!(LAST_TASK_ID).read(), u32::MAX);
+            assert_eq!(addr_of!(CALLS).read(), 2);
+
+            addr_of_mut!(ROM_GATEWAY_OPS).write(DEFAULT_ROM_GATEWAY_OPS);
+        }
+        drop(guard);
     }
 
     /// rom_sem_signal (thunk 0x08037e10 -> ROM 0x220042b4): the kernel
@@ -1168,7 +1215,6 @@ pub(crate) mod tests {
             check(7, rom_svc_22003d00(6, 0x4000), &[6, 0x4000]);
             check(8, kernel_op_dispatch(1, 0x5000), &[1, 0x5000]);
             check(9, task_lock(0x27), &[0x27]);
-            check(10, task_unlock(0x27), &[0x27]);
             check(11, rom_svc_22003ec4(0), &[0]);
             check(12, size_to_class(), &[]);
             check(13, rom_svc_22003be8(1, 4, 0x200, 0), &[1, 4, 0x200, 0]);
