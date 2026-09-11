@@ -61991,3 +61991,43 @@ functions:
       in r0. Ghidra incorrectly reports void, but its chained range-state
       constructor callers consume this result. No NULL guard exists; callers
       must supply two aligned writable u32 words. Deliberate deviations: none.
+
+  # --- Silver list resource processor (app/silver_list_table_resource) ---
+  - address: 0x0812d7bc
+    ghidra: FUN_0812d7bc
+    name: silver_list_table_process_resource
+    size: 68
+    sig: "SilverListTable *silver_list_table_process_resource(void *context, u32 resource_id)"
+    module: app/silver_list_table_resource
+    status: ported
+    renames:
+      param_1/r0: context (unused)
+      param_2/r1: resource_id
+      r4: table
+      FUN_082aadd4: operator_new
+      FUN_081473d8: silver_list_table_ctor
+      FUN_08147360: silver_list_table_item_process_all
+      "table vtable+0x04": virtual_destructor
+    notes: >-
+      Raw osos.dec confirms the exact 68-byte extent: seventeen ARM words
+      from 0x0812d7bc through pop {r4, r5, r6, pc} at 0x0812d7fc; the
+      conditional virtual tail transfer is bxne r1 at 0x0812d7f8, and the next
+      separately linked function's push starts at 0x0812d800. Decoding every ARM
+      B/BL immediate finds exactly ten direct inbound bl sites, all
+      unconditional and none predicated: 0x08126640, 0x0812664c,
+      0x08126658, 0x08126664, 0x08126670, 0x0812667c, 0x081b1394,
+      0x081b13a0, 0x0828a1e0, and 0x0828a1ec; no direct B tail targets
+      this entry. context is dead: r0 is overwritten with 0x30 for
+      operator_new before any use. The body allocates a SilverListTable,
+      constructs it with (table, resource_id, 1), calls
+      FUN_08147360(table, resource_id) while r2 remains 1, then only
+      guards the virtual vtable+4 destructor. Thus a NULL allocation faults
+      in construction/item processing before the final compare, as stock.
+      The vtable +4 word at 0x08986438 is 0x4015622b in this image, not a
+      decodable osos function entry, so its identity is deliberately not
+      invented; the port retains dynamic dispatch. Deliberate deviation:
+      host-replaceable operations model the unported item processor and
+      virtual destructor, while target allocation and construction call the
+      existing Rust ports directly. Host test proves the 0x30 allocation,
+      construct(resource_id, 1) -> process(resource_id) -> destroy order,
+      ignored context, and propagation of the destructor result.
