@@ -163,6 +163,10 @@ pub mod hints {
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const CTYPE_ISDIGIT: usize = 0x7d00_0000;
+    // 0x0400_0000: dedicated to runtime/ctype isspace's raw-u32 LC_CTYPE
+    // table fixture; mappings never unmap, so no other user may share this
+    // hint.
+    pub const CTYPE_ISSPACE: usize = 0x0400_0000;
     // 0x7100_0000: dedicated to ui/coordinate_origin's raw-u32 display
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const COORDINATE_OWNER_DISPLAY_LAYER: usize = 0x7100_0000;
