@@ -65542,3 +65542,35 @@ functions:
       uses their implied C-locale ASCII digit sets (0..7, 0..9, and
       0..9/A..F/a..f). Host tests cover radix normalization, prefix/endptr
       placement, sign, null/empty input, and per-step 16-bit wrapping.
+
+  # --- refcounted body acquire through owner ---
+  - address: 0x08131fb8
+    ghidra: FUN_08131fb8
+    name: refcounted_body_acquire_from_owner
+    size: 8
+    sig: "void refcounted_body_acquire_from_owner(RefcountedBody **dst, const RefcountedBodyOwner *owner)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: owner
+      owner+0x28/r1: body
+      FUN_0839cd5c: refcounted_body_acquire
+    notes: >-
+      Raw ARM confirms the complete two-word body: `ldr r1,[r1,#0x28]` at
+      0x08131fb8 then unconditional `b 0x0839cd5c` at 0x08131fbc. The prior
+      sibling ends with `bx lr` at 0x08131fb4; 0x08131fc0 begins the next
+      independently linked function, so Ghidra's 8-byte extent is exact even
+      though its C output incorrectly absorbs the tail target's implementation.
+      The target is the already ported refcounted_body_acquire, so this port
+      directly delegates rather than inventing a duplicate dispatch seam.
+      Binary-scanning every aligned ARM B/BL word in osos.dec finds exactly
+      nine direct inbound callers, all unconditional bl at 0x08130fe4,
+      0x08131040, 0x0813108c, 0x0813110c, 0x08131158, 0x081311e4,
+      0x08131230, 0x08131418, and 0x08131664; it finds no predicated or
+      direct-tail inbound branches. No aligned image word equals 0x08131fb8,
+      so it is not virtually dispatched. The source owner type remains
+      unidentified: the port exposes only its verified ten-word opaque prefix
+      and refcounted-body field at +0x28. It preserves the original's lack of
+      NULL, alignment, and bounds guards; host tests prove field selection,
+      destination overwrite on a NULL body, and delegated wrapping increment.
