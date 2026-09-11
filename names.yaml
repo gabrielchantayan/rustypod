@@ -26409,9 +26409,9 @@ functions:
       list teardown is skipped; the strings, operands and node are
       still released exactly as the original releases them). The
       select destructor 0x08383c88 is ported as
-      [`crate::sqlite::select_delete::select_delete`]; the FROM-source
-      list cleanup it uses still routes through the `SQLITE_SRC_LIST_DELETE`
-      seam until 0x083843e8 lands.
+      [`crate::sqlite::select_delete::select_delete`], whose FROM-source
+      cleanup now directly calls the ported `src_list_delete` at
+      0x083843e8.
       The port is the shipped default of expr_new's SQLITE_EXPR_DELETE
       slot, replacing the documented no-op stub (retained for host
       tests, which still swap the slot for recording mocks) - the
@@ -26486,6 +26486,49 @@ functions:
       padding +0x02..+0x03 remains untouched. No dispatch seam: this
       function is a leaf with no direct callees. Rust preserves that
       store-only behavior and the unguarded destination dereference.
+  - address: 0x083843e8
+    ghidra: FUN_083843e8
+    name: src_list_delete
+    size: 112
+    sig: "void src_list_delete(SrcList *source_list)"
+    module: sqlite/src_list_delete
+    status: ported
+    renames:
+      param_1/r0: source_list
+      r4: item
+      r5: index
+      "source_list+0x00": n_src
+      "item+0x00": z_database
+      "item+0x04": z_name
+      "item+0x08": z_alias
+      "item+0x0c": p_table
+      "item+0x10": p_select
+      "item+0x1c": p_on
+      "item+0x20": p_using
+    notes: >-
+      SQLite 3.5.x's sqlite3SrcListDelete. Raw ARM confirms the exact
+      112-byte extent 0x083843e8..0x08384454: the next separately linked
+      constructor opens at 0x08384458. A whole-image ARM B/BL decode finds
+      9 direct BL call sites, all unconditional (0x082c36d8, 0x0836f164,
+      0x083701cc, 0x08374760, 0x083751f8, 0x0837ca50, 0x08384268,
+      0x083861b4, 0x0839aeb0), with zero predicated BL forms; five
+      additional unconditional tail B callers are 0x0836eb84, 0x08375670,
+      0x08375bfc, 0x08375cf0, and 0x083997a4. NULL returns without touching
+      memory. Otherwise it re-reads signed n_src (+0x00) for a pre-tested
+      bgt loop over inline 0x30-byte items beginning at +0x08. Each item
+      frees zDatabase, zName, and zAlias through tracked_free @ 0x083906f4,
+      then calls the table release entry @ 0x0837521c, ported select_delete
+      @ 0x08383c88, ported expr_delete @ 0x08377e00, and the identifier-list
+      release entry @ 0x0837b11c. It finally tail-branches to tracked_free
+      with the source-list header. The two real but unported release entries
+      are volatile no-op-default seams; all other calls are direct ports.
+      Typed repr(C) header/item views retain target offsets and strides on
+      ARM while intentionally widening pointer fields for host fixtures.
+      Host tests prove NULL, signed negative-count, per-item ordering, and
+      final-header-free behavior. match.py has the same NULL guard, signed
+      inline-item loop, seven cleanup calls, and final free; LLVM adds its
+      frame and emits blx through the two unported-release seams.
+
   - address: 0x08383c88
     ghidra: FUN_08383c88
     name: select_delete
@@ -26499,12 +26542,10 @@ functions:
       variant (NULL is a no-op). Releases the select's owned
       substructures in field order: result list, FROM source list,
       WHERE, GROUP BY, HAVING, ORDER BY, prior select, LIMIT, OFFSET,
-      then frees the Select block itself. The FROM-source list cleanup
-      still routes through the `SQLITE_SRC_LIST_DELETE` seam because
-      the retail helper at 0x083843e8 is not ported yet. match.py:
-      same high-level structure - the NULL guard, the owned-field
-      teardown order, recursive prior deletion, and final free; the
-      diff is the source-list dispatch seam and LLVM's frame.
+      then frees the Select block itself. The FROM-source list is now a
+      direct call to ported src_list_delete @ 0x083843e8. match.py: same
+      high-level structure - the NULL guard, owned-field teardown order,
+      recursive prior deletion, and final free; the diff is LLVM's frame.
   - address: 0x08378670
     ghidra: FUN_08378670
     name: expr_list_delete

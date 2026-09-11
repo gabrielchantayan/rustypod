@@ -8,32 +8,16 @@
 //! block itself: result list, FROM-source list, WHERE, GROUP BY,
 //! HAVING, ORDER BY, prior select, LIMIT, OFFSET.
 //!
-//! Deliberate deviations: the FROM-source list cleanup still routes
-//! through the `SQLITE_SRC_LIST_DELETE` dispatch seam because the retail
-//! helper at 0x083843e8 is not ported yet. The select layout is modeled
-//! as a typed `#[repr(C)]` view so offsets stay correct on the 64-bit
-//! host; the 32-bit field offsets are asserted.
+//! The FROM-source list cleanup now directly calls the ported
+//! [`src_list_delete`](super::src_list_delete::src_list_delete). The select
+//! layout is modeled as a typed `#[repr(C)]` view so offsets stay correct on
+//! the 64-bit host; the 32-bit field offsets are asserted.
 
 use super::expr_delete::expr_delete;
 use super::expr_list_delete::expr_list_delete;
+use super::src_list_delete::src_list_delete;
 use crate::heap::tracked::tracked_free;
 
-/// The source-list destructor seam used by `select_delete` for the FROM
-/// clause. The retail helper is not ported yet.
-pub type SrcListDeleteFn = unsafe extern "C" fn(source_list: *mut u8);
-
-/// Documented no-op default retained until the source-list destructor is
-/// ported.
-pub(crate) unsafe extern "C" fn missing_src_list_delete(_source_list: *mut u8) {}
-
-/// The active source-list destructor. Host tests install recording
-/// mocks; the real port will replace the default when 0x083843e8 lands.
-pub static mut SQLITE_SRC_LIST_DELETE: SrcListDeleteFn = missing_src_list_delete;
-
-#[inline(always)]
-fn src_list_delete_op() -> SrcListDeleteFn {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_SRC_LIST_DELETE)) }
-}
 
 /// A `SELECT` statement (`sqlite3Select`), only the fields this delete
 /// path touches. The full layout is documented by `select_height.rs`;
@@ -102,7 +86,7 @@ pub unsafe extern "C" fn select_delete(select: *mut u8) {
 
     let node = &*(select as *const Select);
     expr_list_delete(node.p_elist);
-    (src_list_delete_op())(node.p_src);
+    src_list_delete(node.p_src);
     expr_delete(node.p_where);
     expr_list_delete(node.p_group_by);
     expr_delete(node.p_having);
@@ -126,7 +110,6 @@ mod tests {
 
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
     static mut FREED: Vec<(*mut u8, usize)> = Vec::new();
-    static mut SRC_LISTS: Vec<*mut u8> = Vec::new();
 
     unsafe extern "C" fn recording_free(
         _heap: *mut HeapDescriptorDescriptor,
@@ -136,38 +119,18 @@ mod tests {
         (*core::ptr::addr_of_mut!(FREED)).push((ptr, tag));
     }
 
-    unsafe extern "C" fn recording_src_list_delete(source_list: *mut u8) {
-        (*core::ptr::addr_of_mut!(SRC_LISTS)).push(source_list);
-    }
 
     fn freed() -> Vec<(*mut u8, usize)> {
         unsafe { (*core::ptr::addr_of!(FREED)).clone() }
     }
-
-    fn src_lists() -> Vec<*mut u8> {
-        unsafe { (*core::ptr::addr_of!(SRC_LISTS)).clone() }
-    }
-
-    unsafe fn restore_defaults() {
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_SRC_LIST_DELETE),
-            missing_src_list_delete,
-        );
-    }
-
     unsafe fn with_slots(body: impl FnOnce()) {
         let saved_heap_ops = core::ptr::read(core::ptr::addr_of!(HEAP_OPS));
         (*core::ptr::addr_of_mut!(FREED)).clear();
-        (*core::ptr::addr_of_mut!(SRC_LISTS)).clear();
         (*core::ptr::addr_of_mut!(HEAP_OPS)).free = recording_free;
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_SRC_LIST_DELETE),
-            recording_src_list_delete,
-        );
         body();
         core::ptr::write(core::ptr::addr_of_mut!(HEAP_OPS), saved_heap_ops);
-        restore_defaults();
     }
+
 
     #[repr(align(32))]
     struct TrackedBlock([u8; 256]);
@@ -226,11 +189,10 @@ mod tests {
             });
         }
         assert!(freed().is_empty(), "NULL frees nothing");
-        assert!(src_lists().is_empty(), "the source-list seam is not consulted");
     }
 
     #[test]
-    fn owned_fields_free_in_order_and_the_source_list_is_handed_through() {
+    fn owned_fields_free_in_order() {
         let _heap = mock_heap();
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -272,7 +234,7 @@ mod tests {
         let top = Select {
             p_elist: top_elist,
             _gap_04: [0xa5; 0x0c - 0x04],
-            p_src: 0x5a5a_5a5a as *mut u8,
+            p_src: core::ptr::null_mut(),
             p_where: top_where,
             p_group_by: top_group,
             p_having: top_having,
@@ -290,11 +252,6 @@ mod tests {
             });
         }
 
-        assert_eq!(
-            src_lists(),
-            std::vec![0x5a5a_5a5a as *mut u8, core::ptr::null_mut()],
-            "p_src is handed through verbatim, including the null prior"
-        );
         assert_eq!(
             freed(),
             std::vec![
