@@ -61968,3 +61968,26 @@ functions:
       their semantic identities are not invented. Deliberate deviation:
       stock's two final tail paths are one Rust return call after the shared
       state selection; arguments and result are preserved.
+
+  # --- Two-word zero initializer (util/zero_u32_pair) ---
+  - address: 0x080fffcc
+    ghidra: FUN_080fffcc
+    name: zero_u32_pair
+    size: 16
+    sig: "u32 *zero_u32_pair(u32 *dst)"
+    module: util/zero_u32_pair
+    status: ported
+    renames:
+      param_1/r0: dst
+    notes: >-
+      Raw osos.dec confirms the exact 16-byte extent, four ARM words from
+      0x080fffcc through bx lr at 0x080fffd8; the separately linked next
+      function starts at 0x080fffdc. Decoding every ARM B/BL immediate finds
+      exactly 10 direct inbound bl sites, all unconditional and none
+      predicated: 0x08155f54, 0x081dc5e4, 0x081f7294, 0x081f729c,
+      0x081f72a4, 0x081f72ac, 0x081f72e8, 0x081f72f0, 0x081f72f8, and
+      0x081f7300. No direct plain-B tail transfer targets the entry. The
+      function stores zero at dst+0 and dst+4, then returns the unchanged dst
+      in r0. Ghidra incorrectly reports void, but its chained range-state
+      constructor callers consume this result. No NULL guard exists; callers
+      must supply two aligned writable u32 words. Deliberate deviations: none.

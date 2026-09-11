@@ -73,6 +73,7 @@ pub mod tagged_payload_signed_field_sum;
 pub mod three_pointer_select;
 pub mod u16_pair_copy;
 pub mod u32_pair_store;
+pub mod zero_u32_pair;
 pub mod u32_word_swap;
 pub mod u8_pair_copy;
 pub mod utf8_next_codepoint_permissive;
