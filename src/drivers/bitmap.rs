@@ -288,6 +288,34 @@ pub unsafe extern "C" fn bitmap_draw_in_rect(
     }
 }
 
+/// bitmap_get_loaded_object — original: `FUN_082991f0` @ 0x082991f0
+/// (28 bytes; **9 plain `bl` call sites**, no predicated or tail branches,
+/// binary-scanned by decoding every B/BL word in osos.dec).
+///
+/// Ensures the bitmap wrapper is loaded, then returns its parsed bitmap
+/// object. The lazy loader (`FUN_082993b4`, through [`BITMAP_HOOKS`]) always
+/// runs first. If it leaves the +0x08 loaded flag clear, the original returns
+/// zero; otherwise it returns the pointer stored at +0xc4.
+///
+/// The single data-word reference at 0x089b0b20 places this accessor in a
+/// bitmap-wrapper vtable, so callers may dispatch it virtually. All nine
+/// direct call sites are plain `bl`; each checks its result before consuming
+/// the parsed object.
+///
+/// Deliberate deviation: +0xc4 is a 4-byte target pointer but is parked at
+/// +0xc8 in 64-bit host fixtures for native alignment; it remains exactly
+/// +0xc4 on ARM (see [`BITMAP_OBJECT`]).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitmap_get_loaded_object(wrapper: *mut u8) -> *mut u8 {
+    (hooks().ensure_loaded)(wrapper);
+    if byte(wrapper, LOADED) == 0 {
+        core::ptr::null_mut()
+    } else {
+        ptr_field(wrapper, BITMAP_OBJECT)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -576,6 +604,46 @@ mod tests {
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
 
         assert_eq!(out.0, [0; 4], "the no-op loader leaves the wrapper unloaded");
+    }
+
+    #[test]
+    fn an_unloaded_wrapper_returns_null_after_running_the_loader() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+
+        let object = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
+
+        assert!(object.is_null(), "a loader that leaves +0x08 clear yields null");
+        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader must run first");
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn a_loaded_wrapper_returns_its_exact_stored_object_for_any_nonzero_flag() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
+        wrapper.set_ptr(BITMAP_OBJECT, object);
+        wrapper.set_byte(LOADED, 0x80);
+
+        let returned = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
+
+        assert_eq!(returned, object, "the +0xc4 pointer passes through unchanged");
+        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "loading is unconditional");
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn the_loader_can_make_a_wrapper_loaded_during_the_access() {
+        let guard = with_recording_hooks();
+        LOAD_RESOLVES.store(1, Ordering::SeqCst);
+        let mut wrapper = Wrapper::new();
+
+        let object = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
+
+        assert_eq!(object, unsafe { fake_object() }, "the post-load +0xc4 pointer is returned");
+        assert_eq!(LOADS.load(Ordering::SeqCst), 1);
+        restore_hooks(guard);
     }
 
     /// A fake draw context; only its identity (the pointer value
