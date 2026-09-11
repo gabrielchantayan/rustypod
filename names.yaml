@@ -89,6 +89,7 @@ functions:
     status: ported
     renames:
       param_1/r0: dst
+
       param_2/r1: src
       param_3/r2: len
       r3: byte
@@ -62486,9 +62487,37 @@ functions:
       a virtual-dispatch target. The 0x0200..0x0213 register-index sequences
       at 0x080ddd24 and the 0x0002/0x000b/0x0010 sequences at 0x080e3338
       identify this as the LCD register writer. Deliberate deviation: inlines
-      unported helper bodies 0x080d7b60/0x080bb5f4 rather than adding seams;
-      device loads/stores are volatile and host builds use atomic MMIO models.
+      unported helper 0x080d7b60, while routing the tail-call helper through
+      lcd_write_value; device loads/stores are volatile and host builds use
+      atomic MMIO models.
       Reference C: decomp/c/007/080d4b14_FUN_080d4b14.c.
+  # --- LCD controller data-port write ---
+  - address: 0x080bb5f4
+    ghidra: FUN_080bb5f4
+    name: lcd_write_value
+    size: 28
+    sig: "void lcd_write_value(u32 value)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      param_1/r0/r2: value
+      DAT_080bb60c: LCD_CONTROLLER_BASE
+    notes: >-
+      Raw osos.dec confirms six instructions at 0x080bb5f4..0x080bb608:
+      mov r2,r0; push {lr}; bl 0x080ce0c8; ldr r0,[pc,#4]; str r2,[r0,#0x40];
+      then pop {pc}. The 0x38300000 literal at 0x080bb60c belongs to this
+      28-byte extent; the separately linked next function starts at
+      0x080bb610. Thus value survives the readiness call and is written
+      without validation or timeout to LCD controller +0x40. Decoding every
+      ARM B/BL immediate in osos.dec finds nine direct BL call sites, all
+      unconditional and no predicated forms: 0x080bb538, 0x080dbef0,
+      0x080dbef8, 0x080dbf00, 0x080dbf08, 0x0836b3f8, 0x0836b404,
+      0x0836b41c, and 0x0836b428. The sole direct B is the tail call from
+      lcd_write_register at 0x080d4b28; no data word equals the entry address.
+      Deliberate deviation: the local lcd_wait_ready implementation reproduces
+      the unported 0x080ce0c8 status-bit-4 poll; device accesses are volatile,
+      while host tests use atomic MMIO registers. Reference C:
+      decomp/c/007/080bb5f4_FUN_080bb5f4.c.
 
   # --- Scoped path-component query wrapper ---
   - address: 0x0809b678

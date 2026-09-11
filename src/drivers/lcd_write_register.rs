@@ -1,25 +1,29 @@
-//! LCD controller register write.
+//! LCD controller data-port writes.
 //!
-//! Port: [`lcd_write_register`] — original: `FUN_080d4b14` @ `0x080d4b14`
-//! (24 bytes, `0x080d4b14..0x080d4b28`; **12 unconditional `bl` call sites,
-//! no predicated forms**). Raw disassembly places the next function at
-//! `0x080d4b2c`; no literal pool belongs to this body. Decoding every ARM
-//! B/BL word in `osos.dec` finds no direct B or data-word references.
+//! Ports:
+//! - [`lcd_write_value`] — original: `FUN_080bb5f4` @ `0x080bb5f4` (28
+//!   bytes including its literal pool, `0x080bb5f4..0x080bb60f`; **9
+//!   unconditional `bl` call sites, no predicated forms**).
+//! - [`lcd_write_register`] — original: `FUN_080d4b14` @ `0x080d4b14` (24
+//!   bytes, `0x080d4b14..0x080d4b28`; **12 unconditional `bl` call sites, no
+//!   predicated forms**).
 //!
-//! The 0x3830_0000 LCD controller uses bit 4 of status +0x1c as busy. This
-//! routine waits for that bit to clear, writes `register_index` to +0x04,
-//! waits again, then writes `value` to +0x40. It has no timeout or validation;
-//! callers rely on the panel controller becoming ready. The separate waits are
-//! required: the firmware calls the same readiness helper before each store.
+//! Raw disassembly puts the next separately linked function after
+//! `lcd_write_value` at `0x080bb610`; its final word at `0x080bb60c` is the
+//! `0x3830_0000` literal pool. Decoding every ARM B/BL immediate in
+//! `osos.dec` finds the nine inbound calls are all unconditional `bl`; the
+//! sole direct B is the tail call at `0x080d4b28` from `lcd_write_register`.
+//!
+//! The 0x3830_0000 LCD controller uses bit 4 of status +0x1c as busy.
+//! `lcd_write_value` retains its input across the readiness wait and stores it
+//! at +0x40. `lcd_write_register` waits before selecting +0x04, then delegates
+//! the second wait and +0x40 store to `lcd_write_value`. Neither function
+//! validates its input or has a timeout.
 //!
 //! # Deliberate deviation
 //!
-//! The ARM body reaches the two stores through unported 24-byte helpers at
-//! `0x080d7b60` and `0x080bb5f4`. Their complete observable behavior is the
-//! readiness poll and one respective MMIO store, so this port inlines those
-//! helpers instead of inventing dispatch seams. Device MMIO accesses are
-//! volatile; host builds use atomic register models solely for behavioral
-//! tests.
+//! The device uses volatile MMIO loads and stores. Host builds use atomic
+//! register models solely for behavioral tests.
 
 const LCD_CONTROLLER_BASE: usize = 0x3830_0000;
 const LCD_STATUS_OFFSET: usize = 0x1c;
@@ -76,27 +80,42 @@ unsafe fn lcd_wait_ready() {
     while unsafe { lcd_status() } & LCD_BUSY != 0 {}
 }
 
+/// lcd_write_value — original: `FUN_080bb5f4` @ `0x080bb5f4` (28 bytes,
+/// including the literal pool; **9 unconditional `bl` call sites, no
+/// predicated forms**).
+///
+/// Preserves `value` through the readiness wait, then stores all 32 bits at
+/// the LCD controller's data port (+0x40). The original has no NULL pointer,
+/// range, or busy-timeout guard. Host builds deliberately model the volatile
+/// MMIO registers with atomics.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lcd_write_value(value: u32) {
+    unsafe { lcd_wait_ready() };
+    unsafe { lcd_write_word(LCD_REGISTER_VALUE_OFFSET, value) };
+}
+
 /// lcd_write_register — original: `FUN_080d4b14` @ `0x080d4b14` (24 bytes;
 /// **12 unconditional `bl` call sites, no predicated forms**).
 ///
-/// Waits for the LCD controller before issuing `register_index`, waits again,
-/// then writes `value`. Neither argument is restricted to the panel's known
-/// register/value ranges, matching the raw ARM stores.
+/// Waits for the LCD controller before issuing `register_index`, then
+/// tail-calls [`lcd_write_value`] for the second readiness wait and `value`
+/// store. Neither argument is restricted to the panel's known register/value
+/// ranges, matching the raw ARM stores.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn lcd_write_register(register_index: u32, value: u32) {
     unsafe { lcd_wait_ready() };
     unsafe { lcd_write_word(LCD_REGISTER_INDEX_OFFSET, register_index) };
-    unsafe { lcd_wait_ready() };
-    unsafe { lcd_write_word(LCD_REGISTER_VALUE_OFFSET, value) };
+    unsafe { lcd_write_value(value) };
 }
 
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::{lcd_write_register, HOST_LCD_REGISTER_INDEX, HOST_LCD_REGISTER_VALUE,
-        HOST_LCD_STATUS, HOST_LCD_STATUS_READS, LCD_BUSY};
+    use super::{lcd_write_register, lcd_write_value, HOST_LCD_REGISTER_INDEX,
+        HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS, LCD_BUSY};
     use core::sync::atomic::Ordering;
     use parking_lot::Mutex;
     use std::sync::mpsc;
@@ -111,6 +130,18 @@ mod tests {
         HOST_LCD_STATUS_READS.store(0, Ordering::SeqCst);
     }
 
+    #[test]
+    fn writes_full_width_value_after_ready_check() {
+        let _guard = TEST_LOCK.lock();
+
+        for value in [0, 0x8000_0000, u32::MAX] {
+            reset_host_controller(0);
+            unsafe { lcd_write_value(value) };
+            assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), u32::MAX);
+            assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), value);
+            assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+        }
+    }
     #[test]
     fn writes_full_width_register_and_value_after_each_ready_check() {
         let _guard = TEST_LOCK.lock();
