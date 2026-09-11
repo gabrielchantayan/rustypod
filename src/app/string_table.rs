@@ -709,55 +709,182 @@ mod set_current_hex_tests {
 }
 
 
-/// The unported fallback-table value-slot lookup used by
-/// [`string_table_set_hex`]. `FUN_083db69c` copy-constructs a (key,
-/// empty-string) node pair from `key`, runs the string map's
-/// find-or-insert @ 0x083c4884 against the 0x1c-byte map at `map`,
-/// destroys the pair temporaries, and returns the address of the found
-/// node's mapped-value COW-string word (node + 0x14).
+/// The `(iterator, inserted)` result written by the unported map operation
+/// at 0x083c4884. The caller only consumes `node`; target layout is the
+/// four-byte node word at +0 followed by the inserted flag byte at +4.
+#[repr(C)]
+struct StringTableInsertResult {
+    node: *mut u8,
+    inserted: u8,
+}
+
+/// The two COW strings supplied to 0x083c4884: queried key at +0 and the
+/// default mapped value at +4 on the 32-bit target.
+#[repr(C)]
+struct StringTableStringPair {
+    key: *mut u8,
+    value: *mut u8,
+}
+
+// Pin the raw pair/result layouts without pretending 64-bit host pointers
+// occupy their target's four-byte words.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0] = [0; core::mem::offset_of!(StringTableInsertResult, node)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x4] = [0; core::mem::offset_of!(StringTableInsertResult, inserted)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x8] = [0; core::mem::size_of::<StringTableInsertResult>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0] = [0; core::mem::offset_of!(StringTableStringPair, key)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x4] = [0; core::mem::offset_of!(StringTableStringPair, value)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x8] = [0; core::mem::size_of::<StringTableStringPair>()];
+
+/// The one still-unported operation called by
+/// [`string_table_fallback_value_slot`]. No identity beyond this ABI is
+/// assigned: raw ARM establishes only that it receives `(result, map, pair)`
+/// and writes the node word at `result + 0`.
 #[derive(Clone, Copy)]
-pub struct StringTableSlotOps {
-    /// `FUN_083db69c` @ 0x083db69c — resolves the mapped-value string
-    /// word for `key` in the map at `map`, inserting an empty value when
-    /// the key is absent.
-    pub value_slot: unsafe extern "C" fn(map: *mut u8, key: *mut *mut u8) -> *mut *mut u8,
+struct StringTableMapOps {
+    map_operation: unsafe extern "C" fn(
+        result: *mut StringTableInsertResult,
+        map: *mut u8,
+        pair: *const StringTableStringPair,
+    ),
 }
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_table_value_slot(
+unsafe extern "C" fn firmware_string_table_map_operation(
+    result: *mut StringTableInsertResult,
     map: *mut u8,
-    key: *mut *mut u8,
-) -> *mut *mut u8 {
-    let slot: unsafe extern "C" fn(*mut u8, *mut *mut u8) -> *mut *mut u8 =
-        unsafe { core::mem::transmute(0x083d_b69cusize) };
-    unsafe { slot(map, key) }
+    pair: *const StringTableStringPair,
+) {
+    let map_operation: unsafe extern "C" fn(
+        *mut StringTableInsertResult,
+        *mut u8,
+        *const StringTableStringPair,
+    ) = unsafe { core::mem::transmute(0x083c_4884usize) };
+    unsafe { map_operation(result, map, pair) }
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_table_value_slot(
+unsafe extern "C" fn missing_string_table_map_operation(
+    _result: *mut StringTableInsertResult,
     _map: *mut u8,
-    _key: *mut *mut u8,
-) -> *mut *mut u8 {
-    panic!("string_table_set_hex requires fallback-table value-slot lookup 0x083db69c")
+    _pair: *const StringTableStringPair,
+) {
+    panic!("string_table_fallback_value_slot requires map operation 0x083c4884")
 }
 
-/// Active model of `FUN_083db69c`. The target default reaches the retail
-/// helper; host tests install a recorder until that helper is ported.
+/// Active ABI model for the unported 0x083c4884 map operation. Target builds
+/// call the retail address; host tests install a recorder.
 #[cfg(target_os = "none")]
-pub static mut STRING_TABLE_SLOT_OPS: StringTableSlotOps = StringTableSlotOps {
-    value_slot: firmware_string_table_value_slot,
+static mut STRING_TABLE_MAP_OPS: StringTableMapOps = StringTableMapOps {
+    map_operation: firmware_string_table_map_operation,
 };
 
-/// Active model of `FUN_083db69c`. The host default reports an accidental
-/// unmocked traversal into the still-unported helper.
+/// Active ABI model for the unported 0x083c4884 map operation. The host
+/// default fails closed until a test installs a faithful recorder.
 #[cfg(not(target_os = "none"))]
-pub static mut STRING_TABLE_SLOT_OPS: StringTableSlotOps = StringTableSlotOps {
-    value_slot: missing_string_table_value_slot,
+static mut STRING_TABLE_MAP_OPS: StringTableMapOps = StringTableMapOps {
+    map_operation: missing_string_table_map_operation,
 };
 
+/// The literal at 0x083db700, seeded into the original's first stack string
+/// object before its COW copy. It is outside osos.dec, so its contents remain
+/// opaque; its later release proves it is a live retailOS string object.
+#[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn string_table_slot_ops() -> StringTableSlotOps {
-    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_SLOT_OPS))
+fn string_table_default_value() -> *mut u8 {
+    0x08b3_1810usize as *mut u8
+}
+
+/// Host analogue of the opaque retailOS default string object.
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+fn string_table_default_value() -> *mut u8 {
+    crate::cxx::string::empty_rep_data()
+}
+
+/// Preserves the raw `bl 0x083d8c30` boundary without letting LLVM merge the
+/// COW copy into the lookup body.
+#[inline(never)]
+fn string_table_pair_copy_ctor(
+    dst: *mut *mut u8,
+    src: *const *mut u8,
+) -> *mut *mut u8 {
+    unsafe { crate::cxx::string::cxx_string_copy_ctor(dst, src) }
+}
+
+/// Local rendering of the exact 0x082a8580 body: release the second COW
+/// string before the first. Keeping it out of the lookup preserves that
+/// original call boundary without introducing another firmware seam.
+#[inline(never)]
+fn string_table_pair_destroy(pair: *mut StringTableStringPair) {
+    unsafe {
+        crate::cxx::string::cxx_string_release(core::ptr::addr_of_mut!((*pair).value));
+        crate::cxx::string::cxx_string_release(core::ptr::addr_of_mut!((*pair).key));
+    }
+}
+
+/// string_table_fallback_value_slot — original: `FUN_083db69c` @
+/// 0x083db69c (104 bytes: 100 bytes of code through `pop {r4,r5,pc}` @
+/// 0x083db6fc, plus its trailing 0x08b31810 literal word @ 0x083db700; the
+/// next function starts with `push {r4,r5,r6,lr}` @ 0x083db704; **8
+/// unconditional `bl` call sites, zero predicated forms, zero `b`
+/// references, and zero data-word references**, verified by decoding every
+/// ARM B/BL word and every word equal to the address in osos.dec).
+///
+/// Builds a stack pair of COW strings: a copy of `key` and a copy of the
+/// opaque default string whose data word is the literal 0x08b31810. It calls
+/// the unported 0x083c4884 operation with `(result, map, &pair)`, releases
+/// pair.value then pair.key (the verified body of 0x082a8580), releases the
+/// initial default-string object, and returns `result.node + 0x14`, the
+/// mapped-value string word. There is no NULL guard in the raw ARM; callers
+/// must provide live string and map objects.
+///
+/// Deliberate deviations: the known two-release body at 0x082a8580 is
+/// expressed directly through the already ported `cxx_string_release`, not
+/// as a second unported dispatch. The still-unidentified 0x083c4884 ABI uses
+/// [`STRING_TABLE_MAP_OPS`]: target calls the verified retail address and
+/// host tests install a recorder. Host uses the ported shared empty COW rep
+/// in place of the opaque retailOS literal.
+///
+/// # Safety
+/// `key` must point to a live COW `basic_string`; `map` and the installed
+/// 0x083c4884 operation must satisfy the result/pair ABI described above.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_table_fallback_value_slot(
+    map: *mut u8,
+    key: *const *mut u8,
+) -> *mut *mut u8 {
+    let mut default_value = string_table_default_value();
+    let mut pair = StringTableStringPair {
+        key: core::ptr::null_mut(),
+        value: core::ptr::null_mut(),
+    };
+    string_table_pair_copy_ctor(core::ptr::addr_of_mut!(pair.key), key);
+    string_table_pair_copy_ctor(
+        core::ptr::addr_of_mut!(pair.value),
+        core::ptr::addr_of!(default_value),
+    );
+    let mut result = StringTableInsertResult {
+        node: core::ptr::null_mut(),
+        inserted: 0,
+    };
+    let map_operation =
+        unsafe { core::ptr::addr_of!(STRING_TABLE_MAP_OPS.map_operation).read_volatile() };
+    unsafe {
+        map_operation(&mut result, map, &pair);
+    }
+    let node = result.node;
+    unsafe {
+        string_table_pair_destroy(core::ptr::addr_of_mut!(pair));
+        crate::cxx::string::cxx_string_release(core::ptr::addr_of_mut!(default_value));
+    }
+    node.wrapping_add(NODE_VALUE_OFFSET).cast()
 }
 
 /// string_table_set_hex — original: `FUN_08101f94` @ 0x08101f94 (84 bytes,
@@ -768,14 +895,11 @@ unsafe fn string_table_slot_ops() -> StringTableSlotOps {
 /// references**, verified by decoding every ARM B/BL word and every word
 /// equal to the address in osos.dec).
 ///
-/// Renders `value` through `sprintf(buffer, "%lx", value)` into the
-/// original's 512-byte stack buffer, builds a temporary COW string from
-/// the text with `cxx_string_from_cstr` @ 0x083d8b5c, resolves the
 /// mapped-value slot for `key` in the FALLBACK table at `table + 0x38`
-/// via the unported lookup @ 0x083db69c, assigns the temporary into that
-/// slot with `cxx_string_assign` @ 0x083d8d1c, and releases the temporary
-/// with `cxx_string_release` @ 0x083d8b04. There is no NULL guard on any
-/// argument.
+/// via [`string_table_fallback_value_slot`] @ 0x083db69c, assigns the
+/// temporary into that slot with `cxx_string_assign` @ 0x083d8d1c, and
+/// releases the temporary with `cxx_string_release` @ 0x083d8b04. There is
+/// no NULL guard on any argument.
 ///
 /// Unlike its sibling [`string_table_set_decimal`] — which routes through
 /// the current-table assign helper @ 0x08101da0 and takes its number by
@@ -786,11 +910,10 @@ unsafe fn string_table_slot_ops() -> StringTableSlotOps {
 /// its three-argument rendering of the two-argument `cxx_string_from_cstr`
 /// call is register residue, not a real argument.
 ///
-/// Deviations: the formatter port takes an explicit va-list pointer, so
 /// `&value` replaces the original r2 at the `sprintf` boundary; the
-/// 0x083db69c lookup rides the [`STRING_TABLE_SLOT_OPS`] volatile
-/// dispatch seam (the verified retail load address on target, a
-/// panicking default on host).
+/// 0x083db69c lookup now calls the Rust
+/// [`string_table_fallback_value_slot`] port, whose remaining 0x083c4884
+/// map-operation boundary is a volatile target/host dispatch seam.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_table_set_hex(table: *mut u8, key: *mut *mut u8, value: u32) {
@@ -804,7 +927,10 @@ pub unsafe extern "C" fn string_table_set_hex(table: *mut u8, key: *mut *mut u8,
     let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
     let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
     unsafe {
-        let slot = (string_table_slot_ops().value_slot)(table.add(FALLBACK_TABLE_OFFSET), key);
+        let slot = string_table_fallback_value_slot(
+            table.add(FALLBACK_TABLE_OFFSET),
+            key,
+        );
         crate::cxx::string::cxx_string_assign(slot, text);
         crate::cxx::string::cxx_string_release(text);
     }
@@ -1025,9 +1151,25 @@ mod set_hex_tests {
     use std::vec::Vec;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut LOOKUP: Option<(usize, Vec<u8>)> = None;
-    /// The one-word mapped-value string object the lookup seam returns.
-    static mut SLOT: *mut u8 = ptr::null_mut();
+    static mut LOOKUP: Option<(usize, Vec<u8>, usize)> = None;
+    static mut SEEN_KEY_REFCOUNT: i32 = -2;
+
+    /// A host-only backing store whose returned node address is four bytes
+    /// into the allocation: `node + 0x14` then lands on an 8-byte-aligned
+    /// pointer word at storage + 0x18, matching the target offset without
+    /// overlapping 64-bit host pointer fields.
+    #[repr(C, align(8))]
+    struct NodeStorage([u8; 0x30]);
+
+    static mut NODE: NodeStorage = NodeStorage([0; 0x30]);
+
+    unsafe fn recorded_node() -> *mut u8 {
+        unsafe { ptr::addr_of_mut!(NODE.0).cast::<u8>().add(4) }
+    }
+
+    unsafe fn mapped_value_slot() -> *mut *mut u8 {
+        unsafe { recorded_node().add(NODE_VALUE_OFFSET).cast() }
+    }
 
     const ARENA_SIZE: usize = 1024;
 
@@ -1038,14 +1180,14 @@ mod set_hex_tests {
     static mut ARENA_USED: usize = 0;
 
     struct OpsGuard {
-        slot: StringTableSlotOps,
+        map: StringTableMapOps,
         engine: PrintfEngineFn,
     }
 
     impl Drop for OpsGuard {
         fn drop(&mut self) {
             unsafe {
-                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_SLOT_OPS), self.slot);
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_MAP_OPS), self.map);
                 ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
             }
         }
@@ -1077,10 +1219,19 @@ mod set_hex_tests {
         text.len() as i32
     }
 
-    unsafe extern "C" fn record_value_slot(map: *mut u8, key: *mut *mut u8) -> *mut *mut u8 {
-        let key = unsafe { CStr::from_ptr((*key).cast()).to_bytes().to_vec() };
-        unsafe { LOOKUP = Some((map as usize, key)) };
-        unsafe { ptr::addr_of_mut!(SLOT) }
+    unsafe extern "C" fn record_map_operation(
+        result: *mut StringTableInsertResult,
+        map: *mut u8,
+        pair: *const StringTableStringPair,
+    ) {
+        let key = unsafe { CStr::from_ptr((*pair).key.cast()).to_bytes().to_vec() };
+        let key_rep = unsafe { ((*pair).key as *mut crate::cxx::string::StringRep).sub(1) };
+        unsafe {
+            LOOKUP = Some((map as usize, key, (*pair).value as usize));
+            SEEN_KEY_REFCOUNT = (*key_rep).refcount;
+            (*result).node = recorded_node();
+            (*result).inserted = 1;
+        }
     }
 
     unsafe extern "C" fn arena_alloc(
@@ -1118,16 +1269,61 @@ mod set_hex_tests {
         let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             let guard = OpsGuard {
-                slot: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_SLOT_OPS)),
+                map: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_MAP_OPS)),
                 engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
             };
             ptr::write_volatile(
-                ptr::addr_of_mut!(STRING_TABLE_SLOT_OPS),
-                StringTableSlotOps { value_slot: record_value_slot },
+                ptr::addr_of_mut!(STRING_TABLE_MAP_OPS),
+                StringTableMapOps {
+                    map_operation: record_map_operation,
+                },
             );
             ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), hex_engine);
             LOOKUP = None;
+            SEEN_KEY_REFCOUNT = -2;
             (lock, guard)
+        }
+    }
+    /// A sole-owned non-empty COW string: the pair copy raises its refcount
+    /// during the map operation and the two releases restore it on return.
+    #[repr(C, align(4))]
+    struct FakeString {
+        rep: crate::cxx::string::StringRep,
+        data: [u8; 8],
+    }
+
+    fn fake_string() -> FakeString {
+        FakeString {
+            rep: crate::cxx::string::StringRep {
+                refcount: 0,
+                capacity: 7,
+                length: 3,
+            },
+            data: *b"foo\0\0\0\0\0",
+        }
+    }
+
+    /// The raw pair contains a COW share of the input key and a COW share of
+    /// the default value while 0x083c4884 runs. The result flag is ignored;
+    /// only its node word supplies the mapped-value slot.
+    #[test]
+    fn fallback_slot_builds_pair_releases_it_and_returns_node_value_word() {
+        let (_lock, _restore) = install();
+        unsafe {
+            let mut fake = fake_string();
+            let data = ptr::addr_of_mut!(fake.data).cast::<u8>();
+            let key = data;
+            let map = 0x2000usize as *mut u8;
+
+            let slot = string_table_fallback_value_slot(map, &key);
+
+            assert_eq!(
+                LOOKUP,
+                Some((map as usize, b"foo".to_vec(), string_table_default_value() as usize)),
+            );
+            assert_eq!(SEEN_KEY_REFCOUNT, 1);
+            assert_eq!(fake.rep.refcount, 0);
+            assert_eq!(slot, mapped_value_slot());
         }
     }
 
@@ -1145,30 +1341,43 @@ mod set_hex_tests {
             ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
             ArenaGuard { ops: previous }
         };
-        let mut key_data = *b"SelectAlbum\0";
-        let mut key = key_data.as_mut_ptr();
+        let mut key = ptr::null_mut();
+        unsafe {
+            crate::cxx::string::cxx_string_from_cstr(
+                ptr::addr_of_mut!(key),
+                b"SelectAlbum\0".as_ptr(),
+            );
+        }
         // The recorder never dereferences the map pointer, so a fixed
         // stand-in address proves the `table + 0x38` fallback arithmetic.
         let table = 0x2000usize as *mut u8;
 
         for value in [0u32, 0x2a, 0xdead_beef, 0xffff_ffff] {
             unsafe {
-                // A fresh empty mapped value for the lookup to return.
-                crate::cxx::string::cxx_string_from_cstr(ptr::addr_of_mut!(SLOT), b"\0".as_ptr());
+                // A fresh empty mapped value at the raw node + 0x14 return
+                // address makes the assignment's COW ownership real.
+                crate::cxx::string::cxx_string_from_cstr(
+                    mapped_value_slot(),
+                    b"\0".as_ptr(),
+                );
                 string_table_set_hex(table, &mut key, value);
                 assert_eq!(
                     LOOKUP,
                     Some((
                         table as usize + FALLBACK_TABLE_OFFSET,
                         b"SelectAlbum".to_vec(),
+                        string_table_default_value() as usize,
                     )),
                 );
                 assert_eq!(
-                    CStr::from_ptr(SLOT.cast()).to_bytes(),
+                    CStr::from_ptr((*mapped_value_slot()).cast()).to_bytes(),
                     std::format!("{value:x}").as_bytes(),
                 );
-                crate::cxx::string::cxx_string_release(ptr::addr_of_mut!(SLOT));
+                crate::cxx::string::cxx_string_release(mapped_value_slot());
             }
+        }
+        unsafe {
+            crate::cxx::string::cxx_string_release(ptr::addr_of_mut!(key));
         }
     }
 }
