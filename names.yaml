@@ -19647,6 +19647,41 @@ functions:
       volatile-read slot (the documented deviation, same as
       string_object_len_plus1 / string_object_utf8_strcmp_safe).
 
+  - address: 0x080ed884
+    ghidra: FUN_080ed884
+    name: string_object_copy_or_resource_on_casefold_match
+    size: 76
+    sig: "StringObject *string_object_copy_or_resource_on_casefold_match(StringObject *this, const StringObject *source, const char *compare_text, u32 resource_id)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      param_3/r2: compare_text
+      param_4/r3: resource_id
+      r4: source_saved
+      r5: this_saved
+      r6: resource_id_saved
+      iVar1/r0: casefold_compare_result
+    notes: >-
+      Raw osos.dec extent is exactly 76 bytes: 19 ARM words from
+      0x080ed884 through the tail branch at 0x080ed8cc; the next separately
+      linked function starts at 0x080ed8d0. Decoding every ARM B/BL word
+      finds 10 direct bl callers, all unconditional (zero predicated):
+      0x082a596c, 0x082a5998, 0x082a59bc, 0x082a5a1c, 0x082a5a3c,
+      0x082a5a5c, 0x082a5ad0, 0x082a5af8, 0x082a5b20, 0x082a5b48.
+      Three tail callers also target it: unconditional b at 0x08298820 and
+      0x0829acf0, plus bne at 0x08298adc. It loads source->payload and
+      compares it with compare_text through utf8_strcasecmp_safe
+      (0x0827609c). A nonzero result tail-calls the ported StringObject copy
+      constructor; equality reads the current task's provider-chain head,
+      resolves its Str resource by resource_id, and tail-calls the ported C
+      string constructor. No path adds a NULL guard. The compare core remains
+      identified because its runtime case-fold table is unresolved, so this
+      port uses its pre-existing volatile STRING_OBJECT_UTF8_STRCASECMP_CORE
+      dispatch slot; every other callee is ported and direct. Host tests
+      prove the nonzero copy path and the equal resource-construction path,
+      including the raw-u32 provider-chain field.
   - address: 0x0827609c
     ghidra: FUN_0827609c
     name: utf8_strcasecmp_safe
