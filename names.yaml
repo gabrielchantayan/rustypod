@@ -63857,6 +63857,60 @@ functions:
       because the target's 32-bit mutex at +0x74 is misaligned for Rust's
       64-bit-host Mutex representation.
 
+  # --- Layout-state activation ---
+  - address: 0x081a2254
+    ghidra: FUN_081a2254
+    name: activate_layout_state
+    size: 132
+    sig: "void activate_layout_state(void *this)"
+    module: app/layout_state
+    status: ported
+    renames:
+      param_1/r0: this
+      "this+0x14": profile_when_volume_byte_is_zero
+      "this+0x18": profile_when_volume_byte_is_nonzero
+      "this+0x30": embedded_timer
+      "this+0x5c": transition_sentinel
+      "this+0x68": prepared
+      "this+0x70": active
+      "this+0x74": mutex
+      FUN_081a2158: set_layout_state_enabled (unported direct callee)
+      FUN_081eda10: class_8900_path_selector (unported direct callee)
+      FUN_0812af10: reset_selected_profile (unported direct callee)
+      FUN_081a1848: primary_layout_path (unported direct callee)
+      FUN_081a1a90: fallback_layout_path (unported direct callee)
+      FUN_081eb0c4: singleton_class_8900
+      FUN_081f77a4: volume_controller_get
+      FUN_081fa044: volume_controller_byte_at_90
+      FUN_0812c6b0: timer_stop
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec confirms the exact 132-byte extent: push {r4,lr} at
+      0x081a2254 through tail b mutex_unlock at 0x081a22d4; separately linked
+      sibling FUN_081a22d8 opens with push {r4,lr}, and there is no literal
+      pool. Whole-image decoding of every ARM B/BL immediate finds exactly
+      nine inbound direct bl calls: plain bl at 0x0821c660, 0x0821db44, and
+      0x0821dee0; caller-gated blne at 0x0821c628, 0x0821e4a0, 0x0821e764,
+      0x0821e7bc, 0x0821f710, and 0x0821ff5c. There are no inbound direct b
+      transfers or aligned DATA words holding the entry, so it is not a
+      virtual-dispatch target. The predicated majority is caller-side gating;
+      the body itself has no NULL or active-state guard.
+
+      The method locks this+0x74, stops this+0x30, propagates enabled=1, writes
+      -1 to +0x5c, clears +0x68, and sets +0x70. It initializes the ported
+      class-0x8900 singleton, calls unported 0x081eda10 with its return, and
+      takes the primary path only for an exact result of 1. That path fetches
+      the ported volume-controller singleton and selects this+0x14 when its
+      raw +0x90 byte is zero or this+0x18 otherwise. The raw r0 return from
+      unported 0x0812af10 is passed directly to unported 0x081a1848; every
+      other selector calls unported 0x081a1a90 with this. It tail-unlocks in
+      either case. Existing mutex, timer, singleton, and volume ports are
+      direct calls. The unported direct callees use volatile target-address
+      slots; their broader identities are deliberately not inferred. Host
+      tests use a unique low u32 fixture to prove both volume-byte profiles,
+      the exact selector==1 split, field writes, timer stop, and r0 forwarding.
+
   # --- TTrackExtrasCache fixed-static accessor ---
   - address: 0x081ba3ac
     ghidra: FUN_081ba3ac
