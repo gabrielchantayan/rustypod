@@ -59,6 +59,8 @@ pub const SYS_WRITE0: usize = 0x04;
 pub const SYS_WRITE: usize = 0x05;
 /// See [`SYS_OPEN`].
 pub const SYS_READ: usize = 0x06;
+/// Angel SYS_READC: r1 is ignored and the returned character is in r0.
+pub const SYS_READC: usize = 0x07;
 /// See [`SYS_OPEN`].
 pub const SYS_ISTTY: usize = 0x09;
 /// See [`SYS_OPEN`].
