@@ -31514,6 +31514,45 @@ functions:
       release call and the +0x14 add all correspond; LLVM additionally
       pre-zeroes the pair/result stack slots and uses a wider frame.
 
+  - address: 0x083db69c
+    ghidra: FUN_083db69c
+    name: string_table_fallback_value_slot
+    size: 104
+    sig: "char **string_table_fallback_value_slot(u8 *map, char *const *key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: map
+      param_2/r1: key
+      DAT_083db700: default_value_data
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083c4884: map_operation
+      FUN_082a8580: string_table_pair_destroy
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw extent is 104 bytes, not Ghidra's 100: code covers
+      0x083db69c..0x083db6fc and the COW default-string data pointer literal
+      0x08b31810 at 0x083db700 belongs to this function; the next entry
+      pushes at 0x083db704. Decoding every ARM B/BL word and every equal data
+      word in osos.dec finds 8 unconditional bl call sites, no predicated
+      calls, no b references, and no data-word references. It copy-constructs
+      a stack `(key, default_value)` COW-string pair, invokes the real but
+      otherwise unported entry 0x083c4884 with `(result, map, pair)`, releases
+      pair.value then pair.key (the exact two-release body at 0x082a8580),
+      releases the initial default value, and returns result.node + 0x14.
+      0x083c4884 has no names.yaml entry, so this port assigns it no
+      higher-level identity: STRING_TABLE_MAP_OPS carries only its verified
+      result/map/pair ABI, targeting the retail address on device and a host
+      recorder in tests. The 0x082a8580 body is a private two-release helper
+      calling the established cxx_string_release port rather than a second
+      dispatch seam. Host fixtures prove the key COW share is live during the
+      map call and restored afterward, the default empty COW value is passed,
+      and the raw node+0x14 return address feeds fallback-table hexadecimal
+      assignment. match.py reports 32 Rust versus 25 original instructions:
+      same two copy calls, map operation, pair destruction, final release,
+      result reload and +0x14; the expected differences are LLVM's wider
+      frame, private call front-ends, and volatile map-operation blx.
+
   - address: 0x083c327c
     ghidra: FUN_083c327c
     name: string_key_tree_insert_unique
@@ -35612,24 +35651,23 @@ functions:
       equal to the address in osos.dec: 13 bl call sites, all
       unconditional, zero predicated forms, zero b references, zero
       data-word references. sprintf, cxx_string_from_cstr,
-      cxx_string_assign, and cxx_string_release are ported. FUN_083db69c
-      is NOT ported: raw decode shows it copy-constructing a (key,
-      empty-string) node pair, running the string map's find-or-insert @
-      0x083c4884 against the map at table+0x38, destroying the pair
-      (0x082a8580, cxx_string_release), and returning node+0x14, the
-      mapped-value string word. It rides the STRING_TABLE_SLOT_OPS
-      volatile seam whose device default transmutes 0x083db69c. Sibling
-      of string_table_set_decimal @ 0x08101d4c, which takes its number
-      by pointer and routes through the current-table assign helper @
-      0x08101da0 instead. Sampled callers (0x08238320, 0x08225ea4) store
-      UI selection handles under "SelectAlbum"/"SelectArtist" keys. The
+      cxx_string_assign, cxx_string_release, and
+      string_table_fallback_value_slot are ported. The lookup copies the key
+      and default COW value into a pair, calls the still-unported 0x083c4884
+      map operation, releases the pair and default value, then returns
+      node+0x14. That remaining operation uses STRING_TABLE_MAP_OPS, whose
+      device default calls 0x083c4884 and whose host tests install a recorder.
+      This is the sibling of string_table_set_decimal @ 0x08101d4c, which
+      takes its number by pointer and routes through the current-table assign
+      helper @ 0x08101da0 instead. Sampled callers (0x08238320, 0x08225ea4)
+      store UI selection handles under "SelectAlbum"/"SelectArtist" keys. The
       sprintf port takes an explicit va-list pointer, so the port passes
       &value rather than the original variadic r2 word. Host test uses a
-      faithful %lx engine and a heap-backed COW string fixture covering
-      0, 0x2a, 0xdeadbeef, and 0xffffffff; it also proves the table+0x38
-      fallback arithmetic and key pass-through into the lookup seam.
-      match.py structural report differs as expected (exit 1); the call
-      sequence sprintf/from_cstr/lookup/assign/release is preserved.
+      faithful %lx engine and a heap-backed COW string fixture covering 0,
+      0x2a, 0xdeadbeef, and 0xffffffff; it also proves table+0x38 fallback
+      arithmetic and the now-ported lookup's key/default-value pair. match.py
+      structural report differs as expected (exit 1); sprintf/from_cstr/
+      lookup/assign/release still retain their call sequence.
 
   - address: 0x08102048
     ghidra: FUN_08102048
