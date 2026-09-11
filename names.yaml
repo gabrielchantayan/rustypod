@@ -61381,3 +61381,34 @@ functions:
       Host tests cover signed lower and upper clamping, backend equality
       suppression, cached-position update, and independent notification
       suppression.
+
+  # --- Registry-class-0x8780 dispatch state ---
+  - address: 0x081a3ed4
+    ghidra: FUN_081a3ed4
+    name: class_8780_dispatch_state
+    size: 52
+    sig: "u32 class_8780_dispatch_state(const void *object)"
+    module: app/class_8780_dispatch_state
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x1c": priority_gate
+      "object+0x8a": secondary_gate
+      "object+0x8c": secondary_value
+    notes: >-
+      Raw osos.dec confirms Ghidra's 52-byte extent exactly: thirteen ARM
+      instructions from 0x081a3ed4 through bx lr at 0x081a3f04, with the
+      separately linked next function beginning at 0x081a3f08 and no literal
+      pool. Decoding every ARM B/BL immediate in osos.dec finds exactly ten
+      inbound direct call sites, all unconditional plain bl: 0x08126378,
+      0x0819b2f8, 0x081a2ebc, 0x081a2ef0, 0x081a38a0, 0x081a3bfc,
+      0x081a4c2c, 0x081a4e9c, 0x081a4eec, and 0x081a4f3c. There are no
+      predicated bl forms, direct tail b callers, or aligned DATA-word
+      references. Selects a four-value dispatch state: a nonzero priority
+      gate returns 3; otherwise a zero secondary gate returns 0, and a
+      nonzero secondary gate returns 1 or 2 according to whether its
+      associated value is zero. Callers use 0..=2 for alternate dispatches
+      and state 3 as their common readiness gate. The constructor at
+      0x081a4f64 zeroes all three observed bytes. Deliberate deviations:
+      none; the field names express only this selector's verified precedence,
+      not unrecovered business-level state meanings.

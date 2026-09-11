@@ -8,6 +8,7 @@ pub mod application_string_registry;
 pub mod animation;
 pub mod artwork_slot_available;
 pub mod class_6800;
+pub mod class_8780_dispatch_state;
 pub mod class_8900;
 pub mod clamped_mode_position;
 pub mod class_8c00;
