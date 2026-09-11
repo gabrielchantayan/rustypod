@@ -108,3 +108,4 @@ pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
 pub mod vtable_two_pair_derived_construct;
 pub mod vtable_flag_payload_construct;
+pub mod vtable_shared_handle_construct;

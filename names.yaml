@@ -66288,3 +66288,35 @@ functions:
       empty range, and the one-record NULL-output path. match.py structural
       review finds the same cursor loop, conditional copy, and 24-byte step;
       its extra setup and indirect call are the deliberate veneer deviation.
+
+  - address: 0x083e78b4
+    ghidra: FUN_083e78b4
+    name: vtable_shared_handle_construct
+    size: 68
+    sig: "VtableSharedHandle *vtable_shared_handle_construct(VtableSharedHandle *storage)"
+    module: cxx/vtable_shared_handle_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      DAT_083e78f0: shared_handle_base_descriptor
+      DAT_083e78f4: shared_handle_descriptor
+      FUN_082a8b68: shared_handle_initialize
+      return/r0: storage
+    notes: >-
+      Raw ARM gives a 68-byte extent: 60 instruction bytes at
+      0x083e78b4..0x083e78ec plus literal-pool descriptors 0x089a8aac and
+      0x089a8b04 at 0x083e78f0/0x083e78f4; the separate next function starts
+      at 0x083e78f8. It writes the base descriptor, calls unported
+      FUN_082a8b68 on storage+0x18, clears six words at +0x1c..+0x30, writes
+      the derived descriptor, and returns the original storage (Ghidra
+      incorrectly gives void). Decoding every ARM B/BL immediate in
+      osos.dec verifies exactly eight inbound direct calls, all unconditional
+      plain bl at 0x082a782c, 0x082a7dc4, 0x082a8f80, 0x083d8044,
+      0x083d8074, 0x083d80d4, 0x083dae68, and 0x083dae9c; no predicated
+      forms or direct B transfers exist. FUN_082a8b68 is absent from the
+      ledger, so target builds call its verified fixed address and host tests
+      use a volatile seam. The host default intentionally cannot model that
+      function's target-runtime global shared object and is a no-op. Host
+      tests prove the exact call argument, transient base descriptor, retained
+      shared-handle write, six-word clear, preserved prefix, ignored callee
+      return, and returned storage. match.py structural review completed.
