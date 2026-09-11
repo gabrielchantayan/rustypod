@@ -135,6 +135,9 @@ pub mod hints {
     // 0x7f00_0000: dedicated to cxx/bit_set's write-transition fixture;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const BIT_SET_WRITE: usize = 0x7f00_0000;
+    // 0xb600_0000: dedicated to cxx/bit_set's clear-transition fixture;
+    // fixture mappings never unmap, so no other user may share this hint.
+    pub const BIT_SET_CLEAR: usize = 0xb600_0000;
     // 0x6c00_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.

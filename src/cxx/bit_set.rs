@@ -1,6 +1,6 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and its three ported members: the pre-split bit test, bit
-//! write, and UTF-8 bulk insert. Everything below is decoded from the raw
+//! cardinality — and its four ported members: the pre-split bit test, bit
+//! write, bit clear, and UTF-8 bulk insert. Everything below is decoded from the raw
 //! words of `work/firmware/osos.dec`, not from Ghidra.
 //!
 //! ## The class
@@ -41,6 +41,9 @@
 //!   0x082a4ef8, returns untouched if it already matches, and otherwise
 //!   adjusts +0x04 by ±1 and ORs or XORs the mask into the word. The
 //!   cardinality is maintained exactly because of that early-out.
+//! - **0x08274774** — [`bit_set_clear`], `(this, bit)`: splits `bit`, tests
+//!   the current value through 0x082a4ef8, and only if set decrements +0x04
+//!   and clears the mask from the selected word.
 //!
 //! ## bit_set_test — the pre-split test @ 0x082a4ef8
 //!
@@ -232,6 +235,38 @@ pub unsafe extern "C" fn bit_set_write(set: *mut BitSet, bit: u32, value: u32) {
     }
 }
 
+/// bit_set_clear — original: `FUN_08274774` @ 0x08274774
+/// (68 bytes, 0x08274774..0x082747b4; the next function opens `push {r4, lr}`
+/// at 0x082747b8 with no trailing literal pool. 9 plain `bl` call sites, 0
+/// predicated `bl`, and 0 `b`, binary-scanned by decoding every B/BL word in
+/// osos.dec).
+///
+/// Splits `bit` into a word and bit index, then calls [`bit_set_test`]. An
+/// already-clear bit leaves the set untouched. A set bit decrements the
+/// cardinality with ARM `sub` wrapping semantics, then clears the selected
+/// mask through the original's `bic` operation.
+///
+/// The original has no bounds, NULL, or cardinality-underflow guard.
+/// Deviations: none.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose word storage includes
+/// `bit >> 5`. It is mutated in place; callers must synchronize concurrent
+/// access just as they must for the retailOS object.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_clear(set: *mut BitSet, bit: u32) {
+    let word_index = bit >> 5;
+    let bit_index = bit & 31;
+    if bit_set_test(set, word_index, bit_index) != 0 {
+        (*set).cardinality = (*set).cardinality.wrapping_sub(1);
+        let words = (*set).words as usize as *mut u32;
+        let word = words.add(word_index as usize);
+        word.write(word.read() & !(1u32 << bit_index));
+    }
+}
+
 /// The `value` argument the insert passes (`mov r2, #1`): set the bit.
 const BIT_SET_VALUE_SET: u32 = 1;
 
@@ -287,6 +322,11 @@ mod tests {
             .map(|slab| slab as usize)
             .unwrap_or(0)
     });
+    static CLEAR_SLAB: LazyLock<usize> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_CLEAR, WORDS_BYTES)
+            .map(|slab| slab as usize)
+            .unwrap_or(0)
+    });
     static WRITE_SLAB: LazyLock<usize> = LazyLock::new(|| {
         crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_WRITE, WORDS_BYTES)
             .map(|slab| slab as usize)
@@ -317,6 +357,25 @@ mod tests {
     fn write_set(words: &[u32], cardinality: u32) -> Option<BitSet> {
         assert!(words.len() <= WORDS_CAPACITY);
         let slab = *WRITE_SLAB;
+        if slab == 0 {
+            return None;
+        }
+        unsafe {
+            core::ptr::write_bytes(slab as *mut u8, 0, WORDS_BYTES);
+            core::ptr::copy_nonoverlapping(words.as_ptr(), slab as *mut u32, words.len());
+        }
+        Some(BitSet {
+            bit_capacity: (words.len() * 32) as u32,
+            cardinality,
+            words: slab as u32,
+            heap_tag: 0,
+            reserved: [0; 3],
+        })
+    }
+
+    fn clear_set(words: &[u32], cardinality: u32) -> Option<BitSet> {
+        assert!(words.len() <= WORDS_CAPACITY);
+        let slab = *CLEAR_SLAB;
         if slab == 0 {
             return None;
         }
@@ -461,6 +520,52 @@ mod tests {
             assert_eq!(words.read(), 0);
             assert_eq!(words.add(1).read(), 0x8000_0001);
         }
+    }
+
+    // --- bit_set_clear @ 0x08274774 ---
+
+    #[test]
+    fn clear_only_mutates_set_bits_across_word_boundaries() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = clear_set(&[(1u32 << 0) | (1u32 << 31), (1u32 << 0) | (1u32 << 31)], 4) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set_ptr = core::ptr::addr_of_mut!(set);
+
+        unsafe {
+            bit_set_clear(set_ptr, 17);
+            assert_eq!((*set_ptr).cardinality, 4, "an already-clear bit is untouched");
+            let words = (*set_ptr).words as usize as *const u32;
+            assert_eq!(words.read(), 0x8000_0001);
+            assert_eq!(words.add(1).read(), 0x8000_0001);
+
+            for bit in [0, 31, 32, 63] {
+                bit_set_clear(set_ptr, bit);
+            }
+            assert_eq!((*set_ptr).cardinality, 0);
+            assert_eq!(words.read(), 0);
+            assert_eq!(words.add(1).read(), 0);
+
+            bit_set_clear(set_ptr, 63);
+            assert_eq!((*set_ptr).cardinality, 0);
+        }
+    }
+
+    #[test]
+    fn clear_wraps_cardinality_when_the_input_invariant_is_broken() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = clear_set(&[1], 0) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+
+        unsafe {
+            bit_set_clear(core::ptr::addr_of_mut!(set), 0);
+        }
+
+        assert_eq!(set.cardinality, u32::MAX, "the original's `sub` has no underflow guard");
+        assert_eq!(unsafe { (set.words as usize as *const u32).read() }, 0);
     }
 
     // --- bit_set_test @ 0x082a4ef8 ---
