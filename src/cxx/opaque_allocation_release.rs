@@ -21,14 +21,14 @@
 //!
 //! The descriptor at `0x089063e8` has no recoverable concrete type. The port
 //! preserves the raw tail transfer rather than inventing one. On hosts, it
-//! reaches the existing recording seam for that unported helper, still without
-//! adding a NULL guard.
+//! enters the ported helper's recording seam for the still-unported engine,
+//! still without adding a NULL guard.
 //!
 //! Deliberate deviation: none on ARM; the global assembly is the three raw
 //! words above.
 
 #[cfg(not(target_arch = "arm"))]
-use super::typed_allocation_release::{TypedAllocationRelease, TYPED_ALLOCATION_RELEASE};
+use super::typed_allocation_release::typed_allocation_release_helper;
 
 /// Fixed opaque allocation descriptor loaded into r1 by the wrapper.
 pub const OPAQUE_ALLOCATION_DESCRIPTOR: usize = 0x0890_63e8;
@@ -47,8 +47,10 @@ extern "C" {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn release_opaque_allocation(allocation: *mut u8) {
-    let release = core::ptr::read_volatile(core::ptr::addr_of!(TYPED_ALLOCATION_RELEASE));
-    release(allocation, OPAQUE_ALLOCATION_DESCRIPTOR);
+    typed_allocation_release_helper(
+        allocation,
+        OPAQUE_ALLOCATION_DESCRIPTOR as *const u8,
+    );
 }
 
 // Preserve the retail tail transfer: a Rust call would create a local return
@@ -74,53 +76,71 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::typed_allocation_release::TYPED_ALLOCATION_RELEASE_TEST_LOCK;
+    use crate::cxx::typed_allocation_release::{
+        AllocationReleaseFrame, TypeErasedReleaseEngine, TYPE_ERASED_RELEASE_ENGINE,
+        TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK,
+    };
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RECORDED_ALLOCATION: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static RECORDED_FRAME_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
     static RECORDED_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
+    static RECORDED_STATE: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-    unsafe extern "C" fn record_release(allocation: *mut u8, descriptor: usize) {
+    unsafe extern "C" fn record_release(
+        frame: *mut AllocationReleaseFrame,
+        descriptor: *const u8,
+        state: u32,
+    ) {
         CALL_COUNT.fetch_add(1, Ordering::SeqCst);
-        RECORDED_ALLOCATION.store(allocation as usize, Ordering::SeqCst);
-        RECORDED_DESCRIPTOR.store(descriptor, Ordering::SeqCst);
+        RECORDED_ALLOCATION.store((*frame).allocation as usize, Ordering::SeqCst);
+        RECORDED_FRAME_DESCRIPTOR.store((*frame).descriptor as usize, Ordering::SeqCst);
+        RECORDED_DESCRIPTOR.store(descriptor as usize, Ordering::SeqCst);
+        RECORDED_STATE.store(state as usize, Ordering::SeqCst);
     }
 
-    struct HostSeamReset(TypedAllocationRelease);
+    struct HostSeamReset(TypeErasedReleaseEngine);
 
     impl Drop for HostSeamReset {
         fn drop(&mut self) {
-            unsafe { TYPED_ALLOCATION_RELEASE = self.0 };
+            unsafe { TYPE_ERASED_RELEASE_ENGINE = self.0 };
         }
     }
 
     fn install_recorder() -> HostSeamReset {
         CALL_COUNT.store(0, Ordering::SeqCst);
         RECORDED_ALLOCATION.store(usize::MAX, Ordering::SeqCst);
+        RECORDED_FRAME_DESCRIPTOR.store(0, Ordering::SeqCst);
         RECORDED_DESCRIPTOR.store(0, Ordering::SeqCst);
+        RECORDED_STATE.store(usize::MAX, Ordering::SeqCst);
         let previous = unsafe {
-            core::ptr::read_volatile(core::ptr::addr_of!(TYPED_ALLOCATION_RELEASE))
+            core::ptr::read_volatile(core::ptr::addr_of!(TYPE_ERASED_RELEASE_ENGINE))
         };
-        unsafe { TYPED_ALLOCATION_RELEASE = record_release };
+        unsafe { TYPE_ERASED_RELEASE_ENGINE = record_release };
         HostSeamReset(previous)
     }
 
     #[test]
     fn null_allocation_is_forwarded_without_a_wrapper_guard() {
-        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
+        let _guard = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
         let _reset = install_recorder();
 
         unsafe { release_opaque_allocation(core::ptr::null_mut()) };
 
         assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
         assert_eq!(RECORDED_ALLOCATION.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            RECORDED_FRAME_DESCRIPTOR.load(Ordering::SeqCst),
+            OPAQUE_ALLOCATION_DESCRIPTOR,
+        );
         assert_eq!(RECORDED_DESCRIPTOR.load(Ordering::SeqCst), OPAQUE_ALLOCATION_DESCRIPTOR);
+        assert_eq!(RECORDED_STATE.load(Ordering::SeqCst), 0);
     }
 
     #[test]
     fn nonnull_allocation_and_fixed_descriptor_reach_release_helper() {
-        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
+        let _guard = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
         let _reset = install_recorder();
         let allocation = 0x2468_a000usize as *mut u8;
 
@@ -128,6 +148,11 @@ mod tests {
 
         assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
         assert_eq!(RECORDED_ALLOCATION.load(Ordering::SeqCst), allocation as usize);
+        assert_eq!(
+            RECORDED_FRAME_DESCRIPTOR.load(Ordering::SeqCst),
+            OPAQUE_ALLOCATION_DESCRIPTOR,
+        );
         assert_eq!(RECORDED_DESCRIPTOR.load(Ordering::SeqCst), OPAQUE_ALLOCATION_DESCRIPTOR);
+        assert_eq!(RECORDED_STATE.load(Ordering::SeqCst), 0);
     }
 }

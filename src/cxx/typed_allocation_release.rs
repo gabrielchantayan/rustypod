@@ -1,42 +1,48 @@
-//! Typed allocation release — original: `FUN_08060460` @ load address
-//! `0x08060460` (12 bytes: two instructions plus its literal-pool word;
-//! Ghidra's 8-byte extent drops the pool). The next independently linked
-//! function begins at `0x0806046c`.
+//! Typed allocation release helper — retailOS `FUN_0803b3a4` at load address
+//! `0x0803b3a4` (20 bytes, `0x0803b3a4..0x0803b3b7`). Raw `osos.dec` confirms
+//! the extent: the next separately linked function starts at `0x0803b3b8`.
 //!
 //! ```text
-//! 08060460  ldr r1, [pc]        @ 0x0890b608
-//! 08060464  b   0x0803b3a4
-//! 08060468  .word 0x0890b608
+//! 0803b3a4  push {r0,r1,r4,lr}
+//! 0803b3a8  mov  r0,sp
+//! 0803b3ac  mov  r2,#0
+//! 0803b3b0  bl   0x080c85bc
+//! 0803b3b4  pop  {r2,r3,r4,pc}
 //! ```
 //!
 //! ## Call sites and algorithm
 //!
 //! Decoding every ARM B/BL word in `osos.dec` (load base `0x08000000`) finds
-//! 16 direct calls: 6 unconditional `bl` and 10 `blne`; no direct `b` sites.
-//! The predicated callers establish their own non-NULL guards. This wrapper
-//! deliberately has none: it loads the fixed allocation descriptor into r1
-//! and tail-branches to `0x0803b3a4`, which puts `(allocation, descriptor)` in
-//! a temporary two-word frame before calling the unported type-erased release
-//! engine at `0x080c85bc` with its third argument zero.
+//! 27 direct references: 9 unconditional `bl` calls and 18 unconditional `b`
+//! tail transfers; there are no predicated references. The helper preserves
+//! its `allocation` and opaque `descriptor` arguments as a two-word stack
+//! frame, then calls the unported type-erased release engine at `0x080c85bc`
+//! with that frame, the descriptor, and a zero third argument. It has no NULL
+//! guard; the nine direct callers all invoke it unconditionally.
 //!
-//! The descriptor at `0x0890b608` is opaque: the adjacent allocator wrapper
-//! `FUN_080604ac` supplies the same value to `0x0803b468`; no type name is
-//! recoverable from the decrypted bytes. The target implementation therefore
-//! keeps the raw tail transfer rather than inventing an allocation type.
-//!
-//! Deliberate deviation: none on ARM; the global assembly is the three raw
-//! words above. Hosts cannot call mapped retailOS code, so they invoke a
-//! recording-replaceable seam with the exact branch arguments. That seam does
-//! not add a NULL guard, which proves the caller-gated `blne` contract.
+//! Deliberate deviation: target builds call the fixed retail engine address.
+//! Host builds use a volatile replaceable seam because that address is unmapped;
+//! tests prove the complete frame and all forwarded arguments.
 
 /// Fixed opaque allocation descriptor loaded into r1 by the wrapper.
 pub const TYPED_ALLOCATION_DESCRIPTOR: usize = 0x0890_b608;
 
-/// Stock helper reached by the wrapper's unconditional tail branch.
-pub const TYPED_ALLOCATION_RELEASE_HELPER: usize = 0x0803_b3a4;
+/// Target address of the still-unported type-erased release engine.
+const RETAIL_TYPE_ERASED_RELEASE_ENGINE: usize = 0x080c_85bc;
 
-/// ABI of the branch arguments reaching [`TYPED_ALLOCATION_RELEASE_HELPER`].
-pub type TypedAllocationRelease = unsafe extern "C" fn(*mut u8, usize);
+/// The two saved argument words passed to the type-erased release engine.
+///
+/// `repr(C)` retains the retail stack layout: on the 32-bit target,
+/// `allocation` is at +0 and `descriptor` at +4.
+#[repr(C)]
+pub struct AllocationReleaseFrame {
+    pub allocation: *mut u8,
+    pub descriptor: *const u8,
+}
+
+/// ABI of retailOS's still-unported type-erased release engine.
+pub type TypeErasedReleaseEngine =
+    unsafe extern "C" fn(*mut AllocationReleaseFrame, *const u8, u32);
 
 #[cfg(target_arch = "arm")]
 extern "C" {
@@ -45,30 +51,78 @@ extern "C" {
     pub fn release_typed_allocation(allocation: *mut u8);
 }
 
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_typed_allocation_release(_allocation: *mut u8, _descriptor: usize) {}
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn retail_type_erased_release(
+    frame: *mut AllocationReleaseFrame,
+    descriptor: *const u8,
+) {
+    let release: TypeErasedReleaseEngine =
+        core::mem::transmute(RETAIL_TYPE_ERASED_RELEASE_ENGINE);
+    release(frame, descriptor, 0);
+}
 
 /// Host boundary for the still-unported type-erased release engine.
 ///
-/// Target builds use the verbatim tail branch below. Host tests replace this
-/// slot to observe the otherwise unmapped retailOS call.
-#[cfg(not(target_arch = "arm"))]
-pub static mut TYPED_ALLOCATION_RELEASE: TypedAllocationRelease = missing_typed_allocation_release;
+/// Host tests replace this slot to observe the otherwise unmapped retailOS
+/// call. Target builds call `0x080c85bc` directly.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_type_erased_release(
+    _frame: *mut AllocationReleaseFrame,
+    _descriptor: *const u8,
+    _state: u32,
+) {}
+
+#[cfg(not(target_os = "none"))]
+pub static mut TYPE_ERASED_RELEASE_ENGINE: TypeErasedReleaseEngine =
+    missing_type_erased_release;
 
 /// Serializes host tests that replace the shared release-engine seam.
 #[cfg(test)]
-pub(crate) static TYPED_ALLOCATION_RELEASE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+pub(crate) static TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
 
-/// Host representation of the raw tail branch.
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn host_type_erased_release(
+    frame: *mut AllocationReleaseFrame,
+    descriptor: *const u8,
+) {
+    let release = core::ptr::read_volatile(
+        core::ptr::addr_of!(TYPE_ERASED_RELEASE_ENGINE),
+    );
+    release(frame, descriptor, 0);
+}
+
+/// Releases an allocation through an opaque type descriptor.
 ///
-/// It forwards even NULL unchanged; retail callers choose whether to guard the
-/// allocation with `blne` before entering this wrapper.
+/// `allocation` and `descriptor` are forwarded without validation. The
+/// type-erased engine owns all deeper requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn typed_allocation_release_helper(
+    allocation: *mut u8,
+    descriptor: *const u8,
+) {
+    let mut frame = AllocationReleaseFrame { allocation, descriptor };
+    #[cfg(target_os = "none")]
+    retail_type_erased_release(&mut frame, descriptor);
+    #[cfg(not(target_os = "none"))]
+    host_type_erased_release(&mut frame, descriptor);
+}
+
+/// Typed allocation release — retailOS `FUN_08060460` at load address
+/// `0x08060460` (12 bytes). This host representation forwards the fixed
+/// descriptor through [`typed_allocation_release_helper`] and deliberately
+/// preserves NULL; retail callers choose whether to guard with `blne`.
 #[cfg(not(target_arch = "arm"))]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn release_typed_allocation(allocation: *mut u8) {
-    let release = core::ptr::read_volatile(core::ptr::addr_of!(TYPED_ALLOCATION_RELEASE));
-    release(allocation, TYPED_ALLOCATION_DESCRIPTOR);
+    typed_allocation_release_helper(
+        allocation,
+        TYPED_ALLOCATION_DESCRIPTOR as *const u8,
+    );
 }
 
 // Preserve the retail tail transfer: a Rust call would create a local return
@@ -95,54 +149,90 @@ mod tests {
 
     use super::*;
     use core::sync::atomic::{AtomicUsize, Ordering};
+
     static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RECORDED_ALLOCATION: AtomicUsize = AtomicUsize::new(usize::MAX);
-    static RECORDED_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
+    static RECORDED_FRAME_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
+    static RECORDED_DESCRIPTOR_ARGUMENT: AtomicUsize = AtomicUsize::new(0);
+    static RECORDED_STATE: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-    unsafe extern "C" fn record_release(allocation: *mut u8, descriptor: usize) {
+    unsafe extern "C" fn record_release(
+        frame: *mut AllocationReleaseFrame,
+        descriptor: *const u8,
+        state: u32,
+    ) {
         CALL_COUNT.fetch_add(1, Ordering::SeqCst);
-        RECORDED_ALLOCATION.store(allocation as usize, Ordering::SeqCst);
-        RECORDED_DESCRIPTOR.store(descriptor, Ordering::SeqCst);
+        RECORDED_ALLOCATION.store((*frame).allocation as usize, Ordering::SeqCst);
+        RECORDED_FRAME_DESCRIPTOR.store((*frame).descriptor as usize, Ordering::SeqCst);
+        RECORDED_DESCRIPTOR_ARGUMENT.store(descriptor as usize, Ordering::SeqCst);
+        RECORDED_STATE.store(state as usize, Ordering::SeqCst);
     }
 
-    struct HostSeamReset;
+    struct HostSeamReset(TypeErasedReleaseEngine);
 
     impl Drop for HostSeamReset {
         fn drop(&mut self) {
-            unsafe { TYPED_ALLOCATION_RELEASE = missing_typed_allocation_release };
+            unsafe { TYPE_ERASED_RELEASE_ENGINE = self.0 };
         }
     }
 
     fn install_recorder() -> HostSeamReset {
         CALL_COUNT.store(0, Ordering::SeqCst);
         RECORDED_ALLOCATION.store(usize::MAX, Ordering::SeqCst);
-        RECORDED_DESCRIPTOR.store(0, Ordering::SeqCst);
-        unsafe { TYPED_ALLOCATION_RELEASE = record_release };
-        HostSeamReset
+        RECORDED_FRAME_DESCRIPTOR.store(0, Ordering::SeqCst);
+        RECORDED_DESCRIPTOR_ARGUMENT.store(0, Ordering::SeqCst);
+        RECORDED_STATE.store(usize::MAX, Ordering::SeqCst);
+        let previous = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(TYPE_ERASED_RELEASE_ENGINE))
+        };
+        unsafe { TYPE_ERASED_RELEASE_ENGINE = record_release };
+        HostSeamReset(previous)
     }
 
     #[test]
-    fn null_allocation_is_forwarded_without_a_wrapper_guard() {
-        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
+    fn helper_saves_both_arguments_and_clears_engine_state() {
+        let _guard = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
         let _reset = install_recorder();
+        let allocation = 0x1234_5000usize as *mut u8;
+        let descriptor = 0x0890_b608usize as *const u8;
 
-        unsafe { release_typed_allocation(core::ptr::null_mut()) };
+        unsafe { typed_allocation_release_helper(allocation, descriptor) };
+
+        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(RECORDED_ALLOCATION.load(Ordering::SeqCst), allocation as usize);
+        assert_eq!(RECORDED_FRAME_DESCRIPTOR.load(Ordering::SeqCst), descriptor as usize);
+        assert_eq!(RECORDED_DESCRIPTOR_ARGUMENT.load(Ordering::SeqCst), descriptor as usize);
+        assert_eq!(RECORDED_STATE.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn helper_forwards_null_allocation_without_a_guard() {
+        let _guard = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
+        let _reset = install_recorder();
+        let descriptor = 0x0890_63e8usize as *const u8;
+
+        unsafe { typed_allocation_release_helper(core::ptr::null_mut(), descriptor) };
 
         assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
         assert_eq!(RECORDED_ALLOCATION.load(Ordering::SeqCst), 0);
-        assert_eq!(RECORDED_DESCRIPTOR.load(Ordering::SeqCst), TYPED_ALLOCATION_DESCRIPTOR);
+        assert_eq!(RECORDED_FRAME_DESCRIPTOR.load(Ordering::SeqCst), descriptor as usize);
+        assert_eq!(RECORDED_DESCRIPTOR_ARGUMENT.load(Ordering::SeqCst), descriptor as usize);
+        assert_eq!(RECORDED_STATE.load(Ordering::SeqCst), 0);
     }
 
     #[test]
-    fn nonnull_allocation_and_fixed_descriptor_reach_release_helper() {
-        let _guard = TYPED_ALLOCATION_RELEASE_TEST_LOCK.lock();
+    fn typed_wrapper_reaches_the_helper_with_its_fixed_descriptor() {
+        let _guard = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
         let _reset = install_recorder();
-        let allocation = 0x1234_5000usize as *mut u8;
+        let allocation = 0x2468_a000usize as *mut u8;
 
         unsafe { release_typed_allocation(allocation) };
 
         assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
         assert_eq!(RECORDED_ALLOCATION.load(Ordering::SeqCst), allocation as usize);
-        assert_eq!(RECORDED_DESCRIPTOR.load(Ordering::SeqCst), TYPED_ALLOCATION_DESCRIPTOR);
+        assert_eq!(
+            RECORDED_DESCRIPTOR_ARGUMENT.load(Ordering::SeqCst),
+            TYPED_ALLOCATION_DESCRIPTOR,
+        );
     }
 }

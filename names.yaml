@@ -66130,3 +66130,37 @@ functions:
       {data, len, capacity, tag, flags} as {0, 0, 0, 0, 1}; bit 0 makes the
       returned TaggedWordBuffer self-deleting under tagged_word_buffer_destroy.
       No deliberate Rust deviations: both callees are direct ports.
+  - address: 0x0803b3a4
+    ghidra: FUN_0803b3a4
+    name: typed_allocation_release_helper
+    size: 20
+    sig: "void typed_allocation_release_helper(void *allocation, const void *descriptor)"
+    module: cxx/typed_allocation_release
+    status: ported
+    renames:
+      param_1/r0: allocation
+      param_2/r1: descriptor
+      uStack_10/sp: allocation_release_frame.allocation
+      uStack_c/sp: allocation_release_frame.descriptor
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      EXTENT: raw osos.dec is exactly 20 bytes at
+      0x0803b3a4..0x0803b3b7; the next separately linked function begins at
+      0x0803b3b8 with push {r0,r1,r2,r4,r5,r6,r7,lr}. CALL COUNT: decoding
+      every ARM B/BL immediate in osos.dec finds 27 direct references: 9
+      unconditional plain bl calls at 0x08065b18, 0x08065b24, 0x0806f12c,
+      0x0806fb28, 0x0808a3f4, 0x0808aa9c, 0x080c5a2c, 0x080f0130, and
+      0x082c5a50, plus 18 unconditional b tail transfers; no reference is
+      predicated. ALGORITHM: push allocation and descriptor as the first two
+      frame words, call the unported type-erased release engine 0x080c85bc
+      with the frame, descriptor, and zero third argument, then return its
+      r0 value to the caller even though the recovered signature is void.
+      The allocation and descriptor have no NULL guard. Rust uses a repr(C)
+      named two-pointer frame, which preserves the target's +0 and +4 layout;
+      host tests record both frame words, the separate descriptor argument,
+      the zero third argument, and NULL forwarding. Target builds call the
+      fixed engine address; hosts use a volatile replaceable seam because the
+      retail address is unmapped. match.py structural review found the same
+      saved two-word frame, r0=sp, r2=0 setup, and engine call; LLVM's frame
+      pointer and indirect fixed-address call are deliberate codegen
+      differences.
