@@ -108,6 +108,7 @@ pub mod hash_find;
 pub mod hash_function;
 pub mod hash_init;
 pub mod hex_to_int;
+pub mod id_list_delete;
 pub mod mem;
 pub mod mem_extern_release;
 pub mod mem_finalize;
