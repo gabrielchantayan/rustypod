@@ -65877,3 +65877,40 @@ functions:
       predicated form or direct tail branch targets it. No deliberate Rust
       deviations: target code stores through the fixed address, while host
       tests install the established mapped-window fixture.
+
+  # --- Unsigned ASCII integer-prefix parser ---
+  - address: 0x08074c18
+    ghidra: FUN_08074c18
+    name: parse_u32_prefix
+    size: 160
+    sig: "u32 parse_u32_prefix(const u8 *s, u8 **endptr, i32 base)"
+    module: strto/parse_u32_prefix
+    status: ported
+    renames:
+      param_1/r0: s
+      param_2/r1: endptr
+      param_3/r2: base
+      iVar2/r3: u32_accumulator
+      DAT_08074ca8: radix_8_digit_bitmap
+      DAT_08074cac: radix_16_digit_bitmap
+      DAT_08074cb0: radix_10_digit_bitmap
+      DAT_08074cb4: ascii_digit_value_map
+    notes: >-
+      Raw osos.dec establishes a 160-byte entry extent
+      0x08074c18..0x08074cb7: the 144-byte instruction body ends at the
+      pop {r4,r5,r6,r7,pc} at 0x08074ca4, its four-word literal pool fills
+      0x08074ca8..0x08074cb4, and push {r4,r5,r6,lr} at 0x08074cb8 begins a
+      separately linked function. Decoding every ARM B/BL immediate finds
+      exactly nine direct inbound call sites, all unconditional bl at
+      0x0809897c, 0x08098c8c, 0x08098ca8, 0x08098cc4, 0x0809fcdc,
+      0x0809fe90, 0x080a0130, 0x080a0700, and 0x080a075c; no predicated
+      forms or direct tail branches exist. NULL and empty input return zero
+      without writing endptr. Other inputs select radix 8 or 16 only when
+      requested, otherwise decimal; 0x/0X forces hexadecimal. It accumulates
+      accepted digits in a wrapping u32 and writes the stopping cursor when
+      supplied. The four digit-map locations point to zero-filled runtime
+      storage in osos.dec and their initializer is not identified; the port
+      deliberately uses their implied C-locale ASCII digit sets (0..7, 0..9,
+      and 0..9/A..F/a..f). Host tests cover radix normalization, forced
+      prefix/endptr placement, null/empty input, null endptr, and u32
+      wrapping.
