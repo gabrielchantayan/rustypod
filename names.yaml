@@ -65914,3 +65914,32 @@ functions:
       and 0..9/A..F/a..f). Host tests cover radix normalization, forced
       prefix/endptr placement, null/empty input, null endptr, and u32
       wrapping.
+  - address: 0x08051ce4
+    ghidra: FUN_08051ce4
+    name: object_selected_item
+    size: 56
+    sig: "const void *object_selected_item(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: backend
+      r2: object_saved_before_backend_resolve
+      r3: explicit_item
+      r2_after_ldr: primary_item
+      r0_after_ldreq: secondary_item
+    notes: >-
+      Raw ARM confirms the 56-byte extent 0x08051ce4..0x08051d1c: the
+      separately entered sibling begins with push {r0-r4,lr} at 0x08051d1c.
+      The routine first calls the already ported kind-1/self, kind-2/proxy
+      backend resolver 0x08051dc4, then loads the original object's +0x04
+      explicit item. A non-null explicit item wins; otherwise it returns the
+      resolved backend's non-null +0xf44 primary item, then its +0xf48
+      secondary item (including NULL). Decoding every ARM B/BL immediate in
+      osos.dec finds exactly nine inbound direct calls, all unconditional
+      plain bl at 0x08059adc, 0x08059b28, 0x08061d04, 0x080866d8,
+      0x08087694, 0x0808cf10, 0x080e28f4, 0x0813d8b8, and 0x0817b364;
+      there are no predicated calls or direct tail branches. The concrete item
+      class is not recovered; callers use the result as a selected item with
+      a +0x40 subobject. No deliberate Rust deviations: raw u32 pointer-word
+      reads preserve the target's 4-byte field spacing on 64-bit hosts.
