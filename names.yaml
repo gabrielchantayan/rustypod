@@ -59715,11 +59715,41 @@ functions:
       0x0814d21c. The leaf stores the supplied non-NULL node pointer
       in child-B (+0x04) and returns 0; a NULL child returns 1 without
       dereferencing node, so even a NULL node is harmless on that path.
-      This is the companion of unported child-A setter 0x0814d28c.
+      This is the companion of child-A setter 0x0814d28c.
       No deliberate deviations: the Rust export preserves the target-width
       pointer word, conditional store, and u32 return. Host tests prove
       the non-NULL store, exact preservation of every other field, and the
       no-dereference NULL-child path.
+
+  - address: 0x0814d28c
+    ghidra: FUN_0814d28c
+    name: mov_atom_node_set_child_a_if_present
+    size: 20
+    sig: "u32 mov_atom_node_set_child_a_if_present(MovAtomNode *node, MovAtomNode *child_a)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: child_a
+      param_1_plus_0x00: child_a_link
+    notes: >-
+      Raw ARM establishes the exact 20-byte extent
+      0x0814d28c..0x0814d2a0: cmp r1,#0; strne r1,[r0];
+      moveq r0,#1; movne r0,#0; bx lr. The separately linked next
+      function begins at 0x0814d2a0. Decoding every ARM B/BL word in
+      osos.dec finds 9 direct call sites, all unconditional plain bl:
+      0x081c1dec, 0x081c1e10, 0x081c1e1c, 0x081c1e28, 0x081c1e34,
+      0x081c1e40, 0x081c1e4c, 0x081c7dc4, and 0x081c7dd0; there are
+      zero predicated BL forms and no tail branches. No aligned data
+      word in osos.dec holds 0x0814d28c. The leaf stores the supplied
+      non-NULL node pointer in child-A (+0x00) and returns 0; a NULL
+      child returns 1 without dereferencing node, so even a NULL node is
+      harmless on that path. This is the child-A counterpart to the
+      child-B setter at 0x0814d21c. No deliberate deviations: the Rust
+      export preserves the target-width pointer word, conditional store,
+      and u32 return. Host tests prove the non-NULL store, exact
+      preservation of every other field, and the no-dereference
+      NULL-child path.
 
   - address: 0x0814d2e0
     ghidra: FUN_0814d2e0
