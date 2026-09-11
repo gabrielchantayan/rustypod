@@ -9,6 +9,7 @@ pub mod cp15;
 pub mod clock_config;
 pub mod codec;
 pub mod display;
+pub mod internal_display_layers;
 pub mod display_layer;
 pub mod display_index_flags;
 pub mod eight_slot_identity_init;
