@@ -22,6 +22,7 @@
 //! the 32-bit layout is exact while host fixtures retain disjoint pointers.
 
 
+use crate::cxx::string_object::StringObject;
 use crate::kernel::condvar::{condvar_broadcast, CondVar};
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
@@ -42,12 +43,22 @@ pub struct Class8900WorkQueue {
     pub tail: *mut Class8900QueuedWork,
 }
 
-/// A 32-byte work record as seen by the FIFO. Its owning constructors fill
-/// the first six words; only the `next` link at +0x18 belongs to this helper.
+/// A 32-byte queued-work record. The shared constructor initializes its
+/// request context, two embedded strings, state bytes, and queue link.
 #[repr(C)]
 pub struct Class8900QueuedWork {
-    /// +0x00..+0x14: command-specific record data.
-    pub payload: [u32; 6],
+    /// +0x00: caller-provided context; only copied by construction.
+    pub request_context: *mut core::ffi::c_void,
+    /// +0x04: primary work label.
+    pub primary_name: StringObject,
+    /// +0x0c: state sentinel (0xff initially).
+    pub state: u8,
+    /// +0x0d..+0x0f: command-specific flags, option, and untouched padding.
+    pub flags: u8,
+    pub option: u8,
+    pub reserved: u8,
+    /// +0x10: secondary work label.
+    pub secondary_name: StringObject,
     /// +0x18: successor in the pending-work FIFO.
     pub next: *mut Class8900QueuedWork,
     /// +0x1c: command-specific trailing word.
@@ -121,7 +132,17 @@ mod tests {
     }
 
     fn work(next: *mut Class8900QueuedWork) -> Class8900QueuedWork {
-        Class8900QueuedWork { payload: [0; 6], next, trailing: 0 }
+        Class8900QueuedWork {
+            request_context: null_mut(),
+            primary_name: StringObject { vtable: core::ptr::null(), payload: null_mut() },
+            state: 0,
+            flags: 0,
+            option: 0,
+            reserved: 0,
+            secondary_name: StringObject { vtable: core::ptr::null(), payload: null_mut() },
+            next,
+            trailing: 0,
+        }
     }
 
     #[test]
