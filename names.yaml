@@ -64619,6 +64619,44 @@ functions:
       wrapping add; LLVM contracts adds/adc into smlal and uses fp rather
       than r4 for its frame.
 
+
+  # --- Q16.16 two-by-two determinant (util/fixed) ---
+  - address: 0x0823627c
+    ghidra: FUN_0823627c
+    name: fixed16_det2
+    size: 36
+    sig: "i32 fixed16_det2(i32 a, i32 b, i32 c, i32 d)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      param_3/r2: c
+      param_4/r3/r12: d
+      r0: truncated_ad
+      r1: truncated_bc
+      r2: bc_product_low
+      r3: product_high
+    notes: >-
+      Raw osos.dec confirms the exact 36-byte body at 0x0823627c..0x0823629c:
+      mov ip,r3 through bx lr; cmp r1,#0 at 0x082362a0 starts the separately
+      linked next function, and there is no literal pool. It computes the
+      Q16.16 two-by-two determinant by signed-multiplying a*d and b*c,
+      independently extracting each product's bits [47:16] with the
+      lsl#16/lsr#16 funnel, then subtracting those truncated i32 results with
+      wrapping ARM semantics. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly nine inbound direct calls, all plain unconditional bl:
+      0x082a0718, 0x082a0740, 0x082a0760, 0x082a0788, 0x082a07a8,
+      0x082a07c4, 0x082a07e4, 0x082a0804, and 0x082a0824. No predicated
+      branches, tail branches, or aligned data words refer to this entry.
+      No deliberate Rust deviations. Host tests prove Q16.16 identity,
+      signed fractional cross-zero truncation (which distinguishes this from
+      shifting the full determinant once), and signed-extreme arithmetic.
+      match.py finds the same two signed widening multiplies, two Q16.16
+      funnels, and wrapped subtraction; LLVM reverses product scheduling and
+      saves fp/lr, so the instruction sequence is structurally rather than
+      byte-for-byte identical.
+
   # --- Default selector dispatcher (app/default_selector_dispatch) ---
   - address: 0x0821a11c
     ghidra: FUN_0821a11c

@@ -4,11 +4,12 @@
 //! round-and-extract @ 0x08076214 that closes dot products, the guarded
 //! reciprocal @ 0x08076204 that divides by a Q16.16 value, the unguarded
 //! reciprocal body @ 0x080377e4 that it tail-branches to, the float entry
-//! point @ 0x082577bc that feeds Q16.16 values in from f32 literals, and a
-//! four-component Q16.16 unit-interval clamp @ 0x082485d8.
+//! point @ 0x082577bc that feeds Q16.16 values in from f32 literals, a
+//! two-by-two Q16.16 determinant @ 0x0823627c, and a four-component
+//! Q16.16 unit-interval clamp @ 0x082485d8.
 //! - `fixed28_lerp` — `FUN_08242d60` @ 0x08242d60 (48 bytes; 9 call sites).
 //!
-//! Four pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
+//! Five pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
 //! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
 //! wrapper, one unrolled-division body, one float-conversion leaf, and one
 //! four-component clamp wrapper.
@@ -17,6 +18,7 @@
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `fixed16_dot3` — `FUN_082a014c` @ 0x082a014c (64 bytes; 9 call sites).
+//! - `fixed16_det2` — `FUN_0823627c` @ 0x0823627c (36 bytes; 9 call sites).
 //! - `mul_shift_i32` — `FUN_08079a44` @ 0x08079a44 (20 bytes; 12 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
@@ -65,6 +67,31 @@
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_mul(a: i32, b: i32) -> i32 {
     (((a as i64) * (b as i64)) >> 16) as i32
+}
+
+/// fixed16_det2 — original: `FUN_0823627c` @ 0x0823627c (36 bytes).
+///
+/// Computes the Q16.16 two-by-two determinant `a*d - b*c`. Each signed
+/// `smull` product is independently truncated to bits [47:16] through the
+/// original's `lsl #16` / `lsr #16` funnel, then the two 32-bit values are
+/// subtracted with ARM wrapping semantics. This is deliberately not one
+/// widened `(a*d - b*c) >> 16` calculation: the two fractional truncations
+/// occur before subtraction.
+///
+/// Raw `osos.dec` establishes the exact extent 0x0823627c..0x0823629c: the
+/// following `cmp r1,#0` at 0x082362a0 begins a separately linked sibling.
+/// Decoding every ARM B/BL-immediate word finds exactly nine direct inbound
+/// calls, all unconditional and unpredicated `bl`: 0x082a0718, 0x082a0740,
+/// 0x082a0760, 0x082a0788, 0x082a07a8, 0x082a07c4, 0x082a07e4, 0x082a0804,
+/// and 0x082a0824. No aligned `osos.dec` word contains this entry. This
+/// unguarded leaf has no deliberate Rust deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_det2")]
+pub extern "C" fn fixed16_det2(a: i32, b: i32, c: i32, d: i32) -> i32 {
+    let ad = (((a as i64) * (d as i64)) >> 16) as i32;
+    let bc = (((b as i64) * (c as i64)) >> 16) as i32;
+    ad.wrapping_sub(bc)
 }
 
 /// fixed16_dot3 — original: `FUN_082a014c` @ 0x082a014c (64 bytes).
@@ -528,6 +555,32 @@ mod tests {
             let want = ((hi << 16) | (lo >> 16)) as i32;
             assert_eq!(fixed16_mul(a, b), want, "a={a:#x} b={b:#x}");
         }
+    }
+
+    /// The two `smull` funnels complete before the `sub`: subtracting the
+    /// individually truncated Q16.16 products differs from shifting their
+    /// full-precision difference when the discarded fractions cross zero.
+    #[test]
+    fn fixed16_det2_matches_the_two_product_arm_sequence() {
+        fn reference(a: i32, b: i32, c: i32, d: i32) -> i32 {
+            let first = (((a as i64) * (d as i64)) >> 16) as i32;
+            let second = (((b as i64) * (c as i64)) >> 16) as i32;
+            first.wrapping_sub(second)
+        }
+
+        let cases = [
+            (ONE, 0, 0, ONE, ONE),
+            (1, -1, 1, 1, 1),
+            (0x1234_5678, -0x3333_3333, 0x0001_0001, -0x0000_8000, 0),
+            (i32::MAX, i32::MIN, i32::MIN, i32::MAX, 0),
+        ];
+        for (a, b, c, d, expected) in cases {
+            assert_eq!(fixed16_det2(a, b, c, d), reference(a, b, c, d));
+            if expected != 0 {
+                assert_eq!(fixed16_det2(a, b, c, d), expected);
+            }
+        }
+        assert_ne!(fixed16_det2(1, -1, 1, 1), (((1i64 * 1) - (-1i64 * 1)) >> 16) as i32);
     }
     /// The three products and both additions are sequenced exactly as the
     /// original, including signed fixed-point truncation and u32-style sum
