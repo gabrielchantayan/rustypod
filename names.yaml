@@ -13222,6 +13222,29 @@ functions:
       0x08135110 is ported. match.py: identical call/store/dispatch
       structure; the only deltas are the observer seams and frame layout.
 
+  - address: 0x0810e6b0
+    ghidra: thunk_FUN_08135380
+    name: registry_container_destruct
+    size: 4
+    sig: "Registry *registry_container_destruct(Registry *registry)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: registry, "param_1[7]": auxiliary_allocation, "param_1[9]": observer}
+    notes: >-
+      Four-byte tail thunk: raw ARM is `b 0x08135380`. Binary-decoding all
+      B/BL words in osos.dec found 10 plain bl callers, 0 predicated callers,
+      and one tail b caller at 0x0812d314. The destination is a distinct
+      72-byte destructor at 0x08135380..0x081353c8 including its literal
+      0x08984770, not part of Ghidra's reported thunk extent. It installs
+      that vtable, dispatches observer->vtable[+0x1c] for registry+0x24,
+      conditionally frees the registry+0x1c auxiliary allocation via the
+      ported free @ 0x0802edc8, clears both words, and tail-branches to
+      observable_array_destruct @ 0x08271d2c. Host tests substitute only
+      that final direct tail call because Registry's pointer fields widen on
+      x86-64 while ObservableArray intentionally preserves target u32
+      fields; the ARM build calls the existing port directly. match.py
+      structural review is recorded with this port.
+
   - address: 0x08135110
     ghidra: FUN_08135110
     name: registry_container_initialize
