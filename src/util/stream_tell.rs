@@ -62,6 +62,15 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_read(
+        _this: *mut StreamObject,
+        _buf: *mut u8,
+        _len: u32,
+        _mode: u32,
+    ) -> i32 {
+        0
+    }
+
     unsafe extern "C" fn recording_tell(this: *mut StreamObject) -> i32 {
         unsafe {
             CALLS += 1;
@@ -72,7 +81,7 @@ mod tests {
 
     static TELL_VTABLE: StreamVtable = StreamVtable {
         slots_00_0c: [0; 4],
-        read_10: 0,
+        read_10: unused_read,
         seek: unused_seek,
         opaque_18: 0,
         tell: recording_tell,

@@ -62,6 +62,7 @@ pub mod signed_clamp_i32;
 pub mod skip_ascii_whitespace_and_comments;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
+pub mod stream_read_core;
 pub mod stream_read_be32_or_zero;
 pub mod store_static_descriptor;
 pub mod stream_seek;

@@ -53,17 +53,17 @@ pub unsafe extern "C" fn stream_seek_tagged_entry(
     unsafe { stream_seek(stream_handle, 8) };
 
     let mut entry_count = 0u32;
-    unsafe { stream_read_be32_or_zero(stream, &mut entry_count) };
+    unsafe { stream_read_be32_or_zero(stream_handle, &mut entry_count) };
     let mut ignored_header_word = 0u32;
-    unsafe { stream_read_be32_or_zero(stream, &mut ignored_header_word) };
+    unsafe { stream_read_be32_or_zero(stream_handle, &mut ignored_header_word) };
 
     let mut entry_index = 0i32;
     while entry_index < entry_count as i32 {
         let mut tag = 0u32;
-        unsafe { stream_read_be32_or_zero(stream, &mut tag) };
+        unsafe { stream_read_be32_or_zero(stream_handle, &mut tag) };
         let mut offset = 0u32;
-        unsafe { stream_read_be32_or_zero(stream, &mut offset) };
-        unsafe { stream_read_be32(stream, out_entry_value) };
+        unsafe { stream_read_be32_or_zero(stream_handle, &mut offset) };
+        unsafe { stream_read_be32(stream_handle, out_entry_value) };
 
         if tag == entry_tag {
             unsafe { stream_seek(stream_handle, offset as i32) };
@@ -80,8 +80,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, STREAM_READ_CORE_TEST_LOCK};
-    use crate::util::stream_read_be32::{reset_stream_read_core, STREAM_READ_CORE};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use crate::util::stream_seek::StreamVtable;
     use std::sync::LazyLock;
 
@@ -94,6 +93,7 @@ mod tests {
         }
         Some(base as usize as u32)
     });
+    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static mut INPUT: [u8; 128] = [0; 128];
     static mut INPUT_LEN: usize = 0;
     static mut READ_CALL: usize = 0;
@@ -118,24 +118,25 @@ mod tests {
 
     static STREAM_VTABLE: StreamVtable = StreamVtable {
         slots_00_0c: [0; 4],
-        read_10: 0,
+        read_10: recording_read,
         seek: recording_seek,
         opaque_18: 0,
         tell: unused_tell,
     };
 
-    unsafe extern "C" fn fake_stream_read_core(
-        _stream: u32,
+    unsafe extern "C" fn recording_read(
+        _stream: *mut StreamObject,
         buf: *mut u8,
         len: u32,
-        _err_out: *mut u32,
+        mode: u32,
     ) -> i32 {
         unsafe {
             assert_eq!(len, 4);
+            assert_eq!(mode, 2);
             let call = core::ptr::addr_of!(READ_CALL).read();
             core::ptr::addr_of_mut!(READ_CALL).write(call + 1);
             if call == core::ptr::addr_of!(FAILED_READ).read() {
-                return -3;
+                return 0;
             }
             let offset = call * 4;
             assert!(offset + 4 <= core::ptr::addr_of!(INPUT_LEN).read());
@@ -144,15 +145,7 @@ mod tests {
                 buf,
                 4,
             );
-            0
-        }
-    }
-
-    struct CoreReset;
-
-    impl Drop for CoreReset {
-        fn drop(&mut self) {
-            unsafe { reset_stream_read_core() };
+            len as i32
         }
     }
 
@@ -176,13 +169,12 @@ mod tests {
             core::ptr::addr_of_mut!(SEEK_CALLS).write(0);
             core::ptr::addr_of_mut!(SEEK_POSITIONS).write([0; 2]);
             core::ptr::addr_of_mut!(SEEK_STATUS).write(seek_status);
-            core::ptr::addr_of_mut!(STREAM_READ_CORE).write_volatile(fake_stream_read_core);
-        }
+    }
     }
 
     #[test]
     fn seeks_to_matching_entry_and_stores_its_third_word() {
-        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some(stream) = stream_handle() else {
             note_missing_u32_fixture("util/stream_seek_tagged_entry");
             return;
@@ -192,7 +184,6 @@ mod tests {
             usize::MAX,
             0,
         );
-        let _reset = CoreReset;
         let mut value = 0;
 
         let result = unsafe { stream_seek_tagged_entry(stream, 0x202, &mut value) };
@@ -206,13 +197,12 @@ mod tests {
 
     #[test]
     fn missing_tag_returns_minus_twenty_four_after_scanning_signed_count() {
-        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some(stream) = stream_handle() else {
             note_missing_u32_fixture("util/stream_seek_tagged_entry");
             return;
         };
         install_reads(&[1, 0, 0x101, 0x400, 0xdead_beef], usize::MAX, 0);
-        let _reset = CoreReset;
         let mut value = 0;
 
         let result = unsafe { stream_seek_tagged_entry(stream, 0x202, &mut value) };
@@ -225,13 +215,12 @@ mod tests {
 
     #[test]
     fn negative_signed_count_skips_the_entry_loop() {
-        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some(stream) = stream_handle() else {
             note_missing_u32_fixture("util/stream_seek_tagged_entry");
             return;
         };
         install_reads(&[0x8000_0000, 0], usize::MAX, 0);
-        let _reset = CoreReset;
         let mut value = 0x5afe_5afe;
 
         let result = unsafe { stream_seek_tagged_entry(stream, 0x202, &mut value) };
@@ -244,13 +233,12 @@ mod tests {
 
     #[test]
     fn ignores_seek_failures_and_preserves_output_on_direct_read_failure() {
-        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some(stream) = stream_handle() else {
             note_missing_u32_fixture("util/stream_seek_tagged_entry");
             return;
         };
         install_reads(&[1, 0, 0x202, 0x620, 0x1234_5678], 4, 1);
-        let _reset = CoreReset;
         let mut value = 0x5afe_5afe;
 
         let result = unsafe { stream_seek_tagged_entry(stream, 0x202, &mut value) };
