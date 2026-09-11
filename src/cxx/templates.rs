@@ -915,6 +915,36 @@ pub unsafe extern "C" fn container_element_at_alias_6908(this: *mut u8, index: u
     let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
     element_slot(this, index).read()
 }
+/// container_element_at_alias_6bc0 — original: `FUN_083d6bc0` @ 0x083d6bc0
+/// (24 bytes; 9 plain `bl` call sites — 0x08214878, 0x08214930,
+/// 0x08214a0c, 0x08214e20, 0x08214e38, 0x08214e48, 0x08214e5c,
+/// 0x083d1a68, and 0x083d1aa0; no predicated calls).
+///
+/// A byte-identical instantiation of [`container_element_at`] @
+/// 0x083d5efc: `T *operator[](size_t index)`. It dispatches through the
+/// container's own vtable slot 0x40 for an element-slot address, then loads
+/// the element pointer from that slot. The ARM `push {r4,lr}` only aligns
+/// the stack: r4 is never touched. The raw body has no NULL guard for the
+/// virtual result or its element slot.
+///
+/// Ghidra drops the r1 index argument from its one-argument signature; the
+/// `blx r2` preserves it for the virtual method. This distinct link section
+/// keeps the independently hookable alias from being folded into its
+/// byte-identical siblings; otherwise there are no deliberate deviations.
+///
+/// # Safety
+/// Same contract as [`container_element_at`]: `this` must point at an object
+/// whose first word is a vtable with at least [`ELEMENT_SLOT_VTABLE_INDEX`] +
+/// 1 slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_6bc0")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_alias_6bc0(this: *mut u8, index: usize) -> *mut u8 {
+    let vtable = (this as *const *const ElementSlotFn).read();
+    let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
+    element_slot(this, index).read()
+}
+
 
 /// container_element_at_alias_68dc — original: `FUN_083d68dc` @ 0x083d68dc
 /// (24 bytes; 2 `bl` call sites — 0x082848a0 in `FUN_08284878`,
@@ -3163,6 +3193,46 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn element_at_alias_6bc0_dispatches_through_slot_0x40_and_derefs() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            assert_eq!(container_element_at_alias_6bc0(this, 0), &mut a as *mut u8);
+            assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
+            assert_eq!(container_element_at_alias_6bc0(this, 1), &mut b as *mut u8);
+            assert!(container_element_at_alias_6bc0(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
+    #[test]
+    fn element_at_alias_6bc0_matches_primary() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            for index in 0..3 {
+                assert_eq!(
+                    container_element_at_alias_6bc0(this, index),
+                    container_element_at(this, index),
+                    "index {index}"
+                );
+            }
+        }
+    }
+
 
     // ---- vector_is_empty ---------------------------------------------
 
