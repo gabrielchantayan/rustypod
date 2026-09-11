@@ -30111,6 +30111,32 @@ functions:
       sites. No separate port; hook this address to the
       not_equal_deref symbol.
 
+  - address: 0x083cf950
+    ghidra: FUN_083cf950
+    name: equal_deref_f950_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf950: equal_deref_f950_copy
+      param_1: a
+      param_2: b
+    notes: >-
+      Raw osos.dec is exactly the six instructions from 0x083cf950 through
+      bx lr at 0x083cf964; the next separately linked equal_deref copy starts
+      at 0x083cf968. It aligned-loads both u32 operands, compares them, and
+      returns the normalized 0/1 equality result. Decoding every ARM B/BL word
+      finds exactly 8 direct callers, all unconditional bl: 0x081bdd38,
+      0x0839bcfc, 0x083cb914, 0x083cbd80, 0x083cbd9c, 0x083cbe20,
+      0x083cbee4, and 0x083dbb14; there are no predicated calls, tail
+      branches, or aligned raw-word references. The body is byte-identical to
+      the established equal_deref port at 0x083cf968, so this ledger-only
+      alias deliberately adds no duplicate dispatch seam; hook 0x083cf950 to
+      equal_deref. Its existing host test covers equal values at distinct
+      addresses, unequal values in both orders, zero, all-bits-set, and
+      iterator-shaped records whose trailing word is not read.
+
   - address: 0x083cf968
     ghidra: FUN_083cf968
     name: equal_deref
