@@ -395,6 +395,10 @@ pub mod hints {
     // context, slot, and stream-buffer fixtures; mappings never unmap, so no
     // other user may share this hint.
     pub const STREAMBUF_SLOT_PEEK_EQUAL: usize = 0xa600_0000;
+    // 0xee00_0000: dedicated to kernel/debug_task_selector's raw-u32
+    // scheduler-label fixture; fixture mappings never unmap, so no other user
+    // may share this hint.
+    pub const DEBUG_TASK_SELECTOR_LABELS: usize = 0xee00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -540,6 +544,11 @@ pub static TASK_CTX_BLOCK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// The task module's own tests and callers that exercise a port through
 /// `current_task_ctx_block` both need to install a synthetic running node.
 pub static TASK_HOOKS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+/// Serializes every host test that replaces
+/// `util::scheduler_label_lookup::SCHEDULER_LABEL_FIND`. The label lookup's
+/// own tests and debug-task selection both swap this one mutable seam.
+pub static SCHEDULER_LABEL_FIND_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that swaps
 /// `app::event_code_queue::EVENT_CODE_QUEUE_HOOKS`. The queue module's own

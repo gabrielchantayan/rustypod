@@ -27894,6 +27894,41 @@ functions:
       precedent) - slot order, early return and the slot-0 fall-through
       preserved. match.py structural only, as expected.
 
+  - address: 0x082d0b80
+    ghidra: FUN_082d0b80
+    name: debug_task_selector
+    size: 200
+    sig: "i32 debug_task_selector(void)"
+    module: kernel/debug_task_selector
+    status: ported
+    renames:
+      param_1..param_4: input_words (16-byte stack receive buffer)
+      iVar2: task_identifier
+      piVar1: task_count
+      puVar4: task_label
+    notes: >-
+      Raw osos.dec is 172 bytes of instructions at 0x082d0b80..0x082d0c2b
+      plus this function's 28-byte literal pool at 0x082d0c2c..0x082d0c47:
+      200 bytes through 0x082d0c47; the next separately linked function
+      begins at 0x082d0c48. Decoding every ARM B/BL word finds exactly 9
+      direct call sites, all unconditional bl and zero predicated forms:
+      0x082bf6c0, 0x08393e7c, 0x08393e98, 0x08393ea8, 0x08393eb8,
+      0x0839400c, 0x0839401c, 0x08394054, 0x08394094. No osos data word
+      equals the entry address, so it is never indirectly dispatched.
+      Semihost SYS_WRITE0 prints "\nTask (# or name)> ", then the unported
+      debug-console reader 0x082d670c fills a 16-byte stack buffer and
+      SYS_WRITE0 prints "\n". The reader's raw body opens ":tt" and issues
+      SYS_READ; that establishes its narrow debug-console role but not a
+      broader identity. '-' returns -1; a leading decimal token goes through
+      atoi_dead_sign and must be in 1..=the signed mutable task count at
+      0x22008a54; every other token is matched case-sensitively against
+      scheduler_label_lookup's one-based labels. The target port uses the
+      exact firmware reader, IRAM count word, semihost SWI, atoi, label
+      lookup and strcmp; host tests substitute only the reader, mutable word,
+      semihost SWI and existing label-lookup seam. match.py is structural:
+      expected to differ because Rust expresses the semihost/read seam and
+      loops differently.
+
   - address: 0x082d7924
     ghidra: FUN_082d7924
     name: cache_lock_wait
