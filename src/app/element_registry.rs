@@ -487,9 +487,7 @@ mod tests {
 
     #[test]
     fn set_name_updates_only_the_first_matching_element_and_stops() {
-        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK.lock();
         let mut first = RegistryElement { vtable: core::ptr::null(), id: 7, name: 0x1111_1111 };
         let mut match_one = RegistryElement { vtable: core::ptr::null(), id: 42, name: 0x2222_2222 };
         let mut match_two = RegistryElement { vtable: core::ptr::null(), id: 42, name: 0x3333_3333 };
@@ -516,9 +514,7 @@ mod tests {
 
     #[test]
     fn set_name_exhausts_the_iterator_without_writing_when_id_is_absent() {
-        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK.lock();
         let mut first = RegistryElement { vtable: core::ptr::null(), id: 1, name: 0x1111_1111 };
         let mut second = RegistryElement { vtable: core::ptr::null(), id: 2, name: 0x2222_2222 };
         let mut registry = ElementRegistry { vtable: core::ptr::null() };

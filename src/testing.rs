@@ -359,6 +359,10 @@ pub mod hints {
     // circular-list fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const GLOBAL_CALLBACK_UNREGISTER: usize = 0xac00_0000;
+    // 0xb600_0000: dedicated to app/vtable_set file-record teardown's
+    // raw-u32 node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const FILE_RECORD_TEARDOWN: usize = 0xb600_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
