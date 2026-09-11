@@ -33,6 +33,7 @@ pub mod context;
 pub mod controller_layout_dispatch;
 pub mod controller_timer_pair;
 pub mod controller_secondary_interface;
+pub mod controller_pending_command;
 pub mod controller_history_select;
 pub mod context_scope;
 pub mod context_scope_selector;

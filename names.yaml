@@ -60947,6 +60947,43 @@ functions:
       relocation placeholders for the three ported bl targets, the
       accepted deviation classes. 37 instructions vs 30.
 
+  # --- controller pending-command post ---
+  - address: 0x08181110
+    ghidra: FUN_08181110
+    name: app_controller_begin_command
+    size: 48
+    sig: "void app_controller_begin_command(AppControllerPendingCommand *controller, u32 command, u32 arg2, u32 arg3, u32 state, u32 aux)"
+    module: app/controller_pending_command
+    status: ported
+    renames:
+      param_1/r0: controller (application controller; pending command mirror at +0x88)
+      param_2/r1: command (record lookup key's first word)
+      param_3/r2: arg2 (record and controller +0x88 word 0)
+      param_4/r3: arg3 (record and controller +0x8c word 1)
+      param_5/[sp,#0x18]: state (record and controller +0x90 word 2)
+      param_6/[sp,#0x1c]: aux (record and controller +0x94 word 3)
+      FUN_08182c78: command_record_resolve_or_allocate (unported seam)
+    notes: >-
+      EXTENT verified against osos.dec: exactly 48 bytes,
+      0x08181110..0x08181140; the next sibling begins push {r0-r12, lr} at
+      0x08181140. CALL COUNT verified by decoding every ARM B/BL word in
+      osos.dec: exactly 9 unconditional bl sites at 0x08134764, 0x08225498,
+      0x082290f4, 0x08230824, 0x082319d0, 0x08231aa4, 0x08231b78,
+      0x08231c38, and 0x082323bc; no predicated bl and no plain-B tail-call
+      sites. ALGORITHM: call FUN_08182c78(controller, command, 0, 1), write
+      arg2/arg3/state/aux to the returned 16-byte record, then mirror the
+      same four words at controller +0x88..+0x94. Neither the returned record
+      nor controller is NULL-guarded. DEVIATION: the unported resolver is a
+      read_volatile seam: target defaults reach its stock 0x08182c78 body,
+      host defaults panic and tests install a recording resolver. The
+      controller prefix and record have repr(C) named fields with the
+      +0x88 target-width offset assertion rather than host-unsafe byte
+      offsets. The ported handler_list_activate caller now calls this
+      function directly; its old target/default seam has been removed. Host
+      tests prove resolver arguments (command, 0, 1), every high-bit and zero
+      payload word, record/controller mirroring, prior-record overwrite, and
+      +0x00..+0x87 preservation.
+
   - address: 0x080a1d7c
     ghidra: FUN_080a1d7c
     name: string_object_construct_game_path

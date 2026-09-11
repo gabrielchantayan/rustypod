@@ -63,7 +63,7 @@
 //! virtual slot `+0xd0`. The singleton getter is genuinely called twice
 //! (two separate `bl`s), not cached across the install.
 //!
-//! The four retailOS callees are unported and ride the
+//! The three unported retailOS handler-context callees ride the
 //! [`HANDLER_LIST_ACTIVATE_OPS`] `read_volatile` dispatch table (house
 //! pattern):
 //!
@@ -79,11 +79,6 @@
 //! - `handler_context_active_state` @ 0x081e8cd0 — answers 0 when the
 //!   context's +0x30 word is NULL, else `FUN_0816cae4(context + 0x18,
 //!   that word)`.
-//! - `app_controller_begin_command` @ 0x08181110 — 48 bytes; allocates a
-//!   16-byte record through `FUN_08182c78(controller, command, 0, 1)`,
-//!   fills it with the two register args and the two stack args, and
-//!   mirrors the record pointer at controller +0x88 (the controller's
-//!   pending-command slot).
 //!
 //! # Deliberate deviations
 //!
@@ -94,12 +89,14 @@
 //!   pattern). The dynamic slot's identity is not recoverable from the
 //!   static image, so it is dispatched through the supplied owner's
 //!   vtable, exactly like the original's `bx r2`.
-//! - `app_controller_get`, `command_dispatcher_get` and
-//!   `command_dispatch_by_resource` are already ported and are called
-//!   directly, matching the original's direct `bl`s.
+//! - `app_controller_get`, `app_controller_begin_command`,
+//!   `command_dispatcher_get`, and `command_dispatch_by_resource` are
+//!   already ported and are called directly, matching the original's
+//!   direct `bl`s.
 
 use crate::app::singletons::{app_controller_get, command_dispatcher_get};
 use crate::app::command_dispatch::command_dispatch_by_resource;
+use crate::app::controller_pending_command::app_controller_begin_command;
 use crate::cxx::handler_list_construct::HandlerList;
 
 /// Resource id the activation is posted under (the literal-pool word @
@@ -145,11 +142,6 @@ pub struct HandlerListActivateOps {
     /// `FUN_081e8cd0` @ 0x081e8cd0 — the context's active-state word (0
     /// when the context's +0x30 link is NULL).
     pub handler_context_active_state: unsafe extern "C" fn(*mut u8) -> u32,
-    /// `FUN_08181110` @ 0x08181110 — posts `command` to the controller's
-    /// pending-command record (mirrored at controller +0x88), carrying
-    /// `arg2`, `arg3`, `state` and `aux` into the 16-byte record.
-    pub app_controller_begin_command:
-        unsafe extern "C" fn(*mut u8, u32, u32, u32, u32, u32),
 }
 
 #[cfg(target_os = "none")]
@@ -193,31 +185,6 @@ unsafe extern "C" fn missing_handler_context_active_state(_context: *mut u8) -> 
     panic!("handler_list_activate requires handler-context state 0x081e8cd0")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_app_controller_begin_command(
-    controller: *mut u8,
-    command: u32,
-    arg2: u32,
-    arg3: u32,
-    state: u32,
-    aux: u32,
-) {
-    let begin: unsafe extern "C" fn(*mut u8, u32, u32, u32, u32, u32) =
-        unsafe { core::mem::transmute(0x0818_1110usize) };
-    unsafe { begin(controller, command, arg2, arg3, state, aux) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_app_controller_begin_command(
-    _controller: *mut u8,
-    _command: u32,
-    _arg2: u32,
-    _arg3: u32,
-    _state: u32,
-    _aux: u32,
-) {
-    panic!("handler_list_activate requires controller command post 0x08181110")
-}
 
 /// Wired defaults for [`HANDLER_LIST_ACTIVATE_OPS`].
 #[cfg(target_os = "none")]
@@ -226,7 +193,6 @@ pub const DEFAULT_HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
         handler_context_get: firmware_handler_context_get,
         handler_context_install_list: firmware_handler_context_install_list,
         handler_context_active_state: firmware_handler_context_active_state,
-        app_controller_begin_command: firmware_app_controller_begin_command,
     };
 
 /// Wired defaults for [`HANDLER_LIST_ACTIVATE_OPS`].
@@ -236,13 +202,11 @@ pub const DEFAULT_HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
         handler_context_get: missing_handler_context_get,
         handler_context_install_list: missing_handler_context_install_list,
         handler_context_active_state: missing_handler_context_active_state,
-        app_controller_begin_command: missing_app_controller_begin_command,
     };
 
-/// Active model of the unported retailOS dependencies. Target
-/// integration replaces the slots as 0x081e8ca0 / 0x081e8da0 /
-/// 0x081e8cd0 / 0x08181110 are ported; host tests install recording
-/// mocks.
+/// Active model of the unported handler-context dependencies. Target
+/// integration replaces these slots as 0x081e8ca0 / 0x081e8da0 /
+/// 0x081e8cd0 are ported; host tests install recording mocks.
 pub static mut HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
     DEFAULT_HANDLER_LIST_ACTIVATE_OPS;
 
@@ -266,9 +230,9 @@ unsafe fn activate_ops() -> HandlerListActivateOps {
 /// # Safety
 ///
 /// `owner` must have a readable vtable whose +0xd0 entry accepts this
-/// ABI, and `handlers` must be a valid [`HandlerList`] for the duration
-/// of the install. All four context/controller dependencies must be
-/// wired (on device the defaults are the real firmware functions).
+/// ABI, `handlers` must be valid for the duration of the install, and the
+/// handler-context dependencies must be wired (on device the defaults are the
+/// real firmware functions).
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn handler_list_activate(
@@ -281,8 +245,8 @@ pub unsafe extern "C" fn handler_list_activate(
     let context = (ops.handler_context_get)();
     let state = (ops.handler_context_active_state)(context);
     let controller = app_controller_get();
-    (ops.app_controller_begin_command)(
-        controller,
+    app_controller_begin_command(
+        controller.cast(),
         HANDLER_LIST_RESOURCE,
         0,
         0,
@@ -308,6 +272,10 @@ mod tests {
     use crate::app::command_dispatch::{
         CommandDispatchByResourceOps, COMMAND_DISPATCH_BY_RESOURCE_OPS,
         DEFAULT_COMMAND_DISPATCH_BY_RESOURCE_OPS,
+    };
+    use crate::app::controller_pending_command::{
+        AppControllerBeginCommandOps, AppControllerPendingCommand, PendingCommandRecord,
+        APP_CONTROLLER_BEGIN_COMMAND_OPS, DEFAULT_APP_CONTROLLER_BEGIN_COMMAND_OPS,
     };
     use crate::app::silver_list_table::{
         SilverItemMap, SilverListTable, SilverListTableCtorOps, SILVER_LIST_TABLE_CTOR_OPS,
@@ -344,12 +312,25 @@ mod tests {
     static mut EVENTS: Vec<&'static str> = Vec::new();
     static mut CONTEXT: *mut u8 = ptr::null_mut();
     static mut CONTROLLER: *mut u8 = ptr::null_mut();
+    static mut CONTROLLER_OBJECT: AppControllerPendingCommand = AppControllerPendingCommand {
+        opaque_00_87: [0; 34],
+        pending_command: PendingCommandRecord {
+            arg2: 0,
+            arg3: 0,
+            state: 0,
+            aux: 0,
+        },
+    };
+    static mut COMMAND_RECORD: PendingCommandRecord = PendingCommandRecord {
+        arg2: 0,
+        arg3: 0,
+        state: 0,
+        aux: 0,
+    };
     static mut DISPATCHER: *mut u8 = ptr::null_mut();
     static mut STATE_VALUE: u32 = 0;
     static mut DISPATCH_RESULT: *mut u8 = ptr::null_mut();
     static mut INSTALL_SEEN: (*mut u8, *mut HandlerList) = (ptr::null_mut(), ptr::null_mut());
-    static mut BEGIN_SEEN: (*mut u8, u32, u32, u32, u32, u32) =
-        (ptr::null_mut(), 0, 0, 0, 0, 0);
     static mut DISPATCH_SEEN: (*mut u8, u32, u32, u32) = (ptr::null_mut(), 0, 0, 0);
     static mut OWNER_SEEN: (*mut HandlerListOwner, *mut u8) = (ptr::null_mut(), ptr::null_mut());
 
@@ -373,16 +354,14 @@ mod tests {
         STATE_VALUE
     }
 
-    unsafe extern "C" fn mock_begin_command(
-        controller: *mut u8,
-        command: u32,
-        arg2: u32,
-        arg3: u32,
-        state: u32,
-        aux: u32,
-    ) {
+    unsafe extern "C" fn mock_begin_command_resolve(
+        _controller: *mut AppControllerPendingCommand,
+        _command: u32,
+        _zero: u32,
+        _allocate: u32,
+    ) -> *mut PendingCommandRecord {
         events().push("begin-command");
-        BEGIN_SEEN = (controller, command, arg2, arg3, state, aux);
+        ptr::addr_of_mut!(COMMAND_RECORD)
     }
 
     unsafe extern "C" fn record_handlers_activated(
@@ -507,12 +486,11 @@ mod tests {
 
         events().clear();
         CONTEXT = 0x2000_0000usize as *mut u8;
-        CONTROLLER = 0x2000_1000usize as *mut u8;
+        CONTROLLER = ptr::addr_of_mut!(CONTROLLER_OBJECT).cast();
         DISPATCHER = 0x2000_2000usize as *mut u8;
         STATE_VALUE = state;
         DISPATCH_RESULT = result;
         INSTALL_SEEN = (ptr::null_mut(), ptr::null_mut());
-        BEGIN_SEEN = (ptr::null_mut(), 0, 0, 0, 0, 0);
         DISPATCH_SEEN = (ptr::null_mut(), 0, 0, 0);
         OWNER_SEEN = (ptr::null_mut(), ptr::null_mut());
 
@@ -523,7 +501,9 @@ mod tests {
             handler_context_get: mock_context_get,
             handler_context_install_list: mock_context_install,
             handler_context_active_state: mock_context_state,
-            app_controller_begin_command: mock_begin_command,
+        };
+        APP_CONTROLLER_BEGIN_COMMAND_OPS = AppControllerBeginCommandOps {
+            resolve_record: mock_begin_command_resolve,
         };
         SILVER_LIST_TABLE_CTOR_OPS = SilverListTableCtorOps {
             map_header_alloc: mock_header_alloc,
@@ -550,6 +530,7 @@ mod tests {
         HANDLER_LIST_ACTIVATE_OPS = DEFAULT_HANDLER_LIST_ACTIVATE_OPS;
         SILVER_LIST_TABLE_CTOR_OPS = DEFAULT_SILVER_LIST_TABLE_CTOR_OPS;
         COMMAND_DISPATCH_BY_RESOURCE_OPS = DEFAULT_COMMAND_DISPATCH_BY_RESOURCE_OPS;
+        APP_CONTROLLER_BEGIN_COMMAND_OPS = DEFAULT_APP_CONTROLLER_BEGIN_COMMAND_OPS;
         crate::app::singletons::APP_CONTROLLER = ptr::null_mut();
         crate::app::singletons::COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
         events().clear();
@@ -585,8 +566,13 @@ mod tests {
             );
             assert_eq!(INSTALL_SEEN, (CONTEXT, ptr::addr_of_mut!(list)));
             assert_eq!(
-                BEGIN_SEEN,
-                (CONTROLLER, HANDLER_LIST_RESOURCE, 0, 0, 0x5a5a_0001, 0),
+                [
+                    CONTROLLER_OBJECT.pending_command.arg2,
+                    CONTROLLER_OBJECT.pending_command.arg3,
+                    CONTROLLER_OBJECT.pending_command.state,
+                    CONTROLLER_OBJECT.pending_command.aux,
+                ],
+                [0, 0, 0x5a5a_0001, 0],
                 "the context state word rides the controller's pending-command record"
             );
             assert_eq!(
@@ -621,8 +607,13 @@ mod tests {
             handler_list_activate(ptr::addr_of_mut!(owner), ptr::addr_of_mut!(list));
 
             assert_eq!(
-                BEGIN_SEEN,
-                (CONTROLLER, HANDLER_LIST_RESOURCE, 0, 0, 0, 0),
+                [
+                    CONTROLLER_OBJECT.pending_command.arg2,
+                    CONTROLLER_OBJECT.pending_command.arg3,
+                    CONTROLLER_OBJECT.pending_command.state,
+                    CONTROLLER_OBJECT.pending_command.aux,
+                ],
+                [0, 0, 0, 0],
                 "a NULL context link surfaces as state 0, not a skipped post"
             );
             assert_eq!(OWNER_SEEN, (ptr::addr_of_mut!(owner), result));
