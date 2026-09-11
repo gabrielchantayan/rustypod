@@ -64015,3 +64015,37 @@ functions:
       aligned osos.dec data-word references. The distinct sibling begins at
       0x082b5154. No deliberate deviations; repr(C) u32 descriptor fields
       preserve its +0x00 flags and +0x08 offset layout on hosts.
+
+  # --- SQLite VDBE memory-cell affinity application ---
+  - address: 0x082b4694
+    ghidra: FUN_082b4694
+    name: vdbe_mem_apply_affinity
+    size: 100
+    sig: "void sqlite3VdbeMemApplyAffinity(Mem *p_mem, u8 affinity, u8 enc)"
+    module: sqlite/vdbe_mem_apply_affinity
+    status: ported
+    renames:
+      param_1/r0/r4: p_mem
+      param_2/r1: affinity
+      param_3/r2: enc
+      FUN_082b46f8: sqlite3VdbeMemApplyNumericAffinity
+      FUN_0838b644: sqlite3VdbeIntegerAffinity
+      FUN_0838c32c: sqlite3VdbeMemStringify
+    notes: >-
+      Raw osos.dec confirms Ghidra's 100-byte extent: the final pop {r4,pc}
+      is at 0x082b46f4 and the independently entered numeric-affinity helper
+      begins with stmdb at 0x082b46f8; there is no literal pool. Decoding every
+      ARM B/BL-immediate word in the image finds exactly nine inbound BL words:
+      eight unconditional bl at 0x083865dc, 0x08387c14, 0x08387cdc,
+      0x08387d40, 0x08387ea4, 0x08387eb4, 0x083885c8, and 0x08388658, plus
+      one bleq at 0x08387d88. No aligned image-data word contains the entry
+      address. This is SQLite 3.5.9's sqlite3VdbeMemApplyAffinity: TEXT ('a')
+      stringifies an otherwise numeric cell through the ported
+      sqlite3VdbeMemStringify @ 0x0838c32c, then clears MEM_Int|MEM_Real;
+      NONE ('b') is a no-op; all other affinity codes apply numeric affinity,
+      then integer affinity only if the result still has MEM_Real. The two
+      unported helper bodies @ 0x082b46f8 and @ 0x0838b644 use a volatile
+      dispatch seam: target defaults call retailOS and host tests supply
+      recorders. No deliberate behavioral deviations. Tests cover the numeric
+      text-render path, already-text suppression, NONE preservation, and both
+      post-numeric REAL branches.

@@ -153,6 +153,7 @@ pub mod value_new;
 pub mod value_set_str;
 pub mod value_text;
 pub mod vdbe;
+pub mod vdbe_mem_apply_affinity;
 pub mod vdbe_mem_set_double;
 pub mod vdbe_mem_expand_blob;
 pub mod vdbe_mem_grow;
