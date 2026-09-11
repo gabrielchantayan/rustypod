@@ -33,6 +33,7 @@ pub mod controller_secondary_interface;
 pub mod controller_history_select;
 pub mod context_scope;
 pub mod context_scope_selector;
+pub mod firmware_query_low_byte;
 pub mod demo_mode_datetime;
 pub mod fallback_keyed_object;
 pub mod flag_2c_is_one;
