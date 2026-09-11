@@ -20700,6 +20700,41 @@ functions:
       pair into one barrel-shifter `and r0, r1, r0, lsr #15`, plus its
       usual fp frame.
 
+  - address: 0x0824f1e8
+    ghidra: FUN_0824f1e8
+    name: video_frame_dispatch_operation
+    size: 96
+    sig: "void video_frame_dispatch_operation(void *engine, void *frame, u32 operation)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: frame
+      param_3/r2: operation
+      r3: dispatch_context
+      r4: frame
+      r5: operation
+    notes: >-
+      Raw ARM extent is exactly 96 bytes at 0x0824f1e8..0x0824f248; the
+      separately linked next function starts with push {r4,r5,r6,r7,lr} at
+      0x0824f248, matching Ghidra's size. A complete scan of every ARM B/BL
+      immediate in osos.dec finds 9 direct inbound bl calls, all
+      unconditional, at 0x0824d720, 0x0824d768, 0x0824dc00, 0x0824dc1c,
+      0x0824dc2c, 0x0824dc3c, 0x08251b94, 0x08251bb0, and 0x08251bc0;
+      no predicated bl, immediate blx, direct tail b, or aligned DATA word
+      targets the entry. It suppresses an operation only if its low two bits
+      overlap frame+0x90, otherwise computes context as
+      engine + (signed(engine+0xa98) >> 1), dispatches either the direct
+      engine+0xa94 callback or a low-two-bit-masked table offset selected by
+      engine+0xa98 bit 0, then re-reads frame+0x90 after the callback and
+      ORs operation & 3 into that live value. The callback receives the full
+      operation word. Target Rust reads the recovered target-width fields and
+      raw callback word; host fixtures use a widened structural engine/table
+      so native function pointers survive, translating the target byte table
+      offset to a word slot. Tests cover direct dispatch, indirect tagged-table
+      dispatch and low-bit masking, suppression of an already-pending
+      operation, preservation of callback-mutated pending state, and
+      zero-operation dispatch with no state change.
   - address: 0x0824f388
     ghidra: FUN_0824f388
     name: latch_first_error
