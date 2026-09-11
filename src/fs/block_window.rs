@@ -154,6 +154,29 @@ unsafe fn mapped_block_window() -> *mut MappedBlockWindow {
         ptr::read_volatile(ptr::addr_of!(HOST_MAPPED_BLOCK_WINDOW))
     }
 }
+/// mapped_block_window_mark_dirty — original: `FUN_0805cdd0` @ 0x0805cdd0
+/// (16 ARM bytes; the `0x08adc510` literal follows at 0x0805cde0 and the
+/// next function starts at 0x0805cde4).
+///
+/// A complete decode of every ARM B/BL word in `osos.dec` finds nine direct
+/// call sites, all unconditional `bl`; there are no predicated or tail-call
+/// branches. It stores one to the shared mapped block window's `+0x208` dirty
+/// byte. The incoming `r0` from each caller is not read by the original.
+///
+/// Deliberate deviation: none. Host tests install the same window fixture
+/// used by [`mapped_block_window_finish`]; target code uses the fixed firmware
+/// address 0x08adc510.
+///
+/// # Safety
+///
+/// The firmware's shared mapped block window must be writable. The stock
+/// function has no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn mapped_block_window_mark_dirty() {
+    ptr::write_volatile(ptr::addr_of_mut!((*mapped_block_window()).dirty), 1);
+}
+
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -597,6 +620,34 @@ mod tests {
         assert_eq!(unsafe { BEGIN_CALL }, None);
         assert_eq!(out_window, original);
         unsafe { reset_map_fixture() };
+    }
+    #[test]
+    fn mark_dirty_overwrites_every_prior_dirty_value_only() {
+        let _lock = TEST_LOCK.lock();
+        let mut window = MappedBlockWindow {
+            block: [0xa5; 0x200],
+            block_number: 0x1234_5678,
+            owner: 0x89ab_cdef,
+            dirty: 0,
+            mapped: 0x5a,
+        };
+
+        unsafe {
+            HOST_MAPPED_BLOCK_WINDOW = &mut window;
+            for prior_dirty in [0, 1, 0x80, 0xff] {
+                window.dirty = prior_dirty;
+
+                mapped_block_window_mark_dirty();
+
+                assert_eq!(window.dirty, 1, "prior dirty byte {prior_dirty:#x}");
+                assert_eq!(window.block[0], 0xa5);
+                assert_eq!(window.block[0x1ff], 0xa5);
+                assert_eq!(window.block_number, 0x1234_5678);
+                assert_eq!(window.owner, 0x89ab_cdef);
+                assert_eq!(window.mapped, 0x5a);
+            }
+            HOST_MAPPED_BLOCK_WINDOW = ptr::null_mut();
+        }
     }
 }
 
