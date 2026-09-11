@@ -21,6 +21,26 @@
 //! host tests install a volatile seam. `RegistrationHandle` uses named fields
 //! so its ARM layout remains the three target words while its host pointer
 //! field stays naturally wide.
+//!
+//! `registration_handle_init` — original: `FUN_081d96a0` @ `0x081d96a0`
+//! (144 bytes, `0x081d96a0..0x081d9730`; its `0x089a74bc` vtable literal is
+//! the following word at `0x081d9730`, and the separately linked sibling
+//! opens at `0x081d9734`).
+//!
+//! It installs the base vtable, owner, and `-1` slot sentinel. A non-NULL
+//! owner selects a slot either by resolving two selector words (kind one) or
+//! directly from the first selector word (kinds two and three); it retains
+//! only a resolved slot in the unsigned range 0 through 31. The unported
+//! finder and acquirer retain their exact retailOS calls on firmware and have
+//! volatile host seams. Deliberate deviation: named `RegistrationHandle`
+//! fields preserve target word layout while making its owner pointer naturally
+//! wide on the host.
+//!
+//! **10 direct `bl` call sites, all unconditional and no predicated `bl`**,
+//! verified by decoding every ARM B/BL word in `work/firmware/osos.dec`; there
+//! are no direct `b` tail callers. The call sites are 0x081af5d0, 0x081af628,
+//! 0x081c8364, 0x081c84ec, 0x081c8574, 0x081c85f4, 0x081c86e0, 0x081c87b4,
+//! 0x081c8818, and 0x081c8900.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
@@ -28,6 +48,179 @@ use core::ptr::addr_of;
 /// Vtable written before the optional manager-slot release.
 pub const REGISTRATION_HANDLE_VTABLE: u32 = 0x089a_74bc;
 const REGISTRATION_SLOT_RELEASE_ADDRESS: usize = 0x081d_9918;
+const REGISTRATION_SLOT_FIND_ADDRESS: usize = 0x081d_95e4;
+const REGISTRATION_SLOT_ACQUIRE_ADDRESS: usize = 0x081d_98b8;
+
+/// ABI of the manager-table slot finder used by registration initialization.
+pub type RegistrationSlotFind =
+    unsafe extern "C" fn(*mut u8, u32, u32, u32, *mut u32) -> i32;
+
+/// ABI of the manager-table slot acquirer used by registration initialization.
+pub type RegistrationSlotAcquire = unsafe extern "C" fn(*mut u8, u32) -> *mut u8;
+
+/// Host seams for the unported manager-table slot helpers.
+#[derive(Clone, Copy)]
+pub struct RegistrationHandleInitOps {
+    pub find_slot: RegistrationSlotFind,
+    pub acquire_slot: RegistrationSlotAcquire,
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn retail_find_slot(
+    owner: *mut u8,
+    sentinel_slot: u32,
+    selector_first: u32,
+    selector_second: u32,
+    slot_out: *mut u32,
+) -> i32 {
+    let find_slot: RegistrationSlotFind = core::mem::transmute(REGISTRATION_SLOT_FIND_ADDRESS);
+    find_slot(owner, sentinel_slot, selector_first, selector_second, slot_out)
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn retail_acquire_slot(owner: *mut u8, slot_index: u32) -> *mut u8 {
+    let acquire_slot: RegistrationSlotAcquire =
+        core::mem::transmute(REGISTRATION_SLOT_ACQUIRE_ADDRESS);
+    acquire_slot(owner, slot_index)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_find_slot(
+    _owner: *mut u8,
+    _sentinel_slot: u32,
+    _selector_first: u32,
+    _selector_second: u32,
+    _slot_out: *mut u32,
+) -> i32 {
+    panic!("install registration-handle initialization host operations before finding a slot")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_acquire_slot(_owner: *mut u8, _slot_index: u32) -> *mut u8 {
+    panic!("install registration-handle initialization host operations before acquiring a slot")
+}
+
+/// Host default before a test installs the retail helper equivalents.
+#[cfg(not(target_os = "none"))]
+pub const DEFAULT_REGISTRATION_HANDLE_INIT_OPS: RegistrationHandleInitOps =
+    RegistrationHandleInitOps {
+        find_slot: missing_find_slot,
+        acquire_slot: missing_acquire_slot,
+    };
+
+/// Host-side manager-table helper seams. Firmware builds call
+/// `FUN_081d95e4` and `FUN_081d98b8` at their fixed retailOS addresses.
+#[cfg(not(target_os = "none"))]
+pub static mut REGISTRATION_HANDLE_INIT_OPS: RegistrationHandleInitOps =
+    DEFAULT_REGISTRATION_HANDLE_INIT_OPS;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn host_find_slot(
+    owner: *mut u8,
+    sentinel_slot: u32,
+    selector_first: u32,
+    selector_second: u32,
+    slot_out: *mut u32,
+) -> i32 {
+    let find_slot = core::ptr::read_volatile(addr_of!(REGISTRATION_HANDLE_INIT_OPS.find_slot));
+    find_slot(owner, sentinel_slot, selector_first, selector_second, slot_out)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn host_acquire_slot(owner: *mut u8, slot_index: u32) -> *mut u8 {
+    let acquire_slot =
+        core::ptr::read_volatile(addr_of!(REGISTRATION_HANDLE_INIT_OPS.acquire_slot));
+    acquire_slot(owner, slot_index)
+}
+
+/// Initializes a registration handle from an owner and slot selector.
+///
+/// A selector kind of one resolves the two selector words through the
+/// manager-table finder. Kinds two and three use the first selector word as
+/// the slot directly. A resolved slot is stored only after the manager-table
+/// acquirer returns non-NULL.
+///
+/// # Safety
+///
+/// `registration` must be valid and aligned. When `owner` is non-NULL,
+/// `selector` must point to two readable `u32` values for kind one, or one
+/// readable `u32` value for kinds two and three. The owner and selector must
+/// meet the unported helper requirements; stock code provides no further
+/// validation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn registration_handle_init(
+    registration: *mut RegistrationHandle,
+    owner: *mut u8,
+    selector_kind: u32,
+    selector: *const u32,
+) -> *mut RegistrationHandle {
+    (*registration).vtable = REGISTRATION_HANDLE_VTABLE;
+    (*registration).owner = owner;
+    (*registration).slot_index = -1;
+
+    if owner.is_null() {
+        return registration;
+    }
+
+    let slot_index = match selector_kind {
+        1 => {
+            let mut found_slot = u32::MAX;
+            let find_result = {
+                #[cfg(target_os = "none")]
+                {
+                    retail_find_slot(
+                        owner,
+                        u32::MAX,
+                        selector.read(),
+                        selector.add(1).read(),
+                        &mut found_slot,
+                    )
+                }
+                #[cfg(not(target_os = "none"))]
+                {
+                    host_find_slot(
+                        owner,
+                        u32::MAX,
+                        selector.read(),
+                        selector.add(1).read(),
+                        &mut found_slot,
+                    )
+                }
+            };
+            if find_result != 0 {
+                return registration;
+            }
+            found_slot
+        }
+        2 | 3 => selector.read(),
+        _ => return registration,
+    };
+
+    if slot_index >= 32 {
+        return registration;
+    }
+
+    let acquired = {
+        #[cfg(target_os = "none")]
+        {
+            retail_acquire_slot(owner, slot_index)
+        }
+        #[cfg(not(target_os = "none"))]
+        {
+            host_acquire_slot(owner, slot_index)
+        }
+    };
+    if !acquired.is_null() {
+        (*registration).slot_index = slot_index as i32;
+    }
+    registration
+}
+
 
 /// A manager-table registration represented by its owning manager and slot.
 ///
@@ -115,11 +308,45 @@ mod tests {
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut RELEASE_CALL: Option<(*mut u8, u32)> = None;
+    static INIT_OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut FIND_CALL: Option<(*mut u8, u32, u32, u32)> = None;
+    static mut ACQUIRE_CALL: Option<(*mut u8, u32)> = None;
+    static mut FIND_RESULT: i32 = 0;
+    static mut FIND_SLOT: u32 = 0;
+    static mut ACQUIRE_SUCCEEDS: bool = true;
+
 
     unsafe extern "C" fn record_release(owner: *mut u8, slot_index: u32) -> i32 {
         addr_of_mut!(RELEASE_CALL).write(Some((owner, slot_index)));
         0x7f
     }
+
+    unsafe extern "C" fn record_find(
+        owner: *mut u8,
+        sentinel_slot: u32,
+        selector_first: u32,
+        selector_second: u32,
+        slot_out: *mut u32,
+    ) -> i32 {
+        addr_of_mut!(FIND_CALL).write(Some((
+            owner,
+            sentinel_slot,
+            selector_first,
+            selector_second,
+        )));
+        slot_out.write(addr_of!(FIND_SLOT).read());
+        addr_of!(FIND_RESULT).read()
+    }
+
+    unsafe extern "C" fn record_acquire(owner: *mut u8, slot_index: u32) -> *mut u8 {
+        addr_of_mut!(ACQUIRE_CALL).write(Some((owner, slot_index)));
+        if addr_of!(ACQUIRE_SUCCEEDS).read() {
+            1usize as *mut u8
+        } else {
+            core::ptr::null_mut()
+        }
+    }
+
 
     fn install_recorder() -> MutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -129,6 +356,23 @@ mod tests {
         }
         guard
     }
+
+    fn install_init_recorder() -> MutexGuard<'static, ()> {
+        let guard = INIT_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            addr_of_mut!(FIND_CALL).write(None);
+            addr_of_mut!(ACQUIRE_CALL).write(None);
+            addr_of_mut!(FIND_RESULT).write(0);
+            addr_of_mut!(FIND_SLOT).write(0);
+            addr_of_mut!(ACQUIRE_SUCCEEDS).write(true);
+            REGISTRATION_HANDLE_INIT_OPS = RegistrationHandleInitOps {
+                find_slot: record_find,
+                acquire_slot: record_acquire,
+            };
+        }
+        guard
+    }
+
 
     #[test]
     fn zero_index_reinstalls_vtable_releases_owner_and_returns_this() {
@@ -177,4 +421,107 @@ mod tests {
 
         assert_eq!(unsafe { addr_of!(RELEASE_CALL).read() }, Some((owner, u32::MAX - 1)));
     }
+    #[test]
+    fn init_with_null_owner_sets_fields_without_touching_selector_or_helpers() {
+        let _guard = install_init_recorder();
+        let mut registration = RegistrationHandle {
+            vtable: 0,
+            owner: 1usize as *mut u8,
+            slot_index: 27,
+        };
+
+        let returned = unsafe {
+            registration_handle_init(
+                &mut registration,
+                core::ptr::null_mut(),
+                1,
+                core::ptr::null(),
+            )
+        };
+
+        assert!(core::ptr::eq(returned, &mut registration));
+        assert_eq!(registration.vtable, REGISTRATION_HANDLE_VTABLE);
+        assert!(registration.owner.is_null());
+        assert_eq!(registration.slot_index, -1);
+        assert_eq!(unsafe { addr_of!(FIND_CALL).read() }, None);
+        assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, None);
+    }
+
+    #[test]
+    fn init_direct_selector_acquires_in_range_slot() {
+        let _guard = install_init_recorder();
+        let owner = 0x1234_5678usize as *mut u8;
+        let selector = [31u32];
+        let mut registration = RegistrationHandle {
+            vtable: 0,
+            owner: core::ptr::null_mut(),
+            slot_index: 0,
+        };
+
+        let returned = unsafe { registration_handle_init(&mut registration, owner, 2, selector.as_ptr()) };
+
+        assert!(core::ptr::eq(returned, &mut registration));
+        assert_eq!(registration.vtable, REGISTRATION_HANDLE_VTABLE);
+        assert_eq!(registration.owner, owner);
+        assert_eq!(registration.slot_index, 31);
+        assert_eq!(unsafe { addr_of!(FIND_CALL).read() }, None);
+        assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, Some((owner, 31)));
+    }
+
+    #[test]
+    fn init_resolved_slot_rejects_failed_lookup_and_out_of_range_results() {
+        let _guard = install_init_recorder();
+        let owner = 0x8765_4321usize as *mut u8;
+        let selector = [0xaabb_ccdd, 0x1122_3344];
+        let mut registration = RegistrationHandle {
+            vtable: 0,
+            owner: core::ptr::null_mut(),
+            slot_index: 0,
+        };
+
+        unsafe {
+            addr_of_mut!(FIND_RESULT).write(1);
+        }
+        unsafe { registration_handle_init(&mut registration, owner, 1, selector.as_ptr()) };
+        assert_eq!(registration.slot_index, -1);
+        assert_eq!(
+            unsafe { addr_of!(FIND_CALL).read() },
+            Some((owner, u32::MAX, selector[0], selector[1]))
+        );
+        assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, None);
+
+        unsafe {
+            addr_of_mut!(FIND_RESULT).write(0);
+            addr_of_mut!(FIND_SLOT).write(32);
+            addr_of_mut!(FIND_CALL).write(None);
+        }
+        unsafe { registration_handle_init(&mut registration, owner, 1, selector.as_ptr()) };
+        assert_eq!(registration.slot_index, -1);
+        assert_eq!(
+            unsafe { addr_of!(FIND_CALL).read() },
+            Some((owner, u32::MAX, selector[0], selector[1]))
+        );
+        assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, None);
+    }
+
+    #[test]
+    fn init_keeps_sentinel_when_slot_cannot_be_acquired() {
+        let _guard = install_init_recorder();
+        let owner = 0x4242usize as *mut u8;
+        let selector = [0u32];
+        let mut registration = RegistrationHandle {
+            vtable: 0,
+            owner: core::ptr::null_mut(),
+            slot_index: 9,
+        };
+        unsafe {
+            addr_of_mut!(ACQUIRE_SUCCEEDS).write(false);
+        }
+
+        unsafe { registration_handle_init(&mut registration, owner, 3, selector.as_ptr()) };
+
+        assert_eq!(registration.slot_index, -1);
+        assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, Some((owner, 0)));
+    }
+
 }
