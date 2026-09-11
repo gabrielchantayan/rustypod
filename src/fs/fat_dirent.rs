@@ -52,6 +52,28 @@ pub unsafe extern "C" fn fat_dirent_start_cluster(
     }
 }
 
+/// FAT directory-entry start-cluster writer — retailOS `FUN_082e3d30` at
+/// `0x082e3d30` (24 bytes; 8 direct `bl` call sites, binary-verified: 7
+/// plain `bl` and one `bleq` at `0x082b1d7c`).
+///
+/// Stores the low 16 bits of `start_cluster` at entry +0x1a. When the volume
+/// format is exactly 8 (the cluster's FAT32 mode), it also stores bits 31..16
+/// at entry +0x14. The raw body has no NULL guard and callers must supply
+/// valid pointers. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fat_dirent_set_start_cluster(
+    volume: *const FatVolume,
+    entry: *mut FatDirEntry,
+    start_cluster: u32,
+) {
+    (*entry).first_cluster_low = start_cluster as u16;
+    if (*volume).format == 8 {
+        (*entry).first_cluster_high = (start_cluster >> 16) as u16;
+    }
+}
+
+
 /// FAT attribute bit marking a directory entry.
 const ATTR_DIRECTORY: u8 = 0x10;
 
@@ -219,5 +241,39 @@ mod tests {
             unsafe { fat_dirent_start_cluster(&filesystem, &directory_entry) },
             0xabcd_1234
         );
+    }
+
+    #[test]
+    fn non_fat32_formats_store_only_the_low_cluster_word() {
+        for format in [0, 3, 4, 7, 9, u16::MAX] {
+            let filesystem = volume(format);
+            let mut directory_entry = entry(0xbeef, 0x0123);
+
+            unsafe {
+                fat_dirent_set_start_cluster(&filesystem, &mut directory_entry, 0xabcd_5678)
+            };
+
+            assert_eq!(
+                directory_entry.first_cluster_low, 0x5678,
+                "format {format} stores the low word"
+            );
+            assert_eq!(
+                directory_entry.first_cluster_high, 0xbeef,
+                "format {format} preserves the high word"
+            );
+        }
+    }
+
+    #[test]
+    fn fat32_format_splits_the_full_cluster_value() {
+        let filesystem = volume(8);
+        let mut directory_entry = entry(0xffff, 0xffff);
+
+        unsafe {
+            fat_dirent_set_start_cluster(&filesystem, &mut directory_entry, 0xabcd_1234)
+        };
+
+        assert_eq!(directory_entry.first_cluster_high, 0xabcd);
+        assert_eq!(directory_entry.first_cluster_low, 0x1234);
     }
 }
