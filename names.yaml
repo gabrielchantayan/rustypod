@@ -12331,6 +12331,35 @@ functions:
       0x0809449c is ported, so no dispatch seam was added. No deliberate
       deviations.
 
+  - address: 0x0818a128
+    ghidra: FUN_0818a128
+    name: counted_mutex_guard_acquire_lock
+    size: 28
+    sig: "CountedMutex **counted_mutex_guard_acquire_lock(CountedMutex **guard, CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: guard (the one-word scope guard; receives lock and is returned)
+      param_2/r1: lock (CountedMutex acquired through mutex_lock_counted)
+      FUN_08094404: mutex_lock_counted (ported, called directly)
+    notes: >-
+      Raw ARM establishes the 28-byte extent from 0x0818a128 through
+      0x0818a140; the separately linked interface-based acquire helper
+      starts at 0x0818a144. Decoding every B/BL word in osos.dec finds ten
+      direct references at 0x08149fb4, 0x0814a174, 0x0814a1f0, 0x081e1f0c,
+      0x081e1f7c, 0x081e1fc8, 0x081e1ffc, 0x081e2030, 0x082971d0, and
+      0x08297260: all are unconditional BLs (condition 0xe), with no
+      predicated forms or tail B. No word-aligned data word in osos.dec
+      equals this address, so it is not virtually dispatched. The function
+      is the direct-lock form of a one-word counted-mutex scope guard:
+      writes its CountedMutex input to *guard, calls the existing
+      mutex_lock_counted port, then returns guard. The store is before the
+      call, so the guard is visible while waiting. Neither pointer is
+      NULL-checked. LLVM may inline mutex_lock_counted rather than retain
+      the firmware BL; no semantic deviation. Host tests:
+      src/kernel/sync_mutex.rs::tests::guard_acquire_lock_stores_locks_and_returns_the_guard
+      / guard_acquire_lock_stores_the_guard_word_before_waiting /
+      guard_acquire_lock_null_cell_still_stores_and_counts.
   - address: 0x0818a144
     ghidra: FUN_0818a144
     name: counted_mutex_guard_acquire
