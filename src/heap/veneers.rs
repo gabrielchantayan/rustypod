@@ -30,6 +30,11 @@
 //!   region sitting *immediately below* the 0x398-byte descriptor — and
 //!   stores the returned handle (the descriptor pointer; `heap_create` @
 //!   0x0819d7b4 returns its first argument) into the global.
+//! - `default_heap_init_return_high_word` — original: `FUN_0807b19c` @
+//!   0x0807b19c (40 bytes: 36 code + literal; 9 unconditional `bl` call
+//!   sites). It initializes the default heap, passes its single input in r1
+//!   to the otherwise unidentified `mov r0,#0; bx lr` entry @ 0x0819cdf8,
+//!   and therefore returns zero in r0 and the input in r1.
 //! - `operator_new` / `operator_delete` — originals @ 0x082aadd4 (8 bytes,
 //!   1797 call sites — the dominant allocator in osos) and 0x082aad24
 //!   (16 bytes, 665 call sites). Tag-2 pair: new is a pure tail veneer
@@ -317,6 +322,26 @@ pub unsafe extern "C" fn lazy_init_default_heap() {
     let start = core::ptr::addr_of_mut!((*storage).region) as *mut u8;
     let handle = (heap_ops().create)(desc, start, DEFAULT_HEAP_SIZE);
     core::ptr::addr_of_mut!(DEFAULT_HEAP).write(handle);
+}
+
+/// default_heap_init_return_high_word — original: `FUN_0807b19c` @
+/// 0x0807b19c (40 bytes: 36 code + literal; 9 unconditional `bl` call
+/// sites, none predicated).
+///
+/// Saves `request`, invokes [`lazy_init_default_heap`], then loads the
+/// default-heap handle into r0 and tail-branches to 0x0819cdf8 with
+/// `request` in r1. The target's verified two-word body is `mov r0,#0; bx
+/// lr`; it has no recovered identity. Consequently this entry's 64-bit ABI
+/// result is `(request as u64) << 32`, with no allocation or dereference.
+///
+/// Deliberate deviation: represents the raw r0/r1 return pair directly as
+/// `u64`, rather than inventing a signature for the unidentified tail target.
+#[cfg_attr(target_os = "none", link_section = ".text.default_heap_init_return_high_word")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn default_heap_init_return_high_word(request: u32) -> u64 {
+    lazy_init_default_heap();
+    u64::from(request) << 32
 }
 
 /// malloc_wrapper — original: `FUN_080eb67c` @ 0x080eb67c (40 bytes).
@@ -995,6 +1020,24 @@ pub(crate) mod tests {
             lazy_init_default_heap();
             lazy_init_default_heap();
             assert_eq!(CREATE_CALLS, 1, "init must run exactly once");
+        }
+    }
+
+    #[test]
+    fn default_heap_init_return_high_word_preserves_the_raw_return_pair() {
+        let _lock = mock_heap();
+        unsafe {
+            for request in [0u32, 1, 0x8000_0000, u32::MAX] {
+                assert_eq!(
+                    default_heap_init_return_high_word(request),
+                    u64::from(request) << 32,
+                    "r0 is zero and r1 retains the request"
+                );
+            }
+            assert_eq!(CREATE_CALLS, 1, "the first call initializes the default heap");
+            assert_eq!(ALLOC_CALLS, 0, "the tail target is a return-zero stub");
+            assert_eq!(ALLOC_ZERO_CALLS, 0, "the tail target does not allocate");
+            assert_eq!(FREE_CALLS, 0, "the entry never frees");
         }
     }
 
