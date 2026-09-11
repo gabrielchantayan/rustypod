@@ -66102,3 +66102,33 @@ functions:
       targets this destructor. ARM release compilation retains the final tail
       branch to traced_free; its extra prologue only preserves the record
       across the payload release.
+
+  # --- SQLite non-ABI continuation veneer ---
+  - address: 0x080034d0
+    ghidra: FUN_080034d0
+    name: non_abi_continuation_veneer
+    size: 8
+    sig: "void non_abi_continuation_veneer(void)"
+    module: sqlite/vdbe
+    status: identified
+    renames:
+      DAT_080034d4: continuation_address
+      FUN_0838b67c: containing_routine
+    notes: >-
+      Literal veneer: ldr pc, [pc, #-4] at 0x080034d0 tail-branches through
+      0x0838b6d4 at 0x080034d4. Ghidra reports 4 bytes; the true extent is
+      8 (instruction plus literal), because the next separately linked veneer
+      opens at 0x080034d8. The literal is not a function entry: raw ARM at
+      0x0838b6d4 begins `cmp r2, #2; bne 0x0838b6f0`, within the routine that
+      starts at 0x0838b67c with `push {r3,r4-r9,sl,fp,lr}`. Its immediately
+      preceding instruction is `ldrb r2, [r4,#0xfc]`, so this transfer relies
+      on live r0-r6 state from the caller rather than any recoverable C ABI.
+      Decoding every ARM B/BL word in osos.dec finds exactly nine inbound
+      direct calls, all `blne` (0x08000fac, 0x080012d8, 0x080013b4,
+      0x08001508, 0x08001664, 0x08001688, 0x08001800, 0x08001818, and
+      0x0800192c); callers gate the transfer on their live r0 being nonzero.
+      There are no direct B transfers or data-word references. A Rust
+      function cannot preserve and consume this non-ABI register continuation
+      faithfully, so no dispatch seam or guessed callee is added. Retain
+      status identified until the containing continuation's required live
+      register contract can be ported as one coherent routine.
