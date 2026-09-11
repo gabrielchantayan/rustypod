@@ -21701,6 +21701,28 @@ functions:
   # Accounting globals @ 0x08adc2c0 (9 code refs): +0x38 i64 current bytes,
   # +0x40 i64 peak. 0x08390c30 resets peak := current, 0x08390c54 returns
   # current. Allocator raises the peak; the free path only subtracts.
+  - address: 0x08003500
+    ghidra: thunk_FUN_08390bcc
+    name: tracked_stats_raise_peak
+    size: 8
+    sig: "void tracked_stats_raise_peak(i64 current)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: current, param_2: "current high word", unaff_r7: stats}
+    notes: >-
+      IRAM veneer: raw 0x08003500 is `ldr pc,[pc,#-4]` followed by target
+      word 0x08390bcc, so its real extent is 8 bytes despite Ghidra's
+      4-byte size. The target is an interior 28-byte fragment of
+      sqlite3_malloc at 0x08390b14, continuing through its epilogue:
+      it receives current bytes in r0:r1 and the stats block in ambient r7,
+      compares signed i64 peak(+0x40) against current with subs/sbcs, then
+      copies current to peak with ldrdlt/strdlt only when peak < current.
+      Binary scan of every ARM B/BL encoding in osos.dec found 10
+      unconditional bl call sites and no predicated bl; the sole plain b
+      is the tail branch at 0x08001d0c. The port makes r0:r1 an explicit
+      i64 current parameter and substitutes ALLOC_STATS for ambient r7
+      (the established heap/tracked module simplification).
+
   - address: 0x083906f4
     ghidra: FUN_083906f4
     name: tracked_free
