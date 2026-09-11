@@ -64921,3 +64921,33 @@ functions:
       other callee is already ported and is called directly. The temporary
       descriptors remain MaybeUninit stack storage so their initializer's
       deliberately unwritten bytes retain the retail stack-local behavior.
+
+  # --- Stream-write owner constructor ---
+  - address: 0x081f542c
+    ghidra: FUN_081f542c
+    name: stream_write_owner_construct
+    size: 52
+    sig: "StreamWriteOwnerPrefix *stream_write_owner_construct(StreamWriteOwnerPrefix *owner, const char *name, u32 buffer_capacity, u32 ignored_input)"
+    module: cxx/stream_write_owner_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: name
+      param_3/r2: buffer_capacity
+      param_4/r3: ignored_input
+      DAT_081f545c: stream_write_owner_vtable
+      FUN_08030ff4: strcpy
+    notes: >-
+      Raw osos.dec confirms twelve instruction words at
+      0x081f542c..0x081f5458 followed by the 0x0899020c vtable literal at
+      0x081f545c, so the true extent is 52 bytes despite Ghidra's 48-byte
+      report; the separately linked next function begins at 0x081f5460.
+      Decoding every ARM B/BL immediate finds nine direct inbound callers,
+      all unconditional bl (0x0805e730, 0x080f672c, 0x08121558, 0x0816156c,
+      0x081c7f48, 0x081e3210, 0x082828d4, 0x08282f50, 0x08295844), with no
+      predicated forms, tail branches, or aligned data-word references. It
+      writes the vtable at +0, strcpy-copies r1 to inline name storage +0x0c,
+      writes r2 at +0x10c, zeroes +8 then +4, and returns r0; r3 is never
+      read. The complete allocation is 0x114 bytes, but its final word is not
+      touched here. The Rust port calls the existing strcpy port and otherwise
+      reproduces every decoded store; no deliberate deviations.
