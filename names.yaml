@@ -64274,3 +64274,37 @@ functions:
       aligned words. No deliberate deviations. Host tests cover ordinary
       signed Q16.16 products, fractional truncation, and overflow of an
       intermediate dot-product sum.
+
+  # --- rendering request descriptor conversion ---
+  - address: 0x0826b2a8
+    ghidra: FUN_0826b2a8
+    name: render_request_from_descriptor
+    size: 112
+    sig: "void render_request_from_descriptor(const RenderRequestDescriptor *descriptor, void *request)"
+    module: ui/render_request_from_descriptor
+    status: ported
+    renames:
+      param_1/r0/r12: descriptor
+      param_2/r1/lr/r0: request
+      param_1[0]/r2: source
+      param_1[4]/r3: source_parameter
+      param_1[8]/[sp]: options
+      "*(u16 *)(param_1 + 0x24)/[sp,#4]": mode
+      local_14/sp+0x14: bounds.top
+      local_10/sp+0x18: bounds.left
+      local_c/sp+0x1c: bounds.bottom
+      local_8/sp+0x20: bounds.right
+    notes: >-
+      Raw osos.dec confirms the 112-byte extent: `mov ip,r0` at 0x0826b2a8
+      through `pop {pc}` at 0x0826b314; the next independently linked body
+      begins with `push {r4,r5,r6,lr}` at 0x0826b318. Decoding every ARM
+      B/BL-immediate word in the decrypted image finds exactly nine inbound
+      calls, all plain unconditional bl at 0x08101378, 0x08175200,
+      0x081b7380, 0x081cbfac, 0x081cc240, 0x081ccc3c, 0x081f8104,
+      0x081f81d0, and 0x08211378; there are no predicated bl forms or tail
+      b references. It constructs the QuickDraw bounds {top, left,
+      top + height, left + width}, with wrapping ARM addition, and calls
+      0x0810e7d0 with that rectangle, descriptor words +0x00/+0x10/+0x20,
+      the +0x24 low halfword, and two zero words. The callee's identity is
+      intentionally not inferred; target builds dispatch to the retail entry
+      and host tests install a recording seam. No behavioral deviation.
