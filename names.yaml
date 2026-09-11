@@ -33268,6 +33268,37 @@ functions:
       prove primary-only release, ordered primary-plus-auxiliary release, and
       the NULL-primary asymmetric case.
 
+  - address: 0x080be134
+    ghidra: FUN_080be134
+    name: inner_release_buffer_and_reset_cursor
+    size: 144
+    sig: "void inner_release_buffer_and_reset_cursor(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+      DAT_080be1c4: BUFFER_SELECTION
+    notes: >-
+      Raw osos.dec decoding confirms 36 instructions from 0x080be134 through
+      the pop at 0x080be1c0 (144 bytes), followed by the 0x0000082c literal
+      at 0x080be1c4; the next separately linked function begins at
+      0x080be1c8. Decoding every immediate ARM B/BL word finds exactly ten
+      direct calls, all unconditional plain bl (no predicated BL or tail B):
+      0x08066428, 0x080664b4, 0x080664e8, 0x08066564, 0x080665fc,
+      0x08066780, 0x08066a18, 0x08066b50, 0x08068ec8, 0x0809dc0c. It
+      free_tag4-releases and clears inner+0xe90 if nonzero, rewinds the
+      16-byte-aligned cursor end at +0xec0 to its +0xebc begin, stores -1 at
+      +0x1c, and clears the u16 at +0x82c. Ghidra's apparent record copy is
+      dead raw code: r0 and r9 are both loaded from end before the predicated
+      ldmne/stmne loop, so it cannot execute. Deliberate deviation: Rust
+      omits that provable no-op and the subsequent side-effect-free 16-byte
+      walker, directly applying its wrapping rewind. Thus mismatched low four
+      cursor-address bits return instead of reproducing the stock walker's
+      nontermination; valid target behavior is unchanged.
+      Host tests prove the tag-4 release and only the four intended field writes on a
+      three-record cursor, plus the NULL-allocation/empty-cursor edge path.
+
 
   - address: 0x08059ad4
     ghidra: FUN_08059ad4
