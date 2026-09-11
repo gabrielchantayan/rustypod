@@ -28,6 +28,9 @@ const HOLDER_STATE_OFFSET: usize = 4;
 
 /// Byte offset of the returned raw word inside the opaque state object.
 const STATE_WORD_OFFSET: usize = 0x3c;
+/// Byte offset of the status word inside the opaque state object.
+const STATE_STATUS_OFFSET: usize = 0x18;
+
 
 /// Runtime-initialized holder at original address 0x089d03bc.
 ///
@@ -85,6 +88,32 @@ pub unsafe extern "C" fn global_indirect_word_get() -> u32 {
     (state.add(STATE_WORD_OFFSET) as *const u32).read()
 }
 
+/// global_indirect_status_get — original: `FUN_080ee2b4` @ 0x080ee2b4
+/// (16-byte instruction body, followed by the separately located literal at
+/// 0x080ee2c4; the next function starts at 0x080ee2c8).
+///
+/// Raw ARM is `ldr r0,[pc,#8]; ldr r0,[r0,#4]; ldr r0,[r0,#0x18]; bx lr`.
+/// A complete decode of every ARM B/BL-immediate word in `osos.dec` finds ten
+/// direct callers, all unconditional `bl`; no caller passes an argument.
+///
+/// Performs precisely the original's two unchecked pointer dereferences: the
+/// global holder's +4 state pointer, then that state's raw `u32` at +0x18.
+/// The recovered callers only test result bits, so this port deliberately
+/// preserves the word without assigning bit meanings, caching it, or adding a
+/// null guard.
+///
+/// # Safety
+/// The holder's +4 slot must contain a non-null pointer to at least 0x1c
+/// readable bytes, aligned for the raw `u32` load. This is the original ARM
+/// load contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_indirect_status_get() -> u32 {
+    let state = global_indirect_state();
+    (state.add(STATE_STATUS_OFFSET) as *const u32).read()
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -133,6 +162,37 @@ mod tests {
             assert_eq!(global_indirect_word_get(), 0);
             replace_state(second.as_mut_ptr().cast());
             assert_eq!(global_indirect_word_get(), u32::MAX);
+            replace_state(old);
+        }
+    }
+    #[test]
+    fn loads_the_published_status_raw_word_at_18() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = [0u32; 8];
+        state[5] = 0x1111_1111; // +0x14 must not be selected.
+        state[6] = u32::MAX; // +0x18 is the raw result.
+        state[7] = 0x2222_2222; // +0x1c must not be selected.
+
+        unsafe {
+            let old = replace_state(state.as_mut_ptr().cast());
+            assert_eq!(global_indirect_status_get(), u32::MAX);
+            replace_state(old);
+        }
+    }
+
+    #[test]
+    fn status_get_rereads_the_holder_pointer_for_each_call() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut first = [0u32; 8];
+        let mut second = [0u32; 8];
+        first[6] = 0;
+        second[6] = 0x8000_0015;
+
+        unsafe {
+            let old = replace_state(first.as_mut_ptr().cast());
+            assert_eq!(global_indirect_status_get(), 0);
+            replace_state(second.as_mut_ptr().cast());
+            assert_eq!(global_indirect_status_get(), 0x8000_0015);
             replace_state(old);
         }
     }

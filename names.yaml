@@ -3551,6 +3551,32 @@ functions:
     module: heap/veneers
     status: ported
 
+  - address: 0x080ee2b4
+    ghidra: FUN_080ee2b4
+    name: global_indirect_status_get
+    size: 16
+    sig: "u32 global_indirect_status_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_080ee2c4: global_indirect_holder_literal
+      DAT_089d03bc: global_indirect_holder
+      iVar1/r0: opaque_state
+      uVar2/r0: status_word
+    notes: >-
+      Raw ARM confirms 16 instruction bytes at 0x080ee2b4: `ldr
+      r0,[pc,#8]` (literal 0x089d03bc at 0x080ee2c4), `ldr r0,[r0,#4]`,
+      `ldr r0,[r0,#0x18]`, `bx lr`; 0x080ee2c8 is the independently linked
+      next function. It performs two unchecked pointer dereferences and
+      returns the opaque state object's +0x18 raw u32. Whole-image decoding
+      finds exactly ten inbound B/BL-immediate calls, all unconditional `bl`
+      (none predicated): 0x080774ec, 0x080774f8, 0x0807753c, 0x0807756c,
+      0x0807759c, 0x08087a6c, 0x080a0b48, 0x080dbc48, 0x0836a440, and
+      0x0836aad0. Callers test result bits but do not establish their
+      meanings. The port reuses heap/state's existing packed holder model
+      for 0x089d03bc and intentionally adds no null guard, cache, ownership,
+      or bit interpretation.
+
   - address: 0x08077250
     ghidra: FUN_08077250
     name: lazy_init_default_heap
