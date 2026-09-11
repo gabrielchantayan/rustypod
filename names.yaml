@@ -64982,3 +64982,30 @@ functions:
       read. The complete allocation is 0x114 bytes, but its final word is not
       touched here. The Rust port calls the existing strcpy port and otherwise
       reproduces every decoded store; no deliberate deviations.
+  - address: 0x081d068c
+    ghidra: FUN_081d068c
+    name: stop_controller_timer_pair
+    size: 28
+    sig: "void stop_controller_timer_pair(u8 *controller)"
+    module: app/controller_timer_pair
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0xb4": first_timer
+      "controller+0xb0": second_timer
+      FUN_0812c6b0: timer_stop
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent from 0x081d068c
+      through the tail branch at 0x081d06a4; the separately linked next
+      function begins with push {r4,lr} at 0x081d06a8. Decoding every ARM
+      B/BL immediate in osos.dec finds nine direct inbound bl call sites:
+      eight unconditional at 0x081cf878, 0x081cfad4, 0x081d005c, 0x081d04c0,
+      0x081d07a8, 0x081d07cc, 0x081d080c, and 0x081d08b4, plus the predicated
+      blne at 0x0810d5a8. It loads controller+0xb4 and calls the already
+      ported timer_stop, then reloads controller+0xb0 and tail-branches to
+      timer_stop. Neither timer pointer is NULL-guarded. Ghidra incorrectly
+      absorbs the separately linked sibling into this function. Deliberate
+      deviation: Rust represents the final tail branch as a direct call.
+      The host test changes controller+0xb0 from the first stop's trace
+      callback, proving the second pointer is loaded after the first call;
+      it also proves that controller+0xb8 remains untouched.
