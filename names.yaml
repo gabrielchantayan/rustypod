@@ -4578,6 +4578,28 @@ functions:
       NULL; seg_slot = slot; returns iter. 9 bl call sites,
       binary-verified (ctor, pop_front x2, 0x083ddxxx siblings).
 
+  - address: 0x083d9f88
+    ghidra: FUN_083d9f88
+    name: deque_iter_init_elem12
+    size: 68
+    sig: "DequeIter *deque_iter_init_elem12(DequeIter *iter, u8 *cur, u8 **slot)"
+    module: heap/block_deque
+    status: ported
+    renames: {param_1: iter, param_2: cur, param_3: slot}
+    notes: >-
+      Raw ARM stores cur, then either writes NULL seg_base/seg_end for a
+      NULL slot or loads seg_base = *slot and seg_end = seg_base + 0x180;
+      it finally writes seg_slot and returns iter. The 0x180 stride is the
+      local capacity call at 0x083d9fac to the 0x083d9f5c twin (`mov r0,
+      #0x20; bx lr`), followed by `add r0, r0, r0, lsl #1` and `add r0,
+      r1, r0, lsl #2`, yielding 0x20 * 12. Decoding every ARM B/BL word in
+      osos.dec finds exactly 9 direct unconditional plain bl call sites
+      (0x083ddd24, 0x083ddd68, 0x083dde48, 0x083dde70, 0x083dde9c,
+      0x083ddef8, 0x083de014, 0x083de0dc, 0x083de118) and no predicated
+      forms. Rust deliberately calls the canonical deque_seg_capacity port
+      because the local target is an already-ledgered byte-identical
+      capacity twin returning 0x20.
+
   - address: 0x083ddbdc
     ghidra: FUN_083ddbdc
     name: deque_pop_front

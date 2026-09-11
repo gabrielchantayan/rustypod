@@ -27,6 +27,10 @@
 //!   `cur` as given; `seg_base`/`seg_end` from the segment-map slot
 //!   (`*slot` and `*slot + 0x20 * 0x28`, the latter via a real
 //!   `deque_seg_capacity` call) or NULL when `slot` is NULL.
+//! - `deque_iter_init_elem12` — original: `FUN_083d9f88` @ 0x083d9f88
+//!   (68 bytes; 9 plain `bl` call sites, no predicated forms, binary-
+//!   verified). Builds the same four-word iterator for this 12-byte
+//!   element template: `seg_end = *slot + 0x20 * 0xc`.
 //! - `deque_pop_front` — original: `FUN_083ddbdc` @ 0x083ddbdc
 //!   (204 bytes; 4 bl call sites @ 0x0814c724, 0x081fc0c8, 0x08214250,
 //!   0x083ddcbc, binary-verified). Pops the front element: advances
@@ -165,6 +169,9 @@ pub const DEQUE_ELEM_SIZE: usize = 0x28;
 
 /// Deque segment size in bytes: `deque_seg_capacity() * DEQUE_ELEM_SIZE`.
 pub const DEQUE_SEG_BYTES: usize = 0x500;
+
+/// Element stride of the 12-byte deque template at 0x083d9f88.
+const DEQUE_ELEM12_SIZE: usize = 0xc;
 
 /// Byte-count threshold `block_deque_fill` requires from the client
 /// before populating (original: `mov r1, #0x40000`).
@@ -473,6 +480,35 @@ pub unsafe extern "C" fn deque_iter_init(
         let base = slot.read();
         (*iter).seg_base = base;
         (*iter).seg_end = base.add(deque_seg_capacity() * DEQUE_ELEM_SIZE);
+    }
+    (*iter).seg_slot = slot;
+    iter
+}
+
+/// deque_iter_init_elem12 — original: `FUN_083d9f88` @ 0x083d9f88
+/// (68 bytes; 9 plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// Builds an iterator for the 12-byte-element deque template: writes `cur`,
+/// takes the segment base from `slot`, and makes its end 0x20 elements (0x180
+/// bytes) past that base. A NULL `slot` writes NULL bounds. The raw body calls
+/// its local `deque_seg_capacity` twin at 0x083d9f5c; deliberately call the
+/// canonical port because that twin is byte-identical and returns 0x20.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_init_elem12(
+    iter: *mut DequeIter,
+    cur: *mut u8,
+    slot: *mut *mut u8,
+) -> *mut DequeIter {
+    (*iter).cur = cur;
+    if slot.is_null() {
+        (*iter).seg_base = core::ptr::null_mut();
+        (*iter).seg_end = core::ptr::null_mut();
+    } else {
+        let base = slot.read();
+        (*iter).seg_base = base;
+        (*iter).seg_end = base.add(deque_seg_capacity() * DEQUE_ELEM12_SIZE);
     }
     (*iter).seg_slot = slot;
     iter
@@ -905,6 +941,27 @@ mod tests {
         };
         unsafe {
             deque_iter_init(&mut it, core::ptr::null_mut(), core::ptr::null_mut());
+            assert!(it.cur.is_null());
+            assert!(it.seg_base.is_null());
+            assert!(it.seg_end.is_null());
+            assert!(it.seg_slot.is_null());
+        }
+    }
+
+    #[test]
+    fn iter_init_elem12_uses_12_byte_segment_stride_and_null_bounds() {
+        let mut seg = [0u8; 0x20 * DEQUE_ELEM12_SIZE];
+        let mut slot: *mut u8 = seg.as_mut_ptr();
+        let mut it = DequeIter::NULL;
+        unsafe {
+            let ret = deque_iter_init_elem12(&mut it, seg.as_mut_ptr().add(0x54), &mut slot);
+            assert_eq!(ret, &mut it as *mut DequeIter);
+            assert_eq!(it.cur, seg.as_mut_ptr().add(0x54));
+            assert_eq!(it.seg_base, seg.as_mut_ptr());
+            assert_eq!(it.seg_end, seg.as_mut_ptr().add(0x180));
+            assert_eq!(it.seg_slot, &mut slot as *mut *mut u8);
+
+            deque_iter_init_elem12(&mut it, core::ptr::null_mut(), core::ptr::null_mut());
             assert!(it.cur.is_null());
             assert!(it.seg_base.is_null());
             assert!(it.seg_end.is_null());
