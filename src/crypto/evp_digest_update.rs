@@ -130,7 +130,8 @@ pub struct EvpMd {
 pub struct EvpMdCtx {
     /// +0x00: the algorithm descriptor. The only field this function reads.
     pub digest: *const EvpMd,
-    /// +0x04: engine handle, stored by `EVP_DigestInit_ex`.
+    /// +0x04: engine handle. `EVP_DigestInit_ex` accepts an `impl` argument
+    /// but the retail body never reads it or stores this field.
     pub engine: *mut u8,
     /// +0x08: flags. Bit 0 marks a one-shot context; bit 1 is set by
     /// `EVP_DigestFinal_ex` and cleared by `EVP_DigestInit_ex`.
