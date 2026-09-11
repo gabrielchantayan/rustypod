@@ -3,12 +3,14 @@
 //! count-leading-zeros @ 0x0824980c that feeds them, the 64-bit
 //! round-and-extract @ 0x08076214 that closes dot products, the guarded
 //! reciprocal @ 0x08076204 that divides by a Q16.16 value, the unguarded
-//! reciprocal body @ 0x080377e4 that it tail-branches to, and the float entry
-//! point @ 0x082577bc that feeds Q16.16 values in from f32 literals.
+//! reciprocal body @ 0x080377e4 that it tail-branches to, the float entry
+//! point @ 0x082577bc that feeds Q16.16 values in from f32 literals, and a
+//! four-component Q16.16 unit-interval clamp @ 0x082485d8.
 //!
 //! Four pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
 //! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
-//! wrapper, one unrolled-division body, and one float-conversion leaf.
+//! wrapper, one unrolled-division body, one float-conversion leaf, and one
+//! four-component clamp wrapper.
 //! Sizes from decomp/functions.csv; call-site counts from decoding every
 //! `b`/`bl` word in osos.dec (osos.asm drops lines):
 //!
@@ -22,6 +24,8 @@
 //!   listed; true extent 452 bytes, 0x080377e4..0x080379a8 — the listing
 //!   ends at the computed jump; 11 sites).
 //! - `f32_to_fixed16_trunc` — `FUN_082577bc` @ 0x082577bc (88 bytes; 43
+//!   sites).
+//! - `fixed16_clamp_unit4` — `FUN_082485d8` @ 0x082485d8 (100 bytes; 9 call
 //!   sites).
 //!
 //! All but the two reciprocals are leaves and touch no hardware, so host
@@ -384,6 +388,47 @@ pub extern "C" fn f32_to_fixed16_trunc(out: *mut i32, bits: u32) -> *mut i32 {
     let value = if bits & 0x8000_0000 != 0 { scaled.wrapping_neg() } else { scaled };
     unsafe { core::ptr::write(out, value) };
     out
+}
+
+/// fixed16_clamp_unit4 — original: `FUN_082485d8` @ 0x082485d8 (100 bytes).
+///
+/// Raw ARM establishes the exact extent `0x082485d8..0x0824863c`: the
+/// `push {r4, lr}` at the latter address starts the separately linked
+/// in-place sibling. It snapshots four aligned signed Q16.16 values from
+/// `source`, clamps each independently to the closed unit interval
+/// `[0, 0x10000]` through `signed_clamp_i32`, then writes the four results to
+/// `destination`. All loads and clamps finish before the first store, so
+/// overlapping ranges observe the original source quartet rather than earlier
+/// output stores.
+///
+/// A complete `osos.dec` ARM branch decode finds nine direct inbound `bl`
+/// sites (0x0824d470, 0x0824d488, 0x0824d4a4, 0x0824d4c0, 0x0824d4dc,
+/// 0x0824f95c, 0x082545e8, 0x08254608, and 0x08254624), all unconditional;
+/// there are no predicated calls or direct tail branches. No deliberate
+/// deviations.
+///
+/// # Safety
+///
+/// `source` must be valid for four aligned `i32` reads and `destination` for
+/// four aligned `i32` writes. The ranges may overlap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_clamp_unit4")]
+pub unsafe extern "C" fn fixed16_clamp_unit4(destination: *mut i32, source: *const i32) {
+    let component0 = source.read();
+    let component1 = source.add(1).read();
+    let component2 = source.add(2).read();
+    let component3 = source.add(3).read();
+
+    let clamped0 = crate::util::signed_clamp_i32::signed_clamp_i32(component0, 0, 0x10000);
+    let clamped1 = crate::util::signed_clamp_i32::signed_clamp_i32(component1, 0, 0x10000);
+    let clamped2 = crate::util::signed_clamp_i32::signed_clamp_i32(component2, 0, 0x10000);
+    let clamped3 = crate::util::signed_clamp_i32::signed_clamp_i32(component3, 0, 0x10000);
+
+    destination.write(clamped0);
+    destination.add(1).write(clamped1);
+    destination.add(2).write(clamped2);
+    destination.add(3).write(clamped3);
 }
 
 #[cfg(test)]
@@ -1185,5 +1230,32 @@ mod tests {
             // Zero stays saturated even with a live body behind it.
             assert_eq!(fixed16_recip(0), 0x7fff_ffff);
         }
+    }
+    #[test]
+    fn fixed16_clamp_unit4_clamps_signed_q16_boundaries() {
+        let source = [i32::MIN, -1, 0, ONE];
+        let mut destination = [0x5555_5555; 4];
+
+        unsafe { fixed16_clamp_unit4(destination.as_mut_ptr(), source.as_ptr()) };
+
+        assert_eq!(destination, [0, 0, 0, ONE]);
+
+        let source = [ONE, ONE + 1, i32::MAX, ONE / 2];
+        unsafe { fixed16_clamp_unit4(destination.as_mut_ptr(), source.as_ptr()) };
+
+        assert_eq!(destination, [ONE, ONE, ONE, ONE / 2]);
+    }
+
+    #[test]
+    fn fixed16_clamp_unit4_snapshots_before_overlapping_stores() {
+        let mut words = [0x55, i32::MIN, -1, ONE, i32::MAX, 0x66];
+
+        unsafe {
+            // destination overlaps source at +1. The raw body has loaded and
+            // clamped all four source words before its first `stm`.
+            fixed16_clamp_unit4(words.as_mut_ptr().add(2), words.as_ptr().add(1));
+        }
+
+        assert_eq!(words, [0x55, i32::MIN, 0, 0, ONE, ONE]);
     }
 }

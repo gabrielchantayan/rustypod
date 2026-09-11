@@ -64274,3 +64274,32 @@ functions:
       aligned words. No deliberate deviations. Host tests cover ordinary
       signed Q16.16 products, fractional truncation, and overflow of an
       intermediate dot-product sum.
+
+  - address: 0x082485d8
+    ghidra: FUN_082485d8
+    name: fixed16_clamp_unit4
+    size: 100
+    sig: "void fixed16_clamp_unit4(i32 *destination, const i32 *source)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      r6: clamped_component0
+      r7: clamped_component1
+      r8: clamped_component2
+      FUN_080f0f84: signed_clamp_i32
+    notes: >-
+      Raw ARM confirms the exact 100-byte extent
+      0x082485d8..0x0824863c: it snapshots source[0..3], invokes the ported
+      signed_clamp_i32(value, 0, 0x10000) at 0x080f0f84 for each component,
+      then writes the four saved results through destination[0..3]. The
+      source snapshot precedes every destination store, so overlapping ranges
+      preserve the original source quartet. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly nine inbound direct bl instructions, all
+      unconditional and unpredicated: 0x0824d470, 0x0824d488, 0x0824d4a4,
+      0x0824d4c0, 0x0824d4dc, 0x0824f95c, 0x082545e8, 0x08254608, and
+      0x08254624. There are no direct tail branches and no aligned osos.dec
+      data word containing the entry, so it is not dispatched virtually. No
+      deliberate deviations. Host tests cover signed extremes, both Q16.16
+      bounds, values immediately outside them, and an overlapping destination.
