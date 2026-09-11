@@ -15,15 +15,16 @@
 //! handle at `cache + 0x44`. When that handle has no payload, it asks the
 //! block manager to register the embedded node at `cache + 0x38`; lazily
 //! constructs and caches a 24-byte resource at `cache + 0x48`; and hands the
-//! cache to the result of `FUN_0814b460` through `FUN_08124af4`. It always
+//! cache to the result of [`framework_root_get`] through `FUN_08124af4`. It
 //! returns the fixed cache address.
 //!
 //! ## Deliberate deviations
 //!
-//! `FUN_081ba710`, `FUN_083b51f4`, `FUN_081f7450`, `FUN_0814b460`, and
-//! `FUN_08124af4` are unported. Target builds call their verified fixed
-//! addresses; host builds expose them through [`TRACK_EXTRAS_CACHE_OPS`]. The
-//! existing `MANAGER_CLIENT_REGISTER` seam is reused for `FUN_0818a630`.
+//! `FUN_081ba710`, `FUN_083b51f4`, `FUN_081f7450`, and `FUN_08124af4` are
+//! unported. Target builds call their verified fixed addresses; host builds
+//! expose them through [`TRACK_EXTRAS_CACHE_OPS`]. The ported
+//! [`framework_root_get`] is called directly. The existing
+//! `MANAGER_CLIENT_REGISTER` seam is reused for `FUN_0818a630`.
 //! The literal shutdown target `0x081af920` is **not a function entry**: raw
 //! ARM starts there with `add sl, sp, #44` in the middle of an extant frame,
 //! so it cannot be named or called as a valid callback. The port deliberately
@@ -32,6 +33,7 @@
 use core::ffi::c_void;
 use core::ptr;
 
+use crate::app::framework_root::framework_root_get;
 use crate::cxx::handle::handle_deref_or_null;
 use crate::cxx::shared_cell::{shared_cell_release_direct, SharedCell};
 use crate::heap::block_mgr::block_manager_get;
@@ -102,7 +104,6 @@ pub type CachedResourceConstructor = unsafe extern "C" fn(
     block: *mut u8,
     temporary: *const *mut u8,
 ) -> *mut u8;
-pub type FrameworkRootGet = unsafe extern "C" fn() -> *mut u8;
 pub type CacheAttach = unsafe extern "C" fn(root: *mut u8, cache: *mut TrackExtrasCache);
 
 /// Boundaries whose names cannot safely identify their still-unported bodies.
@@ -111,7 +112,6 @@ pub struct TrackExtrasCacheOps {
     pub cache_construct: TrackExtrasCacheConstructor,
     pub temporary_handle_construct: TemporaryHandleConstructor,
     pub cached_resource_construct: CachedResourceConstructor,
-    pub framework_root_get: FrameworkRootGet,
     pub attach_cache: CacheAttach,
 }
 
@@ -159,13 +159,6 @@ unsafe extern "C" fn firmware_cached_resource_construct(
     _temporary: *const *mut u8,
 ) -> *mut u8 { block }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_framework_root_get() -> *mut u8 {
-    let function: FrameworkRootGet = core::mem::transmute(0x0814_b460usize);
-    function()
-}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_framework_root_get() -> *mut u8 { ptr::null_mut() }
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_attach_cache(root: *mut u8, cache: *mut TrackExtrasCache) {
@@ -179,12 +172,11 @@ pub const DEFAULT_TRACK_EXTRAS_CACHE_OPS: TrackExtrasCacheOps = TrackExtrasCache
     cache_construct: firmware_cache_construct,
     temporary_handle_construct: firmware_temporary_handle_construct,
     cached_resource_construct: firmware_cached_resource_construct,
-    framework_root_get: firmware_framework_root_get,
     attach_cache: firmware_attach_cache,
 };
 
 /// Unported dependency boundaries; volatile loading retains their calls in
-/// target code until those entries are ported.
+/// target code.
 pub static mut TRACK_EXTRAS_CACHE_OPS: TrackExtrasCacheOps = DEFAULT_TRACK_EXTRAS_CACHE_OPS;
 
 #[inline(always)]
@@ -232,7 +224,7 @@ pub unsafe extern "C" fn track_extras_cache_get() -> *mut TrackExtrasCache {
             ));
             shared_cell_release_direct(ptr::addr_of_mut!(temporary).cast::<*mut SharedCell>());
         }
-        (ops().attach_cache)((ops().framework_root_get)(), cache);
+        (ops().attach_cache)(framework_root_get(), cache);
     }
     cache
 }
@@ -341,14 +333,12 @@ mod tests {
         RESOURCE_CALLS += 1;
         ptr::addr_of_mut!(RESOURCE)
     }
-    unsafe extern "C" fn record_root() -> *mut u8 { ptr::null_mut() }
     unsafe extern "C" fn record_attach(_root: *mut u8, _cache: *mut TrackExtrasCache) { ATTACH_CALLS += 1; }
 
     const RECORDING_OPS: TrackExtrasCacheOps = TrackExtrasCacheOps {
         cache_construct: initialized_cache,
         temporary_handle_construct: record_temporary,
         cached_resource_construct: record_resource,
-        framework_root_get: record_root,
         attach_cache: record_attach,
     };
 

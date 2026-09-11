@@ -61701,3 +61701,31 @@ functions:
       pre-existing ata_cmd_set_flags owns the matching word store. Host tests
       cover zero, individual observed flags, the high status bit and all
       bits set. No deliberate deviations; match.py is structural review only.
+
+  # --- Framework-root global accessor ---
+  - address: 0x0814b460
+    ghidra: FUN_0814b460
+    name: framework_root_get
+    size: 16
+    sig: "void *framework_root_get(void)"
+    module: app/framework_root
+    status: ported
+    renames:
+      DAT_0814b46c: framework_root_global (0x089cb1e0)
+      "*framework_root_global": framework_root
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: ldr r0,[pc,#4] at
+      0x0814b460, ldr r0,[r0] at 0x0814b464, bx lr at 0x0814b468, then the
+      0x089cb1e0 literal-pool word at 0x0814b46c. The separately linked next
+      function begins at 0x0814b470. Whole-image decoding of every ARM B/BL
+      immediate finds exactly 10 direct inbound branches, all unconditional
+      plain bl at 0x081ba458, 0x081f0738, 0x081f0898, 0x081f1050,
+      0x081f1580, 0x08208798, 0x082143a4, 0x082143b0, 0x08280bac, and
+      0x08280f1c. There are no predicated forms, tail-b transfers, or aligned
+      DATA words that target this entry. It returns the runtime framework-root
+      pointer verbatim, including NULL; no initialization or NULL guard exists.
+      The decrypted image's 0x089cxxxx RW page contains stale runtime state,
+      so the target port reads 0x089cb1e0 directly while host tests model that
+      word with a crate static. The dependent track_extras_cache port now calls
+      this function directly instead of retaining its fixed-address seam.
+      match.py is structural review only.
