@@ -7,6 +7,7 @@
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
+//! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x0819420c | [`service_manager_slot_flags_or`] | 28 | 16 direct |
 //!
@@ -155,6 +156,48 @@ pub unsafe extern "C" fn service_manager_instance() -> *mut u8 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn service_manager_instance_veneer() -> *mut u8 {
     service_manager_instance()
+}
+
+/// service_manager_secondary_handler_state_flags_get — original:
+/// `FUN_08193e50` @ 0x08193e50 (20 bytes; 10 direct, unconditional `bl`
+/// call sites).
+///
+/// Reads the state-flags word at `+0x10` from one of the service manager's
+/// three secondary 0x20-byte handler records. Raw ARM is `cmp r1,#3; blge
+/// 0x08030f44; add r0,r0,r1,lsl #5; ldr r0,[r0,#16]; bx lr`: signed slots
+/// below three, including negative values, pass the original's bounds check
+/// and retain its unchecked addressing behavior. Slots three and above
+/// terminate through [`heap_panic`]. The paired setter at 0x08193e64 only
+/// admits byte-sized values, while callers mask this returned word as a
+/// bitfield; state flags therefore names the observed field behavior without
+/// inventing a concrete state identity.
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly 10 direct
+/// callers — 0x0818e330, 0x08190710, 0x081932a0, 0x08193ae4, 0x08194aac,
+/// 0x081a96fc, 0x081d6d54, 0x081d76e4, 0x082011fc, and 0x08209310 — all
+/// unconditional plain `BL`; no predicated direct calls or tail branches
+/// target this address. The next distinct function begins at 0x08193e64
+/// (`cmp r1,#3`), confirming Ghidra's five-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_state_flags_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> u32 {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(4))
 }
 
 /// service_manager_secondary_handler_code_get — original: `FUN_08193e84` @
@@ -570,6 +613,45 @@ mod secondary_handler_code_get_tests {
             assert_eq!(
                 service_manager_secondary_handler_code_get(table.as_ptr().add(8), -1),
                 0xbeef,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod secondary_handler_state_flags_get_tests {
+    use super::*;
+
+    #[test]
+    fn reads_each_state_flags_word_and_reloads() {
+        let mut table = [0u32; 24];
+        table[4] = 0x0000_0001;
+        table[12] = 0x0000_000c;
+        table[20] = 0x0000_00f0;
+
+        unsafe {
+            assert_eq!(service_manager_secondary_handler_state_flags_get(table.as_ptr(), 0), 1);
+            assert_eq!(service_manager_secondary_handler_state_flags_get(table.as_ptr(), 1), 0xc);
+            assert_eq!(service_manager_secondary_handler_state_flags_get(table.as_ptr(), 2), 0xf0);
+
+            table[12] = 0x0000_0046;
+            assert_eq!(
+                service_manager_secondary_handler_state_flags_get(table.as_ptr(), 1),
+                0x46,
+                "the ARM ldr reloads the state-flags word on every call"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[4] = 0x0000_00a5;
+
+        unsafe {
+            assert_eq!(
+                service_manager_secondary_handler_state_flags_get(table.as_ptr().add(8), -1),
+                0xa5,
             );
         }
     }
