@@ -13,30 +13,20 @@
 //!
 //! # Deliberate deviations
 //!
-//! The tell (`0x08042e70`), seek (`0x08043124`), and read (`0x08042fd4`)
-//! helpers are not ported (checked against `names.yaml`). Target builds call
-//! their retailOS entries directly; host tests replace their volatile seams.
+//! The tell helper is ported in [`crate::ft::buffer`]. Seek (`0x08043124`)
+//! and read (`0x08042fd4`) remain unported and retain volatile seams for host
+//! tests; target builds call their retailOS entries directly.
+
+use crate::ft::buffer::{buffered_stream_tell, FtBufferedStream};
 
 const DISCARD_OFFSET: usize = 0x14;
 const MAX_DISCARD_CHUNK: u32 = 0x8000;
 
-/// ABI of the buffered-stream position helper at `0x08042e70`.
-pub type BufferedStreamTellFn = unsafe extern "C" fn(stream: u32, position: *mut u64) -> i32;
 /// ABI of the buffered-stream absolute-seek helper at `0x08043124`.
 pub type BufferedStreamSeekFn = unsafe extern "C" fn(stream: u32, position: u64) -> i32;
 /// ABI of the buffered-stream reader at `0x08042fd4`.
 pub type BufferedStreamReadFn = unsafe extern "C" fn(stream: u32, count: *mut u32, buffer: *mut u8) -> i32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_buffered_stream_tell(stream: u32, position: *mut u64) -> i32 {
-    let tell: BufferedStreamTellFn = core::mem::transmute(0x08042e70usize);
-    tell(stream, position)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_buffered_stream_tell(_stream: u32, _position: *mut u64) -> i32 {
-    panic!("buffered_stream_skip requires buffered tell 0x08042e70")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_buffered_stream_seek(stream: u32, position: u64) -> i32 {
@@ -68,14 +58,9 @@ unsafe extern "C" fn firmware_buffered_stream_read(
     panic!("buffered_stream_skip requires buffered read 0x08042fd4")
 }
 
-pub static mut BUFFERED_STREAM_TELL: BufferedStreamTellFn = firmware_buffered_stream_tell;
 pub static mut BUFFERED_STREAM_SEEK: BufferedStreamSeekFn = firmware_buffered_stream_seek;
 pub static mut BUFFERED_STREAM_READ: BufferedStreamReadFn = firmware_buffered_stream_read;
 
-#[inline(always)]
-unsafe fn buffered_stream_tell() -> BufferedStreamTellFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_TELL))
-}
 
 #[inline(always)]
 unsafe fn buffered_stream_seek() -> BufferedStreamSeekFn {
@@ -101,7 +86,7 @@ pub unsafe extern "C" fn buffered_stream_skip(owner: *mut u8, distance: i32) -> 
 
     if distance < 0 {
         let mut position = 0u64;
-        let result = buffered_stream_tell()(stream, &mut position);
+        let result = buffered_stream_tell(stream as usize as *const FtBufferedStream, &mut position);
         if result != 0 {
             return result;
         }
@@ -122,11 +107,19 @@ pub unsafe extern "C" fn buffered_stream_skip(owner: *mut u8, distance: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{buffered_stream_skip, BufferedStreamReadFn, BufferedStreamSeekFn, BufferedStreamTellFn,
-        BUFFERED_STREAM_READ, BUFFERED_STREAM_SEEK, BUFFERED_STREAM_TELL, DISCARD_OFFSET};
-    use parking_lot::{Mutex, MutexGuard};
+    extern crate std;
+    use super::{
+        buffered_stream_skip, BufferedStreamReadFn, BufferedStreamSeekFn, BUFFERED_STREAM_READ,
+        BUFFERED_STREAM_SEEK, DISCARD_OFFSET,
+    };
+    use crate::ft::buffer::{
+        BackingStreamTellFn, FtBufferedStream, BACKING_STREAM_TELL,
+        BACKING_STREAM_TELL_TEST_LOCK,
+    };
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use parking_lot::MutexGuard;
+    use std::sync::LazyLock;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut TELL_RESULT: i32 = 0;
     static mut TELL_POSITION: u64 = 0;
     static mut TELL_CALLS: usize = 0;
@@ -146,9 +139,14 @@ mod tests {
         discard: [u8; 0x8000],
     }
 
+    static STREAM_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::BUFFERED_STREAM_SKIP, core::mem::size_of::<FtBufferedStream>())
+            .map(|pointer| pointer as usize)
+    });
+
     struct Seams {
         _lock: MutexGuard<'static, ()>,
-        tell: BufferedStreamTellFn,
+        tell: BackingStreamTellFn,
         seek: BufferedStreamSeekFn,
         read: BufferedStreamReadFn,
     }
@@ -156,7 +154,7 @@ mod tests {
     impl Drop for Seams {
         fn drop(&mut self) {
             unsafe {
-                BUFFERED_STREAM_TELL = self.tell;
+                BACKING_STREAM_TELL = self.tell;
                 BUFFERED_STREAM_SEEK = self.seek;
                 BUFFERED_STREAM_READ = self.read;
             }
@@ -186,15 +184,15 @@ mod tests {
     }
 
     fn install() -> Seams {
-        let lock = TEST_LOCK.lock();
+        let lock = BACKING_STREAM_TELL_TEST_LOCK.lock();
         unsafe {
             let seams = Seams {
                 _lock: lock,
-                tell: BUFFERED_STREAM_TELL,
+                tell: BACKING_STREAM_TELL,
                 seek: BUFFERED_STREAM_SEEK,
                 read: BUFFERED_STREAM_READ,
             };
-            BUFFERED_STREAM_TELL = record_tell;
+            BACKING_STREAM_TELL = record_tell;
             BUFFERED_STREAM_SEEK = record_seek;
             BUFFERED_STREAM_READ = record_read;
             TELL_RESULT = 0;
@@ -212,14 +210,41 @@ mod tests {
         }
     }
 
-    fn owner() -> Owner {
-        Owner { stream: 0x1234_5678, reserved: [0; 16], discard: [0; 0x8000] }
+    fn owner() -> Option<Owner> {
+        let stream = (*STREAM_FIXTURE)? as *mut FtBufferedStream;
+        unsafe {
+            stream.write(FtBufferedStream {
+                magic: u32::from_le_bytes(*b"ffub"),
+                finalized: 0,
+                is_input: 0,
+                state_reserved: [0; 2],
+                io_context: 0x1234_5678,
+                io_reserved: [0; 3],
+                cursor: 0,
+                buffer_start: 0,
+                buffer_end: 0,
+                position_reserved: 0,
+                cached_position: 0,
+            });
+        }
+        Some(Owner {
+            stream: stream as usize as u32,
+            reserved: [0; 16],
+            discard: [0; 0x8000],
+        })
+    }
+
+    fn missing_fixture() {
+        assert!(note_missing_u32_fixture("ft/buffer_skip"));
     }
 
     #[test]
     fn zero_distance_does_not_touch_the_stream() {
         let _seams = install();
-        let mut owner = owner();
+        let Some(mut owner) = owner() else {
+            missing_fixture();
+            return;
+        };
         assert_eq!(unsafe { buffered_stream_skip((&mut owner as *mut Owner).cast(), 0) }, 0);
         unsafe {
             assert_eq!(TELL_CALLS, 0);
@@ -231,12 +256,15 @@ mod tests {
     #[test]
     fn positive_distance_reads_full_chunks_before_the_tail() {
         let _seams = install();
-        let mut owner = owner();
+        let Some(mut owner) = owner() else {
+            missing_fixture();
+            return;
+        };
         assert_eq!(unsafe { buffered_stream_skip((&mut owner as *mut Owner).cast(), 0x8001) }, 0);
         unsafe {
             assert_eq!(READ_CALLS, 2);
             assert_eq!(READ_REQUESTS[..2], [0x8000, 1]);
-            assert_eq!(READ_STREAMS[..2], [0x1234_5678, 0x1234_5678]);
+            assert_eq!(READ_STREAMS[..2], [owner.stream, owner.stream]);
             assert_eq!(READ_BUFFERS[..2], [owner.discard.as_mut_ptr() as usize; 2]);
             assert_eq!(TELL_CALLS, 0);
             assert_eq!(SEEK_CALLS, 0);
@@ -247,7 +275,10 @@ mod tests {
     fn positive_distance_returns_the_first_read_error() {
         let _seams = install();
         unsafe { READ_RESULT = -39; }
-        let mut owner = owner();
+        let Some(mut owner) = owner() else {
+            missing_fixture();
+            return;
+        };
         assert_eq!(unsafe { buffered_stream_skip((&mut owner as *mut Owner).cast(), 0x10000) }, -39);
         unsafe {
             assert_eq!(READ_CALLS, 1);
@@ -259,7 +290,10 @@ mod tests {
     fn negative_distance_wraps_the_told_position_then_seeks() {
         let _seams = install();
         unsafe { TELL_POSITION = 1; }
-        let mut owner = owner();
+        let Some(mut owner) = owner() else {
+            missing_fixture();
+            return;
+        };
         assert_eq!(unsafe { buffered_stream_skip((&mut owner as *mut Owner).cast(), -2) }, 0);
         unsafe {
             assert_eq!(TELL_CALLS, 1);
@@ -273,7 +307,10 @@ mod tests {
     fn tell_error_returns_without_seeking_or_reading() {
         let _seams = install();
         unsafe { TELL_RESULT = -17; }
-        let mut owner = owner();
+        let Some(mut owner) = owner() else {
+            missing_fixture();
+            return;
+        };
         assert_eq!(unsafe { buffered_stream_skip((&mut owner as *mut Owner).cast(), i32::MIN) }, -17);
         unsafe {
             assert_eq!(TELL_CALLS, 1);

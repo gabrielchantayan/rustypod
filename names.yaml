@@ -62617,3 +62617,36 @@ functions:
       inferred. Target builds make payload-safe indirect calls to their fixed
       retailOS addresses; host tests replace them through a seam, preserving
       call order and arguments while changing direct bl to indirect blx.
+
+  # --- Buffered FreeType stream position (ft/buffer) ---
+  - address: 0x08042e70
+    ghidra: FUN_08042e70
+    name: buffered_stream_tell
+    size: 140
+    sig: "i32 buffered_stream_tell(const FtBufferedStream *stream, u64 *position)"
+    module: ft/buffer
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: position
+      r4: stream
+      r5: position
+      FUN_0805b73c: backing_stream_tell
+    notes: >-
+      Raw osos.dec confirms the exact 140-byte extent, from push
+      {r4,r5,r6,lr} at 0x08042e70 through pop {r4,r5,r6,pc} at
+      0x08042ef8; the separately linked next function begins with push at
+      0x08042efc. The function clears the output first. Output mode calls the
+      unported backing-position helper at 0x0805b73c with io_context and then
+      adds the signed 32-bit cursor-buffer_start difference to its 64-bit
+      result; input mode copies cached_position and subtracts the signed,
+      inclusive buffer_end-cursor+1 span. These signed adjustments preserve
+      ARM's adds/adc and subs/sbc behavior when bit 31 is set. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly 10 direct inbound calls:
+      unconditional plain bl at 0x08042d88, 0x08043138, 0x0807fc6c,
+      0x08087804, 0x08094960, 0x0809509c, 0x08097bec, 0x0809d84c,
+      0x080ab0f0, and 0x080bbb20; there are no predicated forms or direct
+      plain-B tail callers. Deliberate deviation: the unported 0x0805b73c
+      helper is called through a volatile seam for host replacement and through
+      its verified retailOS address on target, rather than by the stock direct
+      bl. Its broader identity is not inferred.
