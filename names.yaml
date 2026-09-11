@@ -15695,6 +15695,37 @@ functions:
       space (inferred when 0x08105a34 was ported) is confirmed by this
       table.
 
+  - address: 0x0809d900
+    ghidra: FUN_0809d900
+    name: pixel_format_tag_to_ostype
+    size: 140
+    sig: "u32 pixel_format_tag_to_ostype(u32 pixel_format_tag)"
+    module: app/image_format
+    status: ported
+    renames:
+      param_1/r0: pixel_format_tag
+      DAT_0809d970: PIXEL_FORMAT_TAG_C420
+      DAT_0809d974: OSType_Y420
+      DAT_0809d978: OSType_L565
+      DAT_0809d97c: OSType_ARGB
+      DAT_0809d980: OSType_B565
+      DAT_0809d984: OSType_2VUY
+      DAT_0809d988: OSType_V408
+    notes: >-
+      Maps six exact internal image pixel-format tags to host-facing QuickTime
+      OSType values: 0x0565 -> 'L565', 0x1888 -> 'ARGB', 0x2565 -> 'B565',
+      0xc420 -> 'y420', 0xc422 -> '2vuy', and 0xd444 -> 'v408'; all other
+      u32 inputs return zero. Raw ARM has a 112-byte executable compare/
+      return body at 0x0809d900..0x0809d96c followed by its 28-byte literal
+      pool at 0x0809d970..0x0809d988; the next `push {r4,r5,r6,lr}` function
+      begins at 0x0809d98c, so the true extent is 140 bytes rather than
+      Ghidra's 112. Decoding every ARM B/BL word in osos.dec found 10 direct
+      call sites, all unconditional bl (0x081508d4, 0x0815098c, 0x08150a48,
+      0x08150b1c, 0x08150bd4, 0x08150d04, 0x08150dbc, 0x08150e74,
+      0x08150f78, 0x0815102c), with no predicated or tail-B callers. The
+      comparison order uses a signed `bgt` split around 0xc420, but all
+      unmatched values converge at the same zero return. No deviations.
+
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
     name: record_body_size

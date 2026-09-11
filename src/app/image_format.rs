@@ -169,6 +169,32 @@ const PIXEL_FORMAT_TAG_C422: u16 = 0xc422;
 /// Tag 0xc420 (`ldr r1,[0x8105fec]`), the 480×720 12bpp format — a
 /// 4:2:0-flavored chroma tag, named on the raw value.
 const PIXEL_FORMAT_TAG_C420: u16 = 0xc420;
+/// Maps an internal image pixel-format tag to the host-facing QuickTime
+/// pixel-format OSType used in image capability records.
+///
+/// `pixel_format_tag_to_ostype` — original: `FUN_0809d900` @ 0x0809d900
+/// (140 bytes through the next function at 0x0809d98c: 112-byte executable
+/// body plus a 28-byte literal pool; 10 unconditional `bl` call sites,
+/// binary-scanned).
+///
+/// The literal-pool comparisons select six exact tag-to-OSType translations:
+/// RGB565 (`0x0565`) becomes `'L565'`; `0x1888` becomes `'ARGB'`; `0x2565`
+/// becomes `'B565'`; and the three YUV tags become `'y420'`, `'2vuy'`, and
+/// `'v408'`. Every other tag takes the shared zero-return path. No deliberate
+/// deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn pixel_format_tag_to_ostype(tag: u32) -> u32 {
+    match tag {
+        0x0565 => 0x4c35_3635, // 'L565'
+        0x1888 => 0x4247_5241, // 'ARGB'
+        0x2565 => 0x4235_3635, // 'B565'
+        0xc420 => 0x7934_3230, // 'y420'
+        0xc422 => 0x3276_7579, // '2vuy'
+        0xd444 => 0x7634_3038, // 'v408'
+        _ => 0,
+    }
+}
 
 /// The geometry one covered format id maps to. `height_bytes` is the
 /// +0x08 field: height × bytes-per-pixel in every arm (verified
@@ -402,6 +428,31 @@ pub extern "C" fn image_pixel_buffer_size_for_kind(kind: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pixel_format_tags_map_to_the_decoded_ostypes() {
+        // Each pair is one literal-pool return value decoded from
+        // FUN_0809d900, independent of the port's match arms.
+        for (tag, expected) in [
+            (0x0565, 0x4c35_3635), // 'L565'
+            (0x1888, 0x4247_5241), // 'ARGB'
+            (0x2565, 0x4235_3635), // 'B565'
+            (0xc420, 0x7934_3230), // 'y420'
+            (0xc422, 0x3276_7579), // '2vuy'
+            (0xd444, 0x7634_3038), // 'v408'
+        ] {
+            assert_eq!(pixel_format_tag_to_ostype(tag), expected, "tag {tag:#x}");
+        }
+    }
+
+    #[test]
+    fn unmapped_and_adjacent_pixel_format_tags_return_zero() {
+        // The original has only equality arms; signed branch direction
+        // changes which comparisons run, never the default zero result.
+        for tag in [0u32, 0x0564, 0x0566, 0xc421, 0xc423, 0xd443, 0xd445, u32::MAX] {
+            assert_eq!(pixel_format_tag_to_ostype(tag), 0, "tag {tag:#x}");
+        }
+    }
 
     /// The jump table decoded arm by arm from 0x08105a3c..0x08105a84,
     /// independently of the array the port indexes.
