@@ -45229,6 +45229,36 @@ functions:
       +0xc4 object load, the stm {alpha, 0} stack pair and the void
       epilogue all match.
 
+  - address: 0x082991f0
+    ghidra: FUN_082991f0
+    name: bitmap_get_loaded_object
+    size: 28
+    sig: "u8 * bitmap_get_loaded_object(u8 *wrapper)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1: wrapper
+      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam)
+    notes: >-
+      Extent binary-verified against the next function entry at
+      0x0829920c: push {r4,lr}; preserve wrapper; call the lazy loader;
+      read wrapper+0x08; conditionally load wrapper+0xc4; return. The
+      binary scan over every ARM B/BL word in osos.dec finds exactly nine
+      direct call sites (0x08291408, 0x0829141c, 0x08291430, 0x08291444,
+      0x08291484, 0x082914d0, 0x0829151c, 0x08291568, 0x0829176c), all
+      plain unconditional bl, with no predicated forms or tail branches.
+      Every direct caller tests r0 for zero before using it. A single
+      data-word reference at 0x089b0b20 occurs in a contiguous table of
+      0x0829xxxx function pointers, so this accessor is also vtable
+      dispatched. Algorithm: call FUN_082993b4(wrapper) first and
+      unconditionally; return null when its +0x08 loaded flag remains
+      clear, otherwise return the parsed bitmap pointer at +0xc4. The
+      port reuses the existing BITMAP_HOOKS.ensure_loaded seam rather than
+      introducing a second loader stub. Deliberate host-only deviation:
+      the target's 4-byte +0xc4 pointer is parked at +0xc8 for 64-bit
+      fixture alignment; ARM reads the literal +0xc4 field. Host tests
+      cover unloaded null return, a non-1 nonzero loaded flag, and a loader
+      that resolves the wrapper during this call.
   - address: 0x08299368
     ghidra: FUN_08299368
     name: bitmap_query_bounds
