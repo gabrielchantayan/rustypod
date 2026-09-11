@@ -60122,6 +60122,30 @@ functions:
       lowering of the sel!=0 && sel<49 bound; guard chain, +0x470/+0x3ac
       addressing, materialize-return check, cache store/re-read, and the
       handle-as-key search all match the original's structure.
+  - address: 0x080547b0
+    ghidra: FUN_080547b0
+    name: firmware_query_low_byte
+    size: 16
+    sig: "u8 firmware_query_low_byte(void)"
+    module: app/firmware_query_low_byte
+    status: ported
+    renames:
+      FUN_080547b0: firmware_query_low_byte
+      FUN_080b4eb4: unported_firmware_query
+    notes: >-
+      Raw osos.dec words e92d4010 eb0181be e20000ff e8bd8010 establish the
+      whole 16-byte body: push {r4,lr}; bl 0x080b4eb4; and r0,r0,#0xff;
+      pop {r4,pc}. The following push {r4-r9,sl,lr} at 0x080547c0 begins
+      the distinct next function, so Ghidra's extent is exact. Decoding
+      every ARM B/BL word in osos.dec finds exactly ten direct incoming
+      calls, all unconditional bl (cond=AL): 0x08058860, 0x0812f2cc,
+      0x081a5ec4, 0x081a5fe0, 0x081a62c8, 0x081a6724, 0x081a6f74,
+      0x0825b8e4, 0x082a1ad4, and 0x082ca3f4; there are no predicated bl
+      or direct-b tail callers. The sole callee 0x080b4eb4 has no recovered
+      identity and is not already ported, so target builds dispatch there
+      directly and host tests expose only a replacement seam. Its raw body
+      returns zero or one, but this wrapper preserves the explicit low-byte
+      mask for arbitrary r0 values.
   - address: 0x083d63cc
     ghidra: FUN_083d63cc
     name: wang_hash_64_to_32
