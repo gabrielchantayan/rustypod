@@ -3453,13 +3453,13 @@ unsafe extern "C" fn teardown_outer_begin_unported(_iter: *mut u32, _registry: *
 /// 08212a58  ldmia sp!, {r12, pc}
 /// ```
 ///
-/// A spill-slot wrapper over the shared iterator step `FUN_081ddde8`
-/// (see [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`]): the node out-slot
-/// is bound to the dead r3 spill because the outer loop consumes only
-/// the key. Returns nonzero while keys remain. The wired default
-/// returns 0 — no keys — so an unswapped table yields an empty
-/// traversal (the `store_remove_unported` no-op precedent). Host tests
-/// install a scripted mock via `core::ptr::addr_of_mut!`.
+/// A spill-slot wrapper over the shared
+/// [`file_record_iterator_next`]: the node out-slot is bound to the
+/// dead r3 spill because the outer loop consumes only the key. Returns
+/// nonzero while keys remain. The wired default returns 0 — no keys — so
+/// an unswapped table yields an empty traversal (the
+/// `store_remove_unported` no-op precedent). Host tests install a
+/// scripted mock via `core::ptr::addr_of_mut!`.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT: unsafe extern "C" fn(
     iter: *mut u32,
     key_out: *mut u32,
@@ -3509,18 +3509,24 @@ unsafe extern "C" fn teardown_inner_begin_unported(
 ) {
 }
 
-/// The inner-iterator step behind the `bl 0x081ddde8` at 0x0811d060
-/// inside [`vtable_file_record_teardown`]. `FUN_081ddde8` @ 0x081ddde8
-/// (48 bytes; **10 `bl` call sites**, grep on `decomp/osos.asm`, among
-/// them the outer step wrapper 0x08212a4c's; **unported**):
+/// file_record_iterator_next — original: `FUN_081ddde8` @ 0x081ddde8
+/// (48 bytes exactly, 0x081ddde8..0x081dde18 — twelve instructions, no
+/// literal pool; **10 `bl` call sites binary-scanned, all
+/// unconditional; 0 predicated `bl`, 0 `b`**).
+///
+/// A file-record collection iterator's step: advance its five-word state
+/// at `iter + 4` through [`iterator_state_next`], receiving the
+/// collection's yielded `{key, node}` pair in a two-word local. Only a
+/// nonzero status copies both words to the caller's out-slots; zero
+/// leaves both caller slots untouched and is returned unchanged.
 ///
 /// ```text
 /// 081ddde8  stmdb sp!, {r2, r3, r4, r5, r6, lr}  @ pair = out words
 /// 081dddec  mov   r4, r1            @ save key_out
 /// 081dddf0  mov   r1, sp
 /// 081dddf4  mov   r5, r2            @ save node_out
-/// 081dddf8  add   r0, r0, #0x4      @ step the state object
-/// 081dddfc  bl    0x08155d6c        @ state_step(iter + 4, &pair)
+/// 081dddf8  add   r0, r0, #0x4
+/// 081dddfc  bl    0x08155d6c        @ iterator_state_next(iter + 4, pair)
 /// 081dde00  cmp   r0, #0x0
 /// 081dde04  ldrne r1, [sp, #0x0]
 /// 081dde08  strne r1, [r4, #0x0]    @ *key_out = pair[0]
@@ -3529,28 +3535,32 @@ unsafe extern "C" fn teardown_inner_begin_unported(
 /// 081dde14  ldmia sp!, {r2, r3, r4, r5, r6, pc}
 /// ```
 ///
-/// Steps the state object at iter+4 through the unported 0x08155d6c
-/// and, only on a nonzero status, copies the yielded key and node
-/// words into the caller's out-slots. The wired default returns 0 —
-/// the bucket is empty — so an unswapped table yields an empty
-/// traversal (the `store_remove_unported` no-op precedent). `node_out`
-/// is modeled pointer-sized (the [`vtable_file_record_teardown`]
-/// host-representation deviation: the body dereferences the node).
-/// Host tests install a scripted mock via `core::ptr::addr_of_mut!`.
-pub static mut VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT: unsafe extern "C" fn(
+/// Ghidra invents a fourth parameter and mislabels the `r2` out-slot as
+/// the first local word. Raw ARM establishes three arguments and the
+/// private two-word pair. Deliberate deviation: Rust initializes that
+/// pair, whereas the ARM stack words are uninitialized; its contents are
+/// unobservable when status is zero, the only path that does not overwrite
+/// both outputs.
+///
+/// # Safety
+///
+/// `iter` must point to the six-word file-record iterator whose state
+/// starts at word 1. `key_out` and `node_out` must each point to writable
+/// target-width words. As in the original, no pointer is checked.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn file_record_iterator_next(
     iter: *mut u32,
     key_out: *mut u32,
-    node_out: *mut *mut u8,
-) -> u32 = teardown_inner_next_unported;
-
-/// Default inner-iterator step: returns 0, the bucket is empty (see
-/// the seam's doc).
-unsafe extern "C" fn teardown_inner_next_unported(
-    _iter: *mut u32,
-    _key_out: *mut u32,
-    _node_out: *mut *mut u8,
+    node_out: *mut u32,
 ) -> u32 {
-    0
+    let mut pair = [0u32; 2];
+    let status = iterator_state_next(iter.add(1), pair.as_mut_ptr().cast());
+    if status != 0 {
+        key_out.write(pair[0]);
+        node_out.write(pair[1]);
+    }
+    status
 }
 
 /// Indirect call to the unported observer-list link `FUN_08271710` @
@@ -3674,7 +3684,7 @@ pub static mut ITERATOR_STATE_FETCH: unsafe extern "C" fn(
 ) -> u32 = iterator_state_fetch_unported;
 
 /// Default for [`ITERATOR_STATE_FETCH`]: returns 0, the empty
-/// traversal (the `teardown_inner_next_unported` precedent).
+/// traversal (the `file_record_iterator_next` zero-status contract).
 unsafe extern "C" fn iterator_state_fetch_unported(_state: *mut u32, _out: *mut u8) -> u32 {
     0
 }
@@ -3971,14 +3981,12 @@ unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
 ///
 /// # Deviations
 ///
-/// - **Five unported callees sit behind seams** — the outer begin
+/// - **Four unported callees sit behind seams** — the outer begin
 ///   0x08212a5c behind [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`],
 ///   the outer step 0x08212a4c behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`], the inner begin
 ///   0x0821c4c8 behind [`VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN`],
-///   the inner step `FUN_081ddde8` behind
-///   [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`], and the registry
-///   dispose 0x0812d300 behind
+///   and the registry dispose 0x0812d300 behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. The ported
 ///   [`iterator_state_cleanup`] remains behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`] for host-test
@@ -3992,13 +4000,10 @@ unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
 ///   are called directly** — both ported in `heap/veneers.rs` (the
 ///   app/class_6800.rs ported-callees-called-directly precedent);
 ///   host tests observe the frees through the `HEAP_OPS.free` slot.
-/// - **The node out-slot is modeled pointer-sized** (`*mut *mut u8`),
-///   although the original's `ldr r0, [sp, #0x1c]` is a 32-bit load:
-///   the body DEREFERENCES the node (`ldr r0, [r0, #0x4]`), so a
-///   truncated host pointer would fault — the [`vtable_file_open`]
-///   host-representation deviation. The node's +0x04 payload word is
-///   only forwarded to `free_wrapper`, so it stays a byte-exact
-///   32-bit read.
+/// - **The node out-slot stays target-width**: `FUN_081ddde8` writes
+///   its second yielded word there. It is cast to `*mut u8` immediately
+///   before its `+0x04` payload dereference; host tests map node fixtures
+///   below 4 GiB, as required for target-width pointer words.
 /// - **The record's +0x04 registry field stays a 32-bit word** (the
 ///   [`vtable_file_record_construct_kind1`] byte-exact precedent) —
 ///   on a 64-bit host the pointer truncates to its low 32 bits, the
@@ -4032,7 +4037,7 @@ pub unsafe extern "C" fn vtable_file_record_teardown(record: *mut u8) {
     let mut key = 0u32;
     let mut inner = [0u32; ITERATOR_WORDS];
     let mut inner_key = 0u32;
-    let mut node: *mut u8 = core::ptr::null_mut();
+    let mut node = 0u32;
 
     let outer_begin =
         core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN));
@@ -4054,17 +4059,14 @@ pub unsafe extern "C" fn vtable_file_record_teardown(record: *mut u8) {
             key,
         );
         loop {
-            let inner_next = core::ptr::read_volatile(core::ptr::addr_of!(
-                VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT
-            ));
-            if inner_next(inner.as_mut_ptr(), &mut inner_key, &mut node) == 0 {
+            if file_record_iterator_next(inner.as_mut_ptr(), &mut inner_key, &mut node) == 0 {
                 break;
             }
             crate::heap::veneers::free_wrapper(
-                node.add(4).cast::<u32>().read() as *mut u8,
+                (node as usize as *mut u8).add(4).cast::<u32>().read() as *mut u8,
                 FILE_RECORD_NODE_FREE_TAG,
             );
-            crate::heap::veneers::free_wrapper(node, FILE_RECORD_NODE_FREE_TAG);
+            crate::heap::veneers::free_wrapper(node as usize as *mut u8, FILE_RECORD_NODE_FREE_TAG);
         }
         let cleanup =
             core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP));
@@ -4580,7 +4582,7 @@ pub unsafe extern "C" fn vtable_file_record_insert(
 pub(crate) mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     const MOCK_OK: u32 = 0;
     const OPEN_ERR: u32 = 0x0bad_0001;
@@ -4642,8 +4644,6 @@ pub(crate) mod tests {
                     .write_volatile(teardown_outer_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
                     .write_volatile(teardown_inner_begin_unported);
-                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT)
-                    .write_volatile(teardown_inner_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
                     .write_volatile(iterator_state_cleanup);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
@@ -4847,7 +4847,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -4877,7 +4877,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -4909,7 +4909,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -4944,7 +4944,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -4982,7 +4982,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -5012,7 +5012,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -5041,7 +5041,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iterator_state_cleanup_sentinel_skips_release_and_returns_the_state() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut state = [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32];
         unsafe {
@@ -5069,7 +5069,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             core::ptr::write_bytes(slab, 0xa5, 0x200);
@@ -5112,7 +5112,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut container = [0u32; 4];
         unsafe {
@@ -5187,7 +5187,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iterator_state_construct_stores_fields_links_then_seeks_and_returns_the_state() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut state = [0xa5a5_a5a5u32; 5];
         let owner = 0x0855_0000usize as *mut u8;
@@ -5217,7 +5217,7 @@ pub(crate) mod tests {
     fn iterator_state_construct_zeroes_the_link_word_before_linking() {
         // The original's `str r1, [r4, #0x10]` sits ahead of the
         // `bl 0x08271710`, so the link callee observes a cleared +0x10.
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         static mut LINK_OBSERVED: u32 = u32::MAX;
         unsafe extern "C" fn observing_link(_owner: *mut u8, state: *mut u32) {
@@ -5238,7 +5238,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iterator_state_construct_forwards_any_start_position() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut state = [0u32; 5];
         unsafe {
@@ -5294,9 +5294,55 @@ pub(crate) mod tests {
         core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(recording_fetch);
     }
 
+    // ---- file_record_iterator_next (0x081ddde8) ---------------------
+
+    static mut PAIR_FETCH_STATUS: u32 = 0;
+    static mut PAIR_FETCH_WORDS: [u32; 2] = [0; 2];
+
+    unsafe extern "C" fn recording_pair_fetch(_state: *mut u32, out: *mut u8) -> u32 {
+        out.cast::<u32>().write(PAIR_FETCH_WORDS[0]);
+        out.cast::<u32>().add(1).write(PAIR_FETCH_WORDS[1]);
+        PAIR_FETCH_STATUS
+    }
+
+    #[test]
+    fn file_record_iterator_next_copies_both_words_only_for_nonzero_status() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        // The state starts at iterator word 1, so its +0x0c next word is
+        // iterator word 4.
+        let mut iter = [0u32; ITERATOR_WORDS];
+        let mut key = 0xdead_beefu32;
+        let mut node = 0xcafe_babeu32;
+        unsafe {
+            iter[4] = 7;
+            PAIR_FETCH_WORDS = [0x1122_3344, 0xaabb_ccdd];
+            PAIR_FETCH_STATUS = 0x8000_0000;
+            core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(recording_pair_fetch);
+
+            assert_eq!(
+                file_record_iterator_next(iter.as_mut_ptr(), &mut key, &mut node),
+                0x8000_0000,
+                "any nonzero status is returned verbatim"
+            );
+            assert_eq!((key, node), (0x1122_3344, 0xaabb_ccdd), "both pair words copy");
+            assert_eq!(iter[3], 7, "iterator + 4 state advances before the fetch");
+
+            key = 0xdead_beef;
+            node = 0xcafe_babe;
+            PAIR_FETCH_STATUS = 0;
+            assert_eq!(file_record_iterator_next(iter.as_mut_ptr(), &mut key, &mut node), 0);
+            assert_eq!(
+                (key, node),
+                (0xdead_beef, 0xcafe_babe),
+                "zero leaves both caller out-slots untouched"
+            );
+        }
+    }
+
     #[test]
     fn iterator_state_next_adopts_next_as_position_then_refreshes_then_fetches() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         // [owner, prev, pos, next, link]: pos starts at 5, next is 2.
         let mut state = [0x0855_0000u32, 4, 5, 2, 0];
@@ -5325,7 +5371,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iterator_state_next_returns_the_fetchs_zero_verdict() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut state = [0u32; 5];
         unsafe {
@@ -5353,7 +5399,7 @@ pub(crate) mod tests {
             assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_next"));
             return;
         };
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         static mut GUARDED_POS: [i32; 8] = [0; 8];
         static mut GUARD_LEN: usize = 0;
@@ -5420,7 +5466,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_error_short_circuits_before_write_and_commit() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut value: u32 = VALUE_WORD;
@@ -5446,7 +5492,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_error_skips_commit_and_routes_value_pointer() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut value: u32 = VALUE_WORD;
@@ -5475,7 +5521,7 @@ pub(crate) mod tests {
 
     #[test]
     fn success_runs_all_three_in_order_and_returns_commits_code() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut value: u32 = VALUE_WORD;
@@ -5510,7 +5556,7 @@ pub(crate) mod tests {
 
     #[test]
     fn default_stages_reproduce_the_original_message_sequence() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut value: u32 = VALUE_WORD;
@@ -5562,7 +5608,7 @@ pub(crate) mod tests {
 
     #[test]
     fn default_write_skips_its_second_dispatch_on_error() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut value: u32 = VALUE_WORD;
@@ -5608,7 +5654,7 @@ pub(crate) mod tests {
 
     #[test]
     fn default_dispatch_body_loads_slot_50_and_calls_it() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         // Object whose first word is its vtable; vtable is a raw byte
         // buffer so the +0x50 slot sits at a 4-aligned (not 8-aligned)
@@ -5653,7 +5699,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_probe_tags_selector_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5689,7 +5735,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_probe_ors_instead_of_replacing_the_high_bits() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5708,7 +5754,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_probe_forwards_the_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5729,7 +5775,7 @@ pub(crate) mod tests {
 
     #[test]
     fn probe_tags_selector_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5770,7 +5816,7 @@ pub(crate) mod tests {
 
     #[test]
     fn probe_ors_instead_of_replacing_the_high_bits() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5790,7 +5836,7 @@ pub(crate) mod tests {
 
     #[test]
     fn probe_forwards_the_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5811,7 +5857,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_tags_selector_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5852,7 +5898,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_ors_instead_of_replacing_the_high_bits() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5872,7 +5918,7 @@ pub(crate) mod tests {
 
     #[test]
     fn commit_forwards_the_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5893,7 +5939,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_sends_the_bare_selector_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5934,7 +5980,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_passes_even_tagged_selectors_through_untouched() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -5957,7 +6003,7 @@ pub(crate) mod tests {
 
     #[test]
     fn eight_byte_record_serializes_every_field_in_protocol_order() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         // Five byte fields, skipped padding, a little-endian u16, final
@@ -6036,7 +6082,7 @@ pub(crate) mod tests {
 
     #[test]
     fn eight_byte_record_propagates_field_error_and_skips_later_messages() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let record = [0u8; 16];
@@ -6063,7 +6109,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_forwards_the_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -6084,7 +6130,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_sends_kind_word_then_value_message_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u32 = VALUE_WORD;
@@ -6134,7 +6180,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_short_circuits_the_value_message_on_a_first_error() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u32 = VALUE_WORD;
@@ -6159,7 +6205,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_forwards_the_second_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u32 = VALUE_WORD;
@@ -6184,7 +6230,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_kind2_sends_kind_word_then_value_message_and_routes_arguments() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -6237,7 +6283,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_kind2_loads_a_halfword_not_a_word() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         // The word under the value pointer has junk in its high half;
@@ -6260,7 +6306,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_kind2_short_circuits_the_value_message_on_a_first_error() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -6285,7 +6331,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_kind2_forwards_the_second_dispatch_return_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -6400,7 +6446,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_double_dereferences_and_loads_slot_50_exactly() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_50, direct_method);
         // Decoys at the adjacent non-overlapping host slots: method
@@ -6443,7 +6489,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_forwards_the_spilled_r3_pointer_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_50, direct_method);
         chain.link();
@@ -6479,7 +6525,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_returns_the_methods_error_code_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_50, direct_method);
         chain.link();
@@ -6525,7 +6571,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_4c_double_dereferences_and_loads_slot_4c_exactly() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_4C, direct_method);
         // Decoys at the adjacent non-overlapping host slots: method
@@ -6572,7 +6618,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_4c_forwards_the_spilled_r3_pointer_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_4C, direct_method);
         chain.link();
@@ -6608,7 +6654,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispatch_4c_returns_the_methods_status_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_4C, direct_method);
         chain.link();
@@ -6699,7 +6745,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispose_double_dereferences_and_loads_slot_04_exactly() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install_dispose(VTABLE_SLOT_04, dispose_method);
         // Decoy above the slot only: method pointers are 8 bytes wide
@@ -6733,7 +6779,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispose_nulls_the_handle_after_the_call() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install_dispose(VTABLE_SLOT_04, dispose_method);
         chain.link();
@@ -6758,7 +6804,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dispose_skips_the_call_on_a_null_handle_and_returns_zero() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut handle: *mut u8 = core::ptr::null_mut();
         unsafe {
             reset_dispose_log();
@@ -6860,7 +6906,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_unsupported_status_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -6886,7 +6932,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_query_error_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -6912,7 +6958,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_first_dispatch_args_and_initial_out_slot() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -6943,7 +6989,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_clamps_the_size_unsigned_and_routes_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -6996,7 +7042,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_read_error_skips_the_finish() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -7026,7 +7072,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_read_finish_args_and_final_return() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 0x100];
@@ -7120,7 +7166,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_unsupported_status_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7146,7 +7192,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_probe_error_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7172,7 +7218,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_probe_args_and_initial_out_slot() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7202,7 +7248,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_read_args_and_value_delivery() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7247,7 +7293,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_read_error_skips_the_finish() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7275,7 +7321,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_read_finish_args_and_final_return() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7313,7 +7359,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_unsupported_status_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7339,7 +7385,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_probe_error_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7365,7 +7411,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_probe_args_and_initial_out_slot() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7398,7 +7444,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_read_args_and_value_delivery() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7443,7 +7489,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_read_error_skips_the_finish() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7471,7 +7517,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_kind2_read_finish_args_and_final_return() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7514,7 +7560,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_probe_unsupported_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7541,7 +7587,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_probe_args_and_initial_out_slot() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7575,7 +7621,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_read_dispatch_routes_the_thunk_bound_kind() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7616,7 +7662,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_read_error_skips_the_finish() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7642,7 +7688,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_finish_routing_and_final_return() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut out: u32 = 0;
@@ -7717,14 +7763,14 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_body_end_to_end_kind4_through_the_thunk() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         assert_scalar_thunk_end_to_end(MESSAGE_KIND_4, false);
     }
 
     #[test]
     fn scalar_body_end_to_end_kind2_through_the_thunk() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         assert_scalar_thunk_end_to_end(MESSAGE_KIND_2, true);
     }
@@ -7798,7 +7844,7 @@ pub(crate) mod tests {
 
     #[test]
     fn record_read_full_chain_dispatches_all_fields_in_protocol_order() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         // 16 bytes: the five byte fields, the skipped padding at 5 and
@@ -7893,7 +7939,7 @@ pub(crate) mod tests {
 
     #[test]
     fn record_read_short_circuits_at_every_failing_stage() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -7941,7 +7987,7 @@ pub(crate) mod tests {
 
     #[test]
     fn record_read_finish_result_is_the_return_value() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut record = [0u8; 16];
@@ -8100,7 +8146,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_bare_selector_queries_size_and_allocs_via_slot_54() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install_alloc(VTABLE_SLOT_54, alloc_method);
@@ -8156,7 +8202,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_bare_size_query_error_skips_the_alloc() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install_alloc(VTABLE_SLOT_54, alloc_method);
@@ -8182,7 +8228,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_bare_status_5_gets_no_special_case() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install_alloc(VTABLE_SLOT_54, alloc_method);
@@ -8209,7 +8255,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_other_tags_return_zero_without_any_message() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -8235,7 +8281,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_probe_walks_recurses_and_stops_at_the_matching_marker() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install_alloc(VTABLE_SLOT_54, alloc_method);
@@ -8295,7 +8341,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_probe_recurses_into_foreign_commit_probe_markers() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -8325,7 +8371,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_probe_query_error_returns_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         unsafe {
@@ -8348,7 +8394,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_probe_recursion_error_propagates() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install_alloc(VTABLE_SLOT_54, alloc_method);
@@ -8382,7 +8428,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_default_seams_are_wired_to_the_ported_callees() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             let dispatch =
@@ -8435,7 +8481,7 @@ pub(crate) mod tests {
 
     #[test]
     fn walk_alloc_default_dispatch_seam_runs_the_ported_dispatcher() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut chain = FakeChain::new();
         chain.install(VTABLE_SLOT_4C, walk_direct_method);
@@ -8559,7 +8605,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_probe_unsupported_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8586,7 +8632,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_probe_error_bails_before_the_read() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8613,7 +8659,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_probe_args_route_size_out_and_ignore_capacity() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8657,7 +8703,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_read_dispatch_routes_the_probed_size_unclamped() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8708,7 +8754,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_read_error_skips_the_finish() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8735,7 +8781,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_finish_routing_and_final_return() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8778,7 +8824,7 @@ pub(crate) mod tests {
 
     #[test]
     fn buffer_read_end_to_end_reports_size_and_delivers_bytes() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let mut buffer = [0u8; 8];
@@ -8808,7 +8854,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_write_first_dispatch_error_skips_the_second() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8836,7 +8882,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_write_success_redispatches_with_exact_args() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8878,7 +8924,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_write_arg4_spill_reaches_only_the_first_dispatch() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8909,7 +8955,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_write_forwards_the_second_status_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8938,7 +8984,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_pipeline_open_error_short_circuits_before_write_and_commit() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8968,7 +9014,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_pipeline_write_error_skips_commit() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -8998,7 +9044,7 @@ pub(crate) mod tests {
 
     #[test]
     fn indirect_pipeline_runs_in_order_with_exact_argument_routing() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let payload = [VALUE_WORD, 0xa5a5_a5a5];
@@ -9075,7 +9121,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_open_error_short_circuits_before_write_and_commit() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -9100,7 +9146,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_write_error_skips_commit_and_routes_the_value_pointer() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -9131,7 +9177,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_loads_the_value_as_a_halfword() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         // The word under the value pointer has junk in its high half; a
@@ -9156,7 +9202,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_runs_in_order_with_exact_argument_routing() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         let value: u16 = VALUE_HALFWORD;
@@ -9411,7 +9457,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_write_mode_calls_the_preopen_remove_with_a_zeroed_r1() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9430,7 +9476,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_read_mode_skips_the_preopen_remove() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9448,7 +9494,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_ctor_argument_routing_and_mode_inversion() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9472,7 +9518,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_success_stores_the_object_and_mode_bytes() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9490,7 +9536,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_failure_disposes_nulls_and_returns_the_status_verbatim() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9514,7 +9560,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_mode_byte_mirrors_write_mode_on_both_paths() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9539,7 +9585,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_default_remove_stub_is_a_noop() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         unsafe {
             // The default is already wired (the guard reinstalls it), but
@@ -9551,7 +9597,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_open_default_ctor_stub_fails_the_open_closed() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = RecordFixture::new();
@@ -9618,7 +9664,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_dispose_calls_through_and_returns_the_handle() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install_dispose(VTABLE_SLOT_04, dispose_method);
         chain.install_dispose(VTABLE_SLOT_04 + 8, wrong_slot_dispose);
@@ -9657,7 +9703,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_dispose_null_handle_is_a_noop_and_still_returns_it() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut handle: *mut u8 = core::ptr::null_mut();
         unsafe {
             reset_dispose_log();
@@ -9688,7 +9734,7 @@ pub(crate) mod tests {
         // pin the mov r0, r4 overwrite even when the record lives
         // inside a larger object (the 0x0811c9cc / 0x0815eb58 sites,
         // which do container-of arithmetic on the returned pointer).
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut chain = FakeChain::new();
         chain.install_dispose(VTABLE_SLOT_04, dispose_method);
         chain.link();
@@ -9776,7 +9822,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_kind1_initializes_the_record_and_returns_it() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -9820,7 +9866,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_kind1_allocates_the_registry_and_feeds_it_to_the_ctor() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -9886,7 +9932,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_block_constructs_five_words_without_a_diagnostic() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut block = [0xa5a5_a5a5u32; 6];
         unsafe {
@@ -9919,7 +9965,7 @@ pub(crate) mod tests {
 
     #[test]
     fn kind2_block_reports_bad_descriptor_and_still_constructs() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let descriptor = [2u32, 0x20, 9];
         let mut block = [0xa5a5_a5a5u32; 6];
@@ -9983,10 +10029,10 @@ pub(crate) mod tests {
     static mut TD_FREE_TAGS: [usize; 16] = [0; 16];
     static mut TD_FREE_COUNT: usize = 0;
 
-    /// The stand-in registry object and the three fake bucket nodes
-    /// (a payload word at +0x04, planted by the installer).
+    /// The stand-in registry plus a dedicated sub-4-GiB mapping holding
+    /// three fake bucket nodes (payload words at +0x04).
     static mut TD_REGISTRY: [u8; 0x28] = [0; 0x28];
-    static mut TD_NODES: [[u8; 0x10]; 3] = [[0; 0x10]; 3];
+    static mut TD_NODE_SLAB: *mut u8 = core::ptr::null_mut();
 
     /// The outer/inner script cursors: how many keys the outer step
     /// still yields, and the current bucket's pending nodes.
@@ -10003,7 +10049,7 @@ pub(crate) mod tests {
     }
 
     unsafe fn td_node(index: usize) -> *mut u8 {
-        core::ptr::addr_of_mut!(TD_NODES).cast::<u8>().add(index * 0x10)
+        TD_NODE_SLAB.add(index * 0x10)
     }
 
     unsafe extern "C" fn recording_td_outer_begin(iter: *mut u32, registry: *mut u8) {
@@ -10046,17 +10092,13 @@ pub(crate) mod tests {
         }
     }
 
-    unsafe extern "C" fn recording_td_inner_next(
-        _iter: *mut u32,
-        key_out: *mut u32,
-        node_out: *mut *mut u8,
-    ) -> u32 {
+    unsafe extern "C" fn recording_td_inner_fetch(_state: *mut u32, out: *mut u8) -> u32 {
         td_push(TD_EV_INNER_NEXT);
         let call = TD_INNER_NEXT_CALLS;
         TD_INNER_NEXT_CALLS = call + 1;
         if call < TD_INNER_PENDING_LEN {
-            key_out.write(0x5eed_0000 + call as u32);
-            node_out.write(TD_INNER_PENDING[call]);
+            out.cast::<u32>().write(0x5eed_0000 + call as u32);
+            out.cast::<u32>().add(1).write(TD_INNER_PENDING[call] as u32);
             1
         } else {
             0
@@ -10087,9 +10129,19 @@ pub(crate) mod tests {
     }
 
     /// Resets the walk state, plants the node payloads, swaps in the
-    /// recording free and installs the six recording seam mocks (the
-    /// `install_recording_kind1` precedent).
-    unsafe fn install_recording_teardown() {
+    /// recording free and installs its five remaining seam mocks. The
+    /// shared inner step is ported, so its iterator-state fetch seam
+    /// supplies its yielded pair.
+    unsafe fn install_recording_teardown() -> bool {
+        if TD_NODE_SLAB.is_null() {
+            let Some(slab) = crate::testing::try_map_u32_slab(
+                crate::testing::hints::FILE_RECORD_TEARDOWN,
+                0x100,
+            ) else {
+                return false;
+            };
+            TD_NODE_SLAB = slab;
+        }
         TD_EVENT_COUNT = 0;
         TD_FREE_COUNT = 0;
         TD_OUTER_KEY_COUNT = TD_KEYS.len();
@@ -10109,12 +10161,12 @@ pub(crate) mod tests {
             .write_volatile(recording_td_outer_next);
         core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
             .write_volatile(recording_td_inner_begin);
-        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT)
-            .write_volatile(recording_td_inner_next);
+        core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(recording_td_inner_fetch);
         core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
             .write_volatile(recording_td_cleanup);
         core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
             .write_volatile(recording_td_dispose);
+        true
     }
 
     /// Builds a 0xa5-filled record with the stand-in registry at +0x04
@@ -10129,12 +10181,15 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_teardown_empty_registry_runs_straight_to_the_dispose_delete_tail() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
         unsafe {
-            install_recording_teardown();
+            if !install_recording_teardown() {
+                assert!(crate::testing::note_missing_u32_fixture("vtable_set file_record_teardown"));
+                return;
+            }
             TD_OUTER_KEY_COUNT = 0;
             let registry = td_record(&mut record);
             let registry32 = registry as u32;
@@ -10169,12 +10224,15 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_teardown_populated_registry_walks_keys_and_frees_nodes_in_order() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
         unsafe {
-            install_recording_teardown();
+            if !install_recording_teardown() {
+                assert!(crate::testing::note_missing_u32_fixture("vtable_set file_record_teardown"));
+                return;
+            }
             let registry = td_record(&mut record);
             let registry32 = registry as u32;
 
@@ -10247,12 +10305,15 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_teardown_null_registry_skips_the_dispose_and_delete() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
         unsafe {
-            install_recording_teardown();
+            if !install_recording_teardown() {
+                assert!(crate::testing::note_missing_u32_fixture("vtable_set file_record_teardown"));
+                return;
+            }
             TD_OUTER_KEY_COUNT = 0;
             // +0x04 left at the 0xa5 fill? No: the NULL case — write 0.
             record.as_mut_ptr().add(4).cast::<u32>().write(0);
@@ -10279,12 +10340,15 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_teardown_zeroes_only_the_registry_word_and_the_tag() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
         unsafe {
-            install_recording_teardown();
+            if !install_recording_teardown() {
+                assert!(crate::testing::note_missing_u32_fixture("vtable_set file_record_teardown"));
+                return;
+            }
             TD_OUTER_KEY_COUNT = 0;
             td_record(&mut record);
 
@@ -10320,7 +10384,7 @@ pub(crate) mod tests {
         // zeroed stand-in iterators carry a NULL owner word the unlink
         // would dereference (the ported cleanup is exercised directly
         // by its own tests).
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10437,7 +10501,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_tag0_is_a_noop_and_returns_the_record() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10458,7 +10522,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_unknown_tag_is_a_noop_and_returns_the_record() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10479,7 +10543,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_kind1_null_containers_run_straight_to_the_teardown() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10517,7 +10581,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_kind1_tears_down_and_deletes_both_containers_in_order() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10574,7 +10638,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_kind2_deletes_the_block_then_disposes_and_deletes_the_registry() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10624,7 +10688,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_destruct_kind2_null_members_is_a_noop() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10852,7 +10916,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_insert_hit_path_reuses_the_existing_bucket() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10892,7 +10956,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_insert_miss_path_allocates_constructs_and_keyed_inserts_the_bucket() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10940,7 +11004,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_insert_stores_arg4_and_arg5_into_the_node() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -10972,7 +11036,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_insert_dispatches_vtable_slot_1c_with_the_stack_pair() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];
@@ -11007,7 +11071,7 @@ pub(crate) mod tests {
 
     #[test]
     fn file_record_insert_runs_the_checked_alloc_guard_on_the_node() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
         let mut record = [0xa5u8; 0x20];

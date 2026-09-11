@@ -42954,6 +42954,39 @@ functions:
       pop+bx tail call; the diff is the two seam blx indirections and
       the crate fp frame.
 
+  - address: 0x081ddde8
+    ghidra: FUN_081ddde8
+    name: file_record_iterator_next
+    size: 48
+    sig: "u32 file_record_iterator_next(iter: *mut u32, key_out: *mut u32, node_out: *mut u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0: iter (six-word file-record iterator)
+      param_2/r4: key_out
+      param_3/r5: node_out
+      auStack_8/sp: pair (private yielded key/node words)
+      FUN_08155d6c: iterator_state_next (direct, ported in app/vtable_set)
+    notes: >-
+      File-record iterator step. Raw ARM is exactly 48 bytes,
+      0x081ddde8..0x081dde18: a twelve-instruction body with no literal
+      pool; the next sibling starts immediately at 0x081dde18. Decoding
+      every ARM B/BL word in osos.dec finds 10 bl call sites, all
+      unconditional; 0 predicated bl and 0 b sites. Algorithm: call
+      iterator_state_next(iter + 4, pair), then only if its status is
+      nonzero copy pair[0] to key_out and pair[1] to node_out, returning
+      that status unchanged. Ghidra incorrectly invents a fourth
+      parameter and treats r2 as the first local; raw ARM establishes
+      three arguments and an 8-byte stack pair. Deliberate deviation:
+      Rust zero-initializes the private pair where ARM leaves it
+      uninitialized; zero status does not read either pair word, so this
+      is unobservable. Host tests prove a high-bit nonzero status copies
+      both words, while zero leaves both output sentinels untouched.
+      match.py structural review: same state-step, zero guard, and
+      conditional two-word copy; LLVM differs only in frame setup,
+      zeroing the unobservable pair, and coalescing its successful pair
+      load into ldmne.
+
   - address: 0x08155e80
     ghidra: FUN_08155e80
     name: iterator_state_construct
@@ -43615,8 +43648,8 @@ functions:
       thunk_FUN_081dde18 (0x08212a5c): outer-iterator begin thunk (bare b 0x081dde18; unported; VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN seam)
       FUN_08212a4c: outer-iterator step (spill-slot wrapper over FUN_081ddde8 with a dead node out-slot; unported; VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT seam)
       FUN_0821c4c8: inner-iterator begin (key lookup 0x0812d160 + tail FUN_081dde18; unported; VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN seam)
-      FUN_081ddde8: inner-iterator step (unported; VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT seam)
-      FUN_08155ec0: iterator-state cleanup (unported; VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP seam)
+      FUN_081ddde8: file_record_iterator_next (direct, ported in this module)
+      FUN_08155ec0: iterator-state cleanup (ported; VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP seam)
       FUN_080e7970: free_wrapper (direct, ported in heap/veneers; caller tag 0x19)
       FUN_0812d300: registry dispose (unported; VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE seam)
       FUN_082aad24: operator_delete (direct, ported in heap/veneers)
@@ -43650,25 +43683,23 @@ functions:
       branches to the object teardown 0x0810e6b0 -> b 0x08135380)
       runs and the object is operator_deleted; record +0x04 (32-bit
       str) and the tag byte (strb) are then zeroed on every path.
-      Deviations: the six unported callees sit behind the new
+      Deviations: the four unported callees sit behind
       VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN / _OUTER_NEXT /
-      _INNER_BEGIN / _INNER_NEXT / _ITER_CLEANUP / _REGISTRY_DISPOSE
-      read_volatile seams whose wired defaults do NOT model the exact
-      bodies - the callees are an unported registry-iterator
-      (red-black-tree) subsystem, so the defaults yield an EMPTY
-      traversal (no-op begins/cleanups/dispose, 0-returning steps)
-      and an unswapped table runs straight to the guard/delete/zero
-      tail (the store_remove_unported / construct_guard_unported
-      no-op precedent, unlike VTABLE_SET_50_KIND4_OPS's exact-body
-      defaults); free_wrapper and operator_delete are called directly
-      (both ported in heap/veneers - the app/class_6800.rs
-      ported-callees-called-directly precedent), host tests observe
-      the frees through the HEAP_OPS.free slot; the node out-slot is
-      modeled pointer-sized (*mut *mut u8) although the original's
-      ldr is 32-bit, because the body DEREFERENCES the node (the
-      vtable_file_open host-representation deviation), while the
-      node's +0x04 payload word stays a byte-exact 32-bit read; the
-      record's +0x04 registry field stays a 32-bit word (the kind-1/
+      _INNER_BEGIN / _REGISTRY_DISPOSE read_volatile seams whose wired
+      defaults do NOT model the exact bodies - the callees are an
+      unported registry-iterator (red-black-tree) subsystem, so the
+      defaults yield an EMPTY traversal (no-op begins/dispose,
+      0-returning steps) and an unswapped table runs straight to the
+      guard/delete/zero tail (the store_remove_unported /
+      construct_guard_unported no-op precedent, unlike
+      VTABLE_SET_50_KIND4_OPS's exact-body defaults); free_wrapper and
+      operator_delete are called directly (both ported in
+      heap/veneers - the app/class_6800.rs
+      ported-callees-called-directly precedent), and host tests observe
+      their frees through the HEAP_OPS.free slot. The node out-slot is a
+      target-width u32, cast to *mut u8 only for the immediate
+      dereference; its host fixtures are mapped below 4 GiB.
+      The record's +0x04 registry field stays a 32-bit word (the kind-1/
       kind-2 constructors' byte-exact precedent - the exact inverse
       of their u32 store); the return type is void - the epilogue's
       r0 is the zero immediate of the clearing stores and the sole
@@ -43685,7 +43716,7 @@ functions:
       0x08212a4c wrapper's dead r3 spill. match.py: same
       begin/next/cmp loop structure, the payload-then-node double
       free with tag 0x19, the guard/delete/zero tail; the diff is the
-      crate fp frame, the six seam ldr/blx pairs standing in for the
+      crate fp frame, the five seam ldr/blx pairs standing in for the
       direct bls (the documented seams) and LLVM's inlining of the
       ported free_wrapper/operator_delete bodies (their documented
       HEAP_OPS dispatch). Host tests:
