@@ -31293,6 +31293,35 @@ functions:
       frame, hoists the slot address into a register, reorders the
       mode compares, and emits orr for 2*index+1.
 
+  - address: 0x0839bb58
+    ghidra: FUN_0839bb58
+    name: plane_cursor_init_alias_bb58
+    size: 120
+    sig: "PlaneCursor *plane_cursor_init(PlaneCursor *out, const PlaneDescriptor *plane, u32 mode, u32 index)"
+    module: util/plane_cursor
+    status: ported
+    renames:
+      param_1: out
+      param_2: plane
+      param_3: mode
+      param_4: index
+    notes: >-
+      Byte-similar sibling of plane_cursor_init @ 0x0839bae0: the 30
+      ARM instructions and 120-byte extent are identical except all
+      three handle-element accessor calls target the byte-identical
+      accessor copy @ 0x083d60f0 instead of @ 0x083d60dc. This address
+      is therefore served by the existing plane_cursor_init port, whose
+      handle_elem_ptr call is the intentional common hook target for
+      both accessor copies. Binary-scanning every ARM B/BL word in
+      osos.dec found exactly 8 unconditional bl call sites
+      (0x080c7f30, 0x080c7f44, 0x080c7f58, 0x080c7f6c, 0x080c7f80,
+      0x080c7f94, 0x080c7fa8, 0x080c7fbc); no predicated branch calls
+      occur. The sibling fixed-point YCbCr converter supplies mode=2
+      at every site, while the port faithfully retains the stock mode
+      0/1 phase paths and their wrapping u32 arithmetic. Host tests in
+      util/plane_cursor.rs cover direct, both phase, noncanonical mode,
+      zero-count, wraparound, NULL-cell, and consumer-clamp behavior.
+
   - address: 0x0839bbd0
     ghidra: FUN_0839bbd0
     name: signed_key_tree_find_value_copy
