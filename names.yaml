@@ -61642,3 +61642,35 @@ functions:
       identity is claimed. Literal 0x081af920 is demonstrably inside an extant
       ARM frame (its first word is add sl, sp, #44), not a function entry, so
       the port intentionally registers a no-op shutdown handler instead.
+
+  # --- Vtable flag/payload prefix constructor ---
+  - address: 0x081b6968
+    ghidra: FUN_081b6968
+    name: vtable_flag_payload_construct
+    size: 28
+    sig: "void *vtable_flag_payload_construct(void *this, u32 payload)"
+    module: cxx/vtable_flag_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      r2: saved_payload
+      FUN_08135788: vtable_flag_base_construct
+      DAT_081b6984: derived_vtable (0x0898c2a4)
+    notes: >-
+      Raw osos.dec confirms Ghidra's 28 instruction bytes: mov r2,r1 at
+      0x081b6968 through pop {pc} at 0x081b6980, followed by the
+      0x0898c2a4 literal-pool word at 0x081b6984; the separately linked
+      next function begins at 0x081b6988. Whole-image decoding of every ARM
+      B/BL immediate finds exactly ten direct calls, all unconditional plain
+      bl at 0x08135ba8, 0x0813ee48, 0x08143a6c, 0x08148790, 0x08177f0c,
+      0x08187080, 0x0819cd3c, 0x081ba988, 0x081deb68, and 0x0820b210; no
+      predicated bl or plain-b transfer reaches the entry. No aligned DATA
+      word references it. The function preserves r1 in r2 across unported
+      0x08135788, overwrites the returned object's base vtable with
+      0x0898c2a4, writes the preserved payload at +8, and returns the base
+      result. The fully decoded 0x08135788 has no existing ledger port, so a
+      volatile seam models its stores (base vtable 0x08984948 at +0 and zero
+      byte at +4) until it is ported separately; no wider class identity is
+      inferred. Host tests cover the literal fields, sentinels, and a base
+      return distinct from its input. match.py is structural review only.
