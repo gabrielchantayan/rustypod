@@ -3349,17 +3349,23 @@ unsafe fn cg_binding_mask_allows(binding: *mut u8, mask: u32) -> bool {
     resource < u32::BITS as usize && mask & (1u32 << resource) != 0
 }
 
-/// The direct callees of [`cg_binding_acquire`] which are still unported.
-/// [`cg_binding_unlink`] is ported and remains the default unlink operation;
-/// the other defaults deliberately do no work until their stock bodies are
-/// ported and the complete binding machine can be wired.
+/// The direct callees of [`cg_binding_acquire`] and
+/// [`cg_binding_release`] which are still unported. [`cg_binding_unlink`]
+/// is ported and remains the default unlink operation; the other defaults
+/// deliberately do no work until their stock bodies are ported.
 #[derive(Clone, Copy)]
 pub struct CgBindingAcquireOps {
     /// `FUN_08367390` @ 0x08367390: unlink then push a binding at the
     /// head of its existing anchor, refreshing its position.
     pub binding_promote: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
     /// `FUN_082c5c58` @ 0x082c5c58: release a selected active binding.
+    /// PORTED as [`cg_binding_release`].
     pub binding_release: unsafe extern "C" fn(codegen: *mut CgCodegen, node: *mut CgBinding),
+    /// Direct callee `FUN_083685f0` @ 0x083685f0 of
+    /// [`cg_binding_release`]. Its identity is not yet recovered; it
+    /// receives the codegen, binding, and its previously bound register.
+    pub binding_release_effect:
+        unsafe extern "C" fn(codegen: *mut CgCodegen, node: *mut CgBinding, reg: *mut CgVirtualReg),
     /// `FUN_083673b0` @ 0x083673b0: remove a free binding from its anchor.
     pub binding_unlink: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
     /// `FUN_08367358` @ 0x08367358: push a binding onto the active anchor.
@@ -3367,20 +3373,87 @@ pub struct CgBindingAcquireOps {
 }
 
 unsafe extern "C" fn default_cg_binding_promote(_anchor: *mut u8, _node: *mut CgBinding) {}
-unsafe extern "C" fn default_cg_binding_release(_codegen: *mut CgCodegen, _node: *mut CgBinding) {}
+unsafe extern "C" fn default_cg_binding_release_effect(
+    _codegen: *mut CgCodegen,
+    _node: *mut CgBinding,
+    _reg: *mut CgVirtualReg,
+) {
+}
 
-/// The default preserves the one ported direct callee; the remaining stock
-/// helpers are represented by no-op seams until their own ports land.
+/// The wired defaults of [`CG_BINDING_ACQUIRE_OPS`].
 pub const DEFAULT_CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = CgBindingAcquireOps {
     binding_promote: default_cg_binding_promote,
-    binding_release: default_cg_binding_release,
+    binding_release: cg_binding_release,
+    binding_release_effect: default_cg_binding_release_effect,
     binding_unlink: cg_binding_unlink,
     binding_push: default_cg_binding_push,
 };
 
-/// Active direct-callee table for [`cg_binding_acquire`].
+/// Active direct-callee table for [`cg_binding_acquire`] and
+/// [`cg_binding_release`].
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = DEFAULT_CG_BINDING_ACQUIRE_OPS;
+
+/// cg_binding_release — original: `FUN_082c5c58` @ **0x082c5c58** (196
+/// bytes; **9 `bl` call sites**: 7 plain at 0x082b3cf8/0x082c1518/
+/// 0x082cb808/0x082ccaa8/0x082ccab4/0x082ccb18/0x082d783c and 2
+/// predicated `bleq` at 0x082becc8/0x082c1588).
+///
+/// Releases `binding` from the register-binding machine. When the binding
+/// still agrees with its register's back-pointer, it calls
+/// `FUN_083685f0` only if the binding is marked
+/// [`CG_BINDING_FLAG_BOUND`] and the register is live-OUT in the current
+/// block or retains a queued use. It always clears the binding's register
+/// pointer. An active-list binding is then removed and pushed onto the
+/// free-list anchor. Finally it clears both
+/// [`CG_BINDING_FLAG_BOUND`] and [`CG_BINDING_FLAG_BLOCK_ENTRY`].
+///
+/// Raw ARM's `bic r0,#0x200; and r1,#0x100,r0,lsr #1; bic r0,#0x100`
+/// sequence at 0x082c5d04-0x082c5d10 makes the apparent 0x200→0x100
+/// shift dead, so the precise result is `flags & !0x300`; Ghidra drops
+/// the 0x200 clear. Deliberate deviation: direct callee `FUN_083685f0`
+/// and sibling list push `FUN_08367358` remain the documented no-op
+/// seams in [`CG_BINDING_ACQUIRE_OPS`] until separately ported. The
+/// direct callee's identity is deliberately not inferred.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *mut CgBinding) {
+    let codegen = codegen as *mut u8;
+    let binding = binding as *mut u8;
+    let reg = slot(binding, CG_BINDING_REG).read();
+    let ops = CG_BINDING_ACQUIRE_OPS;
+
+    if !reg.is_null() && slot(reg, CG_VREG_BINDING).read() == binding {
+        let reg_no = word(reg, CG_VREG_NO).read();
+        let block = slot(codegen, CG_CODEGEN_CURRENT_BLOCK).read();
+        let live_out = slot(block, CG_BLOCK_LIVE_OUT).read();
+        let is_live_out =
+            word(live_out, CG_BITSET_BITS + (reg_no >> 5)).read() & (1usize << (reg_no & 31)) != 0;
+        let has_queued_use = !is_live_out
+            && !slot(slot(codegen, CG_CODEGEN_REG_USES).read(), reg_no).read().is_null();
+        if word(binding, CG_BINDING_FLAGS).read() & CG_BINDING_FLAG_BOUND != 0
+            && (is_live_out || has_queued_use)
+        {
+            (ops.binding_release_effect)(
+                codegen as *mut CgCodegen,
+                binding as *mut CgBinding,
+                reg as *mut CgVirtualReg,
+            );
+        }
+    }
+
+    slot(binding, CG_BINDING_REG).write(core::ptr::null_mut());
+    let active_anchor = slot(codegen, CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8;
+    if slot(binding, CG_BINDING_ANCHOR).read() == active_anchor {
+        (ops.binding_unlink)(active_anchor, binding as *mut CgBinding);
+        (ops.binding_push)(
+            slot(codegen, CG_CODEGEN_FREE_BINDINGS) as *mut u8,
+            binding as *mut CgBinding,
+        );
+    }
+    let flags = word(binding, CG_BINDING_FLAGS);
+    flags.write(flags.read() & !(CG_BINDING_FLAG_BOUND | CG_BINDING_FLAG_BLOCK_ENTRY));
+}
 
 /// cg_binding_acquire — original: `FUN_082b3c34` @ 0x082b3c34 (204
 /// bytes; **11 `bl` call sites**, all plain `bl`, no predicated calls:
@@ -3396,10 +3469,11 @@ pub static mut CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = DEFAULT_CG_BINDING_
 /// moves the selected binding from the free to the active anchor. As in the
 /// original, no eligible binding reaches the release/unlink path as NULL.
 ///
-/// Deliberate deviation: `FUN_08367390`, `FUN_082c5c58`, and
-/// `FUN_08367358` are unported and route through
-/// [`CG_BINDING_ACQUIRE_OPS`] with documented no-op defaults; the already
-/// ported `FUN_083673b0` calls [`cg_binding_unlink`] directly by default.
+/// Deliberate deviation: `FUN_08367390` and `FUN_08367358` remain
+/// documented no-op seams in [`CG_BINDING_ACQUIRE_OPS`]; the ported
+/// [`cg_binding_release`] itself retains no-op seams for direct callee
+/// `FUN_083685f0` and list push `FUN_08367358`. The already ported
+/// `FUN_083673b0` calls [`cg_binding_unlink`] directly by default.
 /// The raw branch census found no data word referencing 0x082b3c34.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -8986,6 +9060,195 @@ mod tests {
         teardown();
     }
 
+    // --- cg_binding_release -----------------------------------------
+
+    #[derive(Debug, PartialEq)]
+    enum ReleaseStage {
+        Effect(*mut CgCodegen, *mut CgBinding, *mut CgVirtualReg),
+        Push(*mut u8, *mut CgBinding),
+    }
+
+    static mut RELEASE_LOG: std::vec::Vec<ReleaseStage> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_binding_release_effect(
+        codegen: *mut CgCodegen,
+        node: *mut CgBinding,
+        reg: *mut CgVirtualReg,
+    ) {
+        RELEASE_LOG.push(ReleaseStage::Effect(codegen, node, reg));
+    }
+
+    unsafe extern "C" fn recording_release_push(anchor: *mut u8, node: *mut CgBinding) {
+        RELEASE_LOG.push(ReleaseStage::Push(anchor, node));
+    }
+
+    unsafe fn install_release_ops() -> CgBindingAcquireOps {
+        let saved = hook(core::ptr::addr_of!(CG_BINDING_ACQUIRE_OPS));
+        *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = CgBindingAcquireOps {
+            binding_promote: default_cg_binding_promote,
+            binding_release: cg_binding_release,
+            binding_release_effect: recording_binding_release_effect,
+            binding_unlink: cg_binding_unlink,
+            binding_push: recording_release_push,
+        };
+        RELEASE_LOG.clear();
+        saved
+    }
+
+    struct ReleaseFixture {
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        binding: [usize; 7],
+        reg: [usize; record_size(CG_VREG_BYTES) / WORD],
+        block: [usize; record_size(0x24) / WORD],
+        live_out: [usize; 2],
+        use_heads: [usize; 32],
+    }
+
+    impl ReleaseFixture {
+        fn new() -> std::boxed::Box<ReleaseFixture> {
+            std::boxed::Box::new(ReleaseFixture {
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                binding: [0; 7],
+                reg: [0; record_size(CG_VREG_BYTES) / WORD],
+                block: [0; record_size(0x24) / WORD],
+                live_out: [0; 2],
+                use_heads: [0; 32],
+            })
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        fn binding_ptr(&mut self) -> *mut CgBinding {
+            self.binding.as_mut_ptr() as *mut CgBinding
+        }
+
+        fn reg_ptr(&mut self) -> *mut CgVirtualReg {
+            self.reg.as_mut_ptr() as *mut CgVirtualReg
+        }
+
+        fn free_anchor(&mut self) -> *mut u8 {
+            unsafe { self.codegen.as_mut_ptr().add(CG_CODEGEN_FREE_BINDINGS) as *mut u8 }
+        }
+
+        fn active_anchor(&mut self) -> *mut u8 {
+            unsafe { self.codegen.as_mut_ptr().add(CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8 }
+        }
+
+        fn bind_at_31(&mut self) {
+            self.binding[CG_BINDING_REG] = self.reg.as_mut_ptr() as usize;
+            self.reg[CG_VREG_BINDING] = self.binding.as_mut_ptr() as usize;
+            self.reg[CG_VREG_NO] = 31;
+            self.block[CG_BLOCK_LIVE_OUT] = self.live_out.as_mut_ptr() as usize;
+            self.codegen[CG_CODEGEN_CURRENT_BLOCK] = self.block.as_mut_ptr() as usize;
+        }
+    }
+
+    #[test]
+    fn binding_release_emits_for_a_queued_use_then_moves_active_binding() {
+        let _g = setup();
+        let mut f = ReleaseFixture::new();
+        unsafe {
+            let saved = install_release_ops();
+            f.bind_at_31();
+            f.binding[CG_BINDING_FLAGS] = 0x340;
+            f.use_heads[31] = 1;
+            f.codegen[CG_CODEGEN_REG_USES] = f.use_heads.as_mut_ptr() as usize;
+            f.binding[CG_BINDING_ANCHOR] = f.active_anchor() as usize;
+            f.codegen[CG_CODEGEN_ACTIVE_BINDINGS + CG_BINDING_LIST_HEAD] =
+                f.binding.as_mut_ptr() as usize;
+            f.codegen[CG_CODEGEN_ACTIVE_BINDINGS + CG_BINDING_LIST_TAIL] =
+                f.binding.as_mut_ptr() as usize;
+            let codegen = f.codegen_ptr();
+            let binding = f.binding_ptr();
+            let reg = f.reg_ptr();
+            let free = f.free_anchor();
+
+            cg_binding_release(codegen, binding);
+
+            assert_eq!(
+                RELEASE_LOG,
+                std::vec![
+                    ReleaseStage::Effect(codegen, binding, reg),
+                    ReleaseStage::Push(free, binding),
+                ],
+                "a queued use emits the release before the active-to-free transfer"
+            );
+            assert_eq!(f.binding[CG_BINDING_REG], 0, "the binding is detached from its register");
+            assert_eq!(f.binding[CG_BINDING_FLAGS], 0x40, "both machine-state bits are cleared");
+            assert_eq!(
+                f.codegen[CG_CODEGEN_ACTIVE_BINDINGS + CG_BINDING_LIST_HEAD],
+                0,
+                "the sole active binding was unlinked"
+            );
+            assert_eq!(
+                f.codegen[CG_CODEGEN_ACTIVE_BINDINGS + CG_BINDING_LIST_TAIL],
+                0,
+                "the sole active binding was the tail too"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_release_live_out_avoids_reading_the_use_heads_table() {
+        let _g = setup();
+        let mut f = ReleaseFixture::new();
+        unsafe {
+            let saved = install_release_ops();
+            f.bind_at_31();
+            f.binding[CG_BINDING_FLAGS] = CG_BINDING_FLAG_BOUND;
+            f.live_out[CG_BITSET_BITS] = 1usize << 31;
+            // The raw `ldreq` skips this table when the live-out bit is
+            // set. Keeping it NULL makes an eager table read immediately
+            // visible instead of silently accepting a different path.
+            f.codegen[CG_CODEGEN_REG_USES] = 0;
+            let codegen = f.codegen_ptr();
+            let binding = f.binding_ptr();
+            let reg = f.reg_ptr();
+
+            cg_binding_release(codegen, binding);
+
+            assert_eq!(
+                RELEASE_LOG,
+                std::vec![ReleaseStage::Effect(codegen, binding, reg)],
+                "the live-out bit alone retains the release effect"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_release_stale_back_pointer_skips_liveness_state() {
+        let _g = setup();
+        let mut f = ReleaseFixture::new();
+        unsafe {
+            let saved = install_release_ops();
+            f.binding[CG_BINDING_REG] = f.reg.as_mut_ptr() as usize;
+            f.binding[CG_BINDING_FLAGS] = 0x340;
+            // The guard fails before reading the current block or use heads,
+            // which are deliberately NULL here.
+            f.reg[CG_VREG_BINDING] = 1;
+
+            cg_binding_release(f.codegen_ptr(), f.binding_ptr());
+
+            assert!(RELEASE_LOG.is_empty(), "a stale register back-pointer emits nothing");
+            assert_eq!(f.binding[CG_BINDING_REG], 0, "the stale association is cleared");
+            assert_eq!(f.binding[CG_BINDING_FLAGS], 0x40, "the terminal flag clear is unconditional");
+
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
     // --- cg_binding_acquire -----------------------------------------
 
     #[derive(Debug, PartialEq)]
@@ -9019,6 +9282,7 @@ mod tests {
         *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = CgBindingAcquireOps {
             binding_promote: recording_binding_promote,
             binding_release: recording_binding_release,
+            binding_release_effect: default_cg_binding_release_effect,
             binding_unlink: recording_acquire_unlink,
             binding_push: recording_acquire_push,
         };
@@ -9159,12 +9423,16 @@ mod tests {
     }
 
     #[test]
-    fn binding_acquire_seams_keep_unported_helpers_inert() {
+    fn binding_acquire_seams_wire_the_ported_release_helper() {
         let _g = setup();
         unsafe {
             let ops = hook(core::ptr::addr_of!(CG_BINDING_ACQUIRE_OPS));
             assert_eq!(ops.binding_promote as usize, default_cg_binding_promote as usize);
-            assert_eq!(ops.binding_release as usize, default_cg_binding_release as usize);
+            assert_eq!(ops.binding_release as usize, cg_binding_release as usize);
+            assert_eq!(
+                ops.binding_release_effect as usize,
+                default_cg_binding_release_effect as usize
+            );
             assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
             assert_eq!(ops.binding_push as usize, default_cg_binding_push as usize);
         }
