@@ -38268,6 +38268,42 @@ functions:
       (ldr pc,[pc,#-4]); only diff line is the literal word shown as
       .word vs data-decoded-andcs.
 
+  # --- shared UI manager lazy initialization ---
+  - address: 0x08005018
+    ghidra: FUN_08005018
+    name: ui_manager_instance
+    size: 100
+    sig: "void *ui_manager_instance(void)"
+    module: ui/manager
+    status: ported
+    renames:
+      FUN_08005018: ui_manager_instance
+      DAT_0800507c: ui_manager_state
+      DAT_08005080: ui_manager
+      DAT_08005084: dso_handle
+      DAT_08005088: ui_manager_destructor
+    notes: >-
+      Raw bytes verify 100 bytes of instructions from 0x08005018 through
+      0x0800507b, followed by this function's four-word literal pool at
+      0x0800507c..0x0800508b; the independent veneer at 0x0800508c proves
+      the true extent is 116 bytes. Decoding every ARM B/BL word in osos.dec
+      found 9 direct bl callers (0x08002fcc, 0x08002fdc, 0x08003040,
+      0x080047cc, 0x08005640, 0x0800565c, 0x08005668, 0x080063e4, and
+      0x08007268), all unconditional and zero predicated, plus no direct tail
+      b. The function tests bit 0 of the state+8 C++ guard at 0x22008c9c;
+      if acquired, it calls the unported 0x08005cb8 with fixed manager
+      0x220104e8, registers that call's return through cxa_atexit with literal
+      destructor 0x22005cf4 and __dso_handle 0x089ca09c, then releases the
+      guard. Separately, a zero state+1 byte calls unported 0x08005448 with
+      that manager and becomes 1. It always returns 0x220104e8. Rust directly
+      uses the existing C++ guard and shutdown-chain ports; the two unported
+      calls are volatile replaceable seams (direct retailOS calls on target,
+      inert callbacks on host), because their class-level behavior remains
+      unported. Host tests cover cold initialization, the bit-0-clear nonzero
+      guard, independent initialized flag, registration's constructor-return
+      argument, and repeat calls. match.py structural review is expected to
+      differ at the callback seams and Rust frame.
+
   - address: 0x08038060
     ghidra: thunk_EXT_FUN_22007470
     name: iram_event_handler_source_veneer
