@@ -96,6 +96,7 @@ pub mod find_element_given_hash;
 pub mod finalize;
 pub mod find_collation_encoding;
 pub mod find_table;
+pub mod locate_table;
 pub mod free_p4;
 pub mod get_varint;
 pub mod get_varint64;

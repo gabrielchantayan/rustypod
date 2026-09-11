@@ -78,8 +78,12 @@ pub struct Parse {
     pub rc: i32,
     /// +0x08: heap-owned error message, replaced on every report.
     pub z_err_msg: *mut u8,
-    /// +0x0c..+0x40: unmodeled.
-    pub _gap_0c: [u8; 0x40 - 0x0c],
+    /// +0x0c..+0x12: unmodeled.
+    pub _gap_0c: [u8; 0x12 - 0x0c],
+    /// +0x12: request a schema recheck after a failed relation lookup.
+    pub check_schema: u8,
+    /// +0x13..+0x40: unmodeled.
+    pub _gap_13: [u8; 0x40 - 0x13],
     /// +0x40: error counter, bumped on every report.
     pub n_err: i32,
 }
@@ -91,6 +95,8 @@ pub struct Parse {
 const _PARSE_RC_OFFSET: [u8; 0x04] = [0; core::mem::offset_of!(Parse, rc)];
 #[cfg(target_pointer_width = "32")]
 const _PARSE_Z_ERR_MSG_OFFSET: [u8; 0x08] = [0; core::mem::offset_of!(Parse, z_err_msg)];
+#[cfg(target_pointer_width = "32")]
+const _PARSE_CHECK_SCHEMA_OFFSET: [u8; 0x12] = [0; core::mem::offset_of!(Parse, check_schema)];
 #[cfg(target_pointer_width = "32")]
 const _PARSE_N_ERR_OFFSET: [u8; 0x40] = [0; core::mem::offset_of!(Parse, n_err)];
 
@@ -205,7 +211,15 @@ mod tests {
     }
 
     fn parse(db: *mut u8, rc: i32, message: *mut u8, n_err: i32) -> Parse {
-        Parse { db, rc, z_err_msg: message, _gap_0c: [0xa5; 0x40 - 0x0c], n_err }
+        Parse {
+            db,
+            rc,
+            z_err_msg: message,
+            _gap_0c: [0xa5; 0x12 - 0x0c],
+            check_schema: 0xa5,
+            _gap_13: [0xa5; 0x40 - 0x13],
+            n_err,
+        }
     }
 
     /// A hand-built tag-57 tracked block (layout: `heap::tracked`). Raw
@@ -347,7 +361,9 @@ mod tests {
             with_formatter(message, || {
                 sqlite_error_msg(&mut parse, b"x\0".as_ptr(), core::ptr::null());
             });
-            assert!(parse._gap_0c.iter().all(|b| *b == 0xa5), "gap clobbered");
+            assert!(parse._gap_0c.iter().all(|b| *b == 0xa5), "gap before check_schema clobbered");
+            assert_eq!(parse.check_schema, 0xa5, "check_schema clobbered");
+            assert!(parse._gap_13.iter().all(|b| *b == 0xa5), "gap after check_schema clobbered");
         }
     }
 }

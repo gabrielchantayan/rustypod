@@ -187,7 +187,9 @@ mod tests {
             db: db as *mut u8,
             rc,
             z_err_msg: core::ptr::null_mut(),
-            _gap_0c: [0xa5; 0x40 - 0x0c],
+            _gap_0c: [0xa5; 0x12 - 0x0c],
+            check_schema: 0xa5,
+            _gap_13: [0xa5; 0x40 - 0x13],
             n_err,
         }
     }
@@ -325,7 +327,9 @@ mod tests {
             with_loader(11, core::ptr::null_mut(), || {
                 sqlite_read_schema(&mut parse);
             });
-            assert!(parse._gap_0c.iter().all(|b| *b == 0xa5), "parse gap clobbered");
+            assert!(parse._gap_0c.iter().all(|b| *b == 0xa5), "parse gap before check_schema clobbered");
+            assert_eq!(parse.check_schema, 0xa5, "check_schema clobbered");
+            assert!(parse._gap_13.iter().all(|b| *b == 0xa5), "parse gap after check_schema clobbered");
             assert!(connection._gap_00.iter().all(|b| *b == 0x5a), "db head clobbered");
             assert_eq!(connection.init_busy, 0, "the busy flag is read, never written");
             assert!(connection._gap_81.iter().all(|b| *b == 0x5a), "db tail clobbered");
