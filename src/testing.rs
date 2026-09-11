@@ -123,6 +123,9 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const HFS_BTREE_GET_NODE: usize = 0x6a00_0000;
+    // 0x6900_0000: dedicated to fs/cache_block_prepare's raw-u32 request
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const CACHE_BLOCK_PREPARE: usize = 0x6900_0000;
     // 0x6b00_0000: dedicated to fp_misc query-object destructor tests;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const QUERY_OBJECT_DESTROY: usize = 0x6b00_0000;

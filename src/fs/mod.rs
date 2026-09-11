@@ -13,6 +13,8 @@ pub mod path_node_lookup;
 pub mod cache_entry;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
+/// Cache-entry slot preparation and writeback @ 0x082e48bc.
+pub mod cache_block_prepare;
 /// Cache-entry writeback through the storage-block writer @ 0x082e4b4c.
 pub mod cache_entry_flush;
 /// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
