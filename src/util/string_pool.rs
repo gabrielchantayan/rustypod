@@ -99,7 +99,17 @@ use core::ptr;
 use crate::util::crts_tag::crts_has_tag;
 #[cfg(test)]
 use crate::util::crts_tag::CRTS_TAG;
+#[cfg(test)]
+extern crate std;
 
+
+/// Serializes host tests that replace the shared pool-store boundary.
+///
+/// Ports that call [`string_pool_store_counted`] directly use this same lock
+/// before installing their recorder, so they cannot race this module's own
+/// seam tests.
+#[cfg(test)]
+pub(crate) static STRING_POOL_SEAM_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 
 /// Failure status of every rejected release (`mvn r0, #0x31`). This is
@@ -804,11 +814,7 @@ mod tests {
     // --- string_pool_copy_entry seam-mock scaffolding ---
 
     use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
-    use std::sync::{Mutex, MutexGuard};
-
-    /// Serializes the tests that swap the pool reader/intern seams and the
-    /// heap ops table (the crts_object.rs `DESTROY_LOCK` precedent).
-    static COPY_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
 
     /// Sentinel pool pointers; the copy function never dereferences them
     /// and the recording mocks only compare them.
@@ -911,7 +917,7 @@ mod tests {
     /// (copy lock first, heap lock second — the inner_state.rs order) and
     /// the reset guard.
     fn mock() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, Reset) {
-        let copy_guard = COPY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let copy_guard = STRING_POOL_SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let heap_guard = mock_heap();
         unsafe {
             STRING_POOL_READ = recording_pool_read;
@@ -1130,12 +1136,12 @@ mod tests {
         STORE_STATUS
     }
 
-    /// Installs the recording store seam. Takes the same COPY_LOCK so a
-    /// store test can never run beside a copy test while the shared
-    /// seam statics are swapped; the heap lock is not needed (the thunk
-    /// allocates nothing).
+    /// Installs the recording store seam. Takes the shared store lock so a
+    /// store test can never run beside a copy test while the shared seam
+    /// statics are swapped; the heap lock is not needed (the thunk allocates
+    /// nothing).
     fn store_mock() -> (MutexGuard<'static, ()>, Reset) {
-        let copy_guard = COPY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let copy_guard = STRING_POOL_SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             STRING_POOL_STORE = recording_pool_store;
         }
