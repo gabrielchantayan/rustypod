@@ -10,24 +10,36 @@ use crate::heap::tracked::tracked_free;
 /// Number of words/pointers in a target `Bitvec` union.
 pub const BITVEC_NPTR: usize = 125;
 
-/// SQLite's adaptive bitmap / child-node set.
+/// SQLite's adaptive bitmap / child-pointer/hash-table storage.
 ///
-/// `children` overlays the inline bitmap. It is read only when `i_divisor` is
-/// nonzero, so the widened host pointers cannot be mistaken for bitmap words.
+/// On ARM this union occupies exactly the 500 bytes after the three-word
+/// header. On a 64-bit host, the child view is wider, but the bitmap and hash
+/// views retain their target element widths.
+#[repr(C)]
+pub union BitvecStorage {
+    /// Inline bit set for vectors no wider than 4,000 bits.
+    pub bitmap: [u8; 500],
+    /// Open-addressed set members for a wide vector without child nodes.
+    pub hashes: [u32; BITVEC_NPTR],
+    /// Recursive child vectors for a wide vector with a divisor.
+    pub children: [*mut Bitvec; BITVEC_NPTR],
+}
+
+/// SQLite's adaptive bitmap / child-node set.
 #[repr(C)]
 pub struct Bitvec {
     /// +0x00: number of bits represented.
     pub size: u32,
     /// +0x04: number of bits currently set.
     pub n_set: u32,
-    /// +0x08: zero for the inline bitmap; nonzero for child pointers.
+    /// +0x08: zero for bitmap/hash storage; nonzero for child pointers.
     pub i_divisor: u32,
-    /// +0x0c on ARM: inline bitmap or 125 recursive child pointers.
-    pub children: [*mut Bitvec; BITVEC_NPTR],
+    /// +0x0c on ARM: inline bitmap, hashes, or 125 recursive child pointers.
+    pub storage: BitvecStorage,
 }
 
 #[cfg(target_pointer_width = "32")]
-const _: [u8; 0x0c] = [0; core::mem::offset_of!(Bitvec, children)];
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(Bitvec, storage)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x200] = [0; core::mem::size_of::<Bitvec>()];
 
@@ -60,17 +72,85 @@ pub unsafe extern "C" fn sqlite3_bitvec_destroy(bitvec: *mut Bitvec) {
     if (*bitvec).i_divisor != 0 {
         let mut index = 0;
         while index < BITVEC_NPTR {
-            sqlite3_bitvec_destroy((*bitvec).children[index]);
+            sqlite3_bitvec_destroy((*bitvec).storage.children[index]);
             index += 1;
         }
     }
 
     tracked_free(bitvec.cast());
 }
+
+/// sqlite3_bitvec_test — original `FUN_08370738` @ `0x08370738`
+/// (184 bytes, `0x08370738..0x083707f0`; **8 direct `bl` call sites**, all
+/// unconditional, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Returns false for a NULL vector, zero bit number, or a bit outside the
+/// vector's declared size. Small vectors test their inline bitmap. Larger
+/// vectors either descend through the divisor-selected child and residual bit
+/// number, or probe their 125-slot linear hash table using `(bit * 37) % 125`.
+/// The division helper preserves the retailOS quotient/remainder split.
+///
+/// Deliberate deviation: the target's union is a named [`BitvecStorage`]
+/// rather than overlapping literal byte offsets, so host pointer widening
+/// cannot make the bitmap or hash views overlap incorrectly.
+///
+/// # Safety
+///
+/// `bitvec` must be NULL or point to a valid target-layout [`Bitvec`]. A
+/// nonzero divisor requires valid child pointers for every non-NULL child.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.sqlite3_bitvec_test")]
+pub unsafe extern "C" fn sqlite3_bitvec_test(mut bitvec: *const Bitvec, mut bit: u32) -> u32 {
+    loop {
+        if bitvec.is_null() || (*bitvec).size < bit || bit == 0 {
+            return 0;
+        }
+
+        if (*bitvec).size <= 4_000 {
+            let bit = bit - 1;
+            let mask = 1u8 << (bit & 7);
+            return ((*(*bitvec).storage.bitmap.get_unchecked((bit >> 3) as usize) & mask) != 0) as u32;
+        }
+
+        let divisor = (*bitvec).i_divisor;
+        if divisor != 0 {
+            let mut remainder = 0;
+            let child_index = crate::runtime::rt_div::__rt_udivmod(
+                bit - 1,
+                divisor,
+                core::ptr::addr_of_mut!(remainder),
+            );
+            bitvec = *(*bitvec).storage.children.get_unchecked(child_index as usize);
+            bit = remainder.wrapping_add(1);
+            continue;
+        }
+
+        let mut remainder = 0;
+        crate::runtime::rt_div::__rt_udivmod(
+            bit.wrapping_mul(37),
+            BITVEC_NPTR as u32,
+            core::ptr::addr_of_mut!(remainder),
+        );
+        loop {
+            let candidate = *(*bitvec).storage.hashes.get_unchecked(remainder as usize);
+            if candidate == 0 {
+                return 0;
+            }
+            if candidate == bit {
+                return 1;
+            }
+            remainder += 1;
+            if remainder == BITVEC_NPTR as u32 {
+                remainder = 0;
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::{sqlite3_bitvec_destroy, Bitvec, BITVEC_NPTR};
+    use super::{sqlite3_bitvec_destroy, sqlite3_bitvec_test, Bitvec, BitvecStorage, BITVEC_NPTR};
     use crate::heap::types::HeapDescriptorDescriptor;
     use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
     use parking_lot::Mutex;
@@ -130,7 +210,7 @@ mod tests {
                     size: 0,
                     n_set: 0,
                     i_divisor: divisor,
-                    children: [core::ptr::null_mut(); BITVEC_NPTR],
+                    storage: BitvecStorage { children: [core::ptr::null_mut(); BITVEC_NPTR] },
                 });
             }
 
@@ -151,7 +231,7 @@ mod tests {
 
         let parent = TrackedBitvec::new(0);
         let child = TrackedBitvec::new(0);
-        unsafe { (*parent.node).children[0] = child.node };
+        unsafe { (*parent.node).storage.children[0] = child.node };
         unsafe { sqlite3_bitvec_destroy(parent.node) };
 
         assert_eq!(*FREED.lock(), vec![(parent.raw as usize, 57)]);
@@ -168,8 +248,8 @@ mod tests {
         let first = TrackedBitvec::new(0);
         let last = TrackedBitvec::new(0);
         unsafe {
-            (*parent.node).children[0] = first.node;
-            (*parent.node).children[BITVEC_NPTR - 1] = last.node;
+            (*parent.node).storage.children[0] = first.node;
+            (*parent.node).storage.children[BITVEC_NPTR - 1] = last.node;
             sqlite3_bitvec_destroy(parent.node);
         }
 
@@ -179,5 +259,77 @@ mod tests {
             "all NULL slots are no-ops; non-NULL descendants precede their owner"
         );
         assert!(!first.storage.is_empty() && !last.storage.is_empty());
+    }
+
+    #[test]
+    fn test_rejects_null_zero_and_out_of_range_bits() {
+        let bitvec = Box::new(Bitvec {
+            size: 1,
+            n_set: 0,
+            i_divisor: 0,
+            storage: BitvecStorage { bitmap: [0; 500] },
+        });
+
+        unsafe {
+            assert_eq!(sqlite3_bitvec_test(core::ptr::null(), 1), 0);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 0), 0);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 2), 0);
+        }
+    }
+
+    #[test]
+    fn test_reads_inline_bitmap_first_and_last_bits() {
+        let mut bitvec = Box::new(Bitvec {
+            size: 4_000,
+            n_set: 2,
+            i_divisor: 0,
+            storage: BitvecStorage { bitmap: [0; 500] },
+        });
+        unsafe {
+            bitvec.storage.bitmap[0] = 0x01;
+            bitvec.storage.bitmap[499] = 0x80;
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 1), 1);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 4_000), 1);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 2), 0);
+        }
+    }
+
+    #[test]
+    fn test_descends_using_quotient_and_remainder() {
+        let mut child = Box::new(Bitvec {
+            size: 4_000,
+            n_set: 1,
+            i_divisor: 0,
+            storage: BitvecStorage { bitmap: [0; 500] },
+        });
+        let mut parent = Box::new(Bitvec {
+            size: 4_001,
+            n_set: 1,
+            i_divisor: 4_000,
+            storage: BitvecStorage { children: [core::ptr::null_mut(); BITVEC_NPTR] },
+        });
+        unsafe {
+            child.storage.bitmap[0] = 0x01;
+            parent.storage.children[1] = child.as_mut();
+            assert_eq!(sqlite3_bitvec_test(parent.as_ref(), 4_001), 1);
+            parent.storage.children[1] = core::ptr::null_mut();
+            assert_eq!(sqlite3_bitvec_test(parent.as_ref(), 4_001), 0);
+        }
+    }
+
+    #[test]
+    fn test_probes_hash_table_across_final_slot() {
+        let mut bitvec = Box::new(Bitvec {
+            size: 4_001,
+            n_set: 2,
+            i_divisor: 0,
+            storage: BitvecStorage { hashes: [0; BITVEC_NPTR] },
+        });
+        unsafe {
+            bitvec.storage.hashes[124] = 27;
+            bitvec.storage.hashes[0] = 152;
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 152), 1);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 277), 0);
+        }
     }
 }
