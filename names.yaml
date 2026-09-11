@@ -55120,6 +55120,36 @@ functions:
       both no-read cases, positive and negative counts, every payload
       position, all-zero blocks, and an ignored trailing nonzero word.
 
+  - address: 0x080dadfc
+    ghidra: FUN_080dadfc
+    name: string_object_initial_sort_key
+    size: 108
+    sig: "u32 string_object_initial_sort_key(const StringObject *value)"
+    module: cxx/string_object_initial_sort_key
+    status: ported
+    renames:
+      param_1/r0: value
+      iVar4/r5: codepoint_index
+      uVar1/r4: first_codepoint
+      uVar2/r0: byte_map
+      uVar3/r0: mapped_key
+      DAT_080dae68: INITIAL_SORT_KEY_CHARACTER_FLAGS (0x083ecfdd)
+      FUN_0820b234: retail_byte_map_getter (identity unrecovered)
+      FUN_0829f1f4: signed_range_byte_map_lookup
+    notes: >-
+      Raw ARM extent is 0x080dadfc..0x080dae6c: 104 instruction bytes plus
+      the 4-byte character-flag literal at 0x080dae68; the next separately
+      linked function starts at 0x080dae6c. Decoding every ARM B/BL word in
+      osos.dec found exactly 10 inbound direct calls, all unconditional plain
+      bl (0 predicated forms and 0 direct B tails); no data-word reference
+      targets the entry. It repeatedly obtains StringObject codepoints until a
+      non-space, gets an unidentified three-word byte map through
+      FUN_0820b234, and applies FUN_0829f1f4's signed inclusive range lookup.
+      A zero mapping returns 0x21 for NUL or codepoints >= 0x2e80 and 0x23
+      otherwise; nonzero mappings whose 0x083ecfdd flag has bit 0x10 return
+      0x23, otherwise returning the mapped byte. Deliberate deviation: the
+      unported getter remains a typed fixed-address target call and a host
+      seam, while its independently decoded 20-byte lookup leaf is inlined.
   - address: 0x080da15c
     ghidra: FUN_080da15c
     name: wmcodec_write_reg
