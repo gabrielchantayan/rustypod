@@ -27,6 +27,7 @@ pub mod class_registry;
 pub mod descriptor_layout;
 pub mod descriptor_field;
 pub mod callback_dispatch_release;
+pub mod default_selector_dispatch;
 pub mod context;
 pub mod controller_layout_dispatch;
 pub mod controller_secondary_interface;
