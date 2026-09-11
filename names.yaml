@@ -46317,7 +46317,7 @@ functions:
       r4: binding candidate
       r1: binding resource index, then candidate's bound register
       FUN_08367390: binding_promote seam (refreshes a reused binding in its anchor)
-      FUN_082c5c58: binding_release seam (releases an eligible active binding)
+      FUN_082c5c58: cg_binding_release (ported; releases an eligible active binding)
       FUN_083673b0: cg_binding_unlink (ported direct default)
       FUN_08367358: binding_push seam (inserts the selected binding at active-head)
     notes: >-
@@ -46334,15 +46334,63 @@ functions:
       an active match is released before the normal free-unlink then
       active-push transfer. The raw body is exactly 204 bytes:
       0x082b3c34..0x082b3cfc, followed by distinct FUN_082b3d00.
-      Deliberate deviation: unported FUN_08367390/FUN_082c5c58/
-      FUN_08367358 use the CG_BINDING_ACQUIRE_OPS seam's documented no-op
-      defaults; ported FUN_083673b0 is the unlink default. This matches the
-      existing incomplete binding-machine seam policy and avoids inventing
-      a callee port. Host tests cover a zero-mask bit-31 parent reuse, an
-      out-of-range bit-32 free-tail skip before bit-31 selection, active-list
-      release fallback, call order and seam defaults. match.py exit 1 diff
-      dispatch replaces stock direct bl calls, while LLVM may merge the
-      two tail-to-head filter loops.
+      Deliberate deviation: unported FUN_08367390/FUN_08367358 use the
+      CG_BINDING_ACQUIRE_OPS no-op defaults; ported FUN_082c5c58 is now
+      the release default but retains its documented no-op direct-callee
+      FUN_083685f0 and list-push FUN_08367358 seams. Ported
+      FUN_083673b0 remains the unlink default. Host tests cover a
+      zero-mask bit-31 parent reuse, an out-of-range bit-32 free-tail
+      skip before bit-31 selection, active-list release fallback, call
+      order and seam defaults. match.py exit 1 diff dispatch replaces
+      stock direct bl calls, while LLVM may merge the two tail-to-head
+      filter loops.
+
+  - address: 0x082c5c58
+    ghidra: FUN_082c5c58
+    name: cg_binding_release
+    size: 196
+    sig: "void cg_binding_release(CgCodegen *codegen, CgBinding *binding)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r5: codegen (binding-pool owner; current block +0x208,
+        free anchor +0x1f0, active anchor +0x1f8, use-head table +0x21c)
+      param_2/r4: binding (binding +0x10 bound register, +0x18 flags)
+      r2: bound register (binding +0x10), then its virtual-register number
+        (+0x10 CG_VREG_NO)
+      r0/r1: current block live-OUT bitset and its bitmap word, then the
+        queued-use head and final flags word
+      FUN_083685f0: unported direct callee; identity deliberately unrecovered
+        (called with codegen, binding, bound register)
+      FUN_083673b0: cg_binding_unlink (ported active-list removal)
+      FUN_08367358: unported binding_push (free-list insertion)
+    notes: >-
+      Verified call count: 9 bl sites — 7 plain bl at 0x082b3cf8,
+      0x082c1518, 0x082cb808, 0x082ccaa8, 0x082ccab4, 0x082ccb18 and
+      0x082d783c; two are predicated bleq at 0x082becc8 and 0x082c1588.
+      No aligned osos.dec data word references 0x082c5c58. Raw extent is
+      exactly 196 bytes, 0x082c5c58..0x082c5d18, followed by distinct
+      FUN_082c5d1c. The predicated callers already prove their candidate
+      binding must be releasable before entry; the function itself has no
+      NULL guard. It verifies binding +0x10 against the bound register's
+      +0x08 back-pointer. For a consistent pair it invokes FUN_083685f0
+      only when binding flags bit 0x100 is set and the virtual register is
+      live-OUT in the published block's +0x20 bitset or has a non-NULL
+      codegen +0x21c use-list head. It then unconditionally clears binding
+      +0x10; an active-anchor binding is unlinked from +0x1f8 and pushed
+      onto +0x1f0; and it clears flags 0x100 and 0x200. The raw
+      bic-0x200/and-0x100-(flags>>1)/bic-0x100 sequence makes the apparent
+      0x200-to-0x100 shift dead, so the exact final flags are flags & ~0x300;
+      Ghidra drops the first clear. Deliberate deviation: FUN_083685f0 and
+      FUN_08367358 dispatch through CG_BINDING_ACQUIRE_OPS inert defaults
+      until their own ports; their identities are not invented. Host tests
+      prove queued-use release and active-to-free order, bit-31 live-OUT
+      release without dereferencing the use table, stale back-pointer
+      short-circuiting before liveness reads, unconditional detachment, and
+      the raw 0x300 flag clear. match.py exit 1 diff expected: stock direct
+      bl/blne calls become ops-table dispatch; same back-pointer guard,
+      live-OUT/use-head split, active-anchor transfer, and terminal flag
+      mask remain.
 
 
   - address: 0x082d817c
