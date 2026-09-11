@@ -55811,6 +55811,36 @@ functions:
       traversal fixtures; they prove a non-match is untouched, the first
       matching element alone receives the name, iteration stops immediately
       after that match, and an absent id exhausts without a write.
+  - address: 0x0832774c
+    ghidra: FUN_0832774c
+    name: inline_encoded_word_block_test_bit
+    size: 88
+    sig: "u32 inline_encoded_word_block_test_bit(const InlineEncodedWordBlock *block, i32 bit_index)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      param_2/r1: bit_index
+      r2: preserved block pointer
+      r3: decoded word count then selected decoded word
+      r0: magnitude word index then result
+      DAT_083277a4: INLINE_ENCODED_COUNT_MULTIPLIER (0x4b6143ff)
+      DAT_083277a8: INLINE_ENCODED_WORD_COMPARE_MULTIPLIER (0x3399e27f)
+    notes: >-
+      Raw ARM confirms the 88-byte full extent 0x0832774c..0x083277ac:
+      20 instruction words through 0x083277a0, followed by the count and
+      word decode literal-pool words at 0x083277a4/0x083277a8; the next
+      separately linked function begins with stmdb sp! at 0x083277ac.
+      Decoding every ARM B/BL word in osos.dec finds exactly nine direct
+      inbound call sites, all unconditional bl, with zero predicated forms,
+      tail branches, or aligned DATA-word references to this entry. It takes
+      the wrapping magnitude of bit_index, rejects a magnitude word index
+      outside the wrapping absolute decoded inline-word count before loading
+      any payload, then multiplies that word by 0x3399e27f and returns the
+      selected bit. Negative indices select their positive magnitude
+      counterparts; i32::MIN retains ARM's wrapping-negation behavior and
+      therefore has word index 0x04000000. The same word multiplier is used
+      by inline_encoded_word_block_compare. Deliberate deviation: none.
   - address: 0x08309be0
     ghidra: FUN_08309be0
     name: copy_inline_encoded_word_block
