@@ -340,6 +340,37 @@ pub unsafe extern "C" fn animation_init(
     this
 }
 
+/// animation_default_init — original: `FUN_08166c5c` @ 0x08166c5c (36
+/// instruction bytes: nine ARM words; its separately linked vtable literal
+/// 0x08987f00 is at 0x08166c80, making the true extent 40 bytes; the next
+/// function begins at 0x08166c84).
+///
+/// Decoding every ARM `B`/`BL` word in osos.dec finds exactly ten direct
+/// callers, all plain unconditional `bl`; there are no predicated call forms,
+/// `b` tail callers, or raw DATA-word references. The six calls at
+/// 0x08153198..0x081531c0 and four at 0x0816e3bc..0x0816e3d4 construct
+/// adjacent 0x24-byte animation elements by feeding each returned pointer
+/// into the next address calculation.
+///
+/// Default-constructs an animation in caller-provided storage: initializes
+/// the refcounted base, installs the derived vtable, and clears only the
+/// three retained-value slots. The base initializer and following stores
+/// preserve `r0`, so the ARM function returns `this`; the port makes that
+/// ABI-visible result explicit. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn animation_default_init(this: *mut Animation) -> *mut Animation {
+    // 08166c60: bl 0x08138460 — initializes vtable +0x00 and flags +0x14.
+    refcounted_base_init(this.cast::<FixedValue>());
+    // 08166c64..08166c7c: derived vtable plus the three empty value slots.
+    core::ptr::addr_of_mut!((*this).vtable).write_volatile(ANIMATION_VTABLE);
+    core::ptr::addr_of_mut!((*this).from_value).write_volatile(0);
+    core::ptr::addr_of_mut!((*this).to_value).write_volatile(0);
+    core::ptr::addr_of_mut!((*this).current_value).write_volatile(0);
+    this
+}
+
+
 /// animation_set_values — original: `FUN_08166a40` @ 0x08166a40 (172
 /// instruction bytes; the separately linked pool word at 0x08166aec holds
 /// the scheduler-global address). Raw decoding of every ARM B/BL word in
@@ -1062,6 +1093,38 @@ mod tests {
                     f.current as u32,     // +0x20
                 ],
                 "all nine words, nothing else touched"
+            );
+        }
+    }
+
+    #[test]
+    fn default_init_sets_its_derived_state_and_preserves_other_words() {
+        let _lock = take_lock();
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation_default_init");
+            return;
+        };
+        unsafe {
+            dirty_animation(f.animation);
+
+            let returned = animation_default_init(f.animation);
+
+            assert_eq!(returned, f.animation, "array constructors consume this result");
+            let words = core::slice::from_raw_parts(f.animation.cast::<u32>(), 9);
+            assert_eq!(
+                words,
+                &[
+                    ANIMATION_VTABLE, // +0x00 derived class vtable
+                    0x1111_1111,      // +0x04 untouched
+                    0xcafe_babe,      // +0x08 untouched
+                    0x2222_2222,      // +0x0c untouched
+                    0x3333_3333,      // +0x10 untouched
+                    0,                // +0x14 refcounted base initialization
+                    0,                // +0x18 from
+                    0,                // +0x1c to
+                    0,                // +0x20 current
+                ],
+                "the default constructor writes exactly five of nine words"
             );
         }
     }
