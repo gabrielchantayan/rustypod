@@ -56,6 +56,31 @@ functions:
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
 
+  - address: 0x08038260
+    ghidra: thunk_EXT_FUN_220005fc
+    name: iram_byte_copy_veneer
+    size: 8
+    sig: "void iram_byte_copy_veneer(void *dst, const void *src, u32 len)"
+    module: libc/byte_copy
+    status: ported
+    renames: {thunk_EXT_FUN_220005fc: iram_byte_copy_veneer,
+      EXT_FUN_220005fc: byte_copy}
+    notes: >-
+      Ghidra's 4-byte extent omits this ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038260 and literal
+      0x220005fc at 0x08038264; the next veneer starts at 0x08038268, so
+      the true size is 8 bytes. Decoding every ARM B/BL word finds exactly
+      10 direct calls, all unconditional bl (0x082e1b2c, 0x082e1b3c,
+      0x082e1b4c, 0x082e1b5c, 0x082e1b6c, 0x082e1b84, 0x082e1bb0,
+      0x082e1bd0, 0x082e1bf0, 0x082e1c08); no predicated call, tail branch,
+      or aligned raw word references this thunk, so it is neither
+      caller-gated nor virtually dispatched. The relocator at 0x080046e0
+      copies osos 0x08000000..0x0800aed8 into IRAM 0x22000000, making
+      target 0x220005fc the already ported byte_copy @ 0x080005fc. The
+      veneer forwards to that body through a volatile function pointer,
+      retaining separate hook-target identity and preventing inlining/ICF;
+      it preserves the void byte-copy ABI and forward overlap behavior.
+
   - address: 0x082c4f38
     ghidra: FUN_082c4f38
     size: 24
