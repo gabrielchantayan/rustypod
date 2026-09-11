@@ -53120,6 +53120,37 @@ functions:
       r1,[pc] sequence matches verbatim. Reference C:
       decomp/c/004/08057c2c_FUN_08057c2c.c.
 
+  - address: 0x0805e6d0
+    ghidra: FUN_0805e6d0
+    name: stream_tell
+    size: 28
+    sig: "i32 stream_tell(StreamObject **stream)"
+    module: util/stream_tell
+    status: ported
+    renames:
+      param_1/r0: stream
+      uVar1/r0: position
+      pcVar2/r1: tell
+    notes: >-
+      Stream-position wrapper over a double-dereferenced handle. Raw ARM
+      confirms Ghidra's 28-byte extent: the next sibling begins with
+      cmp r0,#0 at 0x0805e6ec immediately after this wrapper's bx lr.
+      Algorithm: return -5 only when stream is NULL; otherwise load
+      object = *stream, load its vtable, and tail-dispatch vtable slot +0x1c
+      as tell(object), preserving the slot result unchanged. A non-NULL
+      handle with a NULL object or vtable faults because the initial cmp
+      condition still guards only the handle; this is deliberately preserved.
+      Decoding every B/BL word in osos.dec finds exactly 10 direct call
+      sites: 10 unconditional bl, zero predicated bl, and no plain B sites.
+      All callers therefore rely on this wrapper's internal NULL guard.
+      The slot target is runtime vtable data, not a statically identifiable
+      function entry, so no dispatch seam is introduced. Deliberate
+      deviation: named #[repr(C)] vtable fields preserve the 32-bit slot
+      layout and widen on 64-bit hosts. Reference C:
+      decomp/c/004/0805e6d0_FUN_0805e6d0.c. match.py structural review:
+      Rust adds an fp frame and splits the predicated retail bxne into a NULL
+      branch, frame pop, and tail bx, while retaining the +0x1c dispatch.
+
   - address: 0x0805e79c
     ghidra: FUN_0805e79c
     name: stream_seek

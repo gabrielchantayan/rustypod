@@ -56,9 +56,9 @@
 //! vtable, so no dispatch seam is needed (the `app/class_8900.rs`
 //! precedent).
 
-/// The result the wrapper returns for a NULL handle or any nonzero
-/// status from the seek slot (the original's `mvn r0, #4`).
-pub const STREAM_SEEK_ERROR: i32 = -5;
+/// The result returned by these stream-handle wrappers for a NULL handle
+/// (the original's `mvn r0, #4`).
+pub const STREAM_HANDLE_ERROR: i32 = -5;
 
 /// A seekable stream object, as seen through this wrapper: only the
 /// vtable word is decoded.
@@ -68,22 +68,26 @@ pub struct StreamObject {
     pub vtable: *const StreamVtable,
 }
 
-/// The stream vtable, modeled down to the slot this wrapper dispatches.
+/// The stream vtable, modeled down to the slots the seek and tell wrappers
+/// dispatch.
 ///
-/// The filler array plus the opaque read word place `seek` at byte
-/// offset +0x14 on the 32-bit target without any literal byte offset;
-/// on a 64-bit host the named slot simply widens with the rest.
+/// Named fields preserve the target's 32-bit slot layout without literal
+/// byte offsets; each word widens naturally on a 64-bit host.
 #[repr(C)]
 pub struct StreamVtable {
     /// Slots +0x00..+0x0c, not dispatched by this wrapper.
     pub slots_00_0c: [usize; 4],
     /// Slot +0x10: the stream-read entry the read core @ 0x0805e754
-    /// tail-calls; opaque to this wrapper.
+    /// tail-calls; opaque to these wrappers.
     pub read_10: usize,
     /// Slot +0x14: absolute seek, `(this, position) -> status`,
     /// status 0 on success. `position` rides in r2:r3 on the target,
     /// matching this `i64` parameter's AAPCS placement.
     pub seek: unsafe extern "C" fn(this: *mut StreamObject, position: i64) -> i32,
+    /// Slot +0x18, not dispatched by either wrapper.
+    pub opaque_18: usize,
+    /// Slot +0x1c: current absolute position, `(this) -> position`.
+    pub tell: unsafe extern "C" fn(this: *mut StreamObject) -> i32,
 }
 
 /// stream_seek — original: `FUN_0805e79c` @ 0x0805e79c (64 bytes;
@@ -106,7 +110,7 @@ pub struct StreamVtable {
 #[cfg_attr(target_os = "none", link_section = ".text.stream_seek")]
 pub unsafe extern "C" fn stream_seek(stream: *const *mut StreamObject, offset: i32) -> i32 {
     if stream.is_null() {
-        return STREAM_SEEK_ERROR;
+        return STREAM_HANDLE_ERROR;
     }
     let object = unsafe { *stream };
     let vtable = unsafe { (*object).vtable };
@@ -114,7 +118,7 @@ pub unsafe extern "C" fn stream_seek(stream: *const *mut StreamObject, offset: i
     if status == 0 {
         0
     } else {
-        STREAM_SEEK_ERROR
+        STREAM_HANDLE_ERROR
     }
 }
 
@@ -143,10 +147,16 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn unused_tell(_this: *mut StreamObject) -> i32 {
+        0
+    }
+
     static SEEK_VTABLE: StreamVtable = StreamVtable {
         slots_00_0c: [0; 4],
         read_10: 0,
         seek: recording_seek,
+        opaque_18: 0,
+        tell: unused_tell,
     };
 
     fn fixture(status: i32) -> (parking_lot::MutexGuard<'static, ()>, StreamObject) {
