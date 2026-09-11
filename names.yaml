@@ -60637,6 +60637,38 @@ functions:
       instruction selection exactly.
 
 
+  # --- Four-slot disk block-read gate ---
+  - address: 0x082c6244
+    ghidra: FUN_082c6244
+    name: disk_block_read
+    size: 120
+    sig: "u32 disk_block_read(u32 device, u32 block_index, void *destination, u32 block_count, u32 wait_for_ready)"
+    module: fs/disk_block
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: block_index
+      param_3/r2: destination
+      param_4/r3: block_count
+      param_5/[sp]: wait_for_ready
+      uVar2: valid_device
+      iVar1: dispatch_result
+    notes: >-
+      Raw ARM confirms the 120-byte extent from 0x082c6244 through
+      0x082c62b8; the separately linked next function opens at 0x082c62bc.
+      Exactly nine direct B/BL words target this entry, all unconditional bl
+      (0x082b1b48, 0x082c5170, 0x082d0a50, 0x082e1540, 0x082e1ac4,
+      0x082e1c58, 0x082e3e2c, 0x082e3f50, and 0x082e3ff0); there are no
+      predicated calls or tail branches. The body calls unported stock helper
+      0x082c3174 with (device, wait_for_ready) before it checks that device is
+      below four. A false helper result, or device >= 4, returns zero without
+      dispatch. Otherwise it calls unported wrapper 0x083653cc with
+      (device, block_index, destination, block_count, 1) and normalizes any
+      nonzero result to one. The direct callee identities are not asserted
+      beyond their observed readiness-gate and dispatch roles. Target code
+      invokes their verified retailOS addresses; host tests install recording
+      seams for both.
+
   # --- Filesystem cache-backed block acquisition ---
   - address: 0x082e3f98
     ghidra: FUN_082e3f98

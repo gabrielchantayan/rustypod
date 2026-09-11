@@ -15,6 +15,8 @@ pub mod path_node_lookup;
 pub mod cache_entry;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
+/// Four-slot disk block-read gate and dispatch @ 0x082c6244.
+pub mod disk_block;
 /// Cache-entry slot preparation and writeback @ 0x082e48bc.
 pub mod cache_block_prepare;
 /// Cache-entry writeback through the storage-block writer @ 0x082e4b4c.
