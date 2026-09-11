@@ -358,6 +358,36 @@ pub unsafe extern "C" fn mutex_unlock_counted(lock: *mut CountedMutex) {
 /// Byte offset of the [`CountedMutex`] embedded in the interface object
 /// the guard acquire below locks (`add r0, r0, #0x44` in the original).
 const INTERFACE_LOCK_OFFSET: usize = 0x44;
+/// `counted_mutex_guard_acquire_lock` — original: `FUN_0818a128` @
+/// 0x0818a128 (28 bytes; 10 direct `bl` call sites, binary-scanned by
+/// decoding every B/BL word in osos.dec: 0x08149fb4, 0x0814a174,
+/// 0x0814a1f0, 0x081e1f0c, 0x081e1f7c, 0x081e1fc8, 0x081e1ffc,
+/// 0x081e2030, 0x082971d0, and 0x08297260 — all plain `bl`, with no
+/// predicated forms or tail `b`). The next distinct function begins at
+/// 0x0818a144, and no word-aligned data word in osos.dec equals this entry,
+/// so it is never dispatched virtually.
+///
+/// Acquire half of a one-word [`CountedMutex`] scope guard when the caller
+/// already has the lock address: stores `lock` into `*guard`, acquires it
+/// through [`mutex_lock_counted`], and returns `guard`. The store precedes
+/// the lock call (`str r1,[r4]` before `bl 0x08094404`), so a waiting caller
+/// exposes a valid guard word. Neither argument is NULL-checked, matching
+/// the firmware.
+///
+/// Deliberate codegen deviation: as with
+/// [`counted_mutex_guard_acquire`], LLVM may inline the existing Rust
+/// `mutex_lock_counted` body rather than retaining the firmware's `bl`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn counted_mutex_guard_acquire_lock(
+    guard: *mut *mut CountedMutex,
+    lock: *mut CountedMutex,
+) -> *mut *mut CountedMutex {
+    guard.write(lock);
+    mutex_lock_counted(lock);
+    guard
+}
+
 
 /// counted_mutex_guard_acquire — original: `FUN_0818a144` @ 0x0818a144
 /// (32 bytes; 16 `bl` call sites, binary-scanned by decoding every B/BL
@@ -925,6 +955,80 @@ mod tests {
     }
 
     // -- the counted-lock guard acquire @ 0x0818a144 ----------------
+    // -- direct counted-lock guard acquire @ 0x0818a128 ----------------
+
+    /// The direct-lock guard stores its input verbatim, waits on it,
+    /// increments its counter, and returns the guard address.
+    #[test]
+    fn guard_acquire_lock_stores_locks_and_returns_the_guard() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut counted_lock = live_counted_lock(&mut cell, 0);
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe {
+            counted_mutex_guard_acquire_lock(guard_address, core::ptr::addr_of_mut!(counted_lock))
+        };
+
+        assert_eq!(returned, guard_address, "returns the guard address");
+        assert_eq!(guard, core::ptr::addr_of_mut!(counted_lock), "stores lock verbatim");
+        assert_eq!(counted_lock.hold_count, 1, "lock is held");
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE)]);
+    }
+
+    /// The guard store is visible during the semaphore wait: it precedes
+    /// the original's `bl mutex_lock_counted`.
+    #[test]
+    fn guard_acquire_lock_stores_the_guard_word_before_waiting() {
+        let _lock = mock_kernel();
+        static mut PROBED_GUARD: *const *mut CountedMutex = core::ptr::null();
+        static mut GUARD_WORD_AT_WAIT: usize = usize::MAX;
+        unsafe extern "C" fn probing_wait(handle: u32) {
+            record(Call::Wait(handle));
+            unsafe {
+                GUARD_WORD_AT_WAIT = (*PROBED_GUARD) as usize;
+            }
+        }
+        let mut cell = MOCK_HANDLE;
+        let mut counted_lock = live_counted_lock(&mut cell, 0);
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+        unsafe {
+            PROBED_GUARD = guard_address;
+            GUARD_WORD_AT_WAIT = usize::MAX;
+            let mut ops = MOCK_KERNEL;
+            ops.sema_wait = probing_wait;
+            *core::ptr::addr_of_mut!(ROM_KERNEL) = ops;
+            counted_mutex_guard_acquire_lock(guard_address, core::ptr::addr_of_mut!(counted_lock));
+            assert_eq!(
+                GUARD_WORD_AT_WAIT,
+                core::ptr::addr_of_mut!(counted_lock) as usize,
+                "guard word already stored while the wait runs"
+            );
+        }
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE)]);
+    }
+
+    /// The inherited NULL-cell guard skips the ROM wait but still writes
+    /// the guard and increments the hold counter.
+    #[test]
+    fn guard_acquire_lock_null_cell_still_stores_and_counts() {
+        let _lock = mock_kernel();
+        let mut counted_lock = live_counted_lock(core::ptr::null_mut(), 0);
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe {
+            counted_mutex_guard_acquire_lock(guard_address, core::ptr::addr_of_mut!(counted_lock))
+        };
+
+        assert_eq!(returned, guard_address);
+        assert_eq!(guard, core::ptr::addr_of_mut!(counted_lock));
+        assert_eq!(counted_lock.hold_count, 1, "increment is unconditional");
+        assert_eq!(calls(), vec![], "no ROM operation behind a NULL cell");
+    }
+
 
     /// Owner/interface fixture: `words[1]` is the interface pointer the
     /// original loads with `ldr r0,[r1,#4]`; the interface carries a live
