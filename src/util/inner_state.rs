@@ -104,6 +104,22 @@ const CACHED_RESULTS: usize = 0xeec;
 /// Byte offset of the auxiliary allocation paired with [`CACHED_RESULTS`].
 const CACHED_AUXILIARY: usize = 0xef0;
 
+/// Byte offset of a tag-4 allocation released by
+/// [`inner_release_buffer_and_reset_cursor`].
+const BUFFER_ALLOCATION: usize = 0xe90;
+
+/// Byte offsets delimiting the 16-byte cursor reset by
+/// [`inner_release_buffer_and_reset_cursor`].
+const BUFFER_CURSOR_BEGIN: usize = 0xebc;
+const BUFFER_CURSOR_END: usize = 0xec0;
+
+/// Byte offset of the sentinel index reset with the buffer cursor.
+const BUFFER_INDEX: usize = 0x1c;
+
+/// Byte offset of the u16 selection reset with the buffer cursor.
+const BUFFER_SELECTION: usize = 0x82c;
+
+
 /// Byte offsets of the transient resource pointers reset by
 /// [`inner_reset_transient_state`].
 const TRANSIENT_PRIMARY: usize = 0xe7c;
@@ -186,6 +202,55 @@ pub unsafe extern "C" fn inner_clear_cached_results(inner: *mut u8) {
         }
     }
     (inner.add(RESULT_COUNT) as *mut u32).write(0);
+}
+
+/// inner_release_buffer_and_reset_cursor — original: `FUN_080be134` @
+/// `0x080be134` (144 instruction bytes, followed by the literal
+/// `0x0000082c` at `0x080be1c4`; the next separately entered function starts
+/// at `0x080be1c8`).
+///
+/// Raw decoding of every ARM immediate B/BL word in `osos.dec` finds exactly
+/// 10 direct callers, all plain unconditional `bl`: `0x08066428`,
+/// `0x080664b4`, `0x080664e8`, `0x08066564`, `0x080665fc`, `0x08066780`,
+/// `0x08066a18`, `0x08066b50`, `0x08068ec8`, and `0x0809dc0c`.
+///
+/// Releases a nonzero tag-4 allocation at `inner + 0xe90`, clears that word,
+/// rewinds the 16-byte cursor at `+0xebc/+0xec0`, stores -1 at `+0x1c`, and
+/// clears the u16 selection at `+0x82c`. Under the target invariant that
+/// differing begin/end cursor addresses are 16-byte aligned, it leaves
+/// `+0xebc` alone and sets `+0xec0` to it.
+///
+/// Ghidra presents a 16-byte record copy, but raw ARM has `r0 = r9 = end`
+/// before its predicated `ldmne`/`stmne`, making that copy loop unreachable.
+/// Deliberate deviation: Rust omits both that dead copy and the subsequent
+/// side-effect-free 16-byte walker, directly applying its wrapping rewind.
+/// Thus malformed cursor endpoints with mismatched low four bits return
+/// rather than reproducing the stock walker's nontermination. Valid target
+/// behavior is unchanged. The existing [`crate::heap::veneers::free_tag4`]
+/// callee preserves the tag-4 dispatch.
+///
+/// # Safety
+///
+/// `inner` must address writable, suitably aligned storage through `+0xec3`;
+/// a nonzero allocation word must be valid for `free_tag4`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_release_buffer_and_reset_cursor(inner: *mut u8) {
+    let allocation = (inner.add(BUFFER_ALLOCATION) as *const u32).read();
+    if allocation != 0 {
+        crate::heap::veneers::free_tag4(allocation as usize as *mut u8);
+        (inner.add(BUFFER_ALLOCATION) as *mut u32).write(0);
+    }
+
+    let begin = (inner.add(BUFFER_CURSOR_BEGIN) as *const u32).read();
+    let end = (inner.add(BUFFER_CURSOR_END) as *const u32).read();
+    if begin != end {
+        let rewound = end.wrapping_sub(end.wrapping_sub(begin) & !0xf);
+        (inner.add(BUFFER_CURSOR_END) as *mut u32).write(rewound);
+    }
+
+    (inner.add(BUFFER_INDEX) as *mut u32).write(u32::MAX);
+    (inner.add(BUFFER_SELECTION) as *mut u16).write(0);
 }
 
 /// inner_reset_transient_state — original: `FUN_08059644` @ `0x08059644`
@@ -710,6 +775,83 @@ mod tests {
         assert_eq!(fixture.word(CACHED_RESULTS), 0);
         assert_eq!(fixture.word(CACHED_AUXILIARY), 0x7777_8888);
         assert_eq!(fixture.word(RESULT_COUNT), 0);
+    }
+
+    // ---- inner_release_buffer_and_reset_cursor --------------------------
+
+    const BUFFER_RESET_LEN: usize = BUFFER_CURSOR_END + 4;
+
+    #[repr(align(4))]
+    struct BufferResetFixture {
+        bytes: [u8; BUFFER_RESET_LEN],
+    }
+
+    impl BufferResetFixture {
+        fn new() -> Self {
+            BufferResetFixture { bytes: [SENTINEL; BUFFER_RESET_LEN] }
+        }
+
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
+        }
+
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn halfword(&self, offset: usize) -> u16 {
+            u16::from_le_bytes(self.bytes[offset..offset + 2].try_into().unwrap())
+        }
+
+        fn set_halfword(&mut self, offset: usize, value: u16) {
+            self.bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn reset(&mut self) {
+            unsafe { inner_release_buffer_and_reset_cursor(self.bytes.as_mut_ptr()) };
+        }
+    }
+
+    #[test]
+    fn buffer_reset_releases_allocation_rewinds_aligned_cursor_and_resets_fields() {
+        let _heap_guard = mock_heap();
+        let mut fixture = BufferResetFixture::new();
+        fixture.set_word(BUFFER_ALLOCATION, 0x1111_2222);
+        fixture.set_word(BUFFER_CURSOR_BEGIN, 0x1000);
+        fixture.set_word(BUFFER_CURSOR_END, 0x1030);
+        fixture.set_word(BUFFER_INDEX, 7);
+        fixture.set_halfword(BUFFER_SELECTION, u16::MAX);
+        let mut expected = fixture.bytes;
+        expected[BUFFER_ALLOCATION..BUFFER_ALLOCATION + 4].copy_from_slice(&0u32.to_le_bytes());
+        expected[BUFFER_CURSOR_END..BUFFER_CURSOR_END + 4].copy_from_slice(&0x1000u32.to_le_bytes());
+        expected[BUFFER_INDEX..BUFFER_INDEX + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[BUFFER_SELECTION..BUFFER_SELECTION + 2].copy_from_slice(&0u16.to_le_bytes());
+
+        fixture.reset();
+
+        assert_eq!(free_log(), (1, 0x1111_2222usize as *mut u8, 4));
+        assert_eq!(fixture.word(BUFFER_CURSOR_BEGIN), 0x1000);
+        assert_eq!(fixture.bytes, expected);
+    }
+
+    #[test]
+    fn buffer_reset_skips_null_release_and_preserves_an_empty_cursor() {
+        let _heap_guard = mock_heap();
+        let mut fixture = BufferResetFixture::new();
+        fixture.set_word(BUFFER_ALLOCATION, 0);
+        fixture.set_word(BUFFER_CURSOR_BEGIN, 0x2000);
+        fixture.set_word(BUFFER_CURSOR_END, 0x2000);
+        fixture.set_word(BUFFER_INDEX, 0);
+        fixture.set_halfword(BUFFER_SELECTION, 0x1234);
+
+        fixture.reset();
+
+        assert_eq!(free_log().0, 0);
+        assert_eq!(fixture.word(BUFFER_ALLOCATION), 0);
+        assert_eq!(fixture.word(BUFFER_CURSOR_BEGIN), 0x2000);
+        assert_eq!(fixture.word(BUFFER_CURSOR_END), 0x2000);
+        assert_eq!(fixture.word(BUFFER_INDEX), u32::MAX);
+        assert_eq!(fixture.halfword(BUFFER_SELECTION), 0);
     }
 
     // ---- inner_reset_transient_state ------------------------------------
