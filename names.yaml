@@ -16899,6 +16899,46 @@ functions:
       being copied through the ROM memcpy veneer into a private stack image;
       the original never exposes or mutates that scratch image.
 
+  - address: 0x0828dda0
+    ghidra: FUN_0828dda0
+    name: render_context_set_suspended
+    size: 148
+    sig: "u32 render_context_set_suspended(RenderContext *context, u32 suspended)"
+    module: ui/render_context_suspend
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r1: suspended
+      "context+0x20": bounds
+      "context+0x3d": suspend_state
+      "context+0x48": presentation_resource
+      "context+0x54": presentation
+      "context+0x58": presentation_in_use
+      "context+0x60": rendering_enabled
+      "context+0x78": owner
+      FUN_0828c700: render_context_ensure_presentation (unported)
+      FUN_0828d4e0: render_context_release_resource (unported)
+      FUN_0828cd54: render_context_release_presentation (unported)
+      FUN_0826ec9c: ui_element_invalidate
+    notes: >-
+      Raw osos.dec verifies the exact 148-byte extent: push {r4,lr} begins
+      at 0x0828dda0, the closing pop {r4,pc} is at 0x0828de30, and the
+      distinct next function starts at 0x0828de34. Decoding every ARM B/BL
+      word finds nine direct calls: eight unconditional bl and one blne
+      (0x0816e0b8); the predicated caller checks its nullable context before
+      this body dereferences it. No image word contains the address, so it is
+      not virtually dispatched. On a changed state while +0x60 is nonzero,
+      a nonzero r1 releases +0x48 then +0x54 unless the latter is absent or
+      +0x58 is nonzero. Zero r1 creates the presentation only when +0x54 is
+      absent and rect_is_empty(+0x20) is false, then tail-calls
+      ui_element_invalidate for +0x78. The byte store at +0x3d truncates r1
+      but the release-vs-resume branch uses the full word; the port therefore
+      retains u32 rather than narrowing the state argument. Unported setup
+      and release calls use verified-address volatile seams on device and
+      recording host models; their object identities are intentionally not
+      inferred. Host tests cover unchanged and disabled exits, absent and
+      in-use presentation gates, release order, degenerate bounds, and the
+      full-word/truncated-byte edge case.
   - address: 0x082a26c8
     ghidra: FUN_082a26c8
     name: ui_element_is_shown

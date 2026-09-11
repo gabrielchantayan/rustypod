@@ -402,6 +402,10 @@ pub mod hints {
     // scheduler-label fixture; fixture mappings never unmap, so no other user
     // may share this hint.
     pub const DEBUG_TASK_SELECTOR_LABELS: usize = 0xee00_0000;
+    // 0xa700_0000: dedicated to ui/render_context_suspend's raw-u32
+    // render-context fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RENDER_CONTEXT_SUSPEND: usize = 0xa700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
