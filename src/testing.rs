@@ -556,10 +556,6 @@ pub static SCREEN_LAYOUT_ASSIGN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mut
 pub static STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
-/// Serializes every host test that replaces `util::stream_read_be32`'s
-/// stream-read-core seam. The word reader and zeroing wrapper both install
-/// recorders into that mutable global.
-pub static STREAM_READ_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that swaps
 /// `util::context_field::CURRENT_TASK_CTX_BLOCK`. That slot is one shared

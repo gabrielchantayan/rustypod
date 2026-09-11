@@ -54808,7 +54808,7 @@ functions:
     ghidra: FUN_08057874
     name: stream_read_be32
     size: 80
-    sig: "i32 stream_read_be32(u32 ctx, u32 *out)"
+    sig: "i32 stream_read_be32(StreamObject **stream, u32 *out)"
     module: util/stream_read_be32
     status: ported
     renames:
@@ -54816,26 +54816,20 @@ functions:
       param_2/r1: out
       FUN_0805e754: stream_read_core
     notes: >-
-      Reads four bytes from a stream context via the unported stream-read
-      core @ 0x0805e754 and stores them big-endian into *out; returns 1 on
-      success, 0 on core failure, leaving *out untouched on failure. Ghidra's
-      80-byte extent verified from raw words: the u16 twin FUN_080578c4
-      (identical shape, len=2, strh) opens immediately after the final pop.
-      Decoding every B/BL word in osos.dec finds exactly 34 call sites, all
-      plain unconditional bl (matches Ghidra's count); callers cluster in
-      0x080570cc-0x080577ac walking big-endian record bodies one u32 field
-      per call. The core dereferences ctx twice (object pointer, then
-      vtable) and tail-calls vtable slot +0x10 with (object, buf, len,
-      mode=2), returning 0 on success or -3 on a short nonzero-length read;
-      it is NOT yet ported, so the port reaches it through the replaceable
-      STREAM_READ_CORE seam (ROM address 0x0805e754 on target, panic on
-      host, same pattern as util/operation_dispatch). Deliberate deviations:
-      the port assembles the word with u32::from_be_bytes; LLVM emits a
-      single word load plus rotate-based reverse instead of the original's
-      four ldrb + lsl/orr chain, same observable result. match.py
+      Reads four bytes from a stream handle via stream_read_core @
+      0x0805e754 and stores them big-endian into *out; returns 1 on success,
+      0 on core failure, leaving *out untouched on failure. Ghidra's 80-byte
+      extent is verified from raw words: the u16 twin FUN_080578c4 (identical
+      shape, len=2, strh) opens immediately after the final pop. Decoding
+      every B/BL word in osos.dec finds exactly 34 call sites, all plain
+      unconditional bl. The core double-dereferences the stream handle and
+      dispatches vtable slot +0x10 with (object, buf, len, mode=2), returning
+      0 on success or -3 on a short nonzero-length read. Deliberate
+      deviation: the port assembles the word with u32::from_be_bytes instead
+      of four discrete ldrb + lsl/orr steps; LLVM emits a single word load
+      plus rotate-based reverse with the same observable result. match.py
       structural: same shape (core call -> status branch -> BE assembly ->
-      str -> 0/1 return); LLVM adds an fp frame and routes the seam call as
-      blx through a literal slot. Reference C:
+      str -> 0/1 return). Reference C:
       decomp/c/004/08057874_FUN_08057874.c.
 
   - address: 0x08057c2c
@@ -54903,6 +54897,39 @@ functions:
       decomp/c/004/0805e6d0_FUN_0805e6d0.c. match.py structural review:
       Rust adds an fp frame and splits the predicated retail bxne into a NULL
       branch, frame pop, and tail bx, while retaining the +0x1c dispatch.
+
+  - address: 0x0805e754
+    ghidra: FUN_0805e754
+    name: stream_read_core
+    size: 72
+    sig: "i32 stream_read_core(StreamObject **stream, u8 *buf, u32 len, i32 *result_out)"
+    module: util/stream_read_core
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: buf
+      param_3/r2: len
+      param_4/r3: result_out
+      iVar1/r0: slot_result
+      pcVar2/ip: read_10
+    notes: >-
+      Raw ARM verifies the 72-byte extent 0x0805e754..0x0805e79c: the next
+      standalone sibling starts with cmp r0,#0 at 0x0805e79c after this
+      function's pop {r4, r5, r6, pc}. It has no NULL guard: it loads
+      object = *stream, vtable = *object, then blx vtable slot +0x10 as
+      read_10(object, buf, len, 2). It stores the raw slot result through
+      result_out only when that pointer is non-NULL. A zero slot result with
+      nonzero len returns -3; a nonzero result, or zero result with zero len,
+      returns 0. Decoding every B/BL word in osos.dec finds exactly 9 inbound
+      direct calls, all unconditional bl and no predicated forms. Host tests
+      cover raw-result output, the nonzero-length short-read error, and the
+      zero-length exception. Deliberate deviations: Rust uses direct
+      conditionals rather than predicated ARM instructions, and #[repr(C)]
+      named vtable fields widen on 64-bit hosts while preserving target slots.
+      match.py structural review: expected LLVM frame and branch differences;
+      it retains the double dereference, +0x10 dispatch, optional output
+      store, and -3 normalization. Reference C:
+      decomp/c/004/0805e754_FUN_0805e754.c.
 
   - address: 0x0805e79c
     ghidra: FUN_0805e79c

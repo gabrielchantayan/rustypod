@@ -31,11 +31,11 @@
 //! 0805e7d8  pop  {ip, pc}
 //! ```
 //!
-//! `stream` is a handle: a pointer to the stream object pointer (the same
-//! double-dereference convention as the ported sibling `stream_read_be32`
-//! and its unported read core @ 0x0805e754, which dispatches slot +0x10;
-//! the tell wrapper @ 0x0805e6d0 dispatches slot +0x1c with the same -5
-//! NULL result). The offset arrives as a 32-bit word and is sign-extended
+//! `stream` is a handle: a pointer to the stream object pointer. The ported
+//! `stream_read_core` @ 0x0805e754 dispatches slot +0x10, while this wrapper
+//! dispatches slot +0x14 and the tell wrapper @ 0x0805e6d0 dispatches slot
+//! +0x1c; all use the same double-dereference convention.
+//! The offset arrives as a 32-bit word and is sign-extended
 //! into the r2:r3 pair, so the slot receives an absolute signed 64-bit
 //! position; r1 at the `blx` is leftover scratch (the loaded slot pointer
 //! itself), never a real argument. Callers in the 0x080570cc-0x08057874
@@ -60,8 +60,8 @@
 /// (the original's `mvn r0, #4`).
 pub const STREAM_HANDLE_ERROR: i32 = -5;
 
-/// A seekable stream object, as seen through this wrapper: only the
-/// vtable word is decoded.
+/// A stream object, as seen through the read, seek, and tell wrappers: only
+/// its vtable word is decoded.
 #[repr(C)]
 pub struct StreamObject {
     /// +0x00: the stream's vtable.
@@ -77,9 +77,13 @@ pub struct StreamObject {
 pub struct StreamVtable {
     /// Slots +0x00..+0x0c, not dispatched by this wrapper.
     pub slots_00_0c: [usize; 4],
-    /// Slot +0x10: the stream-read entry the read core @ 0x0805e754
-    /// tail-calls; opaque to these wrappers.
-    pub read_10: usize,
+    /// Slot +0x10: stream read, `(this, buf, len, mode) -> raw result`.
+    pub read_10: unsafe extern "C" fn(
+        this: *mut StreamObject,
+        buf: *mut u8,
+        len: u32,
+        mode: u32,
+    ) -> i32,
     /// Slot +0x14: absolute seek, `(this, position) -> status`,
     /// status 0 on success. `position` rides in r2:r3 on the target,
     /// matching this `i64` parameter's AAPCS placement.
@@ -147,13 +151,22 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn unused_read(
+        _this: *mut StreamObject,
+        _buf: *mut u8,
+        _len: u32,
+        _mode: u32,
+    ) -> i32 {
+        0
+    }
+
     unsafe extern "C" fn unused_tell(_this: *mut StreamObject) -> i32 {
         0
     }
 
     static SEEK_VTABLE: StreamVtable = StreamVtable {
         slots_00_0c: [0; 4],
-        read_10: 0,
+        read_10: unused_read,
         seek: recording_seek,
         opaque_18: 0,
         tell: unused_tell,
