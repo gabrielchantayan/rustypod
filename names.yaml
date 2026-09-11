@@ -51697,6 +51697,35 @@ functions:
       insertion seam call. match.py --lib <worktree>: identical skeleton,
       63 instructions vs 51.
 
+  # --- UI animation default constructor ---
+  - address: 0x08166c5c
+    ghidra: FUN_08166c5c
+    name: animation_default_init
+    size: 40
+    sig: "Animation *animation_default_init(Animation *this)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08166c80: ANIMATION_VTABLE (pool word 0x08987f00)
+      FUN_08138460: refcounted_base_init (direct, ported in app/fixed_value)
+    notes: >-
+      Ghidra's 36-byte body is nine instruction words from
+      0x08166c5c..0x08166c7c; its separately linked pool word at
+      0x08166c80 stores the animation vtable 0x08987f00, yielding a true
+      40-byte extent through 0x08166c83. The next real function begins at
+      0x08166c84. Decoding every ARM B/BL word in osos.dec finds exactly
+      ten direct callers, all plain unconditional bl: six at
+      0x08153198..0x081531c0 and four at 0x0816e3bc..0x0816e3d4. There
+      are no predicated BL forms, B tail callers, or raw DATA-word
+      references. Each caller uses the returned pointer as its next array
+      cursor, correcting Ghidra's void signature. The constructor calls
+      refcounted_base_init, replaces the base vtable with ANIMATION_VTABLE,
+      and clears only the from/to/current value slots at +0x18/+0x1c/+0x20;
+      rank, wheel links, and opaque +0x04 remain untouched. The base call
+      and all subsequent stores preserve r0, so it returns this. No
+      deliberate deviations; refcounted_base_init is a direct port.
+
   # --- UI animation non-deleting destructor ---
   - address: 0x08166c9c
     ghidra: FUN_08166c9c
