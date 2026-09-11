@@ -66102,3 +66102,31 @@ functions:
       targets this destructor. ARM release compilation retains the final tail
       branch to traced_free; its extra prologue only preserves the record
       across the payload release.
+
+  - address: 0x080403dc
+    ghidra: FUN_080403dc
+    name: tagged_word_buffer_create
+    size: 92
+    sig: "TaggedWordBuffer *tagged_word_buffer_create(void)"
+    module: heap/tagged_word_buffer
+    status: ported
+    renames:
+      r0: buffer
+      r1: zero
+      r2: zero
+      r3: zero
+      FUN_08043c18: traced_alloc
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw ARM confirms the 92-byte extent exactly: 0x080403dc through
+      0x08040438, where the next separately linked function starts. Decoding
+      every ARM B/BL immediate in osos.dec finds exactly nine inbound direct
+      calls, all unconditional plain bl at 0x0803dca0, 0x0803dcb0,
+      0x0803e2f0, 0x0803e824, 0x0803eeb0, 0x0803f218, 0x0803fa00,
+      0x080e8b3c, and 0x08368390; no predicated BL forms or direct tail
+      branches target it. Calls ported traced_alloc(20, 0, 0); allocation
+      failure records ported diag_ring_record(3, 0x71, 0x41, 0, 0) then
+      returns NULL. Success initializes the five target words
+      {data, len, capacity, tag, flags} as {0, 0, 0, 0, 1}; bit 0 makes the
+      returned TaggedWordBuffer self-deleting under tagged_word_buffer_destroy.
+      No deliberate Rust deviations: both callees are direct ports.

@@ -37,8 +37,9 @@
 //! with `traced_alloc` as [`crate::drivers::ata_cmd::LARGE_ALLOC_TAG`], so
 //! the allocator marker and destructor scrub follow the one retailOS cell.
 
-use crate::drivers::ata_cmd::traced_free;
+use crate::drivers::ata_cmd::{traced_alloc, traced_free};
 use crate::heap::heap_poison::heap_poison;
+use crate::kernel::diag_ring_record::diag_ring_record;
 
 /// `flags` bit 0: release `this` itself through `traced_free` after the
 /// object has been poisoned (scalar deleting destructor behavior).
@@ -67,6 +68,42 @@ pub struct TaggedWordBuffer {
     pub tag: u32,
     /// +0x10: [`FLAG_DELETE_THIS`] / [`FLAG_BUFFER_BORROWED`].
     pub flags: u32,
+}
+
+/// tagged_word_buffer_create — original: `FUN_080403dc` @ 0x080403dc (92
+/// bytes exactly, `0x080403dc..0x08040438`; the separately linked successor
+/// begins at `0x08040438`).
+///
+/// Decoding every ARM B/BL immediate in `osos.dec` finds nine direct inbound
+/// call sites, all unconditional `bl`: 0x0803dca0, 0x0803dcb0, 0x0803e2f0,
+/// 0x0803e824, 0x0803eeb0, 0x0803f218, 0x0803fa00, 0x080e8b3c, and
+/// 0x08368390. There are no predicated BL forms or direct tail branches.
+///
+/// Allocates a five-word buffer with `traced_alloc(20, 0, 0)`. Allocation
+/// failure records diagnostic `(3, 0x71, 0x41, 0, 0)` and returns NULL.
+/// Success initializes `{data, len, capacity, tag, flags}` to
+/// `{0, 0, 0, 0, FLAG_DELETE_THIS}` in the retail store order
+/// `flags, len, tag, capacity, data`, returning the self-deleting object.
+///
+/// Deliberate deviations: none. Both callees are ported, so this retains
+/// direct calls rather than adding a dispatch seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tagged_word_buffer_create() -> *mut TaggedWordBuffer {
+    let buffer = traced_alloc(TAGGED_WORD_BUFFER_SIZE as i32, 0, 0).cast::<TaggedWordBuffer>();
+    if buffer.is_null() {
+        diag_ring_record(3, 0x71, 0x41, 0, 0);
+        return core::ptr::null_mut();
+    }
+
+    // Volatile stores preserve the retail write order, visible to any
+    // allocator instrumentation observing the newly returned block.
+    core::ptr::addr_of_mut!((*buffer).flags).write_volatile(FLAG_DELETE_THIS);
+    core::ptr::addr_of_mut!((*buffer).len).write_volatile(0);
+    core::ptr::addr_of_mut!((*buffer).tag).write_volatile(0);
+    core::ptr::addr_of_mut!((*buffer).capacity).write_volatile(0);
+    core::ptr::addr_of_mut!((*buffer).data).write_volatile(0);
+    buffer
 }
 
 
@@ -109,8 +146,12 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::drivers::ata_cmd::{TracedFreeHooks, LARGE_ALLOC_TAG, TRACED_FREE_HOOKS};
-    use crate::testing::TRACED_ALLOC_TEST_LOCK;
+    use crate::drivers::ata_cmd::{
+        TracedAllocHooks, TracedFreeHooks, LARGE_ALLOC_TAG, TRACED_ALLOC_HOOKS, TRACED_FREE_HOOKS,
+    };
+    use crate::kernel::diag_ring_record::{DiagEventRing, DIAG_RING_BLOCK_GETTER};
+    use crate::testing::{DIAG_RING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
+    use std::boxed::Box;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -122,12 +163,82 @@ mod tests {
     static mut FREE_SET_FLAGS: u32 = 0;
     static mut FLAG_TARGET: *mut u32 = core::ptr::null_mut();
 
+    static mut ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut ALLOC_REQUEST: Option<(i32, u32, u32)> = None;
+    static mut DIAG_RING: *mut DiagEventRing = core::ptr::null_mut();
+
     unsafe extern "C" fn mock_free(block: *mut u8) {
         unsafe {
             (*core::ptr::addr_of_mut!(FREED)).push(block as usize);
             let set = FREE_SET_FLAGS;
             if set != 0 {
                 *FLAG_TARGET |= set;
+            }
+        }
+    }
+
+    unsafe extern "C" fn recording_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+        ALLOC_REQUEST = Some((size, tag1, tag2));
+        ALLOC_RESULT
+    }
+
+    unsafe extern "C" fn ring_getter() -> *mut DiagEventRing {
+        DIAG_RING
+    }
+
+    struct CreateFixture {
+        _diag_guard: MutexGuard<'static, ()>,
+        _alloc_guard: MutexGuard<'static, ()>,
+        saved_alloc_hooks: TracedAllocHooks,
+        saved_ring_getter: Option<unsafe extern "C" fn() -> *mut DiagEventRing>,
+        storage: Box<[u32; 5]>,
+        ring: Box<DiagEventRing>,
+    }
+
+    impl CreateFixture {
+        fn new(allocation_succeeds: bool) -> Self {
+            let diag_guard = DIAG_RING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut storage = Box::new([0xa5a5_a5a5; 5]);
+            let mut ring = Box::new(unsafe { core::mem::zeroed::<DiagEventRing>() });
+            unsafe {
+                ALLOC_REQUEST = None;
+                ALLOC_RESULT = if allocation_succeeds {
+                    storage.as_mut_ptr().cast::<u8>()
+                } else {
+                    core::ptr::null_mut()
+                };
+                DIAG_RING = ring.as_mut();
+                let saved_alloc_hooks = core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS));
+                let saved_ring_getter = core::ptr::read_volatile(core::ptr::addr_of!(DIAG_RING_BLOCK_GETTER));
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                    TracedAllocHooks { alloc: recording_alloc, trace: None },
+                );
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER), Some(ring_getter));
+                Self {
+                    _diag_guard: diag_guard,
+                    _alloc_guard: alloc_guard,
+                    saved_alloc_hooks,
+                    saved_ring_getter,
+                    storage,
+                    ring,
+                }
+            }
+        }
+    }
+
+    impl Drop for CreateFixture {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS), self.saved_alloc_hooks);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER),
+                    self.saved_ring_getter,
+                );
+                ALLOC_RESULT = core::ptr::null_mut();
+                ALLOC_REQUEST = None;
+                DIAG_RING = core::ptr::null_mut();
             }
         }
     }
@@ -288,5 +399,29 @@ mod tests {
         assert_eq!(freed(), std::vec![data as usize, this as usize],
             "the delete bit stored by the buffer free is seen: flags reload at 0x0803e618");
         unsafe { restore(guard, alloc_guard, old_free, old_tag) };
+    }
+
+    #[test]
+    fn create_initializes_the_exact_five_word_object_after_allocation() {
+        let fixture = CreateFixture::new(true);
+        let buffer = unsafe { tagged_word_buffer_create() };
+
+        assert_eq!(buffer.cast::<u32>(), fixture.storage.as_ptr().cast_mut());
+        assert_eq!(unsafe { ALLOC_REQUEST }, Some((20, 0, 0)));
+        assert_eq!(*fixture.storage, [0, 0, 0, 0, FLAG_DELETE_THIS]);
+        assert_eq!(fixture.ring.head, 0);
+    }
+
+    #[test]
+    fn create_records_allocation_failure_and_returns_null() {
+        let fixture = CreateFixture::new(false);
+        let buffer = unsafe { tagged_word_buffer_create() };
+
+        assert!(buffer.is_null());
+        assert_eq!(unsafe { ALLOC_REQUEST }, Some((20, 0, 0)));
+        assert_eq!(fixture.ring.head, 1);
+        assert_eq!(fixture.ring.tags[1], 0x0307_1041);
+        assert_eq!(fixture.ring.data0[1], 0);
+        assert_eq!(fixture.ring.data1[1], 0);
     }
 }
