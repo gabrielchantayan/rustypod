@@ -61856,3 +61856,45 @@ functions:
       initialization, and capacity storage only after success. The ROM marker
       pointer is modeled by static host text. Host tests prove the zero-capacity
       no-dispatch path and nonzero post-initialization reserve dispatch.
+
+  # --- Media-player queue refresh (app/media_player_queue_refresh) ---
+  - address: 0x0817a914
+    ghidra: FUN_0817a914
+    name: media_player_queue_refresh
+    size: 204
+    sig: "u32 media_player_queue_refresh(MediaPlayerQueueOwner *player)"
+    module: app/media_player_queue_refresh
+    status: ported
+    renames:
+      param_1/r0: player
+      "player+0x54": source_link
+      "source_link+0x04": source_interface
+      "source_interface vtable+0x138": source_ready
+      "source_interface vtable+0x0e4": source_usable
+      "player vtable+0x144": queue_refresh_notification
+      "player+0x5c": fallback_state
+      "player+0x60": fallback_descriptor
+      "player+0x88": queue
+      FUN_0822040c: queue_prepare_from_source
+      FUN_082204c0: queue_prepare_fallback
+      thunk_FUN_0822b5e0: queue_complete
+      thunk_FUN_0822ba50: queue_finalize
+    notes: >-
+      Raw ARM extent is exactly 204 bytes at 0x0817a914..0x0817a9df: the
+      next separately linked function starts at 0x0817a9e0. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly 10 direct inbound bl
+      sites, all unconditional and with zero predicated forms or direct
+      plain-B tails: 0x081792e8, 0x081798d4, 0x08179bd8, 0x0817a8c8,
+      0x0817bc9c, 0x0817c724, 0x0817d118, 0x0817d404, 0x0817d630, and
+      0x082a9c88. A nonzero source_link is adjusted by four and tested
+      through its vtable slots +0x138 and +0x0e4. Both successes notify the
+      player through +0x144 with (15,16), prepare queue+0x00 from that
+      interface, complete it, and finalize it with state zero. Missing or
+      rejected input instead notifies (15,-1), prepares from player+0x60,
+      completes, and uses player+0x5c as the final signed state. Either
+      failed prepare returns zero before completion/finalization. The four
+      fixed helper addresses and dynamic vtable entries were absent from the
+      ledger at port time, so they remain target transfers and host seams;
+      their semantic identities are not invented. Deliberate deviation:
+      stock's two final tail paths are one Rust return call after the shared
+      state selection; arguments and result are preserved.
