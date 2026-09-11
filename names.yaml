@@ -65482,3 +65482,34 @@ functions:
       identity; host tests install a recorder that mutates the register
       before the read, proving call-before-read ordering, both banks, all
       nonzero enable values, and the two bank-zero no-op cases.
+  - address: 0x080f3d3c
+    ghidra: FUN_080f3d3c
+    name: parse_i16_prefix
+    size: 200
+    sig: "i32 parse_i16_prefix(const u8 *s, u8 **endptr, i32 base)"
+    module: strto/parse_i16_prefix
+    status: ported
+    renames:
+      param_1/r0: s
+      param_2/r1: endptr
+      param_3/r2: base
+      iVar3/r3: i16_accumulator
+      DAT_080f3df4: radix_8_digit_bitmap
+      DAT_080f3df8: radix_16_digit_bitmap
+      DAT_080f3dfc: radix_10_digit_bitmap
+      DAT_080f3e00: ascii_digit_value_map
+    notes: >-
+      Raw osos.dec establishes the 200-byte extent 0x080f3d3c..0x080f3e03:
+      184 executable bytes followed by its four-word literal pool, before the
+      distinct next entry at 0x080f3e04. Decoding every ARM B/BL immediate
+      finds exactly nine direct inbound call sites, all unconditional bl at
+      0x08098a3c, 0x08098a58, 0x08098a74, 0x08098a90, 0x08098cf8,
+      0x080a07f8, 0x080a0810, 0x080a0828, and 0x080a0840; no predicated
+      forms or direct tail branches exist. It parses an optional '-' and a
+      forced 0x/0X hexadecimal prefix without whitespace or '+' handling,
+      truncating the signed 16-bit accumulator after every multiply-add.
+      The digit-map addresses point to zero-filled runtime storage in
+      osos.dec and their initializer is not identified; the port deliberately
+      uses their implied C-locale ASCII digit sets (0..7, 0..9, and
+      0..9/A..F/a..f). Host tests cover radix normalization, prefix/endptr
+      placement, sign, null/empty input, and per-step 16-bit wrapping.
