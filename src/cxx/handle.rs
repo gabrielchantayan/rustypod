@@ -58,9 +58,10 @@
 //! @ 0x0839cf4c is an owning sibling whose implementation disposer remains an
 //! unported direct call.
 //! [`refcounted_body_acquire`] @ 0x0839cd5c and
-//! [`refcounted_body_attach`] @ 0x0839d370 are separately linked
-//! store-and-bump copies used by refcounted-handle constructors and
-//! copy-assignment operators respectively.
+//! [`refcounted_body_acquire_from_owner`] @ 0x08131fb8 are separately
+//! linked store-and-bump copies used by refcounted-handle constructors and
+//! owner accessors. [`refcounted_body_attach`] @ 0x0839d370 is the equivalent
+//! copy-assignment helper.
 //! [`refcounted_body_release_retain_count`] @ 0x0839d498 is a final-drop
 //! sibling that passes its just-zeroed count to a direct disposer before
 //! freeing the body. [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines
@@ -174,6 +175,17 @@ pub struct RefcountedBody {
     pub refcount: i32,
     /// Target +8: optional mutex guarding the refcount (NULL = unguarded).
     pub mutex: *mut Mutex,
+}
+
+/// Opaque owner record whose refcounted-body handle is the eleventh word.
+///
+/// On target, `body` is at +0x28. The ten preceding words remain
+/// unidentified; `u32` preserves their 4-byte target layout while the named
+/// pointer field remains disjoint in 64-bit host fixtures.
+#[repr(C)]
+pub struct RefcountedBodyOwner {
+    pub opaque_prefix: [u32; 10],
+    pub body: *mut RefcountedBody,
 }
 
 /// refcounted_ptr_construct — original: `FUN_0839ed38` @ 0x0839ed38
@@ -665,6 +677,41 @@ pub unsafe extern "C" fn refcounted_body_acquire(
     if !mutex.is_null() {
         mutex_unlock(mutex);
     }
+}
+
+/// refcounted_body_acquire_from_owner — original: `FUN_08131fb8` @
+/// 0x08131fb8 (8 bytes; **9 `bl` call sites**, all unconditional:
+/// 0x08130fe4, 0x08131040, 0x0813108c, 0x0813110c, 0x08131158,
+/// 0x081311e4, 0x08131230, 0x08131418, and 0x08131664). Decoding every
+/// aligned ARM B/BL word in osos.dec found no predicated or direct-tail
+/// callers, and no image word equals this address, so it is not virtually
+/// dispatched. The preceding sibling ends with `bx lr` at 0x08131fb4; the
+/// next word at 0x08131fc0 begins a separate function, so Ghidra's 8-byte
+/// extent is exact.
+///
+/// Loads the refcounted body from `owner.body` at target +0x28, then tail
+/// transfers it with `dst` to [`refcounted_body_acquire`]. It has no NULL,
+/// alignment, or bounds guard: an invalid `owner` faults on the initial load,
+/// exactly as the original does.
+///
+/// Deliberate deviation: the Rust direct call may compile as `bl` rather than
+/// the original tail `b`; the load and acquire behavior are unchanged. Its
+/// unique ARM text section keeps this separately hookable entry from being
+/// folded with another owner accessor.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned body-pointer slot and `owner` must point to
+/// a readable [`RefcountedBodyOwner`]. A non-NULL `owner.body` must meet
+/// [`refcounted_body_acquire`]'s body requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_acquire_from_owner")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_acquire_from_owner(
+    dst: *mut *mut RefcountedBody,
+    owner: *const RefcountedBodyOwner,
+) {
+    refcounted_body_acquire(dst, (*owner).body);
 }
 
 /// refcounted_body_attach — original: `FUN_0839d370` @ 0x0839d370
@@ -2150,6 +2197,47 @@ mod tests {
             refcounted_body_acquire(&mut slot, &mut body);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, i32::MIN);
+        }
+    }
+
+    /// The owner wrapper reads its fixed +0x28 body field, overwrites the
+    /// destination, and preserves the acquire helper's wrapping increment.
+    #[test]
+    fn acquire_from_owner_reads_body_field_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let owner = RefcountedBodyOwner {
+                opaque_prefix: [0xdead_beef; 10],
+                body: &mut body,
+            };
+            let mut slot = core::ptr::null_mut();
+
+            refcounted_body_acquire_from_owner(&mut slot, &owner);
+
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// A NULL body field still overwrites the destination before the acquire
+    /// helper's NULL early-out.
+    #[test]
+    fn acquire_from_owner_null_body_overwrites_destination() {
+        unsafe {
+            let owner = RefcountedBodyOwner {
+                opaque_prefix: [0; 10],
+                body: core::ptr::null_mut(),
+            };
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_acquire_from_owner(&mut slot, &owner);
+
+            assert!(slot.is_null());
         }
     }
 
