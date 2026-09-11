@@ -165,11 +165,226 @@ pub unsafe extern "C" fn utf8_copy_codepoints(
     count
 }
 
+/// utf8_to_utf16_counted_buffer — original: FUN_08046c24 @ 0x08046c24
+/// (80 bytes, all code; nine direct `bl` call sites verified by scanning
+/// osos.dec; all nine are unconditional). Clear the leading u16 in
+/// `destination`, then, for a nonempty source span, invoke the surviving
+/// conversion helper at 0x08046c74 with a 255-codepoint bound and store its
+/// returned codepoint count in that leading u16. A NULL destination or a
+/// nonempty span with a NULL source returns -50; an empty span returns zero
+/// after clearing the output even when the source is NULL.
+///
+/// No target deviation: 0x08046c74 remains retailOS code and builds its
+/// temporary StringObject before calling the existing UTF-8 decoder. Host
+/// tests use a swappable helper because that allocation-backed retailOS
+/// dependency is not executable on the host.
+type Utf8ToUtf16CountedBufferHelper =
+    unsafe extern "C" fn(*const u8, u32, *mut u16, u32, *mut u32) -> i32;
+
+#[cfg(target_os = "none")]
+const UTF8_TO_UTF16_COUNTED_BUFFER_HELPER_ADDRESS: usize = 0x0804_6c74;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn utf8_to_utf16_counted_buffer_helper(
+    source: *const u8,
+    source_len: u32,
+    destination: *mut u16,
+    max_codepoints: u32,
+    out_count: *mut u32,
+) -> i32 {
+    let helper: Utf8ToUtf16CountedBufferHelper =
+        core::mem::transmute(UTF8_TO_UTF16_COUNTED_BUFFER_HELPER_ADDRESS);
+    helper(source, source_len, destination, max_codepoints, out_count)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_utf8_to_utf16_counted_buffer_helper(
+    _source: *const u8,
+    _source_len: u32,
+    _destination: *mut u16,
+    _max_codepoints: u32,
+    _out_count: *mut u32,
+) -> i32 {
+    0
+}
+
+#[cfg(not(target_os = "none"))]
+static mut UTF8_TO_UTF16_COUNTED_BUFFER_HELPER: Utf8ToUtf16CountedBufferHelper =
+    unavailable_utf8_to_utf16_counted_buffer_helper;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn utf8_to_utf16_counted_buffer_helper(
+    source: *const u8,
+    source_len: u32,
+    destination: *mut u16,
+    max_codepoints: u32,
+    out_count: *mut u32,
+) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(UTF8_TO_UTF16_COUNTED_BUFFER_HELPER))(
+        source,
+        source_len,
+        destination,
+        max_codepoints,
+        out_count,
+    )
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_to_utf16_counted_buffer(
+    source: *const u8,
+    source_len: u32,
+    destination: *mut u16,
+    initial_count: u32,
+) -> i32 {
+    if destination.is_null() {
+        return -50;
+    }
+
+    destination.write(0);
+    if source_len == 0 {
+        return 0;
+    }
+    if source.is_null() {
+        return -50;
+    }
+
+    let mut count = initial_count;
+    let status = utf8_to_utf16_counted_buffer_helper(
+        source,
+        source_len,
+        destination.add(1),
+        0xff,
+        &mut count,
+    );
+    destination.write(count as u16);
+    status
+}
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use std::vec::Vec;
+    use std::sync::Mutex;
+
+    static COUNTED_BUFFER_HELPER_LOCK: Mutex<()> = Mutex::new(());
+    static mut COUNTED_BUFFER_CALLS: u32 = 0;
+    static mut COUNTED_BUFFER_ARGS: (usize, u32, usize, u32, usize) = (0, 0, 0, 0, 0);
+
+    unsafe extern "C" fn recording_counted_buffer_helper(
+        source: *const u8,
+        source_len: u32,
+        destination: *mut u16,
+        max_codepoints: u32,
+        out_count: *mut u32,
+    ) -> i32 {
+        COUNTED_BUFFER_CALLS += 1;
+        COUNTED_BUFFER_ARGS = (
+            source as usize,
+            source_len,
+            destination as usize,
+            max_codepoints,
+            out_count as usize,
+        );
+        destination.write(0x1234);
+        destination.add(1).write(0);
+        out_count.write(0x1_0002);
+        -7
+    }
+
+    struct CountedBufferHelperGuard(Utf8ToUtf16CountedBufferHelper);
+
+    impl CountedBufferHelperGuard {
+        unsafe fn install(helper: Utf8ToUtf16CountedBufferHelper) -> Self {
+            let previous = core::ptr::read_volatile(
+                core::ptr::addr_of!(UTF8_TO_UTF16_COUNTED_BUFFER_HELPER),
+            );
+            core::ptr::addr_of_mut!(UTF8_TO_UTF16_COUNTED_BUFFER_HELPER).write_volatile(helper);
+            Self(previous)
+        }
+    }
+
+    impl Drop for CountedBufferHelperGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(UTF8_TO_UTF16_COUNTED_BUFFER_HELPER)
+                    .write_volatile(self.0);
+            }
+        }
+    }
+
+    fn install_counted_buffer_recorder() -> CountedBufferHelperGuard {
+        unsafe {
+            COUNTED_BUFFER_CALLS = 0;
+            COUNTED_BUFFER_ARGS = (0, 0, 0, 0, 0);
+            CountedBufferHelperGuard::install(recording_counted_buffer_helper)
+        }
+    }
+
+    #[test]
+    fn counted_buffer_rejects_invalid_pointers_after_the_stock_clear_order() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+
+        let mut destination = [0xbeef_u16; 3];
+        assert_eq!(
+            unsafe {
+                utf8_to_utf16_counted_buffer(core::ptr::null(), 1, destination.as_mut_ptr(), 9)
+            },
+            -50
+        );
+        assert_eq!(destination, [0, 0xbeef, 0xbeef]);
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+
+        assert_eq!(
+            unsafe {
+                utf8_to_utf16_counted_buffer(b"x".as_ptr(), 1, core::ptr::null_mut(), 9)
+            },
+            -50
+        );
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+    }
+
+    #[test]
+    fn counted_buffer_empty_span_accepts_null_source_without_the_helper() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+        let mut destination = [0xbeef_u16; 2];
+
+        assert_eq!(
+            unsafe {
+                utf8_to_utf16_counted_buffer(core::ptr::null(), 0, destination.as_mut_ptr(), 9)
+            },
+            0
+        );
+        assert_eq!(destination, [0, 0xbeef]);
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+    }
+
+    #[test]
+    fn counted_buffer_forwards_to_the_helper_and_truncates_its_count_to_u16() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+        let source = b"A\xc2\xa2\0";
+        let mut destination = [0xbeef_u16; 3];
+
+        assert_eq!(
+            unsafe {
+                utf8_to_utf16_counted_buffer(source.as_ptr(), 3, destination.as_mut_ptr(), 0xfeed)
+            },
+            -7
+        );
+        assert_eq!(destination, [2, 0x1234, 0]);
+        let (seen_source, seen_len, seen_destination, seen_max, seen_count) =
+            unsafe { COUNTED_BUFFER_ARGS };
+        assert_eq!(seen_source, source.as_ptr() as usize);
+        assert_eq!(seen_len, 3);
+        assert_eq!(seen_destination, unsafe { destination.as_mut_ptr().add(1) as usize });
+        assert_eq!(seen_max, 0xff);
+        assert_ne!(seen_count, 0);
+    }
 
     // Standard Unicode supplies an independent oracle for scalars. retailOS
     // additionally encodes each surrogate as its own three-byte code unit.

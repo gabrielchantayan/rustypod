@@ -36020,6 +36020,32 @@ functions:
       stores to destination. It appends NUL at destination[copied] and returns
       copied; overlapping ranges retain the original interleaved load/store
       behavior rather than memcpy or memmove semantics.
+  - address: 0x08046c24
+    ghidra: FUN_08046c24
+    name: utf8_to_utf16_counted_buffer
+    size: 80
+    sig: "i32 utf8_to_utf16_counted_buffer(const u8 *source, u32 source_len, u16 *destination, u32 initial_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1: source
+      param_2: source_len
+      param_3: destination
+      param_4: initial_count
+      local_c: decoded_count
+    notes: >-
+      Nine direct unconditional bl call sites, binary-scanned from osos.dec:
+      0x08068570, 0x080960a4, 0x0809610c, 0x0809617c, 0x080ab49c,
+      0x080c61a4, 0x0811505c, 0x08115eb8, and 0x0812cb34; no predicated
+      bl or B entries target it. Raw 80-byte body clears destination[0],
+      accepts a NULL source only when source_len is zero, then calls the
+      unported 0x08046c74 helper with destination + 2, max 255, and a local
+      decoded-count word. That helper constructs a temporary StringObject
+      from the byte span, obtains its C string, bounds its UTF-8-to-UTF-16
+      conversion, records the count, destroys it, and returns zero. The
+      port reaches that remaining retailOS helper directly on target and
+      models it with a host-swappable seam only for tests; no already ported
+      callee was restubbed.
   - address: 0x082774a8
     ghidra: FUN_082774a8
     name: string_object_assign
