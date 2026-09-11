@@ -4,6 +4,7 @@ pub mod control_state;
 pub mod csem;
 pub mod diag_ring_record;
 pub mod diag_ring_strings;
+pub mod event_handler_source;
 pub mod gateway_request;
 pub mod gateway_signal;
 pub mod gateway_wake;
