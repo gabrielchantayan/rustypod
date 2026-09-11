@@ -61536,3 +61536,41 @@ functions:
       RANGE_I32_OPS string_from_range seam is reused rather than duplicated.
       Host test proves slot +0x08 dispatch, observes the post-materialization
       [0, 0xffffffff] range, and confirms direct forwarding of the output.
+
+  # --- Layout-state deactivation ---
+  - address: 0x081a221c
+    ghidra: FUN_081a221c
+    name: deactivate_layout_state
+    size: 56
+    sig: "void deactivate_layout_state(void *this)"
+    module: app/layout_state
+    status: ported
+    renames:
+      param_1/r0: this
+      "this+0x30": embedded_timer
+      "this+0x70": active
+      "this+0x74": mutex
+      FUN_081a2158: set_layout_state_enabled
+      FUN_0812c6b0: timer_stop
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec confirms Ghidra's exact 56-byte extent: fourteen ARM
+      instructions from push {r4,lr} at 0x081a221c through the tail b
+      mutex_unlock at 0x081a2250; the separately linked sibling starts with
+      push {r4,lr} at 0x081a2254 and there is no literal pool. Whole-image
+      decoding of every ARM B/BL immediate finds ten direct bl callers: one
+      unconditional bl at 0x0821c668 and nine caller-gated blne sites at
+      0x08216818, 0x08216878, 0x08217650, 0x082176d4, 0x0821cfd4,
+      0x0821db50, 0x0821deec, 0x0821fa28, and 0x0821fce0. One additional
+      bne tail transfer at 0x0821f494 reaches the entry. No aligned DATA word
+      contains the entry address, so it is not a virtual-dispatch target.
+      The method locks this+0x74, calls the unported 0x081a2158 with
+      (this, 0), stops the embedded timer at this+0x30, clears this+0x70, and
+      tail-unlocks; no NULL or active-state guard exists. The callee's wider
+      identity is not inferred. Deliberate deviation: existing mutex_lock,
+      timer_stop, and mutex_unlock ports are direct target calls; the
+      unported propagation callee uses a volatile seam with its firmware
+      address on target and a host recorder. Host outer-mutex calls are no-ops
+      because the target's 32-bit mutex at +0x74 is misaligned for Rust's
+      64-bit-host Mutex representation.
