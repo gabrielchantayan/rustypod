@@ -152,6 +152,11 @@
 //!   comparison length is the needle's codepoint count but feeds directly
 //!   to bytewise `memcmp`, preserving the retail partial-multibyte-prefix
 //!   match.
+//! - `string_object_find_codepoint` — original: `FUN_082a5220` @
+//!   0x082a5220 (128 bytes, all code; 9 plain `bl` call sites,
+//!   binary-scanned). Starts at a signed codepoint index and finds the first
+//!   decoded payload codepoint equal to the requested scalar, returning its
+//!   codepoint index or `-1`.
 //! - `string_object_equals` — original: `FUN_082aad4c` @ 0x082aad4c
 //!   (40 bytes, all code; 31 `bl` call sites, binary-scanned). The
 //!   equality predicate for two StringObjects: compares this's raw
@@ -1849,6 +1854,56 @@ pub unsafe extern "C" fn string_object_find_utf8_prefix(
 
     -1
 }
+
+/// string_object_find_codepoint — original: `FUN_082a5220` @ 0x082a5220
+/// (128 bytes, all code; the next function begins at 0x082a52a0; **9 plain
+/// `bl` call sites and zero predicated**, verified by decoding every ARM
+/// `B`/`BL` word in `osos.dec`).
+///
+/// Advances through `this.payload` from codepoint zero to the signed
+/// `start_index`, then searches the remaining decoded UTF-8-like codepoints
+/// for `codepoint`. It returns the matching codepoint index or `-1`; a NULL
+/// payload, terminator before the start index, empty payload, or absent
+/// codepoint returns `-1`. Negative starts take the same zero-index path as
+/// the raw signed `bge` check. Both passes use [`utf8_next_codepoint`], so a
+/// malformed four-byte lead consumes three bytes and produces codepoint zero,
+/// which is searchable exactly as in retailOS.
+///
+/// Deliberate deviations: none. The index uses wrapping 32-bit arithmetic to
+/// match the raw ARM `add` instructions; `codepoint` is `u32` only to express
+/// the decoder's bitwise return value, with the same ARM ABI bits as `int`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_find_codepoint(
+    this: *const StringObject,
+    codepoint: u32,
+    start_index: i32,
+) -> i32 {
+    let mut cursor = (*this).payload as *const u8;
+    if cursor.is_null() {
+        return -1;
+    }
+
+    let mut index = 0i32;
+    while index < start_index {
+        if cursor.read() == 0 {
+            return -1;
+        }
+        utf8_next_codepoint(&mut cursor);
+        index = index.wrapping_add(1);
+    }
+
+    while cursor.read() != 0 {
+        if utf8_next_codepoint(&mut cursor) == codepoint {
+            return index;
+        }
+        index = index.wrapping_add(1);
+    }
+
+    -1
+}
+
+
 
 
 /// string_object_equals — original: `FUN_082aad4c` @ 0x082aad4c (40 bytes,
@@ -7447,6 +7502,53 @@ pub(crate) mod tests {
                 -1,
                 "advancing beyond the terminator fails before comparison"
             );
+        }
+    }
+
+    #[test]
+    fn find_codepoint_finds_decoded_codepoints_at_codepoint_indices() {
+        let mut payload = [b'a', 0xc3, 0xa9, b'b', 0xe2, 0x82, 0xac, 0];
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_find_codepoint(&object, 0xe9, 0), 1);
+            assert_eq!(string_object_find_codepoint(&object, b'b' as u32, 2), 2);
+            assert_eq!(string_object_find_codepoint(&object, 0xe9, 2), -1);
+            assert_eq!(string_object_find_codepoint(&object, 0x20ac, -1), 3);
+            assert_eq!(string_object_find_codepoint(&object, b'x' as u32, 0), -1);
+        }
+    }
+
+    #[test]
+    fn find_codepoint_preserves_terminator_and_malformed_lead_behavior() {
+        let empty = [0];
+        let mut single = [b'a', 0];
+        let mut malformed = [0xf0, 0x90, 0x80, 0x80, 0];
+        let empty_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: empty.as_ptr() as *mut u8,
+        };
+        let malformed_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: malformed.as_mut_ptr(),
+        };
+        let single_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: single.as_mut_ptr(),
+        };
+        let null_payload_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_find_codepoint(&empty_object, 0, 0), -1);
+            assert_eq!(string_object_find_codepoint(&malformed_object, 0, 0), 0);
+            assert_eq!(string_object_find_codepoint(&single_object, b'a' as u32, 1), -1);
+            assert_eq!(string_object_find_codepoint(&null_payload_object, 0, 0), -1);
         }
     }
 }

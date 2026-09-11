@@ -19772,6 +19772,37 @@ functions:
       advance-past-terminator rejection. match.py structural review is
       expected to differ in frames and loop lowering.
 
+  - address: 0x082a5220
+    ghidra: FUN_082a5220
+    name: string_object_find_codepoint
+    size: 128
+    sig: "int string_object_find_codepoint(const StringObject *this, int codepoint, int start_index)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1/r5: codepoint
+      param_3/r2/r6: start_index
+      local_14: cursor
+      iVar1/r0: decoded_codepoint
+      iVar2/r4: index
+    notes: >-
+      Raw osos.dec decodes from 0x082a5220 through 0x082a529f, with the
+      next function at 0x082a52a0: exactly 128 bytes, all code. Decoding
+      every ARM B/BL word finds 9 direct call sites, all unconditional bl
+      and zero predicated calls: 0x08119264, 0x081196ec, 0x08119708,
+      0x08178728, 0x08178770, 0x081b2fb8, 0x0826c7b4, 0x082a5c24, and
+      0x082a5c64. The function loads StringObject.payload at +4, returns
+      -1 for NULL, advances its UTF-8 cursor to the signed start_index
+      while rejecting a terminator, then returns the first later index
+      whose utf8_next_codepoint result equals codepoint. Negative starts
+      search from zero; a malformed four-byte lead yields searchable zero
+      after its three-byte decoder advance. No dispatch seam: the sole
+      callee utf8_next_codepoint @ 0x08276214 is already ported and called
+      directly. Host tests cover multibyte codepoint indices, negative
+      starts, absent/empty/NULL payload results, start-at-terminator, and
+      malformed-lead zero matching. match.py structural review is expected
+      to differ in frame and loop lowering.
   - address: 0x082a50a8
     ghidra: FUN_082a50a8
     name: string_object_utf8_strcasecmp_safe
