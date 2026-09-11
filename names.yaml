@@ -46446,6 +46446,38 @@ functions:
       multiply/add overflow, and valid output aliases; match.py reviewed after
       the ARM release build.
 
+  # --- Triple-scaled word cursor advance with range-start output ---
+  - address: 0x0802b9c0
+    ghidra: FUN_0802b9c0
+    name: advance_triple_scaled_word_cursor_with_start
+    size: 44
+    sig: "void advance_triple_scaled_word_cursor_with_start(u32 *cursor, u32 *cursor_mirror, u32 *range_start, u32 stride, u32 factor_2, u32 factor_3)"
+    module: app/triple_scaled_word_cursor_advance
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: cursor_mirror
+      param_3/r2: range_start
+      param_4/r3: stride
+      param_5/[sp,#4]/lr: factor_2
+      param_6/[sp,#8]/r4: factor_3
+      iVar2/r12: old_cursor
+      iVar1/r3: advanced_cursor
+    notes: >-
+      44-byte parser-layout leaf helper (0x0802b9c0..0x0802b9ec), eleven ARM
+      instructions. It reads cursor, computes old_cursor + ((factor_3 *
+      factor_2 * stride) << 2) with ARM's wrapping multiply, shift, and add
+      arithmetic, writes the advanced cursor to cursor then cursor_mirror, and
+      finally writes old_cursor to range_start. Decoding every ARM B/BL word
+      in osos.dec found exactly ten incoming direct calls, all unconditional
+      bl (0x080285fc, 0x08028694, 0x08028774, 0x0802880c, 0x0802897c,
+      0x080289f0, 0x08028adc, 0x08028c04, 0x08028ce4, 0x08028db4); no
+      predicated bl or direct b reaches it. Ordered raw-pointer stores
+      preserve observable output aliasing. No deviations. Focused host tests
+      cover normal advancement, each arithmetic wrap point, and every
+      meaningful output-alias combination; match.py reviewed after the ARM
+      release build.
+
   # --- byte-block checksum continuation literal veneer ---
   - address: 0x08003510
     ghidra: thunk_FUN_0802c03c

@@ -141,6 +141,7 @@ pub mod stream_cache_mass_storage_manager;
 pub mod string_owner_init;
 pub mod utf8_clear_tail_character;
 pub mod triple_scaled_cursor_advance;
+pub mod triple_scaled_word_cursor_advance;
 pub mod tick_accumulator;
 pub mod timed_transition;
 pub mod progress_layout_transition;
