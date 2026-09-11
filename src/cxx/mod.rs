@@ -84,6 +84,7 @@ pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
 pub mod string_encoding;
 pub mod templates;
+pub mod signed_key_tree_find;
 pub mod three_word_clear;
 pub mod three_word_clear_alt;
 pub mod three_word_clear_third;
