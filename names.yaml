@@ -62000,6 +62000,37 @@ functions:
       structure; LLVM emits the independent stores in descending component
       order after all loads.
 
+  # --- Fixed fourteen-byte copy helper (util/copy_fourteen_bytes) ---
+  - address: 0x082231c0
+    ghidra: FUN_082231c0
+    name: copy_fourteen_bytes
+    size: 36
+    sig: "u8 *copy_fourteen_bytes(u8 *dst, const u8 *src)"
+    module: util/copy_fourteen_bytes
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r2: initial_copy_length
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec is exactly nine ARM instructions (36 bytes) from
+      0x082231c0 through 0x082231e0; the next separately linked function
+      opens at 0x082231e4. It copies the first 13 bytes from src to dst by
+      calling the 0x08037df8 IRAM memcpy veneer, then copies byte 13 after
+      that forward grouped copy completes and returns dst. Decoding every ARM
+      B/BL immediate in the image finds exactly nine inbound direct bl calls,
+      all unconditional and none predicated: 0x080f9d38, 0x080fa8d0,
+      0x080fa9e8, 0x080fcc08, 0x080fcd60, 0x080fd28c, 0x080fd3c8,
+      0x080fdf58, and 0x080fe004. No direct plain-B tail or aligned DATA word
+      targets this entry. The veneer is already ported; the Rust body calls
+      memcpy_forward_words directly, which LLVM inlines as the same 8-byte,
+      4-byte, 1-byte, and trailing-byte transfer sequence. match.py against
+      the worktree archive printed the expected structural diff, retaining
+      those grouped loads and stores. Host tests cover disjoint copy, return
+      value, untouched bytes, and every word-aligned overlap. No deliberate
+      deviations.
+
   # --- Fixed four-byte copy helper (util/copy_four_bytes) ---
   - address: 0x0824bf8c
     ghidra: FUN_0824bf8c

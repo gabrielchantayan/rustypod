@@ -10,6 +10,7 @@ pub mod checked_byte_block;
 pub mod bswap;
 pub mod context_field;
 pub mod copy_four_bytes;
+pub mod copy_fourteen_bytes;
 pub mod copy_four_words;
 pub mod counted_wstr_eq;
 pub mod clock_pair;
