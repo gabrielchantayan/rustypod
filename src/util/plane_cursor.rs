@@ -114,8 +114,9 @@ pub struct PlaneDescriptor {
     pub handle: *const *const u32,
 }
 
-/// plane_cursor_init — original: `FUN_0839bae0` @ 0x0839bae0 (120
-/// bytes; 14 `bl` call sites, all unconditional).
+/// plane_cursor_init — originals: `FUN_0839bae0` @ 0x0839bae0 (120
+/// bytes; 14 unconditional `bl` sites) and byte-similar
+/// `FUN_0839bb58` @ 0x0839bb58 (120 bytes; 8 unconditional `bl` sites).
 ///
 /// Fills `out` as described in the module header and returns it — the
 /// ADS construct-and-return-this idiom. Mode 0 = even phase
