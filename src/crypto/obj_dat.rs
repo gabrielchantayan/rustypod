@@ -135,6 +135,8 @@
 //!   read, [`obj_cmp`] implements upstream's body — length first, then
 //!   `memcmp` over `data` — which the `length` @ +0x0c/+0x10 layout
 //!   recovered from `OBJ_obj2txt` @ 0x0805f110 corroborates.
+use crate::drivers::ata_cmd::traced_alloc;
+use crate::runtime::rt_div::__rt_udiv;
 use core::ffi::c_void;
 
 /// OpenSSL's `NID_undef`.
@@ -255,6 +257,11 @@ mod object_layout {
     const _: [u8; 0x10] = [0; core::mem::offset_of!(Asn1Object, data)];
     const _: [u8; 0x04] = [0; core::mem::offset_of!(AddedObj, obj)];
     const _: [u8; 0x08] = [0; core::mem::size_of::<AddedObj>()];
+    const _: [u8; 0x0c] = [0; core::mem::offset_of!(Lhash, num_nodes)];
+    const _: [u8; 0x1c] = [0; core::mem::offset_of!(Lhash, up_load)];
+    const _: [u8; 0x24] = [0; core::mem::offset_of!(Lhash, num_items)];
+    const _: [u8; 0x40] = [0; core::mem::offset_of!(Lhash, num_insert)];
+    const _: [u8; 0x44] = [0; core::mem::offset_of!(Lhash, num_replace)];
     const _: [u8; 0x50] = [0; core::mem::offset_of!(Lhash, num_retrieve)];
     const _: [u8; 0x54] = [0; core::mem::offset_of!(Lhash, num_retrieve_miss)];
     const _: [u8; 0x5c] = [0; core::mem::offset_of!(Lhash, error)];
@@ -302,6 +309,81 @@ unsafe fn lhash_getrn() -> LhashGetrn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_GETRN)) }
 }
 
+
+/// `lh_expand` @ 0x080e8ee4, the unported table-growth worker.
+pub type LhashExpand = unsafe extern "C" fn(table: *mut Lhash);
+
+/// The device's unported `lh_expand` entry.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_lhash_expand(table: *mut Lhash) {
+    let expand: LhashExpand = unsafe { core::mem::transmute(0x080e_8ee4usize) };
+    unsafe { expand(table) };
+}
+
+/// Host calls must explicitly install the unported growth worker.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_lhash_expand(_table: *mut Lhash) {
+    panic!("lh_insert requires the lh_expand worker 0x080e8ee4")
+}
+
+/// Active `lh_expand` worker. The volatile load preserves the target call.
+#[cfg(target_os = "none")]
+pub static mut LHASH_EXPAND: LhashExpand = firmware_lhash_expand;
+
+/// See the target definition.
+#[cfg(not(target_os = "none"))]
+pub static mut LHASH_EXPAND: LhashExpand = missing_lhash_expand;
+
+#[inline(always)]
+unsafe fn lhash_expand() -> LhashExpand {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_EXPAND)) }
+}
+
+/// lh_insert — original: `FUN_082d7c48` @ 0x082d7c48 (192 bytes).
+///
+/// Clears `table->error`; grows the table when
+/// `(num_items << 8) / num_nodes >= up_load`; then resolves `data`'s bucket
+/// with `getrn`. A present node has its data replaced and returns the prior
+/// data. An absent node is allocated as a 12-byte block, linked at the bucket
+/// head, and increments `num_insert` and `num_items`; allocation failure
+/// increments `error` and returns NULL. Raw bytes place the separate next
+/// function at 0x082d7d08, confirming the supplied 192-byte extent. Decoding
+/// every ARM B/BL word in `osos.dec` finds eight unconditional `bl` callers
+/// and one `blne` caller (at 0x080efb34), plus a predicated `bvc` tail branch
+/// at 0x089390b8. Deliberate deviation: the unported `lh_expand` at
+/// 0x080e8ee4 and `getrn` at 0x080e82cc are volatile seams, while the
+/// allocator is the already ported `traced_alloc`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn lh_insert(table: *mut Lhash, data: *mut c_void) -> *mut c_void {
+    (*table).error = 0;
+
+    if __rt_udiv((*table).num_items.wrapping_shl(8), (*table).num_nodes) >= (*table).up_load {
+        lhash_expand()(table);
+    }
+
+    let mut hash = 0;
+    let bucket = lhash_getrn()(table, data, core::ptr::addr_of_mut!(hash));
+    let existing = bucket.read();
+    if !existing.is_null() {
+        let previous = (*existing).data;
+        (*existing).data = data;
+        (*table).num_replace = (*table).num_replace.wrapping_add(1);
+        return previous;
+    }
+
+    let node = traced_alloc(12, 0, 0).cast::<LhashNode>();
+    if node.is_null() {
+        (*table).error = (*table).error.wrapping_add(1);
+        return core::ptr::null_mut();
+    }
+
+    node.write(LhashNode { data, next: core::ptr::null_mut() });
+    bucket.write(node);
+    (*table).num_insert = (*table).num_insert.wrapping_add(1);
+    (*table).num_items = (*table).num_items.wrapping_add(1);
+    core::ptr::null_mut()
+}
 /// lh_retrieve — original: `FUN_082d7e0c` @ 0x082d7e0c (72 bytes).
 ///
 /// The raw ARM body clears `table->error`, asks `getrn` for the bucket word,
@@ -514,11 +596,13 @@ pub unsafe extern "C" fn obj_nid2obj(nid: i32) -> *mut Asn1Object {
 mod tests {
     extern crate std;
     use super::*;
+    use crate::drivers::ata_cmd::{missing_allocator, TracedAllocHooks, TRACED_ALLOC_HOOKS};
+    use crate::testing::TRACED_ALLOC_TEST_LOCK;
     use std::boxed::Box;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes the tests that drive the two globals.
+    /// Serializes the tests that drive the object-database globals.
     static OBJ_LOCK: Mutex<()> = Mutex::new(());
 
     fn object(nid: i32, encoded: &'static [u8]) -> Asn1Object {
@@ -550,6 +634,7 @@ mod tests {
             OBJ_OBJS.len = 0;
             HOST_ADDED_SLOT = core::ptr::null_mut();
             LHASH_GETRN = missing_lhash_getrn;
+            LHASH_EXPAND = missing_lhash_expand;
             HOST_NID_OBJS = core::ptr::null_mut();
         }
 
@@ -597,6 +682,125 @@ mod tests {
             objects.push(object(NID_UNDEF, &[]));
         }
         objects
+    }
+
+    static mut INSERT_NODE: LhashNode = LhashNode {
+        data: core::ptr::null_mut(),
+        next: core::ptr::null_mut(),
+    };
+    static mut INSERT_BUCKET: *mut LhashNode = core::ptr::null_mut();
+    static mut INSERT_ALLOC_SIZE: i32 = 0;
+    static mut INSERT_ALLOC_TAGS: [u32; 2] = [u32::MAX; 2];
+    static mut INSERT_EXPAND_CALLS: u32 = 0;
+
+    unsafe extern "C" fn resolve_insert_bucket(
+        _table: *mut Lhash,
+        _key: *const c_void,
+        hash: *mut u32,
+    ) -> *mut *mut LhashNode {
+        *hash = 0x2468_ace0;
+        core::ptr::addr_of_mut!(INSERT_BUCKET)
+    }
+
+    unsafe extern "C" fn record_insert_expand(_table: *mut Lhash) {
+        INSERT_EXPAND_CALLS = INSERT_EXPAND_CALLS.wrapping_add(1);
+    }
+
+    unsafe extern "C" fn record_insert_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+        INSERT_ALLOC_SIZE = size;
+        INSERT_ALLOC_TAGS = [tag1, tag2];
+        core::ptr::addr_of_mut!(INSERT_NODE).cast::<u8>()
+    }
+
+    struct InsertAllocatorReset(TracedAllocHooks);
+
+    impl Drop for InsertAllocatorReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS), self.0);
+            }
+        }
+    }
+
+    unsafe fn install_insert_allocator() -> InsertAllocatorReset {
+        let reset = InsertAllocatorReset(core::ptr::read_volatile(core::ptr::addr_of!(
+            TRACED_ALLOC_HOOKS
+        )));
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+            TracedAllocHooks { alloc: missing_allocator, trace: None },
+        );
+        reset
+    }
+
+    #[test]
+    fn insertion_replaces_allocates_and_records_allocation_failure() {
+        let _alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _allocator_reset = unsafe { install_insert_allocator() };
+        let old = 1usize as *mut c_void;
+        let replacement = 2usize as *mut c_void;
+
+        unsafe {
+            INSERT_NODE = LhashNode { data: old, next: core::ptr::null_mut() };
+            INSERT_BUCKET = core::ptr::addr_of_mut!(INSERT_NODE);
+            INSERT_EXPAND_CALLS = 0;
+            LHASH_GETRN = resolve_insert_bucket;
+            LHASH_EXPAND = record_insert_expand;
+        }
+        let mut replace_table = Lhash::empty();
+        replace_table.num_nodes = 8;
+        replace_table.up_load = 512;
+        replace_table.num_items = 3;
+        replace_table.num_replace = u32::MAX;
+        replace_table.error = -9;
+        assert_eq!(unsafe { lh_insert(&mut replace_table, replacement) }, old);
+        assert_eq!(unsafe { INSERT_NODE.data }, replacement);
+        assert_eq!(replace_table.error, 0);
+        assert_eq!(replace_table.num_replace, 0, "the counter wraps as the ARM add does");
+        assert_eq!(replace_table.num_items, 3);
+        assert_eq!(replace_table.num_insert, 0);
+        assert_eq!(unsafe { INSERT_EXPAND_CALLS }, 0);
+
+        unsafe {
+            INSERT_BUCKET = core::ptr::null_mut();
+        }
+        let mut failed_table = Lhash::empty();
+        failed_table.num_nodes = 8;
+        failed_table.up_load = 512;
+        failed_table.error = i32::MAX;
+        assert!(unsafe { lh_insert(&mut failed_table, replacement) }.is_null());
+        assert_eq!(failed_table.error, 1, "entry clears error before allocation failure increments it");
+        assert_eq!(failed_table.num_insert, 0);
+        assert_eq!(failed_table.num_items, 0);
+
+        unsafe {
+            INSERT_NODE = LhashNode { data: core::ptr::null_mut(), next: replacement.cast() };
+            INSERT_BUCKET = core::ptr::null_mut();
+            INSERT_ALLOC_SIZE = 0;
+            INSERT_ALLOC_TAGS = [u32::MAX; 2];
+            INSERT_EXPAND_CALLS = 0;
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                TracedAllocHooks { alloc: record_insert_alloc, trace: None },
+            );
+        }
+        let mut inserted_table = Lhash::empty();
+        inserted_table.num_nodes = 8;
+        inserted_table.up_load = 0;
+        inserted_table.error = -1;
+        assert!(unsafe { lh_insert(&mut inserted_table, replacement) }.is_null());
+        assert_eq!(unsafe { INSERT_EXPAND_CALLS }, 1, "zero up_load still expands at equality");
+        assert_eq!(unsafe { INSERT_ALLOC_SIZE }, 12);
+        assert_eq!(unsafe { INSERT_ALLOC_TAGS }, [0, 0]);
+        assert_eq!(unsafe { INSERT_BUCKET }, core::ptr::addr_of_mut!(INSERT_NODE));
+        assert_eq!(unsafe { INSERT_NODE.data }, replacement);
+        assert!(unsafe { INSERT_NODE.next }.is_null(), "the new node explicitly terminates its chain");
+        assert_eq!(inserted_table.error, 0);
+        assert_eq!(inserted_table.num_insert, 1);
+        assert_eq!(inserted_table.num_items, 1);
+        assert_eq!(inserted_table.num_replace, 0);
+        clear(guard);
     }
 
     #[test]
