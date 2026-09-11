@@ -62335,6 +62335,35 @@ functions:
       guard and no callee. No deliberate deviations. Host tests cover the
       first entry, a later entry, and 32-bit address wraparound.
 
+  # --- Mode-selected state byte ---
+  - address: 0x0822b684
+    ghidra: FUN_0822b684
+    name: mode_selected_byte
+    size: 20
+    sig: "u8 mode_selected_byte(const void *state)"
+    module: app/mode_selected_byte
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x2f4": mode_byte
+      "state+0x5ec": default_byte
+      "state+0x5f8": mode_flags
+    notes: >-
+      Raw osos.dec confirms the exact five-instruction, 20-byte extent:
+      ldrb r1,[r0,#0x5f8]; tst r1,#1; ldrbeq r0,[r0,#0x5ec]; ldrbne
+      r0,[r0,#0x2f4]; bx lr from 0x0822b684 through 0x0822b694. The next
+      separately linked function opens at 0x0822b698. It returns the
+      zero-extended +0x5ec byte for flags with bit 0 clear and the
+      zero-extended +0x2f4 byte when bit 0 is set; no NULL or bounds guard
+      exists. The state class, byte semantics, and other flag bits remain
+      unidentified. Decoding every ARM B/BL immediate finds exactly nine
+      direct bl callers, all unconditional and no predicated forms:
+      0x0822aa40, 0x0822ac08, 0x0822aef0, 0x0822af70, 0x0822b158,
+      0x0822b2ec, 0x0822b554, 0x0822b6dc, and 0x0822b800. No direct tail
+      branch reaches this entry. No deliberate deviations. Host tests cover
+      both bytes, every meaningful flag-bit state, byte extremes, and
+      read-only behavior.
+
   # --- Mode-selected stream position ---
   - address: 0x0822aecc
     ghidra: FUN_0822aecc

@@ -74,6 +74,7 @@ pub mod lazy_handle_manager;
 pub mod matched_entry;
 pub mod media_command_facade;
 pub mod media_ext;
+pub mod mode_selected_byte;
 pub mod mode_selected_position;
 pub mod media_player;
 pub mod media_player_queue_refresh;
