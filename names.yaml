@@ -61674,3 +61674,30 @@ functions:
       byte at +4) until it is ported separately; no wider class identity is
       inferred. Host tests cover the literal fields, sentinels, and a base
       return distinct from its input. match.py is structural review only.
+
+  # --- ATA command flag-word getter ---
+  - address: 0x081660d8
+    ghidra: FUN_081660d8
+    name: ata_cmd_get_flags
+    size: 8
+    sig: "u32 ata_cmd_get_flags(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    renames:
+      param_1: cmd
+      "cmd+0x10": flags
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent: ldr r0,[r0,#0x10]
+      at 0x081660d8 followed by bx lr at 0x081660dc; the separately linked
+      next accessor begins at 0x081660e0 with ldr r0,[r0,#0x28]. Whole-image
+      decoding of every ARM B/BL immediate finds exactly 10 direct calls, all
+      unconditional plain bl at 0x0813b624, 0x08166294, 0x08283274,
+      0x08283284, 0x08283324, 0x08283458, 0x08283468, 0x08283798,
+      0x08283cac and 0x08283e24; there are no predicated bl forms or
+      tail-b transfers. No aligned DATA word contains the entry address, so
+      this is not a virtual-dispatch target. Returns the complete u32 ATA
+      command flag word at cmd+0x10 without a NULL guard, precisely as the
+      raw ldr does; all direct callers invoke it unconditionally. The
+      pre-existing ata_cmd_set_flags owns the matching word store. Host tests
+      cover zero, individual observed flags, the high status bit and all
+      bits set. No deliberate deviations; match.py is structural review only.

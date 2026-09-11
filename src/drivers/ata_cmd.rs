@@ -323,6 +323,21 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_get_flags — original: `FUN_081660d8` @ 0x081660d8 (8 bytes;
+/// **10 `bl` call sites**, binary-scanned — all unconditional, at
+/// 0x0813b624, 0x08166294, 0x08283274, 0x08283284, 0x08283324,
+/// 0x08283458, 0x08283468, 0x08283798, 0x08283cac, and 0x08283e24).
+///
+/// Reads the complete command flag word at +0x10. There is deliberately
+/// no NULL guard: every inbound direct call is a plain `bl`, not a
+/// caller-gated predicated branch, and the original is only `ldr r0,
+/// [r0,#0x10]; bx lr`. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_flags(cmd: *const u8) -> u32 {
+    (cmd.add(FLAGS) as *const u32).read_volatile()
+}
+
 /// ata_cmd_set_block_size — original: `FUN_081213e4` @ 0x081213e4
 /// (8 bytes; 12 call sites, binary-scanned).
 ///
@@ -1185,6 +1200,15 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn flag_getter_reads_the_complete_flags_word() {
+        let mut block = poisoned();
+        for flags in [0u32, 0x0000_0080, 0x0008_0000, 0xffff_ffff] {
+            block.0[FLAGS..FLAGS + 4].copy_from_slice(&flags.to_le_bytes());
+            assert_eq!(unsafe { ata_cmd_get_flags(block.0.as_ptr()) }, flags);
+        }
     }
 
     // ---- the device object's index getter (0x08105a2c) -------------------
