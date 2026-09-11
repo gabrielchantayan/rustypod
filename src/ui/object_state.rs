@@ -1254,12 +1254,54 @@ pub unsafe extern "C" fn object_backend_for_kind(object: *const u8) -> *const u8
     core::ptr::null()
 }
 
+/// Word index of the original object's explicit selected-item pointer
+/// (`ldr r3,[r2,#4]`).
+const EXPLICIT_SELECTED_ITEM_WORD: usize = 1;
+
+/// Word indices of the kind-resolved backend's fallback selected-item pointers
+/// (`ldr r2,[r1,#0xf44]`; `ldreq r0,[r1,#0xf48]`).
+const PRIMARY_SELECTED_ITEM_WORD: usize = 0x3d1;
+const SECONDARY_SELECTED_ITEM_WORD: usize = 0x3d2;
+
+/// object_selected_item — original: `FUN_08051ce4` @ `0x08051ce4` (56
+/// bytes; nine verified inbound `bl` call sites, all unconditional).
+///
+/// Raw ARM: `mov r2,r0; push {lr}; bl 0x08051dc4; ldr r3,[r2,#4];
+/// cmp r3,#0; bne ...; ldr r2,[r1,#0xf44]; movs r0,r2; ldreq
+/// r0,[r1,#0xf48]; cmpeq r0,#0; popne {pc}; mov r0,r3; pop {pc}`.
+///
+/// Resolves the current item's target with strict priority: the object's
+/// explicit `+0x04` item wins; otherwise the kind-resolved backend's `+0xf44`
+/// primary item wins, then its `+0xf48` secondary item. The backend resolver
+/// runs before testing the explicit item, exactly as the entry `bl` does.
+/// These are target-width pointer words, so the port reads `u32` fields rather
+/// than host-width pointers and preserves their 4-byte layout. There are no
+/// null or bounds guards, matching the original. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_selected_item(object: *const u8) -> *const u8 {
+    let backend = object_backend_for_kind(object);
+    let explicit_item = object.cast::<u32>().add(EXPLICIT_SELECTED_ITEM_WORD).read();
+    if explicit_item != 0 {
+        return explicit_item as usize as *const u8;
+    }
+
+    let primary_item = backend.cast::<u32>().add(PRIMARY_SELECTED_ITEM_WORD).read();
+    if primary_item != 0 {
+        return primary_item as usize as *const u8;
+    }
+
+    let secondary_item = backend.cast::<u32>().add(SECONDARY_SELECTED_ITEM_WORD).read();
+    secondary_item as usize as *const u8
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
     extern crate std;
 
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::{LazyLock, Mutex, MutexGuard};
 
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
     static OBJECT_SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
@@ -1268,6 +1310,24 @@ mod tests {
     static SCALED_FIELD_TOTAL_LOCK: Mutex<()> = Mutex::new(());
     static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static BASELINE_CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
+    static SELECTED_ITEM_LOCK: Mutex<()> = Mutex::new(());
+    const SELECTED_ITEM_FIXTURE_BYTES: usize = 0x1000;
+    static SELECTED_ITEM_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::OBJECT_SELECTED_ITEM,
+            SELECTED_ITEM_FIXTURE_BYTES,
+        )
+        .map(|storage| storage as usize)
+    });
+
+    fn selected_item_fixture() -> Option<*mut u8> {
+        SELECTED_ITEM_FIXTURE.map(|storage| storage as *mut u8)
+    }
+
+    unsafe fn write_selected_item_word(object: *mut u8, word: usize, value: *const u8) {
+        object.cast::<u32>().add(word).write(value as usize as u32);
+    }
+
     static mut CLOCK_SAMPLE_CALLS: u32 = 0;
     static mut CLOCK_SAMPLE_INTERFACE: u32 = u32::MAX;
     static mut MOCK_SAMPLE: i64 = 0;
@@ -2844,6 +2904,76 @@ mod tests {
             assert!(
                 unsafe { object_backend_for_kind(object.as_ptr()) }.is_null(),
                 "kind {kind:#04x} falls to `movne r0,#0x0`"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_item_prefers_the_explicit_object_field() {
+        let _guard = SELECTED_ITEM_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(object) = selected_item_fixture() else {
+            assert!(crate::testing::note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        unsafe {
+            object.write_bytes(0, SELECTED_ITEM_FIXTURE_BYTES);
+            object.write(KIND_BACKEND);
+            let explicit_item = object.add(0x100);
+            write_selected_item_word(object, EXPLICIT_SELECTED_ITEM_WORD, explicit_item);
+            write_selected_item_word(object, PRIMARY_SELECTED_ITEM_WORD, object.add(0x200));
+            write_selected_item_word(object, SECONDARY_SELECTED_ITEM_WORD, object.add(0x300));
+
+            assert_eq!(
+                object_selected_item(object),
+                explicit_item,
+                "the original returns object+0x04 after resolving the backend"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_item_uses_primary_backend_fallback_before_secondary() {
+        let _guard = SELECTED_ITEM_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(object) = selected_item_fixture() else {
+            assert!(crate::testing::note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        unsafe {
+            object.write_bytes(0, SELECTED_ITEM_FIXTURE_BYTES);
+            object.write(KIND_BACKEND);
+            let primary_item = object.add(0x200);
+            write_selected_item_word(object, EXPLICIT_SELECTED_ITEM_WORD, core::ptr::null());
+            write_selected_item_word(object, PRIMARY_SELECTED_ITEM_WORD, primary_item);
+            write_selected_item_word(object, SECONDARY_SELECTED_ITEM_WORD, object.add(0x300));
+
+            assert_eq!(
+                object_selected_item(object),
+                primary_item,
+                "+0xf44 wins over +0xf48 only when object+0x04 is null"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_item_uses_secondary_fallback_and_preserves_null() {
+        let _guard = SELECTED_ITEM_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(object) = selected_item_fixture() else {
+            assert!(crate::testing::note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        unsafe {
+            object.write_bytes(0, SELECTED_ITEM_FIXTURE_BYTES);
+            object.write(KIND_BACKEND);
+            let secondary_item = object.add(0x300);
+            write_selected_item_word(object, EXPLICIT_SELECTED_ITEM_WORD, core::ptr::null());
+            write_selected_item_word(object, PRIMARY_SELECTED_ITEM_WORD, core::ptr::null());
+            write_selected_item_word(object, SECONDARY_SELECTED_ITEM_WORD, secondary_item);
+            assert_eq!(object_selected_item(object), secondary_item);
+
+            write_selected_item_word(object, SECONDARY_SELECTED_ITEM_WORD, core::ptr::null());
+            assert!(
+                object_selected_item(object).is_null(),
+                "all three null target words return null"
             );
         }
     }

@@ -428,6 +428,10 @@ pub mod hints {
     // profile-pointer fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LAYOUT_STATE_ACTIVATE: usize = 0x8a00_0000;
+    // 0xbd00_0000: dedicated to ui/object_state's raw-u32 selected-item
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const OBJECT_SELECTED_ITEM: usize = 0xbd00_0000;
+
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
