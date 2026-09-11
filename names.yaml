@@ -62083,3 +62083,38 @@ functions:
       existing Rust ports directly. Host test proves the 0x30 allocation,
       construct(resource_id, 1) -> process(resource_id) -> destroy order,
       ignored context, and propagation of the destructor result.
+
+  # --- Range append with boundary newline preservation (app/range_append_boundary_newline) ---
+  - address: 0x0811853c
+    ghidra: FUN_0811853c
+    name: range_append_and_preserve_boundary_newline
+    size: 52
+    sig: "u32 range_append_and_preserve_boundary_newline(void *context, const TextRange *range, u32 metadata)"
+    module: app/range_append_boundary_newline
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: range
+      param_3/r2: metadata
+      "range+0x04": start
+      "range+0x08": end
+      FUN_081195c4: range_append_helper (unported)
+      FUN_08119160: boundary_newline_helper (unported)
+    notes: >-
+      Raw osos.dec confirms the exact 52-byte extent: thirteen ARM words from
+      0x0811853c through the plain-B tail to 0x08119160 at 0x0811856c; the
+      separately linked next function starts with push at 0x08118570. Ghidra's
+      184-byte extent therefore incorrectly swallows that sibling. Decoding
+      every ARM B/BL immediate finds exactly ten direct inbound bl sites:
+      nine unconditional at 0x0811814c, 0x08118190, 0x081183fc, 0x0811840c,
+      0x081189a0, 0x08119004, 0x081196cc, 0x08119734, and 0x08119970; plus
+      blne at 0x081189b4. The predicated caller gates the invocation itself;
+      this body has no range NULL guard. It computes wrapping end - start,
+      calls unported 0x081195c4(context,start,length,metadata), then
+      tail-transfers to unported 0x08119160(context,range), returning that
+      result. Both targets were absent from the ledger at port time, so their
+      semantic identities are not invented; target builds retain their fixed
+      addresses and host tests install seams. Deliberate deviation: the first
+      target transfer is an indirect payload-safe blx instead of stock's
+      PC-relative bl; match.py confirms the final target transfer remains a
+      tail bx, with arguments and result preserved.

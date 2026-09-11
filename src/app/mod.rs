@@ -107,6 +107,7 @@ pub mod pointer_queue;
 pub mod query_param_list;
 pub mod registry;
 pub mod registration_handle;
+pub mod range_append_boundary_newline;
 pub mod registration_handle_wrapper;
 pub mod record_manager;
 pub mod refcounted_value;
