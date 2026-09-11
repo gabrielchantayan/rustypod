@@ -11,6 +11,7 @@
 //! | 0x083b50e4   | copy-assign: release dst, copy src's cell, `refcount += 1`   |
 //! | 0x083b5120   | slot word compare (ported as `cxx::value_compare`)           |
 //! | 0x083b5134   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
+//! | 0x083b51bc   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
 //! | 0x083b524c   | release — this module                                        |
 //! | 0x083b52a0   | release, byte-identical save the `bl` displacement (19 sites)|
 //! | 0x083b52f4   | release variant with a direct `bl 0x081fc930` value destroy  |
@@ -131,6 +132,47 @@ pub unsafe extern "C" fn shared_cell_construct_secondary(
     }
     slot
 }
+///
+/// `shared_cell_construct_tertiary` — retailOS `FUN_083b51bc` @ `0x083b51bc`
+/// (56 bytes; 9 incoming `bl` call sites, ALL unconditional — zero predicated
+/// forms and zero tail `b`, verified by decoding every B/BL word in
+/// `osos.dec`: 0x0818a6ac, 0x0818a8ec, 0x0818a970, 0x0818af40, 0x081a7f10,
+/// 0x081a7f98, 0x081a8788, 0x081a8b80, and 0x081ba77c). Its raw extent ends
+/// immediately before the distinct copy constructor at `0x083b51f4`.
+///
+/// Clears `slot`, then, for a non-NULL polymorphic payload, allocates an
+/// 8-byte `{value, refcount}` cell with tag-2 [`operator_new`], sets its
+/// reference count to one, and installs it in the slot. It returns `slot`.
+/// A NULL payload does not allocate. The original has no allocation-failure
+/// guard; its stores through a NULL allocator result fault, so this port
+/// likewise requires a non-NULL allocator result for a non-NULL payload.
+///
+/// Deliberate deviation: [`SharedCell::value`] is `usize` on hosts to retain
+/// host pointers in tests, while the target field is one 32-bit word; the
+/// allocation request remains the target's 8-byte cell size. Its own text
+/// section keeps this byte-identical constructor sibling device-callable.
+///
+/// # Safety
+/// `slot` must be a valid, aligned writable shared-cell slot. For a non-NULL
+/// `value`, `operator_new(8)` must return writable storage for a
+/// [`SharedCell`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_construct_tertiary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_construct_tertiary(
+    slot: *mut *mut SharedCell,
+    value: *mut u8,
+) -> *mut *mut SharedCell {
+    slot.write(core::ptr::null_mut());
+    if !value.is_null() {
+        let cell = operator_new(8).cast::<SharedCell>();
+        core::ptr::addr_of_mut!((*cell).refcount).write_volatile(1);
+        core::ptr::addr_of_mut!((*cell).value).write_volatile(value as usize);
+        slot.write(cell);
+    }
+    slot
+}
+
 ///
 /// shared_cell_assign — original: `FUN_083b50e4` @ `0x083b50e4`
 /// (60 bytes; 19 incoming `bl` call sites, ALL unconditional — zero
@@ -592,8 +634,7 @@ mod tests {
         let _bench = bench();
         let mut slot = 0x1234usize as *mut SharedCell;
 
-        let result = unsafe { shared_cell_construct_secondary(&mut slot, core::ptr::null_mut()) };
-
+        let result = unsafe { shared_cell_construct_tertiary(&mut slot, core::ptr::null_mut()) };
         assert_eq!(result, core::ptr::addr_of_mut!(slot));
         assert!(slot.is_null());
         assert!(events().is_empty());
@@ -615,8 +656,7 @@ mod tests {
         let payload = 0x1234_5678usize as *mut u8;
         let mut slot = 0xfeed_faceusize as *mut SharedCell;
 
-        let result = unsafe { shared_cell_construct_secondary(&mut slot, payload) };
-
+        let result = unsafe { shared_cell_construct_tertiary(&mut slot, payload) };
         assert_eq!(result, core::ptr::addr_of_mut!(slot));
         assert_eq!(slot, cell_ptr);
         assert_eq!(cell.value, payload as usize);

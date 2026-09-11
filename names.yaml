@@ -21282,6 +21282,34 @@ functions:
       SharedCell uses usize for the payload word so host pointer fixtures
       remain representable; the allocation request remains the target's
       8-byte cell size.
+  # --- shared-cell handle constructor tertiary sibling ---
+  - address: 0x083b51bc
+    ghidra: FUN_083b51bc
+    name: shared_cell_construct_tertiary
+    size: 56
+    sig: "SharedCell **shared_cell_construct_tertiary(SharedCell **slot, void *value)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: value
+      iVar1: cell
+    notes: >-
+      Raw ARM extent is exactly 56 bytes, 0x083b51bc..0x083b51f0; the next
+      separately linked sibling begins at 0x083b51f4. It clears the one-word
+      slot, returns without allocating for a NULL payload, otherwise invokes
+      the already-ported tag-2 operator_new(8) at 0x082aadd4 and fills the
+      new cell as {value, refcount = 1}. It returns slot, not the cell. Raw
+      decoding of every ARM B/BL word in osos.dec found exactly nine incoming
+      BL calls, all unconditional: no predicated BL forms and no direct tail
+      branches. The call sites are 0x0818a6ac, 0x0818a8ec, 0x0818a970,
+      0x0818af40, 0x081a7f10, 0x081a7f98, 0x081a8788, 0x081a8b80, and
+      0x081ba77c. This is byte-identical to shared_cell_construct @
+      0x083b5090 except for its address; the Rust sibling is isolated in its
+      own text section so device hooks retain a distinct callable symbol.
+      Host SharedCell uses usize for the payload word so host pointer fixtures
+      remain representable; the allocation request remains the target's
+      8-byte cell size.
   # --- shared-cell handle release ---
   - address: 0x083b524c
     ghidra: FUN_083b524c
