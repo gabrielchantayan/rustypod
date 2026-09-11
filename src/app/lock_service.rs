@@ -3,6 +3,8 @@
 //! `int method(this, Mutex *)` shape the Silver-era manager classes call.
 //!
 //! Port:
+//! - [`lock_service_create`] — original: `FUN_0822834c` @ 0x0822834c
+//!   (20 bytes; **9 call sites, all unconditional `bl`**).
 //! - [`lock_service_lock`] — original: `FUN_08228360` @ 0x08228360
 //!   (20 bytes; **39 call sites, all unconditional `bl`**).
 //! - [`lock_service_delete`] — original: `FUN_08228374` @ 0x08228374
@@ -23,10 +25,9 @@
 //! 0x08228388  unlock  -> mutex_unlock @ 0x0807f6a0   45 bl + 1 b
 //! ```
 //!
-//! The `push {r4, lr}` is ADS keeping the stack eight-byte aligned; `r4`
-//! is never touched. The next function opens at 0x0822839c with the same
-//! prologue over a different callee, so 20 bytes is the true extent —
-//! Ghidra is right about this one.
+//! All four adapters are ported. The next function opens at 0x0822839c
+//! with the same prologue over a different callee, so 20 bytes is the true
+//! extent — Ghidra is right about this one.
 //!
 //! # Why `this` is dead
 //!
@@ -72,11 +73,50 @@
 
 use core::ffi::c_void;
 
-use crate::kernel::sync_mutex::{mutex_delete, mutex_lock, mutex_unlock, Mutex};
+use crate::kernel::sync_mutex::{mutex_create, mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
 /// The status every member of the family returns. The kernel primitives
 /// are `void`; nothing here can fail.
 pub const LOCK_SERVICE_OK: i32 = 0;
+
+/// lock_service_create — original: `FUN_0822834c` @ 0x0822834c (20 bytes,
+/// 0x0822834c..0x08228360; **9 call sites, all unconditional `bl`, no
+/// predicated forms and no tail `b`** — counted by decoding every ARM
+/// B/BL word in `osos.dec`).
+///
+/// Creates `mutex` and reports success:
+///
+/// ```text
+/// push {r4, lr}          @ alignment only; r4 is never touched
+/// mov  r0, r1            @ the mutex, from the SECOND argument
+/// bl   0x080744a4        @ mutex_create (ported)
+/// mov  r0, #0            @ status: callers test this
+/// pop  {r4, pc}
+/// ```
+///
+/// `service` is the caller's `this` and is deliberately unused. The direct
+/// callers are 0x081c89b4, 0x081d9b18, 0x081d9b4c, 0x081e5d34,
+/// 0x081e5d44, 0x081e5da0, 0x08206c70, 0x08206c98, and 0x0820cec0.
+/// They all arrive as unconditional `bl`; none is predicated or a tail
+/// branch. As with its siblings, the unconditional zero status is
+/// observable to callers.
+///
+/// # Deviations
+///
+/// None. `mutex_create` @ 0x080744a4 is called directly and marked
+/// `inline(never)` so the adapter preserves its direct-call boundary.
+///
+/// # Safety
+///
+/// `mutex` must point at a live [`Mutex`], as the original requires.
+/// `service` may be any value, including NULL or an invalid pointer,
+/// because the original overwrites r0 before dereferencing it.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lock_service_create(_service: *mut c_void, mutex: *mut Mutex) -> i32 {
+    mutex_create(mutex);
+    LOCK_SERVICE_OK
+}
 
 /// lock_service_lock — original: `FUN_08228360` @ 0x08228360 (20 bytes,
 /// 0x08228360..0x08228374; **39 call sites, all unconditional `bl`, no
@@ -196,7 +236,7 @@ mod tests {
 
     use super::*;
     use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
-    use core::sync::atomic::{AtomicU32, Ordering};
+    use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::Mutex as HostMutex;
 
     /// Serializes the `ROM_KERNEL` save/patch/restore (the
@@ -210,6 +250,13 @@ mod tests {
     static DELETED: AtomicU32 = AtomicU32::new(0);
     static LAST_DELETE_KIND: AtomicU32 = AtomicU32::new(0);
     static LAST_DELETE_HANDLE: AtomicU32 = AtomicU32::new(0);
+    static CREATED: AtomicU32 = AtomicU32::new(0);
+    static LAST_CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
+    static LAST_CREATE_CELL: AtomicUsize = AtomicUsize::new(0);
+    static ALLOCATED: AtomicU32 = AtomicU32::new(0);
+    static LAST_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
+    static HEAP_CELL: AtomicU32 = AtomicU32::new(0);
+
 
     unsafe extern "C" fn record_signal(handle: u32) {
         SIGNALLED.fetch_add(1, Ordering::SeqCst);
@@ -227,6 +274,23 @@ mod tests {
         LAST_DELETE_HANDLE.store(*cell, Ordering::SeqCst);
     }
 
+    unsafe extern "C" fn record_define(initial_count: u32, cell: *mut u32) {
+        CREATED.fetch_add(1, Ordering::SeqCst);
+        LAST_CREATE_COUNT.store(initial_count, Ordering::SeqCst);
+        LAST_CREATE_CELL.store(cell as usize, Ordering::SeqCst);
+        *cell = 0x91;
+    }
+
+    unsafe extern "C" fn record_heap_not_early() -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn record_alloc(size: usize) -> *mut u8 {
+        ALLOCATED.fetch_add(1, Ordering::SeqCst);
+        LAST_ALLOC_SIZE.store(size, Ordering::SeqCst);
+        HEAP_CELL.as_ptr() as *mut u8
+    }
+
     /// Runs `body` with a recording `sema_signal` installed, restoring the
     /// table afterwards. The guard is taken once and dropped once, so no
     /// test can re-lock it.
@@ -234,9 +298,12 @@ mod tests {
         let guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved = unsafe { core::ptr::read(core::ptr::addr_of!(ROM_KERNEL)) };
         let patched = RomKernelOps {
+            sema_define: record_define,
             sema_signal: record_signal,
             sema_wait: record_wait,
             sema_delete: record_delete,
+            heap_early_flag: record_heap_not_early,
+            heap_alloc: record_alloc,
             ..saved
         };
         unsafe { core::ptr::write(core::ptr::addr_of_mut!(ROM_KERNEL), patched) };
@@ -247,11 +314,41 @@ mod tests {
         DELETED.store(0, Ordering::SeqCst);
         LAST_DELETE_KIND.store(0, Ordering::SeqCst);
         LAST_DELETE_HANDLE.store(0, Ordering::SeqCst);
+        CREATED.store(0, Ordering::SeqCst);
+        LAST_CREATE_COUNT.store(0, Ordering::SeqCst);
+        LAST_CREATE_CELL.store(0, Ordering::SeqCst);
+        ALLOCATED.store(0, Ordering::SeqCst);
+        LAST_ALLOC_SIZE.store(0, Ordering::SeqCst);
+        HEAP_CELL.store(0, Ordering::SeqCst);
+
 
         body();
 
         unsafe { core::ptr::write(core::ptr::addr_of_mut!(ROM_KERNEL), saved) };
         drop(guard);
+    }
+
+    #[test]
+    fn create_takes_the_mutex_from_the_second_argument_and_ignores_this() {
+        with_recording_kernel(|| {
+            let mut mutex = Mutex {
+                sem_cell: 0xdead_beefusize as *mut u32,
+                unused: 0xa5a5_a5a5,
+            };
+            let bogus_this = 0xcafe_babeusize as *mut c_void;
+
+            let status = unsafe { lock_service_create(bogus_this, &mut mutex) };
+
+            assert_eq!(status, LOCK_SERVICE_OK, "`mov r0, #0`");
+            assert_eq!(ALLOCATED.load(Ordering::SeqCst), 1, "r1 reached mutex_create");
+            assert_eq!(LAST_ALLOC_SIZE.load(Ordering::SeqCst), 4);
+            assert_eq!(CREATED.load(Ordering::SeqCst), 1, "mutex_create defines the semaphore");
+            assert_eq!(LAST_CREATE_COUNT.load(Ordering::SeqCst), 1);
+            assert_eq!(LAST_CREATE_CELL.load(Ordering::SeqCst), HEAP_CELL.as_ptr() as usize);
+            assert_eq!(mutex.sem_cell, HEAP_CELL.as_ptr() as *mut u32);
+            assert_eq!(mutex.unused, 0, "mutex_create clears the padding word");
+            assert_eq!(HEAP_CELL.load(Ordering::SeqCst), 0x91, "the ROM fills the new cell");
+        });
     }
 
     #[test]

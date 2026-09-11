@@ -200,6 +200,7 @@ fn rom_kernel() -> RomKernelOps {
 ///
 /// Creates the semaphore cell and zeroes the padding word. The `mutex`
 /// argument is not NULL-checked, as in the original.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_create(mutex: *mut Mutex) {
     (*mutex).sem_cell = semaphore_cell_create();
