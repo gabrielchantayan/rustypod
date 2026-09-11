@@ -21369,6 +21369,37 @@ functions:
       use an injectable return-preserving seam and target builds call it
       directly.
 
+  # --- shared-cell handle release, direct payload teardown sibling ---
+  - address: 0x083b52f4
+    ghidra: FUN_083b52f4
+    name: shared_cell_release_direct_secondary
+    size: 84
+    sig: "void shared_cell_release_direct_secondary(SharedCell **slot)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: slot
+      iVar1: cell
+      iVar2: remaining
+      FUN_081fc930: direct_payload_teardown
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw ARM is exactly 21 words, 0x083b52f4..0x083b5344; the next distinct
+      function begins at 0x083b5348. A complete osos.dec B/BL-word decode
+      found exactly 9 incoming calls, all unconditional BL (zero predicated
+      forms and zero direct tail branches): 0x0818a6c4, 0x0818a770,
+      0x0818a900, 0x0818a984, 0x0818a98c, 0x0818af58, 0x081a879c,
+      0x083b5228, 0x083dd2c4. An empty slot returns untouched; every
+      non-empty path wrapping-decrements the signed cell refcount and clears
+      the slot. The final 1 -> 0 path passes a non-NULL payload to direct
+      teardown 0x081fc930, operator_deletes its returned pointer, reloads and
+      deletes the still-non-NULL cell, then NULLs the slot. This is
+      byte-identical in behavior to shared_cell_release_direct @ 0x08262b84
+      save the direct BL displacement. The direct callee's identity is not
+      inferred; host builds use its return-preserving seam and target builds
+      call the firmware address. A dedicated target text section retains this
+      otherwise-identical device-callable symbol.
+
   # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
   # String object = one word, the char data pointer. 12-byte _Rep header
   # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}
