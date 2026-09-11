@@ -66192,3 +66192,37 @@ functions:
       faithfully, so no dispatch seam or guessed callee is added. Retain
       status identified until the containing continuation's required live
       register contract can be ported as one coherent routine.
+  - address: 0x083e8ba0
+    ghidra: FUN_083e8ba0
+    name: vector_copy_range_elem24
+    size: 60
+    sig: "u8 *vector_copy_range_elem24(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: unused
+      r4: output_cursor
+      r5: source_cursor
+      r6: last
+      return/r0: output_cursor
+    notes: >-
+      Raw osos.dec extent is exactly 0x083e8ba0..0x083e8bdc; the separately
+      linked next function begins at 0x083e8bdc. It walks [first, last) in
+      24-byte steps, conditionally calling the IRAM memcpy veneer
+      (blne 0x08037df8) only when the current output cursor is nonzero, then
+      advances both cursors and returns the advanced output pointer. An
+      initially NULL output therefore skips only its first record before
+      becoming address 0x18. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly eight inbound direct calls, all unconditional plain bl at
+      0x083e1bd0, 0x083e1c20, 0x083e1d08, 0x083e1d50, 0x083e1d64,
+      0x083e1de8, 0x083e1e10, and 0x083e1e3c; no predicated calls or direct
+      tail branches exist. r3 is never read. The Rust port calls the
+      already-ported memcpy_forward_words body through a volatile function
+      pointer rather than the veneer, preserving its forward-copy semantics
+      without LLVM inlining it. Host tests cover three records and guards, an
+      empty range, and the one-record NULL-output path. match.py structural
+      review finds the same cursor loop, conditional copy, and 24-byte step;
+      its extra setup and indirect call are the deliberate veneer deviation.
