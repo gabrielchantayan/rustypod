@@ -5659,6 +5659,28 @@ functions:
       match.py structural (trace call goes through the ops table, the
       str to +4 is verbatim).
 
+  - address: 0x08076954
+    ghidra: FUN_08076954
+    name: timer_trace_assert
+    size: 40
+    sig: "void timer_trace_assert(u8 *timer)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+    notes: >-
+      Raw ARM confirms the true 40-byte extent: nine instructions (36
+      bytes) from 0x08076954 through the tail branch at 0x08076974 and
+      literal 0x089ca318 at 0x08076978; the next entry opens at
+      0x0807697c. A complete scan of every ARM B/BL word finds 11 direct
+      branch sites: 9 bl (2 bleq, 3 blne, 4 unconditional) and 2 tail b.
+      It locks the pending-list mutex @ 0x089ca318 through ported
+      mutex_lock @ 0x0807f5c4, calls the unported trace/validate walk
+      0x0809e620 through TimerOps::trace_validate without a NULL guard,
+      then tail-branches to ported mutex_unlock @ 0x0807f6a0. Deliberate
+      deviations: the tail branch is a return-position call and the
+      mutex is volatile-copied before locking so LLVM preserves the pair.
+
   - address: 0x08074ba0
     ghidra: FUN_08074ba0
     name: retail_vsnprintf
