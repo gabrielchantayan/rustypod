@@ -278,6 +278,35 @@ pub unsafe extern "C" fn read_usec_timer_into_2(out: *mut u32) {
 pub unsafe extern "C" fn usec_timer_read_seconds() -> u32 {
     unsafe { crate::runtime::rt_div::__rt_udiv(usec_timer_read(), 1_000) }
 }
+/// tick_millis — original: `FUN_081bb384` @ 0x081bb384 (**28 bytes**,
+/// 0x081bb384..0x081bb3a0, binary-decoded; the next separately linked
+/// function begins with `push {r4, lr}` at 0x081bb3a0).
+///
+/// **9 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 0 tail `b` call sites**, verified by decoding every ARM `B`/`BL`
+/// word in `work/firmware/osos.dec`. No aligned image word contains this
+/// address, so it is not a virtual dispatch target.
+///
+/// Samples Timer E once through [`read_usec_timer_into_2`] @ 0x08086e38, then
+/// returns the unsigned millisecond tick `counter_usec / 1000` through the
+/// ADS divider [`crate::runtime::rt_div::__rt_udiv`] @ 0x08036f14. The ARM
+/// body allocates one stack word for the counter, reloads it after the helper,
+/// loads 1000, and tail-branches to the divider.
+///
+/// Deviation: none. Ghidra incorrectly absorbs the tail branch into a
+/// fictional `ulonglong` implementation; the raw branch and the next function
+/// boundary establish this as a 32-bit millisecond reader.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tick_millis")]
+#[inline(never)]
+pub unsafe extern "C" fn tick_millis() -> u32 {
+    let mut counter_usec = 0;
+    unsafe {
+        read_usec_timer_into_2(&mut counter_usec);
+        crate::runtime::rt_div::__rt_udiv(counter_usec, 1_000)
+    }
+}
+
 
 /// iram_usec_timer_read_veneer — original: `thunk_EXT_FUN_08037e20` @
 /// 0x08037e20 (Ghidra reports 4 bytes; the real stub is **8** — the
@@ -637,6 +666,32 @@ mod usec_timer_tests {
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
         assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 2_000);
     }
+    #[test]
+    fn tick_millis_truncates_usecs_and_samples_through_the_out_pointer_helper_once() {
+        let _guard = configure_usec_timer(0, 0);
+
+        for (counter, expected) in [
+            (0, 0),
+            (999, 0),
+            (1_000, 1),
+            (1_999, 1),
+            (2_000, 2),
+            (u32::MAX, 4_294_967),
+        ] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            assert_eq!(unsafe { tick_millis() }, expected, "counter={counter:#010x}");
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        }
+
+        HOST_USEC_TIMER_COUNT.store(1_999, Ordering::Relaxed);
+        HOST_USEC_TIMER_INCREMENT.store(1, Ordering::Relaxed);
+        HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+        assert_eq!(unsafe { tick_millis() }, 1);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 2_000);
+    }
+
 
     #[test]
     fn elapsed_predicate_honors_normal_and_wrapped_boundaries() {
