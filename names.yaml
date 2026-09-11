@@ -61822,3 +61822,37 @@ functions:
       deviations: none. Host tests cover zero, representative low/high-bit
       nonzero words, and isolation of the +0x48 field. match.py is
       structural review only.
+
+  # --- Text buffer constructor ---
+  - address: 0x08186380
+    ghidra: FUN_08186380
+    name: text_buffer_construct_with_capacity
+    size: 60
+    sig: "TextBuffer *text_buffer_construct_with_capacity(TextBuffer *buffer, u32 minimum_capacity)"
+    module: cxx/text_buffer
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: minimum_capacity
+      DAT_081863bc: TEXT_BUFFER_TYPE_MARKER_ADDRESS
+      FUN_08277440: string_default_construct
+      FUN_08186344: text_buffer_reserve
+    notes: >-
+      Raw osos.dec establishes 56 code bytes at 0x08186380..0x081863bc and
+      the 4-byte literal-pool word at 0x081863bc; the next separately linked
+      function begins at 0x081863c0. Whole-image decoding of every ARM B/BL
+      immediate finds ten inbound direct calls, every one an unconditional
+      plain bl at 0x080abfc4, 0x080ac000, 0x080be7c8, 0x081318a0,
+      0x0813283c, 0x0815f364, 0x0815f604, 0x0818cac8, 0x08210054, and
+      0x0822348c; no predicated form or tail b reaches it. It chains the
+      ported StringObject default constructor, overwrites word +0 with the
+      0x081863bc literal, clears word +8, then conditionally reserves the
+      nonzero requested capacity through FUN_08186344. The literal value
+      0x089896bc reads as the static string 4TC_VolumeLimitLockScreenE, not
+      a decodable vtable; its runtime role is unknown and modeled only as a
+      type marker. FUN_08186344 is not separately ported, but its decoded
+      reserve behavior is the volatile TextBufferOps default: realloc_wrapper
+      @ 0x080edbf0 with tag 0x34/copy-on-move 1, NULL-or-one prior-text
+      initialization, and capacity storage only after success. The ROM marker
+      pointer is modeled by static host text. Host tests prove the zero-capacity
+      no-dispatch path and nonzero post-initialization reserve dispatch.
