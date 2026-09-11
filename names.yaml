@@ -34716,6 +34716,40 @@ functions:
       non-digit termination, and overflow wrapping. match.py structural:
       table-classification loop, shift-add/multiply-by-10 accumulation,
       and final cursor store.
+  - address: 0x0808ce8c
+    ghidra: FUN_0808ce8c
+    name: parse_wide_decimal_counted
+    size: 56
+    sig: "u32 parse_wide_decimal_counted(const u16 **cursor, i32 count)"
+    module: strto/wide_decimal_counted
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: count
+      r2: input
+      r3: value
+      r12: code_unit
+      lr: radix
+    notes: >-
+      Raw osos.dec is exactly fourteen ARM words from 0x0808ce8c through
+      bx lr at 0x0808cec0; the next separately linked function starts at
+      0x0808cec4. Decoding every ARM B/BL word finds exactly nine direct
+      callers (0x0807dfd0, 0x0807dfe0, 0x0807dff0, 0x0807e024, 0x0807e034,
+      0x0807e044, 0x0820fdc4, 0x0820fde4, 0x0820fe04), all unconditional
+      bl and none predicated. For each positive signed count, load a u16
+      through the caller-owned cursor, immediately advance the cursor slot,
+      then compute value = value * 10 + code_unit - '0' with wrapping
+      32-bit arithmetic. There is deliberately no ASCII-digit or Unicode
+      validation: every u16 contributes. A count <= 0 touches neither
+      pointer and returns zero. The port spells Ghidra's undefined4 cursor
+      slot as const u16 ** and its int return as u32, preserving target
+      pointer layout and the return-word bit pattern. Host tests cover exact
+      cursor advancement, unchecked non-digits, u32 wraparound, and the
+      signed no-dereference guard. Volatile cursor-slot accesses retain the
+      target's per-iteration load/store rather than allowing LLVM to hoist
+      the cursor load. match.py structural review against this worktree's
+      archive reports the expected non-exact 19-instruction LLVM form:
+      signed early return plus counted u16-load/cursor-store/accumulate loop.
   - address: 0x0804ad80
     ghidra: FUN_0804ad80
     name: scan_stream_allocate_zeroed_scratch
