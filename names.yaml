@@ -3578,6 +3578,29 @@ functions:
       photo-database metric code at 0x08068504 and the threshold check
       at 0x080765ec.
 
+  - address: 0x0807b19c
+    ghidra: FUN_0807b19c
+    name: default_heap_init_return_high_word
+    size: 40
+    sig: "u64 default_heap_init_return_high_word(u32 request)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: request
+      r4: saved_request
+      FUN_08077250: lazy_init_default_heap
+      DAT_089ca638: default_heap_descriptor
+    notes: >-
+      Verified 36 instruction bytes plus the literal at 0x0807b1bc. Raw ARM
+      is `push {r4,lr}; mov r4,r0; bl 0x08077250; ldr r0,[pc,#12]; mov
+      r1,r4; ldr r0,[r0]; pop {r4,lr}; b 0x0819cdf8`. The destination's
+      verified two-word body is `mov r0,#0; bx lr`; its identity is
+      unrecovered, so the port does not invent one. The resulting 64-bit ABI
+      pair is r0 = 0 and r1 = request, represented as `(request as u64) <<
+      32`; no allocation or dereference follows lazy initialization. Whole-
+      image B/BL decode finds exactly 9 inbound calls, all unconditional bl
+      (none predicated): 0x08117a9c, 0x0812ba88, 0x0816d0a4, 0x0816d0d4,
+      0x0816d2e0, 0x0816d3fc, 0x0816d7ac, 0x081cb22c, and 0x08289d28.
   - address: 0x0807b280
     ghidra: FUN_0807b280
     name: global_indirect_word_get
