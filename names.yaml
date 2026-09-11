@@ -66225,6 +66225,35 @@ functions:
       faithfully, so no dispatch seam or guessed callee is added. Retain
       status identified until the containing continuation's required live
       register contract can be ported as one coherent routine.
+  - address: 0x080034c0
+    ghidra: FUN_080034c0
+    name: non_abi_state_machine_continuation_veneer
+    size: 8
+    sig: "void non_abi_state_machine_continuation_veneer(void)"
+    module: sqlite/vdbe
+    status: identified
+    renames:
+      DAT_080034c4: continuation_address
+      FUN_0838b084: containing_routine
+    notes: >-
+      Literal veneer: ldr pc, [pc, #-4] at 0x080034c0 tail-branches through
+      0x0838b198 at 0x080034c4. Ghidra reports 4 bytes; the true extent is
+      8 (instruction plus literal), because the next separately linked veneer
+      opens at 0x080034c8. The literal is not a function entry: raw ARM at
+      0x0838b198 begins `cmp r0, #1; bne 0x0838b218`, within the routine that
+      starts at 0x0838b084 with `push {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}`. This
+      transfer skips that routine's setup of live r4-r8 and therefore depends
+      on the caller's non-ABI register frame; no callee identity is guessed
+      and no Rust dispatch seam is added. Decoding every ARM B/BL word in
+      osos.dec finds exactly nine inbound direct calls: seven unconditional
+      `bl` at 0x08000b64, 0x08000d28, 0x08000e38, 0x08001030, 0x0800124c,
+      0x08001590, and 0x08001860, plus two `bleq` calls at 0x08000c94 and
+      0x08001b50. The predicated calls are caller-side state gates; the veneer
+      itself has no guard. There are no direct B transfers and no additional
+      data-word references (the literal at 0x080034c4 is the sole occurrence).
+      A Rust function cannot preserve and consume this continuation contract
+      faithfully, so retain status identified until the containing routine can
+      be ported as one coherent state machine.
   - address: 0x083e8ba0
     ghidra: FUN_083e8ba0
     name: vector_copy_range_elem24
