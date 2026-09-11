@@ -22,6 +22,12 @@
 
 use core::mem::MaybeUninit;
 
+#[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub static RANGE_I32_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use crate::cxx::string_object::{
     string_object_c_str, string_object_copy_construct, string_object_destroy, StringObject,
 };
@@ -119,9 +125,7 @@ mod tests {
         STRING_OBJECT_OPS, STRING_OBJECT_VTABLE,
     };
     use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
-    use std::sync::{Mutex, MutexGuard};
-
-    static RANGE_I32_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut SOURCE: [u8; 64] = [0; 64];
     static mut COPY: [u8; 64] = [0; 64];
     static mut CONVERTER_CALLS: usize = 0;
@@ -217,7 +221,7 @@ mod tests {
     }
 
     fn install_fixtures() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, OpsGuard) {
-        let range_lock = RANGE_I32_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let range_lock = RANGE_I32_OPS_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let string_lock = STRING_OBJECT_OPS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());

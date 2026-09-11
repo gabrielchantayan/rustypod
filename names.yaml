@@ -61472,3 +61472,38 @@ functions:
       established, so the name describes only the verified construction.
       Deliberate deviation: calls the existing direct base port, with a
       volatile final vtable store retaining the decoded post-call ordering.
+
+  # --- Materialize provider range into StringObject ---
+  - address: 0x081d0d4c
+    ghidra: FUN_081d0d4c
+    name: string_from_range_provider
+    size: 32
+    sig: "void string_from_range_provider(StringObject *out, Utf16RangeProvider *provider)"
+    module: cxx/string_from_range_provider
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: provider
+      "provider+0x0": vtable
+      "provider+0xc": utf16_range
+      "vtable+0x8": materialize_range
+      FUN_081d0d6c: materialize_and_copy_range (inlined)
+      FUN_080f020c: string_from_range (RANGE_I32_OPS seam)
+    notes: >-
+      Raw osos.dec confirms the exact 32-byte extent from 0x081d0d4c through
+      the pop at 0x081d0d68; the separately linked 44-byte helper begins at
+      0x081d0d6c. The wrapper passes a private 8-byte stack range and provider
+      to that helper, which dispatches provider vtable slot +0x08 with the
+      provider, then copies provider+0x0c/+0x10 into the range. The wrapper
+      passes that range directly to the unported UTF-16 converter 0x080f020c
+      with the caller's StringObject output. Whole-image ARM B/BL-immediate
+      decoding found exactly ten inbound calls, all unconditional plain bl at
+      0x08135c80, 0x08135df8, 0x08136140, 0x0813635c, 0x0816c900,
+      0x0816c9e8, 0x08186f50, 0x081dcb40, 0x081dcc2c, and 0x081dcd14;
+      no predicated forms or aligned DATA words target the entry. The plain
+      calls agree with the original's absent NULL guards: invalid pointers
+      reach a direct dereference or indirect call. Deliberate deviation: the
+      uniquely owned helper 0x081d0d6c is inlined, and the existing
+      RANGE_I32_OPS string_from_range seam is reused rather than duplicated.
+      Host test proves slot +0x08 dispatch, observes the post-materialization
+      [0, 0xffffffff] range, and confirms direct forwarding of the output.

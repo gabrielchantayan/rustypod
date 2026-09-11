@@ -70,6 +70,7 @@ pub mod stream_write;
 pub mod stream_write_exact;
 pub mod stream_write_cstr;
 pub mod string_object;
+pub mod string_from_range_provider;
 pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
 pub mod string_encoding;
