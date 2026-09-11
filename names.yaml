@@ -63668,3 +63668,28 @@ functions:
       reports the expected 19-vs-20 instruction structural diff: LLVM uses a
       larger frame and branchy bool normalization around the same ordered
       slot loads and two direct helper calls.
+
+  # --- Storage-layer void errno setter ---
+  - address: 0x082e406c
+    ghidra: FUN_082e406c
+    name: ata_set_error
+    size: 20
+    sig: "void ata_set_error(u32 error)"
+    module: drivers/ata_cmd
+    status: ported
+    renames:
+      param_1/r0: error
+      iVar1: record
+      FUN_082d0ae8: ata_error_record
+    notes: >-
+      Raw ARM confirms the 20-byte extent from 0x082e406c through
+      0x082e407f; 0x082e4080 is a separately entered 404-byte function.
+      The body saves error in r4, calls ata_error_record (0x082d0ae8), and
+      stores it at record +0x04. Exactly nine direct BL words target this
+      entry: eight unconditional bl at 0x082dfeb4, 0x082e07d4, 0x082e0b0c,
+      0x082e1514, 0x082e2f64, 0x082e2fd0, 0x082e3ca4, and 0x082e4254; one
+      blne at 0x082e17e4 is gated by its caller's condition. The port uses
+      the existing ata_error_record seam and an aligned volatile store,
+      preserving no NULL guard and no returned status. Its own text section
+      prevents LLVM from folding it with ata_report_error, which has the
+      same store but returns 0xffffffff.

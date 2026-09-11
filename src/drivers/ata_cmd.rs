@@ -1006,6 +1006,27 @@ pub unsafe extern "C" fn ata_report_error(error: u32) -> u32 {
     0xffff_ffff
 }
 
+/// ata_set_error — original: `FUN_082e406c` @ 0x082e406c (20 bytes; 9
+/// direct `bl` call sites in raw osos.dec: 8 unconditional and one `blne`
+/// at 0x082e17e4).
+///
+/// The storage layer's void errno setter. It obtains the caller's
+/// [`ata_error_record`] and stores `error` in its code word at +0x04. The
+/// predicated call is gated by the caller's condition; this function itself
+/// has no NULL guard, condition checks, or return value.
+///
+/// Deliberate deviation: `link_section` keeps this separate hook seam from
+/// the otherwise byte-identical [`ata_report_error`] body, whose
+/// 0xffffffff return is part of its separate ABI.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_set_error")]
+pub unsafe extern "C" fn ata_set_error(error: u32) {
+    let record = ata_error_record();
+    set_word(record, RECORD_ERROR, error);
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1804,6 +1825,33 @@ mod tests {
             assert_eq!(after, before[i], "byte +{i:#x} disturbed");
         }
         assert_eq!(record_word(record, RECORD_ERROR), 2, "second report wins");
+    }
+
+    // ---- ata_set_error ------------------------------------------------
+
+    #[test]
+    fn set_error_stores_the_code_at_plus4_without_a_status_return() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        unsafe { ata_set_error(0x1c) };
+        let record = unsafe { ata_error_record() };
+        assert_eq!(record_word(record, RECORD_ERROR), 0x1c);
+    }
+
+    #[test]
+    fn set_error_uses_each_callers_own_error_record() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        unsafe { ata_set_error(0x1111_1111) };
+        set_id(8);
+        unsafe { ata_set_error(0x2222_2222) };
+        let base = core::ptr::addr_of!(ERROR_RECORDS) as *const u8;
+        let slot0 = unsafe { base.add(0) };
+        let slot1 = unsafe { base.add(ERROR_RECORD_SIZE) };
+        assert_eq!(record_word(slot0, RECORD_ERROR), 0x1111_1111, "id 7's record");
+        assert_eq!(record_word(slot1, RECORD_ERROR), 0x2222_2222, "id 8's record");
     }
 
     // ---- the zero-argument factory veneer ---------------------------
