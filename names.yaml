@@ -33116,6 +33116,45 @@ functions:
       original relies on the base constructor preserving r0) - the
       accepted house deviations.
 
+  # --- 'plst' UI-element counted-string store (ui/plst_counted_string) ---
+  - address: 0x08067274
+    ghidra: FUN_08067274
+    name: plst_element_store_counted_string
+    size: 88
+    sig: "int plst_element_store_counted_string(u8 *element, const uint16_t *counted)"
+    module: ui/plst_counted_string
+    status: ported
+    renames:
+      param_1/r0/r4: element
+      param_2/r1/r3: counted
+      param_1_plus_0x48: tagged_handler_list
+      param_1_plus_0xcc: inline_string_pool
+      param_1_plus_0x124: string_pool_entry_id
+      DAT_080672cc: POST_STORE_NOTIFY_TAG
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_080be81c: string_pool_store_counted
+      FUN_08066bb8: tagged_list_notify (seam, unported)
+    notes: >-
+      Raw ARM covers 0x08067274 through the return at 0x080672c8 plus
+      literal-pool word 0x63706e6d at 0x080672cc; the next independently
+      linked function begins at 0x080672d0, confirming Ghidra's 88-byte
+      extent. Decoding every ARM B/BL word in osos.dec finds exactly 10
+      direct bl callers, all unconditional (0x080612e0, 0x08063500,
+      0x08065c5c, 0x08068a38, 0x080ab4a8, 0x080b4a30, 0x0812cb8c,
+      0x0816ed6c, 0x0816ee34, 0x0817c0f4), with zero predicated calls.
+      It calls the ported 'plst' class predicate and rejects either a
+      non-'plst'/NULL element or NULL counted UTF-16 source with -50
+      (mvn r0,#0x31). On success it passes element+0xcc, the counted source,
+      and element+0x124 to the ported string_pool_store_counted. A zero store
+      status invokes unported tagged-list walker 0x08066bb8 on element+0x48
+      with literal key 0x63706e6d, element context, and two zeros; its status
+      is discarded while the store status returns. Deliberate deviation:
+      0x08066bb8 has no ported ledger entry, so PLST_COUNTED_STRING_OPS
+      volatile-dispatches to its verified retail address. The key's semantic
+      identity is not recovered or invented. Host tests prove success's exact
+      store/notify tuple, status propagation without notification, and all
+      class/NULL guard no-call paths.
+
   - address: 0x08067300
     ghidra: FUN_08067300
     name: set_navigation_mode

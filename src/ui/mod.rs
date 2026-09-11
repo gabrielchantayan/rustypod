@@ -31,6 +31,7 @@ pub mod tagged_object_link;
 pub mod object_payload;
 pub mod object_packed_field;
 pub mod plst_class_check;
+pub mod plst_counted_string;
 pub mod plst_element_teardown;
 pub mod plst_next;
 pub mod plst_slot_item;
