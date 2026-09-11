@@ -16297,6 +16297,39 @@ functions:
       dispatch slot, exactly like its eighteen siblings.
     renames: {}
 
+  - address: 0x081533ec
+    ghidra: FUN_081533ec
+    name: settings_item_get
+    size: 80
+    sig: "u8 *settings_item_get(void)"
+    module: app/settings_item
+    status: ported
+    renames:
+      DAT_08153434: settings_item_guard
+      DAT_08153438: settings_item
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      EXTENT CORRECTED: Ghidra's 72 bytes are the instructions at
+      0x081533ec..0x08153434; the 8-byte literal pool at 0x08153434
+      (guard 0x089ca62c) and 0x08153438 (record 0x08a12700) belongs to
+      this accessor, and the next independently entered function starts
+      at 0x0815343c. Decoding every ARM B/BL word in osos.dec found
+      exactly nine direct inbound call sites, all unconditional bl:
+      0x08067fbc, 0x0806b894, 0x08165c64, 0x08170e44, 0x081a5428,
+      0x081bbe68, 0x081bbeac, 0x081bbf10, and 0x08202280; there are no
+      predicated bl forms or tail b branches. It tests guard bit 0,
+      acquires through the ported cxa_guard_acquire, clears only byte +12
+      of the fixed 16-byte record, stores 100 at aligned word +8, releases
+      through cxa_guard_release, and returns the record on every path. A
+      nonzero bit-0-clear guard reaches acquire but is refused, leaving the
+      record untouched. Target builds use the original fixed addresses;
+      host tests use private identically laid-out static storage. A volatile
+      function-pointer load retains the original cxa_guard_release call
+      boundary despite that already-ported helper's no-op body. The ported
+      class_8c00_commit_mode now calls it directly rather than using its
+      former getter dispatch seam.
+
   - address: 0x081a53c8
     ghidra: default
     name: class_8c00_commit_mode
@@ -16340,17 +16373,18 @@ functions:
       sites pass mode 1 or 2 and refresh 1, 4, or a variable. The class
       is NOT named and neither the +0xd8 mode nor the byte @ 0x089cc8f0
       has a surviving name; the symbols name the observable mechanics.
-      All six callees are unported, so they ride the
-      CLASS_8C00_COMMIT_SEAMS dispatch table (the SINGLETON_CTORS house
-      pattern, volatile slot reads). Wired defaults are inert but never
-      invent behavior: broadcast returns 11 (the original's exact
-      service-absent path), the store returns the original's constant 0,
-      and the global-mode commit returns the mode unchanged (the
-      original's exact rejection path for modes outside {1, 4}); the
-      property reader (0), scale (identity) and record getter (NULL) are
-      documented stubs, so the refresh != 1 path is NOT hook-ready until
-      the settings chain is ported. The app-root word is the crate
-      static APP_ROOT_OBJECT (the context_scope.rs RW-page deviation).
+      Five remaining unported callees ride the CLASS_8C00_COMMIT_SEAMS
+      dispatch table (the SINGLETON_CTORS house pattern, volatile slot
+      reads); settings_item_get is now ported directly in
+      app/settings_item. Wired defaults are inert but never invent
+      behavior: broadcast returns 11 (the original's exact service-absent
+      path), the store returns the original's constant 0, and the
+      global-mode commit returns the mode unchanged (the original's exact
+      rejection path for modes outside {1, 4}); the property reader (0)
+      and scale (identity) remain documented stubs, so the refresh != 1
+      path is NOT hook-ready until the remaining settings chain is ported.
+      The app-root word is the crate static APP_ROOT_OBJECT (the
+      context_scope.rs RW-page deviation).
       Host tests prove: unchanged mode skips broadcast and store, modes
       1/2 broadcast 61/11 and commit only on a zero return, other modes
       reach neither, refresh == 1 tails with mode 1 while any other

@@ -64,24 +64,23 @@
 //!
 //! ## Deviations
 //!
-//! All six callees are unported, so they ride the
-//! [`CLASS_8C00_COMMIT_SEAMS`] dispatch table (the `SINGLETON_CTORS`
-//! house pattern), read slot-by-slot through `read_volatile`. The wired
-//! defaults are inert but never invent behavior: the broadcast default
-//! returns 11, exactly the original's service-absent path (the
-//! `+4` slot of the global @ `0x089ca458` NULL → `mov r0, #11; bx lr`);
-//! the settings-item store default returns 0, the original's constant
-//! return; the global-mode default returns the mode unchanged, exactly
-//! the original's rejection path for modes outside {1, 4}. The property
-//! reader, scale and item getter defaults (0, identity, NULL) are
-//! documented stubs — with them the refresh path is harmless but writes
-//! nothing real, so the port is NOT hook-ready on the refresh != 1 path
-//! until the settings chain is ported. The app-root word follows the
-//! crate-static [`APP_ROOT_OBJECT`](crate::app::context_scope::APP_ROOT_OBJECT)
-//! deviation (the image's `0x089cxxxx` page holds stale bytes).
+//! Five unported callees ride the [`CLASS_8C00_COMMIT_SEAMS`] dispatch table
+//! (the `SINGLETON_CTORS` house pattern), read slot-by-slot through
+//! `read_volatile`. The settings-item getter is now the direct port
+//! [`settings_item_get`](crate::app::settings_item::settings_item_get). The
+//! wired defaults are inert but never invent behavior: the broadcast default
+//! returns 11, exactly the original's service-absent path (the `+4` slot of
+//! the global @ `0x089ca458` NULL → `mov r0, #11; bx lr`); the settings-item
+//! store default returns 0, the original's constant return; the global-mode
+//! default returns the mode unchanged, exactly the original's rejection path
+//! for modes outside {1, 4}. The property reader and scale defaults (0,
+//! identity) are documented stubs. The app-root word follows the crate-static
+//! [`APP_ROOT_OBJECT`](crate::app::context_scope::APP_ROOT_OBJECT) deviation
+//! (the image's `0x089cxxxx` page holds stale bytes).
 
 use crate::app::context_scope::app_root_object;
 use crate::app::event_code_queue::{event_code_queue_post, EventCodeQueue};
+use crate::app::settings_item::settings_item_get;
 use crate::drivers::timer::{
     timer_is_running, timer_restart, timer_start_after, timer_stop,
 };
@@ -116,9 +115,6 @@ pub struct Class8c00CommitSeams {
     pub read_property_6056: unsafe extern "C" fn(*mut u8) -> u32,
     /// Original @ `0x080e676c`: piecewise-linear 0..100 → 6..55 scale.
     pub scale_value: unsafe extern "C" fn(u32) -> u32,
-    /// Original @ `0x081533ec`: cxa-guarded settings record @
-    /// `0x08a12700`.
-    pub settings_item_get: unsafe extern "C" fn() -> *mut u8,
     /// Original @ `0x081534b8`: stores `value` at record `+8`, notifies
     /// `(*item)->vtable[+0x18]`, always returns 0.
     pub settings_item_store: unsafe extern "C" fn(*mut u8, u32) -> u32,
@@ -146,11 +142,6 @@ unsafe extern "C" fn seam_scale_identity(value: u32) -> u32 {
     value
 }
 
-/// Stub: the settings record is not ported; NULL (the store default
-/// below never dereferences it).
-unsafe extern "C" fn seam_settings_item_absent() -> *mut u8 {
-    ptr::null_mut()
-}
 
 /// Stub: writes nothing; the 0 return matches the original's constant
 /// `mov r0, #0`.
@@ -171,7 +162,6 @@ pub(crate) const DEFAULT_CLASS_8C00_COMMIT_SEAMS: Class8c00CommitSeams =
         broadcast_event: seam_broadcast_absent,
         read_property_6056: seam_read_property_stub,
         scale_value: seam_scale_identity,
-        settings_item_get: seam_settings_item_absent,
         settings_item_store: seam_settings_item_store_stub,
         commit_global_mode: seam_commit_global_mode_passthrough,
     };
@@ -225,7 +215,7 @@ pub unsafe extern "C" fn class_8c00_commit_mode(
         let root = app_root_object();
         let value = seam!(read_property_6056)(root);
         let scaled = seam!(scale_value)(value);
-        let item = seam!(settings_item_get)();
+        let item = settings_item_get();
         seam!(settings_item_store)(item, scaled);
         TAIL_MODE_REFRESHED
     };
@@ -323,6 +313,7 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::app::context_scope::APP_ROOT_OBJECT;
+    use crate::app::settings_item::SETTINGS_ITEM_TEST_LOCK;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -335,7 +326,6 @@ mod tests {
         Broadcast(u32),
         ReadProperty(*mut u8),
         Scale(u32),
-        ItemGet,
         ItemStore(*mut u8, u32),
         CommitGlobal(u32),
     }
@@ -344,7 +334,6 @@ mod tests {
     static mut BROADCAST_RESULT: u32 = 0;
     static mut PROPERTY_RESULT: u32 = 0;
     static mut SCALE_DELTA: u32 = 0;
-    static mut ITEM: *mut u8 = ptr::null_mut();
     static mut COMMIT_RESULT: u32 = 0;
 
     unsafe extern "C" fn recording_broadcast(code: u32) -> u32 {
@@ -362,10 +351,6 @@ mod tests {
         value.wrapping_add(ptr::read_volatile(ptr::addr_of!(SCALE_DELTA)))
     }
 
-    unsafe extern "C" fn recording_item_get() -> *mut u8 {
-        (*ptr::addr_of_mut!(CALLS)).push(Call::ItemGet);
-        ptr::read_volatile(ptr::addr_of!(ITEM))
-    }
 
     unsafe extern "C" fn recording_item_store(item: *mut u8, value: u32) -> u32 {
         (*ptr::addr_of_mut!(CALLS)).push(Call::ItemStore(item, value));
@@ -377,38 +362,43 @@ mod tests {
         ptr::read_volatile(ptr::addr_of!(COMMIT_RESULT))
     }
 
-    /// A fake root object and a fake settings record; only their
-    /// addresses are observed, never their contents.
+    /// A fake root object; the settings-item accessor owns its fixed record.
     static mut FAKE_ROOT: u32 = 0;
-    static mut FAKE_ITEM: [u32; 4] = [0; 4];
 
     /// Installs the recording seams and clears the log. `broadcast_result`
     /// / `commit_result` select the mock return values.
-    fn mock(broadcast_result: u32, commit_result: u32) -> MutexGuard<'static, ()> {
-        let guard = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    struct MockGuard {
+        _settings_item: MutexGuard<'static, ()>,
+        _seams: MutexGuard<'static, ()>,
+    }
+
+    fn mock(broadcast_result: u32, commit_result: u32) -> MockGuard {
+        let settings_item = SETTINGS_ITEM_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let seams = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             CLASS_8C00_COMMIT_SEAMS = Class8c00CommitSeams {
                 broadcast_event: recording_broadcast,
                 read_property_6056: recording_read_property,
                 scale_value: recording_scale,
-                settings_item_get: recording_item_get,
                 settings_item_store: recording_item_store,
                 commit_global_mode: recording_commit_global,
             };
             BROADCAST_RESULT = broadcast_result;
             PROPERTY_RESULT = 0x1234;
             SCALE_DELTA = 0x10;
-            ITEM = ptr::addr_of_mut!(FAKE_ITEM) as *mut u8;
             COMMIT_RESULT = commit_result;
             APP_ROOT_OBJECT = ptr::addr_of_mut!(FAKE_ROOT) as *mut u8;
             (*ptr::addr_of_mut!(CALLS)).clear();
         }
-        guard
+        MockGuard {
+            _settings_item: settings_item,
+            _seams: seams,
+        }
     }
 
-    /// Restores every wired default. Takes the guard by value so it
-    /// cannot be re-locked while still held (the seek_core.rs rule).
-    fn restore(guard: MutexGuard<'static, ()>) {
+    /// Restores every wired default. Takes the guards by value so neither
+    /// lock can be re-locked while still held (the seek_core.rs rule).
+    fn restore(guard: MockGuard) {
         unsafe {
             CLASS_8C00_COMMIT_SEAMS = DEFAULT_CLASS_8C00_COMMIT_SEAMS;
             APP_ROOT_OBJECT = ptr::null_mut();
@@ -524,22 +514,21 @@ mod tests {
         let guard = mock(0, 0xbeef);
         let mut object = FakeObject::new(1);
         let root = unsafe { ptr::addr_of_mut!(FAKE_ROOT) as *mut u8 };
-        let item = unsafe { ptr::addr_of_mut!(FAKE_ITEM) as *mut u8 };
 
         let result = unsafe { class_8c00_commit_mode(object.as_ptr(), 4, 1) };
 
         assert_eq!(result, 0xbeef);
+        let recorded = calls();
         assert_eq!(
-            calls(),
-            [
-                Call::ReadProperty(root),
-                Call::Scale(0x1234),
-                Call::ItemGet,
-                Call::ItemStore(item, 0x1234 + 0x10),
-                Call::CommitGlobal(TAIL_MODE_REFRESHED),
-            ],
-            "root -> property -> scale -> item+8 store -> global mode 4"
+            &recorded[..2],
+            [Call::ReadProperty(root), Call::Scale(0x1234)],
+            "the refresh path reads then scales before resolving the fixed item"
         );
+        assert!(
+            matches!(recorded[2], Call::ItemStore(item, 0x1244) if !item.is_null()),
+            "the direct accessor returns a real settings-item record"
+        );
+        assert_eq!(recorded[3], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
@@ -549,10 +538,10 @@ mod tests {
         let mut object = FakeObject::new(1);
 
         unsafe { class_8c00_commit_mode(object.as_ptr(), 0, 1) };
-
         let recorded = calls();
-        assert_eq!(recorded.len(), 5, "any refresh != 1 refreshes");
-        assert_eq!(recorded[4], Call::CommitGlobal(TAIL_MODE_REFRESHED));
+
+        assert_eq!(recorded.len(), 4, "any refresh != 1 refreshes");
+        assert_eq!(recorded[3], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
@@ -566,13 +555,14 @@ mod tests {
         assert_eq!(object.mode(), 1);
         let recorded = calls();
         assert_eq!(recorded[0], Call::Broadcast(BROADCAST_CODE_MODE_1));
-        assert_eq!(recorded[5], Call::CommitGlobal(TAIL_MODE_REFRESHED));
+        assert_eq!(recorded[4], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
     #[test]
     fn wired_defaults_are_inert_and_safe() {
         let guard = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _settings_item = SETTINGS_ITEM_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { APP_ROOT_OBJECT = ptr::null_mut() };
         let mut object = FakeObject::new(0);
 
@@ -585,7 +575,12 @@ mod tests {
         // The refresh path with stub seams touches nothing and is safe.
         let result = unsafe { class_8c00_commit_mode(object.as_ptr(), 4, 1) };
         assert_eq!(result, TAIL_MODE_REFRESHED);
-        restore(guard);
+        unsafe {
+            CLASS_8C00_COMMIT_SEAMS = DEFAULT_CLASS_8C00_COMMIT_SEAMS;
+            APP_ROOT_OBJECT = ptr::null_mut();
+            (*ptr::addr_of_mut!(CALLS)).clear();
+        }
+        drop(guard);
     }
 
     // ---- class_8c00_rearm_timer_post_0x11 --------------------------
