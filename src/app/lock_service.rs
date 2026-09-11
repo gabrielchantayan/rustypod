@@ -5,9 +5,10 @@
 //! Port:
 //! - [`lock_service_lock`] — original: `FUN_08228360` @ 0x08228360
 //!   (20 bytes; **39 call sites, all unconditional `bl`**).
+//! - [`lock_service_delete`] — original: `FUN_08228374` @ 0x08228374
+//!   (20 bytes; **9 call sites, all unconditional `bl`**).
 //! - [`lock_service_unlock`] — original: `FUN_08228388` @ 0x08228388
 //!   (20 bytes; **46 call sites, 45 `bl` + 1 tail `b`**).
-//!
 //! # The family
 //!
 //! Four byte-identical-shaped functions sit back to back, in declaration
@@ -71,7 +72,7 @@
 
 use core::ffi::c_void;
 
-use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
+use crate::kernel::sync_mutex::{mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
 /// The status every member of the family returns. The kernel primitives
 /// are `void`; nothing here can fail.
@@ -117,6 +118,41 @@ pub const LOCK_SERVICE_OK: i32 = 0;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn lock_service_lock(_service: *mut c_void, mutex: *mut Mutex) -> i32 {
     mutex_lock(mutex);
+    LOCK_SERVICE_OK
+}
+
+/// lock_service_delete — original: `FUN_08228374` @ 0x08228374 (20 bytes,
+/// 0x08228374..0x08228388; **9 call sites, all unconditional `bl`, no
+/// predicated forms and no tail `b`** — counted by decoding every branch
+/// word in `osos.dec`).
+///
+/// Destroys `mutex` and reports success:
+///
+/// ```text
+/// push {r4, lr}          @ alignment only; r4 is never touched
+/// mov  r0, r1            @ the mutex, from the SECOND argument
+/// bl   0x0807f650        @ mutex_delete (ported)
+/// mov  r0, #0            @ status: callers test this
+/// pop  {r4, pc}
+/// ```
+///
+/// `service` is the caller's `this` and is deliberately unused. The nine
+/// direct call sites are 0x081c89d8, 0x081d9b74, 0x081d9b8c, 0x081e5f28,
+/// 0x081e5f5c, 0x081e5f6c, 0x08206e00, 0x08206e1c, and 0x0820cedc.
+///
+/// # Deviations
+///
+/// None. `mutex_delete` @ 0x0807f650 is ported and called directly.
+///
+/// # Safety
+///
+/// `mutex` must point at a live [`Mutex`], as the original requires. A
+/// mutex whose semaphore cell is NULL is already uncreated or deleted and
+/// remains a no-op.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lock_service_delete(_service: *mut c_void, mutex: *mut Mutex) -> i32 {
+    mutex_delete(mutex);
     LOCK_SERVICE_OK
 }
 
@@ -171,6 +207,9 @@ mod tests {
     static LAST_HANDLE: AtomicU32 = AtomicU32::new(0);
     static WAITED: AtomicU32 = AtomicU32::new(0);
     static LAST_WAIT_HANDLE: AtomicU32 = AtomicU32::new(0);
+    static DELETED: AtomicU32 = AtomicU32::new(0);
+    static LAST_DELETE_KIND: AtomicU32 = AtomicU32::new(0);
+    static LAST_DELETE_HANDLE: AtomicU32 = AtomicU32::new(0);
 
     unsafe extern "C" fn record_signal(handle: u32) {
         SIGNALLED.fetch_add(1, Ordering::SeqCst);
@@ -182,18 +221,32 @@ mod tests {
         LAST_WAIT_HANDLE.store(handle, Ordering::SeqCst);
     }
 
+    unsafe extern "C" fn record_delete(kind: u32, cell: *mut u32) {
+        DELETED.fetch_add(1, Ordering::SeqCst);
+        LAST_DELETE_KIND.store(kind, Ordering::SeqCst);
+        LAST_DELETE_HANDLE.store(*cell, Ordering::SeqCst);
+    }
+
     /// Runs `body` with a recording `sema_signal` installed, restoring the
     /// table afterwards. The guard is taken once and dropped once, so no
     /// test can re-lock it.
     fn with_recording_kernel(body: impl FnOnce()) {
         let guard = ROM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved = unsafe { core::ptr::read(core::ptr::addr_of!(ROM_KERNEL)) };
-        let patched = RomKernelOps { sema_signal: record_signal, sema_wait: record_wait, ..saved };
+        let patched = RomKernelOps {
+            sema_signal: record_signal,
+            sema_wait: record_wait,
+            sema_delete: record_delete,
+            ..saved
+        };
         unsafe { core::ptr::write(core::ptr::addr_of_mut!(ROM_KERNEL), patched) };
         SIGNALLED.store(0, Ordering::SeqCst);
         LAST_HANDLE.store(0, Ordering::SeqCst);
         WAITED.store(0, Ordering::SeqCst);
         LAST_WAIT_HANDLE.store(0, Ordering::SeqCst);
+        DELETED.store(0, Ordering::SeqCst);
+        LAST_DELETE_KIND.store(0, Ordering::SeqCst);
+        LAST_DELETE_HANDLE.store(0, Ordering::SeqCst);
 
         body();
 
@@ -308,6 +361,54 @@ mod tests {
                 );
             }
             assert_eq!(WAITED.load(Ordering::SeqCst), 3);
+        });
+    }
+
+    #[test]
+    fn delete_takes_the_mutex_from_the_second_argument_and_ignores_this() {
+        with_recording_kernel(|| {
+            let mut handle: u32 = 0x2b;
+            let mut mutex = Mutex { sem_cell: &mut handle, unused: 0xa5a5_a5a5 };
+            let bogus_this = 0xdead_beefusize as *mut c_void;
+
+            let status = unsafe { lock_service_delete(bogus_this, &mut mutex) };
+
+            assert_eq!(status, LOCK_SERVICE_OK, "`mov r0, #0`");
+            assert_eq!(DELETED.load(Ordering::SeqCst), 1, "r1 reached mutex_delete");
+            assert_eq!(LAST_DELETE_KIND.load(Ordering::SeqCst), 1);
+            assert_eq!(LAST_DELETE_HANDLE.load(Ordering::SeqCst), 0x2b);
+            assert_eq!(handle, 0, "mutex_delete clears the live cell");
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears the cell pointer");
+            assert_eq!(mutex.unused, 0xa5a5_a5a5, "the padding word is untouched");
+        });
+    }
+
+    #[test]
+    fn delete_of_an_uncreated_mutex_is_a_no_op_that_still_reports_success() {
+        with_recording_kernel(|| {
+            let mut mutex = Mutex { sem_cell: core::ptr::null_mut(), unused: 0x5a5a_5a5a };
+
+            let status = unsafe { lock_service_delete(core::ptr::null_mut(), &mut mutex) };
+
+            assert_eq!(status, LOCK_SERVICE_OK);
+            assert_eq!(DELETED.load(Ordering::SeqCst), 0, "no ROM delete");
+            assert!(mutex.sem_cell.is_null());
+            assert_eq!(mutex.unused, 0x5a5a_5a5a);
+        });
+    }
+
+    #[test]
+    fn deleting_a_mutex_twice_only_destroys_its_cell_once() {
+        with_recording_kernel(|| {
+            let mut handle: u32 = 0x37;
+            let mut mutex = Mutex { sem_cell: &mut handle, unused: 0 };
+
+            assert_eq!(unsafe { lock_service_delete(core::ptr::null_mut(), &mut mutex) }, LOCK_SERVICE_OK);
+            assert_eq!(unsafe { lock_service_delete(core::ptr::null_mut(), &mut mutex) }, LOCK_SERVICE_OK);
+
+            assert_eq!(DELETED.load(Ordering::SeqCst), 1);
+            assert_eq!(handle, 0);
+            assert!(mutex.sem_cell.is_null());
         });
     }
 

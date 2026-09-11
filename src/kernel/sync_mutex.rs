@@ -252,6 +252,7 @@ pub unsafe extern "C" fn mutex_unlock(mutex: *mut Mutex) {
 
 /// mutex_delete — original: `FUN_0807f650` @ 0x0807f650 (32 bytes).
 /// Destroys the cell if present, then NULLs the mutex's cell pointer.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_delete(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;

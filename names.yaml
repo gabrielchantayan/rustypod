@@ -51206,6 +51206,35 @@ functions:
       are no-ops that return success, no mutex word is modified, and
       repeated waits plus a lock/unlock pair preserve the same handle.
 
+  - address: 0x08228374
+    ghidra: FUN_08228374
+    name: lock_service_delete
+    size: 20
+    sig: "int lock_service_delete(void *service, Mutex *mutex)"
+    module: app/lock_service
+    status: ported
+    renames: {param_1/r0: service, param_2/r1: mutex}
+    notes: >-
+      Member function of the Silver-era mutex-service class that adapts void
+      mutex_delete @ 0x0807f650 (ported in kernel/sync_mutex.rs) to the int
+      method(this, Mutex *) convention. Raw osos.dec words at
+      0x08228374..0x08228388 are exactly `stmdb sp!,{r4,lr}; mov r0,r1; bl
+      0x0807f650; mov r0,#0; ldmia sp!,{r4,pc}`; 0x08228388 opens the
+      separately linked unlock sibling, confirming Ghidra's 20-byte extent.
+      r0 is dead: each direct caller supplies the mutex in r1, while r0 is
+      its unrelated service this pointer. The unconditional `mov r0,#0`
+      makes status success observable after the call.
+      Decoding every ARM B/BL word in osos.dec found exactly 9 callers, all
+      unconditional `bl` with no predicated forms and no tail branches:
+      0x081c89d8, 0x081d9b74, 0x081d9b8c, 0x081e5f28, 0x081e5f5c,
+      0x081e5f6c, 0x08206e00, 0x08206e1c, and 0x0820cedc.
+      Deviations - none: the direct Rust call retains the already-ported
+      primitive, and both exports are inline(never) to preserve an ARM call
+      target. Host tests prove invalid and NULL service pointers are ignored,
+      a live mutex reaches the delete primitive through r1, an uncreated
+      mutex remains a successful no-op, and repeated deletion destroys its
+      cell only once.
+
   - address: 0x08228388
     ghidra: FUN_08228388
     name: lock_service_unlock
