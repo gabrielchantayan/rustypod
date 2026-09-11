@@ -14610,6 +14610,45 @@ functions:
       neighboring byte reader. Host tests cover mode 0/1, mismatch writes,
       negative count, and distinct primary/mirror cursor slots.
 
+  - address: 0x0802b5d4
+    ghidra: FUN_0802b5d4
+    name: checked_word_block_convert_core
+    size: 128
+    sig: "u32 checked_word_block_convert_core(u32 mode, u32 **input_cursor, u32 **input_cursor_mirror, u32 **output_cursor, u32 **output_cursor_mirror, i32 word_count)"
+    module: util/checked_word_block
+    status: ported
+    renames:
+      param_1/r5: mode
+      param_2/r4: input_cursor
+      param_3/r12: input_cursor_mirror
+      param_4/r3: output_cursor
+      param_5/r10: output_cursor_mirror
+      param_6/r11: word_count
+      puVar4/r7: source
+      piVar3/r6: target
+      iVar6/r9: sum
+      iVar5/r8: index
+      FUN_0802b538: transform_checked_word_for_mode
+    notes: >-
+      Raw ARM is exactly 128 bytes (0x0802b5d4..0x0802b654), 32 instructions,
+      bounded by the distinct following function prologue. Decoding every ARM
+      B/BL immediate in osos.dec finds nine plain unconditional bl callers,
+      zero predicated bl forms, and zero direct B entries at 0x0802b6a0,
+      0x0802c728, 0x0802c924, 0x0802cb20, 0x0802cd38, 0x0802d148,
+      0x0802d3f4, 0x0802d904, and 0x0802dbcc. The core loads source from
+      input_cursor_mirror and target from output_cursor_mirror, transforms
+      word_count aligned words for exact mode 1, stores them, and accumulates
+      a wrapping u32 sum. It transforms and compares the next aligned word.
+      Success advances input cursor, input mirror, output cursor, and output
+      mirror in that store order; failure returns 4 with aliases unchanged
+      after the output writes. The signed blt bound means zero and negative
+      counts require a transformed zero checksum. No deliberate deviations.
+      Host tests cover mode-one conversion, distinct mirror cursor selection,
+      mismatch output writes, distinct untouched aliases, and a negative count.
+      match.py structural review finds the same cursor loads, transform loop,
+      checksum comparison, and success-store order; LLVM uses a decrementing
+      loop and extra frame setup.
+
   - address: 0x0802b654
     ghidra: FUN_0802b654
     name: checked_byte_block_convert

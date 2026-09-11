@@ -59,6 +59,63 @@ pub unsafe extern "C" fn checked_byte_block_convert(
         )
     }
 }
+/// checked_word_block_convert_core — original: `FUN_0802b5d4` @ 0x0802b5d4
+/// (128 bytes; 9 plain unconditional `bl` call sites, zero predicated forms).
+///
+/// Converts `word_count` aligned words from the cursor held by
+/// `input_cursor_mirror`, storing each mode-transformed word through the cursor
+/// held by `output_cursor_mirror` while accumulating their wrapping sum. It
+/// compares that sum with the transformed following word. A match advances
+/// input cursor, input mirror, output cursor, then output mirror; a mismatch
+/// returns [`CHECKSUM_MISMATCH`] without advancing aliases after its output
+/// writes.
+///
+/// The original's `blt` loop makes `word_count` signed: zero or negative
+/// counts convert no words and require a transformed zero checksum. Exactly
+/// mode 1 reverses each word through
+/// [`transform_checked_word_for_mode`]; all other modes preserve it. No
+/// deliberate deviations.
+///
+/// # Safety
+/// `input_cursor_mirror` and `output_cursor_mirror` must be readable and hold
+/// cursors valid for the signed-positive word count plus one aligned checksum
+/// word of input. All four cursor slots must be writable on success.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn checked_word_block_convert_core(
+    mode: u32,
+    input_cursor: *mut *mut u32,
+    input_cursor_mirror: *mut *mut u32,
+    output_cursor: *mut *mut u32,
+    output_cursor_mirror: *mut *mut u32,
+    word_count: i32,
+) -> u32 {
+    let mut source = unsafe { core::ptr::read_volatile(input_cursor_mirror) };
+    let mut target = unsafe { core::ptr::read_volatile(output_cursor_mirror) };
+    let mut sum = 0u32;
+    let mut index = 0i32;
+    while index < word_count {
+        let word = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+        sum = sum.wrapping_add(word);
+        source = unsafe { source.add(1) };
+        unsafe { core::ptr::write_volatile(target, word) };
+        target = unsafe { target.add(1) };
+        index = index.wrapping_add(1);
+    }
+    let checksum = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+    if checksum != sum {
+        return CHECKSUM_MISMATCH;
+    }
+    let advanced_source = unsafe { source.add(1) };
+    unsafe {
+        core::ptr::write_volatile(input_cursor, advanced_source);
+        core::ptr::write_volatile(input_cursor_mirror, advanced_source);
+        core::ptr::write_volatile(output_cursor, target);
+        core::ptr::write_volatile(output_cursor_mirror, target);
+    }
+    0
+}
+
 
 /// checked_word_block_convert_3d — original: `FUN_0802b868` @ 0x0802b868
 /// (188 bytes, 0x0802b868..0x0802b924; 31 `bl` call sites, every one a
@@ -189,6 +246,82 @@ mod tests {
         fn target_offset(&self, cursor: *mut u32) -> usize {
             (cursor as usize - self.target.as_ptr() as usize) / core::mem::size_of::<u32>()
         }
+    }
+
+    #[test]
+    fn core_uses_mirror_cursors_and_advances_all_aliases_after_mode_one_success() {
+        let data = [0x1020_3040u32, 0xa0b0_c0d0, 0x0000_00ff];
+        let sum = data.iter().fold(0u32, |acc, word| acc.wrapping_add(word.swap_bytes()));
+        let mut words = data.to_vec();
+        words.push(sum.swap_bytes());
+        let mut block = Block::new(&words);
+        block.input = unsafe { block.source.as_mut_ptr().add(2) };
+        block.output = unsafe { block.target.as_mut_ptr().add(2) };
+
+        let status = unsafe {
+            checked_word_block_convert_core(
+                1,
+                &mut block.input,
+                &mut block.input_mirror,
+                &mut block.output,
+                &mut block.output_mirror,
+                3,
+            )
+        };
+
+        assert_eq!(status, 0);
+        assert_eq!(&block.target[..3], &[0x4030_2010, 0xd0c0_b0a0, 0xff00_0000]);
+        assert_eq!(block.source_offset(block.input), 4);
+        assert_eq!(block.source_offset(block.input_mirror), 4);
+        assert_eq!(block.target_offset(block.output), 3);
+        assert_eq!(block.target_offset(block.output_mirror), 3);
+    }
+
+    #[test]
+    fn core_mismatch_writes_words_but_leaves_distinct_aliases_unchanged() {
+        let mut block = Block::new(&[10u32, 20, 0]);
+        block.input = unsafe { block.source.as_mut_ptr().add(2) };
+        block.output = unsafe { block.target.as_mut_ptr().add(2) };
+
+        let status = unsafe {
+            checked_word_block_convert_core(
+                0,
+                &mut block.input,
+                &mut block.input_mirror,
+                &mut block.output,
+                &mut block.output_mirror,
+                2,
+            )
+        };
+
+        assert_eq!(status, CHECKSUM_MISMATCH);
+        assert_eq!(&block.target[..2], &[10, 20]);
+        assert_eq!(block.source_offset(block.input), 2);
+        assert_eq!(block.source_offset(block.input_mirror), 0);
+        assert_eq!(block.target_offset(block.output), 2);
+        assert_eq!(block.target_offset(block.output_mirror), 0);
+    }
+
+    #[test]
+    fn core_negative_count_checks_only_zero_checksum() {
+        let mut block = Block::new(&[0u32, 0xaaaa_aaaa]);
+        let status = unsafe {
+            checked_word_block_convert_core(
+                9,
+                &mut block.input,
+                &mut block.input_mirror,
+                &mut block.output,
+                &mut block.output_mirror,
+                -7,
+            )
+        };
+
+        assert_eq!(status, 0);
+        assert_eq!(block.source_offset(block.input), 1);
+        assert_eq!(block.source_offset(block.input_mirror), 1);
+        assert_eq!(block.target_offset(block.output), 0);
+        assert_eq!(block.target_offset(block.output_mirror), 0);
+        assert_eq!(block.target[0], 0xdead_beef);
     }
 
     #[test]
