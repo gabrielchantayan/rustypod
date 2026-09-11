@@ -378,6 +378,9 @@ pub mod hints {
     // stream-handle fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STREAM_SEEK_TAGGED_ENTRY: usize = 0x9b00_0000;
+    // 0xb900_0000: dedicated to ft/buffer_skip's raw-u32 buffered-stream
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const BUFFERED_STREAM_SKIP: usize = 0xb900_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
