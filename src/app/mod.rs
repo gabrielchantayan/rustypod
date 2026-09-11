@@ -74,6 +74,7 @@ pub mod media_command_facade;
 pub mod media_ext;
 pub mod mode_selected_position;
 pub mod media_player;
+pub mod media_player_queue_refresh;
 pub mod media_player_interface_slot_11c;
 pub mod metadata_record;
 pub mod indexed_payload_lookup;
