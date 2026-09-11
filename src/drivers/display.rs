@@ -13,6 +13,9 @@
 //!   `display_get(1)` the secondary output, anything else is NULL.
 //! - [`display_get_layer`] — original: `FUN_081d9064` @ 0x081d9064
 //!   (96 bytes; **63 `bl` call sites**). The lazy per-layer accessor.
+//! - [`display_set_pending_command`] — original: `FUN_081d9138` @
+//!   0x081d9138 (20 bytes; **9 `bl` and 2 tail `b` call sites**). Stores a
+//!   two-byte pending command and marks the display state dirty.
 //! - [`display_set_clear_color`] — original: `FUN_081d8cfc` @ 0x081d8cfc
 //!   (16 bytes; **28 `bl` call sites**). Arms the panel clear: the color
 //!   word at +0x20 plus the pending byte at +0x1e, consumed by the flush
@@ -114,9 +117,15 @@
 //!                cleared to the color word
 //! +0x20  u32     the clear color, handed verbatim to the panel driver's
 //!                vtable slot +0x10 by the flush loop @ 0x081d8bec
+//! +0x24  u8      pending-command dirty flag, set by 0x081d9138
 //! +0x28  Mutex   the display's own mutex (kernel::sync_mutex::Mutex),
 //!                created by the constructor, held across the whole
 //!                lazy-construction window
+//! +0x50  ptr     layer-activity blocker; a non-NULL blocker defers stopping
+//! +0x54  u8      pending command byte, written by 0x081d9138 and consumed
+//!                by the state-completion routine at 0x081d90c4
+//! +0x55  u8      pending command parameter, written with the command
+//! +0x56..+0x8f   geometry and state this module does not yet touch
 //! +0x90  u8      display id — 0 = internal LCD, 1 = secondary output
 //! +0x94  ptr     the panel driver object, handed to every layer this
 //!                accessor builds and landing at the layer's +0x04
@@ -124,10 +133,6 @@
 //! +0x98  u8[16]  the constructor's byte block (+0x98..+0xa5: mostly
 //!                zeroes, 1 at +0x9a and 3 at +0xa3), padded to the
 //!                0xa8 object stride
-//! +0x50  ptr     layer-activity blocker; a non-NULL blocker defers stopping
-//! +0x98  u8      layer activity active; set by 0x081d914c, cleared by
-//!                0x081d9270
-//! ```
 //!
 //! The layer constructor's fifth argument, `display_id == 1`, is what the
 //! layer keeps at its +0x09 — the byte `display_layer.rs` could only call
@@ -183,10 +188,12 @@ pub struct Display {
     /// +0x20: the color the panel driver clears to on the next flush —
     /// handed verbatim to the driver's vtable slot +0x10 @ 0x081d8bec.
     pub clear_color: u32,
-    /// +0x24..+0x27: the flags beside them (+0x24 is a second pending byte,
-    /// armed by the sibling setter @ 0x081d8d0c; +0x25 is the flush loop's
-    /// "changed" marker).
-    pub reserved_24: [u8; 4],
+    /// +0x24: pending-command dirty flag, set by
+    /// [`display_set_pending_command`] and by the state-completion path at
+    /// 0x081d90c4.
+    pub pending_command_dirty: u8,
+    /// +0x25..+0x27: adjacent flags this module does not touch.
+    pub reserved_25_27: [u8; 3],
     /// +0x28: the display's mutex, created by `FUN_081d92a4`.
     pub mutex: Mutex,
     /// +0x30..+0x4f: geometry and state this port does not touch.
@@ -194,8 +201,13 @@ pub struct Display {
     /// +0x50: a non-NULL activity blocker prevents
     /// [`display_set_layer_enabled`] from stopping the layer activity.
     pub layer_activity_blocker: *mut c_void,
-    /// +0x54..+0x8f: geometry and state this port does not touch.
-    pub reserved_54_8f: [u8; 0x3c],
+    /// +0x54: pending command byte, stored by
+    /// [`display_set_pending_command`].
+    pub pending_command: u8,
+    /// +0x55: pending command's parameter byte.
+    pub pending_command_parameter: u8,
+    /// +0x56..+0x8f: geometry and state this port does not touch.
+    pub reserved_56_8f: [u8; 0x3a],
     /// +0x90: display id — 0 internal LCD, 1 secondary output.
     pub display_id: u8,
     /// +0x91..+0x93: padding ahead of the driver word.
@@ -219,6 +231,8 @@ const _: [u8; 0x1e] = [0; core::mem::offset_of!(Display, clear_pending)];
 const _: [u8; 0x20] = [0; core::mem::offset_of!(Display, clear_color)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x28] = [0; core::mem::offset_of!(Display, mutex)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x24] = [0; core::mem::offset_of!(Display, pending_command_dirty)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x90] = [0; core::mem::offset_of!(Display, display_id)];
 #[cfg(target_pointer_width = "32")]
@@ -363,11 +377,14 @@ const ZEROED_DISPLAY: Display = Display {
     clear_pending: 0,
     reserved_1f: 0,
     clear_color: 0,
-    reserved_24: [0; 4],
+    pending_command_dirty: 0,
+    reserved_25_27: [0; 3],
     mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
     reserved_30_4f: [0; 0x20],
     layer_activity_blocker: core::ptr::null_mut(),
-    reserved_54_8f: [0; 0x3c],
+    pending_command: 0,
+    pending_command_parameter: 0,
+    reserved_56_8f: [0; 0x3a],
     display_id: 0,
     reserved_91: [0; 3],
     driver: core::ptr::null_mut(),
@@ -621,6 +638,37 @@ pub unsafe extern "C" fn display_get_layer(display: *mut Display, index: u32) ->
     slot.read_volatile()
 }
 
+/// display_set_pending_command — original: `FUN_081d9138` @ 0x081d9138
+/// (20 bytes exactly, 0x081d9138..0x081d914c; the sibling layer-activity
+/// routine opens at 0x081d914c with `push {r4,r5,r6,lr}`). **9 direct `bl`
+/// and 2 tail `b` call sites**, all unconditional, verified by decoding
+/// every ARM B/BL immediate in `osos.dec`; there are no predicated callers.
+///
+/// Stores a two-byte pending command at display+0x54/+0x55, then stores 1
+/// to the dirty byte at +0x24. The order is exact: consumers observing the
+/// dirty byte cannot see an older command or parameter. The state-completion
+/// routine at 0x081d90c4 writes the same three bytes after it decrements its
+/// pending count; this direct setter is the caller-facing counterpart.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `display` must point at a live display object. As in the ARM routine,
+/// there is no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_pending_command(
+    display: *mut Display,
+    command: u8,
+    parameter: u8,
+) {
+    core::ptr::addr_of_mut!((*display).pending_command).write_volatile(command);
+    core::ptr::addr_of_mut!((*display).pending_command_parameter).write_volatile(parameter);
+    core::ptr::addr_of_mut!((*display).pending_command_dirty).write_volatile(1);
+}
+
+
 /// display_set_clear_color — original: `FUN_081d8cfc` @ 0x081d8cfc
 /// (16 bytes exactly, 0x081d8cfc..0x081d8d0c; the next function opens at
 /// 0x081d8d0c with `cmp r2, #0`. **28 `bl` call sites, 0 predicated** —
@@ -730,11 +778,14 @@ mod tests {
             clear_pending: 0,
             reserved_1f: 0,
             clear_color: 0,
-            reserved_24: [0; 4],
+            pending_command_dirty: 0,
+            reserved_25_27: [0; 3],
             mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
             reserved_30_4f: [0; 0x20],
             layer_activity_blocker: core::ptr::null_mut(),
-            reserved_54_8f: [0; 0x3c],
+            pending_command: 0,
+            pending_command_parameter: 0,
+            reserved_56_8f: [0; 0x3a],
             display_id,
             reserved_91: [0; 3],
             driver,
@@ -1202,6 +1253,41 @@ mod tests {
     }
 
     #[test]
+    fn set_pending_command_replaces_both_bytes_and_arms_the_dirty_flag() {
+        let mut d = display(0, core::ptr::null_mut());
+        unsafe {
+            // The five pairs cover every immediate combination at the nine
+            // direct BL callers; 0/0 and 0xff/0xff cover byte boundaries.
+            for (command, parameter) in [
+                (0, 0),
+                (1, 5),
+                (3, 5),
+                (4, 0),
+                (4, 5),
+                (5, 5),
+                (u8::MAX, u8::MAX),
+            ] {
+                d.pending_command = 0xa5;
+                d.pending_command_parameter = 0x5a;
+                d.pending_command_dirty = 0xa5;
+                d.clear_pending = 0x33;
+                d.reserved_25_27 = [0x99; 3];
+
+                display_set_pending_command(&mut d, command, parameter);
+
+                assert_eq!(d.pending_command, command, "command for {command:#x}");
+                assert_eq!(
+                    d.pending_command_parameter, parameter,
+                    "parameter for {parameter:#x}"
+                );
+                assert_eq!(d.pending_command_dirty, 1, "the command is marked dirty");
+                assert_eq!(d.clear_pending, 0x33, "the neighbouring pending flag is untouched");
+                assert_eq!(d.reserved_25_27, [0x99; 3], "the trailing flags are untouched");
+            }
+        }
+    }
+
+    #[test]
     fn set_clear_color_arms_the_pending_byte_and_stores_the_color() {
         let mut d = display(0, core::ptr::null_mut());
         unsafe {
@@ -1213,7 +1299,8 @@ mod tests {
                 assert_eq!(d.clear_pending, 1, "the pending byte is armed for {color:#x}");
                 assert_eq!(d.clear_color, color, "the color word is stored verbatim");
                 assert_eq!(d.per_layer_bytes, [0; 6], "the per-layer bytes are untouched");
-                assert_eq!(d.reserved_24, [0; 4], "the neighbouring flags are untouched");
+                assert_eq!(d.pending_command_dirty, 0, "the command dirty byte is untouched");
+                assert_eq!(d.reserved_25_27, [0; 3], "the neighbouring flags are untouched");
                 assert_eq!(d.reserved_1f, 0, "the pad byte is untouched");
             }
         }

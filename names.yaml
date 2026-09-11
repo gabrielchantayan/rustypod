@@ -49334,6 +49334,38 @@ functions:
       up as an ldrd chain) and lowers `display_id == 1` to sub/clz/lsr
       instead of cmp/moveq.
 
+  - address: 0x081d9138
+    ghidra: FUN_081d9138
+    name: display_set_pending_command
+    size: 20
+    sig: "void display_set_pending_command(Display *display, u8 command, u8 parameter)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: command
+      param_3/r2: parameter
+    notes: >-
+      Stores the caller's two-byte pending command at display+0x54/+0x55,
+      then sets its +0x24 dirty byte to 1. Raw ARM is exactly five
+      instructions, 0x081d9138..0x081d914c: `strb r1,[r0,#0x54]; mov r1,#1;
+      strb r2,[r0,#0x55]; strb r1,[r0,#0x24]; bx lr`. The separately linked
+      sibling begins at 0x081d914c with `push {r4,r5,r6,lr}`. Decoding every
+      ARM B/BL immediate in osos.dec found 11 inbound direct branches: 9
+      unconditional bl (0x0811e794, 0x08146488, 0x081465ec, 0x08158ac8,
+      0x081f5b80, 0x081f5cc0, 0x081f5f38, 0x081f6054, 0x08296410) and two
+      unconditional tail b (0x08145500, 0x0828d0c0); no predicated sites.
+      No aligned data word equals this address, so it is not directly
+      vtable-dispatched. The state-completion routine at 0x081d90c4 copies
+      a queued entry's bytes into the same +0x54/+0x55 pair, then sets +0x24
+      after decrementing its +0x5c count; this setter is the direct
+      caller-facing path. New Display fields preserve the 32-bit target
+      layout while native host pointers can widen. Deliberate deviations:
+      none. Host tests cover all caller immediate pairs plus 0x00/0xff
+      boundaries, replacement of a previously pending command, exact dirty
+      flag value, and adjacent-byte preservation. match.py structural review
+      expects three ordered byte stores and the mov-immediate.
+
   - address: 0x081d8cfc
     ghidra: FUN_081d8cfc
     name: display_set_clear_color
@@ -49366,7 +49398,8 @@ functions:
       pending byte at +0x24 instead.
       NEW FIELDS for drivers/display.rs - reserved_18 split into
       per_layer_bytes (+0x18..+0x1d), clear_pending (+0x1e), clear_color
-      (+0x20) and reserved_24; 32-bit offset asserts updated to match.
+      (+0x20), pending_command_dirty (+0x24), and adjacent reserved bytes;
+      32-bit offset asserts updated to match.
       Host tests (2) - every call-site immediate (0, 0xffffff, 0xff0000,
       0xffffffff) arms +0x1e and stores the color verbatim while the
       neighbouring bytes stay untouched, and a re-arm over an already
