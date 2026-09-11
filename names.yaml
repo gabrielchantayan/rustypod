@@ -65826,3 +65826,28 @@ functions:
       the entry, so it is an unguarded leaf and not virtually dispatched. No
       deliberate Rust deviations. Host tests cover fractional boundaries,
       signed half ties, and both signed overflow endpoints.
+  # --- Filesystem mapped allocation-bitmap dirty marker ---
+  - address: 0x0805cdd0
+    ghidra: FUN_0805cdd0
+    name: mapped_block_window_mark_dirty
+    size: 16
+    sig: "void mapped_block_window_mark_dirty(void)"
+    module: fs/block_window
+    status: ported
+    renames:
+      DAT_0805cde0/r1: mapped_block_window (fixed object at 0x08adc510)
+      DAT_0805cde0_plus_0x208: dirty
+      param_1/r0: ignored_window_pointer
+    notes: >-
+      Raw ARM confirms four instructions (16 bytes) from 0x0805cdd0 through
+      bx lr at 0x0805cddc. The fixed mapped-window address 0x08adc510 is the
+      following literal word at 0x0805cde0, and the next separately entered
+      function begins with push {r4,lr} at 0x0805cde4. The routine stores one
+      to the shared window's dirty byte at +0x208 without reading the incoming
+      r0 pointer supplied by its callers. Decoding every ARM B/BL-immediate
+      word in osos.dec finds exactly nine inbound calls, all unconditional
+      plain bl at 0x080424c8, 0x08042550, 0x080425f0, 0x08042a04,
+      0x08042aa0, 0x08042b14, 0x08042b7c, 0x08042c14, and 0x08042c84; no
+      predicated form or direct tail branch targets it. No deliberate Rust
+      deviations: target code stores through the fixed address, while host
+      tests install the established mapped-window fixture.
