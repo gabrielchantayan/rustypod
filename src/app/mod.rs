@@ -86,6 +86,7 @@ pub mod object_dispatch_entry;
 pub mod opaque_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
 pub mod object_dispatch_target;
+pub mod once_initializer;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;
 pub mod parse_result;
