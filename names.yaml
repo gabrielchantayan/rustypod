@@ -38892,6 +38892,30 @@ functions:
       cover nonzero construction, zero/default initialization, padding
       preservation, and the already-initialized path.
 
+
+  # --- Tagged value comparison (cxx/tagged_value) ---
+  - address: 0x08258d7c
+    ghidra: FUN_08258d7c
+    name: tagged_value_payload_pair_equal
+    size: 36
+    sig: "bool tagged_value_payload_pair_equal(const TaggedValue *left, const TaggedValue *right)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: left_payload
+      r3: right_payload
+    notes: >-
+      Raw bytes establish a 36-byte, nine-instruction extent at
+      0x08258d7c..0x08258d9c; 0x08258da0 begins the separately linked next
+      function. Decoding every ARM B/BL word in osos.dec finds exactly nine
+      incoming direct calls: nine unconditional bl, zero predicated bl, and
+      zero direct tail b. It loads the aligned +0x08 word from each
+      16-byte TaggedValue, returning false on mismatch; equality gates a
+      comparison of the aligned +0x0c words. Vtable, kind, and padding are
+      ignored, and neither pointer is NULL-checked. No deliberate deviations.
+
   # --- Application context scope (app/context_scope) ---
   - address: 0x082840e8
     ghidra: FUN_082840e8

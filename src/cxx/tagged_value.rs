@@ -114,6 +114,39 @@ pub unsafe extern "C" fn tagged_value_from_optional_word4(
     (*this).auxiliary = (*default).auxiliary;
     this
 }
+/// Compares the payload word pair of two tagged values — original:
+/// `FUN_08258d7c` @ `0x08258d7c` (36 bytes).
+///
+/// Raw ARM contains nine instructions at 0x08258d7c..0x08258d9c; 0x08258da0
+/// starts the next function. Decoding every ARM `B`/`BL` word in `osos.dec`
+/// finds exactly nine direct callers: nine unconditional `bl`, no predicated
+/// `bl`, and no direct tail `b`.
+///
+/// # Algorithm
+///
+/// It loads both aligned words at +0x08 and returns false unless they match.
+/// Only then does it compare the aligned +0x0c words. The vtable, kind, and
+/// padding are ignored. Neither input is NULL-checked. Deliberate deviations:
+/// none.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to readable, four-byte-aligned
+/// [`TaggedValue`] storage. As in the original, the +0x0c word need only be
+/// readable when the +0x08 words are equal.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_value_payload_pair_equal")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_value_payload_pair_equal(
+    left: *const TaggedValue,
+    right: *const TaggedValue,
+) -> bool {
+    if (*left).payload != (*right).payload {
+        return false;
+    }
+    (*left).auxiliary == (*right).auxiliary
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -188,4 +221,30 @@ mod tests {
             assert_eq!(second.auxiliary, 0x8765_4321);
         }
     }
+    #[test]
+    fn payload_pair_comparison_ignores_metadata_and_requires_both_words() {
+        let left = TaggedValue {
+            vtable: 0x089a_76fc,
+            kind: 1,
+            padding: [0x12, 0x34, 0x56],
+            payload: 0x1122_3344,
+            auxiliary: 0x5566_7788,
+        };
+        let matching_pair = TaggedValue {
+            vtable: 0xfeed_face,
+            kind: 0,
+            padding: [0xaa, 0xbb, 0xcc],
+            payload: 0x1122_3344,
+            auxiliary: 0x5566_7788,
+        };
+        let auxiliary_mismatch = TaggedValue { auxiliary: 0x5566_7789, ..matching_pair };
+        let payload_mismatch = TaggedValue { payload: 0x1122_3345, ..matching_pair };
+
+        unsafe {
+            assert!(tagged_value_payload_pair_equal(&left, &matching_pair));
+            assert!(!tagged_value_payload_pair_equal(&left, &auxiliary_mismatch));
+            assert!(!tagged_value_payload_pair_equal(&left, &payload_mismatch));
+        }
+    }
+
 }
