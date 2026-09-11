@@ -1,7 +1,7 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Eight of its members are ported here, all from the
-//! 0x0826/0x0827 framework cluster that also holds the string/buffer class
+//! throw away. Eleven helpers are ported here, all from the 0x0812/0x0826/
+//! 0x0827 framework clusters that also hold the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
 //!
@@ -9,6 +9,7 @@
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //! - [`scoped_context_copy_fields`] — `FUN_08270418` @ 0x08270418.
+//! - [`copy_service_context_selection`] — `FUN_0812c75c` @ 0x0812c75c.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
 //! - [`scoped_context_is_valid`] — `FUN_082a3dcc` @ 0x082a3dcc, an
@@ -128,7 +129,7 @@
 //!   AAPCS argument is ABI-identical.
 
 use crate::app::context_scope::app_root_object;
-use core::ptr;
+use core::{mem::MaybeUninit, ptr};
 
 /// The original's vtable literal, held in the ctor's own literal-pool
 /// word @ 0x082703cc (binary-verified against osos.dec; the sibling
@@ -197,6 +198,34 @@ pub struct ScopedContext {
     pub registry_token: *mut u8,
     /// +0x14 — the caller's mode byte, written last.
     pub mode: u8,
+}
+
+/// An opaque provider whose +0x30 word points at its service context.
+///
+/// The preceding words are deliberately modeled as `u32`s, preserving the
+/// original field address on the 32-bit target and the host without
+/// overlapping a 64-bit pointer field into them.
+#[repr(C)]
+pub struct ServiceContextProvider {
+    _words_before_service_context: [u32; 0x30 / 4],
+    service_context: *mut ServiceContext,
+}
+
+/// The opaque service context consumed by
+/// [`copy_service_context_selection`].
+///
+/// Its selection source starts at +0x14. The actual type and contents do not
+/// survive in the decrypted image, so it remains opaque to this port.
+#[repr(C)]
+pub struct ServiceContext {
+    _words_before_selection_source: [u32; 0x14 / 4],
+    selection_source: ServiceContextSelectionSource,
+}
+
+/// Opaque subobject passed to the unported selection-context constructor.
+#[repr(C)]
+pub struct ServiceContextSelectionSource {
+    _opaque: [u8; 0],
 }
 
 /// Pointer-slot index of the service context inside the system root
@@ -349,6 +378,104 @@ pub unsafe extern "C" fn scoped_context_copy_fields(
     (*destination).service_context = (*source).service_context;
     (*destination).registry_token = (*source).registry_token;
     (*destination).mode = (*source).mode;
+}
+
+/// Firmware load address of the unported selection-context constructor
+/// `FUN_082a5ee4`, called directly by [`copy_service_context_selection`].
+pub const SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS: usize = 0x082a_5ee4;
+
+/// Target default for [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`]: the stock
+/// selection-context constructor at
+/// [`SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS`].
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_service_context_selection_construct(
+    destination: *mut ScopedContext,
+    selection_source: *mut ServiceContextSelectionSource,
+    selection: u32,
+    mode: u32,
+) {
+    let construct: unsafe extern "C" fn(
+        *mut ScopedContext,
+        *mut ServiceContextSelectionSource,
+        u32,
+        u32,
+    ) = core::mem::transmute(SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS);
+    construct(destination, selection_source, selection, mode);
+}
+
+/// Host default for [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`]: the constructor
+/// remains unported, so an unswapped call is a test-setup error.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_service_context_selection_construct(
+    _destination: *mut ScopedContext,
+    _selection_source: *mut ServiceContextSelectionSource,
+    _selection: u32,
+    _mode: u32,
+) {
+    panic!("copy_service_context_selection requires constructor 0x082a5ee4")
+}
+
+/// Dispatch seam for `FUN_082a5ee4` @ 0x082a5ee4. The target default calls
+/// stock firmware; host tests install a recording constructor. `names.yaml`
+/// has no port entry for this callee, so it cannot be called directly.
+#[cfg(target_os = "none")]
+pub static mut SERVICE_CONTEXT_SELECTION_CONSTRUCT: unsafe extern "C" fn(
+    *mut ScopedContext,
+    *mut ServiceContextSelectionSource,
+    u32,
+    u32,
+) = firmware_service_context_selection_construct;
+
+/// Host wired default (panics; see
+/// [`missing_service_context_selection_construct`]).
+#[cfg(not(target_os = "none"))]
+pub static mut SERVICE_CONTEXT_SELECTION_CONSTRUCT: unsafe extern "C" fn(
+    *mut ScopedContext,
+    *mut ServiceContextSelectionSource,
+    u32,
+    u32,
+) = missing_service_context_selection_construct;
+
+/// copy_service_context_selection — original: `FUN_0812c75c` @ 0x0812c75c
+/// (**104 bytes total**: 16-byte entry plus an 88-byte separately linked
+/// body at 0x0816ec30; **10 unconditional `bl` call sites**, no predicated
+/// forms or direct tail `b` sites, verified by decoding every ARM B/BL word
+/// in `osos.dec`).
+///
+/// Loads the provider's service-context pointer and returns immediately when
+/// it is NULL. Otherwise it constructs a temporary [`ScopedContext`] from
+/// the service context's +0x14 opaque selection source, `selection`, and
+/// mode zero. It then copies only that temporary's payload into
+/// `destination`, preserving the destination vtable, and destroys the
+/// temporary.
+///
+/// Deliberate deviations: the +0x30 provider and +0x14 subobject are named
+/// `#[repr(C)]` fields backed by `u32` word arrays rather than host-invalid
+/// byte offsets. The unported `FUN_082a5ee4` is reached through the volatile
+/// [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`] seam: target builds call its ROM
+/// address and host tests replace it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn copy_service_context_selection(
+    provider: *mut ServiceContextProvider,
+    selection: u32,
+    destination: *mut ScopedContext,
+) {
+    let service_context = (*provider).service_context;
+    if service_context.is_null() {
+        return;
+    }
+
+    let mut temporary = MaybeUninit::<ScopedContext>::uninit();
+    let construct = ptr::read_volatile(ptr::addr_of!(SERVICE_CONTEXT_SELECTION_CONSTRUCT));
+    construct(
+        temporary.as_mut_ptr(),
+        ptr::addr_of_mut!((*service_context).selection_source),
+        selection,
+        0,
+    );
+    scoped_context_copy_fields(destination, temporary.as_ptr());
+    scoped_context_destroy(temporary.as_mut_ptr());
 }
 
 /// Firmware load address of the unported owner predicate
@@ -821,6 +948,62 @@ mod tests {
         }
     }
 
+    static mut SERVICE_SELECTION_CALLS: u32 = 0;
+    static mut SERVICE_SELECTION_SOURCE: *mut ServiceContextSelectionSource = ptr::null_mut();
+    static mut SERVICE_SELECTION_INDEX: u32 = 0;
+    static mut SERVICE_SELECTION_MODE: u32 = u32::MAX;
+
+    unsafe extern "C" fn recording_service_context_selection_construct(
+        destination: *mut ScopedContext,
+        selection_source: *mut ServiceContextSelectionSource,
+        selection: u32,
+        mode: u32,
+    ) {
+        SERVICE_SELECTION_CALLS += 1;
+        SERVICE_SELECTION_SOURCE = selection_source;
+        SERVICE_SELECTION_INDEX = selection;
+        SERVICE_SELECTION_MODE = mode;
+        (*destination).vtable = 0x1111_2222usize as *const ScopedContextVtable;
+        (*destination).owner_valid = 0xdead_beef;
+        (*destination).owner = 0x0102_0304usize as *mut u8;
+        (*destination).service_context = 0x0506_0708usize as *mut u8;
+        (*destination).registry_token = 0x090a_0b0cusize as *mut u8;
+        (*destination).mode = 0xff;
+    }
+
+    /// Restores the unported selection-context constructor seam after a test.
+    struct ServiceSelectionGuard {
+        original: unsafe extern "C" fn(
+            *mut ScopedContext,
+            *mut ServiceContextSelectionSource,
+            u32,
+            u32,
+        ),
+    }
+
+    impl ServiceSelectionGuard {
+        unsafe fn install() -> Self {
+            let original =
+                ptr::addr_of!(SERVICE_CONTEXT_SELECTION_CONSTRUCT).read_volatile();
+            SERVICE_SELECTION_CALLS = 0;
+            SERVICE_SELECTION_SOURCE = ptr::null_mut();
+            SERVICE_SELECTION_INDEX = 0;
+            SERVICE_SELECTION_MODE = u32::MAX;
+            ptr::addr_of_mut!(SERVICE_CONTEXT_SELECTION_CONSTRUCT)
+                .write_volatile(recording_service_context_selection_construct);
+            Self { original }
+        }
+    }
+
+    impl Drop for ServiceSelectionGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(SERVICE_CONTEXT_SELECTION_CONSTRUCT)
+                    .write_volatile(self.original);
+            }
+        }
+    }
+
     /// A token pre-filled with sentinels, so every field the constructor
     /// is supposed to write is observably overwritten.
     fn poisoned_token() -> ScopedContext {
@@ -1075,6 +1258,87 @@ mod tests {
             ),
             before
         );
+    }
+
+    #[test]
+    fn copy_service_context_selection_returns_without_touching_a_null_context() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam = unsafe { ServiceSelectionGuard::install() };
+        let mut provider = ServiceContextProvider {
+            _words_before_service_context: [0; 0x30 / 4],
+            service_context: ptr::null_mut(),
+        };
+        let mut destination = poisoned_token();
+        let before = (
+            destination.vtable,
+            destination.owner_valid,
+            destination.owner,
+            destination.service_context,
+            destination.registry_token,
+            destination.mode,
+        );
+
+        unsafe { copy_service_context_selection(&mut provider, u32::MAX, &mut destination) };
+
+        assert_eq!(unsafe { ptr::addr_of!(SERVICE_SELECTION_CALLS).read() }, 0);
+        assert_eq!(
+            (
+                destination.vtable,
+                destination.owner_valid,
+                destination.owner,
+                destination.service_context,
+                destination.registry_token,
+                destination.mode,
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn copy_service_context_selection_constructs_then_copies_only_the_payload() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam = unsafe { ServiceSelectionGuard::install() };
+        let mut service_context = ServiceContext {
+            _words_before_selection_source: [0; 0x14 / 4],
+            selection_source: ServiceContextSelectionSource { _opaque: [] },
+        };
+        let selection_source = ptr::addr_of_mut!(service_context.selection_source);
+        let mut provider = ServiceContextProvider {
+            _words_before_service_context: [0; 0x30 / 4],
+            service_context: &mut service_context,
+        };
+        let destination_vtable = 0x3333_4444usize as *const ScopedContextVtable;
+        let mut destination = ScopedContext {
+            vtable: destination_vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        unsafe {
+            copy_service_context_selection(&mut provider, 0xffff_fffe, &mut destination);
+        }
+
+        let (calls, seen_source, seen_index, seen_mode) = unsafe {
+            (
+                ptr::addr_of!(SERVICE_SELECTION_CALLS).read(),
+                ptr::addr_of!(SERVICE_SELECTION_SOURCE).read(),
+                ptr::addr_of!(SERVICE_SELECTION_INDEX).read(),
+                ptr::addr_of!(SERVICE_SELECTION_MODE).read(),
+            )
+        };
+        assert_eq!(calls, 1);
+        assert_eq!(seen_source, selection_source);
+        assert_eq!(seen_index, 0xffff_fffe);
+        assert_eq!(seen_mode, 0);
+        assert_eq!(destination.vtable, destination_vtable);
+        assert_eq!(destination.owner_valid, 0xdead_beef);
+        assert_eq!(destination.owner, 0x0102_0304usize as *mut u8);
+        assert_eq!(destination.service_context, 0x0506_0708usize as *mut u8);
+        assert_eq!(destination.registry_token, 0x090a_0b0cusize as *mut u8);
+        assert_eq!(destination.mode, 0xff);
     }
 
     #[test]
