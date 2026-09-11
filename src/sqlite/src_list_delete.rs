@@ -11,44 +11,30 @@
 //! ON expression, and USING identifier list in that order. Finally the list
 //! header tail-branches to the tracked allocator.
 //!
-//! The table releaser at 0x0837521c and identifier-list releaser at
-//! 0x0837b11c are real ARM entries but are not yet ledger-ported, so their
-//! calls remain volatile dispatch seams with no-op defaults. The other four
-//! callees are direct calls to existing ports. `#[repr(C)]` views preserve
-//! target offsets; their pointer fields deliberately widen for host tests.
+//! The table releaser at 0x0837521c remains an unported volatile dispatch
+//! seam with a no-op default. The identifier-list releaser at 0x0837b11c is
+//! now the direct [`id_list_delete`](super::id_list_delete::id_list_delete)
+//! port. `#[repr(C)]` views preserve target offsets; their pointer fields
+//! deliberately widen for host tests.
 
 use super::expr_delete::expr_delete;
+use super::id_list_delete::id_list_delete;
 use super::select_delete::select_delete;
 use crate::heap::tracked::tracked_free;
 
 /// The unported table release helper at 0x0837521c.
 pub type TableReleaseFn = unsafe extern "C" fn(table: *mut u8);
 
-/// The unported identifier-list release helper at 0x0837b11c.
-pub type IdListReleaseFn = unsafe extern "C" fn(id_list: *mut u8);
-
 /// Default for the unported table release helper.
 pub(crate) unsafe extern "C" fn missing_table_release(_table: *mut u8) {}
 
-/// Default for the unported identifier-list release helper.
-pub(crate) unsafe extern "C" fn missing_id_list_release(_id_list: *mut u8) {}
-
 /// Active target for the 0x0837521c table-release call.
 pub static mut SQLITE_TABLE_RELEASE: TableReleaseFn = missing_table_release;
-
-/// Active target for the 0x0837b11c identifier-list-release call.
-pub static mut SQLITE_ID_LIST_RELEASE: IdListReleaseFn = missing_id_list_release;
 
 #[inline(always)]
 fn table_release_op() -> TableReleaseFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_TABLE_RELEASE)) }
 }
-
-#[inline(always)]
-fn id_list_release_op() -> IdListReleaseFn {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_ID_LIST_RELEASE)) }
-}
-
 /// `SrcList`'s fixed header. Its `a[]` member begins immediately afterward.
 #[repr(C)]
 pub struct SrcList {
@@ -132,7 +118,7 @@ pub unsafe extern "C" fn src_list_delete(source_list: *mut u8) {
         (table_release_op())((*item).p_table);
         select_delete((*item).p_select);
         expr_delete((*item).p_on);
-        (id_list_release_op())((*item).p_using);
+        id_list_delete((*item).p_using);
         index += 1;
         item = item.add(1);
     }
@@ -143,18 +129,17 @@ pub unsafe extern "C" fn src_list_delete(source_list: *mut u8) {
 #[cfg(test)]
 mod tests {
     extern crate std;
-
     use super::*;
     use crate::heap::tracked::{BLOCK_HEADER_SIZE, TAG_TRACKED};
     use crate::heap::types::HeapDescriptorDescriptor;
     use crate::heap::veneers::{tests::mock_heap, HEAP_OPS};
+    use crate::sqlite::id_list_delete::IdList;
     use std::sync::Mutex;
     use std::vec::Vec;
 
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
     static mut FREED: Vec<(*mut u8, usize)> = Vec::new();
     static mut TABLES: Vec<*mut u8> = Vec::new();
-    static mut ID_LISTS: Vec<*mut u8> = Vec::new();
 
     unsafe extern "C" fn recording_free(
         _heap: *mut HeapDescriptorDescriptor,
@@ -167,11 +152,6 @@ mod tests {
     unsafe extern "C" fn recording_table_release(table: *mut u8) {
         (*core::ptr::addr_of_mut!(TABLES)).push(table);
     }
-
-    unsafe extern "C" fn recording_id_list_release(id_list: *mut u8) {
-        (*core::ptr::addr_of_mut!(ID_LISTS)).push(id_list);
-    }
-
     fn freed() -> Vec<(*mut u8, usize)> {
         unsafe { (*core::ptr::addr_of!(FREED)).clone() }
     }
@@ -179,36 +159,21 @@ mod tests {
     fn tables() -> Vec<*mut u8> {
         unsafe { (*core::ptr::addr_of!(TABLES)).clone() }
     }
-
-    fn id_lists() -> Vec<*mut u8> {
-        unsafe { (*core::ptr::addr_of!(ID_LISTS)).clone() }
-    }
-
     unsafe fn with_ops(body: impl FnOnce()) {
         let saved_heap_ops = core::ptr::read(core::ptr::addr_of!(HEAP_OPS));
         let saved_table_release = core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_TABLE_RELEASE));
-        let saved_id_list_release = core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_ID_LIST_RELEASE));
         (*core::ptr::addr_of_mut!(FREED)).clear();
         (*core::ptr::addr_of_mut!(TABLES)).clear();
-        (*core::ptr::addr_of_mut!(ID_LISTS)).clear();
         (*core::ptr::addr_of_mut!(HEAP_OPS)).free = recording_free;
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_TABLE_RELEASE),
             recording_table_release,
-        );
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_ID_LIST_RELEASE),
-            recording_id_list_release,
         );
         body();
         core::ptr::write(core::ptr::addr_of_mut!(HEAP_OPS), saved_heap_ops);
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_TABLE_RELEASE),
             saved_table_release,
-        );
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_ID_LIST_RELEASE),
-            saved_id_list_release,
         );
     }
 
@@ -250,6 +215,15 @@ mod tests {
         list.cast()
     }
 
+    unsafe fn id_list_in(block: &mut TrackedBlock) -> *mut u8 {
+        let id_list = block.payload() as *mut IdList;
+        core::ptr::write(
+            id_list,
+            IdList { items: core::ptr::null_mut(), n_id: 0, n_alloc: 0 },
+        );
+        id_list.cast()
+    }
+
     fn item(
         z_database: *mut u8,
         z_name: *mut u8,
@@ -278,7 +252,6 @@ mod tests {
         unsafe { with_ops(|| src_list_delete(core::ptr::null_mut())) };
         assert!(freed().is_empty(), "NULL frees nothing");
         assert!(tables().is_empty(), "NULL reaches no table release");
-        assert!(id_lists().is_empty(), "NULL reaches no identifier-list release");
     }
 
     #[test]
@@ -290,7 +263,6 @@ mod tests {
         unsafe { with_ops(|| src_list_delete(source_list)) };
         assert_eq!(freed(), std::vec![(header.raw(), TAG_TRACKED)]);
         assert!(tables().is_empty(), "signed bgt skips negative n_src");
-        assert!(id_lists().is_empty(), "signed bgt skips negative n_src");
     }
 
     #[test]
@@ -304,6 +276,8 @@ mod tests {
         let mut database1 = TrackedBlock::new(8);
         let mut name1 = TrackedBlock::new(8);
         let mut alias1 = TrackedBlock::new(8);
+        let mut using0 = TrackedBlock::new(0x0c);
+        let mut using1 = TrackedBlock::new(0x0c);
         let source_list = unsafe {
             source_list_in(
                 &mut header,
@@ -311,11 +285,11 @@ mod tests {
                 &[
                     item(
                         database0.payload(), name0.payload(), alias0.payload(),
-                        0x1111_1111 as *mut u8, 0x2222_2222 as *mut u8,
+                        0x1111_1111 as *mut u8, id_list_in(&mut using0),
                     ),
                     item(
                         database1.payload(), name1.payload(), alias1.payload(),
-                        0x3333_3333 as *mut u8, 0x4444_4444 as *mut u8,
+                        0x3333_3333 as *mut u8, id_list_in(&mut using1),
                     ),
                 ],
             )
@@ -329,9 +303,11 @@ mod tests {
                 (database0.raw(), TAG_TRACKED),
                 (name0.raw(), TAG_TRACKED),
                 (alias0.raw(), TAG_TRACKED),
+                (using0.raw(), TAG_TRACKED),
                 (database1.raw(), TAG_TRACKED),
                 (name1.raw(), TAG_TRACKED),
                 (alias1.raw(), TAG_TRACKED),
+                (using1.raw(), TAG_TRACKED),
                 (header.raw(), TAG_TRACKED),
             ],
             "database, name, and alias free before each item's other cleanup"
@@ -340,11 +316,6 @@ mod tests {
             tables(),
             std::vec![0x1111_1111 as *mut u8, 0x3333_3333 as *mut u8],
             "table releases follow the three strings in inline-item order"
-        );
-        assert_eq!(
-            id_lists(),
-            std::vec![0x2222_2222 as *mut u8, 0x4444_4444 as *mut u8],
-            "identifier-list releases complete each item before the next"
         );
     }
 }

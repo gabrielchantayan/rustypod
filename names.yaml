@@ -26742,6 +26742,43 @@ functions:
       three free sites (the accepted mem_release/value_free
       deviation).
 
+  - address: 0x0837b11c
+    ghidra: FUN_0837b11c
+    name: id_list_delete
+    size: 68
+    sig: "void id_list_delete(IdList *id_list)"
+    module: sqlite/id_list_delete
+    status: ported
+    renames:
+      param_1/r0: id_list
+      r4: index
+      r5: id_list
+      "id_list+0x00": items
+      "id_list+0x04": n_id
+      "items+0x00": z_name
+    notes: >-
+      SQLite 3.5.x's sqlite3IdListDelete. Raw ARM confirms the exact
+      68-byte extent 0x0837b11c..0x0837b15f; the separately linked
+      identifier-list constructor opens at 0x0837b160. A whole-image ARM
+      B/BL decode finds exactly nine direct BL callers, all unconditional:
+      0x083701d4, 0x08375358, 0x083753b8, 0x0837b0f4, 0x0837ca68,
+      0x08384330, 0x08384434, 0x08385204, and 0x08391a14. No predicated
+      BL reaches it; 0x083997c4 is its sole unconditional tail-B caller.
+      NULL returns before any dereference. Otherwise the signed pre-tested
+      bgt loop re-reads n_id at +0x04, freeing each 8-byte item's z_name
+      word at +0x00 in array order. It then frees items and tail-branches
+      to sqlite3_free for the IdList header. All frees are direct calls to
+      tracked_free @ 0x083906f4, including NULL names/items; its existing
+      NULL guard is the original behavior. Typed repr(C) IdList/IdListItem
+      views and 32-bit offset assertions preserve the target's 12-byte
+      header and 8-byte item stride while avoiding overlapped host pointers.
+      This replaces src_list_delete's former no-op identifier-list dispatch
+      seam with the direct port. Host tests cover NULL, zero and negative
+      counts, a NULL item array, NULL names, and ordered name/array/header
+      release. match.py should retain the NULL early return, signed loop,
+      three tracked frees, and final-header teardown; LLVM need not preserve
+      the original tail branch.
+
   - address: 0x0837894c
     ghidra: FUN_0837894c
     name: expr_span
