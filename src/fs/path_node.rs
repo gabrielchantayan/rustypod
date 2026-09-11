@@ -40,12 +40,13 @@
 //! path returns NULL, which is this function's return value on every
 //! non-NULL input; a NULL node short-circuits before either call.
 //!
-//! Deviation: both callees are still unported, so on the firmware target
-//! they are direct calls to their retailOS load addresses (`0x082e1960`,
-//! `0x082e2f04`). Host builds route them through recording boundaries so
-//! argument pass-through, call order, the NULL guard and the return
-//! value can be exercised; this does not replace or bypass
-//! `path_node_release` itself.
+//! Deviation: the shared-data release is now the ported
+//! [`super::shared_data::shared_data_release`], including on host builds.
+//! The still-unported node-pool recycle @ `0x082e2f04` remains a fixed-address
+//! call on firmware and a recording boundary on hosts; that boundary exists
+//! only to exercise this caller's node-pool handoff.
+
+use super::shared_data::shared_data_release;
 
 /// Width of a target pointer field: 4 on ARMv5TE and pointer-sized in the
 /// host fixtures, so widened host pointers never overlap adjacent fields.
@@ -65,13 +66,6 @@ unsafe fn read_pointer(base: *mut u8, target_offset: usize) -> *mut u8 {
     (base.add(pointer_offset(target_offset)) as *const *mut u8).read()
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn shared_data_release(data: *mut u8) -> *mut u8 {
-    let release: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        core::mem::transmute(0x082e_1960usize);
-    release(data)
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -84,14 +78,9 @@ unsafe fn pool_recycle(node: *mut u8) -> *mut u8 {
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 struct PathNodeHostOps {
-    shared_data_release: unsafe extern "C" fn(*mut u8) -> *mut u8,
     pool_recycle: unsafe extern "C" fn(*mut u8) -> *mut u8,
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_shared_data_release(_data: *mut u8) -> *mut u8 {
-    core::ptr::null_mut()
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_pool_recycle(_node: *mut u8) -> *mut u8 {
@@ -100,7 +89,6 @@ unsafe extern "C" fn host_pool_recycle(_node: *mut u8) -> *mut u8 {
 
 #[cfg(not(target_os = "none"))]
 const DEFAULT_PATH_NODE_HOST_OPS: PathNodeHostOps = PathNodeHostOps {
-    shared_data_release: host_shared_data_release,
     pool_recycle: host_pool_recycle,
 };
 
@@ -113,11 +101,6 @@ unsafe fn host_ops() -> PathNodeHostOps {
     core::ptr::read_volatile(core::ptr::addr_of!(PATH_NODE_HOST_OPS))
 }
 
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn shared_data_release(data: *mut u8) -> *mut u8 {
-    (host_ops().shared_data_release)(data)
-}
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
@@ -156,14 +139,9 @@ mod tests {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Event {
-        SharedDataRelease(usize),
         PoolRecycle(usize),
     }
 
-    unsafe extern "C" fn recording_shared_data_release(data: *mut u8) -> *mut u8 {
-        EVENTS.push(Event::SharedDataRelease(data as usize));
-        data
-    }
 
     unsafe extern "C" fn recording_pool_recycle(node: *mut u8) -> *mut u8 {
         EVENTS.push(Event::PoolRecycle(node as usize));
@@ -199,7 +177,6 @@ mod tests {
         unsafe {
             EVENTS.clear();
             core::ptr::addr_of_mut!(PATH_NODE_HOST_OPS).write_volatile(PathNodeHostOps {
-                shared_data_release: recording_shared_data_release,
                 pool_recycle: recording_pool_recycle,
             });
         }
@@ -248,39 +225,15 @@ mod tests {
     }
 
     #[test]
-    fn a_node_releases_its_data_then_recycles_itself_in_order() {
-        let _bench = bench();
-        let mut data_block = [0u8; 0x54];
-        let data = data_block.as_mut_ptr();
-        let mut fixture = NodeFixture::new(data);
-        let node = fixture.node_ptr();
-
-        assert!(unsafe { path_node_release(node) }.is_null());
-        assert_eq!(
-            events(),
-            std::vec![
-                Event::SharedDataRelease(data as usize),
-                Event::PoolRecycle(node as usize),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_null_data_pointer_is_passed_through_without_a_guard() {
+    fn a_null_data_pointer_reaches_the_ported_release_then_recycles_the_node() {
         let _bench = bench();
         let mut fixture = NodeFixture::new(core::ptr::null_mut());
         let node = fixture.node_ptr();
 
         assert!(unsafe { path_node_release(node) }.is_null());
-        assert_eq!(
-            events(),
-            std::vec![
-                Event::SharedDataRelease(0),
-                Event::PoolRecycle(node as usize),
-            ],
-            "the NULL behavior of the data block belongs to 0x082e1960"
-        );
+        assert_eq!(events(), std::vec![Event::PoolRecycle(node as usize)]);
     }
+
 
     #[test]
     fn the_recycle_result_is_the_return_value() {
@@ -290,12 +243,10 @@ mod tests {
         }
         unsafe {
             core::ptr::addr_of_mut!(PATH_NODE_HOST_OPS).write_volatile(PathNodeHostOps {
-                shared_data_release: recording_shared_data_release,
                 pool_recycle: echo_pool_recycle,
             });
         }
-        let mut data_block = [0u8; 0x54];
-        let mut fixture = NodeFixture::new(data_block.as_mut_ptr());
+        let mut fixture = NodeFixture::new(core::ptr::null_mut());
         let node = fixture.node_ptr();
 
         assert_eq!(unsafe { path_node_release(node) }, node);

@@ -237,6 +237,9 @@ pub mod hints {
     // destructor fixture; mappings never unmap, so no other user may share
     // this hint.
     pub const REFCOUNTED_BASE_DESTROY: usize = 0xbc00_0000;
+    // 0xc600_0000: dedicated to fs/shared_data's raw-u32 linked-list
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const SHARED_DATA_RELEASE: usize = 0xc600_0000;
     // 0xca00_0000: dedicated to app/iap_incoming_client_base's raw-u32
     // client-object and thread-context fixtures; mappings never unmap, so
     // no other user may share this hint.
