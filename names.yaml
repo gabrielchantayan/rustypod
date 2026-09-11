@@ -62719,3 +62719,34 @@ functions:
       helper is called through a volatile seam for host replacement and through
       its verified retailOS address on target, rather than by the stock direct
       bl. Its broader identity is not inferred.
+
+  # --- COW string C-string equality (cxx/string) ---
+  - address: 0x083eab9c
+    ghidra: FUN_083eab9c
+    name: cxx_string_equals_cstr
+    size: 108
+    sig: "int cxx_string_equals_cstr(const char *const *string, const char *cstr)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0/r6: string
+      param_2/r1/r7: cstr
+      r4: captured_length
+      r5: cstr_length
+      r0: ordering
+      FUN_08392478: strlen
+      FUN_08030f64: memcmp
+    notes: >-
+      Raw osos.dec confirms the exact 108-byte extent from push
+      {r4,r5,r6,r7,r8,lr} at 0x083eab9c through pop {r4,r5,r6,r7,r8,pc} at
+      0x083eac04; the separately linked next function begins with push at
+      0x083eac08. Decoding every ARM B/BL immediate finds exactly nine direct
+      inbound calls, all unconditional plain bl at 0x0815af14, 0x0815af60,
+      0x0815af74, 0x0815b33c, 0x0815b4a4, 0x0816764c, 0x08167670,
+      0x0829c0e0, and 0x0829c274; there are no predicated forms or direct
+      plain-B tail callers. It reads the COW `_Rep` length at data-4 before
+      strlen(cstr), reloads data and length, memcmps the smaller captured
+      length, then applies a length tie-break. Only zero comparison returns
+      1. The two direct callees are already ported as strlen @ 0x08392478
+      and memcmp @ 0x08030f64; no new dispatch seam is introduced. Deliberate
+      deviations: none.
