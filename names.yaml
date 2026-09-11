@@ -31266,6 +31266,36 @@ functions:
       frame, hoists the slot address into a register, reorders the
       mode compares, and emits orr for 2*index+1.
 
+  - address: 0x0839bbd0
+    ghidra: FUN_0839bbd0
+    name: signed_key_tree_find_value_copy
+    size: 84
+    sig: "u32 signed_key_tree_find_value_copy(const SignedKeyTree *tree, i32 key, u32 *out_value)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1: tree
+      param_2: key
+      param_3: out_value
+      local_20: candidate
+      local_1c: header
+    notes: >-
+      Raw osos.dec runs from 0x0839bbd0 through the return at 0x0839bc20;
+      the separately linked sibling begins at 0x0839bc24. It
+      stack-materializes the signed key, calls lower_bound @ 0x083db84c,
+      compares the returned node word with tree+0x10 through the ported
+      equal_deref copy @ 0x083cf8a8, and only for a non-header node stores
+      node+0x14 through out_value before returning 1. A header result leaves
+      out_value untouched and returns 0. The lower_bound body calls
+      less_signed @ 0x083d7580, establishing signed key ordering, but the
+      mapped value type remains opaque. Decoding every ARM B/BL word finds
+      exactly 8 direct, unconditional bl callers (0x081be4bc, 0x081be94c,
+      0x081bec9c, 0x081bf7e8, 0x081bf9c8, 0x081bfa6c, 0x081bfac0,
+      0x081bfba8), no predicated calls, no direct b transfers, and no
+      aligned data-word references. The unported lower_bound remains a
+      volatile host seam and a direct call to its retailOS address on target;
+      equal_deref is inlined as the equivalent candidate != header test.
+
   - address: 0x0839bccc
     ghidra: FUN_0839bccc
     name: signed_key_tree_find_value
