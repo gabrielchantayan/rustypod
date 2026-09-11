@@ -35453,6 +35453,41 @@ functions:
       match.py structural report differs as expected (exit 1); the call
       sequence sprintf/from_cstr/lookup/assign/release is preserved.
 
+  - address: 0x08102048
+    ghidra: FUN_08102048
+    name: string_table_set_both_decimal
+    size: 76
+    sig: "void string_table_set_both_decimal(u8 *table, char **key, i32 value)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      r2: value
+      FUN_0802f724: sprintf
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_081020ec: string_table_assign_both
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw ARM confirms Ghidra's 76-byte code extent: the final pop is at
+      0x08102090, the trailing "%d" literal is at 0x08102094, and the
+      distinct sibling begins with push at 0x08102098. It renders by-value
+      r2 as signed decimal into a 512-byte stack buffer, constructs a COW
+      string, hands it to FUN_081020ec with table and key, then releases the
+      temporary. That unported helper finds-or-inserts the key in the
+      current index's 0x1c-byte map and in the other `(index + 1) % 2` map,
+      assigning the same value to both. The helper is retained as the
+      STRING_TABLE_ASSIGN_BOTH_OPS volatile seam defaulting to 0x081020ec;
+      sprintf, cxx_string_from_cstr, and cxx_string_release are ported.
+      Decoding every aligned ARM B/BL word in osos.dec finds exactly 9
+      inbound direct bl calls, all unconditional, and zero b references or
+      aligned data-word references. Callers pass C-string addresses in r2,
+      so their addresses are deliberately serialized as signed decimal; the
+      port preserves that ABI rather than accepting a string pointer.
+      Focused host tests install the helper recorder and real COW-string
+      allocation fixture, covering 0, 42, -17, and i32::MIN while proving
+      table/key propagation and by-value signed-decimal formatting.
+
   - address: 0x08101edc
     ghidra: FUN_08101edc
     name: string_table_has_string

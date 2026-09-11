@@ -379,6 +379,60 @@ pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssign
 unsafe fn string_table_assign_ops() -> StringTableAssignOps {
     core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_ASSIGN_OPS))
 }
+/// The unported two-table assignment helper used by
+/// [`string_table_set_both_decimal`]. `FUN_081020ec` writes `value` at
+/// `key` in the selected map and in the other map selected by
+/// `(current_index + 1) % 2`.
+#[derive(Clone, Copy)]
+pub struct StringTableAssignBothOps {
+    /// `FUN_081020ec` @ 0x081020ec — assigns a COW string into both
+    /// active language tables.
+    pub assign: unsafe extern "C" fn(
+        table: *mut u8,
+        key: *mut *mut u8,
+        value: *mut *mut u8,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_assign_both(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: *mut *mut u8,
+) {
+    let assign: unsafe extern "C" fn(*mut u8, *mut *mut u8, *mut *mut u8) =
+        unsafe { core::mem::transmute(0x0810_20ecusize) };
+    unsafe { assign(table, key, value) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_assign_both(
+    _table: *mut u8,
+    _key: *mut *mut u8,
+    _value: *mut *mut u8,
+) {
+    panic!("string_table_set_both_decimal requires string-table assignment 0x081020ec")
+}
+
+/// Active model of `FUN_081020ec`. The target default reaches the retail
+/// helper; host tests install a recorder until that helper is ported.
+#[cfg(target_os = "none")]
+pub static mut STRING_TABLE_ASSIGN_BOTH_OPS: StringTableAssignBothOps = StringTableAssignBothOps {
+    assign: firmware_string_table_assign_both,
+};
+
+/// Active model of `FUN_081020ec`. The host default reports an accidental
+/// unmocked traversal into the still-unported helper.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_TABLE_ASSIGN_BOTH_OPS: StringTableAssignBothOps = StringTableAssignBothOps {
+    assign: missing_string_table_assign_both,
+};
+
+#[inline(always)]
+unsafe fn string_table_assign_both_ops() -> StringTableAssignBothOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_ASSIGN_BOTH_OPS))
+}
+
 
 /// `string_table_set_decimal` — original: `FUN_08101d4c` @ 0x08101d4c
 /// (80 bytes, 0x08101d4c..0x08101d9c; the next function opens at
@@ -416,6 +470,44 @@ pub unsafe extern "C" fn string_table_set_decimal(
     unsafe {
         (string_table_assign_ops().assign)(table, key, value);
         crate::cxx::string::cxx_string_release(value);
+    }
+}
+/// `string_table_set_both_decimal` — original: `FUN_08102048` @
+/// **0x08102048** (76 bytes of code, 0x08102048..0x08102090; its trailing
+/// `"%d\0"` literal is at 0x08102094 and the distinct next entry starts at
+/// 0x08102098). Decoding every aligned ARM B/BL word in `osos.dec` finds
+/// **9 direct `bl` call sites**, all unconditional; there are no predicated
+/// forms.
+///
+/// Renders the by-value signed `value` through `"%d"` into the original's
+/// 512-byte stack buffer, constructs a temporary COW string, writes it to
+/// `key` in the selected table and its `(current_index + 1) % 2` peer, then
+/// releases the temporary. There is no NULL guard on any argument.
+///
+/// Deliberate deviation: the Rust `sprintf` veneer accepts an explicit
+/// va-list pointer, so `&value` replaces the original variadic r2 word.
+/// `FUN_081020ec` remains a volatile dispatch seam whose target default is
+/// its verified retail load address; the port does not duplicate its
+/// map-insertion implementation.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_both_decimal(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: i32,
+) {
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let arguments = &value as *const i32 as *const u32;
+    unsafe {
+        crate::printf::printf_api::sprintf(buffer, b"%d\0".as_ptr(), arguments);
+    }
+
+    let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
+    unsafe {
+        (string_table_assign_both_ops().assign)(table, key, text);
+        crate::cxx::string::cxx_string_release(text);
     }
 }
 /// `string_table_set_current_hex` — original: `FUN_08101cfc` @
@@ -745,6 +837,7 @@ mod set_decimal_tests {
 
     struct OpsGuard {
         assign: StringTableAssignOps,
+        assign_both: StringTableAssignBothOps,
         engine: PrintfEngineFn,
     }
 
@@ -752,6 +845,10 @@ mod set_decimal_tests {
         fn drop(&mut self) {
             unsafe {
                 ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS), self.assign);
+                ptr::write_volatile(
+                    ptr::addr_of_mut!(STRING_TABLE_ASSIGN_BOTH_OPS),
+                    self.assign_both,
+                );
                 ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
             }
         }
@@ -830,11 +927,16 @@ mod set_decimal_tests {
         unsafe {
             let guard = OpsGuard {
                 assign: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_OPS)),
+                assign_both: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_BOTH_OPS)),
                 engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
             };
             ptr::write_volatile(
                 ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS),
                 StringTableAssignOps { assign: record_assign },
+            );
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_ASSIGN_BOTH_OPS),
+                StringTableAssignBothOps { assign: record_assign },
             );
             ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), decimal_engine);
             ASSIGNMENT = None;
@@ -873,6 +975,38 @@ mod set_decimal_tests {
             }
         }
 
+    }
+
+    #[test]
+    fn formats_by_value_decimal_and_assigns_both_tables() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            ArenaGuard { ops: previous }
+        };
+        let mut key_data = *b"StartGenius\0";
+        let mut key = key_data.as_mut_ptr();
+
+        for value in [0, 42, -17, i32::MIN] {
+            unsafe {
+                string_table_set_both_decimal(0x1234usize as *mut u8, &mut key, value);
+                assert_eq!(
+                    ASSIGNMENT,
+                    Some((
+                        0x1234,
+                        b"StartGenius".to_vec(),
+                        std::format!("{value}").into_bytes(),
+                    )),
+                );
+            }
+        }
     }
 }
 
