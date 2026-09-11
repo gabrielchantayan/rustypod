@@ -82,6 +82,9 @@
 //! there). It defaults to all-zero, so lookups miss (mask 0) until
 //! something fills it in.
 
+#[cfg(test)]
+extern crate std;
+
 /// Number of slots the original scans (`mov r3, #6`).
 pub const TABLE_SLOTS: usize = 6;
 
@@ -166,11 +169,16 @@ const EMPTY_SLOT_RECORD: SlotRecord = SlotRecord {
 pub static mut SLOT_RECORDS: [SlotRecord; SLOT_RECORD_COUNT] =
     [EMPTY_SLOT_RECORD; SLOT_RECORD_COUNT];
 
+#[cfg(test)]
+pub(crate) static SLOT_RECORDS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+
 /// registry_find_for_slot — original: `FUN_08138bd0` @ 0x08138bd0
 /// (88 bytes).
 ///
 /// Returns the first record whose `id` matches and whose `slot_mask`
 /// has bit `1 << slot` set; NULL when the table holds no such record.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn registry_find_for_slot(
     _this: *mut u8,
@@ -204,7 +212,7 @@ mod tests {
     extern crate std;
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
     fn slot(key: u32, state: u8) -> RequestSlot {
         RequestSlot { key, state, reserved: [0; 3] }
@@ -284,12 +292,11 @@ mod tests {
     }
 
     /// Serializes the tests that fill the global registry table.
-    static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
     /// Installs `entries` (index, id, mask) into the global table and
     /// hands back the guard; the caller passes it to [`clear_registry`].
     fn with_registry(entries: &[(usize, u16, u8)]) -> MutexGuard<'static, ()> {
-        let guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = SLOT_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             let base = ptr::addr_of_mut!(SLOT_RECORDS) as *mut SlotRecord;
             for &(index, id, mask) in entries {

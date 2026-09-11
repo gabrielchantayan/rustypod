@@ -30,6 +30,7 @@ use crate::app::service_manager::service_manager_instance_veneer;
 #[cfg(target_os = "none")]
 use crate::app::service_manager::service_handler_at;
 use crate::heap::veneers::heap_panic;
+use crate::util::table_find::registry_find_for_slot;
 use core::ptr;
 #[cfg(test)]
 use crate::app::service_manager::SERVICE_MANAGER_INSTANCE;
@@ -92,8 +93,17 @@ unsafe fn handler_availability_gate() -> u32 {
 #[derive(Clone, Copy)]
 struct ServiceHandlerLifecycleRecord {
     state: i8,
-    _remaining: [u8; 0x113],
+    _padding_1: [u8; 3],
+    descriptor_record: u32,
+    word_8: u32,
+    word_c: u32,
+    _remaining: [u8; 0x104],
 }
+
+const _: [u8; 0x04] = [0; core::mem::offset_of!(ServiceHandlerLifecycleRecord, descriptor_record)];
+const _: [u8; 0x08] = [0; core::mem::offset_of!(ServiceHandlerLifecycleRecord, word_8)];
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(ServiceHandlerLifecycleRecord, word_c)];
+const _: [u8; 0x114] = [0; core::mem::size_of::<ServiceHandlerLifecycleRecord>()];
 
 const SERVICE_HANDLER_LIFECYCLE_RECORD_COUNT: i32 = 3;
 
@@ -105,7 +115,11 @@ const SERVICE_HANDLER_LIFECYCLE_RECORDS: *const ServiceHandlerLifecycleRecord =
 static mut HOST_SERVICE_HANDLER_LIFECYCLE_RECORDS: [ServiceHandlerLifecycleRecord; 5] =
     [ServiceHandlerLifecycleRecord {
         state: 0,
-        _remaining: [0; 0x113],
+        _padding_1: [0; 3],
+        descriptor_record: 0,
+        word_8: 0,
+        word_c: 0,
+        _remaining: [0; 0x104],
     }; 5];
 
 #[cfg(test)]
@@ -156,6 +170,48 @@ pub unsafe extern "C" fn service_handler_lifecycle_state(_manager: *mut u8, sele
     ptr::read_volatile(ptr::addr_of!((*record).state)) as i32
 }
 
+/// service_handler_lifecycle_select_default_descriptor — original:
+/// `FUN_08138c30` @ **0x08138c30** (80 raw bytes: 19 ARM instructions plus
+/// the trailing lifecycle-table literal @ 0x08138c7c; 0x08138c80 begins the
+/// next function). Ghidra's 76-byte extent omits that literal. A complete
+/// decode of every ARM `B`/`BL` word in `osos.dec` finds **9 direct,
+/// unconditional `bl` call sites**, with no predicated calls or tail branches.
+///
+/// Algorithm: reject selector zero and signed selectors three and above with
+/// status 9. Every other signed selector looks up registry id zero for that
+/// selector, writes the returned record pointer to lifecycle record `+4`,
+/// clears `+8` and `+0xc`, and returns zero. The signed guard deliberately
+/// admits negative selectors; their ARM shift makes the registry lookup miss,
+/// but the pre-table lifecycle record is still cleared.
+///
+/// Deliberate deviation: host builds use the same five-record lifecycle
+/// fixture as the adjacent accessors and retain the target's 32-bit pointer
+/// field, so host pointers are stored truncated exactly as device pointers are.
+///
+/// # Safety
+///
+/// `selector` must name a writable lifecycle record at 0x08ad0f34. The
+/// original's signed range check admits negative selectors, which therefore
+/// address records before that table.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_lifecycle_select_default_descriptor(
+    manager: *mut u8,
+    selector: i32,
+) -> u32 {
+    if selector == 0 || selector >= SERVICE_HANDLER_LIFECYCLE_RECORD_COUNT {
+        return 9;
+    }
+
+    let record =
+        service_handler_lifecycle_records().wrapping_offset(selector as isize) as *mut ServiceHandlerLifecycleRecord;
+    let descriptor_record = registry_find_for_slot(manager, selector as u32, 0) as u32;
+    ptr::write_volatile(ptr::addr_of_mut!((*record).descriptor_record), descriptor_record);
+    ptr::write_volatile(ptr::addr_of_mut!((*record).word_8), 0);
+    ptr::write_volatile(ptr::addr_of_mut!((*record).word_c), 0);
+    0
+}
+
 /// # Safety
 ///
 /// `selector` must name a readable lifecycle record at 0x08ad0f34. The
@@ -198,6 +254,7 @@ unsafe extern "C" fn firmware_handler_at(table: *mut u8, selector: u32) -> u32 {
 unsafe extern "C" fn unavailable_handler_at(_table: *mut u8, _selector: u32) -> u32 {
     0
 }
+
 
 #[cfg(target_os = "none")]
 static mut SERVICE_HANDLER_AVAILABILITY_OPS: ServiceHandlerAvailabilityOps =
@@ -249,11 +306,98 @@ pub unsafe extern "C" fn service_handler_is_available(selector: u32) -> u32 {
 }
 
 
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
+    use crate::util::table_find::{SlotRecord, SLOT_RECORDS, SLOT_RECORDS_LOCK};
+    unsafe fn lifecycle_record(selector: i32) -> *mut ServiceHandlerLifecycleRecord {
+        service_handler_lifecycle_records().wrapping_offset(selector as isize) as *mut ServiceHandlerLifecycleRecord
+    }
+
+    unsafe fn set_lifecycle_record(
+        record: *mut ServiceHandlerLifecycleRecord,
+        state: i8,
+        descriptor_record: u32,
+        word_8: u32,
+        word_c: u32,
+    ) {
+        ptr::write_volatile(record, ServiceHandlerLifecycleRecord {
+            state,
+            _padding_1: [0; 3],
+            descriptor_record,
+            word_8,
+            word_c,
+            _remaining: [0; 0x104],
+        });
+    }
+
+    #[test]
+    fn default_descriptor_selection_writes_only_the_three_descriptor_words() {
+        let _registry_guard = SLOT_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lifecycle_guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            let registry = ptr::addr_of_mut!(SLOT_RECORDS) as *mut SlotRecord;
+            (*registry.add(17)).id = 0;
+            (*registry.add(17)).slot_mask = 0b0000_0010;
+
+            let selected = lifecycle_record(1);
+            let missing = lifecycle_record(2);
+            let negative = lifecycle_record(-1);
+            let selected_before = ptr::read_volatile(selected);
+            let missing_before = ptr::read_volatile(missing);
+            let negative_before = ptr::read_volatile(negative);
+            set_lifecycle_record(selected, -5, 0xdead_beef, 0x1111_1111, 0x2222_2222);
+            set_lifecycle_record(missing, 6, 0xdead_beef, 0x3333_3333, 0x4444_4444);
+            set_lifecycle_record(negative, -2, 0xdead_beef, 0x5555_5555, 0x6666_6666);
+
+            assert_eq!(service_handler_lifecycle_select_default_descriptor(ptr::null_mut(), 1), 0);
+            assert_eq!((*selected).state, -5, "the state byte is not initialized here");
+            assert_eq!((*selected).descriptor_record, registry.add(17) as u32);
+            assert_eq!((*selected).word_8, 0);
+            assert_eq!((*selected).word_c, 0);
+
+            assert_eq!(service_handler_lifecycle_select_default_descriptor(ptr::null_mut(), 2), 0);
+            assert_eq!((*missing).state, 6);
+            assert_eq!((*missing).descriptor_record, 0, "a missing default is stored as NULL");
+            assert_eq!((*missing).word_8, 0);
+            assert_eq!((*missing).word_c, 0);
+
+            assert_eq!(service_handler_lifecycle_select_default_descriptor(ptr::null_mut(), -1), 0);
+            assert_eq!((*negative).state, -2);
+            assert_eq!((*negative).descriptor_record, 0, "the signed guard admits negative selectors");
+            assert_eq!((*negative).word_8, 0);
+            assert_eq!((*negative).word_c, 0);
+
+            (*registry.add(17)).id = 0;
+            (*registry.add(17)).slot_mask = 0;
+            ptr::write_volatile(selected, selected_before);
+            ptr::write_volatile(missing, missing_before);
+            ptr::write_volatile(negative, negative_before);
+        }
+    }
+
+    #[test]
+    fn zero_selector_returns_status_nine_without_touching_the_record() {
+        let _lifecycle_guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            let record = lifecycle_record(0);
+            let before = ptr::read_volatile(record);
+            set_lifecycle_record(record, 7, 0xdead_beef, 0x1111_1111, 0x2222_2222);
+
+            assert_eq!(service_handler_lifecycle_select_default_descriptor(ptr::null_mut(), 0), 9);
+            assert_eq!((*record).state, 7);
+            assert_eq!((*record).descriptor_record, 0xdead_beef);
+            assert_eq!((*record).word_8, 0x1111_1111);
+            assert_eq!((*record).word_c, 0x2222_2222);
+
+            ptr::write_volatile(record, before);
+        }
+    }
 
     static mut MOCK_MANAGER: *mut u8 = ptr::null_mut();
     static mut MOCK_SELECTOR: u32 = 0;
