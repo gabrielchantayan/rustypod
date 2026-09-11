@@ -72,6 +72,7 @@ pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod table_transform_fixed_selector;
 pub mod tagged_counter;
+pub mod tagged_payload_address;
 pub mod tagged_payload_signed_field_sum;
 pub mod three_pointer_select;
 pub mod u16_pair_copy;
