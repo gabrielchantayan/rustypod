@@ -61412,3 +61412,33 @@ functions:
       0x081a4f64 zeroes all three observed bytes. Deliberate deviations:
       none; the field names express only this selector's verified precedence,
       not unrecovered business-level state meanings.
+
+  # --- Two-pair derived vtable constructor ---
+  - address: 0x081d0d98
+    ghidra: FUN_081d0d98
+    name: vtable_two_pair_derived_construct
+    size: 20
+    sig: "void *vtable_two_pair_derived_construct(void *this, const void *src_pair_at_4, const void *src_pair_at_12)"
+    module: cxx/vtable_two_pair_derived_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: src_pair_at_4
+      param_3/r2: src_pair_at_12
+      FUN_0811050c: vtable_two_pair_base_construct
+    notes: >-
+      Raw osos.dec has exactly 20 instruction bytes at 0x081d0d98 through
+      0x081d0da8, then the literal-pool derived-vtable word 0x0898dcb0 at
+      0x081d0dac; the next separately linked function starts at 0x081d0db0.
+      It forwards r0-r2 to the already ported 0x0811050c base constructor,
+      then stores the derived vtable at the returned r0 and returns it.
+      Decoding every ARM B/BL immediate found exactly ten inbound calls, all
+      unconditional bl (0x08135c74, 0x08135de8, 0x08136130, 0x0813634c,
+      0x0816c8f0, 0x0816c9d8, 0x08186f38, 0x081dcb34, 0x081dcc20,
+      0x081dcd08); zero predicated bl forms, zero tail b transfers, and zero
+      aligned DATA-word references target the entry. Ghidra drops the
+      pair-source arguments, but the ARM ABI passes their stale r1/r2 values
+      into the base constructor. The concrete class identity is not
+      established, so the name describes only the verified construction.
+      Deliberate deviation: calls the existing direct base port, with a
+      volatile final vtable store retaining the decoded post-call ordering.
