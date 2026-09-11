@@ -38893,6 +38893,34 @@ functions:
       preservation, and the already-initialized path.
 
 
+  # --- Tagged value default construction (cxx/tagged_value) ---
+  - address: 0x08258d48
+    ghidra: FUN_08258d48
+    name: tagged_value_default_construct
+    size: 24
+    sig: "TaggedValue *tagged_value_default_construct(TaggedValue *this)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0: this
+      r1: vtable
+      DAT_08258d5c: tagged_value_vtable (0x089a76fc)
+    notes: >-
+      EXTENT CORRECTED: Ghidra reports 20 instruction bytes at
+      0x08258d48..0x08258d58, but the ldr at entry consumes its literal-pool
+      word at 0x08258d5c; the true 24-byte extent ends there and
+      0x08258d60 starts the separate assignment helper. Decoding every ARM
+      B/BL word in osos.dec found exactly nine direct callers: nine
+      unconditional bl, zero predicated bl, and zero tail b. No aligned
+      osos.dec word equals 0x08258d48, so no stored function-pointer
+      dispatch was found. The constructor stores the opaque vtable literal
+      0x089a76fc at +0x00 and zero at kind byte +0x04, preserving the three
+      padding bytes and the payload words at +0x08/+0x0c; r0 still holds and
+      returns this. The vtable target's class identity is unrecovered, so no
+      identity or dispatch seam is invented. Deliberate deviation: volatile
+      stores preserve the observed vtable-then-kind sequence. Host test covers
+      return-this and preservation of all unmodified bytes.
+
   # --- Tagged value comparison (cxx/tagged_value) ---
   - address: 0x08258d7c
     ghidra: FUN_08258d7c

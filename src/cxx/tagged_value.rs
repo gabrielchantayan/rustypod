@@ -83,6 +83,38 @@ unsafe fn default_tagged_value() -> *const TaggedValue {
     }
     value
 }
+/// Initializes a tagged value to its default kind — original:
+/// `FUN_08258d48` @ `0x08258d48` (24 bytes).
+///
+/// Raw ARM has five instructions at 0x08258d48..0x08258d58 and its vtable
+/// literal at 0x08258d5c; 0x08258d60 starts the separate assignment helper.
+/// Thus Ghidra's reported 20-byte code extent omits the trailing literal-pool
+/// word. Decoding every ARM `B`/`BL` word in `osos.dec` finds exactly nine
+/// direct callers: nine unconditional `bl`, no predicated `bl`, and no tail
+/// `b`. No aligned image word equals 0x08258d48, so the function is not
+/// reached through a stored function-pointer dispatch.
+///
+/// # Algorithm
+///
+/// It stores opaque vtable literal 0x089a76fc at +0x00 and zero at kind byte
+/// +0x04, preserving the three padding bytes and the +0x08/+0x0c payload
+/// words. It returns `this` in r0. Deliberate deviation: volatile stores
+/// preserve the original vtable-then-kind store sequence. The vtable target's
+/// class identity is unrecovered and remains an opaque word.
+///
+/// # Safety
+///
+/// `this` must point to writable, four-byte-aligned [`TaggedValue`] storage.
+/// It is not NULL-checked, matching the original ARM body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_value_default_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_value_default_construct(this: *mut TaggedValue) -> *mut TaggedValue {
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).vtable), TAGGED_VALUE_VTABLE);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).kind), 0);
+    this
+}
+
 
 /// Constructs a tagged value from the source's word at byte offset +0x04.
 ///
@@ -221,6 +253,17 @@ mod tests {
             assert_eq!(second.auxiliary, 0x8765_4321);
         }
     }
+    #[test]
+    fn default_constructor_sets_only_vtable_and_kind_and_returns_this() {
+        let mut destination = [0xdead_beef, 0xa4b3_c2d1, 0x1122_3344, 0x5566_7788];
+        let this = destination.as_mut_ptr().cast::<TaggedValue>();
+
+        unsafe {
+            assert_eq!(tagged_value_default_construct(this), this);
+        }
+        assert_eq!(destination, [TAGGED_VALUE_VTABLE, 0xa4b3_c200, 0x1122_3344, 0x5566_7788]);
+    }
+
     #[test]
     fn payload_pair_comparison_ignores_metadata_and_requires_both_words() {
         let left = TaggedValue {
