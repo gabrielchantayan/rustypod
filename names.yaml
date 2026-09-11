@@ -61178,3 +61178,46 @@ functions:
       and the base-return-derived write target. match.py reports the expected
       dispatch-seam frame/call diff while retaining the base call followed by
       the same derived store order.
+
+  # --- Fixed settings-dispatcher singleton accessor ---
+  - address: 0x0820a008
+    ghidra: FUN_0820a008
+    name: setting_dispatcher_get
+    size: 88
+    sig: "void *setting_dispatcher_get(void)"
+    module: drivers/setting_dispatcher
+    status: ported
+    renames:
+      DAT_0820a050: setting_dispatcher_guard_08a09d68
+      DAT_0820a054: setting_dispatcher_08ae4978
+      DAT_0820a058: __dso_handle_089ca09c
+      DAT_0820a05c: invalid_setting_dispatcher_destructor_082112fc
+      FUN_0821c198: setting_dispatcher_construct (unported fixed-address seam)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes an 88-byte extent: the 72-byte instruction
+      body at 0x0820a008..0x0820a050 followed by four literal-pool words
+      through 0x0820a060; the next separately entered function starts at
+      0x0820a060. The body tests guard bit 0, calls cxa_guard_acquire, calls
+      the unported in-place constructor 0x0821c198 on fixed storage
+      0x08ae4978, registers the constructor result with cxa_atexit using
+      word 0x082112fc and __dso_handle 0x089ca09c, releases the guard, then
+      reloads and returns the fixed object literal rather than the
+      constructor result. Decoding every ARM B/BL word in osos.dec finds
+      exactly 10 inbound direct call sites, all unconditional bl
+      (0x08093614, 0x0809367c, 0x080936b4, 0x08093738, 0x080d9ba0,
+      0x081af8d8, 0x081afb2c, 0x081afb78, 0x081c174c, 0x08202238), with
+      zero predicated bl and no direct tail b. The vtable installed by the
+      unported constructor has a +0x10 method that dispatches selector
+      values 0..5 into fixed hardware-setting words, so the port names the
+      object for verified behavior rather than inventing its class identity.
+      Constructor 0x0821bd10 writes through object+0x1d1, establishing the
+      0x1d4-byte storage extent. Word 0x082112fc is not a callable entry:
+      its first instruction is bne 0x082112c0 after another function's frame
+      setup. The port therefore retains 0x0821c198 as an explicit target
+      seam and uses an inert shutdown handler instead of fabricating a
+      destructor identity. Host tests cover initialization, repeat calls,
+      bit-0-set and bit-0-clear guard paths, constructor-return versus
+      getter-return distinction, storage extent, and shutdown preservation.
