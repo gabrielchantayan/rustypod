@@ -421,6 +421,56 @@ pub unsafe extern "C" fn shared_cell_release_direct(slot: *mut *mut SharedCell) 
 
     slot.write(core::ptr::null_mut());
 }
+///
+/// `shared_cell_release_direct_secondary` — retailOS `FUN_083b52f4` @
+/// `0x083b52f4` (84 bytes; 9 incoming `bl` call sites, ALL unconditional —
+/// zero predicated forms and zero direct tail branches, verified by decoding
+/// every ARM B/BL word in `osos.dec`: 0x0818a6c4, 0x0818a770, 0x0818a900,
+/// 0x0818a984, 0x0818a98c, 0x0818af58, 0x081a879c, 0x083b5228, and
+/// 0x083dd2c4). Raw extent ends before the distinct function at `0x083b5348`.
+///
+/// An empty slot is unchanged. Otherwise, it decrements the signed intrusive
+/// refcount with ARM wrapping semantics and clears the slot. On the 1 -> 0
+/// transition, it passes a non-NULL payload to direct teardown
+/// `0x081fc930`, passes that return directly to tag-2 `operator_delete`, then
+/// reloads and deletes the non-NULL cell before its final NULL store.
+///
+/// Deliberate host deviation: direct teardown at `0x081fc930` remains
+/// unported, so hosts use the same injectable return-preserving seam as
+/// [`shared_cell_release_direct`]; targets call the firmware address. Its
+/// identity is not inferred. This distinct text section preserves the
+/// device-callable sibling despite its byte-identical Rust body.
+///
+/// # Safety
+/// `slot` must be a valid, aligned shared-cell pointer slot. A non-NULL cell
+/// must be valid for its two target words. On the final path, non-NULL payload
+/// and the teardown return must satisfy the firmware teardown/delete contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_release_direct_secondary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_release_direct_secondary(slot: *mut *mut SharedCell) {
+    let cell = slot.read();
+    if cell.is_null() {
+        return;
+    }
+
+    let remaining = (*cell).refcount.wrapping_sub(1);
+    (*cell).refcount = remaining;
+    if remaining == 0 {
+        let payload = (*slot.read()).value as *mut u8;
+        if !payload.is_null() {
+            operator_delete(direct_payload_dispose(payload));
+        }
+
+        let cell = slot.read();
+        if !cell.is_null() {
+            operator_delete(cell.cast());
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -847,6 +897,53 @@ mod tests {
                 recording_direct_payload_dispose,
             );
             shared_cell_release_direct(&mut slot);
+        }
+
+        assert_eq!(cell.refcount, 0);
+        assert!(slot.is_null());
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::Destructor(payload as usize),
+                Event::HeapFree(teardown_return as usize, 2),
+                Event::HeapFree(cell_ptr as *mut u8 as usize, 2),
+            ],
+        );
+    }
+
+    /// The 0x083b52f4 specialization retains the empty-slot early return:
+    /// it does not reach the direct teardown or heap paths.
+    #[test]
+    fn direct_secondary_release_leaves_an_empty_slot_untouched() {
+        let _bench = bench();
+        let mut slot: *mut SharedCell = core::ptr::null_mut();
+
+        unsafe { shared_cell_release_direct_secondary(&mut slot) };
+
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    /// The direct specialization at 0x083b52f4 must delete the teardown
+    /// return before its freshly reloaded cell, then clear the slot.
+    #[test]
+    fn direct_secondary_release_deletes_teardown_return_then_cell() {
+        let _bench = bench();
+        let payload = 0x1234_5678usize as *mut u8;
+        let teardown_return = 0x1234_5670usize as *mut u8;
+        let mut cell = SharedCell {
+            value: payload as usize,
+            refcount: 1,
+        };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        let mut slot = cell_ptr;
+        unsafe {
+            (*core::ptr::addr_of_mut!(DIRECT_DISPOSE_RETURN)) = teardown_return;
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(DIRECT_PAYLOAD_DISPOSE),
+                recording_direct_payload_dispose,
+            );
+            shared_cell_release_direct_secondary(&mut slot);
         }
 
         assert_eq!(cell.refcount, 0);
