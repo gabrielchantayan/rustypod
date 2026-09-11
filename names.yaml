@@ -39866,6 +39866,37 @@ functions:
       the split index/mask, test call, two early returns, wrapping
       cardinality update, and OR/XOR mutation, while differing in register
       allocation and LLVM's frame.
+  - address: 0x08274774
+    ghidra: FUN_08274774
+    name: bit_set_clear
+    size: 68
+    sig: "void bit_set_clear(BitSet *set, u32 bit)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      param_2/r1: bit
+      uVar1/r5: word_index
+      uVar2/r6: bit_index
+      FUN_082a4ef8: bit_set_test
+    notes: >-
+      Splits bit into word_index = bit >> 5 and bit_index = bit & 31,
+      then calls the already ported bit_set_test. An already-clear bit
+      returns without any store. A set bit decrements BitSet +0x04 with
+      ARM wrapping-subtraction semantics, then BIC-clears its mask from
+      words[word_index]. EXTENT - raw ARM is 68 bytes,
+      0x08274774..0x082747b4: `pop {r4, r5, r6, pc}` is final at
+      0x082747b4; the next function opens `push {r4, lr}` at 0x082747b8,
+      without a literal pool. CALL SITES - every ARM B/BL immediate in
+      osos.dec was decoded: 9 unconditional `bl`
+      (0x08131af4, 0x08131c14, 0x08131d3c, 0x0813291c, 0x08132a34,
+      0x08132b80, 0x081cc6a0, 0x081cd138, 0x081cd3a4), 0 predicated
+      `bl`, and 0 `b`; callers invoke unconditionally, so the callee owns
+      its already-clear early return. CALLEE - bit_set_test @ 0x082a4ef8
+      is ported in cxx/bit_set and called directly; no dispatch seam was
+      added. TESTS - host tests cover an already-clear no-op, bit positions
+      0/31/32/63 across two words, and cardinality underflow wrapping.
+      Deviations - none.
   - address: 0x0827489c
     ghidra: FUN_0827489c
     name: bit_set_insert_utf8
