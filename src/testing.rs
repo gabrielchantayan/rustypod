@@ -370,6 +370,10 @@ pub mod hints {
     // 0xb800_0000: dedicated to app/tuning_timer's raw-u32 controller and
     // timer fixtures; mappings never unmap, so no other user may share it.
     pub const TUNING_TIMER_SEQUENCE: usize = 0xb800_0000;
+    // 0x9a00_0000: dedicated to cxx/string_object's case-folded
+    // resource-construction fixture; it carries the provider-chain head as
+    // a raw u32 word, and fixture mappings never unmap.
+    pub const STRING_OBJECT_RESOURCE_CASEFOLD_MATCH: usize = 0x9a00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

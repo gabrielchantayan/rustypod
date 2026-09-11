@@ -372,6 +372,8 @@ use crate::libc::strcpy::strcpy;
 use crate::libc::memcmp::memcmp;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
+use crate::app::resource_chain::{resource_chain_find_string, ResourceProvider};
+use crate::util::context_field::task_ctx_field_0x30;
 use crate::printf::printf_api::VaList;
 
 /// Original load address of the class vtable the constructor plants
@@ -2057,6 +2059,48 @@ pub unsafe extern "C" fn string_object_utf8_strcasecmp_safe(
     )
 }
 
+/// string_object_copy_or_resource_on_casefold_match — original:
+/// `FUN_080ed884` @ 0x080ed884 (76 bytes; **10 direct `bl` call sites**,
+/// binary-scanned, all unconditional; also 2 unconditional `b` and 1 `bne`
+/// tail caller).
+///
+/// Source: `ipod-decomp/decomp/c/008/080ed884_FUN_080ed884.c`. Its
+/// fall-through extent is raw-binary verified: 19 ARM words from 0x080ed884
+/// through the tail branch at 0x080ed8cc; the separately linked next function
+/// starts at 0x080ed8d0.
+///
+/// Compares `source.payload` against `compare_text` using the case-folding
+/// UTF-8 core. A nonzero result copy-constructs `this` from `source`.
+/// Otherwise it obtains the current task's resource-provider chain, resolves
+/// the `"Str "` resource `resource_id`, and constructs `this` from the
+/// returned C string. Both outcomes return `this`; the raw function has no
+/// NULL guard on either object, its payload, the context chain, or the
+/// resource result.
+///
+/// Deliberate deviation: the direct `bl 0x0827609c` reaches the existing
+/// [`STRING_OBJECT_UTF8_STRCASECMP_CORE`] volatile dispatch slot because that
+/// core is identified but blocked on its unresolved runtime fold table. All
+/// other callees are ported and called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_copy_or_resource_on_casefold_match(
+    this: *mut StringObject,
+    source: *const StringObject,
+    compare_text: *const u8,
+    resource_id: u32,
+) -> *mut StringObject {
+    let compare = core::ptr::read_volatile(
+        core::ptr::addr_of!(STRING_OBJECT_UTF8_STRCASECMP_CORE),
+    );
+    if compare((*source).payload as *const u8, compare_text) != 0 {
+        return string_object_copy_construct(this, source);
+    }
+
+    let chain_head = task_ctx_field_0x30() as usize as *mut ResourceProvider;
+    let resource = resource_chain_find_string(chain_head, resource_id);
+    string_object_construct_from_cstr(this, resource)
+}
+
 /// string_object_is_empty — original: `FUN_082a5370` @ 0x082a5370
 /// (28 bytes, all code — the next function starts at 0x082a538c; 55
 /// `bl` call sites, binary-scanned).
@@ -2952,6 +2996,7 @@ pub unsafe extern "C" fn string_id_record_equals(
 pub(crate) mod tests {
     extern crate std;
     use super::*;
+    use crate::app::resource_chain::ResourceKind;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -5515,6 +5560,96 @@ pub(crate) mod tests {
         StrcasecmpCoreGuard { _lock: lock }
     }
 
+    unsafe extern "C" fn fold_equal_utf8_strcasecmp_core(
+        a: *const u8,
+        b: *const u8,
+    ) -> i32 {
+        (*core::ptr::addr_of_mut!(STRCASECMP_CORE_CALLS)).push((a as usize, b as usize));
+        0
+    }
+
+    const CASEFOLD_MATCH_RESOURCE_ID: u32 = 0x0dad_0242;
+    static mut RESOURCE_LOOKUP_CALLS: Vec<(ResourceKind, u32)> = Vec::new();
+    static mut RESOURCE_LOOKUP_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut RESOURCE_CONTEXT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn matching_string_resource(
+        _provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        found: *mut *mut u8,
+    ) -> u32 {
+        (*core::ptr::addr_of_mut!(RESOURCE_LOOKUP_CALLS)).push((kind, id));
+        if kind == ResourceKind::STRING && id == CASEFOLD_MATCH_RESOURCE_ID {
+            found.write(RESOURCE_LOOKUP_RESULT);
+            1
+        } else {
+            0
+        }
+    }
+
+    unsafe extern "C" fn unused_resource_read(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn unused_resource_replacement_allowed(
+        _provider: *mut ResourceProvider,
+        _replacement: *mut ResourceProvider,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn unused_resource_write(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+        _value: u32,
+        _flags: u32,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn resource_context_block() -> *mut u8 {
+        RESOURCE_CONTEXT
+    }
+
+    struct ResourceContextSlotGuard {
+        prior: unsafe extern "C" fn() -> *mut u8,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl ResourceContextSlotGuard {
+        fn install(context: *mut u8) -> ResourceContextSlotGuard {
+            let lock = crate::testing::TASK_CTX_BLOCK_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            unsafe {
+                RESOURCE_CONTEXT = context;
+                let slot = core::ptr::addr_of_mut!(
+                    crate::util::context_field::CURRENT_TASK_CTX_BLOCK
+                );
+                let prior = core::ptr::read_volatile(slot);
+                core::ptr::write_volatile(slot, resource_context_block);
+                ResourceContextSlotGuard { prior, _lock: lock }
+            }
+        }
+    }
+
+    impl Drop for ResourceContextSlotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(crate::util::context_field::CURRENT_TASK_CTX_BLOCK),
+                    self.prior,
+                );
+            }
+        }
+    }
+
     #[test]
     fn utf8_strcasecmp_safe_thunk_dispatches_the_payload_and_returns_the_core_result() {
         let mut payload_storage = *b"JPG\0";
@@ -5585,6 +5720,130 @@ pub(crate) mod tests {
         let result = unsafe { string_object_utf8_strcasecmp_safe(&object, b"jpg\0".as_ptr()) };
 
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn copy_or_resource_on_nonzero_casefold_compare_copy_constructs_source() {
+        let source_payload = *b"artist\0";
+        let compare_text = *b"localized artist\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: source_payload.as_ptr() as *mut u8,
+        };
+        let mut destination_storage = [0xa5u8; 16];
+        let mut destination = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(destination);
+        let _assignment = assign_cstr_bench(destination_storage.as_mut_ptr());
+        let _compare = strcasecmp_core_bench();
+
+        let returned = unsafe {
+            string_object_copy_or_resource_on_casefold_match(
+                this,
+                core::ptr::addr_of!(source),
+                compare_text.as_ptr(),
+                CASEFOLD_MATCH_RESOURCE_ID,
+            )
+        };
+
+        assert_eq!(returned, this);
+        assert_eq!(destination.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(&destination_storage[..source_payload.len()], &source_payload);
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(STRCASECMP_CORE_CALLS)).clone() },
+            std::vec![(source_payload.as_ptr() as usize, compare_text.as_ptr() as usize)],
+            "the raw ldr source,+4 supplies the compare core's first argument"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, source_payload.len(), 0)],
+            "a nonzero compare tail-calls the copy constructor, never looks up a resource"
+        );
+    }
+
+    #[test]
+    fn copy_or_resource_on_fold_equal_constructs_current_task_string_resource() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::STRING_OBJECT_RESOURCE_CASEFOLD_MATCH,
+            0x1000,
+        ) else {
+            crate::testing::note_missing_u32_fixture("cxx/string_object");
+            return;
+        };
+        let source_payload = *b"artist\0";
+        let compare_text = *b"artist\0";
+        let mut resource_payload = *b"localized artist\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: source_payload.as_ptr() as *mut u8,
+        };
+        let vtable = crate::app::resource_chain::ResourceProviderVTable {
+            slots_below: [None; 22],
+            read: unused_resource_read,
+            slot_5c: None,
+            replacement_allowed: unused_resource_replacement_allowed,
+            find: matching_string_resource,
+            write: unused_resource_write,
+        };
+        unsafe {
+            core::ptr::write(
+                slab.cast::<ResourceProvider>(),
+                ResourceProvider {
+                    vtable: &vtable,
+                    state_below_next: [core::ptr::null_mut(); 4],
+                    next: core::ptr::null_mut(),
+                },
+            );
+            RESOURCE_LOOKUP_CALLS.clear();
+            RESOURCE_LOOKUP_RESULT = resource_payload.as_mut_ptr();
+        }
+        let mut context = [0u32; 13];
+        context[12] = slab as usize as u32;
+        let _context = ResourceContextSlotGuard::install(context.as_mut_ptr() as *mut u8);
+        let mut destination_storage = [0xa5u8; 32];
+        let mut destination = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(destination);
+        let _assignment = assign_cstr_bench(destination_storage.as_mut_ptr());
+        let _compare = strcasecmp_core_bench();
+        unsafe {
+            core::ptr::addr_of_mut!(STRING_OBJECT_UTF8_STRCASECMP_CORE)
+                .write_volatile(fold_equal_utf8_strcasecmp_core);
+        }
+
+        let returned = unsafe {
+            string_object_copy_or_resource_on_casefold_match(
+                this,
+                core::ptr::addr_of!(source),
+                compare_text.as_ptr(),
+                CASEFOLD_MATCH_RESOURCE_ID,
+            )
+        };
+
+        assert_eq!(returned, this);
+        assert_eq!(destination.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(
+            &destination_storage[..resource_payload.len()],
+            &resource_payload,
+            "the fold-equal path copy-constructs from the current task's resource"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(STRCASECMP_CORE_CALLS)).clone() },
+            std::vec![(source_payload.as_ptr() as usize, compare_text.as_ptr() as usize)]
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(RESOURCE_LOOKUP_CALLS)).clone() },
+            std::vec![(ResourceKind::STRING, CASEFOLD_MATCH_RESOURCE_ID)],
+            "the resource wrapper binds the Str kind and forwards the supplied id"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, resource_payload.len(), 0)]
+        );
     }
 
     #[test]
