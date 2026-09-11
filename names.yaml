@@ -64715,3 +64715,39 @@ functions:
       same argument move and sentinel write; LLVM materializes the absolute
       target, restores its frame, and bx dispatches instead of using the
       retail tail-branch encoding.
+
+  # --- Validated 0x89c singleton (app/validated_singleton_0x89c) ---
+  - address: 0x0820a570
+    ghidra: FUN_0820a570
+    name: validated_singleton_0x89c_get
+    size: 100
+    sig: "void *validated_singleton_0x89c_get(void)"
+    module: app/validated_singleton_0x89c
+    status: ported
+    renames:
+      DAT_0820a5cc: validated_singleton_0x89c_cache
+      DAT_0820a5d0: validated_singleton_0x89c_size
+      FUN_0820a610: validated_singleton_construct_veneer
+      FUN_0820a4c0: validated_singleton_validate
+      FUN_0820a61c: validated_singleton_destroy
+    notes: >-
+      Raw osos.dec establishes 92 instruction bytes at 0x0820a570..0x0820a5c8
+      followed by cache and size pool words at 0x0820a5cc/0x0820a5d0, so the
+      true extent is 100 bytes; the separate next entry at 0x0820a5d4 is a
+      tail veneer. A complete ARM B/BL decode finds nine direct callers, all
+      plain unconditional bl and no predicated forms or tail branches:
+      0x081007dc, 0x08100874, 0x08101340, 0x081015f4, 0x08174380,
+      0x08174518, 0x081746b4, 0x081751c8, and 0x08177958. It loads the cache
+      word at 0x089cb1dc; on NULL, calls the ported operator_new(0x89c), the
+      unknown construction veneer 0x0820a610, and stores its return before
+      calling the unknown 0x0820a4c0 validator. A nonzero validator result
+      retains and returns the cache; zero reloads the cache, passes
+      0x0820a61c's destructor return to the ported operator_delete, clears the
+      cache, and returns NULL. NULL construction results bypass validation and
+      retry next call. The constructor veneer supplies literal 0x083e9314 in
+      r1, but it does not prove an object identity. Target code uses original
+      cache and retail lifecycle addresses; host tests use a cache and three
+      volatile lifecycle operations to prove cache-hit, acceptance, rollback
+      ordering including the destructor-return deallocation pointer, and NULL
+      construction retry. match.py structural review: expected LLVM frame and
+      direct/indirect call-shape differences only.
