@@ -11725,6 +11725,35 @@ functions:
       is examined before the count is tested. Deviation - the table is
       the crate static SLOT_RECORDS, zeroed (block_mgr.rs precedent).
 
+  - address: 0x081fe954
+    ghidra: FUN_081fe954
+    name: slot_table_register
+    size: 60
+    sig: "u32 slot_table_register(void *this, i32 index, i32 kind, u32 value_a, u32 value_b)"
+    module: app/slot_table
+    status: ported
+    renames:
+      param_1/r0: unused_this
+      param_2/r1: index
+      param_3/r2: kind
+      param_4/r3: value_a
+      param_5/[sp+4]: value_b
+      DAT_081fe990: SLOTS (0x08ac8b94 runtime-RAM registration table)
+    notes: >-
+      Raw ARM is 15 instruction words from 0x081fe954 through 0x081fe98c,
+      followed by its 0x08ac8b94 literal at 0x081fe990; the next function
+      begins at 0x081fe994. The code accepts only signed index < 17 and
+      signed kind < 3, returning 9 before touching the table otherwise.
+      It indexes 16-byte slots, tests occupied byte +0, and, only when zero,
+      stores kind/value_a/value_b at +4/+8/+0xc with stmib before storing
+      occupied = 1. A busy slot still returns 0 unchanged. Exactly 9 direct
+      callers decode as unconditional bl (no predicated bl or tail b);
+      they use in-range constant indices. The first this argument is never
+      read. Negative index and kind pass the signed comparisons; the Rust
+      port preserves the pointer calculation and signed kind semantics, but
+      cannot host-test negative index without intentionally corrupting memory
+      before the static table.
+
   - address: 0x081fea54
     ghidra: FUN_081fea54
     name: slot_table_clear

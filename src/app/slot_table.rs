@@ -1,22 +1,22 @@
 //! `slot_table_clear` — original: `FUN_081fea54` @ 0x081fea54
 //! (52 bytes; 10 `bl` call sites, binary-scanned).
 //!
-//! Releases one entry of the 17-slot registration table @ 0x08ac8b94.
-//! The whole family shares that base:
+//! Manages the 17-slot registration table @ 0x08ac8b94. The whole family
+//! shares that base:
 //!
-//! - `FUN_081ff758` builds it: `memset(table, 0, 0x110)` — 17 × 16
-//!   bytes exactly — then seeds every slot's +4 word with 0x7fffffff.
-//! - `FUN_081fe954` registers a slot: rejects `index >= 17` *or*
-//!   `kind >= 3` with error 9, and, only if the slot is still free
+//! - `FUN_081fe954` registers a slot: rejects signed `index >= 17` or
+//!   signed `kind >= 3` with error 9, and, only if the slot is still free
 //!   (byte +0 == 0), stores `kind`/`value_a`/`value_b` into +4/+8/+0xc
 //!   with one `stmib` and raises the occupied byte.
-//! - this function releases one: restores +4 to 0x7fffffff, zeroes
+//! - `FUN_081fea54` releases one: restores +4 to 0x7fffffff, zeroes
 //!   +8/+0xc, and drops the occupied byte.
+//! - `FUN_081ff758` builds it: `memset(table, 0, 0x110)` — 17 × 16
+//!   bytes exactly — then seeds every slot's +4 word with 0x7fffffff.
 //!
 //! Every call site pairs the two: `if (enabled) register(this, SLOT,
 //! kind, a, b); else slot_table_clear(this, SLOT);` with `SLOT` a
-//! compile-time constant (10 and 16 both appear), so the index is a
-//! slot *id*, not a loop variable.
+//! compile-time constant (10 and 16 both appear), so the index is a slot
+//! *id*, not a loop variable.
 //!
 //! ```text
 //! slot +0x0  u8   occupied — 0 free, 1 registered
@@ -100,6 +100,40 @@ pub unsafe extern "C" fn slot_table_clear(_this: *mut u8, index: i32) -> u32 {
     0
 }
 
+/// slot_table_register — original: `FUN_081fe954` @ 0x081fe954
+/// (60 instruction bytes plus a 4-byte literal pool; 9 unconditional
+/// `bl` call sites, binary-scanned).
+///
+/// Registers the free slot at `index` with `kind`, `value_a`, and
+/// `value_b`, returning 0. It returns [`SLOT_INDEX_OUT_OF_RANGE`] without
+/// writing if the signed `index >= 17` or signed `kind >= 3`; an occupied
+/// in-range slot is unchanged but still returns 0.
+///
+/// The ARM `cmp`/`cmplt` accepts negative indices and kinds. Negative kinds
+/// remain faithful here; a negative index uses the target-equivalent pointer
+/// calculation but cannot be host-tested without writing before [`SLOTS`].
+/// As in [`slot_table_clear`], the runtime-RAM table is represented by the
+/// crate static, and volatile reads/writes retain communication with its
+/// unported users.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn slot_table_register(
+    _this: *mut u8, index: i32, kind: i32, value_a: u32, value_b: u32,
+) -> u32 {
+    if index >= SLOT_COUNT as i32 || kind >= 3 {
+        return SLOT_INDEX_OUT_OF_RANGE;
+    }
+
+    let slot = (core::ptr::addr_of_mut!(SLOTS) as *mut Slot).offset(index as isize);
+    if core::ptr::read_volatile(core::ptr::addr_of!((*slot).occupied)) == 0 {
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*slot).kind), kind);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*slot).value_a), value_a);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*slot).value_b), value_b);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*slot).occupied), 1);
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -145,6 +179,69 @@ mod tests {
 
     fn clear(index: i32) -> u32 {
         unsafe { slot_table_clear(ptr::null_mut(), index) }
+    }
+
+    fn register(index: i32, kind: i32, value_a: u32, value_b: u32) -> u32 {
+        unsafe { slot_table_register(ptr::null_mut(), index, kind, value_a, value_b) }
+    }
+
+    #[test]
+    fn registering_first_and_last_free_slots_writes_all_fields() {
+        let guard = SLOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(register(0, 0, 0x0123_4567, 0x89ab_cdef), 0);
+        assert_eq!(register(SLOT_COUNT as i32 - 1, 2, 0x7654_3210, 0xfedc_ba98), 0);
+        unsafe {
+            assert_eq!((*slot(0)).occupied, 1);
+            assert_eq!((*slot(0)).kind, 0);
+            assert_eq!((*slot(0)).value_a, 0x0123_4567);
+            assert_eq!((*slot(0)).value_b, 0x89ab_cdef);
+            assert_eq!((*slot(SLOT_COUNT - 1)).occupied, 1);
+            assert_eq!((*slot(SLOT_COUNT - 1)).kind, 2);
+            assert_eq!((*slot(SLOT_COUNT - 1)).value_a, 0x7654_3210);
+            assert_eq!((*slot(SLOT_COUNT - 1)).value_b, 0xfedc_ba98);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn registering_an_occupied_slot_leaves_its_contents_unchanged() {
+        let guard = with_registered(4);
+        assert_eq!(register(4, 0, 0x1111_1111, 0x2222_2222), 0);
+        unsafe {
+            assert_eq!((*slot(4)).occupied, 1);
+            assert_eq!((*slot(4)).kind, 2);
+            assert_eq!((*slot(4)).value_a, 0xaaaa_aaaa);
+            assert_eq!((*slot(4)).value_b, 0xbbbb_bbbb);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn out_of_range_index_or_kind_is_refused_without_writing() {
+        let guard = SLOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(register(5, 3, 1, 2), SLOT_INDEX_OUT_OF_RANGE);
+        assert_eq!(register(5, i32::MAX, 3, 4), SLOT_INDEX_OUT_OF_RANGE);
+        assert_eq!(register(SLOT_COUNT as i32, 1, 5, 6), SLOT_INDEX_OUT_OF_RANGE);
+        unsafe {
+            assert_eq!((*slot(5)).occupied, 0);
+            assert_eq!((*slot(5)).kind, SLOT_KIND_FREE);
+            assert_eq!((*slot(5)).value_a, 0);
+            assert_eq!((*slot(5)).value_b, 0);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn negative_kind_is_accepted_by_the_signed_arm_comparison() {
+        let guard = SLOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(register(6, -1, 0xaaaa_5555, 0x1234_5678), 0);
+        unsafe {
+            assert_eq!((*slot(6)).occupied, 1);
+            assert_eq!((*slot(6)).kind, -1);
+            assert_eq!((*slot(6)).value_a, 0xaaaa_5555);
+            assert_eq!((*slot(6)).value_b, 0x1234_5678);
+        }
+        restore(guard);
     }
 
     #[test]
