@@ -54144,6 +54144,36 @@ functions:
       none. Host coverage proves both table edges, NULL-word propagation, and
       the uncached reload.
 
+  - address: 0x08193e50
+    ghidra: FUN_08193e50
+    name: service_manager_secondary_handler_state_flags_get
+    size: 20
+    sig: "u32 service_manager_secondary_handler_state_flags_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_1_plus_slot_times_0x20_plus_0x10: state_flags
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x08193e50..0x08193e64: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; ldr r0,[r0,#16]; bx lr`; the next
+      `cmp r1,#3` at 0x08193e64 begins the separately linked byte-constrained
+      setter. It reads the full word at +0x10 from one of three 8-word
+      secondary handler records. The signed `blge` admits negative slots,
+      which address unchecked before the table exactly as retailOS does; slots
+      >=3 terminate through ported non-returning heap_panic. The paired setter
+      only accepts values <=0xff, while callers mask this word as a bitfield,
+      so state_flags records the observed field behavior without inventing a
+      concrete identity. Decoding every ARM B/BL word in osos.dec found
+      exactly 10 inbound direct call sites — 0x0818e330, 0x08190710,
+      0x081932a0, 0x08193ae4, 0x08194aac, 0x081a96fc, 0x081d6d54,
+      0x081d76e4, 0x082011fc, and 0x08209310 — all unconditional plain BL;
+      no predicated forms or tail branches. Deliberate deviations: none. Host
+      coverage proves all valid record offsets, full-word propagation,
+      uncached reload, and the signed negative-slot path.
+
   - address: 0x08193e84
     ghidra: FUN_08193e84
     name: service_manager_secondary_handler_code_get
