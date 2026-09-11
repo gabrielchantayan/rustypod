@@ -61765,3 +61765,32 @@ functions:
       initializes it to NULL, preserving the cleared rectangle for that empty
       case without undefined behavior. Host tests cover a non-NULL item's four
       signed bounds words and an empty traversal that writes no item pointer.
+
+  # --- UI current collection-item word accessor ---
+  - address: 0x0815d888
+    ghidra: FUN_0815d888
+    name: ui_collection_current_item_word
+    size: 36
+    sig: "u32 ui_collection_current_item_word(void *owner)"
+    module: ui/collection_current_item_word
+    status: ported
+    renames:
+      param_1: owner
+      FUN_081d0e00: collection_current_item_word_dispatch
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent:
+      0x0815d888..0x0815d8ac. The separately linked next function begins at
+      0x0815d8ac with push {r4,r5,r6,lr}. Whole-image decoding of every ARM
+      B/BL immediate finds exactly ten direct inbound calls, all unconditional
+      plain bl at 0x0815d048, 0x0815d338, 0x0815d35c, 0x0815d37c,
+      0x0815d39c, 0x0815d40c, 0x0815d42c, 0x0815d44c, 0x0815d46c, and
+      0x0815e010; there are no predicated bl forms or tail-b transfers. The
+      nonzero owner+0x34 and signed-nonnegative owner+0x80 gates are preserved
+      before the b tail transfer to the unported FUN_081d0e00 with owner+0x2c.
+      That target increments the handle to +0x04, dispatches its object's
+      vtable slot +0x40, and dereferences the returned word pointer. No
+      names.yaml entry exists for FUN_081d0e00, so this one-function port
+      models it as a volatile seam with that exact default body rather than
+      inventing its callee identity. Host tests cover both short-circuit gates,
+      the zero boundary of the signed state, the embedded-handle argument, and
+      returned-word propagation. match.py is structural review only.

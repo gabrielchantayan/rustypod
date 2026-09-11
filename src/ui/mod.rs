@@ -7,6 +7,7 @@ pub mod coordinate_origin;
 pub mod color;
 pub mod content_bounds;
 pub mod first_collection_item_bounds;
+pub mod collection_current_item_word;
 pub mod flag_2c;
 pub mod flag_bit_2_at_4;
 pub mod startup_sequence;
