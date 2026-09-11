@@ -64015,3 +64015,33 @@ functions:
       aligned osos.dec data-word references. The distinct sibling begins at
       0x082b5154. No deliberate deviations; repr(C) u32 descriptor fields
       preserve its +0x00 flags and +0x08 offset layout on hosts.
+
+  - address: 0x082a014c
+    ghidra: FUN_082a014c
+    name: fixed16_dot3
+    size: 64
+    sig: "i32 fixed16_dot3(const i32 *a, const i32 *b)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      r4: a
+      r5: b
+      r6: first_two_products
+      FUN_080e9878: fixed16_mul
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte body
+      0x082a014c..0x082a018b: three word pairs at a[0..2]/b[0..2] are
+      multiplied by fixed16_mul (0x080e9878), then added in order with
+      wrapping 32-bit add. The ldr at 0x082a018c begins the separately
+      entered vector-negation sibling; no literal pool belongs to this body.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly nine
+      inbound calls, all plain unconditional bl (no predicated bl or tail b):
+      0x0824c060, 0x0824c090, 0x0824c134, 0x0824c1ac, 0x0824c210,
+      0x0824c240, 0x0824c2f4, 0x0824c360, and 0x0824c688. There are no
+      aligned osos.dec data words containing this entry. The original has no
+      NULL or bounds guard; the Rust port likewise directly reads all six
+      aligned words. No deliberate deviations. Host tests cover ordinary
+      signed Q16.16 products, fractional truncation, and overflow of an
+      intermediate dot-product sum.

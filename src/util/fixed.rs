@@ -1,20 +1,20 @@
-//! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
-//! the software count-leading-zeros @ 0x0824980c that feeds them, the
-//! 64-bit round-and-extract @ 0x08076214 that closes dot products, the
-//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value, the
-//! unguarded reciprocal body @ 0x080377e4 that it tail-branches to, and the
-//! float entry point @ 0x082577bc that feeds Q16.16 values in from f32
-//! literals.
+//! 16.16 fixed-point arithmetic, three-element dot products, and widening
+//! integer multiply @ 0x080e9878 / 0x082a014c / 0x080f0fa4, the software
+//! count-leading-zeros @ 0x0824980c that feeds them, the 64-bit
+//! round-and-extract @ 0x08076214 that closes dot products, the guarded
+//! reciprocal @ 0x08076204 that divides by a Q16.16 value, the unguarded
+//! reciprocal body @ 0x080377e4 that it tail-branches to, and the float entry
+//! point @ 0x082577bc that feeds Q16.16 values in from f32 literals.
 //!
-//! Three pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
+//! Four pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
 //! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
 //! wrapper, one unrolled-division body, and one float-conversion leaf.
 //! Sizes from decomp/functions.csv; call-site counts from decoding every
 //! `b`/`bl` word in osos.dec (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
+//! - `fixed16_dot3` — `FUN_082a014c` @ 0x082a014c (64 bytes; 9 call sites).
 //! - `mul_shift_i32` — `FUN_08079a44` @ 0x08079a44 (20 bytes; 12 call sites).
-//! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
 //! - `fixed16_recip` — `FUN_08076204` @ 0x08076204 (16 bytes; 36 sites).
@@ -56,10 +56,36 @@
 /// Truncating, not rounding: negative results round toward negative
 /// infinity. Products that do not fit in 32 bits after the shift wrap,
 /// exactly as the original's register assembly does — there is no clamp.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_mul(a: i32, b: i32) -> i32 {
     (((a as i64) * (b as i64)) >> 16) as i32
 }
+
+/// fixed16_dot3 — original: `FUN_082a014c` @ 0x082a014c (64 bytes).
+///
+/// Multiplies the corresponding Q16.16 components of the two aligned
+/// three-word vectors through `fixed16_mul`, then adds the three truncated
+/// products in order. Each `add` is a wrapping 32-bit sum, so there is no
+/// saturation even if an intermediate sum overflows.
+///
+/// Raw `osos.dec` establishes the extent 0x082a014c..0x082a018b: the `ldr`
+/// at 0x082a018c begins the separately entered vector-negation sibling.
+/// Decoding every ARM branch word finds nine inbound `bl` call sites, all
+/// unconditional (no predicated `bl` or tail `b`): 0x0824c060, 0x0824c090,
+/// 0x0824c134, 0x0824c1ac, 0x0824c210, 0x0824c240, 0x0824c2f4, 0x0824c360,
+/// and 0x0824c688. The body directly loads all six input words and has no
+/// NULL or bounds guard. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_dot3")]
+pub unsafe extern "C" fn fixed16_dot3(a: *const i32, b: *const i32) -> i32 {
+    let first = fixed16_mul(unsafe { core::ptr::read(a) }, unsafe { core::ptr::read(b) });
+    let second = fixed16_mul(unsafe { core::ptr::read(a.add(1)) }, unsafe { core::ptr::read(b.add(1)) });
+    let third = fixed16_mul(unsafe { core::ptr::read(a.add(2)) }, unsafe { core::ptr::read(b.add(2)) });
+    first.wrapping_add(second).wrapping_add(third)
+}
+
 
 /// mul_shift_i32 — original: `FUN_08079a44` @ 0x08079a44 (20 bytes).
 ///
@@ -432,6 +458,31 @@ mod tests {
             assert_eq!(fixed16_mul(a, b), want, "a={a:#x} b={b:#x}");
         }
     }
+    /// The three products and both additions are sequenced exactly as the
+    /// original, including signed fixed-point truncation and u32-style sum
+    /// wrapping.
+    #[test]
+    fn fixed16_dot3_matches_fixed_point_reference_and_wraps() {
+        fn reference(a: &[i32; 3], b: &[i32; 3]) -> i32 {
+            a.iter().zip(b).fold(0i32, |sum, (&left, &right)| {
+                sum.wrapping_add((((left as i64) * (right as i64)) >> 16) as i32)
+            })
+        }
+
+        let cases = [
+            ([ONE, 2 * ONE, -3 * ONE], [4 * ONE, -ONE, 2 * ONE]),
+            ([0x1234_5678, -0x3333_3333, 0x7fff], [-0x1000, 0x0001_0001, -0x8000]),
+            ([i32::MAX, i32::MAX, ONE], [ONE, ONE, ONE]),
+        ];
+        for (a, b) in cases {
+            assert_eq!(unsafe { fixed16_dot3(a.as_ptr(), b.as_ptr()) }, reference(&a, &b));
+        }
+
+        let a = [i32::MAX, i32::MAX, ONE];
+        let b = [ONE, ONE, ONE];
+        assert_eq!(unsafe { fixed16_dot3(a.as_ptr(), b.as_ptr()) }, 0xfffe);
+    }
+
 
     /// Truncation toward negative infinity, not round-to-nearest — the
     /// distinction from FreeType's `FT_MulFix`.
