@@ -367,6 +367,9 @@ pub mod hints {
     // collection-owner fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const UI_FIRST_COLLECTION_ITEM_BOUNDS: usize = 0xad00_0000;
+    // 0xb800_0000: dedicated to app/tuning_timer's raw-u32 controller and
+    // timer fixtures; mappings never unmap, so no other user may share it.
+    pub const TUNING_TIMER_SEQUENCE: usize = 0xb800_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

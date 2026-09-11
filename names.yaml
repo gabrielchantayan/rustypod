@@ -14863,6 +14863,35 @@ functions:
       callback teardown shape. The port preserves this false result
       and intentionally does not inspect either opaque argument.
 
+  - address: 0x0811a890
+    ghidra: FUN_0811a890
+    name: stop_frequency_change_and_start_tuning_timer
+    size: 36
+    sig: "void stop_frequency_change_and_start_tuning_timer(u8 *controller)"
+    module: app/tuning_timer
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_1_plus_0xb0: tuning timer
+      param_1_plus_0xb4: frequency-change pending byte
+      param_1_plus_0xb8: frequency-change timer
+      FUN_0812c6b0: timer_stop
+      FUN_0811ac74: stop tuning timer and set its 4000 ms delay
+    notes: >-
+      Exact 36-byte extent, binary-decoded as push {r4,lr}; mov r4,r0;
+      ldr r0,[r0,#0xb8]; bl timer_stop; mov r0,#0; strb r0,[r4,#0xb4];
+      mov r0,r4; pop {r4,lr}; b 0x0811ac74. The next function opens at
+      0x0811a8b4. Decoding every ARM B/BL word in osos.dec finds ten
+      direct callers: ten unconditional bl, zero predicated bl, and zero
+      tail b. It stops the frequency-change timer, clears the pending byte,
+      then tail-branches to the 40-byte helper at 0x0811ac74. Raw decoding
+      verifies that helper stops the tuning timer at controller+0xb0 and
+      starts it after 4000 ms. The Rust port calls the already-ported
+      timer_start_after directly instead of adding a seam for that unported
+      wrapper; the timer effects and order are identical. Host test uses a
+      unique low-address raw-u32 fixture and verifies both timer stops, the
+      pending-byte clear, and the 4000 ms tuning delay.
+
   - address: 0x08266a48
     ghidra: FUN_08266a48
     name: message_kind_construct

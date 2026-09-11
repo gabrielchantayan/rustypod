@@ -1136,6 +1136,7 @@ fn ptr_to_link(timer: *mut u8) -> u32 {
 /// `TIMER_STATE_EXPIRED`, and unconditionally leaves
 /// `TIMER_STATE_STOPPED` in the state word. The `timer` argument is not
 /// NULL-checked, as in the original.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn timer_stop(timer: *mut u8) {
     (timer_ops().trace_assert)(timer);
@@ -1314,6 +1315,7 @@ pub unsafe extern "C" fn timer_set_delay(timer: *mut u8, delay: u32) {
 /// the tail call's r0 is `timer_set_delay`'s leftover, not the timer,
 /// so the scouted `u8 *` return is corrected to `void` (the
 /// `timer_restart` precedent).
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn timer_start_after(timer: *mut u8, delay: u32) {
     timer_stop(timer);
