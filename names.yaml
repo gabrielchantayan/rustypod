@@ -6413,6 +6413,36 @@ functions:
       than retail bl targets and LLVM unrolling the fixed ten-counter group;
       both retain the same 24 attempted increments and ignored results.
 
+  - address: 0x0806c0b8
+    ghidra: FUN_0806c0b8
+    name: tdat_element_release_counters
+    size: 176
+    sig: "void tdat_element_release_counters(u8 *element)"
+    module: ui/tdat_counter_releases
+    status: ported
+    renames:
+      param_1/r0: element
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_0809f744: tagged_counter_try_decrement
+    notes: >-
+      Raw ARM extent is exactly 0x0806c0b8..0x0806c168; the next separately
+      entered function begins at 0x0806c16c, so Ghidra's 180-byte extent is
+      four bytes too long. It first invokes the NULL-safe ported 'tdat' class
+      predicate and immediately returns if it fails. On success it calls the
+      ported tagged_counter_try_decrement on the element's counters at +0xc0,
+      +0x118, +0x170, +0x1c8, +0x220, +0x278, +0x2d0, +0x328, +0x380, +0x3d8,
+      +0x7a0, +0x7f8, +0x8a8, and +0x850, then loops ten times over +0x430 +
+      index*0x58. Every decrement result is ignored, so invalid, zero, and
+      negative tagged counters remain unchanged independently. Decoding every
+      ARM B/BL-immediate word in osos.dec verifies 9 inbound plain bl calls
+      (0x0804622c, 0x08055b54, 0x0805cdc8, 0x08086854, 0x0808d580,
+      0x0809ddd4, 0x0809e154, 0x0809efdc, and 0x080aa5b0), zero predicated
+      forms, and no tail b callers. The raw body contains fifteen static bl
+      instructions: one predicate, fourteen fixed decrements, and one loop
+      decrement call executed ten times. The Rust port directly invokes the
+      already-ported predicate and counter decrement rather than branching into
+      stock code; otherwise no deliberate deviations.
+
   - address: 0x080522d4
     ghidra: FUN_080522d4
     name: ui_tdat_first_plst

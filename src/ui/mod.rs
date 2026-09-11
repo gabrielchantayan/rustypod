@@ -42,6 +42,7 @@ pub mod plst_slot_position;
 pub mod tdat_class_check;
 pub mod tdat_message_dispatch;
 pub mod tdat_counter_addrefs;
+pub mod tdat_counter_releases;
 pub mod tdat_flag_20_bit_2;
 pub mod navigation_mode;
 pub mod tdat_payload;
