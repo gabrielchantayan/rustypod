@@ -65749,3 +65749,28 @@ functions:
       scans 16-byte records for the first matching u32 key, then copies
       words +8 and +12 to its two outputs and returns 1; a miss returns 0
       without modifying either output. The +4 word is not read.
+  - address: 0x0804ea74
+    ghidra: FUN_0804ea74
+    name: fixed16_round_to_integer
+    size: 28
+    sig: "i32 fixed16_round_to_integer(i32 value)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: value
+    notes: >-
+      Raw ARM confirms the complete 28-byte leaf from cmp r0,#0 at
+      0x0804ea74 through bx lr at 0x0804ea8c; cmp r0,#0 at 0x0804ea90 begins
+      a separately linked sibling. Positive Q16.16 inputs form
+      (value + 0x8000) & 0xffff0000. Negative inputs form
+      -((0x8000 - value) & 0xffff0000): the cmp flags survive the two
+      flag-preserving shifts, so half ties round away from zero. All
+      arithmetic wraps in the ARM register, including i32::MIN negation.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly nine
+      inbound direct calls, all unpredicated unconditional bl:
+      0x0809f4c0, 0x080ae484, 0x080ae498, 0x080ae4ac, 0x080ae4bc,
+      0x080b81d4, 0x080b81e0, 0x080b81ec, and 0x080b81f8. There are no
+      predicated calls, direct tail branches, or aligned image words equal to
+      the entry, so it is an unguarded leaf and not virtually dispatched. No
+      deliberate Rust deviations. Host tests cover fractional boundaries,
+      signed half ties, and both signed overflow endpoints.
