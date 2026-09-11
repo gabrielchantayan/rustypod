@@ -55843,6 +55843,50 @@ functions:
   # EVP_MD_CTX. This is the SSLeay-era 0.9.x layout - update hangs off
   # ctx->digest, not off the context - and is a different animal from the
   # proprietary MBA-obfuscated digest ported as crypto/digest_init.
+  - address: 0x0804a6bc
+    ghidra: FUN_0804a6bc
+    name: evp_digest_init_ex
+    size: 108
+    sig: "int evp_digest_init_ex(EvpMdCtx *ctx, const EvpMd *digest, void *impl)"
+    module: crypto/evp_digest_init_ex
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: digest
+      param_3/r2: impl (ignored)
+      param_1_plus_0x00: digest
+      param_1_plus_0x08: flags
+      param_1_plus_0x0c: md_data
+      param_2_plus_0x10: init
+      param_2_plus_0x44: ctx_size
+      FUN_08043994: traced_free
+      FUN_08043c18: traced_alloc
+    notes: >-
+      OpenSSL EVP_DigestInit_ex from crypto/evp/digest.c. Raw ARM spans
+      exactly 0x0804a6bc through the tail bx r1 at 0x0804a724 (27 words);
+      the separately linked EVP_DigestUpdate begins at 0x0804a728, so
+      Ghidra's 108-byte extent is correct. A complete raw-image decode of
+      every ARM B/BL word finds exactly ten inbound calls: nine unconditional
+      bl at 0x0803b530, 0x0804a5ac, 0x0805fd8c, 0x080607dc, 0x08092660,
+      0x080a40d0, 0x080a41a4, 0x080e7488, and 0x080ebf18, plus blne at
+      0x080ebe90; no tail b or aligned image data word targets this entry.
+      The blne caller gates the call itself: this callee has no ctx or digest
+      NULL guard. It clears ctx flags bit 1, and if the descriptor changed,
+      frees ctx->md_data only when the old descriptor is non-NULL with
+      nonzero ctx_size, stores the new descriptor, then allocates its nonzero
+      ctx_size through traced_alloc(ctx_size, 0, 0). It leaves md_data
+      unchanged for a zero-sized new descriptor, even after a descriptor
+      replacement. Finally it tail-dispatches digest->init(ctx), including
+      when digest was unchanged, and returns the callback's result. The third
+      ABI argument impl/r2 is never read and engine (+0x04) is never written:
+      intentional retail behavior that differs from upstream ENGINE-aware
+      OpenSSL. Host tests prove release/allocation/init order, exact allocator
+      arguments, result propagation, cleaned-bit clear, ignored impl,
+      same-descriptor reinitialization without heap calls, and zero-sized
+      descriptor preservation of md_data. Deliberate host deviation:
+      #[repr(C)] named fields preserve target offsets only where pointers are
+      four bytes; the Rust callback is an ordinary call rather than bx tail
+      dispatch, with identical observable arguments and result.
   - address: 0x0804a604
     ghidra: FUN_0804a604
     name: evp_digest_final_ex
@@ -55897,8 +55941,8 @@ functions:
       param_1/r0: ctx
       r1: data
       r2: count
-      FUN_0804a6bc: evp_digest_init_ex (not ported)
-      FUN_0804a604: evp_digest_final_ex (not ported)
+      FUN_0804a6bc: evp_digest_init_ex (ported)
+      FUN_0804a604: evp_digest_final_ex (ported)
       FUN_0804ac2c: evp_md_ctx_cleanup (ported)
       FUN_0804b214: evp_sha1 (the EVP_MD getter; not ported)
     notes: >-
