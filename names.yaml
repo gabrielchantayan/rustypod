@@ -49359,6 +49359,33 @@ functions:
       Host tests use a typed host dispatch model because the retail layout
       deliberately keeps the callback and ctrl entries as 32-bit words;
       target builds transmute and invoke those original words directly.
+  - address: 0x0803d558
+    ghidra: FUN_0803d558
+    name: bio_new
+    size: 104
+    sig: "BIO *bio_new(BIO_METHOD *method)"
+    module: crypto/bio_new
+    status: ported
+    renames:
+      param_1/r0/r5: method
+      r4: bio
+      FUN_08043c18: traced_alloc
+      FUN_0803d8c0: bio_set
+      FUN_08043994: traced_free
+    notes: >-
+      OpenSSL BIO_new. Raw ARM extent is exactly 0x0803d558..0x0803d5c0:
+      the separately linked successor starts at 0x0803d5c0, so Ghidra's
+      104-byte extent is correct. Binary decoding every ARM B/BL word in
+      osos.dec finds exactly 9 direct inbound calls, all unconditional bl
+      (0x0803d634, 0x0805ffdc, 0x0806006c, 0x080602d0, 0x0806030c,
+      0x082728e8, 0x082728f8, 0x082d44b8, 0x082d45b0); no predicated calls,
+      tail branches, or raw-image data words hold this address. Allocates
+      64 bytes via traced_alloc(0x40, 0, 0), logs (0x20, 0x6c, 0x41, 0, 0)
+      and returns NULL on allocation failure, then invokes BIO_set
+      @ 0x0803d8c0. A zero initializer result frees the exact block through
+      traced_free and returns NULL; any nonzero result returns the block.
+      BIO_set remains unported: target builds invoke its verified original
+      entry directly, while host tests replace the call boundary.
   - address: 0x0803d680
     ghidra: FUN_0803d680
     name: bio_printf

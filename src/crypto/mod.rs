@@ -41,6 +41,7 @@
 //! file.
 pub mod add_lock;
 pub mod bio_printf;
+pub mod bio_new;
 pub mod bio_snprintf;
 pub mod bio_ctrl;
 pub mod bio_copy_next_retry;
