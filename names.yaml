@@ -53076,6 +53076,41 @@ functions:
       predicated bl or direct B sites. Deliberate deviations: none. Reference
       C: decomp/c/032/0833dd48_FUN_0833dd48.c.
 
+  - address: 0x080570cc
+    ghidra: FUN_080570cc
+    name: stream_seek_tagged_entry
+    size: 152
+    sig: "i32 stream_seek_tagged_entry(u32 stream, u32 entry_tag, u32 *out_entry_value)"
+    module: util/stream_seek_tagged_entry
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: entry_tag
+      param_3/r2: out_entry_value
+      local_1c/[sp+0xc]: entry_count
+      local_20/[sp+0x8]: tag
+      local_24/[sp+0x4]: offset
+      FUN_0805e79c: stream_seek
+      FUN_080575cc: stream_read_be32_or_zero
+      FUN_08057874: stream_read_be32
+    notes: >-
+      Raw ARM verifies the 152-byte extent 0x080570cc..0x08057160: the
+      following standalone bx lr at 0x08057164 begins a sibling. It first
+      seeks to absolute offset 8, reads a signed big-endian entry count and
+      an opaque second header word, then scans count entries of three
+      big-endian words: tag, absolute seek offset, and an opaque third value.
+      It reads the third value directly through stream_read_be32 into the
+      caller output on every iteration; matching tag seeks to that entry
+      offset and returns 0, while exhausting the signed count returns -24.
+      Every read and seek status is deliberately ignored. Decoding every ARM
+      B/BL word in osos.dec finds exactly 10 inbound direct calls, all plain
+      unconditional BL and no predicated forms. The second header word and
+      third entry word lack a verified format identity, so their names remain
+      opaque rather than inventing a media-database meaning. Host tests cover
+      a second-entry match, miss, negative signed count, ignored seek errors,
+      and direct-reader failure preserving the caller output. Reference C:
+      decomp/c/004/080570cc_FUN_080570cc.c.
+
   - address: 0x08057874
     ghidra: FUN_08057874
     name: stream_read_be32
