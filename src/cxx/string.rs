@@ -910,6 +910,56 @@ pub unsafe extern "C" fn cxx_string_less(
     }
     (ordering as u32) >> 31
 }
+/// cxx_string_equals_cstr — original: `FUN_083eab9c` @ 0x083eab9c
+/// (108 bytes; 9 direct incoming `bl` call sites, all unconditional,
+/// binary-scanned).
+///
+/// `basic_string<char>::operator==(const char *)`: captures the COW
+/// `_Rep` length from `data - 4`, measures the C string, reloads the COW
+/// data and length, then `memcmp`s the shorter byte range. A byte tie is
+/// resolved by comparing the COW length with the C-string length, and only
+/// an exact zero three-way result returns the widened C++ bool 1. Therefore
+/// embedded NUL bytes remain part of the COW string but terminate the C
+/// string. Volatile function-pointer reads retain the retail `strlen` and
+/// `memcmp` call boundaries; no behavioral deviations.
+///
+/// # Safety
+/// `string` must point to a valid one-word COW string object whose data has
+/// a readable length word immediately before it; `cstr` must be a readable,
+/// NUL-terminated byte string.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_equals_cstr(
+    string: *const *mut u8,
+    cstr: *const u8,
+) -> i32 {
+    let initial_data = string.read();
+    let initial_length = (initial_data as *const u32).sub(1).read();
+    let measure: unsafe extern "C" fn(*const u8) -> usize =
+        core::ptr::read_volatile(&(strlen as unsafe extern "C" fn(*const u8) -> usize));
+    let cstr_length = measure(cstr) as u32;
+    let data = string.read();
+    let current_length = (data as *const u32).sub(1).read();
+    let shared_length = if current_length < initial_length {
+        current_length
+    } else {
+        initial_length
+    };
+    let compare: unsafe extern "C" fn(*const u8, *const u8, usize) -> i32 =
+        core::ptr::read_volatile(
+            &(memcmp as unsafe extern "C" fn(*const u8, *const u8, usize) -> i32),
+        );
+    let mut ordering = compare(data, cstr, shared_length as usize);
+    if ordering == 0 {
+        ordering = match shared_length.cmp(&cstr_length) {
+            core::cmp::Ordering::Less => -1,
+            core::cmp::Ordering::Equal => 0,
+            core::cmp::Ordering::Greater => 1,
+        };
+    }
+    i32::from(ordering == 0)
+}
+
 
 /// strstreambuf_has_input_and_output — original: `FUN_083d7008` @
 /// 0x083d7008 (24 bytes: `ldr/mov/bics/movne/moveq/bx`; 2 direct `bl`
@@ -2056,6 +2106,33 @@ mod tests {
             assert_eq!(cxx_string_less(core::ptr::null(), &a, &b), 1);
             assert_eq!(cxx_string_less(core::ptr::null(), &b, &a), 0);
             assert_eq!(cxx_string_less(core::ptr::null(), &a, &a), 0, "strict");
+        }
+    }
+
+    /// The comparison is C-string-based only on the right: the COW length
+    /// participates after the shared byte prefix, including bytes after an
+    /// embedded NUL in the COW string.
+    #[test]
+    fn equals_cstr_requires_equal_bytes_and_lengths() {
+        let _guard = arena();
+        unsafe {
+            for (left, right, expected) in [
+                (b"".as_slice(), b"\0".as_slice(), 1),
+                (b"ipod".as_slice(), b"ipod\0".as_slice(), 1),
+                (b"ipod".as_slice(), b"ipo\0".as_slice(), 0),
+                (b"ipo".as_slice(), b"ipod\0".as_slice(), 0),
+                (b"ipod".as_slice(), b"ipad\0".as_slice(), 0),
+                (b"x\0a".as_slice(), b"x\0".as_slice(), 0),
+            ] {
+                ARENA_USED = 0;
+                let mut string = core::ptr::null_mut();
+                build(&mut string, left);
+                assert_eq!(
+                    cxx_string_equals_cstr(&string, right.as_ptr()),
+                    expected,
+                    "{left:?} == {right:?}",
+                );
+            }
         }
     }
 
