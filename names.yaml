@@ -62232,3 +62232,34 @@ functions:
       enclosing object from it. The literal's target is not a function entry
       and its semantic identity is not inferred. No NULL, alignment, or
       bounds guard exists. Deliberate deviations: none.
+
+  # --- Opaque global identifier slot initializer (app/global_identifier_slot) ---
+  - address: 0x081235dc
+    ghidra: FUN_081235dc
+    name: initialize_global_identifier_slot
+    size: 32
+    sig: "u32 *initialize_global_identifier_slot(u32 *slot, u32 identifier)"
+    module: app/global_identifier_slot
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: identifier
+      r4: slot
+      r5: identifier
+      FUN_081f4e44: identifier_registry_get (unported)
+      FUN_081f4e9c: identifier_registry_initialize (unported)
+    notes: >-
+      Raw osos.dec establishes an exact 32-byte extent: eight ARM words from
+      0x081235dc through pop {r4,r5,r6,pc} at 0x081235fc; the separately linked
+      next function begins with push at 0x08123600. Ghidra's 36-byte size
+      includes that sibling's first word. Decoding every ARM B/BL immediate
+      finds ten direct inbound plain bl calls, all unconditional, at 0x082b07a0,
+      0x082b07ac, 0x082b07b8, 0x082b07c4, 0x082b07d0, 0x082b07dc, 0x082b07e8,
+      0x082b07f4, 0x082b0800, and 0x082b080c; there are no predicated forms.
+      One additional direct plain-B tail enters at 0x082b081c. The body calls
+      unported 0x081f4e44, forwards its result and identifier to unported
+      0x081f4e9c, stores identifier through slot, and returns slot. The opaque
+      shared object's type and the callees' semantic identities are not
+      inferred. Target builds make payload-safe indirect calls to their fixed
+      retailOS addresses; host tests replace them through a seam, preserving
+      call order and arguments while changing direct bl to indirect blx.
