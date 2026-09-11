@@ -146,23 +146,22 @@
 //!   mask to the following allocation/emission helper.
 //! - `cg_block_bind_registers` — original: `FUN_082b3b5c` @
 //!   0x082b3b5c (216 bytes; 1 `bl` call site — inside
-//!   [`cg_block_emit`], right after the use-list build). The JIT's
-//!   block-entry register binder: walks the procedure's register-copy
-//!   list against the current block's live-in/live-out bitsets and
-//!   re-seats every boundary register's binding, setting or clearing
-//!   the binding's block-entry flag. Its three callees sit behind the
-//!   [`CG_BLOCK_BIND_OPS`] ops-table seam; the
-//!   [`CG_BLOCK_EMIT_OPS`]`::bind_registers` slot keeps its no-op
-//!   default (rewiring is a documented follow-up).
+//!   [`cg_block_emit`], right after the use-list build). The block-entry
+//!   register binder: walks register copies against the current block's
+//!   live-in/live-out bitsets, re-seats every boundary binding, and updates
+//!   its block-entry flag. Its three ported list/rebind helpers are wired as
+//!   [`CG_BLOCK_BIND_OPS`] defaults, and the binder is the default
+//!   [`CG_BLOCK_EMIT_OPS`] binding stage.
 //! - `cg_binding_rebind` — original: `FUN_082b5234` @ 0x082b5234
 //!   (100 bytes; 13 `bl` call sites, all in the register-binding
 //!   machine). The binding↔register re-point of the binding machine:
 //!   installs the register at the binding's +0x10 slot, clears the
 //!   bound/block-entry flag pair when the register's phi web changes,
-//!   back-points the register's +0x08 binding slot. Ported, but
-//!   the [`CG_BLOCK_BIND_OPS`]`::binding_rebind` slot keeps its
-//!   documented no-op default (rewiring is a documented follow-up,
-//!   alongside the two sibling slots).
+//!   and back-points the register's +0x08 binding slot.
+//! - `cg_binding_push` — original: `FUN_08367358` @ 0x08367358
+//!   (56 bytes; 8 `bl` + 2 tail `b` call sites). The runtime's intrusive
+//!   doubly-linked-list PUSH-HEAD: inserts a binding at an anchor's head
+//!   and installs its anchor back-pointer.
 //! - `cg_binding_unlink` — original: `FUN_083673b0` @ 0x083673b0
 //!   (64 bytes; 8 `bl` call sites — the block-entry binder
 //!   [`cg_block_bind_registers`], the block-exit flush
@@ -170,9 +169,6 @@
 //!   unlink-then-push move `FUN_08367390`). The runtime's intrusive
 //!   doubly-linked-list REMOVE: unlinks a node from its `{head,
 //!   tail}` anchor and clears the node's next/prev/anchor words.
-//!   Ported, but the [`CG_BLOCK_BIND_OPS`]`::binding_unlink` slot
-//!   keeps its documented no-op default (rewiring is a documented
-//!   follow-up once the last sibling slot is ported).
 //! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
 //!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
 //!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
@@ -2813,18 +2809,14 @@ pub const CG_REG_USE_BYTES: usize = 8;
 /// `sub sp,sp,#0x100` frame, bounded by `add r2,sp,#0x100` — 64 slots.
 const CG_BLOCK_EMIT_USE_SLOTS: usize = 64;
 
-/// The allocation boundary and the unported direct callees of
-/// [`cg_block_emit`], modeled as an ops table (the
-/// [`CgCompileAndPatchOps`] precedent). Fields are in the original's
-/// exact call order. The allocator slots exist so host tests can
-/// substitute an allocator without racing malloc's global ops table
-/// (the [`CG_BUFFER_ALLOC`] precedent); their defaults are the real
-/// ports. The four callee slots default to no work — each original is
-/// a register-binding machine with its own deep callee tree, and
-/// modeling half of it would be worse than modeling none (the
-/// documented [`default_cg_graph_pass`] deviation). Host tests swap in
-/// recording fakes; porting a callee later replaces its slot without
-/// touching the emitter.
+/// The allocation boundary and direct callees of [`cg_block_emit`], modeled
+/// as an ops table (the [`CgCompileAndPatchOps`] precedent). Fields are in
+/// the original's exact call order. The allocator slots exist so host tests
+/// can substitute an allocator without racing malloc's global ops table (the
+/// [`CG_BUFFER_ALLOC`] precedent); their defaults are the real ports. The
+/// ported block-entry binder is likewise the default; the remaining three
+/// register-binding/emission stages default to no work until their stock
+/// bodies are ported. Host tests swap in recording fakes.
 #[derive(Clone, Copy)]
 pub struct CgBlockEmitOps {
     /// The tail-pointer table allocation — the original's direct
@@ -2842,10 +2834,9 @@ pub struct CgBlockEmitOps {
     /// (`proc + 0x1c`, a list of `{next, reg}` cells) against the
     /// current block's live-in/live-out bitsets (block `+0x1c` /
     /// `+0x20`) and sets or clears flag `0x200` on each copy's binding
-    /// record, re-linking the binding chains through `FUN_083673b0` /
-    /// `FUN_082b5234` / `FUN_08367358`. Default: no binding work —
-    /// wiring the port in is a documented follow-up (see the port's
-    /// SEAM DECISION).
+    /// record, re-linking the binding chains through the ported
+    /// [`cg_binding_unlink`], [`cg_binding_rebind`], and
+    /// [`cg_binding_push`]. Default: the ported binder.
     pub bind_registers: unsafe extern "C" fn(codegen: *mut CgCodegen),
     /// `FUN_082c0f4c` @ 0x082c0f4c (1428 bytes) — the per-instruction
     /// emitter: a 25-way dispatch on the OPCODE byte (inst `+0x09`)
@@ -2869,9 +2860,8 @@ pub struct CgBlockEmitOps {
     pub flush_pending_bindings: unsafe extern "C" fn(codegen: *mut CgCodegen),
 }
 
-/// The wired default of [`CgBlockEmitOps::bind_registers`]: no binding
-/// work. See the field's doc for the original.
-unsafe extern "C" fn default_cg_bind_registers(_codegen: *mut CgCodegen) {}
+/// The wired default of [`CgBlockEmitOps::bind_registers`]: the ported
+/// [`cg_block_bind_registers`].
 
 /// The wired default of [`CgBlockEmitOps::emit_inst`]: no emission.
 /// See the field's doc for the original.
@@ -2893,7 +2883,7 @@ unsafe extern "C" fn default_cg_flush_pending_bindings(_codegen: *mut CgCodegen)
 pub const DEFAULT_CG_BLOCK_EMIT_OPS: CgBlockEmitOps = CgBlockEmitOps {
     alloc_use_tails: crate::runtime::malloc_rt::malloc,
     free_use_tails: crate::runtime::malloc_rt::free,
-    bind_registers: default_cg_bind_registers,
+    bind_registers: cg_block_bind_registers,
     emit_inst: default_cg_emit_inst,
     release_hw_reg_bindings: default_cg_release_hw_reg_bindings,
     flush_pending_bindings: default_cg_flush_pending_bindings,
@@ -3135,68 +3125,42 @@ pub struct CgBinding {
     _opaque: [u8; 0],
 }
 
-/// The unported direct callees of [`cg_block_bind_registers`], modeled
-/// as an ops table (the [`CgBlockEmitOps`] precedent). Fields are in
-/// the original's exact call order. All three default to no work —
-/// each original is a piece of the register-binding machine with its
-/// own call tree, and modeling half of it would be worse than modeling
-/// none (the documented [`default_cg_graph_pass`] deviation). Host
-/// tests swap in recording fakes; porting a callee later replaces its
-/// slot without touching the binder.
+/// The direct callees of [`cg_block_bind_registers`], modeled as an ops
+/// table (the [`CgBlockEmitOps`] precedent). Fields are in the original's
+/// exact call order. All three are ported and wired as defaults. Host tests
+/// swap in recording fakes without changing the binder.
 #[derive(Clone, Copy)]
 pub struct CgBlockBindOps {
     /// `FUN_083673b0` @ 0x083673b0 (64 bytes; 8 `bl` call sites) — the
     /// runtime's intrusive doubly-linked-list REMOVE: unlinks `node`
     /// from `anchor`'s `{head +0x00, tail +0x04}` list and clears the
-    /// node's next/prev/anchor words. Called with the binding's
-    /// current anchor (binding +0x08). PORTED as
-    /// [`cg_binding_unlink`]; the slot KEEPS its no-op default (the
-    /// seam decision of [`cg_block_bind_registers`] — rewire once
-    /// sibling `FUN_08367358` is also ported). Default: no unlink.
+    /// node's next/prev/anchor words. PORTED as
+    /// [`cg_binding_unlink`]. Default: the port.
     pub binding_unlink: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
     /// `FUN_082b5234` @ 0x082b5234 (100 bytes; 13 `bl` call sites,
     /// all inside the register-binding machine) — the
     /// binding↔register re-point: installs `reg` at binding +0x10
     /// (unless already there), clears flags bits 0x100/0x200 when the
     /// old and new registers' phi-web parents (+0x04) differ, and
-    /// back-points reg +0x08 ([`CG_VREG_BINDING`]) at the binding
-    /// unless the register already has a self-consistent binding.
-    /// PORTED as [`cg_binding_rebind`]; the slot KEEPS its no-op
-    /// default (the seam decision of [`cg_block_bind_registers`] —
-    /// rewire once all three callees are ported). Default: no rebind.
+    /// back-points reg +0x08 ([`CG_VREG_BINDING`]) at the binding.
+    /// PORTED as [`cg_binding_rebind`]. Default: the port.
     pub binding_rebind:
         unsafe extern "C" fn(codegen: *mut CgCodegen, binding: *mut CgBinding, reg: *mut CgVirtualReg),
     /// `FUN_08367358` @ 0x08367358 (56 bytes; 8 `bl` + 2 tail `b`
     /// call sites) — the runtime's intrusive doubly-linked-list
     /// PUSH-HEAD: inserts `node` at `anchor`'s head and sets the
-    /// node's anchor back-pointer. Called with the codegen's
-    /// pending-bindings anchor at +0x200
-    /// ([`CG_CODEGEN_PENDING_BINDINGS`]). Default: no push.
+    /// node's anchor back-pointer. PORTED as [`cg_binding_push`].
+    /// Default: the port.
     pub binding_push: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
 }
 
-/// The wired default of [`CgBlockBindOps::binding_unlink`]: no unlink.
-/// See the field's doc for the original.
-unsafe extern "C" fn default_cg_binding_unlink(_anchor: *mut u8, _node: *mut CgBinding) {}
+/// The wired defaults of [`CG_BLOCK_BIND_OPS`]: all three direct ported
+/// helpers.
 
-/// The wired default of [`CgBlockBindOps::binding_rebind`]: no rebind.
-/// See the field's doc for the original.
-unsafe extern "C" fn default_cg_binding_rebind(
-    _codegen: *mut CgCodegen,
-    _binding: *mut CgBinding,
-    _reg: *mut CgVirtualReg,
-) {
-}
-
-/// The wired default of [`CgBlockBindOps::binding_push`]: no push.
-/// See the field's doc for the original.
-unsafe extern "C" fn default_cg_binding_push(_anchor: *mut u8, _node: *mut CgBinding) {}
-
-/// The wired defaults of [`CG_BLOCK_BIND_OPS`].
 pub const DEFAULT_CG_BLOCK_BIND_OPS: CgBlockBindOps = CgBlockBindOps {
-    binding_unlink: default_cg_binding_unlink,
-    binding_rebind: default_cg_binding_rebind,
-    binding_push: default_cg_binding_push,
+    binding_unlink: cg_binding_unlink,
+    binding_rebind: cg_binding_rebind,
+    binding_push: cg_binding_push,
 };
 
 /// The active ops table of [`cg_block_bind_registers`]; see
@@ -3239,11 +3203,8 @@ pub static mut CG_BLOCK_BIND_OPS: CgBlockBindOps = DEFAULT_CG_BLOCK_BIND_OPS;
 /// original pays for the reloads anyway. No NULL guard on `anchor`,
 /// like the rest of the cluster.
 ///
-/// SEAM DECISION (the [`cg_binding_rebind`] precedent): ported but
-/// NOT wired — the [`CG_BLOCK_BIND_OPS`]`::binding_unlink` slot keeps
-/// its documented no-op default (the seam decision of
-/// [`cg_block_bind_registers`] — rewire once the last sibling,
-/// `FUN_08367358`, is also ported; noted in names.yaml).
+/// This port is the wired default of [`CG_BLOCK_BIND_OPS`] now that all
+/// three block-entry binding helpers are ported.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_binding_unlink(anchor: *mut u8, node: *mut CgBinding) {
@@ -3269,6 +3230,41 @@ pub unsafe extern "C" fn cg_binding_unlink(anchor: *mut u8, node: *mut CgBinding
     slot(node, CG_BINDING_PREV).write(core::ptr::null_mut());
     slot(node, CG_BINDING_NEXT).write(core::ptr::null_mut());
     slot(node, CG_BINDING_ANCHOR).write(core::ptr::null_mut());
+}
+
+/// cg_binding_push — original: `FUN_08367358` @ **0x08367358** (56
+/// bytes; **8 plain `bl` call sites**, 0 predicated `bl`, plus 2 tail
+/// `b` sites at 0x082d66c4 and 0x083673ac).
+///
+/// The runtime's intrusive doubly-linked-list PUSH-HEAD. It reads the
+/// anchor's tail word (+0x04) to distinguish an empty list. For an empty
+/// list, both anchor words become `node`, and the node's `prev` and `next`
+/// words are cleared. Otherwise, the node's `prev` takes the old head, the
+/// old head's `next` takes the node, and the anchor's head takes the node.
+/// In both paths the node's anchor back-pointer (+0x08) becomes `anchor`.
+/// This is the exact complement of [`cg_binding_unlink`]: a node is pushed
+/// at the head while the first pushed node remains the tail.
+///
+/// The binary branch census found no aligned data word equal to 0x08367358,
+/// so no indirect dispatch is discovered. No NULL guards exist in the ARM
+/// body, and the port intentionally adds none. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_push(anchor: *mut u8, node: *mut CgBinding) {
+    let node = node as *mut u8;
+    let tail = slot(anchor, CG_BINDING_LIST_TAIL).read();
+    if tail.is_null() {
+        slot(anchor, CG_BINDING_LIST_TAIL).write(node);
+        slot(anchor, CG_BINDING_LIST_HEAD).write(node);
+        slot(node, CG_BINDING_PREV).write(core::ptr::null_mut());
+    } else {
+        let head = slot(anchor, CG_BINDING_LIST_HEAD).read();
+        slot(node, CG_BINDING_PREV).write(head);
+        slot(head, CG_BINDING_NEXT).write(node);
+        slot(anchor, CG_BINDING_LIST_HEAD).write(node);
+    }
+    slot(node, CG_BINDING_NEXT).write(core::ptr::null_mut());
+    slot(node, CG_BINDING_ANCHOR).write(anchor);
 }
 
 /// cg_binding_rebind — original: `FUN_082b5234` @ 0x082b5234 (100
@@ -3307,11 +3303,9 @@ pub unsafe extern "C" fn cg_binding_unlink(anchor: *mut u8, node: *mut CgBinding
 /// quirk — the intended bit 0x100 → 0x200 move never happens).
 /// Ghidra folds the rewrite to `& 0xfffffcff`, matching the executed
 /// semantics; LLVM folds the dead insert the same way. The unused
-/// `codegen` parameter is kept for the original's signature. Ported
-/// but NOT wired: the [`CG_BLOCK_BIND_OPS`]`::binding_rebind` slot
-/// keeps its documented no-op default (the seam decision of
-/// [`cg_block_bind_registers`] — rewiring is a follow-up once all
-/// three callees are ported).
+/// `codegen` parameter is kept for the original's signature. This port is
+/// the wired [`CG_BLOCK_BIND_OPS`] default now that the complete
+/// block-entry binding helper trio is ported.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_binding_rebind(
@@ -3350,9 +3344,10 @@ unsafe fn cg_binding_mask_allows(binding: *mut u8, mask: u32) -> bool {
 }
 
 /// The direct callees of [`cg_binding_acquire`] and
-/// [`cg_binding_release`] which are still unported. [`cg_binding_unlink`]
-/// is ported and remains the default unlink operation; the other defaults
-/// deliberately do no work until their stock bodies are ported.
+/// [`cg_binding_release`]. [`cg_binding_unlink`] and
+/// [`cg_binding_push`] are ported and remain the default list operations;
+/// the promote and release-effect defaults deliberately do no work until
+/// their stock bodies are ported.
 #[derive(Clone, Copy)]
 pub struct CgBindingAcquireOps {
     /// `FUN_08367390` @ 0x08367390: unlink then push a binding at the
@@ -3386,7 +3381,7 @@ pub const DEFAULT_CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = CgBindingAcquire
     binding_release: cg_binding_release,
     binding_release_effect: default_cg_binding_release_effect,
     binding_unlink: cg_binding_unlink,
-    binding_push: default_cg_binding_push,
+    binding_push: cg_binding_push,
 };
 
 /// Active direct-callee table for [`cg_binding_acquire`] and
@@ -3411,10 +3406,9 @@ pub static mut CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = DEFAULT_CG_BINDING_
 /// Raw ARM's `bic r0,#0x200; and r1,#0x100,r0,lsr #1; bic r0,#0x100`
 /// sequence at 0x082c5d04-0x082c5d10 makes the apparent 0x200→0x100
 /// shift dead, so the precise result is `flags & !0x300`; Ghidra drops
-/// the 0x200 clear. Deliberate deviation: direct callee `FUN_083685f0`
-/// and sibling list push `FUN_08367358` remain the documented no-op
-/// seams in [`CG_BINDING_ACQUIRE_OPS`] until separately ported. The
-/// direct callee's identity is deliberately not inferred.
+/// the 0x200 clear. Deliberate deviation: only direct callee
+/// `FUN_083685f0` remains an inert seam; its identity is deliberately
+/// not inferred.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *mut CgBinding) {
@@ -3469,11 +3463,10 @@ pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *m
 /// moves the selected binding from the free to the active anchor. As in the
 /// original, no eligible binding reaches the release/unlink path as NULL.
 ///
-/// Deliberate deviation: `FUN_08367390` and `FUN_08367358` remain
-/// documented no-op seams in [`CG_BINDING_ACQUIRE_OPS`]; the ported
-/// [`cg_binding_release`] itself retains no-op seams for direct callee
-/// `FUN_083685f0` and list push `FUN_08367358`. The already ported
-/// `FUN_083673b0` calls [`cg_binding_unlink`] directly by default.
+/// Deliberate deviation: only `FUN_08367390` remains a documented
+/// no-op promotion seam in [`CG_BINDING_ACQUIRE_OPS`], and the ported
+/// [`cg_binding_release`] retains the no-op seam for direct callee
+/// `FUN_083685f0`. Both list operations are now direct port defaults.
 /// The raw branch census found no data word referencing 0x082b3c34.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -3640,25 +3633,17 @@ pub unsafe extern "C" fn cg_consume_register_use(
 /// 0x082b3bb0 / 0x082b3bfc), kept verbatim: through the ops seam a
 /// replacement could legally rewrite the cell.
 ///
-/// SEAM DECISION (the [`CG_BUFFER_PAGE_SLOT`] precedent, deferred):
-/// this port is exported but [`CG_BLOCK_EMIT_OPS`]`::bind_registers`
-/// KEEPS its documented no-op default — wiring the port in would turn
-/// [`cg_block_emit`]'s default pipeline into a half-running binder
-/// (the walk and flag stores live, the three callees no-ops), which
-/// is worse than no binder. Rewiring is a deliberate follow-up once
-/// `FUN_083673b0` / `FUN_082b5234` / `FUN_08367358` are ported and
-/// wired as the [`CG_BLOCK_BIND_OPS`] defaults (noted in
-/// names.yaml).
+/// SEAM DECISION: all three direct helpers are now ported and wired as
+/// [`CG_BLOCK_BIND_OPS`] defaults, so this binder is the default
+/// [`CG_BLOCK_EMIT_OPS`] binding stage. The seam remains swappable for
+/// host tests and hooks.
 ///
-/// DEVIATIONS: the three callees route through the swappable
-/// [`CG_BLOCK_BIND_OPS`] table with no-op defaults (see the table's
-/// doc), so with the defaults wired the walk, the bit tests and the
-/// flag updates run exactly as the original's but no list re-linking
-/// happens; porting a callee replaces its slot. Ghidra's decompile
-/// folds the two call sequences into one shared `LAB_082b3c20` and
-/// drops the second register reload; the raw disassembly's two full
-/// copies are authoritative and the port mirrors them. No NULL guards
-/// beyond the list-termination check, like the rest of the cluster.
+/// DEVIATIONS: none in the binder or its three list/rebind helpers.
+/// Ghidra's decompile folds the two call sequences into one shared
+/// `LAB_082b3c20` and drops the second register reload; the raw
+/// disassembly's two full copies are authoritative and the port mirrors
+/// them. No NULL guards beyond the list-termination check, like the rest
+/// of the cluster.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_block_bind_registers(codegen: *mut CgCodegen) {
@@ -8407,9 +8392,9 @@ mod tests {
                 "the free slot stays wired to the ported free — the original's direct bl"
             );
             assert_eq!(
-                ops.bind_registers as usize, default_cg_bind_registers as usize,
-                "the bind_registers slot keeps its no-op default even with \
-                 FUN_082b3b5c ported — rewiring is the port's documented follow-up"
+                ops.bind_registers as usize, cg_block_bind_registers as usize,
+                "the bind_registers slot is wired to the ported binder once all \
+                 three of its direct helpers are ported"
             );
             assert_eq!(
                 ops.emit_inst as usize, default_cg_emit_inst as usize,
@@ -8602,28 +8587,53 @@ mod tests {
     }
 
     #[test]
-    fn block_bind_registers_with_defaults_walks_and_updates_flags_only() {
+    fn block_bind_registers_with_ported_defaults_relinks_and_updates_flags() {
         let _g = setup();
         let mut f = BindFixture::new();
         unsafe {
             let saved = hook(core::ptr::addr_of!(CG_BLOCK_BIND_OPS));
             *core::ptr::addr_of_mut!(CG_BLOCK_BIND_OPS) = DEFAULT_CG_BLOCK_BIND_OPS;
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_BLOCK_BIND_OPS)).binding_rebind as usize,
+                cg_binding_rebind as usize,
+                "the default table calls the ported rebind helper"
+            );
             f.bindings[0][CG_BINDING_FLAGS] = 0x400;
             f.bindings[1][CG_BINDING_FLAGS] = 0x700;
             f.bindings[2][CG_BINDING_FLAGS] = 0x300;
+            assert_eq!(f.bindings[0][CG_BINDING_REG], 0, "fixture starts unbound");
+            let node0 = f.bindings[0].as_mut_ptr() as usize;
+            let node1 = f.bindings[1].as_mut_ptr() as usize;
+            let pending = f.pending_anchor() as usize;
 
             cg_block_bind_registers(f.codegen_ptr());
 
-            assert_eq!(f.bindings[0][CG_BINDING_FLAGS], 0x600, "live-in gains 0x200");
-            assert_eq!(f.bindings[1][CG_BINDING_FLAGS], 0x500, "live-out-only loses 0x200");
+            assert_eq!(
+                f.bindings[0][CG_BINDING_REG],
+                f.regs[0].as_mut_ptr() as usize,
+                "the ported rebind stores the live-in register"
+            );
+            assert_eq!(
+                f.bindings[0][CG_BINDING_FLAGS],
+                0x600,
+                "live-in sets 0x200 after rebind preserves unrelated 0x400"
+            );
+            assert_eq!(
+                f.bindings[1][CG_BINDING_FLAGS],
+                0x400,
+                "live-out-only clears 0x200 after rebind preserves unrelated 0x400"
+            );
             assert_eq!(f.bindings[2][CG_BINDING_FLAGS], 0x300, "the skipped copy is untouched");
-            for i in 0..3 {
-                assert_eq!(
-                    f.anchors[i],
-                    [0; 2],
-                    "no-op defaults never re-link the binding chains"
-                );
-            }
+            assert_eq!(f.codegen[CG_CODEGEN_PENDING_BINDINGS], node1, "last push is the head");
+            assert_eq!(
+                f.codegen[CG_CODEGEN_PENDING_BINDINGS + CG_BINDING_LIST_TAIL],
+                node0,
+                "first push remains the tail"
+            );
+            assert_eq!(f.bindings[0][CG_BINDING_NEXT], node1, "tail points toward the new head");
+            assert_eq!(f.bindings[1][CG_BINDING_PREV], node0, "head points back toward the tail");
+            assert_eq!(f.bindings[0][CG_BINDING_ANCHOR], pending);
+            assert_eq!(f.bindings[1][CG_BINDING_ANCHOR], pending);
 
             *core::ptr::addr_of_mut!(CG_BLOCK_BIND_OPS) = saved;
         }
@@ -8660,22 +8670,13 @@ mod tests {
     }
 
     #[test]
-    fn block_bind_registers_seams_stay_wired_to_the_defaults() {
+    fn block_bind_registers_seams_wire_the_ported_helpers() {
         let _g = setup();
         unsafe {
             let ops = hook(core::ptr::addr_of!(CG_BLOCK_BIND_OPS));
-            assert_eq!(
-                ops.binding_unlink as usize, default_cg_binding_unlink as usize,
-                "FUN_083673b0 stays a documented no-op until ported"
-            );
-            assert_eq!(
-                ops.binding_rebind as usize, default_cg_binding_rebind as usize,
-                "FUN_082b5234 stays a documented no-op until ported"
-            );
-            assert_eq!(
-                ops.binding_push as usize, default_cg_binding_push as usize,
-                "FUN_08367358 stays a documented no-op until ported"
-            );
+            assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
+            assert_eq!(ops.binding_rebind as usize, cg_binding_rebind as usize);
+            assert_eq!(ops.binding_push as usize, cg_binding_push as usize);
         }
         teardown();
     }
@@ -8847,6 +8848,54 @@ mod tests {
             assert_eq!(f.anchor[CG_BINDING_LIST_HEAD], 0, "the head word drains to NULL");
             assert_eq!(f.anchor[CG_BINDING_LIST_TAIL], 0, "the tail word drains to NULL");
             f.assert_cleared(1);
+        }
+        drop(f);
+        teardown();
+    }
+
+    // --- cg_binding_push --------------------------------------------
+
+    /// A `{head, tail}` anchor and three nodes with a trailing sentinel,
+    /// proving the push writes only the three recovered list words.
+    struct PushFixture {
+        anchor: [usize; 2],
+        nodes: [[usize; 4]; 3],
+    }
+
+    const PUSH_SENTINEL: usize = 0x7157_cafe;
+
+    #[test]
+    fn binding_push_builds_empty_and_nonempty_head_chains() {
+        let _g = setup();
+        let mut f = std::boxed::Box::new(PushFixture {
+            anchor: [0; 2],
+            nodes: [[PUSH_SENTINEL; 4]; 3],
+        });
+        unsafe {
+            let anchor = f.anchor.as_mut_ptr() as *mut u8;
+            let node0 = f.nodes[0].as_mut_ptr() as usize;
+            let node1 = f.nodes[1].as_mut_ptr() as usize;
+            let node2 = f.nodes[2].as_mut_ptr() as usize;
+
+            cg_binding_push(anchor, f.nodes[0].as_mut_ptr() as *mut CgBinding);
+            assert_eq!(f.anchor, [node0, node0], "the first push sets both anchor ends");
+            assert_eq!(f.nodes[0][CG_BINDING_NEXT], 0);
+            assert_eq!(f.nodes[0][CG_BINDING_PREV], 0);
+
+            cg_binding_push(anchor, f.nodes[1].as_mut_ptr() as *mut CgBinding);
+            cg_binding_push(anchor, f.nodes[2].as_mut_ptr() as *mut CgBinding);
+
+            assert_eq!(f.anchor, [node2, node0], "the newest node is head; the first stays tail");
+            assert_eq!(f.nodes[2][CG_BINDING_NEXT], 0, "the head's next is NULL");
+            assert_eq!(f.nodes[2][CG_BINDING_PREV], node1, "the head links to the old head");
+            assert_eq!(f.nodes[1][CG_BINDING_NEXT], node2);
+            assert_eq!(f.nodes[1][CG_BINDING_PREV], node0);
+            assert_eq!(f.nodes[0][CG_BINDING_NEXT], node1);
+            assert_eq!(f.nodes[0][CG_BINDING_PREV], 0, "the tail's prev stays NULL");
+            for node in &f.nodes {
+                assert_eq!(node[CG_BINDING_ANCHOR], anchor as usize, "every node back-points at anchor");
+                assert_eq!(node[3], PUSH_SENTINEL, "no write extends past the anchor word");
+            }
         }
         drop(f);
         teardown();
@@ -9434,7 +9483,7 @@ mod tests {
                 default_cg_binding_release_effect as usize
             );
             assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
-            assert_eq!(ops.binding_push as usize, default_cg_binding_push as usize);
+            assert_eq!(ops.binding_push as usize, cg_binding_push as usize);
         }
         teardown();
     }

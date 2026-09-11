@@ -47785,15 +47785,11 @@ functions:
       prev, next and the anchor back-pointer (+0x08) are cleared in
       that store order (str r0,[r1,#0x4] / str r0,[r1,#0x0] / str
       r0,[r1,#0x8]). Both link reloads are kept verbatim (only a
-      self-referential node could alias them). No NULL guard on
-      anchor, like the rest of the cluster. The port is NOT wired:
-      CG_BLOCK_BIND_OPS::binding_unlink keeps its documented no-op
-      default (cg_block_bind_registers' seam decision, the
-      cg_binding_rebind precedent). REWIRING OPPORTUNITY
-      (deliberately NOT done here): this slot can now default to the
-      ported cg_binding_unlink once the last sibling FUN_08367358
-      (binding_push) is also ported - and only then should
-      CG_BLOCK_EMIT_OPS::bind_registers bind cg_block_bind_registers.
+      anchor, like the rest of the cluster. Now that sibling
+      FUN_08367358 (cg_binding_push) is ported, all three block-entry
+      helpers are wired as CG_BLOCK_BIND_OPS defaults and
+      CG_BLOCK_EMIT_OPS::bind_registers defaults to
+      cg_block_bind_registers.
       match.py (exit 1, diff expected): 16 instructions on both
       sides; the head/tail fixup conditions, the link reloads, both
       anchor-word stores and the three node clears all line up; the
@@ -47813,6 +47809,43 @@ functions:
       ::binding_unlink_unlinks_the_only_node (both anchor words
       drain to NULL) - every test also proves no write lands past
       the +0x08 anchor back-pointer via per-node sentinel words.
+
+  - address: 0x08367358
+    ghidra: FUN_08367358
+    name: cg_binding_push
+    size: 56
+    sig: "void cg_binding_push(u8 *anchor, CgBinding *node)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: anchor (the intrusive {head +0x00, tail +0x04} list anchor)
+      param_2/r1: "node (the CgBinding pushed at anchor's head: next +0x00,
+        prev +0x04, anchor back-pointer +0x08)"
+      r3: prior tail (anchor +0x04, tests the empty-list path)
+      r2: zero for empty-node links, then prior head for non-empty node prev
+    notes: >-
+      Verified raw extent: 56 bytes, 0x08367358..0x0836738c, followed by
+      distinct FUN_08367390 at 0x08367390. Branch census decoding every
+      ARM B/BL word in osos.dec found 8 plain bl sites, 0 predicated bl
+      sites, and 2 tail b sites: bl at 0x082b3bc8, 0x082b3c14,
+      0x082b3cb8, 0x082b6da8, 0x082c5cf8, 0x082ccb34, 0x082ccb78 and
+      0x082d7854; tail b at 0x082d66c4 and 0x083673ac. No aligned
+      osos.dec data word equals 0x08367358, so no indirect dispatch was
+      discovered. Leaf intrusive doubly-linked-list PUSH-HEAD: it reads
+      anchor tail +0x04; for an empty list stores node into both anchor
+      words and clears node prev +0x04, then in every path clears node
+      next +0x00 and stores anchor at node +0x08. For a non-empty list,
+      node prev takes the old head, old-head next takes node, and anchor
+      head takes node. No NULL guards, matching raw ARM. The port is wired
+      as the binding_push default for CG_BLOCK_BIND_OPS and
+      CG_BINDING_ACQUIRE_OPS; because all three block-entry helper defaults
+      are now ported, CG_BLOCK_EMIT_OPS::bind_registers is also wired to
+      cg_block_bind_registers. Host tests cover empty and multi-node head
+      insertion, preserved tail, reciprocal links, back-pointers and
+      sentinels past node +0x08; the binder default test proves end-to-end
+      rebind/unlink/push integration. match.py exit 1 diff is expected:
+      LLVM expresses predicated ARM stores as branches and the Rust export
+      carries the crate frame.
 
   # --- C++ null-pointer status ---
   - address: 0x08027940
