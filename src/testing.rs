@@ -222,6 +222,10 @@ pub mod hints {
     // 0xb700_0000: dedicated to app/animation timing-wheel unlink fixtures;
     // mappings never unmap, so no other user may share this hint.
     pub const TIMING_WHEEL_REMOVE: usize = 0xb700_0000;
+    // 0xb500_0000: dedicated to sqlite/change_cookie's target-width
+    // Parse/database/schema fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const SQLITE_CHANGE_COOKIE: usize = 0xb500_0000;
     // 0xba00_0000: dedicated to app/progress_layout_transition's raw-u32
     // controller, timer, and activity fixture; mappings never unmap, so no
     // other user may share this hint.

@@ -25012,6 +25012,39 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- Schema-cookie increment emitter (src/sqlite/change_cookie.rs) ----
+  - address: 0x08372e54
+    ghidra: FUN_08372e54
+    name: change_cookie
+    size: 108
+    sig: "void change_cookie(Parse *parse, int database_index)"
+    module: sqlite/change_cookie
+    status: ported
+    renames:
+      param_1: parse
+      param_2: database_index
+    notes: >-
+      SQLite 3.5.9 sqlite3ChangeCookie. Raw ARM establishes the true
+      108-byte extent 0x08372e54..0x08372ebc: a separate sibling starts
+      with push {r4-r6,lr} at 0x08372ec0. Binary decoding every ARM B/BL
+      word finds 9 direct BL callers, not Ghidra's count alone: eight
+      unconditional (0x0836f040, 0x083745e4, 0x08375634, 0x08375b98,
+      0x08375dfc, 0x083760c0, 0x08379448, 0x0838d5e4) and one BLNE
+      (0x0836eb78); that sole conditional call is caller-gated, as the
+      callee has no guard. Algorithm: get_temp_reg(parse), load
+      db->aDb[database_index].pSchema->schema_cookie, wrap-add one,
+      emit OP_Integer (0x2f) value,temp_reg, emit OP_SetCookie (4)
+      database_index,0,temp_reg, then tail-branch to release_temp_reg.
+      Ghidra's four-argument void C misses the tail call; the raw ARM
+      calling sequence and SQLite 3.5.9 build.c identify it decisively.
+      Deliberate host-only layout adaptation: Parse, sqlite3, and Db links
+      are u32 words in repr(C) structures, preserving every target offset
+      despite host pointer widening; target behavior is unchanged. Host
+      tests cover selected-db emission and cookie/register wrap with a full
+      free-list.
+      match.py (--size 108, worktree archive): the same get-temp/add-op2/
+      add-op3/release call sequence and schema `+1`; expected differences
+      are LLVM's frame, register scheduling, and relocation placeholders.
   # ---- B-tree lock counter (src/sqlite/btree_lock.rs) ----
   - address: 0x0837118c
     ghidra: FUN_0837118c
