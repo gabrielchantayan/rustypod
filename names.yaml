@@ -52161,6 +52161,36 @@ functions:
       cover null rejection, marked depth-first traversal, root/direct/nested
       failure propagation, skipped siblings, and context forwarding.
 
+  # --- Current UTC offset applied to seconds timestamp (time/utc_adjust) ---
+  - address: 0x0806ba5c
+    ghidra: FUN_0806ba5c
+    name: apply_current_utc_offset_seconds
+    size: 32
+    sig: "u32 apply_current_utc_offset_seconds(u32 seconds)"
+    module: time/utc_adjust
+    status: ported
+    renames:
+      param_1/r0/r4: seconds
+      FUN_08054fcc: current_utc_offset_minutes_negated (unported)
+      FUN_080ab558: current_utc_offset_query (ported, time/utc_offset)
+    notes: >-
+      Raw extent is exactly 32 bytes, 0x0806ba5c..0x0806ba7c: the next
+      separately linked function begins at 0x0806ba7c with cmp r1,#0.
+      Decoding every ARM B/BL word in osos.dec (load base 0x08000000) finds
+      exactly 9 direct unconditional plain BL callers at 0x0806c61c,
+      0x0806c628, 0x0806c634, 0x0806c6a0, 0x0806c6b0, 0x0806c6c0,
+      0x080b44ec, 0x080bdc0c, and 0x080e8510; no predicated BL callers.
+      The zero input branch returns without calling the 48-byte unported
+      helper FUN_08054fcc. Otherwise that helper calls the ported
+      current_utc_offset_query, returns zero when its validity result is
+      zero, and returns the negated signed (i16 base + i8 daylight) minute
+      sum otherwise. The main sub r0,r0,r0,lsl#4 / add r4,r4,r0,lsl#2
+      arithmetic therefore adds that signed sum times 60 seconds, modulo
+      2^32. The port directly calls current_utc_offset_query instead of
+      adding a target seam for the fully decoded unported adapter; a private
+      host-only volatile seam provides valid, invalid, signed-daylight, and
+      zero-input test coverage without changing device dispatch.
+
   # --- Selected paired-buffer capacity predicate (runtime/buffer_state) ---
   - address: 0x0807595c
     ghidra: FUN_0807595c
