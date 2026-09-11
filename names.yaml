@@ -16821,6 +16821,32 @@ functions:
       owner. Representative callers: 0x0812b170, 0x0814274c,
       0x081576a0, and 0x0816d3f0.
 
+  - address: 0x0828c534
+    ghidra: FUN_0828c534
+    name: coordinate_owner_set_opacity
+    size: 36
+    sig: "void coordinate_owner_set_opacity(CoordinateOwner *owner, u8 opacity)"
+    module: ui/coordinate_origin
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: opacity
+      "owner+0x3f": opacity
+      "owner+0xec/+0xed": dirty_and_origin_changed
+      "owner+0xfc": command_index
+      FUN_0828d110: coordinate_owner_refresh
+    notes: >-
+      Raw osos.dec bytes verify the 36-byte extent from the byte stores at
+      0x0828c534 through bx lr at 0x0828c554; FUN_0828c558 begins the next
+      function. Decoding every ARM B/BL word in osos.dec finds nine direct
+      bl callers: eight unconditional and one blne. A separately decoded
+      unconditional tail branch at 0x0808ea68 moves a descriptor-derived
+      owner into r0 and its low-byte opacity into r1 before branching here.
+      This unguarded setter writes +0x3f, sets +0xec and +0xed to 1, and
+      conditionally tail-calls FUN_0828d110 with r1 = 0 unless +0xfc is -1.
+      FUN_0828d110 is an existing verified-address volatile seam: device
+      builds call the retail address while host tests use a recorder.
+
   - address: 0x0828c600
     ghidra: FUN_0828c600
     name: coordinate_owner_set_origin

@@ -163,7 +163,9 @@ struct TargetCoordinateOwner {
     _before_bounds: [u32; 7],
     bounds: Rect,
     origin: Point,
-    _before_dirty: [u8; 0xec - 0x38],
+    _before_opacity: [u8; 7],
+    opacity: u8,
+    _before_dirty: [u8; 0xec - 0x40],
     dirty: u8,
     origin_changed: u8,
     active: u8,
@@ -184,7 +186,9 @@ struct HostCoordinateOwner {
     _before_bounds: [u8; 0x20 - size_of::<*mut u8>()],
     bounds: Rect,
     origin: Point,
-    _before_dirty: [u8; 0xec - 0x38],
+    _before_opacity: [u8; 7],
+    opacity: u8,
+    _before_dirty: [u8; 0xec - 0x40],
     dirty: u8,
     origin_changed: u8,
     active: u8,
@@ -224,6 +228,49 @@ unsafe fn owner_word(owner: *mut u8, offset: usize) -> u32 {
 unsafe fn set_owner_word(owner: *mut u8, offset: usize, value: u32) {
     (owner.add(offset) as *mut u32).write_volatile(value);
 }
+
+/// coordinate_owner_set_opacity — original: `FUN_0828c534` @ **0x0828c534**
+/// (36 bytes; extent verified through `bx lr` at 0x0828c554, immediately
+/// before the distinct next function at 0x0828c558). Decoding every ARM
+/// `B`/`BL` word in `osos.dec` finds 9 direct `bl` call sites: 8
+/// unconditional and 1 `blne`. One additional unconditional `b` tail-call
+/// site at 0x0808ea68 supplies the opacity from a descriptor word.
+///
+/// # Algorithm
+///
+/// Stores the supplied opacity byte at owner +0x3f, marks the owner dirty and
+/// origin-changed (+0xec/+0xed), then refreshes it unless its command index
+/// (+0xfc) is -1. The body has no NULL guard; callers must provide an owner.
+///
+/// # Deliberate deviations
+///
+/// None. The existing volatile refresh seam reaches verified retail address
+/// 0x0828d110 on-device and a recording model in host tests.
+#[cfg(target_os = "none")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn coordinate_owner_set_opacity(owner: *mut u8, opacity: u8) {
+    let owner_fields = owner.cast::<TargetCoordinateOwner>();
+    ptr::addr_of_mut!((*owner_fields).opacity).write_volatile(opacity);
+    ptr::addr_of_mut!((*owner_fields).dirty).write_volatile(1);
+    ptr::addr_of_mut!((*owner_fields).origin_changed).write_volatile(1);
+    if ptr::addr_of!((*owner_fields).command_index).read_volatile() != -1 {
+        coordinate_owner_refresh()(owner);
+    }
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(never)]
+pub unsafe extern "C" fn coordinate_owner_set_opacity(owner: *mut u8, opacity: u8) {
+    let owner_fields = owner.cast::<HostCoordinateOwner>();
+    ptr::addr_of_mut!((*owner_fields).opacity).write_unaligned(opacity);
+    ptr::addr_of_mut!((*owner_fields).dirty).write_unaligned(1);
+    ptr::addr_of_mut!((*owner_fields).origin_changed).write_unaligned(1);
+    if ptr::addr_of!((*owner_fields).command_index).read_unaligned() != -1 {
+        coordinate_owner_refresh()(owner);
+    }
+}
+
 
 /// ARM form of [`coordinate_owner_set_origin`].
 #[cfg(target_os = "none")]
@@ -455,6 +502,41 @@ mod tests {
 
     unsafe fn set_command_index(owner: *mut HostCoordinateOwner, index: i32) {
         ptr::addr_of_mut!((*owner).command_index).write_unaligned(index);
+    }
+
+    #[test]
+    fn opacity_write_marks_state_without_refresh_for_command_index_minus_one() {
+        let _guard = install_recorders();
+        let mut storage = [0u8; 0x100];
+        let owner = unsafe { owner_fields(&mut storage) };
+        unsafe {
+            set_command_index(owner, -1);
+
+            coordinate_owner_set_opacity(owner.cast(), 0);
+
+            assert_eq!(ptr::addr_of!((*owner).opacity).read_unaligned(), 0);
+            assert_eq!(ptr::addr_of!((*owner).dirty).read_unaligned(), 1);
+            assert_eq!(ptr::addr_of!((*owner).origin_changed).read_unaligned(), 1);
+            assert_eq!(REFRESH_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn opacity_write_refreshes_live_owner_after_storing_full_opacity() {
+        let _guard = install_recorders();
+        let mut storage = [0u8; 0x100];
+        let owner = unsafe { owner_fields(&mut storage) };
+        unsafe {
+            set_command_index(owner, i32::MIN);
+
+            coordinate_owner_set_opacity(owner.cast(), 0xff);
+
+            assert_eq!(ptr::addr_of!((*owner).opacity).read_unaligned(), 0xff);
+            assert_eq!(ptr::addr_of!((*owner).dirty).read_unaligned(), 1);
+            assert_eq!(ptr::addr_of!((*owner).origin_changed).read_unaligned(), 1);
+            assert_eq!(REFRESH_CALLS, 1);
+            assert_eq!(REFRESHED_OWNER, owner.cast());
+        }
     }
 
     #[repr(align(4))]
