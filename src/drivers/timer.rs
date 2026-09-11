@@ -24,6 +24,16 @@
 //!   arm helper @ 0x0807a228 multiplies by 1000 to compute the deadline.
 //!   `timer_start_after` tail-branches here.
 //!
+//! - `timer_trace_assert` — original: `FUN_08076954` @ 0x08076954 (40
+//!   bytes true extent: 36 bytes of instructions plus its 4-byte literal
+//!   pool; the next entry begins at 0x0807697c). A complete ARM B/BL scan
+//!   finds 11 direct branch sites: 9 `bl` (2 `bleq`, 3 `blne`, 4
+//!   unconditional) and 2 tail `b`. Locks the pending-list mutex @
+//!   0x089ca318, calls the trace/validate walk @ 0x0809e620 on the timer,
+//!   then tail-branches to unlock that same mutex. The trace/validate walk
+//!   remains a `TimerOps::trace_validate` seam.
+
+//!
 //! - `timer_start_after` — original: `FUN_0812c63c` @ 0x0812c63c (32
 //!   bytes; 100 call sites: 98 `bl` + 2 tail `b`, binary-scanned).
 //!   Stops the timer (the ported `timer_stop`), then tail-branches to
@@ -84,17 +94,13 @@
 //! is imposed, and nothing here shifts on a 64-bit test host.
 //!
 //! Dispatch design (deviation, by necessity — mirrors the `ROM_KERNEL`
-//! pattern in kernel/sync_mutex.rs): the trace/assert helper @ 0x08076954,
-//! the cancel helper @ 0x080a6c0c and the timer constructor @ 0x0812c65c
-//! are not yet ported, so they dispatch indirectly through the `TIMER_OPS`
-//! fn-pointer table instead of undefined `extern "C"` symbols that would
-//! break the freestanding ARM link. Default stubs are harmless no-ops; on
-//! real hardware the table must be installed before `timer_stop` is
-//! hooked. The arm helper @ 0x0807a228 IS ported (`timer_arm`) and is the
-//! wired default of the `arm_timer` slot; its own four callees — the
-//! trace/validate walk @ 0x0809e620, the tick getter @ 0x08056658, the
-//! deadline comparator @ 0x082a243c and the notify helper @ 0x0808e2a8 —
-//! are not, so they are slots of their own with documented default stubs.
+//! pattern in kernel/sync_mutex.rs): the cancel helper @ 0x080a6c0c and
+//! timer constructor @ 0x0812c65c are not yet ported, so they dispatch
+//! indirectly through the `TIMER_OPS` fn-pointer table instead of undefined
+//! `extern "C"` symbols that would break the freestanding ARM link. The
+//! trace/assert helper @ 0x08076954 and arm helper @ 0x0807a228 ARE ported;
+//! their still-unported trace/validate, tick, deadline-comparator and notify
+//! callees remain documented dispatch slots.
 //! The mutex pair is ported, so the globals @ 0x089cb294 and @ 0x089ca318
 //! are modeled directly as the statics `TIMER_CLASS_MUTEX` /
 //! `TIMER_PENDING_MUTEX`.
@@ -1006,8 +1012,8 @@ pub static mut TIMER_NOTIFY_CELL: u32 = 0;
 /// `KERNEL_NOTIFY_CALLBACK` precedent in kernel/sync_mutex.rs).
 pub static mut TIMER_EXPIRY_CALLBACK: usize = 0x0812_16b4;
 
-/// Indirect dispatch table for the not-yet-ported callees (see the
-/// module header for the design and the default-stub behavior).
+/// Indirect dispatch table for the trace/validate and other not-yet-ported
+/// callees (see the module header for the design and default behavior).
 #[derive(Clone, Copy)]
 pub struct TimerOps {
     /// Trace/assert helper @ 0x08076954: locks its own global and calls
@@ -1070,15 +1076,14 @@ pub struct TimerOps {
     ),
 }
 
-// Default stubs: without the trace/cancel/construct layer these
-// operations have no meaning. On real hardware TIMER_OPS must be
-// installed before any timer is stopped through this port. The four
-// `timer_arm` callees likewise default to stubs: trace/notify drop the
-// call, `tick` reads 0, and the comparator never breaks the walk — so
-// the stock-default `timer_arm` appends to the queue tail with deadline
-// period * 1000; documented, harmless, and replaced by the ported
-// helpers as they land.
-unsafe extern "C" fn missing_trace_assert(_timer: *mut u8) {}
+// Default stubs: without the cancel/construct layer these operations have
+// no meaning. On real hardware TIMER_OPS must be installed before any
+// timer is stopped through the unported layers. The four `timer_arm`
+// callees likewise default to stubs: trace/notify drop the call, `tick`
+// reads 0, and the comparator never breaks the walk — so the
+// stock-default `timer_arm` appends to the queue tail with deadline
+// period * 1000; documented, harmless, and replaced by the ported helpers
+// as they land.
 unsafe extern "C" fn missing_cancel_callback(
     _handle: usize,
     _callback_id: usize,
@@ -1102,10 +1107,10 @@ unsafe extern "C" fn missing_compare_deadlines(_a: *const u32, _b: *const u32) -
 }
 unsafe extern "C" fn missing_notify_pending(_cell: *const u32) {}
 
-/// The wired defaults: the arm slot is the ported `timer_arm` below;
-/// the not-yet-ported callees are the documented stubs above.
+// The wired defaults: trace/assert and arm are ported below; the remaining
+// not-yet-ported callees use the documented stubs above.
 const DEFAULT_TIMER_OPS: TimerOps = TimerOps {
-    trace_assert: missing_trace_assert,
+    trace_assert: timer_trace_assert,
     cancel_callback: missing_cancel_callback,
     arm_timer: timer_arm,
     construct_timer: missing_construct_timer,
@@ -1115,9 +1120,9 @@ const DEFAULT_TIMER_OPS: TimerOps = TimerOps {
     notify_pending: missing_notify_pending,
 };
 
-/// The active timer-service dispatch table. Defaults to
-/// `DEFAULT_TIMER_OPS`; replaced by host tests (mocks) and eventually by
-/// the ported trace/cancel/construct layer. Written once at init on
+/// The active timer-service dispatch table. Defaults to `DEFAULT_TIMER_OPS`;
+/// replaced by host tests (mocks) and eventually by the remaining ported
+/// trace/validate, cancel, and construct layers. Written once at init on
 /// target; tests serialize access.
 pub static mut TIMER_OPS: TimerOps = DEFAULT_TIMER_OPS;
 
@@ -1182,6 +1187,27 @@ fn ptr_to_link(timer: *mut u8) -> u32 {
             timer.offset_from(TEST_LINK_BASE) as u32
         }
     }
+}
+
+/// timer_trace_assert — original: `FUN_08076954` @ 0x08076954.
+///
+/// Raw ARM's true extent is 40 bytes: nine instructions (36 bytes) followed
+/// by the 4-byte `0x089ca318` literal pool, ending before the next entry at
+/// 0x0807697c. A complete scan of every ARM B/BL word finds 11 direct branch
+/// sites: 9 `bl` (2 `bleq`, 3 `blne`, 4 unconditional) and 2 tail `b`.
+///
+/// Locks the pending-list mutex, passes `timer` without a NULL guard to the
+/// trace/validate walk @ 0x0809e620, then unlocks. Deliberate deviations:
+/// the stock tail branch is a return-position call, and the global mutex is
+/// copied through a volatile load so LLVM cannot prove its null initializer
+/// and delete the lock/unlock pair.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_trace_assert(timer: *mut u8) {
+    let mut pending_mutex = core::ptr::addr_of!(TIMER_PENDING_MUTEX).read_volatile();
+    mutex_lock(&mut pending_mutex);
+    (timer_ops().trace_validate)(timer);
+    mutex_unlock(&mut pending_mutex);
 }
 
 /// timer_stop — original: `FUN_0812c6b0` @ 0x0812c6b0 (76 bytes).
@@ -1612,6 +1638,40 @@ mod tests {
 
     fn pending_head() -> *mut u8 {
         link_to_ptr(unsafe { core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).read_volatile() })
+    }
+
+    /// The helper takes the pending-list mutex around exactly one
+    /// trace/validate call, forwarding the original timer pointer.
+    #[test]
+    fn trace_assert_locks_validates_and_unlocks_pending_mutex() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_trace_assert(timer_ptr) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(timer_ptr as usize),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
+    }
+
+    /// Stock has no NULL guard; the validator receives null between the
+    /// same pending-mutex lock and unlock.
+    #[test]
+    fn trace_assert_forwards_null_without_a_guard() {
+        let _lock = mock_env();
+        unsafe { timer_trace_assert(core::ptr::null_mut()) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(0),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
     }
 
     /// State 'expi': the pending callback is cancelled with the exact
