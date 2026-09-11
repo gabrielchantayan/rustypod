@@ -38197,6 +38197,39 @@ functions:
       indirect-jump-through-a-literal shape plus one indirection and the
       crate's fp frame, r0-r2 passed through untouched.
 
+  - address: 0x08037f08
+    ghidra: thunk_EXT_FUN_22004230
+    name: gateway_service19_request
+    size: 8
+    sig: "u32 gateway_service19_request(u32 input)"
+    module: kernel/gateway_service19
+    status: ported
+    renames:
+      thunk_EXT_FUN_22004230: gateway_service19_request
+      EXT_FUN_22004230: gateway_service19_request
+      DAT_08037f0c: gateway_service19_rom_target
+    notes: >-
+      Raw osos.dec proves the Ghidra 4-byte function is an 8-byte ADS literal
+      veneer: e51ff004 (ldr pc,[pc,#-4]) at 0x08037f08 and target word
+      0x22004230 at 0x08037f0c; the sibling veneer opens at 0x08037f10.
+      The relocator at 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+      0x22000000, so the target mirrors the 48-byte body at 0x08004230
+      (0x08004230..0x08004260). It stores r0 at sp+24, zero at sp+8, and
+      selector 19 at sp+4, passes sp+4 to the foreign 0x08003660 gateway
+      dispatcher, then returns the dispatcher-written word at sp+8: the
+      verified protocol is {19, 0, _, _, _, input}. Decoding every ARM B/BL
+      word in osos.dec finds exactly nine direct calls, all unconditional bl
+      at 0x080845ac, 0x08084c28, 0x080c9c70, 0x080e184c, 0x082d965c,
+      0x08393580, 0x083935b0, 0x08393850, and 0x08393864; no predicated
+      forms or tail branches. No data word holds the thunk or mirror address;
+      the target literal above is the sole 0x22004230 word. Callers pass
+      owned words before freeing them, but selector 19's RTXC operation is
+      not otherwise identified, so the port calls the existing
+      message_dispatch_veneer seam and names only the established wire
+      protocol. Host tests prove store positions, dispatcher-written output,
+      and unguarded full-width inputs. match.py is structurally expected to
+      differ because Rust calls the dispatcher seam rather than tail-loading
+      PC from the veneer literal.
   - address: 0x08037f58
     ghidra: thunk_EXT_FUN_220060e0
     name: lazy_singleton_106dc_acquire
