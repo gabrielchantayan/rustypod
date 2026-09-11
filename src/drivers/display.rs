@@ -662,15 +662,15 @@ pub unsafe extern "C" fn display_set_clear_color(display: *mut Display, color: u
 }
 
 #[cfg(test)]
+pub(crate) static DISPLAY_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
-    use std::sync::{Mutex as HostMutex, MutexGuard};
-
-    /// Serializes swaps of [`DISPLAY_HOOKS`].
-    static HOOKS_LOCK: HostMutex<()> = HostMutex::new(());
+    use parking_lot::MutexGuard as DisplayMutexGuard;
 
     static mut CONSTRUCT_CALLS: usize = 0;
     static mut LAST_STORAGE: *mut u8 = core::ptr::null_mut();
@@ -698,8 +698,8 @@ mod tests {
 
     /// Installs the recording constructor and the mock heap. The two guards
     /// are returned together so no test ever takes either lock twice.
-    fn install_mocks() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
-        let hooks_guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn install_mocks() -> (DisplayMutexGuard<'static, ()>, std::sync::MutexGuard<'static, ()>) {
+        let hooks_guard = DISPLAY_TEST_LOCK.lock();
         let heap_guard = mock_heap();
         unsafe {
             DISPLAY_HOOKS =
@@ -715,7 +715,7 @@ mod tests {
         (hooks_guard, heap_guard)
     }
 
-    fn restore_mocks(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>)) {
+    fn restore_mocks(guards: (DisplayMutexGuard<'static, ()>, std::sync::MutexGuard<'static, ()>)) {
         unsafe { DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS };
         drop(guards);
     }
@@ -756,8 +756,8 @@ mod tests {
         core::ptr::addr_of_mut!((*display).layers_active).write_volatile(0);
     }
 
-    fn install_activity_mocks() -> MutexGuard<'static, ()> {
-        let guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn install_activity_mocks() -> DisplayMutexGuard<'static, ()> {
+        let guard = DISPLAY_TEST_LOCK.lock();
         unsafe {
             DISPLAY_HOOKS = DisplayHooks {
                 layer_activity_start: recording_layer_activity_start,
@@ -770,7 +770,7 @@ mod tests {
         guard
     }
 
-    fn restore_activity_mocks(guard: MutexGuard<'static, ()>) {
+    fn restore_activity_mocks(guard: DisplayMutexGuard<'static, ()>) {
         unsafe { DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS };
         drop(guard);
     }
@@ -1013,8 +1013,8 @@ mod tests {
     /// Returns both guards and objects to their pre-init state. Takes only
     /// [`HOOKS_LOCK`] — never the heap lock — so it can never self-deadlock
     /// against [`install_mocks`].
-    fn install_singleton_mocks() -> MutexGuard<'static, ()> {
-        let guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn install_singleton_mocks() -> DisplayMutexGuard<'static, ()> {
+        let guard = DISPLAY_TEST_LOCK.lock();
         unsafe {
             DISPLAY_HOOKS = DisplayHooks {
                 display_construct: recording_display_construct,
@@ -1037,7 +1037,7 @@ mod tests {
         guard
     }
 
-    fn restore_singleton_mocks(guard: MutexGuard<'static, ()>) {
+    fn restore_singleton_mocks(guard: DisplayMutexGuard<'static, ()>) {
         unsafe {
             // Drain leftover registrations BEFORE restoring the firmware
             // allocator pair, so the nodes are freed by the allocator that

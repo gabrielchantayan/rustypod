@@ -64809,3 +64809,48 @@ functions:
       ordering including the destructor-return deallocation pointer, and NULL
       construction retry. match.py structural review: expected LLVM frame and
       direct/indirect call-shape differences only.
+
+  # --- Internal LCD layer setup ---
+  - address: 0x081f5c2c
+    ghidra: FUN_081f5c2c
+    name: configure_internal_display_layers
+    size: 176
+    sig: "void configure_internal_display_layers(InternalDisplayLayerSetup *setup)"
+    module: drivers/internal_display_layers
+    status: ported
+    renames:
+      param_1/r4: setup
+      param_1_plus_0x18: layer5_input
+      param_1_plus_0x1c: layer1_input
+      param_1_plus_0x20: layer1
+      param_1_plus_0x24: layer5
+      FUN_081d8870: display_get
+      FUN_081d9064: display_get_layer
+      FUN_08120604: surface_config_init
+      FUN_08120978: layer_apply_config
+      FUN_081d8cfc: display_set_clear_color
+      FUN_081d9138: display_pending_parameters
+      FUN_08120880: layer_set_global_alpha_blend
+    notes: >-
+      Raw osos.dec confirms the 176-byte extent 0x081f5c2c..0x081f5cdc:
+      44 code words through pop {r4,r5,pc}; the separately linked
+      configuration copier opens at 0x081f5cdc. Decoding every ARM BL
+      immediate finds exactly nine direct callers, all unconditional:
+      0x0810dcfc, 0x0810ecf4, 0x08110218, 0x0811e6a0, 0x08130728,
+      0x08144350, 0x081589d8, 0x0816dedc, and 0x081df66c. It obtains
+      internal display layers 1 and 5, stores them at setup+0x20/+0x24,
+      initializes two 64-byte stack surface descriptors, and copies the
+      layer-1 input (+0x1c) then layer-5 input (+0x18) into them. The
+      copier carries input byte +8 to descriptor +0, writes 3 at +1,
+      maps input +0x0c to descriptor +0x10/+0x18 and input +0x10 to
+      +0x0c/+0x14, clears +4/+8/+0x24/+0x28, and conditionally sets the
+      +0x30 opaque word (format 0 -> 0x00ff0010, 2 -> 0x0000001f,
+      3 -> 0). It applies each descriptor, clears the display to zero,
+      calls unported 0x081d9138 with (3,5), then selects global-alpha
+      blending on layers 5 and 1. The unported callee's exact stores are
+      +0x54=3, +0x55=5, and +0x24=1, but its broader identity is not
+      established; target code reaches its verified address through a
+      volatile function pointer, while host tests use a recorder. Every
+      other callee is already ported and is called directly. The temporary
+      descriptors remain MaybeUninit stack storage so their initializer's
+      deliberately unwritten bytes retain the retail stack-local behavior.
