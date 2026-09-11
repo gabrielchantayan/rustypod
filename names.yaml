@@ -590,6 +590,40 @@ functions:
       target/host ROM seams, with a host recorder proving strict call order,
       output-store value, and fixed-zero return.
 
+  # --- event-handler source lazy initialization ---
+  - address: 0x08007470
+    ghidra: FUN_08007470
+    name: event_handler_source
+    size: 100
+    sig: "void *event_handler_source(void)"
+    module: kernel/event_handler_source
+    status: ported
+    renames:
+      DAT_080074d4: event_handler_source_guard
+      DAT_080074d8: event_handler_source_instance
+      DAT_080074dc: dso_handle
+      DAT_080074e0: event_handler_source_destructor
+      DAT_080074e4: event_handler_source_initialized
+      FUN_080036e0: cxa_guard_acquire_veneer
+      FUN_080036e8: cxa_atexit_veneer
+      FUN_080036f0: cxa_guard_release_veneer
+      FUN_08007e38: event_handler_source_setup
+    notes: >-
+      Raw ARM is 100 bytes ending with pop {r4,pc} at 0x080074d0 plus the
+      five-word literal pool at 0x080074d4..0x080074e4; the independently
+      linked leaf at 0x080074e8 confirms the boundary. Decoding every ARM
+      B/BL word in osos.dec found 10 direct callers: all are unconditional
+      bl, with zero predicated forms and zero tail b. It tests bit 0 of
+      guard 0x22008c84, registers fixed instance 0x22010318 with
+      cxa_atexit(instance, 0x2200803c, 0x089ca09c) after successful acquire,
+      and releases the guard. Independently, it calls the sole-caller,
+      still-unidentified FUN_08007e38(instance) under byte flag 0x2200aed4,
+      then returns the instance on every path. The port calls the existing
+      cxa guard and shutdown-chain routines directly; FUN_08007e38 remains a
+      target-only seam, while host tests use private fixed-state backing and a
+      recording setup seam. The relocator at 0x080046e0 mirrors this body to
+      0x22007470, and the former literal thunk 0x08038060 now forwards to
+      this port.
   # --- event-loop callback dispatch ---
   - address: 0x080074e8
     ghidra: FUN_080074e8
@@ -37103,38 +37137,25 @@ functions:
 
   - address: 0x08038060
     ghidra: thunk_EXT_FUN_22007470
-    name: event_handler_source
+    name: iram_event_handler_source_veneer
     size: 8
-    sig: "void *event_handler_source(void)"
+    sig: "void *iram_event_handler_source_veneer(void)"
     module: kernel/thunks
     status: ported
     renames:
-      thunk_EXT_FUN_22007470: event_handler_source
-      FUN_08007470: event_handler_source
-      DAT_080074d4: event_handler_source_guard
-      DAT_080074d8: event_handler_source_instance
-      DAT_080074e4: event_handler_source_initialized
+      thunk_EXT_FUN_22007470: iram_event_handler_source_veneer
     notes: >-
       One stub of the osos -> IRAM thunk table (ROM_THUNKS in
       kernel/thunks.rs): ldr pc,[pc,#-4] + literal word 0x22007470.
       Ghidra reports 4 bytes; the stub is 8 (next stub starts at
       0x08038068). Call count binary-verified by decoding every B/BL word
       in osos.dec: 30 bl, all unconditional, zero predicated forms, zero
-      tail b. Target identification is exact: the boot relocator at
-      0x080046e0 copies 0xaed8 bytes from 0x08000000 to 0x22000000, so
-      IRAM 0x22007470 is byte-identical to FUN_08007470 @ 0x08007470
-      (100 bytes of code + 20-byte literal pool; next function at
-      0x080074e8). The target lazily constructs/registers the object at
-      0x22010318 under guard word 0x22008c84, then calls FUN_08007e38
-      once under byte flag 0x2200aed4 before returning that object pointer.
-      Class identity remains unrecovered; `event_handler_source` records
-      that callers pass the result as the source argument to IRAM
-      event-dispatch routines. Port retains the verbatim ARM veneer through
-      global_asm (ldr pc preserves LR); host builds dispatch through the
-      volatile EVENT_HANDLER_SOURCE_OPS seam, default NULL. match.py
-      structural result: instruction stream identical (ldr pc,[pc,#-4]);
-      only the literal differs in display as .word versus a data-decoded
-      andcs.
+      tail b. The boot relocator at 0x080046e0 copies 0xaed8 bytes from
+      0x08000000 to 0x22000000, so the literal target is the mirror of
+      event_handler_source @ 0x08007470. The Rust veneer makes a volatile
+      indirect call to that port and returns its source pointer, rather than
+      loading PC from the literal; this preserves its no-argument,
+      source-pointer ABI while keeping the call on the ported path.
 
   - address: 0x08037dc8
     ghidra: thunk_EXT_FUN_220002d4
