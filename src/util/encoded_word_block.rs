@@ -455,6 +455,62 @@ pub unsafe extern "C" fn copy_inline_encoded_word_block(
         remaining -= 1;
     }
 }
+/// Returns the selected magnitude bit from an inline encoded-word block, or
+/// zero when the bit lies outside its decoded word count.
+///
+/// Original: `FUN_0832774c` @ 0x0832774c (88-byte full extent:
+/// 20 instruction words at 0x0832774c..0x083277a0, followed by literal-pool
+/// words `0x4b6143ff` and `0x3399e27f` at 0x083277a4..0x083277a8; the next
+/// separately linked function begins at 0x083277ac). Decoding every ARM B/BL
+/// word in osos.dec finds exactly nine direct inbound calls, all unconditional
+/// `bl`; there are zero predicated calls, tail branches, and aligned
+/// DATA-word references to this address.
+///
+/// The signed bit index is converted to a wrapping magnitude. Its word index
+/// must be below the wrapping absolute value of
+/// `block->encoded_count * 0x4b6143ff`; otherwise the function returns zero
+/// without reading a payload word. It then multiplies the selected inline word
+/// by `0x3399e27f`, shifts it by the magnitude modulo 32, and returns the low
+/// bit. This is the bit-selection counterpart to
+/// [`inline_encoded_word_block_compare`], which uses the same payload decoder.
+///
+/// Deliberate deviation: none. A negative index selects the same magnitude
+/// bit as its positive counterpart; `i32::MIN` retains ARM's wrapping
+/// negation and consequently has word index `0x04000000`.
+///
+/// # Safety
+/// `block` must point to a readable [`InlineEncodedWordBlock`]. If the
+/// selected bit is in range, the inline payload must contain its selected word.
+/// RetailOS has no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inline_encoded_word_block_test_bit(
+    block: *const InlineEncodedWordBlock,
+    bit_index: i32,
+) -> u32 {
+    let magnitude = if bit_index < 0 {
+        bit_index.wrapping_neg()
+    } else {
+        bit_index
+    };
+    let word_index = (magnitude as u32) >> 5;
+    let decoded_count = (*block)
+        .encoded_count
+        .wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+    let word_count = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+    if (word_index as i32) >= word_count {
+        return 0;
+    }
+
+    let decoded_word = (*block.cast::<u32>().add(word_index as usize + 1))
+        .wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+    (decoded_word >> ((magnitude as u32) & 31)) & 1
+}
+
 /// Compares two inline encoded-count word blocks as signed magnitudes.
 ///
 /// Original: `FUN_082f5364` @ 0x082f5364 (204 bytes; 21 unconditional `bl`
@@ -532,8 +588,8 @@ mod tests {
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
         copy_inline_encoded_word_block, encoded_word_block_is_zero, encoded_word_block_set_int,
-        encoded_word_block_sign, inline_encoded_word_block_compare, EncodedWordBlock,
-        InlineEncodedWordBlock,
+        encoded_word_block_sign, inline_encoded_word_block_compare,
+        inline_encoded_word_block_test_bit, EncodedWordBlock, InlineEncodedWordBlock,
     };
 
 
@@ -541,6 +597,7 @@ mod tests {
     const ENCODED_WORD_MULTIPLIER: u32 = 0xd561_a67f;
     const ENCODED_WORD_INVERSE: u32 = 0x76b4_197f;
     const INLINE_ENCODED_COUNT_INVERSE: u32 = 0xda8e_bbff;
+    const INLINE_ENCODED_WORD_INVERSE: u32 = 0xff5f_dd7f;
 
     fn encoded_count(decoded_count: i32) -> i32 {
         ((decoded_count as u32).wrapping_mul(ENCODED_COUNT_INVERSE)) as i32
@@ -559,6 +616,10 @@ mod tests {
 
     unsafe fn compare(left: &[u32], right: &[u32]) -> i32 {
         inline_encoded_word_block_compare(left.as_ptr().cast(), right.as_ptr().cast())
+    }
+
+    unsafe fn test_inline_bit(block: &[u32], bit_index: i32) -> u32 {
+        inline_encoded_word_block_test_bit(block.as_ptr().cast(), bit_index)
     }
 
     #[test]
@@ -792,6 +853,34 @@ mod tests {
 
         assert_eq!(unsafe { copy_encoded_word_block_from(block_ptr, block_ptr) }, 0);
         assert_eq!(block.encoded_count, i32::MIN);
+    }
+
+    #[test]
+    fn inline_bit_selector_decodes_words_and_uses_index_magnitude() {
+        let block = inline_block(
+            -2,
+            &[
+                0x8000_0005u32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+                0x4000_0002u32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+            ],
+        );
+
+        assert_eq!(unsafe { test_inline_bit(&block, 0) }, 1);
+        assert_eq!(unsafe { test_inline_bit(&block, -2) }, 1);
+        assert_eq!(unsafe { test_inline_bit(&block, 1) }, 0);
+        assert_eq!(unsafe { test_inline_bit(&block, 31) }, 1);
+        assert_eq!(unsafe { test_inline_bit(&block, 33) }, 1);
+        assert_eq!(unsafe { test_inline_bit(&block, -33) }, 1);
+    }
+
+    #[test]
+    fn inline_bit_selector_rejects_out_of_range_and_wrapping_minimum_index() {
+        let empty = inline_block(0, &[]);
+        let one_word_without_payload = inline_block(1, &[]);
+
+        assert_eq!(unsafe { test_inline_bit(&empty, 0) }, 0);
+        assert_eq!(unsafe { test_inline_bit(&one_word_without_payload, 32) }, 0);
+        assert_eq!(unsafe { test_inline_bit(&one_word_without_payload, i32::MIN) }, 0);
     }
 
     #[test]
