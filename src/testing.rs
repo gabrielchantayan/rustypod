@@ -420,6 +420,10 @@ pub mod hints {
     // render-context fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const RENDER_CONTEXT_SUSPEND: usize = 0xa700_0000;
+    // 0x8a00_0000: dedicated to app/layout_state activation's target-width
+    // profile-pointer fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LAYOUT_STATE_ACTIVATE: usize = 0x8a00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
