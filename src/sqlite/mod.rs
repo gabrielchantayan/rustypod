@@ -77,6 +77,7 @@ pub mod cell_size;
 pub mod change_cookie;
 pub mod column_mem;
 pub mod data_size;
+pub mod restore_cursor_position;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;

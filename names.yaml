@@ -25651,6 +25651,39 @@ functions:
       the flag still set (the original's assert(wantToLock>0) is
       compiled out).
 
+  # ---- B-tree cursor position restoration (src/sqlite/restore_cursor_position.rs) ----
+  - address: 0x08372ae0
+    ghidra: FUN_08372ae0
+    name: btree_restore_cursor_position
+    size: 112
+    sig: "i32 btree_restore_cursor_position(BtCursor *cursor)"
+    module: sqlite/restore_cursor_position
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      iVar1/r0/r5: rc
+      FUN_08371e54: sqlite3BtreeMoveto (BTREE_MOVETO_OPS.moveto seam)
+      FUN_083906f4: tracked_free
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeRestoreOrClearCursorPosition. Raw ARM ends
+      at the separate sibling's push @ 0x08372b50, confirming the
+      0x08372ae0..0x08372b50 112-byte extent and no literal pool. Binary
+      decoding every ARM B/BL word in osos.dec found exactly eight direct
+      BL callers: seven unconditional at 0x08370e24, 0x08370e8c,
+      0x08370f74, 0x08371c68, 0x08371ce4, 0x083722a8, and 0x08372934,
+      plus caller-gated BLCS at 0x08371314; no tail B. FAULT eState 3
+      returns cursor +0x50 saved rc untouched. An isIncrblobHandle byte
+      at +0x54 returns SQLITE_ABORT (4), likewise untouched. Otherwise it
+      stores eState +0x43 = INVALID (0), calls unported sqlite3BtreeMoveto
+      @ 0x08371e54 with cursor, saved key +0x44, zero, result +0x50,
+      saved 64-bit nKey +0x48, zero, and result +0x50; only a zero result
+      frees then clears saved key. The moveto ABI is raw-byte verified but
+      remains a volatile BTREE_MOVETO_OPS seam because its target is
+      unported. Target pointer fields are modeled as u32 loads for host
+      layout parity; this is the only deliberate deviation. Host tests
+      cover fault precedence, incrblob abort, exact movement arguments,
+      successful key clearing, and failure retention.
+
   # ---- B-tree cursor data/key-size accessors (src/sqlite/data_size.rs) ----
   - address: 0x08370e6c
     ghidra: FUN_08370e6c
@@ -25663,7 +25696,7 @@ functions:
       param_1/r0/r4: cursor
       param_2/r1/r5: out
       r6: rc
-      FUN_08372ae0: restore_cursor_position (BTREE_CELL_OPS.restore_cursor_position seam)
+      FUN_08372ae0: btree_restore_cursor_position (direct ported callee)
       FUN_083727c8: btree_parse_cell (direct ported callee)
     notes: >-
       Verified against osos.asm 0x08370e6c..0x08370ed0 (104 bytes) and
@@ -25690,31 +25723,22 @@ functions:
       INVALID, otherwise parses lazily on nSize==0 and returns cached
       nData. A nonzero validator rc branches directly to the epilogue,
       leaving out untouched.
-      Callees: the UNPORTED cursor-state validator
-      sqlite3BtreeRestoreOrClearCursorPosition @ 0x08372ae0 (its C
-      shows FAULT -> cursor +0x50 saved rc, +0x54 isIncrblobHandle ->
-      SQLITE_ABORT, else seek/restore) is modeled by the new
-      read_volatile BTREE_CELL_OPS.restore_cursor_position slot; its
-      shipped documented stand-in returns SQLITE_OK and changes nothing.
+      Callees: sqlite3BtreeRestoreOrClearCursorPosition @ 0x08372ae0 is
+      now the direct ported btree_restore_cursor_position callee; its
+      unported sqlite3BtreeMoveto dependency @ 0x08371e54 remains behind
+      that module's documented BTREE_MOVETO_OPS seam.
       The cache-miss parser is the JUST-PORTED sqlite3BtreeParseCell @
       0x083727c8, called directly with (pPage, idx, cursor +0x20) per
       the ported-callee direct-call house precedent (not via its seam).
-      Host tests: invalid_state_skips_restore_and_writes_zero,
-      valid_state_skips_restore_too,
-      restore_failure_propagates_and_leaves_out_untouched,
-      restore_leaving_state_invalid_writes_zero,
-      cache_hit_skips_parse_and_reads_the_n_data_word,
-      cache_miss_parses_current_cell_caches_and_reuses,
-      default_restore_stand_in_lets_requireseek_proceed,
-      restore_slot_lives_on_btree_cell_ops. match.py (exit 1, diff
-      expected): target has 26 instructions and the port 53; both have
-      the same state gate, rc short-circuit, state re-read, nSize cache
-      gate, parse-on-miss/validNKey store, and nData out-store. Expected
-      differences are the fp frame, the read_volatile slot load + blx in
-      place of the validator's direct bl, the direct ported parser's
-      unresolved `bl 0` relocation, and LLVM expanding raw u16/u32
-      reads to little-endian byte loads/orrs on ARMv5 rather than the
-      original's aligned ldrh/ldrd/ldr.
+      Host tests cover skipped validation, movement failure/no output write,
+      post-restore INVALID handling, cache hits, and cache misses. match.py
+      (exit 1, diff expected): target has 26 instructions and the port 53;
+      both have the same state gate, rc short-circuit, state re-read, nSize
+      cache gate, parse-on-miss/validNKey store, and nData out-store.
+      Expected differences are LLVM frame/register scheduling, the direct
+      ported validator's unresolved `bl 0` relocation, and LLVM expanding
+      raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
+      than the original's aligned ldrh/ldrd/ldr.
 
   - address: 0x08371cc4
     ghidra: FUN_08371cc4
@@ -25728,16 +25752,16 @@ functions:
       param_2/r1/r5: out
       iVar1/r6: rc
       uVar2/r1: n_key_high_word
-      FUN_08372ae0: restore_cursor_position (BTREE_CELL_OPS.restore_cursor_position seam)
+      FUN_08372ae0: btree_restore_cursor_position (direct ported callee)
       FUN_083727c8: btree_parse_cell (direct ported callee)
     notes: >-
       SQLite 3.5.x sqlite3BtreeKeySize, verified against
       decomp/c/033/08371cc4_FUN_08371cc4.c and the 112-byte function
       range. This is the 64-bit sibling of sqlite3BtreeDataSize:
       `ldrd r0,r1,[r4,#0x28]` loads cached CellInfo.nKey (+0x08; cursor
-      +0x28) and `strd r0,r1,[r5]` writes the target-little-endian low
+      +0x28) and `strd r0,r1,[r5]` writes its target-little-endian low
       and high words to the i64 out-parameter. eState +0x43 below 2
-      skips validation; otherwise the shared unported-validator seam
+      skips validation; otherwise the direct ported
       sqlite3BtreeRestoreOrClearCursorPosition @ 0x08372ae0 runs. A
       nonzero rc returns immediately without touching either output word.
       On success, eState is re-read: INVALID writes i64 zero; otherwise
@@ -25745,10 +25769,10 @@ functions:
       direct ported sqlite3BtreeParseCell @ 0x083727c8 call with
       (pPage +0x18, idx +0x1c, CellInfo +0x20), followed by
       validNKey +0x42 = 1. Host tests cover invalid-state zeroing,
-      validator error propagation and no-write behavior, post-restore
+      movement error propagation and no-write behavior, post-restore
       INVALID handling, signed pair cache hits, and parse/cache-state
-      updates. match.py diff is expected because the Rust port uses the
-      shared validator seam and unaligned raw-layout reads.
+      updates. match.py diff is expected because raw layout reads remain
+      unaligned little-endian accesses.
 
   # ---- B-tree cell size query (src/sqlite/cell_size.rs) ----
   - address: 0x082c0a50

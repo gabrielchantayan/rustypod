@@ -72,14 +72,10 @@ const CELL_INFO_SIZE: usize = 0x20;
 /// Byte offset of `CellInfo.nSize` (original: `ldrh r0,[sp,#0x1e]`).
 const N_SIZE_OFFSET: usize = 0x1e;
 
-/// The unported services the b-tree cell cluster reaches: the parser
-/// itself (ported — that slot's default is the real thing), plus the
-/// two varint readers the parser calls, plus the cursor-state
-/// validator the cursor accessors call. The varint readers are ported
-/// and ship as their slots' defaults: 0x0837ac30 in
-/// `sqlite/get_varint.rs`, 0x0837aab0 in `sqlite/get_varint64.rs`. The
-/// validator (`sqlite3BtreeRestoreOrClearCursorPosition` @ 0x08372ae0)
-/// is still unported; its slot ships the success stand-in.
+/// The b-tree cell parsing services: the parser itself plus the two varint
+/// readers it calls. All are ported and ship as their slots' defaults:
+/// 0x083727ec in `sqlite/parse_cell.rs`, 0x0837ac30 in
+/// `sqlite/get_varint.rs`, and 0x0837aab0 in `sqlite/get_varint64.rs`.
 #[derive(Clone, Copy)]
 pub struct BtreeCellOps {
     /// `sqlite3BtreeParseCellPtr` @ 0x083727ec: parse the cell at
@@ -103,24 +99,10 @@ pub struct BtreeCellOps {
     /// one is also called for single-byte varints (the rowid read has
     /// no inline fast path).
     pub get_varint32: unsafe extern "C" fn(p: *const u8, out: *mut u64) -> u32,
-    /// `sqlite3BtreeRestoreOrClearCursorPosition` @ 0x08372ae0
-    /// (UNPORTED — [`missing_restore_cursor_position`] is the shipped
-    /// default): the cursor-state validator every cursor accessor
-    /// (`sqlite3BtreeDataSize` @ 0x08370e6c, its i64 key-size sibling @
-    /// 0x08371cc4, ...) runs when `BtCursor.eState` (+0x43) reaches
-    /// CURSOR_REQUIRESEEK (2). Returns a SQLite result code: the saved
-    /// error at cursor +0x50 when eState is CURSOR_FAULT (3),
-    /// SQLITE_ABORT (4) when cursor +0x54 (isIncrblobHandle) is set,
-    /// otherwise it seeks back to the saved position and returns the
-    /// seek's code (0 on success). See
-    /// `decomp/c/033/08372ae0_FUN_08372ae0.c`.
-    pub restore_cursor_position: unsafe extern "C" fn(cursor: *mut u8) -> i32,
 }
 
-/// Default boundary while 0x083727ec is unported. Zero-filling is the
-/// only honest stand-in for a parser that does not exist yet: the
-/// wrapper then returns `nSize == 0` for every cell instead of whatever
-/// the stack happened to hold.
+/// Test stand-in for the ported parser. Zero-filling makes the wrapper return
+/// `nSize == 0` for every cell.
 unsafe extern "C" fn missing_parse_cell(_page: *const u8, _cell: *const u8, info: *mut u8) {
     core::ptr::write_bytes(info, 0, CELL_INFO_SIZE);
 }
@@ -141,23 +123,13 @@ unsafe extern "C" fn missing_get_varint32(_p: *const u8, out: *mut u64) -> u32 {
     1
 }
 
-/// Stand-in kept for tests while 0x08372ae0 is unported: report
-/// SQLITE_OK and touch nothing. With the save/restore machinery
-/// unmodeled there is no saved position to seek back to — the cursor
-/// is already where the caller left it — so success is the only
-/// honest answer a validator that does not exist yet can give.
-unsafe extern "C" fn missing_restore_cursor_position(_cursor: *mut u8) -> i32 {
-    0
-}
+/// Wired default for [`BTREE_CELL_OPS`]: the ported parser and both ported
+/// varint readers (0x0837ac30 and 0x0837aab0).
 
-/// Wired default for [`BTREE_CELL_OPS`]: the ported parser, both
-/// ported varint readers (0x0837ac30 and 0x0837aab0) and the
-/// success stand-in for the unported cursor validator @ 0x08372ae0.
 pub const DEFAULT_BTREE_CELL_OPS: BtreeCellOps = BtreeCellOps {
     parse_cell: crate::sqlite::parse_cell::btree_parse_cell_ptr,
     get_varint: crate::sqlite::get_varint::get_varint,
     get_varint32: crate::sqlite::get_varint64::get_varint64,
-    restore_cursor_position: missing_restore_cursor_position,
 };
 
 /// Active model of the parser call in [`cell_size_ptr`] and of the
@@ -186,12 +158,6 @@ pub(crate) unsafe fn get_varint32_op() -> unsafe extern "C" fn(*const u8, *mut u
     core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.get_varint32))
 }
 
-/// Reads the `sqlite3BtreeRestoreOrClearCursorPosition` slot.
-/// Volatile, same rationale as `parse_cell_op` above.
-#[inline(always)]
-pub(crate) unsafe fn restore_cursor_position_op() -> unsafe extern "C" fn(*mut u8) -> i32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.restore_cursor_position))
-}
 
 /// cell_size_ptr — original: `FUN_082c0a50` @ 0x082c0a50 (28 bytes;
 /// 11 `bl` call sites).
@@ -361,14 +327,6 @@ mod tests {
         assert_eq!((value, len), (0, 1));
     }
 
-    #[test]
-    fn missing_restore_cursor_position_stand_in_reports_ok() {
-        let mut cursor = [0x5au8; 0x60];
-        let snapshot = cursor;
-        let rc = unsafe { missing_restore_cursor_position(cursor.as_mut_ptr()) };
-        assert_eq!(rc, 0, "SQLITE_OK — nothing to restore");
-        assert_eq!(cursor, snapshot, "the stand-in must not touch the cursor");
-    }
 
     #[test]
     fn shipped_default_is_the_ported_parser() {
