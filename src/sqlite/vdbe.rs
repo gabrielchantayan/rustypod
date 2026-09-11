@@ -32,6 +32,9 @@
 //!   `sqlite3VdbeChangeP1`: patch the first operand of an emitted op.
 //! - `vdbe_change_p2` — `FUN_08386a44` @ 0x08386a44 (48 bytes; 66 `bl` +
 //!   2 tail `b`). `sqlite3VdbeChangeP2`: back-patch a jump target.
+//! - `vdbe_jump_here` — `FUN_0838b674` @ 0x0838b674 (8 bytes; 8 `bl` +
+//!   1 conditional tail `bne`). `sqlite3VdbeJumpHere`: patch an op's P2
+//!   operand to the address of the next op.
 //! - `vdbe_change_p5` — `FUN_08386bd4` @ 0x08386bd4 (32 bytes; 19 `bl` +
 //!   1 tail `b`). `sqlite3VdbeChangeP5`: set P5 on the op just emitted.
 //! - `vdbe_make_label` — `FUN_0838b8fc` @ 0x0838b8fc (88 bytes; 30 `bl`).
@@ -537,6 +540,20 @@ pub unsafe extern "C" fn vdbe_change_p2(p: *mut Vdbe, addr: i32, value: i32) {
     (*a_op.offset(addr as isize)).p2 = value;
 }
 
+/// vdbe_jump_here — original: `FUN_0838b674` @ 0x0838b674 (8 bytes; 8
+/// unconditional `bl` call sites and 1 conditional tail `bne`, verified by
+/// decoding every ARM B/BL word in osos.dec).
+///
+/// `sqlite3VdbeJumpHere`: load the current `nOp` and tail-call
+/// [`vdbe_change_p2`] to patch `addr` to the next op. The original
+/// dereferences `p` before its callee's NULL guard, so `p` must be non-NULL.
+/// No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_jump_here(p: *mut Vdbe, addr: i32) {
+    vdbe_change_p2(p, addr, (*p).n_op);
+}
+
 /// vdbe_change_p5 — original: `FUN_08386bd4` @ 0x08386bd4 (32 bytes;
 /// 19 `bl` + 1 tail `b`).
 ///
@@ -876,6 +893,20 @@ mod tests {
         stmt.vdbe.n_op = 4;
         // No aOp: must return without dereferencing it.
         unsafe { vdbe_change_p2(stmt.ptr(), 0, 7) };
+    }
+
+    #[test]
+    fn jump_here_targets_the_next_op() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        let branch = unsafe { vdbe_add_op3(stmt.ptr(), 0x47, 0, -1, 0) };
+        unsafe { vdbe_add_op3(stmt.ptr(), 0x20, 0, 0, 0) };
+
+        unsafe { vdbe_jump_here(stmt.ptr(), branch) };
+
+        assert_eq!(branch, 0);
+        assert_eq!(slab[branch as usize].p2, 2);
     }
 
     #[test]

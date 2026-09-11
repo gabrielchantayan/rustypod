@@ -23841,6 +23841,25 @@ functions:
       p->nOp <= addr, NULL p->aOp - then `p->aOp[addr].p2 = value`
       (`add r1,r1,r1 lsl#2` then `lsl#2` = stride 20, field at +8).
 
+  - address: 0x0838b674
+    ghidra: FUN_0838b674
+    name: vdbe_jump_here
+    size: 8
+    sig: "void vdbe_jump_here(Vdbe *p, int addr)"
+    module: sqlite/vdbe
+    status: ported
+    renames:
+      param_1: p
+      param_2: addr
+    notes: >-
+      SQLite's sqlite3VdbeJumpHere. 8 unconditional bl call sites and one
+      conditional tail bne (verified by decoding every ARM B/BL word in
+      osos.dec); no predicated BL call sites. The entire 8-byte function is
+      `ldr r2,[r0,#0xc]` then `b 0x08386a44`: it snapshots p->nOp and
+      tail-calls vdbe_change_p2(p, addr, nOp), thereby making the existing
+      opcode at addr jump to the next emitted opcode. The original dereferences
+      p before vdbe_change_p2 can guard it, so a NULL p is invalid.
+
   - address: 0x08386bd4
     ghidra: FUN_08386bd4
     name: vdbe_change_p5
