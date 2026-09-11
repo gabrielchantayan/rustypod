@@ -14,17 +14,16 @@
 //! mirror slots.
 //! `checked_byte_block_reader_3d` — `FUN_0802b7c4` @ 0x0802b7c4 (164 bytes).
 //! This distinct three-dimensional reader starts from the primary cursor slots.
-//! Deliberate deviation: the mode transform is inlined. Exactly mode 1
-//! byte-reverses the checksum; all other modes preserve it.
+//! All checksum transforms call `transform_checked_word_for_mode` at
+//! 0x0802b538; exactly mode 1 byte-reverses the checksum while all other
+//! modes preserve it.
 
+
+use crate::util::bswap::transform_checked_word_for_mode;
 
 /// The checksum-mismatch status returned by the retail reader.
 pub const BYTE_BLOCK_CHECKSUM_MISMATCH: u32 = 4;
 
-#[inline(always)]
-const fn transform_checksum_for_mode(mode: u32, checksum: u32) -> u32 {
-    if mode == 1 { checksum.swap_bytes() } else { checksum }
-}
 
 /// checked_byte_block_convert_core — original: `FUN_0802b56c` @ 0x0802b56c
 /// (104 bytes; 17 plain unconditional `bl` call sites, zero predicated forms).
@@ -69,7 +68,7 @@ pub unsafe extern "C" fn checked_byte_block_convert_core(
         index = index.wrapping_add(1);
     }
 
-    let checksum = transform_checksum_for_mode(mode, unsafe {
+    let checksum = transform_checked_word_for_mode(mode, unsafe {
         core::ptr::read_volatile(source.cast::<u32>())
     });
     if checksum != sum {
@@ -135,7 +134,7 @@ pub unsafe extern "C" fn checked_byte_block_reader(
         row = row.wrapping_add(1);
     }
 
-    let checksum = transform_checksum_for_mode(mode, unsafe {
+    let checksum = transform_checked_word_for_mode(mode, unsafe {
         core::ptr::read_volatile(source.cast::<u32>())
     });
     if checksum != sum {
@@ -168,8 +167,8 @@ pub unsafe extern "C" fn checked_byte_block_reader(
 /// a transformed zero checksum. The 14 stock callers are all unconditional;
 /// none guards this reader with a conditional `bl`.
 ///
-/// Deliberate deviation: the byte-identical `FUN_0802b538` mode transform is
-/// inlined, as it is in the neighboring byte-block readers.
+/// The checksum transform calls the separately ported
+/// [`crate::util::bswap::transform_checked_word_for_mode`].
 ///
 /// # Safety
 ///
@@ -210,7 +209,7 @@ pub unsafe extern "C" fn checked_byte_block_reader_3d(
         i = i.wrapping_add(1);
     }
 
-    let checksum = transform_checksum_for_mode(mode, unsafe {
+    let checksum = transform_checked_word_for_mode(mode, unsafe {
         core::ptr::read_volatile(source.cast::<u32>())
     });
     if checksum != sum {

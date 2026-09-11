@@ -9,18 +9,16 @@
 //! The byte wrapper decodes one leading mode-transformed word through
 //! `input_cursor_mirror`, then invokes the flat byte-block checksum core at
 //! 0x0802b56c. The word core below is the distinct three-dimensional variant.
-//! The mode transform is intentionally inlined: only exact mode 1 reverses
-//! four-byte words, while every other u32 mode is identity.
+//! Every word and its checksum call `transform_checked_word_for_mode`
+//! (0x0802b538): only exact mode 1 reverses four byte lanes.
 
 
+
+use crate::util::bswap::transform_checked_word_for_mode;
 
 /// The core's checksum-mismatch result.
 pub const CHECKSUM_MISMATCH: u32 = 4;
 
-#[inline(always)]
-const fn transform_word_for_mode(mode: u32, word: u32) -> u32 {
-    if mode == 1 { word.swap_bytes() } else { word }
-}
 
 
 
@@ -46,7 +44,7 @@ pub unsafe extern "C" fn checked_byte_block_convert(
     out_leading_word: *mut u32,
 ) -> u32 {
     let source = unsafe { core::ptr::read_volatile(input_cursor_mirror) };
-    let leading = transform_word_for_mode(mode, unsafe {
+    let leading = transform_checked_word_for_mode(mode, unsafe {
         core::ptr::read_volatile(source.cast::<u32>())
     });
     unsafe { core::ptr::write_volatile(out_leading_word, leading) };
@@ -87,10 +85,9 @@ pub unsafe extern "C" fn checked_byte_block_convert(
 /// (typically 8/2/256), so the degenerate paths are binary-verified but
 /// not exercised by stock firmware.
 ///
-/// Deliberate deviation: as in `checked_byte_block_convert`, the tiny
-/// `FUN_0802b538` transform is reproduced inline rather than ported as a
-/// second export; the three `bl 0x0802b538` sites of the original (one in
-/// the inner loop, one for the checksum word) become inlined arithmetic.
+/// Every mode transform calls the separately ported
+/// [`crate::util::bswap::transform_checked_word_for_mode`], retaining the
+/// original's distinct `bl` target.
 ///
 /// # Safety
 /// `input_cursor_mirror` and `output_cursor_mirror` must be readable and
@@ -117,7 +114,7 @@ pub unsafe extern "C" fn checked_word_block_convert_3d(
         while j < dim1 {
             let mut k = 0;
             while k < dim2 {
-                let word = transform_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+                let word = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
                 sum = sum.wrapping_add(word);
                 source = unsafe { source.add(1) };
                 unsafe { core::ptr::write_volatile(target, word) };
@@ -128,7 +125,7 @@ pub unsafe extern "C" fn checked_word_block_convert_3d(
         }
         i += 1;
     }
-    let checksum = transform_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+    let checksum = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
     if checksum != sum {
         return CHECKSUM_MISMATCH;
     }

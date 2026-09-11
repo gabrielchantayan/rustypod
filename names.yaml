@@ -14339,14 +14339,41 @@ functions:
       0x08028xxx..0x08029xxx (FUN_08028e4c, FUN_08028f14, FUN_08028ff4,
       FUN_08029144, FUN_08029630, FUN_0802974c, FUN_080298e0, ...), which
       convert big-endian record fields only when the record mode is 1.
-      0x0802b538 is a byte-identical twin (52 equal bytes) used by the
-      checked_word_block family, which reproduces the transform inline
-      rather than through a second exported symbol; this entry is the
-      standalone instance. Ported into util/bswap.rs under the same name
-      the sibling inliner uses. No deliberate deviations. match.py
+      0x0802b538 is a byte-identical twin used by the checked-block family.
+      It is separately ported as transform_checked_word_for_mode so its ten
+      direct retail callers retain their own exported target rather than an
+      inlined duplicate. No deliberate deviations. match.py
       reviewed: LLVM emits a branchless predicated rotate form (orreq on
       the mode==1 comparison) where ADS branched over the swap, but the
       mode compare, conditional transform, and passthrough structure match.
+
+  - address: 0x0802b538
+    ghidra: FUN_0802b538
+    name: transform_checked_word_for_mode
+    size: 52
+    sig: "u32 transform_checked_word_for_mode(u32 mode, u32 word)"
+    module: util/bswap
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r1: word
+    notes: >-
+      Raw ARM is exactly 52 bytes (0x0802b538..0x0802b56c), thirteen
+      instructions, bounded by checked_byte_block_convert_core's distinct
+      push at 0x0802b56c. It is byte-identical to
+      transform_word_for_mode @ 0x0802b504: move mode to r2, compare exact
+      value 1, pass word through in r0 for every other mode, otherwise
+      construct its four-byte reversal in register lanes. Decoding every ARM
+      B/BL immediate in osos.dec finds ten plain unconditional bl callers,
+      zero predicated bl forms, and zero direct B entries: 0x0802b5ac,
+      0x0802b608, 0x0802b62c, 0x0802b680, 0x0802b704, 0x0802b764,
+      0x0802b794, 0x0802b83c, 0x0802b8ac, and 0x0802b8e8. These are the
+      checked byte/word block conversion family; their unconditional calls
+      confirm the callee itself owns no NULL or flag guard. The port uses
+      u32::swap_bytes for the disjoint-lane XOR result and a distinct
+      target-only text section so LLVM does not fold this address's symbol
+      into its byte-identical sibling. No deliberate deviations. match.py
+      structural review is expected to differ in the conditional-swap shape.
 
   - address: 0x0802b56c
     ghidra: FUN_0802b56c
