@@ -58685,6 +58685,46 @@ functions:
       aligned private storage and an inert handler because retail code cannot
       execute on the host.
 
+  - address: 0x0813e9ec
+    ghidra: FUN_0813e9ec
+    name: shared_interface_tree_mutex_construct
+    size: 184
+    sig: "SharedInterfaceTreeMutex *shared_interface_tree_mutex_construct(SharedInterfaceTreeMutex *this, u8 mode, u32 kind)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r0: this (writable 0x48-byte shared-interface base object)
+      param_2/r1: mode (stored as a byte at this +0x44)
+      param_3/r2: kind (selects root-context resource words 0 or 1)
+      DAT_0813ea98: shared_interface_base_vtable (0x089a75c8)
+      DAT_0813ea9c: shared_interface_tree_mutex_vtable (0x089850c4)
+      DAT_0813eaa0: app_root_object_global (0x089ca674)
+      FUN_083c00dc: word_key_set_allocate_node
+      FUN_08261e28: cxx_mutex_construct
+    notes: >-
+      Raw ARM has 172 bytes of code from 0x0813e9ec through 0x0813ea98,
+      followed by the three literal-pool words at 0x0813ea98/0x0813ea9c/
+      0x0813eaa0; the distinct next function starts with cmp r0,#0 at
+      0x0813eaa4, so the true extent is 184 bytes. It first installs shared
+      interface-base vtable 0x089a75c8, clears the embedded word-key tree at
+      +0x04, obtains its sentinel through word_key_set_allocate_node, makes
+      the sentinel parent NULL and its left/right links self-pointing,
+      constructs the mutex at +0x20, stores 2 at +0x3c, replaces the vtable
+      with 0x089850c4, conditionally copies root-context resource kind 0 or 1
+      to +0x40, and stores mode at +0x44.
+      A complete ARM B/BL immediate decode found exactly ten direct inbound
+      bl sites, all unconditional (0x080fe348, 0x0811ee1c, 0x081436f8,
+      0x0814a938, 0x08168a9c, 0x081aa35c, 0x081b7610, 0x081cc7d4,
+      0x0829df40, 0x082c86e8), with zero predicated bl and zero plain-b
+      tails. An aligned whole-image word scan found no entry-address data
+      reference. The vtable is a shared interface with no recovered class
+      identity, so the name records only the verified tree/mutex shape.
+      Host layout widens tree pointer fields to keep them disjoint; target
+      layout assertions retain the ARM offsets. The original leaves the
+      mutex constructor's unused ABI-scratch scope inputs unspecified after
+      node allocation; the port passes zeroes, which its attr initializer
+      overwrites before use.
+
   - address: 0x08168a8c
     ghidra: FUN_08168a8c
     name: root_context_f9c_bound_construct
@@ -58695,15 +58735,15 @@ functions:
     renames:
       param_1/r0: this (writable 0x48-byte base-derived object)
       param_2/r1: mode (stored as a byte at this +0x44)
-      FUN_0813e9ec: root_context_f9c_bound_base_construct
+      FUN_0813e9ec: shared_interface_tree_mutex_construct
       DAT_08168ac4: root_context_f9c_bound_vtable (0x089880f0)
       DAT_08168ac8: app_root_object_global (0x089ca674)
     notes: >-
       Raw ARM establishes exactly 56 bytes: code 0x08168a8c..0x08168ac4
       plus the two literal-pool words at 0x08168ac4/0x08168ac8; the distinct
-      next function begins at 0x08168acc with cmp r0,#0. It calls the
-      unported base constructor 0x0813e9ec(this, 0, 0), uses that return as
-      the derived object, stores vtable 0x089880f0 at +0x00, copies
+      next function begins at 0x08168acc with cmp r0,#0. It calls the ported
+      shared_interface_tree_mutex_construct 0x0813e9ec(this, 0, 0), uses that
+      returned base object, stores vtable 0x089880f0 at +0x00, copies
       *(*0x089ca674 + 0x30 + 0xf9c) to +0x40, and stores r1's low byte at
       +0x44. The literal vtable address reads C++ name-blob text in osos.dec,
       not a valid static table, so no class or virtual-callee identity is
@@ -58712,10 +58752,10 @@ functions:
       0x081b57bc, 0x081b5c4c, 0x081f89fc, 0x081f8ae4, 0x081f8e60,
       0x081f8f04, 0x08208c38, 0x0820ba60, 0x08210ac8, 0x08211510, and
       0x082c76b0), zero predicated bl, plus the unconditional tail b at
-      0x0825a024. Device builds preserve the original base-constructor
-      boundary; host tests install a recording seam and use a dedicated
-      below-4-GiB raw-u32 root/context fixture. The runtime root global uses
-      app/context_scope.rs's existing APP_ROOT_OBJECT model of 0x089ca674.
+      0x0825a024. The derived constructor calls the ported base directly;
+      host tests use the genuine tree allocator through a dedicated writable
+      arena and app/context_scope.rs's existing APP_ROOT_OBJECT model of
+      0x089ca674 through a dedicated below-4-GiB raw-u32 root/context fixture.
 
   - address: 0x08168ae4
     ghidra: thunk_FUN_0825a028
