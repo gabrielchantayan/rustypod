@@ -725,15 +725,19 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() != b.read())
 }
 
-/// equal_deref — originals: `FUN_083cf8f0` @ 0x083cf8f0,
-/// `FUN_083cf908` @ 0x083cf908, `FUN_083cf950` @ 0x083cf950,
-/// `FUN_083cf968` @ 0x083cf968, and `FUN_083cf980` @ 0x083cf980
-/// (24 bytes each). Raw bytes show all five are the same six-word leaf.
+/// equal_deref — originals: `FUN_083cf8a8` @ 0x083cf8a8,
+/// `FUN_083cf8f0` @ 0x083cf8f0, `FUN_083cf908` @ 0x083cf908,
+/// `FUN_083cf950` @ 0x083cf950, `FUN_083cf968` @ 0x083cf968, and
+/// `FUN_083cf980` @ 0x083cf980 (24 bytes each). Raw bytes show all six are
+/// the same six-word leaf.
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
-/// 0x083cf8f0 (0x081bd33c, 0x0839bc54, 0x083c8fd0, 0x083c943c,
-/// 0x083c9458, 0x083c94dc, 0x083c95a0, 0x083db9c4), with no predicated
+/// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
+/// 0x083c7480, 0x083c7504, 0x083c75c8, and 0x083db8ac), with no predicated
 /// calls, tail branches, or aligned raw-word references. It finds 8 plain
-/// `bl` callers at 0x083cf908 (0x081bea64, 0x0839bca8, 0x083c9a14,
+/// `bl` callers at 0x083cf8f0 (0x081bd33c, 0x0839bc54, 0x083c8fd0,
+/// 0x083c943c, 0x083c9458, 0x083c94dc, 0x083c95a0, 0x083db9c4), with no
+/// predicated calls, tail branches, or aligned raw-word references. It finds
+/// 8 plain `bl` callers at 0x083cf908 (0x081bea64, 0x0839bca8, 0x083c9a14,
 /// 0x083c9e80, 0x083c9e9c, 0x083c9f20, 0x083c9fe4, 0x083dba6c), with no
 /// predicated calls or tail branches. It finds 8 plain `bl` callers at
 /// 0x083cf950 (0x081bdd38, 0x0839bcfc, 0x083cb914, 0x083cbd80, 0x083cbd9c,
@@ -3061,7 +3065,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f8f0_f908_f950_f968_f980_copies_compare_words_by_value() {
+    fn equal_deref_f8a8_f8f0_f908_f950_f968_f980_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
