@@ -6525,7 +6525,6 @@ functions:
     name: kernel_sem5_signal
     size: 8
     sig: "usize kernel_sem5_signal()"
-    module: kernel/task_lock
     status: ported
     notes: >-
       Fixed-id semaphore-release shim: `mov r0, #5; b 0x08037e10`
@@ -65399,6 +65398,35 @@ functions:
       reports the expected 19-vs-20 instruction structural diff: LLVM uses a
       larger frame and branchy bool normalization around the same ordered
       slot loads and two direct helper calls.
+
+  # --- Stream-buffer slot one-byte lookahead ---
+  - address: 0x083d7158
+    ghidra: FUN_083d7158
+    name: streambuf_slot_peek_byte
+    size: 32
+    sig: "u8 streambuf_slot_peek_byte(const u32 *streambuf_slot)"
+    module: cxx/streambuf_slot_peek_byte
+    status: ported
+    renames:
+      param_1/r0: streambuf_slot
+      "*streambuf_slot/r0": streambuf
+      uVar1/r0: character
+      FUN_083da5a8: streambuf_sgetc_raw
+    notes: >-
+      Raw osos.dec confirms the exact 32-byte extent from 0x083d7158 through
+      0x083d7174; a separately linked sibling begins at 0x083d7178. Decoding
+      every ARM B/BL-immediate word finds exactly eight inbound calls, all
+      unconditional plain bl (zero predicated): 0x083b646c, 0x083b64b4,
+      0x083b6528, 0x083b6570, 0x083b66d0, 0x083b6760, 0x083b680c, and
+      0x083b685c. The body dereferences its non-NULL-REQUIRED target-width
+      stream-buffer slot, maps a NULL word to signed EOF (-1), otherwise calls
+      0x083da5a8, then masks either i32 result to its low byte. The ARM port
+      reuses the existing direct bridge to that unported helper without a
+      behavioral deviation; host tests replace it with a recorder to prove
+      NULL avoids the call, the pointed buffer is forwarded, and both a wide
+      result and EOF truncate to their expected byte values. match.py using the
+      worktree archive reports the expected 8-vs-11 instruction diff: LLVM
+      returns the NULL case early and saves fp instead of retailOS's unused r4.
 
   # --- SQLite adaptive Bitvec destructor ---
   - address: 0x08370588

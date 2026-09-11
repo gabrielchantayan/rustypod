@@ -18,9 +18,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! None on ARM: the private bridge tail-branches directly to the unported
+//! None on ARM: the shared bridge tail-branches directly to the unported
 //! helper at 0x083da5a8. Host tests replace that helper through a test-only
-//! recorder because a target-width vtable function word cannot name a native
+//! recorder because a target-width vtable callback word cannot name a native
 //! x86-64 callback.
 
 /// Context fields consumed by [`streambuf_slot_peek_equal`].
@@ -40,7 +40,7 @@ const _: [u8; 0x70] = [0; core::mem::offset_of!(StreambufSlotPairContext, right_
 
 #[cfg(target_arch = "arm")]
 extern "C" {
-    fn streambuf_sgetc(streambuf: *mut u8) -> i32;
+    pub(crate) fn streambuf_sgetc(streambuf: *mut u8) -> i32;
 }
 
 // Reaches the exact unported direct callee while retaining the caller's LR.
@@ -59,7 +59,7 @@ streambuf_sgetc:
 );
 
 #[cfg(not(target_arch = "arm"))]
-type StreambufSgetc = unsafe extern "C" fn(*mut u8) -> i32;
+pub(crate) type StreambufSgetc = unsafe extern "C" fn(*mut u8) -> i32;
 
 /// Host-only stand-in for the unported virtual stream-buffer helper.
 ///
@@ -67,16 +67,16 @@ type StreambufSgetc = unsafe extern "C" fn(*mut u8) -> i32;
 /// tail-branches to 0x083da5a8 above. EOF is the helper's observable result
 /// for an exhausted stream buffer when no recorder is installed.
 #[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn unavailable_streambuf_sgetc(_streambuf: *mut u8) -> i32 {
+pub(crate) unsafe extern "C" fn unavailable_streambuf_sgetc(_streambuf: *mut u8) -> i32 {
     -1
 }
 
 #[cfg(not(target_arch = "arm"))]
-static mut STREAMBUF_SGETC: StreambufSgetc = unavailable_streambuf_sgetc;
+pub(crate) static mut STREAMBUF_SGETC: StreambufSgetc = unavailable_streambuf_sgetc;
 
 #[cfg(not(target_arch = "arm"))]
 #[inline(always)]
-unsafe fn streambuf_sgetc(streambuf: *mut u8) -> i32 {
+pub(crate) unsafe fn streambuf_sgetc(streambuf: *mut u8) -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(STREAMBUF_SGETC))(streambuf)
 }
 
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn streambuf_slot_peek_equal(context: *const StreambufSlot
 }
 
 #[cfg(test)]
-pub(crate) static STREAMBUF_SLOT_PEEK_EQUAL_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+pub(crate) static STREAMBUF_SGETC_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn null_streambufs_compare_as_eof_without_peeking() {
-        let _guard = STREAMBUF_SLOT_PEEK_EQUAL_TEST_LOCK.lock();
+        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
         let _reset = install_sgetc([17, 23]);
         let Some((context, _, _)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_equal"));
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn equal_peeks_sample_left_then_right() {
-        let _guard = STREAMBUF_SLOT_PEEK_EQUAL_TEST_LOCK.lock();
+        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
         let _reset = install_sgetc([0xff, 0xff]);
         let Some((context, left, right)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_equal"));
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn null_buffer_is_eof_and_different_peeks_do_not_compare_equal() {
-        let _guard = STREAMBUF_SLOT_PEEK_EQUAL_TEST_LOCK.lock();
+        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
         let _reset = install_sgetc([0, -1]);
         let Some((context, _, right)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_equal"));
