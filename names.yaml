@@ -46199,6 +46199,30 @@ functions:
       no-write path including a null output pointer; match.py reviewed after
       the ARM release build.
 
+  # --- proprietary STANDARD cipher first lookup table ---
+  - address: 0x0802de78
+    ghidra: FUN_0802de78
+    name: standard_cipher_table_one_lookup
+    size: 12
+    sig: "u8 standard_cipher_table_one_lookup(u32 index)"
+    module: crypto/standard_cipher_table_one
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0802e0d0: STANDARD_CIPHER_TABLE_ONE
+    notes: >-
+      Twelve-byte leaf at 0x0802de78..0x0802de84, immediately followed by
+      sibling lookup 0x0802de84. Raw ARM loads the table base 0x0891f04c from
+      literal 0x0802e0d0 then returns its byte at unguarded r0 offset. A
+      complete decoded ARM B/BL-word scan finds ten direct callers, all plain
+      unconditional bl instructions (0x08027d08, 0x08027d38, 0x08027d64,
+      0x08027d8c, 0x08027dbc, 0x08027f48, 0x08027f78, 0x08027fa4,
+      0x08027fcc, 0x08027ffc); each supplies a byte-range table index during
+      proprietary STANDARD cipher transforms. No deviations: unchecked Rust
+      indexing preserves the retailOS valid-byte caller contract. Host tests
+      cover table boundaries and representative interior values; match.py
+      reviewed after the ARM release build.
+
   # --- sixteen-slot byte identity-table initialization ---
   - address: 0x0802dda8
     ghidra: FUN_0802dda8
