@@ -386,6 +386,10 @@ pub mod hints {
     // raw-u32 node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const FILE_RECORD_TEARDOWN: usize = 0xb600_0000;
+    // 0xbb00_0000: dedicated to app/vtable_set's file-store destructor
+    // fixture; it carries raw-u32 vtable and aligned-buffer words, and
+    // fixture mappings never unmap.
+    pub const VTABLE_FILE_STORE_DESTRUCT: usize = 0xbb00_0000;
     // 0xad00_0000: dedicated to ui/first_collection_item_bounds' raw-u32
     // collection-owner fixture; mappings never unmap, so no other user may
     // share this hint.

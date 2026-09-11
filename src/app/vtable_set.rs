@@ -2688,6 +2688,17 @@ const STORE_OBJECT_SIZE: usize = 0x34;
 /// r1, [r0, #0x30]`).
 const STORE_INNER_OFFSET: usize = 0x30;
 
+/// Byte offset of the embedded aligned buffer the base destructor resets
+/// (`add r0, r0, #0x0c` at 0x0816c050).
+const STORE_ALIGNED_BUFFER_OFFSET: usize = 0x0c;
+
+/// Target word installed by 0x08149d60 before disposing the inner object.
+const STORE_DESTRUCT_VTABLE: u32 = 0x0898_665c;
+
+/// Target word installed by the raw tail target 0x0816c044 before it resets
+/// the embedded aligned buffer.
+const STORE_BASE_DESTRUCT_VTABLE: u32 = 0x0898_846c;
+
 /// Byte offset of the open-status word inside the inner file object
 /// (`ldr r7, [r1, #0x1c]`; zero = the open succeeded).
 const STORE_STATUS_OFFSET: usize = 0x1c;
@@ -2789,6 +2800,42 @@ unsafe extern "C" fn store_ctor_unported(
         .cast::<usize>()
         .write(core::ptr::addr_of!(STUB_STORE_INNER) as usize);
     object
+}
+
+/// vtable_file_store_destruct — original: `FUN_08149d60` @ `0x08149d60`
+/// (64 bytes exactly: 60 executable bytes plus the literal-pool word at
+/// `0x08149d9c`; **9 unconditional `bl` call sites**, 0 predicated direct
+/// calls).
+///
+/// Installs the intermediate destructor vtable, conditionally disposes the
+/// owned inner file object at `this + 0x30` through vtable slot `+0x04`, and
+/// clears that ownership word after the call. The raw tail target
+/// `0x0816c044` then installs the base destructor vtable, resets the
+/// embedded aligned buffer at `this + 0x0c`, and reaches the empty
+/// `0x08275bc8` base tail, which returns `this`.
+///
+/// # Deliberate deviation
+///
+/// The 0x0816c044 tail is unported, but its complete 32-byte body and empty
+/// 0x08275bc8 tail were raw-decoded. They are inlined here so this exported
+/// port preserves the complete destructor chain without an unfaithful seam.
+/// The dynamic disposal is delegated directly to the already-ported
+/// [`vtable_slot_04_dispose`], whose guarded slot-`+0x04` call and
+/// post-call NULL store exactly match this function's fragment.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_store_destruct(this: *mut u8) -> *mut u8 {
+    this.cast::<u32>().write_volatile(STORE_DESTRUCT_VTABLE);
+
+    let inner_slot = this.add(STORE_INNER_OFFSET).cast::<*mut u8>();
+    if !inner_slot.read().is_null() {
+        vtable_slot_04_dispose(inner_slot);
+    }
+    inner_slot.write_volatile(core::ptr::null_mut());
+
+    this.cast::<u32>().write_volatile(STORE_BASE_DESTRUCT_VTABLE);
+    crate::heap::aligned_buffer::aligned_buffer_reset(this.add(STORE_ALIGNED_BUFFER_OFFSET));
+    this
 }
 
 /// vtable_file_open — original: `FUN_0811d724` @ 0x0811d724 (140 bytes;
@@ -4583,6 +4630,7 @@ pub(crate) mod tests {
     extern crate std;
     use super::*;
     use parking_lot::Mutex;
+    use crate::testing::{hints, try_map_u32_slab};
 
     const MOCK_OK: u32 = 0;
     const OPEN_ERR: u32 = 0x0bad_0001;
@@ -9430,6 +9478,104 @@ pub(crate) mod tests {
         }
         fn ptr(&mut self) -> *mut u8 {
             self.bytes.as_mut_ptr()
+        }
+    }
+
+    // ---- vtable_file_store_destruct (0x08149d60) ----------------------
+
+    static mut STORE_DESTRUCT_CALLS: usize = 0;
+    static mut STORE_DESTRUCT_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut STORE_DESTRUCT_OWNER: *mut u8 = core::ptr::null_mut();
+    static mut STORE_DESTRUCT_VTABLE_DURING_CALL: u32 = 0;
+
+    unsafe extern "C" fn recording_store_destruct_dispose(object: *mut u8) {
+        STORE_DESTRUCT_CALLS += 1;
+        STORE_DESTRUCT_OBJECT = object;
+        STORE_DESTRUCT_VTABLE_DURING_CALL =
+            STORE_DESTRUCT_OWNER.cast::<u32>().read_volatile();
+    }
+
+    #[test]
+    fn file_store_destruct_releases_inner_resets_base_and_returns_this() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let Some(store) = try_map_u32_slab(hints::VTABLE_FILE_STORE_DESTRUCT, 0x100) else {
+            return;
+        };
+        let mut inner_vtable = [0u8; 0x10];
+        let mut inner = [0u8; core::mem::size_of::<usize>()];
+        unsafe {
+            core::ptr::write_bytes(store, 0, 0x100);
+            (inner_vtable.as_mut_ptr().add(VTABLE_SLOT_04) as *mut VtableSlot04Method)
+                .write_unaligned(recording_store_destruct_dispose);
+            inner.as_mut_ptr().cast::<usize>().write(inner_vtable.as_ptr() as usize);
+            store
+                .add(STORE_INNER_OFFSET)
+                .cast::<*mut u8>()
+                .write(inner.as_mut_ptr());
+            store
+                .add(STORE_ALIGNED_BUFFER_OFFSET)
+                .cast::<u32>()
+                .write(0xfeed_face);
+            STORE_DESTRUCT_CALLS = 0;
+            STORE_DESTRUCT_OBJECT = core::ptr::null_mut();
+            STORE_DESTRUCT_OWNER = store;
+            STORE_DESTRUCT_VTABLE_DURING_CALL = 0;
+
+            assert_eq!(
+                vtable_file_store_destruct(store),
+                store,
+                "the fully decoded tail chain returns this"
+            );
+            assert_eq!(STORE_DESTRUCT_CALLS, 1, "non-NULL inner reaches slot +0x04 once");
+            assert_eq!(
+                STORE_DESTRUCT_OBJECT,
+                inner.as_mut_ptr(),
+                "the dynamic method receives the inner object, not its handle"
+            );
+            assert_eq!(
+                STORE_DESTRUCT_VTABLE_DURING_CALL,
+                STORE_DESTRUCT_VTABLE,
+                "the intermediate vtable is installed before the dynamic call"
+            );
+            assert_eq!(
+                store.cast::<u32>().read_volatile(),
+                STORE_BASE_DESTRUCT_VTABLE,
+                "the raw tail replants its base-destructor vtable"
+            );
+            assert!(
+                store.add(STORE_INNER_OFFSET).cast::<*mut u8>().read().is_null(),
+                "the owned inner pointer is cleared after disposal"
+            );
+            assert_eq!(
+                store
+                    .add(STORE_ALIGNED_BUFFER_OFFSET)
+                    .cast::<u32>()
+                    .read(),
+                0,
+                "the raw tail resets the embedded aligned-buffer data word"
+            );
+
+            core::ptr::write_bytes(store, 0, 0x100);
+            store
+                .add(STORE_ALIGNED_BUFFER_OFFSET)
+                .cast::<u32>()
+                .write(0xfeed_face);
+            STORE_DESTRUCT_CALLS = 0;
+            STORE_DESTRUCT_OWNER = store;
+            assert_eq!(vtable_file_store_destruct(store), store);
+            assert_eq!(STORE_DESTRUCT_CALLS, 0, "NULL inner skips the dynamic call");
+            assert_eq!(
+                store.cast::<u32>().read_volatile(),
+                STORE_BASE_DESTRUCT_VTABLE
+            );
+            assert_eq!(
+                store
+                    .add(STORE_ALIGNED_BUFFER_OFFSET)
+                    .cast::<u32>()
+                    .read(),
+                0,
+                "the base reset runs on the NULL-inner path too"
+            );
         }
     }
 

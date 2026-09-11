@@ -65315,3 +65315,40 @@ functions:
       then loads word 3 before word 2 and stores word 2 before word 3.
       r0 is unchanged and returned as destination. No deliberate deviations;
       host tests cover all relative four-word overlaps and the return pointer.
+
+  # --- file-backed property-store destructor ---
+  - address: 0x08149d60
+    ghidra: FUN_08149d60
+    name: vtable_file_store_destruct
+    size: 64
+    sig: "u8 *vtable_file_store_destruct(u8 *this)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: this
+      param_1_plus_0x00: vtable
+      param_1_plus_0x0c: aligned_buffer
+      param_1_plus_0x30: inner_file_object
+      DAT_08149d9c: store_destruct_vtable
+      FUN_0816c044: store_base_destructor_tail
+      FUN_081a8204: aligned_buffer_reset (direct, ported in heap/aligned_buffer)
+    notes: >-
+      Raw osos.dec establishes 60 executable bytes at 0x08149d60..0x08149d9b
+      plus the literal-pool word at 0x08149d9c, with the next independent
+      entry at 0x08149da0; Ghidra's 92-byte size is wrong. Decoding every
+      ARM B/BL immediate finds nine direct inbound calls, all unconditional
+      bl: 0x0808e5c4, 0x0808e5e4, 0x080c6c9c, 0x080c6d3c, 0x08103174,
+      0x08149d54, 0x081a36d8, 0x081a3700, and 0x0825c230; no predicated
+      direct calls or direct b callers. It installs literal 0x0898665c,
+      conditionally invokes the non-NULL inner object's dynamic vtable slot
+      +0x04 with the inner object in r0, then clears this+0x30. Its tail
+      branch reaches 0x0816c044, whose raw-decoded body installs
+      0x0898846c, directly resets the aligned buffer at this+0x0c through
+      ported aligned_buffer_reset, and eventually reaches the empty
+      0x08275bc8 base tail; the Rust port inlines that complete tail chain
+      rather than adding an unfaithful seam. The vtable literals remain raw
+      target words because their class identities are not independently
+      established. Host test
+      file_store_destruct_releases_inner_resets_base_and_returns_this covers
+      populated and NULL inner fields, order-visible intermediate vtable
+      installation, ownership clearing, base reset, and the returned this.
