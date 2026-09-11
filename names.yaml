@@ -28224,8 +28224,8 @@ functions:
       NULL providers returns 0. If `capacity <=u count + 1` (unsigned
       `bgt` skips; grows when capacity == count + 1, keeping one spare
       slot), the table is reallocated to `capacity << 3` bytes (the
-      doubled capacity) through the unported traced realloc
-      FUN_08043f3c and the capacity word doubled; a failed realloc
+      doubled capacity) through ported traced_realloc FUN_08043f3c and
+      the capacity word doubled; a failed realloc
       returns 0 with the object untouched. With the count reloaded:
       a negative index or `count <=s index` (signed `ble`) appends at
       table[count]; otherwise `for i in (index..=count).rev(): table[i
@@ -28235,15 +28235,12 @@ functions:
       value. Finally count is stored incremented, the sorted flag at
       +0x08 is cleared (the sort sibling 0x0836982c sets it after
       qsorting with the +0x10 comparator), and the NEW count is
-      returned. Deviations: FUN_08043f3c rides the
-      NAMESPACE_PROVIDER_REALLOC seam (house pattern; the default stub
-      fails every grow, the original's own realloc-failure path)
-      instead of a direct `bl`, and the object words are addressed by
+      returned. Deviation: the object words are addressed by
       pointer-sized word index (byte-exact on the 32-bit target,
       disjoint slots on a 64-bit host - the registry_key_hash key
       model). match.py (--size 184): same structure - NULL guard,
-      unsigned grow gate with `lsl #3` byte size, seam blx for the
-      realloc, table store + capacity doubling, signed append/shift
+      unsigned grow gate with `lsl #3` byte size, direct traced_realloc
+      call, table store + capacity doubling, signed append/shift
       selection, one-past-end-inclusive downward shift loop, count
       increment + sorted-flag clear, new-count return; LLVM swapped
       the two append predicates (both lead to the same path) and uses
@@ -28570,6 +28567,39 @@ functions:
       short-circuit. The free twin 0x08043994 is ported as traced_free
       (see its entry).
 
+  - address: 0x08043f3c
+    ghidra: FUN_08043f3c
+    name: traced_realloc
+    size: 188
+    sig: "u8 *traced_realloc(u8 *block, i32 size, u32 tag1, u32 tag2)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: block, param_2: size, param_3: tag1, param_4: tag2, iVar1: descriptor, puVar3: replacement}
+    notes: >-
+      True raw extent is exactly 188 bytes, 0x08043f3c..0x08043ff8;
+      the next independently linked function starts at 0x08043ff8.
+      Decoding every ARM B/BL word in osos.dec finds 9 direct inbound
+      calls, every one an unconditional bl (0x0803a444, 0x08040c74,
+      0x080420cc, 0x08049640, 0x08077c48, 0x080e8f94, 0x080eed4c,
+      0x083694f4, 0x08369674), with zero predicated forms and zero
+      direct tail branches. NULL block tail-branches to traced_alloc
+      with (size, tag1, tag2). A non-NULL block with size <= 0 by the
+      signed cmp/ble returns NULL without touching descriptor slots.
+      Otherwise optional trace slot +0x2c receives (old, NULL, size,
+      tag1, tag2, 0), descriptor slot +0x14 reallocates
+      (old, size, tag1, tag2), then trace slot +0x2c is re-read and,
+      if present, receives (old, replacement, size, tag1, tag2, 1),
+      including a NULL replacement. The descriptor is RAM
+      0x08a0c2a4 via literal 0x08043ff4. Deviation: the consulted slots
+      are TRACED_REALLOC_HOOKS; its default realloc returns NULL, the
+      retail allocation-failure path, and the NULL tail branch is a
+      returning call to traced_alloc. Host tests cover positive success
+      and failure trace order, signed nonpositive no-call handling, and
+      NULL delegation. match.py (--lib local archive): 58 Rust versus
+      46 retail instructions; it retains the NULL and signed-size
+      early exits, pre/post optional trace calls with stack arguments,
+      underlying realloc call, and trace-slot reload. Extra prologue and
+      hook-table copies arise from the portable descriptor seam.
   - address: 0x08043994
     ghidra: FUN_08043994
     name: traced_free
@@ -58936,20 +58966,19 @@ functions:
       (capacity = 0x400 only when it was zero), copies length bytes from
       inline_buffer via __rt_memcpy through the 0x08037db0 IRAM veneer, then
       clears inline_buffer; a non-NULL heap pointer first adds 0x400 to
-      capacity and calls the unported traced realloc 0x08043f3c. Once
+      capacity and calls ported traced_realloc 0x08043f3c. Once
       length < capacity, increment length with u32 wrap and store value's
       low byte at the old offset, choosing inline_buffer when non-NULL and
       heap_buffer otherwise. Fixed-capacity operation is selected by a NULL
       heap_buffer slot. Deviation: the raw body proceeds to an invalid copy
       or byte store after a NULL allocation/reallocation result; the port
       retains the preceding capacity/heap-slot stores but returns before
-      that invalid access. The unported realloc is an explicit
-      FORMAT_BUFFER_REALLOC seam whose default returns NULL. Host tests
-      cover fixed-capacity emission/full drop, initial allocation at 0x400,
-      inline-byte migration, the mandatory second growth at an exactly full
-      initial heap, and safe failed reallocation. match.py structural review
-      compares the capacity loop, allocation/copy, realloc, and byte-store
-      paths; the seam and null-result guard add control flow.
+      that invalid access. Host tests cover fixed-capacity emission/full
+      drop, initial allocation at 0x400, inline-byte migration, the
+      mandatory second growth at an exactly full initial heap, and safe
+      failed reallocation. match.py structural review compares the
+      capacity loop, allocation/copy, realloc, and byte-store paths; the
+      null-result guard adds control flow.
 
   # --- Legacy printf sprintf veneer ---
   - address: 0x080edc2c
@@ -60801,12 +60830,12 @@ functions:
       non-NULL source is copied through __rt_memcpy and receives a NUL at
       data[length], while NULL source deliberately skips both writes. The
       signed compare makes a high-bit length force a grow even for requested
-      length zero. Deliberate deviation: unported traced_realloc
-      FUN_08043f3c dispatches through OWNED_BUFFER_REALLOC, whose default
-      returns NULL like the original's allocation-failure path. Host tests
-      cover NUL-measured allocation/copy, negative NULL rejection,
-      realloc failure preservation, signed high-bit grow, and NULL-source
-      no-terminator behavior.
+      length zero. traced_realloc FUN_08043f3c is now called directly,
+      preserving its signed positive-size gate and its underlying
+      allocation-failure result. Host tests cover NUL-measured
+      allocation/copy, negative NULL rejection, realloc failure
+      preservation, signed high-bit grow, and NULL-source no-terminator
+      behavior.
 
   # --- I2C slave 0x39 one-byte register read ---
   - address: 0x0836e36c

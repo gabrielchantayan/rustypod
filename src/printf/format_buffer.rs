@@ -24,37 +24,12 @@
 //!
 //! Deliberate deviation: stock code attempts to copy or store through a NULL
 //! result from allocation/reallocation. This port preserves the capacity and
-//! heap-slot stores but returns before that invalid access; the default
-//! reallocation seam therefore safely models an exhausted-buffer failure.
+//! heap-slot stores but returns before that invalid access.
 
-use crate::drivers::ata_cmd::traced_alloc;
+use crate::drivers::ata_cmd::{traced_alloc, traced_realloc};
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::printf::printf_api::{vsprintf, VaList};
 
-/// Unported `FUN_08043f3c`: traced reallocation of a formatter heap buffer.
-pub type FormatBufferRealloc =
-    unsafe extern "C" fn(block: *mut u8, new_size: u32, tag1: u32, tag2: u32) -> *mut u8;
-
-unsafe extern "C" fn missing_format_buffer_realloc(
-    _block: *mut u8,
-    _new_size: u32,
-    _tag1: u32,
-    _tag2: u32,
-) -> *mut u8 {
-    core::ptr::null_mut()
-}
-
-/// Reallocation dependency of [`format_buffer_append_char`].
-///
-/// `FUN_08043f3c` is not ported. Target integration must replace this with the
-/// retail allocator; its default returns NULL, preserving the sink's
-/// allocation-failure result without dereferencing the NULL address.
-pub static mut FORMAT_BUFFER_REALLOC: FormatBufferRealloc = missing_format_buffer_realloc;
-
-#[inline(always)]
-unsafe fn format_buffer_realloc() -> FormatBufferRealloc {
-    core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_BUFFER_REALLOC))
-}
 
 /// `format_buffer_append_char` — original: `FUN_08077bcc` @ 0x08077bcc
 /// (200 bytes).
@@ -102,7 +77,7 @@ pub unsafe extern "C" fn format_buffer_append_char(
             } else {
                 let new_capacity = current_capacity.wrapping_add(0x400);
                 capacity.write(new_capacity);
-                let replacement = format_buffer_realloc()(heap, new_capacity, 0, 0);
+                let replacement = traced_realloc(heap, new_capacity as i32, 0, 0);
                 heap_buffer.write(replacement);
 
                 if replacement.is_null() {
@@ -192,7 +167,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::drivers::ata_cmd::{TracedAllocHooks, TRACED_ALLOC_HOOKS};
+    use crate::drivers::ata_cmd::{
+        TracedAllocHooks, TracedReallocHooks, TRACED_ALLOC_HOOKS,
+        TRACED_REALLOC_HOOKS, TRACED_REALLOC_TEST_LOCK,
+    };
     use crate::testing::TRACED_ALLOC_TEST_LOCK;
     use std::boxed::Box;
     use std::sync::MutexGuard;
@@ -202,7 +180,7 @@ mod tests {
     static mut ALLOC_CALLS: u32 = 0;
     static mut ALLOC_SIZE: i32 = 0;
     static mut REALLOC_CALLS: u32 = 0;
-    static mut REALLOC_SIZE: u32 = 0;
+    static mut REALLOC_SIZE: i32 = 0;
 
     unsafe extern "C" fn test_alloc(size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
         ALLOC_CALLS += 1;
@@ -212,7 +190,7 @@ mod tests {
 
     unsafe extern "C" fn test_realloc(
         _block: *mut u8,
-        new_size: u32,
+        new_size: i32,
         _tag1: u32,
         _tag2: u32,
     ) -> *mut u8 {
@@ -224,13 +202,15 @@ mod tests {
     struct Fixture {
         storage: Box<[u8; 2048]>,
         _allocator_guard: MutexGuard<'static, ()>,
+        _realloc_guard: parking_lot::MutexGuard<'static, ()>,
         old_alloc_hooks: TracedAllocHooks,
-        old_realloc: FormatBufferRealloc,
+        old_realloc: TracedReallocHooks,
     }
 
     impl Fixture {
         fn new() -> Self {
             let allocator_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let realloc_guard = TRACED_REALLOC_TEST_LOCK.lock();
             let mut storage = Box::new([0u8; 2048]);
             let storage_ptr = storage.as_mut_ptr();
             unsafe {
@@ -241,11 +221,12 @@ mod tests {
                 REALLOC_CALLS = 0;
                 REALLOC_SIZE = 0;
                 let old_alloc_hooks = core::ptr::read(core::ptr::addr_of!(TRACED_ALLOC_HOOKS));
-                let old_realloc = core::ptr::read(core::ptr::addr_of!(FORMAT_BUFFER_REALLOC));
+                let old_realloc = core::ptr::read(core::ptr::addr_of!(TRACED_REALLOC_HOOKS));
                 (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = test_alloc;
                 (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace = None;
-                *core::ptr::addr_of_mut!(FORMAT_BUFFER_REALLOC) = test_realloc;
-                Self { storage, _allocator_guard: allocator_guard, old_alloc_hooks, old_realloc }
+                *core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS) =
+                    TracedReallocHooks { realloc: test_realloc, trace: None };
+                Self { storage, _allocator_guard: allocator_guard, _realloc_guard: realloc_guard, old_alloc_hooks, old_realloc }
             }
         }
     }
@@ -254,7 +235,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 *core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS) = self.old_alloc_hooks;
-                *core::ptr::addr_of_mut!(FORMAT_BUFFER_REALLOC) = self.old_realloc;
+                *core::ptr::addr_of_mut!(TRACED_REALLOC_HOOKS) = self.old_realloc;
                 ALLOC_RESULT = core::ptr::null_mut();
                 REALLOC_RESULT = core::ptr::null_mut();
             }
