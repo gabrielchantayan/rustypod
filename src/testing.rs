@@ -374,6 +374,10 @@ pub mod hints {
     // resource-construction fixture; it carries the provider-chain head as
     // a raw u32 word, and fixture mappings never unmap.
     pub const STRING_OBJECT_RESOURCE_CASEFOLD_MATCH: usize = 0x9a00_0000;
+    // 0x9b00_0000: dedicated to util/stream_seek_tagged_entry's raw-u32
+    // stream-handle fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const STREAM_SEEK_TAGGED_ENTRY: usize = 0x9b00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
