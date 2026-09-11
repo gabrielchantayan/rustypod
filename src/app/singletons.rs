@@ -1,4 +1,4 @@
-//! The twenty-four lazily-constructed framework singletons. Every one is the
+//! The twenty-five lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -33,6 +33,7 @@
 //! | 0x0825a6e8 | [`lazy_singleton_0x44`] | 0x44 | 0x08a09f64 | 0x0825aa58 | 14 |
 //! | 0x08259740 | [`lazy_singleton_0xa0`] | 0xa0 | 0x089cc958 | 0x08259278 | 12 |
 //! | 0x08259770 | [`event_listener_kind_10_get`] | 0x44 | 0x08a09f6c | 0x0825939c | 10 |
+//! | 0x082040ec | [`singleton_class_8e80`] | 0x48 | 0x089cc388 | 0x0820416c | 10 |
 
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
@@ -55,7 +56,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the twenty-four constructors is — they are large C++ constructors — so
+//! the twenty-five constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -324,6 +325,9 @@ pub const SINGLETON_0XA0_SIZE: usize = 0xa0;
 /// (`mov r0, #0x22c`).
 pub const CLASS_9400_SIZE: usize = 0x22c;
 
+/// Allocation size of the registry-class-0x8e80 singleton (`mov r0, #0x48`).
+pub const CLASS_8E80_SIZE: usize = 0x48;
+
 /// Allocation size of the application-boot metrics channel (`mov r0, #0xac`).
 pub const APP_BOOT_METRICS_CHANNEL_SIZE: usize = 0xac;
 /// Allocation size of the PhotoBrowse slideshow controller (`ldr r0,
@@ -339,7 +343,7 @@ pub type PhotoBrowseSlideshowConstructor =
     unsafe extern "C" fn(this: *mut u8, base: *mut u8) -> *mut u8;
 
 
-/// Indirect dispatch table for the twenty-four unported constructors (see the
+/// Indirect dispatch table for the twenty-five unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -383,6 +387,8 @@ pub struct SingletonCtors {
     pub singleton_0xbc: Constructor,
     /// Registry-class-0x9400 ctor @ 0x081b6628.
     pub class_9400: Constructor,
+    /// Registry-class-0x8e80 ctor @ 0x0820416c.
+    pub class_8e80: Constructor,
     /// App-boot metrics channel ctor @ 0x08266990.
     pub app_boot_metrics_channel: Constructor,
     /// PhotoBrowse slideshow controller ctor @ 0x081cd5b8.
@@ -425,6 +431,7 @@ zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
 zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
 zeroing_ctor!(zeroing_singleton_0xbc_ctor, SINGLETON_0XBC_SIZE);
 zeroing_ctor!(zeroing_class_9400_ctor, CLASS_9400_SIZE);
+zeroing_ctor!(zeroing_class_8e80_ctor, CLASS_8E80_SIZE);
 zeroing_ctor!(zeroing_app_boot_metrics_channel_ctor, APP_BOOT_METRICS_CHANNEL_SIZE);
 zeroing_ctor!(zeroing_singleton_0xa0_ctor, SINGLETON_0XA0_SIZE);
 unsafe extern "C" fn zeroing_photo_browse_slideshow_ctor(
@@ -469,6 +476,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_9300: zeroing_class_9300_ctor,
     singleton_0xbc: zeroing_singleton_0xbc_ctor,
     class_9400: zeroing_class_9400_ctor,
+    class_8e80: zeroing_class_8e80_ctor,
     app_boot_metrics_channel: zeroing_app_boot_metrics_channel_ctor,
     photo_browse_slideshow: zeroing_photo_browse_slideshow_ctor,
     singleton_0xa0: zeroing_singleton_0xa0_ctor,
@@ -574,6 +582,10 @@ pub static mut SINGLETON_0XBC: *mut u8 = core::ptr::null_mut();
 /// 0x089cc170, the `+8` slot of the shared globals block @ 0x089cc168
 /// — the pool literal @ 0x081b546c).
 pub static mut CLASS_9400_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The registry-class-0x8e80 singleton (original cache word @ 0x089cc388,
+/// addressed through the pool word @ 0x08204118).
+pub static mut CLASS_8E80_INSTANCE: *mut u8 = core::ptr::null_mut();
 
 /// The application-boot metrics channel (original cache word @ 0x089cc918).
 pub static mut APP_BOOT_METRICS_CHANNEL: *mut u8 = core::ptr::null_mut();
@@ -1558,6 +1570,29 @@ pub unsafe extern "C" fn singleton_class_9400() -> *mut u8 {
     lazy_singleton(cache, CLASS_9400_SIZE, || unsafe { ctor!(class_9400) })
 }
 
+/// singleton_class_8e80 — original: `FUN_082040ec` @ **0x082040ec**
+/// (**44 code bytes** plus its pool word @ 0x08204118, **48 bytes true
+/// extent**; **10 direct `bl` call sites, all unconditional — 0 predicated,
+/// 0 plain `b`**, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Tests the cache word @ 0x089cc388. If it is NULL, allocates exactly 0x48
+/// bytes through `operator_new`, constructs the registry-class-0x8e80 object
+/// through `FUN_0820416c`, stores that return, reloads the cache, and returns
+/// it. The constructor publishes the object under class id 0x8e80, so the
+/// symbol uses that verified identity rather than inventing a class name.
+///
+/// Deliberate deviations: the unported constructor uses the
+/// [`SINGLETON_CTORS`] `class_8e80` slot with the family's zeroing default,
+/// and the cache is crate static [`CLASS_8E80_INSTANCE`] rather than the
+/// runtime-initialized firmware word. The getter is not hook-ready until
+/// `FUN_0820416c` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn singleton_class_8e80() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(CLASS_8E80_INSTANCE);
+    lazy_singleton(cache, CLASS_8E80_SIZE, || unsafe { ctor!(class_8e80) })
+}
+
 #[cfg(test)]
 extern crate std;
 
@@ -1658,6 +1693,7 @@ mod tests {
                 class_9300: recording_ctor,
                 singleton_0xbc: recording_ctor,
                 class_9400: recording_ctor,
+                class_8e80: recording_ctor,
                 app_boot_metrics_channel: recording_ctor,
                 photo_browse_slideshow: recording_photo_browse_slideshow_ctor,
                 singleton_0xa0: recording_ctor,
@@ -1706,6 +1742,7 @@ mod tests {
         CLASS_9300_INSTANCE = ptr::null_mut();
         SINGLETON_0XBC = ptr::null_mut();
         CLASS_9400_INSTANCE = ptr::null_mut();
+        CLASS_8E80_INSTANCE = ptr::null_mut();
         APP_BOOT_METRICS_CHANNEL = ptr::null_mut();
         PHOTO_BROWSE_SLIDESHOW = ptr::null_mut();
         SINGLETON_0XA0 = ptr::null_mut();
@@ -3189,4 +3226,49 @@ mod tests {
         }
         restore(guard);
     }
+    #[test]
+    fn class_8e80_allocates_constructs_and_reloads_the_cache() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(singleton_class_8e80(), constructed());
+            assert_eq!(singleton_class_8e80(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![CLASS_8E80_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(CLASS_8E80_INSTANCE)),
+                constructed(),
+                "the constructor return is stored and the cache reload is returned"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn class_8e80_preseeded_cache_skips_allocation_and_construction() {
+        let guard = mock(constructed());
+        unsafe {
+            CLASS_8E80_INSTANCE = arena().add(32);
+            assert_eq!(singleton_class_8e80(), arena().add(32));
+            assert!((*ptr::addr_of!(ALLOC_SIZES)).is_empty());
+            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn null_class_8e80_constructor_result_retries_from_a_null_cache() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(singleton_class_8e80().is_null());
+            assert!(singleton_class_8e80().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![CLASS_8E80_SIZE, CLASS_8E80_SIZE],
+                "a NULL ctor result remains a NULL cache and re-enters the cold path"
+            );
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
+        }
+        restore(guard);
+    }
+
 }

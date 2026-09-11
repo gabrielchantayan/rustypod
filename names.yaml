@@ -61245,3 +61245,34 @@ functions:
       destructor identity. Host tests cover initialization, repeat calls,
       bit-0-set and bit-0-clear guard paths, constructor-return versus
       getter-return distinction, storage extent, and shutdown preservation.
+
+  # --- Registry-class-0x8e80 singleton accessor ---
+  - address: 0x082040ec
+    ghidra: FUN_082040ec
+    name: singleton_class_8e80
+    size: 44
+    sig: "void *singleton_class_8e80(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_08204118: class_8e80_cache_089cc388
+      FUN_0820416c: class_8e80_construct (unported singleton constructor)
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec establishes a 48-byte true extent: eleven instruction
+      words at 0x082040ec..0x08204114 followed by the cache-word literal
+      0x089cc388 at 0x08204118; the next separately linked function starts
+      at 0x0820411c. The 44-byte code body loads and tests that cache, then
+      on NULL allocates 0x48 bytes through the already-ported operator_new,
+      invokes the unported constructor 0x0820416c, stores its return, reloads
+      the cache, and returns it. The constructor registers the object through
+      registry_register with literal class id 0x8e80, so the accessor uses
+      that verified identity rather than inventing a class name. Decoding
+      every ARM B/BL word in osos.dec finds exactly 10 inbound direct call
+      sites, all unconditional bl (0x08172218, 0x0817379c, 0x08199464,
+      0x081994e0, 0x0819ae48, 0x0819afc0, 0x0819b0a8, 0x08227670,
+      0x08227698, 0x082276c0), with zero predicated forms and no direct tail
+      b. Deliberate deviations: the unported constructor uses the existing
+      SINGLETON_CTORS class_8e80 slot with its family zeroing default, and
+      the runtime-initialized cache word is represented by the crate static
+      CLASS_8E80_INSTANCE. It is not hook-ready until 0x0820416c is ported.
