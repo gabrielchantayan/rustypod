@@ -26277,6 +26277,42 @@ functions:
       pMethods still set during the call and NULLed after (original
       ordering), and a second close on the same file is a no-op.
 
+  # ---- SQLite OS read forwarding wrapper (src/sqlite/os_read.rs) ----
+  - address: 0x0837dba0
+    ghidra: FUN_0837dba0
+    name: sqlite_os_read
+    size: 32
+    sig: "i32 sqlite_os_read(sqlite3_file *file, void *buffer, u32 amount, i64 offset)"
+    module: sqlite/os_read
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: buffer
+      param_3/r2: amount
+      r3: AAPCS alignment padding before offset
+      stack_arg_1: offset low word
+      stack_arg_2: offset high word
+      "file->pMethods": sqlite3_io_methods
+      "pMethods+0x08": xRead
+    notes: >-
+      Raw bytes are eight words at 0x0837dba0..0x0837dbbc; the next separately
+      linked function begins at 0x0837dbc0, so Ghidra's 32-byte extent is
+      exact with no literal pool. The wrapper copies its two incoming stack
+      words into its outgoing stack-argument slots, loads file->pMethods and
+      xRead at +0x08, blx-calls it, and returns its i32 status unchanged. The
+      adjacent 0x0837db44..0x0837dc18 forwarding family is SQLite
+      sqlite3_io_methods (xClose/xRead/xWrite/xTruncate...), establishing this
+      as sqlite3OsRead. Its i64 offset is stack-passed under AAPCS because r3
+      is the alignment pad. Decoding every ARM B/BL word in osos.dec finds
+      exactly 9 direct calls, all unconditional bl (0x082dd6c4, 0x082dd944,
+      0x082de1ac, 0x083655ac, 0x08365614, 0x08365a5c, 0x08365c58,
+      0x08365cb8, 0x08372570); no predicated call, tail branch, or aligned raw
+      data word targets this wrapper. The concrete xRead implementation is
+      runtime vtable data, so the port dispatches the supplied method table
+      rather than inventing a callee. Host tests prove it forwards the exact
+      file and mutable buffer pointers, zero amount, i64::MIN offset, and
+      method status unchanged.
+
   # ---- SQLite OS write forwarding wrapper (src/sqlite/os_write.rs) ----
   - address: 0x0837dbf8
     ghidra: FUN_0837dbf8

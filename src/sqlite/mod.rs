@@ -115,6 +115,7 @@ pub mod nested_parse;
 pub mod parse;
 pub mod open_table;
 pub mod os_close;
+pub mod os_read;
 pub mod os_write;
 pub mod parse_cell;
 pub mod parse_expr;
