@@ -26277,6 +26277,39 @@ functions:
       pMethods still set during the call and NULLed after (original
       ordering), and a second close on the same file is a no-op.
 
+  # ---- SQLite file big-endian word reader (src/sqlite/read_be32.rs) ----
+  - address: 0x08365598
+    ghidra: FUN_08365598
+    name: sqlite_read_be32
+    size: 52
+    sig: "i32 sqlite_read_be32(sqlite3_file *file, i64 offset, u32 *out)"
+    module: sqlite/read_be32
+    status: ported
+    renames:
+      param_1/r0: file
+      r1: AAPCS alignment padding before offset
+      param_3/r2: offset low word
+      param_4/r3: offset high word
+      param_5/stack_arg_1/r4: out
+      local_10: read_buffer
+      FUN_0837dba0: sqlite_os_read
+      FUN_0837a158: load_be32
+    notes: >-
+      Raw ARM confirms Ghidra's 52-byte extent: the body runs from
+      0x08365598 through 0x083655c8, and the next separately linked
+      function begins with push {r2,r3,r4,r5,r6,r7,r8,lr} at 0x083655cc.
+      It allocates a four-byte stack buffer, calls the ported
+      sqlite_os_read(file, buffer, 4, offset), and only for status 0 calls
+      the ported load_be32 before storing through out; a nonzero status
+      returns with out untouched. Decoding every ARM B/BL word in osos.dec
+      finds exactly 9 inbound calls, all unconditional bl
+      (0x082de188, 0x082de22c, 0x08365aa4, 0x08365ac8, 0x08365ae4,
+      0x08365b08, 0x08365b60, 0x08365bf0, 0x08365c2c), with no predicated
+      call or tail branch. The 64-bit offset is r2/r3 because r1 is AAPCS
+      alignment padding after the first pointer argument. Rust models the
+      local as MaybeUninit: as in ARM, it is only consumed after xRead
+      returns success, whose SQLite contract initializes all four bytes.
+
   # ---- SQLite OS read forwarding wrapper (src/sqlite/os_read.rs) ----
   - address: 0x0837dba0
     ghidra: FUN_0837dba0
