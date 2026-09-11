@@ -439,6 +439,9 @@ pub mod hints {
     // 0xbd00_0000: dedicated to ui/object_state's raw-u32 selected-item
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const OBJECT_SELECTED_ITEM: usize = 0xbd00_0000;
+    // 0xfc00_0000: dedicated to cxx/signed_key_tree_find's raw-u32 node
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const SIGNED_KEY_TREE_FIND_VALUE: usize = 0xfc00_0000;
 
 }
 
