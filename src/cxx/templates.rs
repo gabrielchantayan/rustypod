@@ -889,6 +889,42 @@ pub unsafe extern "C" fn container_element_at_alias_5f14(this: *mut u8, index: u
     element_slot(this, index).read()
 }
 
+/// container_element_at_alias_5f44 — original: `FUN_083d5f44` @ 0x083d5f44
+/// (24 bytes; 8 plain `bl` call sites — 0x08126ef0, 0x081272f4,
+/// 0x081273ac, 0x08127de0, 0x08127e04, 0x08127e30, 0x0839c1f0, and
+/// 0x0839c234; no predicated calls).
+///
+/// A byte-identical instantiation of [`container_element_at`] @
+/// 0x083d5efc — all 24 bytes are `push {r4,lr}; ldr r2,[r0]; ldr
+/// r2,[r2,#0x40]; blx r2; ldr r0,[r0]; pop {r4,pc}`. It implements
+/// `T *operator[](size_t index)`: dispatch through the container's vtable
+/// slot 0x40 for an element-slot address, then load the element pointer
+/// from that slot. The `push {r4,lr}` only aligns the stack; r4 is never
+/// touched. The raw body has no NULL guard for either the virtual result
+/// or its element slot.
+///
+/// Ghidra omits the r1 index parameter from its signature, but the `blx`
+/// leaves r1 intact for the virtual method; the decoded callers pass loop
+/// or event indexes and NULL-test the returned element. This distinct link
+/// section deliberately keeps this independently hookable export from
+/// being folded into a byte-identical body. There are no other deliberate
+/// deviations from the ARM algorithm.
+///
+/// # Safety
+/// Same contract as [`container_element_at`]: `this` must point at an
+/// object whose first word is a vtable with at least
+/// [`ELEMENT_SLOT_VTABLE_INDEX`] + 1 slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_5f44")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_alias_5f44(this: *mut u8, index: usize) -> *mut u8 {
+    let vtable = (this as *const *const ElementSlotFn).read();
+    let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
+    element_slot(this, index).read()
+}
+
+
+
 
 /// container_element_at_alias_6908 — original: `FUN_083d6908` @ 0x083d6908
 /// (24 bytes; 5 `bl` call sites — 0x08123ff8, 0x08298b84, 0x08298cb4,
@@ -3138,6 +3174,45 @@ mod tests {
             assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
             assert_eq!(container_element_at_alias_5f14(this, 1), &mut b as *mut u8);
             assert!(container_element_at_alias_5f14(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
+    #[test]
+    fn element_at_alias_5f44_dispatches_through_slot_0x40_and_derefs() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            assert_eq!(container_element_at_alias_5f44(this, 0), &mut a as *mut u8);
+            assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
+            assert_eq!(container_element_at_alias_5f44(this, 1), &mut b as *mut u8);
+            assert!(container_element_at_alias_5f44(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
+    #[test]
+    fn element_at_alias_5f44_matches_primary() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            for index in 0..3 {
+                assert_eq!(
+                    container_element_at_alias_5f44(this, index),
+                    container_element_at(this, index),
+                    "index {index}"
+                );
+            }
         }
     }
 

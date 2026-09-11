@@ -29284,6 +29284,27 @@ functions:
       in a distinct link section so LLVM retains a separately hookable
       symbol despite its byte-identical body.
 
+  - address: 0x083d5f44
+    ghidra: FUN_083d5f44
+    name: container_element_at_alias_5f44
+    size: 24
+    sig: "void *container_element_at_alias_5f44(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Byte-identical instantiation of container_element_at @ 0x083d5efc:
+      `push {r4,lr}; ldr r2,[r0]; ldr r2,[r2,#0x40]; blx r2; ldr r0,[r0];
+      pop {r4,pc}`. It implements `T *operator[](size_t)` by dispatching
+      through this container's vtable slot 0x40 to obtain an element-slot
+      address, then loading its element pointer. Ghidra drops the r1 index
+      parameter, but raw `blx r2` preserves it. All eight decoded direct
+      call sites are plain `bl` (none predicated): 0x08126ef0, 0x081272f4,
+      0x081273ac, 0x08127de0, 0x08127e04, 0x08127e30, 0x0839c1f0, and
+      0x0839c234. Callers pass loop or event indexes and NULL-test the
+      returned element. Exported in a distinct link section so LLVM retains
+      a separately hookable symbol despite its byte-identical body.
+
   - address: 0x083d68dc
     ghidra: FUN_083d68dc
     name: container_element_at_alias_68dc
