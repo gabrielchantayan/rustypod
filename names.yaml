@@ -44336,6 +44336,40 @@ functions:
       seams for the two unported cores, merged count/capacity initialization,
       and a direct word_list_copy call whose archive relocation disassembles
       as address zero.
+  - address: 0x082cf804
+    ghidra: FUN_082cf804
+    name: word_list_modular_subtract_assign
+    size: 76
+    sig: "void word_list_modular_subtract_assign(const WordList *subtrahend, WordList *minuend, const ModularReductionContext *modulus)"
+    module: util/word_list_modular_subtract
+    status: ported
+    renames:
+      param_1: subtrahend
+      param_2: minuend
+      param_3: modulus
+    notes: >-
+      Modular subtraction assignment: construct an empty capacity-six inline
+      WordList temporary, copy subtrahend into it, negate the temporary
+      through FUN_082ceb0c, then add it into minuend through the already
+      ported word_list_modular_add_assign. The result is therefore
+      minuend - subtrahend modulo modulus and remains in minuend's existing
+      buffer. Raw extent verified: the next separately linked sibling starts
+      at 0x082cf850 with mov r0,r1; b 0x082d3ca4, so the 19-instruction /
+      76-byte Ghidra extent is correct. Decoding every ARM B/BL immediate in
+      osos.dec finds 9 direct call sites, all unconditional bl (0 predicated:
+      0x0807c484, 0x0807c4d8, 0x080ebad4, 0x080ebb28, 0x080eef0c,
+      0x080ef034, 0x083692ac, 0x083692f4, 0x08369404). No data word in
+      osos.dec holds 0x082cf804, so it is not dispatched virtually.
+      FUN_082ceb0c has no ported names.yaml entry, so the port reaches its
+      exact retail address through a volatile operation-table seam on target
+      and uses a host reference model in tests. The target invokes the
+      ported word_list_init directly; only on 64-bit hosts the temporary's
+      entry pointer is repaired after construction because WordList's native
+      pointer field makes its host header larger than the target's 8 bytes.
+      Tests prove copied-subtrahend negation, capacity-six temporary setup,
+      negate -> add -> mode-zero-reduce order, modular borrow wrap, zero
+      result count, source preservation, and minuend buffer/capacity
+      retention.
   - address: 0x082ceabc
     ghidra: FUN_082ceabc
     name: word_list_modular_multiply_assign
