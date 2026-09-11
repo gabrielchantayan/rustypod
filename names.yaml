@@ -37482,6 +37482,42 @@ functions:
       0xff, copies while the destination vtable remains unchanged, and
       that source == destination is safe.
 
+  - address: 0x0812c75c
+    ghidra: FUN_0812c75c
+    name: copy_service_context_selection
+    size: 104
+    sig: "void copy_service_context_selection(ServiceContextProvider *provider, u32 selection, ScopedContext *destination)"
+    module: app/scoped_context
+    renames:
+      param_1/r0: provider
+      param_2/r1: selection
+      param_3/r2: destination
+      FUN_082a5ee4: service_context_selection_construct
+    status: ported
+    notes: >-
+      Raw ARM proves this is one logical 104-byte member split across two
+      separately linked regions: entry 0x0812c75c..0x0812c768 is `ldr
+      r0,[r0,#0x30]; cmp r0,#0; bne 0x0816ec30; bx lr`, while the 88-byte
+      body is 0x0816ec30..0x0816ec84 (the next entries are 0x0812c76c and
+      0x0816ec88). A NULL provider+0x30 context returns without touching
+      destination. A non-NULL one forms context+0x14, calls the unported
+      FUN_082a5ee4 with that source, selection, and zero mode, copies the
+      temporary ScopedContext payload words +0x04..+0x14 to destination
+      while preserving its vtable, then calls the trivial
+      scoped_context_destroy @ 0x08270414. Decoding every ARM B/BL word in
+      osos.dec finds exactly 10 direct call sites, all unconditional plain
+      BL (0x081758b0, 0x08176878, 0x081768d0, 0x08225ddc, 0x08225eec,
+      0x08225fc0, 0x08226380, 0x082266c8, 0x082269a0, 0x08226bb8), with no
+      predicated forms or direct tail B. 0x082a5ee4 has no port ledger
+      entry, so the Rust port uses a volatile dispatch seam whose target
+      default calls the stock address; host tests replace it. Provider and
+      context layouts use named repr(C) fields backed by u32 word arrays,
+      retaining target addresses without host pointer-width overlap. Host
+      tests prove the NULL branch does not call the seam or change the
+      destination, and the non-NULL branch forwards source/selection/mode
+      zero then copies every payload field while leaving destination vtable
+      intact.
+
   - address: 0x08270f84
     ghidra: FUN_08270f84
     name: descriptor_field_map
