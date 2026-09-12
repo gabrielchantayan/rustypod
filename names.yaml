@@ -60992,6 +60992,34 @@ functions:
       fixed MMIO ready register with an atomic word so the readiness gate can
       be tested; device builds retain the volatile physical read.
 
+  - address: 0x080c9a4c
+    ghidra: FUN_080c9a4c
+    name: ata_pio_write_halfword
+    size: 28
+    sig: "i32 ata_pio_write_halfword(u16 *destination, u16 value)"
+    module: drivers/ata_pio_write_halfword
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: value
+      DAT_080c9a68: ata_controller_base
+    notes: >-
+      Raw ARM is ldr r3, [pc, #20]; ldr r2, [r3, #0x78]; tst r2, #2;
+      beq back to the ready load; strh r1, [r0]; mov r0, #0; bx lr.
+      The literal pool word at 0x080c9a68 is 0x38700000, the S5L8702 ATA
+      controller base, so +0x78 is ATA_PIO_READY. It waits for PIO write
+      readiness (bit 1), stores the complete 16-bit value to the
+      caller-selected ATA task-file register, and returns zero without a NULL
+      guard or timeout. The next function starts at 0x080c9a6c, confirming
+      the 28-byte code extent plus its 4-byte literal. Decoding every ARM B/BL
+      word in osos.dec finds exactly 8 unconditional bl call sites at
+      0x080b1a80, 0x080b1a8c, 0x080b1a98, 0x080b1aa4, 0x080b1ab0,
+      0x080b1abc, 0x080b1ac8, and 0x080b1ad4, with no predicated form; a raw
+      word scan finds no DATA reference to this entry, so it is not virtually
+      dispatched. Host builds model only the fixed MMIO ready register with an
+      atomic word so the readiness gate can be tested; device builds retain
+      the volatile physical read.
+
   - address: 0x0821754c
     ghidra: FUN_0821754c
     name: app_controller_dispatch_layout
