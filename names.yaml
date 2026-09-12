@@ -5238,6 +5238,36 @@ functions:
       Callers 0x08052228, 0x08054ea0, and 0x08055f50 pass its result to
       0x08046a88, which reads byte 0 as length and starts at byte 1.
 
+  - address: 0x08045f54
+    ghidra: FUN_08045f54
+    name: cstr_to_counted_u16
+    size: 92
+    sig: "i32 cstr_to_counted_u16(const u8 *source, u16 *destination, u32 ignored, u32 initial_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      param_3/r2: ignored
+      param_4/r3: initial_count
+      uVar1/r1: source_len
+      pcVar2/r2: cursor
+      local_c: decoded_count
+    notes: >-
+      Raw ARM extent is exactly 0x08045f54..0x08045fb0, 92 bytes; the next
+      entry is 0x08045fb0. It clears destination[0], returns -50 for either
+      NULL source or destination, otherwise scans source through its first
+      NUL, caps the byte length at 255, calls FUN_08046b44 with destination+2
+      and a 255 limit, then stores the u32 decoded count as destination[0].
+      The stock body ignores r2 and initializes its count from r3. Every
+      decoded ARM B/BL word in osos.dec finds eight direct unconditional bl
+      callers, at 0x0805825c, 0x08058288, 0x080582c8, 0x08058790, 0x0805aa74,
+      0x08068a2c, 0x080cb238, and 0x080cb284; no predicated BL or B targets
+      it. FUN_08046b44 is an unported 28-byte veneer that forwards to the
+      already shared 0x08046c74 retailOS helper. The port deliberately uses
+      that existing helper boundary directly rather than restubbing or
+      separately porting the veneer.
+
 
   - address: 0x08045ee0
     ghidra: FUN_08045ee0

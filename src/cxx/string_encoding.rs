@@ -262,6 +262,59 @@ pub unsafe extern "C" fn utf8_to_utf16_counted_buffer(
     destination.write(count as u16);
     status
 }
+
+/// cstr_to_counted_u16 — original: FUN_08045f54 @
+/// 0x08045f54 (92 bytes, all code; eight direct `bl` call sites verified by
+/// scanning osos.dec: 0x0805825c, 0x08058288, 0x080582c8, 0x08058790,
+/// 0x0805aa74, 0x08068a2c, 0x080cb238, and 0x080cb284; all unconditional).
+/// Clear the leading u16 in `destination`, reject a NULL source or
+/// destination with -50, then count source bytes through its first NUL and
+/// cap that length at 255. Expand the span to UTF-16 at `destination + 1`
+/// through the retailOS helper and store its u32 decoded count truncated to
+/// the leading u16. The fourth ABI argument initializes that count; the third
+/// is ignored by the stock body.
+///
+/// Deliberately calls the target of stock's one-instruction
+/// `FUN_08046b44` veneer (0x08046c74) through the existing shared boundary,
+/// rather than porting that veneer as a second function. This preserves the
+/// helper's behavior while keeping this port to its one assigned function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cstr_to_counted_u16(
+    source: *const u8,
+    destination: *mut u16,
+    _ignored: u32,
+    initial_count: u32,
+) -> i32 {
+    if destination.is_null() {
+        return -50;
+    }
+
+    destination.write(0);
+    if source.is_null() {
+        return -50;
+    }
+
+    let mut cursor = source;
+    let mut source_len = 0_u32;
+    while cursor.read_volatile() != 0 {
+        source_len = source_len.wrapping_add(1);
+        cursor = cursor.add(1);
+    }
+    source_len = source_len.min(0xff);
+
+    let mut decoded_count = initial_count;
+    let status = utf8_to_utf16_counted_buffer_helper(
+        source,
+        source_len,
+        destination.add(1),
+        0xff,
+        &mut decoded_count,
+    );
+    destination.write(decoded_count as u16);
+    status
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -272,6 +325,7 @@ mod tests {
     static COUNTED_BUFFER_HELPER_LOCK: Mutex<()> = Mutex::new(());
     static mut COUNTED_BUFFER_CALLS: u32 = 0;
     static mut COUNTED_BUFFER_ARGS: (usize, u32, usize, u32, usize) = (0, 0, 0, 0, 0);
+    static mut COUNTED_BUFFER_INITIAL_COUNT: u32 = 0;
 
     unsafe extern "C" fn recording_counted_buffer_helper(
         source: *const u8,
@@ -288,6 +342,7 @@ mod tests {
             max_codepoints,
             out_count as usize,
         );
+        COUNTED_BUFFER_INITIAL_COUNT = out_count.read();
         destination.write(0x1234);
         destination.add(1).write(0);
         out_count.write(0x1_0002);
@@ -319,8 +374,65 @@ mod tests {
         unsafe {
             COUNTED_BUFFER_CALLS = 0;
             COUNTED_BUFFER_ARGS = (0, 0, 0, 0, 0);
+            COUNTED_BUFFER_INITIAL_COUNT = 0;
             CountedBufferHelperGuard::install(recording_counted_buffer_helper)
         }
+    }
+
+    #[test]
+    fn nul_terminated_buffer_clears_then_rejects_null_source() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+        let mut destination = [0xbeef_u16; 3];
+
+        assert_eq!(
+            unsafe {
+                cstr_to_counted_u16(
+                    core::ptr::null(), destination.as_mut_ptr(), 0x1234_5678, 9,
+                )
+            },
+            -50
+        );
+        assert_eq!(destination, [0, 0xbeef, 0xbeef]);
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+
+        assert_eq!(
+            unsafe {
+                cstr_to_counted_u16(
+                    b"x\0".as_ptr(), core::ptr::null_mut(), 0, 0,
+                )
+            },
+            -50
+        );
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+    }
+
+    #[test]
+    fn nul_terminated_buffer_counts_through_nul_and_caps_helper_length() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+        let mut long_source = Vec::new();
+        long_source.resize(300, b'x');
+        long_source.push(0);
+        let mut destination = [0xbeef_u16; 3];
+
+        assert_eq!(
+            unsafe {
+                cstr_to_counted_u16(
+                    long_source.as_ptr(), destination.as_mut_ptr(), 0x1234_5678, 0xfeed,
+                )
+            },
+            -7
+        );
+        assert_eq!(destination, [2, 0x1234, 0]);
+        let (seen_source, seen_len, seen_destination, seen_max, seen_count) =
+            unsafe { COUNTED_BUFFER_ARGS };
+        assert_eq!(seen_source, long_source.as_ptr() as usize);
+        assert_eq!(seen_len, 0xff);
+        assert_eq!(seen_destination, unsafe { destination.as_mut_ptr().add(1) as usize });
+        assert_eq!(seen_max, 0xff);
+        assert_ne!(seen_count, 0);
+        assert_eq!(unsafe { COUNTED_BUFFER_INITIAL_COUNT }, 0xfeed);
     }
 
     #[test]
