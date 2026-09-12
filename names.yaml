@@ -70546,3 +70546,43 @@ functions:
       a busy poll which reaches 10 ms, sleeps once, then times out. Structural
       review expected to differ in Rust frame/prologue and the one remaining
       helper veneer; control-flow order and status predicates are preserved.
+
+  # --- Context callback dispatch depth ---
+  - address: 0x080d6b14
+    ghidra: FUN_080d6b14
+    name: context_dispatch_callbacks_and_advance
+    size: 144
+    sig: "void context_dispatch_callbacks_and_advance(CallbackDispatchContext *context)"
+    module: app/context_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x24": state
+      "context+0x90": callback_argument
+      "state+0x00": callback_list_anchor
+      "state+0x54": dispatch_depth
+      "state+0x58": counted_mutex
+      "callback_list_anchor+0x10": first_callback_node
+      "callback_node+0x08": callback_word
+      "callback_node+0x10": next_callback_node
+      FUN_0809444c: kernel_running
+      FUN_08094404: mutex_lock_counted
+      FUN_08185b60: clear_context_entry_flags
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte extent
+      0x080d6b14..0x080d6ba4: the next separately linked function begins at
+      0x080d6ba4 with `push {r4-r9,sl,lr}`. Decoding every aligned ARM B/BL
+      immediate finds eight inbound direct callers, all unconditional plain
+      bl at 0x080747d0, 0x080771c0, 0x080f288c, 0x080f2ab4, 0x0820f304,
+      0x08212fd4, 0x08262ea8, and 0x08263ed8; there are zero predicated
+      forms. The separate unconditional tail branch at 0x08277520 is not a
+      call site. The function conditionally locks the already ported counted
+      mutex, dispatches every nonzero callback word in the circular list with
+      `(context+0x90, 1)` only at depth zero, reaches unported 0x08185b60
+      with `state+4`, and wraps the depth increment. `FUN_08185b60` is a
+      real decoded function entry but remains unported; its inferred name
+      records only its observed flag-clearing effect. Target builds invoke its
+      verified address; host tests use a volatile seam because host function
+      pointers cannot fit the callback's u32 slot. Tests cover circular
+      order, zero callback suppression, clear-before-increment ordering, the
+      empty anchor, and a nonzero depth wrapping from u32::MAX to zero.
