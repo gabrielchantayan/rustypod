@@ -72991,3 +72991,38 @@ functions:
       normally; ARM LLVM lowers it to the same register-restoring tail
       transfer. Host tests cover the failed resolve short-circuit, both
       selector choices, and reverse index zero.
+
+  # --- Vector element lookup with lazy default slot (cxx/vector_default_slot) ---
+  - address: 0x0829d0c4
+    ghidra: FUN_0829d0c4
+    name: vector_element_or_default_slot
+    size: 128
+    sig: "u32 *vector_element_or_default_slot(VectorDefaultSlotOwner *owner, u32 index)"
+    module: cxx/vector_default_slot
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      r4: owner
+      r5: index
+      FUN_083d7944: vector_size_elem4_alias_7944
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec fixes the full extent at 128 bytes: 108 bytes of code from
+      0x0829d0c4 through 0x0829d12c, followed by the five-word literal pool
+      through 0x0829d140; the next separately linked function starts at
+      0x0829d144. It calls vector_size_elem4_alias_7944 on owner+4 and returns
+      begin + 4*index when the ARM unsigned compare finds index below the
+      size. Otherwise it lazily fills the fallback word at 0x08a0fc6c with
+      0x08b31810 under the C++ guard at 0x08a0fc68, registers that slot with
+      cxa_atexit, and returns the slot address. Complete aligned ARM
+      B/BL-immediate decoding found exactly seven direct inbound calls, all
+      unconditional plain bl at 0x08134390, 0x081343a4, 0x081343b8,
+      0x08134448, 0x0813453c, 0x081345dc, and 0x08134620; there are no
+      predicated calls, tail branches, or aligned raw-word references. The
+      handler literal 0x083cddb4 is inside FUN_083cdd24 rather than a function
+      entry, so the port uses an inert handler; it also represents the two
+      fixed .bss words with crate statics. No new dispatch seam was added:
+      all four direct callees are already ported.
