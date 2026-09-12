@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod bit_set;
 pub mod string_record;
+pub mod record_work_pump;
 pub mod array_element_at;
 pub mod array_index_stride20;
 pub mod array_index_stride24;

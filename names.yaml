@@ -39203,6 +39203,37 @@ functions:
       untouched, mid-walk set swap (the reload), empty string; fixtures
       in testing::hints::STRING_RECORD (new).
 
+  - address: 0x08148578
+    ghidra: FUN_08148578
+    name: pump_record_work_queue
+    size: 68
+    sig: "void pump_record_work_queue(WorkRecord *record)"
+    module: cxx/record_work_pump
+    status: ported
+    renames:
+      param_1: record
+      FUN_0829b0d8: work_source_vtable_slot_18
+      FUN_081482c0: advance_work
+      FUN_0814848c: teardown_work
+    notes: >-
+      Raw words decode to 68 code bytes at 0x08148578..0x081485bb; the
+      next function begins push {r2, r3, r4, r5, r6, lr} at 0x081485bc.
+      Decoding every ARM B/BL word in osos.dec finds exactly eight direct
+      calls, all unconditional bl: 0x08136270, 0x0816c5d4, 0x0816c648,
+      0x0816c8b4, 0x0816ca20, 0x08186efc, 0x081dc634, 0x081dcf5c; there
+      are no predicated calls or tail branches. Every pass first calls
+      the embedded source's vtable word +0x18 at record+0x08. A zero
+      result returns. A nonzero result then reads bytes +0x62 and, only
+      when it is zero, +0x63; either nonzero byte returns. With both
+      clear it calls FUN_081482c0 then FUN_0814848c, each with record,
+      and repeats. The two sibling identities are not recovered, so their
+      direct target calls use WORK_RECORD_PUMP_OPS (retail addresses on
+      target; recording replacements in host tests); the vtable entry is
+      modeled solely by its observed slot and u32 result. Host tests prove
+      a zero source result has no lifecycle calls, each stop byte gates
+      after the source probe, clear bytes repeat ordered advance/teardown
+      pairs until the source stops, and a status set by advance is first
+      observed only on the following pass after its paired teardown.
   - address: 0x081346e4
     ghidra: FUN_081346e4
     name: template_binding_name_or_default
