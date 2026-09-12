@@ -11747,6 +11747,34 @@ functions:
       registers the result with class id 0x7800. Same deviations and the
       same NOT-HOOK-READY caveat as 0x0817ee04.
 
+  - address: 0x0817790c
+    ghidra: FUN_0817790c
+    name: app_screen_position_decrement_if_flagged
+    size: 28
+    sig: "u32 app_screen_position_decrement_if_flagged(const u8 *screen, u32 position)"
+    module: app/app_screen_position_decrement_if_flagged
+    status: ported
+    renames:
+      param_1/r0: screen
+      param_2/r1: position
+      "screen+0x25": first_state_flag
+      "screen+0x26": second_state_flag
+    notes: >-
+      Raw ARM confirms the 28-byte extent 0x0817790c..0x08177928: ldrb
+      r2,[r0,#0x25]; cmp r2,#0; ldrbeq r0,[r0,#0x26]; cmpeq r0,#0; subne
+      r0,r1,#1; moveq r0,r1; bx lr. The next separately linked function
+      starts at 0x08177928, with no literal pool. Decoding every aligned ARM
+      B/BL immediate in osos.dec finds exactly eight direct inbound bl callers
+      (0x0817696c, 0x08176aa4, 0x08176e0c, 0x0823911c, 0x08239140,
+      0x0823916c, 0x082391d4, and 0x082391e8), all unconditional with zero
+      predicated forms; three unconditional direct tail b transfers also
+      target it (0x08239c34, 0x08239c4c, and 0x08260a30). No aligned data word
+      contains this address. The first opaque state byte short-circuits the
+      second byte load when nonzero; the return is position unchanged only
+      when both are zero, else position - 1 modulo 2^32. Host tests cover
+      every zero/nonzero flag condition, arbitrary nonzero byte values,
+      wrapping from zero, and read-only surrounding storage. Deliberate
+      deviation: none.
   - address: 0x08177944
     ghidra: FUN_08177944
     name: app_screen_cached_position
