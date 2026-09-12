@@ -68683,3 +68683,31 @@ functions:
       0x081a2ab8, and 0x081a2ac8; there are no predicated bl forms or direct
       tail-branch callers. They append alternating (540,200) and (676,400)
       pairs four times. No deliberate deviations.
+
+  # --- fixed configuration-entry initialization ---
+  - address: 0x0824cac0
+    ghidra: FUN_0824cac0
+    name: configuration_entry_initialize
+    size: 164
+    sig: "void configuration_entry_initialize(void *entry, u8 primary_selector, u8 secondary_selector, u32 field_00..field_24)"
+    module: app/configuration_entry
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: primary_selector
+      param_3/r2: secondary_selector
+      param_4..param_28: field_00..field_24
+    notes: >-
+      Raw osos.dec establishes the exact 164-byte extent (41 ARM words) from
+      push {r4-r11,lr} at 0x0824cac0 through pop {r4-r11,pc} at 0x0824cb60;
+      the next independently linked function starts at 0x0824cb64. It is a
+      leaf: stores param_4..param_28 as 25 words at entry+0x00..entry+0x60
+      (with word 12 deliberately stored after words 13..16), then stores the
+      two low-byte parameters at entry+0x64 and entry+0x65. The final two
+      bytes of the 0x68-byte entry remain caller-owned padding. A whole-image
+      immediate ARM B/BL decode finds exactly eight inbound direct calls, all
+      unconditional plain bl from FUN_082ab6c0 at 0x082ab75c, 0x082ab7f8,
+      0x082ab88c, 0x082ab924, 0x082ab9b0, 0x082aba48, 0x082abadc, and
+      0x082abb78; there are no predicated BL forms or direct tail branches.
+      Rust retains the raw 32-bit field layout on 64-bit hosts by using a byte
+      destination pointer and explicit four-byte-aligned volatile word stores.
