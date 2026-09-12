@@ -96,6 +96,52 @@ use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
 use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
 
+/// The five-word owner shape consumed by [`container_end_cursor`].
+///
+/// The retailOS member reads only `end_cursor` at target byte offset +0x10.
+/// Its representation remains a raw target word, so the layout stays
+/// word-for-word on both ARM and 64-bit test hosts without assuming a host
+/// pointer fits in that field.
+#[repr(C)]
+pub struct ContainerEndCursorOwner {
+    pub unknown_0: u32,
+    pub unknown_4: u32,
+    pub unknown_8: u32,
+    pub unknown_c: u32,
+    pub end_cursor: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(ContainerEndCursorOwner, end_cursor)];
+
+/// container_end_cursor — original: `FUN_083dbedc` @ 0x083dbedc
+/// (12 bytes; Ghidra reports 16).
+///
+/// Returns the raw cursor word at `owner + 0x10`. The independently linked
+/// next function starts at 0x083dbeec, so raw `osos.dec` fixes this body's
+/// extent as three instructions: `push {r3,lr}; ldr r0,[r0,#0x10]; str
+/// r0,[sp]; pop {ip,pc}`. All seven inbound direct calls are unconditional
+/// `bl` forms at 0x0825b898, 0x0825b950, 0x0825ba8c, 0x0825bb38,
+/// 0x0825bbd0, 0x0825bc78, and 0x0825bcf4; decoding every aligned ARM
+/// B/BL word finds no predicated calls or tail branches.
+///
+/// Those callers initialize a cursor from the sibling accessor that returns
+/// `*(*owner + 8)`, then repeatedly compare it with this result and advance
+/// it. This establishes the result as their container end cursor but does
+/// not identify the owning container or cursor representation. The raw u32
+/// result deliberately preserves its target-word ABI without inventing a
+/// pointer type; there are no behavioral deviations.
+///
+/// # Safety
+///
+/// `owner` must point to a readable [`ContainerEndCursorOwner`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_end_cursor")]
+#[inline(never)]
+pub unsafe extern "C" fn container_end_cursor(owner: *const ContainerEndCursorOwner) -> u32 {
+    (*owner).end_cursor
+}
+
 /// A 16-byte retailOS record containing two adjacent [`StringObject`]s.
 ///
 /// On the 32-bit target each string object has a vtable and payload word, so
@@ -5567,4 +5613,34 @@ mod tests {
 
         assert_eq!(returned, 24usize as *mut u8, "skipped record still advances output");
     }
+    #[test]
+    fn container_end_cursor_returns_the_opaque_end_word() {
+        let owner = ContainerEndCursorOwner {
+            unknown_0: 0x0102_0304,
+            unknown_4: 0x1112_1314,
+            unknown_8: 0x2122_2324,
+            unknown_c: 0x3132_3334,
+            end_cursor: 0xfedc_ba98,
+        };
+
+        assert_eq!(
+            unsafe { container_end_cursor(&owner) },
+            0xfedc_ba98,
+            "the member loads only the owner word at +0x10"
+        );
+    }
+
+    #[test]
+    fn container_end_cursor_preserves_a_null_cursor_word() {
+        let owner = ContainerEndCursorOwner {
+            unknown_0: u32::MAX,
+            unknown_4: u32::MAX,
+            unknown_8: u32::MAX,
+            unknown_c: u32::MAX,
+            end_cursor: 0,
+        };
+
+        assert_eq!(unsafe { container_end_cursor(&owner) }, 0);
+    }
+
 }

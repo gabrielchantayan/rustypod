@@ -71571,3 +71571,27 @@ functions:
       Deliberate deviation: the unported tail target is represented by the
       volatile VECTOR_PUSH_BACK_ELEM4_OPS seam on host tests while target
       builds dispatch to its verified retail address.
+  - address: 0x083dbedc
+    ghidra: FUN_083dbedc
+    name: container_end_cursor
+    size: 12
+    sig: "u32 container_end_cursor(const ContainerEndCursorOwner *owner)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: owner
+      field_10: end_cursor
+    notes: >-
+      Raw osos.dec fixes the body at 12 bytes despite Ghidra's 16-byte
+      extent: `push {r3,lr}; ldr r0,[r0,#0x10]; str r0,[sp]; pop {ip,pc}`.
+      The separately linked next function starts at 0x083dbeec. It returns
+      the opaque target word at owner + 0x10; seven callers use it as the
+      end cursor paired with the preceding sibling's begin-cursor accessor,
+      but neither owner nor cursor representation is identified. Decoding
+      every aligned ARM B/BL word in osos.dec finds exactly seven inbound
+      direct plain bl calls (0x0825b898, 0x0825b950, 0x0825ba8c,
+      0x0825bb38, 0x0825bbd0, 0x0825bc78, 0x0825bcf4), with no predicated
+      forms or tail branches. No aligned raw word in osos.dec references
+      0x083dbedc, so it is not used as a data-dispatched target. The Rust
+      port returns u32 rather than inventing a pointer type, preserving the
+      target-word ABI and the opaque cursor representation on host tests.
