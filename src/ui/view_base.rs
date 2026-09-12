@@ -36,7 +36,7 @@
 //!                          derived class tests
 //! +0x4c  word_4c           spec +0x10
 //! +0x50  geometry          0x30-byte block copied from spec +0x1c
-//! +0x80  word_80..+0x8c    four words cleared here
+//! +0x80  bounds            x/y start/end coordinates cleared here
 //! +0x90  word_90           spec +0x58 when flags covers 0x38000 or
 //!                          0x1c0000, else 0
 //! +0x94  byte_94           cleared here (0x0826ee08 may set it from
@@ -101,6 +101,22 @@ pub struct ViewSpec {
 
 const _: [u8; 0x5c] = [0; core::mem::size_of::<ViewSpec>()];
 
+/// The four target words at `ViewBase + 0x80`, in their observed order.
+///
+/// The x/y labels follow the paired extent setters at 0x0826d87c and
+/// 0x0826d6e8: they independently alter the first/third and
+/// second/fourth words, respectively.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ViewBounds {
+    pub x_start: u32,
+    pub y_start: u32,
+    pub x_end: u32,
+    pub y_end: u32,
+}
+
+const _: [u8; 0x10] = [0; core::mem::size_of::<ViewBounds>()];
+
 /// The 0xa4-byte grand-base view. Pointer-typed members are modelled
 /// as `u32` target words so the layout is exact on both the 32-bit
 /// target and 64-bit hosts (the `ui/styled_text_view.rs` convention).
@@ -127,14 +143,8 @@ pub struct ViewBase {
     pub word_4c: u32,
     /// +0x50..+0x80 — the 0x30-byte block from spec +0x1c.
     pub geometry: [u8; 0x30],
-    /// +0x80 — cleared here.
-    pub word_80: u32,
-    /// +0x84 — cleared here.
-    pub word_84: u32,
-    /// +0x88 — cleared here.
-    pub word_88: u32,
-    /// +0x8c — cleared here.
-    pub word_8c: u32,
+    /// +0x80..+0x90 — view coordinate bounds, cleared here.
+    pub bounds: ViewBounds,
     /// +0x90 — spec +0x58 when `flags` covers 0x38000 or 0x1c0000,
     /// else 0.
     pub word_90: u32,
@@ -158,6 +168,7 @@ const _: [u8; 0x38] = [0; core::mem::offset_of!(ViewBase, resources)];
 const _: [u8; 0x40] = [0; core::mem::offset_of!(ViewBase, class_code)];
 const _: [u8; 0x48] = [0; core::mem::offset_of!(ViewBase, flags)];
 const _: [u8; 0x50] = [0; core::mem::offset_of!(ViewBase, geometry)];
+const _: [u8; 0x80] = [0; core::mem::offset_of!(ViewBase, bounds)];
 const _: [u8; 0x90] = [0; core::mem::offset_of!(ViewBase, word_90)];
 const _: [u8; 0x94] = [0; core::mem::offset_of!(ViewBase, byte_94)];
 const _: [u8; 0x98] = [0; core::mem::offset_of!(ViewBase, word_98)];
@@ -299,21 +310,29 @@ pub unsafe extern "C" fn view_base_set_resource_provider(
     unsafe { attach(replacement, view) };
     unsafe { crate::ui::invalidate::ui_element_invalidate(view.cast()) }.cast()
 }
-/// The decoded portion of a view's runtime vtable used by
-/// [`view_base_set_word_44`].
+/// The decoded portion of a view's runtime vtable used by the extent and
+/// `word_44` setters.
 ///
-/// The dynamic target at slot `+0xd4` has no statically recoverable
-/// identity; it is invoked only through the object-provided vtable.
+/// Slot `+0x68` is reached by 0x0826d87c, but its target is not a stable
+/// function entry: the grand-base table's word points into 0x08105d0c's
+/// instruction stream. It remains deliberately named by slot, not identity.
 #[repr(C)]
 pub struct ViewBaseVtable {
-    /// Slots `+0x00..+0xd0`, not decoded by this setter.
-    pub unresolved_00_d0: [usize; 53],
+    /// Slots `+0x00..+0x64`, not decoded by the setters.
+    pub unresolved_00_64: [usize; 26],
+    /// Slot `+0x68`: receives `(view, bounds, 1)`.
+    pub slot_68: ViewBaseSlot68,
+    /// Slots `+0x6c..+0xd0`, not decoded by the setters.
+    pub unresolved_6c_d0: [usize; 26],
     /// Slot `+0xd4`: called after `word_44` changes.
     pub word_44_changed: unsafe extern "C" fn(*mut ViewBase),
 }
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0xd4] = [0; core::mem::offset_of!(ViewBaseVtable, word_44_changed)];
+
+/// ABI of the runtime vtable slot `+0x68`.
+pub type ViewBaseSlot68 = unsafe extern "C" fn(*mut ViewBase, *mut ViewBounds, u32);
 
 /// ABI of the runtime vtable slot `+0xd4`.
 pub type ViewBaseWord44Changed = unsafe extern "C" fn(*mut ViewBase);
@@ -537,10 +556,10 @@ pub unsafe extern "C" fn view_base_construct(
         core::ptr::addr_of!((*spec).geometry).cast(),
         0x30,
     );
-    core::ptr::addr_of_mut!((*view).word_80).write_volatile(0);
-    core::ptr::addr_of_mut!((*view).word_84).write_volatile(0);
-    core::ptr::addr_of_mut!((*view).word_88).write_volatile(0);
-    core::ptr::addr_of_mut!((*view).word_8c).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).bounds.x_start).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).bounds.y_start).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).bounds.x_end).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).bounds.y_end).write_volatile(0);
     core::ptr::addr_of_mut!((*view).byte_94).write_volatile(0);
     core::ptr::addr_of_mut!((*view).byte_a0).write_volatile(0);
     let flags = core::ptr::addr_of!((*view).flags).read_volatile();
@@ -781,10 +800,10 @@ mod tests {
                 "the 0x30-byte block is copied verbatim"
             );
             for word in [
-                ptr::addr_of!((*view).word_80),
-                ptr::addr_of!((*view).word_84),
-                ptr::addr_of!((*view).word_88),
-                ptr::addr_of!((*view).word_8c),
+                ptr::addr_of!((*view).bounds.x_start),
+                ptr::addr_of!((*view).bounds.y_start),
+                ptr::addr_of!((*view).bounds.x_end),
+                ptr::addr_of!((*view).bounds.y_end),
             ] {
                 assert_eq!(word.read_volatile(), 0);
             }

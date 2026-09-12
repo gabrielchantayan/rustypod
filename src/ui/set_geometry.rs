@@ -66,6 +66,9 @@
 //!   0x081802fc/0x08182888/0x08288218/0x0828865c) overwrite r0 with
 //!   the very next instruction; no caller can observe it.
 
+#[cfg(test)]
+extern crate std;
+
 use crate::libc::iram_veneers::iram_memcpy_veneer;
 use crate::ui::view_base::ViewBase;
 
@@ -137,16 +140,17 @@ pub unsafe extern "C" fn view_base_set_geometry(
     }
 }
 
+/// Serializes host tests that replace the process-global redraw seam.
+#[cfg(test)]
+pub static VIEW_BASE_GEOMETRY_CHANGED_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use core::ptr;
-    use std::sync::Mutex;
-
-    /// Serializes access to the process-global seam slot.
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
 
     static mut SEEN_VIEW: *mut ViewBase = ptr::null_mut();
     static mut CALLS: u32 = 0;
@@ -170,7 +174,7 @@ mod tests {
     }
 
     fn install_recorder() -> SeamGuard {
-        let lock = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = VIEW_BASE_GEOMETRY_CHANGED_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             SEEN_VIEW = ptr::null_mut();
             CALLS = 0;
@@ -185,7 +189,7 @@ mod tests {
         let mut view: ViewBase = unsafe { core::mem::zeroed() };
         view.flags = 0xcafe_cafe;
         view.word_4c = 0x1234_5678;
-        view.word_80 = 0x8765_4321;
+        view.bounds.x_start = 0x8765_4321;
         for b in &mut view.geometry {
             *b = 0xa5;
         }
@@ -206,7 +210,7 @@ mod tests {
         assert_eq!(view.geometry, block, "geometry copied verbatim");
         assert_eq!(view.flags, 0xcafe_cafe, "flag word before the block untouched");
         assert_eq!(view.word_4c, 0x1234_5678, "word at +0x4c untouched");
-        assert_eq!(view.word_80, 0x8765_4321, "word at +0x80 untouched");
+        assert_eq!(view.bounds.x_start, 0x8765_4321, "word at +0x80 untouched");
         unsafe {
             assert_eq!(CALLS, 0, "redraw == 0: the helper must not run");
             assert_eq!(SEEN_VIEW, ptr::null_mut());
@@ -247,7 +251,7 @@ mod tests {
 
     #[test]
     fn default_host_stub_is_inert_and_the_copy_still_runs() {
-        let _lock = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = VIEW_BASE_GEOMETRY_CHANGED_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             CALLS = 0;
             VIEW_BASE_GEOMETRY_CHANGED = missing_geometry_changed;

@@ -279,6 +279,9 @@ pub mod hints {
     // 0xc800_0000: dedicated to app/context_scope's subject/current-context
     // predicate fixture; it carries raw-u32 scope and context links, and
     // fixture mappings never unmap, so no other user may share this hint.
+    // 0xc000_0000: dedicated to ui/set_x_extent's raw-u32 view fixture;
+    // fixture mappings never unmap, so no other user may share this hint.
+    pub const VIEW_BASE_SET_X_EXTENT: usize = 0xc000_0000;
     pub const CONTEXT_SCOPE_SUBJECT_MATCHES_CONTEXT_FIELD_F40: usize = 0xc800_0000;
     // 0xc900_0000: dedicated to ui/element_reference_construct_string's
     // raw-u32 reference/vtable/target fixture; mappings never unmap, so no
