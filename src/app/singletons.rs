@@ -505,6 +505,10 @@ pub static mut APP_SCREEN: *mut u8 = core::ptr::null_mut();
 /// The TPodMediaPlayer singleton (original: the word @ 0x089ca7cc, the
 /// `+4` slot of the global @ 0x089ca7c8).
 pub static mut MEDIA_PLAYER_INSTANCE: *mut u8 = core::ptr::null_mut();
+/// The registry-class-0x7a00 singleton (original: the `+4` slot of the
+/// holder global @ 0x089cc600).
+pub static mut SINGLETON_CLASS_7A00_INSTANCE: *mut u8 = core::ptr::null_mut();
+
 
 /// The registry-class-0x8900 singleton (original: the word @
 /// 0x089cc3ac, the `+4` slot of the global @ 0x089cc3a8).
@@ -1592,6 +1596,38 @@ pub unsafe extern "C" fn singleton_class_8e80() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(CLASS_8E80_INSTANCE);
     lazy_singleton(cache, CLASS_8E80_SIZE, || unsafe { ctor!(class_8e80) })
 }
+/// singleton_class_7a00_instance — original: `FUN_0827e48c` @ **0x0827e48c**
+/// (**12 bytes**; **8 direct `bl` call sites, all unconditional**).
+///
+/// Loads and returns the `+4` instance slot of the private holder at
+/// `0x089cc600`, without initialization, a NULL guard, or pointer adjustment.
+/// Raw bytes place the separately linked next function at `0x0827e49c`, and
+/// complete ARM B/BL decoding finds callers at `0x08113fc4`, `0x0816cfc4`,
+/// `0x0816d3bc`, `0x0816d838`, `0x0816da48`, `0x0816daac`, `0x0816daf8`, and
+/// `0x0816db64`; no calls are predicated, and no direct tail `b` or aligned
+/// DATA word targets this entry.
+///
+/// The holder is populated by `FUN_0827e76c`: it allocates 0x16c bytes,
+/// constructs `FUN_0827e7fc`, and stores the result at the slot. That
+/// constructor registers the object as class 0x7a00, but neither it nor the
+/// callers recover a class name; the symbol names only the verified registry
+/// identity. Deliberate deviation: the decrypted 0x089cxxxx RW page contains
+/// stale strings, so host builds model the runtime-initialized slot with
+/// [`SINGLETON_CLASS_7A00_INSTANCE`]; target builds load the live word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.singleton_class_7a00_instance")]
+pub unsafe extern "C" fn singleton_class_7a00_instance() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        core::ptr::read_volatile(0x089c_c604 as *const u32) as usize as *mut u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(SINGLETON_CLASS_7A00_INSTANCE))
+    }
+}
+
 
 #[cfg(test)]
 extern crate std;
@@ -3271,4 +3307,26 @@ mod tests {
         restore(guard);
     }
 
+}
+
+#[cfg(test)]
+mod singleton_class_7a00_instance_tests {
+    use super::*;
+    use core::ptr;
+
+    #[test]
+    fn class_7a00_accessor_preserves_the_runtime_slot() {
+        let _guard = SINGLETON_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let instance = 0x2468_ace0usize as *mut u8;
+
+        unsafe {
+            SINGLETON_CLASS_7A00_INSTANCE = ptr::null_mut();
+            assert!(singleton_class_7a00_instance().is_null());
+
+            SINGLETON_CLASS_7A00_INSTANCE = instance;
+            assert_eq!(singleton_class_7a00_instance(), instance);
+
+            SINGLETON_CLASS_7A00_INSTANCE = ptr::null_mut();
+        }
+    }
 }
