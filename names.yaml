@@ -33572,6 +33572,28 @@ functions:
       of the direct bl/b - the documented deviations of the sibling
       ports; the crate fp frame accounts for the rest.
 
+  - address: 0x08123a14
+    ghidra: FUN_08123a14
+    name: formatted_message_close_array
+    size: 52
+    sig: "void formatted_message_close_array(MessageStream *stream, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    renames:
+      param_1: stream
+      param_2: depth
+    notes: >-
+      8 bl call sites, binary-scanned (all plain bl, no predicated forms:
+      no caller-side gating). Raw bytes establish the exact 52-byte extent:
+      indent_prepare @ 0x08123a54 is called with (stream, depth), snprintf
+      @ 0x0802f768 formats the adjacent literal @ 0x08123a48
+      ("%s</array>\n") into the inline 512-byte buffer at +0x15 with one
+      variadic word (the prepared indent), and the body tail-branches to
+      stream append @ 0x08123c58(stream, buf). The Rust port shares the
+      INDENT_PREPARE / STREAM_APPEND dispatch slots with the formatted
+      message siblings, calls and returns rather than tail-branching to
+      append, and calls the ported snprintf directly.
+
   - address: 0x08123a54
     ghidra: FUN_08123a54
     name: indent_prepare

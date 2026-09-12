@@ -15,6 +15,9 @@
 //! - `formatted_message_close_dict` — original: `FUN_081239d4` @
 //!   0x081239d4 (52 bytes; 29 `bl` call sites, binary-scanned, all
 //!   plain `bl`).
+//! - `formatted_message_close_array` — original: `FUN_08123a14` @
+//!   0x08123a14 (52 bytes; 8 `bl` call sites, binary-scanned, all plain
+//!   `bl`).
 //! - `indent_prepare` — original: `FUN_08123a54` @ 0x08123a54 (76
 //!   bytes; 14 `bl` call sites, binary-scanned).
 //!
@@ -57,10 +60,12 @@
 //! word `(indent)` — the original's r3, no stack words — and tail-
 //! branch to the stream append. Its call sites pass the stream and a
 //! nesting depth only (@ 0x0815032c: `formatted_message_close_dict(
-//! ctx + 0xc, 1)` after the property batch of a track dict); the
-//! caller's r2/r3 are dead on entry. The `</array>` twin @ 0x08123a14
-//! (52 bytes, same body, literal `"%s</array>\n"` @ 0x08123a48) is not
-//! ported.
+//! ctx + 0xc, 1)` after the property batch of a track dict). The
+//! array-closing sibling @ 0x08123a14 has the identical body with
+//! `"%s</array>\n"` @ 0x08123a48 and is ported as
+//! [`formatted_message_close_array`].
+//! The `</array>` literal immediately follows its 52-byte body, at
+//! 0x08123a48.
 //!
 //! `MessageStream` fields used (pinned by this function's `add rX, r4,
 //! #off` sequence):
@@ -129,6 +134,11 @@ const PLIST_BOOLEAN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<%s/>\n\0";
 /// original with `add r2, pc, #24`, right after the 52-byte body).
 /// Consumes one argument word: indent.
 const PLIST_DICT_CLOSE_FORMAT: &[u8] = b"%s</dict>\n\0";
+
+/// The array-closing format literal @ 0x08123a48 (addressed by the
+/// original with `add r2, pc, #24`, right after the 52-byte body).
+/// Consumes one argument word: indent.
+const PLIST_ARRAY_CLOSE_FORMAT: &[u8] = b"%s</array>\n\0";
 
 /// The string-property sibling's format literal @ 0x081238b8 (right after
 /// its 132-byte body). A non-null key uses all four argument words; a null
@@ -546,6 +556,46 @@ pub unsafe extern "C" fn formatted_message_close_dict(
     (stream_append_op())(stream, text);
 }
 
+/// formatted_message_close_array — original: `FUN_08123a14` @
+/// 0x08123a14 (52 bytes; verified 8 `bl` call sites, all plain `bl` —
+/// no predicated forms, so no caller-side gating).
+///
+/// Close one indented `<array>` container on `stream`: prepare the
+/// indentation for nesting `depth`, format the `"</array>"` close tag
+/// into the stream's inline buffer with [`PLIST_ARRAY_CLOSE_FORMAT`]
+/// (one argument word: the prepared indent), and append the buffer to
+/// the stream output.
+///
+/// Deliberate deviation: the original tail-branches to stream append @
+/// 0x08123c58; this port calls its swappable [`STREAM_APPEND`] slot and
+/// returns, preserving its arguments and observable formatting while
+/// adding one Rust frame.
+///
+/// Register usage: r0 = stream, r1 = depth (original forwards r1 as
+/// the preparer's depth argument; the caller's r2/r3 are dead on
+/// entry — the original never touches them before overwriting).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_close_array(
+    stream: *mut MessageStream,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    // The original's argument area: r3 = indent, no stack words — here
+    // built as a one-word va_list.
+    let args: [u32; 1] = [indent as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_ARRAY_CLOSE_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -629,6 +679,21 @@ mod tests {
             *slot = *ap.add(i);
         }
         OPEN_DICT_FORMAT_LEG = Some((fmt, *w, *w.add(1), words));
+        0
+    }
+
+    /// Snapshot for the array-closing sibling's exact one-word variadic
+    /// area. Reading more words would step past its stack array.
+    static mut CLOSE_ARRAY_FORMAT_LEG: Option<(*const u8, usize, usize, u32)> = None;
+
+    unsafe extern "C" fn snapshot_close_array_engine(
+        fmt: *const u8,
+        _putc: crate::printf_helpers::PutcFn,
+        ctx: *mut core::ffi::c_void,
+        ap: VaList,
+    ) -> i32 {
+        let w = ctx as *const usize; // BoundedCursor { cursor, end }
+        CLOSE_ARRAY_FORMAT_LEG = Some((fmt, *w, *w.add(1), *ap));
         0
     }
 
@@ -1174,6 +1239,76 @@ mod tests {
             // No mocks installed: ported default preparer, default
             // table, default append, and the engine stub.
             formatted_message_close_dict(stream, 2);
+            assert_eq!(
+                &(&(*stream).indent)[..3],
+                b"\t\t\0".as_slice(),
+                "default preparer: depth copies of the default unit"
+            );
+            assert_eq!((*stream).buf[0], 0, "stub engine still NUL-terminates the buffer");
+            // The default append dropped the message: bytes past the
+            // NUL are the untouched backing fill.
+            assert_eq!((*stream).buf[1], 0xAA);
+        }
+    }
+
+    #[test]
+    fn close_array_prepares_formats_and_appends_in_order() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(snapshot_close_array_engine, || {
+                formatted_message_close_array(stream, 0);
+            });
+            let (prep_stream, prep_depth) = PREPARE_LEG.expect("indent prepared");
+            assert_eq!(prep_stream, stream, "preparer saw the stream");
+            assert_eq!(prep_depth, 0, "preparer saw the depth (original r1)");
+
+            let (fmt, cursor, end, word) =
+                (*core::ptr::addr_of_mut!(CLOSE_ARRAY_FORMAT_LEG)).take().expect("formatter ran");
+            let buf = (*stream).buf.as_mut_ptr();
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(fmt, PLIST_ARRAY_CLOSE_FORMAT.as_ptr());
+            assert_eq!(cursor, buf as usize, "snprintf target is the inline buffer at +0x15");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "bounded at +0x15 + 0x200");
+            assert_eq!(word, indent as u32, "single argument word: the prepared indent");
+
+            let (app_stream, app_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(app_stream, stream);
+            assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn close_array_formats_the_close_tag_end_to_end() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(echo_engine, || {
+                formatted_message_close_array(stream, 1);
+            });
+            // The echo engine emits the literal without expanding the
+            // conversion; the append must receive the formatter's exact
+            // product and the preparer's indent remains in the scratch.
+            let (_, _, text) = (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(text, &PLIST_ARRAY_CLOSE_FORMAT[..PLIST_ARRAY_CLOSE_FORMAT.len() - 1]);
+            let stream = &*stream;
+            assert_eq!(&stream.indent[..3], b"\t\t\0".as_slice(), "preparer's product in place");
+        }
+    }
+
+    #[test]
+    fn close_array_default_slots_prepare_indent_and_drop_the_message() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            (*stream).style = 0; // index the default table's "\t" unit
+            // No mocks installed: ported default preparer, default
+            // table, default append, and the engine stub.
+            formatted_message_close_array(stream, 2);
             assert_eq!(
                 &(&(*stream).indent)[..3],
                 b"\t\t\0".as_slice(),
