@@ -67733,3 +67733,27 @@ functions:
       are zero predicated bl calls. A ninth inbound branch is the unconditional
       tail b at 0x0829dd2c, whose preceding add r0,r0,#4 adapts a containing
       object to this cursor layout. No aligned DATA word names this entry.
+
+  # --- byte code 3-or-4 predicate ---
+  - address: 0x0829cf40
+    ghidra: FUN_0829cf40
+    name: byte_is_three_or_four
+    size: 24
+    sig: "u32 byte_is_three_or_four(const u8 *value)"
+    module: util/value_predicate
+    status: ported
+    renames:
+      param_1/r0: value
+      r0 (return): predicate_result
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent from 0x0829cf40
+      through 0x0829cf54; the separately linked next function begins at
+      0x0829cf58. It performs `ldrb r0,[r0]`, compares that byte with 3 and,
+      only if unequal, 4, then returns normalized one or zero in r0. Decoding
+      every immediate ARM B/BL word in osos.dec finds exactly eight inbound
+      direct calls, all unconditional plain bl at 0x0817dc1c, 0x0817ddd8,
+      0x0817de34, 0x0817de94, 0x0817df90, 0x0817dfb4, 0x0817e088, and
+      0x0817e168; there are no predicated direct calls or direct tail
+      branches. No aligned DATA word names this entry. No deviations: the
+      port preserves the single byte read and intentionally has no NULL guard.
+      Host tests exhaust all 256 input byte values, accepting only 3 and 4.
