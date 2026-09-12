@@ -26751,6 +26751,32 @@ functions:
       shipped default; the returns-0 stand-in remains for tests.
       Ghidra types the return as void; r0 carries ++nMem.
 
+  - address: 0x083960e8
+    ghidra: FUN_083960e8
+    name: parse_release_deferred_vdbe
+    size: 72
+    sig: "void parse_release_deferred_vdbe(Parse *parse)"
+    module: sqlite/parse_release_deferred_vdbe
+    status: ported
+    renames:
+      param_1: parse
+      uVar1: parse_error_message_or_vdbe
+      bVar2: has_parse_error_message
+    notes: >-
+      The extent is 0x083960e8..0x08396130: the next word starts a distinct
+      `push {r4-r11,lr}` function and there is no literal pool. All 8 direct
+      binary-scanned callers are unconditional plain bl: 0x082bdba8,
+      0x08370908, 0x08370b4c, 0x08370cc0, 0x08371880, 0x083718bc,
+      0x08371a74, and 0x08372b8c; no predicated callers exist. Parse identity
+      is established by the known SQLite 3.5.x fields zErrMsg at +0x08 and
+      pVdbe at +0x0c. Algorithm: return while +0x30 or zErrMsg is nonzero, or
+      pVdbe is NULL. Otherwise read db from +0x00 and, if its +0x48 pointer is
+      signed-positive as a target-width word, call the ported
+      release_via_field_0x48. Finally clear pVdbe and the byte at +0x10. The
+      no-NULL-guard dereferences are intentional. Deliberate host-only layout
+      deviation: pointer-word slots scale to the host pointer width to prevent
+      widened fixture pointers from overlapping target fields.
+
   - address: 0x083966a0
     ghidra: FUN_083966a0
     name: used_as_column_cache

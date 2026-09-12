@@ -121,6 +121,7 @@ pub mod mem_release;
 pub mod name_from_token;
 pub mod nested_parse;
 pub mod parse;
+pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod os_close;
 pub mod os_read;

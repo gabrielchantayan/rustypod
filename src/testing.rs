@@ -456,6 +456,13 @@ pub mod hints {
     // node fixture for FUN_0839bbd0; mappings never unmap, so no other user
     // may share this hint.
     pub const SIGNED_KEY_TREE_FIND_VALUE_COPY: usize = 0x0200_0000;
+    // Dedicated to sqlite/parse_release_deferred_vdbe's target-width
+    // Parse/db/Vdbe fixture; mappings never unmap, so each test has a
+    // distinct hint.
+    pub const DEFERRED_OWNER_CHILD_RELEASE: usize = 0x0300_0000;
+    pub const DEFERRED_OWNER_CHILD_RELEASE_BLOCKED: usize = 0x0500_0000;
+    pub const DEFERRED_OWNER_CHILD_ABSENT: usize = 0x0600_0000;
+    pub const DEFERRED_OWNER_CHILD_SIGNED: usize = 0x0700_0000;
 
 }
 
