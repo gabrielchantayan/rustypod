@@ -68990,3 +68990,29 @@ functions:
       guard. The state class and extent unit remain unidentified. No deliberate
       deviations: the target uses a literal veneer to retain the direct call
       to the unported retail helper; host tests model only that helper.
+
+  # --- Selector-controlled object-slot address ---
+  - address: 0x08223aa8
+    ghidra: FUN_08223aa8
+    name: selector_slot_address
+    size: 168
+    sig: "u32 selector_slot_address(u32 base, u32 selector)"
+    module: util/selector_slot_address
+    status: ported
+    renames:
+      param_1/r0: base
+      param_2/r1: selector
+    notes: >-
+      Raw osos.dec establishes the exact 42-instruction, 168-byte extent
+      0x08223aa8..0x08223b4c; the distinct next function starts at
+      0x08223b50. `cmp r1,#16; addls pc,pc,r1,lsl#2` selects a 17-entry
+      branch table. Selectors map to offsets {0:8, 1:12, 2:16, 3/4:20,
+      5/6:24, 7:28, 8:40, 9:44, 10:48, 11..14:12, 15:32, 16:36}; values
+      above 16 branch directly to default offset 12. Each destination is
+      `add r0,r0,#offset; bx lr`, so base addition wraps as a 32-bit ARM
+      address calculation. Decoding every ARM B/BL word in osos.dec finds
+      exactly eight direct inbound bl calls, all unconditional plain bl at
+      0x0822390c, 0x0822392c, 0x08223984, 0x082239c8, 0x08223a20,
+      0x08223a44, 0x08223a64, and 0x08223a8c; there are no predicated calls,
+      plain tail branches, or aligned data-word references. Callers always
+      provide the base in r0 and selector in r1. No deliberate deviations.
