@@ -23133,6 +23133,31 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083d6f0c
+    ghidra: FUN_083d6f0c
+    name: cxx_string_empty
+    size: 20
+    sig: "bool cxx_string_empty(const char *const *string)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: string
+      iVar1/r0: length
+    notes: >-
+      basic_string::empty: raw ARM is ldr r0,[r0]; ldr r0,[r0,#-4];
+      rsbs r0,r0,#1; movcc r0,#0; bx lr. It reads the COW string's data
+      pointer word, then the length word four bytes below that data, and
+      returns 1 only for length 0. The next independent entry begins at
+      0x083d6f20, confirming Ghidra's 20-byte extent. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly 7 inbound
+      direct bl calls (0x08101c74, 0x08101dd8, 0x08101f30, 0x08101f74,
+      0x08102140, 0x08134550, 0x08134a3c), all unconditional; there are
+      zero predicated forms, direct b references, and aligned data-word
+      references. No NULL guard exists. The string-table membership port
+      now routes its target dispatch through this Rust function; its
+      string_empty seam remains only for host fixtures whose pointer words
+      are deliberately 32-bit.
+
   - address: 0x083d8b04
     ghidra: FUN_083d8b04
     name: cxx_string_release
@@ -37705,10 +37730,11 @@ functions:
       node+16 @ 0x083b6acc; writes the found node, or the header on a miss,
       through arg 1). FUN_083cf848 is iterator equality (*a == *b, the
       equal twin of the ported not_equal_deref family @ 0x083d6f40).
-      FUN_083d6f0c is basic_string::empty (size word at (*string)-4 == 0).
-      All three are unported and ride the STRING_TABLE_OPS seam table;
-      target defaults transmute the retail addresses 0x083db55c /
-      0x083cf848 / 0x083d6f0c, so the port is hook-ready on device.
+      FUN_083d6f0c is the now-ported basic_string::empty (size word at
+      (*string)-4 == 0). The one remaining unported callee rides the
+      STRING_TABLE_OPS seam table; its target default transmutates
+      0x083db55c while its empty slot routes to the Rust port, so the
+      caller is hook-ready on device.
       Faithful detail: the current-index word is re-read across the first
       find call for the header compare (the original reloads ldr r0,
       [r4, #84]); a host test proves the reload. Deviations: the original
