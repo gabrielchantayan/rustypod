@@ -2027,6 +2027,25 @@ functions:
       sites (0 predicated forms, 0 tail b); callers therefore do not gate this
       classifier. No NULL or bounds guard exists in retailOS or this port.
 
+  - address: 0x082d7340
+    ghidra: FUN_082d7340
+    name: isspace
+    size: 28
+    sig: "i32 isspace(i32 c)"
+    module: ctype
+    status: ported
+    renames:
+      param_1: c
+      piVar1: ctype_table_slot
+    notes: >-
+      Raw extent is exactly 28 bytes at 0x082d7340..0x082d7358; the distinct
+      following function begins at 0x082d735c. Calls the already ported
+      __rt_ctype_table_addr @ 0x0802eca0, loads its LC_CTYPE table word, and
+      returns unchecked table[c] bit 0. Decoding every ARM B/BL word in
+      osos.dec verified 8 plain unconditional bl sites (0 predicated forms,
+      0 tail b); callers therefore do not gate this classifier. No NULL or
+      bounds guard exists in retailOS or this port.
+
   - address: 0x08032fec
     ghidra: FUN_08032fec
     name: _chval

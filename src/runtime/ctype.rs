@@ -117,6 +117,23 @@ pub unsafe extern "C" fn isdigit(c: i32) -> i32 {
     }
 }
 
+/// isspace — original: `FUN_082d7340` @ 0x082d7340 (28 bytes).
+///
+/// Verified by decoding every ARM B/BL word in osos.dec: 8 plain,
+/// unconditional `bl` call sites and no predicated forms. Calls
+/// `__rt_ctype_table_addr`, loads the current LC_CTYPE table pointer, reads
+/// `table[c]`, and returns its bit 0. There is deliberately no NULL or bounds
+/// guard: as in retailOS, the caller must supply an installed table and an
+/// index it can read.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn isspace(c: i32) -> i32 {
+    let table = core::ptr::read_volatile(crate::runtime::errno::__rt_ctype_table_addr())
+        as usize as *const u8;
+    i32::from(core::ptr::read_volatile(table.wrapping_offset(c as isize)) & 1)
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -127,10 +144,14 @@ mod tests {
     use core::ptr;
     use std::sync::{LazyLock, Mutex};
 
-    const ISDIGIT_FIXTURE_LEN: usize = 0x1000;
-    static ISDIGIT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    const CTYPE_FIXTURE_LEN: usize = 0x1000;
+    static CTYPE_TABLE_TEST_LOCK: Mutex<()> = Mutex::new(());
     static ISDIGIT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
-        try_map_u32_slab(hints::CTYPE_ISDIGIT, ISDIGIT_FIXTURE_LEN)
+        try_map_u32_slab(hints::CTYPE_ISDIGIT, CTYPE_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+    static ISSPACE_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::CTYPE_ISSPACE, CTYPE_FIXTURE_LEN)
             .map(|pointer| pointer as usize)
     });
 
@@ -212,14 +233,14 @@ mod tests {
 
     #[test]
     fn isdigit_reads_the_installed_table_and_requires_exact_digit_class() {
-        let _guard = ISDIGIT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = CTYPE_TABLE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(base) = *ISDIGIT_FIXTURE else {
             assert!(note_missing_u32_fixture("runtime::ctype::isdigit"));
             return;
         };
         unsafe {
             let table = (base as *mut u8).add(1);
-            ptr::write_bytes(base as *mut u8, 0, ISDIGIT_FIXTURE_LEN);
+            ptr::write_bytes(base as *mut u8, 0, CTYPE_FIXTURE_LEN);
             ptr::copy_nonoverlapping(CTYPE_FLAGS.as_ptr(), table, CTYPE_FLAGS.len());
 
             let slot = __rt_ctype_table_addr();
@@ -236,6 +257,35 @@ mod tests {
             table.add(b'0' as usize).write(0x21);
             assert_eq!(isdigit(b'A' as i32), 1);
             assert_eq!(isdigit(b'0' as i32), 0);
+        }
+    }
+
+    #[test]
+    fn isspace_reads_the_installed_table_and_tests_only_bit_zero() {
+        let _guard = CTYPE_TABLE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = *ISSPACE_FIXTURE else {
+            assert!(note_missing_u32_fixture("runtime::ctype::isspace"));
+            return;
+        };
+        unsafe {
+            let table = (base as *mut u8).add(1);
+            ptr::write_bytes(base as *mut u8, 0, CTYPE_FIXTURE_LEN);
+            ptr::copy_nonoverlapping(CTYPE_FLAGS.as_ptr(), table, CTYPE_FLAGS.len());
+
+            let slot = __rt_ctype_table_addr();
+            let _reset = CtypeTableSlotReset { slot, saved: slot.read_volatile() };
+            slot.write_volatile(table as usize as u32);
+
+            for c in -1..=255 {
+                let expected = i32::from(matches!(c, 0x09..=0x0d | 0x20));
+                assert_eq!(isspace(c), expected, "isspace({c:#x})");
+            }
+
+            // The instruction is `and flags, #1`, not an ASCII range test.
+            table.add(b'A' as usize).write(0x01);
+            table.add(b' ' as usize).write(0x02);
+            assert_eq!(isspace(b'A' as i32), 1);
+            assert_eq!(isspace(b' ' as i32), 0);
         }
     }
 }
