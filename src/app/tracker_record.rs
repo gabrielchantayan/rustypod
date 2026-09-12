@@ -3,6 +3,8 @@
 //! - `tracker_record_name` — original: `FUN_082a7774` @ `0x082a7774`
 //!   (8 bytes; 30 direct `bl` call sites, 0 predicated, 0 tail `b`, 0
 //!   data-word references — never dispatched virtually).
+//! - `tracker_record_matches` — original: `FUN_082a777c` @ `0x082a777c`
+//!   (52 bytes; 7 direct `bl` call sites, all unconditional).
 
 /// tracker_record_name — original: `FUN_082a7774` @ `0x082a7774` (8 bytes).
 ///
@@ -50,6 +52,114 @@
 #[cfg_attr(target_os = "none", link_section = ".text.tracker_record_name")]
 pub unsafe extern "C" fn tracker_record_name(record: *const u32) -> u32 {
     record.add(1).read()
+}
+
+/// tracker_record_matches — original: `FUN_082a777c` @ `0x082a777c` (52 bytes).
+///
+/// Assembly decoded from `work/firmware/osos.dec` @
+/// `0x082a777c..0x082a77b0`:
+///
+/// ```text
+/// 082a777c  push    {r4, r5, r6, lr}
+/// 082a7780  cmp     r0, r1
+/// 082a7788  beq     0x082a77a8
+/// 082a778c  bl      0x082a7774
+/// 082a7798  bl      0x082a7774
+/// 082a779c  cmp     r5, r0
+/// 082a77a0  movne   r0, #0
+/// 082a77a4  popne   {r4, r5, r6, pc}
+/// 082a77a8  mov     r0, #1
+/// 082a77ac  pop     {r4, r5, r6, pc}
+/// ```
+///
+/// Ghidra's 52-byte extent is exact: the separately linked next function
+/// begins with `push {r4, r5, r6, lr}` at `0x082a77b0`. Decoding every ARM
+/// B/BL-immediate word in osos.dec finds seven inbound calls, all plain
+/// unconditional `bl` (at 0x080c5344, 0x080c5374, 0x080ccca8, 0x080ccd14,
+/// 0x080dd40c, 0x080dd500, and 0x082ab4f4), with zero predicated forms,
+/// zero direct tail branches, and no data-word references.
+///
+/// Algorithm: identical record addresses compare equal without reading
+/// either record. Otherwise, load each record's name word at +0x04 through
+/// `tracker_record_name` and compare the full 32-bit values. The result is
+/// canonicalized to exactly zero or one. Deliberate deviations: none.
+///
+/// # Safety
+///
+/// When `left` and `right` differ, each must be non-null, word-aligned, and
+/// readable through its second `u32` word (+0x04..+0x08). Equal pointers are
+/// compared without dereference.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tracker_record_matches")]
+pub unsafe extern "C" fn tracker_record_matches(left: *const u32, right: *const u32) -> u32 {
+    if left == right || tracker_record_name(left) == tracker_record_name(right) {
+        1
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    extern crate std;
+
+    use super::*;
+
+    #[test]
+    fn identical_record_compares_equal_without_reading_its_name() {
+        extern "C" {
+            fn mmap(addr: usize, len: usize, prot: i32, flags: i32, fd: i32, offset: i64)
+                -> usize;
+            fn getpagesize() -> i32;
+        }
+        #[cfg(target_os = "macos")]
+        const MAP_PRIVATE_ANON: i32 = 0x1002;
+        #[cfg(target_os = "linux")]
+        const MAP_PRIVATE_ANON: i32 = 0x22;
+        const PROT_NONE: i32 = 0;
+
+        unsafe {
+            let page = getpagesize() as usize;
+            let inaccessible = mmap(0, page, PROT_NONE, MAP_PRIVATE_ANON, -1, 0);
+            assert_ne!(inaccessible, usize::MAX, "mmap failed");
+            let record = inaccessible as *const u32;
+            assert_eq!(tracker_record_matches(record, record), 1);
+        }
+    }
+
+    #[test]
+    fn distinct_records_compare_their_name_words() {
+        let left = [0x0897b904u32, 0xdec0ded];
+        let same_name = [0x00000000u32, 0xdec0ded];
+        let different_name = [0xffffffffu32, 0xdec0dee];
+
+        unsafe {
+            assert_eq!(tracker_record_matches(left.as_ptr(), same_name.as_ptr()), 1);
+            assert_eq!(tracker_record_matches(left.as_ptr(), different_name.as_ptr()), 0);
+        }
+    }
+
+    #[test]
+    fn preserves_zero_and_all_ones_name_words() {
+        let zero = [0u32, 0];
+        let ones = [u32::MAX, u32::MAX];
+
+        assert_eq!(unsafe { tracker_record_matches(zero.as_ptr(), zero.as_ptr()) }, 1);
+        assert_eq!(unsafe { tracker_record_matches(zero.as_ptr(), ones.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn leaves_distinct_records_unmodified() {
+        let left = [0x11223344u32, 0x55667788];
+        let right = [0x99aabbccu32, 0x55667788];
+        let left_before = left;
+        let right_before = right;
+
+        assert_eq!(unsafe { tracker_record_matches(left.as_ptr(), right.as_ptr()) }, 1);
+        assert_eq!(left, left_before);
+        assert_eq!(right, right_before);
+    }
 }
 
 #[cfg(test)]

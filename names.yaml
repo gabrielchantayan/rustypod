@@ -58694,6 +58694,39 @@ functions:
       mov pc,lr. Host tests cover the +0x4 word read, independence from
       word +0x0, zero/all-ones extremes, no mutation, and a guard-page
       fixture proving no byte past +0x8 is read.
+
+  - address: 0x082a777c
+    ghidra: FUN_082a777c
+    name: tracker_record_matches
+    size: 52
+    sig: "u32 tracker_record_matches(const u32 *left, const u32 *right)"
+    module: app/tracker_record
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      FUN_082a7774: tracker_record_name
+      r4: right
+      r5: left_name
+      r0: right_name/result
+    notes: >-
+      Identity/name comparator for two runtime-data tracker records. Raw ARM
+      is e92d4070 e1500001 e1a04001 0a000006 ebfffff8 e1a05000 e1a00004
+      ebfffff5 e1550000 13a00000 18bd8070 e3a00001 e8bd8070: return one
+      immediately when the record addresses are equal; otherwise call
+      tracker_record_name (word +0x04) on each and return one only when the
+      complete u32 name words match. The 52-byte extent is exact: the
+      separately linked next function opens with push {r4,r5,r6,lr} at
+      0x082a77b0. Decoding every ARM B/BL-immediate word in osos.dec verified
+      seven inbound sites, all unconditional plain bl at 0x080c5344,
+      0x080c5374, 0x080ccca8, 0x080ccd14, 0x080dd40c, 0x080dd500, and
+      0x082ab4f4; no predicated forms, tail branches, or data-word references.
+      Host tests cover equal inaccessible pointers (proving the early return),
+      different records with equal/different name words, zero/all-ones
+      extremes, and no mutation. Deliberate deviations: none. match.py (exit
+      1, diff expected) run with the worktree archive: LLVM hoists the pointer
+      equality fast path before its frame, keeps two accessor calls on the
+      unequal path, then normalizes the comparison with sub/clz/lsr.
   - address: 0x08281000
     ghidra: FUN_08281000
     name: fixed3_assign
