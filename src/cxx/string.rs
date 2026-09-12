@@ -61,6 +61,8 @@
 //!   (104 bytes, 46 call sites). `operator=(const basic_string&)`.
 //! - `cxx_string_append_cstr` — original: `FUN_083d8d84` @ 0x083d8d84
 //!   (56 bytes, 21 call sites). `operator+=(const char*)`.
+//! - `cxx_string_empty` — original: `FUN_083d6f0c` @ 0x083d6f0c
+//!   (20 bytes, 7 direct unconditional `bl` call sites). `basic_string::empty()`.
 //! - `cxx_string_less` — original: `FUN_083d74f4` @ 0x083d74f4
 //!   (116 bytes, 34 call sites). `std::less<basic_string>`.
 //! - `strstreambuf_has_input_and_output` — original: `FUN_083d7008` @
@@ -896,6 +898,51 @@ pub unsafe extern "C" fn cxx_string_append_cstr(
     let size = (*data_rep(*string)).length;
     let length = strlen(source) as u32;
     cxx_string_replace_cstr(string, size, 0, source, length)
+}
+
+/// cxx_string_empty — original: `FUN_083d6f0c` @ 0x083d6f0c (20 bytes;
+/// 7 direct, unconditional `bl` call sites, verified by decoding every ARM
+/// B/BL immediate in `osos.dec`; no predicated forms).
+///
+/// `basic_string::empty()`: loads the one-word string object's data pointer,
+/// then its `_Rep` length at `data - 4`, and returns true exactly when that
+/// length is zero. The `rsbs` / `movcc` tail normalizes every nonzero
+/// 32-bit length to false. It has no NULL guard, matching the raw body; no
+/// deliberate deviations.
+///
+/// # Safety
+/// `string` must point to a valid one-word COW string object whose data
+/// pointer has a readable length word immediately before it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_empty(string: *const *mut u8) -> bool {
+    ((*string as *const u32).sub(1).read()) == 0
+}
+
+/// `cxx_string_empty` depends solely on the `_Rep` length word, including
+/// lengths with their top bit set.
+#[cfg(test)]
+#[test]
+fn cxx_string_empty_checks_only_rep_length() {
+    #[repr(C)]
+    struct StringStorage {
+        rep: StringRep,
+        data: [u8; 1],
+    }
+
+    let mut storage = StringStorage {
+        rep: StringRep { refcount: 0, capacity: 0, length: 0 },
+        data: [0],
+    };
+    let string = storage.data.as_mut_ptr();
+    for (refcount, capacity, length, expected) in [
+        (0, 0, 0, true),
+        (-1, 1, 1, false),
+        (37, u32::MAX, u32::MAX, false),
+    ] {
+        storage.rep = StringRep { refcount, capacity, length };
+        assert_eq!(unsafe { cxx_string_empty(&string) }, expected);
+    }
 }
 
 /// cxx_string_less — original: `FUN_083d74f4` @ 0x083d74f4

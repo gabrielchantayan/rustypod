@@ -60,18 +60,19 @@
 //!   buffer copy, which it is not.
 //! - [`crate::cxx::templates::iterator_equal`] @ 0x083cf848 — iterator
 //!   equality: `*a == *b`, directly ported as the header-node miss test.
-//! - `FUN_083d6f0c` @ 0x083d6f0c — `basic_string::empty`: reads the
-//!   size word at `(*string) - 4`, returns 1 iff it is 0
-//!   (`rsbs r0, r0, #1; movcc r0, #0` — 1 for size 0, 0 for any
-//!   nonzero size). **Not ported.**
+//! - [`crate::cxx::string::cxx_string_empty`] @ 0x083d6f0c —
+//!   `basic_string::empty`: reads the size word at `(*string) - 4`,
+//!   returns 1 iff it is 0 (`rsbs r0, r0, #1; movcc r0, #0` — 1 for
+//!   size 0, 0 for any nonzero size). Directly ported.
 //!
 //! # Deviations
 //!
-//! - The two unported callees ride the [`STRING_TABLE_OPS`]
+//! - The one unported callee, `find`, rides the [`STRING_TABLE_OPS`]
 //!   `read_volatile` dispatch table (house pattern). Iterator equality
-//!   directly calls the Rust port; target defaults transmute the real
-//!   firmware addresses 0x083db55c / 0x083d6f0c, while host defaults panic
-//!   until a test installs the remaining mocks.
+//!   is a direct Rust call, while `basic_string::empty`'s target slot
+//!   routes to its Rust port. The target default transmutates the real
+//!   firmware address 0x083db55c; the host default panics until a test
+//!   installs the remaining mock.
 //! - The original spills r0..r3 on entry and reuses those stack slots
 //!   as the two `find` out-slots and the header-temporary; the port
 //!   uses ordinary locals.
@@ -116,8 +117,9 @@ pub struct StringTableOps {
     /// `FUN_083cf848` @ 0x083cf848 — iterator equality: 1 iff the two
     /// pointee words are equal (node == header is the miss test).
     pub iter_eq: unsafe extern "C" fn(a: *const u32, b: *const u32) -> u32,
-    /// `FUN_083d6f0c` @ 0x083d6f0c — `basic_string::empty` on the word
-    /// at `string`: 1 iff the size word at `(*string) - 4` is 0.
+    /// [`crate::cxx::string::cxx_string_empty`] @ 0x083d6f0c —
+    /// `basic_string::empty`, retained behind this table only so the
+    /// 32-bit host fixtures can mock their target-layout data pointers.
     pub string_empty: unsafe extern "C" fn(string: *const u32) -> u32,
 }
 
@@ -135,10 +137,8 @@ unsafe extern "C" fn missing_string_map_find(_out: *mut u32, _map: *mut u8, _key
 
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_empty(string: *const u32) -> u32 {
-    let empty: unsafe extern "C" fn(*const u32) -> u32 =
-        unsafe { core::mem::transmute(0x083d_6f0cusize) };
-    unsafe { empty(string) }
+unsafe extern "C" fn ported_string_empty(string: *const u32) -> u32 {
+    unsafe { crate::cxx::string::cxx_string_empty(string.cast()) as u32 }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -146,17 +146,17 @@ unsafe extern "C" fn missing_string_empty(_string: *const u32) -> u32 {
     panic!("string_table_has_string requires basic_string::empty 0x083d6f0c")
 }
 
-/// Wired defaults for [`STRING_TABLE_OPS`]: iterator equality is ported;
-/// target calls retain the two unported retailOS dependencies.
+/// Wired defaults for [`STRING_TABLE_OPS`]: `find` remains unported;
+/// iterator equality and `basic_string::empty` are Rust ports.
 #[cfg(target_os = "none")]
 pub const DEFAULT_STRING_TABLE_OPS: StringTableOps = StringTableOps {
     find: firmware_string_map_find,
     iter_eq: crate::cxx::templates::iterator_equal,
-    string_empty: firmware_string_empty,
+    string_empty: ported_string_empty,
 };
 
 /// Wired defaults for [`STRING_TABLE_OPS`]: iterator equality is ported;
-/// the remaining unported dependencies panic on host until mocked.
+/// the remaining unported dependency panics on host until mocked.
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_STRING_TABLE_OPS: StringTableOps = StringTableOps {
     find: missing_string_map_find,
@@ -164,9 +164,9 @@ pub const DEFAULT_STRING_TABLE_OPS: StringTableOps = StringTableOps {
     string_empty: missing_string_empty,
 };
 
-/// Active model of the retailOS dependencies still unported in this module.
-/// Target integration may replace `find` / `string_empty` as 0x083db55c /
-/// 0x083d6f0c are ported; iterator equality calls its Rust port directly.
+/// Active model of the retailOS dependency still unported in this module.
+/// The `string_empty` slot is a host-fixture seam; target default dispatches
+/// to the ported 0x083d6f0c implementation.
 pub static mut STRING_TABLE_OPS: StringTableOps = DEFAULT_STRING_TABLE_OPS;
 
 #[inline(always)]
