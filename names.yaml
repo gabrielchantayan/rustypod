@@ -63998,6 +63998,34 @@ functions:
       added; p must point to four readable bytes at a two-byte-aligned
       address.
 
+  # --- ASCII lowercase-to-uppercase conversion ---
+  - address: 0x082e0180
+    ghidra: FUN_082e0180
+    name: ascii_to_uppercase
+    size: 20
+    sig: "u32 ascii_to_uppercase(u32 value)"
+    module: util/ascii_to_uppercase
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: lowercase_offset (value - 'a')
+      r0(after subls): uppercase_value
+    notes: >-
+      Raw osos.dec establishes the exact five-word, 20-byte extent from
+      0x082e0180 through bx lr at 0x082e0190; the next separately entered
+      function begins at 0x082e0194. The ARM computes value - 0x61 with
+      u32 wraparound and applies sub #0x20 followed by and #0xff only when
+      that difference is unsigned <= 25, so exactly the full-u32 values
+      'a' through 'z' map to ASCII uppercase. Inputs with a lowercase low
+      byte but nonzero upper bits remain unchanged. Decoding every ARM B/BL
+      immediate in osos.dec finds exactly eight inbound calls, all
+      unconditional bl at 0x081bc9a4, 0x081bd384, 0x081bd9f0, 0x081bdb04,
+      0x081bdd9c, 0x082e37a0, 0x082e39ac, and 0x082e39b8; there are zero
+      predicated call forms and zero direct B entries. No image data word
+      equals 0x082e0180, so it is not directly dispatched virtually. No
+      deliberate deviations; host tests exhaust all u8 values and prove
+      high-bit word values do not receive byte-style folding.
+
   # --- FAT data-cluster to cache-block-index conversion ---
   - address: 0x082e01cc
     ghidra: FUN_082e01cc
