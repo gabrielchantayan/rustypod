@@ -24778,6 +24778,33 @@ functions:
       allocations with oversized arenas, since the host structs are
       wider than the 32-bit target layout.
 
+  - address: 0x0839ede4
+    ghidra: FUN_0839ede4
+    name: refcounted_ptr_copy_assign_slot7
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_copy_assign_slot7(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+      FUN_0839cd98: refcounted_body_release
+      FUN_0839cd5c: refcounted_body_acquire
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent 0x0839ede4..0x0839ee14:
+      the final pop {r4,r5,r6,pc} is at 0x0839ee10 and the next separately
+      linked function begins at 0x0839ee14. Decoding every ARM B/BL word in
+      osos.dec finds exactly seven direct, unconditional BL callers
+      (0x08131098, 0x08131164, 0x0813123c, 0x08219d3c, 0x0821a260,
+      0x0821a27c, 0x0821a2c4), with no predicated BL or direct-tail B sites;
+      no aligned image word equals this address, so it is not virtually
+      dispatched. This C++ copy-assignment compares slot addresses, then
+      releases dst through the ported slot-7 refcounted_body_release
+      (0x0839cd98), loads *src only afterward, and acquires it through the
+      ported refcounted_body_acquire (0x0839cd5c), returning dst even for
+      self-assignment. No behavioral deviations: both direct callees are
+      ported at the precise original entry addresses. The dedicated target
+      section preserves this separately hookable template instance.
   - address: 0x0839eed4
     ghidra: FUN_0839eed4
     name: refcounted_ptr_construct_vtable_variant

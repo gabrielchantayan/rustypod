@@ -699,6 +699,47 @@ pub unsafe extern "C" fn refcounted_ptr_assign(
     dst
 }
 ///
+/// refcounted_ptr_copy_assign_slot7 — original: `FUN_0839ede4` @ 0x0839ede4
+/// (48 bytes; 7 direct `bl` call sites, all unconditional: 0x08131098,
+/// 0x08131164, 0x0813123c, 0x08219d3c, 0x0821a260, 0x0821a27c, and
+/// 0x0821a2c4). Decoding every ARM `B`/`BL` word in `osos.dec` finds no
+/// predicated calls or direct tail `b` sites; no aligned image word equals
+/// this address, so it is not virtually dispatched. Raw instructions end
+/// with `pop {r4,r5,r6,pc}` at 0x0839ee10; the separately linked next
+/// function begins at 0x0839ee14.
+///
+/// C++ copy-assignment for a refcounted handle slot. Distinct slot addresses
+/// first release the old body through [`refcounted_body_release`] @
+/// 0x0839cd98 (the slot-7 virtual-destructor instance), then load `*src`,
+/// acquire it through [`refcounted_body_acquire`] @ 0x0839cd5c, and return
+/// `dst`. The source load intentionally follows the release exactly as the
+/// ARM's `ldr r1,[r4]` does.
+///
+/// No deliberate behavioral deviations: both original callees are already
+/// ported at their exact entry addresses. Its dedicated target section keeps
+/// this separately hookable template instance distinct from siblings.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL
+/// bodies must satisfy [`refcounted_body_release`]'s and
+/// [`refcounted_body_acquire`]'s requirements. The firmware does not
+/// NULL-check either slot pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_assign_slot7")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign_slot7(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release(dst);
+        refcounted_body_acquire(dst, src.read());
+    }
+    dst
+}
+
+///
 /// refcounted_ptr_copy_construct — original: `FUN_0839ef3c` @ `0x0839ef3c`
 /// (24 bytes). Raw decoding establishes the exact extent: the next separately
 /// linked function begins at `0x0839ef54`. Decoding every ARM `B`/`BL` word
@@ -2707,6 +2748,27 @@ mod tests {
         }
     }
 
+    /// The slot-address guard skips the slot-7 release and acquire on
+    /// self-assignment, preserving the body's count and returning `dst`.
+    #[test]
+    fn slot7_copy_assign_same_slot_is_a_no_op() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_ptr_copy_assign_slot7(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
+        }
+    }
+
+
 
     /// Direct tests of the body release use the ported mutex and heap
     /// surfaces with recording kernel/heap hooks. The crate's test
@@ -3852,6 +3914,41 @@ mod tests {
                     Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
                     Event::HeapFree(body_ptr as *mut u8 as usize, 2),
                 ]
+            );
+        }
+
+        // --- refcounted_ptr_copy_assign_slot7 @ 0x0839ede4 ----------------
+
+        /// A final slot-7 release frees the old body before `*src` is loaded
+        /// and acquired. The recording heap leaves the old allocation
+        /// readable, so the test can observe the firmware's release-then-load
+        /// ordering without reclaiming stack storage.
+        #[test]
+        fn slot7_copy_assign_final_release_then_acquires_source() {
+            let _bench = bench();
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let old_ptr = &mut old as *mut RefcountedBody;
+            let mut dst = old_ptr;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = unsafe { refcounted_ptr_copy_assign_slot7(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(new.refcount, 2);
+            assert_eq!(
+                events(),
+                std::vec![Event::HeapFree(old_ptr as *mut u8 as usize, 2)],
+                "the old body is released before the source is acquired"
             );
         }
 
