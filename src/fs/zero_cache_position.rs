@@ -21,49 +21,7 @@
 //! that helper writes it; Rust initializes it to make that same successful
 //! path defined without exposing an observable difference.
 
-#[cfg(not(target_os = "none"))]
-use core::ptr;
-
-/// ABI of unported `FUN_082e0cac` at `0x082e0cac`.
-type ReadCachePositionValue = unsafe extern "C" fn(*mut u8, u32, *mut u32) -> u32;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn read_cache_position_value(cache: *mut u8, position: u32, value: *mut u32) -> u32 {
-    let read: ReadCachePositionValue = core::mem::transmute(0x082e_0cacusize);
-    read(cache, position, value)
-}
-
-#[cfg(not(target_os = "none"))]
-#[derive(Clone, Copy)]
-struct ZeroCachePositionHostOps {
-    read: ReadCachePositionValue,
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn unavailable_read_cache_position_value(
-    _cache: *mut u8,
-    _position: u32,
-    _value: *mut u32,
-) -> u32 {
-    panic!("find_zero_cache_position called without a host seam")
-}
-
-#[cfg(not(target_os = "none"))]
-const DEFAULT_ZERO_CACHE_POSITION_HOST_OPS: ZeroCachePositionHostOps = ZeroCachePositionHostOps {
-    read: unavailable_read_cache_position_value,
-};
-
-#[cfg(not(target_os = "none"))]
-static mut ZERO_CACHE_POSITION_HOST_OPS: ZeroCachePositionHostOps =
-    DEFAULT_ZERO_CACHE_POSITION_HOST_OPS;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn read_cache_position_value(cache: *mut u8, position: u32, value: *mut u32) -> u32 {
-    let ops = ptr::read_volatile(ptr::addr_of!(ZERO_CACHE_POSITION_HOST_OPS));
-    (ops.read)(cache, position, value)
-}
+use super::cache_position_value::read_cache_position_value;
 
 /// Finds the first cache position whose fetched value is zero.
 ///
@@ -102,7 +60,9 @@ pub unsafe extern "C" fn find_zero_cache_position(
 mod tests {
     use super::*;
 
-    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    use super::super::cache_position_value::{
+        replace_read_cache_position_value, ReadCachePositionValue, CACHE_POSITION_VALUE_TEST_LOCK,
+    };
     static mut READ_RESULTS: [(u32, u32); 8] = [(0, 0); 8];
     static mut READ_RESULT_COUNT: usize = 0;
     static mut READ_CALLS: [u32; 8] = [0; 8];
@@ -120,12 +80,12 @@ mod tests {
         status
     }
 
-    struct HostOpsReset(ZeroCachePositionHostOps);
+    struct HostOpsReset(ReadCachePositionValue);
 
     impl Drop for HostOpsReset {
         fn drop(&mut self) {
             unsafe {
-                ZERO_CACHE_POSITION_HOST_OPS = self.0;
+                replace_read_cache_position_value(self.0);
             }
         }
     }
@@ -137,14 +97,12 @@ mod tests {
         READ_CALLS = [0; 8];
         READ_CALL_COUNT = 0;
         READ_CACHE = core::ptr::null_mut();
-        let previous = ZERO_CACHE_POSITION_HOST_OPS;
-        ZERO_CACHE_POSITION_HOST_OPS = ZeroCachePositionHostOps { read: record_read };
-        HostOpsReset(previous)
+        HostOpsReset(replace_read_cache_position_value(record_read))
     }
 
     #[test]
     fn returns_first_zero_value_and_forwards_cache() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = CACHE_POSITION_VALUE_TEST_LOCK.lock();
         let cache = 0x1234usize as *mut u8;
         let _reset = unsafe { install_recorder(&[(1, 0x44), (1, 0)]) };
 
@@ -158,7 +116,7 @@ mod tests {
 
     #[test]
     fn failure_and_exhaustion_return_zero() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = CACHE_POSITION_VALUE_TEST_LOCK.lock();
         let cache = 0x5678usize as *mut u8;
         let _reset = unsafe { install_recorder(&[(1, 7), (0, 0), (1, 0)]) };
 
@@ -182,7 +140,7 @@ mod tests {
 
     #[test]
     fn empty_or_reversed_range_skips_reader() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = CACHE_POSITION_VALUE_TEST_LOCK.lock();
         let _reset = unsafe { install_recorder(&[(1, 0)]) };
 
         assert_eq!(unsafe { find_zero_cache_position(core::ptr::null_mut(), 5, 5) }, 0);
@@ -195,7 +153,7 @@ mod tests {
 
     #[test]
     fn zero_position_remains_ambiguous_zero_result() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = CACHE_POSITION_VALUE_TEST_LOCK.lock();
         let _reset = unsafe { install_recorder(&[(1, 0)]) };
 
         assert_eq!(unsafe { find_zero_cache_position(core::ptr::null_mut(), 0, 1) }, 0);

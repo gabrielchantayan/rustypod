@@ -67314,3 +67314,37 @@ functions:
       veneer calls resolve through the ported `iram_memzero_veneer`, and the
       retained stock configuration call is an address-loaded `blx`; the
       buffer/header and final field-store ordering remain.
+
+  - address: 0x082e0378
+    ghidra: FUN_082e0378
+    name: fat_next_cluster
+    size: 124
+    sig: "u32 fat_next_cluster(FatVolume *volume, u32 cluster)"
+    module: fs/fat_next_cluster
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: cluster
+      r4: saved volume
+      local_10/[sp]: raw next-cluster value
+      FUN_082e0cac: read_cache_position_value (unported resident boundary)
+      return/r0: validated next cluster (zero on read failure or reserved marker)
+    notes: >-
+      Raw extent is exactly 124 instruction bytes, 0x082e0378 through the
+      `pop {r3,r4,r5,pc}` at 0x082e03f0; the next separately entered function
+      begins with `push {r4,r5,r6,lr}` at 0x082e03f4. Ghidra's four-argument
+      prototype is wrong: decoded ARM consumes only r0 volume and r1 cluster,
+      then passes r2 = its stack-local output word to unported FUN_082e0cac.
+      A zero reader result returns zero before the volume format load. Format
+      3 preserves raw values except 0xff8..0xfff; format 8 masks to 28 bits
+      then maps exactly 0x0fffffff to zero; every other format preserves raw
+      values except 0xfff7..0xffff. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly eight direct inbound calls, all unconditional
+      plain bl at 0x082b2074, 0x082e0258, 0x082e031c, 0x082e1920,
+      0x082e2ba0, 0x082e5f60, 0x082e66d0, and 0x082e6774; no predicated
+      forms or direct B tail calls reach the entry. FUN_082e0cac has no
+      names.yaml entry, but the existing fs/zero_cache_position resident
+      boundary was centralized as fs/cache_position_value and reused rather
+      than creating a second host stub. Host tests cover reader failure before
+      the volume dereference, ABI forwarding, FAT12 endpoints, FAT32 high-nibble
+      masking plus its exact sentinel, and FAT16-style reserved endpoints.
