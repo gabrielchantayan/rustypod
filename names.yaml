@@ -67845,3 +67845,30 @@ functions:
       identity. Target code reads the live runtime slot at 0x089cc604; host
       builds use a NULL-initialized static because the decrypted 0x089cxxxx
       RW page holds stale string data rather than runtime globals.
+
+  # --- Opaque application-object interior-address accessor ---
+  - address: 0x0829a06c
+    ghidra: FUN_0829a06c
+    name: object_offset_48
+    size: 8
+    sig: "u8 *object_offset_48(u8 *object)"
+    module: app/object_offset_48
+    status: ported
+    renames:
+      param_1/r0: object
+      r0 (return): object_plus_0x48
+    notes: >-
+      Raw osos.dec is exactly `add r0,r0,#0x48; bx lr` at 0x0829a06c..0x0829a070;
+      the separately linked next function starts at 0x0829a074, confirming the
+      eight-byte extent. Decoding every aligned ARM B/BL immediate in osos.dec
+      finds exactly eight inbound direct calls, all unconditional plain bl at
+      0x080ac9ec, 0x08109300, 0x08109534, 0x0810a48c, 0x08128130, 0x0817544c,
+      0x081dd9c8, and 0x081e92a0; there are no predicated forms or direct tail
+      branches. No aligned DATA word names the entry, so it is not virtually
+      dispatched. Each caller gets the object through task_ctx_field_0x30 and
+      object_cast_to_class(..., 0x80), then uses object+0x48 as an opaque
+      payload base; the recovered callers do not establish a concrete class or
+      field layout, so the port deliberately retains an offset-based name. No
+      behavioral deviations: wrapping_add preserves the raw address addition,
+      including NULL -> 0x48 and target-width wraparound. Host tests check the
+      exact interior address, surrounding-byte non-mutation, and NULL case.
