@@ -59243,6 +59243,34 @@ functions:
       Host tests verify pointer preservation and that the body performs no
       stores. match.py structural diff reviewed after the ARM release build.
 
+  # --- statically bound empty C++ destructor ---
+  - address: 0x081070b4
+    ghidra: FUN_081070b4
+    name: empty_destructor_1070b4
+    size: 4
+    sig: "void *empty_destructor_1070b4(void *this)"
+    module: cxx/empty_destructor_1070b4
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      Raw extent is exactly 0x081070b4..0x081070b8: 0x081070b0 is another
+      separately linked `bx lr` body, while 0x081070b8 begins the next
+      function with `cmp r0, #0`. The sole instruction is `bx lr`
+      (0xe12fff1e), not an `ldr pc,[pc,#-4]` veneer or a branch. Decoding
+      every ARM B/BL word in osos.dec finds exactly eight direct callers, all
+      unconditional plain BL (zero predicated BL forms and zero plain-B tail
+      calls): 0x08143444, 0x0814a968, 0x0814ab08, 0x081b7690, 0x08224144,
+      0x0829df88, 0x082c8564, and 0x083d3c04. No aligned image word equals
+      0x081070b4, so no virtual table dispatches to it. The last caller
+      immediately calls operator_delete @ 0x082aad24; r0 must therefore pass
+      through unchanged despite Ghidra's void signature. The port performs no
+      reads or writes and permits NULL, unaligned, or dangling input. No
+      deliberate behavioral deviations; the dedicated text section prevents
+      LLVM identical-code folding with other empty-destructor exports. Host
+      tests cover pointer preservation and no object writes.
+
   # --- screen layout-name setter ---
   - address: 0x08174300
     ghidra: FUN_08174300
