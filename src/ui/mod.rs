@@ -69,6 +69,7 @@ pub mod set_flag_bit_3;
 pub mod default_navigation_request;
 pub mod current_window;
 pub mod selection_index;
+pub mod window_list_find_by_key;
 
 pub mod passkey_mask_indicators;
 pub mod mode_state;
