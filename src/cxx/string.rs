@@ -362,6 +362,30 @@ pub unsafe extern "C" fn cxx_string_pair_destroy(
     cxx_string_release(core::ptr::addr_of_mut!((*record).first));
     record
 }
+/// cxx_string_pair_entry_destroy — original: `FUN_08257fa8` @ 0x08257fa8
+/// (32 bytes; 8 direct, unconditional `bl` call sites and no predicated
+/// forms, verified by decoding every ARM B/BL immediate in `osos.dec`).
+///
+/// The 12-byte record has COW string words at +0x00 and +0x04 followed by an
+/// unexamined word at +0x08. It releases the second string, then the first,
+/// and returns the original record pointer in r0.
+///
+/// Deliberate codegen-only deviation: this invokes the established
+/// [`cxx_string_release`] port rather than preserving the raw `bl` sequence.
+/// Its behavior is otherwise byte-for-byte equivalent to
+/// [`cxx_string_pair_destroy`] @ 0x0825c8fc, so a distinct target text
+/// section preserves this exported call target against LLVM's
+/// identical-code folding.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.cxx_string_pair_entry_destroy")]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_entry_destroy(
+    record: *mut CxxStringPairRangeEntry,
+) -> *mut CxxStringPairRangeEntry {
+    cxx_string_release(core::ptr::addr_of_mut!((*record).second));
+    cxx_string_release(core::ptr::addr_of_mut!((*record).first));
+    record
+}
 /// cxx_string_pair_assign — original @ 0x0825c91c (36 bytes).
 ///
 /// Source: `ipod-decomp/decomp/c/025/0825c91c_FUN_0825c91c.c`. The raw ARM
@@ -1318,6 +1342,28 @@ mod tests {
 
             assert_eq!(cxx_string_pair_destroy(record_ptr), record_ptr);
             assert_eq!(freed(), &[second_rep.cast(), first_rep.cast()]);
+        }
+    }
+    #[test]
+    fn pair_entry_destroy_releases_second_before_first_and_returns_the_record() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut first, b"first\0".as_ptr());
+            cxx_string_from_cstr(&mut second, b"second\0".as_ptr());
+            let first_rep = data_rep(first);
+            let second_rep = data_rep(second);
+            let mut record = CxxStringPairRangeEntry {
+                first,
+                second,
+                trailing: 0x5a5a_5a5a,
+            };
+            let record_ptr = core::ptr::addr_of_mut!(record);
+
+            assert_eq!(cxx_string_pair_entry_destroy(record_ptr), record_ptr);
+            assert_eq!(freed(), &[second_rep.cast(), first_rep.cast()]);
+            assert_eq!(record.trailing, 0x5a5a_5a5a);
         }
     }
     #[test]
