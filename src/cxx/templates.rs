@@ -37,6 +37,8 @@
 //! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
 //!   copy-assign of a pair-shaped value type, the only copy, 14 call
 //!   sites.
+//! - [`string_object_word_range_copy`] — copy-assigns the StringObject and
+//!   copies the trailing word of each 12-byte record in a half-open range.
 //! - [`cxx_vector_find_equal`] — searches the COW-string-keyed records
 //!   within the `{unknown, begin, end}` owner shape used by the UI data.
 //! - [`vector_size_elem2`] / [`vector_size_elem4`] /
@@ -88,7 +90,7 @@
 //! with the **source in r2**, and it exists exactly once.
 
 use crate::cxx::string::cxx_string_release;
-use crate::cxx::string_object::{string_object_destroy, StringObject};
+use crate::cxx::string_object::{string_object_assign, string_object_destroy, StringObject};
 use crate::libc::memcmp::memcmp;
 use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
@@ -105,6 +107,24 @@ pub struct StringObjectPair {
     pub first: StringObject,
     pub second: StringObject,
 }
+
+/// A 12-byte retailOS record with a [`StringObject`] followed by an
+/// unidentified trailing word.
+///
+/// The raw copy template assigns the string member, rather than bit-copying
+/// it, then copies the trailing word. Typed records make the target offsets
+/// (+0x00 string, +0x08 word) exact on ARM while retaining disjoint fields in
+/// 64-bit host tests.
+#[repr(C)]
+pub struct StringObjectWord {
+    pub string: StringObject,
+    pub trailing_word: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(StringObjectWord, trailing_word)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] = [0; core::mem::size_of::<StringObjectWord>()];
 
 /// An 8-byte retailOS record containing two adjacent COW string objects.
 ///
@@ -2440,6 +2460,52 @@ pub unsafe extern "C" fn vector_pair_copy_into(
     }
     dst
 }
+
+/// string_object_word_range_copy — original: `FUN_083e9b28` @ 0x083e9b28
+/// (64 bytes; raw extent 0x083e9b28..0x083e9b68, with the next separately
+/// linked function opening at 0x083e9b68). Seven direct `bl` call sites are
+/// all unconditional: 0x083e8570, 0x083e85a8, 0x083e8688, 0x083e86ac,
+/// 0x083e86c4, 0x083e86d8, and 0x083ea80c. One additional unconditional
+/// tail `b` enters at 0x083ea820; no predicated calls target this body.
+///
+/// Copies the half-open `[first, last)` range of 12-byte
+/// [`StringObjectWord`] records into initialized `output` storage. For each
+/// record it calls the existing [`string_object_assign`] port on the leading
+/// StringObject, copies the trailing word, advances both cursors one record,
+/// and returns the final output cursor. The raw ARM has no NULL guard and
+/// terminates solely on cursor equality.
+///
+/// The third word's semantic identity is not recovered; naming it
+/// `trailing_word` records only the verified layout. There are no deliberate
+/// deviations: the direct call remains a direct Rust call to the already
+/// ported assignment operator, and typed iteration preserves the 12-byte ARM
+/// stride without overlapping host pointer fields.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous readable
+/// [`StringObjectWord`] records. `output` must designate equally many valid,
+/// initialized writable records. The StringObject assignment's payload and
+/// virtual-method preconditions apply to every element; this routine has no
+/// overlap guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_word_range_copy(
+    mut first: *const StringObjectWord,
+    last: *const StringObjectWord,
+    mut output: *mut StringObjectWord,
+) -> *mut StringObjectWord {
+    while first != last {
+        string_object_assign(
+            core::ptr::addr_of_mut!((*output).string),
+            core::ptr::addr_of!((*first).string),
+        );
+        (*output).trailing_word = (*first).trailing_word;
+        first = first.add(1);
+        output = output.add(1);
+    }
+    output
+}
 /// vector_copy_range_elem24 — original: `FUN_083e8ba0` @ 0x083e8ba0
 /// (60 bytes, raw extent 0x083e8ba0..0x083e8bdc; 8 direct `bl` call
 /// sites, all unconditional and none predicated).
@@ -2489,9 +2555,13 @@ pub unsafe extern "C" fn vector_copy_range_elem24(
 mod tests {
     extern crate std;
     use super::*;
-    use crate::cxx::string_object::{StringObjectOps, STRING_OBJECT_OPS, STRING_OBJECT_VTABLE};
-    use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
     use crate::cxx::string::StringRep;
+    use crate::cxx::string_object::{
+        StringObjectAssignCstrOps, StringObjectOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        STRING_OBJECT_OPS, STRING_OBJECT_VTABLE,
+    };
+    use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
+    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
     use std::sync::MutexGuard;
     use std::vec::Vec;
 
@@ -2529,6 +2599,56 @@ mod tests {
                 },
             );
             StringObjectReleaseGuard { _lock: lock, saved }
+        }
+    }
+
+    static mut STRING_OBJECT_ASSIGN_CLEAR_CALLS: Vec<usize> = Vec::new();
+
+    unsafe extern "C" fn no_string_object_assign_allocation(
+        _this: *mut StringObject,
+        _requested_size: usize,
+        _flags: u32,
+    ) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn record_string_object_assign_clear(this: *mut StringObject) {
+        (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CLEAR_CALLS)).push(this as usize);
+    }
+
+    struct StringObjectAssignClearGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: StringObjectAssignCstrOps,
+    }
+
+    impl Drop for StringObjectAssignClearGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS),
+                    self.saved,
+                );
+            }
+        }
+    }
+
+    fn record_string_object_assign_clears() -> StringObjectAssignClearGuard {
+        let lock = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CLEAR_CALLS)).clear();
+            let saved = core::ptr::read_volatile(core::ptr::addr_of!(
+                STRING_OBJECT_ASSIGN_CSTR_OPS
+            ));
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS),
+                StringObjectAssignCstrOps {
+                    allocate_payload: no_string_object_assign_allocation,
+                    clear_payload: record_string_object_assign_clear,
+                },
+            );
+            StringObjectAssignClearGuard { _lock: lock, saved }
         }
     }
 
@@ -5084,6 +5204,77 @@ mod tests {
         assert_eq!(vector.end, 12usize as *mut u8, "NULL end still advances by 12");
         assert!(insert_aux_calls().is_empty(), "end != capacity: no grow");
     }
+
+    #[test]
+    fn string_object_word_range_copy_assigns_each_string_and_copies_words() {
+        let source = [
+            StringObjectWord {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                trailing_word: 0x1234_5678,
+            },
+            StringObjectWord {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                trailing_word: 0x9abc_def0,
+            },
+        ];
+        let mut output = [
+            StringObjectWord {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x1111_1111usize as *mut u8,
+                },
+                trailing_word: 0,
+            },
+            StringObjectWord {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x2222_2222usize as *mut u8,
+                },
+                trailing_word: 0,
+            },
+        ];
+        let _guard = record_string_object_assign_clears();
+        let output_start = output.as_mut_ptr();
+
+        let returned = unsafe {
+            string_object_word_range_copy(source.as_ptr(), source.as_ptr().add(2), output_start)
+        };
+
+        let clears = unsafe {
+            (*core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CLEAR_CALLS)).clone()
+        };
+        assert_eq!(
+            clears,
+            std::vec![
+                core::ptr::addr_of_mut!(output[0].string) as usize,
+                core::ptr::addr_of_mut!(output[1].string) as usize,
+            ],
+            "each source NULL payload reaches the existing assignment clear path"
+        );
+        assert_eq!(returned, unsafe { output_start.add(2) });
+        assert_eq!(output[0].trailing_word, source[0].trailing_word);
+        assert_eq!(output[1].trailing_word, source[1].trailing_word);
+        assert_eq!(output[0].string.payload, 0x1111_1111usize as *mut u8);
+        assert_eq!(output[1].string.payload, 0x2222_2222usize as *mut u8);
+    }
+
+    #[test]
+    fn string_object_word_range_copy_empty_range_touches_nothing() {
+        let output = 0x1234usize as *mut StringObjectWord;
+
+        let returned = unsafe {
+            string_object_word_range_copy(core::ptr::null(), core::ptr::null(), output)
+        };
+
+        assert_eq!(returned, output);
+    }
+
     #[repr(C)]
     struct GuardedRecordRange {
         before: u32,
