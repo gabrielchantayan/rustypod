@@ -499,6 +499,11 @@ pub mod hints {
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const MEMBER_RELEASE_LIST_STATE: usize = 0x9100_0000;
 
+    // 0x8d00_0000: dedicated to app/selection_position_at_or_past_item_count's
+    // raw-u32 element-reference, target, and collection fixture; mappings
+    // never unmap, so no other user may share this hint.
+    pub const SELECTION_POSITION_AT_OR_PAST_ITEM_COUNT: usize = 0x8d00_0000;
+
 
 }
 
