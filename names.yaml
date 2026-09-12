@@ -36902,6 +36902,36 @@ functions:
       resolves to the separate sibling checkout, which lacks this
       worktree's new symbol; --lib selects this worktree's archive.
 
+  # --- Bounded formatter byte output (printf/format_bounded_byte) ---
+  - address: 0x08280f7c
+    ghidra: FUN_08280f7c
+    name: format_bounded_byte
+    size: 44
+    sig: "void format_bounded_byte(RadixFormatSpec *spec, uint8_t byte)"
+    module: printf/format_bounded_byte
+    status: ported
+    renames:
+      param_1/r0/r2: spec
+      param_2/r1/r0: byte
+      param_1_plus_0x0: write_byte
+      param_1_plus_0x4: write_context
+      param_1_plus_0x8: emitted
+      param_1_plus_0xc: limit
+    notes: >-
+      Raw ARM establishes an exact 44-byte, 11-instruction body from
+      0x08280f7c through 0x08280fa4; the separately linked sibling starts
+      at 0x08280fa8. The function copies spec to r2 and byte to r0, loads
+      the prior emitted word, stores prior + 1 with 32-bit wraparound,
+      then unsigned-compares the prior value to limit. Only when prior <
+      limit does it load write_context and write_byte and tail-call the
+      callback with (byte, write_context); there is no NULL guard. A full
+      decode of every ARM B/BL immediate in osos.dec finds exactly seven
+      direct bl callers, all unconditional: 0x08077e94, 0x08077ed8,
+      0x08077f0c, 0x08077f1c, 0x080e95dc, 0x080ec0fc, and 0x080ec150.
+      There are no predicated or tail-branch callers. The Rust port has no
+      deliberate behavioral deviations: it performs the same pre-increment
+      unsigned limit comparison and callback argument reversal.
+
   # --- 'plst' UI-element counted-string store (ui/plst_counted_string) ---
   - address: 0x08067274
     ghidra: FUN_08067274

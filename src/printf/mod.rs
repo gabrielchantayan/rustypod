@@ -1,5 +1,6 @@
 //! printf family: state, helpers, converters, engine, API veneers.
 pub mod formatted_message;
+pub mod format_bounded_byte;
 pub mod format_buffer;
 pub mod format_with_descriptor;
 pub mod printf_api;
