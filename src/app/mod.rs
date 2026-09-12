@@ -38,6 +38,7 @@ pub mod controller_secondary_interface;
 pub mod controller_pending_command;
 pub mod controller_history_select;
 pub mod context_scope;
+pub mod directory_iterator;
 pub mod context_scope_selector;
 pub mod current_record_handle;
 pub mod firmware_query_low_byte;

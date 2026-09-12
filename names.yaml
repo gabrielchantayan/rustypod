@@ -69204,3 +69204,46 @@ functions:
       unported dispatcher body into this function. The Rust target-only seam
       calls that load address on device and a host recorder in tests; no
       identity was invented for its opaque vtable class.
+
+  # --- Directory iterator destructor ---
+  - address: 0x081ef9d8
+    ghidra: FUN_081ef9d8
+    name: directory_iterator_destroy
+    size: 136
+    sig: "DirectoryIterator *directory_iterator_destroy(DirectoryIterator *iterator)"
+    module: app/directory_iterator
+    status: ported
+    renames:
+      param_1/r0/r4: iterator
+      DAT_081efa60: DIRECTORY_ITERATOR_VTABLE (0x0898ff40)
+      "iterator+0x0c": pending_entry_queue
+      "iterator+0x3c": directory_path
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_0818a0bc: facade_for_selector
+      FUN_083d75c0: container_is_empty_alias_75c0
+      FUN_083ddf14: queue_front (unidentified retailOS boundary)
+      FUN_083dff70: queue_pop (unidentified retailOS boundary)
+      FUN_0809449c: mutex_unlock_counted
+      thunk_FUN_082792fc: string_object_destroy_veneer
+      FUN_083de1b0: queue_destroy (unidentified retailOS boundary)
+      FUN_0818a0fc: interface_guard_base_destroy (retailOS boundary)
+    notes: >-
+      Raw ARM establishes 132 instruction bytes from 0x081ef9d8 through the
+      pop at 0x081efa5c, then the 4-byte vtable literal 0x0898ff40 at
+      0x081efa60; the separately linked next function begins at 0x081efa64.
+      Every aligned ARM B/BL immediate in osos.dec was decoded: exactly eight
+      direct inbound calls, all unconditional plain bl at 0x08093ffc,
+      0x08100aec, 0x0813a4dc, 0x0813ae84, 0x081a2cf0, 0x081d3ca4,
+      0x081ee8dc, and 0x082752b4; no predicated forms, tail branches, or
+      aligned data-word references exist. It replants the iterator vtable,
+      acquires the embedded interface's counted mutex, and while the 48-byte
+      queue is nonempty fetches facade selector 1, invokes vtable slot +0x44
+      with each entry's leading pointer, and pops that entry. It then unlocks,
+      destroys the StringObject at +0x3c, destroys the queue, and calls the
+      base destructor. The existing mutex, StringObject, empty-predicate,
+      and facade-accessor ports are called directly; only queue front/pop/
+      destroy and the base teardown remain fixed-address target boundaries
+      with host recorder seams, because their class identities are not
+      established. On host only, the native-width lock pointer is read
+      unaligned from the target's +0x44 interface offset before calling the
+      ported mutex operation; ARM reads its naturally aligned 32-bit word.
