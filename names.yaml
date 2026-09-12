@@ -15794,6 +15794,31 @@ functions:
       TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x08289a5c
+    ghidra: FUN_08289a5c
+    name: media_now_playing_controller_noop
+    size: 4
+    sig: "void *media_now_playing_controller_noop(void *controller, unsigned int mode)"
+    module: app/media_now_playing_controller_noop
+    status: ported
+    renames:
+      param_1: controller
+      param_2: mode
+    notes: >-
+      Raw osos.dec verifies one instruction, `bx lr`, exactly at 0x08289a5c:
+      the preceding function ends at 0x08289a58 and the next separately
+      linked function starts at 0x08289a60. It is not an ADS literal veneer
+      and has no trailing pool word. Decoding every ARM B/BL word in the
+      image found 8 direct, unconditional plain bl callers
+      (0x08101560/0x0810176c/0x08101980/0x08130a34/0x081314cc/0x081314dc/
+      0x08131528/0x08131584), with no predicated bl and no b tail callers;
+      there are zero data-word references, so it is statically bound rather
+      than vtable-dispatched. Each caller takes r0 from the ported
+      TMediaNowPlayingCntlr singleton accessor 0x08289690 and supplies 0 or
+      1 in r1, but the body ignores both words except for passing r0 through.
+      The port consequently exposes the verified no-op controller/mode
+      callback rather than inventing a setter or destructor identity.
+
   - address: 0x0828a0a4
     ghidra: FUN_0828a0a4
     name: object_sequence_id_assign
