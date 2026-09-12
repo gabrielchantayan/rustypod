@@ -73391,3 +73391,36 @@ functions:
       unchanged. Target builds call that fixed retailOS address; host tests
       use a volatile dispatch seam. The concrete provider type remains
       unrecovered, so the names record only the verified wrapper behavior.
+
+  # --- Window-list lookup ---
+  - address: 0x082775f4
+    ghidra: FUN_082775f4
+    name: window_list_find_by_key
+    size: 96
+    sig: "WindowList *window_list_find_by_key(WindowList *window_list, u32 key)"
+    module: ui/window_list_find_by_key
+    status: ported
+    renames:
+      param_1/r0: window_list
+      param_2/r1: key
+      param_1_plus_0x80: collection
+      local_0x18: cursor
+      local_0x10: entry
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+    notes: >-
+      Raw ARM extent is exactly 96 bytes: code opens at 0x082775f4 and
+      ends in pop {r1,r2,r3,r4,r5,pc} at 0x08277650; the separately linked
+      next function opens with push at 0x08277654. Decoding every ARM B/BL
+      word finds exactly seven direct callers, all plain unconditional bl
+      (0x0817fc90, 0x08180d14, 0x08182d60, 0x08182fb4, 0x0818375c,
+      0x08183cf4, 0x08184430), with no predicated BL, tail branch, or
+      aligned data-word reference. It initializes the already ported cursor
+      over window_list +0x80, scans entries through cursor_advance, and
+      returns the first whose u32 at +0x100 equals key; cursor_invalidate
+      runs both after a match and after exhaustion. Ghidra's four-argument
+      signature is wrong: r2/r3 are saved but never read, so only r0 list
+      and r1 key are ABI inputs. The Rust local entry is initialized NULL,
+      which only defines malformed cursor behavior where retail stack
+      contents would be indeterminate.
