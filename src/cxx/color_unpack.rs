@@ -17,10 +17,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! The original tail-calls the unported leaf at 0x0824bf18. This port inlines
-//! its fully decoded bit expansion rather than adding a second dispatch seam;
-//! the cursor update remains before the source halfword read and output stores
-//! remain in R/G/B/A order. Neither pointer has a NULL or bounds guard.
+//! The original tail-calls the leaf ported below. The wrapper advances its
+//! cursor before the source halfword read; the leaf retains the RGBA output
+//! order and absence of NULL or bounds guards.
 
 /// `u32_cursor_read_be_bytes` — original: `FUN_0825ec18` @ 0x0825ec18
 /// (60 bytes; **8 unconditional `bl` call sites**, no predicated or tail
@@ -116,6 +115,41 @@ pub unsafe extern "C" fn rgb565_cursor_read_rgba8(
     destination.add(3).write_volatile(0xff);
 }
 
+/// `rgb555a1_expand_to_rgba8` — original: `FUN_0824bf18` @ 0x0824bf18
+/// (68 bytes; **8 direct unconditional `bl` call sites**, no predicated
+/// `bl` forms; one unconditional plain-`b` tail at 0x0825ecec).
+///
+/// The complete 17-word leaf begins immediately after its predecessor's
+/// `bx lr` at 0x0824bf14 and ends at 0x0824bf58; 0x0824bf5c starts the
+/// separate four-byte store helper, with no literal pool between them. It
+/// expands packed RGB555A1 in `packed_pixel`: bits 15..11, 10..6, and 5..1
+/// become five-bit R/G/B components by repeating their high three bits; bit
+/// 0 becomes transparent zero or opaque `0xff` alpha. Bits above 15 do not
+/// affect the result. Full-image decoding finds the eight `bl` sites at
+/// 0x08250c28, 0x08250c38, 0x08250c5c, 0x08250c6c, 0x082510b4, 0x082510cc,
+/// 0x082514ac, and 0x082514b8; all are unconditional.
+///
+/// # Deliberate deviations
+///
+/// None. The four ordered volatile byte stores model the ARM `strb` writes.
+///
+/// # Safety
+///
+/// `destination` must name four writable bytes. The original has no NULL,
+/// alignment, or bounds guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rgb555a1_expand_to_rgba8(destination: *mut u8, packed_pixel: u32) {
+    let red = ((packed_pixel & 0xf800) >> 8) as u8;
+    let green = ((packed_pixel & 0x07c0) >> 3) as u8;
+    let blue = ((packed_pixel & 0x003e) << 2) as u8;
+
+    destination.write_volatile(red | (red >> 5));
+    destination.add(1).write_volatile(green | (green >> 5));
+    destination.add(2).write_volatile(blue | (blue >> 5));
+    destination.add(3).write_volatile(if packed_pixel & 1 == 0 { 0 } else { 0xff });
+}
+
 /// Reads one packed RGB555A1 pixel through `source_cursor`, advances the
 /// cursor, and writes its expanded `{R, G, B, A}` bytes to `destination`.
 ///
@@ -134,14 +168,7 @@ pub unsafe extern "C" fn rgb555a1_cursor_read_rgba8(
     source_cursor.write(source.add(1));
     let pixel = source.read();
 
-    let red = ((pixel & 0xf800) >> 8) as u8;
-    let green = ((pixel & 0x07c0) >> 3) as u8;
-    let blue = ((pixel & 0x003e) << 2) as u8;
-
-    destination.write_volatile(red | (red >> 5));
-    destination.add(1).write_volatile(green | (green >> 5));
-    destination.add(2).write_volatile(blue | (blue >> 5));
-    destination.add(3).write_volatile(if pixel & 1 == 0 { 0 } else { 0xff });
+    rgb555a1_expand_to_rgba8(destination, pixel.into());
 }
 
 /// `rgba4444_cursor_read_rgba8` — original: `FUN_0825ecc8` @ 0x0825ecc8
@@ -191,7 +218,7 @@ pub unsafe extern "C" fn rgba4444_cursor_read_rgba8(
 
 #[cfg(test)]
 mod tests {
-    use super::{rgb555a1_cursor_read_rgba8, rgb565_cursor_read_rgba8, rgba4444_cursor_read_rgba8, u32_cursor_read_be_bytes};
+    use super::{rgb555a1_cursor_read_rgba8, rgb555a1_expand_to_rgba8, rgb565_cursor_read_rgba8, rgba4444_cursor_read_rgba8, u32_cursor_read_be_bytes};
 
     fn reference_rgb555a1(pixel: u16) -> [u8; 4] {
         let expand = |component: u8| (component << 3) | (component >> 2);
@@ -264,20 +291,17 @@ mod tests {
     }
 
     #[test]
-    fn expands_every_packed_value_and_advances_one_halfword() {
+    fn expands_every_rgb555a1_value_and_ignores_upper_input_bits() {
         for pixel in 0..=u16::MAX {
-            let source = [pixel, !pixel];
-            let mut cursor = source.as_ptr();
             let mut destination = [0xa5; 6];
 
             unsafe {
-                rgb555a1_cursor_read_rgba8(destination.as_mut_ptr().add(1), 0, &mut cursor);
+                rgb555a1_expand_to_rgba8(destination.as_mut_ptr().add(1), u32::from(pixel) | 0xbeef_0000);
             }
 
             assert_eq!(&destination[1..5], &reference_rgb555a1(pixel), "pixel {pixel:#06x}");
             assert_eq!(destination[0], 0xa5, "pixel {pixel:#06x} wrote before destination");
             assert_eq!(destination[5], 0xa5, "pixel {pixel:#06x} wrote past destination");
-            assert_eq!(cursor, unsafe { source.as_ptr().add(1) }, "pixel {pixel:#06x}");
         }
     }
 
