@@ -68689,16 +68689,46 @@ functions:
       0x0815ea04, 0x0815ea10, 0x0815ea1c, 0x081a3324, 0x081a3434,
       0x081a3460, 0x081a3470, 0x081a34a4, and 0x081a4a54. Callers pass UI
       resource names (including Stopwatch and Voice Memo image names) and
-      consume the mapped word. The 0x0829047c helper is deliberately retained
-      as a fixed-address target boundary: raw code loads its map global from
-      0x08ad7c6c and calls the separately unported 0x083db75c, whose exact map
-      class is not established. The Rust port uses the existing COW-string
-      constructor/release ports and reaches 0x0829047c through a typed
-      fixed-address boundary on ARM; host tests install the same boundary.
-      Tests cover exact non-empty byte forwarding through the temporary, its
-      heap release, and the empty name with a zero lookup result. match.py
-      structurally differs in the boundary call and Rust frame but retains
-      construct/call/release order.
+      consume the mapped word. The direct port at 0x0829047c now receives the
+      constructed COW string rather than retaining a seam at that address. It
+      uses the verified 0x08ad7c6c map address and keeps only the still
+      unidentified 0x083db75c map operation as a typed target boundary. Host
+      tests supply that operation, prove exact non-empty byte forwarding
+      through the temporary and its heap release, and preserve an empty-name
+      zero lookup value. match.py structurally differs in the map-operation
+      boundary and Rust frame but retains construct/call/release order.
+      The COW-string lookup port is separately tested below.
+
+  # --- UI resource COW-string value lookup ---
+  - address: 0x0829047c
+    ghidra: FUN_0829047c
+    name: ui_resource_value_from_cow_string
+    size: 28
+    sig: "u32 ui_resource_value_from_cow_string(char **key)"
+    module: ui/resource_value
+    status: ported
+    renames:
+      param_1/r0: key
+      DAT_08290494: ui_resource_value_map
+      FUN_083db75c: ui_resource_value_map_lookup
+      "*FUN_083db75c(...)": mapped_value_word
+    notes: >-
+      Raw osos.dec establishes a 28-byte extent
+      0x0829047c..0x08290498: mov r1,r0; push {r4,lr}; ldr r0,
+      [pc,#8] (literal 0x08ad7c6c); bl 0x083db75c; ldr r0,[r0]; pop
+      {r4,pc}. The next distinct entry starts at 0x08290498, so Ghidra's
+      24-byte instruction extent omits one literal-pool word but no sibling.
+      Decoding every aligned ARM B/BL immediate in osos.dec finds exactly
+      seven inbound direct bl sites, all unconditional with no predicated bl
+      or direct b: 0x08134394, 0x081343a8, 0x08134560, 0x081345e0,
+      0x08134624, 0x0816dc80, and 0x08290464. No aligned data word equals
+      0x0829047c, so the function is not virtually dispatched. It passes the
+      COW string object and the global map address to 0x083db75c, then returns
+      the resulting value word without NULL guards. The map class and
+      0x083db75c identity remain unestablished; target builds call that exact
+      address and host tests install a typed map-operation recorder. Tests
+      cover the map-address and COW-byte forwarding, returned word, wrapper
+      construction/release sequence, and an empty name with zero result.
 
   - address: 0x081fbb24
     ghidra: FUN_081fbb24
