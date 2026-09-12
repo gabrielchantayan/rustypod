@@ -73271,3 +73271,38 @@ functions:
       vtable function pointers cannot encode host function pointers. Tests
       prove the zero-result short circuit, exact handle forwarding, state
       bytes 0, 1, 2, 3, and 255, and no fixture writes.
+
+  # --- Opaque mapped-subobject selector ---
+  - address: 0x082941a8
+    ghidra: FUN_082941a8
+    name: mapped_subobject_for_slot
+    size: 60
+    sig: "u8 *mapped_subobject_for_slot(const u8 *context, u32 slot)"
+    module: util/mapped_subobject_for_slot
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: slot
+      "context+0xc4": one_based_map_index
+      DAT_082941e0: slot_map_table_base
+      iVar1/r2: mapped_slot
+      r0: subobject
+    notes: >-
+      Raw ARM confirms 56 bytes of instructions from 0x082941a8 through
+      0x082941dc plus the literal pool word 0x089d04bc at 0x082941e0; the
+      next separately linked function starts at 0x082941e4, making the true
+      extent 60 bytes. It rejects slot > 4 before reading context. Otherwise
+      a zero context+0xc4 one-based map index returns null; a nonzero index
+      loads a byte-map pointer from 0x089d04bc + 4*index - 4, reads map[slot],
+      and returns null only for map byte 4. Every other byte selects the
+      target-width pointer at context+0x38 + 4*map_byte, with no context,
+      table, map, or selected-pointer NULL guard. Complete ARM B/BL-immediate
+      decoding finds seven direct inbound calls, all unconditional plain bl at
+      0x0829301c, 0x08293110, 0x08293c30, 0x08293e84, 0x08293f10,
+      0x08294320, and 0x08294570; there are no predicated calls. The
+      containing object and map-table identity remain unrecovered, so the
+      name records only the proven mapping behavior. Target builds read the
+      exact literal table address; host tests install a private pointer-table
+      stand-in to model target-width table pointers. Tests cover both table
+      indices, all selector outcomes including sentinel 4, the zero-index
+      guard, and the pre-dereference out-of-range guard.

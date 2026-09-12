@@ -570,6 +570,9 @@ pub mod hints {
     // unmap, so each mapping site has its own hint.
     pub const SHARED_HANDLE_INITIALIZE: usize = 0x5300_0000;
     pub const VTABLE_SHARED_HANDLE_CONSTRUCT: usize = 0x5400_0000;
+    // 0x5700_0000: dedicated to util/mapped_subobject_for_slot's raw-u32
+    // context and selected-subobject fixture; mappings never unmap.
+    pub const MAPPED_SUBOBJECT_FOR_SLOT: usize = 0x5700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
