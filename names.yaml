@@ -71159,3 +71159,31 @@ functions:
       callees remain direct firmware calls on target through volatile
       operation slots, while host tests install recording operations; their
       identities are deliberately not inferred from raw addresses.
+
+  # --- OpenSSL RAND_bytes dispatch ---
+  - address: 0x080620f8
+    ghidra: FUN_080620f8
+    name: rand_bytes
+    size: 52
+    sig: "i32 RAND_bytes(u8 *buffer, i32 count)"
+    module: crypto/rand_bytes
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: count
+      iVar1/r0: rand_method
+      UNRECOVERED_JUMPTABLE/r2: bytes_callback
+    notes: >-
+      Raw osos.dec confirms the 52-byte extent from 0x080620f8 through
+      0x08062128; the separately linked RAND-method accessor
+      FUN_0806212c begins at 0x0806212c. A complete aligned ARM B/BL decode
+      finds 8 inbound direct bl calls, all unconditional: 0x080600a0,
+      0x08062648, 0x080627b8, 0x080627e0, 0x08062878, 0x080628a0,
+      0x080d4b48, and 0x080e8c30; no predicated direct call enters it.
+      Calls the lazy RAND-method getter, returns -1 for a NULL method or its
+      NULL +0x04 bytes slot, otherwise tail-dispatches (buffer, count) and
+      returns the callback status unchanged. Adjacent wrappers use +0x0c,
+      +0x10, and +0x14 as RAND_METHOD add, pseudorand, and status slots,
+      identifying +0x04 as RAND_bytes. The getter remains unported: target
+      builds call 0x0806212c directly, while host tests inject a native-width
+      getter/method seam; target layout retains the raw 32-bit +0x04 word.
