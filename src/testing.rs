@@ -386,6 +386,11 @@ pub mod hints {
     // vector-head and entry fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const OPAQUE_KEYED_COLLECTION_ITEM_AT: usize = 0xfd00_0000;
+    // 0xef00_0000: dedicated to app/opaque_keyed_collection_item_count's
+    // raw-u32 vector-head fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const OPAQUE_KEYED_COLLECTION_ITEM_COUNT: usize = 0xef00_0000;
+    
     // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
     // object/payload fixture; mappings never unmap, so no other user may share it.
     pub const TAGGED_PAYLOAD_SIGNED_FIELD_SUM: usize = 0xfe00_0000;
@@ -646,3 +651,9 @@ pub static IAP_PACKET_EVENT_SCHEDULE_OPS_TEST_LOCK: std::sync::Mutex<()> =
 /// behind `app::animation::scheduler_table`. The animation and refcounted
 /// base-destruction ports both unlink nodes through this one host model.
 pub static SCHEDULER_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that swaps
+/// `app::opaque_keyed_collection_item_at::OPAQUE_KEYED_COLLECTION_VECTOR`.
+/// Both keyed-collection accessors install host selectors into this shared
+/// seam, so a module-private lock would race selector restoration.
+pub static OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
