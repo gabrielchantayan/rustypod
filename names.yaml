@@ -16582,6 +16582,29 @@ functions:
       space (inferred when 0x08105a34 was ported) is confirmed by this
       table.
 
+  - address: 0x0809d8b0
+    ghidra: FUN_0809d8b0
+    name: string_object_append_line
+    size: 80
+    sig: "void string_object_append_line(StringObject *this, const StringObject *line)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: line
+    notes: >-
+      Raw ARM is 80 code bytes from 0x0809d8b0 through the tail branch at
+      0x0809d8fc; the next function starts at 0x0809d900. Eight direct BL
+      callers, all unconditional (0x082a594c, 0x082a5958, 0x082a5978,
+      0x082a5aac, 0x082a5adc, 0x082a5b04, 0x082a5b2c, 0x082a5b54),
+      binary-scanned. It checks line->payload with
+      utf8_codepoint_count_safe before reading this; NULL, empty, and
+      decoder-zero malformed lines are no-ops. A nonempty destination gains
+      code unit 10 before line's NULL-safe C string is inserted at INT_MAX.
+      All callees (utf8_codepoint_count_safe, string_object_append_code_unit,
+      string_object_c_str, string_object_insert_cstr) were already ported, so
+      no new dispatch seam or deliberate deviation is needed.
+
   - address: 0x0809d900
     ghidra: FUN_0809d900
     name: pixel_format_tag_to_ostype
