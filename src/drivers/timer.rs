@@ -580,6 +580,18 @@ pub unsafe extern "C" fn iram_usec_delay_veneer(interval: u32) -> u32 {
     let body = core::ptr::read_volatile(&(usec_delay as unsafe extern "C" fn(u32) -> u32));
     body(interval)
 }
+/// Serializes and configures the host Timer E seam for cross-module tests.
+#[cfg(test)]
+pub(crate) fn configure_usec_timer_for_test(initial: u32, increment: u32) -> impl Drop {
+    let guard = crate::testing::TIMER_OPS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    HOST_USEC_TIMER_COUNT.store(initial, Ordering::Relaxed);
+    HOST_USEC_TIMER_INCREMENT.store(increment, Ordering::Relaxed);
+    HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+    guard
+}
+
 
 
 
@@ -588,19 +600,9 @@ pub unsafe extern "C" fn iram_usec_delay_veneer(interval: u32) -> u32 {
 mod usec_timer_tests {
     use super::*;
     extern crate std;
-    use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
-    /// Serializes tests that reprogram the global Timer E host seam.
-    static USEC_TIMER_TEST_LOCK: StdMutex<()> = StdMutex::new(());
-
-    fn configure_usec_timer(initial: u32, increment: u32) -> StdMutexGuard<'static, ()> {
-        let guard = USEC_TIMER_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        HOST_USEC_TIMER_COUNT.store(initial, Ordering::Relaxed);
-        HOST_USEC_TIMER_INCREMENT.store(increment, Ordering::Relaxed);
-        HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
-        guard
+    fn configure_usec_timer(initial: u32, increment: u32) -> impl Drop {
+        super::configure_usec_timer_for_test(initial, increment)
     }
 
 

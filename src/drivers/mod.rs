@@ -1,5 +1,6 @@
 //! Low-level hardware drivers (S5L8702 peripherals, MMIO).
 pub mod ata_cmd;
+pub mod ata_command_execute;
 pub mod ata_command_submit_wait;
 pub mod ata_semaphore;
 pub mod ata_pio_write_byte;

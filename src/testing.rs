@@ -41,6 +41,10 @@ extern crate std;
 pub mod hints {
     pub const HEAP_INTEGRATION: usize = 0x0900_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
+    // 0x6400_0000: dedicated to ATA command execution/submission's raw-u32
+    // status-source fixtures; mappings never unmap, so neither port shares it.
+    pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;
+    pub const ATA_COMMAND_SUBMIT_WAIT: usize = 0x6500_0000;
     pub const CLIENT_POPULATE: usize = 0x0b00_0000;
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;

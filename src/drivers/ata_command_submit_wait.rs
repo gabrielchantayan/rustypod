@@ -19,15 +19,16 @@
 //! and execute with a 5000-ms timeout. Only execution status 3 is success;
 //! all other execution statuses map to `0x59`.
 //!
-//! The four fixed-address callees are not in the port ledger. Their seam names
-//! describe only the roles verified here: preparation `0x080b1ae8`, task-file
-//! programming `0x0836c6c8`, operation-state selection `0x0836ce80`, and
-//! execution `0x080d7b7c`. Target builds use literal veneers because a Rust
-//! payload cannot retain the stock body's PC-relative `bl` reach; host builds
-//! use volatile callback seams. This is the only deliberate code-generation
-//! deviation; behavior and call order are retained.
+//! The three fixed-address callees preparation `0x080b1ae8`, task-file
+//! programming `0x0836c6c8`, and operation-state selection `0x0836ce80` are
+//! still unported and use literal veneers on target plus volatile callback
+//! seams on hosts. Execution `0x080d7b7c` is now the direct
+//! [`ata_command_execute`] port. This is the only deliberate
+//! code-generation deviation; behavior and call order are retained.
 
 use core::ptr;
+use crate::drivers::ata_command_execute::{ata_command_execute, AtaCommandDevice};
+
 
 pub const ATA_DEVICE_SIGNATURE: u32 = 0x3165_6449;
 pub const ATA_DEVICE_NOT_READY: u32 = 7;
@@ -35,23 +36,11 @@ pub const ATA_EXECUTION_FAILED: u32 = 0x59;
 pub const ATA_EXECUTION_COMPLETE: u32 = 3;
 pub const ATA_COMMAND_TIMEOUT_MS: u32 = 5_000;
 
-/// The two fields this routine reads from the opaque `Ide1` ATA-device object.
-///
-/// `u32` reservation words preserve the target's `+0x44` readiness offset on
-/// both the 32-bit firmware and 64-bit host test builds.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct AtaCommandDevice {
-    pub signature: u32,
-    pub _reserved_04_40: [u32; 16],
-    pub ready: u32,
-}
 
 pub type AtaCommandPrepare = unsafe extern "C" fn(device: *mut AtaCommandDevice) -> u32;
 pub type AtaTaskfileProgram =
     unsafe extern "C" fn(device: *mut AtaCommandDevice, command: *mut u8, flags: u32) -> u32;
 pub type AtaOperationStateSet = unsafe extern "C" fn(device: *mut AtaCommandDevice, state: u32) -> u32;
-pub type AtaCommandExecute = unsafe extern "C" fn(device: *mut AtaCommandDevice, timeout_ms: u32) -> u32;
 
 #[cfg(not(target_arch = "arm"))]
 unsafe extern "C" fn missing_prepare(_device: *mut AtaCommandDevice) -> u32 {
@@ -72,10 +61,6 @@ unsafe extern "C" fn missing_operation_state_set(_device: *mut AtaCommandDevice,
     0
 }
 
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_execute(_device: *mut AtaCommandDevice, _timeout_ms: u32) -> u32 {
-    0
-}
 
 /// Host-only seam for the stock preparation function at `0x080b1ae8`.
 #[cfg(not(target_arch = "arm"))]
@@ -86,9 +71,6 @@ pub static mut ATA_TASKFILE_PROGRAM: AtaTaskfileProgram = missing_taskfile_progr
 /// Host-only seam for the stock state setter at `0x0836ce80`.
 #[cfg(not(target_arch = "arm"))]
 pub static mut ATA_OPERATION_STATE_SET: AtaOperationStateSet = missing_operation_state_set;
-/// Host-only seam for the stock command executor at `0x080d7b7c`.
-#[cfg(not(target_arch = "arm"))]
-pub static mut ATA_COMMAND_EXECUTE: AtaCommandExecute = missing_execute;
 
 /// Host replacement for ATA MMIO `0x38700000..0x38700013`.
 #[cfg(not(target_os = "none"))]
@@ -116,7 +98,6 @@ extern "C" {
         flags: u32,
     ) -> u32;
     fn retail_ata_operation_state_set(device: *mut AtaCommandDevice, state: u32) -> u32;
-    fn retail_ata_command_execute(device: *mut AtaCommandDevice, timeout_ms: u32) -> u32;
 }
 
 #[cfg(not(target_arch = "arm"))]
@@ -138,10 +119,6 @@ unsafe fn retail_ata_operation_state_set(device: *mut AtaCommandDevice, state: u
     ptr::read_volatile(ptr::addr_of!(ATA_OPERATION_STATE_SET))(device, state)
 }
 
-#[cfg(not(target_arch = "arm"))]
-unsafe fn retail_ata_command_execute(device: *mut AtaCommandDevice, timeout_ms: u32) -> u32 {
-    ptr::read_volatile(ptr::addr_of!(ATA_COMMAND_EXECUTE))(device, timeout_ms)
-}
 
 // The original's PC-relative calls cannot reach from the patch payload.
 #[cfg(target_arch = "arm")]
@@ -171,12 +148,6 @@ retail_ata_operation_state_set:
     .word   0x0836ce80
     .size retail_ata_operation_state_set, . - retail_ata_operation_state_set
 
-    .globl retail_ata_command_execute
-    .type retail_ata_command_execute, %function
-retail_ata_command_execute:
-    ldr     pc, [pc, #-4]
-    .word   0x080d7b7c
-    .size retail_ata_command_execute, . - retail_ata_command_execute
 "#
 );
 
@@ -221,7 +192,7 @@ pub unsafe extern "C" fn ata_command_submit_wait(
     }
 
     retail_ata_operation_state_set(device, 4);
-    if retail_ata_command_execute(device, ATA_COMMAND_TIMEOUT_MS) == ATA_EXECUTION_COMPLETE {
+    if ata_command_execute(device, ATA_COMMAND_TIMEOUT_MS, 0, 0) == ATA_EXECUTION_COMPLETE {
         0
     } else {
         ATA_EXECUTION_FAILED
@@ -234,13 +205,22 @@ mod tests {
 
     use super::*;
     use core::ptr::addr_of_mut;
-    use parking_lot::{Mutex, MutexGuard};
     use std::vec::Vec;
-
-    static ATA_COMMAND_LOCK: Mutex<()> = Mutex::new(());
+    use crate::drivers::ata_command_execute::{
+        ATA_COMMAND_EXECUTE_TEST_LOCK, ATA_STATUS_ERROR, ATA_STATUS_READ,
+        ATA_STATUS_REGISTER_OFFSET,
+    };
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use parking_lot::MutexGuard;
+    use std::sync::LazyLock;
+    static STATUS_SOURCE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::ATA_COMMAND_SUBMIT_WAIT, 0x1000).map(|pointer| pointer as usize)
+    });
     static mut DEVICE: AtaCommandDevice = AtaCommandDevice {
         signature: 0,
-        _reserved_04_40: [0; 16],
+        _reserved_04_38: [0; 14],
+        status_source: 0,
+        _reserved_40: 0,
         ready: 0,
     };
     static mut COMMAND: [u8; 12] = [0; 12];
@@ -248,7 +228,7 @@ mod tests {
     static mut PREPARE_RESULT: u32 = 0;
     static mut PROGRAM_RESULT: u32 = 0;
     static mut STATE_RESULT: u32 = 0;
-    static mut EXECUTE_RESULT: u32 = ATA_EXECUTION_COMPLETE;
+    static mut EXECUTE_STATUS: u32 = 0;
 
     unsafe extern "C" fn record_prepare(device: *mut AtaCommandDevice) -> u32 {
         assert_eq!(device, addr_of_mut!(DEVICE));
@@ -275,18 +255,21 @@ mod tests {
         STATE_RESULT
     }
 
-    unsafe extern "C" fn record_execute(device: *mut AtaCommandDevice, timeout_ms: u32) -> u32 {
-        assert_eq!(device, addr_of_mut!(DEVICE));
-        assert_eq!(timeout_ms, ATA_COMMAND_TIMEOUT_MS);
+    unsafe extern "C" fn record_status_read(status_source: *mut u8, status_out: *mut u32) -> u32 {
+        assert_eq!(status_source as usize, (*STATUS_SOURCE).unwrap() + ATA_STATUS_REGISTER_OFFSET);
         CALL_LOG.push("execute");
-        EXECUTE_RESULT
+        ptr::write_volatile(status_out, EXECUTE_STATUS);
+        0
     }
 
-    unsafe fn arrange() -> MutexGuard<'static, ()> {
-        let guard = ATA_COMMAND_LOCK.lock();
+    unsafe fn arrange() -> Option<MutexGuard<'static, ()>> {
+        let guard = ATA_COMMAND_EXECUTE_TEST_LOCK.lock();
+        let source = (*STATUS_SOURCE)? as *mut u8;
         DEVICE = AtaCommandDevice {
             signature: ATA_DEVICE_SIGNATURE,
-            _reserved_04_40: [0; 16],
+            _reserved_04_38: [0; 14],
+            status_source: source as usize as u32,
+            _reserved_40: 0,
             ready: 1,
         };
         COMMAND = [0; 12];
@@ -294,18 +277,21 @@ mod tests {
         PREPARE_RESULT = 0;
         PROGRAM_RESULT = 0;
         STATE_RESULT = 0;
-        EXECUTE_RESULT = ATA_EXECUTION_COMPLETE;
+        EXECUTE_STATUS = 0;
         ATA_COMMAND_MMIO_WORDS = [0, 0, 0, 0, 0xa5a5_5a5a];
         ATA_COMMAND_PREPARE = record_prepare;
         ATA_TASKFILE_PROGRAM = record_program;
         ATA_OPERATION_STATE_SET = record_state;
-        ATA_COMMAND_EXECUTE = record_execute;
-        guard
+        ATA_STATUS_READ = record_status_read;
+        Some(guard)
     }
 
     #[test]
     fn rejects_invalid_device_or_command_before_any_side_effect() {
-        let _guard = unsafe { arrange() };
+        let Some(_guard) = (unsafe { arrange() }) else {
+            assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
+            return;
+        };
         assert_eq!(unsafe { ata_command_submit_wait(ptr::null_mut(), addr_of_mut!(COMMAND).cast()) }, ATA_DEVICE_NOT_READY);
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), ptr::null_mut()) }, ATA_DEVICE_NOT_READY);
         unsafe { DEVICE.ready = 0 };
@@ -316,7 +302,10 @@ mod tests {
 
     #[test]
     fn propagates_preparation_or_taskfile_failure_without_later_stages() {
-        let _guard = unsafe { arrange() };
+        let Some(_guard) = (unsafe { arrange() }) else {
+            assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
+            return;
+        };
         unsafe { PREPARE_RESULT = 0x58 };
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0x58);
         assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare"]);
@@ -333,14 +322,17 @@ mod tests {
 
     #[test]
     fn executes_after_taskfile_programming_and_maps_completion_status() {
-        let _guard = unsafe { arrange() };
+        let Some(_guard) = (unsafe { arrange() }) else {
+            assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
+            return;
+        };
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0);
         assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare", "program", "state", "execute"]);
         assert_eq!(unsafe { ATA_COMMAND_MMIO_WORDS[4] }, 0xa5a5_5a5a);
 
         unsafe {
             CALL_LOG.clear();
-            EXECUTE_RESULT = 4;
+            EXECUTE_STATUS = ATA_STATUS_ERROR;
         }
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, ATA_EXECUTION_FAILED);
         assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare", "program", "state", "execute"]);
@@ -348,7 +340,10 @@ mod tests {
 
     #[test]
     fn ignores_operation_state_result_like_the_original() {
-        let _guard = unsafe { arrange() };
+        let Some(_guard) = (unsafe { arrange() }) else {
+            assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
+            return;
+        };
         unsafe { STATE_RESULT = 1 };
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0);
         assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare", "program", "state", "execute"]);
