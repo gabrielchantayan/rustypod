@@ -73201,3 +73201,35 @@ functions:
       the unchecked aligned field read and only the original sentinel
       normalization. Host tests cover the sentinel, zero, positive, and other
       negative values and prove the object is not modified.
+
+  # --- Opaque handle predicate and state-byte gate ---
+  - address: 0x08298064
+    ghidra: FUN_08298064
+    name: handle_slot_18_predicate_and_state_is_two
+    size: 60
+    sig: "u32 handle_slot_18_predicate_and_state_is_two(OpaqueHandle *handle)"
+    module: app/handle_slot_18_predicate_and_state_is_two
+    status: ported
+    renames:
+      param_1/r0: handle
+      r4: handle
+      "handle+0x0c": state_pointer
+      "vtable+0x18": predicate
+      r0: predicate_result_or_state_byte
+    notes: >-
+      Raw osos.dec confirms Ghidra's 60-byte extent exactly: the body runs
+      from 0x08298064 through 0x0829809c, and the separately linked next
+      function begins at 0x082980a0. It loads handle->vtable->slot_18 and
+      invokes it with handle; a zero result returns zero without reading the
+      target-width pointer at handle+0x0c, while a nonzero result returns one
+      only when the first byte of that pointed-to state equals 2. Complete
+      aligned ARM B/BL-immediate decoding finds exactly seven direct inbound
+      calls, all unconditional plain bl at 0x08110718, 0x081111d4,
+      0x0826cad4, 0x0826f028, 0x08288374, 0x08288384, and 0x0828839c; there
+      are no predicated calls or direct tail branches. The concrete virtual
+      predicate and state object's identity are unrecovered, so the port does
+      not invent either. Firmware performs the raw vtable dispatch directly;
+      the sole host-only deviation is a recording seam because target-width
+      vtable function pointers cannot encode host function pointers. Tests
+      prove the zero-result short circuit, exact handle forwarding, state
+      bytes 0, 1, 2, 3, and 255, and no fixture writes.
