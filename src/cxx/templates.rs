@@ -4,9 +4,11 @@
 //! Whole families of byte-identical functions sit in
 //! 0x083c0000-0x083dffff, differing only in address: the accessor in
 //! [`crate::cxx::handle`] (22 copies), `deque_seg_capacity`
-//! @ 0x083d9ec0 in [`crate::heap::block_deque`] (17 copies), and the
-//! four ported here. Each family needs exactly one port; `names.yaml`
-//! carries the address lists so a hook can point every copy at it.
+//! @ 0x083d9ec0 in [`crate::heap::block_deque`] (17 copies), and several
+//! template members ported here. Each family needs exactly one port;
+//! `names.yaml` carries the address lists so a hook can point every copy at it.
+//! - [`deque_back_elem4`] — obtains the final 4-byte deque element by
+//!   walking a copy of the end iterator back one element.
 //!
 //! - [`deque_iter_assign`] — the 16-byte deque-iterator copy, 17
 //!   byte-identical copies, 99 `bl` call sites. Each copy sits
@@ -97,6 +99,7 @@ use crate::libc::memcmp::memcmp;
 use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
 use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
+use crate::heap::block_deque::BlockDeque;
 
 /// The five-word owner shape consumed by [`container_end_cursor`].
 ///
@@ -544,6 +547,50 @@ pub unsafe extern "C" fn deque_iter_init_elem4_alias_9ff8(
     }
     (*iter).seg_slot = slot;
     iter
+}
+
+/// deque_back_elem4 — original: `FUN_083e0044` @ 0x083e0044 (220 bytes;
+/// 7 unconditional plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`: 0x0815a8f4, 0x0815a9b8,
+/// 0x0815aaa0, 0x0815adf8, 0x0815b138, 0x0815b86c, and 0x0815b8d4).
+///
+/// Copies the end iterator, subtracts one 4-byte element, and returns the
+/// resulting element address. When that crosses a segment boundary, it uses
+/// the copied iterator's segment-map slot to select the predecessor segment
+/// and returns its final element. The raw quotient logic also handles an
+/// iterator spanning multiple segment strides.
+///
+/// Deliberate deviation: none. `wrapping_*` preserves the retailOS's
+/// 32-bit modular pointer and signed-index arithmetic without imposing Rust
+/// in-bounds pointer-arithmetic preconditions.
+///
+/// # Safety
+/// `deque` must describe a non-empty, valid 4-byte-element deque. In
+/// particular, `end.seg_slot` and any map slot selected by the raw quotient
+/// must be valid, aligned segment-pointer slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_back_elem4(deque: *const BlockDeque) -> *mut u8 {
+    let end = (*deque).end;
+    let element_index = (((end.cur as usize).wrapping_sub(end.seg_base as usize) as u32 as i32) >> 2)
+        .wrapping_sub(1);
+    let capacity = deque_seg_capacity() as u32;
+    let segment_delta = if element_index < 0 {
+        let numerator = (capacity as i32)
+            .wrapping_sub(element_index)
+            .wrapping_sub(1) as u32;
+        -((numerator / capacity) as i32)
+    } else {
+        ((element_index as u32) / capacity) as i32
+    };
+
+    if segment_delta == 0 {
+        return end.cur.wrapping_sub(4);
+    }
+
+    let base = end.seg_slot.wrapping_offset(segment_delta as isize).read();
+    let within_segment = element_index.wrapping_sub(segment_delta.wrapping_mul(capacity as i32));
+    base.wrapping_add((within_segment as u32).wrapping_mul(4) as usize)
 }
 
 
@@ -3274,6 +3321,41 @@ mod tests {
             assert!(iter.seg_base.is_null());
             assert!(iter.seg_end.is_null());
             assert!(iter.seg_slot.is_null());
+        }
+    }
+
+    #[test]
+    fn deque_back_elem4_steps_within_and_across_segment_map() {
+        let mut previous = [0u8; 0x80];
+        let mut current = [0u8; 0x100];
+        let mut next = [0u8; 0x80];
+        let mut map = [
+            previous.as_mut_ptr(),
+            current.as_mut_ptr(),
+            next.as_mut_ptr(),
+        ];
+        let mut deque = BlockDeque {
+            begin: DequeIter::NULL,
+            end: DequeIter {
+                cur: unsafe { current.as_mut_ptr().add(0x14) },
+                seg_base: current.as_mut_ptr(),
+                seg_end: unsafe { current.as_mut_ptr().add(0x80) },
+                seg_slot: unsafe { map.as_mut_ptr().add(1) },
+            },
+            count: 1,
+            map: map.as_mut_ptr(),
+            map_cap: 3,
+        };
+
+        unsafe {
+            assert_eq!(deque_back_elem4(&deque), current.as_mut_ptr().add(0x10));
+
+            deque.end.cur = current.as_mut_ptr();
+            assert_eq!(deque_back_elem4(&deque), previous.as_mut_ptr().add(0x7c));
+
+            // The raw quotient path also permits spans beyond one segment.
+            deque.end.cur = current.as_mut_ptr().add(0x84);
+            assert_eq!(deque_back_elem4(&deque), next.as_mut_ptr());
         }
     }
 
