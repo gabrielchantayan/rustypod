@@ -566,18 +566,22 @@ pub(crate) mod tests {
         }
     }
 
+    /// Restores the four shared seams after a sibling module temporarily
+    /// installs a compatible facade-fetch recorder.
+    pub(crate) unsafe fn restore_firmware_seams() {
+        core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
+            .write_volatile(firmware_guard_base_construct);
+        core::ptr::addr_of_mut!(PATH_PROBE_GUARD_CTOR)
+            .write_volatile(firmware_guard_construct);
+        core::ptr::addr_of_mut!(PATH_PROBE_FACADE_FETCH)
+            .write_volatile(firmware_facade_fetch);
+        core::ptr::addr_of_mut!(PATH_PROBE_GUARD_DTOR)
+            .write_volatile(firmware_guard_destroy);
+    }
+
     impl Drop for SeamGuard {
         fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
-                    .write_volatile(firmware_guard_base_construct);
-                core::ptr::addr_of_mut!(PATH_PROBE_GUARD_CTOR)
-                    .write_volatile(firmware_guard_construct);
-                core::ptr::addr_of_mut!(PATH_PROBE_FACADE_FETCH)
-                    .write_volatile(firmware_facade_fetch);
-                core::ptr::addr_of_mut!(PATH_PROBE_GUARD_DTOR)
-                    .write_volatile(firmware_guard_destroy);
-            }
+            unsafe { restore_firmware_seams() }
         }
     }
 
