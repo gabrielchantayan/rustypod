@@ -16478,6 +16478,33 @@ functions:
       proves the +0xdc target field reaches its own vtable's checked-cast
       slot for 0x4a80, and proves a target accepting 0x4a00 returns NULL.
 
+  - address: 0x0828b854
+    ghidra: FUN_0828b854
+    name: field_dc_as_class_4b00
+    size: 12
+    sig: "void *field_dc_as_class_4b00(void *owner)"
+    module: app/registry
+    status: ported
+    renames:
+      param_1/r0: owner
+      "[owner + 0xdc]": class_4b00_object
+      FUN_08275b9c: object_cast_to_class
+    notes: >-
+      Raw osos.dec is exactly three ARM instructions at 0x0828b854:
+      `ldr r0,[r0,#0xdc]`, `mov r1,#0x4b00`, then `b 0x08275b9c`
+      tail-branches to the already ported object_cast_to_class. The next
+      separately linked function begins at 0x0828b860, so Ghidra's 12-byte
+      extent is exact. Decoding every aligned ARM B/BL word in osos.dec finds
+      exactly seven direct, unconditional bl callers (0x0828b1ec,
+      0x0828b3d0, 0x0828b5bc, 0x0828b820, 0x0828bacc, 0x0828bb20,
+      0x0828bbd4), zero predicated forms, zero tail branches, and zero
+      data-word references. It has no NULL owner guard: a NULL owner faults
+      on the field load; a NULL field reaches object_cast_to_class and returns
+      NULL. Class 0x4b00 is not otherwise identified, so the port names only
+      the verified field and class id. Host test maps a fresh low-u32 slab,
+      proves the +0xdc target field reaches its own vtable's checked-cast slot
+      for 0x4b00, and proves a target accepting 0x4a80 returns NULL.
+
   - address: 0x081d2408
     ghidra: FUN_081d2408
     name: framework_root_post_message
