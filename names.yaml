@@ -38500,6 +38500,44 @@ functions:
       path, vtable replacement, link allocation, and exact +0x24 target
       forwarding to the base vtable's set-target call.
 
+
+  # --- Silver UI framework: task-context derived base constructor ---
+
+  - address: 0x08272474
+    ghidra: FUN_08272474
+    name: framework_task_target_base_construct
+    size: 28
+    sig: "Class6800 *framework_task_target_base_construct(Class6800 *storage, u32 create_link)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: create_link
+      puVar1/r0: this
+      FUN_0811113c: framework_base_construct_with_task_target
+      DAT_08272490: FRAMEWORK_TASK_TARGET_BASE_VTABLE_ADDRESS
+    notes: >-
+      True extent is 32 bytes, 0x08272474..0x08272494: seven code
+      instructions followed by the 0x089a5de0 vtable literal at
+      0x08272490; raw bytes prove the separately linked null-checking
+      destructor begins at 0x08272494. Decoding every ARM B/BL word in
+      work/firmware/osos.dec found exactly 8 unconditional BL call sites
+      (0x0813042c, 0x081439ac, 0x0819e5cc, 0x081a763c, 0x081b80bc,
+      0x081d9ea4, 0x081e93fc, 0x082139c0), with 0 predicated BL forms
+      and 0 direct B tail calls. It directly calls the already-ported
+      framework_base_construct_with_task_target(storage, create_link),
+      overwrites the returned object's +0x00 vtable with the literal,
+      clears its +0x14 word, and returns that same r0. There are no NULL
+      guards. The vtable's concrete class and slot identities remain
+      unestablished, so the name records only the verified task-context
+      target construction mechanism; the port preserves the retailOS
+      address as an opaque pointer rather than inventing a vtable model.
+      Host coverage supplies a live TaskCtx and proves context forwarding,
+      direct-parent use, the literal vtable store, the exact +0x14 clear,
+      and preservation of the next word. match.py with this worktree's
+      archive reports the same call/literal/store/zero/store skeleton;
+      the expected differences are LLVM's fp frame and the archive
+      relocation rendering the direct callee as the local symbol.
   # --- Silver UI framework: link and owner initializer ---
 
   - address: 0x081108b4
