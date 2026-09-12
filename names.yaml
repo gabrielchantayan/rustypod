@@ -19749,6 +19749,40 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x082a4b94
+    ghidra: FUN_082a4b94
+    name: strided_array_element_address
+    size: 40
+    sig: "u32 strided_array_element_address(const StridedArray *this, i32 index)"
+    module: cxx/array_element_at
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      param_1_plus_0x00: vtable
+      vtable_plus_0x18: element_stride
+      param_1_plus_0x08: storage
+    notes: >-
+      Raw osos.dec is exactly ten ARM words from 0x082a4b94 through
+      pop {r4,r5,r6,pc} at 0x082a4bb8; the next separately linked leaf
+      begins at 0x082a4bbc with ldr r0,[r0,#4]; bx lr. It saves this and
+      index, calls this->vtable[+0x18](this), then returns storage +
+      index * returned_stride through one mla, with all arithmetic modulo
+      2^32. Decoding every ARM B/BL word finds eight direct call sites:
+      0x08135250, 0x08135284, 0x08271798, 0x082a4884, 0x082a4944,
+      0x082a4a38, 0x082a4b44, and 0x082a4c4c; all are plain
+      unconditional bl (zero predicated calls). Two tail branches also
+      target it: predicated bne at 0x082a47ac and unconditional b at
+      0x082a4d0c. The vtable slot is identified only by role: sibling
+      0x082a4c20 tests its return against four before choosing word-copy
+      versus generic element copy. The observable-array vtable sampled at
+      0x089a5d0c holds 0x08102f80 in that slot, which falls inside
+      FUN_08102f44 with r4 live-in rather than decoding as an entry; no
+      concrete callee identity is invented. Target code uses raw
+      target-width vtable words; host tests use a named, widened vtable
+      structure so native function pointers remain valid. Tests prove
+      callback selection, positive and negative index multiplication,
+      accumulation overflow, and array_element_at sentinel integration.
   - address: 0x082a4cf8
     ghidra: FUN_082a4cf8
     name: array_element_at
@@ -19763,33 +19797,19 @@ functions:
       +0x08 = storage base), with a last-element sentinel: 0x7fffffff
       becomes count - 1 when the signed count is positive (`cmn r1,
       #-0x7fffffff; bne; ldr r2,[r0,#4]; cmp r2,#0; subgt r1,r2,#1`),
-      then a tail `b 0x082a4b94` into the element-address helper
-      (`storage + index * element_size(this)`, one `mla`; 40 bytes,
-      binary-verified). 23 `bl` call sites, 0 predicated,
-      binary-scanned by decoding every B/BL word in osos.dec. Extent
-      verified against raw bytes: the next function's push starts
-      exactly at 0x082a4d10, so Ghidra's 24 is right. Sentinel
-      semantics confirmed by callers (FUN_081b92e4 fetches the last
-      element as (array, 0x7fffffff)); slot +0x18 confirmed as the
-      element size by sibling FUN_082a4c20 (`if (size != 4) <generic
-      copy> else *out = *element`). Deliberate deviation: the tail
-      target 0x082a4b94 is a distinct, separately-called function and
-      not yet ported, so it rides the STRIDED_ARRAY_ELEMENT_ADDRESS
-      seam (command_dispatch house pattern): target transmutes the ROM
-      address, host default panics, tests install recording mocks.
-      Anomaly recorded, not resolved: the one concrete vtable sampled
-      (observable array 0x089a5d0c) has slot +0x18 = 0x08102f80, not a
-      function entry in Ghidra's listing (falls inside FUN_08102f44,
-      decodes with r4 live-in), so that class is probably not among
-      this wrapper's receivers and no concrete class identity is
-      claimed. match.py structural: the clamp is instruction-identical
-      (cmn/bne/ldr/cmp/subgt); the tail `b 0x082a4b94` becomes an
-      ldr/bx through the seam static and LLVM re-materializes the
-      sentinel with an `mvn r1, #0x80000000` for the subgt fall-through
-      — equivalent. Host tests:
-      src/cxx/array_element_at.rs (sentinel clamps to count-1, passes
-      through on empty/negative counts and for ordinary indices,
-      helper result returned untouched).
+      then tail-branches to the ported strided_array_element_address at
+      0x082a4b94. 23 bl call sites, 0 predicated, binary-scanned by
+      decoding every B/BL word in osos.dec. Extent verified against raw
+      bytes: the next function's push starts exactly at 0x082a4d10, so
+      Ghidra's 24 is right. Sentinel semantics confirmed by callers
+      (FUN_081b92e4 fetches the last element as
+      (array, 0x7fffffff)); slot +0x18 confirmed as the element size by
+      sibling FUN_082a4c20 (`if (size != 4) <generic copy> else *out =
+      *element`). The helper's host-widened vtable directly replaces the
+      previous unported dispatch seam. Host tests in
+      src/cxx/array_element_at.rs prove sentinel clamping, empty and
+      negative-count pass-through, ordinary indices, and direct virtual
+      stride calculation.
 
   - address: 0x082a4f58
     ghidra: FUN_082a4f58
