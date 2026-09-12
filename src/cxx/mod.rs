@@ -76,6 +76,7 @@ pub mod stream_write_exact;
 pub mod stream_write_cstr;
 pub mod stream_write_owner_construct;
 pub mod string_object;
+pub mod string_from_vtable_slot_50;
 pub mod string_word_record;
 pub mod string_object_initial_sort_key;
 pub mod text_buffer;

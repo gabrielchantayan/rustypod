@@ -19952,6 +19952,35 @@ functions:
       extraction (only byte 2 survives), 0x00/0xff boundaries, and the
       read-only/mask proof with byte 3 and the low halfword at 0xff.
 
+  - address: 0x082a37a4
+    ghidra: FUN_082a37a4
+    name: string_construct_from_vtable_slot_50
+    size: 36
+    sig: "void string_construct_from_vtable_slot_50(StringObject *out, StringSlot50Source *source)"
+    module: cxx/string_from_vtable_slot_50
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      DAT_089a6044: STRING_OBJECT_VTABLE_ADDRESS
+    notes: >-
+      Exact raw extent is 36 bytes / nine ARM instructions from 0x082a37a4
+      through the tail `bx r2` at 0x082a37c4; the separately linked next
+      function begins at 0x082a37c8. It saves source in r4, calls the ported
+      string_default_construct at 0x08277440 for out, then loads source's
+      vtable and tail-dispatches its opaque +0x50 word as slot(source, out).
+      The virtual callee has no established function identity, so this port
+      preserves it as a raw typed vtable call rather than inventing a name or
+      a replacement seam. Direct B/BL decoding across osos.dec found exactly
+      eight direct callers at 0x080fec88, 0x08102c40, 0x081124dc, 0x08174db4,
+      0x081763f0, 0x08176884, 0x08177188, and 0x081f4450: every one is a plain
+      unconditional bl; none is predicated and no direct b references the
+      entry. Each caller treats the interface as void despite the tail branch.
+      Host coverage proves default construction happens before precisely one
+      +0x50 dispatch, forwards the exact source pointer, and preserves the
+      slot's output payload. Host vtable slots use native-width pointers;
+      repr(C) keeps the target layout at the verified 32-bit word offsets.
+
   - address: 0x08277440
     ghidra: FUN_08277440
     name: string_default_construct
