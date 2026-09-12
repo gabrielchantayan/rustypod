@@ -62974,6 +62974,47 @@ functions:
       dynamic vtable is structural so it can retain a native-width callback,
       while the target field's +0x34 layout is asserted on 32-bit builds.
 
+  - address: 0x0817e3b0
+    ghidra: FUN_0817e3b0
+    name: registry_element_construct
+    size: 120
+    sig: "RegistryElementConstruct *registry_element_construct(RegistryElementConstruct *this, u32 first_input, u32 second_input, u32 callback_context)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: this (registry element allocation; returned from the base constructor)
+      param_2/r1: first_input (stored at element +0x10)
+      param_3/r2: second_input (stored at element +0x14)
+      param_4/r3: callback_context (stored at element +0x30)
+      DAT_0817e41c: registry_element_vtable_08989468
+      DAT_0817e420: primary_observable_array_vtable_089a38b8
+      DAT_0817e424: secondary_observable_array_vtable_089a3dc8
+      FUN_08274f10: identified_vtable_base_construct (unported; existing faithful ops boundary)
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw ARM establishes a 120-byte extent, 0x0817e3b0..0x0817e428: the
+      108-byte instruction body ends at pop {r4-r6,pc} @ 0x0817e418, then
+      three literal-pool words hold 0x08989468, 0x089a38b8 and 0x089a3dc8;
+      the separately linked next function opens at 0x0817e428 with cmp r0,#0.
+      The constructor calls base 0x08274f10, writes the registry-element
+      vtable at +0, stores r1/r2 at +0x10/+0x14, constructs observable arrays
+      at +0x18 and +0x34, replaces their vtables and sets their +0x10 flags,
+      clears +0x2c/+0x48/+0x4c/+0x50..+0x52, and stores r3 at +0x30. Every
+      post-base store is addressed from the returned r0; after the second
+      array constructor it returns r0-0x34. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly eight direct inbound calls: all unconditional
+      bl at 0x0817f06c, 0x0817f158, 0x08180d9c, 0x08180ee0, 0x08181098,
+      0x081838ac, 0x08183e70 and 0x081845e8; zero predicated forms, zero
+      direct tail b, and zero aligned data-word references. The eight plain
+      calls establish that callers do not gate this unguarded constructor.
+      0x08274f10 remains unported, so the port deliberately reuses
+      cxx/identified_vtable_object_construct's existing faithful ops boundary;
+      its target default performs the decoded base writes and id-counter update.
+      The observable-array constructors are already ported and called directly.
+      Host tests cover u32::MAX/zero inputs, both embedded-array states, exact
+      untouched padding, and redirection by the base return pointer. match.py
+      structural review is expected to differ in frame setup and seam dispatch.
+
   - address: 0x0811e2e4
     ghidra: FUN_0811e2e4
     name: ui_current_window
