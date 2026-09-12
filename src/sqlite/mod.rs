@@ -146,6 +146,7 @@ pub mod set_string_formatted;
 pub mod snprintf;
 pub mod str_accum;
 pub mod strdup;
+pub mod token_copy;
 pub mod strhash;
 pub mod stricmp;
 pub mod store_u16_le;
