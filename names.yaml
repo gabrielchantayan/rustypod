@@ -65955,6 +65955,44 @@ functions:
       width overlap. Host tests prove NULL handling, inline-bitmap child
       suppression, and sparse child post-order destruction through tag-57
       tracked-free recording.
+
+  # --- SQLite adaptive Bitvec membership test ---
+  - address: 0x08370738
+    ghidra: FUN_08370738
+    name: sqlite3_bitvec_test
+    size: 184
+    sig: "u32 sqlite3BitvecTest(const Bitvec *bitvec, u32 bit)"
+    module: sqlite/bitvec
+    status: ported
+    renames:
+      param_1/r0/r4: bitvec
+      param_2/r1/r5: bit
+      "bitvec+0x00": size
+      "bitvec+0x08": i_divisor
+      "bitvec+0x0c": storage (inline bitmap, hash slots, or child pointers)
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec fixes the exact 184-byte extent at
+      0x08370738..0x083707f0: the final hash-table empty-slot branch returns
+      through the pop at 0x0837078c, and the separately linked next function
+      opens at 0x083707f0. Decoding every ARM B/BL immediate in the image
+      finds exactly eight direct BL callers, all unconditional: 0x082dd0f4,
+      0x08370428, 0x08370438, 0x08370448, 0x0837045c, 0x0837df0c,
+      0x0837e244, and 0x0837f010; no predicated BL forms reach it. The sole
+      direct B is caller-side BEQ at 0x082dd020, selecting this function when
+      a cursor flag is zero. No aligned image data word holds this entry.
+      This is SQLite 3.5.9's sqlite3BitvecTest: NULL, bit zero, and bit >
+      iSize return false; iSize <= 4000 tests bit-1 in the inline 500-byte
+      bitmap. Larger vectors with iDivisor descend to child
+      [(bit-1)/iDivisor] at remainder (bit-1)%iDivisor+1. A zero divisor
+      instead linearly probes the 125 u32 hash slots from (bit*37)%125,
+      wrapping at the final slot, and stops at zero. The existing
+      __rt_udivmod wrapper preserves the retailOS __rt_udiv quotient/remainder
+      ABI without adding a dispatch seam. Deliberate deviation: the target
+      union is named BitvecStorage so its bitmap/hash target-width fields do
+      not overlap widened host child pointers. Host tests cover NULL/zero/range
+      rejection, first and final inline bits, quotient/remainder child descent
+      and NULL child rejection, and a wrapped two-collision hash probe.
   - address: 0x082e406c
     ghidra: FUN_082e406c
     name: ata_set_error
