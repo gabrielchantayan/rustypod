@@ -23,9 +23,9 @@
 //!    [`pmu_i2c_read_bank`]: bank 0 selects register block 0x59 (RTC
 //!    time), bank 1 block 0x60 (alarm), any other bank returns 9 (bad
 //!    bank) with the buffer untouched; a valid bank tail-branches into
-//!    `FUN_0836d3b8(reg, 7, buf)`, which writes the register address
-//!    to I2C slave 0x73 (the PCF50635 PMU) via FUN_0836bb84 and reads
-//!    7 bytes back via FUN_0836b950 — the S5L8702 I2C hardware.
+//!    [`pmu_i2c_read`] (`FUN_0836d3b8`), which writes the register address
+//!    to I2C slave 0x73 and reads seven bytes through the still-unported
+//!    S5L8702 I2C primitives FUN_0836bb84 and FUN_0836b950.
 //! 4. The mirror thunks release in reverse order: `bl 0x080645a8`
 //!    (`mov r0, #5; b 0x08037e10` — rom_sem_signal(5)) then
 //!    `bl 0x08064604` (`mov r0, #0x11; b 0x08037e10` —
@@ -251,6 +251,32 @@ pub unsafe extern "C" fn i2c_0x39_read_register(reg: u32, out: *mut u8) -> i32 {
     kernel_sem5_signal();
     status
 }
+/// i2c_0x39_write_register — original: `FUN_0836e3c8` @ `0x0836e3c8`
+/// (56 bytes; 7 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Acquires semaphore 5, sends the low bytes of `reg` and `value` in that
+/// order to I2C slave 0x39, signals semaphore 5 unconditionally, and returns
+/// the raw write status. The distinct next function begins at 0x0836e400.
+///
+/// # Deviation
+///
+/// The raw S5L8702 I2C write primitive remains unported. Target builds call
+/// its verified load address directly; host tests use the existing volatile
+/// function-pointer seam. This turns the retail direct `bl` into an indirect
+/// `blx` call. The semaphore operations use the existing ported
+/// `kernel_sem5_wait` / `kernel_sem5_signal` wrappers, preserving their order
+/// while replacing each retail direct `bl` with an ordinary Rust call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2c_0x39_write_register(reg: u32, value: u32) -> i32 {
+    let bytes = [reg as u8, value as u8];
+    kernel_sem5_wait();
+    let status = i2c_write(I2C_0X39_SLAVE, 2, bytes.as_ptr());
+    kernel_sem5_signal();
+    status
+}
+
 
 /// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
 /// bytes; 17 plain `bl` call sites, 0 predicated `bl`,
@@ -659,6 +685,44 @@ pub(crate) mod tests {
         }
         restore_0x39_read(state);
     }
+
+    #[test]
+    fn peripheral_0x39_write_serializes_low_bytes_and_returns_raw_status() {
+        let state = install_0x39_read(0, 0);
+        unsafe {
+            assert_eq!(i2c_0x39_write_register(0x1234_56a7, 0xfeed_b0c4), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(I2C_0X39_SLAVE, 2, 0xa7)]
+            );
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0xa7, 0xc4]],
+                "register and value are independently truncated to bytes"
+            );
+            assert!((*addr_of!(RAW_READ_LOG)).is_empty());
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![(0, PMU_I2C_INNER_SEM), (1, PMU_I2C_INNER_SEM)],
+                "semaphore 5 brackets the complete transfer"
+            );
+
+            *addr_of_mut!(RAW_WRITE_STATUS) = -5;
+            assert_eq!(i2c_0x39_write_register(0, 0), -5);
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                ],
+                "the retail signal runs even after a failed write"
+            );
+        }
+        restore_0x39_read(state);
+    }
+
 
     #[test]
     fn peripheral_0x39_write_error_skips_read_but_still_releases_lock() {
