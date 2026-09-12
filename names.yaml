@@ -72705,3 +72705,37 @@ functions:
       the original handler at 0x08252be4, while host tests record that
       seam. Tests cover a NULL session and zero, known, and maximum
       control codes, all forwarded with literal enable value one.
+
+  # --- Video-engine flag enable wrapper (src/util/video_engine.rs) ---
+  - address: 0x082d1290
+    ghidra: FUN_082d1290
+    name: video_engine_enable_flag
+    size: 32
+    sig: "void video_engine_enable_flag(u32 flag)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: flag
+      r4: flag
+      FUN_08252bec: video_engine_get
+      FUN_08253f58: enable_veneer
+      FUN_08254198: unported_code_addressed_flag_handler
+    notes: >-
+      Raw osos.dec fixes the true 32-byte extent at 0x082d1290..0x082d12ac:
+      `push {r4,lr}; mov r4,r0; bl video_engine_get; cmp r0,#0; movne
+      r1,r4; popne {r4,lr}; bne 0x08253f58; pop {r4,pc}`. The next
+      independently linked function begins at 0x082d12b0, so Ghidra's
+      reported 40-byte body merges this wrapper into neighbors. Complete
+      aligned ARM B/BL-immediate decoding finds exactly seven inbound BL
+      calls: five plain bl at 0x08142c30, 0x0825bf64, 0x0825bf90,
+      0x082742e4, and 0x0827d52c; and two caller-gated bleq at
+      0x0827d42c and 0x08281164. There are no inbound B tail calls and no
+      aligned data words holding 0x082d1290. It loads the video-engine
+      singleton, silently returns if it is NULL, otherwise tail-branches
+      with (engine, flag) to the 8-byte veneer at 0x08253f58. That veneer
+      inserts r2 = 1 then branches to the unported code-addressed flag
+      handler at 0x08254198; no callee identity beyond that verified
+      behavior is claimed. Deliberate deviation: target builds call the
+      original veneer directly, while host tests install a recording seam.
+      Tests cover the NULL-session no-op and zero, known, boundary, and
+      maximum flag values passed through unchanged.

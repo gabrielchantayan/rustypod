@@ -255,6 +255,73 @@ pub unsafe extern "C" fn video_engine_enable_control(control: u32) {
     }
     enable_control(engine, control);
 }
+/// Firmware entry of the 8-byte enable veneer `FUN_08253f58`.
+///
+/// The veneer sets `r2 = 1` and tail-branches to the unported code-addressed
+/// flag handler `FUN_08254198`.
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_ENABLE_FLAG_ADDR: usize = 0x0825_3f58;
+
+/// ABI of the enable veneer: video-engine instance followed by a flag code.
+type VideoEngineEnableFlag = unsafe extern "C" fn(*mut u8, u32);
+
+/// Host-test stand-in for the enable veneer @ 0x08253f58.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_ENABLE_FLAG: Option<VideoEngineEnableFlag> = None;
+
+/// Host only: install the mock reached by `video_engine_enable_flag`.
+#[cfg(not(target_arch = "arm"))]
+pub unsafe fn set_mock_enable_flag(enable_flag: Option<VideoEngineEnableFlag>) {
+    *addr_of_mut!(MOCK_ENABLE_FLAG) = enable_flag;
+}
+
+/// Transfers a video-engine flag code to the original enable veneer.
+fn enable_flag(engine: *mut u8, flag: u32) {
+    #[cfg(target_arch = "arm")]
+    unsafe {
+        let enable_flag: VideoEngineEnableFlag =
+            core::mem::transmute(VIDEO_ENGINE_ENABLE_FLAG_ADDR);
+        enable_flag(engine, flag);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    unsafe {
+        match *addr_of!(MOCK_ENABLE_FLAG) {
+            Some(enable_flag) => enable_flag(engine, flag),
+            None => panic!("video_engine_enable_flag requires veneer 0x08253f58"),
+        }
+    }
+}
+
+/// video_engine_enable_flag — retailOS `FUN_082d1290` @ **0x082d1290**
+/// (32 bytes, `0x082d1290..0x082d12ac`). Raw bytes show the next
+/// independently linked function begins at `0x082d12b0`; Ghidra's reported
+/// 40-byte body instead merges this wrapper into its neighbors. Complete
+/// aligned ARM B/BL-immediate decoding finds seven inbound `bl` calls: five
+/// plain `bl` at 0x08142c30, 0x0825bf64, 0x0825bf90, 0x082742e4, and
+/// 0x0827d52c, plus two caller-gated `bleq` calls at 0x0827d42c and
+/// 0x08281164. No aligned data word holds this address.
+///
+/// Loads the video-engine singleton and silently returns for a NULL session.
+/// Otherwise it tail-branches with `(engine, flag)` to `FUN_08253f58`, the
+/// 8-byte veneer that inserts the literal enable value one before transferring
+/// to the unported code-addressed flag handler `FUN_08254198`. The wrapper
+/// performs no validation: every flag value reaches that veneer unchanged.
+///
+/// # Deliberate deviation
+///
+/// The final handler is unported. Target builds call the verified veneer at
+/// 0x08253f58 directly; host tests install a recording seam. The NULL-session
+/// path never accesses the seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_enable_flag(flag: u32) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    enable_flag(engine, flag);
+}
+
 /// Firmware entry of the video-engine one-handle release helper
 /// `FUN_082d1134`.
 #[cfg(target_os = "none")]
@@ -628,6 +695,49 @@ mod tests {
                     ENABLE_CONTROL_RECORDED,
                     Some((engine.as_mut_ptr(), control, 1)),
                     "the wrapper preserves each control code and always enables it"
+                );
+            }
+        }
+    }
+
+    // --- video_engine_enable_flag (FUN_082d1290) ---
+
+    static mut ENABLE_FLAG_RECORDED: Option<(*mut u8, u32)> = None;
+
+    unsafe extern "C" fn record_enable_flag(engine: *mut u8, flag: u32) {
+        *addr_of_mut!(ENABLE_FLAG_RECORDED) = Some((engine, flag));
+    }
+
+    #[test]
+    fn enabling_flag_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            *addr_of_mut!(ENABLE_FLAG_RECORDED) = None;
+            set_mock_enable_flag(Some(record_enable_flag));
+            set_mock_instance(ptr::null_mut());
+            video_engine_enable_flag(0x3000);
+            assert_eq!(
+                ENABLE_FLAG_RECORDED,
+                None,
+                "the enable veneer is not reached without an engine"
+            );
+        }
+    }
+
+    #[test]
+    fn enabling_flag_forwards_engine_and_every_flag_value_verbatim() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_enable_flag(Some(record_enable_flag));
+            set_mock_instance(engine.as_mut_ptr());
+            for &flag in &[0, 0xb10, 0xbc0, 0x3000, 0x3002, u32::MAX] {
+                *addr_of_mut!(ENABLE_FLAG_RECORDED) = None;
+                video_engine_enable_flag(flag);
+                assert_eq!(
+                    ENABLE_FLAG_RECORDED,
+                    Some((engine.as_mut_ptr(), flag)),
+                    "the wrapper prepends the engine and leaves flag validation to the handler"
                 );
             }
         }
