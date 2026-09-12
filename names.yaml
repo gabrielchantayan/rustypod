@@ -69571,3 +69571,35 @@ functions:
       this function has no NULL guard. The Rust port directly volatile-reads
       service+0xcb8 rather than materializing the unobservable stack
       out-parameter call, then directly uses the existing lock-service ports.
+
+  # --- Global slot-5c forwarding dispatch ---
+  - address: 0x081b0ad8
+    ghidra: FUN_081b0ad8
+    name: global_slot_5c_dispatch
+    size: 28
+    sig: "u32 global_slot_5c_dispatch(u32 payload)"
+    module: app/global_slot_5c_dispatch
+    status: ported
+    renames:
+      param_1/r0/r1: payload
+      DAT_081b0af0: GLOBAL_SLOT_5C_HOLDER_ADDRESS (0x089cb230)
+      "*(GLOBAL_SLOT_5C_HOLDER_ADDRESS + 4)": global_target
+      "vtable[0x5c]": dispatch
+    notes: >-
+      EXTENT: raw ARM has six instruction words (24 bytes) from 0x081b0ad8
+      through the bx r2 at 0x081b0aec, followed by its literal-pool word
+      0x089cb230 at 0x081b0af0; the next separately linked function starts at
+      0x081b0af4, making the true extent 28 bytes despite Ghidra's 24-byte
+      report. Full-image aligned ARM B/BL decoding finds exactly 8 direct bl
+      callers, all unconditional plain bl at 0x08179260, 0x08179c40,
+      0x0817a380, 0x0817b5b8, 0x0817bc8c, 0x0817bcc4, 0x0817d108, and
+      0x0817d3f4; no predicated bl forms occur. Three unconditional direct B
+      tail entries at 0x081792f4, 0x0817a7cc, and 0x0817d68c also reach it.
+      It moves payload from r0 to r1, loads the runtime object word from
+      0x089cb234, then tail-dispatches that object's vtable slot +0x5c. There
+      are no aligned DATA-word references to this entry. The decrypted bytes at
+      0x089cb230 are stale string data, so the global and slot identities remain
+      deliberately unnamed; target code performs the exact physical volatile
+      reads, while the host models the global and uses a native-width structural
+      vtable fixture. The tail branch leaves the slot's r0 result intact, so the
+      port returns it even though recovered plain callers ignore it.
