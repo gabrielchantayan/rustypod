@@ -61138,6 +61138,36 @@ functions:
       so LLVM may retain a call instead of the retail tail branch while
       preserving the selected-mutex release behavior. Host tests cover a
       distinct selected mutex and a selected Mutex with no semaphore cell.
+
+  # --- Opaque two-word flagged-record copy (cxx/flagged_pair_copy) ---
+  - address: 0x081fca6c
+    ghidra: FUN_081fca6c
+    name: flagged_pair_copy
+    size: 28
+    sig: "void flagged_pair_copy(FlaggedPair *dst, const FlaggedPair *src)"
+    module: cxx/flagged_pair_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r2: copied_word
+      byte_at_plus_0x08: flag
+    notes: >-
+      Raw ARM establishes the 28-byte extent 0x081fca6c..0x081fca88:
+      ldr/str pairs copy source words +0x00 and +0x04 to destination, then
+      ldrb/and #1/strb normalizes only the low flag bit at +0x08. The next
+      separately linked function begins with push {r4,lr} at 0x081fca8c;
+      Ghidra's 32-byte extent includes its first word. Decoding every ARM
+      B/BL word in osos.dec finds exactly eight inbound calls, all
+      unconditional plain BL at 0x081b7b10, 0x08214e2c, 0x08214e50,
+      0x08214e64, 0x083e27ac, 0x083e27c4, 0x083e2818, and 0x083e29d8.
+      There are no predicated BL forms, direct B tail callers, or aligned
+      image data words equal to the entry. Call sites place these
+      twelve-byte records in a generic vector; their concrete C++ type is
+      unrecovered, so the Rust names state only the observed layout. Volatile
+      field accesses preserve the retail forward load/store order on overlap
+      and prevent a copy intrinsic. Host tests prove both flag outcomes,
+      word copying, trailing-byte preservation, and forward-overlap propagation.
   # --- volume controller opaque byte +0x90 accessor ---
   - address: 0x081fa044
     ghidra: FUN_081fa044
