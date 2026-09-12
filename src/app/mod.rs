@@ -125,6 +125,7 @@ pub mod opaque_keyed_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
 pub mod opaque_keyed_collection_find_item_by_id;
 pub mod object_dispatch_target;
+pub mod object_word_at_d4_or_zero;
 pub mod once_initializer;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;
