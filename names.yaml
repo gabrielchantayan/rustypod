@@ -70798,3 +70798,27 @@ functions:
       tests install recording workers to cover forwarding, formatter failure,
       descriptor-build failure, and zero capacity. The helper names describe
       observed calling roles only; no stronger callee identity is inferred.
+
+  - address: 0x0809da3c
+    ghidra: FUN_0809da3c
+    name: map_status_code
+    size: 72
+    sig: "i32 map_status_code(i32 status)"
+    module: util/status_code_map
+    status: ported
+    renames:
+      param_1/r0: status
+    notes: >-
+      Raw osos.dec confirms the 72-byte executable extent
+      0x0809da3c..0x0809da84: `bx lr` at 0x0809da80 ends this function and
+      the next function begins with `push {r4-r11,lr}` at 0x0809da84. The
+      signed comparison chain preserves every input except 2 -> -34, 5 ->
+      -38, 7 -> -42, 13 -> -48, and 14 -> -36. Decoding every aligned ARM
+      B/BL immediate finds eight direct inbound calls, all unconditional plain
+      bl at 0x0805a5ec, 0x0805a62c, 0x0805a6e0, 0x0805a874, 0x0805a8a8,
+      0x0805a930, 0x0805a980, and 0x0805a9bc; no predicated bl targets it.
+      Three caller-gated non-call tail `bne` branches at 0x0805a72c,
+      0x0805a768, and 0x0805ae54 also target the entry. The callers establish
+      that these are status results, but no stronger subsystem identity is
+      inferred. No deliberate deviations; host tests cover every remapped
+      value plus negative and signed-range boundary pass-through behavior.
