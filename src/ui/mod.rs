@@ -62,6 +62,7 @@ pub mod invalidate;
 pub mod resource_value;
 pub mod draw_state_setup;
 pub mod shown_state;
+pub mod set_flag_bit_3;
 pub mod default_navigation_request;
 pub mod current_window;
 pub mod selection_index;

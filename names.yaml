@@ -17722,6 +17722,39 @@ functions:
       r1 remains caller-saved scratch. The port calls the direct region
       form rather than tail-branching, preserving the returned element.
 
+  - address: 0x0826ed44
+    ghidra: FUN_0826ed44
+    name: ui_element_set_flag_bit_3
+    size: 44
+    sig: "UiElement *ui_element_set_flag_bit_3(UiElement *element, u32 mode)"
+    module: ui/set_flag_bit_3
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: mode
+      r2: flags
+      r3: current_flag_bit
+      "element+0x48": flags
+      "element+0x80": bounds
+      FUN_0826ec14: ui_element_invalidate_region
+    notes: >-
+      Raw extent is exactly 44 bytes: ldr r2,[r0,#0x48] opens at
+      0x0826ed44 and the tail b 0x0826ec14 ends at 0x0826ed6c; the
+      independent next function starts at 0x0826ed70. The normalized
+      bit-3 value (0 or 1) is compared directly with mode. Equal values
+      return immediately; otherwise zero clears 0x08, any nonzero mode
+      sets it, and the element's bounds at +0x80 are tail-passed to
+      ui_element_invalidate_region. Decoding every immediate ARM B/BL
+      word finds exactly eight direct bl call sites: seven unconditional
+      (0x082034bc, 0x0820350c, 0x0820366c, 0x082036fc, 0x08203768,
+      0x0820ade8, 0x0820ae38) and predicated bleq at 0x0816a804; there
+      are no tail-b or data-word references. The bleq is gated by its
+      caller's event condition, while this body has no NULL guard. The
+      Rust call replaces the ARM tail branch while retaining its returned
+      element pointer. Host tests cover boolean transitions, neighbouring
+      flag preservation, non-boolean modes, and the shown-but-suppressed
+      invalidation path.
+
   - address: 0x0826ef88
     ghidra: FUN_0826ef88
     name: view_base_set_resource_provider
