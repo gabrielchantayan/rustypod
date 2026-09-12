@@ -57333,6 +57333,34 @@ functions:
       str -> 0/1 return). Reference C:
       decomp/c/004/08057874_FUN_08057874.c.
 
+  - address: 0x080578c4
+    ghidra: FUN_080578c4
+    name: stream_read_be16
+    size: 56
+    sig: "i32 stream_read_be16(StreamObject **stream, u16 *out)"
+    module: util/stream_read_be16
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: out
+      FUN_0805e754: stream_read_core
+    notes: >-
+      Raw ARM verifies the 56-byte extent 0x080578c4..0x080578fc: its final
+      pop {r3,r4,r5,pc} returns at 0x080578f8 and a distinct branch thunk
+      begins at 0x080578fc. It reads two bytes through stream_read_core @
+      0x0805e754, then stores them big-endian through out and returns 1; a
+      nonzero core status returns 0 while preserving out. The reader core
+      double-dereferences the stream handle and dispatches vtable slot +0x10
+      as (object, buf, len=2, mode=2), returning -3 on a zero-length result.
+      Decoding every ARM B/BL word in osos.dec finds exactly 8 inbound direct
+      calls: 8 unconditional bl and zero predicated forms. Deliberate
+      deviation: the port uses u16::from_be_bytes instead of the original
+      ldrb/shift/orr byte assembly; the observable byte order is identical.
+      match.py structural review is expected to differ in LLVM frame and
+      branch formation while retaining the core call, status branch, BE
+      assembly, store, and 0/1 return shape. Reference C:
+      decomp/c/004/080578c4_FUN_080578c4.c.
+
   - address: 0x08057c2c
     ghidra: FUN_08057c2c
     name: image_library_is_liti_class
