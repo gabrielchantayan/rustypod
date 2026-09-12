@@ -61,6 +61,10 @@ pub mod hints {
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
+    // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
+    // session and pending-event fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const PENDING_EVENT_TAKE_DUE: usize = 0xbf00_0000;
     pub const ANIMATION_INIT: usize = 0x1c00_0000;
     pub const STRING_RECORD: usize = 0x1d00_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
@@ -667,6 +671,12 @@ pub static ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK: std::sync::Mutex<()> =
 /// Serializes tests that replace `app::pending_event_insert`'s shared ops
 /// table. The queue port and packet-event caller both install host models.
 pub static PENDING_EVENT_INSERT_OPS_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
+/// Serializes tests that replace the shared pending-event take ops table.
+/// `pending_event_take` and `pending_event_take_due` both replace its
+/// release/rearm slots with host models.
+pub static PENDING_EVENT_TAKE_OPS_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
 /// Serializes every host test that replaces the shared unported
