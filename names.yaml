@@ -20726,6 +20726,40 @@ functions:
       followed by FT_MEM_ZERO of the grown tail when the call succeeded
       and new_count > cur_count. 116 bl call sites (binary-scanned). Not
       ported - no ported caller needs it yet.
+  - address: 0x082cfca8
+    ghidra: FUN_082cfca8
+    name: ft_module_get_service
+    size: 216
+    sig: >-
+      void *ft_module_get_service(FtModule *module, const char *service_id)
+    module: ft/module
+    status: ported
+    renames:
+      param_1/r5: module
+      param_2/r9: service_id
+      iVar2/r0: module_class
+      iVar3/r0: get_interface
+      iVar6/r6: service
+      puVar5/r4: module_slot
+      puVar7/r7: module_slot_end
+    notes: >-
+      FreeType 2.3 ft_module_get_service (ftobjs.c). Raw ARM is exactly
+      216 bytes from the push at 0x082cfca8 through pop {...,pc} at
+      0x082cfd7c; its 0x082cfd80..0x082cfdb0 literal pool belongs to this
+      function, while the three-word tail-call sibling starts at
+      0x082cfdb4 (Ghidra instead starts its next function at 0x082cfdc0).
+      A non-null module first calls its class's get_interface slot (+0x20)
+      with (module, service_id). A NULL result triggers a linear scan of
+      exactly library->num_modules entries from library->modules (+0x1c),
+      excluding the source module, and returns the first non-NULL service.
+      Module NULL returns NULL; service_id has no guard. The debug assertions
+      report but do not repair a NULL class/callback before retailOS
+      dereferences it; the port documents these as safety preconditions.
+      Decoding every ARM B/BL word in osos.dec verifies eight direct callers,
+      all plain unconditional bl (0x0807aa24, 0x080808d0, 0x0808257c,
+      0x0808b598, 0x080928d4, 0x080a18ac, 0x080a809c, 0x080a81dc), with no
+      predicated direct form. Host tests cover null module, the immediate
+      primary answer, and null-primary fallback to a later module.
   - address: 0x082cfdc0
     ghidra: FUN_082cfdc0
     name: ft_service_list_lookup

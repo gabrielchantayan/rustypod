@@ -28,6 +28,34 @@ pub struct FtModule {
     pub clazz: *const FtModuleClass,
 }
 
+/// `FT_Module_Class::get_interface` — callback at +0x20 on ARM.
+pub type FtModuleGetInterface =
+    unsafe extern "C" fn(module: *mut FtModule, service_id: *const u8) -> *mut c_void;
+
+/// `FT_ModuleRec` fields consumed by `ft_module_get_service`.
+///
+/// This is kept private because the public [`FtModule`] only models the
+/// prefix needed by `ft_get_module`.
+#[repr(C)]
+struct FtModuleService {
+    clazz: *const FtModuleClass,
+    library: *mut FtLibrary,
+}
+
+/// `FT_Module_Class` through the service callback at +0x20 on ARM.
+#[repr(C)]
+struct FtModuleClassService {
+    _module_flags: u32,
+    _module_size: i32,
+    _module_name: *const u8,
+    _module_version: i32,
+    _module_requires: i32,
+    _module_interface: *const c_void,
+    _module_init: *const c_void,
+    _module_done: *const c_void,
+    get_interface: Option<FtModuleGetInterface>,
+}
+
 /// `FT_LibraryRec` fields used by `FT_Get_Module`.
 ///
 /// The retail ARM record has `num_modules` at +0x18 and its 32-entry module
@@ -138,6 +166,67 @@ pub unsafe extern "C" fn ft_get_module_interface(
     (*(*module).clazz).module_interface
 }
 
+/// FreeType 2.3 `ft_module_get_service` (`src/base/ftobjs.c`) — original:
+/// `FUN_082cfca8` at load address 0x082cfca8, 216 bytes.
+///
+/// Raw ARM from 0x082cfca8 through the return at 0x082cfd7c first invokes
+/// `module->clazz->get_interface(module, service_id)`.  If that returns
+/// null, it scans exactly `module->library->num_modules` entries beginning
+/// at `library->modules`, skips `module` itself, and returns the first
+/// non-null result from another module's `get_interface` callback.  A null
+/// module returns null; `service_id` has no null guard.  Decoding every ARM
+/// B/BL word in osos.dec finds eight direct call sites, all unconditional
+/// `bl` (no predicated call forms).
+///
+/// Deliberate deviation: the retail debug body calls `FT_ASSERT` before
+/// dereferencing a null class or a null primary callback, then still
+/// dereferences it.  Those malformed module records are undefined after the
+/// assertion in retailOS; this port requires valid class and callback fields.
+///
+/// # Safety
+/// `module` must be null or a valid retail `FT_ModuleRec` with a valid class,
+/// library, and module table.  Each examined module must have a valid class;
+/// every non-null callback must accept `service_id`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_module_get_service(
+    module: *mut FtModule,
+    service_id: *const u8,
+) -> *mut c_void {
+    if module.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    let module_record = &*module.cast::<FtModuleService>();
+    let primary_class = &*module_record.clazz.cast::<FtModuleClassService>();
+    if let Some(get_interface) = primary_class.get_interface {
+        let service = get_interface(module, service_id);
+        if !service.is_null() {
+            return service;
+        }
+    }
+
+    let library = &*module_record.library.cast::<FtLibraryModuleTable>();
+    let mut current = library.modules.as_ptr();
+    let limit = current.add(library.num_modules as usize);
+    while current < limit {
+        let candidate = core::ptr::read_volatile(current);
+        if candidate != module {
+            let candidate_record = &*candidate.cast::<FtModuleService>();
+            let candidate_class = &*candidate_record.clazz.cast::<FtModuleClassService>();
+            if let Some(get_interface) = candidate_class.get_interface {
+                let service = get_interface(candidate, service_id);
+                if !service.is_null() {
+                    return service;
+                }
+            }
+        }
+        current = current.add(1);
+    }
+
+    core::ptr::null_mut()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -173,6 +262,31 @@ mod tests {
             },
             FtModule { clazz: null() },
         )
+    }
+
+    fn service_class(get_interface: Option<FtModuleGetInterface>) -> FtModuleClassService {
+        FtModuleClassService {
+            _module_flags: 0,
+            _module_size: 0,
+            _module_name: null(),
+            _module_version: 0,
+            _module_requires: 0,
+            _module_interface: null(),
+            _module_init: null(),
+            _module_done: null(),
+            get_interface,
+        }
+    }
+
+    unsafe extern "C" fn no_service(_: *mut FtModule, _: *const u8) -> *mut c_void {
+        null_mut()
+    }
+
+    unsafe extern "C" fn service_from_module(
+        module: *mut FtModule,
+        _: *const u8,
+    ) -> *mut c_void {
+        module.cast()
     }
 
     #[test]
@@ -224,6 +338,58 @@ mod tests {
             assert_eq!(
                 ft_get_module_interface(library_ptr, b"truetype\0".as_ptr()),
                 interface
+            );
+        }
+    }
+
+    #[test]
+    fn module_service_lookup_rejects_a_null_module() {
+        unsafe {
+            assert!(ft_module_get_service(null_mut(), b"glyph-dictionary\0".as_ptr()).is_null());
+        }
+    }
+
+    #[test]
+    fn module_service_lookup_returns_the_primary_module_answer() {
+        unsafe {
+            let class = service_class(Some(service_from_module));
+            let mut module = FtModuleService {
+                clazz: (&class as *const FtModuleClassService).cast::<FtModuleClass>(),
+                library: null_mut(),
+            };
+            let module_ptr = (&mut module as *mut FtModuleService).cast::<FtModule>();
+
+            assert_eq!(
+                ft_module_get_service(module_ptr, b"glyph-dictionary\0".as_ptr()),
+                module_ptr.cast()
+            );
+        }
+    }
+
+    #[test]
+    fn module_service_lookup_tries_other_modules_after_a_null_answer() {
+        unsafe {
+            let primary_class = service_class(Some(no_service));
+            let provider_class = service_class(Some(service_from_module));
+            let mut primary = FtModuleService {
+                clazz: (&primary_class as *const FtModuleClassService).cast::<FtModuleClass>(),
+                library: null_mut(),
+            };
+            let mut provider = FtModuleService {
+                clazz: (&provider_class as *const FtModuleClassService).cast::<FtModuleClass>(),
+                library: null_mut(),
+            };
+            let primary_ptr = (&mut primary as *mut FtModuleService).cast::<FtModule>();
+            let provider_ptr = (&mut provider as *mut FtModuleService).cast::<FtModule>();
+            let mut modules = [null_mut(); 32];
+            modules[0] = primary_ptr;
+            modules[1] = provider_ptr;
+            let mut library = library_with_modules(2, modules);
+            primary.library = (&mut library as *mut FtLibraryModuleTable).cast::<FtLibrary>();
+
+            assert_eq!(
+                ft_module_get_service(primary_ptr, b"glyph-dictionary\0".as_ptr()),
+                provider_ptr.cast()
             );
         }
     }
