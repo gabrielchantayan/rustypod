@@ -1,12 +1,12 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and its six ported members: arbitrary-bit test, the pre-split
-//! bit test, bit write, bit clear, destruction, and UTF-8 bulk insert. Everything
-//! below is decoded from the raw words of `work/firmware/osos.dec`, not from Ghidra.
+//! cardinality — and its seven ported members: arbitrary-bit test, the pre-split
+//! bit test, bit write, bit clear, clear-all, destruction, and UTF-8 bulk insert.
+//! Everything below is decoded from the raw words of `work/firmware/osos.dec`, not from Ghidra.
 //!
 //! ## The class
 //!
 //! Ghidra names none of this cluster, and no single function reveals the
-//! layout. Six consecutive functions at 0x082746f4..0x082748d8 do, and they
+//! layout. Seven consecutive functions at 0x082746f4..0x082748d8 do, and they
 //! agree on a 16-byte object:
 //!
 //! ```text
@@ -172,12 +172,10 @@ const _: [u8; BIT_SET_SIZE] = [0; core::mem::size_of::<BitSet>()];
 /// It then retains the bit capacity, stores only the tag's low byte, clears
 /// every allocated word, sets cardinality to zero, and returns `set`.
 ///
-/// Deliberate deviation: the original calls its unported clear-all sibling
-/// at 0x082747b8, which directly calls the IRAM `memzero_aligned` veneer.
-/// This port calls the already ported [`memzero_aligned`] directly. Both
-/// callee references are loaded through volatile function pointers: that
-/// preserves the ported [`malloc_wrapper`] call despite its small body, and
-/// prevents LLVM from replacing the fill with an AEABI builtin.
+/// Deliberate deviation: the original calls the ported [`bit_set_clear_all`]
+/// sibling, which calls the IRAM `memzero_aligned` veneer. That port directly
+/// calls the already ported [`memzero_aligned`] through a volatile function
+/// pointer, preventing LLVM from replacing the fill with an AEABI builtin.
 ///
 /// # Safety
 ///
@@ -199,11 +197,41 @@ pub unsafe extern "C" fn bit_set_construct(
     (*set).bit_capacity = bit_capacity;
     (*set).heap_tag = heap_tag as u8;
 
+    bit_set_clear_all(set);
+    set
+}
+
+/// bit_set_clear_all — original: `FUN_082747b8` @ **0x082747b8**
+/// (**44 bytes**, 0x082747b8..0x082747e4; the next separately linked copy
+/// constructor opens with `push {r4, r5, r6, lr}` at 0x082747e4 and no literal
+/// pool intervenes. **7 plain `bl` call sites, 0 predicated `bl`, plus 1 plain
+/// tail `b`**, binary-scanned by decoding every ARM B/BL word in `osos.dec`:
+/// `bl` from 0x0805862c, 0x08068f1c, 0x0816f410, 0x0816f418, 0x0816f420,
+/// 0x081cd674, and 0x08274868; tail `b` from 0x081ccb98).
+///
+/// Rounds `bit_capacity` up to a 32-bit word span with the original ARM
+/// wrapping add, clears every byte in that backing span, then resets
+/// `cardinality` to zero. The original neither checks `set` nor `words`; a
+/// NULL storage pointer with a nonzero byte count has the same undefined
+/// behavior here.
+///
+/// Deliberate deviation: the retail body calls the IRAM veneer at 0x08037db8;
+/// the port calls its already ported [`memzero_aligned`] target directly through
+/// a volatile function pointer. This retains a real call and prevents LLVM
+/// from replacing the fill with an AEABI builtin.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose `words` buffer holds
+/// `((bit_capacity + 31) >> 5) * 4` writable bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_clear_all(set: *mut BitSet) {
+    let byte_count = (((*set).bit_capacity.wrapping_add(31) >> 5) << 2) as usize;
     let zero =
         core::ptr::read_volatile(&(memzero_aligned as unsafe extern "C" fn(*mut u8, usize) -> *mut u8));
-    zero(words, byte_count);
+    zero((*set).words as usize as *mut u8, byte_count);
     (*set).cardinality = 0;
-    set
 }
 
 /// bit_set_contains — original: `FUN_082a4ee8` @ 0x082a4ee8 (16 bytes,
@@ -445,6 +473,11 @@ mod tests {
             .map(|slab| slab as usize)
             .unwrap_or(0)
     });
+    static CLEAR_ALL_SLAB: LazyLock<usize> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_CLEAR_ALL, WORDS_BYTES)
+            .map(|slab| slab as usize)
+            .unwrap_or(0)
+    });
 
     /// A [`BitSet`] backed by the one persistent u32-addressable test slab.
     /// Callers hold [`TEST_LOCK`] while using it.
@@ -563,6 +596,45 @@ mod tests {
         assert_eq!(set.cardinality, 0);
         assert_eq!(set.heap_tag, 0x78);
         assert_eq!(unsafe { (slab as *const u8).read() }, 0x5a, "a zero-byte clear is inert");
+    }
+
+    #[test]
+    fn clear_all_rounds_the_word_span_resets_cardinality_and_wraps_capacity() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let slab = *CLEAR_ALL_SLAB;
+        if slab == 0 {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        }
+        unsafe { core::ptr::write_bytes(slab as *mut u8, 0xa5, WORDS_BYTES) };
+        let mut set = BitSet {
+            bit_capacity: 33,
+            cardinality: 0xfeed_beef,
+            words: slab as u32,
+            heap_tag: 0,
+            reserved: [0; 3],
+        };
+
+        unsafe { bit_set_clear_all(core::ptr::addr_of_mut!(set)) };
+
+        assert_eq!(set.cardinality, 0);
+        unsafe {
+            assert_eq!((slab as *const u32).read(), 0);
+            assert_eq!((slab as *const u32).add(1).read(), 0);
+            assert_eq!((slab as *const u32).add(2).read(), 0xa5a5_a5a5);
+        }
+        unsafe { (slab as *mut u32).write(0xdead_beef) };
+
+        set.bit_capacity = u32::MAX - 30;
+        set.cardinality = 1;
+        unsafe { bit_set_clear_all(core::ptr::addr_of_mut!(set)) };
+
+        assert_eq!(set.cardinality, 0, "the metadata reset is independent of byte count");
+        assert_eq!(
+            unsafe { (slab as *const u32).read() },
+            0xdead_beef,
+            "the wrapping add produces a zero-byte clear"
+        );
     }
     /// A non-NULL owned buffer takes the conditional `blne free_wrapper`;
     /// destruction returns the same object and deliberately leaves its fields.

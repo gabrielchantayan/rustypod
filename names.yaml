@@ -43462,7 +43462,7 @@ functions:
 
   # --- C++ layer bit set / character set (0x082746f4..0x082748d8) ---
   #
-  # Six consecutive unnamed functions describe one 16-byte class: +0x00 a
+  # Seven consecutive unnamed functions describe one 16-byte class: +0x00 a
   # bit capacity, +0x04 a running cardinality, +0x08 heap storage of
   # ((bits + 31) >> 5) u32 words, +0x0c an allocator tag byte.
   #   0x08274834  ctor(this, bit_capacity, tag) - sizes the buffer at
@@ -43552,6 +43552,43 @@ functions:
       added. TESTS - host tests cover an already-clear no-op, bit positions
       0/31/32/63 across two words, and cardinality underflow wrapping.
       Deviations - none.
+  - address: 0x082747b8
+    ghidra: FUN_082747b8
+    name: bit_set_clear_all
+    size: 44
+    sig: "void bit_set_clear_all(BitSet *set)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      r4: set
+      r0: bit_capacity_then_words
+      r1: byte_count
+      FUN_08037db8: iram_memzero_aligned_veneer
+      FUN_0800027c: memzero_aligned
+    notes: >-
+      Clears the complete BitSet in two operations: `byte_count =
+      ((set->bit_capacity + 31) >> 5) << 2`, using the ARM wrapping add,
+      then iram_memzero_aligned_veneer(set->words, byte_count) and
+      `set->cardinality = 0`. It has no NULL, allocation, or capacity guard;
+      a nonzero byte count with NULL words is therefore undefined just as in
+      retailOS. EXTENT - 44 bytes, 0x082747b8..0x082747e0: the final
+      `pop {r4, pc}` is at 0x082747e0, and 0x082747e4 begins the distinct copy
+      constructor with `push {r4, r5, r6, lr}`, with no literal pool between;
+      Ghidra's size is exact. CALL SITES - decoding every ARM B/BL immediate
+      in osos.dec finds 7 plain bl at 0x0805862c, 0x08068f1c, 0x0816f410,
+      0x0816f418, 0x0816f420, 0x081cd674, and 0x08274868; 0 predicated bl;
+      plus 1 plain tail b at 0x081ccb98. Thus all direct calls are
+      unconditional. CALLEE - the retail IRAM veneer @ 0x08037db8 is ported;
+      it reaches memzero_aligned @ 0x0800027c. DEVIATION - the port calls
+      ported memzero_aligned directly through a volatile function pointer,
+      preserving a real call and preventing LLVM from replacing the fill with
+      an AEABI builtin. TESTS - host coverage proves rounded 33-bit storage
+      clears exactly two u32 words, preserves the following word, resets a
+      nonzero cardinality, and preserves storage when the ARM byte-count add
+      wraps to zero. match.py structural review is expected to retain the
+      size round-up, volatile fill call, and cardinality store while differing
+      in register allocation and frame details.
   - address: 0x08274834
     ghidra: FUN_08274834
     name: bit_set_construct
@@ -43586,12 +43623,12 @@ functions:
       constructor has no NULL or allocation-failure guard. CALLEES -
       malloc_wrapper @ 0x080eb67c is already ported; a volatile function
       pointer keeps that small callee from inlining into this exported target.
-      The stock second call is unported bit_set_clear_all @ 0x082747b8,
-      itself a direct call through the 0x08037db8 IRAM veneer to ported
-      memzero_aligned. DEVIATION - the port replaces that unported sibling
-      call with a volatile direct call to memzero_aligned, preventing LLVM
-      from replacing the fill with an AEABI builtin while preserving its
-      zeroing behavior. TESTS -
+      The stock second call is now ported bit_set_clear_all @ 0x082747b8,
+      which directly calls ported memzero_aligned through a volatile function
+      pointer. DEVIATION - the port now calls that sibling directly; it
+      preserves the stock clear-all boundary while its volatile fill call
+      prevents LLVM from replacing the operation with an AEABI builtin.
+      TESTS -
       host coverage verifies 33 bits requests and clears exactly 8 bytes,
       retains only the low tag byte while forwarding the full tag to the
       allocator, leaves padding untouched, returns set, and covers the
