@@ -274,8 +274,8 @@ mod tests {
         DEFAULT_COMMAND_DISPATCH_BY_RESOURCE_OPS,
     };
     use crate::app::controller_pending_command::{
-        AppControllerBeginCommandOps, AppControllerPendingCommand, PendingCommandRecord,
-        APP_CONTROLLER_BEGIN_COMMAND_OPS, DEFAULT_APP_CONTROLLER_BEGIN_COMMAND_OPS,
+        AppControllerPendingCommand, CommandRecordResolverOps, PendingCommandRecord,
+        COMMAND_RECORD_RESOLVER_OPS, DEFAULT_COMMAND_RECORD_RESOLVER_OPS,
     };
     use crate::app::silver_list_table::{
         SilverItemMap, SilverListTable, SilverListTableCtorOps, SILVER_LIST_TABLE_CTOR_OPS,
@@ -313,7 +313,9 @@ mod tests {
     static mut CONTEXT: *mut u8 = ptr::null_mut();
     static mut CONTROLLER: *mut u8 = ptr::null_mut();
     static mut CONTROLLER_OBJECT: AppControllerPendingCommand = AppControllerPendingCommand {
-        opaque_00_87: [0; 34],
+        opaque_00_3b: [0; 15],
+        record_map_word: 0,
+        opaque_40_87: [0; 18],
         pending_command: PendingCommandRecord {
             arg2: 0,
             arg3: 0,
@@ -327,6 +329,7 @@ mod tests {
         state: 0,
         aux: 0,
     };
+    static mut COMMAND_RECORD_SLOT: *mut PendingCommandRecord = ptr::null_mut();
     static mut DISPATCHER: *mut u8 = ptr::null_mut();
     static mut STATE_VALUE: u32 = 0;
     static mut DISPATCH_RESULT: *mut u8 = ptr::null_mut();
@@ -354,14 +357,13 @@ mod tests {
         STATE_VALUE
     }
 
-    unsafe extern "C" fn mock_begin_command_resolve(
-        _controller: *mut AppControllerPendingCommand,
+    unsafe extern "C" fn mock_begin_command_lookup(
+        _map: *mut u32,
         _command: u32,
         _zero: u32,
-        _allocate: u32,
-    ) -> *mut PendingCommandRecord {
+    ) -> *mut *mut PendingCommandRecord {
         events().push("begin-command");
-        ptr::addr_of_mut!(COMMAND_RECORD)
+        ptr::addr_of_mut!(COMMAND_RECORD_SLOT)
     }
 
     unsafe extern "C" fn record_handlers_activated(
@@ -497,13 +499,14 @@ mod tests {
         crate::app::singletons::APP_CONTROLLER = CONTROLLER;
         crate::app::singletons::COMMAND_DISPATCHER_INSTANCE = DISPATCHER;
 
+        COMMAND_RECORD_SLOT = ptr::addr_of_mut!(COMMAND_RECORD);
         HANDLER_LIST_ACTIVATE_OPS = HandlerListActivateOps {
             handler_context_get: mock_context_get,
             handler_context_install_list: mock_context_install,
             handler_context_active_state: mock_context_state,
         };
-        APP_CONTROLLER_BEGIN_COMMAND_OPS = AppControllerBeginCommandOps {
-            resolve_record: mock_begin_command_resolve,
+        COMMAND_RECORD_RESOLVER_OPS = CommandRecordResolverOps {
+            lookup_slot: mock_begin_command_lookup,
         };
         SILVER_LIST_TABLE_CTOR_OPS = SilverListTableCtorOps {
             map_header_alloc: mock_header_alloc,
@@ -530,7 +533,7 @@ mod tests {
         HANDLER_LIST_ACTIVATE_OPS = DEFAULT_HANDLER_LIST_ACTIVATE_OPS;
         SILVER_LIST_TABLE_CTOR_OPS = DEFAULT_SILVER_LIST_TABLE_CTOR_OPS;
         COMMAND_DISPATCH_BY_RESOURCE_OPS = DEFAULT_COMMAND_DISPATCH_BY_RESOURCE_OPS;
-        APP_CONTROLLER_BEGIN_COMMAND_OPS = DEFAULT_APP_CONTROLLER_BEGIN_COMMAND_OPS;
+        COMMAND_RECORD_RESOLVER_OPS = DEFAULT_COMMAND_RECORD_RESOLVER_OPS;
         crate::app::singletons::APP_CONTROLLER = ptr::null_mut();
         crate::app::singletons::COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
         events().clear();
