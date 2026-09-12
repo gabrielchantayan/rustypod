@@ -68800,3 +68800,38 @@ functions:
       that status and returns the original state pointer. The port deliberately
       inlines that leaf rather than adding a dispatch seam, because its only
       observable effect is the documented conditional word-zero clear.
+
+  # --- Stream-window position update ---
+  - address: 0x0822b250
+    ghidra: FUN_0822b250
+    name: stream_window_set_position
+    size: 88
+    sig: "void stream_window_set_position(StreamWindowState *state, i32 position)"
+    module: app/stream_window_set_position
+    status: ported
+    renames:
+      param_1/r0/r2: state
+      param_2/r1/r3: position
+      "state+0x2c": maximum_window_length
+      "state+0x30": window_length
+      "state+0x34": requested_position
+      FUN_0822ad9c: retail_mode_selected_extent (unported fixed-address seam)
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte, 22-instruction extent from
+      0x0822b250 through 0x0822b2a4; the next separately linked function
+      starts at 0x0822b2a8. It first stores position at state+0x34. Position
+      -1 returns without changing state+0x30. Otherwise it calls unported
+      0x0822ad9c, which selects the extent word at state+0x5e8 for mode flag
+      bit 0 clear or state+0x2f0 when set, then computes its wrapping u32
+      difference from position. A negative signed result stores -1 at +0x34
+      while preserving +0x30; otherwise +0x30 becomes the signed minimum of
+      the nonnegative remainder and state+0x2c. Decoding every immediate ARM
+      B/BL word in osos.dec finds exactly eight inbound direct calls: one
+      predicated bleq at 0x081cc658 and seven unconditional plain bl at
+      0x081cc938, 0x081cca48, 0x081cca58, 0x081cce68, 0x081ccfb8,
+      0x081ccfcc, and 0x081ccfe0. There are no direct tail branches or
+      aligned data words to this entry. The caller at 0x081cc658 gates this
+      call on equality; this callee itself has no NULL, bounds, or alignment
+      guard. The state class and extent unit remain unidentified. No deliberate
+      deviations: the target uses a literal veneer to retain the direct call
+      to the unported retail helper; host tests model only that helper.
