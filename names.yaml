@@ -60773,6 +60773,44 @@ functions:
       0x0821d43c and cannot safely execute standalone, so its typed Rust
       shutdown handler is a no-op rather than inventing a callee identity.
 
+  # --- StreamCache mass-storage manager timer controller ---
+  - address: 0x08228154
+    ghidra: FUN_08228154
+    name: stream_cache_mass_storage_manager_update_timer
+    size: 172
+    sig: "u32 stream_cache_mass_storage_manager_update_timer(StreamCacheMassStorageManagerTimer *this, u32 context, u32 delay, u32 request_flags)"
+    module: app/stream_cache_mass_storage_manager
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: context
+      param_3/r2: delay
+      param_4/r3: request_flags
+      r9: gateway_flag
+      DAT_082281fc: GATEWAY_PAYLOAD_SPECIAL_CONTEXT
+      FUN_080cb81c: mutex_lock
+      FUN_08048000: gateway_request_blocking
+      FUN_08076954: timer_trace_assert
+      FUN_080744c0: timer_set_delay
+      FUN_0807a228: timer_arm
+      FUN_080cb824: mutex_unlock
+    notes: >-
+      Raw ARM establishes the 172-byte extent: 168 bytes of code from
+      0x08228154 through 0x082281f8 and the literal-pool word
+      0x9c978c9d at 0x082281fc; the next separately linked function begins
+      at 0x08228200. Decoding every B/BL word in osos.dec finds exactly eight
+      direct inbound calls, all unconditional BL and no predicated or tail-B
+      entries: 0x081af5a4, 0x081c876c, 0x08201754, 0x08206338, 0x08206478,
+      0x082066a0, 0x082068f8, and 0x08206aa4. Under mutex this+4, first use
+      posts gateway_request_blocking(payload 0x20 when context == 0x63687363,
+      otherwise 0x1b; flag = ~request_flags & 1), then sets byte +0x00.
+      A pending byte +0x02 is cleared and timer_trace_assert(this+0x10)
+      called before zero delay sets stopped byte +0x01; a nonzero delay while
+      not stopped stores context at +0x30, re-pends the timer, programs its
+      delay, and arms it. Rust calls the ported mutex/timer implementations
+      directly rather than the two 4-byte mutex thunks 0x080cb81c/0x080cb824,
+      which are plain B aliases; return is the raw function's explicit zero.
+
   # --- Fixed selector table-record address mapper ---
   - address: 0x08218aec
     ghidra: FUN_08218aec
