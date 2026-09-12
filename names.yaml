@@ -50213,9 +50213,9 @@ functions:
       `bx lr` at 0x0824bf14 and expands bits 15..11, 10..6, and 5..1 into
       R/G/B bytes by repeating their top three bits; bit 0 selects alpha 0
       or 0xff. The port preserves the cursor-before-halfword-load order and
-      RGBA output order while inlining that unported, decoded leaf instead of
-      creating a dispatch seam. Binary-scanning every aligned ARM B/BL word
-      in osos.dec finds exactly nine direct unconditional bl call sites
+      RGBA output order, then calls the ported `rgb555a1_expand_to_rgba8`
+      leaf at the original tail-call boundary. Binary-scanning every aligned
+      ARM B/BL word in osos.dec finds exactly nine direct unconditional bl call sites
       (0x0825f840, 0x0825f8f4, 0x0825f9ac, 0x0825fa60, 0x0825fb14,
       0x0825fc28, 0x082603f0, 0x083b4f7c, 0x083b504c), with no predicated or
       direct-tail callers. The original has no NULL, alignment, or bounds
@@ -64141,6 +64141,39 @@ functions:
       allocation, raw-block constructor argument, cache fast path, and
       NULL-return retry behavior.
 
+  # --- RGB555A1 to RGBA8 expansion (cxx/color_unpack) ---
+  - address: 0x0824bf18
+    ghidra: FUN_0824bf18
+    name: rgb555a1_expand_to_rgba8
+    size: 68
+    sig: "void rgb555a1_expand_to_rgba8(u8 *destination, u32 packed_pixel)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: packed_rgb555a1
+      r2: expanded_blue
+      r3: expanded_green
+      r12: expanded_red
+    notes: >-
+      Raw ARM establishes the exact 68-byte extent 0x0824bf18..0x0824bf58:
+      it follows a predecessor's `bx lr` at 0x0824bf14, and the separately
+      linked four-byte store helper begins at 0x0824bf5c. There is no literal
+      pool. The leaf masks RGB555A1's R/G/B bits 15..11, 10..6, and 5..1,
+      shifts them to bits 7..3, ORs each with its upper-bit repeat to expand
+      five bits to eight, and stores R/G/B to destination bytes 0..2. Its
+      `lsrs r1,r1,#24; orrne r1,r1,#0x7f` maps bit 0 to alpha 0 or 0xff at
+      byte 3; high input bits are ignored. Full-image decoding of aligned ARM
+      B/BL words finds exactly eight inbound direct calls, all unconditional
+      `bl` with no predicated forms: 0x08250c28, 0x08250c38, 0x08250c5c,
+      0x08250c6c, 0x082510b4, 0x082510cc, 0x082514ac, and 0x082514b8. One
+      unconditional plain-B tail at 0x0825ecec belongs to the ported
+      RGB555A1 cursor reader; there are no other direct-tail callers. The
+      function has no callee or dispatch seam and no NULL, alignment, or
+      bounds guard. No deliberate behavioral deviations: the port uses
+      four ordered volatile byte stores. Host tests exhaust all 65,536
+      low-halfword values, prove upper input bits have no effect, and retain
+      guards around the destination bytes.
   # --- Four-component pixel average (util/four_component_pixel_average) ---
   - address: 0x0824bd98
     ghidra: FUN_0824bd98
