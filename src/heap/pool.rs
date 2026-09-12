@@ -549,13 +549,21 @@ pub unsafe extern "C" fn pool_free(pool: *mut PoolControl, ptr: *mut u8) {
     (op!(heap_free))(heap_desc(pool), raw as *mut u8, TAG_POOL_FREE);
 }
 
-/// pool_destroy — original: `FUN_0826f7e4` @ 0x0826f7e4 (28 bytes).
+/// pool_destroy — original: `FUN_0826f7e4` @ 0x0826f7e4 (32 bytes).
 ///
-/// Clears the ready flag, destroys the embedded heap, and tail-branches
-/// to the non-deleting base-subobject dtor chain (whose result it
-/// returns). Does NOT free the control struct — callers do that with
-/// `operator delete` (see `pool_create`'s failure path).
+/// Verified call count: 7 plain unconditional `bl` sites
+/// (0x081247e8, 0x08153d8c, 0x081b6140, 0x081b6790, 0x081bbad0,
+/// 0x081bbcf0, and 0x0826f68c); no predicated `bl` sites. Clears the
+/// ready flag without testing its prior value, destroys the embedded heap,
+/// then tail-branches to the non-deleting base-subobject dtor chain and
+/// returns that result. It does NOT free the control struct — callers do
+/// that with `operator delete` (see `pool_create`'s failure path).
+///
+/// Deliberate deviation: the original's direct `bl heap_destroy` and tail
+/// `b pool_base_destroy` dispatch through `POOL_OPS` so host tests can
+/// observe both calls; defaults are the existing faithful Rust ports.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_destroy(pool: *mut PoolControl) -> *mut PoolControl {
     ready_flag(pool).write(0);
     let desc = (op!(heap_destroy))(heap_desc(pool));
@@ -935,6 +943,24 @@ mod tests {
             assert_eq!(LAST_DTOR_THIS, pool);
             assert_eq!(ret, pool, "returns the base-dtor chain result");
             assert_eq!(DELETE_CALLS, 0, "destroy does not free the struct");
+        }
+    }
+
+    #[test]
+    fn destroy_tears_down_an_already_unready_pool() {
+        let _lock = mock_pool();
+        unsafe {
+            let pool = control_ptr();
+            assert_eq!(ready_flag(pool).read(), 0);
+
+            let ret = pool_destroy(pool);
+
+            assert_eq!(HEAP_DESTROY_CALLS, 1, "no ready-flag guard");
+            assert_eq!(LAST_HEAP_DESTROY_DESC, heap_desc(pool));
+            assert_eq!(DTOR_CALLS, 1, "always runs the base destructor");
+            assert_eq!(LAST_DTOR_THIS, pool);
+            assert_eq!(ret, pool);
+            assert_eq!(DELETE_CALLS, 0, "the caller owns control storage");
         }
     }
 

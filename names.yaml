@@ -4223,6 +4223,30 @@ functions:
       and routes the tail dispatch through the pre-existing POOL_OPS
       heap_free seam; both preserve target-visible behavior.
 
+  - address: 0x0826f7e4
+    ghidra: FUN_0826f7e4
+    name: pool_destroy
+    size: 32
+    sig: "PoolControl *pool_destroy(PoolControl *pool)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: pool
+    notes: >-
+      Raw extent is 32 bytes, 0x0826f7e4..0x0826f804, not Ghidra's
+      104-byte span: it clear-writes ready (+0x414), bl-calls heap_destroy
+      at 0x0819d7e4 on the embedded heap (+0x7c), subtracts 0x7c from the
+      returned descriptor, then tail-b 0x08214224 (pool_base_destroy).
+      Decoding every ARM B/BL word in osos.dec verifies 7 plain
+      unconditional bl call sites (0x081247e8, 0x08153d8c, 0x081b6140,
+      0x081b6790, 0x081bbad0, 0x081bbcf0, 0x0826f68c), no predicated bl
+      sites, and no B tail-call sites. The Rust port deliberately routes
+      the original's direct calls through the pre-existing POOL_OPS
+      heap_destroy/base_destroy slots so host tests can observe them; both
+      defaults are the existing faithful Rust ports. Host tests prove that
+      destruction runs even with an already-clear ready flag, leaves the
+      control allocation to the caller, and returns the base-dtor result.
+
   - address: 0x0826f780
     ghidra: FUN_0826f780
     name: pool_alloc_v1
