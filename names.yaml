@@ -67515,3 +67515,37 @@ functions:
       recoverable C ABI. No callee identity or host seam is invented. Retain
       identified status until that containing routine and its non-ABI callback
       contract can be ported together.
+
+  # --- UI: passkey mask-indicator refresh ---
+  - address: 0x0827f098
+    ghidra: FUN_0827f098
+    name: refresh_passkey_mask_indicators
+    size: 128
+    sig: "void refresh_passkey_mask_indicators(void *passkey_mask_view)"
+    module: ui/passkey_mask_indicators
+    status: ported
+    renames:
+      param_1/r0: passkey_mask_view
+      DAT_0827f10c: masked_digit_word
+      DAT_0827f108: first_mask_indicator_selector
+      DAT_0827f110: second_mask_indicator_selector
+      DAT_0827f114: third_mask_indicator_selector
+      DAT_0827f118: fourth_mask_indicator_selector
+      "(*passkey_mask_view->vtable)[0x58]": opaque_mask_indicator_dispatch
+    notes: >-
+      Raw osos.dec gives 112 instruction bytes from push {r4-r6,lr} at
+      0x0827f098 through bx r3 at 0x0827f104, then a 16-byte literal pool
+      at 0x0827f108..0x0827f118 (0x5799, 0x2a2a2a2a, 0x579a, 0x579b,
+      0x579c); true extent is 128 bytes and the separately linked next
+      function begins at 0x0827f11c. Decoding every immediate ARM B/BL word
+      in osos.dec finds exactly eight inbound direct calls, all unconditional
+      plain bl at 0x0813f860, 0x0820e880, 0x0827ebcc, 0x0827f2a0,
+      0x0827f2c4, 0x0827f97c, 0x0827fa08 and 0x0827fa80; there are no
+      predicated direct calls or direct tail branches. Algorithm: load the
+      passkey view's vtable slot +0x58 anew for each selector, then call it
+      with the view, the four-asterisk word 0x2a2a2a2a and selectors 0x5799
+      through 0x579c in ascending order. The virtual entry's concrete
+      identity is not recovered, so the port preserves only its verified ABI
+      and reload-before-each-call behavior rather than inventing a callee.
+      Host tests use a native-width structural vtable; the target build
+      asserts its dispatched field remains at ARM byte offset +0x58.

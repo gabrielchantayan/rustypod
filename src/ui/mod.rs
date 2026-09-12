@@ -63,6 +63,7 @@ pub mod default_navigation_request;
 pub mod current_window;
 pub mod selection_index;
 
+pub mod passkey_mask_indicators;
 pub mod mode_state;
 pub mod view_base;
 pub mod container_view;
