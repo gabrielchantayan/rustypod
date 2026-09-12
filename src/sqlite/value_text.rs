@@ -44,8 +44,9 @@
 //! not land (OOM inside a callee) leaves the byte stale and the
 //! function returns NULL instead of a mis-encoded buffer.
 //!
-//! Callee map (ExpandBlob ported; remaining callees use the seams below;
-//! identities verified against the 3.5.9 source and their Ghidra decompiles):
+//! Callee map (ExpandBlob and MakeWriteable are ported; remaining callees
+//! use the seams below; identities verified against the 3.5.9 source and
+//! their Ghidra decompiles):
 //!
 //! - 0x0838bbb4 — `sqlite3VdbeMemExpandBlob`: `n += i`, grows via
 //!   0x0838bdb0, zero-fills the tail, clears `MEM_Zero|MEM_Term`
@@ -89,11 +90,12 @@
 //! +0x1f enc     u8        SQLITE_UTF8 1 / UTF16LE 2 / UTF16BE 3
 //! ```
 //!
-//! - `sqlite3VdbeMemExpandBlob` is now ported and is the wired default of
-//!   the existing expansion seam; its slot remains replaceable for the
-//!   value-text recorder tests. The four still-unported callees each use a
-//!   dispatch static whose default reproduces the original's failure/no-op
-//!   end state (the house seam pattern, `sqlite/value_set_str.rs`).
+//! - `sqlite3VdbeMemExpandBlob` and `sqlite3VdbeMemMakeWriteable` are
+//!   ported and are the wired defaults of their existing raw-pointer seams;
+//!   their slots remain replaceable for the value-text recorder tests. The
+//!   three still-unported callees each use a dispatch static whose default
+//!   reproduces the original's failure/no-op end state (the house seam
+//!   pattern, `sqlite/value_set_str.rs`).
 //! - `enc` is typed `u8` like upstream (the firmware's full-width
 //!   `bic`/`cmp` on r1 are identical for the zero-extended arguments
 //!   every observed call site passes — `mov r1,#1`, `ldrb` of
@@ -103,6 +105,7 @@ use super::error::SQLITE_UTF8;
 use super::value_new::{MEM_FLAGS_OFFSET, MEM_NULL};
 use super::value_set_str::SQLITE_NOMEM;
 use super::vdbe_mem_expand_blob::vdbe_mem_expand_blob;
+use super::vdbe_mem_make_writeable::vdbe_mem_make_writeable;
 
 /// The original's `SQLITE_OK` return (`mov r0,#0x0` in the callees'
 /// success paths).
@@ -162,6 +165,12 @@ unsafe extern "C" fn wired_vdbe_mem_expand_blob(mem: *mut u8) -> i32 {
     vdbe_mem_expand_blob(mem.cast())
 }
 
+/// ABI adapter from this older raw-pointer seam to the typed MakeWriteable
+/// port. The seam remains so value-text tests can record callee order.
+unsafe extern "C" fn wired_vdbe_mem_make_writeable(mem: *mut u8) -> i32 {
+    vdbe_mem_make_writeable(mem.cast())
+}
+
 /// The default for an unported `sqlite3VdbeChangeEncoding`: no-op
 /// shaped like the original's recode-OOM end state — `Mem.enc` stays
 /// stale, this wrapper's final encoding check fails, and the caller
@@ -174,12 +183,6 @@ pub(crate) unsafe extern "C" fn missing_vdbe_change_encoding(
     SQLITE_NOMEM
 }
 
-/// The default for an unported `sqlite3VdbeMemMakeWriteable`:
-/// `SQLITE_NOMEM` — this wrapper returns NULL on the odd-aligned path,
-/// exactly the original's OOM end state.
-pub(crate) unsafe extern "C" fn missing_vdbe_mem_make_writeable(_mem: *mut u8) -> i32 {
-    SQLITE_NOMEM
-}
 
 /// The default for an unported `sqlite3VdbeMemNulTerminate`. The
 /// wrapper discards the code, and the original is itself a no-op when
@@ -205,9 +208,10 @@ pub static mut SQLITE_VDBE_MEM_EXPAND_BLOB: VdbeMemExpandBlobFn =
 pub static mut SQLITE_VDBE_CHANGE_ENCODING: VdbeChangeEncodingFn =
     missing_vdbe_change_encoding;
 
-/// Active `sqlite3VdbeMemMakeWriteable` dispatch slot (same pattern).
+/// Active `sqlite3VdbeMemMakeWriteable` dispatch slot. Its default is the
+/// ported implementation; host value-text tests install a recorder.
 pub static mut SQLITE_VDBE_MEM_MAKE_WRITEABLE: VdbeMemMakeWriteableFn =
-    missing_vdbe_mem_make_writeable;
+    wired_vdbe_mem_make_writeable;
 
 /// Active `sqlite3VdbeMemNulTerminate` dispatch slot (same pattern).
 pub static mut SQLITE_VDBE_MEM_NUL_TERMINATE: VdbeMemNulTerminateFn =
@@ -434,8 +438,7 @@ mod tests {
     }
 
     /// Install the recording seams with the given effect knobs, run
-    /// `body`, then restore the shipped stub defaults (the
-    /// `sqlite/value_set_str.rs` convention).
+    /// `body`, then restore the shipped defaults.
     unsafe fn with_recorders(
         make_writeable_rc: i32,
         change_encoding_lands: bool,
@@ -477,7 +480,7 @@ mod tests {
         );
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_MEM_MAKE_WRITEABLE),
-            missing_vdbe_mem_make_writeable,
+            wired_vdbe_mem_make_writeable,
         );
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_MEM_NUL_TERMINATE),
@@ -671,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_defaults_reproduce_the_documented_end_states() {
+    fn unported_callee_defaults_reproduce_the_documented_end_states() {
         let _guard = SLOT_LOCK.lock().unwrap();
         unsafe {
             // No recorders: the shipped stubs are in place. A string
@@ -701,10 +704,6 @@ mod tests {
             let mut mem = TestMem::new(MEM_INT, 2, false);
             assert_eq!(sqlite_value_text(mem.ptr(), 1), core::ptr::null_mut());
 
-            // The make-writeable stub's SQLITE_NOMEM fails the
-            // odd-aligned path outright.
-            let mut mem = TestMem::new(MEM_STR | MEM_TERM, 2, true);
-            assert_eq!(sqlite_value_text(mem.ptr(), 2 | SQLITE_UTF16_ALIGNED), core::ptr::null_mut());
         }
     }
 
@@ -749,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_defaults_wire_the_expansion_port_and_documented_stubs() {
+    fn the_shipped_defaults_wire_ported_callees_and_documented_stubs() {
         unsafe {
             assert_eq!(
                 expand_blob_op() as usize,
@@ -761,7 +760,7 @@ mod tests {
             );
             assert_eq!(
                 mem_make_writeable_op() as usize,
-                missing_vdbe_mem_make_writeable as usize,
+                wired_vdbe_mem_make_writeable as usize,
             );
             assert_eq!(
                 mem_nul_terminate_op() as usize,

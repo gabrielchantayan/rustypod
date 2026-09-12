@@ -161,6 +161,7 @@ pub mod vdbe;
 pub mod vdbe_mem_apply_affinity;
 pub mod vdbe_mem_set_double;
 pub mod vdbe_mem_expand_blob;
+pub mod vdbe_mem_make_writeable;
 pub mod vdbe_mem_grow;
 pub mod vdbe_mem_nul_terminate;
 pub mod vdbe_mem_realify;
