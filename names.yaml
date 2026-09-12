@@ -71763,3 +71763,27 @@ functions:
       not assumed. The ARM bridge tail-branches directly to that verified,
       still-unported address; its host-only recorder proves NULL skips it,
       non-NULL forwards exactly once, and the slot word is retained.
+
+  # --- Indirect u32 equality ---
+  - address: 0x083cf8d8
+    ghidra: FUN_083cf8d8
+    name: u32_indirect_equal
+    size: 24
+    sig: "u32 u32_indirect_equal(const u32 *left_word, const u32 *right_word)"
+    module: util/u32_indirect_equal
+    status: ported
+    renames:
+      param_1/r0: left_word
+      param_2/r1: right_word
+    notes: >-
+      Raw osos.dec confirms the 24-byte body from 0x083cf8d8 through bx lr at
+      0x083cf8ec; the separately linked next function starts at 0x083cf8f0.
+      It performs two aligned ldr operations and returns 1 only when their
+      u32 results are equal, otherwise 0. There is deliberately no NULL
+      guard, matching the retail load-before-compare behavior. Complete
+      aligned ARM B/BL-immediate decoding finds exactly seven inbound direct
+      calls, all unconditional plain bl and no predicated forms:
+      0x081473b0, 0x0814752c, 0x083c858c, 0x083c89f8, 0x083c8a14,
+      0x083c8a98, and 0x083c8b5c. Neighbouring 24-byte functions repeat this
+      load-and-compare shape; the port uses its own target-only text section
+      to retain a distinct symbol if LLVM otherwise merges identical bodies.
