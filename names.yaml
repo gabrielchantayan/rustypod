@@ -60693,6 +60693,42 @@ functions:
       memory effects. Both callees are already ported and are called
       directly.
 
+  # --- vendored OpenSSL: EVP_MD_CTX initialization ---
+  - address: 0x0804adc4
+    ghidra: FUN_0804adc4
+    name: evp_md_ctx_init
+    size: 20
+    sig: "*mut u32 evp_md_ctx_init(EvpMdCtx *ctx)"
+    module: crypto/evp_md_ctx_init
+    status: ported
+    renames:
+      param_1/r0: ctx
+      r1: zero
+      r2: zero
+      r0/return: ctx_plus_two_words
+      FUN_0804a6bc: evp_digest_init_ex (ported)
+      FUN_0804a728: evp_digest_update (ported)
+      FUN_0804a604: evp_digest_final_ex (ported)
+      FUN_0804ac2c: evp_md_ctx_cleanup (ported)
+    notes: >-
+      The raw ARM body is exactly 0x0804adc4..0x0804add8: mov r1,#0;
+      mov r2,#0; stmia r0!,{r1,r2}; stmia r0,{r1,r2}; bx lr. The next
+      independently entered function starts at 0x0804add8, so Ghidra's
+      20-byte extent is correct. A complete decode of every ARM B/BL
+      immediate in osos.dec finds exactly eight inbound sites, all
+      unconditional bl at 0x0803b4c0, 0x0804afa4, 0x0804b0e0, 0x0805fb4c,
+      0x08060674, 0x08092634, 0x080a3fac, and 0x080e7450; there are no
+      predicated direct calls or direct tail-b calls. Each passes a 16-byte
+      stack object which then traverses the already-ported neighboring EVP
+      init/update/final/cleanup functions. That established usage identifies
+      this as EVP_MD_CTX_init [INFERENCE]. Algorithm: unconditionally clear
+      all four aligned context words. The first stmia writes back, so r0
+      returns ctx plus eight bytes even though no caller observes it; the
+      Rust port returns the corresponding two-word pointer. Deliberate
+      host/codegen deviation: repr(C) named fields preserve four-byte target
+      slots without overlapping host pointers, and four volatile field stores
+      preserve the observable writes rather than requiring paired stmia code.
+
   # --- vendored OpenSSL: the SHA-1 EVP_MD descriptor getter ---
   - address: 0x0804b214
     ghidra: FUN_0804b214
