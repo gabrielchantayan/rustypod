@@ -135,6 +135,7 @@ pub mod randomness;
 pub mod parse_cell;
 pub mod parse_expr;
 pub mod ptrmap_pageno;
+pub mod ptrmap_check_pages;
 pub mod ptrmap_put;
 pub mod read_schema;
 pub mod release_mem_array;

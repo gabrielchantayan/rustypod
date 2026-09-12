@@ -28379,6 +28379,39 @@ functions:
       sqlite3SetString and tracked_free are direct ports. Host tests map the
       target-width string-list fixture below 4 GiB so u32 vararg pointers
       cannot silently truncate.
+  - address: 0x082c27d0
+    ghidra: FUN_082c27d0
+    name: ptrmap_check_pages
+    size: 120
+    sig: "void ptrmap_check_pages(IntegrityCheck *check, u32 pgno, u32 expected_type, u32 expected_parent, const char *prefix)"
+    module: sqlite/ptrmap_check_pages
+    status: ported
+    renames:
+      param_1/r4: check
+      param_2/r7: pgno
+      param_3/r5: expected_type
+      param_4/r6: expected_parent
+      param_5/r8: prefix
+      local_1c: actual_type
+      local_20: actual_parent
+    notes: >-
+      SQLite 3.5.x ptrmapCheckPages. Raw bytes confirm 120 bytes of code
+      from 0x082c27d0 through the pop {r4-r8,pc} at 0x082c2844; the
+      diagnostic-string pool spans 0x082c2848..0x082c289c and the next
+      independent function begins at 0x082c28a0. Seven direct BL callers
+      were verified by decoding every ARM B/BL word in osos.dec, all
+      unconditional: 0x082c2650, 0x082c26c4, 0x082c2720, 0x082c2b58,
+      0x082c2bb8, 0x082c2c78, 0x083719bc. Calls unported ptrmapGet @
+      0x082e85d8 with check->pBt, pgno, and stack byte/word outputs. A
+      nonzero status appends "Failed to read ptrmap key=%d"; otherwise,
+      either actual type != expected type or actual parent != expected
+      parent appends "Bad ptrmap entry key=%d expected=(%d,%d) got=(%d,%d)"
+      with the expected pair preceding the actual pair. Equal values return
+      silently. Deliberate deviation: the target calls unported ptrmapGet
+      at its load address; host tests use an ops seam for that routine and
+      diagnostic capture while target builds call the ported
+      integrity_check_append_msg directly.
+
 
   # ---- SQLite OS close wrapper, sqlite3OsClose (src/sqlite/os_close.rs) ----
   - address: 0x0837dae8
