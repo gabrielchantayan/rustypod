@@ -72303,3 +72303,39 @@ functions:
       through a volatile seam while host tests use a recorder. The port uses
       target-word indices for Token +0x04 and sqlite3 +0x78, avoiding
       host-64-bit pointer-field overlap.
+
+  # --- Clock-snapshot filtered duration trace ---
+  - address: 0x08369110
+    ghidra: FUN_08369110
+    name: trace_matching_clock_snapshot_delta_ms
+    size: 144
+    sig: "void trace_matching_clock_snapshot_delta_ms(u32 kind, u32 name_token, u32 object)"
+    module: kernel/clock_snapshot_trace
+    status: ported
+    renames:
+      param_1/r0: kind
+      param_2/r1: name_token
+      param_3/r2: object
+      puVar4/r4: snapshot
+      DAT_08369184: clock_snapshot_list_head
+      DAT_08369188: clock_tick_scale
+      DAT_0836918c: clock_current_tick
+    notes: >-
+      Raw osos.dec extent is 144 bytes: 29 ARM instructions through the
+      pop-return at 0x08369180, then the 12-byte literal pool
+      (0x22008a68 list head, 0x083e30e8 tick scale, 0x2200acfc current
+      tick) and the 16-byte `(L10,H' ms',N)` format string; the next
+      separately linked function starts at 0x083691a0. This corrects
+      Ghidra's code-only 116-byte extent. Decoding every ARM B/BL word in
+      osos.dec finds exactly seven direct calls, all unconditional bl at
+      0x082bfd58, 0x082c0408, 0x082c0418, 0x082c0694, 0x082c0730,
+      0x082c0780, and 0x082c0800; no predicated call. The helper traverses
+      the 32-byte clock-snapshot chain at 0x22008a68, matching +0x18 kind,
+      +0x1c object, then +0x10 name token before tracing
+      wrapping_u32((snapshot+0x08 deadline - current_tick) * tick_scale)
+      through the already ported trace_printf @ 0x082dcf7c. The target port
+      reads the three original fixed-address words and passes the original
+      format-address to trace_printf; host tests use fixed local backing
+      plus a test-only output observer, avoiding concurrent mutation of
+      trace_printf's formatter slot. Tests cover linked traversal, the
+      three-field match gate, a null head, and ARM sub/mul wraparound.
