@@ -663,6 +663,79 @@ const TIMESTAMP_INTERFACE: u32 = 0;
 const TIMESTAMP_SCALE_SHIFT: u32 = 10;
 
 type ClockSample = unsafe extern "C" fn(u32) -> i64;
+use crate::app::path_probe::{
+    GuardConstruct, GuardDestroy, InterfaceGuard, PATH_PROBE_GUARD_CTOR, PATH_PROBE_GUARD_DTOR,
+};
+
+/// The selector-one interface accessor at `0x08296ea4` returns its virtual
+/// method's 32-bit result in r0.
+type InterfaceSelectorOneU32 = unsafe extern "C" fn(u32) -> u32;
+
+/// Calls the unported selector-one interface accessor.
+///
+/// The raw accessor first passes selector 1 to 0x08296ec0, then tail-calls
+/// the selected object's vtable slot +0x08. Its concrete interface identity
+/// is not established, so this boundary names only the verified operation.
+unsafe extern "C" fn firmware_interface_selector_one_u32(interface: u32) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let accessor: InterfaceSelectorOneU32 = core::mem::transmute(0x0829_6ea4usize);
+        accessor(interface)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = interface;
+        0
+    }
+}
+
+/// Narrow boundary for the unported selector-one accessor at 0x08296ea4.
+static mut INTERFACE_SELECTOR_ONE_U32: InterfaceSelectorOneU32 =
+    firmware_interface_selector_one_u32;
+
+#[inline(always)]
+unsafe fn interface_selector_one_u32_fn() -> InterfaceSelectorOneU32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(INTERFACE_SELECTOR_ONE_U32))
+}
+
+#[inline(always)]
+unsafe fn baseline_guard_construct_fn() -> GuardConstruct {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_CTOR))
+}
+
+#[inline(always)]
+unsafe fn baseline_guard_destroy_fn() -> GuardDestroy {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_DTOR))
+}
+
+/// baseline_clock_sample — original: `FUN_08090b88` @ `0x08090b88` (56
+/// bytes; 8 direct `bl` call sites, all unconditional).
+///
+/// Raw ARM spans `0x08090b88..0x08090bbc`; the next distinct function starts
+/// at `0x08090bc0`. It constructs a 16-byte interface guard over its r0-r3
+/// spill frame with the caller's `interface` as the live r1 hint, reads the
+/// resulting guard's interface word (+0x04) through 0x08296ea4, destroys the
+/// guard, and returns the accessor's u32 result zero-extended in r0:r1. The
+/// eight verified direct callers are 0x08055fd8, 0x08195894, 0x081963c4,
+/// 0x081964f8, 0x08196674, 0x081a3988, 0x081a3ac4, and 0x08258848; none is
+/// predicated.
+///
+/// Deliberate deviations: the already-ported interface guard's existing
+/// replaceable constructor/destructor seams preserve the target path while
+/// allowing host tests to observe the stack-local scope. The separately
+/// unported 0x08296ea4 accessor remains a volatile boundary; its generic
+/// selector-one/vtable-slot identity is documented above rather than guessed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn baseline_clock_sample(interface: u32) -> i64 {
+    let mut storage = core::mem::MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = baseline_guard_construct_fn()(storage.as_mut_ptr(), interface);
+    let sample = interface_selector_one_u32_fn()((*guard).words[1]);
+    baseline_guard_destroy_fn()(guard);
+    i64::from(sample)
+}
+
 
 /// Calls the stock sampled-clock getter, which remains in retailOS.
 ///
@@ -727,32 +800,11 @@ pub unsafe extern "C" fn scaled_timestamp_now() -> i64 {
 /// doubleword means "not yet snapshotted".
 pub static mut TIMESTAMP_BASELINE: i64 = 0;
 
-/// Calls the stock baseline-clock getter, which remains in retailOS.
+/// Replaceable call target for [`baseline_clock_sample`] at 0x08090b88.
 ///
-/// This is deliberately a boundary rather than a port of 0x08090b88. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. Like its sibling 0x0809b60c (see
-/// [`firmware_clock_sample`]), the original constructs a temporary stack
-/// object around interface `interface` (0x08206e40) and destroys it
-/// (0x08206e6c), but reads through the sibling accessor 0x08296ea4 instead
-/// of 0x08296f18 and returns that 32-bit result zero-extended to 64 bits
-/// in r0:r1 (`mov r1,r5` with r5 zeroed at 0x08090b9c).
-unsafe extern "C" fn firmware_baseline_clock_sample(interface: u32) -> i64 {
-    #[cfg(target_os = "none")]
-    {
-        let clock_sample: ClockSample = core::mem::transmute(0x0809_0b88usize);
-        clock_sample(interface)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = interface;
-        0
-    }
-}
-
-/// Narrow boundary for the unported 0x08090b88 dependency.
-static mut BASELINE_CLOCK_SAMPLE: ClockSample = firmware_baseline_clock_sample;
+/// The baseline snapshot tests intercept the fully ported getter here; device
+/// builds default to the direct Rust port.
+static mut BASELINE_CLOCK_SAMPLE: ClockSample = baseline_clock_sample;
 
 #[inline(always)]
 unsafe fn baseline_clock_sample_fn() -> ClockSample {
@@ -1335,6 +1387,80 @@ mod tests {
     static mut BASELINE_SAMPLE_INTERFACE: u32 = u32::MAX;
     static mut MOCK_BASELINE_SAMPLE: i64 = 0;
 
+    const BASELINE_EVENT_GUARD_CONSTRUCT: u8 = 1;
+    const BASELINE_EVENT_ACCESSOR: u8 = 2;
+    const BASELINE_EVENT_GUARD_DESTROY: u8 = 3;
+    static mut BASELINE_PORT_EVENTS: [u8; 3] = [0; 3];
+    static mut BASELINE_PORT_EVENT_COUNT: usize = 0;
+    static mut BASELINE_PORT_CTOR_INTERFACE: u32 = u32::MAX;
+    static mut BASELINE_PORT_GUARD_INTERFACE: u32 = 0;
+    static mut BASELINE_PORT_ACCESSOR_INTERFACE: u32 = u32::MAX;
+    static mut BASELINE_PORT_ACCESSOR_RESULT: u32 = 0;
+    static mut BASELINE_PORT_CTOR_STORAGE: usize = 0;
+    static mut BASELINE_PORT_DTOR_STORAGE: usize = 0;
+
+    unsafe fn record_baseline_port_event(event: u8) {
+        BASELINE_PORT_EVENTS[BASELINE_PORT_EVENT_COUNT] = event;
+        BASELINE_PORT_EVENT_COUNT += 1;
+    }
+
+    unsafe extern "C" fn recording_baseline_guard_construct(
+        storage: *mut InterfaceGuard,
+        interface: u32,
+    ) -> *mut InterfaceGuard {
+        record_baseline_port_event(BASELINE_EVENT_GUARD_CONSTRUCT);
+        BASELINE_PORT_CTOR_STORAGE = storage as usize;
+        BASELINE_PORT_CTOR_INTERFACE = interface;
+        (*storage).words[1] = BASELINE_PORT_GUARD_INTERFACE;
+        storage
+    }
+
+    unsafe extern "C" fn recording_interface_selector_one_u32(interface: u32) -> u32 {
+        record_baseline_port_event(BASELINE_EVENT_ACCESSOR);
+        BASELINE_PORT_ACCESSOR_INTERFACE = interface;
+        BASELINE_PORT_ACCESSOR_RESULT
+    }
+
+    unsafe extern "C" fn recording_baseline_guard_destroy(
+        storage: *mut InterfaceGuard,
+    ) -> *mut InterfaceGuard {
+        record_baseline_port_event(BASELINE_EVENT_GUARD_DESTROY);
+        BASELINE_PORT_DTOR_STORAGE = storage as usize;
+        storage
+    }
+
+    struct BaselineClockSamplePortReset;
+
+    impl Drop for BaselineClockSamplePortReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(INTERFACE_SELECTOR_ONE_U32)
+                    .write(firmware_interface_selector_one_u32);
+                crate::app::path_probe::tests::restore_firmware_seams();
+            }
+        }
+    }
+
+    fn install_recording_baseline_clock_sample_port() {
+        unsafe {
+            BASELINE_PORT_EVENTS = [0; 3];
+            BASELINE_PORT_EVENT_COUNT = 0;
+            BASELINE_PORT_CTOR_INTERFACE = u32::MAX;
+            BASELINE_PORT_GUARD_INTERFACE = 0x2468_ace0;
+            BASELINE_PORT_ACCESSOR_INTERFACE = u32::MAX;
+            BASELINE_PORT_ACCESSOR_RESULT = u32::MAX;
+            BASELINE_PORT_CTOR_STORAGE = 0;
+            BASELINE_PORT_DTOR_STORAGE = 0;
+            core::ptr::addr_of_mut!(PATH_PROBE_GUARD_CTOR)
+                .write(recording_baseline_guard_construct);
+            core::ptr::addr_of_mut!(PATH_PROBE_GUARD_DTOR)
+                .write(recording_baseline_guard_destroy);
+            core::ptr::addr_of_mut!(INTERFACE_SELECTOR_ONE_U32)
+                .write(recording_interface_selector_one_u32);
+        }
+    }
+
+
     unsafe extern "C" fn recording_baseline_clock_sample(interface: u32) -> i64 {
         BASELINE_SAMPLE_CALLS += 1;
         BASELINE_SAMPLE_INTERFACE = interface;
@@ -1347,8 +1473,7 @@ mod tests {
     impl Drop for BaselineClockSampleReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(BASELINE_CLOCK_SAMPLE)
-                    .write(firmware_baseline_clock_sample);
+                core::ptr::addr_of_mut!(BASELINE_CLOCK_SAMPLE).write(baseline_clock_sample);
                 core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(0);
             }
         }
@@ -2132,6 +2257,45 @@ mod tests {
         let _reset = ClockSampleReset;
 
         assert_eq!(unsafe { scaled_timestamp_now() }, -1i64 << 10);
+    }
+
+    #[test]
+    fn baseline_clock_sample_scopes_selector_access_and_zero_extends_result() {
+        let _path_probe_guard = crate::app::path_probe::tests::PATH_PROBE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _sample_guard = BASELINE_CLOCK_SAMPLE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        install_recording_baseline_clock_sample_port();
+        let _reset = BaselineClockSamplePortReset;
+
+        assert_eq!(
+            unsafe { baseline_clock_sample(0x1357_9bdf) },
+            i64::from(u32::MAX),
+            "the original clears r1 before return, so the u32 accessor result is zero-extended"
+        );
+        assert_eq!(unsafe { BASELINE_PORT_CTOR_INTERFACE }, 0x1357_9bdf);
+        assert_eq!(
+            unsafe { BASELINE_PORT_ACCESSOR_INTERFACE },
+            0x2468_ace0,
+            "the accessor consumes the guard's +0x04 interface word, not the caller hint"
+        );
+        assert_eq!(
+            unsafe { BASELINE_PORT_EVENTS },
+            [
+                BASELINE_EVENT_GUARD_CONSTRUCT,
+                BASELINE_EVENT_ACCESSOR,
+                BASELINE_EVENT_GUARD_DESTROY,
+            ],
+            "the accessor runs while the guard remains scoped"
+        );
+        assert_eq!(unsafe { BASELINE_PORT_EVENT_COUNT }, 3);
+        assert_eq!(
+            unsafe { BASELINE_PORT_DTOR_STORAGE },
+            unsafe { BASELINE_PORT_CTOR_STORAGE },
+            "the destructor receives the original r0-r3 spill frame"
+        );
     }
 
     #[test]
