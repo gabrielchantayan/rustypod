@@ -301,6 +301,10 @@ pub mod hints {
     // raw-u32 reference/vtable/target fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const ELEMENT_REFERENCE_CONSTRUCT_STRING: usize = 0xc900_0000;
+    // 0xcb00_0000: dedicated to app/handle_slot_18_predicate_and_state_is_two's
+    // raw-u32 handle/state fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const HANDLE_SLOT_18_PREDICATE_AND_STATE: usize = 0xcb00_0000;
     // 0xe600_0000: dedicated to app/strided_buffer_entry's raw-u32 table
     // and layout fixture; fixture mappings never unmap, so no other user may
     // share this hint.

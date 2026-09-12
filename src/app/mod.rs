@@ -81,6 +81,7 @@ pub mod framework_root_message_post;
 pub mod framework_root;
 pub mod liti_class_check;
 pub mod h264_decode_forwarder;
+pub mod handle_slot_18_predicate_and_state_is_two;
 pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
