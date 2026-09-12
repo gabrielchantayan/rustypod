@@ -59792,6 +59792,36 @@ functions:
       terminal head that must clear its bucket word, and an interior splice.
       There are no deliberate deviations.
 
+  - address: 0x0827398c
+    ghidra: FUN_0827398c
+    name: timing_wheel_insert_global
+    size: 20
+    sig: "void timing_wheel_insert_global(u32 *node)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: node
+      DAT_0827399c: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
+    notes: >-
+      Raw ARM has four instruction words at 0x0827398c..0x08273998 followed
+      by its separately linked literal-pool word 0x089cc7e0 at 0x0827399c,
+      for a true extent of 20 bytes; the preceding function ends at
+      0x08273988 and the next real function starts at 0x082739a0. Ghidra
+      reports only the 16 instruction bytes. Decoding every ARM B/BL word in
+      osos.dec finds exactly seven direct call sites (0x081448b0, 0x081448b8,
+      0x08144a88, 0x08144a90, 0x08145d84, 0x081460d4, and 0x08146308), all
+      plain unconditional bl; there are no predicated forms. Two additional
+      unconditional B tail callers at 0x081448c4 and 0x08144a9c use this
+      wrapper, and no raw DATA word references its address. The wrapper copies
+      node from r0 to r1, loads the live timing-wheel table pointer from global
+      0x089cc7e0 into r0, then unconditionally tail-branches to wheel_insert.
+      wheel_insert remains unported, so this port calls the established
+      ANIMATION_INIT_OPS volatile seam and scheduler_table host model. Host
+      testing records exactly one forwarding call for rank 12 (the last wheel
+      bucket), the live scheduler table, and the unmodified node links/flags.
+      There are no other deliberate deviations.
+
   - address: 0x082739e0
     ghidra: FUN_082739e0
     name: release_refcounted_value

@@ -269,6 +269,30 @@ pub unsafe extern "C" fn timing_wheel_remove_global(node: *mut u32) {
     timing_wheel_remove(scheduler_table().cast(), node);
 }
 
+/// `timing_wheel_insert_global` — original: `FUN_0827398c` @ 0x0827398c
+/// (20 bytes including its four-byte literal pool at 0x0827399c).
+///
+/// Ghidra reports only the four instruction words (16 bytes); the `ldr r0,
+/// [pc, #4]` requires the following pool word `0x089cc7e0`, and the next
+/// separately linked function begins at 0x082739a0. Decoding every ARM B/BL
+/// word in osos.dec finds seven direct call sites, all plain unconditional
+/// `bl`; there are no predicated forms. Two unconditional `b` tail callers
+/// at 0x081448c4 and 0x08144a9c take the same wrapper, and no raw DATA word
+/// references its address.
+///
+/// The wrapper receives a wheel node, loads the live scheduler-table pointer
+/// from global 0x089cc7e0, then tail-branches to the unported
+/// [`AnimationInitOps::wheel_insert`] callee. The port uses that established
+/// volatile seam and [`scheduler_table`]'s host model; there are no other
+/// deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timing_wheel_insert_global(node: *mut u32) {
+    let ops = animation_init_ops();
+    (ops.wheel_insert)(scheduler_table(), node.cast());
+}
+
+
 
 /// animation_init — original: `FUN_08166b88` @ 0x08166b88 (212 bytes
 /// including the two-word pool; 44 `bl` call sites, binary-verified — see
@@ -896,6 +920,38 @@ mod tests {
             assert_eq!((*next).wheel_prev, 0x1234_5678);
             assert_eq!((*node).flags, 0b110);
             table.write(0);
+        }
+    }
+
+    #[test]
+    fn global_wheel_insert_loads_scheduler_table_and_forwards_last_bucket_node() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some([node, _, _]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_insert_global");
+            return;
+        };
+        let table = scheduler_table().cast::<u32>();
+        unsafe {
+            for bucket in 0..TIMING_WHEEL_BUCKETS {
+                table.add(bucket).write(0);
+            }
+            // Rank 12 selects the final timing-wheel bucket in the callee.
+            wheel_node(node, 12, 0x1234_5678, 0x8765_4321, 0b110);
+            install_recording_ops();
+            reset_log();
+
+            timing_wheel_insert_global(node.cast());
+
+            let seen = log();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].kind, EVENT_WHEEL_INSERT);
+            assert_eq!(seen[0].argument, node as usize);
+            assert_eq!(seen[0].extra, table as usize);
+            assert_eq!(seen[0].rank_at_insert, Some(12));
+            assert_eq!((*node).wheel_prev, 0x1234_5678);
+            assert_eq!((*node).wheel_next, 0x8765_4321);
+            assert_eq!((*node).flags, 0b110);
         }
     }
 
