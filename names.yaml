@@ -5127,6 +5127,32 @@ functions:
       documented dispatch-slot deviation), trailing mov r0,#0 return
       matches.
 
+  - address: 0x08037d0c
+    ghidra: FUN_08037d0c
+    name: dcache_clean_invalidate_all
+    size: 52
+    sig: "u32 dcache_clean_invalidate_all(void)"
+    module: heap/dcache
+    status: ported
+    renames:
+      r0: set_index
+      r1: way_accumulator
+      r2: set_way_operand
+    notes: >-
+      Clean and invalidate ENTIRE D-cache by set/way, then drain the write
+      buffer. The RAM listing's inner sweep is r0 = 0, 0x20, ... < 0x1000
+      (128 sets) inside r1 = 0, 0x20000000, ... until wrap (8 ways), issuing
+      mcr p15,0,(r1|r0),c7,c14,2 1024 times; it then issues
+      mcr p15,0,0,c7,c10,4 and returns that zero. Raw ARM branch decoding
+      verified 8 unconditional bl call sites (0x08098ea8, 0x082435d0,
+      0x0824376c, 0x08296a08, 0x08296a48, 0x08296aac, 0x08369eb4,
+      0x0836a408) plus two bcs tail entries, not calls. The supplied
+      osos.dec has a relocation anomaly at this address: 0x08037d08 is
+      ldr pc,[pc,#-4] and its literal 0x081b0e50 starts a non-entry
+      instruction fragment, so no callee identity is inferred from it.
+      Port uses separately swappable clean+invalidate-set/way and drain
+      slots for host observation; target defaults issue the exact CP15 MCRs.
+
   # --- opaque resource-object field access ---
   - address: 0x0804482c
     ghidra: FUN_0804482c

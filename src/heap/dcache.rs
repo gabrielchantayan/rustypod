@@ -20,6 +20,11 @@
 //!   (`mcr p15,0,r0,c7,c10,4` with r0 = 0, which is also the return
 //!   value). Sole `bl` caller: FUN_0836a990 @ 0x0836aa94. Its sibling
 //!   @ 0x08037d0c is the same sweep with clean+invalidate (c7,c14,2).
+//! - `dcache_clean_invalidate_all` — original: `FUN_08037d0c` @
+//!   0x08037d0c (52 bytes; 8 direct `bl` call sites). The same complete
+//!   1024-line set/way sweep as `dcache_clean_all`, but its per-line MCR is
+//!   `c7,c14,2`, so every selected line is cleaned and invalidated before the
+//!   write-buffer drain.
 //! - `dcache_clean_invalidate` — original: `FUN_08044c10` @ 0x08044c10
 //!   (56 bytes; 22 `bl` call sites — DMA buffer prep across the ATA/USB/
 //!   LCD drivers, plus `pool_alloc`'s uncached path via the POOL_OPS
@@ -243,6 +248,38 @@ fn dcache_set_way_clean_op() -> DcacheSetWayFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DCACHE_SET_WAY_CLEAN_OP)) }
 }
 
+
+/// The set/way boundary for the clean+invalidate-all sibling: clean and
+/// invalidate the D-cache line selected by `operand`.
+///
+/// Firmware target: `mcr p15,0,{operand},c7,c14,2`, the original's
+/// clean+invalidate-by-set/way CP15 operation.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+unsafe extern "C" fn dcache_set_way_clean_invalidate(operand: u32) {
+    core::arch::asm!(
+        "mcr p15, 0, {0}, c7, c14, 2",
+        in(reg) operand,
+        options(nostack, preserves_flags),
+    );
+}
+
+/// Host stand-in for [`dcache_set_way_clean_invalidate`]. Host tests replace
+/// its slot to observe the fixed set/way operand sequence.
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+unsafe extern "C" fn dcache_set_way_clean_invalidate(_operand: u32) {}
+
+/// Active CP15 clean+invalidate-by-set/way operation. Kept separate from the
+/// clean-only slot because the two firmware functions are semantically
+/// distinct even though their sweep operands are identical.
+pub static mut DCACHE_SET_WAY_CLEAN_INVALIDATE_OP: DcacheSetWayFn =
+    dcache_set_way_clean_invalidate;
+
+/// Reads the clean+invalidate set/way slot without allowing the default to be
+/// folded into the caller.
+#[inline(always)]
+fn dcache_set_way_clean_invalidate_op() -> DcacheSetWayFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DCACHE_SET_WAY_CLEAN_INVALIDATE_OP)) }
+}
 /// The write-buffer drain the original runs after the sweep — not a
 /// standalone firmware function.
 ///
@@ -302,6 +339,46 @@ pub unsafe extern "C" fn dcache_clean_all() -> u32 {
         let mut index = 0u32;
         loop {
             set_way_clean(way | index);
+            index = index.wrapping_add(DCACHE_LINE_SIZE as u32);
+            if index == DCACHE_SET_SPAN {
+                break;
+            }
+        }
+        way = way.wrapping_add(DCACHE_WAY_STEP);
+        if way == 0 {
+            break;
+        }
+    }
+    drain_write_buffer(0);
+    0
+}
+
+/// dcache_clean_invalidate_all — original: `FUN_08037d0c` @ 0x08037d0c
+/// (52 bytes; verified 8 direct `bl` call sites).
+///
+/// Cleans and invalidates every D-cache line by set/way, then drains the
+/// write buffer and returns 0. It sweeps indices `0, 0x20, ... < 0x1000`
+/// across eight way accumulators (`0, 0x2000_0000, ...,
+/// 0xe000_0000`), issuing 1024 `mcr p15,0,(way | index),c7,c14,2`
+/// operations, followed by `mcr p15,0,0,c7,c10,4`. Raw branch decoding
+/// found the eight unconditional `bl` call sites plus two `bcs` entries;
+/// the latter are tail branches rather than calls.
+///
+/// Deliberate deviation: the two CP15 instructions dispatch through
+/// [`DCACHE_SET_WAY_CLEAN_INVALIDATE_OP`] and
+/// [`DCACHE_DRAIN_WRITE_BUFFER_OP`] so host tests can observe their otherwise
+/// unobservable effects. The target defaults retain the original MCR
+/// encodings.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dcache_clean_invalidate_all() -> u32 {
+    let set_way_clean_invalidate = dcache_set_way_clean_invalidate_op();
+    let drain_write_buffer = dcache_drain_write_buffer_op();
+    let mut way = 0u32;
+    loop {
+        let mut index = 0u32;
+        loop {
+            set_way_clean_invalidate(way | index);
             index = index.wrapping_add(DCACHE_LINE_SIZE as u32);
             if index == DCACHE_SET_SPAN {
                 break;
@@ -507,6 +584,7 @@ mod tests {
     /// Operation tags in the order the sweep records them.
     const SET_WAY_CLEAN: u32 = 0;
     const DRAIN_WRITE_BUFFER: u32 = 1;
+    const SET_WAY_CLEAN_INVALIDATE: u32 = 2;
 
     /// (tag, operand) pairs the recording mocks saw, in call order.
     static mut SWEEP_LOG: Vec<(u32, u32)> = Vec::new();
@@ -515,6 +593,10 @@ mod tests {
         (*core::ptr::addr_of_mut!(SWEEP_LOG)).push((SET_WAY_CLEAN, operand));
     }
 
+
+    unsafe extern "C" fn recording_set_way_clean_invalidate(operand: u32) {
+        (*core::ptr::addr_of_mut!(SWEEP_LOG)).push((SET_WAY_CLEAN_INVALIDATE, operand));
+    }
     unsafe extern "C" fn recording_drain_write_buffer(operand: u32) {
         (*core::ptr::addr_of_mut!(SWEEP_LOG)).push((DRAIN_WRITE_BUFFER, operand));
     }
@@ -539,6 +621,27 @@ mod tests {
         }
     }
 
+    /// Locks the clean+invalidate-all slots, installs recording mocks, and
+    /// clears the shared log.
+    fn mock_clean_invalidate_sweep_ops() -> MutexGuard<'static, ()> {
+        let guard = OP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            DCACHE_SET_WAY_CLEAN_INVALIDATE_OP = recording_set_way_clean_invalidate;
+            DCACHE_DRAIN_WRITE_BUFFER_OP = recording_drain_write_buffer;
+            (*core::ptr::addr_of_mut!(SWEEP_LOG)).clear();
+        }
+        guard
+    }
+
+    /// Restores the clean+invalidate-all CP15 slots before releasing the
+    /// serialization guard.
+    fn restore_clean_invalidate_sweep_ops() {
+        unsafe {
+            DCACHE_SET_WAY_CLEAN_INVALIDATE_OP = dcache_set_way_clean_invalidate;
+            DCACHE_DRAIN_WRITE_BUFFER_OP = dcache_drain_write_buffer;
+        }
+    }
+
     fn sweep_log() -> Vec<(u32, u32)> {
         unsafe { (*core::ptr::addr_of!(SWEEP_LOG)).clone() }
     }
@@ -546,13 +649,13 @@ mod tests {
     /// Reference sequence straight from the original's loops: inner
     /// index 0, 0x20, ... < 0x1000 ORed into an outer way accumulator
     /// stepped 0x2000_0000 until wrap, then one drain of 0.
-    fn expected_sweep() -> Vec<(u32, u32)> {
+    fn expected_sweep(set_way_tag: u32) -> Vec<(u32, u32)> {
         let mut expected = Vec::new();
         let mut way = 0u32;
         loop {
             let mut index = 0u32;
             loop {
-                expected.push((SET_WAY_CLEAN, way | index));
+                expected.push((set_way_tag, way | index));
                 index = index.wrapping_add(0x20);
                 if index == 0x1000 {
                     break;
@@ -572,7 +675,7 @@ mod tests {
         let _guard = mock_sweep_ops();
         let returned = unsafe { dcache_clean_all() };
         assert_eq!(returned, 0, "the drain's zero operand doubles as r0");
-        assert_eq!(sweep_log(), expected_sweep());
+        assert_eq!(sweep_log(), expected_sweep(SET_WAY_CLEAN));
         restore_sweep_ops();
     }
 
@@ -597,5 +700,20 @@ mod tests {
         restore_sweep_ops();
         // Nothing observable beyond returning 0 without effect.
         assert_eq!(unsafe { dcache_clean_all() }, 0);
+    }
+
+    #[test]
+    fn clean_invalidate_all_sweep_matches_original_operands_and_boundaries() {
+        let _guard = mock_clean_invalidate_sweep_ops();
+        let returned = unsafe { dcache_clean_invalidate_all() };
+        let log = sweep_log();
+        assert_eq!(returned, 0, "the trailing drain leaves r0 zero");
+        assert_eq!(log, expected_sweep(SET_WAY_CLEAN_INVALIDATE));
+        assert_eq!(log.len(), 8 * 128 + 1);
+        assert_eq!(log[0], (SET_WAY_CLEAN_INVALIDATE, 0));
+        assert_eq!(log[8 * 128 - 1], (SET_WAY_CLEAN_INVALIDATE, 0xe000_0fe0));
+        assert_eq!(log[128], (SET_WAY_CLEAN_INVALIDATE, 0x2000_0000));
+        assert_eq!(log[8 * 128], (DRAIN_WRITE_BUFFER, 0));
+        restore_clean_invalidate_sweep_ops();
     }
 }
