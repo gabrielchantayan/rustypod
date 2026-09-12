@@ -73333,3 +73333,31 @@ functions:
       stand-in to model target-width table pointers. Tests cover both table
       indices, all selector outcomes including sentinel 4, the zero-index
       guard, and the pre-dereference out-of-range guard.
+
+  # --- Opaque record-source item-count wrapper ---
+  - address: 0x082841f8
+    ghidra: FUN_082841f8
+    name: opaque_record_source_item_count
+    size: 28
+    sig: "i32 opaque_record_source_item_count(const OpaqueRecordSource *source)"
+    module: app/opaque_record_source_item_count
+    status: ported
+    renames:
+      param_1/r0: source
+      "source+0x00": provider
+      "source+0x1a": selector
+      FUN_081c1ee0: record_source_item_count
+    notes: >-
+      Raw osos.dec confirms Ghidra's 28-byte extent exactly: mov r1,r0;
+      ldr r0,[r0]; cmp r0,#0; ldrhne r1,[r1,#26]; mvneq r0,#0; bne
+      0x081c1ee0; bx lr from 0x082841f8 through 0x08284210, with the
+      separately linked next function beginning at 0x08284214. Complete ARM
+      B/BL-immediate decoding finds exactly seven direct inbound calls, all
+      unconditional plain bl at 0x081a1b68, 0x081a1bdc, 0x081a1d68,
+      0x081a1df0, 0x081a1e64, 0x081a1fd0, and 0x08284458; there are no
+      predicated calls or direct tail branches. A zero provider returns -1
+      without reading the selector. Otherwise the signed halfword at +0x1a is
+      passed to unported helper 0x081c1ee0 and its i32 result is returned
+      unchanged. Target builds call that fixed retailOS address; host tests
+      use a volatile dispatch seam. The concrete provider type remains
+      unrecovered, so the names record only the verified wrapper behavior.
