@@ -58977,6 +58977,32 @@ functions:
       with a dangling entry pointer, attribute bits 0x10/0x30/0x1f
       answering 1, and 0x00/0x08/0x20/0x0f answering 0.
 
+  - address: 0x082e2a68
+    ghidra: FUN_082e2a68
+    name: fat_dirent_is_volume_label
+    size: 20
+    sig: "u32 fat_dirent_is_volume_label(const FatDirentHandle *handle)"
+    module: fs/fat_dirent
+    status: ported
+    renames:
+      param_1/r0: handle
+      bVar1: attributes
+      bVar2: is_volume_label
+    notes: >-
+      FAT lookup-handle volume-label predicate. It follows the entry pointer
+      at handle +0x04, reads the FAT attribute byte at entry +0x0b, masks
+      ATTR_VOLUME_LABEL (0x08), and canonicalizes the result to 0 or 1.
+      The raw extent is exactly 20 bytes: 0x082e2a68..0x082e2a78 ends in bx
+      lr, and the separate next function begins with ldr r3,[pc,#72] at
+      0x082e2a7c. Every ARM B/BL word in osos.dec was decoded: 7 direct
+      call sites, all plain bl at 0x082e316c, 0x082e34fc, 0x082e35a8,
+      0x082e40ec, 0x082e4814, 0x082e63e4, and 0x082e6430; no predicated
+      calls or tail branches. It has no NULL guard. Unlike sibling
+      fat_dirent_is_directory, it ignores the handle's cached directory flag.
+      No deliberate deviations. Host tests cover the volume-label bit alone,
+      combined with directory/LFN/all-bit attribute values, and absent-bit
+      edge cases despite a nonzero cached directory flag.
+
   - address: 0x0836f91c
     ghidra: FUN_0836f91c
     name: sqlite_auth_check
