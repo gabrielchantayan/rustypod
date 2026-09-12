@@ -495,6 +495,9 @@ pub mod hints {
     // 0xec00_0000: dedicated to app/current_record_handle's raw-u32 record
     // array fixture; mappings never unmap, so no other user may share it.
     pub const CURRENT_RECORD_HANDLE: usize = 0xec00_0000;
+    // 0x9100_0000: dedicated to app/member_release's raw-u32 list-state
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const MEMBER_RELEASE_LIST_STATE: usize = 0x9100_0000;
 
 
 }

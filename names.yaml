@@ -69204,3 +69204,36 @@ functions:
       unported dispatcher body into this function. The Rust target-only seam
       calls that load address on device and a host recorder in tests; no
       identity was invented for its opaque vtable class.
+
+  # --- List cursor release under embedded mutex ---
+  - address: 0x081f0530
+    ghidra: FUN_081f0530
+    name: list_cursor_release
+    size: 48
+    sig: "void list_cursor_release(ListCursorReleaseState *state)"
+    module: cxx/list_cursor_release
+    status: ported
+    renames:
+      param_1/r0/r5: state
+      "state+0x50": mutex
+      "state+0x70": cursor_clear_suppressed
+      FUN_0807f5c4: mutex_lock (ported)
+      FUN_081f10a0: clear_active_cursor (unported seam)
+      FUN_0807f6a0: mutex_unlock (ported)
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent 0x081f0530..0x081f0560:
+      push {r4,r5,r6,lr}; preserve state in r5; add r4,state,#0x50; lock;
+      load the byte at state+0x70; when it is zero move state into r0 and
+      execute bleq FUN_081f10a0; then unlock through a tail branch. The next
+      separately linked function opens with push {r4-r9,sl,lr} at 0x081f0560.
+      Full-image ARM B/BL decoding finds exactly eight inbound direct calls:
+      one plain bl (0x0821435c), six blne (0x0822ac14, 0x0822b164,
+      0x0822b2f8, 0x0822b560, 0x0822b6e8, 0x0822b80c), and one bleq
+      (0x0822b660); there are no tail branches or aligned DATA words to this
+      entry. Thus callers commonly gate the release themselves, while the
+      callee itself has no state-pointer NULL guard. It always locks and
+      unlocks; only the active-cursor clear is conditional. The direct mutex
+      calls use their existing ports. FUN_081f10a0 is unported, so a volatile
+      target-address seam retains the stock call on device and lets host tests
+      observe the zero/nonzero flag behavior. The stock tail branch to unlock
+      becomes a normal Rust call after the conditional clear returns.
