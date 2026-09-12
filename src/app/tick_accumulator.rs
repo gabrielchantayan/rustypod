@@ -262,6 +262,34 @@ pub unsafe extern "C" fn tick_accumulator_step(
     (*accumulator).update_result
 }
 
+/// tick_accumulator_rejects_rate — original: `FUN_081bb410` @ `0x081bb410`
+/// (**40 bytes**, `0x081bb410..0x081bb438`; the next separately linked
+/// function begins at `0x081bb438`).
+///
+/// **8 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`.
+///
+/// Rejects a measured rate (returns 1) unless scaling is enabled, the rate is
+/// nonzero, and it is no greater than `upper_input_bound`; returns 0 for that
+/// accepted interval. The unconditional byte load of `mode_enabled` means
+/// this deliberately has no NULL guard. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_accumulator_rejects_rate(
+    accumulator: *const TickAccumulator,
+    measured_rate: u32,
+) -> u32 {
+    let mode_enabled = core::ptr::read_volatile(core::ptr::addr_of!((*accumulator).mode_enabled));
+    if mode_enabled != 0
+        && measured_rate != 0
+        && measured_rate <= (*accumulator).upper_input_bound
+    {
+        0
+    } else {
+        1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -455,6 +483,27 @@ mod tests {
             assert_eq!(accumulator.update_result, 0);
             assert_eq!(accumulator.last_tick_ms, u32::MAX);
             assert_eq!(result, 0);
+        }
+    }
+
+    #[test]
+    fn rejects_disabled_zero_and_out_of_range_rates() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator.mode_enabled = 1;
+            accumulator.upper_input_bound = 20_000;
+
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), 0), 1);
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), 1), 0);
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), 20_000), 0);
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), 20_001), 1);
+
+            accumulator.mode_enabled = 0;
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), 1), 1);
+
+            accumulator.mode_enabled = 2;
+            accumulator.upper_input_bound = u32::MAX;
+            assert_eq!(tick_accumulator_rejects_rate(addr_of!(accumulator), u32::MAX), 0);
         }
     }
 }
