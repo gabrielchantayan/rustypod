@@ -250,6 +250,25 @@ pub unsafe extern "C" fn timing_wheel_remove(table: *mut u32, node: *mut u32) {
     }
     *flags &= !1;
 }
+/// `timing_wheel_remove_global` — original: `FUN_08273a2c` @ 0x08273a2c
+/// (20 bytes including its four-byte literal pool at 0x08273a3c).
+///
+/// Ghidra reports only the four instruction words (16 bytes); the `ldr r0,
+/// [pc, #4]` requires the following pool word `0x089cc7e0`, and the next
+/// separately linked function begins at 0x08273a40. Decoding every ARM B/BL
+/// word in osos.dec finds eight direct call sites, all plain unconditional
+/// `bl`; there are no predicated forms, tail callers, or raw DATA-word
+/// references. The ARM wrapper receives a wheel node, loads the live
+/// scheduler-table pointer from that global, and tail-branches to
+/// [`timing_wheel_remove`]. This port makes the same call through
+/// [`scheduler_table`], whose existing host model substitutes a house-static
+/// table; there are no further deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timing_wheel_remove_global(node: *mut u32) {
+    timing_wheel_remove(scheduler_table().cast(), node);
+}
+
 
 /// animation_init — original: `FUN_08166b88` @ 0x08166b88 (212 bytes
 /// including the two-word pool; 44 `bl` call sites, binary-verified — see
@@ -855,6 +874,31 @@ mod tests {
             assert_eq!((*node).flags, 0b110);
         }
     }
+    #[test]
+    fn global_wheel_remove_loads_the_scheduler_table() {
+        let _lock = take_lock();
+        let Some([node, next, _]) = wheel_remove_fixture() else {
+            note_missing_u32_fixture("app::timing_wheel_remove_global");
+            return;
+        };
+        let table = scheduler_table().cast::<u32>();
+        unsafe {
+            for bucket in 0..TIMING_WHEEL_BUCKETS {
+                table.add(bucket).write(0);
+            }
+            wheel_node(node, 1, 0x1234_5678, next as usize as u32, 0b111);
+            wheel_node(next, 1, node as usize as u32, 0, 0b111);
+            table.write(node as usize as u32);
+
+            timing_wheel_remove_global(node.cast());
+
+            assert_eq!(table.read(), next as usize as u32);
+            assert_eq!((*next).wheel_prev, 0x1234_5678);
+            assert_eq!((*node).flags, 0b110);
+            table.write(0);
+        }
+    }
+
 
     #[test]
     fn it_returns_the_storage_it_was_given() {
