@@ -70654,3 +70654,36 @@ functions:
       cannot contain host function pointers. Tests cover multi-entry drain
       ordering, zero callback suppression, mode-0 argument delivery, and the
       zero-depth underflow that suppresses drain and callback traversal.
+
+
+  - address: 0x080caab4
+    ghidra: FUN_080caab4
+    name: format_with_descriptor
+    size: 104
+    sig: "int format_with_descriptor(char *destination, u32 capacity, const char *format, const void *arguments, const void *context)"
+    module: printf/format_with_descriptor
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: capacity
+      param_3/r2: format
+      param_4/r3: arguments
+      param_5/[sp]: context
+      local_36_byte_descriptor: descriptor
+      FUN_08075ff0: build_format_descriptor
+      FUN_080ac954: descriptor_format_core
+    notes: >-
+      Raw osos.dec confirms the 104-byte extent 0x080caab4..0x080cab1c; the
+      next separately linked function begins at 0x080cab1c. Decoding every
+      aligned ARM B/BL immediate finds eight inbound direct callers, all
+      unconditional plain bl at 0x080dac00, 0x080dac2c, 0x081095a8,
+      0x0810a4a8, 0x0812815c, 0x08175490, 0x081e92b8, and 0x08299e48; no
+      predicated forms or tail branches target this entry. It asks unported
+      0x08075ff0 to normalize arguments into a nine-word descriptor, then
+      invokes unported 0x080ac954 with destination, capacity, format,
+      descriptor, and context. A nonzero formatter result passes through;
+      otherwise it returns zero and clears destination[0] if capacity is
+      nonzero. Target dispatch slots call those verified raw addresses; host
+      tests install recording workers to cover forwarding, formatter failure,
+      descriptor-build failure, and zero capacity. The helper names describe
+      observed calling roles only; no stronger callee identity is inferred.
