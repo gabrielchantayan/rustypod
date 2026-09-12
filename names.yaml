@@ -46820,7 +46820,7 @@ functions:
       param_3: rect_a
       param_4: rect_b
       param_5: alpha (stack-passed; every sampled caller passes 0xff)
-      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam, no-op default)
+      FUN_082993b4: bitmap_ensure_loaded (ported direct lazy BMap loader; parser alone uses BITMAP_HOOKS.parse)
       FUN_08262bdc: bitmap_draw_helper (rect-offsetting draw helper; BITMAP_HOOKS.draw seam, no-op default)
     notes: >-
       42 bl call sites, all plain bl (no predicated forms), no tail
@@ -46873,7 +46873,7 @@ functions:
     status: ported
     renames:
       param_1: wrapper
-      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam)
+      FUN_082993b4: bitmap_ensure_loaded (ported direct lazy BMap loader)
     notes: >-
       Extent binary-verified against the next function entry at
       0x0829920c: push {r4,lr}; preserve wrapper; call the lazy loader;
@@ -46887,13 +46887,12 @@ functions:
       0x0829xxxx function pointers, so this accessor is also vtable
       dispatched. Algorithm: call FUN_082993b4(wrapper) first and
       unconditionally; return null when its +0x08 loaded flag remains
-      clear, otherwise return the parsed bitmap pointer at +0xc4. The
-      port reuses the existing BITMAP_HOOKS.ensure_loaded seam rather than
-      introducing a second loader stub. Deliberate host-only deviation:
-      the target's 4-byte +0xc4 pointer is parked at +0xc8 for 64-bit
-      fixture alignment; ARM reads the literal +0xc4 field. Host tests
-      cover unloaded null return, a non-1 nonzero loaded flag, and a loader
-      that resolves the wrapper during this call.
+      clear, otherwise return the parsed bitmap pointer at +0xc4.
+      The loader is now called directly; only its unported bitmap parser
+      FUN_082645a0 uses the BITMAP_HOOKS.parse seam. Deliberate host-only
+      deviation: the target's 4-byte +0xc4 pointer naturally lands at +0xc8
+      in the 64-bit #[repr(C)] fixture; ARM reads the literal +0xc4 field.
+      Host tests cover unloaded null return and a non-1 nonzero loaded flag.
   - address: 0x08299368
     ghidra: FUN_08299368
     name: bitmap_query_bounds
@@ -46907,7 +46906,7 @@ functions:
       param_3: arg3
       param_4: arg4
       local_20: bounds (the r0..r3 spill slots doubling as the query block)
-      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam, no-op default)
+      FUN_082993b4: bitmap_ensure_loaded (ported direct lazy BMap loader; parser uses BITMAP_HOOKS.parse)
       FUN_082a1dbc: bitmap_object_read_bounds (parsed object's direct bounds getter)
       DAT_08299400: 'the "BMap" kind literal (0x424d6170 big-endian, ResourceKind::BITMAP in app/resource_chain)'
     notes: >-
@@ -46938,10 +46937,10 @@ functions:
       rect) and FUN_08299404 run the same loader-then-flag-check shape.
       Deviations - arg3/arg4 exist only because the original spills all
       four argument registers into the block; FUN_082a1dbc overwrites
-      all four words, making them unobservable. Only the lazy loader
-      remains on the BITMAP_HOOKS seam (documented no-op default, NOT
-      hook-ready - the stock loader must be ported or the wrapper
-      pre-loaded before the query path runs on target). +0xc4 is read
+      four words, making them unobservable. Only the bitmap parser
+      FUN_082645a0 remains on the BITMAP_HOOKS.parse seam (documented
+      pass-through default, NOT hook-ready for a real bitmap resource).
+      +0xc4 is read
       as a native-width pointer; 0xc4 is not eight-aligned, so on
       64-bit hosts the field is parked at 0xc8 in the wrapper's
       unaccounted tail (the drivers/display_layer.rs parked-pointer
@@ -46949,6 +46948,46 @@ functions:
       expected): same spill-block / loader-call / flag-test /
       zero-or-query structure; the crate fp frame and LLVM outlining
       the zero path account for the diff.
+  - address: 0x082993b4
+    ghidra: FUN_082993b4
+    name: bitmap_ensure_loaded
+    size: 80
+    sig: "void bitmap_ensure_loaded(u8 *wrapper)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1/r0: wrapper
+      wrapper_plus_0x00: resource_head
+      wrapper_plus_0x04: resource_id
+      wrapper_plus_0x08: loaded
+      wrapper_plus_0x0c: parser_args
+      wrapper_plus_0xc4: parsed_bitmap
+      DAT_08299400: '"BMap" resource kind (0x424d6170 big-endian)'
+      FUN_0827216c: resource_chain_find
+      FUN_082aadd4: operator_new
+      FUN_082645a0: bitmap_resource_parse (BITMAP_HOOKS.parse seam)
+    notes: >-
+      Raw ARM disassembly confirms a true 80-byte extent: 76 bytes of code
+      from 0x082993b4 through 0x082993fc, followed by the 0x424d6170
+      ("BMap") literal at 0x08299400; the next distinct function starts
+      with push {r4,r5,r6,lr} at 0x08299404. Decoding every ARM B/BL word
+      in osos.dec finds exactly eight direct incoming calls, all
+      unconditional bl (0x082991bc, 0x082991f8, 0x08299378, 0x08299418,
+      0x082994b8, 0x0829952c, 0x082995b4, 0x0829963c), with zero
+      predicated calls and no direct tail branch; no aligned raw data word
+      references this address. If wrapper.loaded is nonzero, return. Else
+      look up (resource_head, "BMap", resource_id); a null result leaves
+      loaded clear. On success allocate 0x44 bytes via operator_new, call
+      FUN_082645a0(allocation, wrapper+0x0c, resource) without an
+      allocation-null check, store its return at +0xc4, then store 1 at
+      +0x08. The resource lookup and allocator call their existing direct
+      ports. Deliberate deviation: the unported parser remains a volatile
+      BITMAP_HOOKS.parse dispatch whose default passes the allocation through;
+      it preserves this loader's store and flag flow but cannot initialize a
+      real bitmap until FUN_082645a0 is ported. #[repr(C)] named fields retain
+      the target layout and avoid host pointer/u32 overlap. Host tests cover
+      failed lookup, a successful lookup's BMap kind/id/allocation/parser
+      arguments, and the already-loaded no-op path.
   # --- Tagged payload signed-field sum ---
   - address: 0x082a1d7c
     ghidra: FUN_082a1d7c
