@@ -69571,3 +69571,34 @@ functions:
       this function has no NULL guard. The Rust port directly volatile-reads
       service+0xcb8 rather than materializing the unobservable stack
       out-parameter call, then directly uses the existing lock-service ports.
+
+  - address: 0x0818a0c4
+    ghidra: FUN_0818a0c4
+    name: interface_guard_base_construct
+    size: 56
+    sig: "InterfaceGuard *interface_guard_base_construct(InterfaceGuard *this, u32 base_hint, u32 base_flag)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: base_hint (live through the resolver call)
+      param_3/r2: base_flag (stored as its low byte)
+      DAT_0818a0f8: INTERFACE_GUARD_BASE_VTABLE_ADDRESS (0x0898994c)
+      FUN_0818a06c: "INTERFACE_GUARD_INTERFACE_RESOLVE seam (unported resolver)"
+    notes: >-
+      Raw ARM establishes 52 instruction bytes at 0x0818a0c4..0x0818a0f8
+      followed by the 4-byte vtable literal 0x0898994c at 0x0818a0f8; the
+      next distinct function starts at 0x0818a0fc, so the true extent is 56
+      bytes. It stores that vtable at this+0, calls 0x0818a06c with this in
+      r0 and base_hint still live in r1, stores its r0 result at this+4,
+      clears byte this+8, stores the low byte of base_flag at this+9, and
+      returns this. Full-image aligned ARM B/BL decoding finds 8 inbound
+      calls, all unconditional bl and no predicated forms: 0x080758f0,
+      0x080ef4c4, 0x081ef8a4, 0x081ef950, 0x0820276c, 0x08206e48,
+      0x08278de0, and 0x08278ea8. There is no NULL guard. The resolver is
+      separately linked and unported, so the Rust port retains it as a
+      read-volatile dispatch seam: device builds call 0x0818a06c directly;
+      host tests install a recorder and prove r1 forwarding, resolver-result
+      storage, low-byte truncation, word-boundary preservation, and this
+      return. Both existing transition-addon constructors now call this port
+      directly, removing their stale 0x0818a0c4 constructor seam.

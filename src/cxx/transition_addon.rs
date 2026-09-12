@@ -74,7 +74,7 @@ use super::string_object::{
     construct_from_cstr_op, string_object_destroy_veneer, StringObject,
 };
 use crate::app::facade_for_selector::facade_for_selector;
-use crate::app::path_probe::InterfaceGuard;
+use crate::app::path_probe::{interface_guard_base_construct, InterfaceGuard};
 use crate::heap::block_deque::deque_seg_capacity;
 
 /// Literal-pool word at 0x08278f94, installed before derived cleanup.
@@ -239,20 +239,15 @@ pub unsafe extern "C" fn silver_controller_transition_addon_destroy(
     this
 }
 
-/// Dispatch boundaries for the seven unresolved calls in
+/// Dispatch boundaries for the six unresolved calls in
 /// [`silver_controller_transition_addon_construct`]. Two more callees are
-/// already ported and called directly: the facade accessor 0x0818a0bc
-/// ([`facade_for_selector`]) and the alignment query 0x081a81bc (a
-/// byte-identical copy of [`deque_seg_capacity`], which the 0x083d9fc0
-/// ledger entry sanctions hooking any copy to).
+/// already ported and called directly: the common interface-guard base
+/// constructor 0x0818a0c4 ([`interface_guard_base_construct`]), the facade
+/// accessor 0x0818a0bc ([`facade_for_selector`]), and the alignment query
+/// 0x081a81bc (a byte-identical copy of [`deque_seg_capacity`], which the
+/// 0x083d9fc0 ledger entry sanctions hooking any copy to).
 #[derive(Clone, Copy)]
 pub struct TransitionAddonConstructOps {
-    /// `FUN_0818a0c4`: the base transition-addon constructor. Plants the
-    /// base vtable 0x0898994c at +0x00, resolves the interface word at
-    /// +0x04 through the guard accessor 0x0818a06c (which forwards `hint`
-    /// to the resolver 0x0814a130), zeroes the +0x08 byte and stores the
-    /// inverted flag at +0x09. Returns `this`.
-    pub base_construct: unsafe extern "C" fn(this: *mut u8, hint: u32, flag: u32) -> *mut u8,
     /// `FUN_082792b4`: the embedded string member's construction veneer —
     /// chains to the StringObject copy constructor @ 0x082773e0 on
     /// `member` with `source`, then plants the derived string vtable
@@ -290,20 +285,6 @@ pub struct TransitionAddonConstructOps {
     pub register_with_owner: unsafe extern "C" fn(this: *mut u8),
 }
 
-/// Default for the unresolved base constructor @ 0x0818a0c4: reproduces
-/// every store of the decoded body in the original's order — base vtable
-/// at +0x00, interface word at +0x04, zero byte at +0x08, flag byte at
-/// +0x09 — with the unresolved interface-resolution chain (0x0818a06c →
-/// 0x0814a130 → 0x081e1f64) modeled as a zero word. Returns `this`, the
-/// ADS constructor convention.
-unsafe extern "C" fn base_construct_unported(this: *mut u8, _hint: u32, flag: u32) -> *mut u8 {
-    write_u32_unaligned(this, TRANSITION_ADDON_BASE_VTABLE_ADDRESS as u32);
-    write_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET), 0);
-    *this.add(0x08) = 0;
-    *this.add(0x09) = flag as u8;
-    this
-}
-
 /// Default for the unresolved string-member veneer @ 0x082792b4: the
 /// empty-construction prefix (the string_object.rs
 /// `STRING_OBJECT_COPY_CONSTRUCT` stub precedent) — derived string vtable
@@ -320,10 +301,10 @@ unsafe extern "C" fn string_member_construct_unported(
 
 /// Default for the unresolved owner capacity query @ 0x08296efc: the
 /// decoded body's own `moveq r0, #0x200` fallback for a NULL interface
-/// word, reproduced without dereferencing the owner (the default base
-/// boundary models an unresolved interface, so there is nothing valid to
-/// dispatch on). The live-interface vtable slot +0x2c call is not
-/// reproduced.
+/// word, reproduced without dereferencing the owner (the common base
+/// constructor's host resolver boundary supplies that NULL word by default,
+/// so there is nothing valid to dispatch on). The live-interface vtable
+/// slot +0x2c call is not reproduced.
 unsafe extern "C" fn owner_capacity_query_unported(_owner: *mut u8) -> u32 {
     0x200
 }
@@ -377,7 +358,6 @@ unsafe extern "C" fn register_with_owner_unported(_this: *mut u8) {}
 /// Wired defaults for the unresolved construction boundaries.
 pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
     TransitionAddonConstructOps {
-        base_construct: base_construct_unported,
         string_member_construct: string_member_construct_unported,
         owner_capacity_query: owner_capacity_query_unported,
         transfer_quantum: transfer_quantum_unported,
@@ -392,12 +372,6 @@ pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
 pub static mut TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
     DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS;
 
-#[inline(always)]
-unsafe fn base_construct_op() -> unsafe extern "C" fn(*mut u8, u32, u32) -> *mut u8 {
-    core::ptr::read_volatile(core::ptr::addr_of!(
-        TRANSITION_ADDON_CONSTRUCT_OPS.base_construct
-    ))
-}
 
 #[inline(always)]
 unsafe fn string_member_construct_op() -> unsafe extern "C" fn(*mut u8, *const u8) -> *mut u8 {
@@ -490,20 +464,21 @@ unsafe fn register_with_owner_op() -> unsafe extern "C" fn(*mut u8) {
 /// the interface resolver 0x0814a130 through the base constructor's guard
 /// accessor 0x0818a06c (r1 is live there); its semantics are unresolved.
 ///
-/// Deviations: the seven unresolved callees cross
+/// Deviations: six remaining helper calls cross
 /// [`TRANSITION_ADDON_CONSTRUCT_OPS`] dispatch slots — see each default's
-/// documentation; the scale-class default is the faithful decoded body,
-/// the base/string/vector defaults reproduce their decoded stores, the
-/// capacity default reproduces the NULL-interface 0x200 fallback, and the
-/// quantum/registration defaults are inert. The two already-ported callees
-/// are called directly: [`facade_for_selector`] (its `ldr r0,[r0,#4]`
-/// reads the owner/interface word this constructor just stored) and
-/// [`deque_seg_capacity`], the byte-identical ported body of the 0x081a81bc
-/// alignment query. Consequently this constructor is **not hook-ready**
-/// until the five non-faithful boundaries are ported and wired in. All
-/// object stores are 32-bit like the original's `str`s; on a 64-bit host
-/// pointer-valued words keep their low half (no host fixture needs the
-/// full width — the recording mocks receive `this` directly).
+/// documentation; the scale-class default is the faithful decoded body, the
+/// string/vector defaults reproduce their decoded stores, the capacity
+/// default reproduces the NULL-interface 0x200 fallback, and the
+/// quantum/registration defaults are inert. Three already-ported callees
+/// are called directly: [`interface_guard_base_construct`],
+/// [`facade_for_selector`] (its `ldr r0,[r0,#4]` reads the owner/interface
+/// word this constructor just stored), and [`deque_seg_capacity`], the
+/// byte-identical ported body of the 0x081a81bc alignment query. Consequently
+/// this constructor is **not hook-ready** until the five non-faithful
+/// boundaries are ported and wired in. All object stores are 32-bit like the
+/// original's `str`s; on a 64-bit host pointer-valued words keep their low
+/// half (no host fixture needs the full width — the recording mocks receive
+/// `this` directly).
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn silver_controller_transition_addon_construct(
@@ -515,7 +490,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
     scale_arg: u32,
     context: u32,
 ) -> *mut u8 {
-    let base = base_construct_op()(this, base_hint, flag ^ 1);
+    let base = interface_guard_base_construct(this.cast(), base_hint, flag ^ 1).cast();
     write_u32_unaligned(base, TRANSITION_ADDON_VTABLE_ADDRESS as u32);
 
     let string = string_member_construct_op()(
@@ -604,29 +579,28 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
 /// the directory-entry-index sentinel [`file_has_directory_entry`] @
 /// 0x082a548c tests).
 ///
-/// Deviations: the six unresolved callees cross the SAME
+/// Deviations: five unported helpers cross the same
 /// [`TRANSITION_ADDON_CONSTRUCT_OPS`] dispatch slots as the 0x08278e8c
 /// overload (its `string_member_construct` slot is unused here), and the
-/// from-cstr string construction crosses
-/// `STRING_OBJECT_CONSTRUCT_FROM_CSTR` (the string_object.rs
-/// `STRING_OBJECT_COPY_CONSTRUCT` pattern) whose wired default IS the
-/// ported [`string_object_construct_from_cstr`]. That slot exists because
-/// this constructor calls BOTH the string constructor on the +0x0c member
-/// AND [`facade_for_selector`] on the object base, and the two
+/// from-cstr string construction crosses `STRING_OBJECT_CONSTRUCT_FROM_CSTR`
+/// (the string_object.rs `STRING_OBJECT_COPY_CONSTRUCT` pattern) whose wired
+/// default IS the ported [`string_object_construct_from_cstr`]. That slot
+/// exists because this constructor calls BOTH the string constructor on the
+/// +0x0c member AND [`facade_for_selector`] on the object base, and the two
 /// native-widened host dereferences demand incompatible fixture alignments
 /// on 64-bit hosts: `StringObject` at this+0x0c needs this ≡ 4 mod 8 while
 /// the facade guard read at this+0x00 needs this ≡ 0 mod 8, so no host
 /// fixture can run both real callees in one call; host tests install
 /// recording mocks on the string slot (the real callee's own behavior is
-/// pinned by the string_object.rs tests). [`facade_for_selector`] and
-/// [`deque_seg_capacity`] (the byte-identical 0x081a81bc alignment query)
-/// are called directly. Consequently this constructor is **not hook-ready**
-/// until the five non-faithful boundaries are ported and wired in, and
-/// ft/system.rs's `FT_PLATFORM_FILE_CTOR` slot deliberately keeps its
-/// fail-closed default. All object stores are 32-bit like the original's
-/// `str`s; on a 64-bit host the string member's native payload word
-/// overlaps the +0x14 flag byte (the crate's face-word artifact — no
-/// construct-then-destroy round trip is possible, same as the sibling
+/// pinned by the string_object.rs tests). [`interface_guard_base_construct`],
+/// [`facade_for_selector`], and [`deque_seg_capacity`] (the byte-identical
+/// 0x081a81bc alignment query) are called directly. Consequently this
+/// constructor is **not hook-ready** until the five non-faithful boundaries
+/// are ported and wired in, and ft/system.rs's `FT_PLATFORM_FILE_CTOR` slot
+/// deliberately keeps its fail-closed default. All object stores are 32-bit
+/// like the original's `str`s; on a 64-bit host the string member's native
+/// payload word overlaps the +0x14 flag byte (the crate's face-word artifact
+/// — no construct-then-destroy round trip is possible, same as the sibling
 /// overload).
 ///
 /// [`file_has_directory_entry`]: crate::codegen::file_directory_entry::file_has_directory_entry
@@ -641,7 +615,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
     scale_arg: u32,
     context: u32,
 ) -> *mut u8 {
-    let base = base_construct_op()(this, base_hint, flag ^ 1);
+    let base = interface_guard_base_construct(this.cast(), base_hint, flag ^ 1).cast();
     write_u32_unaligned(base, TRANSITION_ADDON_VTABLE_ADDRESS as u32);
 
     let string = construct_from_cstr_op()(
@@ -843,12 +817,12 @@ mod tests {
 
     use crate::app::facade_for_selector::{tests::FACADE_TEST_LOCK, FACADE_REGISTRY_WALK};
     use crate::app::facade_registry_walk::{facade_registry_walk, RegistryFacade, RegistryNode};
+    use crate::app::path_probe::tests::PATH_PROBE_TEST_LOCK;
 
     static CONSTRUCT_OPS_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum ConstructCall {
-        Base { this: usize, hint: u32, flag: u32, prior_vtable: u32 },
         StringMember { member: usize, source: usize },
         Capacity { owner: u32 },
         Quantum { this: usize, arg: u32, context_at_call: u32 },
@@ -862,22 +836,6 @@ mod tests {
     static mut STRING_RETURN_SHIFT: usize = 0;
     static mut VECTOR_RETURN_SHIFT: usize = 0;
     static mut FAKE_FACADE: [u8; 16] = [0; 16];
-
-    unsafe extern "C" fn recording_base_construct(
-        this: *mut u8,
-        hint: u32,
-        flag: u32,
-    ) -> *mut u8 {
-        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::Base {
-            this: this as usize,
-            hint,
-            flag,
-            // The constructor plants the derived vtable only after this
-            // boundary returns, so the recorder still sees the pre-fill.
-            prior_vtable: read_u32_unaligned(this),
-        });
-        this
-    }
 
     unsafe extern "C" fn recording_string_member_construct(
         member: *mut u8,
@@ -943,6 +901,7 @@ mod tests {
     struct ConstructOpsGuard {
         _lock: MutexGuard<'static, ()>,
         _facade_lock: MutexGuard<'static, ()>,
+        _path_probe_lock: MutexGuard<'static, ()>,
     }
 
     impl Drop for ConstructOpsGuard {
@@ -957,12 +916,15 @@ mod tests {
     }
 
     fn construct_guard(ops: TransitionAddonConstructOps) -> ConstructOpsGuard {
-        // Lock order is construct-then-facade everywhere; the facade tests
-        // never take the construct lock, so no cycle is possible.
+        // Lock order is construct, facade, then path-probe. The sibling
+        // suites take none of the earlier locks, so no cycle is possible.
         let lock = CONSTRUCT_OPS_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let facade_lock = FACADE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let path_probe_lock = PATH_PROBE_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         unsafe {
@@ -970,7 +932,11 @@ mod tests {
             core::ptr::addr_of_mut!(TRANSITION_ADDON_CONSTRUCT_OPS).write_volatile(ops);
             core::ptr::addr_of_mut!(FACADE_REGISTRY_WALK).write_volatile(recording_walk);
         }
-        ConstructOpsGuard { _lock: lock, _facade_lock: facade_lock }
+        ConstructOpsGuard {
+            _lock: lock,
+            _facade_lock: facade_lock,
+            _path_probe_lock: path_probe_lock,
+        }
     }
 
     fn install_construct_recorders(string_shift: usize, vector_shift: usize) -> ConstructOpsGuard {
@@ -979,7 +945,6 @@ mod tests {
             core::ptr::addr_of_mut!(VECTOR_RETURN_SHIFT).write(vector_shift);
         }
         construct_guard(TransitionAddonConstructOps {
-            base_construct: recording_base_construct,
             string_member_construct: recording_string_member_construct,
             owner_capacity_query: recording_owner_capacity_query,
             transfer_quantum: recording_transfer_quantum,
@@ -1029,12 +994,6 @@ mod tests {
         assert_eq!(
             construct_calls(),
             vec![
-                ConstructCall::Base {
-                    this: this as usize,
-                    hint: 0xbabe,
-                    flag: 0, // the constructor inverts the flag for the base
-                    prior_vtable: 0xa5a5_a5a5,
-                },
                 ConstructCall::StringMember {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
@@ -1060,7 +1019,7 @@ mod tests {
             ]
         );
         unsafe {
-            // The derived vtable overwrites whatever the base boundary left.
+            // The derived vtable overwrites the common base's vtable.
             assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
             // The raw flag byte lands at the string member's +8 (this'+0x14).
             assert_eq!(*this.add(0x2c + 8), 1);
@@ -1269,12 +1228,6 @@ mod tests {
         assert_eq!(
             construct_calls(),
             vec![
-                ConstructCall::Base {
-                    this: this as usize,
-                    hint: 0xbabe,
-                    flag: 0, // the constructor inverts the flag for the base
-                    prior_vtable: 0xa5a5_a5a5,
-                },
                 ConstructCall::StringMember {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
@@ -1300,7 +1253,7 @@ mod tests {
             ]
         );
         unsafe {
-            // The derived vtable overwrites whatever the base boundary left.
+            // The derived vtable overwrites the common base's vtable.
             assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
             // THIS constructor plants the derived string vtable at the
             // shifted member's +0x00 (the 0x082792b4 veneer does it in the

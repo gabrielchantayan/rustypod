@@ -99,14 +99,14 @@
 //! - The constructor is now [`path_probe_guard_construct`]. Its caller seam
 //!   remains only to keep the host-only fail-closed path-probe default and
 //!   recording tests possible; device builds route it to this port. Its
-//!   unresolved base constructor @ 0x0818a0c4 rides
-//!   [`PATH_PROBE_GUARD_BASE_CONSTRUCT`] (a fixed firmware call on device).
-//!   The facade accessor rides [`PATH_PROBE_FACADE_FETCH`] (read_volatile
-//!   dispatch; host tests install recording mocks). On `target_os = "none"`
-//!   its default calls the fixed retailOS address. The guard destructor seam
-//!   reaches [`path_probe_guard_destroy`] on device and remains a no-op host
-//!   boundary because the host default constructor does not establish a real
-//!   counted lock.
+//!   shared base constructor [`interface_guard_base_construct`] is ported;
+//!   only the separately linked interface resolver @ 0x0818a06c remains a
+//!   device boundary. The facade accessor rides [`PATH_PROBE_FACADE_FETCH`]
+//!   (read_volatile dispatch; host tests install recording mocks). On
+//!   `target_os = "none"` its default calls the fixed retailOS address. The
+//!   guard destructor seam reaches [`path_probe_guard_destroy`] on device and
+//!   remains a no-op host boundary because the host default constructor does
+//!   not establish a real counted lock.
 
 use core::mem::MaybeUninit;
 
@@ -122,9 +122,15 @@ use crate::kernel::sync_mutex::mutex_lock_counted;
 /// @ 0x080f4ae4). Kept as an identity constant for the boundary
 /// default.
 pub const GUARD_CTOR_ADDRESS: usize = 0x0820_6e40;
-/// Firmware load address of the shared transition-addon base constructor
-/// called first by this guard constructor (`bl` @ 0x08206e48).
+/// Firmware load address of the common interface-guard base constructor
+/// called first by the guard constructor (`bl` @ 0x08206e48).
 pub const GUARD_BASE_CONSTRUCT_ADDRESS: usize = 0x0818_a0c4;
+/// Firmware load address of the interface resolver called by the common
+/// base constructor (`bl` @ 0x0818a0dc).
+pub const GUARD_INTERFACE_RESOLVE_ADDRESS: usize = 0x0818_a06c;
+/// Literal-pool word at 0x0818a0f8, installed by the common base
+/// constructor.
+pub const INTERFACE_GUARD_BASE_VTABLE_ADDRESS: u32 = 0x0898_994c;
 
 /// Firmware load address of the facade accessor veneer (the `bl` @
 /// 0x080f4af0): `ldr r0, [r0, #0x4]; b 0x08296ec0`.
@@ -210,47 +216,44 @@ pub type PathFacadeSlot5c =
 pub type GuardConstruct =
     unsafe extern "C" fn(this: *mut InterfaceGuard, base_hint: u32) -> *mut InterfaceGuard;
 
-/// The unresolved shared base constructor @ 0x0818a0c4. It returns the
-/// storage it was given after initializing the vtable, interface word, and
-/// two flag bytes; the identity is not ported yet, so it is a boundary.
-pub type GuardBaseConstruct = unsafe extern "C" fn(
+/// The interface resolver @ 0x0818a06c. It receives the base storage and
+/// live hint in r0/r1, returning the interface word that the common base
+/// constructor stores at +0x04.
+pub type GuardInterfaceResolve =
+    unsafe extern "C" fn(this: *mut InterfaceGuard, base_hint: u32) -> u32;
+
+/// Boundary default for the separately linked interface resolver @
+/// 0x0818a06c. Device builds preserve the exact retailOS call; host tests
+/// install a recorder rather than inventing its trace-buffer and registry
+/// dependencies.
+unsafe extern "C" fn firmware_guard_interface_resolve(
     this: *mut InterfaceGuard,
     base_hint: u32,
-    base_flag: u32,
-) -> *mut InterfaceGuard;
+) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let resolve: GuardInterfaceResolve =
+            core::mem::transmute(GUARD_INTERFACE_RESOLVE_ADDRESS);
+        resolve(this, base_hint)
+    }
 
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = this;
+        let _ = base_hint;
+
+        0
+    }
+}
 /// The facade accessor @ 0x0818a0bc: takes the constructed guard and
 /// the [`FACADE_SELECTOR`] immediate, returns the facade object.
 pub type FacadeFetch =
     unsafe extern "C" fn(guard: *mut InterfaceGuard, selector: u32) -> *mut FacadeObject;
 
-/// The interface-guard destructor @ 0x08206e6c: unlocks and tears the
-/// guard down, returning `this` via the 0x0818a0fc base-destructor tail.
+/// The interface-guard destructor @ 0x08206e6c: unlocks and tears down the
+/// guard, returning `this` via the 0x0818a0fc base-destructor tail.
 pub type GuardDestroy =
     unsafe extern "C" fn(this: *mut InterfaceGuard) -> *mut InterfaceGuard;
-
-/// Boundary default for the shared base constructor @ 0x0818a0c4. Device
-/// builds call retailOS. The host default returns storage without trying to
-/// invent the unported interface-resolution graph; direct constructor tests
-/// install a layout-valid base mock instead.
-unsafe extern "C" fn firmware_guard_base_construct(
-    this: *mut InterfaceGuard,
-    base_hint: u32,
-    base_flag: u32,
-) -> *mut InterfaceGuard {
-    #[cfg(target_os = "none")]
-    {
-        let construct: GuardBaseConstruct = core::mem::transmute(GUARD_BASE_CONSTRUCT_ADDRESS);
-        construct(this, base_hint, base_flag)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = base_hint;
-        let _ = base_flag;
-        this
-    }
-}
 
 /// Boundary default for the guard constructor. Device builds route this
 /// caller seam to [`path_probe_guard_construct`]; host builds preserve the
@@ -349,10 +352,10 @@ unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) -> *mut I
     }
 }
 
-/// The active unported base constructor @ 0x0818a0c4. Device builds call its
-/// fixed firmware address; host tests install a live-interface mock.
-pub static mut PATH_PROBE_GUARD_BASE_CONSTRUCT: GuardBaseConstruct =
-    firmware_guard_base_construct;
+/// The active separately linked interface resolver. Device builds call the
+/// fixed retailOS function; host tests install a recorder.
+pub static mut INTERFACE_GUARD_INTERFACE_RESOLVE: GuardInterfaceResolve =
+    firmware_guard_interface_resolve;
 
 /// The active interface-guard constructor. Device builds route it to
 /// [`path_probe_guard_construct`] while host tests install a recording mock.
@@ -369,13 +372,13 @@ pub static mut PATH_PROBE_FACADE_FETCH: FacadeFetch = firmware_facade_fetch;
 pub static mut PATH_PROBE_GUARD_DTOR: GuardDestroy = firmware_guard_destroy;
 
 #[inline(always)]
-unsafe fn guard_ctor_fn() -> GuardConstruct {
-    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_CTOR))
+unsafe fn interface_resolve_fn() -> GuardInterfaceResolve {
+    core::ptr::read_volatile(core::ptr::addr_of!(INTERFACE_GUARD_INTERFACE_RESOLVE))
 }
 
 #[inline(always)]
-unsafe fn guard_base_construct_fn() -> GuardBaseConstruct {
-    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_BASE_CONSTRUCT))
+unsafe fn guard_ctor_fn() -> GuardConstruct {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_CTOR))
 }
 
 #[inline(always)]
@@ -407,12 +410,42 @@ unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut Interf
     }
 }
 
+/// interface_guard_base_construct — original: `FUN_0818a0c4` @ 0x0818a0c4
+/// (52 instruction bytes plus its literal-pool word at 0x0818a0f8; **8
+/// plain `bl` call sites and 0 predicated forms**, verified by decoding every
+/// ARM B/BL word in `osos.dec`: 0x080758f0, 0x080ef4c4, 0x081ef8a4,
+/// 0x081ef950, 0x0820276c, 0x08206e48, 0x08278de0, and 0x08278ea8).
+///
+/// Installs the common transition-addon vtable, resolves and stores the
+/// interface word using the live `base_hint`, clears byte +0x08, stores the
+/// low byte of `base_flag` at +0x09, then returns `this`. There is no NULL
+/// guard: every store dereferences `this` exactly as the ARM does.
+///
+/// Deliberate deviation: the separately linked resolver @ 0x0818a06c remains
+/// a dispatch boundary. Its target build default is the raw firmware entry;
+/// host defaults to a null interface and tests install a recorder.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.interface_guard_base_construct")]
+pub unsafe extern "C" fn interface_guard_base_construct(
+    this: *mut InterfaceGuard,
+    base_hint: u32,
+    base_flag: u32,
+) -> *mut InterfaceGuard {
+    core::ptr::addr_of_mut!((*this).words[0])
+        .write_volatile(INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
+    let interface = interface_resolve_fn()(this, base_hint);
+    core::ptr::addr_of_mut!((*this).words[1]).write_volatile(interface);
+    this.cast::<u8>().add(8).write_volatile(0);
+    this.cast::<u8>().add(9).write_volatile(base_flag as u8);
+    this
+}
 /// path_probe_guard_construct — original: `FUN_08206e40` @ 0x08206e40
 /// (40 instruction bytes plus its 4-byte literal pool; **14 direct `bl`
 /// call sites**, all unconditional; no predicated `bl` forms).
 ///
-/// Runs the unresolved shared base constructor @ 0x0818a0c4 with
-/// `(storage, base_hint, 0)`, plants the interface-guard vtable, then
+/// Runs [`interface_guard_base_construct`] with `(storage, base_hint, 0)`,
+/// plants the interface-guard vtable, then
 /// acquires the CountedMutex scope guard at +0x0c through the ported
 /// [`crate::kernel::sync_mutex::counted_mutex_guard_acquire`]. Its returned
 /// guard pointer is backed up by 12 bytes, so this returns the base
@@ -429,7 +462,7 @@ pub unsafe extern "C" fn path_probe_guard_construct(
     storage: *mut InterfaceGuard,
     base_hint: u32,
 ) -> *mut InterfaceGuard {
-    let guard = guard_base_construct_fn()(storage, base_hint, 0);
+    let guard = interface_guard_base_construct(storage, base_hint, 0);
     (*guard).words[0] = INTERFACE_GUARD_VTABLE_ADDRESS;
 
     #[cfg(target_os = "none")]
@@ -569,8 +602,8 @@ pub(crate) mod tests {
     /// Restores the four shared seams after a sibling module temporarily
     /// installs a compatible facade-fetch recorder.
     pub(crate) unsafe fn restore_firmware_seams() {
-        core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
-            .write_volatile(firmware_guard_base_construct);
+        core::ptr::addr_of_mut!(INTERFACE_GUARD_INTERFACE_RESOLVE)
+            .write_volatile(firmware_guard_interface_resolve);
         core::ptr::addr_of_mut!(PATH_PROBE_GUARD_CTOR)
             .write_volatile(firmware_guard_construct);
         core::ptr::addr_of_mut!(PATH_PROBE_FACADE_FETCH)
@@ -599,10 +632,9 @@ pub(crate) mod tests {
 
     static mut CTOR_THIS: *mut InterfaceGuard = core::ptr::null_mut();
     static mut CTOR_HINT: u32 = 0;
-    static mut BASE_THIS: *mut InterfaceGuard = core::ptr::null_mut();
-    static mut BASE_HINT: u32 = 0;
-    static mut BASE_FLAG: u32 = 1;
-    static mut BASE_INTERFACE_ADDRESS: u32 = 0;
+    static mut RESOLVE_THIS: *mut InterfaceGuard = core::ptr::null_mut();
+    static mut RESOLVE_HINT: u32 = 0;
+    static mut RESOLVED_INTERFACE: u32 = 0;
     static mut FETCH_GUARD: *mut InterfaceGuard = core::ptr::null_mut();
     static mut FETCH_SELECTOR: u32 = 0;
     static mut QUERY_FACADE: *mut FacadeObject = core::ptr::null_mut();
@@ -638,16 +670,13 @@ pub(crate) mod tests {
         this
     }
 
-    unsafe extern "C" fn recording_base_construct(
+    unsafe extern "C" fn recording_interface_resolve(
         this: *mut InterfaceGuard,
         base_hint: u32,
-        base_flag: u32,
-    ) -> *mut InterfaceGuard {
-        BASE_THIS = this;
-        BASE_HINT = base_hint;
-        BASE_FLAG = base_flag;
-        (*this).words = [0x1234_5678, BASE_INTERFACE_ADDRESS, 0x8765_4321, 0];
-        this
+    ) -> u32 {
+        RESOLVE_THIS = this;
+        RESOLVE_HINT = base_hint;
+        RESOLVED_INTERFACE
     }
 
     unsafe extern "C" fn recording_fetch(
@@ -704,10 +733,9 @@ pub(crate) mod tests {
         EVENT_COUNT = 0;
         CTOR_THIS = core::ptr::null_mut();
         CTOR_HINT = 0;
-        BASE_THIS = core::ptr::null_mut();
-        BASE_HINT = 0;
-        BASE_FLAG = 1;
-        BASE_INTERFACE_ADDRESS = 0;
+        RESOLVE_THIS = core::ptr::null_mut();
+        RESOLVE_HINT = 0;
+        RESOLVED_INTERFACE = 0;
         FETCH_GUARD = core::ptr::null_mut();
         FETCH_SELECTOR = 0;
         QUERY_FACADE = core::ptr::null_mut();
@@ -938,6 +966,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn interface_guard_base_constructor_preserves_word_boundaries_and_flag_low_byte() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            core::ptr::addr_of_mut!(INTERFACE_GUARD_INTERFACE_RESOLVE)
+                .write_volatile(recording_interface_resolve);
+            for (hint, flag) in [
+                (0u32, 0u32),
+                (1, 1),
+                (0x5a5a_f00d, 0x100),
+                (u32::MAX, u32::MAX),
+            ] {
+                RESOLVE_THIS = core::ptr::null_mut();
+                RESOLVE_HINT = 0;
+                RESOLVED_INTERFACE = 0xcafe_babe;
+                let mut guard = InterfaceGuard {
+                    words: [0xa5a5_a5a5; 4],
+                };
+                let this = core::ptr::addr_of_mut!(guard);
+
+                assert_eq!(interface_guard_base_construct(this, hint, flag), this);
+                assert_eq!(RESOLVE_THIS, this, "r0 reaches the resolver");
+                assert_eq!(RESOLVE_HINT, hint, "r1 stays live into the bl");
+                assert_eq!(guard.words[0], INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
+                assert_eq!(guard.words[1], 0xcafe_babe, "resolver r0 is stored at +0x04");
+                assert_eq!(
+                    guard.words[2],
+                    0xa5a5_0000 | ((flag & 0xff) << 8),
+                    "strb updates only +0x08/+0x09 and truncates the flag"
+                );
+                assert_eq!(guard.words[3], 0xa5a5_a5a5, "the +0x0c word is untouched");
+            }
+        }
+    }
+
+    #[test]
     fn guard_constructor_forwards_hint_installs_vtable_and_acquires_lock() {
         let Some(slab) = crate::testing::try_map_u32_slab(
             crate::testing::hints::PATH_PROBE_GUARD_CONSTRUCT,
@@ -957,9 +1021,9 @@ pub(crate) mod tests {
                 },
                 hold_count: 0,
             });
-            BASE_INTERFACE_ADDRESS = interface as usize as u32;
-            core::ptr::addr_of_mut!(PATH_PROBE_GUARD_BASE_CONSTRUCT)
-                .write_volatile(recording_base_construct);
+            RESOLVED_INTERFACE = interface as usize as u32;
+            core::ptr::addr_of_mut!(INTERFACE_GUARD_INTERFACE_RESOLVE)
+                .write_volatile(recording_interface_resolve);
 
             let mut guard = InterfaceGuard {
                 words: [0xffff_ffff; 4],
@@ -970,9 +1034,8 @@ pub(crate) mod tests {
                 this,
                 "the acquire result is rebased by 12 bytes to this"
             );
-            assert_eq!(BASE_THIS, this, "the base constructor receives storage");
-            assert_eq!(BASE_HINT, 0x5a5a_f00d, "r1 reaches the base constructor");
-            assert_eq!(BASE_FLAG, 0, "mov r2, #0 is the third base argument");
+            assert_eq!(RESOLVE_THIS, this, "the base constructor receives storage");
+            assert_eq!(RESOLVE_HINT, 0x5a5a_f00d, "r1 reaches the base constructor");
             assert_eq!(
                 guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS,
                 "the derived constructor overwrites the base vtable"
