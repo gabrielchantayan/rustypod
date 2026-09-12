@@ -32250,6 +32250,31 @@ functions:
       structure; LLVM expands host-safe unaligned head accesses to byte
       operations and adds a frame.
 
+  - address: 0x083e5fe8
+    ghidra: FUN_083e5fe8
+    name: vector_bool_reference_assign
+    size: 32
+    sig: "void vector_bool_reference_assign(VectorBoolReference *mask_ref, u32 value)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: mask_ref, param_2: value, uVar1: previous, uVar2: updated}
+    notes: >-
+      `std::vector<bool>` mask-reference assignment: `ldr r3,[r0]; movs
+      ip,r1; ldr r1,[r0,#4]; ldr r2,[r3]; biceq r1,r2,r1; orrne
+      r1,r2,r1; str r1,[r3]; bx lr` reads `{word, mask}`, then clears
+      every mask-selected bit when the raw C++ bool value is zero or
+      sets every selected bit for any nonzero value. The 32-byte leaf
+      leaves r0 as mask_ref incidentally, but the recovered ABI is void
+      and every verified caller overwrites/discards it. There is no
+      NULL guard in the original or port: all 7 decoded branch
+      callsites are unconditional `bl` instructions at 0x08269f50,
+      0x08269f78, 0x0826a400, 0x083e5db8, 0x083e5de4, 0x083e5e84, and
+      0x083e5f34; four calls are in the vector<bool> storage-grow path.
+      This is the only copy. Deliberate host-only deviation:
+      read_unaligned accesses make firmware-aligned proxy heads safe on
+      64-bit hosts; the target uses aligned named-field loads, and the
+      selected storage word is aligned on both.
+
   - address: 0x083d7a20
     ghidra: FUN_083d7a20
     name: vector_bool_reference_test

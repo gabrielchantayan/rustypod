@@ -70,6 +70,8 @@
 //! - [`vector_bool_reference_test`] — the `vector<bool>` mask-reference
 //!   dereference: reads the storage word and returns whether the masked
 //!   bit is set.
+//! - [`vector_bool_reference_assign`] — the `vector<bool>` mask-reference
+//!   assignment: sets or clears the selected storage bit from a raw C++ bool.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
 //!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
 //!   / [`vector_capacity_elem40`] / [`vector_capacity_elem8`] /
@@ -1899,6 +1901,56 @@ pub unsafe extern "C" fn vector_bool_iter_advance(iter: *mut VectorBoolIter, dis
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), new_word);
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), rem as u32);
 }
+
+/// vector_bool_reference_assign — original: `FUN_083e5fe8` @ 0x083e5fe8
+/// (32 bytes; 7 unconditional `bl` call sites — 0x08269f50, 0x08269f78,
+/// 0x0826a400, 0x083e5db8, 0x083e5de4, 0x083e5e84, and 0x083e5f34; the
+/// only copy).
+///
+/// `std::vector<bool>` mask-reference assignment: reads the proxy's
+/// `{word, mask}` fields and replaces the masked storage bit(s), clearing
+/// them when `value` is zero and setting them for every nonzero raw C++ bool
+/// value. The raw ARM sequence is `ldr r3,[r0]; movs ip,r1; ldr r1,[r0,#4];
+/// ldr r2,[r3]; biceq r1,r2,r1; orrne r1,r2,r1; str r1,[r3]; bx lr`.
+///
+/// Although the raw leaf body leaves r0 as `mask_ref`, all seven verified
+/// call sites discard it; the recovered ABI is therefore `void`, matching
+/// the original signature. There is deliberately no NULL guard: every call
+/// is unconditional and the original dereferences both the reference head
+/// and its storage word.
+///
+/// On target, named-field loads compile as aligned word accesses, matching
+/// the firmware's 4-byte-aligned proxy layout. The host-only branch uses
+/// `read_unaligned` so the same function can test a firmware-aligned head
+/// that is not 8-byte-aligned for host pointers.
+///
+/// # Safety
+///
+/// `mask_ref` must point at a readable [`VectorBoolReference`] whose `word`
+/// points at a writable, aligned `u32` storage word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_reference_assign(
+    mask_ref: *mut VectorBoolReference,
+    value: u32,
+) {
+    #[cfg(target_os = "none")]
+    let word = (*mask_ref).word;
+    #[cfg(not(target_os = "none"))]
+    let word = core::ptr::read_unaligned(core::ptr::addr_of!((*mask_ref).word));
+    #[cfg(target_os = "none")]
+    let mask = (*mask_ref).mask;
+    #[cfg(not(target_os = "none"))]
+    let mask = core::ptr::read_unaligned(core::ptr::addr_of!((*mask_ref).mask));
+    let previous = word.read();
+    let updated = if value == 0 {
+        previous & !mask
+    } else {
+        previous | mask
+    };
+    word.write(updated);
+}
+
 
 /// vector_bool_iter_minus — original: `FUN_083d79f8` @ 0x083d79f8
 /// (40 bytes; 2 `bl` call sites — 0x0826a3e8 and 0x083e5d6c, the
@@ -4474,6 +4526,70 @@ mod tests {
             assert_eq!(returned, base.add(1));
         }
     }
+    // ---- vector_bool_reference_assign -------------------------------
+
+    /// The zero/nonzero branch follows `movs ip,r1`: zero clears exactly
+    /// the selected bit and every nonzero raw C++ bool sets it.
+    #[test]
+    fn vector_bool_reference_assign_sets_and_clears_each_bit() {
+        unsafe {
+            for bit in 0..32u32 {
+                let mask = 1u32 << bit;
+                let initial = 0xa5a5_5a5a;
+                let mut storage = [initial; 1];
+                let mut reference =
+                    VectorBoolReference { word: core::ptr::addr_of_mut!(storage[0]), mask };
+                vector_bool_reference_assign(&mut reference, 0);
+                assert_eq!(storage[0], initial & !mask, "clear bit {bit}");
+
+                for value in [1u32, 2, 0x8000_0000, u32::MAX] {
+                    storage[0] = initial & !mask;
+                    vector_bool_reference_assign(&mut reference, value);
+                    assert_eq!(storage[0], (initial & !mask) | mask, "set bit {bit}, value {value:#x}");
+                }
+            }
+        }
+    }
+
+    /// A mask need not be a single bit at this ABI boundary: the exact
+    /// `bic`/`orr` sequence clears or sets every selected bit and preserves
+    /// every unselected bit.
+    #[test]
+    fn vector_bool_reference_assign_updates_only_masked_bits() {
+        unsafe {
+            let mut storage = [0xa5a5_5a5a; 1];
+            let mut reference = VectorBoolReference {
+                word: core::ptr::addr_of_mut!(storage[0]),
+                mask: 0x00f0_000f,
+            };
+            vector_bool_reference_assign(&mut reference, 0);
+            assert_eq!(storage[0], 0xa5a5_5a5a & !0x00f0_000f);
+            vector_bool_reference_assign(&mut reference, 0xffff_fffe);
+            assert_eq!(storage[0], (0xa5a5_5a5a & !0x00f0_000f) | 0x00f0_000f);
+        }
+    }
+
+    /// Firmware proxy heads may be only 4-byte aligned; the head loads
+    /// remain valid on the 64-bit host without changing the aligned storage
+    /// word they select.
+    #[test]
+    fn vector_bool_reference_assign_reads_an_unaligned_head() {
+        unsafe {
+            let mut buf = [0u8; 24];
+            let mut storage = [0xffff_ffffu32; 1];
+            let reference = buf.as_mut_ptr().add(4) as *mut VectorBoolReference;
+            core::ptr::write_unaligned(
+                core::ptr::addr_of_mut!((*reference).word),
+                core::ptr::addr_of_mut!(storage[0]),
+            );
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*reference).mask), 0x0000_0081);
+            vector_bool_reference_assign(reference, 0);
+            assert_eq!(storage[0], 0xffff_ff7e);
+            vector_bool_reference_assign(reference, 7);
+            assert_eq!(storage[0], 0xffff_ffff);
+        }
+    }
+
     // ---- vector_bool_reference_test ---------------------------------
 
     /// The masked bit set answers 1, clear answers 0, across every bit
