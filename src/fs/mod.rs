@@ -5,6 +5,8 @@ pub mod fat_dirent;
 /// FAT data-cluster to cache-block-index conversion @ 0x082e01cc.
 pub mod fat_cluster_to_block;
 pub mod path_limits;
+/// Splits a path at its final configured delimiter @ 0x082e37d4.
+pub mod path_component_split;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
 /// Shared path-data reference release @ 0x082e1960.
