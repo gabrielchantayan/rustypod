@@ -13,6 +13,8 @@
 //! - [`service_context_selection_construct`] — `FUN_082a5ee4` @ 0x082a5ee4.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
+//! - [`scoped_context_owner_validity`] — `FUN_0806b410` @ 0x0806b410,
+//!   a NULL-safe owner-to-'tdat'-element predicate.
 //! - [`scoped_context_is_valid`] — `FUN_082a3dcc` @ 0x082a3dcc, an
 //!   owner-and-registry consistency predicate.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
@@ -509,39 +511,35 @@ pub unsafe extern "C" fn copy_service_context_selection(
     scoped_context_destroy(temporary.as_mut_ptr());
 }
 
-/// Firmware load address of the unported owner predicate
-/// `FUN_0806b410`, called directly by [`scoped_context_is_valid`].
-pub const SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS: usize = 0x0806_b410;
-
-/// Target default for [`SCOPED_CONTEXT_OWNER_VALIDITY`]: the stock owner
-/// predicate at [`SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS`].
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_scoped_context_owner_validity(owner: *mut u8) -> u32 {
-    let predicate: unsafe extern "C" fn(*mut u8) -> u32 =
-        core::mem::transmute(SCOPED_CONTEXT_OWNER_VALIDITY_ADDRESS);
-    predicate(owner)
+/// scoped_context_owner_validity — original: `FUN_0806b410` @ 0x0806b410
+/// (**40 bytes**, exact: the next separately linked function begins at
+/// 0x0806b438; **8 direct unconditional `bl` call sites, 0 predicated forms,
+/// and 0 direct tail `b` sites**, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Returns 0 for a NULL owner. Otherwise it loads the owner's first word as a
+/// UI-element pointer, calls [`crate::ui::tdat_class_check::ui_element_is_tdat_class`],
+/// and normalizes any nonzero result to 1. Thus it only accepts owners whose
+/// first linked object is in the `'tdat'` class.
+///
+/// Deliberate deviation: the owner's first target-width pointer is represented
+/// by the typed `*const *const u8` argument instead of a literal byte offset;
+/// this is the same word on ARM and remains host-pointer-width correct.
+///
+/// # Safety
+///
+/// `owner` may be NULL. Otherwise it must point to a readable element-pointer
+/// word, and that element must satisfy the safety contract of
+/// [`crate::ui::tdat_class_check::ui_element_is_tdat_class`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.scoped_context_owner_validity")]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_validity(owner: *const *const u8) -> u32 {
+    if owner.is_null() {
+        return 0;
+    }
+    (crate::ui::tdat_class_check::ui_element_is_tdat_class(owner.read()) != 0) as u32
 }
-
-/// Host default for [`SCOPED_CONTEXT_OWNER_VALIDITY`]: the owner predicate
-/// remains unported, so an unswapped call is a test-setup error.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_scoped_context_owner_validity(_owner: *mut u8) -> u32 {
-    panic!("scoped_context_is_valid requires owner predicate 0x0806b410")
-}
-
-/// Dispatch seam for `FUN_0806b410` @ 0x0806b410. Target builds invoke the
-/// stock predicate; host tests install a recording mock. The helper first
-/// rejects a NULL owner, then follows its first word and accepts only an
-/// object carrying the `tdat` tag, but remains a seam because it is not
-/// itself ported.
-#[cfg(target_os = "none")]
-pub static mut SCOPED_CONTEXT_OWNER_VALIDITY: unsafe extern "C" fn(*mut u8) -> u32 =
-    firmware_scoped_context_owner_validity;
-
-/// Host wired default (panics; see [`missing_scoped_context_owner_validity`]).
-#[cfg(not(target_os = "none"))]
-pub static mut SCOPED_CONTEXT_OWNER_VALIDITY: unsafe extern "C" fn(*mut u8) -> u32 =
-    missing_scoped_context_owner_validity;
 
 /// scoped_context_is_valid — original: `FUN_082a3dcc` @ 0x082a3dcc
 /// (72 bytes, exact: the next separately linked function starts at
@@ -559,14 +557,12 @@ pub static mut SCOPED_CONTEXT_OWNER_VALIDITY: unsafe extern "C" fn(*mut u8) -> u
 /// Deliberate deviations: [`ScopedContext`] models pointer fields with
 /// `#[repr(C)]` Rust pointers, and the service/registry offsets are their
 /// word indices so they remain 4-byte-spaced on target and host-consistent.
-/// The unported owner predicate is a target ROM dispatch seam; host callers
-/// must install it before testing.
+/// The owner predicate is the direct Rust port, so there is no remaining ROM
+/// dispatch seam.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn scoped_context_is_valid(this: *const ScopedContext) -> u32 {
-    let owner_validity =
-        core::ptr::read_volatile(core::ptr::addr_of!(SCOPED_CONTEXT_OWNER_VALIDITY));
-    if owner_validity((*this).owner) != 0 {
+    if scoped_context_owner_validity((*this).owner.cast()) != 0 {
         let registry = ((*this).service_context as *const *mut u8)
             .add(SERVICE_CONTEXT_REGISTRY_SLOT)
             .read();
@@ -1057,39 +1053,6 @@ mod tests {
         }
     }
 
-    static mut OWNER_VALIDITY_CALLS: u32 = 0;
-    static mut OWNER_VALIDITY_OWNER: *mut u8 = ptr::null_mut();
-    static mut OWNER_VALIDITY_RESULT: u32 = 0;
-
-    unsafe extern "C" fn recording_owner_validity(owner: *mut u8) -> u32 {
-        OWNER_VALIDITY_CALLS += 1;
-        OWNER_VALIDITY_OWNER = owner;
-        OWNER_VALIDITY_RESULT
-    }
-
-    /// Restores the owner-predicate seam after a validity-predicate test.
-    struct OwnerValidityGuard {
-        original: unsafe extern "C" fn(*mut u8) -> u32,
-    }
-
-    impl OwnerValidityGuard {
-        unsafe fn install(result: u32) -> Self {
-            let original = ptr::addr_of!(SCOPED_CONTEXT_OWNER_VALIDITY).read_volatile();
-            OWNER_VALIDITY_CALLS = 0;
-            OWNER_VALIDITY_OWNER = ptr::null_mut();
-            OWNER_VALIDITY_RESULT = result;
-            ptr::addr_of_mut!(SCOPED_CONTEXT_OWNER_VALIDITY).write_volatile(recording_owner_validity);
-            Self { original }
-        }
-    }
-
-    impl Drop for OwnerValidityGuard {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::addr_of_mut!(SCOPED_CONTEXT_OWNER_VALIDITY).write_volatile(self.original);
-            }
-        }
-    }
 
     unsafe extern "C" fn selection_source_available(
         _source: *mut ServiceContextSelectionSource,
@@ -1822,68 +1785,86 @@ mod tests {
         }
     }
 
+    fn owner_for_element(element: *const u8) -> [*const u8; 1] {
+        [element]
+    }
+
     #[test]
-    fn context_validity_runs_the_owner_predicate_before_a_zero_fallback() {
-        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _seam = unsafe { OwnerValidityGuard::install(0) };
-        let owner = 0x0102_0304usize as *mut u8;
-        // A non-NULL invalid address proves the failed helper prevents the
-        // service-context load, while owner_valid == 0 chooses the fallback.
-        let token = context_validity_token(0, owner, 1usize as *mut u8, ptr::null_mut());
+    fn owner_validity_rejects_null_owner_and_null_element() {
+        assert_eq!(unsafe { scoped_context_owner_validity(ptr::null()) }, 0);
+        let owner = owner_for_element(ptr::null());
+        assert_eq!(unsafe { scoped_context_owner_validity(owner.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn owner_validity_accepts_only_tdat_element() {
+        let tdat = [0u32, 0x7464_6174];
+        let other = [0u32, 0x706c_7374];
+        let tdat_owner = owner_for_element(tdat.as_ptr().cast());
+        let other_owner = owner_for_element(other.as_ptr().cast());
+
+        assert_eq!(unsafe { scoped_context_owner_validity(tdat_owner.as_ptr()) }, 1);
+        assert_eq!(unsafe { scoped_context_owner_validity(other_owner.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn context_validity_uses_failed_owner_predicate_before_zero_fallback() {
+        let owner_element = [0u32, 0x706c_7374];
+        let owner = owner_for_element(owner_element.as_ptr().cast());
+        // An invalid service-context pointer is safe because the rejected
+        // owner prevents its registry slot from being read.
+        let token = context_validity_token(
+            0,
+            owner.as_ptr().cast_mut().cast(),
+            1usize as *mut u8,
+            ptr::null_mut(),
+        );
 
         assert_eq!(unsafe { scoped_context_is_valid(&token) }, 0);
-        unsafe {
-            assert_eq!(OWNER_VALIDITY_CALLS, 1);
-            assert_eq!(OWNER_VALIDITY_OWNER, owner);
-        }
     }
 
     #[test]
     fn context_validity_nonzero_owner_valid_overrides_a_failed_owner_predicate() {
-        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _seam = unsafe { OwnerValidityGuard::install(0) };
-        let owner = 0x0506_0708usize as *mut u8;
-        let token = context_validity_token(0x8000_0000, owner, 1usize as *mut u8, ptr::null_mut());
+        let owner_element = [0u32, 0x706c_7374];
+        let owner = owner_for_element(owner_element.as_ptr().cast());
+        let token = context_validity_token(
+            0x8000_0000,
+            owner.as_ptr().cast_mut().cast(),
+            1usize as *mut u8,
+            ptr::null_mut(),
+        );
 
         assert_eq!(unsafe { scoped_context_is_valid(&token) }, 1);
-        unsafe {
-            assert_eq!(OWNER_VALIDITY_CALLS, 1);
-            assert_eq!(OWNER_VALIDITY_OWNER, owner);
-        }
     }
 
     #[test]
     fn context_validity_accepts_matching_live_registry_token() {
-        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _seam = unsafe { OwnerValidityGuard::install(0xffff_ffff) };
         let current = 0x1011_1213usize as *mut u8;
         let mut registry = registry_with_token(current);
         let mut service_context: Vec<*mut u8> =
             vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
         service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
+        let owner_element = [0u32, 0x7464_6174];
+        let owner = owner_for_element(owner_element.as_ptr().cast());
         let token = context_validity_token(
             0,
-            0x1415_1617usize as *mut u8,
+            owner.as_ptr().cast_mut().cast(),
             service_context.as_mut_ptr() as *mut u8,
             current,
         );
 
         assert_eq!(unsafe { scoped_context_is_valid(&token) }, 1);
-        unsafe {
-            assert_eq!(OWNER_VALIDITY_CALLS, 1);
-            assert_eq!(OWNER_VALIDITY_OWNER, token.owner);
-        }
     }
 
     #[test]
     fn context_validity_rejects_missing_or_mismatched_registry_token() {
-        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _seam = unsafe { OwnerValidityGuard::install(1) };
         let mut service_context: Vec<*mut u8> =
             vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        let owner_element = [0u32, 0x7464_6174];
+        let owner = owner_for_element(owner_element.as_ptr().cast());
         let missing = context_validity_token(
             0,
-            0x1819_1a1busize as *mut u8,
+            owner.as_ptr().cast_mut().cast(),
             service_context.as_mut_ptr() as *mut u8,
             0x1c1d_1e1fusize as *mut u8,
         );
@@ -1893,15 +1874,11 @@ mod tests {
         service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
         let mismatched = context_validity_token(
             0,
-            0x2425_2627usize as *mut u8,
+            owner.as_ptr().cast_mut().cast(),
             service_context.as_mut_ptr() as *mut u8,
             0x2829_2a2busize as *mut u8,
         );
         assert_eq!(unsafe { scoped_context_is_valid(&mismatched) }, 0);
-        unsafe {
-            assert_eq!(OWNER_VALIDITY_CALLS, 2);
-            assert_eq!(OWNER_VALIDITY_OWNER, mismatched.owner);
-        }
     }
     /// Token + owner fixture for the u64 getter: the owner buffer runs
     /// one word past the pair's high word so the reads cannot drift out
