@@ -67035,3 +67035,41 @@ functions:
       non-3 execution-status mapping. match.py structural review (exit-1 diff
       expected) retains the validation, early-return, MMIO read/write, four
       call stages, and final status mapping.
+
+  - address: 0x0839b864
+    ghidra: FUN_0839b864
+    name: record_stream_begin
+    size: 156
+    sig: "void record_stream_begin(RecordStream *stream, u32 flags)"
+    module: util/record_stream_begin
+    status: ported
+    renames:
+      param_1/r4: stream (opaque record stream; position +0x08, record offset +0x0e, remaining +0x12, count +0x14, info +0x40, buffer +0x44)
+      param_2/r8: flags (record header byte; bit 3 selects compact offset)
+      r5: saved buffer position
+      r6: current record header (buffer + saved position)
+      r7: stream info (capacity halfword +0x1e)
+      r9: record buffer
+      FUN_082c5d1c: unported stream flag configuration helper
+    notes: >-
+      Raw extent is exactly 156 bytes, 0x0839b864..0x0839b8fc; the
+      distinct next function starts at 0x0839b900. Decoding every ARM B/BL
+      word in osos.dec finds eight direct inbound calls: seven plain bl at
+      0x082b5c28, 0x082b641c, 0x082b68b4, 0x082b6ac0, 0x082bdb80,
+      0x082bde90, and 0x082dae70; one bleq at 0x082c3688. The predicated
+      caller provides the equality gate; this body has no NULL checks.
+      It saves byte position +0x08, clears buffer[position..capacity),
+      writes an eight-byte header `{flags, 0, 0, 0, 0, capacity_hi,
+      capacity_lo, 0}`, chooses next offset position + 8 + (bit3 clear ? 4
+      : 0), stores capacity - offset modulo 2^16, invokes
+      FUN_082c5d1c(stream, flags), then restores position and publishes
+      offset, zero flag bytes +0x01/+0x02 and count +0x14, and state 1 at
+      +0x00 in that order. The target reaches still-stock FUN_082c5d1c
+      through its literal address; host tests use a recording replacement
+      solely for the unported helper, proving its arguments and that it sees
+      remaining before final state publication. Host tests also cover both
+      bit-3 forms, post-capacity header writes, and u16 remaining underflow.
+      match.py structural review exits 1 as expected: the two stock IRAM
+      veneer calls resolve through the ported `iram_memzero_veneer`, and the
+      retained stock configuration call is an address-loaded `blx`; the
+      buffer/header and final field-store ordering remain.
