@@ -102,6 +102,7 @@ pub mod object_offset_48;
 pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
 pub mod opaque_collection_item_count;
+pub mod opaque_collection_item_at;
 pub mod opaque_keyed_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
 pub mod object_dispatch_target;
