@@ -220,7 +220,7 @@ mod tests {
         let _free_guard = TRACED_FREE_TEST_LOCK.lock();
         let _diagnostic_guard = DIAG_RING_TEST_LOCK.lock().unwrap();
         let _hooks = unsafe { HooksGuard::install(allocating) };
-        let mut method = BioMethod { _reserved: [0; 6], ctrl: 0 };
+        let mut method = BioMethod { _reserved: [0; 6], ctrl: 0, _create: 0, destroy: 0 };
 
         let result = unsafe { bio_new(&mut method) };
 

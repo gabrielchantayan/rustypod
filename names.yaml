@@ -51605,6 +51605,40 @@ functions:
       Host tests use a typed host dispatch model because the retail layout
       deliberately keeps the callback and ctrl entries as 32-bit words;
       target builds transmute and invoke those original words directly.
+  - address: 0x0803d3c8
+    ghidra: FUN_0803d3c8
+    name: bio_free
+    size: 140
+    sig: "int bio_free(BIO *bio)"
+    module: crypto/bio_free
+    status: ported
+    renames:
+      param_1/r0/r4: bio
+      "bio + 0x2c": references
+      "bio + 0x38": ex_data
+      FUN_08043828: crypto_add_lock
+      FUN_080439e0: crypto_free_ex_data
+      FUN_08043994: traced_free
+    notes: >-
+      OpenSSL BIO_free. Raw ARM extent is exactly 140 bytes,
+      0x0803d3c8..0x0803d454: the separately linked BIO_free_all sibling
+      begins at 0x0803d454, so Ghidra's size is exact. Binary decoding every
+      ARM B/BL word in osos.dec finds exactly 8 direct inbound calls: 6
+      unconditional bl (0x0803d46c, 0x080437a4, 0x080eee64, 0x08272908,
+      0x082d4104, 0x082d4824) and 2 blne (0x082d483c, 0x082d487c), with no
+      tail branches and no raw-image data word holding this address. NULL
+      returns 0. Otherwise CRYPTO_add_lock(&bio->references, -1, 21, NULL,
+      0) returns a positive shared-reference result unchanged as 1. On the
+      final reference, a non-NULL callback receives (bio, 1, NULL, 0, 0, 1)
+      and a non-positive result cancels teardown. It then calls
+      CRYPTO_free_ex_data(0, bio, &bio->ex_data). Raw ARM only tests
+      bio->method and method->destroy (+0x20) before calling traced_free(bio);
+      it never invokes the destroy slot, despite upstream OpenSSL's familiar
+      source-level pattern. Deviation: CRYPTO_free_ex_data @ 0x080439e0 is
+      unported, so target builds invoke its verified entry while host tests
+      use BIO_FREE_OPS; the raw target-width callback word uses that same
+      host dispatch boundary. Tests prove NULL, shared-reference, callback
+      veto, release ordering, and the method/destroy free gate.
   - address: 0x0803d558
     ghidra: FUN_0803d558
     name: bio_new

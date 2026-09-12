@@ -39,8 +39,8 @@ pub const BIO_CB_RETURN: u32 = 0x80;
 /// The callback operation after a control method runs.
 pub const BIO_CB_CTRL_RETURN: u32 = BIO_CB_CTRL | BIO_CB_RETURN;
 
-/// The target's 32-bit `BIO` layout through `prev_bio`. Pointer members stay
-/// `u32` even on hosts so their offsets match the firmware structure.
+/// The 64-byte target `BIO` layout. Pointer members stay `u32` even on hosts
+/// so their offsets match the firmware structure.
 #[repr(C)]
 pub struct Bio {
     /// +0x00 — `BIO_METHOD *`.
@@ -63,15 +63,33 @@ pub struct Bio {
     pub next_bio: u32,
     /// +0x28 — `prev_bio`.
     pub _prev_bio: u32,
+    /// +0x2c — OpenSSL reference count.
+    pub references: i32,
+    /// +0x30..+0x34 — byte counters.
+    pub _num_read: u32,
+    pub _num_write: u32,
+    /// +0x38 — application-owned OpenSSL ex-data.
+    pub ex_data: BioExData,
 }
 
-/// The portion of an OpenSSL BIO method used by [`bio_ctrl`].
+/// The target's eight-byte `CRYPTO_EX_DATA` embedded in a [`Bio`].
+#[repr(C)]
+pub struct BioExData {
+    pub _stack: u32,
+    pub _dummy: i32,
+}
+
+/// The portion of an OpenSSL BIO method used by the ported BIO operations.
 #[repr(C)]
 pub struct BioMethod {
     /// +0x00..+0x14 — method slots not read here.
     pub _reserved: [u32; 6],
     /// +0x18 — `ctrl` method slot.
     pub ctrl: u32,
+    /// +0x1c — method initialization slot.
+    pub _create: u32,
+    /// +0x20 — method destruction slot, inspected by [`super::bio_free`].
+    pub destroy: u32,
 }
 
 /// The BIO callback ABI: `bio, operation, parg, cmd, larg, return_value`.
