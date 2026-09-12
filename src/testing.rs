@@ -545,6 +545,10 @@ pub mod hints {
     // 0x8c00_0000: dedicated to app/descriptor_attachment's raw-u32 owner,
     // descriptor, and link fixtures; mappings never unmap.
     pub const DESCRIPTOR_ATTACHMENT: usize = 0x8c00_0000;
+    // 0x8e00_0000: dedicated to ui/element_reference_item's raw-u32
+    // reference, vtable, element, header, and slot fixtures; mappings never
+    // unmap, so no other user may share this hint.
+    pub const ELEMENT_REFERENCE_ITEM: usize = 0x8e00_0000;
     // 0x5300_0000 and 0x5400_0000: dedicated to the cxx shared-handle
     // initializer and its vtable-owner constructor fixtures; mappings never
     // unmap, so each mapping site has its own hint.
