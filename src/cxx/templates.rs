@@ -1069,6 +1069,38 @@ pub unsafe extern "C" fn container_element_at(this: *mut u8, index: usize) -> *m
     let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
     element_slot(this, index).read()
 }
+/// container_element_at_alias_9bac0 — original: `FUN_0829bac0` @ 0x0829bac0
+/// (24 bytes; 7 plain `bl` call sites — 0x080fe88c, 0x0810b34c,
+/// 0x0813ef14, 0x08155f10, 0x08156048, 0x0827df04, and 0x0827df68;
+/// no predicated calls).
+///
+/// A byte-identical instantiation of [`container_element_at`] @
+/// 0x083d5efc: `T *operator[](size_t index)`. It dispatches through the
+/// container's own vtable slot 0x40 for an element-slot address, then loads
+/// the element pointer from that slot. The ARM `push {r4,lr}` only aligns the
+/// stack; r4 is never touched. The raw body has no NULL guard for either the
+/// virtual result or its element slot.
+///
+/// Ghidra omits the r1 index argument from its one-argument signature, but
+/// the `blx r2` preserves it for the virtual method. The decoded callers pass
+/// loop indexes and consume the returned element as a signed value, pointer,
+/// or byte. This distinct link section deliberately keeps the independently
+/// hookable export from being folded into a byte-identical sibling; otherwise
+/// there are no deliberate deviations from the ARM algorithm.
+///
+/// # Safety
+/// Same contract as [`container_element_at`]: `this` must point at an object
+/// whose first word is a vtable with at least [`ELEMENT_SLOT_VTABLE_INDEX`] +
+/// 1 slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_9bac0")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_alias_9bac0(this: *mut u8, index: usize) -> *mut u8 {
+    let vtable = (this as *const *const ElementSlotFn).read();
+    let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
+    element_slot(this, index).read()
+}
+
 /// container_element_at_alias_5f14 — original: `FUN_083d5f14` @ 0x083d5f14
 /// (24 bytes; 11 plain `bl` call sites — 0x081002e4, 0x08100408,
 /// 0x08100624, 0x0810070c, 0x081008f4, 0x08100930, 0x081010a4,
@@ -3714,6 +3746,24 @@ mod tests {
             assert!(container_element_at(this, 2).is_null(), "NULL element, not NULL slot");
         }
     }
+    #[test]
+    fn element_at_alias_9bac0_dispatches_through_slot_0x40_and_derefs() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            assert_eq!(container_element_at_alias_9bac0(this, 0), &mut a as *mut u8);
+            assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
+            assert_eq!(container_element_at_alias_9bac0(this, 1), &mut b as *mut u8);
+            assert!(container_element_at_alias_9bac0(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
     #[test]
     fn element_at_alias_5f14_dispatches_through_slot_0x40_and_derefs() {
         unsafe {
