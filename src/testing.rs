@@ -446,6 +446,10 @@ pub mod hints {
     // profile-pointer fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LAYOUT_STATE_ACTIVATE: usize = 0x8a00_0000;
+    // 0x8900_0000: dedicated to fs/fat_cursor's target-width cursor-state,
+    // FAT-volume, and directory-entry fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const FAT_CURSOR_SYNCHRONIZE: usize = 0x8900_0000;
     // 0xbd00_0000: dedicated to ui/object_state's raw-u32 selected-item
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const OBJECT_SELECTED_ITEM: usize = 0xbd00_0000;

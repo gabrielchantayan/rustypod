@@ -27,6 +27,8 @@ pub mod cache_page;
 pub(crate) mod cache_position_value;
 /// FAT next-cluster reader and reserved-value filter @ 0x082e0378.
 pub mod fat_next_cluster;
+/// FAT directory-cursor initialization and advancement @ 0x082b2014.
+pub mod fat_cursor;
 /// Searches a cache-position range for its first zero value @ 0x082e1098.
 pub mod zero_cache_position;
 /// Cache lock semaphore release @ 0x082d7944.

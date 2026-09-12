@@ -9,36 +9,25 @@
 //! branches or aligned data words that reference this entry.
 //!
 //! It looks up a mounted-volume descriptor, locks the descriptor's ATA
-//! semaphore, synchronizes its cursor through resident `FUN_082b2014`, then
-//! forwards the requested 64-bit offset and origin to resident
-//! `FUN_082b1784`. It always releases the semaphore after a successful
-//! lookup, records ATA status 0 on that path and status 9 on a missing
-//! descriptor, and preserves the seek result across status reporting.
+//! semaphore, synchronizes its cursor through ported `fat_cursor_synchronize`,
+//! then forwards the requested 64-bit offset and origin to resident
+//! `FUN_082b1784`. It always releases the semaphore after a successful lookup,
+//! records ATA status 0 on that path and status 9 on a missing descriptor, and
+//! preserves the seek result across status reporting.
 //!
-//! Deliberate deviations: the two unrecovered cursor routines remain typed
-//! resident boundaries at their verified addresses. Target builds call the
-//! already ported volume-table, ATA-semaphore, and ATA-error entries directly;
-//! host builds substitute a volatile operation table so the lock, status, and
-//! forwarding behavior can be tested without a firmware BSS mapping.
+//! Deliberate deviations: only the unrecovered cursor seek routine remains a
+//! typed resident boundary. Target builds call the ported cursor synchronizer,
+//! volume-table, ATA-semaphore, and ATA-error entries directly; host builds
+//! substitute a volatile operation table for the remaining external behavior.
 
 use crate::drivers::{ata_cmd, ata_semaphore};
-use crate::fs::volume_table;
+use crate::fs::{fat_cursor::{fat_cursor_synchronize, FatCursor}, volume_table};
 
-/// Resident descriptor cursor synchronizer, `FUN_082b2014`.
-pub const CURSOR_SYNC_ADDRESS: usize = 0x082b_2014;
 /// Resident descriptor cursor seek routine, `FUN_082b1784`.
 pub const CURSOR_SEEK_ADDRESS: usize = 0x082b_1784;
 
-type ResidentCursorSync = unsafe extern "C" fn(*mut u8);
 type ResidentCursorSeek = unsafe extern "C" fn(*mut u8, u32, u32, i32, u32) -> u64;
 type VolumeLookup = unsafe extern "C" fn(i32, u32) -> *mut u8;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn retail_cursor_sync(descriptor: *mut u8) {
-    let sync: ResidentCursorSync = core::mem::transmute(CURSOR_SYNC_ADDRESS);
-    sync(descriptor);
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -57,8 +46,6 @@ unsafe extern "C" fn missing_lookup(_index: i32, _flags: u32) -> *mut u8 {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_semaphore(_index: usize) -> usize { 0 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_cursor_sync(_descriptor: *mut u8) {}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_cursor_seek(
@@ -77,7 +64,6 @@ unsafe extern "C" fn missing_error_report(_error: u32) -> u32 { u32::MAX }
 struct VolumeSeekHostOps {
     lookup: VolumeLookup,
     semaphore_wait: unsafe extern "C" fn(usize) -> usize,
-    cursor_sync: ResidentCursorSync,
     cursor_seek: ResidentCursorSeek,
     semaphore_signal: unsafe extern "C" fn(usize) -> usize,
     error_report: unsafe extern "C" fn(u32) -> u32,
@@ -87,7 +73,6 @@ struct VolumeSeekHostOps {
 const DEFAULT_HOST_OPS: VolumeSeekHostOps = VolumeSeekHostOps {
     lookup: missing_lookup,
     semaphore_wait: missing_semaphore,
-    cursor_sync: missing_cursor_sync,
     cursor_seek: missing_cursor_seek,
     semaphore_signal: missing_semaphore,
     error_report: missing_error_report,
@@ -138,17 +123,6 @@ unsafe fn signal_ata(index: usize) {
     }
 }
 
-#[inline(always)]
-unsafe fn synchronize_cursor(descriptor: *mut u8) {
-    #[cfg(target_os = "none")]
-    {
-        retail_cursor_sync(descriptor);
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        (host_ops().cursor_sync)(descriptor);
-    }
-}
 
 #[inline(always)]
 unsafe fn seek_cursor(
@@ -214,7 +188,7 @@ pub unsafe extern "C" fn volume_seek(
 
     let ata_index = descriptor_ata_semaphore_index(descriptor);
     wait_for_ata(ata_index);
-    synchronize_cursor(descriptor);
+    fat_cursor_synchronize(descriptor.cast::<FatCursor>());
     let result = seek_cursor(descriptor, unused, offset_low, offset_high, origin);
     signal_ata(ata_index);
     report_ata_error(0);
@@ -238,7 +212,6 @@ mod tests {
     static LOOKUP_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
     static LOOKUP_FLAGS: AtomicU32 = AtomicU32::new(u32::MAX);
     static SEMAPHORE_INDEX: AtomicUsize = AtomicUsize::new(usize::MAX);
-    static SYNC_DESCRIPTOR: AtomicUsize = AtomicUsize::new(usize::MAX);
     static SEEK_DESCRIPTOR: AtomicUsize = AtomicUsize::new(usize::MAX);
     static SEEK_UNUSED: AtomicU32 = AtomicU32::new(u32::MAX);
     static SEEK_LOW: AtomicU32 = AtomicU32::new(u32::MAX);
@@ -262,11 +235,6 @@ mod tests {
         note(2);
         SEMAPHORE_INDEX.store(index, Ordering::SeqCst);
         0
-    }
-
-    unsafe extern "C" fn record_sync(descriptor: *mut u8) {
-        note(3);
-        SYNC_DESCRIPTOR.store(descriptor as usize, Ordering::SeqCst);
     }
 
     unsafe extern "C" fn record_seek(
@@ -294,13 +262,12 @@ mod tests {
     }
 
     fn install(lookup_result: *mut u8) -> (MutexGuard<'static, ()>, VolumeSeekHostOps) {
-        let guard = HOST_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = HOST_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let saved = unsafe { addr_of!(HOST_OPS).read_volatile() };
         unsafe {
             addr_of_mut!(HOST_OPS).write_volatile(VolumeSeekHostOps {
                 lookup: record_lookup,
                 semaphore_wait: record_wait,
-                cursor_sync: record_sync,
                 cursor_seek: record_seek,
                 semaphore_signal: record_signal,
                 error_report: record_error,
@@ -312,7 +279,6 @@ mod tests {
         LOOKUP_INDEX.store(u32::MAX, Ordering::SeqCst);
         LOOKUP_FLAGS.store(u32::MAX, Ordering::SeqCst);
         SEMAPHORE_INDEX.store(usize::MAX, Ordering::SeqCst);
-        SYNC_DESCRIPTOR.store(usize::MAX, Ordering::SeqCst);
         SEEK_DESCRIPTOR.store(usize::MAX, Ordering::SeqCst);
         SEEK_UNUSED.store(u32::MAX, Ordering::SeqCst);
         SEEK_LOW.store(u32::MAX, Ordering::SeqCst);
@@ -336,7 +302,6 @@ mod tests {
         assert_eq!(ERROR.load(Ordering::SeqCst), 9);
         assert_eq!(EVENT_LOG.load(Ordering::SeqCst), 0x61);
         assert_eq!(SEMAPHORE_INDEX.load(Ordering::SeqCst), usize::MAX);
-        assert_eq!(SYNC_DESCRIPTOR.load(Ordering::SeqCst), usize::MAX);
         assert_eq!(SEEK_DESCRIPTOR.load(Ordering::SeqCst), usize::MAX);
         restore(state);
     }
@@ -351,12 +316,19 @@ mod tests {
             }
         };
         let descriptor = slab;
-        let owner = unsafe { slab.add(0x100) };
-        let ata = unsafe { slab.add(0x200) };
+        let cursor_state = unsafe { slab.add(0x100) };
+        let volume = unsafe { slab.add(0x200) };
+        let entry = unsafe { slab.add(0x500) };
         unsafe {
-            (descriptor as *mut u32).write_volatile(owner as usize as u32);
-            (owner as *mut u32).write_volatile(ata as usize as u32);
-            (ata.add(0x78) as *mut u16).write_volatile(6);
+            core::ptr::write_bytes(slab, 0, 0x1000);
+            (descriptor as *mut u32).write_volatile(cursor_state as usize as u32);
+            (cursor_state as *mut u32).write_volatile(volume as usize as u32);
+            (cursor_state.add(4) as *mut u32).write_volatile(entry as usize as u32);
+            (volume.add(0x78) as *mut u16).write_volatile(6);
+            (volume.add(0x74) as *mut u32).write_volatile(10);
+            (volume.add(0x1ce) as *mut u16).write_volatile(2);
+            (volume.add(0x1d8) as *mut u32).write_volatile(100);
+            (entry.add(0x1a) as *mut u16).write_volatile(3);
         }
 
         let state = install(descriptor);
@@ -364,14 +336,13 @@ mod tests {
         assert_eq!(LOOKUP_INDEX.load(Ordering::SeqCst), 2);
         assert_eq!(LOOKUP_FLAGS.load(Ordering::SeqCst), 0);
         assert_eq!(SEMAPHORE_INDEX.load(Ordering::SeqCst), 6);
-        assert_eq!(SYNC_DESCRIPTOR.load(Ordering::SeqCst), descriptor as usize);
         assert_eq!(SEEK_DESCRIPTOR.load(Ordering::SeqCst), descriptor as usize);
         assert_eq!(SEEK_UNUSED.load(Ordering::SeqCst), 0x7a);
         assert_eq!(SEEK_LOW.load(Ordering::SeqCst), 0x89ab_cdef);
         assert_eq!(SEEK_HIGH.load(Ordering::SeqCst), (-2i32) as u32);
         assert_eq!(SEEK_ORIGIN.load(Ordering::SeqCst), 1);
         assert_eq!(ERROR.load(Ordering::SeqCst), 0);
-        assert_eq!(EVENT_LOG.load(Ordering::SeqCst), 0x654321);
+        assert_eq!(EVENT_LOG.load(Ordering::SeqCst), 0x65421);
         restore(state);
     }
 }
