@@ -73505,3 +73505,37 @@ functions:
       uses volatile byte accesses solely to prevent LLVM lowering this
       freestanding byte loop to a libc builtin; valid ordinary-memory
       behavior is otherwise unchanged.
+
+  # --- Locked vtable slot dispatcher ---
+  - address: 0x0828083c
+    ghidra: FUN_0828083c
+    name: locked_vtable_slot_16_dispatch
+    size: 80
+    sig: "u32 locked_vtable_slot_16_dispatch(LockedVtableSlot16Receiver *receiver, u32 selector, u32 mode)"
+    module: cxx/locked_vtable_slot_16_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: selector
+      param_3/r2: mode
+      param_1_plus_0x70: dispatch_context
+      param_1_plus_0x78: lock
+      vtable_slot_0x10: dispatch_callback
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte body from 0x0828083c
+      through pop {r4,r5,r6,r7,r8,pc} at 0x08280888; the separately linked
+      sibling begins at 0x0828088c. Full ARM B/BL decoding finds seven direct
+      inbound calls, all plain unconditional bl: 0x0814a3a0, 0x08162e58,
+      0x08162e70, 0x08162e88, 0x081631e0, 0x081631f8, and 0x0816331c.
+      There are no predicated or tail-branch callers and no aligned image
+      word equal to this entry. It locks the ported CountedMutex pointer at
+      receiver +0x78, invokes vtable slot +0x10 as
+      (receiver, selector, mode, receiver[+0x70] +0xc4), unlocks, and returns
+      the slot result unchanged. The concrete receiver and virtual slot
+      identity remain unrecovered, so the name records only the verified
+      locked dispatch behavior. Deliberate deviation: Rust models the
+      ARM vtable with host-sized function pointers and uses a slot index;
+      named repr(C) fields preserve the distinct target fields without
+      host-pointer overlap.
