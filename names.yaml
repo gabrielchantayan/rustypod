@@ -32369,6 +32369,45 @@ functions:
       drop the rotation and branch to the timer pointer - the port
       reads the fn-pointer field directly to sidestep it.
 
+  - address: 0x0810ea18
+    ghidra: FUN_0810ea18
+    name: pair_header_base_construct_with_payload
+    size: 96
+    sig: "u32 *pair_header_base_construct_with_payload(u32 *base, const u32 *descriptor, u32 payload, u32 byte_count, u32 unused_payload_argument, u32 decoder_argument, u32 tag, u32 context, u8 owns_payload, u32 payload_pool)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      param_1: base
+      param_2: descriptor
+      param_3: payload
+      param_4: byte_count
+      param_5: unused_payload_argument
+      param_6: decoder_argument
+      param_7: tag
+      param_8: context
+      param_9: owns_payload
+      param_10: payload_pool
+    notes: >-
+      True extent is 96 bytes: 23 instructions through 0x0810ea70 plus
+      the vtable literal 0x08981630 at 0x0810ea74; Ghidra's reported
+      92-byte extent omits only that literal, and the sibling constructor
+      starts at 0x0810ea78. Decoding every ARM B/BL word in osos.dec
+      finds exactly eight direct, unconditional bl callers
+      (0x081427c8, 0x08146790, 0x0816e704, 0x0816e830, 0x081844cc,
+      0x08184534, 0x081db070, 0x08298640), with no predicated calls.
+      Algorithm: install the shared PairHeaderBase vtable, construct the
+      grand base at +4, clear +0xac and the low byte at +0xb4, store
+      payload_pool at +0xb0, call 0x0810e7d0 with the recovered eight-word
+      payload-initializer ABI, then store owns_payload at +0xb4 and return
+      base. Unlike 0x0810ebbc it never clears +4..+0x97. The callee
+      0x0810e7d0 is not already ported; its identity is deliberately not
+      inferred. The host seam records every ABI word and target dispatches
+      directly to that retail entry. Focused host coverage proves the
+      grand-base chain, vtable/pool/ownership ordering, exact argument
+      forwarding, return pointer, trailing field writes, and absent
+      zero-fill. match.py structural review is expected to differ at the
+      seam's indirect call.
+
   - address: 0x0810ebbc
     ghidra: FUN_0810ebbc
     name: pair_header_base_construct
