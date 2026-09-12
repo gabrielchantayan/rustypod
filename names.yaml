@@ -71538,3 +71538,36 @@ functions:
       StringObjectWord iteration preserves the ARM 12-byte layout while
       keeping host pointer fields disjoint; the existing string assignment
       port is called directly and no dispatch seam is added.
+
+  # --- vector<T>::push_back, 4-byte element ---
+  - address: 0x083e685c
+    ghidra: FUN_083e685c
+    name: vector_push_back_elem4
+    size: 48
+    sig: "void vector_push_back_elem4(VectorStorage *vector, const u32 *element)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: element
+      FUN_083e6500: insert_aux (unported, VECTOR_PUSH_BACK_ELEM4_OPS seam)
+      puVar9/r3: end
+      puVar2/r2: end_of_storage
+    notes: >-
+      Raw osos.dec confirms the 48-byte extent: 0x083e685c through
+      0x083e6888, then the separately linked zeroing function opens at
+      0x083e688c. This is std::vector<T>::push_back for a
+      trivially-copyable four-byte element: load end (+4) and
+      end_of_storage (+8); if equal, tail-branch to unported 0x083e6500
+      with (vector, end, element) for allocation and insertion; otherwise
+      store end + 4 first and, only when the old end is non-NULL, copy
+      *element there. The NULL end fast path thus advances to raw address 4
+      without reading element. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds exactly seven direct inbound calls: five plain bl at
+      0x08177768, 0x081777e0, 0x08177808, 0x08177838, and 0x08177868; plus
+      two blne at 0x0813e208 and 0x0813e26c. Each blne follows a caller-side
+      non-NULL test, so this body deliberately has no element NULL guard.
+      The full-storage edge is a beq tail branch, not an additional call.
+      Deliberate deviation: the unported tail target is represented by the
+      volatile VECTOR_PUSH_BACK_ELEM4_OPS seam on host tests while target
+      builds dispatch to its verified retail address.
