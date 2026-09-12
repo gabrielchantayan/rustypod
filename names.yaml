@@ -63480,7 +63480,7 @@ functions:
       param_4/r3: arg3 (record and controller +0x8c word 1)
       param_5/[sp,#0x18]: state (record and controller +0x90 word 2)
       param_6/[sp,#0x1c]: aux (record and controller +0x94 word 3)
-      FUN_08182c78: command_record_resolve_or_allocate (unported seam)
+      FUN_08182c78: command_record_resolve_or_allocate (direct, ported)
     notes: >-
       EXTENT verified against osos.dec: exactly 48 bytes,
       0x08181110..0x08181140; the next sibling begins push {r0-r12, lr} at
@@ -63488,19 +63488,60 @@ functions:
       osos.dec: exactly 9 unconditional bl sites at 0x08134764, 0x08225498,
       0x082290f4, 0x08230824, 0x082319d0, 0x08231aa4, 0x08231b78,
       0x08231c38, and 0x082323bc; no predicated bl and no plain-B tail-call
-      sites. ALGORITHM: call FUN_08182c78(controller, command, 0, 1), write
-      arg2/arg3/state/aux to the returned 16-byte record, then mirror the
+      sites. ALGORITHM: calls the directly ported resolver
+      command_record_resolve_or_allocate(controller, command, 0, 1), writes
+      arg2/arg3/state/aux to the returned 16-byte record, then mirrors the
       same four words at controller +0x88..+0x94. Neither the returned record
-      nor controller is NULL-guarded. DEVIATION: the unported resolver is a
-      read_volatile seam: target defaults reach its stock 0x08182c78 body,
-      host defaults panic and tests install a recording resolver. The
-      controller prefix and record have repr(C) named fields with the
-      +0x88 target-width offset assertion rather than host-unsafe byte
-      offsets. The ported handler_list_activate caller now calls this
-      function directly; its old target/default seam has been removed. Host
-      tests prove resolver arguments (command, 0, 1), every high-bit and zero
-      payload word, record/controller mirroring, prior-record overwrite, and
-      +0x00..+0x87 preservation.
+      nor controller is NULL-guarded. DEVIATION: the resolver's unported
+      slot-lookup helper FUN_083daf6c remains behind its documented
+      read_volatile seam; the ported resolver is otherwise called directly.
+      The controller prefix and record have repr(C) named fields with
+      target-width +0x3c map-state and +0x88 pending-record offset assertions.
+      Host tests prove resolver arguments (command, 0, 1), every high-bit and
+      zero payload word, record/controller mirroring, prior-record overwrite,
+      and +0x00..+0x87 preservation.
+
+  # --- controller command-record resolve or allocate ---
+  - address: 0x08182c78
+    ghidra: FUN_08182c78
+    name: command_record_resolve_or_allocate
+    size: 104
+    sig: "PendingCommandRecord *command_record_resolve_or_allocate(AppControllerPendingCommand *controller, u32 first_key, u32 second_key, u32 allocate)"
+    module: app/controller_pending_command
+    status: ported
+    renames:
+      param_1/r0: controller (inline command-record map begins at +0x3c)
+      param_2/r1: first_key (zero returns NULL without reading controller)
+      param_3/r2: second_key (second map-key word)
+      param_4/r3: allocate (zero returns NULL on a missing slot)
+      piVar1/r0: record_slot (pointer to the map value word)
+      iVar2/r4: record (existing or newly initialized 16-byte record)
+      FUN_083daf6c: command_record_slot_lookup (unported dispatch seam; identity not inferred)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_08287278: four_word_sentinel_init (direct, ported in util/four_word_sentinel_init)
+    notes: >-
+      Raw ARM establishes the exact 104-byte extent
+      0x08182c78..0x08182ce0; the next separately linked sibling begins with
+      push {r4-r11,lr} at 0x08182ce0. Decoding every ARM B/BL word in
+      osos.dec finds exactly eight direct BL sites, all unconditional, at
+      0x0817ebf4, 0x0817eedc, 0x0817eef8, 0x0817fdb8, 0x0817fe08,
+      0x0818112c, 0x08183968, and 0x081847e0: there are no predicated call
+      sites. There is one additional unconditional plain-B tail site at
+      0x0817f404. A zero first key returns NULL without touching controller.
+      Otherwise the map state at controller+0x3c is queried for the two-word
+      key; an occupied slot returns its record. A missing slot returns NULL
+      when allocate is zero, else operator_new(16), four_word_sentinel_init,
+      a second lookup of the same slot, slot store, and record return. The
+      allocation result deliberately has no NULL guard: the retail body invokes
+      the initializer unconditionally.
+      DEVIATION: FUN_083daf6c is unported and has no inferred identity; its
+      observed map/key-to-value-slot contract is the COMMAND_RECORD_RESOLVER_OPS
+      read_volatile seam, wired to its stock address on target and a host
+      fixture in tests. The resolver itself is a direct port and replaces the
+      former seam used by app_controller_begin_command. Host tests cover zero
+      key, existing slot, missing nonallocating slot, and allocating sentinel
+      initialization with the 16-byte tag-2 allocation and second lookup
+      asserted.
 
   - address: 0x080a1d7c
     ghidra: FUN_080a1d7c
