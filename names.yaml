@@ -70177,3 +70177,33 @@ functions:
       invented identity. Host tests cover exact due, empty and future outputs
       untouched, the 0x80000000 wrapping boundary, release-failure rearm skip,
       rearm-status chaining, and mutex ownership inside every seam call.
+
+  # --- opaque singleton selection predecessor ---
+  - address: 0x0812ce60
+    ghidra: FUN_0812ce60
+    name: singleton_selection_predecessor
+    size: 20
+    sig: "u32 singleton_selection_predecessor(const u8 *singleton, u32 selection)"
+    module: app/singleton_selection_predecessor
+    status: ported
+    renames:
+      param_1/r0: singleton
+      param_2/r1: selection
+      "singleton+0x54": state_flag
+      return/r0: preceding_selection
+    notes: >-
+      Raw ARM confirms the exact 20-byte extent 0x0812ce60..0x0812ce74:
+      ldrb r0,[r0,#0x54]; cmp r0,#0; subeq r0,r1,#2; subne r0,r1,#1; bx lr.
+      The next separately linked function begins at 0x0812ce74, with no
+      literal pool. Decoding every aligned ARM B/BL immediate in osos.dec
+      finds exactly eight direct inbound bl callers, all plain unconditional:
+      0x08225dcc, 0x08225edc, 0x08225fb0, 0x08226370, 0x08226644,
+      0x08226858, 0x0822691c, and 0x08226b7c. There are zero predicated bl
+      forms, zero direct tail b transfers, and zero aligned data-word
+      references. The opaque state byte is truthy: zero returns selection - 2
+      modulo 2^32, while every nonzero byte returns selection - 1 modulo
+      2^32. It has no NULL guard and reads no other object bytes. The
+      singleton's class and state-flag meaning remain unidentified; the Rust
+      port names only the observed selection-predecessor behavior. Host tests
+      cover zero and arbitrary nonzero byte states, arithmetic wraparound, and
+      read-only surrounding storage. Deliberate deviation: none.
