@@ -186,6 +186,67 @@ pub unsafe extern "C" fn video_engine_set_property(command: u32, key: u32, value
     }
     property_dispatch(engine, command, key, value);
 }
+/// Firmware entry of the video-engine one-handle release helper
+/// `FUN_082d1134`.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_RELEASE_ONE_HANDLE_ADDR: usize = 0x082d_1134;
+
+/// ABI of the still-unported video-engine one-handle release helper.
+type VideoEngineReleaseOneHandle = unsafe extern "C" fn(usize, *mut u32);
+
+/// Target transfer into `FUN_082d1134`.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn video_engine_release_one_handle(handle: *mut u32) {
+    let release: VideoEngineReleaseOneHandle =
+        core::mem::transmute(VIDEO_ENGINE_RELEASE_ONE_HANDLE_ADDR);
+    release(1, handle);
+}
+
+/// Host boundary for the still-unported one-handle release helper.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_RELEASE_ONE_HANDLE: Option<VideoEngineReleaseOneHandle> = None;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn video_engine_release_one_handle(handle: *mut u32) {
+    match core::ptr::addr_of!(MOCK_RELEASE_ONE_HANDLE).read() {
+        Some(release) => release(1, handle),
+        None => panic!("video_engine_release_one_handle_and_delete requires helper 0x082d1134"),
+    }
+}
+
+/// video_engine_release_one_handle_and_delete — retailOS `FUN_08272800` @
+/// **0x08272800** (28 bytes; `0x08272800..0x08272818`). The next distinct
+/// function begins at `0x0827281c`.
+///
+/// Raw ARM is `push {r4,lr}; mov r4,r1; mov r0,#1; bl 0x082d1134; mov r0,r4;
+/// pop {r4,lr}; b 0x082aad24`: it discards its first argument, releases the
+/// one-word handle supplied in `r1` through the video-engine helper, then
+/// tail-transfers that same allocation to tag-2 `operator_delete`. There is no
+/// NULL guard before the release helper. A full osos.dec ARM B/BL decode finds
+/// 8 inbound calls: 4 plain `bl` (0x0827ba6c, 0x0827ba84, 0x0827bc88,
+/// 0x0828e6a8) and 4 `blne` (0x0827bd38, 0x0827bd48, 0x0827bd58,
+/// 0x0827bd68); the predicated callers gate the call on their own non-NULL
+/// handle loads. No aligned DATA word references this entry.
+///
+/// Deliberate deviation: `FUN_082d1134` is not ported. Target builds call its
+/// resident firmware address directly; host builds use the narrow recording
+/// boundary above. `operator_delete` is already ported and called directly.
+///
+/// # Safety
+///
+/// `handle` is forwarded without validation to `FUN_082d1134`, then to the
+/// allocator. The first argument is intentionally ignored, as in the raw ARM.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_release_one_handle_and_delete(
+    _unused: *mut u8,
+    handle: *mut u32,
+) {
+    video_engine_release_one_handle(handle);
+    crate::heap::veneers::operator_delete(handle.cast());
+}
 
 /// ABI of the frame-operation callback selected by the video engine.
 pub type VideoFrameOperationDispatch =
@@ -625,6 +686,92 @@ mod tests {
                 "zero has no low pending bits, so it is dispatched"
             );
             assert_eq!(frame.pending_operations, 0xffff_fffc);
+        }
+    }
+    // --- video_engine_release_one_handle_and_delete (FUN_08272800) ---
+
+    static mut RELEASED_ONE_HANDLE: Option<(usize, *mut u32)> = None;
+    static mut DELETED_HANDLE: Option<(*mut u8, usize)> = None;
+
+    unsafe extern "C" fn record_release_one_handle(count: usize, handle: *mut u32) {
+        *addr_of_mut!(RELEASED_ONE_HANDLE) = Some((count, handle));
+    }
+
+    unsafe extern "C" fn record_operator_delete(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        handle: *mut u8,
+        tag: usize,
+    ) {
+        *addr_of_mut!(DELETED_HANDLE) = Some((handle, tag));
+    }
+
+    struct ReleaseAndDeleteReset {
+        release: Option<VideoEngineReleaseOneHandle>,
+        heap_ops: crate::heap::veneers::HeapVeneerOps,
+    }
+
+    impl Drop for ReleaseAndDeleteReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(MOCK_RELEASE_ONE_HANDLE).write(self.release);
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(self.heap_ops);
+            }
+        }
+    }
+
+    unsafe fn record_release_and_delete() -> ReleaseAndDeleteReset {
+        let release = core::ptr::addr_of!(MOCK_RELEASE_ONE_HANDLE).read();
+        let heap_ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+        let mut recording_heap_ops = heap_ops;
+        recording_heap_ops.free = record_operator_delete;
+        core::ptr::addr_of_mut!(MOCK_RELEASE_ONE_HANDLE).write(Some(record_release_one_handle));
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(recording_heap_ops);
+        *addr_of_mut!(RELEASED_ONE_HANDLE) = None;
+        *addr_of_mut!(DELETED_HANDLE) = None;
+        ReleaseAndDeleteReset { release, heap_ops }
+    }
+
+    #[test]
+    fn release_one_handle_then_deletes_the_same_allocation() {
+        let _guard = LOCK.lock();
+        let mut handle = 0xfeed_c0de;
+        let _reset = unsafe { record_release_and_delete() };
+
+        unsafe {
+            video_engine_release_one_handle_and_delete(
+                0x1234_5678usize as *mut u8,
+                &mut handle,
+            );
+            assert_eq!(
+                RELEASED_ONE_HANDLE,
+                Some((1, &mut handle as *mut u32)),
+                "the r1 handle is released once; r0 is discarded"
+            );
+            assert_eq!(
+                DELETED_HANDLE,
+                Some(((&mut handle as *mut u32).cast(), 2)),
+                "the unchanged r1 allocation reaches tag-2 operator_delete"
+            );
+        }
+    }
+
+    #[test]
+    fn null_handle_still_reaches_release_but_skips_operator_delete() {
+        let _guard = LOCK.lock();
+        let _reset = unsafe { record_release_and_delete() };
+
+        unsafe {
+            video_engine_release_one_handle_and_delete(ptr::null_mut(), ptr::null_mut());
+            assert_eq!(
+                RELEASED_ONE_HANDLE,
+                Some((1, ptr::null_mut())),
+                "the raw body has no release-side NULL guard"
+            );
+            assert_eq!(
+                DELETED_HANDLE,
+                None,
+                "operator_delete alone supplies the NULL guard"
+            );
         }
     }
 }

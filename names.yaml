@@ -68326,3 +68326,31 @@ functions:
       through it, so no identity is inferred for its unresolved slots. Host
       tests prove the five exact stores, guard-word preservation, returned
       pointer, and source/storage alias ordering.
+
+  - address: 0x08272800
+    ghidra: FUN_08272800
+    name: video_engine_release_one_handle_and_delete
+    size: 28
+    sig: "void video_engine_release_one_handle_and_delete(void *unused, u32 *handle)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1/r4: handle
+      FUN_082d1134: video_engine_release_one_handle_unported
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec fixes the complete 28-byte extent: `push {r4,lr}; mov
+      r4,r1; mov r0,#1; bl 0x082d1134; mov r0,r4; pop {r4,lr}; b
+      0x082aad24`, followed immediately by the distinct function at
+      0x0827281c. It ignores r0, calls the unported video-engine helper
+      0x082d1134 with count 1 and the r1 handle, then tail-branches to the
+      already ported tag-2 operator_delete with that unchanged handle. There
+      is no NULL guard before the helper; operator_delete alone guards its
+      free path. A whole-image ARM B/BL decode finds 8 inbound direct calls:
+      4 unconditional bl at 0x0827ba6c, 0x0827ba84, 0x0827bc88, and
+      0x0828e6a8; 4 blne at 0x0827bd38, 0x0827bd48, 0x0827bd58, and
+      0x0827bd68, each gated by its caller's non-NULL handle load. No aligned
+      data word references this entry. Target builds transfer directly to
+      0x082d1134; host tests replace only that unported boundary and record
+      both the exact count/handle forwarding and the tag-2 deletion.
