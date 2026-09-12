@@ -11750,6 +11750,48 @@ functions:
       registers the result with class id 0x7800. Same deviations and the
       same NOT-HOOK-READY caveat as 0x0817ee04.
 
+  - address: 0x0817794c
+    ghidra: FUN_0817794c
+    name: app_screen_update_position
+    size: 124
+    sig: "u32 app_screen_update_position(void *screen, u32 requested_position)"
+    module: app/app_screen_update_position
+    status: ported
+    renames:
+      param_1/r0/r4: screen
+      param_2/r1/r5: requested_position
+      r6: validated_singleton
+      "screen+0x18": nullable_position_handle
+      "screen+0x2c": cached_position
+      "object->vtable+0x110": position_limit (unidentified virtual target)
+      FUN_0820a570: validated_singleton_0x89c_get
+      FUN_0820a49c: mode_selected_position thunk
+      FUN_083d604c: handle_deref_or_null
+      FUN_0820a60c: mode-position setter veneer
+    notes: >-
+      Raw ARM confirms the 124-byte extent from 0x0817794c through
+      0x081779c4; the next separately linked function begins at 0x081779c8.
+      It first obtains validated_singleton_0x89c_get, then compares the
+      mode-selected position of screen with screen+0x2c. Only when equal does
+      it use handle_deref_or_null(screen+0x18) as a NULL test, call that
+      accessor a second time, and invoke the resulting object's unidentified
+      vtable slot +0x110. A return strictly above cached_position selects mode
+      zero with requested_position - cached_position (wrapping u32); all other
+      paths select mode one with requested_position. It writes requested_position
+      to screen+0x2c before calling the mode-position setter only when
+      mode | position is nonzero; the setter's return becomes this function's
+      result. Decoding every ARM B/BL immediate in osos.dec finds exactly eight
+      inbound direct bl callers, all unconditional with zero predicated forms
+      and no direct tail b: 0x0822748c, 0x08229d44, 0x0822a0ec, 0x0822a758,
+      0x08231050, 0x08234168, 0x08234294, and 0x08260a10. The 0x0820a49c
+      thunk tail-branches to the existing mode_selected_position port; the
+      0x0820a60c tail veneer reaches unported 0x0822ba50 through the existing
+      shared host seam. The virtual callee has no recovered identity and is
+      dispatched only at the observed vtable index. Host tests cover strict
+      limit/delta mode, stale and NULL-handle mode-one forwarding, zero
+      mode/delta send suppression, cache storage, virtual-slot selection, and
+      setter return propagation.
+
   - address: 0x0817ceb4
     ghidra: FUN_0817ceb4
     name: media_player_get

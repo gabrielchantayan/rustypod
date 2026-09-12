@@ -28,11 +28,16 @@ const CACHED_POSITION_OFFSET: usize = 0x8b8;
 const LOWER_POSITION_OFFSET: usize = 0x8bc;
 const UPPER_POSITION_OFFSET: usize = 0x8c0;
 
-pub type ModePositionSetter = unsafe extern "C" fn(*mut u8, u32, u32);
+pub type ModePositionSetter = unsafe extern "C" fn(*mut u8, u32, u32) -> u32;
 pub type PositionChanged = unsafe extern "C" fn(*mut u8);
 
+#[cfg(test)]
+pub(crate) static MODE_POSITION_SETTER_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_mode_position_setter(_state: *mut u8, _mode: u32, _position: u32) {}
+unsafe extern "C" fn missing_mode_position_setter(_state: *mut u8, _mode: u32, _position: u32) -> u32 {
+    0
+}
 
 #[cfg(not(target_arch = "arm"))]
 unsafe extern "C" fn missing_position_changed(_state: *mut u8) {}
@@ -47,15 +52,20 @@ pub static mut MODE_POSITION_CHANGED: PositionChanged = missing_position_changed
 
 #[cfg(target_arch = "arm")]
 #[inline(always)]
-unsafe fn set_backend_position(state: *mut u8, position: u32) {
+pub(crate) unsafe fn set_mode_position(state: *mut u8, mode: u32, position: u32) -> u32 {
     let setter: ModePositionSetter = core::mem::transmute(0x0822_ba50usize);
-    setter(state, 1, position)
+    setter(state, mode, position)
 }
 
 #[cfg(not(target_arch = "arm"))]
 #[inline(always)]
+pub(crate) unsafe fn set_mode_position(state: *mut u8, mode: u32, position: u32) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(MODE_POSITION_SETTER))(state, mode, position)
+}
+
+#[inline(always)]
 unsafe fn set_backend_position(state: *mut u8, position: u32) {
-    core::ptr::read_volatile(core::ptr::addr_of!(MODE_POSITION_SETTER))(state, 1, position)
+    let _ = set_mode_position(state, 1, position);
 }
 
 #[cfg(target_arch = "arm")]
@@ -105,13 +115,11 @@ pub unsafe extern "C" fn set_clamped_mode_position(state: *mut u8, requested_pos
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
     const STATE_BYTES: usize = UPPER_POSITION_OFFSET + core::mem::size_of::<u32>();
     const MODE_POSITION_OFFSET: usize = BACKEND_OFFSET + 0x2ec;
     const DEFAULT_POSITION_OFFSET: usize = BACKEND_OFFSET + 0x5e4;
     const MODE_FLAGS_OFFSET: usize = BACKEND_OFFSET + 0x5f8;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut SETTER_STATE: *mut u8 = core::ptr::null_mut();
     static mut SETTER_MODE: u32 = 0;
     static mut SETTER_POSITION: u32 = 0;
@@ -122,11 +130,12 @@ mod tests {
     #[repr(align(4))]
     struct State([u8; STATE_BYTES]);
 
-    unsafe extern "C" fn record_setter(state: *mut u8, mode: u32, position: u32) {
+    unsafe extern "C" fn record_setter(state: *mut u8, mode: u32, position: u32) -> u32 {
         SETTER_STATE = state;
         SETTER_MODE = mode;
         SETTER_POSITION = position;
         SETTER_CALLS += 1;
+        0
     }
 
     unsafe extern "C" fn record_notification(state: *mut u8) {
@@ -151,7 +160,7 @@ mod tests {
 
     #[test]
     fn clamps_signed_bounds_and_updates_both_observable_paths() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
@@ -176,7 +185,7 @@ mod tests {
 
     #[test]
     fn skips_backend_setter_when_active_position_already_matches() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
@@ -196,7 +205,7 @@ mod tests {
 
     #[test]
     fn backend_update_does_not_notify_when_cached_position_is_unchanged() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
