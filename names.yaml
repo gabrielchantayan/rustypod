@@ -71283,3 +71283,34 @@ functions:
       identifying +0x04 as RAND_bytes. The getter remains unported: target
       builds call 0x0806212c directly, while host tests inject a native-width
       getter/method seam; target layout retains the raw 32-bit +0x04 word.
+
+  # --- Descriptor attachment ---
+  - address: 0x0803c034
+    ghidra: FUN_0803c034
+    name: attach_matching_descriptor
+    size: 184
+    sig: "u32 *attach_matching_descriptor(u32 *owner, u32 *descriptor, void *context)"
+    module: app/descriptor_attachment
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: descriptor
+      param_3/r2: context
+      piVar2/r4: link
+    notes: >-
+      Raw osos.dec covers 0x0803c034 through the return at 0x0803c0e8 and
+      literal tag word 0x61706c69 at 0x0803c0ec; the independently linked
+      next function starts at 0x0803c0f0, confirming the 184-byte extent.
+      Decoding every aligned ARM B/BL immediate finds eight inbound direct bl
+      calls: five unconditional at 0x0803bf38, 0x08094ef8, 0x080ab0e0,
+      0x081792e0, and 0x08283ec4, plus three blne at 0x080ab3b0,
+      0x080ab448, and 0x0816eeec. The predicated call sites gate attachment
+      on their own lookup or inequality result. It returns NULL when
+      descriptor word 0 differs from owner +0x0c, optionally suppresses a
+      duplicate when descriptor +0x24 is nonzero and owner byte +0x18d has
+      bit 4, allocates/splices/initializes a new link, then notifies owner
+      +0x48 with raw tag 0x61706c69. After an attempted allocation only, it
+      ORs descriptor +0xbc into owner +0x1a8, including allocation failure.
+      FUN_080daa7c, FUN_0808e228, FUN_08093dfc, and FUN_08066bb8 are
+      unported and represented by volatile target seams; their identities
+      beyond observed roles and the tag's semantic identity are not claimed.
