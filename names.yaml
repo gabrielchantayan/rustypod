@@ -49932,6 +49932,49 @@ functions:
       live-OUT/use-head split, active-anchor transfer, and terminal flag
       mask remain.
 
+  - address: 0x082d7800
+    ghidra: FUN_082d7800
+    name: cg_release_call_clobbered_bindings
+    size: 112
+    sig: "void cg_release_call_clobbered_bindings(CgCodegen *codegen)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r6: codegen (owner of the r0-r15 binding records)
+      r5: descriptor_index (0 through 3)
+      r4: binding (codegen + 0x14 + descriptor_index * 0x1c)
+      r0: bound virtual register (binding +0x10), then codegen/free anchor
+      r1: binding (argument to the direct list helpers)
+      FUN_082c5c58: cg_binding_release (ported direct callee)
+      FUN_083673b0: cg_binding_unlink (ported direct callee)
+      FUN_08367358: cg_binding_push (ported direct callee)
+    notes: >-
+      Verified raw extent: exactly 112 bytes,
+      0x082d7800..0x082d786c, followed by distinct FUN_082d7870.
+      Branch census decoding every ARM B/BL word in osos.dec found 7 plain
+      bl sites, 0 predicated bl sites, and no tail branches:
+      0x082c0fc4, 0x082c1028, 0x082c1058, 0x082c1088, 0x082c1110,
+      0x082c11b8, 0x082cbc54. No aligned osos.dec data word equals
+      0x082d7800, so no indirect dispatch was discovered. For each of the
+      first four 28-byte hardware-register binding records (r0-r3), it reads
+      binding +0x10. A non-NULL virtual register that back-points through
+      reg +0x08 to the binding takes the direct cg_binding_release path.
+      Otherwise, the raw body assumes the binding is active: it directly
+      unlinks it from codegen +0x1f8, pushes it at codegen +0x1f0, and
+      clears only binding +0x10; its flags are deliberately preserved.
+      NULL binding +0x10 skips the descriptor. Every recovered caller first
+      calls FUN_082d7870 for the CPSR binding, then invokes this r0-r3
+      release before call-like instruction emission. The name reflects that
+      observed call-clobbered scope. No deliberate deviations; all three
+      direct callees are ported, so this retains raw direct calls without an
+      additional dispatch seam. Host coverage proves the consistent release,
+      stale active-to-free transfer with preserved flags, empty r2/r3 skips,
+      and r4 exclusion.
+      match.py (exit 1, diff expected): LLVM unrolls the four descriptors and
+      expresses the raw `beq` direct-release path as inverted branch arms;
+      each arm retains the +0x10 load, reg +0x08 comparison, direct release,
+      and stale unlink/push/clear sequence.
+
 
   - address: 0x082d817c
     ghidra: FUN_082d817c
