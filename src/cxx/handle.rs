@@ -57,11 +57,12 @@
 //! linked copies of that slot-1 teardown. [`refcounted_body_release_owned_variant`]
 //! @ 0x0839cf4c is an owning sibling whose implementation disposer remains an
 //! unported direct call.
-//! [`refcounted_body_acquire`] @ 0x0839cd5c and
-//! [`refcounted_body_acquire_from_owner`] @ 0x08131fb8 are separately
+//! [`refcounted_body_acquire`] @ 0x0839cd5c,
+//! [`refcounted_body_acquire_from_owner`] @ 0x08131fb8, and
+//! [`refcounted_body_acquire_from_controller`] @ 0x08218e04 are separately
 //! linked store-and-bump copies used by refcounted-handle constructors and
-//! owner accessors. [`refcounted_body_attach`] @ 0x0839d370 is the equivalent
-//! copy-assignment helper.
+//! owner or controller accessors. [`refcounted_body_attach`] @ 0x0839d370 is
+//! the equivalent copy-assignment helper.
 //! [`refcounted_body_release_retain_count`] @ 0x0839d498 is a final-drop
 //! sibling that passes its just-zeroed count to a direct disposer before
 //! freeing the body. [`refcounted_ptr_assign_owned`] @ 0x0839f1b0 combines
@@ -215,6 +216,18 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock(body: *mut RefcountedBody)
 #[repr(C)]
 pub struct RefcountedBodyOwner {
     pub opaque_prefix: [u32; 10],
+    pub body: *mut RefcountedBody,
+}
+
+/// Opaque body-bearing controller record whose refcounted-body handle is its
+/// forty-sixth target word.
+///
+/// On target, `body` is at +0xb4. The preceding 45 words remain
+/// unidentified; `u32` preserves their 4-byte target layout while the named
+/// pointer field remains disjoint in 64-bit host fixtures.
+#[repr(C)]
+pub struct BodyBearingController {
+    pub opaque_prefix: [u32; 45],
     pub body: *mut RefcountedBody,
 }
 
@@ -799,6 +812,39 @@ pub unsafe extern "C" fn refcounted_body_acquire_from_owner(
     owner: *const RefcountedBodyOwner,
 ) {
     refcounted_body_acquire(dst, (*owner).body);
+}
+
+/// refcounted_body_acquire_from_controller — original: `FUN_08218e04` @
+/// 0x08218e04 (8 bytes; **8 `bl` call sites**, all unconditional:
+/// 0x0821943c, 0x08219518, 0x0821996c, 0x08219c7c, 0x08219d30, 0x082608f8,
+/// 0x08260974, and 0x082609c0). Decoding every aligned ARM B/BL word in
+/// osos.dec finds no predicated or direct-tail inbound branches, and no
+/// aligned image word equals this address, so it is not virtually dispatched.
+/// The preceding function ends at 0x08218e00 and the separately linked next
+/// function starts at 0x08218e0c, confirming Ghidra's 8-byte extent.
+///
+/// Loads the refcounted body from `controller.body` at target +0xb4, then
+/// tail-transfers it with `dst` to [`refcounted_body_acquire`]. It has no
+/// NULL, alignment, or bounds guard: an invalid `controller` faults on the
+/// initial load, exactly as the original does.
+///
+/// Deliberate deviation: the Rust direct call may compile as `bl` rather than
+/// the original tail `b`; the load and acquire behavior are unchanged. Its
+/// distinct ARM text section preserves this separately hookable entry.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned body-pointer slot and `controller` must
+/// point to a readable [`BodyBearingController`]. A non-NULL `controller.body`
+/// must meet [`refcounted_body_acquire`]'s body requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_acquire_from_controller")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_acquire_from_controller(
+    dst: *mut *mut RefcountedBody,
+    controller: *const BodyBearingController,
+) {
+    refcounted_body_acquire(dst, (*controller).body);
 }
 
 /// refcounted_body_attach — original: `FUN_0839d370` @ 0x0839d370
@@ -2323,6 +2369,47 @@ mod tests {
             let mut slot = 0xdead_beefusize as *mut RefcountedBody;
 
             refcounted_body_acquire_from_owner(&mut slot, &owner);
+
+            assert!(slot.is_null());
+        }
+    }
+
+    /// The controller wrapper reads the fixed target +0xb4 body field before
+    /// acquiring it, so a wrapping increment leaves its opaque prefix intact.
+    #[test]
+    fn acquire_from_controller_reads_body_field_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let controller = BodyBearingController {
+                opaque_prefix: [0xdead_beef; 45],
+                body: &mut body,
+            };
+            let mut slot = core::ptr::null_mut();
+
+            refcounted_body_acquire_from_controller(&mut slot, &controller);
+
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(controller.opaque_prefix[44], 0xdead_beef);
+        }
+    }
+
+    /// A NULL controller body still overwrites the destination before the
+    /// shared acquire helper takes its NULL early-out.
+    #[test]
+    fn acquire_from_controller_null_body_overwrites_destination() {
+        unsafe {
+            let controller = BodyBearingController {
+                opaque_prefix: [0; 45],
+                body: core::ptr::null_mut(),
+            };
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_acquire_from_controller(&mut slot, &controller);
 
             assert!(slot.is_null());
         }
