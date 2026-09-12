@@ -24778,6 +24778,42 @@ functions:
       allocations with oversized arenas, since the host structs are
       wider than the 32-bit target layout.
 
+  - address: 0x0839eed4
+    ghidra: FUN_0839eed4
+    name: refcounted_ptr_construct_vtable_variant
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_vtable_variant(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2/r0: mutex
+    notes: >-
+      Raw ARM establishes the exact 104-byte extent
+      0x0839eed4..0x0839ef3b: twenty-six instruction words ending in
+      `pop {r4-r8,pc}`; the next separately linked function starts at
+      0x0839ef3c. Decoding every ARM B/BL word in osos.dec finds exactly
+      seven direct BL callers, all unconditional (0x08132ecc, 0x08133264,
+      0x0813349c, 0x081334f8, 0x08133e7c, 0x08133e8c, 0x08133f98), with no
+      predicated BL or tail-B caller. Image word 0x089a4bd4 equals this
+      address inside a vtable-like table; its owner and indirect-dispatch
+      semantics are unidentified, so no dispatch seam is invented.
+      Separately linked C++ template instantiation of refcounted_ptr_construct:
+      it clears slot, then when implementation is non-NULL creates a tag-2
+      operator_new(12) RefcountedBody { implementation, refcount = 1,
+      mutex = NULL }; a nonzero want_mutex also tag-2 allocates and zeros an
+      8-byte Mutex, stores it at body+8, calls mutex_create, publishes body
+      last, and returns slot. Both direct callees were already ported
+      (heap/veneers operator_new and kernel/sync_mutex mutex_create).
+      Deliberate codegen deviation: LLVM may inline mutex_create; its
+      alloc/init/create/publish behavior is retained. A dedicated target
+      section prevents this separately hookable copy from being folded into
+      byte-identical siblings. Host tests cover NULL, unguarded, and
+      mutex-backed construction paths and allocation ordering.
+
   - address: 0x0839f28c
     ghidra: FUN_0839f28c
     name: refcounted_ptr_copy_assign
