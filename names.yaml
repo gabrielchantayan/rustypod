@@ -72739,3 +72739,34 @@ functions:
       original veneer directly, while host tests install a recording seam.
       Tests cover the NULL-session no-op and zero, known, boundary, and
       maximum flag values passed through unchanged.
+  - address: 0x082ab68c
+    ghidra: FUN_082ab68c
+    name: tracker_record_from_payload
+    size: 52
+    sig: "u32 tracker_record_from_payload(const u32 * const *payload_slot)"
+    module: app/tracker_record
+    status: ported
+    renames:
+      param_1/r0: payload_slot
+      r0: payload
+      r4: tracker_record
+      FUN_08033714: rt_exit_branch_alias
+      FUN_08033720: __rt_exit
+    notes: >-
+      Raw osos.dec confirms Ghidra's 52-byte extent: the body runs from
+      0x082ab68c (cmp r0,#0) through 0x082ab6bc (pop {r4,pc}), and the next
+      independently linked function begins with push {r4,r5,lr} at
+      0x082ab6c0. It requires a non-NULL slot, loads its payload pointer and
+      requires that to be non-NULL, then loads the word at payload-4 and
+      requires it to be nonzero before returning it. Every failing condition
+      branches through the real 4-byte alias at 0x08033714 to the already
+      ported __rt_exit at 0x08033720; the apparent post-call zero return is
+      unreachable. Complete aligned ARM B/BL-immediate decoding finds exactly
+      seven direct inbound calls, all unconditional plain bl at 0x080c533c,
+      0x080c536c, 0x080ccca0, 0x080ccd0c, 0x080dd404, 0x080dd4f8, and
+      0x082ab4ec; there are no predicated BL forms or direct tail branches.
+      All callers pass the returned word to FUN_082a777c, the tracker-record
+      identity/name comparator, establishing the prefix's tracker-record
+      meaning. Firmware builds call the existing __rt_exit port directly;
+      host tests deliberately substitute a catchable panic for that
+      non-returning path.
