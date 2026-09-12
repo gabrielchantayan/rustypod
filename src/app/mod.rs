@@ -35,6 +35,7 @@ pub mod default_selector_dispatch;
 pub mod context;
 pub mod controller_layout_dispatch;
 pub mod controller_timer_pair;
+pub mod controller_transition_volume_post;
 pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;

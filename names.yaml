@@ -66541,6 +66541,50 @@ functions:
       none; the field names express only this selector's verified precedence,
       not unrecovered business-level state meanings.
 
+  # --- Availability-gated controller transition and volume post ---
+  - address: 0x081a4044
+    ghidra: FUN_081a4044
+    name: controller_transition_volume_post
+    size: 160
+    sig: "void controller_transition_volume_post(void *controller)"
+    module: app/controller_transition_volume_post
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0x20": dispatch_target
+      "controller+0x76": singleton_selection
+      "controller+0x8a": transition_started
+      "controller+0x8b": transition_auxiliary
+      "controller+0x8c": timer_stop_select
+      "controller+0xa4": transition_timer
+      FUN_08259534: lazy_singleton_0xbc
+      FUN_0812c6b0: timer_stop
+      FUN_0812bf4c: timer_restart
+      FUN_081f77a4: volume_controller_get
+      FUN_081a4210: singleton availability virtual at vtable slot +0x38
+      FUN_081f9354: unported volume post continuation
+    notes: >-
+      Raw osos.dec confirms the true 160-byte extent from push {r4,lr} at
+      0x081a4044 through the tail b 0x081f9354 at 0x081a40e0; the separately
+      linked sibling begins at 0x081a40e4. Decoding every ARM B/BL immediate
+      finds eight incoming direct transfers, all unconditional plain bl:
+      0x08126294, 0x081263d0, 0x081264dc, 0x0819b130, 0x0819b1d4,
+      0x0819b41c, 0x081a2fac, and 0x081a39a0. There are no predicated bl
+      forms or direct tail b callers. The availability-false path reaches
+      only the unconditional volume post. A true availability result either
+      initializes +0x8a..+0x8c and +0x76 then dispatches the +0xac virtual,
+      or toggles +0x8c then dispatches +0xb0; +0x8c selects restart versus
+      stop for the embedded +0xa4 timer. 0x081a4210 is the verified
+      lazy_singleton_0xbc +0x38 virtual wrapper, while 0x081f9354 invokes
+      the returned volume controller's +0x58 virtual three times with stock
+      command words. Deliberate deviations: those unknown virtual/external
+      operations are a volatile swappable seam (ARM defaults retain the
+      verified slots/address; host tests record them and substitute the
+      otherwise-ported volume getter to avoid its shared cache), and Rust
+      represents the stock tail branch as a normal call without inventing
+      their unrecovered identities. Host tests cover unavailable-only-post,
+      initialization/+0xac/restart, and toggle/+0xb0/stop paths.
+
   # --- Two-pair derived vtable constructor ---
   - address: 0x081d0d98
     ghidra: FUN_081d0d98
