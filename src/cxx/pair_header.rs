@@ -200,6 +200,139 @@ pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 
     object
 }
 
+/// Host/test and target dispatch for `FUN_0810e7d0`, the unported payload
+/// initializer called by [`pair_header_base_construct_with_payload`].
+///
+/// The initializer's identity is not inferred: the seam preserves its eight
+/// recovered ARM arguments and target builds call the retail entry directly.
+#[derive(Clone, Copy)]
+pub struct PairHeaderBasePayloadInitializeOps {
+    pub initialize: unsafe extern "C" fn(
+        base: *mut u32,
+        descriptor: *const u32,
+        payload: u32,
+        byte_count: u32,
+        unused_payload_argument: u32,
+        decoder_argument: u32,
+        tag: u32,
+        context: u32,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_initialize_pair_header_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    payload: u32,
+    byte_count: u32,
+    unused_payload_argument: u32,
+    decoder_argument: u32,
+    tag: u32,
+    context: u32,
+) {
+    let initialize: unsafe extern "C" fn(
+        *mut u32,
+        *const u32,
+        u32,
+        u32,
+        u32,
+        u32,
+        u32,
+        u32,
+    ) = core::mem::transmute(0x0810_e7d0usize);
+    initialize(
+        base,
+        descriptor,
+        payload,
+        byte_count,
+        unused_payload_argument,
+        decoder_argument,
+        tag,
+        context,
+    );
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_initialize_pair_header_payload(
+    _base: *mut u32,
+    _descriptor: *const u32,
+    _payload: u32,
+    _byte_count: u32,
+    _unused_payload_argument: u32,
+    _decoder_argument: u32,
+    _tag: u32,
+    _context: u32,
+) {
+    panic!("pair_header_base_construct_with_payload requires initializer 0x0810e7d0")
+}
+
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_PAYLOAD_INITIALIZE_OPS: PairHeaderBasePayloadInitializeOps =
+    PairHeaderBasePayloadInitializeOps {
+        initialize: firmware_initialize_pair_header_payload,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_PAYLOAD_INITIALIZE_OPS: PairHeaderBasePayloadInitializeOps =
+    PairHeaderBasePayloadInitializeOps {
+        initialize: missing_initialize_pair_header_payload,
+    };
+
+/// pair_header_base_construct_with_payload — original: `FUN_0810ea18` @
+/// **0x0810ea18** (96 bytes: 23 instructions plus the four-byte vtable
+/// literal at 0x0810ea74; Ghidra's 92-byte extent omits that literal and the
+/// next function opens at 0x0810ea78).
+///
+/// Eight verified, unconditional `bl` call sites construct the concrete
+/// PairHeaderBase with a supplied payload initializer. It plants the shared
+/// vtable, builds the grand base at +4, recovers `base`, clears +0xac, stores
+/// `payload_pool` at +0xb0, clears the ownership byte +0xb4, then calls
+/// `FUN_0810e7d0(base, descriptor, payload, byte_count,
+/// unused_payload_argument, decoder_argument, tag, context)`. Finally it
+/// stores `owns_payload` at +0xb4 and returns `base`. It deliberately does
+/// not zero +4..+0x97, unlike [`pair_header_base_construct`].
+///
+/// Deliberate deviation: `FUN_0810e7d0` is not ported, so the host test seam
+/// and target's direct retail dispatch preserve its recovered ABI without
+/// inventing a callee identity.
+///
+/// # Safety
+/// `base` must point at 0xb8 writable, four-byte-aligned bytes. `descriptor`
+/// and all payload arguments must satisfy `FUN_0810e7d0`'s unported contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_construct_with_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    payload: u32,
+    byte_count: u32,
+    unused_payload_argument: u32,
+    decoder_argument: u32,
+    tag: u32,
+    context: u32,
+    owns_payload: u8,
+    payload_pool: u32,
+) -> *mut u32 {
+    base.write(PAIR_HEADER_BASE_VTABLE);
+    let object = pair_header_grand_base_construct(base.add(1)).sub(1);
+    object.add(0xac / 4).write(0);
+    object.add(0xb0 / 4).write(payload_pool);
+    object.cast::<u8>().add(0xb4).write(0);
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(PAIR_HEADER_BASE_PAYLOAD_INITIALIZE_OPS));
+    (ops.initialize)(
+        object,
+        descriptor,
+        payload,
+        byte_count,
+        unused_payload_argument,
+        decoder_argument,
+        tag,
+        context,
+    );
+    object.cast::<u8>().add(0xb4).write(owns_payload);
+    object
+}
+
 /// Byte-offset-in-words of the grand-base body *inside the base object*.
 /// The base stores its vtable in word 0 and puts the grand base at +4, so
 /// this is one word past [`GRAND_BASE_BODY_OFFSET_WORDS`] — 0x30 bytes,
@@ -531,12 +664,43 @@ mod tests {
         }
     }
 
+    struct PayloadInitializeOpsGuard;
+
+    impl PayloadInitializeOpsGuard {
+        fn install(ops: PairHeaderBasePayloadInitializeOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_PAYLOAD_INITIALIZE_OPS)
+                    .write_volatile(ops);
+            }
+            PayloadInitializeOpsGuard
+        }
+    }
+
+    impl Drop for PayloadInitializeOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_PAYLOAD_INITIALIZE_OPS).write_volatile(
+                    PairHeaderBasePayloadInitializeOps {
+                        initialize: missing_initialize_pair_header_payload,
+                    },
+                );
+            }
+        }
+    }
+
+
     static mut ARRAY_CALLS: usize = 0;
     static mut CALL_ORDER: [u8; 2] = [0; 2];
     static mut SEEN_ARRAY_ARGS: [usize; 11] = [0; 11];
     static mut SEEN_VTABLE: u32 = 0;
     static mut SEEN_PREZERO_WORD: u32 = 0;
     static mut SEEN_PRECLEAR_WORD: u32 = 0;
+    static mut INITIALIZER_CALLS: usize = 0;
+    static mut SEEN_INITIALIZER_ARGS: [usize; 8] = [0; 8];
+    static mut SEEN_INITIALIZER_VTABLE: u32 = 0;
+    static mut SEEN_INITIALIZER_POOL: u32 = 0;
+    static mut SEEN_INITIALIZER_OWNERSHIP: u8 = 0;
+
 
     unsafe fn reset_recording() {
         core::ptr::addr_of_mut!(ARRAY_CALLS).write_volatile(0);
@@ -545,6 +709,12 @@ mod tests {
         core::ptr::addr_of_mut!(SEEN_VTABLE).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_PREZERO_WORD).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_PRECLEAR_WORD).write_volatile(0);
+        core::ptr::addr_of_mut!(INITIALIZER_CALLS).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_ARGS).write_volatile([0; 8]);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_VTABLE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_POOL).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_OWNERSHIP).write_volatile(0);
+
     }
 
     unsafe extern "C" fn recording_element_array_reset(
@@ -589,6 +759,35 @@ mod tests {
         // distinct result proves the wrapper forwards r0 verbatim.
         this.add(4)
     }
+
+    unsafe extern "C" fn recording_payload_initialize(
+        base: *mut u32,
+        descriptor: *const u32,
+        payload: u32,
+        byte_count: u32,
+        unused_payload_argument: u32,
+        decoder_argument: u32,
+        tag: u32,
+        context: u32,
+    ) {
+        let calls = core::ptr::addr_of!(INITIALIZER_CALLS).read_volatile();
+        core::ptr::addr_of_mut!(INITIALIZER_CALLS).write_volatile(calls + 1);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_ARGS).write_volatile([
+            base as usize,
+            descriptor as usize,
+            payload as usize,
+            byte_count as usize,
+            unused_payload_argument as usize,
+            decoder_argument as usize,
+            tag as usize,
+            context as usize,
+        ]);
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_VTABLE).write_volatile(base.read());
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_POOL).write_volatile(base.add(0xb0 / 4).read());
+        core::ptr::addr_of_mut!(SEEN_INITIALIZER_OWNERSHIP)
+            .write_volatile(base.cast::<u8>().add(0xb4).read());
+    }
+
 
     unsafe fn seen_array_args() -> [usize; 11] {
         core::ptr::addr_of!(SEEN_ARRAY_ARGS).read_volatile()
@@ -737,6 +936,80 @@ mod tests {
             assert_eq!(base[0xac / 4], 0);
             assert_eq!(base[0xb0 / 4], 0);
             assert_eq!(base[0xb4 / 4], 0xaaaa_5500);
+        }
+    }
+
+    /// The payload-construction variant keeps the grand-base chain but skips
+    /// the default constructor's +4..+0x97 zero-fill, brackets the unported
+    /// initializer with the pool/ownership writes, and forwards every ABI word.
+    #[test]
+    fn payload_constructor_forwards_initializer_abi_and_ownership_order() {
+        let _lock = lock_ops();
+        let _array_guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: recording_element_array_reset,
+        });
+        let _initializer_guard =
+            PayloadInitializeOpsGuard::install(PairHeaderBasePayloadInitializeOps {
+                initialize: recording_payload_initialize,
+            });
+        unsafe {
+            reset_recording();
+            let mut base = vec![FILL; BASE_WORDS];
+            let descriptor = [0x1111_2222, 0x3333_4444, 0x5555_6666, 0x7777_8888];
+            let this = base.as_mut_ptr();
+            let returned = pair_header_base_construct_with_payload(
+                this,
+                descriptor.as_ptr(),
+                0x1020_3040,
+                0x5060_7080,
+                0x90a0_b0c0,
+                0xd0e0_f001,
+                0x1234_5678,
+                0x9abc_def0,
+                0x7d,
+                0x2468_ace0,
+            );
+
+            assert_eq!(returned, this);
+            assert_eq!(core::ptr::addr_of!(ARRAY_CALLS).read_volatile(), 1);
+            assert_eq!(core::ptr::addr_of!(INITIALIZER_CALLS).read_volatile(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_INITIALIZER_ARGS).read_volatile(),
+                [
+                    this as usize,
+                    descriptor.as_ptr() as usize,
+                    0x1020_3040,
+                    0x5060_7080,
+                    0x90a0_b0c0,
+                    0xd0e0_f001,
+                    0x1234_5678,
+                    0x9abc_def0,
+                ]
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_INITIALIZER_VTABLE).read_volatile(),
+                PAIR_HEADER_BASE_VTABLE,
+                "the vtable is present before the payload initializer"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_INITIALIZER_POOL).read_volatile(),
+                0x2468_ace0,
+                "the pool is stored before the payload initializer"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_INITIALIZER_OWNERSHIP).read_volatile(),
+                0,
+                "ownership stays clear while the payload initializer runs"
+            );
+            assert_eq!(base[1], FILL, "this variant does not zero +4");
+            assert_eq!(
+                base[0x98 / 4],
+                FILL,
+                "only the initializer, not this constructor, may write +0x98"
+            );
+            assert_eq!(base[0xac / 4], 0);
+            assert_eq!(base[0xb0 / 4], 0x2468_ace0);
+            assert_eq!(this.cast::<u8>().add(0xb4).read(), 0x7d);
         }
     }
 
