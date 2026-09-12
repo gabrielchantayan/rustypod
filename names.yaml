@@ -10554,6 +10554,34 @@ functions:
       direct C call sites use it before file virtual I/O or return the
       file's open-status word at +0x1c.
 
+  - address: 0x082d3c5c
+    ghidra: FUN_082d3c5c
+    name: least_common_multiple
+    size: 72
+    sig: "u32 least_common_multiple(u32 left, u32 right)"
+    module: util/least_common_multiple
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1/r4: right
+      r5: signed_low_half_product
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec extent is exactly 72 bytes, from push {r4-r6,lr} at
+      0x082d3c5c through the tail b __rt_udiv at 0x082d3ca0; the next
+      separately linked function begins at 0x082d3ca4. It first computes
+      smulbb(left,right), so the zero-product guard uses signed low 16-bit
+      halves and returns 1; every known caller passes ldrb values. Otherwise
+      it performs unsigned full-u32 Euclid division, swapping operands when
+      necessary, and tail-divides that signed-low-half product by the GCD.
+      Decoding every ARM B/BL word in osos.dec found 8 direct call sites, all
+      unconditional bl and no predicated forms: 0x08043608, 0x08043618,
+      0x08043630, 0x08043640, 0x08043658, 0x08043668, 0x08043680, and
+      0x08043690. These are four duplicate byte-pair evaluations in
+      FUN_080435f0 and consume r0 only. The port gets each Euclidean
+      remainder via the existing __rt_udivmod out-parameter rather than
+      the retail __rt_udiv r1 remainder; r0's returned quotient is unchanged.
+
   - address: 0x082d3cb4
     ghidra: FUN_082d3cb4
     name: ft_platform_file_open
