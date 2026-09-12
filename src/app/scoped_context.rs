@@ -24,6 +24,8 @@
 //! - [`scoped_context_owner_u64_110`] — `FUN_082a368c` @ 0x082a368c, a
 //!   validity-gated getter returning the token owner's 64-bit word pair at
 //!   +0x110/+0x114.
+//! - [`scoped_context_chapter_count_or_zero`] — `FUN_082a2c34` @ 0x082a2c34,
+//!   a validity-gated owner chapter-count lookup.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -654,6 +656,118 @@ const OWNER_FLAGS_MASK_8062: u32 = 0x8062;
 
 /// ABI of the token vtable's slot-+0x08 validity method.
 type ScopedContextValidity = unsafe extern "C" fn(*const ScopedContext) -> u32;
+
+/// Opaque owner fragment whose +0x10 word names a conditionally present
+/// `name`-value source.
+///
+/// The four leading target-width words preserve the ARM address while the
+/// named pointer field remains self-consistent in host fixtures.
+#[repr(C)]
+struct OwnerNameValueOwner {
+    _words_before_source: [u32; 0x10 / 4],
+    source: *mut OwnerNameValueSource,
+}
+
+/// Conditional owner value source consumed by `FUN_082a2c34`.
+///
+/// Its +0x00 bit 0 gates the +0x14 source pointer. The source type itself is
+/// opaque because this port only selects it for the retailOS lookup.
+#[repr(C)]
+struct OwnerNameValueSource {
+    enabled: u8,
+    _bytes_before_value: [u8; 0x13],
+    value: *mut OwnerNameValue,
+}
+
+/// Opaque input to the still-unported `FUN_080448a0` lookup.
+#[repr(C)]
+struct OwnerNameValue {
+    _private: [u8; 0],
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x14] = [0; core::mem::size_of::<OwnerNameValueOwner>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(OwnerNameValueOwner, source)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x18] = [0; core::mem::size_of::<OwnerNameValueSource>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x14] = [0; core::mem::offset_of!(OwnerNameValueSource, value)];
+
+type OwnerNameValueLookup = unsafe extern "C" fn(*mut OwnerNameValue) -> u32;
+
+/// The raw tail-branch target. Its body uses the literal `"name"`, but its
+/// concrete function identity has not been recovered.
+const OWNER_NAME_VALUE_LOOKUP_ADDRESS: usize = 0x0804_48a0;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn owner_name_value_lookup(value: *mut OwnerNameValue) -> u32 {
+    let lookup: OwnerNameValueLookup = core::mem::transmute(OWNER_NAME_VALUE_LOOKUP_ADDRESS);
+    lookup(value)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_owner_name_value_lookup(_value: *mut OwnerNameValue) -> u32 {
+    0
+}
+
+#[cfg(not(target_os = "none"))]
+static mut OWNER_NAME_VALUE_HOST_LOOKUP: OwnerNameValueLookup =
+    unavailable_owner_name_value_lookup;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn owner_name_value_lookup(value: *mut OwnerNameValue) -> u32 {
+    let lookup = ptr::read_volatile(ptr::addr_of!(OWNER_NAME_VALUE_HOST_LOOKUP));
+    lookup(value)
+}
+
+/// scoped_context_chapter_count_or_zero — original: `FUN_082a2c34` @
+/// 0x082a2c34 (76 bytes, exact: nineteen ARM instructions through the final
+/// `pop {r4, pc}` at 0x082a2c7c; the separately linked next function begins
+/// at 0x082a2c80; **8 `bl` call sites**, all unconditional and no predicated
+/// forms, binary-scanned by decoding every B/BL word in `osos.dec`).
+///
+/// Calls the scoped-context vtable's +0x08 validity slot. A zero result
+/// returns zero without reading the owner. Otherwise it follows owner +0x10,
+/// requires that source's byte +0x00 bit 0 and its non-NULL +0x14 value, then
+/// tail-branches to `FUN_080448a0`. Callers establish that its u32 result is a
+/// chapter count: 0x0823419c takes its NoChapters path for values 0 and 1 and
+/// AudiobookHasMultipleChapters only for values greater than 1. The tail
+/// callee's raw body resolves a literal `"name"` lookup but has no recovered
+/// function identity, so this function is named for its caller-observed result
+/// rather than inventing the callee's identity. As in ARM, a valid token with
+/// a NULL owner or source faults before a zero result can be returned.
+///
+/// Deliberate deviations: the modeled `#[repr(C)]` fragments replace literal
+/// offsets and source expresses the stock direct tail branch as a typed call.
+/// Target codegen retains the tail transfer through a literal-loaded `bx`
+/// rather than the stock direct `b`; host tests install a private callback
+/// because that callee is unported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_chapter_count_or_zero(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+
+    let owner = (*this).owner.cast::<OwnerNameValueOwner>();
+    let source = (*owner).source;
+    if ((*source).enabled & 1) == 0 {
+        return 0;
+    }
+
+    let value = (*source).value;
+    if value.is_null() {
+        return 0;
+    }
+    owner_name_value_lookup(value)
+}
 
 /// scoped_context_owner_flags_any_8062 — original: `FUN_082a40c8` @
 /// 0x082a40c8 (60 bytes: 56 code + the 4-byte mask literal @ 0x082a4100
@@ -1884,5 +1998,146 @@ mod tests {
         link_getter_fixture(&mut fixture, false);
         let result = unsafe { scoped_context_owner_u64_110(&fixture.token) };
         assert_eq!(result, 0x0000_0009_0000_0007);
+    }
+    static mut OWNER_NAME_VALUE_LOOKUP_CALLS: u32 = 0;
+    static mut OWNER_NAME_VALUE_LOOKUP_ARGUMENT: *mut OwnerNameValue = ptr::null_mut();
+    static mut OWNER_NAME_VALUE_LOOKUP_RESULT: u32 = 0;
+
+    unsafe extern "C" fn recording_owner_name_value_lookup(
+        value: *mut OwnerNameValue,
+    ) -> u32 {
+        OWNER_NAME_VALUE_LOOKUP_CALLS += 1;
+        OWNER_NAME_VALUE_LOOKUP_ARGUMENT = value;
+        OWNER_NAME_VALUE_LOOKUP_RESULT
+    }
+
+    /// Restores the unavailable host default even when an assertion panics.
+    struct OwnerNameValueLookupGuard;
+    impl OwnerNameValueLookupGuard {
+        unsafe fn install() -> Self {
+            ptr::addr_of_mut!(OWNER_NAME_VALUE_HOST_LOOKUP)
+                .write_volatile(recording_owner_name_value_lookup);
+            Self
+        }
+    }
+    impl Drop for OwnerNameValueLookupGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(OWNER_NAME_VALUE_HOST_LOOKUP)
+                    .write_volatile(unavailable_owner_name_value_lookup);
+            }
+        }
+    }
+
+    /// Self-referential fixture for the owner +0x10, source flag, and source
+    /// +0x14 selection chain. Link it only after its final placement.
+    struct OwnerNameValueFixture {
+        vtable: ScopedContextVtable,
+        owner: OwnerNameValueOwner,
+        source: OwnerNameValueSource,
+        value: [u8; 1],
+        token: ScopedContext,
+    }
+
+    fn owner_name_value_fixture(enabled: u8) -> OwnerNameValueFixture {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        OwnerNameValueFixture {
+            vtable: ScopedContextVtable { slots },
+            owner: OwnerNameValueOwner {
+                _words_before_source: [0; 0x10 / 4],
+                source: ptr::null_mut(),
+            },
+            source: OwnerNameValueSource {
+                enabled,
+                _bytes_before_value: [0; 0x13],
+                value: ptr::null_mut(),
+            },
+            value: [0],
+            token: ScopedContext {
+                vtable: ptr::null(),
+                owner_valid: 1,
+                owner: ptr::null_mut(),
+                service_context: ptr::null_mut(),
+                registry_token: ptr::null_mut(),
+                mode: 0,
+            },
+        }
+    }
+
+    fn link_owner_name_value_fixture(fixture: &mut OwnerNameValueFixture) {
+        fixture.token.vtable = &fixture.vtable;
+        fixture.token.owner = (&mut fixture.owner as *mut OwnerNameValueOwner).cast();
+        fixture.owner.source = &mut fixture.source;
+        fixture.source.value = fixture.value.as_mut_ptr().cast();
+    }
+
+    fn reset_owner_name_value_lookup(result: u32) {
+        unsafe {
+            OWNER_NAME_VALUE_LOOKUP_CALLS = 0;
+            OWNER_NAME_VALUE_LOOKUP_ARGUMENT = ptr::null_mut();
+            OWNER_NAME_VALUE_LOOKUP_RESULT = result;
+        }
+    }
+
+    #[test]
+    fn chapter_count_short_circuits_on_invalid_token() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lookup_restore = unsafe { OwnerNameValueLookupGuard::install() };
+        reset_validity_recording(0);
+        reset_owner_name_value_lookup(0xfeed_face);
+        let mut fixture = owner_name_value_fixture(1);
+        link_owner_name_value_fixture(&mut fixture);
+
+        assert_eq!(unsafe { scoped_context_chapter_count_or_zero(&fixture.token) }, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(OWNER_NAME_VALUE_LOOKUP_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn chapter_count_requires_enabled_nonnull_source() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lookup_restore = unsafe { OwnerNameValueLookupGuard::install() };
+        reset_validity_recording(0xffff_ffff);
+        reset_owner_name_value_lookup(0xfeed_face);
+
+        for enabled in [0, 0x02, 0x80, 0xfe] {
+            let mut fixture = owner_name_value_fixture(enabled);
+            link_owner_name_value_fixture(&mut fixture);
+            assert_eq!(unsafe { scoped_context_chapter_count_or_zero(&fixture.token) }, 0);
+        }
+        let mut fixture = owner_name_value_fixture(1);
+        link_owner_name_value_fixture(&mut fixture);
+        fixture.source.value = ptr::null_mut();
+        assert_eq!(unsafe { scoped_context_chapter_count_or_zero(&fixture.token) }, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 5);
+            assert_eq!(OWNER_NAME_VALUE_LOOKUP_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn chapter_count_delegates_full_result_after_all_gates_pass() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lookup_restore = unsafe { OwnerNameValueLookupGuard::install() };
+        reset_validity_recording(0x8000_0000);
+        reset_owner_name_value_lookup(0xcafe_babe);
+        let mut fixture = owner_name_value_fixture(0x81);
+        link_owner_name_value_fixture(&mut fixture);
+
+        assert_eq!(
+            unsafe { scoped_context_chapter_count_or_zero(&fixture.token) },
+            0xcafe_babe
+        );
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(OWNER_NAME_VALUE_LOOKUP_CALLS, 1);
+            assert_eq!(
+                OWNER_NAME_VALUE_LOOKUP_ARGUMENT,
+                fixture.value.as_mut_ptr().cast()
+            );
+        }
     }
 }
