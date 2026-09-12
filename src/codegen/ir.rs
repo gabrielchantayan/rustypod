@@ -169,6 +169,11 @@
 //!   unlink-then-push move `FUN_08367390`). The runtime's intrusive
 //!   doubly-linked-list REMOVE: unlinks a node from its `{head,
 //!   tail}` anchor and clears the node's next/prev/anchor words.
+//! - `cg_release_call_clobbered_bindings` — original: `FUN_082d7800` @
+//!   0x082d7800 (112 bytes; 7 `bl` call sites — the instruction emitters'
+//!   call paths). Releases or, on a stale virtual-register back-pointer,
+//!   moves each of the r0-r3 hardware-register binding records to the free
+//!   anchor.
 //! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
 //!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
 //!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
@@ -428,15 +433,14 @@ pub const CG_BUFFER_PAGE_SHIFT: usize = 12;
 /// Size of `cg_codegen_t` in target bytes — the constructor's
 /// `mov r1, #0x220` (twice: the arena request and the zero-fill).
 pub const CG_CODEGEN_BYTES: usize = 0x220;
-/// `cg_codegen_t + 0x20` — the register-number byte of the first
-/// hardware-register descriptor. The table runs 16 entries of 28
-/// target bytes each, one per ARM register r0-r15; entry `i` starts at
-/// `+0x14 + i*0x1c` as a descriptor anchor and the constructor stamps
-/// `i` into the byte at `+0x20 + i*0x1c` (anchor `+0x0c`). Field
-/// evidence from the walkers `FUN_082cea24` / `FUN_082d7800` / the
-/// spill path `FUN_082d7870`: anchor `+0x10` is the head of an
-/// intrusive binding list (nodes back-point to the anchor at their
-/// `+0x08`) and anchor `+0x18` is a flags word (bit 0x100).
+/// `cg_codegen_t + 0x14` — first hardware-register binding record.
+/// Each subsequent 28-byte record starts [`CG_HW_REG_ENTRY_WORDS`] words later.
+pub const CG_CODEGEN_HW_REG_BINDINGS: usize = 0x14 / 4;
+/// `cg_codegen_t + 0x20` — the resource byte of the first
+/// hardware-register binding. The table has 16 `cg_binding_t`-shaped
+/// records, one per ARM register r0-r15; entry `i` starts at
+/// `+0x14 + i*0x1c`, with its bound virtual register at `+0x10` and its
+/// flags at `+0x18`. The constructor stamps `i` at entry `+0x0c`.
 pub const CG_CODEGEN_HW_REGS: usize = 8;
 /// Number of hardware-register descriptors — exactly ARM r0-r15.
 pub const CG_HW_REG_COUNT: usize = 16;
@@ -3454,6 +3458,51 @@ pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *m
     }
     let flags = word(binding, CG_BINDING_FLAGS);
     flags.write(flags.read() & !(CG_BINDING_FLAG_BOUND | CG_BINDING_FLAG_BLOCK_ENTRY));
+}
+
+/// cg_release_call_clobbered_bindings — original: `FUN_082d7800` @
+/// **0x082d7800** (112 bytes; **7 plain `bl` call sites**, no predicated
+/// calls: 0x082c0fc4/0x082c1028/0x082c1058/0x082c1088/0x082c1110/
+/// 0x082c11b8/0x082cbc54).
+///
+/// Releases the four call-clobbered hardware-register bindings r0-r3. For
+/// each 28-byte binding record beginning at codegen `+0x14`, it reads the
+/// bound virtual register at `+0x10`. A consistent virtual-register
+/// back-pointer at `reg +0x08` takes the normal [`cg_binding_release`] path.
+/// A stale back-pointer instead unlinks that hardware binding from the
+/// codegen's active anchor (`+0x1f8`), pushes it onto the free anchor
+/// (`+0x1f0`), and clears only its bound-register word.
+///
+/// The raw caller sequences first spill the CPSR binding through
+/// `FUN_082d7870`, then call this function before emitting call-like
+/// instructions. It assumes a stale binding is active and has no NULL guard
+/// on `codegen`, matching ARM. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_release_call_clobbered_bindings(codegen: *mut CgCodegen) {
+    let codegen = codegen as *mut u8;
+    for descriptor_index in 0..4 {
+        let binding = slot(
+            codegen,
+            CG_CODEGEN_HW_REG_BINDINGS + descriptor_index * CG_HW_REG_ENTRY_WORDS,
+        ) as *mut u8;
+        let reg = slot(binding, CG_BINDING_REG).read();
+        if !reg.is_null() {
+            if slot(reg, CG_VREG_BINDING).read() == binding {
+                cg_binding_release(codegen as *mut CgCodegen, binding as *mut CgBinding);
+            } else {
+                cg_binding_unlink(
+                    slot(codegen, CG_CODEGEN_ACTIVE_BINDINGS) as *mut u8,
+                    binding as *mut CgBinding,
+                );
+                cg_binding_push(
+                    slot(codegen, CG_CODEGEN_FREE_BINDINGS) as *mut u8,
+                    binding as *mut CgBinding,
+                );
+                slot(binding, CG_BINDING_REG).write(core::ptr::null_mut());
+            }
+        }
+    }
 }
 
 /// cg_binding_acquire — original: `FUN_082b3c34` @ 0x082b3c34 (204
@@ -9363,6 +9412,92 @@ mod tests {
             assert_eq!(f.binding[CG_BINDING_FLAGS], 0x40, "the terminal flag clear is unconditional");
 
             *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    // --- cg_release_call_clobbered_bindings --------------------------
+
+    struct CallClobberedReleaseFixture {
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        regs: [[usize; 5]; 5],
+        block: [usize; record_size(0x24) / WORD],
+        live_out: [usize; 2],
+        use_heads: [usize; 1],
+    }
+
+    impl CallClobberedReleaseFixture {
+        fn new() -> std::boxed::Box<CallClobberedReleaseFixture> {
+            std::boxed::Box::new(CallClobberedReleaseFixture {
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                regs: [[0; 5]; 5],
+                block: [0; record_size(0x24) / WORD],
+                live_out: [0; 2],
+                use_heads: [0; 1],
+            })
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        unsafe fn binding(&mut self, index: usize) -> *mut u8 {
+            self.codegen
+                .as_mut_ptr()
+                .add(CG_CODEGEN_HW_REG_BINDINGS + index * CG_HW_REG_ENTRY_WORDS) as *mut u8
+        }
+    }
+
+    #[test]
+    fn release_call_clobbered_bindings_handles_consistent_stale_empty_and_r4_bindings() {
+        let _g = setup();
+        let mut f = CallClobberedReleaseFixture::new();
+        unsafe {
+            let bindings = [
+                f.binding(0),
+                f.binding(1),
+                f.binding(2),
+                f.binding(3),
+                f.binding(4),
+            ];
+            let regs = [
+                f.regs[0].as_mut_ptr() as *mut u8,
+                f.regs[1].as_mut_ptr() as *mut u8,
+                f.regs[2].as_mut_ptr() as *mut u8,
+                f.regs[3].as_mut_ptr() as *mut u8,
+                f.regs[4].as_mut_ptr() as *mut u8,
+            ];
+            for binding in bindings {
+                word(binding, CG_BINDING_FLAGS).write(0x700);
+            }
+            slot(bindings[0], CG_BINDING_REG).write(regs[0]);
+            slot(regs[0], CG_VREG_BINDING).write(bindings[0]);
+            word(regs[0], CG_VREG_NO).write(0);
+            f.block[CG_BLOCK_LIVE_OUT] = f.live_out.as_mut_ptr() as usize;
+            f.codegen[CG_CODEGEN_CURRENT_BLOCK] = f.block.as_mut_ptr() as usize;
+            f.codegen[CG_CODEGEN_REG_USES] = f.use_heads.as_mut_ptr() as usize;
+            slot(bindings[1], CG_BINDING_REG).write(regs[1]);
+            slot(regs[1], CG_VREG_BINDING).write(1usize as *mut u8);
+            slot(bindings[4], CG_BINDING_REG).write(regs[4]);
+            slot(regs[4], CG_VREG_BINDING).write(bindings[4]);
+
+            cg_release_call_clobbered_bindings(f.codegen_ptr());
+
+            assert_eq!(word(bindings[0], CG_BINDING_FLAGS).read(), 0x400, "r0 releases");
+            assert_eq!(slot(bindings[1], CG_BINDING_REG).read(), core::ptr::null_mut(),
+                       "a stale r1 binding is detached");
+            assert_eq!(word(bindings[1], CG_BINDING_FLAGS).read(), 0x700,
+                       "the stale path preserves lifecycle flags");
+            assert_eq!(
+                slot(f.codegen.as_mut_ptr() as *mut u8, CG_CODEGEN_FREE_BINDINGS).read(),
+                bindings[1],
+                "the stale r1 binding moves to the free anchor"
+            );
+            assert_eq!(word(bindings[2], CG_BINDING_FLAGS).read(), 0x700, "empty r2 is skipped");
+            assert_eq!(word(bindings[3], CG_BINDING_FLAGS).read(), 0x700, "empty r3 is skipped");
+            assert_eq!(slot(bindings[4], CG_BINDING_REG).read(), regs[4], "r4 is not visited");
+            assert_eq!(word(bindings[4], CG_BINDING_FLAGS).read(), 0x700, "r4 stays bound");
         }
         drop(f);
         teardown();
