@@ -17669,6 +17669,54 @@ functions:
       handling, exact zero-extended halfword extraction, arbitrary nonzero
       resolve truthiness, and slot selection.
 
+  - address: 0x082a5ee4
+    ghidra: FUN_082a5ee4
+    name: service_context_selection_construct
+    size: 152
+    sig: "void service_context_selection_construct(ScopedContext *destination, ServiceContextSelectionSource *source, u32 selection, u32 selector)"
+    module: app/scoped_context
+    renames:
+      param_1/r0: destination
+      param_2/r4: source
+      param_3/r6: selection
+      param_4/r5: selector
+      "source vtable+0xc": selection_available
+      "source+0x4": selection_element
+      "source+0x10": context_mode
+      "element+0x18c bit 0": default_selector_flag
+      "element+0x18d bit 2": reverse_flag
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_08054454: object_payload_if_available
+      FUN_08270394: scoped_context_construct
+      FUN_08270418: scoped_context_copy_fields
+    status: ported
+    notes: >-
+      Raw ARM is exactly 0x082a5ee4..0x082a5f78: the following word
+      0x082a5f7c is a distinct push {r4,r5,r6,lr} prologue, so Ghidra's
+      152-byte extent is accurate and has no trailing literal pool. The
+      function first constructs an ownerless ScopedContext in destination,
+      then calls source vtable slot +0x0c. A zero response returns with that
+      initialized token and never reads source+0x4. Otherwise selector zero
+      maps element+0x18c bit 0 to selector 1 or 2; nonzero selectors pass
+      through. Element+0x18d bit 2 is isolated as the reverse flag for
+      ui_plst_slot_item_at(element, selector, reverse_flag, selection).
+      object_payload_if_available turns the selected object's payload into
+      the owner of a temporary ScopedContext built with source+0x10 mode;
+      scoped_context_copy_fields copies its payload to destination while
+      retaining destination's vtable. Decoding every ARM B/BL word in
+      osos.dec finds exactly 8 direct callers, all unconditional plain BL
+      (0x0816ec4c, 0x081758c8, 0x081b5de8, 0x081b620c, 0x081fd150,
+      0x081fd1c4, 0x08219af0, 0x082c8784), with no predicated BL or
+      direct tail-B sites. The source vtable's concrete slot target is not
+      established, so the port preserves the observed virtual dispatch
+      rather than inventing an identity. Host tests exercise the false
+      availability gate, both default selectors, reverse indexing, explicit
+      selector bypass, payload ownership, source mode, and the direct caller
+      preserving its destination vtable. Deliberate host deviation: native
+      pointer fields retain target offsets on ARM and stay self-consistent on
+      the 64-bit host; the 'plst' fixture's firmware u32 links use a unique
+      below-4-GiB slab.
+
   - address: 0x082a63c0
     ghidra: FUN_082a63c0
     name: ui_element_reference_target_field_210
