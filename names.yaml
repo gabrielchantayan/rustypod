@@ -17332,6 +17332,31 @@ functions:
       appears in the image data @ 0x0843a1f8 and 0x084e05e8 -
       bottom = 240, right = 320, the Classic 6G's 320x240 LCD.
 
+  - address: 0x082a25d8
+    ghidra: FUN_082a25d8
+    name: ui_element_render_bounds
+    size: 36
+    sig: "void ui_element_render_bounds(UiElement *element, Rect *out)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: out
+      "element+0x80": local_bounds
+      FUN_082a2670: ui_element_resolve_render_context
+      FUN_0828cb64: render_context_transform_rect
+    notes: >-
+      Extent is binary-verified: push {r4,lr} starts at 0x082a25d8 and the
+      next function begins with ldr r0,[r0,#20] at 0x082a25fc. Every ARM
+      branch-with-link encoding in osos.dec was decoded: eight direct
+      unconditional bl call sites target this function and no predicated bl
+      forms do. It copies the four-word local bounds rectangle at +0x80 to
+      out, resolves the element's RenderContext via 0x082a2670, then
+      tail-branches to the unported 0x0828cb64 transform with
+      RenderContext and out. Rust uses the existing
+      DRAW_STATE_RENDER_TRANSFORM volatile seam: device builds retain the
+      retail target; host tests exercise its deterministic model. The tail
+      branch becomes an ordinary Rust call with identical observable output.
   - address: 0x082a2670
     ghidra: FUN_082a2670
     name: ui_element_resolve_render_context

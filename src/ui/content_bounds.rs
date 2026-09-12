@@ -23,7 +23,11 @@
 use core::mem::{offset_of, size_of};
 use core::ptr;
 
+use crate::ui::draw_state_setup::DRAW_STATE_RENDER_TRANSFORM;
+#[cfg(test)]
+use crate::ui::draw_state_setup::DrawStateRenderTransform;
 use crate::ui::rect::{rect_inset, rect_move_to_origin, Rect};
+use crate::ui::render_context::ui_element_resolve_render_context;
 
 
 #[repr(C)]
@@ -70,6 +74,34 @@ pub unsafe extern "C" fn ui_element_bounds(element: *const u8, out: *mut Rect) {
     rect_move_to_origin(out);
 }
 
+/// ui_element_render_bounds — original: `FUN_082a25d8` @ 0x082a25d8
+/// (36 bytes; `0x082a25d8..0x082a25fc`; the next function starts at
+/// 0x082a25fc).
+///
+/// Copies the element's local bounds at +0x80 to `out`, resolves its render
+/// context, then transforms `out` into that context's coordinates. Raw ARM
+/// decoding finds exactly eight direct, unconditional `bl` call sites and no
+/// predicated `bl` forms. Its one `bl` resolves the render context; the closing
+/// `b 0x0828cb64` tail-dispatches the copied rectangle to the render-coordinate
+/// transform.
+///
+/// # Deliberate deviations
+///
+/// Rust represents the tail dispatch as an ordinary call through the existing
+/// [`DRAW_STATE_RENDER_TRANSFORM`] seam. Device builds retain the retail
+/// 0x0828cb64 transform; host tests use its deterministic test model because
+/// that target is not yet ported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_render_bounds(element: *mut u8, out: *mut Rect) {
+    let fields = element.cast::<ElementFields>();
+    ptr::write(out, ptr::addr_of!((*fields).bounds).read());
+
+    let render_context = ui_element_resolve_render_context(element);
+    let transform = ptr::read_volatile(ptr::addr_of!(DRAW_STATE_RENDER_TRANSFORM));
+    transform(render_context, out);
+}
+
 /// ui_element_content_bounds — original: `FUN_082a2604` @ 0x082a2604
 /// (84 bytes; 21 direct `bl` call sites).
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -100,6 +132,34 @@ mod tests {
     const _: [u8; 0x90] = [0; size_of::<Fixture>()];
     const _: [u8; 0x48] = [0; offset_of!(Fixture, flags)];
     const _: [u8; 0x80] = [0; offset_of!(Fixture, bounds)];
+
+    #[repr(C, packed)]
+    struct ElementRenderContext {
+        _before_render_context: [u8; 0x3c],
+        render_context: *mut u8,
+    }
+
+    const _: [u8; 0x3c] = [0; offset_of!(ElementRenderContext, render_context)];
+
+    static mut SEEN_RENDER_CONTEXT: *mut u8 = ptr::null_mut();
+
+    unsafe extern "C" fn recording_render_transform(render_context: *mut u8, rect: *mut Rect) {
+        SEEN_RENDER_CONTEXT = render_context;
+        (*rect).top = (*rect).top.wrapping_sub(4);
+        (*rect).left = (*rect).left.wrapping_add(3);
+        (*rect).bottom = (*rect).bottom.wrapping_sub(4);
+        (*rect).right = (*rect).right.wrapping_add(3);
+    }
+
+    struct TransformGuard(DrawStateRenderTransform);
+
+    impl Drop for TransformGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(DRAW_STATE_RENDER_TRANSFORM), self.0);
+            }
+        }
+    }
 
     fn rect(top: i32, left: i32, bottom: i32, right: i32) -> Rect {
         Rect {
@@ -204,6 +264,55 @@ mod tests {
         }
 
         assert_eq!(fixture.bounds, rect(0, 0, 25, 30));
+    }
+
+    #[test]
+    fn render_bounds_copies_before_transforming_with_direct_context() {
+        let bounds_cases = [
+            rect(10, 20, 18, 34),
+            rect(i32::MIN, i32::MAX, -1, 0),
+        ];
+        let _transform_guard = unsafe {
+            TransformGuard(ptr::read_volatile(ptr::addr_of!(DRAW_STATE_RENDER_TRANSFORM)))
+        };
+        unsafe {
+            ptr::write_volatile(
+                ptr::addr_of_mut!(DRAW_STATE_RENDER_TRANSFORM),
+                recording_render_transform,
+            );
+        }
+
+        for bounds in bounds_cases {
+            let mut fixture = Fixture {
+                _before_flags: [0xa5; 0x48],
+                flags: 0xfeed_face,
+                _before_bounds: [0x5a; 0x34],
+                bounds,
+            };
+            let mut context = 0_u8;
+
+            unsafe {
+                SEEN_RENDER_CONTEXT = ptr::null_mut();
+                ptr::addr_of_mut!((*(&mut fixture as *mut Fixture).cast::<ElementRenderContext>()).render_context)
+                    .write_unaligned(&mut context);
+                ui_element_render_bounds(
+                    (&mut fixture as *mut Fixture).cast::<u8>(),
+                    core::ptr::addr_of_mut!(fixture.bounds),
+                );
+            }
+            assert_eq!(unsafe { SEEN_RENDER_CONTEXT }, ptr::addr_of_mut!(context));
+
+            assert_eq!(
+                fixture.bounds,
+                rect(
+                    bounds.top.wrapping_sub(4),
+                    bounds.left.wrapping_add(3),
+                    bounds.bottom.wrapping_sub(4),
+                    bounds.right.wrapping_add(3),
+                ),
+                "bounds={bounds:?}",
+            );
+        }
     }
 
     #[test]
