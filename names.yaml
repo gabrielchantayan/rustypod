@@ -70388,6 +70388,46 @@ functions:
       cover zero and arbitrary nonzero byte states, arithmetic wraparound, and
       read-only surrounding storage. Deliberate deviation: none.
 
+  # --- slot value processing ---
+  - address: 0x080fc540
+    ghidra: FUN_080fc540
+    name: process_present_slot_values
+    size: 88
+    sig: "void process_present_slot_values(SlotManager *slot_manager)"
+    module: app/slot_value_process
+    status: ported
+    renames:
+      param_1/r0/r5: slot_manager
+      "slot_manager+0x468": slot_count
+      "slot_manager+0x484": slots
+      "slot+0x00": slot_value
+      "slot+0x01": has_slot_value
+      FUN_080fa540: unported_slot_value_processor
+      FUN_08283178: parse_result_destroy
+    notes: >-
+      Raw ARM confirms the exact 88-byte extent 0x080fc540..0x080fc594:
+      push {r3,r4,r5,lr}; iterate unsigned r4 while r4 < this+0x468; form
+      each 60-byte slot at this+0x484+r4*0x3c; test byte +0x01, then only
+      when it is nonzero test byte +0x00. When both are nonzero it passes a
+      four-byte stack parse-result record, this, and the index to the direct
+      callee 0x080fa540, then calls parse_result_destroy (0x08283178). The
+      next independently linked function begins at 0x080fc598, with no
+      literal pool. Decoding every aligned ARM B/BL immediate in osos.dec
+      finds exactly eight inbound calls, all unconditional bl:
+      0x080f9a30, 0x080f9a98, 0x080f9f14, 0x080fa014, 0x080fa290,
+      0x080fb4f4, 0x080fbef8, and 0x080fcdb8. There are no predicated bl
+      forms, no direct tail-b transfers, and no aligned data-word references.
+      0x080fa540 is a real unported function entry, but its semantic identity
+      remains unresolved; the port calls it only through a seam named for its
+      observed per-slot role. Device builds dispatch to its verified retail
+      address while host tests install a replacement. The stack record is
+      MaybeUninit but explicitly four-byte aligned, matching the original
+      uninitialized aligned frame object; its already-ported destructor is a
+      no-op, so no observable cleanup is omitted. Host tests prove both
+      nonzero gates, a truthy (not == 1) presence byte, exact index forwarding,
+      aligned result storage, slot-state preservation, and the zero-count
+      no-touch path.
+
   # --- slot notification and value-state clear ---
   - address: 0x080fd4c0
     ghidra: FUN_080fd4c0
