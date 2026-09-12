@@ -68711,3 +68711,29 @@ functions:
       0x082abb78; there are no predicated BL forms or direct tail branches.
       Rust retains the raw 32-bit field layout on 64-bit hosts by using a byte
       destination pointer and explicit four-byte-aligned volatile word stores.
+
+  # --- AHTP-tagged state teardown ---
+  - address: 0x08261dbc
+    ghidra: FUN_08261dbc
+    name: ahtp_state_destroy
+    size: 20
+    sig: "u32 *ahtp_state_destroy(u32 *state)"
+    module: util/ahtp_state_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      FUN_082e7b80: ahtp_state_tag_clear_unported
+    notes: >-
+      Raw osos.dec establishes the exact five-instruction, 20-byte extent
+      0x08261dbc..0x08261dcc: `push {r4,lr}; mov r4,r0; bl 0x082e7b80; mov
+      r0,r4; pop {r4,pc}`. The next separately linked function starts at
+      0x08261dd0. A whole-image ARM B/BL decode finds exactly eight inbound
+      direct calls, all unconditional plain bl at 0x081e6bac, 0x082628b8,
+      0x0839e8ac, 0x0839e968, 0x0839ea18, 0x0839ead4, 0x0839f3f4, and
+      0x0839f4b0; there are no predicated BL forms, tail branches, or aligned
+      data-word references. The sole callee is a fully decoded unported
+      20-byte leaf: NULL or a non-0x50544841 ('AHTP') first word is untouched;
+      otherwise it zeros word zero and returns status 0. This wrapper discards
+      that status and returns the original state pointer. The port deliberately
+      inlines that leaf rather than adding a dispatch seam, because its only
+      observable effect is the documented conditional word-zero clear.
