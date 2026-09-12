@@ -67532,6 +67532,41 @@ functions:
       construct(resource_id, 1) -> process(resource_id) -> destroy order,
       ignored context, and propagation of the destructor result.
 
+  # --- Dual-pool screen constructor (app/dual_pool_screen) ---
+  - address: 0x0812d800
+    ghidra: FUN_0812d800
+    name: dual_pool_screen_construct
+    size: 164
+    sig: "DualPoolScreen *dual_pool_screen_construct(DualPoolScreen *storage, u32 initial_target, u32 resource_id)"
+    module: app/dual_pool_screen
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: initial_target
+      param_3/r2: resource_id
+      FUN_082045ac: screen_base_construct
+      DAT_0812d8a0: DUAL_POOL_SCREEN_VTABLE_ADDRESS (0x08983cf8)
+      FUN_083dcb1c: first_pool_reserve_16_byte_element (unported)
+      FUN_083dc9b0: second_pool_reserve_36_byte_element (unported)
+    notes: >-
+      Raw osos.dec confirms the 164-byte true extent: 160 bytes of ARM code
+      from 0x0812d800 through pop {r4, r5, r6, pc} at 0x0812d89c, followed
+      by the vtable literal 0x08983cf8 at 0x0812d8a0; the separately linked
+      next function opens with cmp r0, #0 at 0x0812d8a4. Decoding every ARM
+      B/BL immediate finds exactly eight direct inbound plain bl sites, all
+      unconditional and none predicated: 0x08103d10, 0x081281b0, 0x081356b8,
+      0x0815b8f4, 0x081b292c, 0x081dfe48, 0x0827e804, and 0x0828bf74; no
+      direct B tail transfer targets this entry. The function calls the ported
+      screen_base_construct(storage, initial_target, 1, resource_id), takes
+      its return as this, plants vtable 0x08983cf8 and primary + 0xe4 at
+      +0x00/+0x1c, clears two 24-byte pool headers at +0x28/+0x40, then calls
+      0x083dcb1c and 0x083dc9b0 with (header, 1). Their returned pre-advance
+      cursors become header+0x10 sentinels whose first two words are self
+      linked. The helpers reserve 16-byte and 36-byte elements respectively;
+      neither is ported, so target builds use typed fixed-address calls while
+      host tests install observable operations. Deliberate deviations: those
+      host-only reserve seams; none on target.
+
   # --- Range append with boundary newline preservation (app/range_append_boundary_newline) ---
   - address: 0x0811853c
     ghidra: FUN_0811853c
