@@ -1,115 +1,108 @@
-//! array_element_at — original: `FUN_082a4cf8` @ 0x082a4cf8 (**24 bytes**,
-//! 0x082a4cf8..0x082a4d10 — the next function's `push {r4..r8, lr}` starts
-//! exactly at 0x082a4d10, so Ghidra's extent is right for once; **23 `bl`
-//! call sites, 0 predicated**, binary-scanned by decoding every B/BL word
-//! in `work/firmware/osos.dec`).
+//! Strided-array element addressing — retailOS's generic accessor pair:
+//! `FUN_082a4b94` @ 0x082a4b94 (**40 bytes**, 0x082a4b94..0x082a4bb8; the
+//! next separately linked leaf begins at 0x082a4bbc) and
+//! `FUN_082a4cf8` @ 0x082a4cf8 (24 bytes).
 //!
-//! Element-address accessor of retailOS's polymorphic strided-array class
-//! (layout below), with a "last element" sentinel:
+//! Raw ARM for the newly ported helper:
 //!
 //! ```text
-//! 082a4cf8  cmn r1, #-0x7fffffff   @ index == 0x7fffffff (LAST_ELEMENT)?
-//! 082a4cfc  bne 0x082a4d0c
-//! 082a4d00  ldr r2, [r0, #4]       @ count
-//! 082a4d04  cmp r2, #0
-//! 082a4d08  subgt r1, r2, #1       @ count > 0: index = count - 1
-//! 082a4d0c  b   0x082a4b94         @ tail: element address helper
+//! 082a4b94  push {r4,r5,r6,lr}
+//! 082a4b98  mov  r4,r0
+//! 082a4b9c  ldr  r0,[r0]       @ vtable
+//! 082a4ba0  mov  r5,r1         @ index
+//! 082a4ba4  ldr  r1,[r0,#0x18] @ virtual element_stride(this)
+//! 082a4ba8  mov  r0,r4
+//! 082a4bac  blx  r1
+//! 082a4bb0  ldr  r1,[r4,#8]    @ storage
+//! 082a4bb4  mla  r0,r5,r0,r1
+//! 082a4bb8  pop  {r4,r5,r6,pc}
 //! ```
 //!
-//! Algorithm: if `index` is the `LAST_ELEMENT_INDEX` sentinel and the
-//! signed `count` at +0x04 is positive, replace `index` with `count - 1`
-//! (so the sentinel names the final element; an empty or negative-count
-//! array passes the sentinel through untouched — `subgt` is a signed
-//! test). Then tail-branch into the element-address helper
-//! `FUN_082a4b94` @ 0x082a4b94 (40 bytes, binary-verified:
-//! `push {r4,r5,r6,lr}; size = vtable[+0x18](this); r0 = storage +
-//! index*size; pop {r4,r5,r6,pc}` — one `mla`).
+//! Its **8 direct `bl` call sites, 0 predicated**, were verified by decoding
+//! every ARM B/BL word in `work/firmware/osos.dec`: 0x08135250, 0x08135284,
+//! 0x08271798, 0x082a4884, 0x082a4944, 0x082a4a38, 0x082a4b44, and
+//! 0x082a4c4c. There are also two tail branches: predicated `bne` from
+//! 0x082a47ac and the unconditional `b` from `array_element_at` at
+//! 0x082a4d0c. The absence of predicated calls means callers do not gate this
+//! helper; it has no NULL or bounds guard of its own.
 //!
-//! Callers confirm the sentinel semantics: `FUN_081b92e4` calls it as
-//! `(array, 0x7fffffff)` to fetch the last element, and the sibling
-//! `FUN_082a4c20` proves vtable slot +0x18 is the element size (`if
-//! (size != 4) <generic copy> else *out = *element`).
+//! Algorithm: call vtable slot +0x18 to get the element stride, then return
+//! `storage + index * stride` in wrapping 32-bit arithmetic. `array_element_at`
+//! handles `LAST_ELEMENT_INDEX` before tail-calling this helper.
 //!
-//! Deliberate deviation: the tail target 0x082a4b94 is a distinct,
-//! separately-called function (a dozen direct `bl` sites of its own) and
-//! is not yet ported, so it rides the [`STRIDED_ARRAY_ELEMENT_ADDRESS`]
-//! dispatch seam (the `command_dispatch` house pattern): target builds
-//! transmute the ROM address, host tests install recording mocks, and a
-//! later port of 0x082a4b94 replaces the default without touching this
-//! wrapper.
-//!
-//! Anomaly, recorded not resolved: the one concrete vtable sampled — the
-//! observable array's 0x089a5d0c — has slot +0x18 = 0x08102f80, which is
-//! not a function entry in Ghidra's listing (it falls inside
-//! `FUN_08102f44` and decodes with r4 live-in). That class is therefore
-//! probably not among this wrapper's receivers; the wrapper is generic
-//! over any object with the layout below and no concrete class identity
-//! is claimed.
+//! Deliberate host deviation: the target's vtable and its function slots are
+//! 32-bit words, while host function pointers are wider. The host vtable is
+//! structurally widened with named fields; target-only assertions retain the
+//! physical offsets. The sampled observable-array vtable at 0x089a5d0c has
+//! slot +0x18 = 0x08102f80, which is not a function entry in Ghidra's listing
+//! (it falls inside `FUN_08102f44` with r4 live-in). This port dispatches the
+//! slot but does not invent a concrete callee identity.
 
 /// The index value that names the final element (`cmn r1, #-0x7fffffff`
 /// sets Z exactly when r1 == 0x7fffffff).
 pub const LAST_ELEMENT_INDEX: i32 = 0x7fff_ffff;
 
-/// The polymorphic strided array the accessor runs on: a vtable whose
-/// slot +0x18 is the virtual `element_size(this)` getter, a signed
-/// element count, and the storage base. All fields are target words so
-/// the layout stays exact in 64-bit host tests.
+/// The polymorphic strided array shared by both accessors.
 #[repr(C)]
 pub struct StridedArray {
     /// +0x00: vtable pointer; slot +0x18 returns the element stride.
-    pub vtable: u32,
-    /// +0x04: signed element count; read only for the last-element
-    /// sentinel, and only a positive count clamps.
+    pub vtable: *const StridedArrayVtable,
+    /// +0x04: signed element count, read only by [`array_element_at`].
     pub count: i32,
     /// +0x08: base address of the element storage.
     pub storage: u32,
 }
 
+/// Vtable portion reached by [`strided_array_element_address`].
+///
+/// The unresolved slots occupy +0x00..+0x14 on the target. `usize` keeps the
+/// host fixture's function pointer naturally wide without overlapping slots.
+#[repr(C)]
+pub struct StridedArrayVtable {
+    pub unresolved_00_14: [usize; 6],
+    /// +0x18: returns the byte stride for an element of `this`.
+    pub element_stride: unsafe extern "C" fn(*const StridedArray) -> u32,
+}
+
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x00] = [0; core::mem::offset_of!(StridedArray, vtable)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x04] = [0; core::mem::offset_of!(StridedArray, count)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x08] = [0; core::mem::offset_of!(StridedArray, storage)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::size_of::<StridedArray>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x18] = [0; core::mem::offset_of!(StridedArrayVtable, element_stride)];
 
-/// Firmware load address of the unported element-address helper
-/// `FUN_082a4b94` the original tail-branches into.
-pub const ELEMENT_ADDRESS_HELPER_ADDRESS: usize = 0x082a_4b94;
-
-/// Target default for [`STRIDED_ARRAY_ELEMENT_ADDRESS`]: the stock
-/// helper at [`ELEMENT_ADDRESS_HELPER_ADDRESS`].
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_element_address(this: *const StridedArray, index: i32) -> u32 {
-    let helper: unsafe extern "C" fn(*const StridedArray, i32) -> u32 =
-        core::mem::transmute(ELEMENT_ADDRESS_HELPER_ADDRESS);
-    helper(this, index)
-}
-
-/// Host default for [`STRIDED_ARRAY_ELEMENT_ADDRESS`]: the helper is
-/// unported, so an unswapped call is a test-setup error.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_element_address(_this: *const StridedArray, _index: i32) -> u32 {
-    panic!("array_element_at requires the element-address helper 0x082a4b94")
-}
-
-/// Dispatch seam for the unported tail target `FUN_082a4b94` @
-/// 0x082a4b94 (`storage + index * element_size(this)`). Target builds
-/// wire the ROM address; host tests install recording mocks; a later
-/// port of the helper replaces the default.
-#[cfg(target_os = "none")]
-pub static mut STRIDED_ARRAY_ELEMENT_ADDRESS: unsafe extern "C" fn(
+/// strided_array_element_address — original: `FUN_082a4b94` @ `0x082a4b94`
+/// (40 bytes; 8 plain `bl` call sites, no predicated calls). See the module
+/// header for the raw listing and algorithm.
+///
+/// Returns `this.storage + index * this.vtable.element_stride(this)` using
+/// ARM's wrapping 32-bit multiply-accumulate semantics.
+///
+/// # Safety
+///
+/// `this` must point to a readable strided-array object with a readable
+/// vtable and a valid +0x18 stride callback. Neither `this`, the vtable, nor
+/// the virtual slot is NULL-checked by retailOS.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strided_array_element_address(
     this: *const StridedArray,
     index: i32,
-) -> u32 = firmware_element_address;
-
-/// Host wired default (panics; see [`missing_element_address`]).
-#[cfg(not(target_os = "none"))]
-pub static mut STRIDED_ARRAY_ELEMENT_ADDRESS: unsafe extern "C" fn(
-    this: *const StridedArray,
-    index: i32,
-) -> u32 = missing_element_address;
+) -> u32 {
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
+    let element_stride =
+        core::ptr::read_volatile(core::ptr::addr_of!((*vtable).element_stride));
+    let stride = element_stride(this);
+    let storage = core::ptr::read_volatile(core::ptr::addr_of!((*this).storage));
+    storage.wrapping_add((index as u32).wrapping_mul(stride))
+}
 
 /// array_element_at — original: `FUN_082a4cf8` @ 0x082a4cf8 (24 bytes;
-/// 23 `bl` call sites, binary-scanned). See the module header for the
-/// algorithm and the listing.
+/// 23 `bl` call sites, binary-scanned).
 ///
 /// Returns the address of element `index`, where `index ==
 /// `[`LAST_ELEMENT_INDEX`] names the final element of a non-empty array.
@@ -117,10 +110,9 @@ pub static mut STRIDED_ARRAY_ELEMENT_ADDRESS: unsafe extern "C" fn(
 ///
 /// # Safety
 ///
-/// `this` must point to at least eight readable, word-aligned bytes (the
-/// count at +0x04 is read when, and only when, `index` is the sentinel);
-/// the storage word and vtable are touched only by the dispatched helper.
-/// As in the original, `this` is not NULL-checked.
+/// `this` must point to a readable strided-array and satisfy
+/// [`strided_array_element_address`]'s virtual-dispatch contract. As in
+/// retailOS, it is not NULL-checked.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn array_element_at(this: *const StridedArray, index: i32) -> u32 {
@@ -131,9 +123,7 @@ pub unsafe extern "C" fn array_element_at(this: *const StridedArray, index: i32)
             index = count - 1;
         }
     }
-    let element_address =
-        core::ptr::read_volatile(core::ptr::addr_of!(STRIDED_ARRAY_ELEMENT_ADDRESS));
-    element_address(this, index)
+    strided_array_element_address(this, index)
 }
 
 #[cfg(test)]
@@ -142,142 +132,129 @@ mod tests {
     extern crate std;
     use parking_lot::Mutex;
     use std::ptr;
-    use std::vec::Vec;
 
-    /// Serializes the tests: they all swap the one crate-global seam.
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
+    static VTABLE_LOCK: Mutex<()> = Mutex::new(());
+    static mut STRIDE: u32 = 0;
+    static mut STRIDE_CALLS: u32 = 0;
+    static mut SEEN_THIS: *const StridedArray = ptr::null();
 
-    static mut CALLS: Vec<(usize, i32)> = Vec::new();
-    static mut RESULT: u32 = 0;
-
-    unsafe extern "C" fn recording_element_address(
-        this: *const StridedArray,
-        index: i32,
-    ) -> u32 {
-        (*ptr::addr_of_mut!(CALLS)).push((this as usize, index));
-        ptr::addr_of!(RESULT).read_volatile()
+    unsafe extern "C" fn recorded_stride(this: *const StridedArray) -> u32 {
+        ptr::addr_of_mut!(STRIDE_CALLS).write(
+            ptr::addr_of!(STRIDE_CALLS).read_volatile().wrapping_add(1),
+        );
+        ptr::addr_of_mut!(SEEN_THIS).write(this);
+        ptr::addr_of!(STRIDE).read_volatile()
     }
 
-    struct SeamGuard;
+    static VTABLE: StridedArrayVtable = StridedArrayVtable {
+        unresolved_00_14: [0; 6],
+        element_stride: recorded_stride,
+    };
 
-    impl SeamGuard {
-        fn install() -> Self {
-            unsafe {
-                ptr::addr_of_mut!(STRIDED_ARRAY_ELEMENT_ADDRESS)
-                    .write_volatile(recording_element_address);
-                (*ptr::addr_of_mut!(CALLS)).clear();
-            }
-            SeamGuard
+    fn reset(stride: u32) {
+        unsafe {
+            ptr::addr_of_mut!(STRIDE).write_volatile(stride);
+            ptr::addr_of_mut!(STRIDE_CALLS).write_volatile(0);
+            ptr::addr_of_mut!(SEEN_THIS).write_volatile(ptr::null());
         }
     }
 
-    impl Drop for SeamGuard {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::addr_of_mut!(STRIDED_ARRAY_ELEMENT_ADDRESS)
-                    .write_volatile(missing_element_address);
-            }
-        }
-    }
-
-    fn recorded_calls() -> Vec<(usize, i32)> {
-        unsafe { (*ptr::addr_of!(CALLS)).clone() }
-    }
-
-    fn array(count: i32) -> StridedArray {
-        StridedArray { vtable: 0x089a_0000, count, storage: 0x0840_0000 }
+    fn array(count: i32, storage: u32) -> StridedArray {
+        StridedArray { vtable: &VTABLE, count, storage }
     }
 
     #[test]
-    fn a_plain_index_passes_through_without_reading_the_count() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        // Poison the count at an unmapped-looking value; if the wrapper
-        // read it for a non-sentinel index the recorded index would move.
-        let object = array(-1);
+    fn helper_calls_the_stride_slot_and_accumulates_a_positive_index() {
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(-1, 0x0840_0000);
+        reset(12);
 
+        let address = unsafe { strided_array_element_address(&object, 3) };
+
+        assert_eq!(address, 0x0840_0024);
         unsafe {
-            ptr::addr_of_mut!(RESULT).write_volatile(0x0840_0060);
-            let returned = array_element_at(&object, 3);
-            assert_eq!(returned, 0x0840_0060, "the helper's r0 is handed back untouched");
+            assert_eq!(ptr::addr_of!(STRIDE_CALLS).read_volatile(), 1);
+            assert_eq!(ptr::addr_of!(SEEN_THIS).read_volatile(), &object as *const StridedArray);
         }
+    }
+
+    #[test]
+    fn helper_retains_signed_index_as_a_wrapping_word_multiply() {
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(0x1234, 0x0000_0040);
+        reset(6);
 
         assert_eq!(
-            recorded_calls(),
-            std::vec![(&object as *const _ as usize, 3)],
-            "index 3 reaches the helper verbatim"
+            unsafe { strided_array_element_address(&object, -2) },
+            0x0000_0034,
+            "mla treats -2 as 0xfffffffe"
         );
     }
 
     #[test]
-    fn the_sentinel_names_the_last_element_of_a_non_empty_array() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        let object = array(7);
+    fn helper_wraps_the_multiply_accumulate_result() {
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(0, 0xffff_fffc);
+        reset(4);
 
+        assert_eq!(unsafe { strided_array_element_address(&object, 2) }, 4);
+    }
+
+    #[test]
+    fn a_plain_index_reaches_the_helper_unchanged() {
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(-1, 0x0840_0000);
+        reset(8);
+
+        assert_eq!(unsafe { array_element_at(&object, 3) }, 0x0840_0018);
         unsafe {
-            array_element_at(&object, LAST_ELEMENT_INDEX);
-            assert_eq!(
-                recorded_calls(),
-                std::vec![(&object as *const _ as usize, 6)],
-                "0x7fffffff with count 7 becomes index 6"
-            );
+            assert_eq!(ptr::addr_of!(STRIDE_CALLS).read_volatile(), 1);
+            assert_eq!(ptr::addr_of!(SEEN_THIS).read_volatile(), &object as *const StridedArray);
         }
+    }
+
+    #[test]
+    fn the_sentinel_names_the_last_element_of_a_non_empty_array() {
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(7, 0x0840_0000);
+        reset(4);
+
+        assert_eq!(unsafe { array_element_at(&object, LAST_ELEMENT_INDEX) }, 0x0840_0018);
     }
 
     #[test]
     fn the_sentinel_on_a_one_element_array_yields_index_zero() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        let object = array(1);
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(1, 0x0840_0000);
+        reset(4);
 
-        unsafe {
-            array_element_at(&object, LAST_ELEMENT_INDEX);
-            assert_eq!(recorded_calls()[0].1, 0);
-        }
+        assert_eq!(unsafe { array_element_at(&object, LAST_ELEMENT_INDEX) }, 0x0840_0000);
     }
 
     #[test]
-    fn the_sentinel_passes_through_on_an_empty_array() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        let object = array(0);
+    fn the_sentinel_passes_through_on_an_empty_or_negative_count() {
+        let _lock = VTABLE_LOCK.lock();
+        let empty = array(0, 0);
+        let negative = array(-3, 0);
+        reset(4);
 
+        let sentinel_address = (LAST_ELEMENT_INDEX as u32).wrapping_mul(4);
+        assert_eq!(unsafe { array_element_at(&empty, LAST_ELEMENT_INDEX) }, sentinel_address);
+        assert_eq!(unsafe { array_element_at(&negative, LAST_ELEMENT_INDEX) }, sentinel_address);
         unsafe {
-            array_element_at(&object, LAST_ELEMENT_INDEX);
-            assert_eq!(
-                recorded_calls()[0].1,
-                LAST_ELEMENT_INDEX,
-                "count == 0 fails the signed subgt, so the sentinel survives"
-            );
-        }
-    }
-
-    #[test]
-    fn the_sentinel_passes_through_on_a_negative_count() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        let object = array(-3);
-
-        unsafe {
-            array_element_at(&object, LAST_ELEMENT_INDEX);
-            assert_eq!(
-                recorded_calls()[0].1,
-                LAST_ELEMENT_INDEX,
-                "the clamp is signed: a negative count never clamps"
-            );
+            assert_eq!(ptr::addr_of!(STRIDE_CALLS).read_volatile(), 2);
         }
     }
 
     #[test]
     fn one_below_the_sentinel_is_an_ordinary_index() {
-        let _lock = SEAM_LOCK.lock();
-        let _seam = SeamGuard::install();
-        let object = array(2);
+        let _lock = VTABLE_LOCK.lock();
+        let object = array(2, 0);
+        reset(4);
 
-        unsafe {
-            array_element_at(&object, LAST_ELEMENT_INDEX - 1);
-            assert_eq!(recorded_calls()[0].1, LAST_ELEMENT_INDEX - 1);
-        }
+        assert_eq!(
+            unsafe { array_element_at(&object, LAST_ELEMENT_INDEX - 1) },
+            ((LAST_ELEMENT_INDEX - 1) as u32).wrapping_mul(4)
+        );
     }
 }
