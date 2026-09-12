@@ -57109,6 +57109,33 @@ functions:
       there are no deliberate deviations. Existing animation callers now use
       this direct port rather than a retain dispatch seam.
 
+  - address: 0x08273a2c
+    ghidra: FUN_08273a2c
+    name: timing_wheel_remove_global
+    size: 20
+    sig: "void timing_wheel_remove_global(u32 *node)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: node
+      DAT_08273a3c: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_082738e0: timing_wheel_remove
+    notes: >-
+      Raw ARM has four instruction words at 0x08273a2c..0x08273a38 followed
+      by its separately linked literal-pool word 0x089cc7e0 at 0x08273a3c,
+      for a true extent of 20 bytes; the next real function starts at
+      0x08273a40. Ghidra reports only the 16 instruction bytes and attributes
+      timing_wheel_remove's body to this wrapper. Decoding every ARM B/BL word
+      in osos.dec finds exactly eight direct call sites (0x081446d8,
+      0x081446e0, 0x081446e8, 0x081448d4, 0x081448dc, 0x081448e4,
+      0x08145e40, and 0x081463b4), all plain unconditional bl; there are no
+      predicated forms, tail callers, or raw DATA-word references. The wrapper
+      copies node from r0 to r1, loads the live timing-wheel table pointer
+      from global 0x089cc7e0 into r0, then unconditionally tail-branches to
+      timing_wheel_remove(table, node). The port calls the existing direct
+      timing-wheel port through scheduler_table; its established host model
+      substitutes a house-static table. No other deliberate deviations.
+
   - address: 0x08273a40
     ghidra: FUN_08273a40
     name: value_aux_max
