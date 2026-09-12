@@ -67901,3 +67901,39 @@ functions:
       behavioral deviations: wrapping_add preserves the raw address addition,
       including NULL -> 0x48 and target-width wraparound. Host tests check the
       exact interior address, surrounding-byte non-mutation, and NULL case.
+  - address: 0x0827d6e4
+    ghidra: FUN_0827d6e4
+    name: recording_controller_get
+    size: 116
+    sig: "void *recording_controller_get(void)"
+    module: app/recording_controller
+    status: ported
+    renames:
+      DAT_0827d748: recording_controller_state
+      DAT_0827d74c: recording_controller
+      DAT_0827d750: dso_handle
+      DAT_0827d754: recording_controller_destructor_word
+      FUN_0827de04: recording_controller_construct
+      FUN_0827ddb8: recording_controller_one_time_setup
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec corrects Ghidra's 100-byte code-only extent: instructions
+      run from 0x0827d6e4 through pop {r4,pc} at 0x0827d744, then the four
+      literal words at 0x0827d748..0x0827d754 make the true extent 116 bytes;
+      the next separately linked function begins at 0x0827d758. Decoding every
+      immediate ARM B/BL word finds exactly eight inbound direct calls, all
+      unconditional plain bl at 0x08085ff8, 0x0816803c, 0x08168080,
+      0x081b0b1c, 0x081b0b30, 0x081b0b84, 0x081b0bec, and 0x081b0de4;
+      there are no predicated forms or direct tail branches. It tests bit 0 of
+      the guard at state+8, conditionally constructs and registers the fixed
+      0x08ad17c0 controller, then independently runs one-time setup while the
+      state byte is clear before returning the fixed literal. Recording-buffer
+      producers call it before the paired recording sync path, so
+      recording_controller is the observed role; no C++ class-name literal
+      survives, and none is invented. The unported constructor 0x0827de04 and
+      setup 0x0827ddb8 remain target-address seams with host models. The
+      registered word 0x08272fac is not a function entry: raw bytes are ASCII
+      URL data beginning g/00/9/xmlsig#, so the Rust shutdown handler is
+      deliberately inert rather than inventing a callee.
