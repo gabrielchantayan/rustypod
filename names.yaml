@@ -18251,6 +18251,28 @@ functions:
       context clipping, hidden-origin preservation, and the parent-clip
       branch.
 
+  - address: 0x082a2468
+    ghidra: FUN_082a2468
+    name: ui_element_content_inset
+    size: 84
+    sig: "int ui_element_content_inset(const UiElement *element)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      r1: flags
+      "element+0x48": flags
+    notes: >-
+      Raw extent is 0x082a2468..0x082a24b8; the distinct next function
+      starts at 0x082a24bc. It reads element +0x48 without a NULL guard and
+      masks bits 21-23. Classes 0x20_0000 and 0x40_0000 return 1; classes
+      0x60_0000, 0x80_0000, and 0xa0_0000 return 2; all other classes
+      return whether any bit in 0x1c_0000 is set. Decoding every ARM B/BL
+      word in osos.dec finds exactly seven direct unconditional bl call
+      sites, zero predicated bl forms, zero tail-b references, and no
+      aligned data-word references. Rust preserves the priority of the
+      high-bit classes over 0x1c_0000; there are no deliberate deviations.
+
   - address: 0x082a24f4
     ghidra: FUN_082a24f4
     name: ui_element_bounds
