@@ -351,6 +351,10 @@ pub mod hints {
     // subject/context fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CONTEXT_SCOPE_SELECTOR: usize = 0xf200_0000;
+    // 0xf800_0000: dedicated to app/current_record_handle's containing-owner
+    // cursor fixture; mappings never unmap, so no other user may share this
+    // hint.
+    pub const OWNER_CURRENT_RECORD_HANDLE: usize = 0xf800_0000;
     // 0xd300_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.

@@ -71133,6 +71133,32 @@ functions:
       Host tests use a native-width structural vtable; the target build
       asserts its dispatched field remains at ARM byte offset +0x58.
 
+  # --- containing current-record handle accessor ---
+  - address: 0x0829dd28
+    ghidra: FUN_0829dd28
+    name: current_record_handle_from_owner
+    size: 8
+    sig: "u32 current_record_handle_from_owner(const CurrentRecordCursorOwner *owner)"
+    module: app/current_record_handle
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1+0x04: cursor
+      FUN_0829e1b4: current_record_handle
+    notes: >-
+      Raw osos.dec is exactly two ARM words at 0x0829dd28..0x0829dd30:
+      add r0,r0,#4 followed by an unconditional tail b 0x0829e1b4; the next
+      separately linked function starts at 0x0829dd30. The adapter shifts its
+      containing owner pointer to the embedded CurrentRecordCursor and returns
+      current_record_handle's selected 20-byte-record handle, or zero when the
+      cursor index is -1. Decoding every immediate ARM B/BL word finds exactly
+      seven inbound direct calls, all unconditional plain bl at 0x0820cf6c,
+      0x0820d0c8, 0x0820d390, 0x0820d41c, 0x0820d4b0, 0x0820d5b8 and
+      0x0820d610; there are no predicated calls, other direct tail branches,
+      or aligned DATA-word references. The Rust source delegates to the already
+      ported current_record_handle; the release archive preserves a tail branch
+      after the same pointer adaptation, with no deliberate semantic deviation.
+
   # --- current indexed-record handle accessor ---
   - address: 0x0829e1b4
     ghidra: FUN_0829e1b4
