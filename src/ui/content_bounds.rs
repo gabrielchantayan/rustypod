@@ -14,11 +14,10 @@
 //! Over-insetting clears the rectangle through the shared `rect_inset`
 //! validity check.
 //!
-//! # Deliberate deviations
+//! # Implementation note
 //!
-//! The flag-to-inset decision is reproduced as a private Rust helper in
-//! this module; the retail 0x082a2468 symbol stays unported rather than
-//! becoming a second exported seam.
+//! The original calls `FUN_082a2468`; this port calls
+//! [`ui_element_content_inset`], its Rust port.
 
 use core::mem::{offset_of, size_of};
 use core::ptr;
@@ -42,8 +41,24 @@ const _: [u8; 0x90] = [0; size_of::<ElementFields>()];
 const _: [u8; 0x48] = [0; offset_of!(ElementFields, flags)];
 const _: [u8; 0x80] = [0; offset_of!(ElementFields, bounds)];
 
+/// ui_element_content_inset — original: `FUN_082a2468` @ 0x082a2468
+/// (84 bytes; `0x082a2468..0x082a24bc`; the next function starts at
+/// `0x082a24bc`).
+///
+/// Reads the element flag word at +0x48 and returns the content-border inset:
+/// 1 for the 0x20_0000/0x40_0000 classes, 2 for the
+/// 0x60_0000/0x80_0000/0xa0_0000 classes, otherwise 1 when any
+/// 0x1c_0000 bit is set and 0 when none is. Raw decoding finds exactly seven
+/// direct, unconditional `bl` call sites; no predicated `bl`, tail `b`, or
+/// data-word references target this address. The function has no NULL guard.
+///
+/// # Deliberate deviations
+///
+/// None.
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-fn content_inset_for_flags(flags: u32) -> i32 {
+pub unsafe extern "C" fn ui_element_content_inset(element: *const u8) -> i32 {
+    let flags = ptr::addr_of!((*element.cast::<ElementFields>()).flags).read();
     match flags & 0x00e0_0000 {
         0x0020_0000 | 0x0040_0000 => 1,
         0x0060_0000 | 0x0080_0000 | 0x00a0_0000 => 2,
@@ -111,7 +126,7 @@ pub unsafe extern "C" fn ui_element_content_bounds(element: *mut u8, out: *mut R
     ptr::write(out, ptr::addr_of!((*element).bounds).read());
     rect_move_to_origin(out);
 
-    let inset = content_inset_for_flags(ptr::addr_of!((*element).flags).read());
+    let inset = ui_element_content_inset(element.cast());
     if inset > 0 {
         rect_inset(out, inset, inset);
     }
@@ -213,6 +228,44 @@ mod tests {
             );
         }
         out
+    }
+
+    #[test]
+    fn content_inset_classifies_all_high_flag_classes_without_writing_element() {
+        let cases = [
+            (0x0000_0000, 0, 1),
+            (0x0020_0000, 1, 1),
+            (0x0040_0000, 1, 1),
+            (0x0060_0000, 2, 2),
+            (0x0080_0000, 2, 2),
+            (0x00a0_0000, 2, 2),
+            (0x00c0_0000, 0, 1),
+            (0x00e0_0000, 0, 1),
+        ];
+
+        for (high_flags, expected_without_low_flags, expected_with_low_flags) in cases {
+            for (low_flags, expected) in [
+                (0, expected_without_low_flags),
+                (0x001c_0000, expected_with_low_flags),
+            ] {
+                let mut fixture = Fixture {
+                    _before_flags: [0xa5; 0x48],
+                    flags: high_flags | low_flags,
+                    _before_bounds: [0x5a; 0x34],
+                    bounds: rect(-11, 13, 17, 19),
+                };
+
+                let got = unsafe {
+                    ui_element_content_inset((&mut fixture as *mut Fixture).cast::<u8>())
+                };
+
+                assert_eq!(got, expected, "flags={:#010x}", high_flags | low_flags);
+                assert_eq!(fixture._before_flags, [0xa5; 0x48]);
+                assert_eq!(fixture.flags, high_flags | low_flags);
+                assert_eq!(fixture._before_bounds, [0x5a; 0x34]);
+                assert_eq!(fixture.bounds, rect(-11, 13, 17, 19));
+            }
+        }
     }
 
     #[test]
