@@ -67481,3 +67481,37 @@ functions:
       padding word. Host tests cover strict-limit rejection, equality at the
       limit, and zero/negative including i64::MIN requests. match.py
       structural review completed.
+  - address: 0x082a8ba0
+    ghidra: FUN_082a8ba0
+    name: opaque_shared_array_handle_release
+    size: 96
+    sig: "void **opaque_shared_array_handle_release(void **handle)"
+    module: cxx/handle
+    status: identified
+    renames:
+      param_1/r0: handle
+      puVar3/r4: shared_array_body
+      DAT_082a8c00: opaque_array_element_callback
+      FUN_0803170c: cxx_vec_delete
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec gives an exact 96-byte extent: 92 instruction bytes from
+      0x082a8ba0 through the pop {r4,r5,r6,pc} at 0x082a8bfc, followed by
+      the literal word 0x083cddb4 at 0x082a8c00; the next separately linked
+      function opens at 0x082a8c04. It returns handle. A NULL *handle is
+      unchanged; otherwise it decrements the body word at +0x1c with wrapping
+      subs semantics. Only a 1-to-0 transition C++-deletes arrays at body+0
+      and body+8 through 0x0803170c using the literal callback, then
+      operator-deletes the body at 0x082aad24. The handle word is never
+      cleared. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      eight inbound direct calls, all unconditional plain bl at 0x08266e54,
+      0x082a7174, 0x082a7430, 0x082a7d80, 0x082a950c, 0x083da7a4,
+      0x083e7880, and 0x083e7974; there are no predicated or tail-B callers.
+      This cannot be ported faithfully in isolation: the array finalizer calls
+      0x083cddb4 as an element destructor, but raw ARM there begins
+      `str r6,[sp,#8]` inside the separately linked routine that starts at
+      0x083cdd24. Its immediately preceding execution relies on live r4-r9
+      and stack-frame state, so it is not a real function entry or a
+      recoverable C ABI. No callee identity or host seam is invented. Retain
+      identified status until that containing routine and its non-ABI callback
+      contract can be ported together.
