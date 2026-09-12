@@ -50,6 +50,7 @@ pub mod keyed_event_binding;
 pub mod keyed_record_pair_lookup;
 pub mod event_hub;
 pub mod event_list;
+pub mod event_payload_message;
 pub mod event_source;
 pub mod facade_registry_walk;
 pub mod facade_for_selector;

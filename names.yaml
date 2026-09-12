@@ -68215,3 +68215,37 @@ functions:
       through a typed function pointer and host tests install a recording seam.
       Tests cover an absent zero word,
       duplicate suppression, complete-list traversal, and mutex unlock.
+
+  - address: 0x08275b40
+    ghidra: FUN_08275b40
+    name: event_payload_message_construct
+    size: 48
+    sig: "EventPayloadMessage *event_payload_message_construct(EventPayloadMessage *storage, u32 kind, const u32 *payload_words, u32 event_code)"
+    module: app/event_payload_message
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: kind
+      param_3/r2/r4: payload_words
+      param_4/r3/r5: event_code
+      puVar1/r0: this
+      DAT_08275b70: EVENT_PAYLOAD_MESSAGE_VTABLE
+      FUN_08266a48: message_kind_construct
+    notes: >-
+      Raw osos.dec has 48 bytes of code from the push {r4,r5,r6,lr} at
+      0x08275b40 through pop {r4,r5,r6,pc} at 0x08275b6c, then the 4-byte
+      literal-pool word 0x089a5fb4 at 0x08275b70; the separately linked
+      next function opens at 0x08275b74, making the true extent 52 bytes.
+      Decoding every aligned immediate ARM B/BL word in osos.dec finds eight
+      inbound direct calls, all unconditional plain bl at 0x08100044,
+      0x08110678, 0x08110990, 0x08110c98, 0x08110cd8, 0x08110d04,
+      0x08110d54, and 0x08110d84; there are no predicated bl forms or tail
+      b callers. It calls the already-ported message_kind_construct with r0
+      and r1, stores its own vtable at +0x00, copies the two words addressed
+      by r2 to +0x08/+0x0c in order, stores r3 at +0x10, and returns the
+      constructor result in r0. Ghidra's void signature loses this returned
+      pointer, which all eight callers consume. The 0x089a5fb4 vtable is
+      retained as a raw address constant: this constructor never dispatches
+      through it, so no identity is inferred for its unresolved slots. Host
+      tests prove the five exact stores, guard-word preservation, returned
+      pointer, and source/storage alias ordering.
