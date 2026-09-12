@@ -68979,6 +68979,36 @@ functions:
       larger frame and branchy bool normalization around the same ordered
       slot loads and two direct helper calls.
 
+  # --- Stateless StringObject ordering comparator ---
+  - address: 0x083d6550
+    ghidra: FUN_083d6550
+    name: string_object_less
+    size: 40
+    sig: "bool string_object_less(const void *comparator, const StringObject *left, const StringObject *right)"
+    module: cxx/string_object_less
+    status: ported
+    renames:
+      param_1/r0: comparator
+      param_2/r1/r4: left
+      param_3/r2/r0: right
+      "left+0x4": left.payload
+      FUN_082a50b0: string_object_c_str
+      FUN_08276d64: utf8_strcmp_safe
+    notes: >-
+      Raw osos.dec confirms exactly 40 code bytes at 0x083d6550..0x083d6574;
+      the next separately linked function begins at 0x083d6578. Decoding every
+      ARM B/BL-immediate word finds exactly seven inbound calls, all
+      unconditional plain bl and none predicated or tail b: 0x083e7e20,
+      0x083e7e90, 0x083e82b4, 0x083e8334, 0x083e87bc, 0x083e97dc, and
+      0x083ea7b0. Raw ARM saves left, overwrites its otherwise-unused
+      comparator argument with right, calls string_object_c_str(right), then
+      calls utf8_strcmp_safe(left.payload, returned_c_str). lsrs r0,#31 plus
+      movne r0,#1 returns 1 precisely for a signed-negative comparison result,
+      implementing a stateless StringObject ordering functor. NULL left payload
+      is normalized inside utf8_strcmp_safe; NULL right payload is replaced by
+      string_object_c_str's shared empty string. Both callees are direct
+      existing Rust ports; no dispatch seam or other deviation is needed.
+
   # --- Stream-buffer slot one-byte lookahead ---
   - address: 0x083d7158
     ghidra: FUN_083d7158
