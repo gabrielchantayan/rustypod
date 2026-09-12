@@ -470,6 +470,10 @@ pub mod hints {
     // stream-buffer-slot fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STREAMBUF_SLOT_PEEK_BYTE: usize = 0xed00_0000;
+    // 0xe500_0000: dedicated to cxx/streambuf_slot_consume's raw-u32
+    // stream-buffer-slot fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const STREAMBUF_SLOT_CONSUME: usize = 0xe500_0000;
     // 0xee00_0000: dedicated to kernel/debug_task_selector's raw-u32
     // scheduler-label fixture; fixture mappings never unmap, so no other user
     // may share this hint.

@@ -71620,3 +71620,29 @@ functions:
       0x083dbedc, so it is not used as a data-dispatched target. The Rust
       port returns u32 rather than inventing a pointer type, preserving the
       target-word ABI and the opaque cursor representation on host tests.
+
+  # --- Stream-buffer slot consumption ---
+  - address: 0x083daf50
+    ghidra: FUN_083daf50
+    name: streambuf_slot_consume
+    size: 28
+    sig: "u32 *streambuf_slot_consume(u32 *streambuf_slot)"
+    module: cxx/streambuf_slot_consume
+    status: ported
+    renames:
+      param_1/r0/r4: streambuf_slot
+      "*streambuf_slot/r0": streambuf
+      FUN_083da654: streambuf_consume_raw
+    notes: >-
+      Raw osos.dec confirms the exact 28-byte body from 0x083daf50 through
+      pop {r4,pc} at 0x083daf68; the separately linked next function opens at
+      0x083daf6c. Complete aligned ARM B/BL-immediate decoding finds exactly
+      seven inbound direct calls, all unconditional plain bl (zero predicated):
+      0x083b649c, 0x083b6544, 0x083b6594, 0x083b6728, 0x083b677c,
+      0x083b6820, and 0x083b6944. The body loads one target-width stream-buffer
+      pointer from its slot, calls raw helper 0x083da654 only when non-NULL,
+      then returns the original slot without storing it. Raw 0x083da654 shows
+      buffered-byte consumption or a virtual fallback, but its C++ identity is
+      not assumed. The ARM bridge tail-branches directly to that verified,
+      still-unported address; its host-only recorder proves NULL skips it,
+      non-NULL forwards exactly once, and the slot word is retained.
