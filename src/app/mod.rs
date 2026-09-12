@@ -124,6 +124,7 @@ pub mod path_probe;
 pub mod playlist_pointer_marker;
 pub mod pending_event_take;
 pub mod pending_event_insert;
+pub mod request_callback_state_reset;
 pub mod queued_message;
 pub mod pointer_queue;
 pub mod query_param_list;

@@ -69347,3 +69347,44 @@ functions:
       established. On host only, the native-width lock pointer is read
       unaligned from the target's +0x44 interface offset before calling the
       ported mutex operation; ARM reads its naturally aligned 32-bit word.
+
+  # --- Opaque request callback lifecycle ---
+  - address: 0x081e2ae8
+    ghidra: FUN_081e2ae8
+    name: request_callback_state_reset
+    size: 184
+    sig: "void request_callback_state_reset(RequestCallbackState *state, u32 reset_pending_request, u32 reset_reply_progress)"
+    module: app/request_callback_state_reset
+    status: ported
+    renames:
+      param_1/r0/r5: state
+      param_2/r1/r8: reset_pending_request
+      param_3/r2/r9: reset_reply_progress
+      DAT_081e2ba0: CALLBACK_REGISTRY_MUTEX (0x08ac88a0)
+      DAT_081e2ba4: CALLBACK_REGISTRY (0x089cca14)
+      "state+0x2d0": pending_request
+      "state+0x2d4": pending_request_payload
+      "state+0x2e0..+0x2e3": reply_progress
+      FUN_08261e20: posix_mutex_lock_veneer_a (ported alias)
+      FUN_082aad14: operator_delete_tag3 (ported)
+      FUN_08261e24: posix_mutex_unlock_veneer_a (ported alias)
+    notes: >-
+      Raw ARM establishes 184 instruction bytes from 0x081e2ae8 through the
+      tail branch at 0x081e2b9c, followed by the two 4-byte literals at
+      0x081e2ba0 and 0x081e2ba4; the independently linked next function
+      starts at 0x081e2ba8. Ghidra's reported 184 bytes omits those literals
+      and follows the unlock tail branch into the unrelated PosixMutex body.
+      Full-image aligned ARM B/BL decoding finds exactly eight inbound direct
+      calls, all unconditional bl: 0x081e2720, 0x081e2874, 0x081e29c4,
+      0x081e29e8, 0x081e2c40, 0x081e2e0c, 0x081e2ea4, and 0x081e30d8; no
+      predicated call forms were found. Under the fixed global mutex, a
+      nonzero callback count reloads both that count and the table word on
+      every iteration, dispatching each non-NULL entry through vtable slot
+      +0x04; it then releases the final reloaded tag-3 table allocation and
+      clears its word plus the registry's leading four bytes. Independent
+      nonzero arguments reset the two pending-request words and the four
+      reply-progress bytes. The mutex status values are ignored. Existing
+      PosixMutex and tag-3-delete ports are called directly; host tests model
+      only the fixed registry with native-width pointers, while target code
+      retains its exact 32-bit layout. The stock unlock tail branch is a
+      normal Rust call.
