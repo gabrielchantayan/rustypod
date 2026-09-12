@@ -31,8 +31,14 @@ const NEWLINE: &[u8; 2] = b"\n\0";
 /// The integrity-check state fields touched by `checkAppendMsg`.
 #[repr(C)]
 pub struct IntegrityCheck {
-    /// +0x00..+0x10: caller-owned checker state not touched here.
-    pub _prefix: [u8; 0x10],
+    /// +0x00: shared b-tree whose pointer map this check validates.
+    pub p_bt: *mut u8,
+    /// +0x04: owning pager; not touched by the ported routines here.
+    pub _p_pager: *mut u8,
+    /// +0x08: page count recorded when the check began.
+    pub _n_page: i32,
+    /// +0x0c: per-page reference counts.
+    pub _an_ref: *mut i32,
     /// +0x10: remaining diagnostics allowed.
     pub mx_err: i32,
     /// +0x14: accumulated heap-owned diagnostic text.
@@ -193,7 +199,15 @@ mod tests {
     }
 
     fn check(mx_err: i32, z_err_msg: *mut u8, n_err: i32) -> IntegrityCheck {
-        IntegrityCheck { _prefix: [0xa5; 0x10], mx_err, z_err_msg, n_err }
+        IntegrityCheck {
+            p_bt: core::ptr::null_mut(),
+            _p_pager: core::ptr::null_mut(),
+            _n_page: 0,
+            _an_ref: core::ptr::null_mut(),
+            mx_err,
+            z_err_msg,
+            n_err,
+        }
     }
 
     #[test]
