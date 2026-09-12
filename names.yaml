@@ -67758,6 +67758,30 @@ functions:
       PC-relative bl; match.py confirms the final target transfer remains a
       tail bx, with arguments and result preserved.
 
+  # --- Little-endian halfword store with final-byte return (util/u16_le_store_last_byte) ---
+  - address: 0x080eda28
+    ghidra: FUN_080eda28
+    name: store_u16_le_last_byte
+    size: 16
+    sig: "u8 *store_u16_le_last_byte(u8 *dst, u32 value)"
+    module: util/u16_le_store_last_byte
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+    notes: >-
+      Raw osos.dec confirms the exact 16-byte extent, four ARM words from
+      0x080eda28 through bx lr at 0x080eda34; the separately linked next
+      function starts at 0x080eda38. Decoding every ARM B/BL immediate finds
+      exactly eight direct inbound calls: seven unconditional plain bl at
+      0x0805b4cc, 0x0805b570, 0x0805b57c, 0x0805b658, 0x0805b8c0,
+      0x0809bf8c, and 0x0809c818, plus bllt at 0x0805b8d4. The predicated
+      caller gates this unguarded store when its signed decremented counter is
+      negative; the body itself has no NULL, alignment, range, or value-width
+      guard. It uses strb with post-index +1, then lsr r1,#8 and a final strb,
+      storing only value's low 16 bits in little-endian order and returning
+      dst+1 in r0. Deliberate deviations: none.
+
   # --- Little-endian word store with final-byte return (util/u32_le_store_last_byte) ---
   - address: 0x080eda38
     ghidra: FUN_080eda38
