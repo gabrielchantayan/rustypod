@@ -64600,6 +64600,44 @@ functions:
       mutex_unlock instead of reproducing the final ARM tail branch, and
       discards its scratch return.
 
+  # --- FAT directory cursor synchronizer ---
+  - address: 0x082b2014
+    ghidra: FUN_082b2014
+    name: fat_cursor_synchronize
+    size: 140
+    sig: "void fat_cursor_synchronize(FatCursor *cursor)"
+    module: fs/fat_cursor
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "cursor+0x0": state
+      "cursor+0xc": current_cluster
+      "cursor+0x10": current_block
+      "cursor+0x1c": advance
+      "state+0x0": volume
+      "state+0x4": entry
+      FUN_082e1378: fat_dirent_start_cluster (ported, fs/fat_dirent)
+      FUN_082e01cc: fat_cluster_to_block_index (ported, fs/fat_cluster_to_block)
+      FUN_082e0378: fat_next_cluster (ported, fs/fat_next_cluster)
+    notes: >-
+      Raw ARM confirms the exact 140-byte extent 0x082b2014..0x082b20a0:
+      35 instruction words end in `pop {r4-r6,pc}` and the separately entered
+      next function begins at 0x082b20a0 (`mov r0,sp; mov r1,#8; b
+      0x080441e4`). The decoded body ignores Ghidra's second parameter. It
+      initializes a zero current cluster from state volume/entry through
+      fat_dirent_start_cluster, translates a nonzero cluster through
+      fat_cluster_to_block_index, and optionally reads fat_next_cluster. A
+      nonzero next cluster updates the block, clears advance, then clears the
+      current cluster for reinitialization; zero preserves the cursor. A decode
+      of every ARM B/BL-immediate word finds eight direct inbound branches, all
+      unconditional BL at 0x082b19b4, 0x082b1c64, 0x082b1ccc, 0x082e5ebc,
+      0x082e620c, 0x082e62d0, 0x082e65b8, and 0x082e6650. No predicated
+      branch, tail branch, or aligned data word targets the entry. No semantic
+      deviation: the port directly calls all three already ported FAT helpers;
+      host tests use a dedicated below-4-GiB target-pointer fixture and the
+      shared FAT cache-value seam to prove initialization, cached no-op,
+      successful advance, and unavailable-next preservation.
+
   # --- Mounted-volume descriptor cursor seek wrapper ---
   - address: 0x082e628c
     ghidra: FUN_082e628c
@@ -64622,7 +64660,7 @@ functions:
       r9: saved_origin
       FUN_082e0e1c: volume_table_lookup (ported, fs/volume_table)
       FUN_082d7934: ata_semaphore_wait (ported, drivers/ata_semaphore)
-      FUN_082b2014: resident cursor synchronizer (unrecovered)
+      FUN_082b2014: fat_cursor_synchronize (ported, fs/fat_cursor)
       FUN_082b1784: resident cursor seek (unrecovered)
       FUN_082d7954: ata_semaphore_signal (ported, drivers/ata_semaphore)
       FUN_083690a8: ata_report_error (ported, drivers/ata_cmd)
@@ -64635,23 +64673,23 @@ functions:
       volume_table_lookup(index, 0); on NULL it forms the full -1 r0/r1
       result and reports ATA error 9. Otherwise it follows descriptor+0
       then that object's +0 word to load the ATA u16 semaphore index at
-      +0x78, waits, calls the unrecovered state synchronizer
-      FUN_082b2014(descriptor), and calls unrecovered FUN_082b1784 with
-      descriptor, r2/r3 offset, and stack origin. It always signals after
-      a successful lookup, reports error 0, then restores the cursor
-      seek's r0/r1 result pair. A decode of every ARM B/BL-immediate word
-      in osos.dec finds 10 direct inbound branches: nine unconditional BL
-      at 0x081bca9c, 0x081bcb40, 0x081bd24c, 0x081bd2b8, 0x081be02c,
-      0x081be168, 0x082e5c44, 0x082e5c74, and 0x082e5dc8; plus predicated
-      BLLT at 0x082e5cf4. That conditional reach is gated by its caller's
-      signed comparison; this wrapper has no added guard. No tail B branch
-      and no aligned data word in the full decrypted image targets this
-      address. Target builds call the existing volume-table, ATA semaphore,
-      and ATA error ports; the two unrecovered entries remain typed fixed
-      address boundaries. Host tests install volatile recorders and use a
-      dedicated below-4-GiB raw-u32 fixture to prove the nested +0/+0/+0x78
-      selection, lock/sync/seek/unlock/status order, complete seek argument
-      forwarding, and the missing-descriptor early failure.
+      +0x78, waits, calls ported fat_cursor_synchronize(descriptor), and
+      calls unrecovered FUN_082b1784 with descriptor, r2/r3 offset, and stack
+      origin. It always signals after a successful lookup, reports error 0,
+      then restores the cursor seek's r0/r1 result pair. A decode of every ARM
+      B/BL-immediate word in osos.dec finds 10 direct inbound branches: nine
+      unconditional BL at 0x081bca9c, 0x081bcb40, 0x081bd24c, 0x081bd2b8,
+      0x081be02c, 0x081be168, 0x082e5c44, 0x082e5c74, and 0x082e5dc8; plus
+      predicated BLLT at 0x082e5cf4. That conditional reach is gated by its
+      caller's signed comparison; this wrapper has no added guard. No tail B
+      branch and no aligned data word in the full decrypted image targets this
+      address. Target builds call the ported cursor synchronizer, volume-table,
+      ATA semaphore, and ATA error ports; only the cursor-seek entry remains a
+      typed fixed-address boundary. Host tests install volatile recorders and
+      use a dedicated below-4-GiB raw-u32 fixture to prove nested
+      +0/+0/+0x78 selection, ported cursor synchronization, lock/seek/unlock/
+      status order, complete seek argument forwarding, and missing-descriptor
+      early failure.
 
   # --- Opaque descriptor lookup veneer ---
   - address: 0x082c5814
