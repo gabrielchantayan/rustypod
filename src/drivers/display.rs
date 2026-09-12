@@ -11,8 +11,10 @@
 //!   (188 bytes; **123 call sites, 118 `bl` + 5 `bleq`**). The two-panel
 //!   singleton table: `display_get(0)` is the internal LCD,
 //!   `display_get(1)` the secondary output, anything else is NULL.
-//! - [`display_get_layer`] — original: `FUN_081d9064` @ 0x081d9064
-//!   (96 bytes; **63 `bl` call sites**). The lazy per-layer accessor.
+//! - [`display_restore_forced_layers`] — original: `FUN_081d8a6c` @
+//!   0x081d8a6c (124 bytes; **8 `bl` call sites**). Clears the forced-visible
+//!   state, forwards the panel's stored resume argument, then restores the
+//!   secondary panel's temporarily enabled layers.
 //! - [`display_set_pending_command`] — original: `FUN_081d9138` @
 //!   0x081d9138 (20 bytes; **9 `bl` and 2 tail `b` call sites**). Stores a
 //!   two-byte pending command and marks the display state dirty.
@@ -143,9 +145,10 @@
 
 use core::ffi::c_void;
 
+use crate::drivers::display_layer::layer_restore_enable;
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
-use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
+use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 
 /// Layer slots a display owns (`i < 6` in the constructor's clearing loop;
 /// the accessor's call sites use exactly the immediates 0..5).
@@ -196,8 +199,11 @@ pub struct Display {
     pub reserved_25_27: [u8; 3],
     /// +0x28: the display's mutex, created by `FUN_081d92a4`.
     pub mutex: Mutex,
-    /// +0x30..+0x4f: geometry and state this port does not touch.
-    pub reserved_30_4f: [u8; 0x20],
+    /// +0x30..+0x4b: geometry and state this module does not touch.
+    pub reserved_30_4b: [u8; 0x1c],
+    /// +0x4c: the panel argument forwarded through vtable slot +0x68 by
+    /// [`display_restore_forced_layers`].
+    pub panel_resume_argument: u32,
     /// +0x50: a non-NULL activity blocker prevents
     /// [`display_set_layer_enabled`] from stopping the layer activity.
     pub layer_activity_blocker: *mut c_void,
@@ -217,8 +223,22 @@ pub struct Display {
     /// +0x98: set by the layer-activity start path @ 0x081d914c and cleared
     /// by its stop counterpart @ 0x081d9270.
     pub layers_active: u8,
-    /// +0x99..+0xa7: start/stop arguments and padding the constructor fills.
-    pub reserved_99: [u8; 0x0f],
+    /// +0x99..+0x9d: state and panel arguments this module does not touch.
+    pub reserved_99_9d: [u8; 5],
+    /// +0x9e: requests the stored panel parameter be applied on activity
+    /// start; both force and restore transitions raise it.
+    pub panel_parameter_pending: u8,
+    /// +0x9f..+0xa1: state and panel arguments this module does not touch.
+    pub reserved_9f_a1: [u8; 3],
+    /// +0xa2: requests the pending panel command when activity starts.
+    pub panel_command_pending: u8,
+    /// +0xa3..+0xa4: state this module does not touch.
+    pub reserved_a3_a4: [u8; 2],
+    /// +0xa5: true while the sibling transition @ 0x081d89d0 has forced
+    /// hidden layers visible; clear once they are restored.
+    pub forced_layers_visible: u8,
+    /// +0xa6..+0xa7: trailing padding.
+    pub reserved_a6_a7: [u8; 2],
 }
 
 // The header's offsets are only claims about the 32-bit target layout, so
@@ -234,9 +254,15 @@ const _: [u8; 0x28] = [0; core::mem::offset_of!(Display, mutex)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x24] = [0; core::mem::offset_of!(Display, pending_command_dirty)];
 #[cfg(target_pointer_width = "32")]
+const _: [u8; 0x4c] = [0; core::mem::offset_of!(Display, panel_resume_argument)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x90] = [0; core::mem::offset_of!(Display, display_id)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x94] = [0; core::mem::offset_of!(Display, driver)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x98] = [0; core::mem::offset_of!(Display, layers_active)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0xa5] = [0; core::mem::offset_of!(Display, forced_layers_visible)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; DISPLAY_OBJECT_SIZE] = [0; core::mem::size_of::<Display>()];
 
@@ -380,7 +406,8 @@ const ZEROED_DISPLAY: Display = Display {
     pending_command_dirty: 0,
     reserved_25_27: [0; 3],
     mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
-    reserved_30_4f: [0; 0x20],
+    reserved_30_4b: [0; 0x1c],
+    panel_resume_argument: 0,
     layer_activity_blocker: core::ptr::null_mut(),
     pending_command: 0,
     pending_command_parameter: 0,
@@ -389,7 +416,13 @@ const ZEROED_DISPLAY: Display = Display {
     reserved_91: [0; 3],
     driver: core::ptr::null_mut(),
     layers_active: 0,
-    reserved_99: [0; 0x0f],
+    reserved_99_9d: [0; 5],
+    panel_parameter_pending: 0,
+    reserved_9f_a1: [0; 3],
+    panel_command_pending: 0,
+    reserved_a3_a4: [0; 2],
+    forced_layers_visible: 0,
+    reserved_a6_a7: [0; 2],
 };
 
 /// The internal LCD (original: the fixed object @ 0x08a1b624, pool word
@@ -556,6 +589,75 @@ pub unsafe extern "C" fn display_set_layer_enabled(
     }
 }
 
+/// The `driver->vtable[0x68]` ABI used only by
+/// [`display_restore_forced_layers`]. The raw target is a virtual entry, not
+/// a separately decoded firmware function, so no callee identity is claimed.
+type PanelRestore = unsafe extern "C" fn(*mut u8, u32);
+
+/// display_restore_forced_layers — original: `FUN_081d8a6c` @ 0x081d8a6c
+/// (124 bytes exactly, 0x081d8a6c..0x081d8ae8; the separately linked
+/// `strb r1,[r0,#0x99]` sibling starts at 0x081d8ae8). **8 direct `bl` call
+/// sites, all unconditional** — 0x081a59f4, 0x081a5a00, 0x081a5c40,
+/// 0x081a5c4c, 0x081a620c, 0x081a6218, 0x081a69d0, and 0x081a69dc —
+/// verified by decoding every ARM B/BL immediate in `osos.dec`; there are
+/// no predicated or tail-branch callers.
+///
+/// Clears the forced-visible latch at +0xa5. When a panel driver exists,
+/// forwards +0x4c to its vtable entry +0x68. Only display id 1 then raises
+/// the two deferred panel flags (+0x9e/+0xa2), walks all six layer slots, and
+/// calls [`layer_restore_enable`] for each non-NULL layer. Any nonzero
+/// restore result sets the layer-activity latch (+0x98); a zero result leaves
+/// the latch untouched. The sibling transition @ 0x081d89d0 is the forcing
+/// half: it sets +0xa5 and calls `layer_force_enable` over the same slots.
+///
+/// # Deliberate deviations
+///
+/// The virtual target at vtable +0x68 has not been independently identified.
+/// The port performs that dispatch directly rather than inventing a named
+/// callee or a test-only hook. On the 32-bit device the slot is index 26; the
+/// explicit index remains target-faithful in host fixtures.
+///
+/// # Safety
+///
+/// `display` must be a live retail layout. A non-NULL `driver` must begin
+/// with a vtable whose entry 26 has the `PanelRestore` ABI; layer pointers
+/// must satisfy [`layer_restore_enable`]'s requirements. As in the original,
+/// there is no guard for any of those non-NULL objects.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_restore_forced_layers(display: *mut Display) -> u32 {
+    core::ptr::addr_of_mut!((*display).forced_layers_visible).write_volatile(0);
+
+    let driver = core::ptr::addr_of!((*display).driver).read_volatile();
+    if !driver.is_null() {
+        let vtable = (driver as *const *const PanelRestore).read_volatile();
+        vtable.add(0x68 / 4).read_volatile()(
+            driver,
+            core::ptr::addr_of!((*display).panel_resume_argument).read_volatile(),
+        );
+    }
+
+    if core::ptr::addr_of!((*display).display_id).read_volatile() == SECONDARY_DISPLAY_ID {
+        core::ptr::addr_of_mut!((*display).panel_command_pending).write_volatile(1);
+        core::ptr::addr_of_mut!((*display).panel_parameter_pending).write_volatile(1);
+
+        let mut restored_any = false;
+        let mut index = 0;
+        while index < LAYER_SLOT_COUNT {
+            let layer = layer_slot(display, index as u32).read_volatile();
+            if !layer.is_null() && layer_restore_enable(layer) != 0 {
+                restored_any = true;
+            }
+            index += 1;
+        }
+        if restored_any {
+            core::ptr::addr_of_mut!((*display).layers_active).write_volatile(1);
+        }
+    }
+
+    0
+}
+
 /// The slot the original addresses with `ldr r0, [r4, r5, lsl #2]`.
 ///
 /// Deliberately unchecked: the original has no bound on the index either,
@@ -717,6 +819,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::drivers::display_layer::DriverVtable;
     use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
     use parking_lot::MutexGuard as DisplayMutexGuard;
 
@@ -781,7 +884,8 @@ mod tests {
             pending_command_dirty: 0,
             reserved_25_27: [0; 3],
             mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
-            reserved_30_4f: [0; 0x20],
+            reserved_30_4b: [0; 0x1c],
+            panel_resume_argument: 0,
             layer_activity_blocker: core::ptr::null_mut(),
             pending_command: 0,
             pending_command_parameter: 0,
@@ -790,10 +894,47 @@ mod tests {
             reserved_91: [0; 3],
             driver,
             layers_active: 0,
-            reserved_99: [0; 0x0f],
+            reserved_99_9d: [0; 5],
+            panel_parameter_pending: 0,
+            reserved_9f_a1: [0; 3],
+            panel_command_pending: 0,
+            reserved_a3_a4: [0; 2],
+            forced_layers_visible: 0,
+            reserved_a6_a7: [0; 2],
         }
     }
 
+    static mut PANEL_RESTORE_CALLS: usize = 0;
+    static mut LAST_PANEL_RESTORE_DRIVER: *mut u8 = core::ptr::null_mut();
+    static mut LAST_PANEL_RESTORE_ARGUMENT: u32 = 0;
+
+    unsafe extern "C" fn ignored_panel_restore(_driver: *mut u8, _argument: u32) {}
+
+    unsafe extern "C" fn recording_panel_restore(driver: *mut u8, argument: u32) {
+        PANEL_RESTORE_CALLS += 1;
+        LAST_PANEL_RESTORE_DRIVER = driver;
+        LAST_PANEL_RESTORE_ARGUMENT = argument;
+    }
+
+    #[repr(C)]
+    struct TestPanel {
+        vtable: *const PanelRestore,
+    }
+
+
+    #[repr(C)]
+    struct TestLayerDriver {
+        vtable: *const DriverVtable,
+    }
+
+    #[repr(align(8))]
+    struct TestLayer([u8; LAYER_OBJECT_SIZE]);
+
+    unsafe extern "C" fn discard_geometry(_driver: *mut u8, _layer_id: u8, _desc: *mut u8) {}
+    unsafe extern "C" fn discard_surface_flag(_driver: *mut u8, _surface_flag: u8) {}
+    unsafe extern "C" fn discard_enable_state(_driver: *mut u8, _layer_id: u8) {}
+    unsafe extern "C" fn discard_blend(_driver: *mut u8, _layer_id: u8, _code: u32) {}
+    unsafe extern "C" fn discard_alpha(_driver: *mut u8, _layer_id: u8, _alpha: u8) {}
     static mut ACTIVITY_START_CALLS: usize = 0;
     static mut ACTIVITY_STOP_CALLS: usize = 0;
 
@@ -886,6 +1027,62 @@ mod tests {
             assert_eq!(d.layers_active, 1, "the activity latch remains set");
         }
         restore_activity_mocks(guard);
+    }
+
+    #[test]
+    fn restoring_forced_layers_forwards_panel_argument_and_only_visits_secondary_layers() {
+        let _guard = DISPLAY_TEST_LOCK.lock();
+        let mut vtable = [ignored_panel_restore as PanelRestore; 27];
+        vtable[26] = recording_panel_restore;
+        let mut panel = TestPanel { vtable: vtable.as_ptr() };
+        let driver = (&mut panel as *mut TestPanel).cast::<u8>();
+        let mut internal = display(INTERNAL_DISPLAY_ID as u8, driver);
+        let layer_vtable = DriverVtable {
+            _slots_0x00: [0; 5],
+            push_geometry: discard_geometry,
+            kind5_surface_flag: discard_surface_flag,
+            _slots_0x1c: [0; 8],
+            enable_state_changed: discard_enable_state,
+            set_blend_mode: discard_blend,
+            set_global_alpha: discard_alpha,
+        };
+        let mut layer_driver = TestLayerDriver { vtable: &layer_vtable };
+        let mut parked_layer = TestLayer([0; LAYER_OBJECT_SIZE]);
+        let mut secondary = display(SECONDARY_DISPLAY_ID, driver);
+
+        unsafe {
+            PANEL_RESTORE_CALLS = 0;
+            LAST_PANEL_RESTORE_DRIVER = core::ptr::null_mut();
+            LAST_PANEL_RESTORE_ARGUMENT = 0;
+
+            internal.forced_layers_visible = 1;
+            internal.panel_resume_argument = 0x1122_3344;
+            internal.panel_parameter_pending = 0;
+            internal.panel_command_pending = 0;
+            assert_eq!(display_restore_forced_layers(&mut internal), 0);
+            assert_eq!(internal.forced_layers_visible, 0);
+            assert_eq!(internal.panel_parameter_pending, 0, "internal skips secondary flags");
+            assert_eq!(internal.panel_command_pending, 0, "internal skips secondary flags");
+
+            secondary.forced_layers_visible = 1;
+            secondary.panel_resume_argument = 0xaabb_ccdd;
+            (parked_layer.0.as_mut_ptr().add(0x70) as *mut *mut u8)
+                .write_volatile((&mut layer_driver as *mut TestLayerDriver).cast::<u8>());
+            parked_layer.0[0x42] = 1;
+            secondary.layers[4] = parked_layer.0.as_mut_ptr();
+            assert_eq!(display_restore_forced_layers(&mut secondary), 0);
+            assert_eq!(secondary.forced_layers_visible, 0);
+            assert_eq!(secondary.panel_parameter_pending, 1);
+            assert_eq!(secondary.panel_command_pending, 1);
+            assert_eq!(secondary.layers_active, 1, "a parked layer reactivates activity");
+            assert_eq!(parked_layer.0[0x41], 1, "restore disables the formerly forced layer");
+            assert_eq!(parked_layer.0[0x42], 0, "restore consumes the parked flag");
+            assert_eq!(parked_layer.0[0x1bc], 0, "restore clears dirty after rendering");
+
+            assert_eq!(PANEL_RESTORE_CALLS, 2);
+            assert_eq!(LAST_PANEL_RESTORE_DRIVER, driver);
+            assert_eq!(LAST_PANEL_RESTORE_ARGUMENT, 0xaabb_ccdd);
+        }
     }
 
     #[test]
