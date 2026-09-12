@@ -67952,3 +67952,38 @@ functions:
       registered word 0x08272fac is not a function entry: raw bytes are ASCII
       URL data beginning g/00/9/xmlsig#, so the Rust shutdown handler is
       deliberately inert rather than inventing a callee.
+
+  - address: 0x0826ed98
+    ghidra: FUN_0826ed98
+    name: ui_element_set_render_owner_clip
+    size: 68
+    sig: "void ui_element_set_render_owner_clip(UiElement *element, const Rect *region)"
+    module: ui/render_owner_clip
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r5: region
+      iVar1/r6: render_owner
+      local_20: clipped_region
+      "element+0x80": bounds
+      "render_owner+0xec": pending_clip
+      "vtable+0x5c": render_owner
+      FUN_0826c24c: rect_intersect_into
+    notes: >-
+      Raw osos.dec establishes the true 68-byte extent: push {r0-r6,lr} at
+      0x0826ed98 through pop {r0-r6,pc} at 0x0826edd8; the separately linked
+      next function is the bx lr at 0x0826eddc. Decoding every immediate ARM
+      B/BL word finds exactly eight inbound direct calls, all unconditional
+      plain bl at 0x08140df4, 0x08158434, 0x081b8d14, 0x081baee0,
+      0x0826ea6c, 0x08285d9c, 0x08285ef0, and 0x08287dac; there are no
+      predicated forms, tail-branch callers, or aligned data-word references.
+      The body calls element's vtable +0x5c method before intersecting region
+      with element+0x80 through already ported rect_intersect_into, then
+      copies the four-word result to returned render_owner+0xec. It has no
+      NULL guard for any input, vtable, returned owner, or accessed field.
+      The render owner's concrete class is not inferred. Target builds load the
+      existing rect_intersect_into port through a volatile function pointer to
+      retain the original call boundary; that makes an indirect blx where ADS
+      used direct bl but changes no behavior. Host fixtures use packed
+      native-pointer views solely to retain retailOS byte offsets. Tests cover
+      clipping plus the vtable-selected owner, and empty/disjoint rectangles.
