@@ -83,6 +83,7 @@ pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;
 pub mod error_msg;
+pub mod expr_affinity;
 pub mod expr_code;
 pub mod expr_cache_affinity_change;
 pub mod expr_code_temp;
