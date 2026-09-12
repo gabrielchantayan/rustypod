@@ -156,13 +156,13 @@ pub unsafe extern "C" fn identified_vtable_object_construct(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static IDENTIFIED_VTABLE_BASE_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut FORWARDED_THIS: *mut u8 = core::ptr::null_mut();
     static mut BASE_RETURN: *mut u8 = core::ptr::null_mut();
 
@@ -171,7 +171,7 @@ mod tests {
     }
 
     fn bench() -> Bench {
-        let lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = IDENTIFIED_VTABLE_BASE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             IDENTIFIED_VTABLE_OBJECT_OPS = DEFAULT_IDENTIFIED_VTABLE_OBJECT_OPS;
             HOST_BASE_ID_COUNTER = 0;

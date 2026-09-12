@@ -300,6 +300,141 @@ pub unsafe extern "C" fn element_registry_set_name_for_id(
     crate::app::vtable_set::iterator_state_cleanup(state);
 }
 
+/// Vtable literal installed on the registry element itself.
+pub const REGISTRY_ELEMENT_VTABLE: u32 = 0x0898_9468;
+/// Vtable literal installed on the first embedded observable array.
+pub const REGISTRY_ELEMENT_PRIMARY_ARRAY_VTABLE: u32 = 0x089a_38b8;
+/// Vtable literal installed on the secondary embedded observable array.
+pub const REGISTRY_ELEMENT_SECONDARY_ARRAY_VTABLE: u32 = 0x089a_3dc8;
+
+/// Target-exact layout of the 0x54-byte registry element initialized by
+/// [`registry_element_construct`].
+///
+/// The separately modeled [`RegistryElementSecondaryDispatch`] uses a native
+/// pointer vtable only for host dispatch tests. This constructor instead uses
+/// the firmware's `u32` vtable words throughout, so its layout remains exact
+/// on both host and target builds.
+#[repr(C)]
+pub struct RegistryElementConstruct {
+    /// +0x00..+0x0c: the unported identified-vtable base subobject.
+    pub base: [u32; 4],
+    /// +0x10/+0x14: the first two incoming words.
+    pub inputs: [u32; 2],
+    /// +0x18: first observable-array subobject.
+    pub primary_collection: crate::cxx::observable_array::ObservableArray,
+    /// +0x28: first byte is one; its remaining three bytes are untouched.
+    pub primary_enabled: u8,
+    pub primary_padding: [u8; 3],
+    /// +0x2c: explicitly cleared.
+    pub middle_zero: u32,
+    /// +0x30: the third incoming word.
+    pub callback_context: u32,
+    /// +0x34: second observable-array subobject.
+    pub secondary_collection: crate::cxx::observable_array::ObservableArray,
+    /// +0x44: first byte is one; its remaining three bytes are untouched.
+    pub secondary_enabled: u8,
+    pub secondary_padding: [u8; 3],
+    /// +0x48/+0x4c: explicitly cleared.
+    pub trailing_zeroes: [u32; 2],
+    /// +0x50..+0x52: explicitly cleared; +0x53 remains untouched.
+    pub state_flags: [u8; 3],
+    pub trailing_padding: u8,
+}
+
+const _: [u8; 0x10] = [0; core::mem::offset_of!(RegistryElementConstruct, inputs)];
+const _: [u8; 0x18] = [0; core::mem::offset_of!(RegistryElementConstruct, primary_collection)];
+const _: [u8; 0x28] = [0; core::mem::offset_of!(RegistryElementConstruct, primary_enabled)];
+const _: [u8; 0x2c] = [0; core::mem::offset_of!(RegistryElementConstruct, middle_zero)];
+const _: [u8; 0x30] = [0; core::mem::offset_of!(RegistryElementConstruct, callback_context)];
+const _: [u8; 0x34] = [0; core::mem::offset_of!(RegistryElementConstruct, secondary_collection)];
+const _: [u8; 0x44] = [0; core::mem::offset_of!(RegistryElementConstruct, secondary_enabled)];
+const _: [u8; 0x48] = [0; core::mem::offset_of!(RegistryElementConstruct, trailing_zeroes)];
+const _: [u8; 0x50] = [0; core::mem::offset_of!(RegistryElementConstruct, state_flags)];
+const _: [u8; 0x54] = [0; core::mem::size_of::<RegistryElementConstruct>()];
+
+/// registry_element_construct — original: `FUN_0817e3b0` @ **0x0817e3b0**
+/// (120 bytes: 108 instruction bytes plus three literal-pool vtable words).
+///
+/// Raw ARM calls the unported identified-vtable base constructor
+/// `0x08274f10`, installs the element vtable, preserves the first two input
+/// words at +0x10/+0x14, and constructs observable-array-derived subobjects
+/// at +0x18 and +0x34. It replaces each subobject's vtable, marks both
+/// enabled, clears the intermediate/trailing fields, stores `callback_context`
+/// at +0x30, then returns the base constructor's result. All stores after the
+/// base call are derived from its returned `r0`; the final `sub r0,#0x34`
+/// likewise derives the return value from the second observable-array
+/// constructor's result.
+///
+/// Raw extent is `0x0817e3b0..0x0817e428`: code ends at `pop {r4-r6,pc}` at
+/// `0x0817e418`, followed by literals `0x08989468`, `0x089a38b8`, and
+/// `0x089a3dc8`; the separately linked next function starts at `0x0817e428`.
+/// Decoding every ARM B/BL immediate in `osos.dec` finds exactly eight inbound
+/// direct calls, all unconditional `bl` (0x0817f06c, 0x0817f158, 0x08180d9c,
+/// 0x08180ee0, 0x08181098, 0x081838ac, 0x08183e70, 0x081845e8), with no
+/// predicated forms, direct tail `b`, or aligned data-word references.
+///
+/// Deliberate deviation: `0x08274f10` is still unported, so this reuses the
+/// existing `IDENTIFIED_VTABLE_OBJECT_OPS` boundary. Its default reproduces
+/// that base's decoded stores and counter update; the two observable-array
+/// constructors are already ported and are called directly.
+///
+/// # Safety
+///
+/// `this`, and the pointer returned by the installed base constructor, must
+/// point to at least 0x54 writable, four-byte-aligned bytes. The retail
+/// constructor has no NULL or alignment guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_element_construct(
+    this: *mut RegistryElementConstruct,
+    first_input: u32,
+    second_input: u32,
+    callback_context: u32,
+) -> *mut RegistryElementConstruct {
+    let base_ops = unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            crate::cxx::identified_vtable_object_construct::IDENTIFIED_VTABLE_OBJECT_OPS
+        ))
+    };
+    let element = unsafe { (base_ops.construct_base)(this.cast()).cast::<RegistryElementConstruct>() };
+
+    unsafe {
+        let element_bytes = element.cast::<u8>();
+        element_bytes.cast::<u32>().write_volatile(REGISTRY_ELEMENT_VTABLE);
+        element_bytes.add(0x10).cast::<u32>().write_volatile(first_input);
+        element_bytes.add(0x14).cast::<u32>().write_volatile(second_input);
+
+        let primary = crate::cxx::observable_array::observable_array_construct(
+            element_bytes.add(0x18).cast(),
+        );
+        let primary_bytes = primary.cast::<u8>();
+        primary_bytes
+            .cast::<u32>()
+            .write_volatile(REGISTRY_ELEMENT_PRIMARY_ARRAY_VTABLE);
+        primary_bytes.add(0x10).write_volatile(1);
+        let middle = primary_bytes.add(0x14);
+        middle.cast::<u32>().write_volatile(0);
+        middle.add(4).cast::<u32>().write_volatile(callback_context);
+
+        let secondary = crate::cxx::observable_array::observable_array_construct(
+            middle.add(8).cast(),
+        );
+        let secondary_bytes = secondary.cast::<u8>();
+        secondary_bytes
+            .cast::<u32>()
+            .write_volatile(REGISTRY_ELEMENT_SECONDARY_ARRAY_VTABLE);
+        secondary_bytes.add(0x10).write_volatile(1);
+        secondary_bytes.add(0x14).cast::<u32>().write_volatile(0);
+        secondary_bytes.add(0x18).cast::<u32>().write_volatile(0);
+
+        let result = secondary_bytes.sub(0x34);
+        result.add(0x50).write_volatile(0);
+        result.add(0x51).write_volatile(0);
+        result.add(0x52).write_volatile(0);
+        result.cast()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,5 +727,129 @@ mod tests {
             0,
             "NULL is dispatched rather than filtered by a wrapper guard"
         );
+    }
+    #[repr(C, align(4))]
+    struct RegistryElementBytes([u8; 0x54]);
+
+    unsafe fn registry_word_at(bytes: *const u8, offset: usize) -> u32 {
+        unsafe { bytes.add(offset).cast::<u32>().read() }
+    }
+
+    fn reset_identified_base_constructor() {
+        unsafe {
+            core::ptr::addr_of_mut!(
+                crate::cxx::identified_vtable_object_construct::IDENTIFIED_VTABLE_OBJECT_OPS
+            )
+            .write_volatile(
+                crate::cxx::identified_vtable_object_construct::DEFAULT_IDENTIFIED_VTABLE_OBJECT_OPS,
+            );
+        }
+    }
+
+    #[test]
+    fn registry_element_constructor_initializes_both_collections_and_preserves_padding() {
+        let _base_lock =
+            crate::cxx::identified_vtable_object_construct::tests::IDENTIFIED_VTABLE_BASE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_identified_base_constructor();
+        let mut bytes = RegistryElementBytes([0xa5; 0x54]);
+        let entry = bytes.0.as_mut_ptr();
+
+        let returned = unsafe {
+            registry_element_construct(
+                entry.cast(),
+                u32::MAX,
+                0,
+                0xfeed_cafe,
+            )
+        };
+
+        assert_eq!(returned.cast::<u8>(), entry);
+        assert_eq!(unsafe { registry_word_at(entry, 0x00) }, REGISTRY_ELEMENT_VTABLE);
+        assert_eq!(unsafe { registry_word_at(entry, 0x08) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x0c) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x10) }, u32::MAX);
+        assert_eq!(unsafe { registry_word_at(entry, 0x14) }, 0);
+        assert_eq!(
+            unsafe { registry_word_at(entry, 0x18) },
+            REGISTRY_ELEMENT_PRIMARY_ARRAY_VTABLE
+        );
+        assert_eq!(unsafe { registry_word_at(entry, 0x1c) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x20) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x24) }, 0);
+        assert_eq!(unsafe { entry.add(0x28).read() }, 1);
+        assert_eq!(&bytes.0[0x29..0x2c], &[0xa5; 3]);
+        assert_eq!(unsafe { registry_word_at(entry, 0x2c) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x30) }, 0xfeed_cafe);
+        assert_eq!(
+            unsafe { registry_word_at(entry, 0x34) },
+            REGISTRY_ELEMENT_SECONDARY_ARRAY_VTABLE
+        );
+        assert_eq!(unsafe { registry_word_at(entry, 0x38) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x3c) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x40) }, 0);
+        assert_eq!(unsafe { entry.add(0x44).read() }, 1);
+        assert_eq!(&bytes.0[0x45..0x48], &[0xa5; 3]);
+        assert_eq!(unsafe { registry_word_at(entry, 0x48) }, 0);
+        assert_eq!(unsafe { registry_word_at(entry, 0x4c) }, 0);
+        assert_eq!(&bytes.0[0x50..0x53], &[0; 3]);
+        assert_eq!(bytes.0[0x53], 0xa5);
+    }
+
+    static BASE_ENTRY: AtomicUsize = AtomicUsize::new(0);
+    static REDIRECTED_BASE: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn redirecting_identified_base(entry: *mut u8) -> *mut u8 {
+        BASE_ENTRY.store(entry as usize, Ordering::SeqCst);
+        REDIRECTED_BASE.load(Ordering::SeqCst) as *mut u8
+    }
+
+    #[test]
+    fn registry_element_constructor_derives_every_store_from_the_base_result() {
+        let _base_lock =
+            crate::cxx::identified_vtable_object_construct::tests::IDENTIFIED_VTABLE_BASE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut entry = RegistryElementBytes([0xa5; 0x54]);
+        let mut redirected = RegistryElementBytes([0x3c; 0x54]);
+        BASE_ENTRY.store(0, Ordering::SeqCst);
+        REDIRECTED_BASE.store(redirected.0.as_mut_ptr() as usize, Ordering::SeqCst);
+        unsafe {
+            core::ptr::addr_of_mut!(
+                crate::cxx::identified_vtable_object_construct::IDENTIFIED_VTABLE_OBJECT_OPS
+            )
+            .write_volatile(crate::cxx::identified_vtable_object_construct::IdentifiedVtableObjectOps {
+                construct_base: redirecting_identified_base,
+            });
+        }
+
+        let returned = unsafe {
+            registry_element_construct(
+                entry.0.as_mut_ptr().cast(),
+                7,
+                9,
+                0x0123_4567,
+            )
+        };
+        reset_identified_base_constructor();
+
+        assert_eq!(BASE_ENTRY.load(Ordering::SeqCst), entry.0.as_mut_ptr() as usize);
+        assert_eq!(returned.cast::<u8>(), redirected.0.as_mut_ptr());
+        assert_eq!(
+            unsafe { registry_word_at(redirected.0.as_ptr(), 0x00) },
+            REGISTRY_ELEMENT_VTABLE
+        );
+        assert_eq!(unsafe { registry_word_at(redirected.0.as_ptr(), 0x10) }, 7);
+        assert_eq!(unsafe { registry_word_at(redirected.0.as_ptr(), 0x14) }, 9);
+        assert_eq!(
+            unsafe { registry_word_at(redirected.0.as_ptr(), 0x30) },
+            0x0123_4567
+        );
+        assert_eq!(
+            unsafe { registry_word_at(redirected.0.as_ptr(), 0x34) },
+            REGISTRY_ELEMENT_SECONDARY_ARRAY_VTABLE
+        );
+        assert_eq!(&entry.0, &[0xa5; 0x54]);
     }
 }
