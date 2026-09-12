@@ -11750,6 +11750,29 @@ functions:
       registers the result with class id 0x7800. Same deviations and the
       same NOT-HOOK-READY caveat as 0x0817ee04.
 
+  - address: 0x08177944
+    ghidra: FUN_08177944
+    name: app_screen_cached_position
+    size: 8
+    sig: "u32 app_screen_cached_position(const void *screen)"
+    module: app/app_screen_cached_position
+    status: ported
+    renames:
+      param_1/r0: screen
+      "screen+0x2c": cached_position
+    notes: >-
+      Raw ARM confirms the eight-byte extent 0x08177944..0x0817794c: ldr
+      r0,[r0,#0x2c]; bx lr. The next separately linked function begins at
+      0x0817794c, with no literal pool. It returns the cached position word
+      without a NULL, bounds, or alignment guard. Decoding every aligned ARM
+      B/BL immediate in osos.dec finds exactly eight inbound direct bl callers,
+      all unconditional with zero predicated forms and no direct tail b:
+      0x0812ff50, 0x08229984, 0x08229a04, 0x0823b074, 0x0823b250, 0x0823b2cc,
+      0x0823b32c, and 0x0823b3b0. No aligned data word names this address, so
+      there is no evidence it is a virtual or table-dispatched target. Callers
+      obtain the screen from app_screen_get. Host tests cover zero, one, the
+      sign bit, and u32::MAX while confirming adjacent storage is unchanged.
+
   - address: 0x0817794c
     ghidra: FUN_0817794c
     name: app_screen_update_position

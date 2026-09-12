@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
 pub mod app_boot_metrics_submit;
+pub mod app_screen_cached_position;
 pub mod app_screen_update_position;
 pub mod active_service_handler_readiness;
 pub mod application_resource_provider;
