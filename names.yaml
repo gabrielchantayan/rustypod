@@ -72141,3 +72141,40 @@ functions:
       0x083c8a98, and 0x083c8b5c. Neighbouring 24-byte functions repeat this
       load-and-compare shape; the port uses its own target-only text section
       to retain a distinct symbol if LLVM otherwise merges identical bodies.
+
+  # --- SQLite two-part name resolver (src/sqlite/two_part_name.rs) ---
+  - address: 0x0838527c
+    ghidra: FUN_0838527c
+    name: sqlite_two_part_name
+    size: 96
+    sig: "int sqlite_two_part_name(Parse *parse, const Token *name1, const Token *name2, const Token **out_name)"
+    module: sqlite/two_part_name
+    status: ported
+    renames:
+      param_1/r0/r4: parse
+      param_2/r1/r5: name1
+      param_3/r2: name2
+      param_4/r3: out_name
+      iVar1/r0: database_index
+      FUN_08378b04: sqlite_find_db
+      FUN_083767a0: sqlite_error_msg
+    notes: >-
+      Raw osos.dec confirms the exact 96-byte code body at
+      0x0838527c..0x083852dc: 24 ARM words through pop {r4-r6,pc} at
+      0x083852d8. The following bytes are the "unknown database %T" literal;
+      the separately linked next function begins at 0x083852f0. Complete
+      aligned ARM B/BL-immediate decoding finds exactly seven inbound direct
+      calls, all unconditional plain bl (zero predicated forms): 0x0836f410,
+      0x0836fdb0, 0x08373d6c, 0x08374800, 0x0837f2a4, 0x08381eb0, and
+      0x08384630. This is SQLite 3.5.x's sqlite3TwoPartName: a non-NULL
+      name2 whose packed dyn:1 | n:31 word has n != 0 becomes *out_name and
+      is resolved through sqlite3FindDb(db, name1); a nonnegative result is
+      returned unchanged. Failure calls the ported sqlite_error_msg with the
+      literal and name1, then independently increments parse->nErr and
+      returns -1 (so nErr rises twice). A NULL or zero-length name2 stores
+      name1 and returns db->init.iDb at +0x78. sqlite3FindDb @ 0x08378b04 is
+      verified from raw bytes and Ghidra as the unported database lookup; it
+      has no existing ledger entry, so target builds call that retail address
+      through a volatile seam while host tests use a recorder. The port uses
+      target-word indices for Token +0x04 and sqlite3 +0x78, avoiding
+      host-64-bit pointer-field overlap.
