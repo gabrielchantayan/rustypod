@@ -64198,6 +64198,33 @@ functions:
       allocation, raw-block constructor argument, cache fast path, and
       NULL-return retry behavior.
 
+  # --- Luminance/alpha 8:8 to RGBA8 expansion (cxx/color_unpack) ---
+  - address: 0x0824bd7c
+    ghidra: FUN_0824bd7c
+    name: luminance_alpha88_expand_to_rgba8
+    size: 28
+    sig: "void luminance_alpha88_expand_to_rgba8(u8 *destination, u32 packed_pixel)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: packed_luminance_alpha88
+      r2: alpha
+    notes: >-
+      Raw ARM establishes the exact seven-word, 28-byte extent
+      0x0824bd7c..0x0824bd94: it follows the prior sibling's final
+      instruction at 0x0824bd78, and the separately linked four-component
+      average helper starts at 0x0824bd98. There is no literal pool. The
+      leaf writes packed bits 7..0 to destination bytes 0, 1, and 2, then
+      writes bits 15..8 to byte 3, producing {L, L, L, A}; bits 16..31 are
+      ignored. Full-image decoding of every aligned ARM B/BL immediate finds
+      exactly eight direct callers, all unconditional bl: 0x08250a84,
+      0x08250a94, 0x08250ab8, 0x08250ac8, 0x08250f90, 0x08250fa8,
+      0x08251398, and 0x082513a4. There are zero predicated calls and zero
+      direct plain-B tails. No deliberate deviations: the port retains the
+      ARM's four ordered volatile byte stores and lack of NULL, alignment,
+      and bounds guards. Host tests exhaust all 65,536 low-halfword inputs,
+      confirm upper bits have no effect, and guard the four-byte destination.
   # --- RGB555A1 to RGBA8 expansion (cxx/color_unpack) ---
   - address: 0x0824bf18
     ghidra: FUN_0824bf18

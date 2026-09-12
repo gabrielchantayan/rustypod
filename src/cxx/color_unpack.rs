@@ -63,6 +63,43 @@ pub unsafe extern "C" fn u32_cursor_read_be_bytes(
     destination.add(3).write_volatile(value as u8);
 }
 
+/// `luminance_alpha88_expand_to_rgba8` — original: `FUN_0824bd7c` @ 0x0824bd7c
+/// (28 bytes; **8 direct unconditional `bl` call sites**, no predicated `bl`
+/// forms or direct plain-`b` tails).
+///
+/// The complete seven-word leaf starts after the previous sibling's final
+/// instruction at 0x0824bd78 and ends with `bx lr` at 0x0824bd94; 0x0824bd98
+/// starts the separately linked four-component average helper. There is no
+/// literal pool. It expands the packed luminance/alpha value's low byte into
+/// R, G, and B, then writes its next byte as A, producing `{L, L, L, A}`.
+/// Bits 16..31 do not affect the result. Full-image decoding of aligned ARM
+/// B/BL words finds the eight unconditional `bl` sites at 0x08250a84,
+/// 0x08250a94, 0x08250ab8, 0x08250ac8, 0x08250f90, 0x08250fa8, 0x08251398,
+/// and 0x082513a4; there are no predicated calls or direct tail branches.
+///
+/// # Deliberate deviations
+///
+/// None. The four ordered volatile byte stores model the ARM `strb` writes.
+///
+/// # Safety
+///
+/// `destination` must name four writable bytes. The original has no NULL,
+/// alignment, or bounds guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn luminance_alpha88_expand_to_rgba8(
+    destination: *mut u8,
+    packed_pixel: u32,
+) {
+    let luminance = packed_pixel as u8;
+
+    destination.write_volatile(luminance);
+    destination.add(1).write_volatile(luminance);
+    destination.add(2).write_volatile(luminance);
+    destination.add(3).write_volatile((packed_pixel >> 8) as u8);
+}
+
+
 
 /// `rgb565_expand_to_rgba8` — original: `FUN_0824be9c` @ 0x0824be9c
 /// (60 bytes; **8 direct unconditional `bl` call sites**, no predicated
@@ -259,7 +296,7 @@ pub unsafe extern "C" fn rgba4444_cursor_read_rgba8(
 
 #[cfg(test)]
 mod tests {
-    use super::{rgb555a1_cursor_read_rgba8, rgb555a1_expand_to_rgba8, rgb565_cursor_read_rgba8, rgb565_expand_to_rgba8, rgba4444_cursor_read_rgba8, rgba4444_expand_to_rgba8, u32_cursor_read_be_bytes};
+    use super::{luminance_alpha88_expand_to_rgba8, rgb555a1_cursor_read_rgba8, rgb555a1_expand_to_rgba8, rgb565_cursor_read_rgba8, rgb565_expand_to_rgba8, rgba4444_cursor_read_rgba8, rgba4444_expand_to_rgba8, u32_cursor_read_be_bytes};
     #[test]
     fn expands_every_rgb565_value_and_ignores_upper_input_bits() {
         for pixel in 0..=u16::MAX {
@@ -270,6 +307,28 @@ mod tests {
             }
 
             assert_eq!(&destination[1..5], &reference_rgb565(pixel), "pixel {pixel:#06x}");
+            assert_eq!(destination[0], 0xa5, "pixel {pixel:#06x} wrote before destination");
+            assert_eq!(destination[5], 0xa5, "pixel {pixel:#06x} wrote past destination");
+        }
+    }
+
+    #[test]
+    fn expands_every_luminance_alpha88_value_and_ignores_upper_input_bits() {
+        for pixel in 0..=u16::MAX {
+            let mut destination = [0xa5; 6];
+
+            unsafe {
+                luminance_alpha88_expand_to_rgba8(
+                    destination.as_mut_ptr().add(1),
+                    u32::from(pixel) | 0xbeef_0000,
+                );
+            }
+
+            assert_eq!(
+                &destination[1..5],
+                &[pixel as u8, pixel as u8, pixel as u8, (pixel >> 8) as u8],
+                "pixel {pixel:#06x}",
+            );
             assert_eq!(destination[0], 0xa5, "pixel {pixel:#06x} wrote before destination");
             assert_eq!(destination[5], 0xa5, "pixel {pixel:#06x} wrote past destination");
         }
