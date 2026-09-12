@@ -6239,6 +6239,38 @@ functions:
       seam rather than issuing the target-only ldr pc ROM transfer. Host
       tests prove transparent forwarding for (0,1) and (usize::MAX,
       usize::MAX), including the hook result.
+  - address: 0x08037ed0
+    ghidra: thunk_EXT_FUN_22003bcc
+    name: task_priority_set
+    size: 8
+    sig: "u32 task_priority_set(u32 task, u32 priority)"
+    module: kernel/task_priority
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003bcc: task_priority_set
+      DAT_08037ed4: task_priority_set_rom_target
+      FUN_08003660: gateway_dispatch
+      param_1: task
+      param_2: priority
+    notes: >-
+      Raw words establish the complete literal veneer: e51ff004 (ldr
+      pc,[pc,#-4]) at 0x08037ed0 plus target word 0x22003bcc at
+      0x08037ed4. Ghidra's 4-byte extent omits the literal; the next sibling
+      veneer begins at 0x08037ed8. The relocator at 0x080046e0 mirrors the
+      target to the 28-byte osos body 0x08003bcc..0x08003be7. That body saves
+      r0-r4/lr, overwrites its dispatched four-word prefix with
+      {0x1b, priority=r1, task=r0, priority=r1}, calls the 0x08003660 RTXC
+      gateway, then restores the original r0 as its return word. RTXC service
+      0x1b is KS_defpriority(TASK task, PRIORITY priority); callers set the
+      current task with (0,2) and restore a saved priority. Every ARM B/BL
+      word in osos.dec was decoded: exactly 8 direct calls, 7 unconditional
+      bl at 0x08067fa8, 0x0806802c, 0x08104fec, 0x0810500c, 0x081e1d1c,
+      0x082e85c8, and 0x08393f04, plus the caller-gated blne at 0x081e1d5c;
+      no tail branches or data words reference the veneer. The stub has no
+      guard. The port uses the pre-existing volatile ROM gateway seam rather
+      than tail-branching into IRAM; host tests record both request edge cases,
+      prove dispatch clobbers cannot change the restored task return word, and
+      prove exactly one dispatch per invocation.
 
   - address: 0x08037e10
     ghidra: thunk_EXT_FUN_220042b4
