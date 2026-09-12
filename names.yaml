@@ -73477,3 +73477,31 @@ functions:
       and r1 key are ABI inputs. The Rust local entry is initialized NULL,
       which only defines malformed cursor behavior where retail stack
       contents would be indeterminate.
+
+  # --- Byte-at-a-time C-string copy ---
+  - address: 0x0827668c
+    ghidra: FUN_0827668c
+    name: cstr_copy
+    size: 20
+    sig: "void cstr_copy(unsigned char *dst, const unsigned char *src)"
+    module: libc/cstr_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r2: byte
+    notes: >-
+      Raw osos.dec confirms exactly five instructions, from 0x0827668c
+      through bx lr at 0x0827669c; the separately linked next function
+      starts at 0x082766a0. Decoding every ARM B/BL immediate finds seven
+      direct inbound calls, all plain unconditional bl at 0x08111d80,
+      0x08115498, 0x081155a8, 0x08115630, 0x081157ec, 0x081701b0, and
+      0x0827e154; there are no predicated BL callers. The bne at 0x08276698
+      is the function's internal loop edge, not an inbound tail branch.
+      Each iteration post-increments source after ldrb, compares its byte,
+      post-increments destination after strb, and repeats until copying the
+      NUL. Although r0 physically ends one byte past that terminator, none
+      of the seven callers consumes it and the recovered ABI is void. Rust
+      uses volatile byte accesses solely to prevent LLVM lowering this
+      freestanding byte loop to a libc builtin; valid ordinary-memory
+      behavior is otherwise unchanged.
