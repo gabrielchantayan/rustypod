@@ -61010,6 +61010,36 @@ functions:
       words are neither read nor written, and that status_override really
       sits at byte offset 0x20.
 
+  - address: 0x080c4b70
+    ghidra: FUN_080c4b70
+    name: ata_pio_read_halfword
+    size: 52
+    sig: "i32 ata_pio_read_halfword(const u16 *source, u16 *destination)"
+    module: drivers/ata_pio_read_halfword
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      DAT_080c4ba4: ata_controller_base
+    notes: >-
+      Raw ARM is ldr r3, [pc, #44]; ldr r2, [r3, #0x78]; tst r2, #2;
+      beq back to the ready load; ldrh r0, [r0]; strh r0, [r1]; ldr r0,
+      [r3, #0x78]; tst r0, #1; beq back to the second ready load; ldrh r0,
+      [r3, #0x7c]; strh r0, [r1]; mov r0, #0; bx lr. The literal pool word
+      at 0x080c4ba4 is 0x38700000, the S5L8702 ATA controller base, so
+      +0x78 is ATA_PIO_READY and +0x7c supplies the final halfword. The
+      first gate needs bit 1, reads source, and writes destination; the
+      second gate needs bit 0, then overwrites destination with the fixed
+      controller halfword. No NULL guard or timeout exists. The next function
+      starts at 0x080c4ba8, confirming the 52-byte code extent plus its
+      4-byte literal. Decoding every ARM B/BL word in osos.dec finds exactly
+      8 unconditional bl call sites at 0x080a98b4, 0x080a98c0, 0x080a98cc,
+      0x080a98d8, 0x080a98e4, 0x080a98f0, 0x080a98fc, and 0x080a9908, with
+      no predicated form; a raw word scan finds no DATA reference to this
+      entry, so it is not virtually dispatched. Host builds model only the
+      fixed MMIO registers with atomics to test both gates and final overwrite;
+      device builds retain volatile physical reads.
+
   - address: 0x080c4ba8
     ghidra: FUN_080c4ba8
     name: ata_pio_write_byte
