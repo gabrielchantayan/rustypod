@@ -30545,6 +30545,32 @@ functions:
       then 0x083d7434, 0x083d744c, 0x083d7464, 0x083d747c, 0x083d74ac,
       0x083d74c4, 0x083d74dc, 0x083d7568 at 5 each, 0x083d741c and
       0x083d7494 at 3 each.
+  - address: 0x083d7404
+    ghidra: FUN_083d7404
+    name: less_unsigned_alias_7404
+    size: 24
+    sig: "u32 less_unsigned_alias_7404(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      Byte-identical `std::less<unsigned>::operator()` instantiation of
+      less_unsigned @ 0x083d7598, retained as its own exported,
+      link-section-pinned Rust symbol so the distinct retailOS branch target
+      remains hookable. Raw ARM is `ldr r0,[r1]; ldr r1,[r2]; cmp r0,r1;
+      movcs r0,#0; movcc r0,#1; bx lr`: it ignores this, dereferences both
+      aligned u32 operands without NULL guards, unsigned-compares them, and
+      returns 1 only when `*a < *b`. Its next independently linked sibling
+      starts at 0x083d741c, confirming the 24-byte extent. Decoding every
+      BL word in osos.dec finds exactly 7 call sites, all plain unconditional
+      bl (no predicated calls): 0x08109ce0, 0x08109d30, 0x083bb090,
+      0x083bb0cc, 0x083bb1a8, 0x083bb2cc, and 0x083bb398. The latter five
+      are the unsigned-key tree traversal/insertion paths; their
+      post-call `cmp r0,#0` chooses tree child links. Host tests cover equal,
+      ordered, and high-bit u32 edge values. match.py structurally confirms
+      the two aligned word loads, unsigned comparison, and 0/1 result; LLVM
+      may use a different conditional-result instruction sequence.
+
 
   - address: 0x083d5efc
     ghidra: FUN_083d5efc

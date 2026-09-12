@@ -802,6 +802,34 @@ pub unsafe extern "C" fn less_signed(_this: *const u8, a: *const i32, b: *const 
 pub unsafe extern "C" fn less_unsigned(_this: *const u8, a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() < b.read())
 }
+/// less_unsigned_alias_7404 — original: `FUN_083d7404` @ 0x083d7404
+/// (24 bytes; 7 `bl` call sites, all unconditional: 0x08109ce0,
+/// 0x08109d30, 0x083bb090, 0x083bb0cc, 0x083bb1a8, 0x083bb2cc, and
+/// 0x083bb398; verified by decoding every `bl` word in `osos.dec`).
+///
+/// Byte-identical `std::less<unsigned>::operator()(const unsigned &a,
+/// const unsigned &b)` instantiation: load both aligned referenced words,
+/// unsigned-compare them, and return 1 when `*a < *b`, otherwise 0. The
+/// raw body is `ldr r0,[r1]; ldr r1,[r2]; cmp r0,r1; movcs r0,#0; movcc
+/// r0,#1; bx lr`; it neither reads `this` nor guards either operand.
+///
+/// Deliberately exported in its own text section rather than sharing
+/// [`less_unsigned`], so the distinct retailOS branch target remains
+/// hookable and LLVM cannot fold the byte-identical bodies.
+///
+/// # Safety
+/// `a` and `b` must be valid, aligned `u32` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.less_unsigned_alias_7404")]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_alias_7404(
+    _this: *const u8,
+    a: *const u32,
+    b: *const u32,
+) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
 
 /// less_unsigned_byte — original: `FUN_083d73bc` @ 0x083d73bc
 /// (24 bytes; 10 `bl` call sites at this copy; the byte-identical
@@ -3538,6 +3566,23 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn less_unsigned_alias_7404_matches_unsigned_reference_edges() {
+        unsafe {
+            let values = [0, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX];
+            let ignored_this = 0u8;
+            for a in values {
+                for b in values {
+                    assert_eq!(
+                        less_unsigned_alias_7404(&ignored_this, &a, &b),
+                        u32::from(a < b),
+                        "{a:#010x} < {b:#010x}"
+                    );
+                }
+            }
+        }
+    }
+
 
     #[test]
     fn not_equal_deref_compares_words_by_value() {
