@@ -124,6 +124,7 @@ pub mod range_append_boundary_newline;
 pub mod registration_handle_wrapper;
 pub mod record_manager;
 pub mod recording_buffer;
+pub mod recording_controller;
 pub mod refcounted_value;
 pub mod resource;
 pub mod root_context_f9c_bound;
