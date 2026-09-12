@@ -69038,3 +69038,32 @@ functions:
       0x08223a44, 0x08223a64, and 0x08223a8c; there are no predicated calls,
       plain tail branches, or aligned data-word references. Callers always
       provide the base in r0 and selector in r1. No deliberate deviations.
+
+  # --- Refcounted body acquire through body-bearing controller ---
+  - address: 0x08218e04
+    ghidra: FUN_08218e04
+    name: refcounted_body_acquire_from_controller
+    size: 8
+    sig: "void refcounted_body_acquire_from_controller(RefcountedBody **dst, const BodyBearingController *controller)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: controller
+      "controller+0xb4": body
+      FUN_0839cd5c: refcounted_body_acquire
+    notes: >-
+      Raw ARM confirms the complete two-word body: `ldr r1,[r1,#0xb4]` at
+      0x08218e04 then unconditional `b 0x0839cd5c` at 0x08218e08. The
+      preceding function ends at 0x08218e00 and the distinct next function
+      starts at 0x08218e0c, so Ghidra's 8-byte extent is exact. The controller
+      type is only identified through the body-bearing controller hierarchy;
+      its 45 preceding target words remain opaque. The target tail-delegates
+      to the already ported refcounted_body_acquire rather than adding a
+      duplicate dispatch seam. Decoding every aligned ARM B/BL word in
+      osos.dec finds exactly eight direct inbound calls, all unconditional bl
+      at 0x0821943c, 0x08219518, 0x0821996c, 0x08219c7c, 0x08219d30,
+      0x082608f8, 0x08260974, and 0x082609c0; no predicated or direct-tail
+      inbound branches exist. No aligned image word equals 0x08218e04, so it
+      is not virtually dispatched. The Rust direct call may compile as bl
+      rather than the original tail b; load-and-acquire behavior is unchanged.
