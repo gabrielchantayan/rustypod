@@ -89,7 +89,6 @@ functions:
     status: ported
     renames:
       param_1/r0: dst
-
       param_2/r1: src
       param_3/r2: len
       r3: byte
@@ -68182,3 +68181,37 @@ functions:
       used direct bl but changes no behavior. Host fixtures use packed
       native-pointer views solely to retain retailOS byte offsets. Tests cover
       clipping plus the vtable-selected owner, and empty/disjoint rectangles.
+  - address: 0x08292788
+    ghidra: FUN_08292788
+    name: global_callback_register
+    size: 128
+    sig: "void global_callback_register(u32 callback)"
+    module: app/global_callback_register
+    status: ported
+    renames:
+      param_1/r4: callback
+      DAT_08292808: callback_list_mutex
+      DAT_0829280c: callback_list
+      local_10: cursor
+      local_0c: end
+      FUN_083d6f94: not_equal_deref_alias_6f94
+      FUN_083dd660: callback_list_append
+    notes: >-
+      Raw osos.dec establishes exactly 128 bytes from push {r0,r4,r5,r6,lr}
+      at 0x08292788 through the branch to the common unlock at 0x08292804;
+      the two literal words at 0x08292808 and 0x0829280c are its pool, and
+      the separately linked next function starts at 0x08292810. It locks the
+      callback-list mutex at 0x08ad2c4c through the ported 0x082621a8 alias,
+      then walks the circular list headed by the sentinel word at
+      0x08ad2c68 + 0x10. It compares each node's callback word at +0x08 with
+      r0; an equal word exits without mutation, while reaching the sentinel
+      appends r0 through 0x083dd660. It always unlocks through the ported
+      0x082621ac alias and ignores both mutex statuses. Decoding every aligned
+      immediate ARM B/BL word in osos.dec finds exactly eight inbound direct
+      calls, all unconditional plain bl at 0x0816e3fc, 0x0819e888,
+      0x081a0fd4, 0x081b8304, 0x081b8bb0, 0x081db82c, 0x081ea538, and
+      0x081ea5dc; there are no predicated forms. The unported list append has
+      no names.yaml port entry, so target builds call its fixed retail address
+      through a typed function pointer and host tests install a recording seam.
+      Tests cover an absent zero word,
+      duplicate suppression, complete-list traversal, and mutex unlock.
