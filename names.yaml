@@ -28417,6 +28417,41 @@ functions:
       local as MaybeUninit: as in ARM, it is only consumed after xRead
       returns success, whose SQLite contract initializes all four bytes.
 
+  # ---- SQLite OS open forwarding wrapper, sqlite3OsOpen (src/sqlite/os_open.rs) ----
+  - address: 0x0837db80
+    ghidra: FUN_0837db80
+    name: sqlite_os_open
+    size: 32
+    sig: "i32 sqlite_os_open(sqlite3_vfs *vfs, const char *path, sqlite3_file *file, u32 flags, u32 *out_flags)"
+    module: sqlite/os_open
+    status: ported
+    renames:
+      param_1/r0: vfs
+      param_2/r1: path
+      param_3/r2: file
+      param_4/r3: flags
+      stack_arg_1: out_flags
+      "vfs+0x18": sqlite3_vfs::xOpen
+    notes: >-
+      SQLite's sqlite3OsOpen from os.c. Raw bytes are eight instructions at
+      0x0837db80..0x0837db9c; the next separately linked function begins at
+      0x0837dba0, so Ghidra's 32-byte extent is exact with no literal pool.
+      The wrapper saves r3 (flags), copies its incoming fifth argument
+      (out_flags) into the outgoing stack slot, restores r3, loads
+      vfs->xOpen at +0x18, blx-calls it as xOpen(vfs, path, file, flags,
+      out_flags), and returns the i32 status unchanged. The adjacent
+      0x0837db44..0x0837dc18 forwarding family exactly matches SQLite's
+      sqlite3_vfs layout: xOpen is slot +0x18. Decoding every ARM B/BL word
+      in osos.dec finds exactly 7 inbound calls, all unconditional plain bl
+      (0x082dd5d8, 0x082dd8c0, 0x082dd99c, 0x082dde2c, 0x0837e568,
+      0x0837e7a4, 0x083972b4); there are no predicated BL forms, tail
+      branches, or aligned raw data words targeting this wrapper. The concrete
+      xOpen implementation is runtime VFS data, so the port dispatches the
+      supplied VFS slot rather than inventing a callee. Host tests cover NULL
+      path forwarding, all-bits flags, both NULL and non-NULL out_flags, exact
+      pointer forwarding, callee mutation of the output word, and unchanged
+      status propagation.
+
   # ---- SQLite OS read forwarding wrapper (src/sqlite/os_read.rs) ----
   - address: 0x0837dba0
     ghidra: FUN_0837dba0
