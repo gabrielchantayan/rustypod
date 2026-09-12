@@ -68761,6 +68761,35 @@ functions:
       identity; host tests install a recorder that mutates the register
       before the read, proving call-before-read ordering, both banks, all
       nonzero enable values, and the two bank-zero no-op cases.
+  # --- DMA channel command / bounded wait ---
+  - address: 0x080f49b8
+    ghidra: FUN_080f49b8
+    name: dma_channel_command_and_wait
+    size: 80
+    sig: "void dma_channel_command_and_wait(u32 channel, u32 mode)"
+    module: drivers/dma_channel_command
+    status: ported
+    renames:
+      param_1/r0: channel
+      param_2/r1: mode
+      DAT_38400010: dma_command_status_register
+      thunk_EXT_FUN_22001edc: iram_usec_timer_read_veneer
+      thunk_EXT_FUN_22001ee8: iram_usec_timer_elapsed_veneer
+    notes: >-
+      Raw osos.dec establishes an 80-byte body from 0x080f49b8 through
+      0x080f4a04; the next independently linked function begins at
+      0x080f4a08. Decoding every ARM B/BL immediate finds 8 direct inbound
+      bl calls: unconditional at 0x080a774c, 0x080a77c0, 0x080a7850,
+      0x080a789c, 0x081074a8, 0x08107504, and 0x08107e8c, plus bleq at
+      0x08107c8c. One further unconditional tail b at 0x080ae9cc reaches
+      this entry; no aligned data word contains its address. The body writes
+      `(channel << 6) | 0x20` to 0x38400010 for every mode except 2, returns
+      immediately for mode 1, otherwise samples the ported Timer E IRAM
+      veneer and polls bit 5 until clear or its 100-us elapsed predicate
+      succeeds. Both called IRAM veneers were already ported, so Rust uses
+      them directly rather than adding duplicate dispatch seams. Host tests
+      prove issue-only, wait-only timeout, idle completion, shift wrapping,
+      and status-before-timeout ordering.
   - address: 0x080f3d3c
     ghidra: FUN_080f3d3c
     name: parse_i16_prefix

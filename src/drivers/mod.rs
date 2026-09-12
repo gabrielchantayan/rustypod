@@ -7,6 +7,7 @@ pub mod ata_pio_write_byte;
 pub mod byte_identity_slot_init;
 pub mod channel_control_enable;
 pub mod bitmap;
+pub mod dma_channel_command;
 pub mod clock;
 pub mod cp15;
 pub mod clock_config;
