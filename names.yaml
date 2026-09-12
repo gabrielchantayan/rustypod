@@ -9506,6 +9506,36 @@ functions:
       LLVM did not fold the body; the symbol resolves in
       librustypod.a next to region_ref_lock.
 
+  - address: 0x082805b8
+    ghidra: FUN_082805b8
+    name: region_ref_is_empty
+    size: 68
+    sig: "u32 region_ref_is_empty(const void *elem, u32 skip_empty_check)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1: elem
+      param_2: skip_empty_check
+      iVar1: region
+      iVar2: region_start
+      uVar3: is_empty
+    notes: >-
+      Binary-verified extent: 68 bytes of code at 0x082805b8..0x082805f8;
+      the next sibling begins at 0x082805fc. Full ARM B/BL decoding of
+      osos.dec finds eight unconditional bl call sites
+      (0x08119d7c, 0x08167d74, 0x0818ab58, 0x081a7d90, 0x081a82e4,
+      0x081fc1b8, 0x08235cf8, 0x08280610), no predicated forms, and no
+      tail b sites. It locks elem's region reference, then returns one only
+      when skip_empty_check is zero and either elem +0x4 or the live
+      region's +0x4 start pointer is NULL; it always unlocks before return.
+      The Rust port uses the existing lock/unlock ports and word-index
+      pointer fields, preserving 32-bit target offsets without host-field
+      overlap. Host tests cover NULL region (no mutex traffic), NULL start
+      (lock/unlock bracket), live start, and the nonzero bypass flag (still
+      brackets with lock/unlock). match.py structural review is expected to
+      differ because LLVM emits calls to the Rust lock/unlock ports rather
+      than the retail direct bl instructions.
+
   # --- byte-order swap cluster (0x0805dc24..0x0805dd88) ---
   - address: 0x0805dc24
     ghidra: FUN_0805dc24
