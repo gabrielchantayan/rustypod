@@ -30334,6 +30334,38 @@ functions:
       wrapping_add preserves the raw NULL-base + 0x80 result. Its dedicated
       text section prevents LLVM from folding this independently hookable
       copy into another deque template instance.
+  - address: 0x083da304
+    ghidra: FUN_083da304
+    name: deque_iter_init_elem4_alias_a304
+    size: 64
+    sig: "DequeIter *deque_iter_init_elem4_alias_a304(DequeIter *iter, u8 *cur, u8 **slot)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, param_2: cur, param_3: slot, iVar1: seg_base}
+    renames:
+      FUN_083da2d8: deque_seg_capacity
+      param_1: iter
+      param_2: cur
+      param_3: slot
+      iVar1: seg_base
+    notes: >-
+      Raw ARM confirms Ghidra's 64-byte extent: the entry at 0x083da304 runs
+      through `pop {r4,r5,pc}` at 0x083da340; the next separately linked
+      capacity member begins at 0x083da344. It stores cur; for a NULL
+      segment-slot pointer writes NULL base/end; otherwise loads the slot
+      base, calls the adjacent `mov r0,#0x20; bx lr` capacity member at
+      0x083da2d8, reloads the slot, writes base + 0x20 * 4 as end, then
+      stores the slot. A non-NULL slot containing NULL therefore writes end
+      0x80, not NULL. Decoding every ARM B/BL word in osos.dec finds exactly
+      seven unconditional plain bl call sites (0x083df08c, 0x083df0b4,
+      0x083df0e0, 0x083df138, 0x083df16c, 0x083df228, and 0x083df264),
+      zero predicated bl forms, and zero tail b sites. The port deliberately
+      calls the existing deque_seg_capacity export through a volatile function
+      pointer rather than the local duplicate, retaining the capacity call
+      instead of folding its constant result into this independently hookable
+      body; wrapping_add preserves the raw NULL-base + 0x80 result. Its
+      dedicated text section prevents LLVM from folding this independently
+      hookable copy into another deque template instance.
 
   - address: 0x083d6fdc
     ghidra: FUN_083d6fdc
