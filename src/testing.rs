@@ -163,6 +163,9 @@ pub mod hints {
     // 0xcc00_0000: dedicated to cxx/bit_set's constructor allocation
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BIT_SET_CONSTRUCT: usize = 0xcc00_0000;
+    // 0xce00_0000: dedicated to cxx/bit_set's clear-all fixture; fixture
+    // mappings never unmap, so no other user may share this hint.
+    pub const BIT_SET_CLEAR_ALL: usize = 0xce00_0000;
     // 0x6c00_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
