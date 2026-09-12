@@ -2947,6 +2947,21 @@ functions:
     status: ported
     notes: Truncate, saturate MIN/MAX, NaN->0 via FP_TRAP_HANDLER.
 
+  - address: 0x0826f418
+    ghidra: FUN_0826f418
+    name: double_to_u32_saturating
+    size: 56
+    sig: "u32 double_to_u32_saturating(u64 x_bits)"
+    module: fp_dconv
+    status: ported
+    renames: {param_1/r0: x_low_word, param_2/r1: x_high_word}
+    notes: >-
+      Input is an IEEE-754 double in r1:r0. Raw instructions construct
+      double(u32::MAX) through __u2d, then invoke __dcmplt(limit, x). `bhi`
+      tail-calls __d2u for limit > x and unordered (NaN); equality and x >=
+      limit return u32::MAX directly. Decoded all image B/BL words: 8 plain
+      BL callsites (0x083d24fc, 0x083d264c, 0x083d2824, 0x083d2974,
+      0x083d2b4c, 0x083d2c9c, 0x083d2e74, 0x083d2fbc), no predicated calls.
   - address: 0x083eb880
     name: __d2u
     size: 132

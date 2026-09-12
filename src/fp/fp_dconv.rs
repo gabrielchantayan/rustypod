@@ -3,6 +3,9 @@
 //! - `__d2i`   — original: `FUN_083eb7d0` @ 0x083eb7d0 (184 bytes, 55 callers).
 //! - `__d2u`   — original: `FUN_083eb880` @ 0x083eb880 (132 bytes, 4 callers).
 //! - `__i2d`   — original: `FUN_083eb908` @ 0x083eb908 (48 bytes, 65 callers).
+//! - `double_to_u32_saturating` — original: `FUN_0826f418` @ 0x0826f418
+//!   (56 bytes, 8 plain `bl` callers). Checks the `u32::MAX` limit before
+//!   tail-calling `__d2u` for the in-range and unordered cases.
 //! - `__u2d`   — original: `FUN_083eb9b4` @ 0x083eb9b4 (12 bytes, 32 callers)
 //!   — tail-branches into the `__i2d` core at 0x083eb918 with sign = +.
 //! - `__ll2d`  — original: `FUN_083eb940` @ 0x083eb940 (116 bytes, 10 callers).
@@ -192,6 +195,38 @@ unsafe fn d2u_overflow(hi: u32, lo: u32) -> u32 {
     }
     !((hi as i32) >> 31) as u32
 }
+/// `double_to_u32_saturating` — original: `FUN_0826f418` @ 0x0826f418
+/// (56 bytes, 8 verified unconditional `bl` callers; no predicated calls).
+///
+/// Double -> u32 with truncation toward zero and saturation. The original
+/// converts `u32::MAX` to double, compares that limit against `x`, and uses
+/// `__d2u` only when `limit > x` or the comparison is unordered. Equal and
+/// larger values return `u32::MAX` directly; negatives and NaNs enter
+/// `__d2u` for its 0/trap behavior. The packed-flags test below is the Rust
+/// representation of the original's `bhi` after `__dcmplt`.
+///
+/// Deliberate deviations: CPSR flags cannot cross a Rust call boundary, so
+/// `C && !Z` is tested against `__dcmplt`'s packed flag result. The helper
+/// addresses are loaded with `read_volatile` to preserve their call boundaries
+/// rather than letting LLVM inline their soft-float bodies into this wrapper.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn double_to_u32_saturating(x: u64) -> u32 {
+    let u2d: unsafe extern "C" fn(u32) -> u64 =
+        core::ptr::read_volatile(&(__u2d as unsafe extern "C" fn(u32) -> u64));
+    let dcmplt: extern "C" fn(u64, u64) -> u32 =
+        core::ptr::read_volatile(&(crate::fp_compare::__dcmplt as extern "C" fn(u64, u64) -> u32));
+    let d2u: unsafe extern "C" fn(u64) -> u32 =
+        core::ptr::read_volatile(&(__d2u as unsafe extern "C" fn(u64) -> u32));
+    let limit = u2d(u32::MAX);
+    let flags = dcmplt(limit, x);
+    if flags & 0x6 == 0x2 {
+        d2u(x)
+    } else {
+        u32::MAX
+    }
+}
+
 
 /// Shared core of `__i2d`/`__u2d` (original @ 0x083eb918): clz-normalize
 /// the magnitude, exponent base 1055 - clz with the hidden bit's 0x100000
@@ -541,6 +576,31 @@ mod tests {
             let got = unsafe { __u2d(x) };
             let want = (x as f64).to_bits();
             assert_eq!(got, want, "__u2d({x})");
+        }
+    }
+    /// `double_to_u32_saturating` edge cases: both sides of the explicit
+    /// `u32::MAX` comparison plus negative, fractional, infinity, and NaN input.
+    #[test]
+    fn double_to_u32_saturating_boundaries() {
+        let below_limit = f64::from_bits((u32::MAX as f64).to_bits() - 1);
+        let above_limit = f64::from_bits((u32::MAX as f64).to_bits() + 1);
+        for value in [
+            -f64::INFINITY, -1.0, -0.0, 0.0, 0.999_999_999, 1.999_999_999,
+            below_limit, u32::MAX as f64, above_limit, f64::INFINITY,
+        ] {
+            assert_eq!(
+                unsafe { double_to_u32_saturating(value.to_bits()) },
+                value as u32,
+                "double_to_u32_saturating({value:e})"
+            );
+        }
+
+        // `__dcmplt` returns unordered as C=1/Z=0, therefore the `bhi` path
+        // reaches __d2u's NaN descriptor route rather than returning MAX.
+        let handler = unsafe { crate::fp_scalb::FP_TRAP_HANDLER };
+        let expected_nan = unsafe { handler(D2U_NAN_DESCRIPTOR, 0) } as u32;
+        for nan in [f64::NAN.to_bits(), (-f64::NAN).to_bits(), 0x7ff4_0000_0000_0001] {
+            assert_eq!(unsafe { double_to_u32_saturating(nan) }, expected_nan);
         }
     }
 
