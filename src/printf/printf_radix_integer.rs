@@ -10,10 +10,10 @@
 //! byte length, then delegates leading padding, reverse-byte emission, and
 //! trailing padding to its formatter callbacks.
 //!
-//! Deliberate deviation: the three external retailOS helpers — unsigned
-//! divide/mod (`FUN_08036f14`), bounded character output (`FUN_08280f7c`),
-//! and field padding (`FUN_080ec120`) — remain callback seams rather than
-//! being reimplemented here. Host tests install deterministic equivalents.
+//! Deliberate deviation: the two external retailOS helpers — unsigned
+//! divide/mod (`FUN_08036f14`) and field padding (`FUN_080ec120`) — remain
+//! callback seams. Bounded character output (`FUN_08280f7c`) is ported as
+//! [`crate::printf::format_bounded_byte::format_bounded_byte`].
 //! On the firmware target digit bytes are read from the original literal;
 //! host tests use an ordinary printable radix alphabet because that firmware
 //! address is not mapped into the host process. The scratch buffer has 33
@@ -21,6 +21,7 @@
 //! one-byte edge overrun for a base-2 `u32` while preserving emitted bytes.
 
 use core::{ffi::c_void, mem::MaybeUninit};
+use crate::printf::format_bounded_byte::format_bounded_byte;
 
 /// Callback seam for retailOS `FUN_08036f14`: `(quotient, remainder)` for
 /// unsigned `dividend / radix`. The original receives the quotient in r0 and
@@ -35,9 +36,6 @@ pub struct RadixDivision {
     pub remainder: u32,
 }
 
-/// Callback seam for retailOS `FUN_08280f7c`, which accounts for bounded
-/// output before calling the format state's underlying byte writer.
-pub type FormatByteFn = unsafe extern "C" fn(spec: *mut RadixFormatSpec, byte: u8);
 
 /// Callback seam for retailOS `FUN_080ec120`. `phase` is nonzero before the
 /// reverse byte stream and `left_justify` after it, exactly as the original
@@ -83,16 +81,12 @@ unsafe extern "C" fn divide_not_ported(_dividend: u32, _radix: u32) -> RadixDivi
     RadixDivision { quotient: 0, remainder: 0 }
 }
 
-unsafe extern "C" fn output_not_ported(_spec: *mut RadixFormatSpec, _byte: u8) {}
 
 unsafe extern "C" fn padding_not_ported(_phase: u32, _spec: *mut RadixFormatSpec) {}
 
 /// Active divide helper. The eventual port of `FUN_08036f14` replaces this
 /// slot; tests install a precise host divider.
 pub static mut RADIX_DIVIDE: RadixDivideFn = divide_not_ported;
-/// Active bounded-byte helper. The eventual port of `FUN_08280f7c` replaces
-/// this slot; tests install a recorder with the same count/limit contract.
-pub static mut FORMAT_BYTE: FormatByteFn = output_not_ported;
 /// Active field-padding helper. The eventual port of `FUN_080ec120` replaces
 /// this slot; tests install a deterministic padding recorder.
 pub static mut FORMAT_PAD: FormatPadFn = padding_not_ported;
@@ -102,10 +96,6 @@ unsafe fn radix_divide() -> RadixDivideFn {
     core::ptr::read_volatile(core::ptr::addr_of!(RADIX_DIVIDE))
 }
 
-#[inline(always)]
-unsafe fn format_byte() -> FormatByteFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_BYTE))
-}
 
 #[inline(always)]
 unsafe fn format_pad() -> FormatPadFn {
@@ -194,7 +184,7 @@ pub unsafe extern "C" fn format_signed_radix_integer(
     (format_pad())(leading_phase, spec);
     while end != 0 {
         end -= 1;
-        (format_byte())(spec, reverse.add(end).read());
+        format_bounded_byte(spec, reverse.add(end).read());
     }
     (format_pad())(spec_ref.left_justify, spec);
 }
@@ -223,33 +213,22 @@ mod tests {
         RadixDivision { quotient: dividend / radix, remainder: dividend % radix }
     }
 
-    /// Exact observable contract of `FUN_08280f7c`: count every attempted
-    /// byte, then call the underlying writer only while prior count < limit.
-    unsafe extern "C" fn bounded_byte(spec: *mut RadixFormatSpec, byte: u8) {
-        let spec = &mut *spec;
-        let previous = spec.emitted;
-        spec.emitted = previous.wrapping_add(1);
-        if previous < spec.limit {
-            (spec.write_byte)(byte, spec.write_context);
-        }
-    }
 
     /// Deterministic stand-in for `FUN_080ec120`: a nonzero phase requests
-    /// this side's field padding. It intentionally emits through the bounded
-    /// byte seam rather than recreating the writer in the formatter body.
+    /// this side's field padding. It emits through the ported bounded-byte
+    /// helper, preserving the normal output count and limit behavior.
     unsafe extern "C" fn field_pad(phase: u32, spec: *mut RadixFormatSpec) {
         PHASES.push(phase);
         if phase != 0 {
             let padding = (*spec).width.saturating_sub((*spec).text_len as i32);
             for _ in 0..padding {
-                bounded_byte(spec, (*spec).fill);
+                format_bounded_byte(spec, (*spec).fill);
             }
         }
     }
 
     struct Hooks {
         divide: RadixDivideFn,
-        byte: FormatByteFn,
         pad: FormatPadFn,
     }
 
@@ -257,11 +236,9 @@ mod tests {
         unsafe fn install() -> Self {
             let hooks = Self {
                 divide: core::ptr::read_volatile(core::ptr::addr_of!(RADIX_DIVIDE)),
-                byte: core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_BYTE)),
                 pad: core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_PAD)),
             };
             core::ptr::write_volatile(core::ptr::addr_of_mut!(RADIX_DIVIDE), host_divide);
-            core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_BYTE), bounded_byte);
             core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_PAD), field_pad);
             PHASES.clear();
             hooks
@@ -272,7 +249,6 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(RADIX_DIVIDE), self.divide);
-                core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_BYTE), self.byte);
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_PAD), self.pad);
             }
         }
