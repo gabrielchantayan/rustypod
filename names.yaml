@@ -58768,6 +58768,41 @@ functions:
       among the ported functions (volume_table_lookup) uses it as the
       constant VOLUME_TABLE_CAPACITY, documented in that entry.
 
+  - address: 0x082e37d4
+    ghidra: FUN_082e37d4
+    name: split_path_at_last_delimiter
+    size: 224
+    sig: "u32 split_path_at_last_delimiter(u8 *prefix_out, u8 *component_out, void *accumulator_contribution, const u8 *path)"
+    module: fs/path_component_split
+    status: ported
+    renames:
+      param_1/r0: prefix_out
+      param_2/r1: component_out
+      param_3/r2: accumulator_contribution
+      param_4/r3: path
+      DAT_082e38a4: path_split_accumulator
+      DAT_082e38a8..DAT_082e38b0: component_delimiter_bytes
+    notes: >-
+      True raw extent is 224 bytes, not Ghidra's 208-byte code-only size:
+      the body starts at 0x082e37d4 and ends with `pop
+      {r4,r5,r6,r7,r8,pc}` at 0x082e38a0, followed by the four-word literal
+      pool at 0x082e38a4..0x082e38b0; the separately entered next function
+      begins at 0x082e38b4. The body adds the numeric third argument to the
+      resident word at 0x08a0a748, then scans the r3 NUL-terminated string
+      against three mutable bytes at 0x089059b7..0x089059b9. The decrypted
+      image initially holds `t`, `u`, and `v` there. It copies through the
+      last matched byte to r0, except that two or more total matches omit the
+      final one, and copies the remaining tail to r1; both are NUL-terminated
+      and it returns 1. It never dereferences r2. Decoding every ARM B/BL word
+      in osos.dec finds exactly seven direct callers, all unconditional plain
+      bl at 0x082e22c0, 0x082e3120, 0x082e34cc, 0x082e3578, 0x082e40bc,
+      0x082e47dc, and 0x082e6398, with no predicated forms or tail branches.
+      The port reads/writes the fixed resident locations on target and mirrors
+      their decrypted initial values only for host tests; no callee identity
+      or hidden meaning was invented. Tests cover no match, one match,
+      repeated-match final-delimiter removal, delimiter-only input, output
+      termination, and the r2-address accumulator side effect.
+
   - address: 0x082e18bc
     ghidra: FUN_082e18bc
     name: cache_entry_release
