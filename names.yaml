@@ -34341,6 +34341,30 @@ functions:
       The cxx_array_dealloc count arguments are faithfully computed from the
       capacity-minus-begin spans but dead at its already-ported tail veneer.
 
+  - address: 0x082a0074
+    ghidra: FUN_082a0074
+    name: rgb8_to_rgb565
+    size: 40
+    sig: "u32 rgb8_to_rgb565(const u8 *components)"
+    module: ui/rgb565_pack
+    status: ported
+    renames:
+      param_1/r0: components (three source bytes in R, G, B order)
+    notes: >-
+      Raw ARM extent is exactly 40 bytes: ten instructions from
+      0x082a0074 through the bx lr at 0x082a0098, immediately before
+      the separate RGBA4444 packer at 0x082a009c; no literal pool.
+      Full osos.dec ARM B/BL-word decoding finds eight incoming bl
+      sites (0x08250bc0, 0x08251054, 0x08251448, 0x082533b4,
+      0x08253478, 0x08256748, 0x08256754, and 0x0825ec68), all
+      unconditional, with no predicated or tail-branch callers.
+      It reads three RGB8 bytes, preserves their upper R5/G6/B5 bits,
+      and packs them into bits 15..11, 10..5, and 4..0 respectively.
+      No NULL or bounds guard exists. The Rust port keeps the ARM u32
+      return-register representation and adds no validation. Host
+      tests pin full-intensity primary colors, each field position,
+      low-bit discard, and an offset source record. match.py structural
+      review is expected to differ from ADS code generation.
   - address: 0x082a009c
     ghidra: FUN_082a009c
     name: rgba8_to_rgba4444
