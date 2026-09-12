@@ -68166,6 +68166,47 @@ functions:
       connection forwarding, healthy result masking, and the `mallocFailed`
       result replacement.
 
+  # --- opaque keyed collection item lookup by identifier ---
+  - address: 0x0829e280
+    ghidra: FUN_0829e280
+    name: opaque_keyed_collection_find_item_by_id
+    size: 96
+    sig: "u32 opaque_keyed_collection_find_item_by_id(const void *collection, u32 selector, u32 item_id, u32 *result)"
+    module: app/opaque_keyed_collection_find_item_by_id
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: selector
+      param_3/r2/r6: item_id
+      param_4/r3/r7: result
+      piVar1/r5: vector
+      uVar4/r4: signed_i16_index
+      "vector+0x00": begin
+      "vector+0x04": end
+      "entry+0x04": item_id
+      FUN_0829e310: opaque_keyed_collection_vector_select
+      FUN_083d78e4: vector_size_elem4_alias_78e4
+    notes: >-
+      Raw osos.dec confirms the 96-byte extent from push {r4,r5,r6,r7,r8,lr}
+      at 0x0829e280 through pop {r4,r5,r6,r7,r8,pc} at 0x0829e2dc; the next
+      separately entered function begins at 0x0829e2e0, with no literal-pool
+      word in this body. Decoding every ARM B/BL-immediate word in osos.dec
+      finds exactly seven direct, unconditional plain bl callers:
+      0x0817eb24, 0x0817fb80, 0x0817fe60, 0x0817fed8, 0x0817ff60,
+      0x08180004, and 0x08180088. There are no predicated calls and no
+      aligned 32-bit data word equal to 0x0829e280. It forwards collection and
+      selector unchanged to unported FUN_0829e310, reads each vector entry,
+      compares its aligned word at +4 with item_id, and writes the matching
+      entry to result before returning one; it returns zero without a result
+      write after a miss. The first entry read occurs before its first size
+      check. The post-miss index is sign-extended from 16 bits, so the unsigned
+      count comparison stops before index 32768. The selector has no recovered
+      identity. Deliberate deviation: it reuses
+      opaque_keyed_collection_item_at's existing target-retail-address and
+      host-recording selector seam rather than adding a new stub. Host tests
+      prove raw selector forwarding, match output, miss non-write behavior,
+      unchecked zero-length index zero access, and the signed-16-bit limit.
+
   # --- opaque keyed collection item count ---
   - address: 0x0829e2e0
     ghidra: FUN_0829e2e0

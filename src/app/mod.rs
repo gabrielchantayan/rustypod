@@ -122,6 +122,7 @@ pub mod opaque_u16_pair_buffer;
 pub mod opaque_collection_item_at;
 pub mod opaque_keyed_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
+pub mod opaque_keyed_collection_find_item_by_id;
 pub mod object_dispatch_target;
 pub mod once_initializer;
 pub mod own_target_notification_post;
