@@ -64457,6 +64457,37 @@ functions:
       lock-release order; the already-established raw I2C target/host seam
       uses indirect blx calls in place of retail direct bl calls.
 
+  # --- I2C slave 0x39 two-byte register write ---
+  - address: 0x0836e3c8
+    ghidra: FUN_0836e3c8
+    name: i2c_0x39_write_register
+    size: 56
+    sig: "i32 i2c_0x39_write_register(u32 reg, u32 value)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: value
+      local_8/sp: bytes
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836bb84: i2c_write
+      FUN_080645a8: kernel_sem5_signal
+    notes: >-
+      Raw ARM extent is exactly 56 bytes, 0x0836e3c8..0x0836e400: push
+      {r3,r4,r5,lr}; strb r0,[sp]; strb r1,[sp,#1]; kernel_sem5_wait();
+      i2c_write(0x39,2,sp); save its status in r4; kernel_sem5_signal(); and
+      return the saved status. The next independently linked function begins
+      at 0x0836e400, with no literal pool. Both inputs truncate independently
+      to their low byte. The I2C device at slave address 0x39 has no verified
+      identity in the retail image, so the name deliberately describes the
+      wire-visible operation. Decoding every ARM B/BL immediate in osos.dec
+      finds 7 direct calls, all unconditional bl and zero predicated forms:
+      0x0836e26c, 0x0836e280, 0x0836e2c0, 0x0836e2e8, 0x0836e310,
+      0x0836e330, and 0x0836e40c. No deliberate semantic deviation: the
+      existing kernel semaphore ports preserve the unconditional lock-release
+      order; the already-established raw I2C target/host seam uses an
+      indirect blx call in place of the retail direct bl call.
+
   # --- Encoded word block signed-shift dispatcher ---
   - address: 0x08342d70
     ghidra: FUN_08342d70
