@@ -251,6 +251,18 @@ pub unsafe extern "C" fn mutex_unlock(mutex: *mut Mutex) {
     }
 }
 
+/// mutex_unlock_veneer — original: `FUN_080cb824` @ 0x080cb824 (4 bytes;
+/// 8 unconditional `bl` call sites).
+///
+/// A one-instruction tail branch (`b 0x0807f6a0`) to [`mutex_unlock`].
+/// The veneer adds no guard or transformation: its mutex argument is passed
+/// directly to the canonical unlock port.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_unlock_veneer(mutex: *mut Mutex) {
+    mutex_unlock(mutex);
+}
+
 /// mutex_delete — original: `FUN_0807f650` @ 0x0807f650 (32 bytes).
 /// Destroys the cell if present, then NULLs the mutex's cell pointer.
 #[inline(never)]
@@ -714,6 +726,34 @@ mod tests {
         }
         assert_eq!(calls(), vec![Call::Signal(0x99), Call::Signal(0x99)]);
     }
+
+    /// The 0x080cb824 tail veneer preserves the target's NULL/zero-handle
+    /// guards and forwards a live semaphore handle unchanged.
+    #[test]
+    fn unlock_veneer_delegates_to_mutex_unlock() {
+        let _lock = mock_kernel();
+        let mut live_cell: u32 = 0x7c;
+        let mut live = Mutex {
+            sem_cell: &mut live_cell,
+            unused: 0,
+        };
+        let mut null_cell = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        let mut zero_handle_cell: u32 = 0;
+        let mut zero_handle = Mutex {
+            sem_cell: &mut zero_handle_cell,
+            unused: 0,
+        };
+        unsafe {
+            mutex_unlock_veneer(&mut live);
+            mutex_unlock_veneer(&mut null_cell);
+            mutex_unlock_veneer(&mut zero_handle);
+        }
+        assert_eq!(calls(), vec![Call::Signal(0x7c)]);
+    }
+
 
     #[test]
     fn delete_heap_cell_deletes_and_frees() {
