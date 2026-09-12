@@ -54468,6 +54468,44 @@ functions:
       tests cover zero and usize::MAX offsets, NULL bases, instruction
       wiring, append order and virtual-register creation order.
 
+  - address: 0x0826f4d8
+    ghidra: FUN_0826f4d8
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1/r5: base
+      param_3/r2/r6: offset
+      uVar1/r7: offset_reg
+      uVar2/r8: address_reg
+      uVar3/r9/r0: value_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18c4: cg_create_inst_load
+    notes: >-
+      Raw ARM confirms the 136-byte, 34-word extent: `push
+      {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0826f4d8 through `pop
+      {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x0826f55c, with the next function's
+      prologue at 0x0826f560 and no literal pool. Decoding every ARM B/BL
+      word in osos.dec finds seven direct call sites, all unconditional
+      `bl` (zero predicated, zero tail `b`): 0x0824b150, 0x0824b164,
+      0x0824b178, 0x0824b18c, 0x0824b200, 0x0824b214, and 0x0824bc94, all
+      in FUN_0824af94. A word-for-word comparison with the established
+      cg_emit_load_word_at_offset body at 0x082605f0 finds six differing
+      words, exclusively the relative `bl` encodings to the same three
+      cg_virtual_reg_create calls and cg_create_inst_load_immed,
+      cg_create_inst_binary, and cg_create_inst_load factories. Algorithm:
+      create offset, address, and value general virtual registers, emit LDI
+      offset / ADD address, base, offset / LDW value, [address], and return
+      value. The existing codegen/pipeline_emit implementation and its host
+      tests serve this behaviorally identical emission. Deliberate
+      deviation: it reads block->proc once rather than the retail body's
+      three reloads; nothing writes the field between those reads.
+
   - address: 0x0826077c
     ghidra: FUN_0826077c
     ghidra: FUN_0826077c
