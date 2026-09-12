@@ -48966,6 +48966,40 @@ functions:
       the target layout and avoid host pointer/u32 overlap. Host tests cover
       failed lookup, a successful lookup's BMap kind/id/allocation/parser
       arguments, and the already-loaded no-op path.
+# --- Tagged payload signed-field +0x52 getter ---
+  - address: 0x082a1d74
+    ghidra: FUN_082a1d74
+    name: tagged_payload_read_signed_field_0x52
+    size: 8
+    sig: "i32 tagged_payload_read_signed_field_0x52(const u32 *object)"
+    module: util/tagged_payload_read_signed_field_0x52
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x20: tagged_payload
+      uVar1/r0: untagged_payload
+      iVar2/r0: signed_field
+    notes: >-
+      Raw osos.dec is exactly two ARM instructions (8 bytes):
+      `add r0,r0,#0x20; b 0x0829be90`. The separately linked sibling
+      tagged_payload_signed_field_sum begins at 0x082a1d7c. A binary scan of
+      every ARM B/BL immediate finds exactly seven inbound direct calls, all
+      unconditional bl with zero predicated forms: 0x081431a4, 0x081b3200,
+      0x0820d730, 0x0820ddb0, 0x0820ddc8, 0x08290b9c, and 0x08290cc4.
+      The tail destination is not a recovered named function, but its raw
+      instructions load the target-width word at object+0x20, clear bit zero,
+      return zero for raw words 0 and 1, and otherwise sign-extend the i16 at
+      payload+0x52. The concrete object and payload types are unrecovered, so
+      the name records only this observed operation. Deliberate deviation:
+      Rust materializes that tail destination's field read instead of adding a
+      dispatch seam for the unported identity-unrecovered entry at 0x0829be90.
+      It retains target pointer fields as u32 words, preserving the +0x20
+      layout on 64-bit hosts. Host tests cover zero/tag-only payload words,
+      tag clearing, and all i16 sign-extension boundaries.
+      match.py structural review (using this worktree's archive) prints the
+      expected diff: the original's two-instruction tail transfer becomes the
+      target's `ldr/bics` null guard and signed-halfword load, plus Rust's
+      frame.
   # --- Tagged payload signed-field getter ---
   - address: 0x082a1da8
     ghidra: FUN_082a1da8
