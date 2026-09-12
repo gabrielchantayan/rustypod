@@ -85,23 +85,16 @@
 //!
 //! Everything about the function says the record is 1970-01-01 00:00:00 —
 //! it is the value below which the converter clamps to 0, and 0 is exactly
-//! the Unix timestamp of that instant — but this port does not write that
-//! guess down as data. [`DATETIME_FLOOR`] holds the **address**, which is
-//! what the original's literal holds, and the comparison goes through the
-//! [`DATETIME_OPS`] dispatch. On target with the stock comparator wired in
-//! that is byte-for-byte the original's behavior whatever the record says.
+//! that instant's timestamp — but this port does not write that guess down
+//! as data. [`DATETIME_FLOOR`] holds the **address**, which is what the
+//! original's literal holds. On target it names the real record; host tests
+//! install a local fixture before asking the comparator to dereference it.
 //!
 //! # Deviations
 //!
-//! - `FUN_08093af8` (comparator) is not ported; it dispatches through
-//!   [`DATETIME_OPS`], the house pattern
-//!   (see `app/iap_packet.rs`, `heap/alloc_core.rs`).
-//! - `FUN_0807ea68` (day number) IS ported as
-//!   [`crate::time::day_number::datetime_day_number`] and is the wired
-//!   default; the comparator's wired default returns 0 — "at or after
-//!   the floor" — so the arithmetic path stays live with no hooks
-//!   installed and no dereference of the unmapped host address in
-//!   [`DATETIME_FLOOR`].
+//! None. `FUN_08093af8` is ported as [`datetime_compare`] and the
+//! day-number helper is ported as
+//! [`crate::time::day_number::datetime_day_number`].
 
 /// The packed calendar record the 0x0807exxx / 0x08093xxx helpers take.
 ///
@@ -131,6 +124,50 @@ pub struct DateTime {
     /// +0x09 — padding.
     pub reserved2: u8,
 }
+/// datetime_compare — original: `FUN_08093af8` @ 0x08093af8
+/// (**92 bytes, 0x08093af8..0x08093b54**; 8 unconditional `bl` call sites
+/// and no predicated branches, counted by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Lexicographically compares two packed calendar records in descending
+/// significance: year, month, day, hour, minute, then second. Each
+/// comparison returns the unsigned field difference (`left - right`) as
+/// soon as it differs; reserved and weekday bytes are ignored. The retailOS
+/// body has no NULL guard, and neither does this port.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to a readable, properly aligned
+/// [`DateTime`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn datetime_compare(left: *const DateTime, right: *const DateTime) -> i32 {
+    let left = &*left;
+    let right = &*right;
+
+    let difference = left.year as i32 - right.year as i32;
+    if difference != 0 {
+        return difference;
+    }
+    let difference = left.month as i32 - right.month as i32;
+    if difference != 0 {
+        return difference;
+    }
+    let difference = left.day as i32 - right.day as i32;
+    if difference != 0 {
+        return difference;
+    }
+    let difference = left.hour as i32 - right.hour as i32;
+    if difference != 0 {
+        return difference;
+    }
+    let difference = left.minute as i32 - right.minute as i32;
+    if difference != 0 {
+        return difference;
+    }
+    left.second as i32 - right.second as i32
+}
+
 
 /// Day number of 1970-01-01 under `FUN_0807ea68`'s Rata Die numbering —
 /// the literal 0xfff506c5 = -719163 @ 0x08093c98, added rather than
@@ -146,53 +183,15 @@ pub const SECONDS_PER_HOUR: i32 = 3600;
 /// 60, formed by the original as `rsb r1, min, min, lsl #4` << 2.
 pub const SECONDS_PER_MINUTE: i32 = 60;
 
+
 /// The fixed record [`datetime_to_unix_seconds`] refuses to go below:
 /// **runtime address 0x083e2e3e**, the literal @ 0x08093c94.
 ///
 /// Its ten bytes are not recoverable from `osos.dec` (module header), so
 /// this is deliberately a pointer and never a value. On target it aims at
-/// the real record; on the host it is only ever handed to the
-/// [`DATETIME_OPS`] comparator, which the default stub never
-/// dereferences.
+/// the real record; host tests temporarily replace it with a readable local
+/// fixture.
 pub static mut DATETIME_FLOOR: *const DateTime = 0x083e2e3e as *const DateTime;
-
-/// Indirect dispatch for this converter's two unported callees.
-#[derive(Clone, Copy)]
-pub struct DateTimeOps {
-    /// `FUN_08093af8` @ 0x08093af8 (8 `bl` call sites): lexicographic
-    /// compare of two records, most significant field first — year
-    /// (`ldrh` +6), month, day, hour, minute, second. It returns the
-    /// difference of the first pair of fields that differ, as
-    /// `left_field - right_field`, and 0 when all six match; the
-    /// converter only tests the sign. Default: 0.
-    pub compare: unsafe extern "C" fn(left: *const DateTime, right: *const DateTime) -> i32,
-    /// `FUN_0807ea68` @ 0x0807ea68 (25 `bl` call sites): the Rata Die day
-    /// number of the record's year/month/day, which it also reduces mod 7
-    /// into `dt->weekday`. Default: the ported
-    /// [`crate::time::day_number::datetime_day_number`].
-    pub day_number: unsafe extern "C" fn(dt: *mut DateTime) -> i32,
-}
-
-unsafe extern "C" fn compare_stub(_left: *const DateTime, _right: *const DateTime) -> i32 {
-    0
-}
-
-/// Wired defaults: the documented comparator stub and the ported
-/// day-number helper.
-pub(crate) const DEFAULT_DATETIME_OPS: DateTimeOps = DateTimeOps {
-    compare: compare_stub,
-    day_number: super::day_number::datetime_day_number,
-};
-
-/// The active ops. Host tests swap in real implementations and restore.
-pub static mut DATETIME_OPS: DateTimeOps = DEFAULT_DATETIME_OPS;
-
-/// Volatile read so LLVM cannot fold the default stubs in and delete the
-/// dispatch (the `alloc_core.rs` rationale).
-#[inline(always)]
-unsafe fn datetime_ops() -> DateTimeOps {
-    core::ptr::read_volatile(core::ptr::addr_of!(DATETIME_OPS))
-}
 
 /// datetime_to_unix_seconds — original: `FUN_08093c38` @ 0x08093c38
 /// (**104 bytes, 0x08093c38..0x08093ca0**, including the three trailing
@@ -216,20 +215,17 @@ unsafe fn datetime_ops() -> DateTimeOps {
 ///
 /// # Safety
 ///
-/// `dt` must point at a readable, writable [`DateTime`]. The installed
-/// [`DATETIME_OPS`] comparator must accept [`DATETIME_FLOOR`] as its
-/// right-hand argument.
+/// `dt` must point at a readable, writable [`DateTime`]. [`DATETIME_FLOOR`]
+/// must point to a readable [`DateTime`].
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn datetime_to_unix_seconds(dt: *mut DateTime) -> i32 {
-    let ops = datetime_ops();
-
     let floor = core::ptr::read_volatile(core::ptr::addr_of!(DATETIME_FLOOR));
-    if (ops.compare)(dt, floor) < 0 {
+    if datetime_compare(dt, floor) < 0 {
         return 0;
     }
 
-    let days = (ops.day_number)(dt);
+    let days = super::day_number::datetime_day_number(dt);
     let seconds = days
         .wrapping_sub(UNIX_EPOCH_DAY_NUMBER)
         .wrapping_mul(SECONDS_PER_DAY);
@@ -247,8 +243,8 @@ mod tests {
     use core::ptr;
     use std::sync::Mutex;
 
-    /// Serializes the tests that write the shared dispatch slots.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that replace the shared floor pointer.
+    static FLOOR_LOCK: Mutex<()> = Mutex::new(());
 
     /// The floor the host tests stand in for the unreadable record @
     /// 0x083e2e3e. Its value is a test fixture only — the port never
@@ -279,55 +275,12 @@ mod tests {
         }
     }
 
-    /// Faithful re-implementation of `FUN_08093af8` @ 0x08093af8:
-    /// lexicographic compare, most significant field first, returning
-    /// the difference of the first differing pair.
-    unsafe extern "C" fn compare_real(left: *const DateTime, right: *const DateTime) -> i32 {
-        let (l, r) = (&*left, &*right);
-        for (a, b) in [
-            (l.year as i32, r.year as i32),
-            (l.month as i32, r.month as i32),
-            (l.day as i32, r.day as i32),
-            (l.hour as i32, r.hour as i32),
-            (l.minute as i32, r.minute as i32),
-            (l.second as i32, r.second as i32),
-        ] {
-            if a != b {
-                return a - b;
-            }
-        }
-        0
-    }
 
-    /// Faithful re-implementation of `FUN_0807ea68` @ 0x0807ea68: the
-    /// Rata Die day number, plus the weekday side effect.
-    unsafe extern "C" fn day_number_real(dt: *mut DateTime) -> i32 {
-        let d = &mut *dt;
-        let y = d.year as i32 - 1;
-        let leap_adjust = if d.month <= 2 {
-            0
-        } else if (d.year % 4 == 0 && d.year % 100 != 0) || d.year % 400 == 0 {
-            -1
-        } else {
-            -2
-        };
-        let days = 365 * y + y / 4 - y / 100 + y / 400
-            + (367 * d.month as i32 - 362) / 12
-            + leap_adjust
-            + d.day as i32;
-        d.weekday = (days % 7) as u8;
-        days
-    }
-
-    /// Installs the real comparator/day-number pair and the fixture
-    /// floor; returns the guard that restores them.
+    /// Installs the readable floor fixture and returns the lock that keeps
+    /// other tests from observing it.
     fn install() -> std::sync::MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = FLOOR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            ptr::write_volatile(
-                ptr::addr_of_mut!(DATETIME_OPS),
-                DateTimeOps { compare: compare_real, day_number: day_number_real },
-            );
             ptr::write_volatile(
                 ptr::addr_of_mut!(DATETIME_FLOOR),
                 ptr::addr_of!(TEST_FLOOR),
@@ -338,7 +291,6 @@ mod tests {
 
     fn restore(guard: std::sync::MutexGuard<'static, ()>) {
         unsafe {
-            ptr::write_volatile(ptr::addr_of_mut!(DATETIME_OPS), DEFAULT_DATETIME_OPS);
             ptr::write_volatile(
                 ptr::addr_of_mut!(DATETIME_FLOOR),
                 0x083e2e3e as *const DateTime,
@@ -361,6 +313,32 @@ mod tests {
         assert_eq!(ptr::addr_of!(d.month) as usize - base, 0x04);
         assert_eq!(ptr::addr_of!(d.year) as usize - base, 0x06);
         assert_eq!(ptr::addr_of!(d.weekday) as usize - base, 0x08);
+    }
+    /// Every comparison field returns its unsigned difference, in
+    /// year-to-second order. The ignored bytes must not affect equality.
+    #[test]
+    fn datetime_compare_is_lexicographic_and_ignores_non_time_bytes() {
+        let reference = dt(2000, 10, 20, 12, 30, 40);
+        let equal_with_ignored_bytes = DateTime {
+            reserved: 0xff,
+            weekday: 6,
+            reserved2: 0xff,
+            ..reference
+        };
+        let cases = [
+            (dt(2001, 1, 1, 0, 0, 0), 1),
+            (dt(1999, 12, 31, 23, 59, 59), -1),
+            (dt(2000, 2, 1, 0, 0, 0), -8),
+            (dt(2000, 10, 19, 0, 0, 0), -1),
+            (dt(2000, 10, 20, 11, 0, 0), -1),
+            (dt(2000, 10, 20, 12, 29, 0), -1),
+            (dt(2000, 10, 20, 12, 30, 255), 215),
+        ];
+
+        assert_eq!(unsafe { datetime_compare(&reference, &equal_with_ignored_bytes) }, 0);
+        for (candidate, expected) in cases {
+            assert_eq!(unsafe { datetime_compare(&candidate, &reference) }, expected);
+        }
     }
 
     /// The epoch itself: the floor compares equal, so the clamp does not
@@ -447,19 +425,4 @@ mod tests {
         restore(guard);
     }
 
-    /// With no hooks installed the wired defaults must still produce the
-    /// documented result rather than dereferencing the target-only floor
-    /// address: compare 0 (not below), and the now-ported day number
-    /// computes the real Rata Die value and weekday — the epoch record
-    /// lands exactly on `UNIX_EPOCH_DAY_NUMBER`, so only the time-of-day
-    /// terms contribute.
-    #[test]
-    fn the_wired_defaults_run_the_arithmetic_without_touching_the_floor() {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut d = dt(1970, 1, 1, 2, 3, 4);
-        let expected = 2 * 3600 + 3 * 60 + 4;
-        assert_eq!(unsafe { datetime_to_unix_seconds(&mut d) }, expected);
-        assert_eq!(d.weekday, 4, "the ported day_number writes the weekday");
-        drop(guard);
-    }
 }
