@@ -454,9 +454,9 @@ pub unsafe extern "C" fn rom_sem_signal(sem: usize) -> usize {
 /// drivers/i2c), plus 0x080671ac, 0x08067f90, 0x080aa06c, 0x080b28a0,
 /// 0x080da17c, 0x080da658, 0x0836d420, 0x0836e380, 0x0836e3dc.
 ///
-/// Sibling shims @ 0x0806a4a8 (`mov r0, #1`) and 0x0806a4b0 (`mov r0,
-/// #0x11`, the PMU OUTER lock) share the same branch target but are
-/// separate 8-byte functions, not part of this port.
+/// Sibling shims @ 0x0806a4a8 (`mov r0, #1`, ported as
+/// kernel_sem1_wait) and 0x0806a4b0 (`mov r0, #0x11`, the PMU OUTER lock)
+/// share the same branch target but are separate 8-byte functions.
 ///
 /// Deviation: dispatches through the ported rom_sem_wait (the ROM_KERNEL
 /// hook) instead of branching to the 8-byte ROM veneer; the original
@@ -465,6 +465,29 @@ pub unsafe extern "C" fn rom_sem_signal(sem: usize) -> usize {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_sem5_wait() -> usize {
     rom_sem_wait(5)
+}
+
+/// kernel_sem1_wait — original: `FUN_0806a4a8` @ 0x0806a4a8 (8 bytes):
+/// `mov r0, #1; b 0x08037e08` — a fixed-id shim that acquires kernel
+/// semaphore 1 through the rom_sem_wait veneer (ROM 0x22003fd0), passing
+/// its r0 result word back through the tail branch.
+///
+/// Raw words verify the 8-byte extent: kernel_sem5_wait ends at
+/// 0x0806a4a8 and kernel_sem17_wait begins at 0x0806a4b0. No data word in
+/// osos references 0x0806a4a8, so this shim is never dispatched virtually.
+///
+/// Binary decoding finds 8 unconditional `bl` call sites — 0x082bc690,
+/// 0x082bca14, 0x082e5668, 0x082e5ab8, 0x0836a6fc, 0x0836a7c4,
+/// 0x0836c8e0, and 0x0836cac8 — with no predicated `bl` or tail `b`;
+/// callers never flag-gate this acquire.
+///
+/// Deliberate deviation: dispatches through the ported rom_sem_wait (the
+/// ROM_KERNEL hook) instead of branching to the 8-byte ROM veneer; the
+/// original tail-branch becomes a call whose r0 result is returned verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem1_wait() -> usize {
+    rom_sem_wait(1)
 }
 
 /// kernel_sem5_signal — original: `FUN_080645a8` @ 0x080645a8 (8 bytes):
@@ -501,10 +524,10 @@ pub unsafe extern "C" fn kernel_sem5_signal() -> usize {
 /// (ROM 0x22003fd0), the r0 result word passing back through the tail
 /// branch. Extent verified: the next function's `ldr r1, [pc, #156]`
 /// prologue starts at 0x0806a4b8; sibling shims 0x0806a498 (`mov r0,
-/// #18`), 0x0806a4a0 (`mov r0, #5`, ported as kernel_sem5_wait) and
-/// 0x0806a4a8 (`mov r0, #1`, unported) share the same branch target as
-/// separate 8-byte functions. No data word in osos references 0x0806a4b0
-/// — the shim is never dispatched virtually.
+/// #18`), 0x0806a4a0 (`mov r0, #5`, ported as kernel_sem5_wait), and
+/// 0x0806a4a8 (`mov r0, #1`, ported as kernel_sem1_wait) share the same
+/// branch target as separate 8-byte functions. No data word in osos
+/// references 0x0806a4b0 — the shim is never dispatched virtually.
 ///
 /// 31 `bl` call sites (binary-verified, all unconditional — no
 /// predicated `bl` and no `b`; callers never flag-gate the acquire): 28
@@ -1159,6 +1182,20 @@ pub(crate) mod tests {
             check(1, ret, &[5]);
             let ret = kernel_sem5_wait();
             check(1, ret, &[5]);
+        }
+    }
+
+    /// kernel_sem1_wait (shim @ 0x0806a4a8): the id is forced to
+    /// semaphore 1 before the ROM wait fires, and the hook's r0 result
+    /// word comes back. No other slot may fire.
+    #[test]
+    fn kernel_sem1_wait_forces_id_1() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem1_wait();
+            check(1, ret, &[1]);
+            let ret = kernel_sem1_wait();
+            check(1, ret, &[1]);
         }
     }
 

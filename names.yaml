@@ -6083,7 +6083,7 @@ functions:
       code: 24 unconditional bl (Ghidra's 24 is correct), zero
       predicated bl, 8 unconditional tail b - fixed-id shims mov r0,
       #(18, 5, 1, 0x11) @ 0x0806a498 / 0x0806a4a0 (kernel_sem5_wait) /
-      0x0806a4a8 / 0x0806a4b0 (kernel_sem17_wait), bare pass-through
+      0x0806a4a8 (kernel_sem1_wait) / 0x0806a4b0 (kernel_sem17_wait), bare
       aliases @ 0x08115310 and 0x081e6218, cache_lock_wait @ 0x082d792c
       and the ata table-indexed wait @ 0x082d793c - and 1 predicated
       bne @ 0x0805651c, the guarded tail of sem_wait @ 0x08056510 (cmp
@@ -6392,10 +6392,10 @@ functions:
       Fixed-id semaphore-acquire shim: `mov r0, #5; b 0x08037e08`
       (rom_sem_wait veneer -> ROM 0x22003fd0), the r0 result word passing
       back through the tail branch. Extent verified against the sibling
-      shims that follow immediately: 0x0806a4a8 (`mov r0, #1`) and
-      0x0806a4b0 (`mov r0, #0x11`, the PMU OUTER lock), both separate
-      8-byte functions with the same branch target, both unported. 37 bl
-      call sites (binary-verified, all unconditional; zero predicated bl
+      shims that follow immediately: 0x0806a4a8 (`mov r0, #1`, ported as
+      kernel_sem1_wait) and 0x0806a4b0 (`mov r0, #0x11`, the PMU OUTER
+      lock), both separate 8-byte functions with the same branch target.
+      37 bl call sites (binary-verified, all unconditional; zero predicated bl
       and zero b — callers never flag-gate the acquire): 28 in the PMU
       I2C family 0x082e53xx-0x082e5bxx, where semaphore 5 is the INNER
       lock of the wait(0x11)/wait(5) bracket around every raw transfer
@@ -6406,6 +6406,31 @@ functions:
       veneer — same family pattern as the other task_lock wrappers, so
       match.py shows an expected structural diff (indirect call through
       hook slot 1, `mov r0, #5` intact).
+
+  - address: 0x0806a4a8
+    ghidra: FUN_0806a4a8
+    name: kernel_sem1_wait
+    size: 8
+    sig: "usize kernel_sem1_wait()"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      FUN_0806a4a8: kernel_sem1_wait
+    notes: >-
+      Fixed-id semaphore-acquire shim: `mov r0, #1; b 0x08037e08`
+      (rom_sem_wait veneer -> ROM 0x22003fd0), the r0 result word passing
+      back through the tail branch. Raw words establish its full 8-byte
+      extent: kernel_sem5_wait ends immediately before at 0x0806a4a8 and
+      kernel_sem17_wait starts immediately after at 0x0806a4b0. No data
+      word in osos holds 0x0806a4a8, so the shim is never dispatched
+      virtually. Eight `bl` call sites are binary-verified by decoding
+      every ARM B/BL word in osos.dec for every condition code:
+      0x082bc690, 0x082bca14, 0x082e5668, 0x082e5ab8, 0x0836a6fc,
+      0x0836a7c4, 0x0836c8e0, and 0x0836cac8. All are unconditional; zero
+      predicated `bl` and zero tail branches mean callers do not flag-gate
+      the acquire. Deviation: dispatches through the ported rom_sem_wait
+      (the ROM_KERNEL hook) instead of tail-branching to the ROM veneer,
+      preserving fixed semaphore id 1 and the r0 result word.
 
   - address: 0x0806a4b0
     ghidra: FUN_0806a4b0
@@ -6423,9 +6448,9 @@ functions:
       drivers/i2c). Extent verified: the next function's
       `ldr r1, [pc, #156]` prologue starts at 0x0806a4b8; sibling shims
       0x0806a498 (`mov r0, #18`, unported), 0x0806a4a0 (ported) and
-      0x0806a4a8 (`mov r0, #1`, unported) share the same branch target as
-      separate 8-byte functions. No data word in osos references
-      0x0806a4b0 - the shim is never dispatched virtually. 31 bl call
+      0x0806a4a8 (`mov r0, #1`, ported as kernel_sem1_wait) share the same
+      branch target as separate 8-byte functions. No data word in osos
+      references 0x0806a4b0 - the shim is never dispatched virtually. 31 bl
       sites (binary-verified, all unconditional; zero predicated bl and
       zero b - callers never flag-gate the acquire): 28 in the PMU I2C
       family 0x082e53dc..0x082e5bf8, plus 0x080671a8, 0x08067f8c,
