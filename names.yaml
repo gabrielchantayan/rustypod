@@ -71504,3 +71504,37 @@ functions:
       FUN_080daa7c, FUN_0808e228, FUN_08093dfc, and FUN_08066bb8 are
       unported and represented by volatile target seams; their identities
       beyond observed roles and the tag's semantic identity are not claimed.
+
+  # --- StringObject-word range-copy template ---
+  - address: 0x083e9b28
+    ghidra: FUN_083e9b28
+    name: string_object_word_range_copy
+    size: 64
+    sig: "StringObjectWord *string_object_word_range_copy(const StringObjectWord *first, const StringObjectWord *last, StringObjectWord *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      FUN_082774a8: string_object_assign
+      field_8: trailing_word
+    notes: >-
+      Raw osos.dec has a 64-byte body from 0x083e9b28 through 0x083e9b64;
+      the separately linked next function starts at 0x083e9b68. It walks
+      [first, last) in 12-byte steps, calling the already-ported
+      StringObject copy assignment at 0x082774a8 for the leading two words,
+      copying the source's third word to output + 8, then returning the
+      advanced output pointer. Complete aligned ARM B/BL decoding finds seven
+      inbound direct plain bl calls, all unconditional: 0x083e8570,
+      0x083e85a8, 0x083e8688, 0x083e86ac, 0x083e86c4, 0x083e86d8, and
+      0x083ea80c. One additional unconditional direct b tail branch at
+      0x083ea820 targets it; there are no predicated calls. The element's
+      third word has no recovered semantic identity, so the typed target
+      layout calls it trailing_word rather than inventing one. Typed
+      StringObjectWord iteration preserves the ARM 12-byte layout while
+      keeping host pointer fields disjoint; the existing string assignment
+      port is called directly and no dispatch seam is added.
