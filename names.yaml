@@ -51170,6 +51170,43 @@ functions:
       shrink-wrapped frame and rotated loop. #[inline(never)] for the
       15 `bl` targets.
   # --- display object: the six-layer compositor root ---
+  - address: 0x081d8a6c
+    ghidra: FUN_081d8a6c
+    name: display_restore_forced_layers
+    size: 124
+    sig: "u32 display_restore_forced_layers(Display *display)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r4: display
+      param_1_plus_0x4c: panel_resume_argument
+      param_1_plus_0x98: layers_active
+      param_1_plus_0x9e: panel_parameter_pending
+      param_1_plus_0xa2: panel_command_pending
+      param_1_plus_0xa5: forced_layers_visible
+      FUN_0812068c: layer_restore_enable
+    notes: >-
+      Raw osos.dec confirms Ghidra's 124-byte code extent: 31 instructions
+      from 0x081d8a6c through pop {r4-r8,pc} at 0x081d8ae4; the separate
+      sibling starts at 0x081d8ae8 with strb r1,[r0,#0x99]. Decoding every
+      ARM B/BL immediate finds exactly eight direct callers, all plain
+      unconditional bl (cond 0xe) at 0x081a59f4, 0x081a5a00, 0x081a5c40,
+      0x081a5c4c, 0x081a620c, 0x081a6218, 0x081a69d0, and 0x081a69dc;
+      there are no predicated or tail-b forms. This makes the callers'
+      display_get(0)/restore/display_get(1)/restore sequence unconditional,
+      not a NULL-guard or flag-gated call.
+      Algorithm: clear display+0xa5; if +0x94 is non-NULL, call its vtable
+      slot +0x68 with the driver in r0 and display+0x4c in r1. For display
+      id 1 only, write 1 to +0xa2 then +0x9e, visit all six +0x00 layer
+      slots, and OR the ported layer_restore_enable results. If any result
+      is nonzero, write 1 to +0x98; otherwise preserve its old value.
+      The +0x68 word is a virtual slot, not a decoded standalone entry, so
+      no callee identity is invented. Deliberate deviation: none in the
+      target dispatch; layer_restore_enable is kept inline(never) so the
+      required per-layer bl remains emitted. The host fixture supplies its
+      26th vtable entry to prove driver/argument forwarding, id-1-only flag
+      writes, NULL-slot skipping, and a parked layer's restore (disabled,
+      parked, and dirty bytes plus +0x98).
   - address: 0x081d892c
     ghidra: FUN_081d892c
     name: display_set_layer_enabled

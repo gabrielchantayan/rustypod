@@ -884,6 +884,9 @@ pub unsafe extern "C" fn layer_force_enable(layer: *mut u8) -> u8 {
 /// disabled here.
 ///
 /// Renamed from the earlier scouting note's `layer_resume`.
+/// Kept as an emitted ARM `bl` target for
+/// [`super::display::display_restore_forced_layers`].
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn layer_restore_enable(layer: *mut u8) -> u8 {
     let parked = byte(layer, PARKED_ENABLE);
