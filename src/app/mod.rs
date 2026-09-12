@@ -143,6 +143,7 @@ pub mod resource_reference_value;
 pub mod scoped_context;
 pub mod scoped_string_id_record_set;
 pub mod service_manager;
+pub mod service_state_synchronize;
 pub mod service_handler_availability;
 pub mod service_handler_slot_bit_update;
 pub mod silver_controller;
