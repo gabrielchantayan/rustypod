@@ -72896,3 +72896,38 @@ functions:
       meaning. Firmware builds call the existing __rt_exit port directly;
       host tests deliberately substitute a catchable panic for that
       non-returning path.
+
+  # --- Resolve-gated PLST reference item lookup (src/ui/element_reference_item.rs) ---
+  - address: 0x082a60a8
+    ghidra: FUN_082a60a8
+    name: ui_element_reference_item_at
+    size: 80
+    sig: "u32 ui_element_reference_item_at(const u8 *reference, u32 index)"
+    module: ui/element_reference_item
+    status: ported
+    renames:
+      param_1/r0: reference
+      param_2/r1: index
+      r4: reference
+      r5: index
+      r0: element
+      r1: selector
+      r2: reverse_flag
+      FUN_08052728: ui_plst_slot_item_at
+    notes: >-
+      Raw osos.dec confirms Ghidra's 80-byte extent: the body starts with
+      `push {r4,r5,r6,lr}` at 0x082a60a8 and ends in the direct tail branch
+      to already ported ui_plst_slot_item_at (0x08052728) at 0x082a60f4;
+      the next separately linked function begins with the same push prologue
+      at 0x082a60f8. It invokes reference-vtable slot +0xc and returns zero
+      if that resolve method returns zero. Otherwise its target pointer at
+      reference+4 is passed to ui_plst_slot_item_at with index unchanged,
+      selector 1 or 2 from target+0x18c bit 0, and reverse flag from
+      target+0x18d bit 2. Complete aligned ARM B/BL-immediate decoding finds
+      seven direct inbound calls, all unconditional plain bl at 0x08179198,
+      0x0817ab3c, 0x0817bb80, 0x0817cc20, 0x0817d0d0, 0x0817d3bc, and
+      0x0817d5f4; the unconditional b at 0x0817bb30 is a non-call tail
+      transfer and is excluded. The source calls the existing Rust port
+      normally; ARM LLVM lowers it to the same register-restoring tail
+      transfer. Host tests cover the failed resolve short-circuit, both
+      selector choices, and reverse index zero.
