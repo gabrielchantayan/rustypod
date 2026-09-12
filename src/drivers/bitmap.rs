@@ -15,9 +15,9 @@
 //! +0xc4 ptr  the parsed bitmap object, stored by the loader
 //! ```
 //!
-//! The loader `FUN_082993b4` @ 0x082993b4 (80 bytes + the "BMap"
-//! literal @ 0x08299400; 8 `bl` call sites) is the lazy initializer:
-//! if the +0x08 flag is clear it resolves the (head, id) pair through
+//! The loader `FUN_082993b4` @ 0x082993b4 (80 bytes total: 76 bytes of
+//! code plus the "BMap" literal @ 0x08299400; 8 `bl` call sites) is a lazy
+//! initializer: if the +0x08 flag is clear it resolves the (head, id) pair through
 //! `resource_chain_find` @ 0x0827216c with the kind literal
 //! 0x424d6170 ("BMap" big-endian — `ResourceKind::BITMAP` in
 //! app/resource_chain.rs), allocates 0x44 bytes via `operator_new`,
@@ -25,65 +25,70 @@
 //! +0xc4 and raises the flag. A failed lookup leaves the flag clear,
 //! which is exactly the state the query below treats as "no bounds".
 //!
-//! Offsets are literal byte offsets into a `*mut u8`, the
-//! drivers/surface.rs / drivers/display_layer.rs precedent. The only
-//! pointer field the query reads (+0xc4) is native-width — exactly the
-//! 4-byte field on target — but 0xc4 is not eight-aligned, so on a
-//! 64-bit host it is parked at 0xc8, the first aligned slot behind it,
-//! in the wrapper's unaccounted tail (the display_layer.rs
-//! parked-pointer rule; the tests size the block to 0xd0 to leave that
-//! slack). On the 32-bit target every offset is the literal one and
-//! the codegen is unaffected. See [`BITMAP_OBJECT`].
+//! [`BitmapWrapper`] represents those fields directly. On the 32-bit target
+//! the fields are exactly at their decoded addresses. Its native pointer
+//! fields expand on a 64-bit host, so host fixtures use the matching
+//! `#[repr(C)]` layout instead of overlapping a pointer and the next u32.
 
-/// +0x08: the loaded flag byte the lazy loader raises.
-const LOADED: usize = 0x08;
+use crate::app::resource_chain::{resource_chain_find, ResourceKind, ResourceProvider};
+use crate::heap::veneers::operator_new;
 
-/// +0xc4 on target: the parsed bitmap object the loader stores. 0xc4
-/// is not eight-aligned, so on 64-bit hosts the native-width field is
-/// parked at 0xc8, in the unaccounted tail behind the literal field
-/// (the module header's parked-pointer rule).
+/// The target's 0xC8-byte bitmap-resource wrapper. `#[repr(C)]` preserves
+/// the target's four-byte resource-head field, id, flag, argument block, and
+/// result pointer placements on ARM; its native pointer layout is also valid
+/// for host fixtures.
+#[repr(C)]
+struct BitmapWrapper {
+    resource_head: *mut ResourceProvider,
+    resource_id: u32,
+    loaded: u8,
+    _padding_after_loaded: [u8; 3],
+    parser_args: [u8; 0xb8],
+    object: *mut u8,
+}
+
 #[cfg(target_pointer_width = "32")]
-const BITMAP_OBJECT: usize = 0xc4;
-#[cfg(target_pointer_width = "64")]
-const BITMAP_OBJECT: usize = 0xc8;
-/// +0x1c on target: the bitmap's inner data object. This is a 4-byte
-/// pointer on target but is parked at +0x20 in the aligned 64-bit
-/// host fixture, just as [`BITMAP_OBJECT`] is parked above.
+const _: [u8; 0xc4] = [0; core::mem::offset_of!(BitmapWrapper, object)];
+
+#[inline(always)]
+unsafe fn wrapper_mut(wrapper: *mut u8) -> *mut BitmapWrapper {
+    wrapper.cast()
+}
+
+/// Runs the parser for a resolved "BMap" resource. The parser at
+/// `FUN_082645a0` is still unported, so this is the cluster's remaining
+/// dispatch seam.
+pub type BitmapParseFn = unsafe extern "C" fn(
+    object: *mut u8,
+    args: *mut u8,
+    resource: *mut u8,
+) -> *mut u8;
+
+/// Parsed bitmap prefix ending in its inner-object pointer at +0x1c on ARM.
+/// `#[repr(C)]` naturally inserts the four host-only alignment bytes before
+/// the native-width pointer.
+#[repr(C)]
+struct ParsedBitmap {
+    _prefix: [u8; 0x1c],
+    inner: *mut u8,
+}
+
 #[cfg(target_pointer_width = "32")]
-const BITMAP_INNER_OBJECT: usize = 0x1c;
-#[cfg(target_pointer_width = "64")]
-const BITMAP_INNER_OBJECT: usize = 0x20;
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(ParsedBitmap, inner)];
 
 /// +0x98 within the inner object: the first of four bounds words.
 const INNER_BOUNDS: usize = 0x98;
-
-
-#[inline(always)]
-unsafe fn byte(wrapper: *mut u8, offset: usize) -> u8 {
-    wrapper.add(offset).read_volatile()
-}
-
-/// A stored pointer field, native-width at the given offset — the
-/// [`crate::drivers::display_layer`] precedent.
-#[inline(always)]
-unsafe fn ptr_field(wrapper: *mut u8, offset: usize) -> *mut u8 {
-    (wrapper.add(offset) as *const *mut u8).read_volatile()
-}
 
 /// Indirect dispatch for this cluster's unported callees (the house
 /// pattern — see `drivers/display_layer.rs`'s `LayerDriverHooks`).
 #[derive(Clone, Copy)]
 pub struct BitmapHooks {
-    /// `FUN_082993b4` @ 0x082993b4 (8 `bl` call sites): the lazy
-    /// loader — resolves the wrapper's ("BMap", id) resource, parses
-    /// it into a fresh 0x44-byte object stored at +0xc4 and raises the
-    /// +0x08 loaded flag; a failed lookup leaves the flag clear.
-    /// Default: no-op — a wrapper starts unloaded, so the wired build
-    /// takes the zeroed-bounds path exactly as the original does for a
-    /// resource that fails to resolve. NOT hook-ready: the stock
-    /// loader must be ported (or the wrapper pre-loaded) before the
-    /// query path can run on target.
-    pub ensure_loaded: unsafe extern "C" fn(wrapper: *mut u8),
+    /// `FUN_082645a0`: parses a resolved bitmap resource into the freshly
+    /// allocated 0x44-byte object. The stock parser is still unported, so
+    /// this is the sole loader dependency that remains indirect. Default:
+    /// return the allocation unchanged; this preserves the loader's result
+    /// flow but is NOT hook-ready for an actual bitmap resource.
+    pub parse: BitmapParseFn,
     /// `FUN_08262bdc` @ 0x08262bdc (224 bytes; 60 `bl` call sites,
     /// binary-scanned): the rect-offsetting draw helper — adds the draw
     /// context's +0x2c/+0x30 origin into both four-word rects and the
@@ -106,8 +111,13 @@ pub struct BitmapHooks {
     ),
 }
 
-unsafe extern "C" fn ensure_loaded_stub(_wrapper: *mut u8) {}
-
+unsafe extern "C" fn bitmap_parse_stub(
+    object: *mut u8,
+    _args: *mut u8,
+    _resource: *mut u8,
+) -> *mut u8 {
+    object
+}
 
 unsafe extern "C" fn draw_stub(
     _ctx: *mut u8,
@@ -119,9 +129,10 @@ unsafe extern "C" fn draw_stub(
 ) {
 }
 
-/// Wired defaults: no-op stubs for the unported originals.
+/// Wired defaults: a pass-through parser for the unported parser and a no-op
+/// draw helper for the unported renderer.
 pub(crate) const DEFAULT_BITMAP_HOOKS: BitmapHooks = BitmapHooks {
-    ensure_loaded: ensure_loaded_stub,
+    parse: bitmap_parse_stub,
     draw: draw_stub,
 };
 
@@ -133,6 +144,47 @@ pub static mut BITMAP_HOOKS: BitmapHooks = DEFAULT_BITMAP_HOOKS;
 #[inline(always)]
 unsafe fn hooks() -> BitmapHooks {
     core::ptr::read_volatile(core::ptr::addr_of!(BITMAP_HOOKS))
+}
+
+/// bitmap_ensure_loaded — original: `FUN_082993b4` @ 0x082993b4
+/// (80 bytes: 76 bytes of code plus the `"BMap"` literal at 0x08299400;
+/// **8 plain `bl` call sites**, zero predicated calls and no direct tail
+/// branch, binary-scanned from osos.dec).
+///
+/// Lazily resolves the wrapper's `(resource_head, resource_id)` as a
+/// `"BMap"` resource. If the loaded byte is already non-zero it returns
+/// unchanged. Otherwise a failed lookup also returns unchanged; a successful
+/// lookup allocates 0x44 bytes through `operator_new`, invokes the bitmap
+/// parser on the allocation, wrapper-owned parser arguments, and resource,
+/// stores the parser result, then raises the loaded byte. Like the original,
+/// allocation failure is passed to the parser without a NULL check.
+///
+/// Deliberate deviation: `FUN_082645a0` remains behind
+/// [`BitmapHooks::parse`]. Its default returns the allocation unchanged,
+/// which preserves this loader's result and flag stores but cannot initialize
+/// bitmap contents; a wired resource provider is therefore not hook-ready
+/// until the parser itself is ported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitmap_ensure_loaded(wrapper: *mut u8) {
+    let wrapper = &mut *wrapper_mut(wrapper);
+    if core::ptr::addr_of!(wrapper.loaded).read_volatile() != 0 {
+        return;
+    }
+
+    let resource = resource_chain_find(
+        core::ptr::addr_of!(wrapper.resource_head).read_volatile(),
+        ResourceKind::BITMAP,
+        core::ptr::addr_of!(wrapper.resource_id).read_volatile(),
+    );
+    if resource.is_null() {
+        return;
+    }
+
+    let object = operator_new(0x44);
+    let parsed = (hooks().parse)(object, wrapper.parser_args.as_mut_ptr(), resource);
+    core::ptr::addr_of_mut!(wrapper.object).write_volatile(parsed);
+    core::ptr::addr_of_mut!(wrapper.loaded).write_volatile(1);
 }
 
 /// bitmap_object_read_bounds — original: `FUN_082a1dbc` @ 0x082a1dbc
@@ -151,7 +203,8 @@ unsafe fn hooks() -> BitmapHooks {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn bitmap_object_read_bounds(object: *mut u8, out: *mut u32) {
-    let inner = ptr_field(object, BITMAP_INNER_OBJECT);
+    let parsed = &*object.cast::<ParsedBitmap>();
+    let inner = core::ptr::addr_of!(parsed.inner).read_volatile();
     let bounds = inner.add(INNER_BOUNDS) as *mut u32;
     let word0 = bounds.read_volatile();
     let word1 = bounds.add(1).read_volatile();
@@ -170,9 +223,8 @@ pub unsafe extern "C" fn bitmap_object_read_bounds(object: *mut u8, out: *mut u3
 /// block at `out` with the four bounds words of the wrapper's parsed
 /// bitmap object. The algorithm:
 ///
-/// 1. Run the lazy loader (`FUN_082993b4`, through
-///    [`BITMAP_HOOKS`]) **first, unconditionally** — a wrapper whose
-///    resource has not been resolved yet is loaded on demand here.
+/// 1. Run [`bitmap_ensure_loaded`] **first, unconditionally** — a wrapper
+///    whose resource has not been resolved yet is loaded on demand here.
 /// 2. If the loaded flag (+0x08) is still clear (no resource, or the
 ///    lookup failed), zero all four words of `out` with four word
 ///    stores (`streq`).
@@ -201,9 +253,8 @@ pub unsafe extern "C" fn bitmap_object_read_bounds(object: *mut u8, out: *mut u3
 ///   argument registers and uses the spill slots as the query block;
 ///   the getter always overwrites all four words, making them
 ///   unobservable.
-/// - +0xc4 is read as a native-width pointer (parked at 0xc8 on
-///   64-bit hosts — see the module header); on target it is exactly
-///   the 4-byte field at +0xc4.
+/// - The `#[repr(C)]` wrapper layout retains the exact target +0xc4 object
+///   field while moving it to the naturally aligned +0xc8 on 64-bit hosts.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn bitmap_query_bounds(
     out: *mut u32,
@@ -213,13 +264,14 @@ pub unsafe extern "C" fn bitmap_query_bounds(
 ) -> u64 {
     // The original's r0..r3 spill slots double as the query block.
     let mut bounds: [u32; 4] = [out as u32, wrapper as u32, arg3, arg4];
-    (hooks().ensure_loaded)(wrapper);
-    if byte(wrapper, LOADED) == 0 {
+    bitmap_ensure_loaded(wrapper);
+    let wrapper = &mut *wrapper_mut(wrapper);
+    if core::ptr::addr_of!(wrapper.loaded).read_volatile() == 0 {
         for slot in 0..4 {
             (out.add(slot)).write_volatile(0);
         }
     } else {
-        let object = ptr_field(wrapper, BITMAP_OBJECT);
+        let object = core::ptr::addr_of!(wrapper.object).read_volatile();
         bitmap_object_read_bounds(object, bounds.as_mut_ptr());
         for slot in 0..4 {
             (out.add(slot)).write_volatile(bounds[slot]);
@@ -236,9 +288,8 @@ pub unsafe extern "C" fn bitmap_query_bounds(
 /// [`bitmap_query_bounds`] running the same loader-then-flag-check
 /// shape. The algorithm:
 ///
-/// 1. Run the lazy loader (`FUN_082993b4`, through
-///    [`BITMAP_HOOKS`]) **first, unconditionally** — exactly as the
-///    bounds query does.
+/// 1. Run [`bitmap_ensure_loaded`] **first, unconditionally** — exactly as
+///    the bounds query does.
 /// 2. If the loaded flag (+0x08) is still clear, return without
 ///    drawing anything.
 /// 3. Otherwise dispatch the rect-offsetting draw helper
@@ -266,9 +317,8 @@ pub unsafe extern "C" fn bitmap_query_bounds(
 ///
 /// Deviations:
 ///
-/// - +0xc4 is read as a native-width pointer (parked at 0xc8 on
-///   64-bit hosts — see the module header); on target it is exactly
-///   the 4-byte field at +0xc4.
+/// - The `#[repr(C)]` wrapper layout retains the exact target +0xc4 object
+///   field while moving it to the naturally aligned +0xc8 on 64-bit hosts.
 /// - The draw helper rides the [`BITMAP_HOOKS`] seam with a no-op
 ///   default (documented, NOT hook-ready — the stock helper and the
 ///   engine beneath it must be ported before the draw path runs on
@@ -281,9 +331,10 @@ pub unsafe extern "C" fn bitmap_draw_in_rect(
     rect_b: *const u32,
     alpha: u32,
 ) {
-    (hooks().ensure_loaded)(wrapper);
-    if byte(wrapper, LOADED) != 0 {
-        let object = ptr_field(wrapper, BITMAP_OBJECT);
+    bitmap_ensure_loaded(wrapper);
+    let wrapper = &mut *wrapper_mut(wrapper);
+    if core::ptr::addr_of!(wrapper.loaded).read_volatile() != 0 {
+        let object = core::ptr::addr_of!(wrapper.object).read_volatile();
         (hooks().draw)(ctx, object, rect_a, rect_b, alpha, 0);
     }
 }
@@ -292,27 +343,26 @@ pub unsafe extern "C" fn bitmap_draw_in_rect(
 /// (28 bytes; **9 plain `bl` call sites**, no predicated or tail branches,
 /// binary-scanned by decoding every B/BL word in osos.dec).
 ///
-/// Ensures the bitmap wrapper is loaded, then returns its parsed bitmap
-/// object. The lazy loader (`FUN_082993b4`, through [`BITMAP_HOOKS`]) always
-/// runs first. If it leaves the +0x08 loaded flag clear, the original returns
-/// zero; otherwise it returns the pointer stored at +0xc4.
+/// object. [`bitmap_ensure_loaded`] always runs first. If it leaves the
+/// +0x08 loaded flag clear, the original returns zero; otherwise it returns
+/// the pointer stored at +0xc4.
 ///
 /// The single data-word reference at 0x089b0b20 places this accessor in a
 /// bitmap-wrapper vtable, so callers may dispatch it virtually. All nine
 /// direct call sites are plain `bl`; each checks its result before consuming
 /// the parsed object.
 ///
-/// Deliberate deviation: +0xc4 is a 4-byte target pointer but is parked at
-/// +0xc8 in 64-bit host fixtures for native alignment; it remains exactly
-/// +0xc4 on ARM (see [`BITMAP_OBJECT`]).
+/// Deliberate deviation: the `#[repr(C)]` wrapper places this native pointer
+/// at +0xc8 in 64-bit host fixtures; it remains exactly +0xc4 on ARM.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn bitmap_get_loaded_object(wrapper: *mut u8) -> *mut u8 {
-    (hooks().ensure_loaded)(wrapper);
-    if byte(wrapper, LOADED) == 0 {
+    bitmap_ensure_loaded(wrapper);
+    let wrapper = &mut *wrapper_mut(wrapper);
+    if core::ptr::addr_of!(wrapper.loaded).read_volatile() == 0 {
         core::ptr::null_mut()
     } else {
-        ptr_field(wrapper, BITMAP_OBJECT)
+        core::ptr::addr_of!(wrapper.object).read_volatile()
     }
 }
 
@@ -323,45 +373,53 @@ mod tests {
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Mutex as StdMutex, MutexGuard};
 
-    /// The wrapper is addressed by literal byte offset, so a plain
-    /// aligned byte block stands in for it on the host. Aligned to 8 so
-    /// the native-width +0xc4 pointer is well aligned on a 64-bit host
-    /// too (on target the block is word-aligned).
+    /// A native-layout bitmap wrapper. The structure keeps every target
+    /// field distinct on both ARM and the 64-bit host.
     #[repr(align(8))]
-    struct Wrapper([u8; 0xd0]);
+    struct Wrapper(BitmapWrapper);
 
     impl Wrapper {
         fn new() -> Self {
-            Wrapper([0; 0xd0])
+            Wrapper(BitmapWrapper {
+                resource_head: core::ptr::null_mut(),
+                resource_id: 0,
+                loaded: 0,
+                _padding_after_loaded: [0; 3],
+                parser_args: [0; 0xb8],
+                object: core::ptr::null_mut(),
+            })
         }
         fn ptr(&mut self) -> *mut u8 {
-            self.0.as_mut_ptr()
+            core::ptr::addr_of_mut!(self.0).cast()
         }
-        fn set_byte(&mut self, offset: usize, value: u8) {
-            self.0[offset] = value;
+        fn set_loaded(&mut self, value: u8) {
+            self.0.loaded = value;
         }
-        fn set_ptr(&mut self, offset: usize, value: *mut u8) {
-            self.0[offset..offset + core::mem::size_of::<*mut u8>()]
-                .copy_from_slice(&(value as usize).to_ne_bytes());
+        fn set_object(&mut self, value: *mut u8) {
+            self.0.object = value;
+        }
+        fn set_resource(&mut self, head: *mut ResourceProvider, id: u32) {
+            self.0.resource_head = head;
+            self.0.resource_id = id;
         }
     }
 
-    /// The parsed object has an inner-object pointer at +0x1c on target.
-    /// It is parked at +0x20 here, leaving the host's native-width
-    /// pointer aligned; 0x44 is the stock parser allocation size.
+    /// The parsed object has its inner-object pointer at +0x1c on target.
+    /// The shared [`ParsedBitmap`] layout supplies host alignment.
     #[repr(align(8))]
-    struct ParsedBitmap([u8; 0x44]);
+    struct ParsedBitmapFixture([u8; 0x44]);
 
-    impl ParsedBitmap {
+    impl ParsedBitmapFixture {
         fn new() -> Self {
-            ParsedBitmap([0; 0x44])
+            ParsedBitmapFixture([0; 0x44])
         }
         fn ptr(&mut self) -> *mut u8 {
             self.0.as_mut_ptr()
         }
         fn set_inner_object(&mut self, inner: *mut u8) {
             unsafe {
-                (self.ptr().add(BITMAP_INNER_OBJECT) as *mut *mut u8).write_volatile(inner);
+                core::ptr::addr_of_mut!((*self.ptr().cast::<ParsedBitmap>()).inner)
+                    .write_volatile(inner);
             }
         }
     }
@@ -396,17 +454,18 @@ mod tests {
         }
     }
 
-    /// The parsed object and inner bounds that the loader mock resolves.
-    static mut FAKE_OBJECT: ParsedBitmap = ParsedBitmap([0; 0x44]);
+    /// The parsed object and inner bounds that loader fixtures return.
+    static mut FAKE_OBJECT: ParsedBitmapFixture = ParsedBitmapFixture([0; 0x44]);
     static mut FAKE_INNER: BitmapInner = BitmapInner([0; (INNER_BOUNDS + 16) / 4]);
 
-    /// Serializes the tests that swap [`BITMAP_HOOKS`] or use the fake
-    /// parsed object.
+    /// Serializes tests that swap [`BITMAP_HOOKS`] or use the fake parsed
+    /// object.
     static HOOK_LOCK: StdMutex<()> = StdMutex::new(());
-    static LOADS: AtomicU32 = AtomicU32::new(0);
-    /// Set by a test to make the loader mock resolve the wrapper
-    /// (store the fake object at +0xc4, raise the +0x08 flag).
-    static LOAD_RESOLVES: AtomicU32 = AtomicU32::new(0);
+
+    static PARSES: AtomicU32 = AtomicU32::new(0);
+    static PARSE_OBJECT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static PARSE_ARGS: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static PARSE_RESOURCE: AtomicUsize = AtomicUsize::new(usize::MAX);
 
     static DRAWS: AtomicU32 = AtomicU32::new(0);
     static LAST_DRAW_CTX: AtomicUsize = AtomicUsize::new(usize::MAX);
@@ -416,12 +475,81 @@ mod tests {
     static LAST_DRAW_ALPHA: AtomicU32 = AtomicU32::new(u32::MAX);
     static LAST_DRAW_RESERVED: AtomicU32 = AtomicU32::new(u32::MAX);
 
-    unsafe extern "C" fn recording_ensure_loaded(wrapper: *mut u8) {
-        LOADS.fetch_add(1, Ordering::SeqCst);
-        if LOAD_RESOLVES.load(Ordering::SeqCst) != 0 {
-            set_bitmap_object(wrapper, fake_object());
-            wrapper.add(LOADED).write_volatile(1);
+    static mut BITMAP_RESOURCE: [u8; 1] = [0];
+
+    static mut LOADER_ALLOCATION: [u8; 0x44] = [0; 0x44];
+    static ALLOC_SIZE: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static ALLOC_TAG: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+    unsafe extern "C" fn recording_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        ALLOC_SIZE.store(size, Ordering::SeqCst);
+        ALLOC_TAG.store(tag, Ordering::SeqCst);
+        core::ptr::addr_of_mut!(LOADER_ALLOCATION).cast()
+    }
+
+    unsafe extern "C" fn find_test_bitmap(
+        _provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        found: *mut *mut u8,
+    ) -> u32 {
+        if kind == ResourceKind::BITMAP && id == 0x51 {
+            found.write(core::ptr::addr_of_mut!(BITMAP_RESOURCE).cast());
+            1
+        } else {
+            0
         }
+    }
+
+    unsafe extern "C" fn unused_read(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn replacement_allowed(
+        _provider: *mut ResourceProvider,
+        _replacement: *mut ResourceProvider,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn unused_write(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+        _value: u32,
+        _flags: u32,
+    ) -> u32 {
+        0
+    }
+
+    const BITMAP_VTABLE: crate::app::resource_chain::ResourceProviderVTable =
+        crate::app::resource_chain::ResourceProviderVTable {
+            slots_below: [None; 22],
+            read: unused_read,
+            slot_5c: None,
+            replacement_allowed,
+            find: find_test_bitmap,
+            write: unused_write,
+        };
+
+    unsafe extern "C" fn recording_parse(
+        object: *mut u8,
+        args: *mut u8,
+        resource: *mut u8,
+    ) -> *mut u8 {
+        PARSES.fetch_add(1, Ordering::SeqCst);
+        PARSE_OBJECT.store(object as usize, Ordering::SeqCst);
+        PARSE_ARGS.store(args as usize, Ordering::SeqCst);
+        PARSE_RESOURCE.store(resource as usize, Ordering::SeqCst);
+        object
     }
 
 
@@ -442,10 +570,6 @@ mod tests {
         LAST_DRAW_RESERVED.store(reserved, Ordering::SeqCst);
     }
 
-    /// Plants the +0xc4 object pointer the way the loader's store does.
-    unsafe fn set_bitmap_object(wrapper: *mut u8, object: *mut u8) {
-        (wrapper.add(BITMAP_OBJECT) as *mut *mut u8).write_volatile(object);
-    }
 
     /// Configures the stock-sized parsed-object fixture with recognizable
     /// bounds. Every caller holds [`HOOK_LOCK`] before touching it.
@@ -457,9 +581,9 @@ mod tests {
         object
     }
 
-    /// Plants the parsed object's +0x1c inner-object pointer.
+    /// Plants the parsed object's inner-object pointer.
     unsafe fn set_bitmap_inner_object(object: *mut u8, inner: *mut u8) {
-        (object.add(BITMAP_INNER_OBJECT) as *mut *mut u8).write_volatile(inner);
+        core::ptr::addr_of_mut!((*object.cast::<ParsedBitmap>()).inner).write_volatile(inner);
     }
 
     /// Installs the recording hooks and hands back the guard; the
@@ -467,8 +591,12 @@ mod tests {
     /// never shadow a guard).
     fn with_recording_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        LOADS.store(0, Ordering::SeqCst);
-        LOAD_RESOLVES.store(0, Ordering::SeqCst);
+        PARSES.store(0, Ordering::SeqCst);
+        PARSE_OBJECT.store(usize::MAX, Ordering::SeqCst);
+        PARSE_ARGS.store(usize::MAX, Ordering::SeqCst);
+        PARSE_RESOURCE.store(usize::MAX, Ordering::SeqCst);
+        ALLOC_SIZE.store(usize::MAX, Ordering::SeqCst);
+        ALLOC_TAG.store(usize::MAX, Ordering::SeqCst);
         DRAWS.store(0, Ordering::SeqCst);
         LAST_DRAW_CTX.store(usize::MAX, Ordering::SeqCst);
         LAST_DRAW_OBJECT.store(usize::MAX, Ordering::SeqCst);
@@ -478,7 +606,7 @@ mod tests {
         LAST_DRAW_RESERVED.store(u32::MAX, Ordering::SeqCst);
         unsafe {
             BITMAP_HOOKS = BitmapHooks {
-                ensure_loaded: recording_ensure_loaded,
+                parse: recording_parse,
                 draw: recording_draw,
             }
         };
@@ -505,7 +633,7 @@ mod tests {
 
     #[test]
     fn bitmap_object_read_bounds_copies_all_words_before_an_aliasing_store() {
-        let mut object = ParsedBitmap::new();
+        let mut object = ParsedBitmapFixture::new();
         let mut inner = BitmapInner::new(BOUNDS);
         object.set_inner_object(inner.ptr());
         let mut out = Out::new();
@@ -528,7 +656,8 @@ mod tests {
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
 
         assert_eq!(out.0, [0; 4], "every bounds word is zeroed");
-        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader still runs first");
+        assert_eq!(wrapper.0.loaded, 0, "a failed lookup leaves the wrapper unloaded");
+        assert_eq!(PARSES.load(Ordering::SeqCst), 0, "the parser is not called");
         restore_hooks(guard);
     }
 
@@ -536,9 +665,9 @@ mod tests {
     fn a_loaded_wrapper_copies_the_query_words_verbatim() {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
-        wrapper.set_byte(LOADED, 1);
+        wrapper.set_loaded(1);
         let object = unsafe { fake_object() };
-        wrapper.set_ptr(BITMAP_OBJECT, object);
+        wrapper.set_object(object);
         let mut out = Out::new();
 
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
@@ -551,8 +680,8 @@ mod tests {
     fn the_first_two_words_come_back_as_the_return_value() {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
-        wrapper.set_byte(LOADED, 1);
-        wrapper.set_ptr(BITMAP_OBJECT, unsafe { fake_object() });
+        wrapper.set_loaded(1);
+        wrapper.set_object(unsafe { fake_object() });
         let mut out = Out::new();
 
         let ret = unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
@@ -563,19 +692,56 @@ mod tests {
     }
 
     #[test]
-    fn the_loader_runs_before_the_flag_check() {
+    fn bitmap_ensure_loaded_resolves_parses_and_caches_once() {
         let guard = with_recording_hooks();
-        // Starts unloaded; the loader mock resolves it mid-call, so the
-        // query path must run on the strength of the loader's stores.
-        LOAD_RESOLVES.store(1, Ordering::SeqCst);
+        let mut provider = ResourceProvider {
+            vtable: &BITMAP_VTABLE,
+            state_below_next: [core::ptr::null_mut(); 4],
+            next: core::ptr::null_mut(),
+        };
         let mut wrapper = Wrapper::new();
-        let mut out = Out::new();
+        wrapper.set_resource(&mut provider, 0x51);
 
-        let ret = unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
+        let saved_heap_ops = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS))
+        };
+        let saved_default_heap = unsafe { crate::heap::types::DEFAULT_HEAP };
+        let mut heap_ops = saved_heap_ops;
+        heap_ops.alloc = recording_alloc;
+        unsafe {
+            crate::heap::veneers::HEAP_OPS = heap_ops;
+            crate::heap::types::DEFAULT_HEAP =
+                core::ptr::addr_of_mut!(LOADER_ALLOCATION).cast();
+            bitmap_ensure_loaded(wrapper.ptr());
+        }
 
-        assert_eq!(out.0, BOUNDS, "a just-loaded wrapper yields real bounds");
-        assert_eq!(ret as u32, BOUNDS[0]);
-        assert_eq!((ret >> 32) as u32, BOUNDS[1]);
+        assert_eq!(wrapper.0.loaded, 1, "successful lookup raises the loaded byte");
+        assert!(!wrapper.0.object.is_null(), "parser result is stored in the wrapper");
+        assert_eq!(ALLOC_SIZE.load(Ordering::SeqCst), 0x44, "allocation size is exact");
+        assert_eq!(ALLOC_TAG.load(Ordering::SeqCst), 2, "operator_new keeps tag 2");
+        assert_eq!(PARSES.load(Ordering::SeqCst), 1, "the parser runs once");
+        assert_eq!(
+            PARSE_OBJECT.load(Ordering::SeqCst),
+            wrapper.0.object as usize,
+            "the parser receives the 0x44-byte allocation"
+        );
+        assert_eq!(
+            PARSE_ARGS.load(Ordering::SeqCst),
+            wrapper.0.parser_args.as_mut_ptr() as usize,
+            "the parser receives the wrapper's inline argument block"
+        );
+        assert_eq!(
+            PARSE_RESOURCE.load(Ordering::SeqCst),
+            core::ptr::addr_of_mut!(BITMAP_RESOURCE) as *mut u8 as usize,
+            "the BMap resource passes through unchanged"
+        );
+
+        unsafe { bitmap_ensure_loaded(wrapper.ptr()) };
+        assert_eq!(PARSES.load(Ordering::SeqCst), 1, "a loaded wrapper is untouched");
+        unsafe {
+            crate::heap::veneers::HEAP_OPS = saved_heap_ops;
+            crate::heap::types::DEFAULT_HEAP = saved_default_heap;
+        }
         restore_hooks(guard);
     }
 
@@ -603,7 +769,7 @@ mod tests {
 
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
 
-        assert_eq!(out.0, [0; 4], "the no-op loader leaves the wrapper unloaded");
+        assert_eq!(out.0, [0; 4], "an empty resource chain leaves the wrapper unloaded");
     }
 
     #[test]
@@ -614,7 +780,6 @@ mod tests {
         let object = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
 
         assert!(object.is_null(), "a loader that leaves +0x08 clear yields null");
-        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader must run first");
         restore_hooks(guard);
     }
 
@@ -623,28 +788,15 @@ mod tests {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
         let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
-        wrapper.set_ptr(BITMAP_OBJECT, object);
-        wrapper.set_byte(LOADED, 0x80);
+        wrapper.set_object(object);
+        wrapper.set_loaded(0x80);
 
         let returned = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
 
         assert_eq!(returned, object, "the +0xc4 pointer passes through unchanged");
-        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "loading is unconditional");
         restore_hooks(guard);
     }
 
-    #[test]
-    fn the_loader_can_make_a_wrapper_loaded_during_the_access() {
-        let guard = with_recording_hooks();
-        LOAD_RESOLVES.store(1, Ordering::SeqCst);
-        let mut wrapper = Wrapper::new();
-
-        let object = unsafe { bitmap_get_loaded_object(wrapper.ptr()) };
-
-        assert_eq!(object, unsafe { fake_object() }, "the post-load +0xc4 pointer is returned");
-        assert_eq!(LOADS.load(Ordering::SeqCst), 1);
-        restore_hooks(guard);
-    }
 
     /// A fake draw context; only its identity (the pointer value
     /// reaching `draw`) matters to these tests.
@@ -666,7 +818,6 @@ mod tests {
             )
         };
 
-        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader still runs first");
         assert_eq!(DRAWS.load(Ordering::SeqCst), 0, "nothing is drawn");
         restore_hooks(guard);
     }
@@ -675,9 +826,9 @@ mod tests {
     fn a_loaded_wrapper_draws_with_the_object_and_a_hard_zero_reserved_word() {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
-        wrapper.set_byte(LOADED, 1);
+        wrapper.set_loaded(1);
         let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
-        wrapper.set_ptr(BITMAP_OBJECT, object);
+        wrapper.set_object(object);
         let ctx = core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8;
         let rect_a = Out::new();
         let rect_b = Out::new();
@@ -704,37 +855,14 @@ mod tests {
         restore_hooks(guard);
     }
 
-    #[test]
-    fn the_loader_runs_before_the_draw_flag_check() {
-        let guard = with_recording_hooks();
-        // Starts unloaded; the loader mock resolves it mid-call, so the
-        // draw path must run on the strength of the loader's stores.
-        LOAD_RESOLVES.store(1, Ordering::SeqCst);
-        let mut wrapper = Wrapper::new();
-        let rect = Out::new();
-
-        unsafe {
-            bitmap_draw_in_rect(
-                wrapper.ptr(),
-                core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8,
-                rect.0.as_ptr(),
-                rect.0.as_ptr(),
-                0x80,
-            )
-        };
-
-        assert_eq!(DRAWS.load(Ordering::SeqCst), 1, "a just-loaded wrapper draws");
-        assert_eq!(LAST_DRAW_ALPHA.load(Ordering::SeqCst), 0x80);
-        restore_hooks(guard);
-    }
 
     #[test]
     fn the_default_hooks_draw_nothing_for_a_fresh_wrapper() {
         let mut wrapper = Wrapper::new();
         let rect = Out::new();
 
-        // Must simply return: no-op loader leaves the flag clear and
-        // the no-op draw stub is never reached.
+        // An empty resource chain leaves the flag clear, so the draw stub is
+        // never reached.
         unsafe {
             bitmap_draw_in_rect(
                 wrapper.ptr(),
