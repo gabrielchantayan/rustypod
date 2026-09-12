@@ -37,6 +37,23 @@ pub unsafe extern "C" fn u32_value_eq(left: *const u32, right: *const u32) -> u3
     u32::from(left.read() == right.read())
 }
 
+/// byte_is_three_or_four — original: `FUN_0829cf40` @ 0x0829cf40 (24 bytes).
+///
+/// The ARM leaf loads the first byte and returns a normalized C-ABI truth word
+/// only when it is 3 or 4. A raw branch-word scan verifies eight direct,
+/// unconditional `bl` callers and no predicated direct calls.
+///
+/// No deliberate deviations: like the `ldrb` source instruction, this has no
+/// null guard and reads exactly one byte.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn byte_is_three_or_four(value: *const u8) -> u32 {
+    let byte = value.read();
+    u32::from(byte == 3 || byte == 4)
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -131,5 +148,17 @@ mod tests {
         let before = (left, right);
         assert_eq!(unsafe { u32_value_eq(&left, &right) }, 0);
         assert_eq!((left, right), before);
+    }
+
+    #[test]
+    fn byte_predicate_accepts_only_three_and_four() {
+        for value in 0..=u8::MAX {
+            let expected = u32::from(value == 3 || value == 4);
+            assert_eq!(
+                unsafe { byte_is_three_or_four(&value) },
+                expected,
+                "value {value:#04x}"
+            );
+        }
     }
 }
