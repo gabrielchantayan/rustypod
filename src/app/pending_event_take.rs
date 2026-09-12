@@ -299,14 +299,11 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{note_missing_u32_fixture, try_map_u32_slab, hints};
-    use std::sync::{Mutex, MutexGuard};
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, PENDING_EVENT_TAKE_OPS_TEST_LOCK,
+    };
+    use std::sync::MutexGuard;
     use std::vec::Vec;
-
-    /// Serializes every test here: they share one fixture slab (the
-    /// mapper never unmaps, so a second mapping would land above 4 GiB
-    /// and skip silently) and swap the global ops table.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Fixture layout inside the mapped slab:
     ///
@@ -453,7 +450,7 @@ mod tests {
     }
 
     fn bench() -> Option<Bench> {
-        let lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let lock = PENDING_EVENT_TAKE_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let slab = unsafe { slab() };
         if slab.is_null() {
             note_missing_u32_fixture("app::pending_event_take");

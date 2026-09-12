@@ -70098,3 +70098,47 @@ functions:
       deliberate deviations. Focused host test proves the returned destination
       and that nonzero guard words remain untouched. Reference C:
       decomp/c/014/08158cf0_FUN_08158cf0.c; assembly: osos.dec 0x08158cf0.
+
+  # --- pending-event queue take due ---
+  - address: 0x081394b0
+    ghidra: FUN_081394b0
+    name: pending_event_take_due
+    size: 204
+    sig: "u32 pending_event_take_due(u8 *this, u32 *key_out, u16 *tag_a_out, u16 *tag_b_out, u32 *payload_out)"
+    module: app/pending_event_take_due
+    status: ported
+    renames:
+      param_1/r0/r7: this
+      param_2/r1/r8: key_out
+      param_3/r2/r9: tag_a_out
+      param_4/r3/sl: tag_b_out
+      param_5/sp+0x38/fp: payload_out
+      r4: head_node
+      r5: mutex_ptr (this + 0x2ac)
+      r6/iVar3: status (0x52 = no due event)
+      sp+0x0c: clock
+      sp+0x04: timespec
+      FUN_0813908c: pending_event_release (unported)
+      FUN_0813957c: pending_event_rearm_timer (unported)
+    notes: >-
+      Raw ARM extent is exactly 204 code bytes from 0x081394b0 through the
+      pop {r4-r9,sl,fp,pc} at 0x08139578; the next function begins with a
+      distinct push at 0x0813957c, with no literal pool. Every aligned ARM
+      B/BL immediate in osos.dec was decoded: exactly 8 direct callers, all
+      plain unconditional bl (0x08164304, 0x0818eaa4, 0x08194800,
+      0x08196010, 0x081d7858, 0x081e28ac, 0x081f3094, 0x08209204), with 0
+      predicated bl forms, 0 tail b forms, and 0 aligned data-word references.
+      Under the PosixMutex at this+0x2ac, inspect the live-list head at +0x04.
+      If present, construct a kind-1 clock, call its vtable +0x0c slot into a
+      timespec, and convert to milliseconds. The `subs`/`beq`/`cmn
+      r0,#0x80000001`/`bls` sequence accepts deadline-now equal to zero or in
+      0x80000000..0xffffffff, i.e. the firmware's wrapping signed due test.
+      A future head (difference 1..0x7fffffff) and an empty list return 0x52
+      without touching outputs. A due head copies key, both tag halfwords, and
+      payload before release; release status is kept, and successful release
+      then runs rearm. The two unported named callees reuse
+      PENDING_EVENT_TAKE_OPS; the clock slot uses a local dynamic seam because
+      the stock vtable word is the documented mid-function anomaly, not an
+      invented identity. Host tests cover exact due, empty and future outputs
+      untouched, the 0x80000000 wrapping boundary, release-failure rearm skip,
+      rearm-status chaining, and mutex ownership inside every seam call.
