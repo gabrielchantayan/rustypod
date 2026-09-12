@@ -24,6 +24,10 @@
 //!   SQLite's fault-injection allocation-deny schedule (the upstream
 //!   `sqlite3MemdebugFail` deny-counter family): a countdown of
 //!   successes to let through, then a budget of denials.
+//! - `fault_begin_benign` — original: `FUN_083789ac` @ 0x083789ac (72
+//!   bytes plus a 4-byte literal pool; 7 `bl` call sites, binary-scanned).
+//!   SQLite's `sqlite3FaultBeginBenign`, which enters a fault injector's
+//!   benign section.
 //! - `fault_end_benign` — original: `FUN_083789f8` @ 0x083789f8 (68
 //!   bytes; 7 `bl` call sites, binary-scanned). SQLite's
 //!   `sqlite3FaultEndBenign`, which leaves a fault injector's benign
@@ -167,6 +171,46 @@ pub static mut ALLOC_DENY_SCHEDULE: [AllocDenyRecord; 1] = [AllocDenyRecord {
 /// +0x18 of the BSS struct @ 0x08a09918 (literal @ 0x08378acc), which
 /// no other code references.
 pub static mut ALLOC_DENY_TOTAL: i32 = 0;
+/// `fault_begin_benign` — original: `FUN_083789ac` @ 0x083789ac (72 bytes
+/// of code at 0x083789ac..0x083789f3, then the 4-byte literal pool at
+/// 0x083789f4; 7 direct `bl` callers, binary-scanned: five unconditional,
+/// `blne` at 0x082de498, and `blgt` at 0x08367434; no tail branches).
+///
+/// SQLite's `sqlite3FaultBeginBenign`: enter a fault-injector section where
+/// scheduled allocation failures are recoverable. Raw ARM loads the schedule
+/// literal `0x08adc2cc`, selects its 0x14-byte record stride, and increments
+/// the unsigned halfword at +0x12. A nonnegative `slot` changes that record;
+/// any negative `slot` loops through every injector. This image has exactly
+/// one injector, so the negative path visits slot 0 once. The two predicated
+/// callers set slot 0 only when their caller-side allocation guard is nonzero;
+/// this callee has no guard of its own.
+///
+/// The addition wraps as the raw `ldrh`/`add`/`strh` sequence does; it
+/// deliberately has no overflow assertion or bounds check.
+///
+/// Deviation: the schedule is the shared [`ALLOC_DENY_SCHEDULE`] static
+/// rather than the retailOS stats block at `0x08adc2cc`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fault_begin_benign(slot: i32) {
+    let schedule = core::ptr::addr_of_mut!(ALLOC_DENY_SCHEDULE).cast::<AllocDenyRecord>();
+    if slot >= 0 {
+        let record = schedule.add(slot as usize);
+        (*record).benign_mode = (*record).benign_mode.wrapping_add(1);
+        return;
+    }
+
+    let mut index = 0usize;
+    loop {
+        let record = schedule.add(index);
+        (*record).benign_mode = (*record).benign_mode.wrapping_add(1);
+        index += 1;
+        if index >= 1 {
+            return;
+        }
+    }
+}
+
 /// `fault_end_benign` — original: `FUN_083789f8` @ 0x083789f8 (68 bytes;
 /// 7 `bl` call sites, binary-scanned: five unconditional, one `blne`, and
 /// one `blgt`).
@@ -1539,6 +1583,48 @@ pub(crate) mod tests {
             reset_schedule();
         }
     }
+    /// The slot-0 path increments the halfword and makes the next injected
+    /// denial benign. Its addition wraps exactly like ARM's `ldrh`/`add`/`strh`.
+    #[test]
+    fn fault_begin_benign_increments_wraps_and_marks_a_denial() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            {
+                let record = schedule();
+                record.active = 1;
+                record.deny_budget = 1;
+            }
+            fault_begin_benign(0);
+            assert_eq!(schedule().benign_mode, 1);
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(schedule().benign_denies, 1);
+
+            reset_schedule();
+            schedule().benign_mode = i16::MAX;
+            fault_begin_benign(0);
+            assert_eq!(schedule().benign_mode, i16::MIN);
+            reset_schedule();
+        }
+    }
+
+    /// Every negative selector takes the one-record all-injectors path,
+    /// rather than becoming an out-of-range table index.
+    #[test]
+    fn fault_begin_benign_negative_slots_enter_the_single_injector() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            fault_begin_benign(-1);
+            assert_eq!(schedule().benign_mode, 1);
+
+            reset_schedule();
+            fault_begin_benign(i32::MIN);
+            assert_eq!(schedule().benign_mode, 1);
+            reset_schedule();
+        }
+    }
+
     /// The slot-0 path uses a signed argument only for the branch: its
     /// halfword decrement wraps exactly like ARM's `ldrh`/`sub`/`strh`.
     #[test]
