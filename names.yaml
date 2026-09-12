@@ -61077,6 +61077,43 @@ functions:
       lengths (len 0 sends the lone reg byte, len -1 wraps the count to
       0), and the 15-byte maximum frame payload.
 
+  # --- Opaque payload/list owner teardown (cxx/payload_list_owner_destroy) ---
+  - address: 0x081fc930
+    ghidra: FUN_081fc930
+    name: payload_list_owner_destroy
+    size: 144
+    sig: "PayloadListOwner *payload_list_owner_destroy(PayloadListOwner *this)"
+    module: cxx/payload_list_owner_destroy
+    status: ported
+    renames:
+      param_1/r4: this
+      param_1_plus_0x04: payload
+      param_1_plus_0x08: list_sentinel
+      param_1_plus_0x18: list_count
+      param_1_plus_0x24: mutex
+      FUN_0818ad44: unresolved_payload_list_teardown
+      FUN_083d5c90: unresolved_list_cursor_erase
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+      FUN_082621dc: cxx_mutex_destroy
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM is exactly 144 bytes (36 words), 0x081fc930..0x081fc9c0; the
+      separately linked next function begins at 0x081fc9c0. Decoding every ARM
+      B/BL immediate in osos.dec found exactly eight inbound direct calls, all
+      unconditional BL: 0x0814c770, 0x081682a8, 0x081f0104, 0x082086d4,
+      0x08236248, 0x08262bb8, 0x0828c1c8, and 0x083b5328; zero predicated
+      forms. It locks this+0x24, sends non-NULL payload at +0x04 and the
+      circular-list sentinel at +0x08 to unresolved 0x0818ad44 only when the
+      list count at +0x18 is nonzero, clears payload, unlocks and destroys the
+      mutex, then erases list cursors until the sentinel through unresolved
+      0x083d5c90. A NULL payload calls non-returning heap_panic. Both
+      unresolved direct callees retain descriptive dispatch slots rather than
+      invented identities; their target defaults call the raw addresses and
+      host defaults fail loudly. Existing mutex and heap-panic ports are called
+      directly. Host tests cover the zero-count callback skip and nonzero
+      teardown-before-erase order using low-address target-word fixtures.
+
   # --- Bootstrap-to-current mutex handoff (kernel/mutex_handoff) ---
   - address: 0x081fca10
     ghidra: FUN_081fca10
