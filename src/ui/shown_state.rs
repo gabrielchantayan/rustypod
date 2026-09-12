@@ -1,5 +1,9 @@
 //! Querying a UI element's shown state from its flag word.
 //!
+//! - `ui_element_is_fully_shown` — original: `FUN_082a26a8` @ 0x082a26a8
+//!   (32 bytes; 8 direct, unconditional `bl` call sites, no data-word
+//!   references — verified by decoding every B/BL word and scanning every
+//!   word of osos.dec, so the helper is never dispatched virtually).
 //! - `ui_element_is_shown` — original: `FUN_082a26c8` @ 0x082a26c8
 //!   (24 bytes; 32 direct `bl` call sites, none predicated, no data-word
 //!   references — verified by decoding every B/BL word and scanning every
@@ -26,6 +30,14 @@ const SHOWN_STATE_MASK: u32 = 0x1800;
 
 /// Field value meaning "shown" (`cmp r0, #0x800`).
 const SHOWN_STATE_SHOWN: u32 = 0x800;
+
+/// Mask selecting the sibling two-bit state field, bits 9–10
+/// (`and r1, r0, #0x600`).
+const AUXILIARY_STATE_MASK: u32 = 0x600;
+
+/// Sibling state value required for an element to be fully shown
+/// (`cmp r1, #0x200`).
+const AUXILIARY_STATE_SHOWN: u32 = 0x200;
 
 /// ui_element_is_shown — original: `FUN_082a26c8` @ 0x082a26c8
 /// (24 bytes, extent binary-verified: the sibling flag query opens at
@@ -63,6 +75,47 @@ pub unsafe extern "C" fn ui_element_is_shown(element: *const u8) -> u32 {
     (flags & SHOWN_STATE_MASK == SHOWN_STATE_SHOWN) as u32
 }
 
+/// ui_element_is_fully_shown — original: `FUN_082a26a8` @ 0x082a26a8
+/// (32 bytes, extent binary-verified: this leaf begins immediately after
+/// the preceding function's `pop {r4, pc}` at 0x082a26a4 and the distinct
+/// sibling [`ui_element_is_shown`] begins at 0x082a26c8).
+///
+/// ```text
+/// 082a26a8  ldr    r0, [r0, #0x48]   @ flags_48
+/// 082a26ac  and    r1, r0, #0x600    @ sibling state field
+/// 082a26b0  cmp    r1, #0x200
+/// 082a26b4  andeq  r0, r0, #0x1800   @ shown-state field
+/// 082a26b8  cmpeq  r0, #0x800
+/// 082a26bc  movne  r0, #0
+/// 082a26c0  moveq  r0, #1
+/// 082a26c4  bx     lr
+/// ```
+///
+/// Returns 1 only if both two-bit fields in `flags_48` hold their shown
+/// values: bits 9–10 are `0x200` and bits 11–12 are `0x800`; otherwise
+/// returns 0. It is a pure, unguarded leaf. Decoding every ARM B/BL word in
+/// osos.dec finds exactly eight direct callers — all unconditional plain
+/// `bl` at 0x081575bc, 0x08158704, 0x0815c1e4, 0x0815c4f0, 0x081b83ec,
+/// 0x081b88c8, 0x0829bafc, and 0x082a24cc — and no data word contains its
+/// address, so it is not virtually dispatched.
+///
+/// # Algorithm
+///
+/// Load the aligned flag word at `element + 0x48`, then compare its two
+/// adjacent two-bit state fields with their shown encodings.
+///
+/// # Deliberate deviations
+///
+/// None. This is the original's predicated
+/// `(flags_48 & 0x600) == 0x200 && (flags_48 & 0x1800) == 0x800`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_is_fully_shown(element: *const u8) -> u32 {
+    let flags = element.add(FLAGS_OFFSET).cast::<u32>().read();
+    ((flags & AUXILIARY_STATE_MASK == AUXILIARY_STATE_SHOWN)
+        && (flags & SHOWN_STATE_MASK == SHOWN_STATE_SHOWN)) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +143,48 @@ mod tests {
     fn is_shown(flags: u32) -> u32 {
         let element = Element::with_flags(flags);
         unsafe { ui_element_is_shown(element.ptr()) }
+    }
+
+    fn is_fully_shown(flags: u32) -> u32 {
+        let element = Element::with_flags(flags);
+        unsafe { ui_element_is_fully_shown(element.ptr()) }
+    }
+
+    #[test]
+    fn fully_shown_requires_both_shown_states() {
+        assert_eq!(is_fully_shown(0x200 | 0x800), 1);
+
+        // Each field independently rejects its other three encodings.
+        for auxiliary in [0u32, 0x400, 0x600] {
+            assert_eq!(is_fully_shown(auxiliary | 0x800), 0, "auxiliary={auxiliary:#05x}");
+        }
+        for shown in [0u32, 0x1000, 0x1800] {
+            assert_eq!(is_fully_shown(0x200 | shown), 0, "shown={shown:#06x}");
+        }
+    }
+
+    #[test]
+    fn fully_shown_matches_predicated_arm_comparisons() {
+        // `andeq` and `cmpeq` mean the second field matters only after the
+        // first equality succeeds; the final truth table is the conjunction.
+        for auxiliary in 0u32..4 {
+            for shown in 0u32..4 {
+                let flags = (auxiliary << 9) | (shown << 11) | 0xffff_e1ff;
+                let want = (auxiliary == 1 && shown == 1) as u32;
+                assert_eq!(is_fully_shown(flags), want, "flags={flags:#010x}");
+            }
+        }
+    }
+
+    #[test]
+    fn fully_shown_reads_the_same_aligned_flag_word() {
+        let mut element = Element::with_flags(0x200 | 0x800);
+        for byte in &mut element.bytes[..FLAGS_OFFSET] {
+            *byte = 0xaa;
+        }
+        assert_eq!(unsafe { ui_element_is_fully_shown(element.ptr()) }, 1);
+        element.bytes[FLAGS_OFFSET..FLAGS_OFFSET + 4].copy_from_slice(&0x200u32.to_le_bytes());
+        assert_eq!(unsafe { ui_element_is_fully_shown(element.ptr()) }, 0);
     }
 
     #[test]
