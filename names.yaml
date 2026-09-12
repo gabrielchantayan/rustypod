@@ -9738,6 +9738,35 @@ functions:
       first.
 
 
+  # --- FreeType 2 size API ---
+  - address: 0x0804be6c
+    ghidra: FUN_0804be6c
+    name: ft_activate_size
+    size: 36
+    sig: "i32 ft_activate_size(FtSize *size)"
+    module: ft/size
+    status: ported
+    renames:
+      FUN_0804be6c: ft_activate_size
+      param_1/r0: size
+      "[size,#0x0]": face
+      "[face,#0x58]": active_size
+      "[face,#0x60]": driver
+    notes: >-
+      FreeType 2.3 FT_Activate_Size (src/base/ftobjs.c). Raw osos.dec
+      confirms the complete 36-byte body from 0x0804be6c through
+      0x0804be8c, with the next separately entered function at 0x0804be90.
+      It tests size, size->face, and face->driver, writes size to
+      face->size (+0x58) only when all are non-null, then returns 0;
+      every failed gate returns the raw immediate 0x84 and leaves the face
+      untouched. Decoding every ARM B/BL word finds exactly eight direct
+      callers, all unconditional bl at 0x08080f0c, 0x0808f35c,
+      0x08097a68, 0x0812e304, 0x0812e5c0, 0x0829a7b8, 0x0829a9f0, and
+      0x0829ab40; there are no predicated calls, tail-B targets, or aligned
+      raw address words, so it is neither caller-gated nor virtually
+      dispatched. Host tests cover null size, a missing face, a missing
+      driver preserving the old active size, and successful installation.
+
   # --- FreeType 2 character-map API ---
   - address: 0x0804c4d0
     ghidra: FUN_0804c4d0
