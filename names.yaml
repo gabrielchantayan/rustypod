@@ -56355,6 +56355,31 @@ functions:
       all 16 call sites are plain bl, with no predicated calls or tail
       branches. No NULL guards or deliberate deviations.
 
+  - address: 0x082e3d30
+    ghidra: FUN_082e3d30
+    name: fat_dirent_set_start_cluster
+    size: 24
+    sig: "void fat_dirent_set_start_cluster(const FatVolume *volume, FatDirEntry *entry, u32 start_cluster)"
+    module: fs/fat_dirent
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: entry
+      param_3/r2: start_cluster
+    notes: >-
+      FAT short-directory-entry start-cluster writer. It first truncates
+      start_cluster into entry +0x1a, then, only for format 8 (FAT32), stores
+      its upper halfword at entry +0x14. Raw extent is exactly 24 bytes:
+      0x082e3d30..0x082e3d44 ends in bx lr and the separate next function
+      begins with push {r4,r5,r6,lr} at 0x082e3d48. Every ARM B/BL word in
+      osos.dec was decoded: 8 direct call sites, 7 plain bl at 0x082e3634,
+      0x082e3668, 0x082e4270, 0x082e618c, 0x082e6484, 0x082e64cc, and
+      0x082e6728, plus one caller-gated bleq at 0x082b1d7c; no tail branches.
+      The sole predicated call means that caller elides this otherwise
+      unguarded writer when its preceding equality check fails. No deliberate
+      deviations. Host tests prove low-word truncation, high-word preservation
+      for every non-FAT32 format edge, and full FAT32 splitting.
+
   - address: 0x082e2a48
     ghidra: FUN_082e2a48
     name: fat_dirent_is_directory
