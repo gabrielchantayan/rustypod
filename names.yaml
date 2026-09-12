@@ -65726,6 +65726,39 @@ functions:
       argument forwarding for 0, 1, and 0x5a5af00d, derived/base vtable
       transitions, and verbatim statuses 0, 13, and 53.
 
+  # --- C-string-to-path facade slot +0x5c wrapper ---
+  - address: 0x08084d28
+    ghidra: FUN_08084d28
+    name: path_facade_slot_5c_from_cstr
+    size: 48
+    sig: "u32 path_facade_slot_5c_from_cstr(const u8 *path, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0/r1: path (NUL-terminated C string)
+      param_2/r1/r4: base_hint (forwarded to path_facade_slot_5c)
+      r2/r3 spill: derived StringObject stack storage
+      r4: facade-slot status across string destruction
+    notes: >-
+      Raw osos.dec decoding confirms the exact 48-byte extent: twelve ARM
+      instructions from 0x08084d28 through 0x08084d54, followed immediately
+      by the distinct path_facade_slot_5c entry at 0x08084d58. The wrapper
+      saves arg2 in r4, constructs a derived path object in its r2/r3 spill
+      slots through ported path_object_construct @ 0x08279284, calls the
+      already-ported path_facade_slot_5c with the constructor return and
+      saved base_hint, preserves the status in r4, then destroys the original
+      spill storage through ported string_object_destroy_veneer @ 0x082792fc.
+      Full-image decoding of every ARM B/BL immediate finds exactly eight
+      direct BL callers: seven unconditional at 0x0805a8a4, 0x080b544c,
+      0x080b5984, 0x08113e6c, 0x0811c5b0, 0x08265828, and 0x08266980, plus
+      one blne at 0x08236b58; 0x08236cac is the sole direct B tail caller.
+      The predicated call gates this wrapper only at that caller; this body has
+      no NULL/path guard. The +0x5c operation's identity remains unresolved,
+      so the port uses its existing direct Rust port and adds no invented
+      dispatch seam. Host tests cover nonempty C-string construction, derived
+      path-vtable delivery, scoped guard/slot/destruction ordering, base_hint
+      values 0, 1, and 0x5a5af00d, and verbatim statuses 0, 7, and
+      0xdeadbeef.
   # --- Scoped facade path slot +0x5c operation ---
   - address: 0x08084d58
     ghidra: FUN_08084d58

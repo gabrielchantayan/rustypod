@@ -110,7 +110,8 @@
 
 use core::mem::MaybeUninit;
 
-use crate::cxx::string_object::StringObject;
+use crate::app::path_object_construct::path_object_construct;
+use crate::cxx::string_object::{string_object_destroy_veneer, StringObject};
 
 use crate::kernel::sync_mutex::{mutex_unlock_counted, CountedMutex};
 #[cfg(target_os = "none")]
@@ -575,12 +576,50 @@ pub unsafe extern "C" fn path_facade_slot_5c(path: *const u8, base_hint: u32) ->
     guard_dtor_fn()(guard);
     status
 }
+/// path_facade_slot_5c_from_cstr — original: `FUN_08084d28` @
+/// **0x08084d28** (48 bytes; **8 direct `bl` call sites**: 7
+/// unconditional and 1 `blne`, plus 1 tail `b`, verified by decoding every
+/// ARM `B`/`BL` word in `osos.dec`).
+///
+/// Constructs a two-word derived [`StringObject`] path object in its r2/r3
+/// spill slots from `path`, calls [`path_facade_slot_5c`] with the
+/// constructor's returned pointer and `base_hint`, then destroys the original
+/// stack storage through [`string_object_destroy_veneer`]. Returns the
+/// guarded facade-slot status verbatim. The direct call sites are
+/// 0x0805a8a4, 0x080b544c, 0x080b5984, 0x08113e6c, 0x0811c5b0,
+/// 0x08236b58 (`blne`), 0x08265828, and 0x08266980; 0x08236cac
+/// tail-branches here. The `blne` is a caller-side gate; the wrapper has no
+/// NULL or path guard in its own raw instruction sequence.
+///
+/// # Deliberate deviations
+///
+/// The slot +0x5c operation's concrete semantic identity is unresolved, so
+/// this wrapper retains its structural name and calls the already-ported
+/// [`path_facade_slot_5c`] directly rather than inventing another dispatch
+/// seam. Its pointer ABI is identical on ARM: the constructed
+/// `StringObject *` occupies r0 where that sibling accepts its opaque path
+/// pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_5c_from_cstr(
+    path: *const u8,
+    base_hint: u32,
+) -> u32 {
+    let mut storage = MaybeUninit::<StringObject>::uninit();
+    let storage = storage.as_mut_ptr();
+    let path_object = path_object_construct(storage, path);
+    let status = path_facade_slot_5c(path_object as *const u8, base_hint);
+    string_object_destroy_veneer(storage);
+    status
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
+    use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
+    use crate::cxx::string_object::{StringObjectOps, STRING_OBJECT_OPS, STRING_OBJECT_VTABLE};
 
     /// Serializes tests that swap the four probe seams (the
     /// vtable_query.rs `SLOT_TEST_LOCK` precedent). `pub(crate)` so
@@ -618,6 +657,28 @@ pub(crate) mod tests {
         }
     }
 
+    /// Restores the shared StringObject release slot if a wrapper assertion
+    /// aborts before its temporary storage is inspected.
+    struct StringObjectOpsGuard {
+        saved_ops: StringObjectOps,
+    }
+
+    impl StringObjectOpsGuard {
+        unsafe fn new() -> Self {
+            StringObjectOpsGuard {
+                saved_ops: core::ptr::addr_of!(STRING_OBJECT_OPS).read_volatile(),
+            }
+        }
+    }
+
+    impl Drop for StringObjectOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(self.saved_ops);
+            }
+        }
+    }
+
     // Event tags for the call-order recording.
     const EVENT_GUARD_CTOR: u8 = 1;
     const EVENT_FETCH: u8 = 2;
@@ -626,6 +687,7 @@ pub(crate) mod tests {
     /// A vtable slot OTHER than +0x50 fired — the port read the wrong
     /// word.
     const EVENT_WRONG_SLOT: u8 = 5;
+    const EVENT_STRING_RELEASE: u8 = 6;
 
     static mut EVENTS: [u8; 16] = [0; 16];
     static mut EVENT_COUNT: usize = 0;
@@ -643,6 +705,9 @@ pub(crate) mod tests {
     /// The status the recording query hands back.
     static mut QUERY_RESULT: u32 = 0;
     static mut QUERY_PATH: *const u8 = core::ptr::null();
+    static mut QUERY_PATH_VTABLE: usize = 0;
+    static mut RELEASED_STORAGE: *mut StringObject = core::ptr::null_mut();
+    static mut RELEASED_VTABLE: usize = 0;
 
     /// The mock facade and its vtable; every slot begins as the wrong-slot
     /// trap. Individual tests install their expected query slot. Laid out at
@@ -709,6 +774,17 @@ pub(crate) mod tests {
         QUERY_RESULT
     }
 
+    unsafe extern "C" fn recording_path_object_facade_slot_5c(
+        facade: *mut FacadeObject,
+        path: *const u8,
+    ) -> u32 {
+        record(EVENT_QUERY);
+        QUERY_FACADE = facade;
+        QUERY_PATH = path;
+        QUERY_PATH_VTABLE = (*(path as *const StringObject)).vtable as usize;
+        QUERY_RESULT
+    }
+
     unsafe extern "C" fn recording_wrong_slot(
         _facade: *mut FacadeObject,
         _path_object: *mut StringObject,
@@ -723,6 +799,12 @@ pub(crate) mod tests {
         record(EVENT_GUARD_DTOR);
         DTOR_THIS = this;
         this
+    }
+
+    unsafe extern "C" fn recording_release(this: *mut StringObject) {
+        record(EVENT_STRING_RELEASE);
+        RELEASED_STORAGE = this;
+        RELEASED_VTABLE = (*this).vtable as usize;
     }
 
     /// Resets the recording state, installs the recording mocks, and lays
@@ -742,6 +824,9 @@ pub(crate) mod tests {
         QUERY_PATH_OBJECT = core::ptr::null_mut();
         DTOR_THIS = core::ptr::null_mut();
         QUERY_PATH = core::ptr::null();
+        QUERY_PATH_VTABLE = 0;
+        RELEASED_STORAGE = core::ptr::null_mut();
+        RELEASED_VTABLE = 0;
         QUERY_RESULT = 0;
         let vtable = core::ptr::addr_of_mut!(MOCK_VTABLE);
         for slot in 0..FACADE_VTABLE_SLOTS {
@@ -918,6 +1003,52 @@ pub(crate) mod tests {
         let _restore = unsafe { SeamGuard::new() };
         unsafe {
             assert_eq!(path_facade_slot_5c(b"unused".as_ptr(), 0), 0);
+        }
+    }
+
+    #[test]
+    fn cstr_wrapper_constructs_path_calls_slot_5c_and_destroys_storage() {
+        let _path_lock = take_lock();
+        let _string_lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _string_ops_restore = unsafe { StringObjectOpsGuard::new() };
+        let _restore = unsafe { SeamGuard::new() };
+        const PATH: &[u8] = b"iPod_Control/Device/radio\0";
+
+        unsafe {
+            for (base_hint, status) in [(0u32, 0u32), (1, 7), (0x5a5a_f00d, 0xdead_beef)] {
+                install_recording();
+                (*core::ptr::addr_of_mut!(MOCK_VTABLE)).slots[FACADE_PATH_SLOT_5C_INDEX] =
+                    recording_path_object_facade_slot_5c as usize;
+                let mut ops = core::ptr::addr_of!(STRING_OBJECT_OPS).read_volatile();
+                ops.release_payload = recording_release;
+                core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(ops);
+                QUERY_RESULT = status;
+
+                assert_eq!(path_facade_slot_5c_from_cstr(PATH.as_ptr(), base_hint), status);
+                assert_eq!(
+                    &EVENTS[..EVENT_COUNT],
+                    &[EVENT_GUARD_CTOR, EVENT_FETCH, EVENT_QUERY, EVENT_GUARD_DTOR, EVENT_STRING_RELEASE],
+                    "the constructed path is scoped around the guarded operation"
+                );
+                assert_eq!(CTOR_HINT, base_hint, "the wrapper forwards arg2 through r4");
+                assert_eq!(
+                    QUERY_PATH_VTABLE,
+                    crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS,
+                    "the facade receives the derived path object, not the input C string"
+                );
+                assert_eq!(
+                    RELEASED_STORAGE as *const u8,
+                    QUERY_PATH,
+                    "the veneer destroys original r2/r3 storage after the call"
+                );
+                assert_eq!(
+                    RELEASED_VTABLE,
+                    &STRING_OBJECT_VTABLE as *const _ as usize,
+                    "the veneer restores the base StringObject vtable before release"
+                );
+            }
         }
     }
 
