@@ -542,6 +542,11 @@ pub mod hints {
     // 0x8c00_0000: dedicated to app/descriptor_attachment's raw-u32 owner,
     // descriptor, and link fixtures; mappings never unmap.
     pub const DESCRIPTOR_ATTACHMENT: usize = 0x8c00_0000;
+    // 0x5300_0000 and 0x5400_0000: dedicated to the cxx shared-handle
+    // initializer and its vtable-owner constructor fixtures; mappings never
+    // unmap, so each mapping site has its own hint.
+    pub const SHARED_HANDLE_INITIALIZE: usize = 0x5300_0000;
+    pub const VTABLE_SHARED_HANDLE_CONSTRUCT: usize = 0x5400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
