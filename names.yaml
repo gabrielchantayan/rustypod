@@ -67348,3 +67348,32 @@ functions:
       than creating a second host stub. Host tests cover reader failure before
       the volume dereference, ABI forwarding, FAT12 endpoints, FAT32 high-nibble
       masking plus its exact sentinel, and FAT16-style reserved endpoints.
+  - address: 0x082d38f4
+    ghidra: FUN_082d38f4
+    name: opaque_descriptor_convert
+    size: 12
+    sig: "i32 opaque_descriptor_convert(void *source, void **output_slot)"
+    module: cxx/opaque_descriptor_convert
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: output_slot
+      DAT_082d38fc/r2: opaque_descriptor_0x089063e8
+      FUN_0803b3b8: generic_descriptor_convert_engine
+      return/r0: conversion_result
+    notes: >-
+      Raw osos.dec proves a 12-byte extent, not Ghidra's reported 8:
+      0x082d38f4 ldr r2,[pc]; 0x082d38f8 b 0x0803b3b8; and the
+      function-local literal 0x089063e8 at 0x082d38fc. The separately linked
+      sibling begins at 0x082d3900. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly eight inbound direct calls, all unconditional
+      plain bl at 0x080af15c, 0x080af16c, 0x080af270, 0x080af280,
+      0x08272a84, 0x08272aac, 0x082d4694, and 0x082d46a4; there are no
+      predicated BL forms or direct tail branches. No aligned DATA word in
+      osos.dec contains this entry. It replaces incoming r2 with the opaque
+      descriptor then tail-branches to unported generic engine 0x0803b3b8,
+      forwarding source and the optional output-slot unchanged and returning
+      that engine's r0 result. The concrete descriptor and engine identities
+      remain unrecovered, so none were invented. ARM global assembly preserves
+      the three raw words and tail edge; host tests use a volatile callback
+      seam because the retail engine is unmapped. match.py reviewed.
