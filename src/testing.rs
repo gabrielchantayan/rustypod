@@ -426,6 +426,10 @@ pub mod hints {
     // 0xb900_0000: dedicated to ft/buffer_skip's raw-u32 buffered-stream
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BUFFERED_STREAM_SKIP: usize = 0xb900_0000;
+    // 0xbe00_0000: dedicated to app/scoped_context's raw-u32 'plst'
+    // selection-source fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SERVICE_CONTEXT_SELECTION_CONSTRUCT: usize = 0xbe00_0000;
     // 0xa600_0000: dedicated to cxx/streambuf_slot_peek_equal's raw-u32
     // context, slot, and stream-buffer fixtures; mappings never unmap, so no
     // other user may share this hint.

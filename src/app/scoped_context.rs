@@ -1,6 +1,6 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Eleven helpers are ported here, all from the 0x0812/0x0826/
+//! throw away. Twelve helpers are ported here, all from the 0x0812/0x0826/
 //! 0x0827 framework clusters that also hold the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
@@ -10,6 +10,7 @@
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //! - [`scoped_context_copy_fields`] — `FUN_08270418` @ 0x08270418.
 //! - [`copy_service_context_selection`] — `FUN_0812c75c` @ 0x0812c75c.
+//! - [`service_context_selection_construct`] — `FUN_082a5ee4` @ 0x082a5ee4.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
 //! - [`scoped_context_is_valid`] — `FUN_082a3dcc` @ 0x082a3dcc, an
@@ -211,21 +212,44 @@ pub struct ServiceContextProvider {
     service_context: *mut ServiceContext,
 }
 
-/// The opaque service context consumed by
-/// [`copy_service_context_selection`].
+/// The opaque service context whose selection source begins at +0x14.
 ///
-/// Its selection source starts at +0x14. The actual type and contents do not
-/// survive in the decrypted image, so it remains opaque to this port.
+/// Four target-width words precede that source. They remain unnamed because
+/// the constructor reads none of them.
 #[repr(C)]
 pub struct ServiceContext {
     _words_before_selection_source: [u32; 0x14 / 4],
     selection_source: ServiceContextSelectionSource,
 }
 
-/// Opaque subobject passed to the unported selection-context constructor.
+/// The service context's selection source, consumed by
+/// [`copy_service_context_selection`] and
+/// [`service_context_selection_construct`].
+///
+/// Raw ARM establishes a vtable at +0x00, a 'plst' element pointer at +0x04,
+/// and the output mode byte at +0x10. The two intervening words remain
+/// opaque.
 #[repr(C)]
 pub struct ServiceContextSelectionSource {
-    _opaque: [u8; 0],
+    /// +0x00 — polymorphic source interface.
+    pub vtable: *const ServiceContextSelectionSourceVtable,
+    /// +0x04 — 'plst' element from which the selected item is fetched.
+    pub selection_element: *mut u8,
+    _words_before_mode: [u32; 2],
+    /// +0x10 — copied to the constructed scoped-context token's mode byte.
+    pub mode: u8,
+}
+
+/// The selection source's vtable prefix used by
+/// [`service_context_selection_construct`].
+///
+/// The +0x0c slot is a source-availability predicate. Its concrete firmware
+/// target has not been identified, so this model retains the observed virtual
+/// dispatch rather than inventing one.
+#[repr(C)]
+pub struct ServiceContextSelectionSourceVtable {
+    _slots_before_selection_available: [usize; 3],
+    pub selection_available: unsafe extern "C" fn(*mut ServiceContextSelectionSource) -> u32,
 }
 
 /// Pointer-slot index of the service context inside the system root
@@ -380,61 +404,68 @@ pub unsafe extern "C" fn scoped_context_copy_fields(
     (*destination).mode = (*source).mode;
 }
 
-/// Firmware load address of the unported selection-context constructor
-/// `FUN_082a5ee4`, called directly by [`copy_service_context_selection`].
-pub const SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS: usize = 0x082a_5ee4;
-
-/// Target default for [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`]: the stock
-/// selection-context constructor at
-/// [`SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS`].
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_service_context_selection_construct(
+/// service_context_selection_construct — original: `FUN_082a5ee4` @
+/// 0x082a5ee4 (**152 bytes**, exact: the distinct next function begins with
+/// `push {r4,r5,r6,lr}` at 0x082a5f7c; **8 direct `bl` call sites**, all
+/// unconditional and binary-scanned by decoding every ARM B/BL word in
+/// `osos.dec` — no predicated forms or direct tail `b` sites).
+///
+/// Initializes `destination` as an ownerless [`ScopedContext`], then asks the
+/// selection source's vtable +0x0c availability predicate whether it may
+/// resolve an item. A false result leaves that initial token intact and does
+/// not read the source's element pointer. Otherwise, zero `selector` chooses
+/// selector 1 or 2 from element byte +0x18c bit 0; a nonzero value passes
+/// through. Element byte +0x18d bit 2 becomes the `reverse_flag` passed to
+/// [`crate::ui::plst_slot_item::ui_plst_slot_item_at`]. The selected object's
+/// flag-gated payload becomes the token owner, and source +0x10 becomes its
+/// mode.
+///
+/// Deliberate deviations: the source's vtable and element links are named
+/// `#[repr(C)]` fields, preserving their target offsets and host consistency
+/// rather than using literal byte offsets. The availability target remains a
+/// raw virtual slot because its concrete entry is not established; no callee
+/// identity is invented. The recovered signature returns void, although ARM
+/// leaves different incidental r0 values on the availability paths.
+///
+/// # Safety
+///
+/// `destination` and `selection_source` must be valid. The source's vtable
+/// must carry a callable +0x0c slot. When that slot returns nonzero, its
+/// element must be a valid 'plst' object whose selected item is a valid object
+/// for [`crate::ui::object_payload::object_payload_if_available`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn service_context_selection_construct(
     destination: *mut ScopedContext,
     selection_source: *mut ServiceContextSelectionSource,
     selection: u32,
-    mode: u32,
+    mut selector: u32,
 ) {
-    let construct: unsafe extern "C" fn(
-        *mut ScopedContext,
-        *mut ServiceContextSelectionSource,
-        u32,
-        u32,
-    ) = core::mem::transmute(SERVICE_CONTEXT_SELECTION_CONSTRUCT_ADDRESS);
-    construct(destination, selection_source, selection, mode);
+    let destination = scoped_context_construct(destination, ptr::null_mut(), 0);
+    if ((*(*selection_source).vtable).selection_available)(selection_source) == 0 {
+        return;
+    }
+
+    let element = (*selection_source).selection_element;
+    if selector == 0 {
+        selector = if element.add(0x18c).read() & 1 == 0 { 1 } else { 2 };
+    }
+    let reverse_flag = u32::from((element.add(0x18d).read() >> 2) & 1);
+    let selected = crate::ui::plst_slot_item::ui_plst_slot_item_at(
+        element,
+        selector,
+        reverse_flag,
+        selection,
+    );
+    let owner = crate::ui::object_payload::object_payload_if_available(selected as usize as *const u8);
+    let mut temporary = MaybeUninit::<ScopedContext>::uninit();
+    let temporary = scoped_context_construct(
+        temporary.as_mut_ptr(),
+        owner as usize as *mut u8,
+        (*selection_source).mode,
+    );
+    scoped_context_copy_fields(destination, temporary);
 }
-
-/// Host default for [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`]: the constructor
-/// remains unported, so an unswapped call is a test-setup error.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_service_context_selection_construct(
-    _destination: *mut ScopedContext,
-    _selection_source: *mut ServiceContextSelectionSource,
-    _selection: u32,
-    _mode: u32,
-) {
-    panic!("copy_service_context_selection requires constructor 0x082a5ee4")
-}
-
-/// Dispatch seam for `FUN_082a5ee4` @ 0x082a5ee4. The target default calls
-/// stock firmware; host tests install a recording constructor. `names.yaml`
-/// has no port entry for this callee, so it cannot be called directly.
-#[cfg(target_os = "none")]
-pub static mut SERVICE_CONTEXT_SELECTION_CONSTRUCT: unsafe extern "C" fn(
-    *mut ScopedContext,
-    *mut ServiceContextSelectionSource,
-    u32,
-    u32,
-) = firmware_service_context_selection_construct;
-
-/// Host wired default (panics; see
-/// [`missing_service_context_selection_construct`]).
-#[cfg(not(target_os = "none"))]
-pub static mut SERVICE_CONTEXT_SELECTION_CONSTRUCT: unsafe extern "C" fn(
-    *mut ScopedContext,
-    *mut ServiceContextSelectionSource,
-    u32,
-    u32,
-) = missing_service_context_selection_construct;
 
 /// copy_service_context_selection — original: `FUN_0812c75c` @ 0x0812c75c
 /// (**104 bytes total**: 16-byte entry plus an 88-byte separately linked
@@ -451,9 +482,8 @@ pub static mut SERVICE_CONTEXT_SELECTION_CONSTRUCT: unsafe extern "C" fn(
 ///
 /// Deliberate deviations: the +0x30 provider and +0x14 subobject are named
 /// `#[repr(C)]` fields backed by `u32` word arrays rather than host-invalid
-/// byte offsets. The unported `FUN_082a5ee4` is reached through the volatile
-/// [`SERVICE_CONTEXT_SELECTION_CONSTRUCT`] seam: target builds call its ROM
-/// address and host tests replace it.
+/// byte offsets. The selection constructor is ported directly, so this caller
+/// has no ROM dispatch seam.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn copy_service_context_selection(
@@ -467,8 +497,7 @@ pub unsafe extern "C" fn copy_service_context_selection(
     }
 
     let mut temporary = MaybeUninit::<ScopedContext>::uninit();
-    let construct = ptr::read_volatile(ptr::addr_of!(SERVICE_CONTEXT_SELECTION_CONSTRUCT));
-    construct(
+    service_context_selection_construct(
         temporary.as_mut_ptr(),
         ptr::addr_of_mut!((*service_context).selection_source),
         selection,
@@ -948,60 +977,84 @@ mod tests {
         }
     }
 
-    static mut SERVICE_SELECTION_CALLS: u32 = 0;
-    static mut SERVICE_SELECTION_SOURCE: *mut ServiceContextSelectionSource = ptr::null_mut();
-    static mut SERVICE_SELECTION_INDEX: u32 = 0;
-    static mut SERVICE_SELECTION_MODE: u32 = u32::MAX;
-
-    unsafe extern "C" fn recording_service_context_selection_construct(
-        destination: *mut ScopedContext,
-        selection_source: *mut ServiceContextSelectionSource,
-        selection: u32,
-        mode: u32,
-    ) {
-        SERVICE_SELECTION_CALLS += 1;
-        SERVICE_SELECTION_SOURCE = selection_source;
-        SERVICE_SELECTION_INDEX = selection;
-        SERVICE_SELECTION_MODE = mode;
-        (*destination).vtable = 0x1111_2222usize as *const ScopedContextVtable;
-        (*destination).owner_valid = 0xdead_beef;
-        (*destination).owner = 0x0102_0304usize as *mut u8;
-        (*destination).service_context = 0x0506_0708usize as *mut u8;
-        (*destination).registry_token = 0x090a_0b0cusize as *mut u8;
-        (*destination).mode = 0xff;
+    unsafe extern "C" fn selection_source_available(
+        _source: *mut ServiceContextSelectionSource,
+    ) -> u32 {
+        1
     }
 
-    /// Restores the unported selection-context constructor seam after a test.
-    struct ServiceSelectionGuard {
-        original: unsafe extern "C" fn(
-            *mut ScopedContext,
-            *mut ServiceContextSelectionSource,
-            u32,
-            u32,
-        ),
+    unsafe extern "C" fn selection_source_unavailable(
+        _source: *mut ServiceContextSelectionSource,
+    ) -> u32 {
+        0
     }
 
-    impl ServiceSelectionGuard {
-        unsafe fn install() -> Self {
-            let original =
-                ptr::addr_of!(SERVICE_CONTEXT_SELECTION_CONSTRUCT).read_volatile();
-            SERVICE_SELECTION_CALLS = 0;
-            SERVICE_SELECTION_SOURCE = ptr::null_mut();
-            SERVICE_SELECTION_INDEX = 0;
-            SERVICE_SELECTION_MODE = u32::MAX;
-            ptr::addr_of_mut!(SERVICE_CONTEXT_SELECTION_CONSTRUCT)
-                .write_volatile(recording_service_context_selection_construct);
-            Self { original }
+    static AVAILABLE_SELECTION_SOURCE_VTABLE: ServiceContextSelectionSourceVtable =
+        ServiceContextSelectionSourceVtable {
+            _slots_before_selection_available: [0; 3],
+            selection_available: selection_source_available,
+        };
+
+    static UNAVAILABLE_SELECTION_SOURCE_VTABLE: ServiceContextSelectionSourceVtable =
+        ServiceContextSelectionSourceVtable {
+            _slots_before_selection_available: [0; 3],
+            selection_available: selection_source_unavailable,
+        };
+
+    fn selection_source(
+        vtable: *const ServiceContextSelectionSourceVtable,
+        element: *mut u8,
+        mode: u8,
+    ) -> ServiceContextSelectionSource {
+        ServiceContextSelectionSource {
+            vtable,
+            selection_element: element,
+            _words_before_mode: [0; 2],
+            mode,
         }
     }
 
-    impl Drop for ServiceSelectionGuard {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::addr_of_mut!(SERVICE_CONTEXT_SELECTION_CONSTRUCT)
-                    .write_volatile(self.original);
-            }
+    /// Builds one below-4-GiB 'plst' element and its u32-linked header, slots,
+    /// selected objects, and payloads for the real ported callee chain.
+    unsafe fn selection_element_fixture() -> Option<*mut u8> {
+        const FIXTURE_LEN: usize = 0x1000;
+        let element = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SERVICE_CONTEXT_SELECTION_CONSTRUCT,
+            FIXTURE_LEN,
+        )?;
+        element.write_bytes(0, FIXTURE_LEN);
+        element.add(4).cast::<u32>().write(0x706c_7374);
+
+        let header = element.add(0x700);
+        element.add(0x40).cast::<u32>().write(header as usize as u32);
+        header.add(0x2e).cast::<u16>().write(2);
+
+        for (selector, slot_offset) in [(1usize, 0x800usize), (2, 0x840), (3, 0x880)] {
+            let slot = element.add(slot_offset);
+            element
+                .add(0x3ac)
+                .cast::<u32>()
+                .add(selector)
+                .write(slot as usize as u32);
         }
+
+        let payloads = [
+            (0x800usize, 0usize, 0x900usize, 0x1111_2222u32),
+            (0x840, 0, 0x940, 0x3333_4444),
+            (0x840, 1, 0x980, 0x3333_4444),
+            (0x880, 0, 0x9c0, 0x5555_6666),
+        ];
+        for (slot_offset, index, object_offset, payload) in payloads {
+            let object = element.add(object_offset);
+            object.add(0x1d).write(0);
+            object.add(0x20).cast::<u32>().write(payload);
+            element
+                .add(slot_offset + 0x10)
+                .cast::<u32>()
+                .add(index)
+                .write(object as usize as u32);
+        }
+        Some(element)
     }
 
     /// A token pre-filled with sentinels, so every field the constructor
@@ -1262,8 +1315,6 @@ mod tests {
 
     #[test]
     fn copy_service_context_selection_returns_without_touching_a_null_context() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _seam = unsafe { ServiceSelectionGuard::install() };
         let mut provider = ServiceContextProvider {
             _words_before_service_context: [0; 0x30 / 4],
             service_context: ptr::null_mut(),
@@ -1280,7 +1331,6 @@ mod tests {
 
         unsafe { copy_service_context_selection(&mut provider, u32::MAX, &mut destination) };
 
-        assert_eq!(unsafe { ptr::addr_of!(SERVICE_SELECTION_CALLS).read() }, 0);
         assert_eq!(
             (
                 destination.vtable,
@@ -1295,50 +1345,81 @@ mod tests {
     }
 
     #[test]
-    fn copy_service_context_selection_constructs_then_copies_only_the_payload() {
+    fn selection_construct_gates_and_resolves_default_explicit_and_reversed_selectors() {
         let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _seam = unsafe { ServiceSelectionGuard::install() };
+        let _restore = SlotGuard;
+
+        let mut unavailable_source = selection_source(
+            &UNAVAILABLE_SELECTION_SOURCE_VTABLE,
+            ptr::null_mut(),
+            0x7b,
+        );
+        let mut destination = poisoned_token();
+        unsafe { install_mock() };
+        unsafe {
+            service_context_selection_construct(&mut destination, &mut unavailable_source, 0, 0);
+        }
+        assert_eq!(unsafe { MOCK_CALLS }, 1);
+        assert_eq!(unsafe { MOCK_OWNER }, ptr::null_mut());
+        assert_eq!(destination.owner, ptr::null_mut());
+        assert_eq!(destination.mode, 0);
+
+        let Some(element) = (unsafe { selection_element_fixture() }) else {
+            assert!(crate::testing::note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        let mut source =
+            selection_source(&AVAILABLE_SELECTION_SOURCE_VTABLE, element, 0x7b);
+
+        unsafe { install_mock() };
+        unsafe { service_context_selection_construct(&mut destination, &mut source, 0, 0) };
+        assert_eq!(unsafe { MOCK_CALLS }, 2);
+        assert_eq!(unsafe { MOCK_OWNER }, 0x1111_2222usize as *mut u8);
+        assert_eq!(unsafe { MOCK_MODE_AT_CALL }, 0);
+        assert_eq!(destination.owner, 0x1111_2222usize as *mut u8);
+        assert_eq!(destination.mode, 0x7b);
+
+        unsafe {
+            element.add(0x18c).write(1);
+            element.add(0x18d).write(4);
+            install_mock();
+            service_context_selection_construct(&mut destination, &mut source, 0, 0);
+        }
+        assert_eq!(unsafe { MOCK_CALLS }, 2);
+        assert_eq!(unsafe { MOCK_OWNER }, 0x3333_4444usize as *mut u8);
+        assert_eq!(destination.owner, 0x3333_4444usize as *mut u8);
+
+        unsafe {
+            element.add(0x18d).write(0);
+            install_mock();
+            service_context_selection_construct(&mut destination, &mut source, 0, 3);
+        }
+        assert_eq!(unsafe { MOCK_CALLS }, 2);
+        assert_eq!(unsafe { MOCK_OWNER }, 0x5555_6666usize as *mut u8);
+        assert_eq!(destination.owner, 0x5555_6666usize as *mut u8);
+
         let mut service_context = ServiceContext {
             _words_before_selection_source: [0; 0x14 / 4],
-            selection_source: ServiceContextSelectionSource { _opaque: [] },
+            selection_source: selection_source(
+                &AVAILABLE_SELECTION_SOURCE_VTABLE,
+                element,
+                0x7b,
+            ),
         };
-        let selection_source = ptr::addr_of_mut!(service_context.selection_source);
         let mut provider = ServiceContextProvider {
             _words_before_service_context: [0; 0x30 / 4],
             service_context: &mut service_context,
         };
         let destination_vtable = 0x3333_4444usize as *const ScopedContextVtable;
-        let mut destination = ScopedContext {
-            vtable: destination_vtable,
-            owner_valid: 0,
-            owner: ptr::null_mut(),
-            service_context: ptr::null_mut(),
-            registry_token: ptr::null_mut(),
-            mode: 0,
-        };
-
+        destination.vtable = destination_vtable;
         unsafe {
-            copy_service_context_selection(&mut provider, 0xffff_fffe, &mut destination);
+            install_mock();
+            copy_service_context_selection(&mut provider, 0, &mut destination);
         }
-
-        let (calls, seen_source, seen_index, seen_mode) = unsafe {
-            (
-                ptr::addr_of!(SERVICE_SELECTION_CALLS).read(),
-                ptr::addr_of!(SERVICE_SELECTION_SOURCE).read(),
-                ptr::addr_of!(SERVICE_SELECTION_INDEX).read(),
-                ptr::addr_of!(SERVICE_SELECTION_MODE).read(),
-            )
-        };
-        assert_eq!(calls, 1);
-        assert_eq!(seen_source, selection_source);
-        assert_eq!(seen_index, 0xffff_fffe);
-        assert_eq!(seen_mode, 0);
+        assert_eq!(unsafe { MOCK_CALLS }, 2);
         assert_eq!(destination.vtable, destination_vtable);
-        assert_eq!(destination.owner_valid, 0xdead_beef);
-        assert_eq!(destination.owner, 0x0102_0304usize as *mut u8);
-        assert_eq!(destination.service_context, 0x0506_0708usize as *mut u8);
-        assert_eq!(destination.registry_token, 0x090a_0b0cusize as *mut u8);
-        assert_eq!(destination.mode, 0xff);
+        assert_eq!(destination.owner, 0x3333_4444usize as *mut u8);
+        assert_eq!(destination.mode, 0x7b);
     }
 
     #[test]
