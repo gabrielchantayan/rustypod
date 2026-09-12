@@ -25,6 +25,7 @@ pub mod callback_queue;
 pub mod callback_target_slot_14_dispatch;
 pub mod callback_target_slot_20_dispatch;
 pub mod command_dispatch;
+pub mod command_kind_7_enqueue;
 pub mod command_dispatch_name_callback;
 pub mod class_registry;
 pub mod descriptor_layout;

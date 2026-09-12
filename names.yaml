@@ -17053,6 +17053,36 @@ functions:
       callee. Deviation: unported FUN_080e9cbc is a fixed retailOS call on
       target and a replaceable inert seam on host. Host tests prove the
       zero/nonzero gates, argument sequence, and post-call byte store.
+  - address: 0x081df164
+    ghidra: FUN_081df164
+    name: enqueue_command_kind_7
+    size: 56
+    sig: "void enqueue_command_kind_7(CommandQueue *queue)"
+    module: app/command_kind_7_enqueue
+    status: ported
+    renames:
+      param_1: queue
+      FUN_082aadd4: operator_new
+      FUN_0839e5f8: pointer_queue_enqueue
+      FUN_081ded74: initialize_once
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw ARM confirms the exact 56-byte extent 0x081df164..0x081df19c:
+      fourteen instructions ending in `add r0,r4,#0x20; pop {r4,lr}; b
+      0x0808e2a8`; the independently linked next function starts at
+      0x081df19c. It allocates 12 bytes via the ported operator_new, writes
+      kind 7 at +0 only, enqueues the record through the ported leading
+      PointerQueue, invokes the ported shared +0x25 initialization guard, then
+      posts the mailbox slot at +0x20. Ghidra's three extra parameters are
+      dead: raw r1-r3 are never read. A full decoded B/BL scan finds exactly
+      eight inbound direct BLs, all unconditional (0x0817bc34, 0x0817bc84,
+      0x0817bcbc, 0x0817c914, 0x0817d100, 0x0817d1b4, 0x0817d3ec,
+      0x0817d4a0), with no predicated direct calls or tail branches. No
+      aligned data word contains the entry, so it is not a virtual dispatch
+      target. Deliberate deviation: Rust calls mailbox_slot_post instead of
+      tail-branching. Host test proves the sequential 12/8-byte tag-2
+      allocations, only-kind initialization, FIFO node, +0x25 guard write,
+      and mailbox token post.
   - address: 0x081df9ac
     ghidra: FUN_081df9ac
     name: command_dispatch_by_name_single_arg
