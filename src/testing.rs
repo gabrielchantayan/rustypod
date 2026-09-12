@@ -401,6 +401,10 @@ pub mod hints {
     // circular-list fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const GLOBAL_CALLBACK_UNREGISTER: usize = 0xac00_0000;
+    // 0xaf00_0000: dedicated to app/global_callback_register's raw-u32
+    // circular-list fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const GLOBAL_CALLBACK_REGISTER: usize = 0xaf00_0000;
     // 0xb600_0000: dedicated to app/vtable_set file-record teardown's
     // raw-u32 node fixture; mappings never unmap, so no other user may
     // share this hint.

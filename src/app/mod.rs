@@ -60,6 +60,7 @@ pub mod global_flag_table;
 pub mod global_identifier_slot;
 pub mod global_observer_unregister;
 pub mod global_callback_unregister;
+pub mod global_callback_register;
 pub mod handler_list_activate;
 pub mod framework_root_message_post;
 pub mod framework_root;
