@@ -60,6 +60,7 @@ pub mod raster_profile;
 pub mod range_state;
 pub mod service_manager_get;
 pub mod selector_record_address;
+pub mod selector_slot_address;
 pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
 pub mod state_flags;
