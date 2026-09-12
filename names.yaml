@@ -73138,3 +73138,32 @@ functions:
       identified. No deliberate deviations. Host tests prove zero and
       nonzero index selection, record dereference, overflow shift arithmetic,
       and no table write.
+
+  # --- Opaque object sentinel-word accessor ---
+  - address: 0x082980dc
+    ghidra: FUN_082980dc
+    name: object_word_at_d4_or_zero
+    size: 16
+    sig: "i32 object_word_at_d4_or_zero(const OpaqueObject *object)"
+    module: app/object_word_at_d4_or_zero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xd4": sentinel_word
+      iVar1/r0: sentinel_word
+    notes: >-
+      Raw osos.dec confirms Ghidra's 16-byte extent exactly: ldr
+      r0,[r0,#0xd4]; cmn r0,#1; moveq r0,#0; bx lr at
+      0x082980dc..0x082980e8, with the separately linked next function
+      starting at 0x082980ec. Complete aligned ARM B/BL-immediate decoding
+      finds exactly seven direct inbound calls, all unconditional plain bl at
+      0x08111f50, 0x08111f6c, 0x08112ba4, 0x08114658, 0x08115718,
+      0x082982f4, and 0x0829830c; there are no predicated calls or aligned
+      raw-data word references. The function reads the signed +0xd4 sentinel
+      word of an opaque object and normalizes only -1 to zero; all other i32
+      bit patterns pass through. Callers compare the result with requested
+      indices, so it is count-like, but neither its unit nor the concrete
+      object type is recovered. No deliberate deviations: the port retains
+      the unchecked aligned field read and only the original sentinel
+      normalization. Host tests cover the sentinel, zero, positive, and other
+      negative values and prove the object is not modified.
