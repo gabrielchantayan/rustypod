@@ -10,6 +10,7 @@ pub mod artwork_slot_available;
 pub mod class_6800;
 pub mod class_8780_dispatch_state;
 pub mod class_8900;
+pub mod class_8900_prid_first_byte;
 pub mod class_8900_work_queue;
 pub mod class_8900_queued_work_construct;
 pub mod clamped_mode_position;

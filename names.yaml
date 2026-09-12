@@ -16406,6 +16406,45 @@ functions:
       caveat as the other four getters - the ctor is a dispatch slot
       with a zeroing stub.
 
+  - address: 0x081ec2ec
+    ghidra: FUN_081ec2ec
+    name: class_8900_prid_first_byte
+    size: 40
+    sig: "i32 class_8900_prid_first_byte(const Class8900 *this)"
+    module: app/class_8900_prid_first_byte
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_081ec314: RESOURCE_ID_PRID
+      DAT_081ec318: RESOURCE_KIND_PRID
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      Ghidra's 40-byte count is the exact code extent
+      0x081ec2ec..0x081ec314. The following two literal words are
+      0x000060f0 (resource id) and 0x70724944 ("prID" read big-endian),
+      so the complete extent is 48 bytes through 0x081ec31c, where
+      FUN_081ec31c starts. Decoding every ARM B/BL word in osos.dec finds
+      exactly 8 direct call sites: 0x0812b098, 0x0817adec, 0x0817f5d8,
+      0x08186d14, 0x081997f4, 0x08199830, 0x0819a648, and 0x081ccf40.
+      All are unconditional bl; there are no predicated or tail-b callers.
+      No aligned data word in the image equals 0x081ec2ec, so it is not
+      virtually dispatched. Raw ARM is
+      `push {r4,lr}; ldr r0,[r0,#0x378]; ldr r2,=0x60f0;
+      ldr r1,=0x70724944; mov r4,#0; bl 0x0827216c; cmp r0,#0;
+      ldrsbne r4,[r0]; mov r0,r4; pop {r4,pc}`. Thus it queries the
+      class-0x8900 receiver's class-0x6000 store — known from the ported
+      Class8900 layout to occupy +0x378 — as a resource-provider chain
+      for ("prID", 0x60f0), returning the first answered byte sign-extended
+      to i32 or zero on a NULL answer. The resource's meaning is not
+      recovered and is intentionally not named beyond its literal tag.
+      The port reuses Class8900's existing named +0x378 field and casts its
+      Class6000 store through ResourceProvider for the decoded
+      resource_chain_find ABI; the original performs that same ABI call.
+      Host tests cover NULL answers, every signed-byte boundary (0, 1, 127,
+      -128, -1), and the exact bound kind/id pair. match.py structural
+      review is expected to differ because LLVM uses branchy NULL handling
+      and its own frame shape.
+
   - address: 0x081ec268
     ghidra: FUN_081ec268
     name: class_8900_cached_property_6031
