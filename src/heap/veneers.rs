@@ -731,6 +731,24 @@ pub unsafe extern "C" fn cxx_array_dealloc(ptr: *mut u8, _count: usize, _elem: u
     operator_delete(ptr);
 }
 
+/// operator_delete_forwarder — original: `FUN_08049398` @ 0x08049398
+/// (4 bytes; 8 unconditional `bl` call sites, no predicated forms).
+///
+/// Whole body is `b 0x082aad24`: it preserves `ptr` in r0 and tail-branches
+/// to the tag-2 [`operator_delete`]. There are no tail-branch callers or
+/// aligned data-word references to this entry; its eight direct callers
+/// therefore use it as a separately linked delete entry.
+///
+/// Deliberate deviation: Rust cannot guarantee the original tail branch, so
+/// this makes a normal call into the existing port. Its target-only section
+/// prevents folding with the otherwise equivalent `cxx_array_dealloc`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.operator_delete_forwarder")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn operator_delete_forwarder(ptr: *mut u8) {
+    operator_delete(ptr);
+}
+
 /// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
 /// (48 bytes, 223 call sites). The port lives in heap/new_handler.rs
 /// alongside the new-handler dispatch it calls with code 3; re-exported
@@ -1159,6 +1177,23 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_TAG, 2, "the tag-2 delete, not tag 3");
             cxx_array_dealloc(BLOCK_A as *mut u8, 0, usize::MAX);
             assert_eq!(FREE_CALLS, 2);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn operator_delete_forwarder_preserves_tag2_delete_behavior() {
+        let _lock = mock_heap();
+        unsafe {
+            // The one-word branch forwards NULL into operator_delete's guard.
+            operator_delete_forwarder(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0);
+            assert_eq!(CREATE_CALLS, 0);
+
+            operator_delete_forwarder(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(CREATE_CALLS, 1);
             assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 2);
         }
