@@ -409,6 +409,10 @@ pub mod hints {
     // handler and context fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const TDAT_MESSAGE_DISPATCH: usize = 0xfb00_0000;
+    // 0xf900_0000: dedicated to util/tagged_payload_read_signed_field_0x54's
+    // raw-u32 object/payload fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const TAGGED_PAYLOAD_READ_SIGNED_FIELD_0X54: usize = 0xf900_0000;
     // 0xfc00_0000: dedicated to util/object_masked_word_refresh's raw-u32
     // owner fixture; mappings never unmap, so no other user may share it.
     pub const OBJECT_MASKED_WORD_REFRESH: usize = 0xfc00_0000;

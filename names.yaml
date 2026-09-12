@@ -48936,6 +48936,35 @@ functions:
       the target layout and avoid host pointer/u32 overlap. Host tests cover
       failed lookup, a successful lookup's BMap kind/id/allocation/parser
       arguments, and the already-loaded no-op path.
+  # --- Tagged payload signed-field getter ---
+  - address: 0x082a1da8
+    ghidra: FUN_082a1da8
+    name: tagged_payload_read_signed_field_0x54
+    size: 20
+    sig: "i32 tagged_payload_read_signed_field_0x54(const u32 *object)"
+    module: util/tagged_payload_read_signed_field_0x54
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x20: tagged_payload
+      uVar1/r0: untagged_payload
+      iVar2/r0: signed_field
+    notes: >-
+      Raw ARM extent is exactly 20 bytes, from 0x082a1da8 through bx lr at
+      0x082a1db8; the next separately linked function begins at 0x082a1dbc.
+      A binary scan of every ARM B/BL word in osos.dec found seven direct
+      call sites, all unconditional bl (zero predicated forms): 0x08140f2c,
+      0x081431b0, 0x081b320c, 0x0820d73c, 0x0820ddd4, 0x08290ba8, and
+      0x08290cd0. There are no direct tail branches or aligned data-word
+      references to this address. The callee has no guard for object itself:
+      it loads the target-width word at object+0x20, clears low tag bit zero,
+      and returns zero if that produces NULL (so raw words 0 and 1 both
+      return zero). Otherwise it sign-extends and returns the i16 at
+      payload+0x54. The concrete object and payload types are unrecovered,
+      so the name records only this observed operation. The Rust port retains
+      pointer fields as u32 target words to preserve the target +0x20 layout
+      on 64-bit hosts. Host tests cover null/tag-only payload words, tag
+      clearing, and i16 sign-extension boundaries.
   # --- Tagged payload signed-field sum ---
   - address: 0x082a1d7c
     ghidra: FUN_082a1d7c
