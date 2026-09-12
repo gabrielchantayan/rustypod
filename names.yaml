@@ -67952,3 +67952,32 @@ functions:
       registered word 0x08272fac is not a function entry: raw bytes are ASCII
       URL data beginning g/00/9/xmlsig#, so the Rust shutdown handler is
       deliberately inert rather than inventing a callee.
+
+  # --- Runtime-populated single-byte Unicode case-fold map ---
+  - address: 0x08276fbc
+    ghidra: FUN_08276fbc
+    name: unicode_casefold_byte
+    size: 20
+    sig: "u32 unicode_casefold_byte(u32 codepoint)"
+    module: cxx/string_object
+    status: identified
+    renames:
+      param_1/r0: codepoint
+      DAT_08276fd0: unicode_casefold_byte_table
+    notes: >-
+      Raw osos.dec is exactly five ARM words from 0x08276fbc through bx lr at
+      0x08276fcc; the literal word at 0x08276fd0 (0x083ed1dd) belongs to this
+      function's pool and the separately linked next function begins at
+      0x08276fd4. It returns codepoint unchanged when codepoint >= 0x100;
+      otherwise it returns unicode_casefold_byte_table[codepoint & 0xff].
+      Decoding every aligned immediate ARM B/BL word in osos.dec finds exactly
+      eight inbound direct calls, all unconditional plain bl at 0x080c6d74,
+      0x080c6d80, 0x081326bc, 0x082760cc, 0x082760dc, 0x08276140,
+      0x08276150, and 0x082761a8; there are no predicated forms or direct tail
+      branches. This is deliberately identified rather than ported: the
+      literal table base is in static-image code, whose first byte is 0xf0,
+      making fold(0) nonzero and contradicting the case-insensitive UTF-8
+      comparison callers' terminator behavior. The firmware must replace or
+      relocate this 256-byte table at runtime, but that mechanism and its
+      contents are unresolved; modeling the static bytes would be fabricated
+      behavior.
