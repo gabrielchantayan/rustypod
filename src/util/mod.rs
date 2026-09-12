@@ -65,6 +65,7 @@ pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
 pub mod state_flags;
 pub mod signed_clamp_i32;
+pub mod status_code_map;
 pub mod skip_ascii_whitespace_and_comments;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
