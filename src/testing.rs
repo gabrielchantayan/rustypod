@@ -39,6 +39,9 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x0100_0000: dedicated to cxx/stream_read's target-width descriptor,
+    // complete-owner state, and reader fixture; mappings never unmap.
+    pub const CXX_STREAM_READ: usize = 0x0100_0000;
     pub const HEAP_INTEGRATION: usize = 0x0900_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
     // 0x6400_0000: dedicated to ATA command execution/submission's raw-u32

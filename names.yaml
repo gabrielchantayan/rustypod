@@ -71763,3 +71763,40 @@ functions:
       not assumed. The ARM bridge tail-branches directly to that verified,
       still-unported address; its host-only recorder proves NULL skips it,
       non-NULL forwards exactly once, and the slot word is retained.
+
+  # --- stream read through owner reader ---
+  - address: 0x083d8134
+    ghidra: FUN_083d8134
+    name: stream_read
+    size: 120
+    sig: "StreamReadOwner *stream_read(StreamReadOwner *owner, u8 *buffer, u32 requested)"
+    module: cxx/stream_read
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1/r6: buffer
+      param_3/r2/r5: requested
+      local_enabled: operation_enabled
+      iVar2/r0: completed
+      piVar1: reader
+      FUN_083d81ac: unported owner readiness helper
+      FUN_083e7898: unported owner error endpoint
+    notes: >-
+      Raw osos.dec disassembly establishes the exact 120-byte body from
+      0x083d8134 through 0x083d81a8; 0x083d81ac starts the separately linked
+      next function. This wrapper first calls the still-unported 0x083d81ac
+      with (enabled byte, owner, 1). When enabled is nonzero, it derives the
+      complete owner using the signed word at owner_descriptor - 0x0c, loads
+      the target-width reader word at complete-owner + 0x34, and calls that
+      reader's vtable slot +0x1c with (reader, buffer, requested). A
+      nonnegative result replaces owner +4; any raw u32 mismatch from
+      requested calls still-unported 0x083e7898 with (complete owner, 6).
+      Decoding every aligned ARM B/BL immediate in osos.dec finds exactly
+      seven direct inbound calls, all unconditional plain bl (zero
+      predicated and zero tail branches): 0x080745d0, 0x080745e8,
+      0x082aae4c, 0x082aaec0, 0x082aaf28, 0x082aafe4, and 0x082ab0cc.
+      The reader's concrete type and slot identity are not established, so
+      the port names only its verified read behavior. Deliberate deviation:
+      the two unported direct callees and target-width virtual function
+      pointer are one volatile host-test seam; target defaults call the
+      verified retail addresses and vtable slot directly.
