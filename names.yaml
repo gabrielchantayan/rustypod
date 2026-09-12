@@ -25413,6 +25413,40 @@ functions:
       volatile slot loads plus blx calls, while the flag-priority and
       short-circuit skeleton is preserved.
 
+  - address: 0x0838bb30
+    ghidra: FUN_0838bb30
+    name: vdbe_mem_make_writeable
+    size: 132
+    sig: "i32 vdbe_mem_make_writeable(Mem *p_mem)"
+    module: sqlite/vdbe_mem_make_writeable
+    status: ported
+    renames:
+      param_1: p_mem
+      uVar1: flags
+      FUN_0838bbb4: sqlite3VdbeMemExpandBlob
+      FUN_0838bdb0: sqlite3VdbeMemGrow
+    notes: >-
+      SQLite 3.5.9's sqlite3VdbeMemMakeWriteable (vdbemem.c). Raw extent
+      0x0838bb30..0x0838bbb4 is confirmed by the closing ldmia sp!,
+      {r4,pc} at 0x0838bbb0 and the distinct stmdb entry of
+      sqlite3VdbeMemExpandBlob at 0x0838bbb4; no literal pool. MEM_Zero
+      (0x800) first calls the already ported ExpandBlob; any nonzero
+      result maps to SQLITE_NOMEM (7). After rereading flags, only
+      MEM_Str|MEM_Blob (0x12) with z != zMalloc grows n + 2 with
+      preserve = 1. On success it writes two zero bytes at z[n] and
+      z[n + 1], then sets MEM_Term (0x20); owned or non-string/blob cells
+      are untouched. Every ARM B/BL word in osos.dec was decoded: 7
+      direct bl call sites, all unconditional, at 0x08386778,
+      0x083873e8, 0x08387540, 0x0838855c, 0x0838bb20, 0x0838bef4, and
+      0x0838c43c. The three 0x08387xxx calls lie in sqlite3VdbeExec;
+      0x08386778 is sqlite3ValueText. Deliberate deviation: typed repr(C)
+      Mem fields replace target offsets to keep host pointers disjoint.
+      Both direct callees are already ported. The existing raw-pointer
+      value_text recorder seam now defaults to this port; it remains only
+      so its host tests can observe call order. Host tests cover untouched
+      non-string cells, borrowed-string copying plus the double
+      terminator, and zero-tail expansion before the post-expansion
+      ownership check.
   - address: 0x0838bbb4
     ghidra: FUN_0838bbb4
     name: vdbe_mem_expand_blob
