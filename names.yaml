@@ -18121,6 +18121,44 @@ functions:
       being copied through the ROM memcpy veneer into a private stack image;
       the original never exposes or mutates that scratch image.
 
+  - address: 0x0828d6cc
+    ghidra: FUN_0828d6cc
+    name: configure_display_pending_nibbles
+    size: 168
+    sig: "void configure_display_pending_nibbles(Display *display, i32 selector, i32 first, i32 second, i32 third, i32 fourth)"
+    module: ui/display_pending_nibbles
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r8: selector
+      param_3/r4: first
+      param_4/r5: second
+      stack_0/r6: third
+      stack_4/r7: fourth
+      DAT_0828d76c: display_pending_selector (0x089cc8a0)
+      DAT_0828d770: display_pending_nibbles (0x089cc8b8)
+      FUN_081d8870: display_get
+      FUN_081d8d0c: display_set_pending_nibbles
+    notes: >-
+      Raw osos.dec proves the true 168-byte extent: 160 code bytes at
+      0x0828d6cc..0x0828d76c through the tail branch to 0x081d8d0c, plus
+      two literal-pool words at 0x0828d76c/0x0828d770; the separately linked
+      next function opens at 0x0828d774. Decoding every ARM B/BL immediate
+      finds exactly 7 direct callers, all unconditional bl and no tail
+      branches or predicated forms: 0x0817ae2c, 0x0817f36c, 0x0828ccc4,
+      0x0828d664, 0x0828d688, 0x0828d6a4, and 0x0828d6c4. It accepts only a
+      selector -1..1 and four values -1..15, rejecting all invalid input
+      before any state update. A NULL display becomes display_get(1); selector
+      and value -1 retain the respective byte at 0x089cc8a0 or four-byte
+      block 0x089cc8b8, while nonnegative inputs update it. It tail-calls
+      unported 0x081d8d0c with the retained selector and block. That target's
+      raw body writes selector to display+0x56, masks the four bytes into
+      +0x57..+0x5a, then raises display+0x24. 0x081d8d0c is absent from the
+      ledger, so target code uses a verified-address volatile seam and host
+      tests use a recorder; its broader identity is deliberately not inferred.
+      The runtime RW globals are modeled as crate statics rather than their
+      fixed RAM addresses. Host tests cover sentinel retention, boundary
+      rejection without a call, and NULL secondary-display fallback.
   - address: 0x0828dda0
     ghidra: FUN_0828dda0
     name: render_context_set_suspended
