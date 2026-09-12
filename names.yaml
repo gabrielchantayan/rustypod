@@ -58687,6 +58687,38 @@ functions:
       calculation, first-word liveness check, and conditional NULL result;
       LLVM makes the condition branch-based instead of predicated and adds
       its frame setup.
+  - address: 0x082e149c
+    ghidra: FUN_082e149c
+    name: drive_slot_flush_pending_writes
+    size: 84
+    sig: "u32 drive_slot_flush_pending_writes(u32 index)"
+    module: fs/drive_slot_flush
+    status: ported
+    renames:
+      param_1/r0: index
+      iVar1/r4: drive_slot
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082e14f0: first_resident_flush_phase
+      FUN_082e3be4: second_resident_flush_phase
+      drive_slot[34]/+0x88: pending_flush_indicator
+    notes: >-
+      Raw extent is exact: 0x082e149c..0x082e14ec contains 84 code bytes,
+      and the next separately entered function starts at 0x082e14f0. The
+      missing Ghidra argument is r0: raw code passes it to drive_slot_lookup.
+      A null lookup fails. A zero word at drive slot +0x88 succeeds without
+      further calls. A nonzero word calls the resident phase at 0x082e14f0,
+      then only on nonzero status the resident phase at 0x082e3be4; either
+      zero status fails and retains the word, while two nonzero statuses clear
+      it and return one. Decoding every ARM B/BL word finds seven unconditional
+      bl callers (0x082b1770, 0x082c50f0, 0x082e0650, 0x082e3414, 0x082e61a4,
+      0x082e64bc, 0x082e67c0), zero predicated calls, and one unconditional
+      tail b at 0x082e42a4. No aligned data word equals 0x082e149c, so this is
+      not virtually dispatched. The two resident phases are deliberately left
+      unnamed and unported: target builds call their verified addresses, while
+      host seams prove missing-slot, clean-slot, first-phase failure,
+      second-phase failure, and success behavior. Host suite passed 7256 tests;
+      match.py against this worktree archive reports the same lookup, pending
+      gate, ordered resident calls, conditional clear, and return paths.
   - address: 0x082c3000
     ghidra: FUN_082c3000
     name: resolve_path_drive_index
