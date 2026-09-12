@@ -38577,6 +38577,47 @@ functions:
       return sequence; the expected diff is the parent ops-table call and
       the crate frame.
 
+  - address: 0x08177fd8
+    ghidra: FUN_08177fd8
+    name: casefold_token_match_consume
+    size: 92
+    sig: "int casefold_token_match_consume(void *unused_context, const char **cursor, const char *token)"
+    module: app/token_parser
+    status: identified
+    renames:
+      param_1/r0: unused_context
+      param_2/r1/r6: cursor
+      param_3/r2/r4: token
+      iVar1/r5: token_byte_length
+      FUN_081780c4: skip_space_or_tab
+      FUN_082760f4: utf8_casefold_compare_bounded
+      FUN_08276214: utf8_next_codepoint
+      FUN_08392478: strlen
+    notes: >-
+      BLOCKED: raw osos.dec confirms the exact 92-byte extent from
+      0x08177fd8 through 0x08178030; the separately linked next function
+      begins at 0x08178034. A whole-image ARM B/BL decode finds exactly eight
+      direct callers, all unconditional bl (none predicated or tail branches):
+      0x081781b8, 0x081781d0, 0x081781ec, 0x0817820c, 0x08178224,
+      0x08178258, 0x08178270, and 0x081782a4. It first skips U+0020 and
+      U+0009 at *cursor through 0x081780c4 (which decodes then backs up one
+      UTF-8 sequence), measures token with strlen, calls the bounded UTF-8
+      case-fold comparator 0x082760f4, and, only on equality, advances
+      *cursor through that many utf8_next_codepoint calls before returning 1;
+      mismatch returns 0 without consuming the token. The byte length is
+      deliberately used as both the comparator's codepoint limit and the
+      number of consumed codepoints, so a multibyte token preserves the
+      retail over-consumption/prefix-match behavior. Faithful comparison is
+      currently impossible: 0x082760f4 folds every codepoint below 0x100
+      through 0x08276fbc's literal table pointer 0x083ed1dd. In osos.dec that
+      location contains instruction/data bytes (first bytes
+      f0 a0 e1 03; fold('A') = 0x2c and fold('a') = 0), not a case table, and
+      no initialization path establishing the runtime table is decoded. The
+      existing cxx/string_object case-fold comparator records the same
+      unresolved anomaly, so substituting ASCII lowercasing or its arbitrary
+      default seam would invent behavior. No Rust module or hook is added
+      until the runtime table is established.
+
 
   # --- Silver UI framework: root instance getter ---
 
