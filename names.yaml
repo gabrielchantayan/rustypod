@@ -16945,6 +16945,41 @@ functions:
       untouched field, registry +0x20, stack-copy key value, slot write, and
       return-this result. match.py structural review: expected frame and
       call-shape differences around the direct 0x083db8f4 boundary.
+  - address: 0x081de1f4
+    ghidra: FUN_081de1f4
+    name: keyed_event_binding_construct_with_state
+    size: 80
+    sig: "KeyedEventBinding *keyed_event_binding_construct_with_state(KeyedEventBinding *this, u32 key, u32 context, u32 state, u32 kind)"
+    module: app/keyed_event_binding
+    status: ported
+    renames:
+      param_1: this
+      param_2: key
+      param_3: context
+      param_4: state
+      param_5: kind
+      FUN_0826c5a8: rect_clear (direct, ported in ui/rect)
+      FUN_0816df60: lazy_singleton_0x3c (direct, ported in app/singletons)
+      FUN_083db8f4: element_registry_slot_for_key (direct firmware boundary)
+    notes: >-
+      Exact 80-byte extent 0x081de1f4..0x081de244: raw decoding finds the
+      standalone bx lr at 0x081de244 immediately after it; no literal pool is
+      present. Decoding every ARM B/BL word in osos.dec finds 8 call sites,
+      all unconditional bl: 0x08180c80, 0x08180e10, 0x08180f54, 0x08182e40,
+      0x08183068, 0x08183844, 0x08183864, and 0x081838d8. No predicated or
+      tail-branch sites. The constructor stores key, state, context, and the
+      low kind byte; clears its embedded Rect and word +0x20; then registers
+      this in the 0x3c element registry's map (+0x20) using a stack key copy.
+      The strb leaves bytes +0x05..+0x07 untouched. rect_clear is a direct
+      ported boundary; device builds load its pointer volatilely so LLVM keeps
+      the call instead of inlining four zero stores. lazy_singleton_0x3c is a
+      direct ported call. FUN_083db8f4 remains stock: device builds call its
+      verified entry directly, while the host-only volatile function pointer
+      proves only its observed map-slot ABI rather than inventing an identity.
+      The host test covers kind truncation, all
+      stores, untouched padding, rectangle clearing, key-copy registration,
+      slot write, and return-this. match.py structural review is expected to
+      differ around the direct 0x083db8f4 boundary.
   - address: 0x081de270
     ghidra: FUN_081de270
     name: event_code_queue_post

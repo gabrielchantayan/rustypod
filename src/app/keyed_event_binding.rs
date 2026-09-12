@@ -28,10 +28,32 @@
 //! its observed `(registry + 0x20, &key) -> writable value slot` ABI is used.
 
 use crate::app::singletons::lazy_singleton_0x3c;
-use crate::ui::rect::{rect_clear, Rect};
+use crate::ui::rect::Rect;
+#[cfg(target_os = "none")]
+use crate::ui::rect::rect_clear;
+#[cfg(not(target_os = "none"))]
+use crate::ui::rect::rect_clear;
 
 /// Target offset of the ordered-map object in the 0x3c-byte element registry.
 const ELEMENT_REGISTRY_MAP_OFFSET: usize = 0x20;
+
+// `rect_clear` must remain a call from this constructor. A volatile load
+// prevents LLVM from replacing this direct firmware boundary with four stores.
+#[cfg(target_os = "none")]
+static RECT_CLEAR: unsafe extern "C" fn(*mut Rect) = rect_clear;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn clear_binding_bounds(bounds: *mut Rect) {
+    let clear = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RECT_CLEAR)) };
+    unsafe { clear(bounds) }
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn clear_binding_bounds(bounds: *mut Rect) {
+    unsafe { rect_clear(bounds) }
+}
 
 /// The 0x24-byte record initialized by `keyed_event_binding_construct`.
 ///
@@ -131,6 +153,26 @@ unsafe fn initialize_binding(
     }
 }
 
+/// Performs the variant's stores in the order used by
+/// `keyed_event_binding_construct_with_state`.
+#[inline(always)]
+unsafe fn initialize_binding_with_state(
+    this: *mut KeyedEventBinding,
+    key: u32,
+    context: u32,
+    state: u32,
+    kind: u32,
+) {
+    unsafe {
+        (*this).key = key;
+        (*this).kind = kind as u8;
+        (*this).opaque_20 = 0;
+        (*this).context = context;
+        (*this).state = state;
+        clear_binding_bounds(core::ptr::addr_of_mut!((*this).bounds));
+    }
+}
+
 #[inline(always)]
 unsafe fn register_binding_in_element_registry(
     this: *mut KeyedEventBinding,
@@ -166,6 +208,24 @@ unsafe fn construct_in_element_registry(
     this
 }
 
+/// Performs the stock stores and registration against an already acquired
+/// element registry for the state-bearing constructor.
+#[inline(always)]
+unsafe fn construct_with_state_in_element_registry(
+    this: *mut KeyedEventBinding,
+    key: u32,
+    context: u32,
+    state: u32,
+    kind: u32,
+    registry: *mut u8,
+) -> *mut KeyedEventBinding {
+    unsafe {
+        initialize_binding_with_state(this, key, context, state, kind);
+        register_binding_in_element_registry(this, key, registry);
+    }
+    this
+}
+
 /// keyed_event_binding_construct — original: `FUN_081de158` @ 0x081de158
 /// (76 bytes; 12 unconditional `bl` call sites, binary-verified above).
 ///
@@ -184,6 +244,53 @@ pub unsafe extern "C" fn keyed_event_binding_construct(
     kind: u32,
 ) -> *mut KeyedEventBinding {
     unsafe { initialize_binding(this, key, context, kind) };
+    let registry = unsafe { lazy_singleton_0x3c() };
+    unsafe { register_binding_in_element_registry(this, key, registry) };
+    this
+}
+
+/// Construction of a keyed event binding that retains caller-supplied state.
+///
+/// `keyed_event_binding_construct_with_state` — original: `FUN_081de1f4` @
+/// **0x081de1f4** (**80 bytes**, exactly `0x081de1f4..0x081de244`; followed
+/// by the standalone `bx lr` at 0x081de244). **8 unconditional `bl` call
+/// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`:
+/// 0x08180c80, 0x08180e10, 0x08180f54, 0x08182e40, 0x08183068, 0x08183844,
+/// 0x08183864, and 0x081838d8. There are no predicated or tail-branch call
+/// sites.
+///
+/// # Algorithm
+///
+/// Stores `key`, the low byte of `kind`, `context`, and `state`; clears the
+/// embedded QuickDraw rectangle and trailing word; then registers `this` in
+/// the 0x3c element registry's map (+0x20) under a stack copy of `key`.
+/// Bytes +0x05..+0x07 remain untouched.
+///
+/// # Deliberate deviation
+///
+/// As with `keyed_event_binding_construct`, the still-stock
+/// `FUN_083db8f4` map helper is called directly on device and through the
+/// host-only injectable ABI boundary in tests. Its identity is not inferred.
+/// On device the already-ported `rect_clear` is loaded through a volatile
+/// function pointer so LLVM preserves the stock call boundary rather than
+/// inlining its four zero stores.
+///
+/// # Safety
+///
+/// `this` must designate a writable, 0x24-byte aligned binding object. The
+/// lazy 0x3c-byte element registry and its map at +0x20 must be initialized;
+/// as in retailOS, neither pointer is checked for NULL.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.keyed_event_binding_construct_with_state")]
+pub unsafe extern "C" fn keyed_event_binding_construct_with_state(
+    this: *mut KeyedEventBinding,
+    key: u32,
+    context: u32,
+    state: u32,
+    kind: u32,
+) -> *mut KeyedEventBinding {
+    unsafe { initialize_binding_with_state(this, key, context, state, kind) };
     let registry = unsafe { lazy_singleton_0x3c() };
     unsafe { register_binding_in_element_registry(this, key, registry) };
     this
@@ -270,6 +377,52 @@ mod tests {
         assert_eq!(binding.untouched_05, [0xa5; 3], "strb leaves padding alone");
         assert_eq!(binding.context, 0xdead_c0de);
         assert_eq!(binding.state, 0);
+        assert_eq!(binding.bounds, Rect::default());
+        assert_eq!(binding.opaque_20, 0);
+        unsafe {
+            assert_eq!(SEEN_MAP, registry.as_mut_ptr().add(ELEMENT_REGISTRY_MAP_OFFSET));
+            assert_eq!(SEEN_KEY, 0xfeed_beef, "the registry receives the key copy");
+            assert_ne!(
+                SEEN_KEY_POINTER,
+                ptr::addr_of!(binding.key),
+                "the retail call receives a stack key copy, not this->key",
+            );
+            assert_eq!(SLOT, ptr::addr_of_mut!(binding), "the located value slot receives this");
+            restore_slot_recorder(previous, guard);
+        }
+    }
+
+    #[test]
+    fn it_initializes_a_state_bearing_binding_and_registers_its_keyed_slot() {
+        let (guard, previous) = unsafe { install_slot_recorder() };
+        let mut registry = [0u8; 0x3c];
+        let mut binding = KeyedEventBinding {
+            key: 0,
+            kind: 0,
+            untouched_05: [0xa5; 3],
+            context: 0,
+            state: 0,
+            bounds: Rect { top: 7, left: -8, bottom: 9, right: -10 },
+            opaque_20: u32::MAX,
+        };
+
+        let result = unsafe {
+            construct_with_state_in_element_registry(
+                ptr::addr_of_mut!(binding),
+                0xfeed_beef,
+                0xdead_c0de,
+                0x2468_ace0,
+                0x1ab,
+                registry.as_mut_ptr(),
+            )
+        };
+
+        assert_eq!(result, ptr::addr_of_mut!(binding));
+        assert_eq!(binding.key, 0xfeed_beef);
+        assert_eq!(binding.kind, 0xab, "the retail strb truncates kind");
+        assert_eq!(binding.untouched_05, [0xa5; 3], "strb leaves padding alone");
+        assert_eq!(binding.context, 0xdead_c0de);
+        assert_eq!(binding.state, 0x2468_ace0);
         assert_eq!(binding.bounds, Rect::default());
         assert_eq!(binding.opaque_20, 0);
         unsafe {
