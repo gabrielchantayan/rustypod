@@ -22435,6 +22435,30 @@ functions:
       record + 4 then record + 0, restores the saved record pointer to r0,
       and returns it. The pair fields are otherwise untouched.
 
+  - address: 0x08257fa8
+    ghidra: FUN_08257fa8
+    name: cxx_string_pair_entry_destroy
+    size: 32
+    sig: "CxxStringPairRangeEntry *cxx_string_pair_entry_destroy(CxxStringPairRangeEntry *record)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: record}
+    renames:
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw ARM is exactly 32 bytes, from push {r4,lr} at 0x08257fa8 through
+      pop {r4,pc} at 0x08257fc4; the next independent function starts at
+      0x08257fc8. A complete decode of every ARM B/BL immediate in osos.dec
+      finds exactly 8 direct callers, all unconditional bl and zero
+      predicated forms. The 12-byte record has two one-word COW strings at
+      +0x00 and +0x04 plus an unexamined trailing word at +0x08. It releases
+      the second string through cxx_string_release @ 0x083d8b04, then the
+      first, restores record to r0, and returns it without writing any field.
+      It is byte-identical in behavior to cxx_string_pair_destroy @
+      0x0825c8fc; the port uses CxxStringPairRangeEntry to retain the
+      trailing target word and places this exported duplicate in a distinct
+      target text section so LLVM does not coalesce the two call targets.
+
   - address: 0x0825c91c
     ghidra: FUN_0825c91c
     name: cxx_string_pair_assign
