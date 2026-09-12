@@ -67377,3 +67377,41 @@ functions:
       remain unrecovered, so none were invented. ARM global assembly preserves
       the three raw words and tail edge; host tests use a volatile callback
       seam because the retail engine is unmapped. match.py reviewed.
+  - address: 0x082c4e84
+    ghidra: FUN_082c4e84
+    name: context_malloc
+    size: 104
+    sig: "void *context_malloc(sqlite3_context *context, i64 n_byte)"
+    module: sqlite/context_malloc
+    status: ported
+    renames:
+      param_1/r0: context
+      param_3/r2: n_byte low word
+      param_4/r3: n_byte high word
+      FUN_083911d0: sqlite3_result_error_toobig
+      FUN_083911a8: sqlite3_result_error_nomem
+      FUN_08390b14: sqlite3_malloc
+      return/r0: allocation
+    notes: >-
+      Raw osos.dec extent is exactly 104 bytes,
+      0x082c4e84..0x082c4eec: the return is pop {r4-r8,pc} at 0x082c4ee8,
+      and the distinct next function starts with push {r4-r6,lr} at
+      0x082c4eec. Decoding every immediate ARM B/BL word finds exactly eight
+      direct inbound calls, all unconditional plain bl at 0x082d2b40,
+      0x082d8dd8, 0x082e8b24, 0x082e8bf8, 0x08365410, 0x08367c88,
+      0x083944cc, and 0x08396648; there are no predicated forms or direct
+      tail branches. This is SQLite 3.5's private contextMalloc: obtain the
+      scalar callback context's embedded Mem.db at context+0x18, sign-extend
+      its aLimit[SQLITE_LIMIT_LENGTH] word at db+0x50, and compare that full
+      signed i64 ceiling with n_byte. A request strictly over the limit calls
+      sqlite3_result_error_toobig and returns NULL. Otherwise it calls
+      sqlite3_malloc with the low word; a NULL result calls
+      sqlite3_result_error_nomem only for a strictly positive i64 request.
+      The error helpers are verified real entries but absent from the ledger,
+      so the target uses fixed-address callback defaults for
+      0x083911d0/0x083911a8 while host tests install recorders; sqlite3_malloc
+      @ 0x08390b14 is already ported and called directly. Rust models the
+      AAPCS r2:r3 request as a natural i64, omitting only the ABI's unused r1
+      padding word. Host tests cover strict-limit rejection, equality at the
+      limit, and zero/negative including i64::MIN requests. match.py
+      structural review completed.

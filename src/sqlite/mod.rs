@@ -76,6 +76,7 @@ pub mod btree_lock;
 pub mod cell_size;
 pub mod change_cookie;
 pub mod column_mem;
+pub mod context_malloc;
 pub mod data_size;
 pub mod restore_cursor_position;
 pub mod dequote;
