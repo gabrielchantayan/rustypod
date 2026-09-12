@@ -67657,3 +67657,29 @@ functions:
       and reload-before-each-call behavior rather than inventing a callee.
       Host tests use a native-width structural vtable; the target build
       asserts its dispatched field remains at ARM byte offset +0x58.
+
+  # --- current indexed-record handle accessor ---
+  - address: 0x0829e1b4
+    ghidra: FUN_0829e1b4
+    name: current_record_handle
+    size: 36
+    sig: "u32 current_record_handle(const CurrentRecordCursor *cursor)"
+    module: app/current_record_handle
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_1+0x04: records
+      param_1+0x08: current_index
+      field_+0x04: handle
+    notes: >-
+      Raw osos.dec gives the exact 36-byte extent 0x0829e1b4..0x0829e1d8:
+      the next separately linked function starts at 0x0829e1d8. The routine
+      returns zero only when cursor->current_index is -1; otherwise it returns
+      the word at cursor->records + current_index * 0x14 + 4, with modulo-32-bit
+      add arithmetic and no NULL or bounds guards. Decoding every ARM B/BL
+      immediate in osos.dec finds exactly eight inbound direct calls, all
+      unconditional plain bl at 0x081af640, 0x081c836c, 0x081c84f4,
+      0x081c857c, 0x081c85fc, 0x081c86e8, 0x081c8820, and 0x081c8908; there
+      are zero predicated bl calls. A ninth inbound branch is the unconditional
+      tail b at 0x0829dd2c, whose preceding add r0,r0,#4 adapts a containing
+      object to this cursor layout. No aligned DATA word names this entry.
