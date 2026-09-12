@@ -1408,6 +1408,60 @@ pub unsafe extern "C" fn string_object_append(
     string_object_insert_cstr(this, i32::MAX, source);
     this
 }
+
+/// string_object_append_line — original: `FUN_0809d8b0` @ 0x0809d8b0
+/// (80 bytes, all code; the next function begins at 0x0809d900; **8 direct
+/// `bl` call sites**, all unconditional, binary-scanned).
+///
+/// Appends a nonempty `line` to `this`, separating it with a line feed when
+/// `this` is already nonempty. The initial `utf8_codepoint_count_safe` check
+/// reads `line.payload` directly, so a NULL payload, an empty string, or a
+/// malformed lead which the retail decoder reports as zero causes an early
+/// return before `this` is read. A nonempty destination similarly means a
+/// nonzero *codepoint* count, not merely a non-NULL payload: only then does
+/// this append code unit `0x0a`. It subsequently obtains `line` through the
+/// NULL-safe C-string accessor and inserts it at `INT_MAX`.
+///
+/// Raw ARM:
+///
+/// ```text
+/// ldr r0, [r1, #4]       ; line->payload (no empty-string substitution)
+/// bl  0x082770e0         ; utf8_codepoint_count_safe
+/// cmp r0, #0
+/// popeq {r4,r5,r6,pc}    ; line is empty
+/// ldr r0, [r4, #4]       ; this->payload
+/// bl  0x082770e0
+/// cmp r0, #0
+/// movne r1, #10
+/// movne r0, r4
+/// blne 0x082768e8        ; append line feed only to a nonempty destination
+/// mov r0, r5
+/// bl  0x082a50b0         ; string_object_c_str(line)
+/// mov r2, r0
+/// mov r0, r4
+/// mvn r1, #0x80000000    ; INT_MAX
+/// b   0x08276a18         ; string_object_insert_cstr
+/// ```
+///
+/// No NULL guard exists for either object pointer once its corresponding
+/// payload is read. No self-append snapshot is made: if `this == line`, the
+/// optional line-feed insertion completes before the source C string is
+/// obtained, exactly as in the firmware. All four callees are existing Rust
+/// ports; no dispatch seam or other deliberate deviation is needed.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_append_line(
+    this: *mut StringObject, line: *const StringObject,
+) {
+    if utf8_codepoint_count_safe((*line).payload) == 0 {
+        return;
+    }
+    if utf8_codepoint_count_safe((*this).payload) != 0 {
+        string_object_append_code_unit(this, 10);
+    }
+    string_object_insert_cstr(this, i32::MAX, string_object_c_str(line));
+}
+
 /// string_object_concatenate — original: `FUN_082aade4` @ 0x082aade4
 /// (56 bytes; **13 direct `bl` call sites**, all unconditional, zero
 /// predicated, binary-scanned).
@@ -4602,6 +4656,45 @@ pub(crate) mod tests {
         let _bench = insert_bench(out.as_mut_ptr());
         assert_eq!(unsafe { string_object_append(this, this) }, this);
         assert_eq!(&out[..7], b"abcabc\0");
+    }
+
+    #[test]
+    fn append_line_skips_empty_lines_and_separates_nonempty_ones() {
+        let mut target = [0u8; 32];
+        target[..6].copy_from_slice(b"title\0");
+        let mut line_bytes = *b"artist\0";
+        let line = StringObject { vtable: core::ptr::null(), payload: line_bytes.as_mut_ptr() };
+        let null_line = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        let empty_line = StringObject { vtable: core::ptr::null(), payload: b"\0".as_ptr() as *mut u8 };
+        let malformed_line_bytes = [0xf0, 0x80, 0x80, 0];
+        let malformed_line = StringObject {
+            vtable: core::ptr::null(),
+            payload: malformed_line_bytes.as_ptr() as *mut u8,
+        };
+        let mut object = StringObject { vtable: core::ptr::null(), payload: target.as_mut_ptr() };
+        let mut out = [0xa5; 32];
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe {
+            string_object_append_line(core::ptr::null_mut(), &null_line);
+            string_object_append_line(&mut object, &null_line);
+            string_object_append_line(&mut object, &empty_line);
+            string_object_append_line(core::ptr::null_mut(), &malformed_line);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+
+            string_object_append_line(&mut object, &line);
+        }
+        assert_eq!(&out[..13], b"title\nartist\0");
+        assert!(out[13..].iter().all(|&byte| byte == 0xa5));
+        assert_eq!(&target[..6], b"title\0");
+        assert_eq!(&line_bytes, b"artist\0");
+
+        let mut empty_target = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe { string_object_append_line(&mut empty_target, &line) };
+        assert_eq!(&out[..7], b"artist\0");
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 3);
     }
 
     #[test]
