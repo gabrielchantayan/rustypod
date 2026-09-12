@@ -56315,6 +56315,43 @@ functions:
       including unreachable high mask bits and the zero mask, and the
       NULL base + index 0 case.
 
+  - address: 0x082e1098
+    ghidra: FUN_082e1098
+    name: find_zero_cache_position
+    size: 84
+    sig: "u32 find_zero_cache_position(void *cache, u32 start, u32 end)"
+    module: fs/zero_cache_position
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: start
+      param_3/r2: end
+      local_18/[sp]: value
+      FUN_082e0cac: read_cache_position_value (unported resident boundary)
+    notes: >-
+      Raw extent is exactly 84 code bytes from 0x082e1098 through the
+      `pop {r3,r4,r5,r6,r7,pc}` at 0x082e10e8; the next separately entered
+      function opens `push {r4,r5,r6,r7,r8,r9,sl,fp,lr}` at 0x082e10ec.
+      The unsigned `cmp start,end; bcc` loop calls unported
+      FUN_082e0cac(cache, start, &value). A zero call result aborts with
+      zero; a successful zero value returns start; every other successful
+      value increments start. Reaching the exclusive end returns zero.
+      Therefore result zero intentionally conflates failure/not-found with a
+      successful match at position zero. Decoding every ARM B/BL word in
+      osos.dec finds exactly eight direct calls, all unconditional plain bl
+      (0x082dff24, 0x082dff4c, 0x082dff78, 0x082dff90, 0x082dffa8,
+      0x082e0294, 0x082e02ac, 0x082e02c4), with zero predicated forms; no
+      caller flag-gates the search. FUN_082e0cac has no names.yaml entry, so
+      it remains an explicit resident boundary: target builds call its
+      verified address 0x082e0cac and host tests install a recorder rather
+      than inventing its identity. The original leaves its stack output word
+      uninitialized before the call, but the decoded helper writes it on
+      every successful path; Rust initializes that local solely to make the
+      same successful contract defined. Host tests prove first-match
+      selection, reader argument progression and cache forwarding,
+      reader-failure short-circuiting, end exhaustion, empty/reversed
+      unsigned ranges, and the zero-position ambiguity.
+
   - address: 0x082e3774
     ghidra: FUN_082e3774
     name: volume_table_capacity

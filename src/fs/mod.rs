@@ -23,6 +23,8 @@ pub mod cache_block_prepare;
 pub mod cache_entry_flush;
 /// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
 pub mod cache_page;
+/// Searches a cache-position range for its first zero value @ 0x082e1098.
+pub mod zero_cache_position;
 /// Cache lock semaphore release @ 0x082d7944.
 pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
