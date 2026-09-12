@@ -64937,6 +64937,45 @@ functions:
       both bytes, every meaningful flag-bit state, byte extremes, and
       read-only behavior.
 
+  # --- Stream-window request dispatch ---
+  - address: 0x0822adb0
+    ghidra: FUN_0822adb0
+    name: stream_window_dispatch_request
+    size: 112
+    sig: "u32 stream_window_dispatch_request(StreamWindowRequestState *state, u32 request_arg_1, u32 maximum_window_length, u32 request_arg_3, u32 request_arg_4, u32 request_arg_5, u32 request_arg_6, u32 request_arg_7)"
+    module: app/stream_window_dispatch_request
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: request_arg_1
+      param_3/r2: maximum_window_length
+      param_4/r3: request_arg_3
+      param_5/stack: request_arg_4
+      param_6/stack: request_arg_5
+      param_7/stack: request_arg_6
+      param_8/stack: request_arg_7
+      "state+0x14": request_interface
+      "state+0x24": request_flags
+      "state+0x2c": maximum_window_length
+      "request_interface->vtable+0x54": dispatch_request (unidentified virtual target)
+    notes: >-
+      Raw ARM establishes the exact 112-byte extent from 0x0822adb0 through
+      0x0822ae1c; the next separately linked function starts at 0x0822ae20.
+      It loads state+0x14 and reads state+0x24 only when that pointer is
+      non-NULL. A NULL interface or clear flag bit 0 returns zero without
+      dispatch. Otherwise it calls vtable slot +0x54 with the interface and
+      all seven supplied arguments, normalizes any nonzero result to one, and
+      writes the second forwarded argument to state+0x2c only on success.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly eight inbound
+      direct bl callers, all unconditional and no predicated forms:
+      0x081b7dec, 0x081cc92c, 0x081cca30, 0x081cce40, 0x081ccfa4,
+      0x0820a490, 0x082202e0, and 0x0822050c. There are no direct tail
+      branches or aligned DATA words to this entry. The virtual target is not
+      independently identified, so the port dispatches its observed slot
+      directly without adding a callee seam. No behavioral deviation; host
+      tests use pointer-width vtable fixtures while target layout preserves
+      the observed 32-bit offsets.
+
   # --- Mode-selected stream position ---
   - address: 0x0822aecc
     ghidra: FUN_0822aecc
