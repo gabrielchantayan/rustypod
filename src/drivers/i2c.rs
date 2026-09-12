@@ -23,9 +23,9 @@
 //!    [`pmu_i2c_read_bank`]: bank 0 selects register block 0x59 (RTC
 //!    time), bank 1 block 0x60 (alarm), any other bank returns 9 (bad
 //!    bank) with the buffer untouched; a valid bank tail-branches into
-//!    `FUN_0836d3b8(reg, 7, buf)`, which writes the register address
-//!    to I2C slave 0x73 (the PCF50635 PMU) via FUN_0836bb84 and reads
-//!    7 bytes back via FUN_0836b950 — the S5L8702 I2C hardware.
+//!    [`pmu_i2c_read`] (`FUN_0836d3b8`), which writes the register address
+//!    to I2C slave 0x73 and reads seven bytes through the still-unported
+//!    S5L8702 I2C primitives FUN_0836bb84 and FUN_0836b950.
 //! 4. The mirror thunks release in reverse order: `bl 0x080645a8`
 //!    (`mov r0, #5; b 0x08037e10` — rom_sem_signal(5)) then
 //!    `bl 0x08064604` (`mov r0, #0x11; b 0x08037e10` —
