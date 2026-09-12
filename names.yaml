@@ -68462,3 +68462,29 @@ functions:
       data word references this entry. Target builds transfer directly to
       0x082d1134; host tests replace only that unported boundary and record
       both the exact count/handle forwarding and the tag-2 deletion.
+
+  # --- opaque u16-pair buffer append ---
+  - address: 0x0826c8b8
+    ghidra: FUN_0826c8b8
+    name: opaque_u16_pair_buffer_append
+    size: 40
+    sig: "void opaque_u16_pair_buffer_append(OpaqueU16PairBuffer *buffer, u16 first, u16 second)"
+    module: app/opaque_u16_pair_buffer
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: first
+      param_3/r2: second
+      iVar1/r3: entry_count
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent from the ldr r3,
+      [r0,#0xfac] at 0x0826c8b8 through bx lr at 0x0826c8dc; the separately
+      linked next function begins at 0x0826c8e0. It treats buffer+0x0c as
+      four-byte {u16,u16} entries, stores first/second in entry_count from
+      buffer+0xfac, then increments that word with no NULL or capacity guard.
+      Decoding every aligned immediate ARM B/BL word in osos.dec finds exactly
+      8 inbound direct calls, all unconditional plain bl at 0x081a2a58,
+      0x081a2a68, 0x081a2a78, 0x081a2a88, 0x081a2a98, 0x081a2aa8,
+      0x081a2ab8, and 0x081a2ac8; there are no predicated bl forms or direct
+      tail-branch callers. They append alternating (540,200) and (676,400)
+      pairs four times. No deliberate deviations.
