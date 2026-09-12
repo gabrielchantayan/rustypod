@@ -489,6 +489,10 @@ pub mod hints {
     // profile-pointer fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LAYOUT_STATE_ACTIVATE: usize = 0x8a00_0000;
+    // 0x8800_0000: dedicated to kernel/clock_snapshot_trace's raw-u32
+    // clock-snapshot chain fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const CLOCK_SNAPSHOT_TRACE: usize = 0x8800_0000;
     // 0x8900_0000: dedicated to fs/fat_cursor's target-width cursor-state,
     // FAT-volume, and directory-entry fixture; mappings never unmap, so no
     // other user may share this hint.
