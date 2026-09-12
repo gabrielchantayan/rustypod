@@ -476,6 +476,10 @@ pub mod hints {
     pub const DEFERRED_OWNER_CHILD_RELEASE_BLOCKED: usize = 0x0500_0000;
     pub const DEFERRED_OWNER_CHILD_ABSENT: usize = 0x0600_0000;
     pub const DEFERRED_OWNER_CHILD_SIGNED: usize = 0x0700_0000;
+    // 0xec00_0000: dedicated to app/current_record_handle's raw-u32 record
+    // array fixture; mappings never unmap, so no other user may share it.
+    pub const CURRENT_RECORD_HANDLE: usize = 0xec00_0000;
+
 
 }
 
