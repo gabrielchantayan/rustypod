@@ -64850,6 +64850,41 @@ functions:
       connection forwarding, healthy result masking, and the `mallocFailed`
       result replacement.
 
+  # --- opaque keyed collection item count ---
+  - address: 0x0829e2e0
+    ghidra: FUN_0829e2e0
+    name: opaque_keyed_collection_item_count
+    size: 24
+    sig: "u32 opaque_keyed_collection_item_count(const void *collection, u32 selector)"
+    module: app/opaque_keyed_collection_item_count
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: selector
+      FUN_0829e310: opaque_keyed_collection_vector_select
+      "vector+0x00": begin
+      "vector+0x04": end
+      "end-begin": byte_span
+    notes: >-
+      Raw osos.dec confirms the 24-byte extent: push {r4,lr}; bl 0x0829e310;
+      ldm r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#2; pop {r4,pc}, from
+      0x0829e2e0 through 0x0829e2f4. The next separately entered function
+      begins at 0x0829e2f8; no literal-pool word belongs to this body.
+      Decoding every ARM B/BL immediate in osos.dec found exactly eight direct,
+      unconditional plain bl callers — 0x0817eadc, 0x0817ec04, 0x0817fb40,
+      0x0817fb50, 0x0817fe1c, 0x0817fe2c, 0x0818225c, and 0x081836dc — with
+      no predicated calls. No 32-bit data word in osos.dec equals 0x0829e2e0.
+      The wrapper passes collection and selector unchanged to unported
+      FUN_0829e310, then returns the signed target-width `(end - begin) >> 2`
+      from that vector head; it has no NULL guard or writes. No concrete
+      collection or selector identity is claimed. Deliberate deviation:
+      instead of a new stub, the port reuses opaque_keyed_collection_item_at's
+      existing retail-address/host-test selector seam; names.yaml has no port
+      for 0x0829e310. Host tests prove selector forwarding, normal counts,
+      zero count, signed underflow, and read-only vector-head access. match.py
+      structural review is expected to differ because Rust loads the seam
+      through a static rather than issuing the retail bl.
+
   # --- opaque keyed collection indexed accessor ---
   - address: 0x0829e2f8
     ghidra: FUN_0829e2f8

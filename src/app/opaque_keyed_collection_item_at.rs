@@ -121,12 +121,14 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use parking_lot::Mutex;
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab,
+        OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK,
+    };
     use std::sync::LazyLock;
     use std::vec::Vec;
 
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
+    
     static FIXTURE_BASE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::OPAQUE_KEYED_COLLECTION_ITEM_AT, 0x1000).map(|p| p as usize)
     });
@@ -180,7 +182,7 @@ mod tests {
 
     #[test]
     fn returns_the_requested_entry_and_forwards_selector() {
-        let _lock = SEAM_LOCK.lock();
+        let _lock = OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK.lock();
         let Some((entries, vector)) = fixture() else {
             assert!(note_missing_u32_fixture("app::opaque_keyed_collection_item_at"));
             return;
@@ -204,7 +206,7 @@ mod tests {
 
     #[test]
     fn preserves_all_selector_bits_and_reads_index_zero() {
-        let _lock = SEAM_LOCK.lock();
+        let _lock = OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK.lock();
         let Some((entries, vector)) = fixture() else {
             assert!(note_missing_u32_fixture("app::opaque_keyed_collection_item_at"));
             return;
@@ -226,7 +228,7 @@ mod tests {
 
     #[test]
     fn does_not_consult_end_or_write_the_vector_head() {
-        let _lock = SEAM_LOCK.lock();
+        let _lock = OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK.lock();
         let Some((entries, vector)) = fixture() else {
             assert!(note_missing_u32_fixture("app::opaque_keyed_collection_item_at"));
             return;
