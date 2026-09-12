@@ -23,6 +23,7 @@ pub mod sync_mutex;
 pub mod sync_sem;
 pub mod task;
 pub mod task_delay;
+pub mod task_priority;
 pub mod task_lock;
 pub mod stream_buffer_page_contexts;
 pub mod stream_buffer_initializer;
