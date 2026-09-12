@@ -73048,3 +73048,34 @@ functions:
       entry, so the port uses an inert handler; it also represents the two
       fixed .bss words with crate statics. No new dispatch seam was added:
       all four direct callees are already ported.
+
+  # --- Opaque eight-byte record-table accessor ---
+  - address: 0x0829c01c
+    ghidra: FUN_0829c01c
+    name: opaque_record_table_entry_at
+    size: 12
+    sig: "void *opaque_record_table_entry_at(const OpaqueRecordTable *table, u32 index)"
+    module: app/opaque_record_table_entry
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      "table+0x0c": entries
+      r0: record
+    notes: >-
+      Raw osos.dec confirms Ghidra's 12-byte extent exactly: `ldr
+      r0,[r0,#0xc]; add r0,r0,r1,lsl #3; bx lr` at 0x0829c01c..0x0829c028;
+      the separately linked next function begins at 0x0829c028. It loads the
+      opaque record-base word at table+0x0c and returns base + 8*index with
+      ARM's wrapping 32-bit arithmetic; it has no NULL, bounds, or alignment
+      checks. Complete aligned ARM B/BL-immediate decoding finds exactly seven
+      direct inbound calls, all unconditional plain bl at 0x08133808,
+      0x08133828, 0x08133864, 0x0813389c, 0x081338d0, 0x081339b8, and
+      0x08133a18; no predicated bl calls. The unconditional b at 0x0829ae50,
+      after `add r0,r0,#0x4c`, is a non-call tail transfer and is excluded.
+      No aligned raw-data word references this entry. Callers treat the result
+      as an opaque record whose first two words participate in further
+      dispatch; neither the record contents nor table's leading words are
+      identified. No deliberate deviations. Host tests prove zero and
+      nonzero index selection, record dereference, overflow shift arithmetic,
+      and no table write.
