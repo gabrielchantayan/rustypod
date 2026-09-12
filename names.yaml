@@ -43408,6 +43408,40 @@ functions:
       r4` return; differing by the crate's fp frame and the loop rotated so
       the first decode is peeled.
 
+  - address: 0x082a4ee8
+    ghidra: FUN_082a4ee8
+    name: bit_set_contains
+    size: 16
+    sig: "u32 bit_set_contains(BitSet *set, u32 bit)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      param_2/r1: bit
+      r1_after_lsr: word_index
+      r2: bit_index
+      FUN_082a4ef8: bit_set_test
+    notes: >-
+      Tests an arbitrary bit in a BitSet, returning exactly 0 or 1.
+      EXTENT - raw osos.dec words at 0x082a4ee8..0x082a4ef4 are `mov r2,
+      r1; and r2, r2, #31; lsr r1, r1, #5; nop`; the separately linked
+      sibling bit_set_test opens at 0x082a4ef8 with `ldr r0, [r0, #8]`, so
+      the true size is 16 bytes, agreeing with Ghidra.
+      CALL SITES - 7 unconditional `bl`, 0 `b`, and 0 predicated calls,
+      binary-scanned by decoding every ARM B/BL word in osos.dec: 0x08131a3c,
+      0x08131b5c, 0x08131c84, 0x081cc574, 0x082a4e6c, 0x082a4ebc, and
+      0x082a6b98. The absence of predication confirms callers never supply
+      a local NULL or flag gate; this member has no such guard itself.
+      BODY - split `bit` into `word_index = bit >> 5` and `bit_index =
+      bit & 31`, then fall through to bit_set_test at 0x082a4ef8. The
+      intervening `nop` is semantically inert. The Rust port calls the
+      existing direct sibling port rather than representing fall-through;
+      its input words and normalized result are identical.
+      TESTS - a u32-mapped four-word BitSet checks bits 0, 31, 32, 63, 64,
+      95, and 127, proving the 32-bit split, zero and high-bit outcomes,
+      cross-word selection, and 0/1 normalization. Deviations - direct
+      Rust call replaces stock fall-through only.
+
   - address: 0x082a4ef8
     ghidra: FUN_082a4ef8
     name: bit_set_test
