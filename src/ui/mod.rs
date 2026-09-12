@@ -5,6 +5,7 @@ pub mod byte_store;
 pub mod checked_byte_block_forwarder;
 pub mod coordinate_origin;
 pub mod color;
+pub mod rgb565_pack;
 pub mod rgba4444_pack;
 pub mod content_bounds;
 pub mod first_collection_item_bounds;
