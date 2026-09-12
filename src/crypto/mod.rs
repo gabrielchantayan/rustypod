@@ -64,3 +64,4 @@ pub mod x509v3_add_value;
 pub mod standard_cipher_table_four;
 pub mod standard_cipher_table_five;
 pub mod standard_cipher_table_six;
+pub mod rand_bytes;
