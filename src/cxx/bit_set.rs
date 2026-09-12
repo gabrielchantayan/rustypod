@@ -1,7 +1,7 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and its four ported members: the pre-split bit test, bit
-//! write, bit clear, and UTF-8 bulk insert. Everything below is decoded from the raw
-//! words of `work/firmware/osos.dec`, not from Ghidra.
+//! cardinality — and its five ported members: arbitrary-bit test, the
+//! pre-split bit test, bit write, bit clear, and UTF-8 bulk insert. Everything
+//! below is decoded from the raw words of `work/firmware/osos.dec`, not from Ghidra.
 //!
 //! ## The class
 //!
@@ -44,6 +44,9 @@
 //! - **0x08274774** — [`bit_set_clear`], `(this, bit)`: splits `bit`, tests
 //!   the current value through 0x082a4ef8, and only if set decrements +0x04
 //!   and clears the mask from the selected word.
+//! - **0x082a4ee8** — [`bit_set_contains`] splits an arbitrary bit number
+//!   into a word index / intra-word bit index, then falls through into the
+//!   adjacent pre-split test at 0x082a4ef8.
 //!
 //! ## bit_set_test — the pre-split test @ 0x082a4ef8
 //!
@@ -153,6 +156,31 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(BitSet, cardinality)];
 const _: [u8; 0x08] = [0; core::mem::offset_of!(BitSet, words)];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(BitSet, heap_tag)];
 const _: [u8; BIT_SET_SIZE] = [0; core::mem::size_of::<BitSet>()];
+
+/// bit_set_contains — original: `FUN_082a4ee8` @ 0x082a4ee8 (16 bytes,
+/// 0x082a4ee8..0x082a4ef8; the next separately linked function begins
+/// `ldr r0, [r0, #8]` at 0x082a4ef8, so Ghidra's extent is exact). 7 `bl`
+/// call sites, 0 predicated, binary-scanned by decoding every B/BL word in
+/// `osos.dec`; every call is unconditional.
+///
+/// Splits `bit` into `word_index = bit >> 5` and `bit_index = bit & 31`,
+/// then falls through to [`bit_set_test`] at 0x082a4ef8. Its `nop` is
+/// deliberately retained in the stock body between the split and the
+/// sibling entry; it has no data or control-flow effect.
+///
+/// Deliberate deviation: Rust directly calls [`bit_set_test`] instead of
+/// falling through to the adjacent stock function. The arguments and
+/// normalized 0/1 result are identical.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose word storage includes
+/// `bit >> 5`. The original performs no NULL or capacity check.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_contains(set: *mut BitSet, bit: u32) -> u32 {
+    bit_set_test(set, bit >> 5, bit & 31)
+}
 
 /// bit_set_test — original: `FUN_082a4ef8` @ 0x082a4ef8
 /// (24 bytes, 0x082a4ef8..0x082a4f10; the next function opens `push {r4, lr}`
@@ -566,6 +594,25 @@ mod tests {
 
         assert_eq!(set.cardinality, u32::MAX, "the original's `sub` has no underflow guard");
         assert_eq!(unsafe { (set.words as usize as *const u32).read() }, 0);
+    }
+
+    // --- bit_set_contains @ 0x082a4ee8 ---
+
+    #[test]
+    fn contains_splits_bits_across_word_boundaries() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = require_set!(&[1, 1u32 << 31, 1, 1u32 << 31], 4);
+        let set = core::ptr::addr_of_mut!(set);
+
+        unsafe {
+            assert_eq!(bit_set_contains(set, 0), 1, "first bit of word 0");
+            assert_eq!(bit_set_contains(set, 31), 0, "last bit of word 0");
+            assert_eq!(bit_set_contains(set, 32), 0, "first bit of word 1");
+            assert_eq!(bit_set_contains(set, 63), 1, "last bit of word 1 normalizes to one");
+            assert_eq!(bit_set_contains(set, 64), 1, "first bit of word 2");
+            assert_eq!(bit_set_contains(set, 95), 0, "last bit of word 2");
+            assert_eq!(bit_set_contains(set, 127), 1, "last bit of word 3");
+        }
     }
 
     // --- bit_set_test @ 0x082a4ef8 ---
