@@ -18436,6 +18436,29 @@ functions:
       the crate-wide frame prologue + return, structurally a no-op
       either way.
 
+  - address: 0x0826c5d0
+    ghidra: FUN_0826c5d0
+    name: usec_to_millis
+    size: 24
+    sig: "u32 usec_to_millis(const u32 *counter_usec)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: counter_usec
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw extent is exactly 0x0826c5d0..0x0826c5e8: push {r3,lr}; ldr r0,
+      [r0]; mov r1,#1000; bl __rt_udiv; str r0,[sp]; pop {ip,pc}. It
+      unguardedly loads a microsecond-counter word and returns its truncated
+      unsigned millisecond count. The stack store loads the quotient into
+      caller-scratch r12 before return; the divider also leaves a
+      caller-scratch remainder in r1. ARM release code for the Rust port
+      tail-branches to the ported __rt_udiv rather than reproducing that
+      bl/stack-spill/pop sequence, so only the r0 API return is modeled. 8
+      direct bl call sites, all unconditional; no predicated bl or tail b call
+      sites, verified by decoding every ARM B/BL word in osos.dec. No aligned
+      image word contains this address, so it is not a virtual dispatch target.
+
   # --- Timer E whole-second counter ---
   - address: 0x0826c5e8
     ghidra: FUN_0826c5e8

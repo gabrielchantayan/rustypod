@@ -262,6 +262,32 @@ pub unsafe extern "C" fn read_usec_timer_into_2(out: *mut u32) {
     }
 }
 
+/// usec_to_millis — original: `FUN_0826c5d0` @ 0x0826c5d0 (**24 bytes**,
+/// 0x0826c5d0..0x0826c5e8, binary-decoded; the next separately linked
+/// function begins with `push {r3, lr}` at 0x0826c5e8).
+///
+/// **8 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 0 tail `b` call sites**, verified by decoding every ARM `B`/`BL`
+/// word in `osos.dec`. No aligned image word contains this address, so it is
+/// not a virtual dispatch target.
+///
+/// Dereferences the unguarded `counter_usec` pointer once, then calls the
+/// ported unsigned ADS divider [`crate::runtime::rt_div::__rt_udiv`] @
+/// 0x08036f14 with 1000, returning the truncated microsecond count in
+/// milliseconds.
+///
+/// Deviation: Rust models the `r0` return only. Its ARM release code
+/// tail-branches to `__rt_udiv` rather than the original `bl`/stack-spill/pop
+/// sequence; the original leaves the quotient in caller-scratch `r12` and
+/// the divider remainder in caller-scratch `r1`, neither part of this
+/// function's API.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.usec_to_millis")]
+#[inline(never)]
+pub unsafe extern "C" fn usec_to_millis(counter_usec: *const u32) -> u32 {
+    unsafe { crate::runtime::rt_div::__rt_udiv(counter_usec.read(), 1_000) }
+}
+
 /// usec_timer_read_seconds — original: `FUN_0826c5e8` @ 0x0826c5e8
 /// (**28 bytes**, 0x0826c5e8..0x0826c604, binary-decoded).
 ///
@@ -1447,6 +1473,28 @@ mod tests {
     use std::sync::Mutex as StdMutex;
     use std::vec;
     use std::vec::Vec;
+
+    /// The helper is an unguarded single-word load followed by unsigned
+    /// divide, so sub-millisecond values truncate and the full u32 range is
+    /// preserved before division.
+    #[test]
+    fn usec_to_millis_truncates_full_u32_counter_range() {
+        for (counter_usec, expected_millis) in [
+            (0, 0),
+            (999, 0),
+            (1_000, 1),
+            (1_001, 1),
+            (u32::MAX, 4_294_967),
+        ] {
+            let counter_before = counter_usec;
+            assert_eq!(
+                unsafe { usec_to_millis(&counter_usec) },
+                expected_millis,
+                "{counter_usec} microseconds"
+            );
+            assert_eq!(counter_usec, counter_before, "the source word is read-only");
+        }
+    }
 
 
     #[derive(Debug, Clone, PartialEq, Eq)]
