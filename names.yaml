@@ -11228,6 +11228,34 @@ functions:
       inclusive end; the permitted sub/add also wraps for the full
       0..=u32::MAX input range.
 
+  - address: 0x08042cfc
+    ghidra: FUN_08042cfc
+    name: ft_buffered_stream_finalize
+    size: 104
+    sig: "i32 ft_buffered_stream_finalize(FtBufferedStream *stream)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1: stream
+      uVar1: result
+      FUN_08042d68: buffered stream flush helper (unported)
+      FUN_0805b6d8: I/O-context finalizer (unported)
+      FUN_0805d070: free_tag4
+      FUN_0805cfb4: bzero
+    notes: >-
+      Raw osos.dec decoding verifies the 104-byte body at load address
+      0x08042cfc through literal word 0x62756666 at 0x08042d64; 0x08042d68
+      is a distinct neighbouring function. The buff-tagged record is rejected
+      with -50 for a foreign tag. A valid record gets byte +4 set, flushes
+      only when byte +5 is zero, then unconditionally finalizes its +8 I/O
+      context through the real but unported entry 0x0805b6d8. A nonzero +0x14
+      tag-4 allocation is freed before bzero clears all 48 bytes; the earlier
+      output-flush result is returned unchanged. Binary decoding found exactly
+      8 direct inbound bl calls: 6 plain (0x08063e44, 0x08064160, 0x0806e6dc,
+      0x080ab108, 0x080b4dbc, 0x080bee3c) and 2 blne (0x08042f58,
+      0x08042fc4). The Rust port retains the two unported direct callees as
+      volatile host seams and calls their retailOS addresses on target.
+
   - address: 0x0813b714
     ghidra: FUN_0813b714
     name: berec_test_bit
