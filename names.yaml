@@ -62762,6 +62762,30 @@ functions:
       seam; its only deliberate Rust choice is to expose the otherwise
       untyped r0 result as u32.
 
+  - address: 0x08248704
+    ghidra: FUN_08248704
+    name: copy_four_words_staggered
+    size: 36
+    sig: "u32 *copy_four_words_staggered(u32 *destination, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r2: copied_word
+    notes: >-
+      Raw ARM is exactly nine instructions at 0x08248704..0x08248724; the
+      next separately linked function opens at 0x08248728. It copies four
+      aligned words from r1/source to r0/destination in load/store order 0,
+      2, 1, 3, leaving r0 intact as the destination return value. This order
+      is observable for overlapping ranges. Decoding every ARM B/BL immediate
+      in osos.dec found exactly eight inbound direct bl sites
+      (0x0824c3cc/0x0824c3e8/0x0824c404/0x0824f96c/0x08252390/0x082526bc/
+      0x082528f0/0x08252fd8), all unconditional, plus seven unconditional
+      direct tail b sites (0x0824c398/0x0824c3a0/0x0824c488/0x08256c50/
+      0x08256c58/0x08256c60/0x08256c68); no predicated branch forms and no
+      aligned raw data words reference the address. No deliberate deviations.
+
 
   # --- Silver controller secondary-interface base constructor ---
   - address: 0x0821599c
