@@ -15341,6 +15341,49 @@ functions:
       and LLVM loop shape. Reference:
       decomp/c/001/0802b6a8_FUN_0802b6a8.c.
 
+  - address: 0x0802b72c
+    ghidra: FUN_0802b72c
+    name: checked_word_block_reader
+    size: 152
+    sig: "u32 checked_word_block_reader(u32 mode, u32 **input_cursor, u32 **input_cursor_mirror, u32 **output_cursor, u32 **output_cursor_mirror, i32 row_count, i32 words_per_row)"
+    module: util/checked_word_block
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r1: input_cursor
+      param_3/r12: input_cursor_mirror
+      param_4/r3: output_cursor
+      param_5/stack: output_cursor_mirror
+      param_6/stack: row_count
+      param_7/stack: words_per_row
+      puVar4/r5: source
+      piVar3/r4: target
+      iVar6/r7: word_sum
+      iVar7/r8: row
+      iVar5/r6: column
+      FUN_0802b538: transform_checked_word_for_mode
+    notes: >-
+      Raw ARM is exactly 152 bytes (0x0802b72c..0x0802b7c4), bounded by the
+      distinct following three-dimensional byte-block reader. Decoding every
+      ARM B/BL word in osos.dec finds exactly 8 plain unconditional bl call
+      sites, zero predicated bl forms, and zero direct B sites; callers are
+      0x0802c74c, 0x0802c948, 0x0802cb50, 0x0802cd68, 0x0802d16c,
+      0x0802d418, 0x0802d934, and 0x0802dbfc. It reads initial source and
+      output cursors from input_cursor_mirror and output_cursor_mirror,
+      respectively, converts row_count * words_per_row aligned words in
+      row-major order through 0x0802b538 (exact mode 1 reverses bytes; every
+      other mode is identity), writes them, and accumulates their wrapping
+      u32 sum. The following transformed word is the checksum. A match
+      returns 0 and advances input cursor, input mirror, output cursor, then
+      output mirror; mismatch returns 4 without advancing aliases after its
+      output writes. Signed blt bounds mean zero or negative dimensions make
+      the block empty and require a transformed zero checksum. No deliberate
+      deviations: the existing transform_checked_word_for_mode port remains a
+      direct call. Host tests cover mirror selection, mode-one conversion,
+      mismatch-after-copy, negative rows, and wrapping sums. match.py review
+      is structural; LLVM's loop shape and frame differ from ARM. Reference:
+      decomp/c/001/0802b72c_FUN_0802b72c.c.
+
   - address: 0x0802b7c4
     ghidra: FUN_0802b7c4
     name: checked_byte_block_reader_3d
