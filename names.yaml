@@ -50126,6 +50126,35 @@ functions:
       all-one, mixed-byte, and high-bit words, destination bounds, and
       successive cursor advancement.
 
+  # --- packed RGB565 expansion ---
+  - address: 0x0824be9c
+    ghidra: FUN_0824be9c
+    name: rgb565_expand_to_rgba8
+    size: 60
+    sig: "void rgb565_expand_to_rgba8(u8 *destination, u32 packed_pixel)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: packed_rgb565
+      r2: expanded_blue
+      r3: expanded_green
+    notes: >-
+      Raw ARM decoding confirms the exact 60-byte, 15-word leaf from
+      0x0824be9c through `bx lr` at 0x0824bed4. The preceding sibling ends
+      with `bx lr` at 0x0824be98; 0x0824bed8 begins the distinct RGBA4444
+      expansion leaf, with no literal pool between them. It expands packed
+      RGB565 bits 15..11, 10..5, and 4..0 to R/G/B bytes by repeating each
+      component's high bits, then writes alpha 0xff. Decoding every aligned
+      ARM B/BL word in osos.dec finds exactly eight direct unconditional bl
+      callers (0x08250b58, 0x08250b68, 0x08250b8c, 0x08250b9c, 0x08251024,
+      0x0825103c, 0x08251424, and 0x08251430), no predicated BL callers, and
+      one unconditional direct tail B caller at 0x0825ec84. The port has no
+      deliberate deviations: four ordered volatile byte stores preserve the
+      ARM strb output order and no NULL, alignment, or bounds checks were
+      added. Host tests exhaust all 65,536 RGB565 values, verify high input
+      bits are ignored, and retain destination guards.
+
   # --- packed RGB565 cursor reader ---
   - address: 0x0825ec74
     ghidra: FUN_0825ec74
@@ -50145,12 +50174,10 @@ functions:
       `add r3,r1,#2`, `str r3,[r2]`, `ldrh r1,[r1]`, then `b 0x0824be9c`.
       The preceding sibling ends at 0x0825ec70 with `pop {r4,pc}`; 0x0825ec88
       starts the next distinct function with `push {r4,lr}`; no literal pool
-      is present. The tail target leaf starts at 0x0824be9c, immediately after
-      its predecessor's `bx lr`, and expands RGB565 bits 15..11, 10..5, and
-      4..0 to R/G/B bytes by repeating each component's high bits, then stores
-      A=0xff. The port preserves cursor advancement before the source halfword
-      read and RGBA output order while inlining that unported decoded leaf
-      rather than adding a dispatch seam. Binary-scanning every aligned ARM
+      is present. The tail target is the separately ported RGB565 expansion leaf at
+      0x0824be9c, which expands bits 15..11, 10..5, and 4..0 to RGBA8 with
+      alpha 0xff. The port preserves cursor advancement before the source
+      halfword read and invokes that leaf. Binary-scanning every aligned ARM
       B/BL word in osos.dec finds exactly eight direct unconditional bl call
       sites (0x0825e790, 0x0825ef34, 0x0825efec, 0x0825f100, 0x0825f1b4,
       0x0825f268, 0x08260380, 0x083b4d14), with no predicated or direct-tail
