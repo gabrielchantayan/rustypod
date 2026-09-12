@@ -57874,6 +57874,34 @@ functions:
       store and re-stamp), the zero-tick skip (update never runs,
       update_result zeroed), and zero-result propagation.
 
+  # --- adaptive tick accumulator rate rejection ---
+  - address: 0x081bb410
+    ghidra: FUN_081bb410
+    name: tick_accumulator_rejects_rate
+    size: 40
+    sig: "u32 tick_accumulator_rejects_rate(const TickAccumulator *accumulator, u32 measured_rate)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      param_2/r1: measured_rate
+      param_1_plus_0x24: mode_enabled
+      param_1_plus_0x2c: upper_input_bound
+    notes: >-
+      EXTENT: raw ARM is exactly 40 bytes (ten words) from 0x081bb410
+      through `bx lr` at 0x081bb434; the next separately linked function
+      starts at 0x081bb438. CALL COUNT: decoding every ARM B/BL word in
+      work/firmware/osos.dec finds exactly eight direct call sites
+      (0x08140b10, 0x0816a970, 0x0816bbcc, 0x081bb30c, 0x081f616c,
+      0x082033f8, 0x0820d930, 0x082874d4), all plain unconditional bl;
+      there are no predicated BL or direct tail-B forms. ALGORITHM: load
+      mode_enabled from accumulator +0x24; return 0 only when it is
+      nonzero, measured_rate is nonzero, and unsigned measured_rate is at
+      most upper_input_bound (+0x2c); otherwise return 1. The
+      unconditional initial byte load means there is no NULL guard.
+      DEVIATION: none. Host tests cover disabled, zero, inclusive-boundary,
+      just-above-boundary, noncanonical enabled-byte, and u32::MAX cases.
+
   # --- adaptive tick accumulator constructor ---
   - address: 0x081bb450
     ghidra: FUN_081bb450
