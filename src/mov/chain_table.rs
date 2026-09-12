@@ -14,6 +14,12 @@
 //!   0x0820ca10, 0x0820cb54, 0x0829e3e8, 0x0829e458, 0x0829e468,
 //!   0x0829e480. No DATA word references the address, so it is only ever
 //!   direct-called.
+//! - [`mov_chain_table_set_next`] — original: `FUN_0820c8d8` @ 0x0820c8d8
+//!   (**28 bytes**, 0x0820c8d8..0x0820c8f4, 7 instructions, no literal
+//!   pool). **8 direct call sites, all unconditional `bl`; 0 predicated
+//!   forms**, verified by decoding every ARM B/BL word in `osos.dec`:
+//!   0x081e451c, 0x081e4748, 0x081e4ce4, 0x081e4cfc, 0x081e4fd4,
+//!   0x081e4fec, 0x081e51e8, and 0x081e5378.
 //!
 //! # What it is
 //!
@@ -152,6 +158,44 @@ pub unsafe extern "C" fn mov_chain_table_next(
         MOV_CHAIN_TABLE_ERR
     }
 }
+/// mov_chain_table_set_next — original: `FUN_0820c8d8` @ 0x0820c8d8
+/// (28 bytes, 0x0820c8d8..0x0820c8f4; **8 call sites, all unconditional
+/// `bl`, 0 predicated forms** — counted by decoding every B/BL word in
+/// `osos.dec`).
+///
+/// Writes `next` into the +0x0c next-slot link of table entry `index`.
+/// The `cmp r1, #128` makes the address calculation and store conditional:
+/// indexes 0..127 update their own entry and return
+/// [`MOV_CHAIN_TABLE_OK`]; every other `u32` leaves the table untouched
+/// and returns [`MOV_CHAIN_TABLE_ERR`]. Unlike
+/// [`mov_chain_table_next`], this setter does not validate the link value.
+///
+/// # Deviations
+///
+/// None. The function has no NULL guard; stock faults when a valid index
+/// reaches the store. The zero predicated-call count means callers rely on
+/// this bounds check rather than pre-checking the index.
+///
+/// # Safety
+///
+/// `table` must point to a writable [`MovChainTable`] when `index < 128`;
+/// it is not NULL-checked, matching stock.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_chain_table_set_next")]
+pub unsafe extern "C" fn mov_chain_table_set_next(
+    table: *mut MovChainTable,
+    index: u32,
+    next: u32,
+) -> i32 {
+    if index < MOV_CHAIN_TABLE_SLOTS as u32 {
+        unsafe { core::ptr::write(core::ptr::addr_of_mut!((*table).entries[index as usize].next), next) };
+        MOV_CHAIN_TABLE_OK
+    } else {
+        MOV_CHAIN_TABLE_ERR
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -285,5 +329,49 @@ mod tests {
             assert!(hops < 128, "walk must terminate");
         }
         assert_eq!((hops, cursor), (3, 40), "10 -> 20 -> 30 -> 40 -> end");
+    }
+    /// The setter accepts every link bit-pattern unchanged, including
+    /// values the accessor later treats as corrupt, and changes only the
+    /// selected entry's +0x0c word.
+    #[test]
+    fn setter_writes_selected_entry_without_validating_link() {
+        let mut table = fresh_table();
+        for (i, entry) in table.entries.iter_mut().enumerate() {
+            let i = i as u32;
+            entry.field_00 = 0x1000 + i;
+            entry.field_04 = 0x2000 + i;
+            entry.tag = i as u8;
+            entry.next = 0x2000 + i;
+            entry.field_10 = 0x5000 + i;
+        }
+
+        assert_eq!(unsafe { mov_chain_table_set_next(&mut table, 0, 0xffff_fffe) }, MOV_CHAIN_TABLE_OK);
+        assert_eq!(unsafe { mov_chain_table_set_next(&mut table, 127, 0x80) }, MOV_CHAIN_TABLE_OK);
+
+        assert_eq!(table.entries[0].next, 0xffff_fffe);
+        assert_eq!(table.entries[127].next, 0x80);
+        assert_eq!(table.entries[1].next, 0x2001);
+        assert_eq!(table.entries[0].field_00, 0x1000);
+        assert_eq!(table.entries[127].field_10, 0x507f);
+    }
+
+    /// The conditional `strcc` skips all stores at and above the 128-slot
+    /// boundary, including high-bit indexes.
+    #[test]
+    fn setter_out_of_range_indexes_leave_table_unchanged() {
+        let mut table = fresh_table();
+        table.entries[0].next = 10;
+        table.entries[127].next = 20;
+
+        for index in [128u32, 129, 0x8000_0000, 0xffff_ffff] {
+            assert_eq!(
+                unsafe { mov_chain_table_set_next(&mut table, index, 0xdead_beef) },
+                MOV_CHAIN_TABLE_ERR,
+                "index {index:#x}",
+            );
+        }
+
+        assert_eq!(table.entries[0].next, 10);
+        assert_eq!(table.entries[127].next, 20);
     }
 }
