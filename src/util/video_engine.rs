@@ -88,6 +88,7 @@ fn instance() -> *mut u8 {
 /// Returns the video-engine instance @ *0x089ca8a8, or NULL when no
 /// video session is installed (the case every caller checks for).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
@@ -185,6 +186,74 @@ pub unsafe extern "C" fn video_engine_set_property(command: u32, key: u32, value
         return;
     }
     property_dispatch(engine, command, key, value);
+}
+/// Firmware entry of the video-engine control-code enabler
+/// (`FUN_08252be4`, unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_ENABLE_CONTROL_ADDR: usize = 0x0825_2be4;
+
+/// ABI of the engine helper that receives an engine, a control code, and
+/// the literal enable value one.
+type VideoEngineEnableControl = unsafe extern "C" fn(*mut u8, u32, u32);
+
+/// Host-test stand-in for `FUN_08252be4`.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_ENABLE_CONTROL: Option<VideoEngineEnableControl> = None;
+
+/// Host only: install the control-code enabler reached by the wrapper.
+#[cfg(not(target_arch = "arm"))]
+pub unsafe fn set_mock_enable_control(
+    enable_control: Option<VideoEngineEnableControl>,
+) {
+    *addr_of_mut!(MOCK_ENABLE_CONTROL) = enable_control;
+}
+
+/// Transfers an enabled control code into the engine's unported handler.
+fn enable_control(engine: *mut u8, control: u32) {
+    #[cfg(target_arch = "arm")]
+    unsafe {
+        let enable_control: VideoEngineEnableControl =
+            core::mem::transmute(VIDEO_ENGINE_ENABLE_CONTROL_ADDR);
+        enable_control(engine, control, 1);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    unsafe {
+        match *addr_of!(MOCK_ENABLE_CONTROL) {
+            Some(enable_control) => enable_control(engine, control, 1),
+            None => panic!("video_engine_enable_control requires handler 0x08252be4"),
+        }
+    }
+}
+
+/// video_engine_enable_control — retailOS `FUN_082d12b0` @ **0x082d12b0**
+/// (32 bytes, `0x082d12b0..0x082d12cc`). Raw bytes show that the next
+/// independently linked function starts at `0x082d12d0`; Ghidra's reported
+/// 40-byte extent incorrectly includes its first eight bytes. A complete
+/// aligned ARM B/BL-immediate decode finds seven direct inbound calls, all
+/// `bleq` (zero plain `bl`): 0x0827d3e0, 0x0827d4c0, 0x0827d5b4,
+/// 0x0828ca88, 0x0828caec, 0x083d38d4, and 0x083d39b4. Each caller gates
+/// this wrapper on its own equality condition.
+///
+/// Loads the video-engine singleton, returns silently if no session exists,
+/// then tail-transfers `(engine, control, 1)` to `FUN_08252be4`. That helper
+/// enables the control-code-specific engine flag: codes 0x8074, 0x8075,
+/// 0x8076, and 0x8b9c set bits 0 through 3 in the byte at `engine + 0x14c`;
+/// 0x8078 sets the byte at `engine + engine[0x250] + 0x14d`; other codes
+/// reach its 0x500 error latch.
+///
+/// # Deliberate deviation
+///
+/// `FUN_08252be4` is unported. Target builds call its resident firmware
+/// entry directly; host tests install a recording handler. The NULL-session
+/// path never accesses that seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_enable_control(control: u32) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    enable_control(engine, control);
 }
 /// Firmware entry of the video-engine one-handle release helper
 /// `FUN_082d1134`.
@@ -521,6 +590,49 @@ mod tests {
             assert_eq!(recorded(), None, "teardown stops the dispatch");
         }
     }
+    // --- video_engine_enable_control (FUN_082d12b0) ---
+
+    static mut ENABLE_CONTROL_RECORDED: Option<(*mut u8, u32, u32)> = None;
+
+    unsafe extern "C" fn record_enable_control(engine: *mut u8, control: u32, enabled: u32) {
+        *addr_of_mut!(ENABLE_CONTROL_RECORDED) = Some((engine, control, enabled));
+    }
+
+    #[test]
+    fn enabling_control_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            *addr_of_mut!(ENABLE_CONTROL_RECORDED) = None;
+            set_mock_enable_control(Some(record_enable_control));
+            set_mock_instance(ptr::null_mut());
+            video_engine_enable_control(0x8074);
+            assert_eq!(
+                ENABLE_CONTROL_RECORDED,
+                None,
+                "the handler is not reached without an engine"
+            );
+        }
+    }
+
+    #[test]
+    fn enabling_control_forwards_engine_code_and_literal_one() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_enable_control(Some(record_enable_control));
+            set_mock_instance(engine.as_mut_ptr());
+            for &control in &[0, 0x8074, 0x8075, 0x8076, 0x8078, 0x8b9c, u32::MAX] {
+                *addr_of_mut!(ENABLE_CONTROL_RECORDED) = None;
+                video_engine_enable_control(control);
+                assert_eq!(
+                    ENABLE_CONTROL_RECORDED,
+                    Some((engine.as_mut_ptr(), control, 1)),
+                    "the wrapper preserves each control code and always enables it"
+                );
+            }
+        }
+    }
+
 
     // --- video_frame_dispatch_operation (FUN_0824f1e8) ---
 

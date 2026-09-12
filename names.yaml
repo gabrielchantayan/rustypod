@@ -72642,3 +72642,33 @@ functions:
       for a positive signed product, -1 for zero or a negative product.
       Host defaults report zero because retailOS is unmapped, while tests
       install a recorder; this is the deliberate host-only deviation.
+
+  # --- Video-engine control-code enable wrapper (src/util/video_engine.rs) ---
+  - address: 0x082d12b0
+    ghidra: FUN_082d12b0
+    name: video_engine_enable_control
+    size: 32
+    sig: "void video_engine_enable_control(u32 control)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: control
+      r4: control
+      FUN_08252bec: video_engine_get
+      FUN_08252be4: video_engine_enable_control_handler
+    notes: >-
+      Raw osos.dec shows a 32-byte wrapper from 0x082d12b0 through
+      0x082d12cc; the next independently linked function starts at
+      0x082d12d0, so Ghidra's 40-byte extent swallows eight bytes of its
+      sibling. Complete aligned ARM B/BL-immediate decoding finds seven
+      inbound calls, all bleq and no plain bl: 0x0827d3e0, 0x0827d4c0,
+      0x0827d5b4, 0x0828ca88, 0x0828caec, 0x083d38d4, and 0x083d39b4.
+      The wrapper calls video_engine_get, silently returns for a NULL
+      session, and tail-branches to unported FUN_08252be4 with
+      (engine, control, 1). That helper sets engine +0x14c control bits
+      for 0x8074, 0x8075, 0x8076, and 0x8b9c; 0x8078 stores one at
+      engine + engine[0x250] + 0x14d; unknown control codes reach its
+      0x500 error latch. Deliberate deviation: target builds transfer to
+      the original handler at 0x08252be4, while host tests record that
+      seam. Tests cover a NULL session and zero, known, and maximum
+      control codes, all forwarded with literal enable value one.
