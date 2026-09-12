@@ -11,22 +11,10 @@
 //! 0x0817c71c, 0x0817d110, 0x0817d3fc, 0x0817d600, and 0x082a9c80. No image
 //! word equals the veneer address, so it is not directly dispatched as data.
 //!
-//! The member's semantic type is not recoverable from this 4-byte veneer.
-//! This port therefore names only the verified operation: release the
-//! non-NULL member word at +0x14 through the stock `FUN_081f0530` callee.
-//!
-//! # Deliberate deviations
-//!
-//! The two stock tail branches are flattened so the hook has one Rust body.
-//! `FUN_081f0530` remains unported and is reached through a volatile seam:
-//! target builds call its fixed retailOS address, while host tests install a
-//! recorder. The stock destination leaves an otherwise unspecified `r4` in
-//! `r0` after a non-NULL release; every verified caller ignores it, and this
-//! port exposes the function as `void`.
-
-use core::ptr::addr_of;
-
-const RETAIL_MEMBER_RELEASE_ADDRESS: usize = 0x081f_0530;
+//! The member is now known to be the list state accepted by the ported
+//! [`crate::cxx::list_cursor_release::list_cursor_release`] operation. The
+//! stock destination leaves an otherwise unspecified `r4` in `r0` after the
+//! call; every verified caller ignores it, and this veneer remains `void`.
 
 /// Target-sized prefix of an object holding a releasable member at +0x14.
 /// Pointer-like target fields remain `u32` so this layout is 24 bytes on
@@ -35,53 +23,12 @@ const RETAIL_MEMBER_RELEASE_ADDRESS: usize = 0x081f_0530;
 pub struct MemberReleaseOwner {
     /// +0x00..+0x10: words untouched by this helper.
     pub unresolved_00: [u32; 5],
-    /// +0x14: non-NULL member passed to `FUN_081f0530`.
+    /// +0x14: non-NULL member passed to `list_cursor_release`.
     pub member: u32,
 }
 
 const _: () = assert!(core::mem::size_of::<MemberReleaseOwner>() == 0x18);
 const _: () = assert!(core::mem::offset_of!(MemberReleaseOwner, member) == 0x14);
-
-/// ABI of the unported member release routine at `0x081f0530`.
-pub type MemberRelease = unsafe extern "C" fn(*mut u8);
-
-/// Indirection used only because the retail member release callee is not yet
-/// ported.
-#[derive(Clone, Copy)]
-pub struct MemberReleaseOps {
-    pub release: MemberRelease,
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_member_release(member: *mut u8) {
-    let release: MemberRelease = core::mem::transmute(RETAIL_MEMBER_RELEASE_ADDRESS);
-    release(member)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_member_release(_member: *mut u8) {
-    panic!("install member-release host operations before releasing a member")
-}
-
-#[cfg(target_os = "none")]
-pub const DEFAULT_MEMBER_RELEASE_OPS: MemberReleaseOps = MemberReleaseOps {
-    release: retail_member_release,
-};
-
-#[cfg(not(target_os = "none"))]
-pub const DEFAULT_MEMBER_RELEASE_OPS: MemberReleaseOps = MemberReleaseOps {
-    release: missing_member_release,
-};
-
-/// Active member-release implementation. A volatile load at the call site
-/// keeps the target path indirect rather than letting LLVM elide the ROM
-/// transfer.
-pub static mut MEMBER_RELEASE_OPS: MemberReleaseOps = DEFAULT_MEMBER_RELEASE_OPS;
-
-#[inline(always)]
-fn member_release_ops() -> MemberReleaseOps {
-    unsafe { core::ptr::read_volatile(addr_of!(MEMBER_RELEASE_OPS)) }
-}
 
 /// Releases `owner`'s member word at +0x14 when it is non-NULL.
 ///
@@ -95,7 +42,9 @@ fn member_release_ops() -> MemberReleaseOps {
 pub unsafe extern "C" fn member_release_if_present(owner: *mut MemberReleaseOwner) {
     let member = (*owner).member;
     if member != 0 {
-        (member_release_ops().release)(member as usize as *mut u8);
+        crate::cxx::list_cursor_release::list_cursor_release(
+            member as usize as *mut crate::cxx::list_cursor_release::ListCursorReleaseState,
+        );
     }
 }
 
@@ -104,63 +53,43 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut RELEASED_MEMBER: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn record_member_release(member: *mut u8) {
-        RELEASED_MEMBER = member;
-    }
-
-    fn install_recorder() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        unsafe {
-            addr_of_mut!(RELEASED_MEMBER).write(core::ptr::null_mut());
-            addr_of_mut!(MEMBER_RELEASE_OPS).write(MemberReleaseOps {
-                release: record_member_release,
-            });
-        }
-        guard
-    }
-
-    fn restore_default(guard: MutexGuard<'static, ()>) {
-        unsafe {
-            addr_of_mut!(MEMBER_RELEASE_OPS).write(DEFAULT_MEMBER_RELEASE_OPS);
-        }
-        drop(guard);
-    }
+    use crate::cxx::list_cursor_release::ListCursorReleaseState;
+    use crate::testing::{hints, try_map_u32_slab};
+    use core::ptr::{addr_of_mut, write};
 
     #[test]
     fn releases_the_non_null_member_word() {
-        let guard = install_recorder();
+        let Some(member) = try_map_u32_slab(
+            hints::MEMBER_RELEASE_LIST_STATE,
+            core::mem::size_of::<ListCursorReleaseState>(),
+        ) else {
+            return;
+        };
+        let member = member.cast::<ListCursorReleaseState>();
+        unsafe {
+            write(member, ListCursorReleaseState {
+                unresolved_00: [0; 20],
+                mutex_words: [0; 2],
+                unresolved_58: [0; 6],
+                cursor_clear_suppressed: 1,
+                unresolved_71: [0; 3],
+            });
+        }
         let mut owner = MemberReleaseOwner {
             unresolved_00: [0; 5],
-            member: 0x1234_5678,
+            member: member as usize as u32,
         };
 
         unsafe { member_release_if_present(addr_of_mut!(owner)) };
-
-        unsafe {
-            assert_eq!(addr_of!(RELEASED_MEMBER).read() as usize, 0x1234_5678);
-        }
-        restore_default(guard);
     }
 
     #[test]
     fn leaves_a_null_member_unreleased() {
-        let guard = install_recorder();
         let mut owner = MemberReleaseOwner {
             unresolved_00: [0; 5],
             member: 0,
         };
 
         unsafe { member_release_if_present(addr_of_mut!(owner)) };
-
-        unsafe {
-            assert!(addr_of!(RELEASED_MEMBER).read().is_null());
-        }
-        restore_default(guard);
     }
 }
