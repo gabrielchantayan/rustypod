@@ -32737,6 +32737,41 @@ functions:
       the operator_delete blne; the diff is the seam blx and the crate
       fp frame.
 
+  - address: 0x08124a9c
+    ghidra: FUN_08124a9c
+    name: resource_provider_contains_view
+    size: 88
+    sig: "u32 resource_provider_contains_view(u32 *provider, void *view)"
+    module: app/resource_provider_contains_view
+    status: ported
+    vars:
+      param_1/r4: provider
+      param_2: view
+      provider+4: membership_index
+      provider_vtable+8: begin_membership_query
+      membership_index_vtable+0x4c: contains_view
+      provider_vtable+12: end_membership_query
+    notes: >-
+      Raw extent is exactly 88 bytes: the push at 0x08124a9c through its
+      pop at 0x08124af0; FUN_08124af4 begins immediately after. Decoding
+      every ARM B/BL immediate in osos.dec finds eight direct call sites:
+      0x08108db0, 0x0819eef0, 0x081f6df8, 0x08213898, 0x0822e028,
+      0x0822e0e8, 0x08230860, and 0x08230884. All eight are unconditional
+      bl; there are no predicated direct calls or B tail calls. The routine
+      invokes unnamed provider vtable slots +8 and +12 around an optional
+      membership-index vtable +0x4c probe. It gives that probe the address
+      of a stack copy of view and returns 0 only for its exact -1 sentinel;
+      every other u32 result returns 1. The virtual callees' identities are
+      deliberately not inferred. ARM builds read the retail 32-bit object
+      and vtable words directly; host tests use named wide-pointer fields
+      for the same recovered slots. Host tests prove lifecycle ordering,
+      the NULL membership-index path, stack-copy view forwarding, and the
+      -1/0/-2/INT_MAX result boundary. match.py structural review retains
+      the begin/probe/end blx sequence and sentinel test; LLVM differs in
+      frame setup, retains the provider vtable in r6, and uses a branch for
+      the NULL path. No dispatch seam was introduced because the original
+      calls both vtables directly at runtime.
+
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
     name: pair_assign_guarded
