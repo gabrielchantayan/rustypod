@@ -39988,6 +39988,42 @@ functions:
       bit-0x20-masked modes, all three rule families, modular overflow,
       generic no-redraw, and equal-extent no-dispatch paths. match.py
       structural review is recorded with the port.
+  - address: 0x0826dde8
+    ghidra: FUN_0826dde8
+    name: view_base_release_render_state
+    size: 52
+    sig: "ViewBase *view_base_release_render_state(ViewBase *view)"
+    module: ui/view_base
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      "view+0x3c": render_state
+      FUN_0828e5b0: render_state_disposer (unported direct callee)
+      FUN_082aad24: operator_delete (direct, ported)
+      FUN_0826ec14: ui_element_invalidate_region (direct, ported)
+    notes: >-
+      Raw ARM establishes a 52-byte body: push {r4,lr} starts at
+      0x0826dde8, its tail b 0x0826ec14 is at 0x0826de18, and the distinct
+      next function starts push {r4,lr} at 0x0826de1c. Ghidra's 28-byte
+      extent drops the clear, bounds argument, and invalidation tail after
+      mistaking FUN_082aad24 for non-returning. The state word is loaded into
+      r0 before cmp #0, so an absent state returns NULL rather than view; a
+      present state runs unported FUN_0828e5b0, passes its return to the
+      already ported tag-2 operator_delete, clears view+0x3c, then
+      tail-branches to ui_element_invalidate_region(view, view+0x80), which
+      returns view. The concrete type and full identity of FUN_0828e5b0 are
+      not inferred; ui/view_base models only its observed dispose-returning-
+      allocation contract through VIEW_BASE_RENDER_STATE_OPS (firmware target
+      on device, host recorder in tests). Full osos.dec ARM B/BL decode finds
+      exactly seven inbound direct calls: six unconditional bl at
+      0x0816d5c8, 0x0816e0e0, 0x081ddec4, 0x081ddf50, 0x081ddff4, and
+      0x081de030, plus one caller-gated blne at 0x0817e4a4; no direct tail b
+      or image-word reference reaches this entry. The callee has no NULL
+      guard, while the predicated caller gates its invocation itself. Host
+      test covers the complete nonempty order (disposer sees the live state,
+      its distinct return is tag-2 deleted, then the state clears and bounds
+      invalidate) and the empty early return with no disposal or deletion.
+
   # --- Silver UI framework: the class-0x6800 controller addon ---
 
   - address: 0x08177e84

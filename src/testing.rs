@@ -586,6 +586,9 @@ pub mod hints {
     // 0x5700_0000: dedicated to util/mapped_subobject_for_slot's raw-u32
     // context and selected-subobject fixture; mappings never unmap.
     pub const MAPPED_SUBOBJECT_FOR_SLOT: usize = 0x5700_0000;
+    // 0x3000_0000: dedicated to ui/view_base's render-state release fixture;
+    // mappings never unmap, so no other user may share this hint.
+    pub const VIEW_BASE_RENDER_STATE_RELEASE: usize = 0x3000_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

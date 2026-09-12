@@ -55,6 +55,7 @@
 //! it only after this constructor returns).
 
 use crate::app::resource_chain::ResourceProvider;
+use crate::heap::veneers::operator_delete;
 use crate::libc::iram_veneers::iram_memcpy_veneer;
 
 /// The ROM address of this class's vtable — the constructor's
@@ -131,8 +132,9 @@ pub struct ViewBase {
     pub linkage: [u8; 0x34],
     /// +0x38 — the caller's resource provider (target word).
     pub resources: u32,
-    /// +0x3c — cleared here.
-    pub word_3c: u32,
+    /// +0x3c — owned render state, cleared by construction and by
+    /// [`view_base_release_render_state`].
+    pub render_state: u32,
     /// +0x40 — the class fourcc from spec +0x04.
     pub class_code: u32,
     /// +0x44 — spec +0x08, verbatim.
@@ -309,6 +311,93 @@ pub unsafe extern "C" fn view_base_set_resource_provider(
     let attach = unsafe { core::ptr::addr_of!(VIEW_BASE_RESOURCE_OPS.attach_view).read_volatile() };
     unsafe { attach(replacement, view) };
     unsafe { crate::ui::invalidate::ui_element_invalidate(view.cast()) }.cast()
+}
+
+/// The unported render-state disposer used by
+/// [`view_base_release_render_state`].
+///
+/// `FUN_0828e5b0` receives the non-NULL `view + 0x3c` word and returns the
+/// allocation that its caller passes to tag-2 `operator_delete`. Its internal
+/// type is not identified here.
+#[derive(Clone, Copy)]
+pub struct ViewBaseRenderStateOps {
+    pub dispose: unsafe extern "C" fn(*mut u8) -> *mut u8,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_dispose_render_state(render_state: *mut u8) -> *mut u8 {
+    let dispose: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        unsafe { core::mem::transmute(0x0828_e5b0usize) };
+    unsafe { dispose(render_state) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_dispose_render_state(_render_state: *mut u8) -> *mut u8 {
+    panic!("view_base_release_render_state requires FUN_0828e5b0")
+}
+
+/// Default render-state disposal target: the firmware entry on device and an
+/// explicit missing-operation failure on host.
+pub const DEFAULT_VIEW_BASE_RENDER_STATE_OPS: ViewBaseRenderStateOps = ViewBaseRenderStateOps {
+    #[cfg(target_os = "none")]
+    dispose: firmware_dispose_render_state,
+    #[cfg(not(target_os = "none"))]
+    dispose: missing_dispose_render_state,
+};
+
+/// Active render-state disposal operation. Host tests install a recorder;
+/// target integration starts with the retailOS entry.
+pub static mut VIEW_BASE_RENDER_STATE_OPS: ViewBaseRenderStateOps =
+    DEFAULT_VIEW_BASE_RENDER_STATE_OPS;
+
+/// view_base_release_render_state — original: `FUN_0826dde8` @
+/// **0x0826dde8** (52 bytes, `0x0826dde8..0x0826de18`; the distinct next
+/// function begins with `push {r4,lr}` at `0x0826de1c`).
+///
+/// Loads the owned render-state word at `view + 0x3c`. An empty word returns
+/// NULL immediately—the loaded word remains in r0 at the conditional pop.
+/// Otherwise it calls unported `FUN_0828e5b0`, passes that return value to
+/// tag-2 [`operator_delete`], clears the state word, and tail-branches to
+/// `ui_element_invalidate_region(view, &view->bounds)`. The non-empty path
+/// returns `view` through that region form.
+///
+/// A full-image ARM B/BL-word decode verifies **7 direct calls: 6
+/// unconditional `bl` and 1 `blne`** at `0x0817e4a4`; there are no direct
+/// tail `b` references or image-word references. The lone predicate is
+/// caller-side gating; this body itself dereferences `view` without a NULL
+/// guard.
+///
+/// Deliberate deviation: `FUN_0828e5b0` is not ported and its concrete type
+/// is unidentified, so [`VIEW_BASE_RENDER_STATE_OPS`] preserves only the
+/// observed dispose-then-delete contract. The already ported delete and
+/// invalidation entries are called directly.
+///
+/// # Safety
+///
+/// `view` must point to a writable, 4-byte-aligned [`ViewBase`]. When
+/// `render_state` is nonzero, the installed disposer must accept it and return
+/// an allocation valid for [`operator_delete`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn view_base_release_render_state(view: *mut ViewBase) -> *mut ViewBase {
+    let render_state =
+        unsafe { core::ptr::addr_of!((*view).render_state).read_volatile() } as usize as *mut u8;
+    if render_state.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    let dispose =
+        unsafe { core::ptr::addr_of!(VIEW_BASE_RENDER_STATE_OPS.dispose).read_volatile() };
+    let allocation = unsafe { dispose(render_state) };
+    unsafe { operator_delete(allocation) };
+    unsafe { core::ptr::addr_of_mut!((*view).render_state).write_volatile(0) };
+    unsafe {
+        crate::ui::invalidate::ui_element_invalidate_region(
+            view.cast(),
+            core::ptr::addr_of!((*view).bounds).cast(),
+        )
+    }
+    .cast()
 }
 /// The decoded portion of a view's runtime vtable used by the extent and
 /// `word_44` setters.
@@ -546,7 +635,7 @@ pub unsafe extern "C" fn view_base_construct(
     construct_linkage_base(view, parent, (*spec).flags & 1);
     core::ptr::addr_of_mut!((*view).resources).write_volatile(resources as usize as u32);
     core::ptr::addr_of_mut!((*view).vtable).write_volatile(VIEW_BASE_VTABLE_ADDRESS);
-    core::ptr::addr_of_mut!((*view).word_3c).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).render_state).write_volatile(0);
     core::ptr::addr_of_mut!((*view).class_code).write_volatile((*spec).class_code);
     core::ptr::addr_of_mut!((*view).word_44).write_volatile((*spec).word_08);
     core::ptr::addr_of_mut!((*view).flags).write_volatile((*spec).flags);
@@ -726,6 +815,33 @@ mod tests {
         }
     }
 
+    static mut DISPOSED_RENDER_STATE: *mut u8 = ptr::null_mut();
+    static mut DISPOSER_SAW_LIVE_STATE: bool = false;
+    static mut DISPOSER_OWNER: *mut ViewBase = ptr::null_mut();
+    static mut DISPOSER_RETURN: *mut u8 = ptr::null_mut();
+
+    unsafe extern "C" fn recording_dispose_render_state(render_state: *mut u8) -> *mut u8 {
+        unsafe {
+            *(&raw mut DISPOSED_RENDER_STATE) = render_state;
+            *(&raw mut DISPOSER_SAW_LIVE_STATE) =
+                ptr::addr_of!((*DISPOSER_OWNER).render_state).read_volatile()
+                    == render_state as usize as u32;
+            *(&raw const DISPOSER_RETURN)
+        }
+    }
+
+    struct RenderStateOpsRestore {
+        previous: ViewBaseRenderStateOps,
+    }
+
+    impl Drop for RenderStateOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(VIEW_BASE_RENDER_STATE_OPS).write_volatile(self.previous);
+            }
+        }
+    }
+
     fn fill_spec(spec: *mut ViewSpec, flags: u32, word_58: u32) {
         unsafe {
             ptr::addr_of_mut!((*spec).word_00).write_volatile(0x0000_1111);
@@ -749,6 +865,52 @@ mod tests {
         assert_eq!(core::mem::size_of::<ViewSpec>(), 0x5c);
         assert_eq!(core::mem::align_of::<ViewBase>(), 4);
         assert_eq!(core::mem::align_of::<ViewSpec>(), 4);
+    }
+
+    #[test]
+    fn release_render_state_disposes_deletes_clears_and_invalidates() {
+        let _guard = TEST_LOCK.lock();
+        let Some(slab) = try_map_u32_slab(hints::VIEW_BASE_RENDER_STATE_RELEASE, SLAB_LEN) else {
+            assert!(note_missing_u32_fixture("ui/view_base render-state release"));
+            return;
+        };
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            ptr::write_bytes(slab, 0, SLAB_LEN);
+            let view = slab.cast::<ViewBase>();
+            let render_state = slab.add(0x200);
+            let allocation = slab.add(0x300);
+            ptr::addr_of_mut!((*view).render_state)
+                .write_volatile(render_state as usize as u32);
+            *(&raw mut DISPOSED_RENDER_STATE) = ptr::null_mut();
+            *(&raw mut DISPOSER_SAW_LIVE_STATE) = false;
+            *(&raw mut DISPOSER_OWNER) = view;
+            *(&raw mut DISPOSER_RETURN) = allocation;
+
+            let previous = ptr::addr_of!(VIEW_BASE_RENDER_STATE_OPS).read_volatile();
+            ptr::addr_of_mut!(VIEW_BASE_RENDER_STATE_OPS).write_volatile(ViewBaseRenderStateOps {
+                dispose: recording_dispose_render_state,
+            });
+            let _restore = RenderStateOpsRestore { previous };
+
+            assert_eq!(view_base_release_render_state(view), view);
+            assert_eq!(*(&raw const DISPOSED_RENDER_STATE), render_state);
+            assert!(*(&raw const DISPOSER_SAW_LIVE_STATE));
+            assert_eq!(ptr::addr_of!((*view).render_state).read_volatile(), 0);
+            assert_eq!(
+                crate::heap::veneers::tests::free_log(),
+                (1, allocation, 2),
+                "the disposer return, not the state pointer, is tag-2 deleted"
+            );
+
+            assert_eq!(view_base_release_render_state(view), ptr::null_mut());
+            assert_eq!(*(&raw const DISPOSED_RENDER_STATE), render_state);
+            assert_eq!(
+                crate::heap::veneers::tests::free_log().0,
+                1,
+                "an empty state returns before disposal and deletion"
+            );
+        }
     }
 
     #[test]
@@ -777,7 +939,7 @@ mod tests {
                 ptr::addr_of!((*view).resources).read_volatile(),
                 fixture.resources() as usize as u32
             );
-            assert_eq!(ptr::addr_of!((*view).word_3c).read_volatile(), 0);
+            assert_eq!(ptr::addr_of!((*view).render_state).read_volatile(), 0);
             assert_eq!(
                 ptr::addr_of!((*view).class_code).read_volatile(),
                 ptr::addr_of!((*spec).class_code).read_volatile()
