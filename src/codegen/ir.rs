@@ -443,13 +443,20 @@ pub const CG_HW_REG_COUNT: usize = 16;
 /// Descriptor stride in words: 28 target bytes (the original's
 /// `rsb r1, r0, r0, lsl #3` / `add r1, r4, r1, lsl #2` = i*7*4).
 pub const CG_HW_REG_ENTRY_WORDS: usize = 7;
-/// `cg_codegen_t + 0x1e0` — the id byte of the codegen's own embedded
-/// descriptor anchor at `+0x1d4` (same layout as the register-table
+/// `cg_codegen_t + 0x1e0` — the id/resource byte of the codegen's embedded
+/// CPSR descriptor anchor at `+0x1d4` (same layout as the register-table
 /// anchors: list head at anchor `+0x10` = `+0x1e4`, per `FUN_082d7870`
 /// and the fixup-path stores at 0x082c1660). The constructor zeroes it
-/// explicitly even though the record-wide zero-fill already did — the
-/// same defensive style as the explicit `labels = NULL` store.
+/// explicitly even though the record-wide zero-fill already did. The
+/// materializer's `ldrb` / `and #0xf` pair puts its low nibble in the
+/// destination field of the emitted `MRS`.
 pub const CG_CODEGEN_ANCHOR_ID: usize = 0x78;
+/// `cg_codegen_t + 0x1d4` — the embedded descriptor anchor for the
+/// virtual register carrying CPSR state. [`cg_materialize_cpsr_vreg`]
+/// accepts only a list head whose binding back-pointer is this anchor.
+pub const CG_CODEGEN_CPSR_BINDING_ANCHOR: usize = 0x1d4 / 4;
+/// `cg_codegen_t + 0x1e4` — head of the CPSR virtual-register list.
+pub const CG_CODEGEN_CPSR_VREG_HEAD: usize = 0x1e4 / 4;
 
 /// `cg_label_t + 0x00` — next label in the codegen's list.
 pub const CG_LABEL_NEXT: usize = 0;
@@ -3518,6 +3525,69 @@ pub unsafe extern "C" fn cg_binding_acquire(
     );
     binding as *mut CgBinding
 }
+/// cg_materialize_cpsr_vreg — original: `FUN_082d7870` @ **0x082d7870**
+/// (180 bytes; **7 plain `bl` call sites**, 0 predicated `bl` sites:
+/// 0x082c0fbc, 0x082c1020, 0x082c1050, 0x082c1080, 0x082c1108,
+/// 0x082c11b0, 0x082cbc4c).
+///
+/// Materializes the first virtual register on the codegen's CPSR descriptor
+/// list. It first requires that the register still back-points at the
+/// embedded CPSR binding anchor. It then proceeds only when the register is
+/// live-OUT of the current block or has a queued use. The binding allocator
+/// selects a hardware binding, the rebind helper installs it, and the
+/// recovered `FUN_083685d4` tail sequence emits `MRS rd, CPSR`, with `rd`
+/// from the binding resource's low nibble. Finally flags bits 0x100 and
+/// 0x200 are forced on the binding.
+///
+/// Raw extent is 0x082d7870..0x082d7920; the next function starts at
+/// 0x082d7924. No aligned osos.dec data word references this address.
+/// Deliberate deviation: the complete observable sequence of the 24-byte
+/// unported direct callee `FUN_083685d4` is expressed through the
+/// already-ported canonical word emitter, rather than introducing a second
+/// exported port.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_materialize_cpsr_vreg(codegen: *mut CgCodegen) {
+    let codegen = codegen as *mut u8;
+    let reg = slot(codegen, CG_CODEGEN_CPSR_VREG_HEAD).read();
+    if reg.is_null()
+        || slot(reg, CG_VREG_BINDING).read()
+            != slot(codegen, CG_CODEGEN_CPSR_BINDING_ANCHOR) as *mut u8
+    {
+        return;
+    }
+
+    let reg_no = word(reg, CG_VREG_NO).read();
+    let block = slot(codegen, CG_CODEGEN_CURRENT_BLOCK).read();
+    let live_out = slot(block, CG_BLOCK_LIVE_OUT).read();
+    let is_live_out =
+        word(live_out, CG_BITSET_BITS + (reg_no >> 5)).read() & (1usize << (reg_no & 31)) != 0;
+    if !is_live_out
+        && slot(slot(codegen, CG_CODEGEN_REG_USES).read(), reg_no)
+            .read()
+            .is_null()
+    {
+        return;
+    }
+
+    let binding = cg_binding_acquire(codegen as *mut CgCodegen, reg as *mut CgVirtualReg, 0);
+    cg_binding_rebind(codegen as *mut CgCodegen, binding, reg as *mut CgVirtualReg);
+    let resource = (binding as *const u8)
+        .add(CG_BINDING_RESOURCE * WORD)
+        .read();
+    let instruction = 0xe10f_0000u32 | (u32::from(resource & 0x0f) << 12);
+    cg_buffer_emit_word(
+        slot(codegen, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer,
+        instruction,
+    );
+    let flags = word(binding as *mut u8, CG_BINDING_FLAGS);
+    flags.write(
+        (flags.read() & !CG_BINDING_FLAG_BOUND)
+            | CG_BINDING_FLAG_BOUND
+            | CG_BINDING_FLAG_BLOCK_ENTRY,
+    );
+}
+
 
 /// The unported tail callee of [`cg_consume_register_use`]. The raw tail
 /// target `FUN_082d8140` acquires a binding, rebinds it to the virtual
@@ -9487,6 +9557,113 @@ mod tests {
         }
         teardown();
     }
+    // --- cg_materialize_cpsr_vreg ------------------------------------
+
+    struct CpsrMaterializeFixture {
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        reg: [usize; record_size(CG_VREG_BYTES) / WORD],
+        block: [usize; record_size(0x24) / WORD],
+        live_out: [usize; 2],
+        use_heads: [usize; 16],
+        output: [usize; CG_CODEGEN_OUTPUT_OFFSET + 1],
+    }
+
+    impl CpsrMaterializeFixture {
+        fn new() -> std::boxed::Box<CpsrMaterializeFixture> {
+            std::boxed::Box::new(CpsrMaterializeFixture {
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                reg: [0; record_size(CG_VREG_BYTES) / WORD],
+                block: [0; record_size(0x24) / WORD],
+                live_out: [0; 2],
+                use_heads: [0; 16],
+                output: [0; CG_CODEGEN_OUTPUT_OFFSET + 1],
+            })
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        fn configure_valid_cpsr_reg(&mut self, reg_no: usize, resource: usize) {
+            self.codegen[CG_CODEGEN_CPSR_VREG_HEAD] = self.reg.as_mut_ptr() as usize;
+            self.reg[CG_VREG_BINDING] = unsafe {
+                self.codegen
+                    .as_mut_ptr()
+                    .add(CG_CODEGEN_CPSR_BINDING_ANCHOR) as usize
+            };
+            self.reg[CG_VREG_NO] = reg_no;
+            self.codegen[CG_CODEGEN_ANCHOR_ID] = resource;
+            self.codegen[CG_CODEGEN_CURRENT_BLOCK] = self.block.as_mut_ptr() as usize;
+            self.block[CG_BLOCK_LIVE_OUT] = self.live_out.as_mut_ptr() as usize;
+            self.codegen[CG_CODEGEN_REG_USES] = self.use_heads.as_mut_ptr() as usize;
+            self.codegen[CG_CODEGEN_OUTPUT] = self.output.as_mut_ptr() as usize;
+        }
+    }
+
+    #[test]
+    fn materialize_cpsr_vreg_guards_absent_foreign_and_dead_registers() {
+        let _g = setup();
+        let mut f = CpsrMaterializeFixture::new();
+        unsafe {
+            cg_materialize_cpsr_vreg(f.codegen_ptr());
+            assert_eq!(f.codegen[CG_CODEGEN_CPSR_VREG_HEAD], 0, "an empty CPSR list is a no-op");
+
+            f.codegen[CG_CODEGEN_CPSR_VREG_HEAD] = f.reg.as_mut_ptr() as usize;
+            f.reg[CG_VREG_BINDING] = usize::MAX;
+            cg_materialize_cpsr_vreg(f.codegen_ptr());
+
+            f.configure_valid_cpsr_reg(3, 3);
+            cg_materialize_cpsr_vreg(f.codegen_ptr());
+            assert_eq!(
+                f.output[CG_CODEGEN_OUTPUT_OFFSET],
+                0,
+                "a register with neither live-OUT state nor queued use is not materialized"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn materialize_cpsr_vreg_emits_mrs_for_live_out_and_queued_use() {
+        let _g = setup();
+        let mut f = CpsrMaterializeFixture::new();
+        let mut cell = 0u32;
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            f.configure_valid_cpsr_reg(9, 9);
+            f.codegen[CG_CODEGEN_CPSR_BINDING_ANCHOR + CG_BINDING_FLAGS] = 0x456;
+            f.live_out[CG_BITSET_BITS] = 1 << 9;
+            let output = f.output.as_mut_ptr() as *mut CgCodegenBuffer;
+
+            cg_materialize_cpsr_vreg(f.codegen_ptr());
+            assert_eq!(cell, 0xe10f_9000, "the hardware resource selects MRS rd");
+            assert_eq!(
+                f.codegen[CG_CODEGEN_CPSR_BINDING_ANCHOR + CG_BINDING_FLAGS],
+                0x756,
+                "the materializer forces both binding lifecycle flags"
+            );
+
+            f.live_out[CG_BITSET_BITS] = 0;
+            f.use_heads[9] = 1;
+            cg_materialize_cpsr_vreg(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(output, 0), (output, 4)],
+                "either live-OUT or a queued use emits the same MRS word"
+            );
+            assert_eq!(f.output[CG_CODEGEN_OUTPUT_OFFSET], 8);
+        }
+        drop(f);
+        teardown();
+    }
+
     // --- cg_consume_register_use -------------------------------------
 
     static mut CONSUME_REGISTER_USE_LOG: std::vec::Vec<(usize, usize, u32)> = std::vec::Vec::new();

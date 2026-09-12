@@ -30124,6 +30124,42 @@ functions:
       expected to differ because Rust expresses the semihost/read seam and
       loops differently.
 
+  - address: 0x082d7870
+    ghidra: FUN_082d7870
+    name: cg_materialize_cpsr_vreg
+    size: 180
+    sig: "void cg_materialize_cpsr_vreg(CgCodegen *codegen)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r4: codegen
+      iVar3/r5: cpsr virtual register at the embedded descriptor head
+      iVar2/r6: selected hardware binding
+      FUN_082b3c34: cg_binding_acquire
+      FUN_082b5234: cg_binding_rebind
+      FUN_083685d4: MRS word emission through cg_buffer_emit_word
+    notes: >-
+      Verified call count: 7 plain bl sites, 0 predicated bl sites:
+      0x082c0fbc, 0x082c1020, 0x082c1050, 0x082c1080, 0x082c1108,
+      0x082c11b0, 0x082cbc4c. Raw extent is 180 bytes at
+      0x082d7870..0x082d7920; the next separately linked function starts
+      at 0x082d7924. No aligned osos.dec data word equals this address, so
+      no indirect dispatch is discovered. It takes the first virtual
+      register at codegen +0x1e4 only when its binding back-pointer equals
+      the embedded CPSR anchor at +0x1d4. It proceeds when the current
+      block's live-OUT bitset contains the virtual-register number or the
+      corresponding codegen +0x21c use-list head is non-NULL, then acquires
+      and rebinds a hardware binding. The recovered direct-callee behavior
+      emits MRS rd,CPSR (rd = binding-resource low nibble), through the
+      existing canonical word emitter, and forces binding flags 0x100 and
+      0x200. Deliberate deviation: no separately exported port is added for
+      the 24-byte FUN_083685d4 callee; its complete observable sequence is
+      inlined through already-ported cg_buffer_emit_word. Host tests:
+      src/codegen/ir.rs::materialize_cpsr_vreg_guards_absent_foreign_and_dead_registers
+      and ::materialize_cpsr_vreg_emits_mrs_for_live_out_and_queued_use.
+      match.py (against this worktree's ARM archive) reports the expected
+      Rust frame, call relocations and simplified final flag OR.
+
   - address: 0x082d7924
     ghidra: FUN_082d7924
     name: cache_lock_wait
