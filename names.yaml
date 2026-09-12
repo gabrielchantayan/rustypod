@@ -35046,6 +35046,36 @@ functions:
       original relies on the base constructor preserving r0) - the
       accepted house deviations.
 
+  - address: 0x08280fc0
+    ghidra: FUN_08280fc0
+    name: fixed_value_triplet_default_init
+    size: 32
+    sig: "FixedValue *fixed_value_triplet_default_init(FixedValue *this)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_081523dc: fixed_value_default_init
+    notes: >-
+      Raw binary decode establishes the exact 32-byte extent:
+      push {r4,lr}; bl fixed_value_default_init(this); add r0,#0x18;
+      bl fixed_value_default_init; add r0,#0x18; bl
+      fixed_value_default_init; sub r0,#0x30; pop {r4,pc}. It constructs
+      three consecutive 0x18-byte FixedValue slots and returns the first.
+      Decoding every ARM B/BL word in osos.dec finds eight direct call
+      sites (0x08153150/58/60/68 and 0x0816e37c/84/8c/94), all
+      unconditional bl; no tail branches, predicated calls, or exact
+      DATA-word references target this address. No NULL or bounds guard,
+      matching stock. Host test seeds unique dirty payloads in all slots,
+      verifies each receives the vtable and zero flags word, and proves
+      its value, aux, and opaque fields remain untouched.
+      match.py structural review against this worktree's ARM archive:
+      the three calls and their 0x18/0x30 slot progression are retained;
+      LLVM adds its standard fp frame and preserves the base in r4 rather
+      than using stock's final r0 subtract. The prescribed default archive
+      resolves to the separate sibling checkout, which lacks this
+      worktree's new symbol; --lib selects this worktree's archive.
+
   # --- 'plst' UI-element counted-string store (ui/plst_counted_string) ---
   - address: 0x08067274
     ghidra: FUN_08067274

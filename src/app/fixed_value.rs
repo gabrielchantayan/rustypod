@@ -210,6 +210,35 @@ pub unsafe extern "C" fn fixed_value_default_init(this: *mut FixedValue) -> *mut
     this
 }
 
+/// fixed_value_triplet_default_init — original: `FUN_08280fc0` @
+/// 0x08280fc0 (32 bytes; eight verified direct `bl` call sites:
+/// 0x08153150, 0x08153158, 0x08153160, 0x08153168, 0x0816e37c,
+/// 0x0816e384, 0x0816e38c, and 0x0816e394; all unconditional, with no
+/// tail branches, predicated calls, or DATA-word references).
+///
+/// Constructs three consecutive 0x18-byte [`FixedValue`] slots with the
+/// default constructor. The original calls `fixed_value_default_init` at
+/// `this`, `this + 0x18`, and `this + 0x30`, then returns the initial
+/// pointer. Each slot therefore receives the scalar vtable and a zero
+/// flags/refcount word while retaining its value, aux, and opaque payload
+/// words. There are no deliberate deviations.
+///
+/// # Safety
+///
+/// `this` must identify three consecutive, live, 4-byte-aligned
+/// [`FixedValue`] objects with 0x48 writable bytes in total. Stock has no
+/// NULL or bounds checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed_value_triplet_default_init(
+    this: *mut FixedValue,
+) -> *mut FixedValue {
+    let after_first = fixed_value_default_init(this);
+    let after_second = fixed_value_default_init(after_first.add(1));
+    fixed_value_default_init(after_second.add(1)).sub(2)
+}
+
+
 /// value_aux_max — original: `FUN_08273a40` @ 0x08273a40 (20 bytes:
 /// five ARM instruction words; the next separately linked function
 /// begins at 0x08273a54, so Ghidra's extent is exact and there is no
@@ -474,6 +503,43 @@ mod tests {
         assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32, "+0x04 is not written");
         assert_eq!(object.aux, 0xcafe_babe, "+0x08 is not written");
         assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    fn triplet_default_init_constructs_each_slot_and_preserves_payloads() {
+        let mut objects = [dirty(), dirty(), dirty()];
+        for (index, object) in objects.iter_mut().enumerate() {
+            let index = index as u32;
+            object.vtable = 0xdead_beef ^ index;
+            object.value_q16 = (0x0bad_f00d_u32.wrapping_add(index)) as i32;
+            object.aux = 0xcafe_babe_u32.wrapping_sub(index);
+            object.opaque = [0x1111_1111 ^ index, 0x2222_2222 ^ index];
+            object.flags = 0xffff_fffc | index;
+        }
+
+        let this = objects.as_mut_ptr();
+        assert_eq!(unsafe { fixed_value_triplet_default_init(this) }, this);
+
+        for (index, object) in objects.iter().enumerate() {
+            let index = index as u32;
+            assert_eq!(object.vtable, FIXED_VALUE_VTABLE, "slot {index}");
+            assert_eq!(object.flags, 0, "slot {index}");
+            assert_eq!(
+                object.value_q16,
+                (0x0bad_f00d_u32.wrapping_add(index)) as i32,
+                "slot {index}: +0x04 stays dirty",
+            );
+            assert_eq!(
+                object.aux,
+                0xcafe_babe_u32.wrapping_sub(index),
+                "slot {index}: +0x08 stays dirty",
+            );
+            assert_eq!(
+                object.opaque,
+                [0x1111_1111 ^ index, 0x2222_2222 ^ index],
+                "slot {index}: +0x0c..+0x13 stay dirty",
+            );
+        }
     }
 
     #[test]
