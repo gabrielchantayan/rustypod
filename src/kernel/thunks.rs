@@ -803,7 +803,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038118, rom_target: 0x22007530, name: None },
     RomThunk { thunk_addr: 0x08038120, rom_target: 0x220055f8, name: None },
     RomThunk { thunk_addr: 0x08038128, rom_target: 0x220052ec, name: None },
-    RomThunk { thunk_addr: 0x08038130, rom_target: 0x2200509c, name: None },
+    RomThunk { thunk_addr: 0x08038130, rom_target: 0x2200509c, name: Some("ui_manager_finish_pending_operation") },
     RomThunk { thunk_addr: 0x08038138, rom_target: 0x22007f88, name: None },
     RomThunk { thunk_addr: 0x08038140, rom_target: 0x220051d0, name: None },
     RomThunk { thunk_addr: 0x08038148, rom_target: 0x22007fcc, name: None },
@@ -925,7 +925,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 21] = [
+        let expected: [(u32, &str); 22] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -944,6 +944,7 @@ mod tests {
             (0x22004230, "gateway_service19_request"),
             (0x22004368, "wake_object"),
             (0x22005018, "ui_manager_acquire"),
+            (0x2200509c, "ui_manager_finish_pending_operation"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
             (0x22007470, "iram_event_handler_source_veneer"),
@@ -1023,8 +1024,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 21 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 23);
+        // 22 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 24);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 

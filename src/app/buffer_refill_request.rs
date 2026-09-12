@@ -157,13 +157,16 @@ pub unsafe extern "C" fn stream_buffer_request_flags_update(enable: u32, mask: u
 }
 
 #[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub(crate) static STREAM_BUFFER_REQUEST_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
-    extern crate std;
-
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
 
-    static REFILL_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut CONTROLLER_CALLS: u32 = 0;
     static mut CONTROLLER_RESULT: u32 = 0;
 
@@ -187,7 +190,7 @@ mod tests {
     }
 
     fn arrange(level: u32, result: u32) -> MutexGuard<'static, ()> {
-        let guard = REFILL_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = STREAM_BUFFER_REQUEST_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             STREAM_BUFFER_REFILL_LEVEL = level;
             CONTROLLER_CALLS = 0;
@@ -198,7 +201,7 @@ mod tests {
     }
 
     fn arrange_request_flags(flags: u32) -> MutexGuard<'static, ()> {
-        let guard = REFILL_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = STREAM_BUFFER_REQUEST_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             STREAM_BUFFER_REQUEST_FLAGS = flags;
         }
