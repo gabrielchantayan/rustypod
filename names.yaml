@@ -69848,3 +69848,34 @@ functions:
       and host. Tests cover the zero gate without a valid reference, nonzero
       byte truthiness, equality and both u16/u32 boundary directions, and the
       unresolved-reference zero count.
+
+  # --- four consecutive word clear ---
+  - address: 0x08158cf0
+    ghidra: FUN_08158cf0
+    name: four_word_clear
+    size: 24
+    sig: "u32 *four_word_clear(u32 *target)"
+    module: cxx/four_word_clear
+    status: ported
+    renames:
+      param_1/r0: target
+      return/r0: target
+      "target+0x00": target_word_0
+      "target+0x04": target_word_1
+      "target+0x08": target_word_2
+      "target+0x0c": target_word_3
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent: four `str r2,[r0,#offset]`
+      zero stores through +0x0c followed by `bx lr` at 0x08158d04; the next
+      separately linked function begins at 0x08158d08. Decoding every aligned
+      ARM B/BL immediate in osos.dec finds exactly eight direct callers, all
+      plain unconditional bl (0x0812775c, 0x08140578, 0x0814066c, 0x08284700,
+      0x0828478c, 0x08284834, 0x082848ac, 0x0829b3e4), with no predicated bl
+      forms, tail b callers, or aligned data-word references. The leaf has no
+      NULL guard, reads no target words, and writes only the four consecutive
+      words at target +0x00/+0x04/+0x08/+0x0c. Although Ghidra declares void,
+      caller 0x0814066c consumes the preserved r0 destination; the Rust
+      signature returns target to retain the verified ABI behavior. No
+      deliberate deviations. Focused host test proves the returned destination
+      and that nonzero guard words remain untouched. Reference C:
+      decomp/c/014/08158cf0_FUN_08158cf0.c; assembly: osos.dec 0x08158cf0.
