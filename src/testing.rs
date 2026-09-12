@@ -341,6 +341,15 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_POSITION: usize = 0xd300_0000;
+    // 0xc100_0000: dedicated to cxx/payload_list_owner_destroy's raw-u32
+    // owner/list fixture; mappings never unmap, so no other user may share it.
+    pub const PAYLOAD_LIST_OWNER_DESTROY: usize = 0xc100_0000;
+    // 0xc200_0000: dedicated to cxx/shared_cell's direct-release payload
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const SHARED_CELL_DIRECT_RELEASE: usize = 0xc200_0000;
+    // 0xc300_0000: dedicated to cxx/shared_cell's secondary direct-release
+    // payload fixture; mappings never unmap, so no other user may share it.
+    pub const SHARED_CELL_DIRECT_RELEASE_SECONDARY: usize = 0xc300_0000;
     // 0xf300_0000: dedicated to fs/volume_table's raw-u32 descriptor-table
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const VOLUME_TABLE_LOOKUP: usize = 0xf300_0000;
