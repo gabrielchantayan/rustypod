@@ -67819,3 +67819,29 @@ functions:
       branches. No aligned DATA word names this entry. No deviations: the
       port preserves the single byte read and intentionally has no NULL guard.
       Host tests exhaust all 256 input byte values, accepting only 3 and 4.
+  - address: 0x0827e48c
+    ghidra: FUN_0827e48c
+    name: singleton_class_7a00_instance
+    size: 12
+    sig: "void *singleton_class_7a00_instance(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0827e498: singleton_class_7a00_holder
+      DAT_089cc604: singleton_class_7a00_instance
+    notes: >-
+      Raw osos.dec gives the exact 12-byte extent 0x0827e48c..0x0827e498:
+      `ldr r0,[pc,#4]; ldr r0,[r0,#4]; bx lr`; the literal at 0x0827e498 is
+      0x089cc600 and the separately linked next function begins at
+      0x0827e49c. The accessor returns the holder's +4 slot unconditionally,
+      including NULL. Decoding every immediate ARM B/BL word in osos.dec finds
+      exactly eight inbound direct calls, all unconditional plain bl at
+      0x08113fc4, 0x0816cfc4, 0x0816d3bc, 0x0816d838, 0x0816da48, 0x0816daac,
+      0x0816daf8, and 0x0816db64; there are no predicated bl forms, direct
+      tail b callers, or aligned DATA words that name this entry. The holder
+      is filled by FUN_0827e76c after allocating 0x16c bytes and constructing
+      FUN_0827e7fc, which registers the result under class id 0x7a00. No
+      concrete class name survives, so the symbol records only that verified
+      identity. Target code reads the live runtime slot at 0x089cc604; host
+      builds use a NULL-initialized static because the decrypted 0x089cxxxx
+      RW page holds stale string data rather than runtime globals.
