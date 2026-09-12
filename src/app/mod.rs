@@ -146,6 +146,7 @@ pub mod recording_buffer;
 pub mod recording_controller;
 pub mod refcounted_value;
 pub mod resource;
+pub mod resource_provider_contains_view;
 pub mod root_context_f9c_bound;
 pub mod resource_chain;
 pub mod resource_reference_value;
