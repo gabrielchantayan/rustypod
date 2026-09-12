@@ -1,6 +1,6 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and its five ported members: arbitrary-bit test, the
-//! pre-split bit test, bit write, bit clear, and UTF-8 bulk insert. Everything
+//! cardinality — and its six ported members: arbitrary-bit test, the pre-split
+//! bit test, bit write, bit clear, destruction, and UTF-8 bulk insert. Everything
 //! below is decoded from the raw words of `work/firmware/osos.dec`, not from Ghidra.
 //!
 //! ## The class
@@ -123,6 +123,7 @@
 //! ported and called directly.
 
 use crate::cxx::string_object::utf8_next_codepoint;
+use crate::heap::veneers::free_wrapper;
 
 /// The 16-byte bit set. Every field is target-width so the layout stays
 /// exact in 64-bit host tests, where a real pointer would not fit in
@@ -294,6 +295,37 @@ pub unsafe extern "C" fn bit_set_clear(set: *mut BitSet, bit: u32) {
         word.write(word.read() & !(1u32 << bit_index));
     }
 }
+/// bit_set_destroy — original: `FUN_08274874` @ 0x08274874
+/// (**40 bytes**, 0x08274874..0x08274898; the next function starts with
+/// `push {r0, r1, r4, lr}` at 0x0827489c and there is no trailing literal
+/// pool. **7 plain `bl` call sites, 0 predicated `bl`, 0 `b`**, binary-scanned
+/// by decoding every B/BL word in `osos.dec`.)
+///
+/// Releases `set.words` through [`free_wrapper`] with allocator tag zero only
+/// when it is non-NULL and `set.heap_tag != 0x3a`, then returns `set` without
+/// altering any field. The tag is an ownership sentinel: borrowed backing
+/// storage remains live after destruction. The stock `blne` makes the free
+/// conditional; its seven callers all invoke this destructor unconditionally.
+///
+/// Deliberate deviation: the port directly calls the already ported
+/// [`free_wrapper`], whose heap-ops dispatch replaces the retail image's
+/// direct heap path.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`]. If its word pointer is non-NULL and
+/// its tag is not [`BIT_SET_TAG_BORROWED`], the caller must transfer its
+/// allocation to the default heap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_destroy(set: *mut BitSet) -> *mut BitSet {
+    let words = (*set).words as usize as *mut u8;
+    if !words.is_null() && (*set).heap_tag != BIT_SET_TAG_BORROWED {
+        free_wrapper(words, 0);
+    }
+    set
+}
+
 
 /// The `value` argument the insert passes (`mov r2, #1`): set the bit.
 const BIT_SET_VALUE_SET: u32 = 1;
@@ -430,6 +462,57 @@ mod tests {
                 }
             }
         };
+    }
+    /// A non-NULL owned buffer takes the conditional `blne free_wrapper`;
+    /// destruction returns the same object and deliberately leaves its fields.
+    #[test]
+    fn destroy_releases_owned_words_with_tag_zero_and_returns_this() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let words = 0xdead_beecusize as *mut u8;
+        let mut set = BitSet {
+            bit_capacity: 32,
+            cardinality: 1,
+            words: words as usize as u32,
+            heap_tag: 0,
+            reserved: [0; 3],
+        };
+        let set_ptr = core::ptr::addr_of_mut!(set);
+
+        let returned = unsafe { bit_set_destroy(set_ptr) };
+
+        assert_eq!(returned, set_ptr, "the original restores this to r0");
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(calls, 1);
+        assert_eq!(freed, words);
+        assert_eq!(tag, 0);
+        assert_eq!(set.words, words as usize as u32, "the destructor does not NULL words");
+    }
+
+    /// The raw `cmp r0,#0` and `cmpne tag,#0x3a` guards both bypass the
+    /// conditional free; neither empty nor borrowed storage changes.
+    #[test]
+    fn destroy_skips_empty_and_borrowed_words() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let mut empty = BitSet {
+            bit_capacity: 0,
+            cardinality: 0,
+            words: 0,
+            heap_tag: 0,
+            reserved: [0; 3],
+        };
+        let borrowed_words = 0xcafe_babeusize as *mut u8;
+        let mut borrowed = BitSet {
+            bit_capacity: 32,
+            cardinality: 1,
+            words: borrowed_words as usize as u32,
+            heap_tag: BIT_SET_TAG_BORROWED,
+            reserved: [0; 3],
+        };
+
+        assert_eq!(unsafe { bit_set_destroy(&mut empty) }, core::ptr::addr_of_mut!(empty));
+        assert_eq!(unsafe { bit_set_destroy(&mut borrowed) }, core::ptr::addr_of_mut!(borrowed));
+        assert_eq!(crate::heap::veneers::tests::free_log().0, 0);
+        assert_eq!(borrowed.words, borrowed_words as usize as u32);
     }
 
     #[test]

@@ -43528,6 +43528,38 @@ functions:
       added. TESTS - host tests cover an already-clear no-op, bit positions
       0/31/32/63 across two words, and cardinality underflow wrapping.
       Deviations - none.
+  - address: 0x08274874
+    ghidra: FUN_08274874
+    name: bit_set_destroy
+    size: 40
+    sig: "BitSet *bit_set_destroy(BitSet *set)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      iVar1/r0: words
+      r4: set
+      r1: heap_tag
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Destroys a BitSet without altering its fields: loads words at +0x08,
+      then only when it is non-NULL and the allocator tag byte at +0x0c is
+      not 0x3a, sets r1 to zero and conditionally calls free_wrapper(words,
+      0). The 0x3a tag marks borrowed backing storage and therefore skips the
+      free. It restores this to r0 before returning. EXTENT - 40 bytes,
+      0x08274874..0x08274898: `pop {r4, pc}` at 0x08274898 is final and
+      0x0827489c opens the separately linked UTF-8 insert function with
+      `push {r0, r1, r4, lr}`; no literal pool intervenes. CALL SITES -
+      decoding every ARM B/BL immediate in osos.dec finds 7 plain bl
+      (0x0816f5d4, 0x0816f5e8, 0x0816f5fc, 0x0829a974, 0x0829a9a8,
+      0x082a6be4, 0x082a6c1c), 0 predicated bl, and 0 b, so all direct
+      callers invoke it unconditionally; the `blne free_wrapper` is the
+      destructor's own ownership gate. CALLEE - free_wrapper @ 0x080e7970 is
+      already ported in heap/veneers and called directly, so no dispatch seam
+      was added. TESTS - owned storage frees exactly once with tag 0 and
+      returns this; NULL and borrowed storage skip the heap and retain the
+      fields. Deviation - the ported free_wrapper dispatches through HEAP_OPS
+      rather than following the retail heap path directly.
   - address: 0x0827489c
     ghidra: FUN_0827489c
     name: bit_set_insert_utf8
