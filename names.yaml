@@ -62013,6 +62013,40 @@ functions:
       storing nothing, and a full 10->20->30->40->end chain walk as
       the 0x0820c9ec caller performs it.
 
+  - address: 0x0820c8d8
+    ghidra: FUN_0820c8d8
+    name: mov_chain_table_set_next
+    size: 28
+    sig: "i32 mov_chain_table_set_next(MovChainTable *table, u32 index, u32 next)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      param_3/r2: next
+    notes: >-
+      Raw ARM establishes the exact 28-byte extent 0x0820c8d8..0x0820c8f4:
+      cmp r1,#128; addcc r1,r1,r1,lsl#2; addcc r0,r0,r1,lsl#2;
+      strcc r2,[r0,#12]; movcc r0,#0; movcs r0,#2; bx lr. The separately
+      linked chain walker begins at 0x0820c8f4, so Ghidra's 28-byte extent
+      is exact and there is no literal pool. Decoding every ARM B/BL word
+      in osos.dec finds 8 direct call sites, all unconditional plain bl:
+      0x081e451c, 0x081e4748, 0x081e4ce4, 0x081e4cfc, 0x081e4fd4,
+      0x081e4fec, 0x081e51e8, and 0x081e5378; there are zero predicated
+      BL forms and zero tail branches. No aligned DATA word in osos.dec
+      holds 0x0820c8d8, so it is not dispatched virtually. This is the
+      matching setter for mov_chain_table_next: for indexes below 128 it
+      stores r2 in the selected 20-byte entry's +0x0c next-link word and
+      returns 0; all other u32 indexes store nothing and return 2. The
+      link value is deliberately not validated, including 0x80 and
+      0xfffffffe values that the accessor rejects. No NULL guard exists;
+      stock faults if a valid index produces an invalid table pointer.
+      Zero predicated call forms are behavioural: callers rely on this
+      leaf's unsigned bounds check rather than guarding the index. No
+      deviations. Host tests prove valid boundary slots 0 and 127 update
+      only their own link word and retain arbitrary link patterns, while
+      128, 129, 0x80000000, and 0xffffffff leave the table unchanged.
+
   - address: 0x0835206c
     ghidra: FUN_0835206c
     name: xor_f6_in_place
