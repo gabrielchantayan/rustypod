@@ -88,6 +88,7 @@ pub mod u16_pair_copy;
 pub mod u32_pair_store;
 pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
+pub mod zero_four_words;
 pub mod u32_word_swap;
 pub mod u8_pair_copy;
 pub mod utf8_next_codepoint_permissive;

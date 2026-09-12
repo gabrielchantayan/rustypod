@@ -62762,6 +62762,28 @@ functions:
       seam; its only deliberate Rust choice is to expose the otherwise
       untyped r0 result as u32.
 
+  - address: 0x082486ec
+    ghidra: FUN_082486ec
+    name: zero_four_words
+    size: 20
+    sig: "u32 *zero_four_words(u32 *dst)"
+    module: util/zero_four_words
+    status: ported
+    renames:
+      param_1/r0: dst
+      r1: zero
+    notes: >-
+      Raw ARM is exactly five instructions at 0x082486ec..0x08248700; the
+      next separately linked function opens at 0x08248704, so Ghidra's
+      24-byte extent consumes that sibling's first instruction. It loads
+      zero into r1, stores it at dst+0, +4, +8, and +12, then returns the
+      original dst in r0. Decoding every ARM B/BL word in osos.dec finds
+      exactly eight inbound direct bl sites, all unconditional:
+      0x0824c658, 0x0824c660, 0x0824c668, 0x0825603c, 0x08256044,
+      0x08256058, 0x08256d1c, and 0x08256d24. No predicated BL forms or
+      direct tail branches target it. No callee or dispatch seam exists.
+      No deliberate deviations.
+
   - address: 0x08248704
     ghidra: FUN_08248704
     name: copy_four_words_staggered
