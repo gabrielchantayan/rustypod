@@ -40823,6 +40823,33 @@ functions:
       every valid tag with high tag-word bits set and source/destination
       aliasing; descriptor_layout_initialize now calls this port directly,
       replacing its former fixed-address mapper seam.
+  - address: 0x0806b410
+    ghidra: FUN_0806b410
+    name: scoped_context_owner_validity
+    size: 40
+    sig: "u32 scoped_context_owner_validity(const void *owner)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: owner
+      "*owner": element
+      FUN_0806aa3c: ui_element_is_tdat_class
+    notes: >-
+      Raw ARM extent is exactly 0x0806b410..0x0806b437: cmp r0,#0; push
+      {lr}; branch to 0x0806b430 for a NULL owner; load the owner's first
+      word; call the ported ui_element_is_tdat_class at 0x0806aa3c; then
+      normalize a nonzero result to 1 with movne r0,#1 or return 0. The
+      next separately linked function starts at 0x0806b438 with
+      ldrb r0,[r0,#0xb91], so there is no literal pool. Decoding every ARM
+      B/BL word in osos.dec finds exactly eight direct callers, all
+      unconditional plain BL (0x080506cc, 0x08050c68, 0x08053d5c,
+      0x08061774, 0x0806a64c, 0x0806a900, 0x080c5fec, and 0x082a3dd8);
+      there are zero predicated forms and no direct tail-B sites. The Rust
+      port keeps the NULL guard and direct call to the existing 'tdat'
+      predicate; it represents the first target-width owner word as a
+      typed pointer-to-pointer rather than a literal offset, preserving
+      target layout and host pointer width. scoped_context_is_valid now
+      directly calls this port, removing its former ROM dispatch seam.
   - address: 0x082a3dcc
     ghidra: FUN_082a3dcc
     name: scoped_context_is_valid
@@ -40843,20 +40870,17 @@ functions:
       unconditional BL (0x080aa544, 0x0813d794, 0x0817c224,
       0x0817dfc4, 0x081b5df0, 0x081fd158, 0x081fd1cc, 0x08208b3c,
       0x08208bb4, and 0x08226bc0), with zero predicated forms and no
-      direct tail B sites. It always calls the unported 0x0806b410
-      owner predicate first. When that returns nonzero, it reads the
-      ScopedContext service_context +0xf60 registry slot and, if that
-      registry exists, returns 1 immediately when its +0x18 word equals
+      direct tail B sites. It calls the ported 0x0806b410 owner predicate
+      first. When that returns nonzero, it reads the ScopedContext
+      service_context +0xf60 registry slot and, if that registry exists,
+      returns 1 immediately when its +0x18 word equals
       this->registry_token. Every other path returns whether the full
       owner_valid word is nonzero. The Rust port keeps the existing
       repr(C) ScopedContext model and aligned word-indexed service and
-      registry accesses, avoiding host pointer-width overlap. The
-      0x0806b410 callee has no existing ledger entry, so its target
-      default dispatches to the ROM address while host tests install a
-      recording seam; no callee identity is invented. The helper's raw
-      code rejects NULL, then checks a dereferenced object's +0x04 word
-      against the literal tdat tag, but it remains unported. Host tests
-      prove the helper runs before every fallback, matching live registry
+      registry accesses, avoiding host pointer-width overlap, and directly
+      calls scoped_context_owner_validity instead of its former ROM
+      dispatch seam. Host tests prove rejected owners skip the service
+      context read before the owner_valid fallback, matching live registry
       token succeeds, and absent or mismatched registry tokens fail when
       owner_valid is zero.
 
