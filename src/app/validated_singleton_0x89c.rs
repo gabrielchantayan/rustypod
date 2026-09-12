@@ -134,6 +134,9 @@ unsafe fn cache_slot() -> *mut *mut u8 {
 #[cfg(not(target_os = "none"))]
 pub static mut VALIDATED_SINGLETON_0X89C: *mut u8 = core::ptr::null_mut();
 
+#[cfg(test)]
+pub(crate) static VALIDATED_SINGLETON_0X89C_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
 unsafe fn cache_slot() -> *mut *mut u8 {
@@ -179,9 +182,7 @@ mod tests {
 extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
     static mut CONSTRUCT_RESULT: *mut u8 = core::ptr::null_mut();
     static mut DESTROY_RESULT: *mut u8 = core::ptr::null_mut();
@@ -262,7 +263,7 @@ extern crate std;
 
     #[test]
     fn returns_cached_object_without_lifecycle_calls() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         unsafe {
             let _reset = install();
             let cached = 0x1010usize as *mut u8;
@@ -274,7 +275,7 @@ extern crate std;
 
     #[test]
     fn keeps_a_constructed_object_only_after_validation() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         unsafe {
             let _reset = install();
             ALLOC_RESULT = 0x1110usize as *mut u8;
@@ -289,7 +290,7 @@ extern crate std;
 
     #[test]
     fn destroys_and_deletes_the_destructor_result_on_validation_failure() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         unsafe {
             let _reset = install();
             ALLOC_RESULT = 0x1110usize as *mut u8;
@@ -304,7 +305,7 @@ extern crate std;
 
     #[test]
     fn null_constructor_result_skips_validation_and_retries() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         unsafe {
             let _reset = install();
             assert!(validated_singleton_0x89c_with(allocate, release).is_null());
