@@ -161,6 +161,7 @@ pub mod silver_list_table;
 pub mod silver_list_table_resource;
 pub mod stage_progress;
 pub mod singletons;
+pub mod singleton_selection_predecessor;
 pub mod settings_item;
 pub mod validated_singleton_0x89c;
 pub mod showcase_queue_has_pending_entry;
