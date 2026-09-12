@@ -30096,6 +30096,29 @@ functions:
       0x0803bbb0). match.py: same mov r0,#0 + tail-call shape, plus the
       hook-table ldr/bx indirection and an LLVM frame.
 
+  - address: 0x082d0ab4
+    ghidra: FUN_082d0ab4
+    name: parse_ascii_decimal_cursor
+    size: 52
+    sig: "u32 parse_ascii_decimal_cursor(const u8 **cursor)"
+    module: util/parse_ascii_decimal_cursor
+    status: ported
+    renames:
+      param_1: cursor
+      iVar1: value
+      pbVar2: input
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x082d0ab4..0x082d0ae7: the next separately linked function,
+      ata_error_record, starts at 0x082d0ae8. Decoding every ARM B/BL word
+      finds exactly 7 direct call sites, all unconditional bl
+      (0x082cee88, 0x082cef34, 0x082cef6c, 0x082cf060, 0x082cf138,
+      0x082cf198, 0x082cf1d8); zero predicated forms and zero tail branches.
+      It loads the caller-owned input cursor, accepts consecutive ASCII
+      '0'..='9' bytes with the raw unsigned `byte - 0x30 <= 9` test,
+      computes value = value * 10 + digit modulo 2^32, stores the first
+      non-digit address back through the cursor word, and returns the value.
+      There are no NULL guards. Deliberate deviations: none.
   - address: 0x082d0ae8
     ghidra: FUN_082d0ae8
     name: ata_error_record

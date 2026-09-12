@@ -48,6 +48,7 @@ pub mod object_masked_word_refresh;
 pub mod object_word_payload_resolve;
 pub mod resource_list;
 pub mod pascal_string;
+pub mod parse_ascii_decimal_cursor;
 pub mod plane_cursor;
 pub mod q15_mul;
 pub mod operation_dispatch;
