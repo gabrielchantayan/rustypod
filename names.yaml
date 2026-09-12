@@ -17495,6 +17495,33 @@ functions:
       inferred. Host tests cover unchanged and disabled exits, absent and
       in-use presentation gates, release order, degenerate bounds, and the
       full-word/truncated-byte edge case.
+  - address: 0x082a26a8
+    ghidra: FUN_082a26a8
+    name: ui_element_is_fully_shown
+    size: 32
+    sig: "u32 ui_element_is_fully_shown(const UiElement *element)"
+    module: ui/shown_state
+    status: ported
+    renames:
+      FUN_082a26a8: ui_element_is_fully_shown
+      param_1/r0: element
+      "element+0x48": flags_48
+      "flags_48 bits 9-10": auxiliary_state
+      "flags_48 bits 11-12": shown_state
+    notes: >-
+      Exact raw extent is 0x082a26a8..0x082a26c8: its bx lr is at
+      0x082a26c4, with the separate ui_element_is_shown sibling opening at
+      0x082a26c8. It reads the aligned flags word at element+0x48 and returns
+      1 only when bits 9-10 equal 0x200 AND bits 11-12 equal 0x800; the
+      conditional and/cmp sequence means the second comparison is evaluated
+      only after the first succeeds. Decoding every ARM B/BL word in osos.dec
+      finds exactly 8 direct, unconditional bl call sites (0x081575bc,
+      0x08158704, 0x0815c1e4, 0x0815c4f0, 0x081b83ec, 0x081b88c8,
+      0x0829bafc, 0x082a24cc), with no predicated forms and no data-word
+      references; callers supply a live pointer and the leaf has no NULL
+      guard. Host tests cover each rejected encoding, the complete 4x4
+      two-field truth table with unrelated flags set, and the +0x48 read
+      extent. No deliberate deviations.
   - address: 0x082a26c8
     ghidra: FUN_082a26c8
     name: ui_element_is_shown
