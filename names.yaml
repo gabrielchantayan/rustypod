@@ -70426,3 +70426,54 @@ functions:
       fields are u32 pointers, so host code calls its known csem_signal body
       directly after target-width conversion instead of reading an eight-byte
       host pointer through mailbox_slot_signal.
+
+  # --- ATA command status polling ---
+  - address: 0x080d7b7c
+    ghidra: FUN_080d7b7c
+    name: ata_command_execute
+    size: 140
+    sig: "u32 ata_command_execute(AtaCommandDevice *device, u32 timeout_ms, u32 unused, u32 initial_status)"
+    module: drivers/ata_command_execute
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: timeout_ms
+      param_3/r2: unused
+      param_4/r3: initial_status
+      "device+0x3c": status_source
+      r4: status_source_saved
+      r5: start_usec
+      r6: timeout_usec
+      r7: busy_sleep_interval_usec
+      "status_source+0x1c": status_register
+      local_18: status
+      thunk_EXT_FUN_22001edc: iram_usec_timer_read_veneer
+      FUN_080bb610: ata_status_read
+      thunk_EXT_FUN_22001ee8: iram_usec_timer_elapsed_veneer
+      FUN_080568e8: task_sleep
+      return/r0: status
+    notes: >-
+      Raw osos.dec confirms a 140-byte extent: 34 instruction words at
+      0x080d7b7c..0x080d7bff followed by literal 0x00002710 at 0x080d7c04;
+      the next independently linked function begins at 0x080d7c08. Ghidra's
+      136-byte size omits only that literal-pool word. Decoding every aligned
+      ARM B/BL immediate in osos.dec finds exactly eight inbound direct
+      callers, all unconditional plain bl at 0x0807d7b8, 0x080b1b04,
+      0x080c4b28, 0x0836bf0c, 0x0836c3cc, 0x0836c4a0, 0x0836c59c, and
+      0x0836cf6c; there are zero predicated forms and zero direct tail
+      branches. The entry does not occur in any aligned image data word.
+      It captures the Timer E microsecond counter through the ported
+      0x08037e20 veneer, loads device+0x3c once, and repeatedly passes its
+      +0x1c register to unported 0x080bb610 to overwrite the status stack
+      word. Status bit 0 returns 2. If bit 7 is set, each 10-ms elapsed
+      check invokes ported task_sleep(10), then a wrapping
+      timeout_ms * 1000 check returns 1 when expired. Once bit 7 clears,
+      bit 3 returns 4 and every other status returns 3. The status reader's
+      object type is not identified: raw code proves it waits on ATA MMIO
+      readiness and writes the supplied word, so target builds use a literal
+      veneer and hosts use a volatile callback seam. The timer reader,
+      elapsed predicate, and task_sleep are already ported and called
+      directly. Host tests cover abort, completion, bit-3 device error, and
+      a busy poll which reaches 10 ms, sleeps once, then times out. Structural
+      review expected to differ in Rust frame/prologue and the one remaining
+      helper veneer; control-flow order and status predicates are preserved.
