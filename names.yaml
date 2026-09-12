@@ -50009,6 +50009,37 @@ functions:
       predicated or tail branches. The port keeps the u32 ARM return
       register representation and adds no range or format validation.
 
+  # --- big-endian u32 cursor reader ---
+  - address: 0x0825ec18
+    ghidra: FUN_0825ec18
+    name: u32_cursor_read_be_bytes
+    size: 60
+    sig: "void u32_cursor_read_be_bytes(u8 *destination, u32 unused, const u32 **source_cursor)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: unused (overwritten by destination)
+      param_3/r2: source_cursor
+      puVar2/r3: source_word_pointer
+      uVar1/r0: source_word
+    notes: >-
+      Raw ARM decoding confirms the complete 60-byte body from 0x0825ec18
+      through `bx lr` at 0x0825ec50: it loads the current aligned u32 pointer,
+      advances and stores the cursor by four bytes before the word load, then
+      emits the loaded word's bits 31..24, 23..16, 15..8, and 7..0 as four
+      destination bytes. The preceding sibling's `pop {r4,pc}` at 0x0825ec14
+      and the separately linked next function's `push {r4,lr}` at 0x0825ec54
+      prove the extent; there is no literal pool. Decoding every ARM B/BL word
+      in osos.dec finds exactly eight direct unconditional bl callers
+      (0x0825fd68, 0x0825fe1c, 0x0825fed0, 0x0825ff80, 0x08260034,
+      0x082600e4, 0x08260194, and 0x0826025c), with no predicated BL or
+      direct tail B callers. Every call ignores the incidental loaded-word
+      residue in r0, so the port uses a void Rust ABI. No NULL, alignment, or
+      bounds guards exist in the original or port. Host tests cover zero,
+      all-one, mixed-byte, and high-bit words, destination bounds, and
+      successive cursor advancement.
+
   # --- packed RGB565 cursor reader ---
   - address: 0x0825ec74
     ghidra: FUN_0825ec74
