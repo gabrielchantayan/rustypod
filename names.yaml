@@ -51366,6 +51366,40 @@ functions:
       rather than reproduce undefined stack contents. Device NID_OBJS remains
       the original absolute array; host tests install an inline fixture.
 
+  - address: 0x0805efc4
+    ghidra: FUN_0805efc4
+    name: obj_nid2sn
+    size: 176
+    sig: "const char *obj_nid2sn(int nid)"
+    module: crypto/obj_dat
+    status: ported
+    renames:
+      param_1/r0: nid
+      DAT_0805f06c: NID_OBJS
+      DAT_0805f070: ADDED_SLOT
+      local_1c: key_nid
+      local_c: key_kind
+      local_8: key_object
+    notes: >-
+      OpenSSL's OBJ_nid2sn from crypto/objects/obj_dat.c. Raw ARM extent is
+      176 bytes: code 0x0805efc4-0x0805f068 followed by literal-pool words
+      0x0805f06c (NID_OBJS = 0x08906668) and 0x0805f070 (ADDED_SLOT =
+      0x08a0c334); Ghidra's 168-byte extent omits both words, and the
+      separately linked next function starts at 0x0805f074. For unsigned
+      nid < NUM_NID (650), it returns nid_objs[nid].sn if nid is NID_undef
+      or the entry's nid field (+0x08) is nonzero. An unresolved in-range
+      entry records error (8, 0x68, 0x65, 0, 0) and returns NULL without
+      probing added. Out-of-range, including negative, nids probe
+      lh_retrieve(added, { ADDED_NID = 3, &nid }) when added is non-NULL; a
+      hit returns adp->obj->sn, while a miss emits the same error and returns
+      NULL. The raw body stores nid at sp+0xc but supplies a pointer to
+      uninitialized sp+4 as the key object's pointer field; Rust passes
+      &nid per OpenSSL source rather than reproduce that undefined stack read.
+      Decoding every ARM B/BL word in osos.dec confirms exactly eight plain
+      unconditional bl callers, zero predicated forms, and zero plain b
+      branches. Host tests cover NID_undef, resolved low and upper boundary
+      entries, unresolved in-range bypass of added, and out-of-range plus
+      negative added-hash hits with the exact key tag and nid.
   - address: 0x0805f074
     ghidra: FUN_0805f074
     name: obj_obj2nid
