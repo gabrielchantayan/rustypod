@@ -22,6 +22,49 @@
 //! the cursor update remains before the source halfword read and output stores
 //! remain in R/G/B/A order. Neither pointer has a NULL or bounds guard.
 
+/// `u32_cursor_read_be_bytes` — original: `FUN_0825ec18` @ 0x0825ec18
+/// (60 bytes; **8 unconditional `bl` call sites**, no predicated or tail
+/// branches, binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+///
+/// The complete 15-word body loads the aligned native-endian `u32` through
+/// the cursor in `r2`, advances the cursor by four bytes before dereferencing
+/// it, then stores the word's most-significant byte through least-significant
+/// byte at `r0`. Thus a little-endian source word is materialized as four
+/// big-endian bytes. The incoming `r1` is overwritten with `r0` and unused.
+/// The 60-byte extent is exact: the preceding sibling ends with `pop {r4,pc}`
+/// at 0x0825ec14, and the separately linked RGB565 reader starts with
+/// `push {r4,lr}` at 0x0825ec54. There is no literal pool.
+///
+/// # Deliberate deviations
+///
+/// The ARM leaves the loaded word in `r0`, but Ghidra declares this a `void`
+/// helper and each verified direct caller overwrites or otherwise ignores
+/// `r0`. The port therefore models its observable output and cursor effects
+/// with a `void` ABI rather than exposing that incidental register residue.
+///
+/// # Safety
+///
+/// `source_cursor` must point to a writable aligned pointer to a readable
+/// aligned `u32`; `destination` must name four writable bytes. The original
+/// has no NULL, alignment, or bounds checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn u32_cursor_read_be_bytes(
+    destination: *mut u8,
+    _unused: u32,
+    source_cursor: *mut *const u32,
+) {
+    let source = source_cursor.read();
+    source_cursor.write(source.add(1));
+    let value = source.read();
+
+    destination.write_volatile((value >> 24) as u8);
+    destination.add(1).write_volatile((value >> 16) as u8);
+    destination.add(2).write_volatile((value >> 8) as u8);
+    destination.add(3).write_volatile(value as u8);
+}
+
+
 /// `rgb565_cursor_read_rgba8` — original: `FUN_0825ec74` @ 0x0825ec74
 /// (20 bytes; **8 unconditional `bl` call sites**, no predicated or tail
 /// branches, binary-scanned by decoding every ARM B/BL word in `osos.dec`).
@@ -148,7 +191,7 @@ pub unsafe extern "C" fn rgba4444_cursor_read_rgba8(
 
 #[cfg(test)]
 mod tests {
-    use super::{rgb555a1_cursor_read_rgba8, rgb565_cursor_read_rgba8, rgba4444_cursor_read_rgba8};
+    use super::{rgb555a1_cursor_read_rgba8, rgb565_cursor_read_rgba8, rgba4444_cursor_read_rgba8, u32_cursor_read_be_bytes};
 
     fn reference_rgb555a1(pixel: u16) -> [u8; 4] {
         let expand = |component: u8| (component << 3) | (component >> 2);
@@ -165,6 +208,41 @@ mod tests {
         let green = ((pixel & 0x07e0) >> 3) as u8;
         let blue = ((pixel & 0x001f) << 3) as u8;
         [red | (red >> 5), green | (green >> 6), blue | (blue >> 5), 0xff]
+    }
+
+    #[test]
+    fn writes_u32_as_big_endian_bytes_and_advances_one_word() {
+        for value in [0, u32::MAX, 0x1122_3344, 0x80ff_7f00] {
+            let source = [value, !value];
+            let mut cursor = source.as_ptr();
+            let mut destination = [0xa5; 6];
+
+            unsafe {
+                u32_cursor_read_be_bytes(destination.as_mut_ptr().add(1), 0xffff_ffff, &mut cursor);
+            }
+
+            assert_eq!(&destination[1..5], &value.to_be_bytes(), "word {value:#010x}");
+            assert_eq!(destination[0], 0xa5, "word {value:#010x} wrote before destination");
+            assert_eq!(destination[5], 0xa5, "word {value:#010x} wrote past destination");
+            assert_eq!(cursor, unsafe { source.as_ptr().add(1) }, "word {value:#010x}");
+        }
+    }
+
+    #[test]
+    fn preserves_u32_cursor_progression_across_multiple_words() {
+        let source = [0x1122_3344, 0xaabb_ccdd, 0xfeed_face];
+        let mut cursor = source.as_ptr();
+        let mut first = [0; 4];
+        let mut second = [0; 4];
+
+        unsafe {
+            u32_cursor_read_be_bytes(first.as_mut_ptr(), 0, &mut cursor);
+            u32_cursor_read_be_bytes(second.as_mut_ptr(), 0xffff_ffff, &mut cursor);
+        }
+
+        assert_eq!(first, [0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(second, [0xaa, 0xbb, 0xcc, 0xdd]);
+        assert_eq!(cursor, unsafe { source.as_ptr().add(2) });
     }
 
     #[test]
