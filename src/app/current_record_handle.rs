@@ -45,6 +45,19 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(CurrentRecordCursor, records)];
 const _: [u8; 0x08] = [0; core::mem::offset_of!(CurrentRecordCursor, current_index)];
 const _: [u8; 0x0c] = [0; core::mem::size_of::<CurrentRecordCursor>()];
 
+/// The containing object accepted by `current_record_handle_from_owner`.
+///
+/// The initial word is opaque to the accessor. Its only purpose here is to
+/// retain the target's `add r0, r0, #4` adaptation to the embedded cursor.
+#[repr(C)]
+pub struct CurrentRecordCursorOwner {
+    pub opaque_00: u32,
+    pub cursor: CurrentRecordCursor,
+}
+
+const _: [u8; 0x04] = [0; core::mem::offset_of!(CurrentRecordCursorOwner, cursor)];
+const _: [u8; 0x10] = [0; core::mem::size_of::<CurrentRecordCursorOwner>()];
+
 /// A recovered 20-byte record. Only its word at `+0x04` is observed here.
 #[repr(C)]
 pub struct CurrentRecord {
@@ -82,6 +95,32 @@ pub unsafe extern "C" fn current_record_handle(cursor: *const CurrentRecordCurso
         .records
         .wrapping_add((index as u32).wrapping_mul(0x14));
     (record.wrapping_add(4) as usize as *const u32).read()
+}
+
+/// current_record_handle_from_owner — original: `FUN_0829dd28` @ `0x0829dd28`
+/// (8 bytes; the separately linked next function begins at `0x0829dd30`).
+///
+/// Raw ARM is `add r0, r0, #4; b 0x0829e1b4`: adapt an owner to its embedded
+/// [`CurrentRecordCursor`] and tail-dispatch to [`current_record_handle`].
+/// Decoding every immediate ARM branch in `osos.dec` finds seven direct
+/// callers, all unconditional `bl` at `0x0820cf6c`, `0x0820d0c8`,
+/// `0x0820d390`, `0x0820d41c`, `0x0820d4b0`, `0x0820d5b8`, and `0x0820d610`;
+/// no predicated direct call, tail branch, or aligned DATA word names this
+/// entry. It returns the embedded cursor's selected handle, or zero for its
+/// `-1` index sentinel. No deliberate semantic deviations; the release archive
+/// retains a tail branch after the pointer adaptation.
+///
+/// # Safety
+///
+/// `owner` must identify readable, aligned [`CurrentRecordCursorOwner`]
+/// storage. The embedded cursor inherits [`current_record_handle`]'s records
+/// and index validity requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn current_record_handle_from_owner(
+    owner: *const CurrentRecordCursorOwner,
+) -> u32 {
+    current_record_handle(core::ptr::addr_of!((*owner).cursor))
 }
 
 #[cfg(test)]
@@ -182,6 +221,52 @@ mod tests {
             assert_eq!(current_record_handle(&cursor), 0x0102_0304);
             cursor.current_index = 1;
             assert_eq!(current_record_handle(&cursor), 0x1122_3344);
+        }
+    }
+
+    #[test]
+    fn owner_adapter_preserves_the_sentinel_without_reading_records() {
+        let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let owner = CurrentRecordCursorOwner {
+            opaque_00: 0xfeed_face,
+            cursor: CurrentRecordCursor {
+                opaque_00: 0x0123_4567,
+                records: 0,
+                current_index: -1,
+            },
+        };
+
+        assert_eq!(unsafe { current_record_handle_from_owner(&owner) }, 0);
+    }
+
+    #[test]
+    fn owner_adapter_reads_the_embedded_cursor_selected_record() {
+        let _guard = FIXTURE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(records) = try_map_u32_slab(hints::OWNER_CURRENT_RECORD_HANDLE, FIXTURE_LEN) else {
+            assert!(note_missing_u32_fixture("app::current_record_handle owner"));
+            return;
+        };
+        let records = records as *mut CurrentRecord;
+
+        unsafe {
+            ptr::write_bytes(records.cast::<u8>(), 0, FIXTURE_LEN);
+            records.add(1).write(CurrentRecord {
+                opaque_00: 0x1111_1111,
+                handle: 0xc001_d00d,
+                opaque_08: 0x2222_2222,
+                opaque_0c: 0x3333_3333,
+                opaque_10: 0x4444_4444,
+            });
+            let owner = CurrentRecordCursorOwner {
+                opaque_00: 0xaaaa_aaaa,
+                cursor: CurrentRecordCursor {
+                    opaque_00: 0xbbbb_bbbb,
+                    records: records as usize as u32,
+                    current_index: 1,
+                },
+            };
+
+            assert_eq!(current_record_handle_from_owner(&owner), 0xc001_d00d);
         }
     }
 }
