@@ -321,6 +321,166 @@ pub unsafe extern "C" fn inner_reset_transient_state(inner: *mut u8) {
     inner.add(TRANSIENT_STATUS).write(0);
     inner.add(TRANSIENT_ACTIVE).write(0);
 }
+/// Object word holding the selected resource pointer.
+const SELECTED_RESOURCE: usize = 4;
+/// Object word holding the selected resource's table index.
+const SELECTED_RESOURCE_INDEX: usize = 8;
+/// Backend word pointing at the selected-resource table.
+const RESOURCE_TABLE: usize = 0xf64;
+/// Backend word containing the selected-resource table length.
+const RESOURCE_COUNT: usize = 0xf68;
+/// Stock error returned for a negative or out-of-range resource index.
+const RESOURCE_INDEX_OUT_OF_RANGE: i32 = -50;
+
+type ActivateResource = unsafe extern "C" fn(resource: *mut u8, mode: u32);
+type ObjectCleanup = unsafe extern "C" fn(object: *mut u8);
+
+#[derive(Clone, Copy)]
+struct ObjectSelectionOps {
+    activate_resource: ActivateResource,
+    call_080be1c8: ObjectCleanup,
+    call_08059870: ObjectCleanup,
+    call_08059700: ObjectCleanup,
+    call_08059820: ObjectCleanup,
+    call_08059a04: ObjectCleanup,
+    call_0805997c: ObjectCleanup,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_activate_resource(resource: *mut u8, mode: u32) {
+    let activate: unsafe extern "C" fn(*mut u8, u32) -> i32 =
+        core::mem::transmute(0x0806_cf80usize);
+    let _ = activate(resource, mode);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_080be1c8(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x080b_e1c8usize);
+    call(object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_08059870(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x0805_9870usize);
+    call(object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_08059700(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x0805_9700usize);
+    call(object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_08059820(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x0805_9820usize);
+    call(object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_08059a04(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x0805_9a04usize);
+    call(object);
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_call_0805997c(object: *mut u8) {
+    let call: ObjectCleanup = core::mem::transmute(0x0805_997cusize);
+    call(object);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_activate_resource(_resource: *mut u8, _mode: u32) {
+    panic!("object_select_resource_index requires activation 0x0806cf80")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_object_cleanup(_object: *mut u8) {
+    panic!("object_select_resource_index requires an unported object cleanup")
+}
+
+#[cfg(target_os = "none")]
+const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
+    activate_resource: firmware_activate_resource,
+    call_080be1c8: firmware_call_080be1c8,
+    call_08059870: firmware_call_08059870,
+    call_08059700: firmware_call_08059700,
+    call_08059820: firmware_call_08059820,
+    call_08059a04: firmware_call_08059a04,
+    call_0805997c: firmware_call_0805997c,
+};
+
+#[cfg(not(target_os = "none"))]
+const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
+    activate_resource: missing_activate_resource,
+    call_080be1c8: missing_object_cleanup,
+    call_08059870: missing_object_cleanup,
+    call_08059700: missing_object_cleanup,
+    call_08059820: missing_object_cleanup,
+    call_08059a04: missing_object_cleanup,
+    call_0805997c: missing_object_cleanup,
+};
+
+/// Unported operations which flank the already-ported inner-state resets.
+/// Target defaults preserve every original direct call; host tests replace
+/// the operations to make the complete reset sequence observable.
+static mut OBJECT_SELECTION_OPS: ObjectSelectionOps = DEFAULT_OBJECT_SELECTION_OPS;
+
+/// object_select_resource_index — original: `FUN_0806673c` @ `0x0806673c`
+/// (152 bytes; next independent function starts at `0x080667d4`).
+///
+/// Raw decoding of every ARM B/BL word in `osos.dec` finds eight direct
+/// callers, all unconditional `bl` (`0x08111674`, `0x081118ec`,
+/// `0x0813c054`, `0x0813c6e8`, `0x0813c728`, `0x0813ccd8`,
+/// `0x0813d4a0`, `0x0813e524`), plus one unconditional tail `b` at
+/// `0x0813bd18`; no predicated call enters this function.
+///
+/// Resolves the object's kind-1 backend or kind-2 proxy, rejects a negative
+/// index or one outside the backend's `+0xf68` resource-table count with
+/// -50, then stores that table entry and its index at object `+0x04/+0x08`.
+/// It activates the selected resource with mode zero and resets all
+/// selection-dependent object state in the stock call order, returning zero
+/// even when the final callback-dispatch reset reports a status.
+///
+/// Deliberate deviation: seven unported callees remain volatile operation
+/// slots on host and direct firmware calls on target. Their identities are
+/// not inferred from their addresses; the four already ported cleanup calls
+/// remain direct Rust calls. This preserves the ARM call boundaries and lets
+/// host tests observe the full sequence.
+///
+/// # Safety
+///
+/// `object` must satisfy [`crate::ui::object_state::object_backend_for_kind`]
+/// and be writable through all invoked cleanup fields. Its resolved backend
+/// must contain aligned u32 words at `+0xf64/+0xf68`; a valid index requires
+/// a readable table entry.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_select_resource_index(object: *mut u8, index: i32) -> i32 {
+    let backend = crate::ui::object_state::object_backend_for_kind(object);
+    if index < 0 || (index as u32) >= (backend.add(RESOURCE_COUNT) as *const u32).read() {
+        return RESOURCE_INDEX_OUT_OF_RANGE;
+    }
+
+    let resource_table = (backend.add(RESOURCE_TABLE) as *const u32).read() as usize as *const u32;
+    let resource = resource_table.add(index as usize).read();
+    (object.add(SELECTED_RESOURCE) as *mut u32).write(resource);
+    (object.add(SELECTED_RESOURCE_INDEX) as *mut u32).write(index as u32);
+
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SELECTION_OPS));
+    (ops.activate_resource)(resource as usize as *mut u8, 0);
+    inner_release_buffer_and_reset_cursor(object);
+    (ops.call_080be1c8)(object);
+    (ops.call_08059870)(object);
+    (ops.call_08059700)(object);
+    (ops.call_08059820)(object);
+    inner_reset_transient_state(object);
+    (ops.call_08059a04)(object);
+    (ops.call_0805997c)(object);
+    inner_clear_cached_results(object);
+    let _ = inner_dispatch_selected_resource(object);
+    0
+}
 
 /// The callback-root field of an inner query resource. `repr(C)` preserves
 /// its target offset while using a host-width pointer in host fixtures.
@@ -1237,5 +1397,156 @@ mod tests {
         fixture.inner = [0; INNER_LEN];
         let count = unsafe { inner_result_count(fixture.outer.as_mut_ptr()) };
         assert_eq!(count, 0);
+    }
+    // ---- object_select_resource_index -----------------------------------
+
+    static OBJECT_SELECTION_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut OBJECT_SELECTION_CALL_COUNT: usize = 0;
+    static mut OBJECT_SELECTION_STAGES: [u8; 7] = [0; 7];
+    static mut OBJECT_SELECTION_OBJECTS: [usize; 7] = [0; 7];
+    static mut OBJECT_SELECTION_RESOURCE: *mut u8 = core::ptr::null_mut();
+    static mut OBJECT_SELECTION_MODE: u32 = u32::MAX;
+
+    unsafe fn record_object_selection_call(stage: u8, object: *mut u8) {
+        OBJECT_SELECTION_STAGES[OBJECT_SELECTION_CALL_COUNT] = stage;
+        OBJECT_SELECTION_OBJECTS[OBJECT_SELECTION_CALL_COUNT] = object as usize;
+        OBJECT_SELECTION_CALL_COUNT += 1;
+    }
+
+    unsafe extern "C" fn mock_activate_selected_resource(resource: *mut u8, mode: u32) {
+        OBJECT_SELECTION_RESOURCE = resource;
+        OBJECT_SELECTION_MODE = mode;
+        record_object_selection_call(1, resource);
+    }
+
+    unsafe extern "C" fn mock_call_080be1c8(object: *mut u8) {
+        record_object_selection_call(2, object);
+    }
+
+    unsafe extern "C" fn mock_call_08059870(object: *mut u8) {
+        record_object_selection_call(3, object);
+    }
+
+    unsafe extern "C" fn mock_call_08059700(object: *mut u8) {
+        record_object_selection_call(4, object);
+    }
+
+    unsafe extern "C" fn mock_call_08059820(object: *mut u8) {
+        record_object_selection_call(5, object);
+    }
+
+    unsafe extern "C" fn mock_call_08059a04(object: *mut u8) {
+        record_object_selection_call(6, object);
+    }
+
+    unsafe extern "C" fn mock_call_0805997c(object: *mut u8) {
+        record_object_selection_call(7, object);
+    }
+
+    struct ObjectSelectionOpsRestore;
+
+    impl Drop for ObjectSelectionOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(OBJECT_SELECTION_OPS)
+                    .write_volatile(DEFAULT_OBJECT_SELECTION_OPS);
+            }
+        }
+    }
+
+    fn install_object_selection_mocks() -> ObjectSelectionOpsRestore {
+        unsafe {
+            OBJECT_SELECTION_CALL_COUNT = 0;
+            OBJECT_SELECTION_STAGES = [0; 7];
+            OBJECT_SELECTION_OBJECTS = [0; 7];
+            OBJECT_SELECTION_RESOURCE = core::ptr::null_mut();
+            OBJECT_SELECTION_MODE = u32::MAX;
+            core::ptr::addr_of_mut!(OBJECT_SELECTION_OPS).write_volatile(
+                ObjectSelectionOps {
+                    activate_resource: mock_activate_selected_resource,
+                    call_080be1c8: mock_call_080be1c8,
+                    call_08059870: mock_call_08059870,
+                    call_08059700: mock_call_08059700,
+                    call_08059820: mock_call_08059820,
+                    call_08059a04: mock_call_08059a04,
+                    call_0805997c: mock_call_0805997c,
+                },
+            );
+        }
+        ObjectSelectionOpsRestore
+    }
+
+    #[test]
+    fn selected_resource_index_rejects_negative_and_past_end_without_writes() {
+        let mut object = [SENTINEL; RESOURCE_COUNT + 4];
+        object[0] = 1; // kind-1 backend
+        object[RESOURCE_COUNT..RESOURCE_COUNT + 4].copy_from_slice(&3u32.to_le_bytes());
+        let before = object;
+
+        assert_eq!(
+            unsafe { object_select_resource_index(object.as_mut_ptr(), -1) },
+            RESOURCE_INDEX_OUT_OF_RANGE
+        );
+        assert_eq!(
+            unsafe { object_select_resource_index(object.as_mut_ptr(), 3) },
+            RESOURCE_INDEX_OUT_OF_RANGE
+        );
+        assert_eq!(object, before, "both bounds checks precede every store and call");
+    }
+
+    #[test]
+    fn selected_resource_index_stores_entry_and_resets_in_stock_order() {
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+        let _selection_guard = OBJECT_SELECTION_TEST_LOCK.lock();
+        let _dispatch_guard = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _selection_restore = install_object_selection_mocks();
+        let _dispatch_restore = install_selected_resource_mocks();
+        let Some(object) = try_map_u32_slab(hints::OBJECT_SELECT_RESOURCE_INDEX, 0x2000) else {
+            assert!(note_missing_u32_fixture("util/inner_state::object_select_resource_index"));
+            return;
+        };
+        unsafe {
+            core::ptr::write_bytes(object, 0, 0x2000);
+            object.write(1); // kind-1 backend
+            let table = object.add(0x1000).cast::<u32>();
+            table.write(0x1122_3344);
+            table.add(1).write(0x5566_7788);
+            table.add(2).write(0x89ab_cdef);
+            object.add(RESOURCE_TABLE).cast::<u32>().write(table as usize as u32);
+            object.add(RESOURCE_COUNT).cast::<u32>().write(3);
+
+            object.add(BUFFER_CURSOR_BEGIN).cast::<u32>().write(0x1000);
+            object.add(BUFFER_CURSOR_END).cast::<u32>().write(0x1040);
+            object.add(BUFFER_INDEX).cast::<u32>().write(7);
+            object.add(BUFFER_SELECTION).cast::<u16>().write(u16::MAX);
+            object.add(TRANSIENT_MARKER).cast::<u32>().write(0xaabb_ccdd);
+            object.add(TRANSIENT_SELECTION).cast::<u16>().write(0x1234);
+            object.add(TRANSIENT_STATUS).write(0x56);
+            object.add(TRANSIENT_ACTIVE).write(0x78);
+            object.add(CACHED_AUXILIARY).cast::<u32>().write(0xfeed_cafe);
+            object.add(RESULT_COUNT).cast::<u32>().write(9);
+
+            assert_eq!(object_select_resource_index(object, 2), 0);
+
+            assert_eq!(object.add(SELECTED_RESOURCE).cast::<u32>().read(), 0x89ab_cdef);
+            assert_eq!(object.add(SELECTED_RESOURCE_INDEX).cast::<u32>().read(), 2);
+            assert_eq!(OBJECT_SELECTION_RESOURCE, 0x89ab_cdefusize as *mut u8);
+            assert_eq!(OBJECT_SELECTION_MODE, 0);
+            assert_eq!(OBJECT_SELECTION_CALL_COUNT, 7);
+            assert_eq!(OBJECT_SELECTION_STAGES, [1, 2, 3, 4, 5, 6, 7]);
+            assert_eq!(OBJECT_SELECTION_OBJECTS[1..], [object as usize; 6]);
+            assert_eq!(object.add(BUFFER_CURSOR_END).cast::<u32>().read(), 0x1000);
+            assert_eq!(object.add(BUFFER_INDEX).cast::<u32>().read(), u32::MAX);
+            assert_eq!(object.add(BUFFER_SELECTION).cast::<u16>().read(), 0);
+            assert_eq!(object.add(TRANSIENT_MARKER).cast::<u32>().read(), 0);
+            assert_eq!(object.add(TRANSIENT_SELECTION).cast::<u16>().read(), 0);
+            assert_eq!(object.add(TRANSIENT_STATUS).read(), 0);
+            assert_eq!(object.add(TRANSIENT_ACTIVE).read(), 0);
+            assert_eq!(object.add(CACHED_AUXILIARY).cast::<u32>().read(), 0xfeed_cafe);
+            assert_eq!(object.add(RESULT_COUNT).cast::<u32>().read(), 0);
+            assert_eq!(SELECTED_RESOURCE_RESOLVE_CALLS, 1);
+            assert_eq!(SELECTED_RESOURCE_SELECT_CALLS, 0);
+        }
     }
 }

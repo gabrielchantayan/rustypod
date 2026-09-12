@@ -522,6 +522,9 @@ pub mod hints {
     pub const CONTEXT_CALLBACK_DISPATCH: usize = 0xa200_0000;
 
 
+    // 0x9300_0000: dedicated to util/inner_state's selected-resource table
+    // and object fixture; mappings never unmap, so no other user may share it.
+    pub const OBJECT_SELECT_RESOURCE_INDEX: usize = 0x9300_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

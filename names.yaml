@@ -71100,3 +71100,33 @@ functions:
       role; no stronger subsystem identity is inferred. Host tests cover
       lower, equal, greater, and u32::MAX thresholds plus forwarded drain
       results.
+
+  # --- selected resource table index ---
+  - address: 0x0806673c
+    ghidra: FUN_0806673c
+    name: object_select_resource_index
+    size: 152
+    sig: "i32 object_select_resource_index(void *object, i32 index)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      iVar1/r0: backend
+      uVar2/r0: resource
+    notes: >-
+      Raw osos.dec confirms 38 ARM instructions from 0x0806673c through the
+      pop at 0x080667d0; the distinct sibling begins at 0x080667d4, so the
+      executable extent is 152 bytes. Decoding every aligned ARM B/BL
+      immediate finds eight direct inbound bl calls, all unconditional
+      (0x08111674, 0x081118ec, 0x0813c054, 0x0813c6e8, 0x0813c728,
+      0x0813ccd8, 0x0813d4a0, 0x0813e524), plus an unconditional tail b at
+      0x0813bd18; no predicated call enters it. It resolves the kind-1 or
+      kind-2 backend, returns -50 for a negative or out-of-range index,
+      stores the chosen table word and index at object +0x04/+0x08, invokes
+      resource activation 0x0806cf80 with mode zero, then executes the
+      eleven cleanup/dispatch calls in order and returns zero. Four callees
+      were already ported and remain direct Rust calls. The seven unported
+      callees remain direct firmware calls on target through volatile
+      operation slots, while host tests install recording operations; their
+      identities are deliberately not inferred from raw addresses.
