@@ -28904,6 +28904,41 @@ functions:
       the tst #1 word loads (the accepted expr_delete deviation), and
       a reassociated (bic #1; orr) form of the length<<1 | dyn merge.
 
+  - address: 0x083789f8
+    ghidra: FUN_083789f8
+    name: fault_end_benign
+    size: 68
+    sig: "void sqlite3FaultEndBenign(int fault_id)"
+    module: sqlite/mem
+    status: ported
+    renames:
+      param_1/r0: fault_id
+      iVar1/r3: fault_table
+      iVar2/r0: index
+      iVar3/r1: fault_record
+      "fault_record+0x12": benign_mode
+    notes: >-
+      SQLite 3.5.x's sqlite3FaultEndBenign. Raw ARM establishes the
+      68-byte extent 0x083789f8..0x08378a3c; the word at 0x08378a40 is
+      the literal pool of the separately linked alloc_deny_check body
+      beginning there, not part of this function. The function loads
+      0x08adc2cc (the single 0x14-byte allocation fault-injector record,
+      represented by sqlite/mem's ALLOC_DENY_SCHEDULE) then performs an
+      ldrh/sub/strh decrement at +0x12. fault_id >= 0 updates that record
+      with no bounds check. Any negative fault_id loops from index 0 while
+      index < 1, therefore updates the one installed injector once. The
+      unsigned halfword arithmetic wraps; no assertion guards an
+      underflow. Whole-image ARM B/BL decode finds seven direct BL callers
+      and no tail-B callers: unconditional BL at 0x082dd834, 0x08370644,
+      0x0837de04, 0x08382530, and 0x083974a4; blne at 0x082de4b4 and
+      blgt at 0x08367450. Each call follows the paired begin-benign
+      function FUN_083789ac, so the two predicated callers leave the
+      benign section only when their allocation-protection guard held.
+      The Rust port shares the existing ALLOC_DENY_SCHEDULE static rather
+      than retailOS's stats block at 0x08adc2cc. Host tests cover the
+      slot-zero decrement, i16 underflow wrapping, and both ordinary and
+      extreme negative selectors' one-record all-injectors path.
+
   - address: 0x08378a44
     ghidra: FUN_08378a44
     name: alloc_deny_check
