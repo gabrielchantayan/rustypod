@@ -40,6 +40,7 @@ pub mod le_read;
 pub mod linked_list_count;
 pub mod list_find;
 pub mod lazy_slot_table_entry;
+pub mod least_common_multiple;
 pub mod ptr_vector;
 pub mod object_masked_word_refresh;
 pub mod object_word_payload_resolve;
