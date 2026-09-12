@@ -43528,6 +43528,50 @@ functions:
       added. TESTS - host tests cover an already-clear no-op, bit positions
       0/31/32/63 across two words, and cardinality underflow wrapping.
       Deviations - none.
+  - address: 0x08274834
+    ghidra: FUN_08274834
+    name: bit_set_construct
+    size: 64
+    sig: "BitSet *bit_set_construct(BitSet *set, u32 bit_capacity, u32 heap_tag)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      param_2/r1: bit_capacity
+      param_3/r2: heap_tag
+      r4: set
+      r5: bit_capacity
+      r6: heap_tag
+      iVar1/r0: words
+      FUN_080eb67c: malloc_wrapper
+      FUN_082747b8: bit_set_clear_all
+      FUN_08037db8: memzero_aligned
+    notes: >-
+      Constructs the 16-byte BitSet: ARM computes byte_count as
+      ((bit_capacity + 31) >> 5) << 2 using wrapping add, calls
+      malloc_wrapper(byte_count, heap_tag), stores the returned words pointer
+      at +0x08, stores bit_capacity at +0x00 and heap_tag's low byte at
+      +0x0c, then clears the word storage and cardinality at +0x04 before
+      returning set. EXTENT - 64 bytes, 0x08274834..0x08274870: the final
+      `pop {r4, r5, r6, pc}` is at 0x08274870; 0x08274874 begins the distinct
+      destructor with `push {r4, lr}`, with no intervening literal pool, so
+      Ghidra's size is exact. CALL SITES - decoding every ARM B/BL immediate
+      in osos.dec finds 7 plain bl at 0x0816f55c, 0x0816f574, 0x0816f58c,
+      0x0829a880, 0x0829aab4, 0x082a6b78, and 0x082a6e24; 0 predicated bl
+      and 0 tail b. Every direct caller invokes unconditionally; this
+      constructor has no NULL or allocation-failure guard. CALLEES -
+      malloc_wrapper @ 0x080eb67c is already ported; a volatile function
+      pointer keeps that small callee from inlining into this exported target.
+      The stock second call is unported bit_set_clear_all @ 0x082747b8,
+      itself a direct call through the 0x08037db8 IRAM veneer to ported
+      memzero_aligned. DEVIATION - the port replaces that unported sibling
+      call with a volatile direct call to memzero_aligned, preventing LLVM
+      from replacing the fill with an AEABI builtin while preserving its
+      zeroing behavior. TESTS -
+      host coverage verifies 33 bits requests and clears exactly 8 bytes,
+      retains only the low tag byte while forwarding the full tag to the
+      allocator, leaves padding untouched, returns set, and covers the
+      wrapping-add overflow case that requests and clears zero bytes.
   - address: 0x08274874
     ghidra: FUN_08274874
     name: bit_set_destroy
