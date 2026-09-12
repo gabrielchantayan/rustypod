@@ -192,6 +192,92 @@ pub unsafe extern "C" fn root_context_f9c_bound_construct(
     bound
 }
 
+/// Literal-pool base at `0x08139de8`; the instance cache is its `+0x08`
+/// word (`0x089cca28`).
+pub static mut ROOT_CONTEXT_F9C_BOUND_INSTANCE: *mut RootContextF9cBound =
+    core::ptr::null_mut();
+
+/// RetailOS helper entered by the sole `bl` in
+/// [`root_context_f9c_bound_instance`]. It allocates 0x48 bytes through
+/// `operator_new`, then tail-branches to [`root_context_f9c_bound_construct`]
+/// with mode zero.
+pub const ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT_TARGET_ADDRESS: usize = 0x0825_a010;
+
+/// ABI of the unported allocation-and-construction helper at
+/// [`ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT_TARGET_ADDRESS`].
+pub type RootContextF9cBoundInstanceConstruct =
+    unsafe extern "C" fn() -> *mut RootContextF9cBound;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_root_context_f9c_bound_instance_construct(
+) -> *mut RootContextF9cBound {
+    let construct: RootContextF9cBoundInstanceConstruct =
+        core::mem::transmute(ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT_TARGET_ADDRESS);
+    construct()
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_root_context_f9c_bound_instance_construct(
+) -> *mut RootContextF9cBound {
+    panic!("root_context_f9c_bound_instance_construct requires helper 0x0825a010")
+}
+
+/// Active boundary for the unported allocation-and-construction helper.
+#[cfg(target_os = "none")]
+pub static mut ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT: RootContextF9cBoundInstanceConstruct =
+    retail_root_context_f9c_bound_instance_construct;
+
+/// Active host boundary for the unported allocation-and-construction helper.
+#[cfg(not(target_os = "none"))]
+pub static mut ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT: RootContextF9cBoundInstanceConstruct =
+    missing_root_context_f9c_bound_instance_construct;
+
+#[inline(always)]
+unsafe fn root_context_f9c_bound_instance_construct_target() -> RootContextF9cBoundInstanceConstruct {
+    core::ptr::read_volatile(core::ptr::addr_of!(ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT))
+}
+
+/// root_context_f9c_bound_instance — original: `FUN_08139dbc` @
+/// `0x08139dbc` (**44 bytes**: 40 bytes of code plus the `0x089cca20`
+/// literal-pool word at `0x08139de8`; next independent function begins at
+/// `0x08139dec`).
+///
+/// Returns the lazily allocated root-context `+0xf9c` binding cached at
+/// `0x089cca28`. The cache is reloaded on every path. On a NULL cache it calls
+/// the 24-byte helper at `0x0825a010`, stores its returned pointer before
+/// checking it, then terminates through `heap_panic` if construction failed.
+///
+/// A full-image ARM B/BL decode found exactly **eight** inbound direct calls,
+/// all unconditional `bl` (0x08139384, 0x081393b8, 0x081393d4, 0x0813962c,
+/// 0x081399a8, 0x08139cd8, 0x08139d08, and 0x08139d34): zero predicated
+/// forms and zero plain-`b` tails. No aligned image word equals the entry
+/// address, so it is never data-dispatched.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0825a010` is unported. Device builds call its verified fixed address
+/// through a volatile seam; host tests install a recorder. Its raw body is
+/// fully understood (allocate 0x48 bytes then tail-call the ported
+/// [`root_context_f9c_bound_construct`] with zero mode), but retaining the
+/// helper boundary preserves this function's one call dependency.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.root_context_f9c_bound_instance"
+)]
+pub unsafe extern "C" fn root_context_f9c_bound_instance() -> *mut RootContextF9cBound {
+    let cache = core::ptr::addr_of_mut!(ROOT_CONTEXT_F9C_BOUND_INSTANCE);
+    if cache.read_volatile().is_null() {
+        let instance = root_context_f9c_bound_instance_construct_target()();
+        cache.write_volatile(instance);
+        if instance.is_null() {
+            crate::heap::veneers::heap_panic();
+        }
+    }
+    cache.read_volatile()
+}
+
 /// RetailOS entry address of the unported destructor body reached by the
 /// two stock tail veneers.
 pub const ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS: usize = 0x0825_a028;
@@ -292,6 +378,31 @@ mod tests {
     static mut DESTRUCT_CALLS: u32 = 0;
     static mut DESTRUCT_INPUTS: [*mut RootContextF9cBound; 2] = [ptr::null_mut(); 2];
     static mut DESTRUCT_RETURN: *mut RootContextF9cBound = ptr::null_mut();
+
+    static INSTANCE_LOCK: Mutex<()> = Mutex::new(());
+    static mut INSTANCE_CONSTRUCT_CALLS: u32 = 0;
+    static mut INSTANCE_CONSTRUCT_RETURN: *mut RootContextF9cBound = ptr::null_mut();
+
+    unsafe extern "C" fn recording_instance_construct() -> *mut RootContextF9cBound {
+        INSTANCE_CONSTRUCT_CALLS += 1;
+        INSTANCE_CONSTRUCT_RETURN
+    }
+
+    struct InstanceRestore {
+        construct: RootContextF9cBoundInstanceConstruct,
+        instance: *mut RootContextF9cBound,
+    }
+
+    impl Drop for InstanceRestore {
+        fn drop(&mut self) {
+            unsafe {
+                ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT = self.construct;
+                ROOT_CONTEXT_F9C_BOUND_INSTANCE = self.instance;
+                INSTANCE_CONSTRUCT_CALLS = 0;
+                INSTANCE_CONSTRUCT_RETURN = ptr::null_mut();
+            }
+        }
+    }
 
     unsafe extern "C" fn recording_destruct(
         this: *mut RootContextF9cBound,
@@ -461,6 +572,49 @@ mod tests {
             assert_eq!(zero_bound.kind_resource, 0);
             assert_eq!(zero_bound.mode, 0);
             assert_eq!(zero_bound.trailing, [0x99; 3]);
+        }
+
+        drop(restore);
+    }
+
+    #[test]
+    fn instance_caches_constructor_result_and_bypasses_constructor_when_live() {
+        let _guard = INSTANCE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut expected = object(0x0123_4567, 0x89, [0xab, 0xcd, 0xef]);
+        let restore = unsafe {
+            let restore = InstanceRestore {
+                construct: ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT,
+                instance: ROOT_CONTEXT_F9C_BOUND_INSTANCE,
+            };
+            ROOT_CONTEXT_F9C_BOUND_INSTANCE = ptr::null_mut();
+            ROOT_CONTEXT_F9C_BOUND_INSTANCE_CONSTRUCT = recording_instance_construct;
+            INSTANCE_CONSTRUCT_RETURN = ptr::addr_of_mut!(expected);
+            restore
+        };
+
+        unsafe {
+            assert_eq!(
+                root_context_f9c_bound_instance(),
+                ptr::addr_of_mut!(expected),
+                "cold cache returns the helper's result"
+            );
+            assert_eq!(INSTANCE_CONSTRUCT_CALLS, 1, "cold cache enters the helper once");
+            assert_eq!(
+                ROOT_CONTEXT_F9C_BOUND_INSTANCE,
+                ptr::addr_of_mut!(expected),
+                "the helper result is stored before returning"
+            );
+
+            assert_eq!(
+                root_context_f9c_bound_instance(),
+                ptr::addr_of_mut!(expected),
+                "live cache is reloaded and returned unchanged"
+            );
+            assert_eq!(
+                INSTANCE_CONSTRUCT_CALLS,
+                1,
+                "live cache bypasses the allocation-and-construction helper"
+            );
         }
 
         drop(restore);

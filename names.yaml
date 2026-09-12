@@ -63629,6 +63629,35 @@ functions:
       arena and app/context_scope.rs's existing APP_ROOT_OBJECT model of
       0x089ca674 through a dedicated below-4-GiB raw-u32 root/context fixture.
 
+  - address: 0x08139dbc
+    ghidra: FUN_08139dbc
+    name: root_context_f9c_bound_instance
+    size: 44
+    sig: "RootContextF9cBound *root_context_f9c_bound_instance(void)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      DAT_08139de8: root_context_f9c_bound_instance_global (0x089cca20; cache word +0x08)
+      FUN_0825a010: root_context_f9c_bound_instance_construct (unported allocation-and-construction helper)
+      FUN_08030f44: heap_panic (ported; fatal after caching a NULL helper result)
+    notes: >-
+      Raw ARM establishes Ghidra's 44-byte extent exactly: ten instruction
+      words from 0x08139dbc through 0x08139de4 plus the literal-pool word
+      0x089cca20 at 0x08139de8; the distinct next function begins at
+      0x08139dec. It reads the cache at 0x089cca28, returns it when live, or
+      calls the unported 0x0825a010 helper, stores the result before checking
+      it, calls heap_panic on NULL, then reloads and returns the cache.
+      The helper is verified as a 24-byte body: operator_new(0x48), then an
+      unconditional tail branch to the ported root_context_f9c_bound_construct
+      at 0x08168a8c with mode 0. Device builds retain that helper as a
+      volatile fixed-address seam; host tests replace it and prove cold-cache
+      store/return plus live-cache bypass behavior. Full-image ARM B/BL decode
+      finds exactly eight inbound direct bl sites, all unconditional:
+      0x08139384, 0x081393b8, 0x081393d4, 0x0813962c, 0x081399a8,
+      0x08139cd8, 0x08139d08, 0x08139d34. There are no predicated bl forms,
+      no plain-b tails, and no aligned whole-image word equal to the entry
+      address, so this accessor is not data-dispatched.
+
   - address: 0x08168ae4
     ghidra: thunk_FUN_0825a028
     name: root_context_f9c_bound_destruct
