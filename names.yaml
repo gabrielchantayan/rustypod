@@ -71530,6 +71530,43 @@ functions:
       unported and represented by volatile target seams; their identities
       beyond observed roles and the tag's semantic identity are not claimed.
 
+  # --- deque<T>::back, 4-byte element ---
+  - address: 0x083e0044
+    ghidra: FUN_083e0044
+    name: deque_back_elem4
+    size: 220
+    sig: "u8 *deque_back_elem4(const BlockDeque *deque)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: deque
+      piVar1/r4: end_iter
+      iVar5/r5: element_index
+      iVar6/r6: segment_delta
+      FUN_083da1a8: deque_seg_capacity
+      FUN_083da1b0: deque_iter_copy_local
+    notes: >-
+      Raw osos.dec confirms Ghidra's 220-byte extent: 0x083e0044 through
+      pop {r4-r7,pc} at 0x083e011c; the separately linked next function
+      begins at 0x083e0120. This is the 4-byte-element deque back accessor:
+      it copies the end iterator, decrements its current element by one,
+      and returns that element address. The raw signed quotient
+      ((cur - seg_base) >> 2 - 1) / 0x20 moves the copied map slot when
+      decrementing over a segment boundary; the normal in-segment case
+      subtracts four directly. There is deliberately no empty-deque or NULL
+      guard: an empty iterator follows the predecessor-slot path and
+      dereferences it, matching C++ back()'s precondition. Complete aligned
+      ARM B/BL-immediate decoding finds exactly seven inbound direct plain
+      bl calls, all unconditional: 0x0815a8f4, 0x0815a9b8, 0x0815aaa0,
+      0x0815adf8, 0x0815b138, 0x0815b86c, and 0x0815b8d4. There are no
+      predicated bl forms or direct tail b sites. The 0x083da1b0 iterator
+      copy helper is an adjacent four-word load/store body with no recovered
+      standalone Rust port; its local result has no observable effect beyond
+      the returned current-element address, so Rust uses the existing
+      repr(C) end iterator directly. Wrapping arithmetic preserves the raw
+      32-bit modular address/index calculations without adding a host-only
+      pointer precondition.
+
   # --- StringObject-word range-copy template ---
   - address: 0x083e9b28
     ghidra: FUN_083e9b28
