@@ -7,6 +7,7 @@ pub mod byte_fill;
 pub mod forward_byte_copy;
 pub mod counted_copy;
 pub mod bounded_copy;
+pub mod cstr_copy;
 pub mod bzero;
 pub mod zero_unwritten_suffix;
 pub mod halfword_load;
