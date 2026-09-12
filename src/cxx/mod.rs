@@ -72,6 +72,7 @@ pub mod settings;
 pub mod scaled_cursor;
 pub mod selector_item_base;
 pub mod shared_cell;
+pub mod shared_handle_initialize;
 pub mod slot_reset;
 pub mod state_object_destroy;
 pub mod string;

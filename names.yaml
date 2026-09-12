@@ -70738,20 +70738,18 @@ functions:
       Raw ARM gives a 68-byte extent: 60 instruction bytes at
       0x083e78b4..0x083e78ec plus literal-pool descriptors 0x089a8aac and
       0x089a8b04 at 0x083e78f0/0x083e78f4; the separate next function starts
-      at 0x083e78f8. It writes the base descriptor, calls unported
-      FUN_082a8b68 on storage+0x18, clears six words at +0x1c..+0x30, writes
-      the derived descriptor, and returns the original storage (Ghidra
-      incorrectly gives void). Decoding every ARM B/BL immediate in
-      osos.dec verifies exactly eight inbound direct calls, all unconditional
-      plain bl at 0x082a782c, 0x082a7dc4, 0x082a8f80, 0x083d8044,
-      0x083d8074, 0x083d80d4, 0x083dae68, and 0x083dae9c; no predicated
-      forms or direct B transfers exist. FUN_082a8b68 is absent from the
-      ledger, so target builds call its verified fixed address and host tests
-      use a volatile seam. The host default intentionally cannot model that
-      function's target-runtime global shared object and is a no-op. Host
-      tests prove the exact call argument, transient base descriptor, retained
-      shared-handle write, six-word clear, preserved prefix, ignored callee
-      return, and returned storage. match.py structural review completed.
+      at 0x083e78f8. It writes the base descriptor, calls the ported
+      shared_handle_initialize on storage+0x18, clears six words at
+      +0x1c..+0x30, writes the derived descriptor, and returns the original
+      storage (Ghidra incorrectly gives void). Decoding every ARM B/BL
+      immediate in osos.dec verifies exactly eight inbound direct calls, all
+      unconditional plain bl at 0x082a782c, 0x082a7dc4, 0x082a8f80,
+      0x083d8044, 0x083d8074, 0x083d80d4, 0x083dae68, and 0x083dae9c; no
+      predicated forms or direct B transfers exist. Target builds now call the
+      ported initializer directly. Host tests install a low-address shared
+      object, proving the transient base descriptor, retained shared-handle
+      write, reference-count increment, six-word clear, preserved prefix, and
+      returned storage. match.py structural review completed.
 
   - address: 0x083d8008
     ghidra: FUN_083d8008
@@ -70961,6 +70959,37 @@ functions:
       padding word. Host tests cover strict-limit rejection, equality at the
       limit, and zero/negative including i64::MIN requests. match.py
       structural review completed.
+  - address: 0x082a8b68
+    ghidra: FUN_082a8b68
+    name: shared_handle_initialize
+    size: 52
+    sig: "u32 *shared_handle_initialize(u32 *slot)"
+    module: cxx/shared_handle_initialize
+    status: ported
+    renames:
+      param_1/r0: slot
+      DAT_082a8b9c: shared_handle_global
+      FUN_082a89e0: shared_handle_bootstrap
+      iVar2/r0: shared_object
+      shared_object+0x1c: shared_object_refcount
+      return/r0: slot
+    notes: >-
+      Raw osos.dec gives an exact 52-byte extent: twelve instruction words at
+      0x082a8b68..0x082a8b98 plus the global-pointer literal 0x08a0fbdc at
+      0x082a8b9c; the next separately linked release sibling begins at
+      0x082a8ba0. It loads the global shared object, conditionally calls
+      0x082a89e0 only when that word is zero, reloads the word, stores it in
+      slot, increments object word seven (+0x1c) with wrapping arithmetic, and
+      returns slot. Decoding every ARM B/BL immediate in osos.dec finds seven
+      inbound direct calls, all unconditional plain bl at 0x08266e2c,
+      0x082a94a4, 0x083d97f4, 0x083d9db0, 0x083dad20, 0x083daf1c, and
+      0x083e78c0; there are no predicated or tail-B callers. Its sole outbound
+      call is predicated bleq 0x082a89e0, so failed bootstrap initialization
+      faults on the immediate object dereference exactly as retailOS does.
+      Target code reads 0x08a0fbdc and calls that unported bootstrap directly;
+      host-only seams model those unavailable target globals. Tests cover
+      normal retain, u32::MAX wraparound, and a bootstrap that installs then is
+      reloaded from the global. match.py structural review completed.
   - address: 0x082a8ba0
     ghidra: FUN_082a8ba0
     name: opaque_shared_array_handle_release

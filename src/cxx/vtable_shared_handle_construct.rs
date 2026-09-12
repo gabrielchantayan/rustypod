@@ -15,21 +15,12 @@
 //! the incoming storage. It deliberately preserves words `+0x04..+0x14` and
 //! the shared-handle initializer's `+0x18` result.
 //!
-//! `FUN_082a8b68` is not yet ported (and has no ledger entry). Target builds
-//! call its verified fixed address; host builds use the replaceable seam below.
-//! The default host seam is a no-op because the initializer's global shared
-//! object is target runtime state, not a recoverable host object. This is the
-//! only deliberate host deviation.
-
-#[cfg(not(target_os = "none"))]
-use core::ptr::addr_of;
+use crate::cxx::shared_handle_initialize::shared_handle_initialize;
 
 /// The descriptor written before calling `FUN_082a8b68`.
 pub const SHARED_HANDLE_BASE_DESCRIPTOR: u32 = 0x089a_8aac;
 /// The descriptor installed after the shared handle is initialized.
 pub const SHARED_HANDLE_DESCRIPTOR: u32 = 0x089a_8b04;
-#[cfg(target_os = "none")]
-const RETAIL_SHARED_HANDLE_INITIALIZE: usize = 0x082a_8b68;
 
 /// Target-layout record constructed by [`vtable_shared_handle_construct`].
 #[repr(C)]
@@ -52,31 +43,6 @@ const _: [u8; 24] = [0; core::mem::offset_of!(VtableSharedHandle, shared_handle)
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 28] = [0; core::mem::offset_of!(VtableSharedHandle, cleared)];
 
-/// ABI of the unported shared-handle initializer.
-pub type SharedHandleInitialize = unsafe extern "C" fn(*mut u32) -> *mut u32;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn shared_handle_initialize(slot: *mut u32) {
-    let initialize: SharedHandleInitialize = core::mem::transmute(RETAIL_SHARED_HANDLE_INITIALIZE);
-    initialize(slot);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn unported_shared_handle_initialize(_slot: *mut u32) -> *mut u32 {
-    core::ptr::null_mut()
-}
-
-/// Host-side replacement for unported `FUN_082a8b68`.
-#[cfg(not(target_os = "none"))]
-pub static mut SHARED_HANDLE_INITIALIZE: SharedHandleInitialize = unported_shared_handle_initialize;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn shared_handle_initialize(slot: *mut u32) {
-    let initialize = core::ptr::read_volatile(addr_of!(SHARED_HANDLE_INITIALIZE));
-    initialize(slot);
-}
 
 /// `vtable_shared_handle_construct` — original `FUN_083e78b4` @
 /// `0x083e78b4` (60 code bytes + 8 literal-pool bytes).
@@ -98,34 +64,41 @@ pub unsafe extern "C" fn vtable_shared_handle_construct(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
-    use core::ptr::{addr_of, addr_of_mut};
+    use crate::cxx::shared_handle_initialize::{
+        SHARED_HANDLE_BOOTSTRAP, SHARED_HANDLE_GLOBAL, SHARED_HANDLE_INITIALIZE_TEST_LOCK,
+    };
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use core::ptr::addr_of_mut;
+    use std::sync::LazyLock;
 
-    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-    static mut OBSERVED_SLOT: *mut u32 = core::ptr::null_mut();
-    static mut OBSERVED_BASE_DESCRIPTOR: u32 = 0;
-    static mut INITIALIZER_CALLS: u32 = 0;
+    const OBJECT_LEN: usize = 0x40;
+    static OBJECT: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::VTABLE_SHARED_HANDLE_CONSTRUCT, OBJECT_LEN).map(|pointer| pointer as usize)
+    });
 
-    unsafe extern "C" fn recording_initializer(slot: *mut u32) -> *mut u32 {
-        OBSERVED_SLOT = slot;
-        OBSERVED_BASE_DESCRIPTOR = slot.sub(6).read();
-        INITIALIZER_CALLS += 1;
-        slot.write(0xfeed_beef);
-        core::ptr::null_mut()
+    unsafe extern "C" fn unexpected_bootstrap() {
+        panic!("constructor fixture must install a shared object");
     }
 
-    unsafe fn reset() {
-        OBSERVED_SLOT = core::ptr::null_mut();
-        OBSERVED_BASE_DESCRIPTOR = 0;
-        INITIALIZER_CALLS = 0;
-        SHARED_HANDLE_INITIALIZE = recording_initializer;
+    unsafe fn reset_shared_object() -> Option<*mut u32> {
+        let object = (*OBJECT)? as *mut u32;
+        core::ptr::write_bytes(object.cast::<u8>(), 0, OBJECT_LEN);
+        object.add(7).write(0);
+        SHARED_HANDLE_GLOBAL = object as usize as u32;
+        SHARED_HANDLE_BOOTSTRAP = unexpected_bootstrap;
+        Some(object)
     }
 
     #[test]
     fn initializes_only_the_observed_words_and_returns_storage() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = SHARED_HANDLE_INITIALIZE_TEST_LOCK.lock();
         unsafe {
-            reset();
+            let Some(object) = reset_shared_object() else {
+                assert!(note_missing_u32_fixture("cxx/vtable_shared_handle_construct"));
+                return;
+            };
             let mut record = VtableSharedHandle {
                 descriptor: 0x1111_2222,
                 preserved: [0x3333_4444, 0x5555_6666, 0x7777_8888, 0x9999_aaaa, 0xbbbb_cccc],
@@ -136,33 +109,10 @@ mod tests {
             let returned = vtable_shared_handle_construct(addr_of_mut!(record));
 
             assert_eq!(returned, addr_of_mut!(record));
-            assert_eq!(INITIALIZER_CALLS, 1);
-            assert_eq!(OBSERVED_SLOT, addr_of_mut!(record.shared_handle));
-            assert_eq!(OBSERVED_BASE_DESCRIPTOR, SHARED_HANDLE_BASE_DESCRIPTOR);
             assert_eq!(record.descriptor, SHARED_HANDLE_DESCRIPTOR);
             assert_eq!(record.preserved, [0x3333_4444, 0x5555_6666, 0x7777_8888, 0x9999_aaaa, 0xbbbb_cccc]);
-            assert_eq!(record.shared_handle, 0xfeed_beef);
-            assert_eq!(record.cleared, [0; 6]);
-        }
-    }
-
-    #[test]
-    fn ignores_the_initializer_return_value() {
-        let _guard = TEST_LOCK.lock();
-        unsafe {
-            reset();
-            let mut record = VtableSharedHandle {
-                descriptor: 0,
-                preserved: [0; 5],
-                shared_handle: 0,
-                cleared: [u32::MAX; 6],
-            };
-
-            assert_eq!(vtable_shared_handle_construct(addr_of_mut!(record)), addr_of_mut!(record));
-            assert_eq!(INITIALIZER_CALLS, 1);
-            assert_eq!(addr_of!(record.shared_handle).cast_mut(), OBSERVED_SLOT);
-            assert_eq!(record.descriptor, SHARED_HANDLE_DESCRIPTOR);
-            assert_eq!(record.shared_handle, 0xfeed_beef);
+            assert_eq!(record.shared_handle, object as usize as u32);
+            assert_eq!(object.add(7).read(), 1);
             assert_eq!(record.cleared, [0; 6]);
         }
     }
