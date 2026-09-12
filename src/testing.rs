@@ -516,6 +516,10 @@ pub mod hints {
     // manager and mailbox fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SLOT_SIGNAL_RESET: usize = 0x9400_0000;
+    // 0xa200_0000: dedicated to app/context_callback_dispatch's raw-u32
+    // owner/state/list fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const CONTEXT_CALLBACK_DISPATCH: usize = 0xa200_0000;
 
 
 }
