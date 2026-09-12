@@ -98,6 +98,7 @@ pub mod node_list;
 pub mod notes_dispatcher_status;
 pub mod no_content_layout_default;
 pub mod object_byte_at_5;
+pub mod object_offset_48;
 pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
 pub mod opaque_collection_item_count;
