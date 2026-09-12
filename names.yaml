@@ -72373,3 +72373,32 @@ functions:
       plus a test-only output observer, avoiding concurrent mutation of
       trace_printf's formatter slot. Tests cover linked traversal, the
       three-field match gate, a null head, and ARM sub/mul wraparound.
+
+  # --- Encoded multi-limb integer sign ---
+  - address: 0x082f7730
+    ghidra: FUN_082f7730
+    name: bigint_sign
+    size: 72
+    sig: "i32 bigint_sign(const u32 *value)"
+    module: fp/bigint_sign
+    status: ported
+    renames:
+      param_1/r0: value
+      r4: value
+      FUN_083276f0: bigint_is_zero
+      DAT_082f7778: encoded_count_multiplier
+    notes: >-
+      Raw osos.dec confirms the 72-byte extent from push {r4,lr} at
+      0x082f7730 through pop {r4,pc} at 0x082f7774, followed by the
+      0x4b6143ff multiplier literal; the separately linked next function
+      starts at 0x082f777c. Complete aligned ARM B/BL-immediate decoding
+      finds exactly seven direct inbound calls, all unconditional plain bl
+      (zero predicated forms): 0x0830a85c, 0x0831ef84, 0x0831ef90,
+      0x08323464, 0x08338658, 0x0834d69c, and 0x08360bc0. The callee
+      FUN_083276f0 at 0x083276f0 is unported and has no ledger entry; it is
+      retained as a volatile seam that defaults to its verified load address
+      on device. A nonzero zero-predicate result returns 0; otherwise the
+      routine wraps the encoded header word times 0x4b6143ff and returns 1
+      for a positive signed product, -1 for zero or a negative product.
+      Host defaults report zero because retailOS is unmapped, while tests
+      install a recorder; this is the deliberate host-only deviation.
