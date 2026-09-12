@@ -32,6 +32,7 @@ pub mod draw_state_text_width;
 pub mod draw_state_color;
 pub mod draw_state_fill;
 pub mod draw_state_line;
+pub mod draw_state_stroke;
 pub mod draw_state_style;
 pub mod draw_state_surface;
 pub mod handler_list_construct;
