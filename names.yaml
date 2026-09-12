@@ -27642,6 +27642,30 @@ functions:
       the warn helper inlined (same bytes, different shape - the
       documented deviations).
 
+  - address: 0x08390eb0
+    ghidra: FUN_08390eb0
+    name: sqlite3_randomness
+    size: 56
+    sig: "void sqlite3Randomness(int N, void *P)"
+    module: sqlite/randomness
+    status: ported
+    vars: {param_1: count, param_2: output, r5: remaining_count, r4: output_cursor,
+      DAT_08390ee8: "anonymous setup-word base (literal 0x08a09918)"}
+    notes: >-
+      SQLite's sqlite3Randomness. Raw 56-byte body ends immediately before
+      the literal at 0x08390ee8. Exactly 7 bl call sites, all unconditional,
+      verified by decoding every ARM B/BL word in osos.dec: 0x082367dc,
+      0x08365424, 0x0836555c, 0x08370384, 0x08389608, 0x08397234, and
+      0x08398ab8; no predicated calls. Reads the anonymous BSS word at
+      0x08a09918 + 0x1c and writes 8 only when it is zero, including for a
+      zero-length request. It then calls still-stock FUN_08365444 once per
+      byte and stores its result through the post-incremented output cursor.
+      The count is the raw unsigned subs/bcs loop: a negative i32 causes
+      2^32 - 1 writes rather than becoming zero. Deviation: the unclassified
+      BSS word is named for its observed setup role, and the unported byte
+      generator is a volatile callback slot on the host; target builds call
+      its verified 0x08365444 load address.
+
   - address: 0x08390eec
     ghidra: FUN_08390eec
     name: sqlite3_realloc
