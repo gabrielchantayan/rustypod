@@ -8,8 +8,9 @@
 
 /// The target's 48-byte buffered-stream record.
 ///
-/// The I/O context is a 32-bit target handle. The field at +0x24 remains a
-/// word-sized placeholder; +0x28 is the cached 64-bit stream position.
+/// The I/O context is a 32-bit target handle. The allocation at +0x14 is
+/// released during finalization; +0x24 remains a word-sized placeholder and
+/// +0x28 is the cached 64-bit stream position.
 #[repr(C)]
 pub struct FtBufferedStream {
     pub magic: u32,
@@ -18,7 +19,9 @@ pub struct FtBufferedStream {
     pub is_input: u8,
     pub state_reserved: [u8; 2],
     pub io_context: u32,
-    pub io_reserved: [u32; 3],
+    pub io_reserved: [u32; 2],
+    /// +0x14: tag-4 heap allocation freed when the stream is finalized.
+    pub buffer_allocation: u32,
     /// +0x18: current byte within the buffer.
     pub cursor: u32,
     /// +0x1c: first byte of an output buffer.
@@ -33,6 +36,7 @@ pub struct FtBufferedStream {
 const _: () = assert!(core::mem::size_of::<FtBufferedStream>() == 48);
 const _: () = assert!(core::mem::offset_of!(FtBufferedStream, is_input) == 5);
 const _: () = assert!(core::mem::offset_of!(FtBufferedStream, cursor) == 0x18);
+const _: () = assert!(core::mem::offset_of!(FtBufferedStream, buffer_allocation) == 0x14);
 const _: () = assert!(core::mem::offset_of!(FtBufferedStream, buffer_start) == 0x1c);
 const _: () = assert!(core::mem::offset_of!(FtBufferedStream, buffer_end) == 0x20);
 const _: () = assert!(core::mem::offset_of!(FtBufferedStream, cached_position) == 0x28);
@@ -62,6 +66,98 @@ pub static mut BACKING_STREAM_TELL: BackingStreamTellFn = firmware_backing_strea
 unsafe fn backing_stream_tell() -> BackingStreamTellFn {
     core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_TELL))
 }
+
+/// ABI of the unported output-buffer flush helper at `0x08042d68`.
+pub type BufferedStreamFlushFn = unsafe extern "C" fn(stream: *mut FtBufferedStream) -> i32;
+
+/// ABI of the unported I/O-context finalizer at `0x0805b6d8`.
+pub type BufferedStreamIoContextFinalizeFn = unsafe extern "C" fn(io_context: u32);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_buffered_stream_flush(stream: *mut FtBufferedStream) -> i32 {
+    let flush: BufferedStreamFlushFn = core::mem::transmute(0x08042d68usize);
+    flush(stream)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_buffered_stream_flush(_stream: *mut FtBufferedStream) -> i32 {
+    panic!("buffered_stream_finalize requires flush helper 0x08042d68")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_buffered_stream_io_context_finalize(io_context: u32) {
+    let finalize: BufferedStreamIoContextFinalizeFn = core::mem::transmute(0x0805b6d8usize);
+    finalize(io_context);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_buffered_stream_io_context_finalize(_io_context: u32) {
+    panic!("buffered_stream_finalize requires I/O-context finalizer 0x0805b6d8")
+}
+
+/// Host-replaceable direct calls retained as volatile seams. Neither helper is
+/// ported in `names.yaml`; target builds invoke its verified retailOS entry.
+pub static mut BUFFERED_STREAM_FLUSH: BufferedStreamFlushFn = firmware_buffered_stream_flush;
+pub static mut BUFFERED_STREAM_IO_CONTEXT_FINALIZE: BufferedStreamIoContextFinalizeFn =
+    firmware_buffered_stream_io_context_finalize;
+
+#[inline(always)]
+unsafe fn buffered_stream_flush() -> BufferedStreamFlushFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_FLUSH))
+}
+
+#[inline(always)]
+unsafe fn buffered_stream_io_context_finalize() -> BufferedStreamIoContextFinalizeFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_IO_CONTEXT_FINALIZE))
+}
+
+/// ft_buffered_stream_finalize — original: `FUN_08042cfc` @ `0x08042cfc`
+/// (104 bytes; 8 verified direct `bl` call sites: 6 unconditional and 2
+/// `blne`).
+///
+/// Validates the `buff` tag, marks the stream finalized, flushes only output
+/// streams, then always finalizes the I/O context. A non-null +0x14 tag-4
+/// allocation is released and all 48 record bytes are zeroed. The output
+/// flush result is retained across the subsequent teardown; an invalid tag
+/// returns -50 without modifying the record.
+///
+/// Deliberate deviation: the unported flush helper at `0x08042d68` and
+/// I/O-context finalizer at `0x0805b6d8` are volatile dispatch seams on host
+/// and indirect calls to their verified retailOS entries on target. Raw
+/// `osos.dec` decoding confirms the body ends at the literal `0x62756666`
+/// at `0x08042d64`, immediately before the distinct function at `0x08042d68`.
+///
+/// # Safety
+///
+/// `stream` must be a valid, aligned writable [`FtBufferedStream`]. Its
+/// nonzero `buffer_allocation` must be valid for tag-4 deallocation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ft_buffered_stream_finalize")]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_finalize(stream: *mut FtBufferedStream) -> i32 {
+    if (*stream).magic != u32::from_le_bytes(*b"ffub") {
+        return -50;
+    }
+
+    (*stream).finalized = 1;
+    let result = if (*stream).is_input == 0 {
+        buffered_stream_flush()(stream)
+    } else {
+        0
+    };
+
+    buffered_stream_io_context_finalize()((*stream).io_context);
+    let allocation = (*stream).buffer_allocation;
+    if allocation != 0 {
+        crate::heap::veneers::free_tag4(allocation as usize as *mut u8);
+    }
+    crate::libc::bzero::bzero(stream.cast(), 0x30);
+    result
+}
+
+#[cfg(test)]
+pub(crate) static BUFFERED_STREAM_FINALIZE_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
 
 /// buffered_stream_tell — original: `FUN_08042e70` @ `0x08042e70` (140
 /// bytes; 10 verified direct `bl` call sites, all unconditional).
@@ -156,14 +252,22 @@ mod tests {
 
     use parking_lot::MutexGuard;
     use super::{
-        buffered_stream_tell, ft_buffered_stream_buffered_bytes, BackingStreamTellFn,
+        buffered_stream_tell, ft_buffered_stream_buffered_bytes, ft_buffered_stream_finalize,
+        BackingStreamTellFn, BufferedStreamFlushFn, BufferedStreamIoContextFinalizeFn,
         FtBufferedStream, BACKING_STREAM_TELL, BACKING_STREAM_TELL_TEST_LOCK,
+        BUFFERED_STREAM_FINALIZE_TEST_LOCK, BUFFERED_STREAM_FLUSH,
+        BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
     };
 
     static mut BACKING_RESULT: i32 = 0;
     static mut BACKING_POSITION: u64 = 0;
     static mut BACKING_CONTEXT: u32 = 0;
     static mut BACKING_CALLS: usize = 0;
+    static mut FLUSH_RESULT: i32 = 0;
+    static mut FLUSH_CALLS: usize = 0;
+    static mut FLUSH_SAW_FINALIZED: u8 = 0;
+    static mut FINALIZE_CONTEXT: u32 = 0;
+    static mut FINALIZE_CALLS: usize = 0;
 
     struct BackingSeam {
         _lock: MutexGuard<'static, ()>,
@@ -176,11 +280,37 @@ mod tests {
         }
     }
 
+    struct FinalizeSeams {
+        _lock: MutexGuard<'static, ()>,
+        flush: BufferedStreamFlushFn,
+        finalize_context: BufferedStreamIoContextFinalizeFn,
+    }
+
+    impl Drop for FinalizeSeams {
+        fn drop(&mut self) {
+            unsafe {
+                BUFFERED_STREAM_FLUSH = self.flush;
+                BUFFERED_STREAM_IO_CONTEXT_FINALIZE = self.finalize_context;
+            }
+        }
+    }
+
     unsafe extern "C" fn record_backing_tell(context: u32, position: *mut u64) -> i32 {
         BACKING_CALLS += 1;
         BACKING_CONTEXT = context;
         position.write(BACKING_POSITION);
         BACKING_RESULT
+    }
+
+    unsafe extern "C" fn record_flush(stream: *mut FtBufferedStream) -> i32 {
+        FLUSH_CALLS += 1;
+        FLUSH_SAW_FINALIZED = (*stream).finalized;
+        FLUSH_RESULT
+    }
+
+    unsafe extern "C" fn record_io_context_finalize(io_context: u32) {
+        FINALIZE_CALLS += 1;
+        FINALIZE_CONTEXT = io_context;
     }
 
     fn install_backing() -> BackingSeam {
@@ -196,6 +326,25 @@ mod tests {
         }
     }
 
+    fn install_finalizer() -> FinalizeSeams {
+        let lock = BUFFERED_STREAM_FINALIZE_TEST_LOCK.lock();
+        unsafe {
+            let seams = FinalizeSeams {
+                _lock: lock,
+                flush: BUFFERED_STREAM_FLUSH,
+                finalize_context: BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
+            };
+            BUFFERED_STREAM_FLUSH = record_flush;
+            BUFFERED_STREAM_IO_CONTEXT_FINALIZE = record_io_context_finalize;
+            FLUSH_RESULT = 0;
+            FLUSH_CALLS = 0;
+            FLUSH_SAW_FINALIZED = 0;
+            FINALIZE_CONTEXT = 0;
+            FINALIZE_CALLS = 0;
+            seams
+        }
+    }
+
     fn stream(is_input: u8, cursor: u32, buffer_start: u32, buffer_end: u32) -> FtBufferedStream {
         FtBufferedStream {
             magic: u32::from_le_bytes(*b"ffub"),
@@ -203,7 +352,8 @@ mod tests {
             is_input,
             state_reserved: [0; 2],
             io_context: 0,
-            io_reserved: [0; 3],
+            io_reserved: [0; 2],
+            buffer_allocation: 0,
             cursor,
             buffer_start,
             buffer_end,
@@ -298,5 +448,56 @@ mod tests {
         assert_eq!(unsafe { buffered_stream_tell(&stream, &mut position) }, -17);
         assert_eq!(position, 0x1122_3344_5566_7788);
         unsafe { assert_eq!(BACKING_CALLS, 1); }
+    }
+
+    #[test]
+    fn finalizer_rejects_a_foreign_tag_without_side_effects() {
+        let _seams = install_finalizer();
+        let mut stream = stream(0, 0, 0, 0);
+        stream.magic = 0;
+
+        assert_eq!(unsafe { ft_buffered_stream_finalize(&mut stream) }, -50);
+        assert_eq!(stream.magic, 0);
+        assert_eq!(stream.finalized, 0);
+        unsafe {
+            assert_eq!(FLUSH_CALLS, 0);
+            assert_eq!(FINALIZE_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn finalizer_flushes_output_retains_error_and_zeros_the_record() {
+        let _seams = install_finalizer();
+        unsafe { FLUSH_RESULT = -17; }
+        let mut stream = stream(0, 0x140, 0x100, 0);
+        stream.io_context = 0x1234_5678;
+        stream.position_reserved = 0xa5a5_a5a5;
+
+        assert_eq!(unsafe { ft_buffered_stream_finalize(&mut stream) }, -17);
+        unsafe {
+            assert_eq!(FLUSH_CALLS, 1);
+            assert_eq!(FLUSH_SAW_FINALIZED, 1);
+            assert_eq!(FINALIZE_CALLS, 1);
+            assert_eq!(FINALIZE_CONTEXT, 0x1234_5678);
+            let bytes = core::slice::from_raw_parts(
+                core::ptr::addr_of!(stream).cast::<u8>(),
+                core::mem::size_of::<FtBufferedStream>(),
+            );
+            assert!(bytes.iter().all(|byte| *byte == 0));
+        }
+    }
+
+    #[test]
+    fn finalizer_skips_flush_for_input_but_finalizes_its_context() {
+        let _seams = install_finalizer();
+        let mut stream = stream(1, 0, 0, 0);
+        stream.io_context = 0xfeed_cafe;
+
+        assert_eq!(unsafe { ft_buffered_stream_finalize(&mut stream) }, 0);
+        unsafe {
+            assert_eq!(FLUSH_CALLS, 0);
+            assert_eq!(FINALIZE_CALLS, 1);
+            assert_eq!(FINALIZE_CONTEXT, 0xfeed_cafe);
+        }
     }
 }
