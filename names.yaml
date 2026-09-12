@@ -52691,6 +52691,32 @@ functions:
       indirect through an ops table.
 
   # --- time: the packed calendar record ---
+  - address: 0x08093af8
+    ghidra: FUN_08093af8
+    name: datetime_compare
+    size: 92
+    sig: "i32 datetime_compare(const DateTime *left, const DateTime *right)"
+    module: time/datetime
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: left_field
+      r3: right_field
+    notes: >-
+      Raw ARM is exactly 92 code bytes (0x08093af8..0x08093b54), with the
+      next function's `push {r4,r5,r6,lr}` at 0x08093b54 and no literal pool.
+      Decoding every condition-coded ARM B/BL word in osos.dec finds eight
+      unconditional bl call sites (0x08093c44, 0x080ca874, 0x080dab98,
+      0x08108d38, 0x08198c78, 0x081a43d0, 0x0829b1dc, 0x082aadc0), no
+      predicated calls, and no B tail calls. The lack of predicated callers
+      does not add a NULL guard: the original immediately reads both
+      pointers. It lexicographically compares packed DateTime fields in
+      significance order: u16 year (+6), then u8 month (+4), day (+3), hour
+      (+2), minute (+1), second (+0). On the first mismatch it returns the
+      unsigned field difference left - right; weekday and padding bytes are
+      ignored. No deviations. Host tests cover equality despite differing
+      ignored bytes and every comparison field's signed difference.
   - address: 0x08093c38
     ghidra: FUN_08093c38
     name: datetime_to_unix_seconds
@@ -52745,29 +52771,16 @@ functions:
       00:00:00 - it is the value below which the converter clamps to 0, and 0
       is exactly that instant's timestamp - but the port does not write the
       guess down as data. DATETIME_FLOOR holds the address, which is what the
-      original's literal holds, and the comparison goes through the
-      DATETIME_OPS dispatch; on target with the stock comparator wired in
-      that is byte-for-byte the original whatever the record says.
-      Deviations - datetime_compare @ 0x08093af8 (8 bl sites) is not
-      ported and dispatches through DATETIME_OPS, the house pattern
-      (app/iap_packet.rs, heap/alloc_core.rs). The wired default comparator
-      returns 0, "at or after the floor", so the arithmetic path stays live
-      with no hooks installed and nothing dereferences the unmapped host
-      address in DATETIME_FLOOR. datetime_day_number @ 0x0807ea68 (25 bl
-      sites) has since been ported in time/day_number.rs and is now the
-      wired DATETIME_OPS day_number default, so the default path computes
-      the real Rata Die value and weekday.
-      Host tests (7) - the ten-byte record layout with year halfword-aligned
-      at +6, the epoch converting to 0 through the arithmetic path rather
-      than the clamp, ten known instants including a leap day, the 2100
-      century non-leap year and two i32-wrapping post-2038 dates, records
-      below the floor clamping to 0 without running the day-number helper (so
-      the weekday side effect must not fire), the clamp being strict so an
-      equal record takes the arithmetic path, out-of-range time-of-day bytes
-      added verbatim with no validation, and the wired defaults producing the
-      documented result without touching the floor address. The comparator
-      and day-number stand-ins used by the tests are independent
-      re-implementations of the two originals.
+      original's literal holds. The port directly calls datetime_compare and
+      datetime_day_number, and host tests temporarily install a readable
+      floor fixture before exercising that path.
+      Host tests (7) cover the ten-byte record layout with year halfword-
+      aligned at +6; the comparator's field precedence, exact differences,
+      and ignored bytes; the epoch through the arithmetic path; ten known
+      instants including a leap day, the 2100 century non-leap year and two
+      i32-wrapping post-2038 dates; records below the floor clamping to 0
+      without running day-number; the strict clamp; and out-of-range
+      time-of-day bytes added verbatim with no validation.
 
   # --- time: unsigned Unix seconds -> packed calendar record ---
   - address: 0x080964cc
@@ -54186,9 +54199,9 @@ functions:
       mvnne r0,#0 (leap, -1). It dispatches through the
       LEAP_MONTH_CORRECTION seam: target default transmutes the verified
       load address; the host default reproduces the fully decoded body on
-      the ported is_leap_year (month_length precedent). The port is wired
-      as the day_number default of time/datetime.rs's DATETIME_OPS now
-      that it exists. Fields are raw bytes/halfwords with no validation:
+      the ported is_leap_year (month_length precedent). The port is called
+      directly by time/datetime.rs's datetime_to_unix_seconds. Fields are
+      raw bytes/halfwords with no validation:
       year=0 wraps y to 0xffffffff through the unsigned divides (host
       tests pin 0x3e147975 for 0000-01-01 and 0x5369ceab for
       0/0/0), month=0 feeds 0xfffffe96 to the /12. Host tests (5):
