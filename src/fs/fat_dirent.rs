@@ -76,6 +76,9 @@ pub unsafe extern "C" fn fat_dirent_set_start_cluster(
 
 /// FAT attribute bit marking a directory entry.
 const ATTR_DIRECTORY: u8 = 0x10;
+/// FAT attribute bit marking a volume label.
+const ATTR_VOLUME_LABEL: u8 = 0x08;
+
 
 /// Lookup-result handle produced by the retailOS path resolver and consumed
 /// by the directory predicates and the opendir/readdir family.
@@ -131,6 +134,24 @@ pub unsafe extern "C" fn fat_dirent_is_directory(handle: *const FatDirentHandle)
     }
     ((*(*handle).entry).attributes & ATTR_DIRECTORY != 0) as u32
 }
+
+/// FAT directory-entry volume-label predicate — retailOS `FUN_082e2a68` at
+/// `0x082e2a68` (20 bytes; 7 direct `bl` call sites, verified by decoding
+/// every ARM B/BL word in `osos.dec`: 7 plain `bl`, no predicated calls or
+/// tail branches).
+///
+/// Reads the FAT short directory entry pointed at by the lookup handle's
+/// `entry` field (+0x04), then returns 1 when its attribute byte (+0x0b) has
+/// ATTR_VOLUME_LABEL (0x08) set; otherwise returns 0. Unlike the neighboring
+/// directory predicate, it does not consult the cached directory flag. The
+/// raw body has no NULL guard and callers must supply valid pointers. No
+/// deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fat_dirent_is_volume_label(handle: *const FatDirentHandle) -> u32 {
+    ((*(*handle).entry).attributes & ATTR_VOLUME_LABEL != 0) as u32
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -216,6 +237,34 @@ mod tests {
         directory_entry.attributes = 0x20;
         let lookup = handle(&directory_entry, 0xdead_beef);
         assert_eq!(unsafe { fat_dirent_is_directory(&lookup) }, 1);
+    }
+
+    #[test]
+    fn volume_label_attribute_bit_controls_the_result() {
+        for attributes in [0x08, 0x18, 0x0f, 0xff] {
+            let mut directory_entry = entry(0, 0);
+            directory_entry.attributes = attributes;
+            let lookup = handle(&directory_entry, 0);
+            assert_eq!(
+                unsafe { fat_dirent_is_volume_label(&lookup) },
+                1,
+                "attributes {attributes:#04x} carry the volume-label bit"
+            );
+        }
+    }
+
+    #[test]
+    fn attributes_without_volume_label_bit_answer_zero() {
+        for attributes in [0x00, 0x10, 0x20, 0xf7] {
+            let mut directory_entry = entry(0, 0);
+            directory_entry.attributes = attributes;
+            let lookup = handle(&directory_entry, u32::MAX);
+            assert_eq!(
+                unsafe { fat_dirent_is_volume_label(&lookup) },
+                0,
+                "attributes {attributes:#04x} lack the volume-label bit"
+            );
+        }
     }
 
     #[test]
