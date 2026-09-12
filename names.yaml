@@ -5784,6 +5784,31 @@ functions:
     module: kernel/sync_mutex
     status: ported
 
+  - address: 0x080cb824
+    ghidra: FUN_080cb824
+    name: mutex_unlock_veneer
+    size: 4
+    sig: "void mutex_unlock_veneer(Mutex *mutex)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      One instruction, `b 0x0807f6a0` (0xeafecf9d): a true 4-byte
+      tail-branch veneer, not Ghidra's unrelated 0x080cb828 onward body,
+      an ldr-pc veneer, or an empty destructor. Raw extent is exactly one
+      word: 0x080cb820 is the preceding `b 0x080cb650`, while 0x080cb828
+      starts an unrelated `push {r4,lr}` function. Target 0x0807f6a0 is
+      the already ported mutex_unlock: `ldr r0,[r0]`; `b 0x08056710`.
+      Decoding every A32 B/BL word in osos.dec finds 8 direct call sites,
+      all unconditional plain `bl` (no predicated forms and no tail b):
+      0x0820a2a4, 0x0821be5c, 0x0821bf18, 0x0821bfa0, 0x0821c188,
+      0x0822812c, 0x082281f0, and 0x08228260. No aligned image data word
+      equals 0x080cb824, so the veneer is not virtually dispatched.
+      Ported as its own inline-never forwarding symbol rather than an
+      alias, so a hook at this entry reaches a real tail-call veneer.
+
   - address: 0x0807f650
     name: mutex_delete
     size: 32
