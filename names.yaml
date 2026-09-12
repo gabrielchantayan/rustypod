@@ -3869,6 +3869,32 @@ functions:
       early return, and tail branch; Rust adds an ABI frame, so it is 6
       instructions rather than the original 3.
 
+  - address: 0x08049398
+    ghidra: FUN_08049398
+    name: operator_delete_forwarder
+    size: 4
+    sig: "void operator_delete_forwarder(void *ptr)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: ptr
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec is exactly one ARM word, `ea098661` (`b 0x082aad24`),
+      whose direct target is the already ported tag-2 operator_delete. The
+      distinct preceding function ends at 0x08049394 and the next function
+      starts at 0x0804939c, confirming Ghidra's 4-byte extent. Decoding every
+      ARM B/BL word finds exactly eight direct callers, all unconditional bl
+      (0x080486e0, 0x08048730, 0x080491d0, 0x08051a28, 0x08056100,
+      0x08136b68, 0x08136c38, 0x081bfb6c); there are no predicated calls,
+      tail branches, or aligned data-word references. The entry preserves ptr
+      in r0 and tail-dispatches to operator_delete, so NULL remains a no-op
+      and a non-NULL pointer is freed with tag 2. Deliberate deviation: Rust
+      calls rather than tail-branches to operator_delete; its unique
+      target-only text section prevents folding with cxx_array_dealloc.
+      match.py structural review found the expected ABI frame plus a final
+      branch relocation for the Rust call in place of the retail tail branch.
+
   - address: 0x0805d070
     ghidra: FUN_0805d070
     name: free_tag4
