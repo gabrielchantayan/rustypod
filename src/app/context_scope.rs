@@ -1,13 +1,14 @@
 //! The application framework's 20-byte **context scope** — the stack-local
 //! RAII record 110 functions build on entry and tear down on exit.
 //!
-//! Four functions live here, all decoded from the raw words in
+//! Six functions live here, all decoded from the raw words in
 //! `work/firmware/osos.dec` (load base 0x08000000) rather than from Ghidra:
 //!
 //! | address | bytes | `bl` | `b` | role |
 //! |---|---|---|---|---|
 //! | 0x082840e8 | 44 code + 4 literal | 110 | 1 | [`context_scope_init`] — the direct-subject constructor |
 //! | 0x08284118 | 48 code + 4 literal | 12 | 0 | [`context_scope_init_from_handle`] — the handle constructor |
+//! | 0x0828414c | 44 code + 4 literal | 7 | 0 | [`context_scope_copy_construct`] — the copy constructor |
 //! | 0x08283f3c | 52 code + 4 literal | 1 | 1 | [`context_scope_capture`] — the shared capture body |
 //! | 0x08284188 | 4 | 120 | 0 | [`context_scope_drop`] — the trivial destructor |
 //! | 0x0828418c | 36 | 37 | 0 | [`context_scope_assign`] — the assignment operator |
@@ -272,6 +273,56 @@ pub unsafe extern "C" fn context_scope_init_from_handle(
     context_scope_capture(scope, subject);
 
     scope.add(CONTEXT_SCOPE_FLAG).write(flag);
+    scope
+}
+
+/// context_scope_copy_construct — original: `FUN_0828414c` @ 0x0828414c
+/// (**48 bytes: 44 code**, 0x0828414c..0x08284174, **plus the 4-byte
+/// descriptor literal** at 0x08284178; the separately linked deleting
+/// destructor starts at 0x0828417c). **7 direct, unconditional `bl` call
+/// sites; no tail `b` or predicated call**, verified by decoding every ARM
+/// B/BL word in `osos.dec`.
+///
+/// Copy-constructs a 20-byte context scope into caller-supplied storage. It
+/// plants the descriptor at +0x00, copies the three payload words at
+/// +0x04..+0x0c and the single flag byte at +0x10 from `source`, then returns
+/// `scope` in the ADS C++ constructor convention. Unlike
+/// [`context_scope_assign`], construction overwrites the descriptor.
+///
+/// The raw instructions are five load/store pairs after the literal load:
+///
+/// ```text
+/// ldr r2,[r1,#4];  str r2,[r0,#4]
+/// ldr r2,[r1,#8];  str r2,[r0,#8]
+/// ldr r2,[r1,#12]; str r2,[r0,#12]
+/// ldrb r1,[r1,#16]; strb r1,[r0,#16]
+/// bx lr
+/// ```
+///
+/// No deliberate deviations.
+///
+/// # Safety
+///
+/// `scope` must point at [`CONTEXT_SCOPE_SIZE`] writable, word-aligned bytes
+/// and `source` at [`CONTEXT_SCOPE_SIZE`] readable, word-aligned bytes.
+/// Self-construction is safe: the descriptor source word is never read and
+/// every copied field is read before its matching write, as in retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.context_scope_copy_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_copy_construct(
+    scope: *mut u8,
+    source: *const u8,
+) -> *mut u8 {
+    let dst = scope.cast::<u32>();
+    let src = source.cast::<u32>();
+    dst.write(CONTEXT_SCOPE_DESCRIPTOR);
+    dst.add(WORD_SUBJECT).write(src.add(WORD_SUBJECT).read());
+    dst.add(WORD_CONTEXT).write(src.add(WORD_CONTEXT).read());
+    dst.add(WORD_OWNER).write(src.add(WORD_OWNER).read());
+    scope
+        .add(CONTEXT_SCOPE_FLAG)
+        .write(source.add(CONTEXT_SCOPE_FLAG).read());
     scope
 }
 
@@ -674,6 +725,62 @@ mod tests {
         assert_eq!(record.word(1), 0);
         assert_eq!(record.word(2), 0);
         assert_eq!(record.word(3), 0);
+    }
+
+    #[test]
+    fn copy_construction_plants_its_descriptor_and_copies_payload_bytes() {
+        for &(subject, context, owner, flag) in &[
+            (0u32, 0, 0, 0u8),
+            (0xffff_ffff, 0xffff_ffff, 0xffff_ffff, 0xff),
+            (0x0800_0004, 0x2200_1234, 0x089a_6600, 0xa5),
+        ] {
+            let mut source = Record::new();
+            let src = source.0.as_mut_ptr();
+            unsafe {
+                src.cast::<u32>().write(0xdead_beef);
+                src.cast::<u32>().add(WORD_SUBJECT).write(subject);
+                src.cast::<u32>().add(WORD_CONTEXT).write(context);
+                src.cast::<u32>().add(WORD_OWNER).write(owner);
+                src.add(CONTEXT_SCOPE_FLAG).write(flag);
+            }
+            let source_before = source.0;
+            let mut destination = Record::new();
+            let this = destination.0.as_mut_ptr();
+
+            let returned = unsafe { context_scope_copy_construct(this, source.0.as_ptr()) };
+
+            assert_eq!(returned, this, "the ADS copy constructor returns this");
+            assert_eq!(destination.word(0), CONTEXT_SCOPE_DESCRIPTOR);
+            assert_eq!(destination.word(1), subject, "+0x04 subject");
+            assert_eq!(destination.word(2), context, "+0x08 context");
+            assert_eq!(destination.word(3), owner, "+0x0c owner");
+            assert_eq!(destination.0[CONTEXT_SCOPE_FLAG], flag, "+0x10 flag");
+            assert_eq!(
+                &destination.0[CONTEXT_SCOPE_FLAG + 1..],
+                &[FILL; 7],
+                "the flag copy is one byte wide"
+            );
+            assert_eq!(source.0, source_before, "the source is read-only");
+        }
+    }
+
+    #[test]
+    fn copy_construction_of_self_replaces_only_the_descriptor() {
+        let mut record = Record::new();
+        let this = record.0.as_mut_ptr();
+        unsafe {
+            this.cast::<u32>().write(0xdead_beef);
+            this.cast::<u32>().add(WORD_SUBJECT).write(0x0bad_f00d);
+            this.cast::<u32>().add(WORD_CONTEXT).write(0x1234_5678);
+            this.cast::<u32>().add(WORD_OWNER).write(0x9abc_def0);
+            this.add(CONTEXT_SCOPE_FLAG).write(0x5a);
+        }
+        let mut payload_before = [0; CONTEXT_SCOPE_SIZE];
+        payload_before.copy_from_slice(&record.0[4..]);
+
+        assert_eq!(unsafe { context_scope_copy_construct(this, this) }, this);
+        assert_eq!(record.word(0), CONTEXT_SCOPE_DESCRIPTOR);
+        assert_eq!(&record.0[4..], &payload_before);
     }
 
     #[test]
