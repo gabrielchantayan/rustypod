@@ -164,6 +164,7 @@ pub mod string_owner_init;
 pub mod stream_window_set_position;
 pub mod stream_window_dispatch_request;
 pub mod utf8_clear_tail_character;
+pub mod three_word_message_post;
 pub mod triple_scaled_cursor_advance;
 pub mod triple_scaled_word_cursor_advance;
 pub mod tick_accumulator;

@@ -69067,3 +69067,39 @@ functions:
       inbound branches exist. No aligned image word equals 0x08218e04, so it
       is not virtually dispatched. The Rust direct call may compile as bl
       rather than the original tail b; load-and-acquire behavior is unchanged.
+
+  # --- Kind-0x27 three-word message poster ---
+  - address: 0x0820d98c
+    ghidra: FUN_0820d98c
+    name: three_word_message_post
+    size: 76
+    sig: "u32 three_word_message_post(u32 first_payload_word, u32 second_payload_word, u32 third_payload_word, u32 payload_flag)"
+    module: app/three_word_message_post
+    status: ported
+    renames:
+      param_1/r0/r4: first_payload_word
+      param_2/r1/r5: second_payload_word
+      param_3/r2/r6: third_payload_word
+      param_4/r3/r7: payload_flag
+      DAT_0820d9d4: THREE_WORD_MESSAGE_VTABLE
+      FUN_082669e4: message_kind_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08266a48: message_kind_construct
+      FUN_08110e4c: three_word_message_dispatch
+    notes: >-
+      Raw ARM fixes the true extent at 76 bytes: 18 instruction words from
+      0x0820d98c through the tail b at 0x0820d9d0, plus the vtable literal
+      0x0898b85c at 0x0820d9d4; the next function starts with push at
+      0x0820d9d8. Ghidra's 72-byte size drops that literal-pool word. It
+      allocates 24 bytes from message_kind_arena_pool,
+      initializes a MessageKind with fixed tag 0x27, overwrites its vtable,
+      stores r0/r1/r2 at +0x08/+0x0c/+0x10, stores only r3's low byte at
+      +0x14, then tail-dispatches the message to FUN_08110e4c with r1 = 0.
+      Decoding every ARM B/BL word in osos.dec finds eight direct inbound bl
+      calls, all unconditional (0x0820dab8, 0x0820db14, 0x0820db50,
+      0x0820dc8c, 0x0820dcc0, 0x0820dcf4, 0x0820dd28, 0x0820dd5c), and one
+      unconditional inbound tail b at 0x0820dbe0; no predicated calls and no
+      aligned data word references exist. Ghidra incorrectly absorbs the
+      unported dispatcher body into this function. The Rust target-only seam
+      calls that load address on device and a host recorder in tests; no
+      identity was invented for its opaque vtable class.
