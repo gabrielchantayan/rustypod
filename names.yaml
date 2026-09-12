@@ -70852,3 +70852,36 @@ functions:
       that these are status results, but no stronger subsystem identity is
       inferred. No deliberate deviations; host tests cover every remapped
       value plus negative and signed-range boundary pass-through behavior.
+
+  # --- stream-buffer transition inhibit ---
+  - address: 0x0808e054
+    ghidra: thunk_EXT_FUN_2200441c
+    name: stream_buffer_transition_inhibit_raise
+    size: 4
+    sig: "u32 stream_buffer_transition_inhibit_raise(u32 requested_inhibit)"
+    module: app/buffer_transition_controller
+    status: ported
+    renames:
+      param_1/r0: requested_inhibit
+      DAT_0808e054: stream_buffer_transition_inhibit_raise_entry
+      DAT_08037f3c: stream_buffer_transition_inhibit_raise_body (target RAM @ 0x2200441c, osos mirror @ 0x0800441c)
+      DAT_08004430: stream_buffer_request_controller (target RAM @ 0x2200aebc)
+      FUN_080029ac: stream_buffer_transition_controller
+    notes: >-
+      Ghidra's 4-byte entry is a branch from 0x0808e054 to the 8-byte veneer
+      at 0x08037f38; its literal word 0x2200441c resolves through the IRAM
+      mirror to the osos body 0x0800441c. Raw bytes establish that body's
+      20-byte extent, including the 0x2200aebc literal at 0x08004430; the
+      distinct sibling begins at 0x08004434. The body volatile-loads the
+      request-controller inhibit word at +0x0c and stores r0 only when the
+      old word is unsigned-lower, then tail-branches to the shared transition
+      controller. Decoding every aligned ARM B/BL immediate in osos.dec found
+      eight direct inbound plain bl calls to 0x0808e054, all unconditional:
+      0x081007f0, 0x0812b10c, 0x0812b3d8, 0x08131e9c, 0x08132d64,
+      0x0817452c, 0x0817f864, and 0x08295d38. No predicated bl or direct
+      tail b targets this entry. The Rust port calls the existing Rust
+      transition controller instead of the stock tail branch, preserving its
+      returned result. The name describes only the verified maximum-update
+      role; no stronger subsystem identity is inferred. Host tests cover
+      lower, equal, greater, and u32::MAX thresholds plus forwarded drain
+      results.

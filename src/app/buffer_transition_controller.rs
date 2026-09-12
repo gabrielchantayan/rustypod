@@ -361,6 +361,41 @@ pub unsafe extern "C" fn stream_buffer_transition_controller() -> u32 {
     retail_stream_buffer_level_wait_zero()
 }
 
+/// stream_buffer_transition_inhibit_raise — original:
+/// `thunk_EXT_FUN_2200441c` @ `0x0808e054` (Ghidra size 4 bytes) branches to
+/// `0x08037f38`, whose literal veneer targets the IRAM body at `0x2200441c`
+/// (osos mirror `0x0800441c`). That body is 20 bytes including its literal;
+/// `0x08004434` opens the next distinct function.
+///
+/// Raw decoding of every ARM `B`/`BL` word in `osos.dec` found **8 direct
+/// `bl` callers** to `0x0808e054`, all unconditional; there are no predicated
+/// calls or direct tail `b` transfers to that entry.
+///
+/// Volatile-loads the request controller's inhibit word (`0x2200aebc + 0x0c`)
+/// and writes `requested_inhibit` only when it is greater under unsigned
+/// comparison. It then transfers to the shared transition controller and
+/// returns that controller's result.
+///
+/// # Deliberate deviations
+///
+/// The stock IRAM body tail-branches to `0x080029ac`; this port calls the
+/// existing Rust transition-controller port, preserving the observable
+/// return value and controller transfer while allowing the payload to link.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.stream_buffer_transition_inhibit_raise"
+)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_buffer_transition_inhibit_raise(requested_inhibit: u32) -> u32 {
+    let controller = request_controller_ptr();
+    let current_inhibit = core::ptr::read_volatile(controller.add(3));
+    if current_inhibit < requested_inhibit {
+        core::ptr::write_volatile(controller.add(3) as *mut u32, requested_inhibit);
+    }
+    stream_buffer_transition_controller()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -618,5 +653,60 @@ mod tests {
         unsafe { stream_buffer_transition_controller() };
         // flags reloaded as 0x08 -> level 1, not the mutated base of 42.
         assert_eq!(unsafe { WAIT_EQUAL_LEVEL }, 1);
+    }
+
+    #[test]
+    fn raised_inhibit_keeps_the_larger_value_and_forwards_the_drain_result() {
+        let (_guard, _reset) = arrange(0, 7);
+        unsafe {
+            STREAM_BUFFER_REQUEST_CONTROLLER.inhibit = 100;
+            WAIT_ZERO_RESULT = 0xbeef;
+        }
+
+        assert_eq!(
+            unsafe { stream_buffer_transition_inhibit_raise(99) },
+            0xbeef
+        );
+        assert_eq!(unsafe { STREAM_BUFFER_REQUEST_CONTROLLER.inhibit }, 100);
+        assert_eq!(log(), ["wait_zero"]);
+
+        unsafe {
+            CALL_LOG = Vec::new();
+        }
+        assert_eq!(
+            unsafe { stream_buffer_transition_inhibit_raise(100) },
+            0xbeef
+        );
+        assert_eq!(unsafe { STREAM_BUFFER_REQUEST_CONTROLLER.inhibit }, 100);
+        assert_eq!(log(), ["wait_zero"]);
+
+        unsafe {
+            CALL_LOG = Vec::new();
+        }
+        assert_eq!(
+            unsafe { stream_buffer_transition_inhibit_raise(200) },
+            0xbeef
+        );
+        assert_eq!(unsafe { STREAM_BUFFER_REQUEST_CONTROLLER.inhibit }, 200);
+        assert_eq!(log(), ["wait_zero"]);
+    }
+
+    #[test]
+    fn raised_inhibit_uses_unsigned_maximum_at_u32_boundary() {
+        let (_guard, _reset) = arrange(0, 7);
+        unsafe {
+            STREAM_BUFFER_REQUEST_CONTROLLER.inhibit = 0x8000_0000;
+            WAIT_ZERO_RESULT = 0xcafe;
+        }
+
+        assert_eq!(
+            unsafe { stream_buffer_transition_inhibit_raise(u32::MAX) },
+            0xcafe
+        );
+        assert_eq!(
+            unsafe { STREAM_BUFFER_REQUEST_CONTROLLER.inhibit },
+            u32::MAX
+        );
+        assert_eq!(log(), ["wait_zero"]);
     }
 }
