@@ -6,9 +6,15 @@
 //! bytes, 0x0802b868..0x0802b924; 31 `bl` call sites, all unconditional,
 //! binary-scanned).
 //!
+//! `checked_word_block_reader` — `FUN_0802b72c` @ 0x0802b72c (152 bytes,
+//! 0x0802b72c..0x0802b7c4; 8 plain unconditional `bl` call sites, binary
+//! scanned).
+//!
 //! The byte wrapper decodes one leading mode-transformed word through
 //! `input_cursor_mirror`, then invokes the flat byte-block checksum core at
-//! 0x0802b56c. The word core below is the distinct three-dimensional variant.
+//! 0x0802b56c. The word readers are separate two- and three-dimensional
+//! variants.
+
 //! Every word and its checksum call `transform_checked_word_for_mode`
 //! (0x0802b538): only exact mode 1 reverses four byte lanes.
 
@@ -101,6 +107,71 @@ pub unsafe extern "C" fn checked_word_block_convert_core(
         unsafe { core::ptr::write_volatile(target, word) };
         target = unsafe { target.add(1) };
         index = index.wrapping_add(1);
+    }
+    let checksum = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+    if checksum != sum {
+        return CHECKSUM_MISMATCH;
+    }
+    let advanced_source = unsafe { source.add(1) };
+    unsafe {
+        core::ptr::write_volatile(input_cursor, advanced_source);
+        core::ptr::write_volatile(input_cursor_mirror, advanced_source);
+        core::ptr::write_volatile(output_cursor, target);
+        core::ptr::write_volatile(output_cursor_mirror, target);
+    }
+    0
+}
+
+/// checked_word_block_reader — original: `FUN_0802b72c` @ 0x0802b72c
+/// (152 bytes, 0x0802b72c..0x0802b7c4; 8 plain unconditional `bl` call
+/// sites, zero predicated forms, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Converts `row_count * words_per_row` aligned words from the cursor held by
+/// `input_cursor_mirror`, stores the mode-transformed words through the cursor
+/// held by `output_cursor_mirror`, and accumulates their wrapping sum. The
+/// following input word is transformed and compared to that sum. A matching
+/// checksum advances input cursor, input mirror, output cursor, then output
+/// mirror; a mismatch returns [`CHECKSUM_MISMATCH`] without updating aliases
+/// after the output words were written.
+///
+/// The raw `blt` loop bounds are signed: zero or negative bounds leave the
+/// corresponding loop empty, requiring a transformed zero checksum. Exactly
+/// mode 1 transforms every word through
+/// [`transform_checked_word_for_mode`]; all other modes preserve it. No
+/// deliberate deviations.
+///
+/// # Safety
+///
+/// `input_cursor_mirror` and `output_cursor_mirror` must be readable and hold
+/// cursors valid for the signed-positive product plus one aligned checksum word
+/// of input. All four cursor slots must be writable on success.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn checked_word_block_reader(
+    mode: u32,
+    input_cursor: *mut *mut u32,
+    input_cursor_mirror: *mut *mut u32,
+    output_cursor: *mut *mut u32,
+    output_cursor_mirror: *mut *mut u32,
+    row_count: i32,
+    words_per_row: i32,
+) -> u32 {
+    let mut source = unsafe { core::ptr::read_volatile(input_cursor_mirror) };
+    let mut target = unsafe { core::ptr::read_volatile(output_cursor_mirror) };
+    let mut sum = 0u32;
+    let mut row = 0i32;
+    while row < row_count {
+        let mut column = 0i32;
+        while column < words_per_row {
+            let word = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+            sum = sum.wrapping_add(word);
+            source = unsafe { source.add(1) };
+            unsafe { core::ptr::write_volatile(target, word) };
+            target = unsafe { target.add(1) };
+            column = column.wrapping_add(1);
+        }
+        row = row.wrapping_add(1);
     }
     let checksum = transform_checked_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
     if checksum != sum {
@@ -238,6 +309,20 @@ mod tests {
             }
         }
 
+        fn run_2d(&mut self, mode: u32, row_count: i32, words_per_row: i32) -> u32 {
+            unsafe {
+                checked_word_block_reader(
+                    mode,
+                    &mut self.input,
+                    &mut self.input_mirror,
+                    &mut self.output,
+                    &mut self.output_mirror,
+                    row_count,
+                    words_per_row,
+                )
+            }
+        }
+
 
         fn source_offset(&self, cursor: *mut u32) -> usize {
             (cursor as usize - self.source.as_ptr() as usize) / core::mem::size_of::<u32>()
@@ -246,6 +331,68 @@ mod tests {
         fn target_offset(&self, cursor: *mut u32) -> usize {
             (cursor as usize - self.target.as_ptr() as usize) / core::mem::size_of::<u32>()
         }
+    }
+
+    #[test]
+    fn reader_uses_mirror_cursors_and_mode_one_transform() {
+        let data = [0x1020_3040u32, 0xa0b0_c0d0, 0x0000_00ff, 0x8000_0001, 5, 6];
+        let sum = data.iter().fold(0u32, |acc, word| acc.wrapping_add(word.swap_bytes()));
+        let mut words = data.to_vec();
+        words.push(sum.swap_bytes());
+        let mut block = Block::new(&words);
+        block.input = unsafe { block.source.as_mut_ptr().add(2) };
+        block.output = unsafe { block.target.as_mut_ptr().add(2) };
+
+        let status = block.run_2d(1, 2, 3);
+
+        assert_eq!(status, 0);
+        let expected: std::vec::Vec<u32> = data.iter().map(|word| word.swap_bytes()).collect();
+        assert_eq!(&block.target[..6], &expected[..]);
+        assert_eq!(block.source_offset(block.input), 7);
+        assert_eq!(block.source_offset(block.input_mirror), 7);
+        assert_eq!(block.target_offset(block.output), 6);
+        assert_eq!(block.target_offset(block.output_mirror), 6);
+    }
+
+    #[test]
+    fn reader_mismatch_writes_words_but_leaves_distinct_aliases_unchanged() {
+        let mut block = Block::new(&[10u32, 20, 30, 40, 0x1234_5678]);
+        block.input = unsafe { block.source.as_mut_ptr().add(2) };
+        block.output = unsafe { block.target.as_mut_ptr().add(2) };
+
+        let status = block.run_2d(0, 2, 2);
+
+        assert_eq!(status, CHECKSUM_MISMATCH);
+        assert_eq!(&block.target[..4], &[10, 20, 30, 40]);
+        assert_eq!(block.source_offset(block.input), 2);
+        assert_eq!(block.source_offset(block.input_mirror), 0);
+        assert_eq!(block.target_offset(block.output), 2);
+        assert_eq!(block.target_offset(block.output_mirror), 0);
+    }
+
+    #[test]
+    fn reader_negative_row_count_checks_only_zero_checksum() {
+        let mut block = Block::new(&[0u32, 0xaaaa_aaaa]);
+
+        let status = block.run_2d(9, -7, 8);
+
+        assert_eq!(status, 0);
+        assert_eq!(block.source_offset(block.input), 1);
+        assert_eq!(block.source_offset(block.input_mirror), 1);
+        assert_eq!(block.target_offset(block.output), 0);
+        assert_eq!(block.target_offset(block.output_mirror), 0);
+        assert_eq!(block.target[0], 0xdead_beef);
+    }
+
+    #[test]
+    fn reader_sum_wraps_mod_2_to_the_32() {
+        let mut block = Block::new(&[0xffff_ffffu32, 2, 1]);
+
+        let status = block.run_2d(0, 2, 1);
+
+        assert_eq!(status, 0);
+        assert_eq!(&block.target[..2], &[0xffff_ffff, 2]);
+        assert_eq!(block.source_offset(block.input), 3);
     }
 
     #[test]
