@@ -79,6 +79,20 @@ unsafe fn block_proc(block: *mut CgBlock) -> *mut CgProc {
 /// 0x08249d1c, 0x0824a250, 0x0824a264, 0x0824a278 and 0x0824a28c. Raw
 /// word comparison against 0x082605f0 differs only in the six relative
 /// call encodings; it shares this implementation and its host tests.
+///
+/// `FUN_0826f4d8` @ 0x0826f4d8 is a fifth separately linked emission:
+/// 136 bytes / 34 instruction words from `push {r3-r9,lr}` through the
+/// `pop {r3-r9,pc}` at 0x0826f55c; the next function starts at 0x0826f560.
+/// It differs from this implementation's retail body only in the six
+/// relative `bl` encodings to the same factories. Raw decoding of every ARM
+/// B/BL word in osos.dec finds seven direct callers, all unconditional `bl`
+/// (no predicated calls or tail branches), at 0x0824b150, 0x0824b164,
+/// 0x0824b178, 0x0824b18c, 0x0824b200, 0x0824b214, and 0x0824bc94, all in
+/// `FUN_0824af94`. It performs the same LDI / ADD / LDW algorithm described
+/// above and shares this implementation and its host edge-case tests. As
+/// with the primary emission, this port deliberately reads `block->proc`
+/// once rather than reloading it before each virtual-register creation; that
+/// field is not written between the original reads.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_emit_load_word_at_offset(
