@@ -38298,6 +38298,43 @@ functions:
       cmp-redraw core survives verbatim; the diff is the crate's
       frame-pointer prologue and the seam's ldr/bx tail in place of the
       original's movne/popne/bne predicated fold.
+  - address: 0x0826d87c
+    ghidra: FUN_0826d87c
+    name: view_base_set_x_extent
+    size: 184
+    sig: "ViewBase *view_base_set_x_extent(ViewBase *view, u32 extent)"
+    module: ui/set_x_extent
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      param_2/r1/r0: extent
+      local_20/local_18: temporary bounds x_start/x_end
+      "*(code **)(*param_1 + 0x68)": vtable slot +0x68 (identity unresolved)
+      FUN_0826db38: VIEW_BASE_GEOMETRY_CHANGED seam (unported redraw helper)
+    notes: >-
+      Raw-byte extent is 184 bytes from push {r0-r6,lr} @ 0x0826d87c
+      through the final branch @ 0x0826d930; the separately linked next
+      function starts push {r4,r5,lr} @ 0x0826d934, so Ghidra's
+      100-byte extent truncated this body. A whole-image ARM B/BL decode
+      finds eight direct callers: five unconditional bl and three blne
+      (0x081bae70, 0x081d9ff0, 0x08287924), zero direct tail branches,
+      and zero image-word references. The predicated callers gate the
+      update themselves; this body has no NULL guard and its changed path
+      always calls the vtable +0x68 slot. It snapshots bounds
+      +0x80/+0x84/+0x88/+0x8c, returns view unchanged when x_end-x_start
+      equals extent, otherwise handles end rule 0x80000001, absolute
+      extent rule 0x80000008, or a generic rule before slot dispatch with
+      the temporary bounds and r2=1. The 0x80000001 and absolute end
+      rules write geometry +0x70; the matching start rule writes +0x58.
+      The generic rule deliberately omits the subsequent redraw helper;
+      every other changed path calls it. The grand-base vtable's +0x68
+      word is 0x08105d0c, an address inside an instruction stream rather
+      than a verified function entry, so the port names the callback only
+      by slot and does not invent its identity. Target builds dispatch the
+      actual vtable; host builds use a recording seam. Host tests exercise
+      bit-0x20-masked modes, all three rule families, modular overflow,
+      generic no-redraw, and equal-extent no-dispatch paths. match.py
+      structural review is recorded with the port.
   # --- Silver UI framework: the class-0x6800 controller addon ---
 
   - address: 0x08177e84

@@ -72,3 +72,4 @@ pub mod mode_state;
 pub mod view_base;
 pub mod container_view;
 pub mod set_geometry;
+pub mod set_x_extent;
