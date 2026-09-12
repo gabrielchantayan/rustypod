@@ -28904,6 +28904,40 @@ functions:
       the tst #1 word loads (the accepted expr_delete deviation), and
       a reassociated (bic #1; orr) form of the length<<1 | dyn merge.
 
+  - address: 0x083789ac
+    ghidra: FUN_083789ac
+    name: fault_begin_benign
+    size: 72
+    sig: "void sqlite3FaultBeginBenign(int fault_id)"
+    module: sqlite/mem
+    status: ported
+    renames:
+      param_1/r0: fault_id
+      iVar1/r3: fault_table
+      iVar2/r0: index
+      iVar3/r1: fault_record
+      "fault_record+0x12": benign_mode
+    notes: >-
+      SQLite 3.5.x's sqlite3FaultBeginBenign. Raw ARM establishes the
+      72-byte code extent 0x083789ac..0x083789f3, followed by its
+      0x08adc2cc literal-pool word at 0x083789f4; the separately linked
+      fault_end_benign begins at 0x083789f8. The function selects its
+      0x14-byte fault-injector record and increments the unsigned
+      halfword benign_mode at +0x12. fault_id >= 0 updates that record
+      with no bounds check. Any negative fault_id loops from index 0
+      while index < 1, therefore updates the one installed injector
+      once. Unsigned halfword arithmetic wraps; no assertion guards an
+      overflow. Whole-image ARM B/BL decode finds seven direct BL callers
+      and no tail-B callers: unconditional BL at 0x082dd824, 0x08370630,
+      0x0837dde0, 0x083824c0, and 0x0839746c; blne at 0x082de498 and
+      blgt at 0x08367434. The two predicated callers load slot 0 and call
+      only when their allocation-protection guards are nonzero or positive,
+      respectively; the callee itself is unguarded. The Rust port shares
+      the existing ALLOC_DENY_SCHEDULE static rather than retailOS's stats
+      block at 0x08adc2cc. Host tests cover a slot-zero increment feeding
+      the benign-denial counter, i16 overflow wrapping, and both ordinary
+      and extreme negative selectors' one-record all-injectors path.
+
   - address: 0x083789f8
     ghidra: FUN_083789f8
     name: fault_end_benign
