@@ -22935,6 +22935,33 @@ functions:
       either slot pointer. Host SharedCell uses usize for the payload field,
       while the copied slot and 32-bit signed refcount retain target
       semantics.
+  # --- shared-cell handle direct-release copy assignment ---
+  - address: 0x083b5210
+    ghidra: FUN_083b5210
+    name: shared_cell_assign_direct_secondary
+    size: 60
+    sig: "SharedCell **shared_cell_assign_direct_secondary(SharedCell **dst, SharedCell **src)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar1/r0: cell
+      iVar2/r1: refcount
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x083b5210..0x083b5248; the next
+      separately linked sibling begins at 0x083b524c. The identity path
+      returns dst without release or retain. Distinct slots first BL the
+      already-ported shared_cell_release_direct_secondary at 0x083b52f4,
+      then load src, store its cell into dst, and increment the non-NULL
+      cell's signed refcount with wrapping ADD. The source read deliberately
+      follows the destination release. A full binary decode of every ARM B/BL
+      word found exactly seven incoming calls: all unconditional BL at
+      0x0818a748, 0x0818a8f8, 0x0818a97c, 0x0818af4c, 0x0818af68,
+      0x081a8794, and 0x081a8bd0; no predicated BL forms or direct tail
+      branches. Host SharedCell uses usize for its payload field so host
+      fixtures remain representable; source slots and refcounts retain
+      target-word semantics.
   # --- shared-cell handle release ---
   - address: 0x083b524c
     ghidra: FUN_083b524c

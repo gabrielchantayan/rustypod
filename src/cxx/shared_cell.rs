@@ -13,6 +13,7 @@
 //! | 0x083b5134   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
 //! | 0x083b51bc   | constructor sibling: 8-byte `operator_new`, `{value, refcount = 1}` |
 //! | 0x083b51f4   | copy-construct: copy the cell pointer, `refcount += 1`       |
+//! | 0x083b5210   | copy-assign: direct-release dst, copy src, retain cell    |
 //! | 0x083b524c   | release — this module                                        |
 //! | 0x083b52a0   | release, byte-identical save the `bl` displacement (19 sites)|
 //! | 0x083b52f4   | release variant with a direct `bl 0x081fc930` value destroy  |
@@ -277,6 +278,63 @@ pub unsafe extern "C" fn shared_cell_assign(
     dst
 }
 
+/// `shared_cell_assign_direct_secondary` — retailOS `FUN_083b5210` @
+/// `0x083b5210` (60 bytes; 7 incoming `bl` call sites, all unconditional:
+/// zero predicated forms and zero direct tail branches, verified by decoding
+/// every ARM B/BL word in `osos.dec`). The raw extent ends immediately before
+/// the distinct release sibling at `0x083b524c`.
+///
+/// ```text
+/// 083b5210: push  {r4, r5, r6, lr}
+/// 083b5214: cmp   r0, r1
+/// 083b5218: mov   r5, r1
+/// 083b521c: mov   r4, r0
+/// 083b5220: beq   0x083b5244
+/// 083b5224: mov   r0, r4
+/// 083b5228: bl    0x083b52f4        @ shared_cell_release_direct_secondary
+/// 083b522c: ldr   r0, [r5]          @ cell = *src
+/// 083b5230: cmp   r0, #0
+/// 083b5234: str   r0, [r4]          @ *dst = cell
+/// 083b5238: ldrne r1, [r0, #4]
+/// 083b523c: addne r1, r1, #1
+/// 083b5240: strne r1, [r0, #4]
+/// 083b5244: mov   r0, r4
+/// 083b5248: pop   {r4, r5, r6, pc}
+/// ```
+///
+/// Assigns the intrusive shared cell in `src` to `dst`. Distinct slots first
+/// release `dst` using the direct-payload release specialization, then read
+/// and install `src`'s cell and increment its signed refcount with wrapping
+/// arithmetic. Self-assignment leaves the slot unchanged and returns it. The
+/// source read deliberately follows the destination release.
+///
+/// Deliberate deviation: [`SharedCell::value`] is `usize` on hosts to retain
+/// host pointers. The source-slot and signed refcount retain their target
+/// 32-bit semantics. This distinct section prevents folding with the
+/// otherwise equivalent copy-assignment sibling.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned shared-cell slots. Their non-NULL
+/// cells must be writable for both target words; when distinct, `dst` must
+/// meet [`shared_cell_release_direct_secondary`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_assign_direct_secondary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_assign_direct_secondary(
+    dst: *mut *mut SharedCell,
+    src: *mut *mut SharedCell,
+) -> *mut *mut SharedCell {
+    if dst != src {
+        shared_cell_release_direct_secondary(dst);
+        let cell = src.read();
+        dst.write(cell);
+        if !cell.is_null() {
+            (*cell).refcount = (*cell).refcount.wrapping_add(1);
+        }
+    }
+    dst
+}
+
 
 /// shared_cell_release — original: `FUN_083b524c` @ `0x083b524c`
 /// (84 bytes; 38 `bl` call sites, ALL unconditional — zero predicated
@@ -514,7 +572,9 @@ pub unsafe extern "C" fn shared_cell_release_direct_secondary(slot: *mut *mut Sh
     (*cell).refcount = remaining;
     if remaining == 0 {
         let payload = (*slot.read()).value as *mut u8;
+        if !payload.is_null() {
             operator_delete(super::payload_list_owner_destroy::payload_list_owner_destroy(payload));
+        }
 
         let cell = slot.read();
         if !cell.is_null() {
@@ -917,6 +977,56 @@ mod tests {
         assert_eq!(dst, source_cell_ptr);
         assert_eq!(source_cell.refcount, i32::MIN);
         assert!(events().is_empty());
+    }
+
+    /// The direct-secondary sibling's `beq` self-assignment path performs no
+    /// release or retain and preserves the slot's ABI result.
+    #[test]
+    fn direct_secondary_assignment_self_assignment_preserves_reference() {
+        let _bench = bench();
+        let mut cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: 7,
+        };
+        let mut slot = core::ptr::addr_of_mut!(cell);
+        let slot_ptr = core::ptr::addr_of_mut!(slot);
+
+        let result = unsafe { shared_cell_assign_direct_secondary(slot_ptr, slot_ptr) };
+
+        assert_eq!(result, slot_ptr);
+        assert_eq!(slot, core::ptr::addr_of_mut!(cell));
+        assert_eq!(cell.refcount, 7);
+        assert!(events().is_empty());
+    }
+
+    /// A final destination whose payload is NULL skips the direct payload
+    /// destroy, frees only its cell, then installs and retains the source.
+    #[test]
+    fn direct_secondary_assignment_releases_then_retains_source() {
+        let _bench = bench();
+        let mut old_cell = SharedCell {
+            value: 0,
+            refcount: 1,
+        };
+        let old_cell_ptr = core::ptr::addr_of_mut!(old_cell);
+        let mut source_cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: i32::MAX,
+        };
+        let source_cell_ptr = core::ptr::addr_of_mut!(source_cell);
+        let mut dst = old_cell_ptr;
+        let mut src = source_cell_ptr;
+
+        let result = unsafe { shared_cell_assign_direct_secondary(&mut dst, &mut src) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(dst));
+        assert_eq!(dst, source_cell_ptr);
+        assert_eq!(src, source_cell_ptr, "the source slot is only read");
+        assert_eq!(source_cell.refcount, i32::MIN);
+        assert_eq!(
+            events(),
+            std::vec![Event::HeapFree(old_cell_ptr as *mut u8 as usize, 2)]
+        );
     }
     /// The direct specialization keeps a NULL slot untouched and does not
     /// invoke its teardown or heap paths.
