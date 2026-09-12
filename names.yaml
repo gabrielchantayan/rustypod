@@ -9976,6 +9976,45 @@ functions:
       early return, contour-error propagation, successful on-curve 16.16
       point append, and capacity-error no-append behavior.
 
+  # --- FreeType 2 Type 1 glyph-outline builder ---
+  - address: 0x080bb65c
+    ghidra: FUN_080bb65c
+    name: t1_builder_add_point
+    size: 104
+    sig: "void t1_builder_add_point(T1Builder *builder, i32 x, i32 y, i32 on_curve)"
+    module: ft/t1_builder
+    status: ported
+    renames:
+      param_1/r0: builder
+      param_2/r1: x
+      param_3/r2: y
+      param_4/r3: on_curve
+      "builder+0x14": current
+      "builder+0x51": load_points
+      "builder+0x53": shift
+    notes: >-
+      FreeType psaux.c t1_builder_add_point, the Type 1 charstring
+      interpreter's glyph-outline point recorder. Raw ARM is exactly
+      0x080bb65c..0x080bb65c0: Ghidra's 104-byte extent is correct and the
+      separate getter at 0x080bb6c4 begins `ldr r0,[r0,#0x168] / bx lr`.
+      It loads builder->current from +0x14 without a NULL guard; with the
+      load_points byte at +0x51 set, sign-extends current->n_points at +2
+      for points/tags indexing, and conditionally arithmetic-shifts x/y
+      right 16 only when builder->shift (+0x53) is nonzero. It stores tag
+      1 for nonzero on_curve or 2 for zero, copies the stored pair to last
+      (+0x18/+0x1c), then increments n_points outside the load_points guard
+      using ldrh/add/strh, preserving the signed-i16 wrap. Eight `bl` call
+      sites were verified by decoding every B/BL word in osos.dec: seven
+      unconditional calls in t1_decoder_parse_charstrings @ 0x080de384,
+      0x080de920, 0x080de944, 0x080dead4, 0x080deaf8, 0x080deb68, and
+      0x080deb8c plus one `bleq` @ 0x080c4d0c. That predicated caller
+      invokes only after its preceding decoder operation returns zero; it
+      does not imply a NULL guard here. No tail B and no DATA word holds the
+      address, so it is not virtually dispatched. No deliberate deviations.
+      Host tests prove shifted negative fixed-point flooring, unshifted
+      coordinates, both tags, no-store counting pass, negative indexing,
+      and i16 count wrap.
+
   # --- FreeType 2 ftoutln outline helpers ---
   - address: 0x0804fe08
     ghidra: FUN_0804fe08
