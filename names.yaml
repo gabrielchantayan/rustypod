@@ -11495,9 +11495,9 @@ functions:
       a little-endian u32 ('tkhd' = 0x64686b74); the site @
       0x080a3f00 is inside the table search FUN_080a3ea0 itself,
       growing the tree with a placeholder on a populate miss. The
-      tail callee @ 0x0814d2b0 (unported, 48 bytes, 12 instructions,
-      stores only, no callees) is reproduced store-for-store in the
-      original's register order as the private atom_node_init:
+      tail callee @ 0x0814d2b0 (ported separately as
+      mov_atom_node_init, 48 bytes, 12 instructions, 8 direct bl callers
+      plus this tail branch) stores in the original's register order:
       dup_chain/child_a/child_b = NULL (+0x08/+0x00/+0x04), kind
       byte +0x21 = 0, offset and size u64s +0x10/+0x18 = -1
       (placeholder), fourcc at +0x24; it deliberately does NOT write
@@ -11509,13 +11509,10 @@ functions:
       Node layout cross-checked three ways: the init, the getters @
       0x0814d230/0x0814d1ac/0x0814d270, and FUN_080a3ea0's word
       reads (puVar2[9] = +0x24 key, puVar2[5]/[4] = -1 placeholder
-      test, puVar2[0..2] = links). Deviations: the tail branch
-      becomes an ordinary call+return (ABI-identical result); the
-      init is not a separate exported symbol. match.py --lib
-      <worktree> --size 28: LLVM inlines the init body with the
-      store order intact (str +8, +0, +4, strb +0x21, mvn, str
-      +0x10/+0x14/+0x18, fourcc +0x24, str +0x1c) - the only deltas
-      are the crate fp prologue and the archive bl relocation. Host
+      test, puVar2[0..2] = links). Deviations: the tail branch becomes an
+      ordinary call+return (ABI-identical result); mov_atom_node_init is
+      now an independently exported, non-inlined port. Its ledger entry
+      records its standalone structural review. Host
       tests drive the mock heap: allocation is exactly one tag-2
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
@@ -62299,6 +62296,45 @@ functions:
       preservation of every other field, and the no-dereference
       NULL-child path.
 
+  - address: 0x0814d2b0
+    ghidra: FUN_0814d2b0
+    name: mov_atom_node_init
+    size: 48
+    sig: "MovAtomNode *mov_atom_node_init(MovAtomNode *node, u32 fourcc)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: fourcc
+      param_1_plus_0x00: child_a
+      param_1_plus_0x04: child_b
+      param_1_plus_0x08: dup_chain
+      param_1_plus_0x10: offset_lo
+      param_1_plus_0x14: offset_hi
+      param_1_plus_0x18: size_lo
+      param_1_plus_0x1c: size_hi
+      param_1_plus_0x21: kind
+      param_1_plus_0x24: fourcc
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent
+      0x0814d2b0..0x0814d2e0: mov r2,#0; str r2,[r0,#8];
+      str r2,[r0]; str r2,[r0,#4]; strb r2,[r0,#0x21]; mvn r2,#0;
+      str r2,[r0,#0x10]; str r2,[r0,#0x14]; str r2,[r0,#0x18];
+      str r1,[r0,#0x24]; str r2,[r0,#0x1c]; bx lr. The separately
+      linked next function begins at 0x0814d2e0. Decoding every ARM B/BL
+      word in osos.dec finds 8 direct call sites, all unconditional plain
+      bl: 0x08121100, 0x081e5fc0, 0x081e5fcc, and
+      0x0820c684..0x0820c6b4. There are zero predicated BL forms and one
+      unconditional B tail caller at 0x080b3d58 (mov_atom_node_new); no
+      aligned DATA word in osos.dec holds this address. The leaf initializes
+      one MOV atom placeholder node: it clears duplicate-chain then child-A
+      and child-B; clears kind; sets each offset/size u32 half to -1; stores
+      the fourcc; and leaves r0/node unchanged. It deliberately does not
+      write +0x0c, flag +0x20, or padding +0x22..+0x23, and has no NULL
+      guard. No deliberate deviations: Rust emits individual volatile
+      target-width stores in the original order. Host tests directly cover
+      zero, all-ones, and fourcc keys, the returned pointer, every initialized
+      field, and every deliberately untouched byte.
   - address: 0x0814d2e0
     ghidra: FUN_0814d2e0
     name: mov_atom_node_clear_links

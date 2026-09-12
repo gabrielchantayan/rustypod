@@ -34,10 +34,10 @@
 //! 080b3d58  ea026554  b    0x0814d2b0        @ tail: node_init(node, fourcc)
 //! ```
 //!
-//! The tail callee @ 0x0814d2b0 (unported; 48 bytes,
+//! The tail callee @ 0x0814d2b0 is the exported node initializer (48 bytes,
 //! 0x0814d2b0..0x0814d2e0, 12 instructions, no literal pool — the next
-//! function opens at 0x0814d2e0 with `mov r1, #0`) is the node
-//! initializer, stores only, in this exact register order:
+//! function opens at 0x0814d2e0 with `mov r1, #0`), stores only, in this
+//! exact register order:
 //!
 //! ```text
 //! 0814d2b0  mov  r2, #0
@@ -80,19 +80,13 @@
 //!
 //! # Deviations
 //!
-//! - The original tail-branches to the initializer (`b 0x0814d2b0`);
-//!   the port calls [`atom_node_init`] and returns its result. The
-//!   initializer returns its node argument unchanged (`bx lr` with r0
-//!   untouched), so the ABI-visible result is identical.
-//! - The initializer @ 0x0814d2b0 is not ported as its own symbol; its
-//!   whole decoded body is reproduced as the private [`atom_node_init`]
-//!   (12 instructions, stores only, no external dependencies — no
-//!   dispatch seam is needed).
+//! - The original factory tail-branches to the initializer
+//!   (`b 0x0814d2b0`); Rust calls the separately exported
+//!   [`mov_atom_node_init`] and returns its result. The initializer returns
+//!   its node argument unchanged (`bx lr` with r0 untouched), so the
+//!   ABI-visible result is identical.
 //! - No NULL guard between `operator_new` and the initializer, exactly
-//!   like the original: on allocation failure the first field store
-//!   faults. (The one caller that checks the result against NULL —
-//!   `FUN_080a3ea0` — can therefore never observe NULL on the stock
-//!   build.)
+//!   like the original: on allocation failure the first field store faults.
 
 /// Allocation size of one atom node — the `mov r0, #0x28` feeding
 /// `operator_new` in [`mov_atom_node_new`].
@@ -140,19 +134,35 @@ const _: [u8; 0x21] = [0; core::mem::offset_of!(MovAtomNode, kind)];
 const _: [u8; 0x24] = [0; core::mem::offset_of!(MovAtomNode, fourcc)];
 const _: [u8; 0x28] = [0; core::mem::size_of::<MovAtomNode>()];
 
-/// The node initializer @ 0x0814d2b0, reproduced store-for-store in
-/// the original's register order (see the module header). Returns
-/// `node` unchanged, like the original's `bx lr` with r0 untouched.
+/// MOV atom node placeholder initializer — original: `FUN_0814d2b0` @
+/// **0x0814d2b0** (48 bytes, 0x0814d2b0..0x0814d2e0, 12 instructions, no
+/// literal pool). The next separately linked function starts at 0x0814d2e0.
+/// Raw decoding finds **8 direct `bl` call sites**, all unconditional (zero
+/// predicated `bl` forms), plus one unconditional `b` tail caller at
+/// 0x080b3d58; no aligned DATA word references this address.
 ///
-/// `+0x0c` and the `+0x20` flag byte are deliberately not written;
-/// the `-1` words are written individually (`mvn r2, #0` per half),
-/// never as a u64 store.
+/// Clears the duplicate-chain, child-A, and child-B pointer words in that
+/// order (+0x08, +0x00, +0x04); clears kind (+0x21); writes -1 independently
+/// to the four offset/size words (+0x10..+0x1c); stores `fourcc` at +0x24;
+/// and returns `node` unchanged. `+0x0c`, flag +0x20, and padding +0x22..23
+/// are deliberately untouched. No NULL guard: stock faults on its first
+/// store.
+///
+/// # Deviations
+///
+/// None. The individual volatile target-width stores preserve the observed
+/// store order.
 ///
 /// # Safety
 ///
-/// `node` must point to at least 0x28 writable bytes. No NULL guard,
-/// exactly like the original.
-unsafe fn atom_node_init(node: *mut MovAtomNode, fourcc: u32) -> *mut MovAtomNode {
+/// `node` must point to at least 0x28 writable bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_init")]
+pub unsafe extern "C" fn mov_atom_node_init(
+    node: *mut MovAtomNode,
+    fourcc: u32,
+) -> *mut MovAtomNode {
     unsafe {
         core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).dup_chain), 0);
         core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).child_a), 0);
@@ -189,7 +199,7 @@ unsafe fn atom_node_init(node: *mut MovAtomNode, fourcc: u32) -> *mut MovAtomNod
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mov_atom_node_new(fourcc: u32) -> *mut MovAtomNode {
     let block = unsafe { crate::heap::veneers::operator_new(MOV_ATOM_NODE_SIZE) };
-    unsafe { atom_node_init(block.cast(), fourcc) }
+    unsafe { mov_atom_node_init(block.cast(), fourcc) }
 }
 /// MOV atom node payload-offset getter — original: `FUN_0814d230` @
 /// 0x0814d230 (16 bytes, 0x0814d230..0x0814d240, 4 instructions, no
@@ -398,6 +408,35 @@ mod tests {
                 assert_eq!((*node).fourcc, fourcc, "key stored byte-for-byte");
                 assert_eq!(node, block.cast::<MovAtomNode>());
             }
+        }
+    }
+
+    #[test]
+    fn initializes_atom_node_directly_and_preserves_unwritten_bytes() {
+        for fourcc in [0, u32::MAX, u32::from_le_bytes(*b"tkhd")] {
+            let mut node = MovAtomNode {
+                child_a: POISON,
+                child_b: POISON,
+                dup_chain: POISON,
+                unused_0c: POISON,
+                offset_lo: POISON,
+                offset_hi: POISON,
+                size_lo: POISON,
+                size_hi: POISON,
+                flag: 0xaa,
+                kind: 0xbb,
+                pad_22: [0xcc, 0xdd],
+                fourcc: POISON,
+            };
+            let node_ptr = core::ptr::addr_of_mut!(node);
+
+            assert_eq!(unsafe { mov_atom_node_init(node_ptr, fourcc) }, node_ptr);
+            assert_eq!((node.child_a, node.child_b, node.dup_chain), (0, 0, 0));
+            assert_eq!((node.offset_lo, node.offset_hi), (u32::MAX, u32::MAX));
+            assert_eq!((node.size_lo, node.size_hi), (u32::MAX, u32::MAX));
+            assert_eq!((node.kind, node.fourcc), (0, fourcc));
+            assert_eq!(node.unused_0c, POISON);
+            assert_eq!((node.flag, node.pad_22), (0xaa, [0xcc, 0xdd]));
         }
     }
     #[test]
