@@ -11706,6 +11706,32 @@ functions:
       vtables. Ghidra incorrectly declared this pointer-returning body
       void.
 
+  - address: 0x0817f6b0
+    ghidra: FUN_0817f6b0
+    name: app_controller_opaque_item_vector_nonempty
+    size: 24
+    sig: "u32 app_controller_opaque_item_vector_nonempty(const AppControllerOpaqueItemVector *controller)"
+    module: app/controller_opaque_item_vector
+    status: ported
+    renames:
+      param_1: controller
+      FUN_083d7a38: vector_size_elem4_alias_7a38
+    notes: >-
+      Raw osos.dec confirms the 24-byte extent 0x0817f6b0..0x0817f6c8:
+      push {r4,lr}; add r0,r0,#0x58; bl FUN_083d7a38; cmp r0,#0; movne
+      r0,#1; pop {r4,pc}. The next separately entered function starts at
+      0x0817f6c8; there is no literal pool. Decoding every ARM B/BL immediate
+      in osos.dec found exactly eight direct inbound call sites
+      (0x0816d308, 0x0817e9d8, 0x0817ea3c, 0x0818013c, 0x08188924,
+      0x082883d8, 0x08288434, 0x08288b08), all unconditional bl, with zero
+      predicated BL forms and no direct plain-B tail call. It invokes the
+      already ported 4-byte-element vector-size instantiation at controller
+      +0x58 and returns whether its signed count is nonzero; reversed spans
+      therefore remain true. The vector element type is unrecovered, so the
+      Rust member is deliberately named opaque_items rather than assigned an
+      invented domain meaning. Host tests cover empty, complete, reversed, and
+      sub-element spans.
+
   - address: 0x08173848
     ghidra: FUN_08173848
     name: app_screen_get
