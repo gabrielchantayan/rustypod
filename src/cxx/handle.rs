@@ -288,6 +288,58 @@ pub unsafe extern "C" fn refcounted_ptr_construct(
     }
     slot
 }
+/// refcounted_ptr_construct_vtable_variant — original: `FUN_0839eed4` @
+/// 0x0839eed4 (104 bytes; 7 direct `bl` call sites, all unconditional:
+/// 0x08132ecc, 0x08133264, 0x0813349c, 0x081334f8, 0x08133e7c,
+/// 0x08133e8c, and 0x08133f98). Decoding every ARM `B`/`BL` word in
+/// `osos.dec` finds no tail `b` sites or predicated forms. The image word at
+/// 0x089a4bd4 also equals this address within a vtable-like table, so an
+/// indirect dispatch is possible; the table's owner is unidentified.
+/// Raw instructions end with `pop {r4-r8, pc}` at 0x0839ef38; the next
+/// separately linked function starts at 0x0839ef3c.
+///
+/// This separately linked C++ template instantiation clears `slot`, then,
+/// when `implementation` is non-NULL, wraps it in a tag-2
+/// [`operator_new`](operator_new) 12-byte [`RefcountedBody`] initialized as
+/// `{ implementation, refcount = 1, mutex = NULL }`. A nonzero `want_mutex`
+/// adds a tag-2 8-byte zeroed [`Mutex`], installs it at body+8, and calls
+/// [`mutex_create`] before publishing the body to `slot`. It returns `slot`;
+/// a NULL implementation performs no allocation.
+///
+/// Deliberate codegen deviation: LLVM may inline [`mutex_create`] rather than
+/// retaining the stock direct `bl`. The dedicated target section preserves
+/// this hookable template instance rather than folding it into its
+/// byte-identical siblings.
+///
+/// # Safety
+///
+/// `slot` must be a valid, aligned pointer slot. `implementation` is opaque;
+/// allocation failures are unchecked, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_construct_vtable_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct_vtable_variant(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
+}
 /// refcounted_handle_construct — original: `FUN_0839ebc4` @ 0x0839ebc4
 /// (104 bytes; 13 direct `bl` call sites, all unconditional — verified by
 /// decoding every ARM B/BL word in osos.dec: no `b` sites, no predicated
@@ -4219,6 +4271,74 @@ mod tests {
                     Event::SemaDefine(1, cell_arena),
                 ],
                 "both allocations precede the mutex cell create, in ARM order"
+            );
+        }
+
+        /// The vtable-referenced template copy preserves the NULL, unguarded,
+        /// and mutex-backed construction paths, including publication last.
+        #[test]
+        fn vtable_variant_constructs_each_path() {
+            let _bench = bench();
+
+            let mut null_slot = 0xdead_beefusize as *mut RefcountedBody;
+            let null_slot_ptr = &mut null_slot as *mut *mut RefcountedBody;
+            let returned = unsafe {
+                refcounted_ptr_construct_vtable_variant(null_slot_ptr, 0, u32::MAX)
+            };
+            assert_eq!(returned, null_slot_ptr);
+            assert!(null_slot.is_null());
+            assert!(events().is_empty(), "NULL implementation must not allocate");
+
+            let body_arena = unsafe { (*core::ptr::addr_of_mut!(ARENAS))[0].as_mut_ptr() as usize };
+            let mut unguarded_slot: *mut RefcountedBody = core::ptr::null_mut();
+            let unguarded_slot_ptr = &mut unguarded_slot as *mut *mut RefcountedBody;
+            let returned = unsafe {
+                refcounted_ptr_construct_vtable_variant(unguarded_slot_ptr, 0x1122_3344, 0)
+            };
+            assert_eq!(returned, unguarded_slot_ptr);
+            assert_eq!(unguarded_slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0x1122_3344);
+            assert_eq!(body.refcount, 1);
+            assert!(body.mutex.is_null());
+            assert_eq!(events(), std::vec![Event::Alloc(12, 2)]);
+
+            unsafe {
+                (*core::ptr::addr_of_mut!(EVENTS)).clear();
+                (*core::ptr::addr_of_mut!(ARENAS)) = [[0; 8]; 3];
+            }
+            let (body_arena, mutex_arena, cell_arena) = unsafe {
+                let arenas = &mut *core::ptr::addr_of_mut!(ARENAS);
+                (
+                    arenas[0].as_mut_ptr() as usize,
+                    arenas[1].as_mut_ptr() as usize,
+                    arenas[2].as_mut_ptr() as usize,
+                )
+            };
+            let mut guarded_slot: *mut RefcountedBody = core::ptr::null_mut();
+            let guarded_slot_ptr = &mut guarded_slot as *mut *mut RefcountedBody;
+            let returned = unsafe {
+                refcounted_ptr_construct_vtable_variant(guarded_slot_ptr, 0xaabb_ccdd, 1)
+            };
+            assert_eq!(returned, guarded_slot_ptr);
+            assert_eq!(guarded_slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0xaabb_ccdd);
+            assert_eq!(body.refcount, 1);
+            assert_eq!(body.mutex as usize, mutex_arena);
+            let mutex = unsafe { &*(mutex_arena as *const Mutex) };
+            assert_eq!(mutex.sem_cell as usize, cell_arena);
+            assert_eq!(unsafe { *(cell_arena as *const u32) }, KERNEL_SEM_HANDLE);
+            assert_eq!(mutex.unused, 0);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Alloc(12, 2),
+                    Event::Alloc(8, 2),
+                    Event::KernelAlloc(4),
+                    Event::SemaDefine(1, cell_arena),
+                ],
+                "both allocations must precede mutex creation"
             );
         }
     }
