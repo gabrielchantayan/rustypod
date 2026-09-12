@@ -27,6 +27,37 @@ pub unsafe extern "C" fn copy_four_words(source: *const u32, destination: *mut u
     destination.add(3).write(final_word);
     final_word
 }
+/// copy_four_words_staggered — original: `FUN_08248704` @ **0x08248704**
+/// (**36 bytes exactly**, `0x08248704..0x08248728`; `0x08248728` opens the
+/// next separately linked function).
+///
+/// Decoding every ARM B/BL word in `osos.dec` verifies **8 direct inbound
+/// `bl` call sites**, all unconditional; seven unconditional direct `b` tail
+/// branches also target it, and there are no predicated forms. The
+/// nine-instruction body copies four aligned words from `source` (r1) to
+/// `destination` (r0), loading and storing words in 0, 2, 1, 3 order. It
+/// leaves r0 intact and returns `destination`. With overlap, each later load
+/// observes earlier stores exactly as the instruction order dictates.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+/// `source` must be valid for four aligned `u32` reads and `destination` for
+/// four aligned `u32` writes. The ranges may overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.copy_four_words_staggered")]
+#[inline(never)]
+pub unsafe extern "C" fn copy_four_words_staggered(
+    destination: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    destination.write(source.read());
+    destination.add(2).write(source.add(2).read());
+    destination.add(1).write(source.add(1).read());
+    destination.add(3).write(source.add(3).read());
+    destination
+}
+
 
 /// copy_four_words_paired — original: `FUN_08158c94` @ **0x08158c94**
 /// (**28 bytes exactly**, `0x08158c94..0x08158cac`; the separately linked
@@ -66,7 +97,7 @@ pub unsafe extern "C" fn copy_four_words_paired(
 mod tests {
     extern crate std;
 
-    use super::{copy_four_words, copy_four_words_paired};
+    use super::{copy_four_words, copy_four_words_paired, copy_four_words_staggered};
 
     /// Independent model of the four ordered `ldr`/`str` pairs. The returned
     /// value comes from the fourth load, after the first three stores.
@@ -89,6 +120,18 @@ mod tests {
         let word2 = words[source + 2];
         words[destination + 2] = word2;
         words[destination + 3] = word3;
+    }
+
+    /// Independent model of `FUN_08248704`'s ordered load/store schedule.
+    fn reference_staggered_four_word_copy(
+        words: &mut [u32],
+        source: usize,
+        destination: usize,
+    ) {
+        words[destination] = words[source];
+        words[destination + 2] = words[source + 2];
+        words[destination + 1] = words[source + 1];
+        words[destination + 3] = words[source + 3];
     }
 
     #[test]
@@ -130,6 +173,58 @@ mod tests {
 
             assert_eq!(actual, expected, "destination={destination}");
             assert_eq!(actual_return, expected_return, "destination={destination}");
+        }
+    }
+
+    #[test]
+    fn staggered_copy_returns_destination_after_copying_distinct_range() {
+        let source = [0x1020_3040, 0x5060_7080, 0x90a0_b0c0, 0xd0e0_f001];
+        let mut destination = [0; 4];
+
+        let returned = unsafe {
+            copy_four_words_staggered(destination.as_mut_ptr(), source.as_ptr())
+        };
+
+        assert_eq!(destination, source);
+        assert_eq!(returned, destination.as_mut_ptr());
+    }
+
+    #[test]
+    fn staggered_copy_matches_instruction_order_for_all_four_word_overlaps() {
+        // Destination offsets -3 through +3 cover every overlap shape. In
+        // particular, offsets +1..+3 prove the 2, 1, 3 loads observe prior
+        // stores, unlike the source-order sibling.
+        for destination in 0..=6 {
+            let source = 3;
+            let initial = [
+                0x0000_0000,
+                0x1111_1111,
+                0x2222_2222,
+                0x3333_3333,
+                0x4444_4444,
+                0x5555_5555,
+                0x6666_6666,
+                0x7777_7777,
+                0x8888_8888,
+                0x9999_9999,
+            ];
+            let mut expected = initial;
+            let mut actual = initial;
+
+            reference_staggered_four_word_copy(&mut expected, source, destination);
+            let returned = unsafe {
+                copy_four_words_staggered(
+                    actual.as_mut_ptr().add(destination),
+                    actual.as_ptr().add(source),
+                )
+            };
+
+            assert_eq!(actual, expected, "destination={destination}");
+            assert_eq!(
+                returned,
+                actual.as_mut_ptr().wrapping_add(destination),
+                "destination={destination}"
+            );
         }
     }
 
