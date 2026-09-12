@@ -32542,6 +32542,38 @@ functions:
       splitting the original's single five-register stm into a
       four-word stm plus a separate tag str.
 
+  - address: 0x0810e7d0
+    ghidra: FUN_0810e7d0
+    name: pair_header_base_initialize_payload
+    size: 84
+    sig: "u32 pair_header_base_initialize_payload(u32 *base, const u32 *descriptor, u32 payload, u32 byte_count, u32 unused_payload_argument, u32 decoder_argument, u32 tag, u32 context)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r4: base, param_2/r5: descriptor, param_3/r6: payload, param_4/r7: byte_count, param_5: unused_payload_argument, param_6/r8: decoder_argument, param_7/r10: tag, param_8/r9: context}
+    notes: >-
+      Ghidra's 84-byte extent is correct: raw ARM starts with "push
+      {r1-r11,lr}" at 0x0810e7d0, ends with "pop {r1-r11,pc}" at
+      0x0810e820, and the next function begins at 0x0810e824. Exactly
+      eight unconditional bl call sites (0x080906bc, 0x0809e360,
+      0x0810ea60, 0x081444e8, 0x08159710, 0x0826b30c, 0x08298014,
+      0x082985c4), zero predicated calls, and no b tail calls were
+      verified by decoding every branch word in osos.dec. It first calls
+      the unported owned-payload release at 0x0810e908, then loads all
+      four descriptor words before storing them to base+0x98..+0xa4,
+      stores param_7 at +0xa8, and calls the unported decoder at
+      0x08094214 with (base+4, descriptor, payload, byte_count,
+      decoder_argument, base, context). param_5 is never loaded. The final
+      pop preserves the decoder's r0 despite Ghidra's void declaration, so
+      the port returns it. Deliberate deviation: the unported release and
+      decoder use a seven-word operations seam; target defaults transmute
+      their retail addresses and host defaults panic. Focused host tests
+      prove release-before-read, ldm/stm all-loads-before-stores semantics
+      with an overlapping descriptor, the exact decoder ABI, store window,
+      and r0 forwarding. match.py structural review confirms release then
+      decoder dispatch, the four-word load before the combined five-word
+      descriptor/tag store, and the seven-word decoder ABI; its extra
+      instructions preserve volatile-call inputs and the forwarded result.
+
   - address: 0x0813eee0
     ghidra: FUN_0813eee0
     name: pair_header_grand_base_construct
