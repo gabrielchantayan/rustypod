@@ -333,6 +333,34 @@ pub unsafe extern "C" fn region_ref_unlock(elem: *const u8) -> u32 {
     (mutex_op!(unlock))(ptr_field(region, REGION_MUTEX_INDEX))
 }
 
+/// region_ref_is_empty — original: `FUN_082805b8` @ 0x082805b8 (68 bytes).
+///
+/// Full ARM B/BL decoding finds eight unconditional `bl` call sites and no
+/// predicated or tail-`b` sites. The predicate locks `elem`'s region
+/// reference, and, unless `skip_empty_check` is nonzero, returns one when
+/// either `elem + 0x4` (the region) or `region + 0x4` (its start) is NULL.
+/// It always calls the matching unlock before returning; mutex-operation
+/// statuses are deliberately ignored, as they are in the original.
+///
+/// The word-index field helpers preserve the target's 32-bit `+0x4` layout
+/// while keeping host pointer fields disjoint. No other deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_ref_is_empty(
+    elem: *const u8,
+    skip_empty_check: u32,
+) -> u32 {
+    region_ref_lock(elem);
+    let is_empty = if skip_empty_check != 0 {
+        false
+    } else {
+        let region = ptr_field(elem, ELEM_REGION_INDEX);
+        region.is_null() || ptr_field(region, REGION_START_INDEX).is_null()
+    };
+    region_ref_unlock(elem);
+    is_empty as u32
+}
+
 /// region_elem_default_construct — original: `FUN_082804b8` @
 /// 0x082804b8 (40 bytes: 36 bytes of code plus its vtable literal at
 /// 0x082804e0; the next sibling begins at 0x082804e4).
@@ -612,6 +640,63 @@ mod tests {
             assert_eq!(region_ref_unlock(elem.as_ptr()), 0);
             assert_eq!(events(), std::vec![(true, 0x7000), (false, 0x7000)]);
         }
+        restore_mutex();
+    }
+
+    // ---- region_ref_is_empty --------------------------------------
+
+    #[test]
+    fn empty_predicate_reports_null_region_without_mutex_traffic() {
+        let _guard = mock_mutex();
+        let mut elem = [0usize; 5];
+        unsafe {
+            write_elem(elem.as_mut_ptr().cast(), core::ptr::null_mut());
+            assert_eq!(region_ref_is_empty(elem.as_mut_ptr().cast(), 0), 1);
+        }
+        assert!(events().is_empty(), "NULL region short-circuits both helpers");
+        restore_mutex();
+    }
+
+    #[test]
+    fn empty_predicate_brackets_a_null_start_with_mutex_operations() {
+        let _guard = mock_mutex();
+        let mut elem = [0usize; 5];
+        let mut region = [0usize; 3];
+        unsafe {
+            write_region(
+                region.as_mut_ptr().cast(),
+                core::ptr::null_mut(),
+                0x8100usize as *mut u8,
+            );
+            write_elem(elem.as_mut_ptr().cast(), region.as_mut_ptr().cast());
+            assert_eq!(region_ref_is_empty(elem.as_mut_ptr().cast(), 0), 1);
+        }
+        assert_eq!(events(), std::vec![(true, 0x8100), (false, 0x8100)]);
+        restore_mutex();
+    }
+
+    #[test]
+    fn empty_predicate_skips_the_check_but_not_the_lock_bracket() {
+        let _guard = mock_mutex();
+        let mut elem = [0usize; 5];
+        let mut region = [0usize; 3];
+        unsafe {
+            write_region(
+                region.as_mut_ptr().cast(),
+                0x9000usize as *mut u8,
+                0x8200usize as *mut u8,
+            );
+            write_elem(elem.as_mut_ptr().cast(), region.as_mut_ptr().cast());
+            assert_eq!(region_ref_is_empty(elem.as_mut_ptr().cast(), 0), 0);
+
+            (*core::ptr::addr_of_mut!(EVENTS)).clear();
+            assert_eq!(region_ref_is_empty(elem.as_mut_ptr().cast(), 1), 0);
+        }
+        assert_eq!(
+            events(),
+            std::vec![(true, 0x8200), (false, 0x8200)],
+            "a nonzero flag bypasses the field reads, not synchronization"
+        );
         restore_mutex();
     }
 
