@@ -123,7 +123,8 @@
 //! ported and called directly.
 
 use crate::cxx::string_object::utf8_next_codepoint;
-use crate::heap::veneers::free_wrapper;
+use crate::heap::veneers::{free_wrapper, malloc_wrapper};
+use crate::libc::memzero::memzero_aligned;
 
 /// The 16-byte bit set. Every field is target-width so the layout stays
 /// exact in 64-bit host tests, where a real pointer would not fit in
@@ -157,6 +158,53 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(BitSet, cardinality)];
 const _: [u8; 0x08] = [0; core::mem::offset_of!(BitSet, words)];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(BitSet, heap_tag)];
 const _: [u8; BIT_SET_SIZE] = [0; core::mem::size_of::<BitSet>()];
+
+/// bit_set_construct — original: `FUN_08274834` @ 0x08274834
+/// (**64 bytes**, 0x08274834..0x08274870; the next separately linked
+/// destructor begins with `push {r4, lr}` at 0x08274874 and no literal pool
+/// intervenes. **7 plain `bl` call sites, 0 predicated `bl`**, binary-scanned
+/// by decoding every ARM B/BL word in `osos.dec`: 0x0816f55c, 0x0816f574,
+/// 0x0816f58c, 0x0829a880, 0x0829aab4, 0x082a6b78, and 0x082a6e24).
+///
+/// Rounds `bit_capacity` up to a 32-bit-word count with the original ARM
+/// wrapping add, allocates that many bytes through [`malloc_wrapper`] using
+/// the full `heap_tag`, and installs the resulting target-width pointer.
+/// It then retains the bit capacity, stores only the tag's low byte, clears
+/// every allocated word, sets cardinality to zero, and returns `set`.
+///
+/// Deliberate deviation: the original calls its unported clear-all sibling
+/// at 0x082747b8, which directly calls the IRAM `memzero_aligned` veneer.
+/// This port calls the already ported [`memzero_aligned`] directly. Both
+/// callee references are loaded through volatile function pointers: that
+/// preserves the ported [`malloc_wrapper`] call despite its small body, and
+/// prevents LLVM from replacing the fill with an AEABI builtin.
+///
+/// # Safety
+///
+/// `set` must point to writable [`BitSet`] storage. The allocator must return
+/// a writable block of `((bit_capacity + 31) >> 5) * 4` bytes, or the same
+/// undefined behavior as the retailOS's unconditional clear follows.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_construct(
+    set: *mut BitSet,
+    bit_capacity: u32,
+    heap_tag: u32,
+) -> *mut BitSet {
+    let byte_count = ((bit_capacity.wrapping_add(31) >> 5) << 2) as usize;
+    let allocate =
+        core::ptr::read_volatile(&(malloc_wrapper as unsafe extern "C" fn(usize, usize) -> *mut u8));
+    let words = allocate(byte_count, heap_tag as usize);
+    (*set).words = words as usize as u32;
+    (*set).bit_capacity = bit_capacity;
+    (*set).heap_tag = heap_tag as u8;
+
+    let zero =
+        core::ptr::read_volatile(&(memzero_aligned as unsafe extern "C" fn(*mut u8, usize) -> *mut u8));
+    zero(words, byte_count);
+    (*set).cardinality = 0;
+    set
+}
 
 /// bit_set_contains — original: `FUN_082a4ee8` @ 0x082a4ee8 (16 bytes,
 /// 0x082a4ee8..0x082a4ef8; the next separately linked function begins
@@ -392,6 +440,11 @@ mod tests {
             .map(|slab| slab as usize)
             .unwrap_or(0)
     });
+    static CONSTRUCT_SLAB: LazyLock<usize> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_CONSTRUCT, WORDS_BYTES)
+            .map(|slab| slab as usize)
+            .unwrap_or(0)
+    });
 
     /// A [`BitSet`] backed by the one persistent u32-addressable test slab.
     /// Callers hold [`TEST_LOCK`] while using it.
@@ -462,6 +515,54 @@ mod tests {
                 }
             }
         };
+    }
+
+    #[test]
+    fn construct_rounds_words_clears_storage_and_truncates_the_tag_byte() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let slab = *CONSTRUCT_SLAB;
+        if slab == 0 {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        }
+        crate::heap::veneers::tests::set_alloc_ret(slab as *mut u8);
+        unsafe { core::ptr::write_bytes(slab as *mut u8, 0xa5, WORDS_BYTES) };
+        let mut set = BitSet {
+            bit_capacity: 0xdead_beef,
+            cardinality: 0xcafe_babe,
+            words: 0,
+            heap_tag: 0,
+            reserved: [0x5a; 3],
+        };
+        let set_ptr = core::ptr::addr_of_mut!(set);
+
+        let returned = unsafe { bit_set_construct(set_ptr, 33, 0xfeed_003a) };
+
+        assert_eq!(returned, set_ptr, "the original restores set to r0");
+        assert_eq!(crate::heap::veneers::tests::alloc_log(), (1, 8, 0xfeed_003a));
+        assert_eq!(set.bit_capacity, 33);
+        assert_eq!(set.cardinality, 0);
+        assert_eq!(set.words, slab as u32);
+        assert_eq!(set.heap_tag, 0x3a, "strb keeps only the low tag byte");
+        assert_eq!(set.reserved, [0x5a; 3], "the constructor never writes padding");
+        unsafe {
+            assert_eq!((slab as *const u32).read(), 0);
+            assert_eq!((slab as *const u32).add(1).read(), 0);
+            assert_eq!((slab as *const u32).add(2).read(), 0xa5a5_a5a5);
+        }
+
+        unsafe { core::ptr::write_bytes(slab as *mut u8, 0x5a, WORDS_BYTES) };
+        unsafe { bit_set_construct(set_ptr, u32::MAX - 30, 0x1234_5678) };
+
+        assert_eq!(
+            crate::heap::veneers::tests::alloc_log(),
+            (2, 0, 0x1234_5678),
+            "the ARM add wraps before the word rounding"
+        );
+        assert_eq!(set.bit_capacity, u32::MAX - 30);
+        assert_eq!(set.cardinality, 0);
+        assert_eq!(set.heap_tag, 0x78);
+        assert_eq!(unsafe { (slab as *const u8).read() }, 0x5a, "a zero-byte clear is inert");
     }
     /// A non-NULL owned buffer takes the conditional `blne free_wrapper`;
     /// destruction returns the same object and deliberately leaves its fields.
