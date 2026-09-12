@@ -89,6 +89,7 @@ pub mod three_pointer_select;
 pub mod u16_le_store_last_byte;
 pub mod u16_pair_copy;
 pub mod u32_pair_store;
+pub mod u32_indirect_equal;
 pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
 pub mod zero_four_words;
