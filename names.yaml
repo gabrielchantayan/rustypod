@@ -52870,6 +52870,52 @@ functions:
       the difference being only the crate's fp frame
       (push {fp,lr} / mov fp,sp / pop {fp,pc}) around an empty body
       that returns r0 unchanged.
+  - address: 0x0826290c
+    ghidra: thunk_FUN_082e8070
+    name: validate_and_dispatch_tagged_context
+    size: 4
+    sig: "u32 validate_and_dispatch_tagged_context(u32 *context, u32 *tagged_input)"
+    module: cxx/tagged_context_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1/r5: tagged_input
+      DAT_082e80d4: tagged_input_magic_0x4d555458
+      DAT_082e80d8: context_magic_0x434e4453
+      FUN_082e7e54: opaque_context_initialize (unported seam)
+      FUN_080c96d8: opaque_context_dispatch (unported seam)
+      r2: null_selector
+    notes: >-
+      Binary-verified veneer: its sole word is 0xea0215d7, "b
+      0x082e8070"; three separately linked sibling veneers begin at
+      0x08262910, 0x08262914, and 0x08262918, proving the requested
+      four-byte extent and no trailing literal pool. The target body
+      starts "push {r4,r5,r6,lr}" at 0x082e8070 and the next separately
+      linked function starts at 0x082e80dc, so its true 108-byte body is
+      distinct from Ghidra's erroneous 568-byte extent. Whole-image
+      decoding of every ARM B/BL immediate finds exactly 8 direct
+      unconditional bl callers, at 0x0818a518, 0x082618cc, 0x08261a40,
+      0x082625b0, 0x08262a10, 0x0839e950, 0x0839eabc, and 0x0839f498;
+      0 predicated forms, 0 tail b callers, and 0 words equal to
+      0x0826290c as data. The body returns 0x1a for NULL r0, NULL r1,
+      or r1[0] != 0x4d555458. When r0[0] == 0x434e4453, it calls
+      0x082e7e54(r0,NULL) and returns a nonzero status immediately.
+      Otherwise it tail-branches to 0x080c96d8(r0,r1,NULL). Neither
+      opaque object type nor the terminal target is identified or
+      invented. Deviation: those two unported direct branches are
+      fixed-address calls on target and replaceable host seams in tests;
+      the port returns the terminal result instead of literally
+      tail-branching. Tests cover NULL and bad magic rejection, the
+      initializer's nonzero early return, its zero-success dispatch path,
+      and the nonmatching-context direct-dispatch path.
+      match.py review used the required veneer address and the worktree
+      archive (the tool's default archive is the sibling non-worktree
+      rustypod): the veneer comparison is necessarily one branch versus
+      the Rust body. A second review against the binary-verified
+      0x082e8070..0x082e80db body preserves its validation branches,
+      conditional initializer/early return, NULL selector, and final
+      dispatcher transfer; the diffs are the host/target seam `blx`
+      calls, LLVM frame, and literal-pool words.
   - address: 0x0826291c
     ghidra: FUN_0826291c
     name: initialize_opaque_context
