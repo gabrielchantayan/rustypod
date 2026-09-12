@@ -70586,3 +70586,46 @@ functions:
       pointers cannot fit the callback's u32 slot. Tests cover circular
       order, zero callback suppression, clear-before-increment ordering, the
       empty anchor, and a nonzero depth wrapping from u32::MAX to zero.
+
+  - address: 0x080d2118
+    ghidra: FUN_080d2118
+    name: context_dispatch_callbacks_and_finish
+    size: 184
+    sig: "void context_dispatch_callbacks_and_finish(CallbackDispatchContext *context)"
+    module: app/context_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x24": state
+      "context+0x90": callback_argument
+      "state+0x00": completion_callback_list
+      "state+0x04": queued_entries
+      "state+0x54": dispatch_depth
+      "state+0x58": counted_mutex
+      "completion_callback_node+0x0c": callback_word
+      "completion_callback_node+0x14": next_completion_callback_node
+      FUN_0829cfc8: pop_queued_entry
+      FUN_080aa3a8: invoke_queued_entry_primary_callbacks
+      FUN_080b28bc: invoke_queued_entry_secondary_callbacks
+      FUN_0809444c: kernel_running
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent
+      0x080d2118..0x080d21d0: the next separately linked function begins at
+      0x080d21d0 with `cmp r0,#0`. Decoding every aligned ARM B/BL immediate
+      finds eight inbound direct callers, all unconditional plain bl at
+      0x0807488c, 0x08077240, 0x080f2a50, 0x080f2b3c, 0x0820fa44,
+      0x08213534, 0x082630c8, and 0x08264048; there are zero predicated
+      forms. The separate unconditional tail branch at 0x08277720 is not a
+      call site. The routine wraps the dispatch-depth decrement. Only on zero
+      does it repeatedly call the unported real entry 0x0829cfc8 with
+      state+4, then call unported real entries 0x080aa3a8 and 0x080b28bc for
+      each returned entry; it then walks state+0 callback nodes, invoking each
+      nonzero +0x0c callback with (context+0x90, 0). It conditionally releases
+      the already ported counted mutex after either path. The helper names only
+      describe their observed calling roles; their object-level identities are
+      not inferred. Target builds invoke the three verified raw addresses;
+      host tests use a replaceable seam because target-width callback words
+      cannot contain host function pointers. Tests cover multi-entry drain
+      ordering, zero callback suppression, mode-0 argument delivery, and the
+      zero-depth underflow that suppresses drain and callback traversal.
