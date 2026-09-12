@@ -67952,3 +67952,49 @@ functions:
       registered word 0x08272fac is not a function entry: raw bytes are ASCII
       URL data beginning g/00/9/xmlsig#, so the Rust shutdown handler is
       deliberately inert rather than inventing a callee.
+
+  # --- Scoped-context chapter count ---
+  - address: 0x082a2c34
+    ghidra: FUN_082a2c34
+    name: scoped_context_chapter_count_or_zero
+    size: 76
+    sig: "u32 scoped_context_chapter_count_or_zero(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_080448a0: owner_name_value_lookup
+      r1@0x082a2c60: source
+      r1@0x082a2c68: value
+    notes: >-
+      Raw bytes establish a 76-byte extent, correcting Ghidra's 156-byte
+      report: nineteen ARM instructions run from 0x082a2c34 through the final
+      pop {r4,pc} at 0x082a2c7c, and the separately linked next function
+      begins with its own push {r4,lr} at 0x082a2c80. Decoding every aligned
+      immediate ARM B/BL word in osos.dec finds eight inbound direct calls,
+      all unconditional plain bl at 0x08112580, 0x08173b10, 0x081798a4,
+      0x0817bec4, 0x081f8fb8, 0x0821dc7c, 0x0821efb8, and 0x0823419c; there
+      are zero predicated forms and zero direct tail branches to this entry.
+      It dispatches this->vtable slot +0x08, returns zero without reading the
+      owner on a zero validity result, then reads owner +0x10. Bit 0 of that
+      source's first byte gates a non-NULL +0x14 value pointer, which it passes
+      by tail branch to 0x080448a0; every other path returns zero. Callers
+      establish that the returned u32 is a chapter count: at 0x0823419c,
+      values 0 and 1 select AudiobookHasNoChapters while an unsigned value
+      greater than 1 selects AudiobookHasMultipleChapters. A valid token with
+      a NULL owner or source faults just as in ARM. The target's raw body
+      carries the literal name, but no concrete identity for 0x080448a0 is
+      recovered or invented. It has no ledger entry, so target builds call its
+      verified ROM address while host tests replace it with a recording callback.
+      No aligned data word in osos.dec holds 0x082a2c34,
+      so this entry is not virtual-dispatched. Deliberate deviations: repr(C)
+      fragments replace literal offsets and source expresses the stock direct
+      tail branch as a typed call; ARM codegen retains the transfer as
+      literal-loaded bx rather than direct b. The validity gate, source
+      selection, pointer argument, and u32 result are preserved. Host tests
+      prove invalid short-circuiting, every disabled-bit case, NULL value
+      rejection, and full-result delegation after all gates pass. match.py
+      structural review with --size 76 finds the same vtable +0x08 blx,
+      validity compare, gated owner +0x10/source byte/source +0x14 chain, and
+      tail transfer. The 22-versus-19 instruction diff is the crate frame,
+      branch layout in place of ADS predicates, and literal-loaded bx target.
