@@ -21633,6 +21633,40 @@ functions:
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
 
+  - address: 0x083995d8
+    ghidra: FUN_083995d8
+    name: scheduler_handle_label_lookup
+    size: 76
+    sig: "u32 scheduler_handle_label_lookup(i32 identifier)"
+    module: util/scheduler_handle_label_lookup
+    status: ported
+    renames:
+      param_1/r0: identifier
+      local_8: label_out
+      DAT_08399618: direct_label_limit
+      DAT_0839961c: direct_label_base
+      DAT_08399620: fallback_label
+      FUN_080632a4: registered_handle_label_find
+    notes: >-
+      Raw osos.dec is 64 bytes of instructions plus the three-word literal
+      pool at 0x08399618..0x08399620: 76 bytes from 0x083995d8 through
+      0x08399623; the next separately linked function begins at
+      0x08399624. Decoding every ARM B/BL word finds exactly 8 direct call
+      sites, all unconditional bl (0x082bef60, 0x082bef8c, 0x082bf508,
+      0x082bf538, 0x082bf568, 0x082bf598, 0x082bfce8, 0x082c03ec), with
+      zero predicated forms. Scheduler-diagnostic callers use the result as
+      an S16 label for semaphore and timer handle identifiers. A signed
+      identifier strictly below the runtime word at 0x083e89d8 maps to the
+      direct table address [0x083e7718] + identifier * 17 with wrapping ARM
+      arithmetic. Other identifiers call unported 201-entry lookup
+      FUN_080632a4(identifier, &stack_word); a nonzero return selects
+      stack_word and zero selects [0x083e237c]. These runtime words are
+      mutable retailOS data at run time despite decoding as instructions in
+      the static image. The target port makes the same volatile absolute
+      reads and call; host tests use private word and lookup seams to prove
+      strict signed-bound exclusion, wrapping direct arithmetic, lookup
+      forwarding, success, and fallback behavior.
+
   - address: 0x08399624
     ghidra: FUN_08399624
     name: scheduler_label_lookup
