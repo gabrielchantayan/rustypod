@@ -78,6 +78,7 @@
 //! | 0x08289690 | [`instance_of_class_3280`] | 24 | 37 `bl` |
 //! | 0x0828ae68 | [`instance_of_class_4180`] | 28 | 23 `bl` |
 //! | 0x0828b1d4 | [`field_dc_as_class_4a80`] | 12 | 9 `bl` |
+//! | 0x0828b854 | [`field_dc_as_class_4b00`] | 12 | 7 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -1037,6 +1038,37 @@ pub unsafe extern "C" fn field_dc_as_class_4a80(owner: *mut u8) -> *mut u8 {
     let object = owner.cast::<u32>().add(0xdc / 4).read() as usize as *mut FrameworkObject;
     object_cast_to_class(object, CLASS_ID_4A80)
 }
+///
+/// The class id 0x4b00. No constructor registration paired with a class-name
+/// factory call has been recovered, so the runtime class remains unidentified.
+pub const CLASS_ID_4B00: u32 = 0x4b00;
+
+/// field_dc_as_class_4b00 — original: `FUN_0828b854` @ 0x0828b854
+/// (**12 bytes; 7 `bl` call sites**, binary-scanned over osos.dec; no
+/// predicated forms, tail branches, or data-word references).
+///
+/// ```text
+/// ldr r0, [r0, #0xdc]
+/// mov r1, #0x4b00
+/// b   0x08275b9c
+/// ```
+///
+/// Reads the target-width pointer at an otherwise unidentified owner's +0xdc
+/// field and checks it against runtime class 0x4b00. The next separately
+/// linked function begins at 0x0828b860. The raw code has no NULL guard for
+/// the owner: NULL faults on the field load. A NULL field instead reaches
+/// [`object_cast_to_class`] and returns NULL. This port names only the
+/// observed field and class id because the class has no recovered identity.
+///
+/// Deviation: Rust calls [`object_cast_to_class`] rather than tail-branching;
+/// LLVM may still select a tail call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn field_dc_as_class_4b00(owner: *mut u8) -> *mut u8 {
+    let object = owner.cast::<u32>().add(0xdc / 4).read() as usize as *mut FrameworkObject;
+    object_cast_to_class(object, CLASS_ID_4B00)
+}
+
 
 
 #[cfg(test)]
@@ -1521,6 +1553,15 @@ mod tests {
         .map(|pointer| pointer as usize)
     });
 
+    const FIELD_DC_CLASS_4B00_CAST_FIXTURE_LEN: usize = 0x1000;
+    static FIELD_DC_CLASS_4B00_CAST_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::FIELD_DC_AS_CLASS_4B00,
+            FIELD_DC_CLASS_4B00_CAST_FIXTURE_LEN,
+        )
+        .map(|pointer| pointer as usize)
+    });
+
     #[test]
     fn field_dc_as_class_4a80_reads_the_target_width_field_and_checks_its_class() {
         let Some(base) = *FIELD_DC_CAST_FIXTURE else {
@@ -1539,6 +1580,29 @@ mod tests {
             (*target).accepts = 0x4a00;
             assert!(
                 field_dc_as_class_4a80(owner).is_null(),
+                "the fixed class id rejects a target that accepts another class"
+            );
+        }
+    }
+
+    #[test]
+    fn field_dc_as_class_4b00_reads_the_target_width_field_and_checks_its_class() {
+        let Some(base) = *FIELD_DC_CLASS_4B00_CAST_FIXTURE else {
+            assert!(crate::testing::note_missing_u32_fixture("app/registry::field_dc_as_class_4b00"));
+            return;
+        };
+        unsafe {
+            let owner = base as *mut u8;
+            ptr::write_bytes(owner, 0, FIELD_DC_CLASS_4B00_CAST_FIXTURE_LEN);
+            let target = owner.add(0x400).cast::<TestObject>();
+            target.write(object_accepting(CLASS_ID_4B00));
+            owner.cast::<u32>().add(0xdc / 4).write(target as usize as u32);
+
+            assert_eq!(field_dc_as_class_4b00(owner), target.cast::<u8>());
+
+            (*target).accepts = CLASS_ID_4A80;
+            assert!(
+                field_dc_as_class_4b00(owner).is_null(),
                 "the fixed class id rejects a target that accepts another class"
             );
         }

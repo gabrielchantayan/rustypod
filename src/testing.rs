@@ -80,6 +80,10 @@ pub mod hints {
     // fixture for field_dc_as_class_4a80; mappings never unmap, so no other
     // user may share this hint.
     pub const FIELD_DC_AS_CLASS_4A80: usize = 0x6700_0000;
+    // 0x6d00_0000: dedicated to app/registry's raw-u32 owner field
+    // fixture for field_dc_as_class_4b00; mappings never unmap, so no other
+    // user may share this hint.
+    pub const FIELD_DC_AS_CLASS_4B00: usize = 0x6d00_0000;
     pub const VIEW_TIMER: usize = 0x2000_0000;
     pub const STRING_TABLE: usize = 0x2100_0000;
     pub const VIEW_EVENT_TIMER_STOP: usize = 0x5b00_0000;
