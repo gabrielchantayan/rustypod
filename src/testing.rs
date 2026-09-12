@@ -508,6 +508,11 @@ pub mod hints {
     // never unmap, so no other user may share this hint.
     pub const SELECTION_POSITION_AT_OR_PAST_ITEM_COUNT: usize = 0x8d00_0000;
 
+    // 0x9400_0000: dedicated to app/slot_signal_reset's target-width
+    // manager and mailbox fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SLOT_SIGNAL_RESET: usize = 0x9400_0000;
+
 
 }
 

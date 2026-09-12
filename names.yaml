@@ -70363,3 +70363,42 @@ functions:
       port names only the observed selection-predecessor behavior. Host tests
       cover zero and arbitrary nonzero byte states, arithmetic wraparound, and
       read-only surrounding storage. Deliberate deviation: none.
+
+  # --- slot notification and value-state clear ---
+  - address: 0x080fd4c0
+    ghidra: FUN_080fd4c0
+    name: signal_slots_and_clear_values
+    size: 80
+    sig: "void signal_slots_and_clear_values(SlotManager *slot_manager)"
+    module: app/slot_signal_reset
+    status: ported
+    renames:
+      param_1/r0: slot_manager
+      "slot_manager+0x468": slot_count
+      "slot_manager+0x484": slots
+      "slot+0x00": slot_value
+      "slot+0x01": has_slot_value
+      "slot+0x18": notification_mailbox
+      "slot+0x20": notification_requested
+      FUN_0808e2b0: mailbox_slot_signal
+    notes: >-
+      Raw ARM confirms the exact 80-byte extent 0x080fd4c0..0x080fd510:
+      push {r4-r8,lr}; iterate unsigned index r5 while r5 < this+0x468;
+      form each 60-byte slot at this+0x484+r5*0x3c; test its byte +0x20
+      for equality with one; then invoke mailbox_slot_signal on the word at
+      +0x18 and clear the tested byte. Every slot then clears bytes +0x01
+      followed by +0x00; notification values other than one remain unchanged.
+      The next independently linked function begins at 0x080fd510, so
+      there is no trailing literal pool. Decoding every aligned ARM B/BL
+      immediate in osos.dec finds exactly eight direct inbound calls, all
+      unconditional bl (0x080f9a38, 0x080f9aa0, 0x080f9f1c, 0x080fa01c,
+      0x080fa298, 0x080fb4fc, 0x080fbf00, 0x080fcdc0); there are zero
+      predicated bl forms and zero tail-b transfers. The mailbox callee is
+      already ported (0x0808e2b0) and has no NULL guard, so only a slot whose
+      request byte is exactly one needs a valid mailbox field. Host tests
+      prove the exact-equality gate (0 and 2 do not signal), signal-side
+      semaphore decrement, unconditional two-value-flag clearing, and the
+      zero-count no-touch case. Deliberate host deviation: firmware mailbox
+      fields are u32 pointers, so host code calls its known csem_signal body
+      directly after target-width conversion instead of reading an eight-byte
+      host pointer through mailbox_slot_signal.
