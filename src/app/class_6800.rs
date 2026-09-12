@@ -133,6 +133,11 @@ pub const FRAMEWORK_BASE_VTABLE_ADDRESS: u32 = 0x0898_1958;
 /// Address of the global whose +4 slot 0x081d2204 returns (pool word @
 /// 0x081d2210). Modeled by [`FRAMEWORK_ROOT_HOLDER`].
 pub const FRAMEWORK_ROOT_HOLDER_ADDRESS: u32 = 0x089c_c858;
+/// The physical vtable literal `FUN_08272474` plants after the
+/// task-context-target framework constructor returns (pool word @
+/// 0x08272490). Its virtual slots remain retailOS implementations.
+pub const FRAMEWORK_TASK_TARGET_BASE_VTABLE_ADDRESS: u32 = 0x089a_5de0;
+
 
 /// The object's vtable, modeled down to the slots observed in the base
 /// constructor and state-transition routine. The filler reproduces the
@@ -725,6 +730,35 @@ pub unsafe extern "C" fn framework_base_construct_with_task_target(
     this
 }
 
+/// framework_task_target_base_construct — original: `FUN_08272474` @
+/// 0x08272474 (28 bytes of code plus the literal-pool word at 0x08272490;
+/// **8 plain `bl` call sites, 0 predicated calls, and 0 direct `b` call
+/// sites**, binary-scanned from `work/firmware/osos.dec`).
+///
+/// Constructs the task-context-target variant of the shared framework base.
+/// It calls [`framework_base_construct_with_task_target`] with `storage` and
+/// `create_link`, replaces the returned object's vtable with the literal
+/// 0x089a5de0, clears the returned object's +0x14 word, then returns that
+/// same pointer. There is no NULL guard before either store.
+///
+/// The +0x14 field is [`Class6800::default_target`] in the recovered common
+/// layout; its semantic role for this distinct vtable is not established.
+/// No behavioral deviations: the retailOS vtable address is preserved as an
+/// opaque pointer rather than inventing unported virtual implementations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_task_target_base_construct(
+    storage: *mut Class6800,
+    create_link: u32,
+) -> *mut Class6800 {
+    let this = framework_base_construct_with_task_target(storage, create_link);
+    core::ptr::addr_of_mut!((*this).vtable).write_volatile(
+        FRAMEWORK_TASK_TARGET_BASE_VTABLE_ADDRESS as usize as *const Class6800Vtable,
+    );
+    core::ptr::addr_of_mut!((*this).default_target).write_volatile(core::ptr::null_mut());
+    this
+}
+
 /// class_6800_new — original: `FUN_08177e84` @ 0x08177e84
 /// (72 bytes of code + the 4-byte vtable literal @ 0x08177ecc;
 /// **128 `bl` call sites**, binary-scanned).
@@ -1202,6 +1236,52 @@ mod tests {
             assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
             assert_eq!(SET_TARGET_ARGS[0], (storage, target));
             assert_eq!(object.link_owner, ptr::addr_of_mut!(ACTIVE_OWNER));
+
+            restore_task_hooks(saved_hooks);
+            restore();
+            drop(guard);
+        }
+        drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn task_target_base_constructor_installs_vtable_and_clears_post_base_word() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(object);
+        let target = 0x2468usize as *mut u8;
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            let guard = install_mocks();
+            task_context.framework_base_initial_target = target;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            let result = framework_task_target_base_construct(storage, 1);
+
+            assert_eq!(result, storage, "the base constructor's r0 is returned");
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "context is fetched once");
+            assert_eq!(PARENT_CALLS, 0, "the direct parent call bypasses the seam");
+            assert_eq!(
+                object.vtable,
+                FRAMEWORK_TASK_TARGET_BASE_VTABLE_ADDRESS as usize as *const Class6800Vtable,
+                "the literal at 0x08272490 replaces the base vtable"
+            );
+            assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
+            assert_eq!(SET_TARGET_ARGS[0], (storage, target));
+            assert!(object.default_target.is_null(), "exact zero store at +0x14");
+            assert_eq!(
+                object.demo_mode,
+                0xa5a5_a5a5usize as *mut u8,
+                "the following derived word is untouched"
+            );
 
             restore_task_hooks(saved_hooks);
             restore();
