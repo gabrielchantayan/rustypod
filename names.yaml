@@ -41061,6 +41061,45 @@ functions:
       blx-through-volatile-slot dispatch standing in for the direct
       bl.
 
+  - address: 0x08264430
+    ghidra: FUN_08264430
+    name: draw_state_stroke_rect
+    size: 120
+    sig: "void draw_state_stroke_rect(u8 *this, const Rect *rect)"
+    module: cxx/draw_state_stroke
+    status: ported
+    renames:
+      param_1/r0: this (the 0x44-byte scoped draw-state record)
+      param_2/r1: rect (record-local bounds, QuickDraw top/left/bottom/right)
+      local_14/local_10/local_c/local_8: adjusted (the origin-translated stack rect)
+      FUN_08074788: stroke_rect_engine (unported rectangle-outline engine)
+    notes: >-
+      Whole 120-byte function binary-verified: 0x08264430 begins `push
+      {lr}` and the distinct sibling 0x082644a8 begins `mov r2,r0; push
+      {lr}`; no literal pool lies between. Exactly 8 unconditional bl call
+      sites, 0 predicated bl and 0 b, were verified by decoding every ARM
+      B/BL word in osos.dec: 0x0808da1c, 0x0815c480, 0x0815c708,
+      0x0816acd4, 0x0816ad10, 0x0816ad58, 0x0816b518 and 0x0826da84.
+      No DATA word in the image holds 0x08264430, so it is not virtually
+      dispatched. The scoped 0x44-byte draw-state member translates the
+      caller's four-word QuickDraw rect with native wrapping adds
+      (top/bottom += origin_y @ this+0x30; left/right += origin_x @
+      this+0x2c), then calls unported 0x08074788. Raw ARM proves its six
+      operands: surface body `*(this+0x1c)+4`, adjusted rect, signed
+      stroke-width word this+0x08, foreground colour this+0x11,
+      zero-extended style byte this+0x10, and embedded clip rect this+0x34.
+      The engine's decompilation makes four calls to the fill engine using
+      its input's top/bottom and left/right edges, supporting the
+      rectangle-outline/stroke name. Deviation: the unported engine rides
+      the new volatile DRAW_STATE_STROKE_OPS dispatch seam; target builds
+      transmute 0x08074788 and host tests install a recorder. The surface
+      word is u32, and its +4 wraps at ARM word width before becoming a host
+      usize. Host tests (3) prove all six engine operands, axis-specific
+      translation, no record/input/guard mutation, coordinate and surface
+      wrapping, style-byte zero extension, signed width forwarding, and
+      unchecked degenerate rect forwarding. match.py structural review is
+      expected to differ in crate-frame and dispatch details.
+
   - address: 0x082644a8
     ghidra: FUN_082644a8
     name: draw_state_fill_rect_foreground
