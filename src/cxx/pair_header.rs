@@ -29,6 +29,11 @@
 //! derived trailing word at +0xc4. The class itself is unidentified —
 //! the name is structural (see the names.yaml notes).
 
+use core::ffi::c_void;
+
+use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
+use crate::runtime::shutdown_chain::{cxa_atexit, ShutdownHandlerFn};
+
 /// Host-test dispatch for the still-unported `FUN_082b498c` array helper.
 /// Its eleven ARM word arguments are represented explicitly so callers cannot
 /// accidentally change the stack-argument order.
@@ -682,6 +687,116 @@ pub unsafe extern "C" fn pair_header_construct(
     let object = pair_header_base_construct(this.add(3)).sub(3);
     object.add(0xc4 / 4).write(0);
     object.cast::<u8>().add(8).write(0);
+    object
+}
+
+/// Fixed PairHeaderBase storage at the accessor's object literal.
+const PAIR_HEADER_BASE_DEFAULT_ADDRESS: usize = 0x08a7_9ccc;
+/// ADS's process-wide teardown key, the literal at 0x0809e3c8.
+const DSO_HANDLE: i32 = 0x089c_a09c;
+
+/// Fixed direct binding to the ported registration routine. The volatile
+/// load keeps its allocation sequence out of this small retail wrapper.
+type PairHeaderBaseDefaultCxaAtexit =
+    unsafe extern "C" fn(*mut c_void, ShutdownHandlerFn, i32) -> i32;
+static mut PAIR_HEADER_BASE_DEFAULT_CXA_ATEXIT: PairHeaderBaseDefaultCxaAtexit = cxa_atexit;
+
+/// The retail wrapper has a real `bl` to the otherwise-empty release routine.
+static mut PAIR_HEADER_BASE_DEFAULT_CXA_GUARD_RELEASE: unsafe extern "C" fn(*mut u32) =
+    cxa_guard_release;
+
+#[inline(always)]
+unsafe fn pair_header_base_default_cxa_atexit() -> PairHeaderBaseDefaultCxaAtexit {
+    core::ptr::read_volatile(core::ptr::addr_of!(PAIR_HEADER_BASE_DEFAULT_CXA_ATEXIT))
+}
+
+#[inline(always)]
+unsafe fn pair_header_base_default_cxa_guard_release() -> unsafe extern "C" fn(*mut u32) {
+    core::ptr::read_volatile(core::ptr::addr_of!(PAIR_HEADER_BASE_DEFAULT_CXA_GUARD_RELEASE))
+}
+
+/// `pair_header_base_construct` initializes through the ownership byte at
+/// +0xb4, so its fixed storage is exactly 0xb8 bytes.
+const PAIR_HEADER_BASE_DEFAULT_WORDS: usize = 0xb8 / 4;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pair_header_base_default_state() -> (*mut u32, *mut u32) {
+    (
+        0x089c_c88cusize as *mut u32,
+        PAIR_HEADER_BASE_DEFAULT_ADDRESS as *mut u32,
+    )
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_PAIR_HEADER_BASE_DEFAULT_GUARD: u32 = 0;
+#[cfg(not(target_os = "none"))]
+static mut HOST_PAIR_HEADER_BASE_DEFAULT: [u32; PAIR_HEADER_BASE_DEFAULT_WORDS] =
+    [0; PAIR_HEADER_BASE_DEFAULT_WORDS];
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pair_header_base_default_state() -> (*mut u32, *mut u32) {
+    (
+        core::ptr::addr_of_mut!(HOST_PAIR_HEADER_BASE_DEFAULT_GUARD),
+        core::ptr::addr_of_mut!(HOST_PAIR_HEADER_BASE_DEFAULT).cast(),
+    )
+}
+
+/// Returns the raw shutdown handler literal at 0x0809e3cc without assigning
+/// an unsupported identity to it.
+///
+/// It is deliberately preserved for device builds even though 0x08103d38 is
+/// not a standalone raw ARM entry: it is a `bl 0x08133e14` inside the prior
+/// function, followed by stores and that function's epilogue. The retail
+/// accessor registers this exact word.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pair_header_base_default_destructor() -> ShutdownHandlerFn {
+    core::mem::transmute(0x0810_3d38usize)
+}
+
+/// The literal retail handler cannot run in a host process.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn host_pair_header_base_default_destructor(_object: *mut c_void) {}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pair_header_base_default_destructor() -> ShutdownHandlerFn {
+    host_pair_header_base_default_destructor
+}
+
+/// pair_header_base_default_get — original: `FUN_0809e374` @ `0x0809e374`
+/// (**92 bytes**: 72 instruction bytes plus its five-word literal pool
+/// through 0x0809e3cc; the next distinct function begins at 0x0809e3d0).
+///
+/// Eight direct callers were verified by decoding every ARM B/BL immediate in
+/// `osos.dec`: eight unconditional `bl`, zero predicated calls, and no tail
+/// `b`. Tests guard bit 0 at 0x089cc88c; when clear, acquires the ADS guard,
+/// constructs the fixed 0x08a79ccc PairHeaderBase, registers the constructor
+/// result with the literal handler and `__dso_handle`, then releases the
+/// guard. Every path returns the fixed object literal, never the constructor
+/// result.
+///
+/// Deliberate deviations: host builds use private aligned state rather than
+/// firmware RAM and an inert shutdown handler. Device builds preserve the
+/// anomalous handler literal 0x08103d38 exactly; raw bytes prove it is not a
+/// real function entry, so this port intentionally does not invent a name or
+/// replacement dispatch seam for it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pair_header_base_default_get")]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_default_get() -> *mut u32 {
+    let (guard, object) = pair_header_base_default_state();
+    if (core::ptr::read_volatile(guard) & 1) == 0 && cxa_guard_acquire(guard) != 0 {
+        let this = pair_header_base_construct(object);
+        pair_header_base_default_cxa_atexit()(
+            this.cast::<c_void>(),
+            pair_header_base_default_destructor(),
+            DSO_HANDLE,
+        );
+        pair_header_base_default_cxa_guard_release()(guard);
+    }
     object
 }
 
@@ -1551,6 +1666,132 @@ mod base_bind_payload_tests {
             assert_eq!(base.add(0x9c / 4).read(), 0x26);
             assert_eq!(base.add(0xa0 / 4).read(), 0x27);
             assert_eq!(base.add(0xa4 / 4).read(), 0x28);
+        }
+        restore(guard);
+    }
+}
+
+#[cfg(test)]
+mod default_get_tests {
+    extern crate std;
+
+    use super::*;
+    use core::ptr;
+    use std::boxed::Box;
+    use std::sync::MutexGuard;
+
+    use crate::runtime::shutdown_chain::{
+        lib_shutdown_chain, shutdown_chain_head, ShutdownNode, SHUTDOWN_ALLOC, SHUTDOWN_FREE,
+    };
+
+    const FILL: u32 = 0xaaaa_5555;
+
+    unsafe extern "C" fn box_alloc(_size: usize) -> *mut u8 {
+        Box::into_raw(Box::new(ShutdownNode {
+            next: ptr::null_mut(),
+            arg: ptr::null_mut(),
+            handler: host_pair_header_base_default_destructor,
+            key: 0,
+        })) as *mut u8
+    }
+
+    unsafe extern "C" fn box_free(block: *mut u8) {
+        drop(Box::from_raw(block as *mut ShutdownNode));
+    }
+
+    /// PairHeaderBase's element-array dispatch is shared with other
+    /// constructor tests, so serialize every fixture mutation on its
+    /// crate-wide lock.
+    fn reset() -> MutexGuard<'static, ()> {
+        let guard = crate::testing::CPP_ARRAY_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_ELEMENT_ARRAY_OPS).write_volatile(
+                PairHeaderElementArrayOps {
+                    reset: missing_reset_element_array,
+                },
+            );
+            let (init_guard, object) = pair_header_base_default_state();
+            init_guard.write_volatile(0);
+            for word in 0..PAIR_HEADER_BASE_DEFAULT_WORDS {
+                object.add(word).write_volatile(FILL);
+            }
+            SHUTDOWN_ALLOC = box_alloc;
+            SHUTDOWN_FREE = box_free;
+            *shutdown_chain_head() = ptr::null_mut();
+        }
+        guard
+    }
+
+    fn restore(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            lib_shutdown_chain(0);
+            SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
+            SHUTDOWN_FREE = crate::malloc_rt::free;
+            core::ptr::addr_of_mut!(PAIR_HEADER_ELEMENT_ARRAY_OPS).write_volatile(
+                PairHeaderElementArrayOps {
+                    reset: missing_reset_element_array,
+                },
+            );
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn constructs_registers_and_returns_the_fixed_object() {
+        let guard = reset();
+        unsafe {
+            let (init_guard, object) = pair_header_base_default_state();
+            assert_eq!(pair_header_base_default_get(), object);
+            assert_eq!(init_guard.read_volatile(), 1, "acquire publishes before registration");
+            assert_eq!(object.read(), PAIR_HEADER_BASE_VTABLE, "base constructor plants vtable");
+            assert!(
+                (1..(0x98 / 4)).all(|word| object.add(word).read() == 0),
+                "base constructor clears the +4..+0x97 interval"
+            );
+            let registration = *shutdown_chain_head();
+            assert!(!registration.is_null(), "cxa_atexit registration is retained");
+            assert_eq!((*registration).arg, object.cast::<c_void>());
+            assert_eq!(
+                (*registration).handler as usize,
+                host_pair_header_base_default_destructor as usize,
+                "host model is inert; device retains the anomalous raw literal"
+            );
+            assert_eq!((*registration).key, DSO_HANDLE);
+
+            object.add(0x20 / 4).write(0x1234_5678);
+            assert_eq!(pair_header_base_default_get(), object);
+            assert_eq!(object.add(0x20 / 4).read(), 0x1234_5678, "fast path does not reconstruct");
+            assert!((*registration).next.is_null(), "only one shutdown registration");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn bit0_set_guard_skips_construction() {
+        let guard = reset();
+        unsafe {
+            let (init_guard, object) = pair_header_base_default_state();
+            init_guard.write_volatile(3);
+            assert_eq!(pair_header_base_default_get(), object);
+            assert_eq!(init_guard.read_volatile(), 3);
+            assert_eq!(object.read(), FILL, "no constructor store");
+            assert!(shutdown_chain_head().read().is_null(), "no registration");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn nonzero_bit0_clear_guard_reaches_and_is_refused_by_acquire() {
+        let guard = reset();
+        unsafe {
+            let (init_guard, object) = pair_header_base_default_state();
+            init_guard.write_volatile(2);
+            assert_eq!(pair_header_base_default_get(), object);
+            assert_eq!(init_guard.read_volatile(), 2, "acquire rejects every nonzero word");
+            assert_eq!(object.read(), FILL, "refused acquire skips constructor");
+            assert!(shutdown_chain_head().read().is_null(), "refused acquire does not register");
         }
         restore(guard);
     }

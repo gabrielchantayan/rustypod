@@ -9268,6 +9268,50 @@ functions:
       call instead of retail b 0x0836d3b8, and the reordered
       compare/select structure (the accepted deviations).
 
+  # --- fixed PairHeaderBase default accessor (cxx/pair_header) ---
+  - address: 0x0809e374
+    ghidra: FUN_0809e374
+    name: pair_header_base_default_get
+    size: 92
+    sig: "u32 *pair_header_base_default_get(void)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      DAT_0809e3bc: pair_header_base_default_guard_pool
+      "DAT_0809e3bc + 4": pair_header_base_default_guard
+      DAT_0809e3c0: pair_header_base_default_guard
+      DAT_0809e3c4: pair_header_base_default
+      DAT_0809e3c8: dso_handle
+      DAT_0809e3cc: anomalous_pair_header_base_default_shutdown_handler
+      FUN_0810ebbc: pair_header_base_construct
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      EXTENT CORRECTED: Ghidra's 72 bytes cover instructions
+      0x0809e374..0x0809e3bc only. Raw osos.dec has five following literal
+      words through 0x0809e3cc; the next distinct function starts at
+      0x0809e3d0, making the true extent 92 bytes. This is an ADS
+      function-local-static accessor for the fixed 0xb8-byte PairHeaderBase
+      at 0x08a79ccc: test bit 0 of guard 0x089cc88c; on clear, call the
+      ported cxa_guard_acquire; construct through the ported
+      pair_header_base_construct; register that constructor return with the
+      ported cxa_atexit using literal handler 0x08103d38 and __dso_handle
+      0x089ca09c; call the ported cxa_guard_release; and reload/return the
+      fixed object literal rather than the constructor result. Decoding every
+      ARM B/BL immediate in osos.dec found exactly eight inbound direct calls:
+      unconditional bl at 0x0826cd88, 0x0826cd98, 0x0826ce24, 0x0826ce3c,
+      0x0826d260, 0x0826d270, 0x0826d290, and 0x0826d2a8; zero predicated
+      bl and no tail b. The handler word is anomalous: raw code at 0x08103d38
+      is a bl 0x08133e14 within the preceding function, not a standalone ARM
+      function entry. The port preserves that exact raw target on device and
+      uses an inert host handler, rather than inventing an identity or an
+      unported-callee dispatch seam. Host tests cover first construction and
+      registration, the bit-0 fast path, and cxa_guard_acquire's refusal of a
+      nonzero bit-0-clear guard. match.py structural review: same guarded
+      call order; its added frame and volatile indirect calls retain the
+      ported registration/release boundaries instead of inlining them.
+
   # --- indexed payload lookup wrapper (app) ---
   - address: 0x0809e3d0
     ghidra: FUN_0809e3d0
