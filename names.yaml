@@ -50158,6 +50158,36 @@ functions:
       tests exhaust all 65,536 packed values, retain guards around the
       four-byte destination, and prove cursor advancement.
 
+  # --- packed RGBA4444 expansion ---
+  - address: 0x0824bed8
+    ghidra: FUN_0824bed8
+    name: rgba4444_expand_to_rgba8
+    size: 64
+    sig: "void rgba4444_expand_to_rgba8(u8 *destination, u32 packed_pixel)"
+    module: cxx/color_unpack
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: packed_rgba4444
+      r2: expanded_red
+      r3: expanded_green
+      r12: expanded_blue
+      r1: expanded_alpha
+    notes: >-
+      Raw ARM decoding confirms the complete 64-byte, 16-word leaf from
+      0x0824bed8 through `bx lr` at 0x0824bf14. The preceding sibling ends
+      with `bx lr` at 0x0824bed4, and 0x0824bf18 starts the next separately
+      linked RGB555A1 expansion leaf; no literal pool is present. It expands
+      packed RGBA4444 bits 15..12, 11..8, 7..4, and 3..0 by duplicating each
+      nibble into R, G, B, and A output bytes, respectively; bits above 15 do
+      not affect the result. Decoding every aligned ARM B/BL word in osos.dec
+      finds exactly eight direct unconditional bl call sites (0x08250cf8,
+      0x08250d08, 0x08250d2c, 0x08250d3c, 0x08251144, 0x0825115c,
+      0x08251534, and 0x08251540), with no predicated BL forms. One
+      unconditional plain B tail branch at 0x0825ecd8 comes from the
+      RGBA4444 cursor reader; no aligned data word points here. The original
+      has no NULL, alignment, or bounds guards. Host tests exhaust all 65,536
+      packed values with non-zero upper input bits and destination guards.
   # --- packed RGBA4444 cursor reader ---
   - address: 0x0825ecc8
     ghidra: FUN_0825ecc8
