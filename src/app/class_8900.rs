@@ -63,6 +63,8 @@
 //!   object's own vtable, so hooks that replace the object or its
 //!   vtable are honored verbatim.
 
+use crate::app::resource_chain::ResourceKind;
+
 /// The property key this getter always binds (arg2 of the slot +0xdc
 /// call; formed in the original as 0x6000 + 0x31).
 const PROPERTY_KEY_6031: u32 = 0x6031;
@@ -76,17 +78,27 @@ const CLASS_ID_6000: u32 = 0x6000;
 /// additionally takes a `"Ui32"`-style kind — see the module header).
 pub type Class6000ReadFn =
     unsafe extern "C" fn(this: *mut Class6000, key: u32, class_id: u32) -> u32;
+/// Vtable slot +0xe0 of the class-0x6000 store: typed property lookup.
+/// The returned pointer, when non-NULL, addresses the property's u32 value.
+pub type Class6000ReadTypedFn = unsafe extern "C" fn(
+    this: *mut Class6000,
+    key: u32,
+    class_id: u32,
+    kind: ResourceKind,
+) -> *mut u32;
 
-/// The class-0x6000 store vtable. Only slot +0xdc is decoded; the words
-/// below it are named as a block so the decoded slot lands on its
-/// original offset on the 32-bit target without any literal byte offset
-/// (the `app/resource_chain.rs` `ResourceProviderVTable` pattern).
+
+/// The class-0x6000 store vtable. Slots +0xdc and +0xe0 are decoded;
+/// the words below them are named as a block so both slots land on their
+/// original target offsets without literal byte-offset arithmetic.
 #[repr(C)]
 pub struct Class6000VTable {
     /// Slots +0x00..+0xd8, not decoded by this port.
     pub slots_below: [Option<unsafe extern "C" fn()>; 55],
     /// Slot +0xdc.
     pub read: Class6000ReadFn,
+    /// Slot +0xe0.
+    pub read_typed: Class6000ReadTypedFn,
 }
 
 /// The class-0x6000 store singleton, as seen through this getter: only
@@ -120,6 +132,8 @@ const _: [u8; 0x30] = [0; core::mem::offset_of!(Class8900, cached_6031)];
 const _: [u8; 0x378] = [0; core::mem::offset_of!(Class8900, store)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0xdc] = [0; core::mem::offset_of!(Class6000VTable, read)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0xe0] = [0; core::mem::offset_of!(Class6000VTable, read_typed)];
 
 /// class_8900_cached_property_6031 — original: `FUN_081ec268` @
 /// `0x081ec268` (40 bytes).
@@ -194,9 +208,19 @@ mod tests {
         ANSWER
     }
 
+    unsafe extern "C" fn unreachable_typed_read(
+        _store: *mut Class6000,
+        _key: u32,
+        _class_id: u32,
+        _kind: ResourceKind,
+    ) -> *mut u32 {
+        panic!("class_8900_cached_property_6031 never dispatches slot +0xe0")
+    }
+
     const VTABLE: Class6000VTable = Class6000VTable {
         slots_below: [None; 55],
         read: scripted_read,
+        read_typed: unreachable_typed_read,
     };
 
     /// Builds the pair of fixture objects: a class-0x8900 receiver with

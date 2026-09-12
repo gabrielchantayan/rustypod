@@ -14786,6 +14786,36 @@ functions:
       LLVM adds the frame-pointer push/pop every tiny port in this crate
       shows (observable_set_changed precedent).
 
+  - address: 0x08171ba0
+    ghidra: FUN_08171ba0
+    name: class6000_dirp_property_6066_or_default
+    size: 60
+    sig: "u32 class6000_dirp_property_6066_or_default(void)"
+    module: app/class_6000_property
+    status: ported
+    renames:
+      FUN_08172124: instance_of_class_6000
+      DAT_08171bd4: DEFAULT_PROPERTY_6067
+      DAT_08171bd8: RESOURCE_KIND_DIRP
+      piVar1: store
+      puVar2: value
+      uVar3: property
+    notes: >-
+      Raw extent is 60 bytes: 13 ARM instructions through 0x08171bd0,
+      followed by literal-pool words at 0x08171bd4 (0x00006067) and
+      0x08171bd8 (0x70724944, "DirP"); the next function begins at
+      0x08171bdc. Ghidra's 52-byte size omits those literals. Binary scan
+      of every ARM B/BL word finds exactly 8 direct call sites, all plain
+      unconditional bl (0x08086ea4, 0x081002f8, 0x08124338, 0x08148530,
+      0x081702ec, 0x081b1b18, 0x081b1b3c, 0x082a5ca4); no predicated
+      call, tail branch, or aligned data-word reference targets it. Calls
+      the ported class-0x6000 singleton accessor, then virtual slot +0xe0
+      as `(store, 0x6066, 0x6000, "DirP")`; returns the pointed-to first
+      word when that slot yields non-NULL, otherwise the 0x6067 default.
+      The resource kind and values are not semantically identified in the
+      image, so the name records only the verified literals. A missing
+      singleton still faults at the unguarded vtable load, matching stock.
+
   - address: 0x08172124
     ghidra: FUN_08172124
     name: instance_of_class_6000
