@@ -40210,6 +40210,37 @@ functions:
       (ldr pc,[pc,#-4]); only diff line is the literal word shown as
       .word vs data-decoded-andcs.
 
+  # --- shared UI manager pending-operation completion ---
+  - address: 0x08038130
+    ghidra: thunk_EXT_FUN_2200509c
+    name: ui_manager_finish_pending_operation
+    size: 8
+    sig: "int ui_manager_finish_pending_operation(void *manager, int completion_enabled, int cleanup_requested)"
+    module: ui/manager_pending_operation
+    status: ported
+    renames:
+      thunk_EXT_FUN_2200509c: ui_manager_finish_pending_operation
+      FUN_0800509c: ui_manager_finish_pending_operation
+    notes: >-
+      Raw osos.dec has the 8-byte literal veneer e51ff004 / 2200509c at
+      0x08038130; Ghidra's 4-byte extent omits its target word. The boot
+      relocator at 0x080046e0 mirrors 0x08000000..0x0800aed8 to
+      0x22000000, so this target is the 88-byte mirror body at 0x0800509c
+      through its literal at 0x080050f0. It clears byte 0x22008c94, and only
+      when manager[0] and r1 are nonzero sets request flags 0x18 through the
+      existing stream_buffer_request_flags_update port before entering
+      0x081b09b4. That verified target is an anomalous mid-function entry:
+      it consumes manager/r2 from r4/r5 and returns through their saved frame,
+      so ARM uses a bridge that recreates the exact frame and host uses an
+      explicit seam rather than inventing a callee identity. A nonzero r2
+      then tail-dispatches ui_dispatch_pending_cleanup(manager + 0x10), whose
+      zero result replaces the prior result. Decoding every ARM B/BL word in
+      osos.dec found 8 unconditional bl callers (0x081b0c1c, 0x081b0ef8,
+      0x081b0fcc, 0x08201d1c, 0x08201f74, 0x08235e10, 0x08236150,
+      0x08237314), zero predicated bl forms, and one unconditional tail b
+      (0x0820208c). Host tests cover the disabled path, the request-mask and
+      delegated-result path, and cleanup's result precedence and flag clear.
+
   # --- shared UI manager lazy initialization ---
   - address: 0x08005018
     ghidra: FUN_08005018

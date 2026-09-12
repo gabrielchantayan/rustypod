@@ -81,6 +81,10 @@ pub unsafe extern "C" fn ui_dispatch_pending_cleanup(cleanup_slot: *mut u8) -> i
 }
 
 #[cfg(test)]
+pub(crate) static UI_PENDING_CLEANUP_TEST_LOCK: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use core::sync::atomic::{AtomicBool, Ordering};
@@ -104,7 +108,6 @@ mod tests {
         };
     }
 
-    static TEST_LOCK: AtomicBool = AtomicBool::new(false);
     static mut MOCK: Mock = Mock::EMPTY;
 
     unsafe extern "C" fn mock_dispatch_cleanup(cleanup_slot: *mut u8) {
@@ -136,12 +139,12 @@ mod tests {
     impl Drop for Bench {
         fn drop(&mut self) {
             unsafe { UI_PENDING_CLEANUP_OPS = self.previous };
-            TEST_LOCK.store(false, Ordering::Release);
+            UI_PENDING_CLEANUP_TEST_LOCK.store(false, Ordering::Release);
         }
     }
 
     fn bench(state: &mut [u8; 8]) -> Bench {
-        while TEST_LOCK
+        while UI_PENDING_CLEANUP_TEST_LOCK
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
