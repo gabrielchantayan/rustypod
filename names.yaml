@@ -24296,6 +24296,42 @@ functions:
       family as the assign. match.py structural: same push/mov-r4/call/
       return-this frame; LLVM may inline the teardown helpers.
 
+  - address: 0x0816cf24
+    ghidra: FUN_0816cf24
+    name: refcounted_ptr_release_dtor
+    size: 140
+    sig: "RefcountedBody **refcounted_ptr_release_dtor(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      vtable_plus_0x4: virtual_destructor_slot_1
+    notes: >-
+      Raw ARM establishes the exact 140-byte extent
+      0x0816cf24..0x0816cfb8; the separately linked next function starts
+      at 0x0816cfb8. Decoding every ARM B/BL word in osos.dec finds exactly
+      eight inbound direct calls, all unconditional bl: 0x0810cf68,
+      0x0810cf70, 0x0810cf78, 0x0810d188, 0x0810d190, 0x0810d198,
+      0x0822afd8, and 0x0822afe0. No predicated forms, direct tail b sites,
+      or word-aligned image references exist, so it is not virtually
+      dispatched. The NULL body early-out returns slot unchanged. Otherwise
+      it locks optional body+8, wrapping-decrements body+4, and clears slot;
+      non-final releases only unlock. Final release NULL-guardedly dispatches
+      implementation vtable word 1 (+4), never frees the implementation
+      block, unlocks through a fresh slot load, then mutex-deletes and
+      tag-2-frees the reloaded mutex, clears body+8, and tag-2-frees body.
+      Its 36-word control structure matches refcounted_body_release_dtor_variant
+      @ 0x0839d3ac except this ADS destroy-and-return-this instance returns
+      slot. Rust calls the already ported mutex_lock, mutex_unlock,
+      mutex_delete, and operator_delete helpers directly; LLVM may inline
+      them instead of retaining local helper bl instructions while preserving
+      the ordering. Host tests cover NULL return identity plus final vtable
+      dispatch, mutex/body teardown, and return identity.
+
   # --- Embedded SQLite, 0x08360000-0x0838ffff (agent media) ---
   # The whole span is an amalgamated SQLite ~3.5.x - see src/sqlite/mod.rs
   # for the identification evidence and the recovered struct layouts
