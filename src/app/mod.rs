@@ -128,6 +128,7 @@ pub mod refcounted_value;
 pub mod resource;
 pub mod root_context_f9c_bound;
 pub mod resource_chain;
+pub mod resource_reference_value;
 pub mod scoped_context;
 pub mod scoped_string_id_record_set;
 pub mod service_manager;

@@ -67733,3 +67733,37 @@ functions:
       are zero predicated bl calls. A ninth inbound branch is the unconditional
       tail b at 0x0829dd2c, whose preceding add r0,r0,#4 adapts a containing
       object to this cursor layout. No aligned DATA word names this entry.
+
+  # --- application resource-reference value lookup ---
+  - address: 0x082a449c
+    ghidra: FUN_082a449c
+    name: resource_reference_value
+    size: 120
+    sig: "u32 resource_reference_value(ResourceReference *reference)"
+    module: app/resource_reference_value
+    status: ported
+    renames:
+      param_1/r0: reference
+      param_1+0x00: vtable
+      param_1+0x04: indirect_source
+      param_1+0x08: direct_entry
+      param_1+0x0c: resource_context
+      "(*reference->vtable)[0x08]": resource_reference_is_valid
+      FUN_082a2cac: resolve_indirect_resource_entry
+      FUN_080506bc: resource_index_lookup
+    notes: >-
+      Raw osos.dec proves the Ghidra 120-byte extent is exact: the body runs
+      from 0x082a449c through pop {r4,r5,r6,pc} at 0x082a4510 and the next
+      separately linked function opens at 0x082a4514, with no literal pool.
+      Decoding every immediate ARM B/BL word finds exactly eight inbound
+      direct calls, all unconditional plain bl at 0x0812f918, 0x081f79a4,
+      0x081fd178, 0x08208b5c, 0x0821dc8c, 0x0821efc8, 0x0823a570 and
+      0x0823a57c; there are no predicated forms or direct tail branches.
+      It calls vtable slot +0x08 to validate the reference, selects its
+      direct +0x08 entry or resolves a non-null +0x04 source through the
+      still-unported 0x082a2cac, then queries the resource index at
+      context+0xf9c through still-unported 0x080506bc. A matched record
+      returns its +0x0c value, otherwise zero. Target builds call both
+      verified retailOS addresses; host tests inject their ABI through a
+      private seam. The vtable target has no recovered concrete identity, so
+      only its binary-verified ABI and slot are represented.
