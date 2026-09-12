@@ -69700,3 +69700,33 @@ functions:
       storage, low-byte truncation, word-boundary preservation, and this
       return. Both existing transition-addon constructors now call this port
       directly, removing their stale 0x0818a0c4 constructor seam.
+  - address: 0x0816eefc
+    ghidra: FUN_0816eefc
+    name: selection_position_is_at_or_past_item_count
+    size: 52
+    sig: "u32 selection_position_is_at_or_past_item_count(const SelectionPositionCheck *state)"
+    module: app/selection_position_at_or_past_item_count
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0xc": selection_position
+      "state+0x10": item_count_check_enabled
+      "state+0x14": item_reference
+      FUN_082a5e48: ui_element_reference_target_item_count
+    notes: >-
+      Raw ARM is exactly 52 instruction bytes from the push at 0x0816eefc
+      through pop {r4,r5,r6,pc} at 0x0816ef2c; the next separately linked
+      function starts with push {r4,r5,r6,r7,r8,lr} at 0x0816ef30, with no
+      literal pool. Full-image aligned ARM B/BL decoding finds exactly eight
+      direct calls, all plain unconditional bl and no predicated forms:
+      0x081de6f8, 0x0821d9ac, 0x08222b6c, 0x08226020, 0x08226238,
+      0x08235458, 0x08238618, and 0x082387f0. It returns zero without
+      touching the embedded reference when byte state+0x10 is zero. Any
+      nonzero byte calls the ported item-count reader on state+0x14, then the
+      unsigned cmp/movcs returns one exactly when its count is less than or
+      equal to state+0xc. The class is otherwise unidentified, so the Rust
+      representation models only the observed target-word prefix; this avoids
+      guessing a complete type while preserving every accessed offset on target
+      and host. Tests cover the zero gate without a valid reference, nonzero
+      byte truthiness, equality and both u16/u32 boundary directions, and the
+      unresolved-reference zero count.
