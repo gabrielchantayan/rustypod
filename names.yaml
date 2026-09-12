@@ -69460,3 +69460,42 @@ functions:
       only the fixed registry with native-width pointers, while target code
       retains its exact 32-bit layout. The stock unlock tail branch is a
       normal Rust call.
+
+  # --- Service state synchronization ---
+  - address: 0x081c843c
+    ghidra: FUN_081c843c
+    name: service_state_synchronize
+    size: 108
+    sig: "int service_state_synchronize(void *service)"
+    module: app/service_state_synchronize
+    status: ported
+    renames:
+      "service+0xcb8": transient_state_byte
+      "service+0xccc": global_wrapper_context
+      "service+0xcd4": mutex
+      FUN_081af73c: read_service_state_byte
+      FUN_08228360: lock_service_lock (ported)
+      FUN_08228400: unidentified_global_wrapper
+      FUN_08228388: lock_service_unlock (ported)
+    notes: >-
+      Raw ARM confirms the 108-byte extent 0x081c843c..0x081c84a8: the next
+      independently linked function starts at 0x081c84a8. Its four direct bl
+      calls lock the embedded Mutex at service+0xcd4 through the existing
+      lock_service_lock port, read the byte at service+0xcb8 through
+      FUN_081af73c into a stack byte, call FUN_08228400 with service+0xccc,
+      then unlock through the existing lock_service_unlock port. Each helper
+      result is compared with zero; any nonzero result returns 1, otherwise
+      it returns 0.
+      All four direct callees unconditionally return zero in their raw bodies.
+      FUN_08228400 calls 0x080d7110 with global 0x08a09d78 before
+      setting r0 to zero; that downstream callee has no established identity,
+      so the target port reaches the wrapper at its stock address and host
+      tests use a recorder seam plus a four-byte-shifted backing object that
+      aligns the target +0xcd4 mutex field for the host-native Mutex layout.
+      Full-image aligned ARM B/BL decoding finds 8
+      inbound calls: seven unconditional bl at 0x081af6dc, 0x0820cfb8,
+      0x0820d028, 0x0820d1fc, 0x0820d27c, 0x0820d2e0, and 0x0820d518; one
+      predicated blne at 0x08201a38. The predicated caller supplies the gate;
+      this function has no NULL guard. The Rust port directly volatile-reads
+      service+0xcb8 rather than materializing the unobservable stack
+      out-parameter call, then directly uses the existing lock-service ports.
