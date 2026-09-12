@@ -72373,3 +72373,36 @@ functions:
       plus a test-only output observer, avoiding concurrent mutation of
       trace_printf's formatter slot. Tests cover linked traversal, the
       three-field match gate, a null head, and ARM sub/mul wraparound.
+
+  # --- SQLite expression affinity (src/sqlite/expr_affinity.rs) ---
+  - address: 0x083768e0
+    ghidra: FUN_083768e0
+    name: expr_affinity
+    size: 48
+    sig: "char expr_affinity(Expr *expr)"
+    module: sqlite/expr_affinity
+    status: ported
+    renames:
+      param_1/r0: expr
+      r1: op
+      FUN_0836e90c: affinity_type
+      DAT_0836e9cc: sqlite_upper_to_lower
+    notes: >-
+      Raw osos.dec confirms this 48-byte body at
+      0x083768e0..0x0837690c, ending in bx lr; the next independently linked
+      function starts at 0x08376910. Decoding every aligned ARM B/BL immediate
+      in osos.dec finds exactly seven direct inbound BL calls, all
+      unconditional: 0x082c3c1c, 0x082c4724, 0x082cd3d4, 0x082cd3e8,
+      0x083732c8, 0x083735c0, and 0x08382448. There are zero predicated BL
+      callers; its lone beq at 0x083768f8 is its internal TK_SELECT loop, not
+      an inbound call. No aligned data word contains 0x083768e0, so it is not
+      virtually dispatched. This is SQLite 3.5.9's sqlite3ExprAffinity:
+      TK_SELECT (110) repeatedly follows
+      expr->pSelect->pEList->a[0].pExpr, TK_CAST (31) tail-branches to
+      sqlite3AffinityType with &expr->token, and all other expressions return
+      expr->affinity. The tail target at 0x0836e90c is unported and classifies
+      exactly token.n bytes through sqlite3UpperToLower. Deliberate deviation:
+      the Rust port inlines that verified target scan, including its rolling
+      CHAR/CLOB/TEXT, BLOB, REAL/FLOA/DOUB, and INT rules, rather than adding
+      a dispatch seam. Host tests cover direct, SELECT, packed-length, empty,
+      and case-folded cast-token paths.
