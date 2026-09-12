@@ -128,3 +128,135 @@ mod tests {
         }
     }
 }
+
+/// tracker_record_from_payload — original: `FUN_082ab68c` @ `0x082ab68c`
+/// (52 bytes).
+///
+/// Raw ARM from `work/firmware/osos.dec`:
+///
+/// ```text
+/// 082ab68c  cmp     r0, #0
+/// 082ab690  push    {r4, lr}
+/// 082ab694  ldrne   r0, [r0]
+/// 082ab698  cmpne   r0, #0
+/// 082ab69c  bne     0x082ab6ac
+/// 082ab6a0  bl      0x08033714
+/// 082ab6a4  mov     r0, #0
+/// 082ab6a8  pop     {r4, pc}
+/// 082ab6ac  ldr     r4, [r0, #-4]
+/// 082ab6b0  cmp     r4, #0
+/// 082ab6b4  bleq    0x08033714
+/// 082ab6b8  mov     r0, r4
+/// 082ab6bc  pop     {r4, pc}
+/// ```
+///
+/// The independently linked next function starts with `push {r4, r5, lr}` at
+/// `0x082ab6c0`, confirming Ghidra's 52-byte extent. Complete ARM
+/// B/BL-immediate decoding finds seven inbound calls, all unconditional
+/// plain `bl` (at 0x080c533c, 0x080c536c, 0x080ccca0, 0x080ccd0c,
+/// 0x080dd404, 0x080dd4f8, and 0x082ab4ec); no predicated direct call reaches
+/// this entry.
+///
+/// Algorithm: require a non-null `payload_slot`, then a non-null payload
+/// pointer in that slot, then a nonzero tracker-record word immediately
+/// preceding the payload. Return that prefix word. Each failure calls
+/// `0x08033714`, an ARM branch alias for the already ported `__rt_exit` at
+/// `0x08033720`, which does not return. The tracker-record relationship is
+/// established by all callers passing the result to `FUN_082a777c`, the
+/// record identity/name comparator.
+///
+/// Deliberate deviation: host tests replace the non-returning exit path with
+/// a catchable panic inside the Rust body; firmware builds call `__rt_exit`
+/// directly.
+///
+/// # Safety
+///
+/// `payload_slot` must be null or point to one readable payload pointer. A
+/// non-null payload must be word-aligned and readable for the preceding
+/// `u32` tracker-record word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tracker_record_from_payload")]
+pub unsafe extern "C" fn tracker_record_from_payload(payload_slot: *const *const u32) -> u32 {
+    tracker_record_from_payload_body(payload_slot)
+}
+
+unsafe fn tracker_record_from_payload_body(payload_slot: *const *const u32) -> u32 {
+    if payload_slot.is_null() {
+        missing_payload_tracker_record();
+    }
+
+    let payload = payload_slot.read();
+    if payload.is_null() {
+        missing_payload_tracker_record();
+    }
+
+    let record = payload.sub(1).read();
+    if record == 0 {
+        missing_payload_tracker_record();
+    }
+    record
+}
+
+#[cfg(not(test))]
+unsafe fn missing_payload_tracker_record() -> ! {
+    crate::runtime::exit::__rt_exit(0)
+}
+
+#[cfg(test)]
+unsafe fn missing_payload_tracker_record() -> ! {
+    panic!("required payload tracker record is missing")
+}
+
+#[cfg(test)]
+mod payload_tracker_record_tests {
+    extern crate std;
+
+    use super::*;
+
+    #[test]
+    fn returns_the_nonzero_prefix_tracker_record() {
+        let storage = [0x0897b904u32, 0x11223344];
+        let payload = unsafe { storage.as_ptr().add(1) };
+        let payload_slot = &payload;
+
+        assert_eq!(
+            unsafe { tracker_record_from_payload(payload_slot) },
+            0x0897b904
+        );
+    }
+
+    #[test]
+    fn preserves_the_payload_and_prefix_words() {
+        let storage = [u32::MAX, 0x55667788];
+        let before = storage;
+        let payload = unsafe { storage.as_ptr().add(1) };
+
+        assert_eq!(
+            unsafe { tracker_record_from_payload(&payload) },
+            u32::MAX
+        );
+        assert_eq!(storage, before);
+    }
+
+    #[test]
+    fn rejects_null_slot_null_payload_and_zero_prefix() {
+        let null_slot = std::panic::catch_unwind(|| unsafe {
+            tracker_record_from_payload_body(core::ptr::null())
+        });
+        assert!(null_slot.is_err());
+
+        let null_payload: *const u32 = core::ptr::null();
+        let null_payload = std::panic::catch_unwind(|| unsafe {
+            tracker_record_from_payload_body(&null_payload)
+        });
+        assert!(null_payload.is_err());
+
+        let storage = [0u32, 0x55667788];
+        let payload = unsafe { storage.as_ptr().add(1) };
+        let zero_prefix = std::panic::catch_unwind(|| unsafe {
+            tracker_record_from_payload_body(&payload)
+        });
+        assert!(zero_prefix.is_err());
+    }
+}
