@@ -25072,6 +25072,30 @@ functions:
       already freed, so it clears both aTableLock and nTableLock and
       explicitly sets db->mallocFailed (+0x1e) even though
       sqlite3DbRealloc has set it too.
+
+  # ---- SQLite token copy (src/sqlite/token_copy.rs) ----
+  - address: 0x08385134
+    ghidra: FUN_08385134
+    name: token_copy
+    size: 112
+    sig: "void token_copy(sqlite3 *db, Token *destination, const Token *source)"
+    module: sqlite/token_copy
+    status: ported
+    vars: {param_1/r6: db, param_2/r4: destination, param_3/r5: source, FUN_083906f4: sqlite3_free, FUN_08374a40: sqlite3DbStrNDup}
+    notes: >-
+      SQLite's sqlite3TokenCopy. Raw ARM fixes the exact extent at
+      0x08385134..0x083851a4, followed by a separately linked sibling's
+      push. A scan of every ARM B/BL immediate in osos.dec finds exactly
+      seven direct inbound BLs: unconditional at 0x082cd600, 0x083701b8,
+      0x08392548, and 0x08392558; BLNE at 0x0836e6ac and 0x08378760; BLEQ
+      at 0x08375490. The callee releases destination->z only when the
+      destination packed word's low dyn bit was set. A NULL source->z stores
+      NULL at destination->z and retains its entire old packed word. Otherwise
+      it preserves only destination dyn while replacing the length bits from
+      source, calls sqlite3DbStrNDup with source->n, stores its result, then
+      sets destination dyn even when allocation failed. The port uses the
+      shared repr(C) Token type and directly calls the already ported
+      tracked_free and db_str_ndup; no dispatch seam was introduced.
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x083867f8
     ghidra: FUN_083867f8
