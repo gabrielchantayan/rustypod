@@ -42332,6 +42332,29 @@ functions:
       selected capture, flag, and return ordering while folding the
       state-free unexported tail adapter at 0x08283e80 into this one port.
 
+  - address: 0x0828414c
+    ghidra: FUN_0828414c
+    name: context_scope_copy_construct
+    size: 48
+    sig: "void *context_scope_copy_construct(void *scope, const void *source)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, param_2: source, "scope+0x0": descriptor, "scope+0x4": subject, "scope+0x8": context, "scope+0xc": owner_id, "scope+0x10": flag}
+    notes: >-
+      Copy constructor for the 20-byte context-scope record. The 44 code
+      bytes load descriptor literal 0x089a6600, store it at scope+0x00,
+      copy source's aligned 32-bit fields +0x04, +0x08 and +0x0c in
+      ascending order, then copy only source+0x10's low byte and return
+      scope unchanged. Ghidra's 44-byte extent omits the descriptor literal
+      at 0x08284178, so the verified true extent is 48 bytes; the separately
+      linked deleting destructor starts at 0x0828417c. Decoding every ARM
+      B/BL word in osos.dec finds seven direct calls, all unconditional bl:
+      0x0813e058, 0x0817391c, 0x08176b0c, 0x081b6668, 0x081b6690,
+      0x081b66b8 and 0x082a6398. There are no predicated or tail branches
+      and no data-word references to this entry. Unlike context_scope_assign,
+      construction always overwrites +0x00 with the descriptor. No deliberate
+      deviations.
+
   - address: 0x08283f3c
     ghidra: FUN_08283f3c
     name: context_scope_capture
