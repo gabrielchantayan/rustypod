@@ -348,6 +348,36 @@ pub unsafe extern "C" fn cxx_string_release(string: *mut *mut u8) {
     // which reads only the pointer.
     operator_delete(data_rep(*string) as *mut u8);
 }
+/// cxx_string_pair_copy_ctor — retailOS `FUN_083d7e98` @ `0x083d7e98`
+/// (40 bytes; six direct, unconditional `bl` call sites at 0x0825c188,
+/// 0x0825cd44, 0x083e360c, 0x083e36ac, 0x083e8de0, and 0x083e905c).
+///
+/// Raw ARM is ten instructions at 0x083d7e98..0x083d7ebc; the independent
+/// two-word constructor begins at 0x083d7ec0. The unused r0 context is
+/// discarded, a null destination returns unchanged without reading source,
+/// and otherwise the constructor COW-copies first then second. Its tail call
+/// returns the address of the destination's second string word. There are no
+/// deliberate deviations.
+///
+/// # Safety
+///
+/// A non-null `destination` and `source` must designate valid two-string
+/// records. `source` is dereferenced only after the destination null guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_copy_ctor(
+    _unused: *mut u8,
+    destination: *mut *mut u8,
+    source: *const *mut u8,
+) -> *mut *mut u8 {
+    if destination.is_null() {
+        return destination.cast();
+    }
+
+    cxx_string_copy_ctor(destination, source);
+    cxx_string_copy_ctor(destination.add(1), source.add(1))
+}
+
 /// cxx_string_pair_destroy — original @ 0x0825c8fc (32 bytes).
 ///
 /// Source: `ipod-decomp/decomp/c/025/0825c8fc_FUN_0825c8fc.c`. The raw ARM
@@ -572,6 +602,7 @@ pub unsafe extern "C" fn cxx_string_dtor(string: *mut *mut u8) -> *mut *mut u8 {
 ///
 /// Returns `dst`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cxx_string_copy_ctor(
     dst: *mut *mut u8,
     src: *const *mut u8,
@@ -1374,6 +1405,57 @@ mod tests {
             assert_eq!(freed(), &[rep as *mut u8]);
         }
     }
+    #[test]
+    fn pair_copy_ctor_null_destination_returns_without_reading_source() {
+        unsafe {
+            assert!(cxx_string_pair_copy_ctor(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+            )
+            .is_null());
+        }
+    }
+
+    #[test]
+    fn pair_copy_ctor_shares_then_clones_and_returns_second_member() {
+        let _guard = arena();
+        unsafe {
+            let mut source_first: *mut u8 = core::ptr::null_mut();
+            let mut source_second: *mut u8 = core::ptr::null_mut();
+            build(&mut source_first, b"shared");
+            build(&mut source_second, b"leaked");
+            (*data_rep(source_second)).refcount = -1;
+            let source = CxxStringPair {
+                first: source_first,
+                second: source_second,
+            };
+            let mut destination = CxxStringPair {
+                first: core::ptr::null_mut(),
+                second: core::ptr::null_mut(),
+            };
+            let mut unused = 0_u32;
+
+            assert_eq!(
+                cxx_string_pair_copy_ctor(
+                    core::ptr::addr_of_mut!(unused).cast(),
+                    core::ptr::addr_of_mut!(destination.first),
+                    core::ptr::addr_of!(source.first),
+                ),
+                core::ptr::addr_of_mut!(destination.second),
+            );
+            assert_eq!(destination.first, source.first);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_ne!(destination.second, source.second);
+            assert_eq!(
+                core::slice::from_raw_parts(destination.second, 7),
+                b"leaked\0",
+            );
+            assert_eq!((*data_rep(source.second)).refcount, -1);
+            assert_eq!((*data_rep(destination.second)).refcount, 0);
+        }
+    }
+
     #[test]
     fn pair_destroy_releases_second_before_first_and_returns_the_record() {
         let _guard = arena();
