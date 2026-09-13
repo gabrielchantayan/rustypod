@@ -4055,6 +4055,28 @@ functions:
       Rust entry directly invokes heap_panic rather than branching to its
       retailOS address; its isolated host test verifies the resulting
       raise(1,0) -> exit -> terminate(1) sequence.
+
+  - address: 0x080eba5c
+    ghidra: thunk_FUN_08030f44
+    name: heap_panic_nonreturn_entry
+    size: 4
+    sig: "noreturn heap_panic_nonreturn_entry(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      thunk_FUN_08030f44: heap_panic_nonreturn_entry
+      FUN_08030f44: heap_panic
+    notes: >-
+      The raw one-word body is `bl 0x08030f44`; 0x080eba60 begins the next
+      separately linked function, confirming Ghidra's 4-byte extent and that
+      this entry has no return instruction. Decoding every ARM B/BL word in
+      osos.dec finds exactly seven direct calls: six `bleq`
+      (0x0827bed8, 0x083d5834, 0x083d5898, 0x083d59d4, 0x083d5b04,
+      0x083d5c48) and one `blne` (0x0827bf9c), so every caller gates the
+      fatal transfer itself. There are no tail-branch calls or aligned
+      data-word references. The Rust port directly invokes the existing
+      heap_panic port; its isolated host test verifies the inherited
+      raise(1,0) -> exit -> terminate(1) non-returning sequence.
   - address: 0x080edb74
     ghidra: FUN_080edb74
     name: allocation_construct_guard
