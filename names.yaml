@@ -76375,3 +76375,34 @@ functions:
       (+0x04) before child_a (+0x00). No deviations: the duplicate chain is
       iterative like stock's back-edge and all target pointer words remain
       u32.
+
+  - address: 0x08087bac
+    ghidra: FUN_08087bac
+    name: cff_index_done
+    size: 76
+    sig: "void cff_index_done(CffIndex *index)"
+    module: ft/cff_index
+    status: ported
+    renames:
+      param_1/r4: index
+      iVar1/r0: stream
+      uVar2/r5: memory
+    notes: >-
+      FreeType CFF_Index_Done (cffload.c). Raw ARM extent is exactly 76
+      bytes, 0x08087bac..0x08087bf8; the next independently linked sibling
+      starts at 0x08087bf8 with push {r4-r9, sl, lr}. Decoding every ARM
+      B/BL-immediate word in osos.dec finds seven inbound direct calls, all
+      unconditional bl: 0x08082d28, 0x08082d30, 0x08082d3c, 0x08082d44,
+      0x08082d50, 0x0808318c, and 0x0809a2b8. A null index->stream returns
+      immediately without changing the record. Otherwise, if index->bytes
+      (+0x14) is non-null it calls ft_stream_release_frame
+      (0x0804fcb8) with that slot, frees index->offsets (+0x10) through
+      ft_mem_free (0x082cfae8) using stream->memory (+0x1c), nulls offsets,
+      then tail-branches through the IRAM memzero_aligned veneer
+      (0x08037db8) to clear all 24 bytes. Deliberate deviation: the port
+      volatile-loads ft_stream_release_frame, ft_mem_free, and
+      memzero_aligned, preventing LLVM from inlining the first two or
+      lowering the fixed clear to an AEABI builtin; the indirect calls retain
+      the retail release/free/clear order. Host tests cover disk-frame release
+      before offset release, memory-stream frame forgetfulness, and the
+      null-stream early return.
