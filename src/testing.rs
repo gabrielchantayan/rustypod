@@ -430,6 +430,10 @@ pub mod hints {
     // fixture for the signed-decimal getter; mappings never unmap, so no
     // other user may share this hint.
     pub const STRING_TABLE_PARSE_I32: usize = 0xf600_0000;
+    // 0xcafe_0000: dedicated to app/string_table's raw-u32 COW value
+    // fixture for the unsigned-hexadecimal getter; mappings never unmap, so
+    // no other user may share this hint.
+    pub const STRING_TABLE_PARSE_U32_HEX: usize = 0xcafe_0000;
     // 0xb300_0000: dedicated to cxx/nested_object_value's raw-u32
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
