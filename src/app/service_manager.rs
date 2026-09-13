@@ -9,6 +9,7 @@
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
+//! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
 //! | 0x0819420c | [`service_manager_slot_flags_or`] | 28 | 16 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
@@ -321,6 +322,47 @@ pub unsafe extern "C" fn service_manager_slot_handler_get(
     }
     core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(1) as isize).add(25))
         as usize as *mut u8
+}
+
+/// service_manager_secondary_handler_kind_get — original: `FUN_08193efc` @
+/// 0x08193efc (20 bytes; 7 direct, unconditional `bl` call sites).
+///
+/// Reads the kind word at `+0x14` from one of the service manager's three
+/// secondary 0x20-byte handler records. Raw ARM is `cmp r1,#3; blge
+/// 0x08030f44; add r0,r0,r1,lsl #5; ldr r0,[r0,#20]; bx lr`: signed slots
+/// below three, including negative values, pass the original's bounds check
+/// and retain its unchecked addressing behavior. Slots three and above
+/// terminate through [`heap_panic`]. The callers compare the returned
+/// discrete value against 1 and 0x13 to select handler behavior, so `kind`
+/// records the verified role without inventing a concrete handler identity.
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly 7 direct
+/// callers — 0x0818e840, 0x0818f2e8, 0x08190e6c, 0x081924a8, 0x081d760c,
+/// 0x081f2e90, and 0x081f2f54 — all unconditional plain `BL`; no predicated
+/// direct calls or tail branches target this address. The preceding distinct
+/// function ends at 0x08193efc and the following `cmp r1,#3` at 0x08193f10
+/// begins the paired setter, confirming the five-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_manager_secondary_handler_kind_get")]
+pub unsafe extern "C" fn service_manager_secondary_handler_kind_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> u32 {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(5))
 }
 
 /// service_handler_at — original: `FUN_08194080` @ 0x08194080 (16 bytes;
@@ -660,6 +702,53 @@ mod secondary_handler_state_flags_get_tests {
             assert_eq!(
                 service_manager_secondary_handler_state_flags_get(table.as_ptr().add(8), -1),
                 0xa5,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod secondary_handler_kind_get_tests {
+    use super::*;
+
+    #[test]
+    fn reads_each_handler_kind_word_and_reloads() {
+        let mut table = [0u32; 24];
+        table[5] = 0x0000_0001;
+        table[13] = 0x0000_0013;
+        table[21] = 0xffff_ffff;
+        table[4] = 0xdead_beef;
+        table[6] = 0xcafe_babe;
+
+        unsafe {
+            assert_eq!(service_manager_secondary_handler_kind_get(table.as_ptr(), 0), 1);
+            assert_eq!(service_manager_secondary_handler_kind_get(table.as_ptr(), 1), 0x13);
+            assert_eq!(
+                service_manager_secondary_handler_kind_get(table.as_ptr(), 2),
+                0xffff_ffff
+            );
+
+            table[13] = 0x0000_0046;
+            assert_eq!(
+                service_manager_secondary_handler_kind_get(table.as_ptr(), 1),
+                0x46,
+                "the ARM ldr reloads the kind word on every call"
+            );
+        }
+
+        assert_eq!(table[4], 0xdead_beef, "the preceding word is not read");
+        assert_eq!(table[6], 0xcafe_babe, "the following word is not read");
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[5] = 0xa5a5_5a5a;
+
+        unsafe {
+            assert_eq!(
+                service_manager_secondary_handler_kind_get(table.as_ptr().add(8), -1),
+                0xa5a5_5a5a,
             );
         }
     }
