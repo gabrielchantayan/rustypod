@@ -54158,6 +54158,38 @@ functions:
       mvn/movhi -1/+1 correspond one-to-one; the diff is LLVM's
       shrink-wrapped frame and rotated loop. #[inline(never)] for the
       15 `bl` targets.
+  - address: 0x0803e144
+    ghidra: FUN_0803e144
+    name: bn_add
+    size: 188
+    sig: "int bn_add(BigNum *result, const BigNum *a, const BigNum *b)"
+    module: crypto/bn_add
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: a
+      param_3/r2: b
+      r5: a_negative
+      r6: negative
+      r7: positive
+      FUN_08040ce0: bn_uadd
+      FUN_08040ddc: bn_ucmp
+      FUN_08040e34: bn_usub
+    notes: >-
+      OpenSSL BN_add from crypto/bn/bn_add.c. Raw osos.dec decoding confirms
+      the 188-byte extent, 0x0803e144..0x0803e200: 47 ARM words ending in
+      pop {r4-r9,sl,pc}; the next word @ 0x0803e200 is a separately linked
+      push {r4-r6,lr} prologue. Decode-every-B/BL verification found exactly
+      7 callers, all unconditional bl (cond 0xe), with no predicated forms.
+      Equal nonzero neg fields delegate to BN_uadd and normalize result->neg
+      to 1; equal zero signs normalize it to 0. Opposite signs compare
+      positive against negative magnitude then BN_usub(larger,smaller), with
+      sign 0/1 following the larger magnitude; a failed worker returns 0
+      before changing the result sign. BN_uadd @ 0x08040ce0 and BN_usub @
+      0x08040e34 are unported, so volatile dispatch slots call their stock
+      device addresses until direct ports replace them. Host tests cover sign
+      normalization, both workers' success/failure effects, all four
+      different-sign magnitude orders, and exact-magnitude positive zero.
   # --- display object: the six-layer compositor root ---
   - address: 0x081d8a6c
     ghidra: FUN_081d8a6c
