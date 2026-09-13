@@ -82232,3 +82232,31 @@ functions:
       review: identical indexed flag and 20-byte record stores; LLVM derives
       the second flag table's +3 address from the first literal and adds a
       prologue/epilogue.
+
+
+  # --- opaque collection entry-data lookup ---
+  - address: 0x08184cf4
+    ghidra: FUN_08184cf4
+    name: opaque_collection_entry_data_at
+    size: 20
+    sig: "u32 opaque_collection_entry_data_at(const void *collection, u32 index)"
+    module: app/opaque_collection_entry_data_at
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: index
+      FUN_08184f98: collection_entry_at_or_null
+      param_1_plus_8: entry_data
+    notes: >-
+      Raw osos.dec contains five ARM instructions from 0x08184cf4 through
+      pop {r4,pc} at 0x08184d04; the separately linked next function begins
+      at 0x08184d08, so Ghidra's 20-byte extent is exact. It calls the
+      unported bounds-checking vector-entry helper at 0x08184f98 with the
+      collection and index unchanged, returns zero when that helper returns
+      NULL, otherwise returns its entry's aligned word at +8. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly six direct callers at
+      0x0811dc04, 0x08185700, 0x08185760, 0x0819ee70, 0x081d0bc4, and
+      0x08218660: all are plain unconditional bl, with no predicated calls.
+      Target builds call the unported helper at its verified address; host
+      tests install a recording seam and prove input forwarding, the +8 read,
+      and the NULL-to-zero path. Deliberate deviations: none.
