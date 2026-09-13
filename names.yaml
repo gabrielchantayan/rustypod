@@ -75075,6 +75075,32 @@ functions:
       32-bit modular address/index calculations without adding a host-only
       pointer precondition.
 
+  # --- StringObject-word cursor advancement template ---
+  - address: 0x083ea988
+    ghidra: FUN_083ea988
+    name: advance_string_object_word_cursor
+    size: 32
+    sig: "void advance_string_object_word_cursor(u32 *cursor, i32 element_count)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: element_count
+      r2: cursor_value
+    notes: >-
+      Raw osos.dec has a 32-byte body from 0x083ea988 through 0x083ea9a4;
+      the separately linked next function starts at 0x083ea9a8. It loads the
+      32-bit cursor word, computes element_count * 12 as (count * 3) << 2,
+      adds it with ARM modular arithmetic, and writes it back. The 12-byte
+      stride matches the StringObject-plus-trailing-word records used by the
+      immediately adjacent range-copy template at 0x083e9b28. Complete
+      aligned ARM B/BL-immediate decoding finds exactly six inbound direct
+      plain bl calls, all unconditional: 0x083e85f0, 0x083e862c, 0x083e8704,
+      0x083e9854, 0x083e9894, and 0x083e98dc; there are no predicated calls
+      or direct tail b sites. The Rust u32 cursor deliberately models the
+      target pointer word, preserving 32-bit address arithmetic on 64-bit
+      host tests without adding a dispatch seam.
+
   # --- StringObject-word range-copy template ---
   - address: 0x083e9b28
     ghidra: FUN_083e9b28

@@ -43,6 +43,8 @@
 //!   sites.
 //! - [`string_object_word_range_copy`] — copy-assigns the StringObject and
 //!   copies the trailing word of each 12-byte record in a half-open range.
+//! - [`advance_string_object_word_cursor`] — advances a cursor through the
+//!   12-byte StringObject-and-word records used by the range-copy template.
 //! - [`cxx_vector_find_equal`] — searches the COW-string-keyed records
 //!   within the `{unknown, begin, end}` owner shape used by the UI data.
 //! - [`vector_size_elem2`] / [`vector_size_elem4`] /
@@ -3060,6 +3062,30 @@ pub unsafe extern "C" fn string_object_word_range_copy(
     }
     output
 }
+/// advance_string_object_word_cursor — original: `FUN_083ea988` @ 0x083ea988
+/// (32 bytes; raw extent 0x083ea988..0x083ea9a8, with the separately linked
+/// next function opening at 0x083ea9a8). Six direct `bl` call sites are all
+/// unconditional: 0x083e85f0, 0x083e862c, 0x083e8704, 0x083e9854,
+/// 0x083e9894, and 0x083e98dc; no predicated direct calls target this body.
+///
+/// Advances the target 32-bit cursor stored at `cursor` by
+/// `element_count * 12` bytes, wrapping exactly as the ARM `add` and
+/// shift-add sequence does. The callers use that stride for
+/// [`StringObjectWord`] records.
+///
+/// The host-safe `u32` cursor deliberately represents the retailOS pointer
+/// word rather than a native host pointer: this preserves the 32-bit ARM
+/// arithmetic despite host pointer width. No firmware behavior is changed.
+///
+/// # Safety
+///
+/// `cursor` must be valid and aligned for one writable target pointer word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn advance_string_object_word_cursor(cursor: *mut u32, element_count: i32) {
+    *cursor = (*cursor).wrapping_add((element_count as u32).wrapping_mul(12));
+}
+
 /// vector_copy_range_elem24 — original: `FUN_083e8ba0` @ 0x083e8ba0
 /// (60 bytes, raw extent 0x083e8ba0..0x083e8bdc; 8 direct `bl` call
 /// sites, all unconditional and none predicated).
@@ -6187,6 +6213,22 @@ mod tests {
 
         assert_eq!(returned, output);
     }
+    #[test]
+    fn advance_string_object_word_cursor_uses_12_byte_wrapping_stride() {
+        let cases = [
+            (0x0800_1000u32, 0i32, 0x0800_1000u32),
+            (0x0800_1000, 3, 0x0800_1024),
+            (0x0000_0004, -1, 0xffff_fff8),
+            (0xdead_beef, i32::MIN, 0xdead_beef),
+        ];
+
+        for (initial, element_count, expected) in cases {
+            let mut cursor = initial;
+            unsafe { advance_string_object_word_cursor(&mut cursor, element_count) };
+            assert_eq!(cursor, expected, "count {element_count}");
+        }
+    }
+
 
     #[repr(C)]
     struct GuardedRecordRange {
