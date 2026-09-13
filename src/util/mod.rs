@@ -51,6 +51,7 @@ pub mod least_common_multiple;
 pub mod mapped_subobject_for_slot;
 pub mod ptr_vector;
 pub mod object_masked_word_refresh;
+pub mod object_release_slot1;
 pub mod object_word_payload_resolve;
 pub mod resource_list;
 pub mod pascal_string;
