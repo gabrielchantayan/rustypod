@@ -1185,8 +1185,9 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8f0` @ 0x083cf8f0,
 /// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf950` @ 0x083cf950, `FUN_083cf968` @ 0x083cf968,
-/// `FUN_083cf980` @ 0x083cf980, and `FUN_083cf9c8` @ 0x083cf9c8 (24 bytes
-/// each). Raw bytes show all eleven are the same six-word leaf. At
+/// `FUN_083cf980` @ 0x083cf980, `FUN_083cf9b0` @ 0x083cf9b0, and
+/// `FUN_083cf9c8` @ 0x083cf9c8 (24 bytes each). Raw bytes show all twelve
+/// are the same six-word leaf. At
 /// 0x083cf650, the next separately linked copy begins at 0x083cf668,
 /// confirming the extent. Decoding every ARM B/BL word
 /// in `osos.dec` finds exactly 7 plain `bl` callers there: 0x08109d10,
@@ -1219,7 +1220,11 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// callers; the 0x083cf980 copy has 9 plain `bl` callers — 0x081e1518,
 /// 0x081e1568, 0x083cd808, 0x083cdc74, 0x083cdc90, 0x083cdd14, 0x083cddf4,
 /// 0x083cdee4 and 0x083dbcc4 — likewise with no predicated forms. The
-/// 0x083cf9c8 copy has six direct callers: five plain `bl` at 0x083ced9c,
+/// 0x083cf9b0 copy has exactly six direct callers, all unconditional `bl`:
+/// 0x083cc358, 0x083cc7c4, 0x083cc7e0, 0x083cc864, 0x083cc928, and
+/// 0x083dbf64. Decoding every ARM B/BL word finds no predicated calls or
+/// direct tail branches. The 0x083cf9c8 copy has six direct callers: five
+/// plain `bl` at 0x083ced9c,
 /// 0x083cf208, 0x083cf224, 0x083cf2a8, and 0x083cf36c, plus predicated
 /// `blhi` at 0x088a976c; there are no direct tail branches.
 ///
@@ -1236,9 +1241,10 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// stack-materialize a cursor iterator and the list/deque end iterator and
 /// compare their FIRST words (the current-node pointer) through this helper,
 /// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf7b8,
-/// 0x083cf908, 0x083cf920, 0x083cf950, 0x083cf980, and 0x083cf9c8 copies
-/// have the same raw body and ABI, so their ledger entries deliberately hook
-/// this established export instead of introducing redundant dispatch seams.
+/// 0x083cf908, 0x083cf920, 0x083cf950, 0x083cf980, 0x083cf9b0, and
+/// 0x083cf9c8 copies have the same raw body and ABI, so their ledger entries
+/// deliberately hook this established export instead of introducing redundant
+/// dispatch seams.
 ///
 /// The body is byte-identical to `fixed16_eq_indirect` @ 0x082a1834
 /// ([`crate::fp::fp_misc`]) — a Q16.16 comparator that merely shares
@@ -4236,7 +4242,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f7a0_f7b8_f8a8_f8f0_f908_f920_f950_f968_f980_c9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f7a0_f7b8_f8a8_f8f0_f908_f920_f950_f968_f980_c9b0_c9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
