@@ -113,6 +113,7 @@ pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
 pub mod media_player;
 pub mod media_player_queue_refresh;
+pub mod media_player_pending_item;
 pub mod media_player_interface_slot_11c;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
