@@ -763,6 +763,9 @@ pub mod hints {
     // guard and allocation fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SCOPED_GLOBAL_GUARD_DESTROY: usize = 0xe300_0000;
+    // 0x2300_0000: dedicated to util/nested_container_item_count's raw-u32
+    // owner and nested-container fixture; mappings never unmap.
+    pub const NESTED_CONTAINER_ITEM_COUNT: usize = 0x2300_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
