@@ -100,6 +100,7 @@ pub mod image_format_descriptor_slot;
 pub mod lock_service;
 pub mod input_capabilities;
 pub mod managed_entry;
+pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod lazy_handle_manager;
 pub mod matched_entry;

@@ -70861,6 +70861,31 @@ functions:
       constructor callers consume this result. No NULL guard exists; callers
       must supply two aligned writable u32 words. Deliberate deviations: none.
 
+  # --- Class-0x6600 byte accessor (app/class_6600_byte_at_100) ---
+  - address: 0x080fffdc
+    ghidra: FUN_080fffdc
+    name: class_6600_byte_at_100
+    size: 8
+    sig: "u8 class_6600_byte_at_100(const void *class_6600)"
+    module: app/class_6600_byte_at_100
+    status: ported
+    renames:
+      param_1/r0: class_6600
+    notes: >-
+      Raw osos.dec confirms the exact 8-byte extent: ldrb r0, [r0, #0x100]
+      at 0x080fffdc followed by bx lr at 0x080fffe0; the separately linked
+      next function begins at 0x080fffe4. Decoding every ARM B/BL immediate
+      finds exactly seven direct inbound bl sites, all unconditional and none
+      predicated: 0x080aea38, 0x08113be0, 0x0811617c, 0x081bba30, 0x082897dc,
+      0x08289990, and 0x08292220. No direct plain-B tail transfer targets the
+      entry. Each caller invokes the already-ported instance_of_class_6600
+      accessor immediately before this byte load and tests zero versus nonzero,
+      but no source establishes the byte's domain meaning. The port returns
+      the raw unsigned byte at class_6600+0x100 without a NULL guard or
+      mutation; its offset-based name deliberately avoids inventing a semantic
+      flag. Host tests cover every byte value, guard bytes, and an unaligned
+      object. Deviation: none.
+
   # --- Silver list resource processor (app/silver_list_table_resource) ---
   - address: 0x0812d7bc
     ghidra: FUN_0812d7bc
