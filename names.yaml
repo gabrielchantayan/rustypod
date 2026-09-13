@@ -81293,3 +81293,48 @@ functions:
       0x08208054; there are no predicated calls, direct tail branches, or
       aligned raw-word references. No deliberate deviations. Host tests cover
       zero, one, the high bit, and all bits set.
+
+
+  # --- Directory iterator constructor ---
+  - address: 0x081ef88c
+    ghidra: FUN_081ef88c
+    name: directory_iterator_construct
+    size: 172
+    sig: "DirectoryIterator *directory_iterator_construct(DirectoryIterator *iterator, const char *root_path, u32 entry_filter_flags, u32 base_hint)"
+    module: app/directory_iterator
+    status: ported
+    renames:
+      param_1/r0/r4: iterator
+      param_2/r1/r6: root_path
+      param_3/r2/r5: entry_filter_flags (low byte stored)
+      param_4/r3: base_hint
+      DAT_081ef930: DIRECTORY_ITERATOR_VTABLE (0x0898ff40)
+      DAT_081ef934: PATH_OBJECT_VTABLE (0x089a60d8)
+      FUN_0818a0c4: interface_guard_base_construct (ported)
+      FUN_083de190: queue default-constructor boundary
+      FUN_083dffc4: queue copy-constructor boundary
+      FUN_083d75c0: container_is_empty_alias_75c0 (ported)
+      FUN_083de03c: temporary queue cleanup boundary
+      FUN_08277304: string_object_construct_from_cstr (ported via path_object_construct)
+      FUN_082792cc: path_object_default_construct (ported)
+      FUN_081ef764: opaque iterator path-seed boundary
+      thunk_FUN_082792fc: string_object_destroy_veneer (ported)
+    notes: >-
+      Raw ARM establishes 164 instruction bytes from 0x081ef88c through the
+      return at 0x081ef92c, followed by two literal-pool words at 0x081ef930
+      (0x0898ff40) and 0x081ef934 (0x089a60d8); the next separately linked
+      function starts at 0x081ef938, so the true extent is 172 bytes. It
+      constructs the shared base with base_hint in r1 and a zero flag in r2,
+      plants the iterator vtable, default-constructs then copy-constructs its
+      44-byte pending-entry queue, drains the temporary queue, stores only
+      entry_filter_flags' low byte at iterator+0x38, constructs the trailing
+      PathObject from root_path, invokes the opaque 0x081ef764 worker with a
+      default temporary PathObject, destroys it, and returns iterator.
+      Full-image decoding of every aligned ARM B/BL immediate finds exactly
+      six inbound direct calls, all unconditional plain bl at 0x08093fa4,
+      0x0813a48c, 0x0813ac44, 0x081a2bd8, 0x081d3c30, and 0x081ee81c; no
+      predicated forms. The queue helpers and 0x081ef764 have no established
+      fuller identity, so target code retains fixed-address defaults and host
+      tests install recorders. Host-native pointers require an adapter around
+      the existing 32-bit base constructor that invokes the same resolver
+      before applying its 32-bit result and flag bytes to named host fields.

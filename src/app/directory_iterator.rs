@@ -1,13 +1,21 @@
-//! Directory-iterator teardown and its opaque queue boundaries.
+//! Directory-iterator construction, teardown, and opaque queue boundaries.
 //!
-//! The iterator owns a 48-byte queue of pending directory entries and a
-//! trailing [`StringObject`] path. Its queue helpers are still retailOS
-//! boundaries; their target defaults call their verified fixed addresses and
-//! host tests install recorders rather than assigning them identities.
+//! The iterator owns a 44-byte queue of pending directory entries, one
+//! option word, and a trailing [`StringObject`] path. Its queue helpers and
+//! initial-path worker are still retailOS boundaries; their target defaults
+//! call verified fixed addresses and host tests install recorders rather than
+//! assigning the opaque worker a stronger identity.
 
-use core::ptr;
+use core::{mem::MaybeUninit, ptr};
 
-use crate::app::path_probe::{FacadeFetch, FacadeObject, FacadeVtable, InterfaceGuard, PATH_PROBE_FACADE_FETCH};
+use crate::app::path_object_construct::{path_object_construct, path_object_default_construct};
+use crate::app::path_probe::{
+    FacadeFetch, FacadeObject, FacadeVtable, InterfaceGuard, PATH_PROBE_FACADE_FETCH,
+};
+#[cfg(target_os = "none")]
+use crate::app::path_probe::interface_guard_base_construct;
+#[cfg(not(target_os = "none"))]
+use crate::app::path_probe::{GuardInterfaceResolve, INTERFACE_GUARD_INTERFACE_RESOLVE};
 use crate::cxx::string_object::{string_object_destroy_veneer, StringObject};
 use crate::cxx::templates::container_is_empty;
 #[cfg(target_os = "none")]
@@ -16,8 +24,16 @@ use crate::kernel::sync_mutex::counted_mutex_guard_acquire;
 use crate::kernel::sync_mutex::mutex_lock_counted;
 use crate::kernel::sync_mutex::{mutex_unlock_counted, CountedMutex};
 
-/// Original literal-pool value at `0x081efa60`: the iterator's class vtable.
+/// Original literal-pool value at `0x081ef930`: the iterator's class vtable.
 pub const DIRECTORY_ITERATOR_VTABLE: usize = 0x0898_ff40;
+/// RetailOS queue default constructor called at `0x081ef8bc`.
+pub const DIRECTORY_ITERATOR_QUEUE_DEFAULT_CONSTRUCT_ADDRESS: usize = 0x083d_e190;
+/// RetailOS queue copy constructor called at `0x081ef8c8`.
+pub const DIRECTORY_ITERATOR_QUEUE_COPY_CONSTRUCT_ADDRESS: usize = 0x083d_ffc4;
+/// RetailOS queue cleanup step called while the temporary queue is nonempty.
+pub const DIRECTORY_ITERATOR_QUEUE_TEMP_POP_ADDRESS: usize = 0x083d_e03c;
+/// Opaque iterator path-seed worker called at `0x081ef918`.
+pub const DIRECTORY_ITERATOR_PATH_SEED_ADDRESS: usize = 0x081e_f764;
 /// RetailOS queue-front helper called at `0x081efa0c`.
 pub const DIRECTORY_ITERATOR_QUEUE_FRONT_ADDRESS: usize = 0x083d_df14;
 /// RetailOS queue-pop helper called at `0x081efa28`.
@@ -29,26 +45,34 @@ pub const DIRECTORY_ITERATOR_BASE_DESTROY_ADDRESS: usize = 0x0818_a0fc;
 /// Facade vtable slot loaded by `ldr r2,[r0,#0x44]` at `0x081efa18`.
 pub const DIRECTORY_ITERATOR_RELEASE_SLOT_INDEX: usize = 0x44 / 4;
 
-/// The opaque 48-byte target queue at iterator offset `+0x0c`.
+/// The opaque 44-byte target queue at iterator offset `+0x0c`.
 #[repr(C)]
 pub struct DirectoryIteratorQueue {
-    pub words: [u32; 12],
+    pub words: [u32; 11],
 }
 
 /// The 68-byte directory iterator on ARM: a three-word shared base, then the
-/// 48-byte entry queue and a two-word `StringObject` path at `+0x3c`.
-/// Native-width pointer fields deliberately make the host model non-overlap.
+/// 44-byte entry queue, its option word at `+0x38`, and a two-word
+/// `StringObject` path at `+0x3c`. Native-width pointer fields deliberately
+/// make the host model non-overlap.
 #[repr(C)]
 pub struct DirectoryIterator {
     pub vtable: usize,
     pub interface: *mut u8,
     pub base_flags: u32,
     pub queue: DirectoryIteratorQueue,
+    pub entry_filter_flags: u32,
     pub path: StringObject,
 }
 
 /// The facade slot receives one queued entry's leading opaque pointer.
 pub type DirectoryIteratorRelease = unsafe extern "C" fn(*mut FacadeObject, *mut u8);
+pub type DirectoryIteratorQueueDefaultConstruct =
+    unsafe extern "C" fn(*mut DirectoryIteratorQueue, *mut u8) -> *mut DirectoryIteratorQueue;
+pub type DirectoryIteratorQueueCopyConstruct =
+    unsafe extern "C" fn(*mut DirectoryIteratorQueue, *const DirectoryIteratorQueue) -> *mut DirectoryIteratorQueue;
+pub type DirectoryIteratorQueueTempPop = unsafe extern "C" fn(*mut DirectoryIteratorQueue);
+pub type DirectoryIteratorPathSeed = unsafe extern "C" fn(*mut DirectoryIterator, *mut StringObject);
 pub type DirectoryIteratorQueueFront = unsafe extern "C" fn(*mut DirectoryIteratorQueue) -> *mut *mut u8;
 pub type DirectoryIteratorQueuePop = unsafe extern "C" fn(*mut DirectoryIteratorQueue);
 pub type DirectoryIteratorQueueDestroy = unsafe extern "C" fn(*mut DirectoryIteratorQueue) -> *mut DirectoryIteratorQueue;
@@ -64,6 +88,66 @@ pub type DirectoryIteratorNextExtended = unsafe extern "C" fn(
     *mut u32,
     *mut u32,
 ) -> i32;
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_queue_default_construct(
+    queue: *mut DirectoryIteratorQueue,
+    allocator: *mut u8,
+) -> *mut DirectoryIteratorQueue {
+    let function: DirectoryIteratorQueueDefaultConstruct =
+        core::mem::transmute(DIRECTORY_ITERATOR_QUEUE_DEFAULT_CONSTRUCT_ADDRESS);
+    function(queue, allocator)
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_queue_default_construct(
+    queue: *mut DirectoryIteratorQueue,
+    _allocator: *mut u8,
+) -> *mut DirectoryIteratorQueue {
+    ptr::write(queue, DirectoryIteratorQueue { words: [0; 11] });
+    queue
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_queue_copy_construct(
+    queue: *mut DirectoryIteratorQueue,
+    source: *const DirectoryIteratorQueue,
+) -> *mut DirectoryIteratorQueue {
+    let function: DirectoryIteratorQueueCopyConstruct =
+        core::mem::transmute(DIRECTORY_ITERATOR_QUEUE_COPY_CONSTRUCT_ADDRESS);
+    function(queue, source)
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_queue_copy_construct(
+    queue: *mut DirectoryIteratorQueue,
+    source: *const DirectoryIteratorQueue,
+) -> *mut DirectoryIteratorQueue {
+    ptr::copy_nonoverlapping(source, queue, 1);
+    queue
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_queue_temp_pop(queue: *mut DirectoryIteratorQueue) {
+    let function: DirectoryIteratorQueueTempPop =
+        core::mem::transmute(DIRECTORY_ITERATOR_QUEUE_TEMP_POP_ADDRESS);
+    function(queue)
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_queue_temp_pop(_queue: *mut DirectoryIteratorQueue) {}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_path_seed(
+    iterator: *mut DirectoryIterator,
+    path: *mut StringObject,
+) {
+    let function: DirectoryIteratorPathSeed =
+        core::mem::transmute(DIRECTORY_ITERATOR_PATH_SEED_ADDRESS);
+    function(iterator, path)
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_path_seed(
+    _iterator: *mut DirectoryIterator,
+    _path: *mut StringObject,
+) {}
+
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_queue_front(queue: *mut DirectoryIteratorQueue) -> *mut *mut u8 {
@@ -142,11 +226,15 @@ unsafe fn directory_iterator_next_extended() -> DirectoryIteratorNextExtended {
     ptr::read_volatile(ptr::addr_of!(DIRECTORY_ITERATOR_NEXT_EXTENDED))
 }
 
-/// Unported queue and base-destruction boundaries. The facade accessor is
-/// already represented by `PATH_PROBE_FACADE_FETCH`, so this does not create
-/// a duplicate seam for `0x0818a0bc`.
+/// Unported queue and path-seed boundaries. The facade accessor is already
+/// represented by `PATH_PROBE_FACADE_FETCH`, so this does not create a
+/// duplicate seam for `0x0818a0bc`.
 #[derive(Clone, Copy)]
 pub struct DirectoryIteratorOps {
+    pub queue_default_construct: DirectoryIteratorQueueDefaultConstruct,
+    pub queue_copy_construct: DirectoryIteratorQueueCopyConstruct,
+    pub queue_temp_pop: DirectoryIteratorQueueTempPop,
+    pub path_seed: DirectoryIteratorPathSeed,
     pub queue_front: DirectoryIteratorQueueFront,
     pub queue_pop: DirectoryIteratorQueuePop,
     pub queue_destroy: DirectoryIteratorQueueDestroy,
@@ -154,6 +242,10 @@ pub struct DirectoryIteratorOps {
 }
 
 pub static mut DIRECTORY_ITERATOR_OPS: DirectoryIteratorOps = DirectoryIteratorOps {
+    queue_default_construct: firmware_queue_default_construct,
+    queue_copy_construct: firmware_queue_copy_construct,
+    queue_temp_pop: firmware_queue_temp_pop,
+    path_seed: firmware_path_seed,
     queue_front: firmware_queue_front,
     queue_pop: firmware_queue_pop,
     queue_destroy: firmware_queue_destroy,
@@ -168,6 +260,73 @@ unsafe fn directory_iterator_ops() -> DirectoryIteratorOps {
 #[inline(always)]
 unsafe fn facade_fetch() -> FacadeFetch {
     ptr::read_volatile(ptr::addr_of!(PATH_PROBE_FACADE_FETCH))
+}
+
+/// directory_iterator_construct — original: `FUN_081ef88c` @ `0x081ef88c`
+/// (164 instruction bytes followed by literal-pool words at `0x081ef930` and
+/// `0x081ef934`; **172 bytes true extent** through the next distinct function
+/// at `0x081ef938`; **6 direct inbound plain `bl` call sites**, no predicated
+/// forms: `0x08093fa4`, `0x0813a48c`, `0x0813ac44`, `0x081a2bd8`,
+/// `0x081d3c30`, and `0x081ee81c`, verified by decoding every ARM B/BL word
+/// in `osos.dec`).
+///
+/// Constructs the common three-word interface base with `base_hint`, plants
+/// the iterator vtable, default-constructs and copy-constructs the 44-byte
+/// pending-entry queue, then empties that temporary queue. It stores only the
+/// low byte of `entry_filter_flags` in the adjacent option word, constructs
+/// the trailing path from `root_path`, passes a default path object to the
+/// opaque path-seed worker, destroys that temporary, and returns `iterator`.
+///
+/// Deliberate deviation: queue construction/temporary cleanup and the
+/// separately linked path-seed worker have no established fuller identity, so
+/// they remain fixed-address device defaults with host recorder seams. The
+/// host queue defaults establish the observable empty queue needed to run the
+/// raw temporary-cleanup loop safely. Host-native iterator pointers require a
+/// small base-constructor adapter: it invokes the same resolver with the
+/// iterator address, then applies its 32-bit interface result and two flag
+/// bytes to named host fields; device builds call the ported base directly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn directory_iterator_construct(
+    iterator: *mut DirectoryIterator,
+    root_path: *const u8,
+    entry_filter_flags: u32,
+    base_hint: u32,
+) -> *mut DirectoryIterator {
+    #[cfg(target_os = "none")]
+    interface_guard_base_construct(iterator.cast::<InterfaceGuard>(), base_hint, 0);
+    #[cfg(not(target_os = "none"))]
+    {
+        let resolve: GuardInterfaceResolve =
+            ptr::read_volatile(ptr::addr_of!(INTERFACE_GUARD_INTERFACE_RESOLVE));
+        (*iterator).interface = resolve(iterator.cast::<InterfaceGuard>(), base_hint) as usize as *mut u8;
+        ptr::addr_of_mut!((*iterator).base_flags).cast::<u8>().write(0);
+        ptr::addr_of_mut!((*iterator).base_flags).cast::<u8>().add(1).write(0);
+    }
+    (*iterator).vtable = DIRECTORY_ITERATOR_VTABLE;
+
+    let ops = directory_iterator_ops();
+    let mut allocator = MaybeUninit::<u32>::uninit();
+    let mut temporary_queue = MaybeUninit::<DirectoryIteratorQueue>::uninit();
+    let temporary_queue = (ops.queue_default_construct)(
+        temporary_queue.as_mut_ptr(),
+        allocator.as_mut_ptr().cast::<u8>(),
+    );
+    (ops.queue_copy_construct)(ptr::addr_of_mut!((*iterator).queue), temporary_queue);
+    while container_is_empty(temporary_queue.cast::<u8>()) == 0 {
+        (ops.queue_temp_pop)(temporary_queue);
+    }
+
+    ptr::addr_of_mut!((*iterator).entry_filter_flags)
+        .cast::<u8>()
+        .write(entry_filter_flags as u8);
+    path_object_construct(ptr::addr_of_mut!((*iterator).path), root_path);
+
+    let mut path = MaybeUninit::<StringObject>::uninit();
+    let path = path_object_default_construct(path.as_mut_ptr());
+    (ops.path_seed)(iterator, path);
+    string_object_destroy_veneer(path);
+    iterator
 }
 
 /// directory_iterator_next — original: `FUN_081ef598` @ `0x081ef598`
@@ -338,6 +497,77 @@ mod tests {
     static mut MOCK_VTABLE: FacadeVtable = FacadeVtable { slots: [0; 24] };
     static mut MOCK_FACADE: FacadeObject = FacadeObject { vtable: ptr::null() };
 
+    const CONSTRUCT_EVENT_QUEUE_DEFAULT: u8 = 1;
+    const CONSTRUCT_EVENT_QUEUE_COPY: u8 = 2;
+    const CONSTRUCT_EVENT_QUEUE_TEMP_POP: u8 = 3;
+    const CONSTRUCT_EVENT_PATH_SEED: u8 = 4;
+
+    static mut CONSTRUCT_EVENTS: [u8; 5] = [0; 5];
+    static mut CONSTRUCT_EVENT_COUNT: usize = 0;
+    static mut CONSTRUCT_ITERATOR: *mut DirectoryIterator = ptr::null_mut();
+    static mut CONSTRUCT_TEMP_QUEUE: *mut DirectoryIteratorQueue = ptr::null_mut();
+
+    unsafe fn record_construct(event: u8) {
+        CONSTRUCT_EVENTS[CONSTRUCT_EVENT_COUNT] = event;
+        CONSTRUCT_EVENT_COUNT += 1;
+    }
+
+    unsafe extern "C" fn recording_queue_default_construct(
+        queue: *mut DirectoryIteratorQueue,
+        allocator: *mut u8,
+    ) -> *mut DirectoryIteratorQueue {
+        assert!(!allocator.is_null());
+        CONSTRUCT_TEMP_QUEUE = queue;
+        ptr::write(queue, DirectoryIteratorQueue { words: [0; 11] });
+        (*queue).words[8] = 2;
+        record_construct(CONSTRUCT_EVENT_QUEUE_DEFAULT);
+        queue
+    }
+
+    unsafe extern "C" fn recording_queue_copy_construct(
+        queue: *mut DirectoryIteratorQueue,
+        source: *const DirectoryIteratorQueue,
+    ) -> *mut DirectoryIteratorQueue {
+        assert_eq!(source, CONSTRUCT_TEMP_QUEUE);
+        ptr::copy_nonoverlapping(source, queue, 1);
+        record_construct(CONSTRUCT_EVENT_QUEUE_COPY);
+        queue
+    }
+
+    unsafe extern "C" fn recording_queue_temp_pop(queue: *mut DirectoryIteratorQueue) {
+        assert_eq!(queue, CONSTRUCT_TEMP_QUEUE);
+        assert!((*queue).words[8] > 0);
+        (*queue).words[8] -= 1;
+        record_construct(CONSTRUCT_EVENT_QUEUE_TEMP_POP);
+    }
+
+    unsafe extern "C" fn recording_path_seed(
+        iterator: *mut DirectoryIterator,
+        path: *mut StringObject,
+    ) {
+        assert_eq!(iterator, CONSTRUCT_ITERATOR);
+        assert!((*path).payload.is_null());
+        assert!(!(*path).vtable.is_null());
+        record_construct(CONSTRUCT_EVENT_PATH_SEED);
+    }
+
+    unsafe fn install_constructor_recording(iterator: *mut DirectoryIterator) {
+        CONSTRUCT_EVENTS = [0; 5];
+        CONSTRUCT_EVENT_COUNT = 0;
+        CONSTRUCT_ITERATOR = iterator;
+        CONSTRUCT_TEMP_QUEUE = ptr::null_mut();
+        ptr::addr_of_mut!(DIRECTORY_ITERATOR_OPS).write_volatile(DirectoryIteratorOps {
+            queue_default_construct: recording_queue_default_construct,
+            queue_copy_construct: recording_queue_copy_construct,
+            queue_temp_pop: recording_queue_temp_pop,
+            path_seed: recording_path_seed,
+            queue_front: firmware_queue_front,
+            queue_pop: firmware_queue_pop,
+            queue_destroy: firmware_queue_destroy,
+            base_destroy: firmware_base_destroy,
+        });
+    }
+
     // A host pointer cannot be naturally aligned at the target's `+0x44`
     // address, so the fixture writes its lock pointer into raw target-layout
     // storage and the port reads it with `read_unaligned`.
@@ -400,6 +630,10 @@ mod tests {
         (*FACADE).vtable = vtable;
         ptr::addr_of_mut!(PATH_PROBE_FACADE_FETCH).write_volatile(recording_fetch);
         ptr::addr_of_mut!(DIRECTORY_ITERATOR_OPS).write_volatile(DirectoryIteratorOps {
+            queue_default_construct: firmware_queue_default_construct,
+            queue_copy_construct: firmware_queue_copy_construct,
+            queue_temp_pop: firmware_queue_temp_pop,
+            path_seed: firmware_path_seed,
             queue_front: recording_front,
             queue_pop: recording_pop,
             queue_destroy: recording_queue_destroy,
@@ -409,6 +643,10 @@ mod tests {
 
     unsafe fn restore_ops() {
         ptr::addr_of_mut!(DIRECTORY_ITERATOR_OPS).write_volatile(DirectoryIteratorOps {
+            queue_default_construct: firmware_queue_default_construct,
+            queue_copy_construct: firmware_queue_copy_construct,
+            queue_temp_pop: firmware_queue_temp_pop,
+            path_seed: firmware_path_seed,
             queue_front: firmware_queue_front,
             queue_pop: firmware_queue_pop,
             queue_destroy: firmware_queue_destroy,
@@ -418,6 +656,57 @@ mod tests {
 
     fn take_lock() -> MutexGuard<'static, ()> {
         PATH_PROBE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    #[test]
+    fn construct_initializes_queue_path_and_low_option_byte_in_order() {
+        let _lock = take_lock();
+        let root_path = b"/iPod_Control/iTunes\0";
+        let mut iterator = DirectoryIterator {
+            vtable: 0,
+            interface: ptr::null_mut(),
+            base_flags: 0xffff_ffff,
+            queue: DirectoryIteratorQueue { words: [0; 11] },
+            entry_filter_flags: 0xa5a5_0000,
+            path: StringObject { vtable: ptr::null(), payload: ptr::null_mut() },
+        };
+
+        unsafe {
+            install_constructor_recording(ptr::addr_of_mut!(iterator));
+            let returned = directory_iterator_construct(
+                ptr::addr_of_mut!(iterator),
+                root_path.as_ptr(),
+                0x105,
+                0xdecafbad,
+            );
+
+            assert_eq!(returned, ptr::addr_of_mut!(iterator));
+            assert_eq!(iterator.vtable, DIRECTORY_ITERATOR_VTABLE);
+            assert_eq!(iterator.interface, ptr::null_mut());
+            assert_eq!(iterator.base_flags, 0xffff_0000);
+            assert_eq!(iterator.queue.words[8], 2);
+            assert_eq!(iterator.entry_filter_flags, 0xa5a5_0005);
+            assert_eq!(
+                iterator.path.vtable as usize,
+                crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS,
+            );
+            assert!(
+                iterator.path.payload.is_null(),
+                "the existing host string-allocation boundary fails closed",
+            );
+            assert_eq!(
+                &CONSTRUCT_EVENTS[..CONSTRUCT_EVENT_COUNT],
+                &[
+                    CONSTRUCT_EVENT_QUEUE_DEFAULT,
+                    CONSTRUCT_EVENT_QUEUE_COPY,
+                    CONSTRUCT_EVENT_QUEUE_TEMP_POP,
+                    CONSTRUCT_EVENT_QUEUE_TEMP_POP,
+                    CONSTRUCT_EVENT_PATH_SEED,
+                ],
+            );
+            string_object_destroy_veneer(ptr::addr_of_mut!(iterator.path));
+            restore_ops();
+        }
     }
 
     #[test]
@@ -438,7 +727,8 @@ mod tests {
             vtable: 0,
             interface: interface_bytes.as_mut_ptr(),
             base_flags: 0,
-            queue: DirectoryIteratorQueue { words: [0; 12] },
+            queue: DirectoryIteratorQueue { words: [0; 11] },
+            entry_filter_flags: 0,
             path: StringObject { vtable: ptr::null(), payload: ptr::null_mut() },
         };
         iterator.queue.words[8] = 2;
@@ -462,7 +752,8 @@ mod tests {
             vtable: 0,
             interface: ptr::null_mut(),
             base_flags: 0,
-            queue: DirectoryIteratorQueue { words: [0; 12] },
+            queue: DirectoryIteratorQueue { words: [0; 11] },
+            entry_filter_flags: 0,
             path: StringObject { vtable: ptr::null(), payload: ptr::null_mut() },
         };
         let mut entry_path = StringObject { vtable: ptr::null(), payload: ptr::null_mut() };
