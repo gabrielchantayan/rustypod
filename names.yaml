@@ -80626,3 +80626,34 @@ functions:
       preserving their target layout
       despite wider host pointers. Host tests cover empty input and both
       values of the tested status bit.
+
+  # --- Q16.16 scaled three-word accumulator (app/fixed3_add_scaled) ---
+  - address: 0x08248580
+    ghidra: FUN_08248580
+    name: fixed3_add_scaled
+    size: 84
+    sig: "void fixed3_add_scaled(i32 *accumulator, const i32 *value, i32 scale)"
+    module: app/fixed3_add_scaled
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      param_2/r1: value
+      param_3/r2: scale
+      r3: product_low
+      r12: product_high
+    notes: >-
+      Raw osos.dec establishes the 84-byte body at 0x08248580..0x082485d4:
+      Ghidra's reported 88 bytes wrongly includes the push opening the next
+      separately linked function at 0x082485d8. Decoding every ARM B/BL word
+      finds exactly six direct inbound calls: plain bl at 0x0824c168,
+      0x0824c1d8, and 0x0824c38c; and bleq at 0x0824c128, 0x0824c2d8, and
+      0x0824c31c. The three conditional calls are gated by caller flag tests;
+      the leaf itself has no NULL guard. Each of three ascending components
+      receives wrapping accumulator + ((signed scale * signed value) >> 16).
+      Rust uses i64 arithmetic for smull and the lsl/orr product-bit selection,
+      and volatile word accesses preserve the original component ordering for
+      partially overlapping ranges. Host tests cover signed fractional products,
+      accumulator wraparound, and overlap-propagated loads.
+      match.py structural review against the worktree archive retains the three
+      ldr/smull/Q16.16-recombine/add/str groups in order; LLVM only adds a
+      frame and chooses different scratch registers.
