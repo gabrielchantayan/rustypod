@@ -30909,6 +30909,38 @@ functions:
   # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
   # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
   # (already ported) belongs to this island, not to the database engine.
+  - address: 0x0836954c
+    ghidra: FUN_0836954c
+    name: namespace_provider_find
+    size: 204
+    sig: "i32 namespace_provider_find(usize *providers, usize value)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r0: providers
+      param_2/r1: value
+      iVar1/r0: index
+      iVar2/r0: comparator_result
+      local_10: key
+      FUN_0836982c: namespace_provider_sort
+      FUN_08030dd4: bsearch
+    notes: >-
+      Raw ARM extent is exactly 204 bytes, 0x0836954c..0x08369618; the next
+      separately linked sibling begins `push {r4,lr}` at 0x08369618. Decoding
+      every ARM B/BL word in osos.dec finds six direct inbound bl calls, all
+      unconditional (0 predicated): 0x0806ea28, 0x0806fbc0, 0x0806fc04,
+      0x0806fe1c, 0x08070724, and 0x080eebf4. NULL providers returns -1.
+      A null +0x10 comparator takes a linear first-exact-word search. Otherwise
+      the function calls the still-unported sort sibling 0x0836982c, rejects
+      zero value, calls the ported ADS bsearch over +0x04 table words, then
+      scans backwards while comparator(table[index-1], &key) >= 0 to select
+      the first duplicate. Host words are pointer-sized to keep the target's
+      five 32-bit fields disjoint, so bsearch uses a host-sized stride; device
+      stride remains the literal four bytes. The unported sort sibling is a
+      host-injected seam and direct target call. match.py: expected structural
+      difference from an indirect host/test seam; control flow preserves the
+      null, linear, sort, zero, bsearch, and duplicate-backscan paths.
+
   - address: 0x08369780
     ghidra: FUN_08369780
     name: namespace_provider_count

@@ -176,6 +176,7 @@ pub unsafe extern "C" fn atof(s: *const u8) -> f64 {
 /// here per batch assignment even though it is not part of the strtod
 /// family (see the module docs).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn bsearch(
     key: *const u8,
     mut base: *const u8,
