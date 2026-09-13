@@ -69984,6 +69984,33 @@ functions:
       their unrecovered identities. Host tests cover unavailable-only-post,
       initialization/+0xac/restart, and toggle/+0xb0/stop paths.
 
+
+  # --- Event-listener controller availability ---
+  - address: 0x081a4210
+    ghidra: FUN_081a4210
+    name: event_listener_controller_available
+    size: 24
+    sig: "u32 event_listener_controller_available(void)"
+    module: app/event_listener_controller_available
+    status: ported
+    renames:
+      FUN_08259534: lazy_singleton_0xbc
+      "controller+0x0": vtable
+      "vtable+0x38": availability
+    notes: >-
+      Raw osos.dec confirms Ghidra's 24-byte code extent exactly: push
+      {r4,lr}; bl lazy_singleton_0xbc; load the controller vtable from +0;
+      load its +0x38 word; pop {r4,lr}; bx that word. The separately linked
+      next function begins at 0x081a4228; there is no literal pool. Decoding
+      every ARM B/BL immediate in the image finds exactly seven inbound direct
+      call sites, all unconditional plain bl: 0x0815fd14, 0x0819b298,
+      0x081a404c, 0x081b4b08, 0x081b4c08, 0x081e7b5c, and 0x0820aac0.
+      There are zero predicated bl forms and zero direct tail b transfers.
+      Callers use the returned word as an availability predicate. No caller,
+      constructor, or vtable data establishes an identity for the +0x38
+      target, so it remains named only by its observed availability role.
+      Deliberate deviation: host fixtures widen vtable words to pointer width;
+      ARM retains the exact getter call and tail bx dispatch.
   # --- Two-pair derived vtable constructor ---
   - address: 0x081d0d98
     ghidra: FUN_081d0d98
