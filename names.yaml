@@ -7683,6 +7683,40 @@ functions:
       entered==1 boundary; fixtures assert every word outside +0xe0 is
       untouched and +0xdc is never written.
 
+  - address: 0x082ddd78
+    ghidra: FUN_082ddd78
+    name: pager_lookup
+    size: 60
+    sig: "PgHdr *pager_lookup(const Pager *pager, u32 page_number)"
+    module: sqlite/pager_lookup
+    status: ported
+    vars: {param_1: pager, param_2: page_number, iVar1: page}
+    renames:
+      param_1/r0: pager
+      param_2/r1: page_number
+      "*(u32*)(pager+0xcc)": pager->nHash, power-of-two bucket count
+      "*(PgHdr**)(pager+0xd0)": pager->apHash, page-hash bucket array
+      "*(u32*)(page+0x04)": page->pgno
+      "*(PgHdr**)(page+0x08)": page->pNextHash
+    notes: >-
+      SQLite 3.5.x sqlite3PagerLookup: if pager->apHash is NULL return NULL;
+      otherwise select apHash[(pager->nHash - 1) & page_number] and traverse
+      pNextHash until pgno equals page_number or the chain ends. Raw code
+      extent is exactly 60 bytes, 0x082ddd78..0x082dddb4; the next separately
+      linked function starts at 0x082dddb4 with push {r3-r7,lr}, so Ghidra's
+      size is exact and there is no literal pool. Decoding every ARM B/BL word
+      in osos.dec finds exactly six inbound sites, all unconditional plain bl
+      (0x082dd0c0, 0x082de274, 0x08367b58, 0x0837e210, 0x0837f07c,
+      0x0837f0c4), with no predicated BL forms. Ghidra incorrectly gives the
+      function a void signature; the raw r0 return is the found PgHdr pointer
+      or NULL. The Rust port preserves the raw 32-bit field layout through word
+      indices and deliberately retains the firmware's lack of pager NULL and
+      nHash-zero guards. Host test covers NULL apHash, an empty selected bucket,
+      chain-end miss, collision-chain hit, and the mask bucket calculation.
+      match.py structural review differs only by LLVM's fp/lr frame and local
+      branch offsets; the load, mask, chain-link traversal, and NULL return
+      structure match the ARM body.
+
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
   # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,
