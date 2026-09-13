@@ -68,6 +68,7 @@ pub mod operation_dispatch;
 pub mod query_object_release;
 pub mod field_query_result_release;
 pub mod record_body_size;
+pub mod record_store_trailer_header;
 pub mod record_stream_begin;
 pub mod record_entry_payload_length;
 pub mod record_fields_configure;
