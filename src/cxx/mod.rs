@@ -57,6 +57,7 @@ pub mod locked_vtable_slot_16_dispatch;
 pub mod magic_tagged_object;
 pub mod mutex;
 pub mod mutex_opaque_context_construct;
+pub mod mutex_opaque_context_acquire;
 pub mod mutex_destroy;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;

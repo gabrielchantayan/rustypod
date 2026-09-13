@@ -20,8 +20,8 @@
 //!
 //! The constructor first builds the 0x1c-byte C++ mutex wrapper, then the
 //! adjacent 0x1c-byte opaque context, and finally clears the outer object's
-//! word at +0x38. It returns the original object through the two child
-//! constructors' documented pointer-return contracts. Whole-image ARM
+//! active-context count at +0x38. It returns the original object through the
+//! two child constructors' documented pointer-return contracts. Whole-image ARM
 //! B/BL-immediate decoding finds exactly seven callers — 0x0815335c,
 //! 0x08165100, 0x08196ee8, 0x081d6910, 0x081d7cb4, 0x081d8198, and
 //! 0x081e6b60 — all unconditional `bl`; no predicated or tail-`b` calls.
@@ -46,9 +46,9 @@ const CXX_MUTEX_WORDS: usize = 7;
 /// and construction order are established by the raw ARM.
 #[repr(C)]
 pub struct CxxMutexOpaqueContext {
-    mutex_wrapper: [u32; CXX_MUTEX_WORDS],
-    opaque_context: [u32; CXX_MUTEX_WORDS],
-    initialization_status: u32,
+    pub(crate) mutex_wrapper: [u32; CXX_MUTEX_WORDS],
+    pub(crate) opaque_context: [u32; CXX_MUTEX_WORDS],
+    pub(crate) active_context_count: u32,
 }
 
 /// `cxx_mutex_opaque_context_construct` — original: `FUN_08262a64` @
@@ -77,7 +77,7 @@ pub unsafe extern "C" fn cxx_mutex_opaque_context_construct(
     let context = ptr::addr_of_mut!((*mutex).opaque_context).cast::<u32>();
     let context = initialize_opaque_context(context);
     let owner = context.sub(CXX_MUTEX_WORDS).cast::<CxxMutexOpaqueContext>();
-    ptr::addr_of_mut!((*owner).initialization_status).write(0);
+    ptr::addr_of_mut!((*owner).active_context_count).write(0);
     owner
 }
 
@@ -179,7 +179,7 @@ mod tests {
         let mut object = CxxMutexOpaqueContext {
             mutex_wrapper: [0xa5a5_a5a5; CXX_MUTEX_WORDS],
             opaque_context: [0xa5a5_a5a5; CXX_MUTEX_WORDS],
-            initialization_status: 0xa5a5_a5a5,
+            active_context_count: 0xa5a5_a5a5,
         };
 
         let returned = unsafe {
@@ -195,17 +195,17 @@ mod tests {
         assert_eq!(unsafe { OPAQUE_STATUS_AT_CALL }, 0, "child clears +0x18 first");
         assert_eq!(unsafe { OPAQUE_SELECTOR }, ptr::null(), "child passes NULL selector");
         assert_eq!(object.opaque_context[6], 0x2a, "child stores its returned status");
-        assert_eq!(object.initialization_status, 0, "outer +0x38 clear is last");
+        assert_eq!(object.active_context_count, 0, "outer +0x38 clear is last");
         assert_eq!(core::mem::size_of::<CxxMutexOpaqueContext>(), 0x3c);
     }
 
     #[test]
-    fn overwrites_prior_child_and_outer_error_statuses_without_a_branch() {
+    fn overwrites_prior_child_status_and_outer_count_without_a_branch() {
         let (_guard, _restore) = install_recorders(0);
         let mut object = CxxMutexOpaqueContext {
             mutex_wrapper: [0; CXX_MUTEX_WORDS],
             opaque_context: [0; CXX_MUTEX_WORDS],
-            initialization_status: 0xfeed_face,
+            active_context_count: 0xfeed_face,
         };
         object.opaque_context[6] = 0xffff_ffff;
 
@@ -214,6 +214,6 @@ mod tests {
         assert_eq!(returned, &mut object as *mut _);
         assert_eq!(unsafe { OPAQUE_STATUS_AT_CALL }, 0, "old child error is cleared before call");
         assert_eq!(object.opaque_context[6], 0, "zero status is retained");
-        assert_eq!(object.initialization_status, 0, "old outer error is overwritten");
+        assert_eq!(object.active_context_count, 0, "old outer count is overwritten");
     }
 }
