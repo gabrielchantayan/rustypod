@@ -16,6 +16,7 @@ pub mod color_copy;
 pub mod color_pack;
 pub mod color_unpack;
 pub mod context_activity;
+pub mod context_line_terminator;
 pub mod context_child_handle;
 pub mod context_record_resolve;
 pub mod decoder_begin_batch;
