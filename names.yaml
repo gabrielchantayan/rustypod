@@ -81072,6 +81072,35 @@ functions:
       preservation is represented by the Rust return type.
 
 
+  # --- Widened product arithmetic shift ---
+  - address: 0x08261140
+    ghidra: FUN_08261140
+    name: mul_i64_i32_asr
+    size: 40
+    sig: "i64 mul_i64_i32_asr(i64 value, i32 multiplier, u32 shift)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: value_low
+      param_2/r1: value_high
+      param_3/r2: multiplier
+      param_4/r3: shift
+      r0:r1 return: shifted_product
+    notes: >-
+      Raw osos.dec establishes the 40-byte body at 0x08261140..0x08261164;
+      the separately linked det2_i64 starts at 0x08261168. The umull/mla/mla
+      sequence forms the low 64 bits of signed i64 value times signed i32
+      multiplier, then tail-branches to the existing __aeabi_lasr body at
+      0x0802eed4 for an arithmetic right shift. Full-image decoding of every
+      ARM B/BL-immediate word finds exactly six inbound calls, all
+      unconditional unpredicated bl at 0x08241e18, 0x08241e3c, 0x08241f00,
+      0x08241f24, 0x08242000, and 0x08242034; every caller passes shift 28.
+      The port keeps the tail helper's register-shift sequence local rather
+      than adding another dispatch seam, including its full-u32 branch choice
+      and low-byte shift-count behavior. Host tests compare all product words
+      and shift paths against an independent i128/register-sequence model.
+
+
   # --- Signed widened two-by-two determinant ---
   - address: 0x08261168
     ghidra: FUN_08261168
