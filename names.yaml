@@ -695,6 +695,7 @@ functions:
     name: ft_metadata_u16_at_b26
     size: 16
     sig: "u16 ft_metadata_u16_at_b26(const FtMetadataOwner *object)"
+
     module: ft/metadata
     status: ported
     vars:
@@ -74371,3 +74372,29 @@ functions:
       0x08256d14, 0x0829f89c), with zero predicated BL forms and zero direct
       B tail branches; no aligned raw image word holds this address. No
       deliberate deviations.
+  - address: 0x0822aa34
+    ghidra: thunk_FUN_08214348
+    name: member_release_if_present
+    size: 4
+    sig: "void member_release_if_present(MemberReleaseOwner *owner)"
+    module: app/member_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x14": member
+      FUN_08214348: conditional_member_release_tail_target
+      FUN_081f0530: list_cursor_release (ported)
+    notes: >-
+      Raw osos.dec establishes this exact 4-byte veneer as `b 0x08214348`;
+      the 32-byte tail target reads owner+0x14 and invokes the ported
+      list_cursor_release only when that word is nonzero. The next separately
+      linked function begins at 0x0822aa38. Full-image decoding of every ARM
+      B/BL immediate finds exactly seven direct bl callers, all unconditional
+      and zero predicated: 0x081b757c, 0x081cc8bc, 0x081cc8f0, 0x081cc9fc,
+      0x081cce0c, 0x081ccf6c, and 0x08220470. Two unconditional plain-B tails
+      at 0x0820a45c and 0x082201f4 also enter the veneer. No aligned image word
+      equals 0x0822aa34, so it is not directly dispatched as data. Deliberate
+      deviation: this semantically identical veneer reuses the existing
+      member_release_if_present Rust body rather than adding a duplicate
+      dispatch seam; the target's unspecified post-release r0 is represented
+      by the void Rust ABI, because every verified caller ignores it.
