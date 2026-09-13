@@ -66978,6 +66978,34 @@ functions:
       the port uses a crate static for the runtime cache word; it is not
       hook-ready until FUN_081cd5b8 is ported.
 
+  # --- Current normalized calendar -> day-and-seconds pair ---
+  - address: 0x081b4dcc
+    ghidra: FUN_081b4dcc
+    name: current_datetime_to_day_seconds
+    size: 68
+    sig: "void current_datetime_to_day_seconds(DayAndSeconds *out)"
+    module: time/current_day_and_seconds
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      local_stack/r0: datetime
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_0807ea68: datetime_day_number
+    notes: >-
+      Raw extent is exactly 68 instruction bytes, 0x081b4dcc..0x081b4e0c;
+      the next separately linked function begins at 0x081b4e10 with ldr r2,
+      [r1]. Decoding every ARM B/BL word in osos.dec finds 6 direct bl call
+      sites, all unconditional, with no predicated bl forms and no b tail
+      callers: 0x08109790, 0x0812695c, 0x081274b8, 0x08127980,
+      0x081b4d44, and 0x08271144. The body reserves a stack DateTime,
+      calls current_datetime_to_normalized_record, calls datetime_day_number
+      on that normalized record, stores its full u32 bit pattern to out+0,
+      and stores second + minute*60 + hour*3600 to out+4. The instructions
+      form minute*60 with rsb/add and hour*3600 with smulbb #225/add; all
+      additions wrap. Stack DateTime padding is indeterminate in retailOS,
+      and the Rust port preserves that by initializing only the fields the
+      callees write and read.
+
   # --- Two-word record initialization helper ---
   - address: 0x081b4e24
     ghidra: FUN_081b4e24
