@@ -1906,9 +1906,6 @@ pub unsafe extern "C" fn plist_node_ctor(
     node
 }
 
-/// Unported direct-copy callee `FUN_083d7e98`.
-pub type PlistNodeAttributePairCopyFn =
-    unsafe extern "C" fn(*mut CxxStringPair, *const CxxStringPair) -> *mut CxxStringPair;
 
 /// Unported capacity-growth callee `FUN_083e35cc`.
 pub type PlistNodeAttributeVectorGrowFn = unsafe extern "C" fn(
@@ -1916,23 +1913,6 @@ pub type PlistNodeAttributeVectorGrowFn = unsafe extern "C" fn(
     *mut CxxStringPair,
     *const CxxStringPair,
 ) -> *mut CxxStringPair;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_plist_node_attribute_pair_copy(
-    destination: *mut CxxStringPair,
-    source: *const CxxStringPair,
-) -> *mut CxxStringPair {
-    let copy: PlistNodeAttributePairCopyFn = unsafe { core::mem::transmute(0x083d_7e98usize) };
-    unsafe { copy(destination, source) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_plist_node_attribute_pair_copy(
-    _destination: *mut CxxStringPair,
-    _source: *const CxxStringPair,
-) -> *mut CxxStringPair {
-    panic!("plist_node_attribute_vector_push_back requires pair copy helper 0x083d7e98")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_plist_node_attribute_vector_grow(
@@ -1953,24 +1933,21 @@ unsafe extern "C" fn missing_plist_node_attribute_vector_grow(
     panic!("plist_node_attribute_vector_push_back requires growth helper 0x083e35cc")
 }
 
-/// Operations supplied by the unported pair-copy and vector-growth helpers.
+/// Operations supplied by the unported vector-growth helper.
 #[derive(Clone, Copy)]
 pub struct PlistNodeAttributeVectorPushBackOps {
-    pub copy: PlistNodeAttributePairCopyFn,
     pub grow: PlistNodeAttributeVectorGrowFn,
 }
 
 #[cfg(target_os = "none")]
 pub static mut PLIST_NODE_ATTRIBUTE_VECTOR_PUSH_BACK_OPS: PlistNodeAttributeVectorPushBackOps =
     PlistNodeAttributeVectorPushBackOps {
-        copy: firmware_plist_node_attribute_pair_copy,
         grow: firmware_plist_node_attribute_vector_grow,
     };
 
 #[cfg(not(target_os = "none"))]
 pub static mut PLIST_NODE_ATTRIBUTE_VECTOR_PUSH_BACK_OPS: PlistNodeAttributeVectorPushBackOps =
     PlistNodeAttributeVectorPushBackOps {
-        copy: missing_plist_node_attribute_pair_copy,
         grow: missing_plist_node_attribute_vector_grow,
     };
 
@@ -2007,11 +1984,12 @@ unsafe fn plist_node_attribute_copy_string(
 /// the growth helper. Both paths destroy the temporary pair afterward, so the
 /// inserted pair owns a separate COW reference.
 ///
-/// Deliberate deviation: `FUN_083d7e98` and `FUN_083e35cc` are unported, so
-/// target builds reach their verified retailOS addresses through this volatile
-/// operation table and host tests install recorders. The raw final destroy
-/// leaves its invalid temporary-stack address in r0, but all callers discard
-/// it; this faithful Rust API returns `()`.
+/// Deliberate deviation: the pair-copy helper is now the direct
+/// [`crate::cxx::string::cxx_string_pair_copy_ctor`] port. The unported
+/// growth helper still uses a volatile operation table so device builds reach
+/// its verified retailOS address and host tests can install a recorder. The
+/// raw final destroy leaves its invalid temporary-stack address in r0, but
+/// all callers discard it; this faithful Rust API returns `()`.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn plist_node_attribute_vector_push_back(
@@ -2030,12 +2008,18 @@ pub unsafe extern "C" fn plist_node_attribute_vector_push_back(
 
     let attributes = unsafe { &mut (*owner).attributes };
     let destination = attributes.end;
-    let ops = unsafe { plist_node_attribute_vector_push_back_ops() };
     if destination == attributes.capacity {
+        let ops = unsafe { plist_node_attribute_vector_push_back_ops() };
         unsafe { (ops.grow)(attributes, destination, core::ptr::addr_of!(temporary).cast()) };
     } else {
         attributes.end = destination.wrapping_add(1);
-        unsafe { (ops.copy)(destination, core::ptr::addr_of!(temporary).cast()) };
+        unsafe {
+            crate::cxx::string::cxx_string_pair_copy_ctor(
+                core::ptr::addr_of_mut!(*attributes).cast(),
+                destination.cast(),
+                core::ptr::addr_of!(temporary.first),
+            );
+        }
     }
     unsafe { crate::cxx::string::cxx_string_pair_destroy(&mut temporary) };
 }
@@ -6209,29 +6193,10 @@ mod tests {
     // ---- plist_node_attribute_vector_push_back ----
 
     static PLIST_NODE_ATTRIBUTE_PUSH_BACK_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut PLIST_NODE_ATTRIBUTE_COPY_CALL: Option<(*mut CxxStringPair, *const CxxStringPair)> = None;
-    static mut PLIST_NODE_ATTRIBUTE_COPY_END: *mut CxxStringPair = core::ptr::null_mut();
-    static mut PLIST_NODE_ATTRIBUTE_PUSH_BACK_OWNER: *mut PlistNode = core::ptr::null_mut();
     static mut PLIST_NODE_ATTRIBUTE_GROW_CALL:
         Option<(*mut PlistNodeAttributeVector, *mut CxxStringPair, *const CxxStringPair)> = None;
     static mut PLIST_NODE_ATTRIBUTE_GROW_PAIR: Option<(*mut u8, *mut u8)> = None;
 
-    unsafe extern "C" fn record_plist_node_attribute_pair_copy(
-        destination: *mut CxxStringPair,
-        source: *const CxxStringPair,
-    ) -> *mut CxxStringPair {
-        PLIST_NODE_ATTRIBUTE_COPY_CALL = Some((destination, source));
-        PLIST_NODE_ATTRIBUTE_COPY_END = (*PLIST_NODE_ATTRIBUTE_PUSH_BACK_OWNER).attributes.end;
-        crate::cxx::string::cxx_string_copy_ctor(
-            core::ptr::addr_of_mut!((*destination).first),
-            core::ptr::addr_of!((*source).first),
-        );
-        crate::cxx::string::cxx_string_copy_ctor(
-            core::ptr::addr_of_mut!((*destination).second),
-            core::ptr::addr_of!((*source).second),
-        );
-        destination
-    }
 
     unsafe extern "C" fn record_plist_node_attribute_vector_grow(
         vector: *mut PlistNodeAttributeVector,
@@ -6257,23 +6222,17 @@ mod tests {
         }
     }
 
-    fn install_plist_node_attribute_push_back_mock(
-        owner: *mut PlistNode,
-    ) -> PlistNodeAttributePushBackMock {
+    fn install_plist_node_attribute_push_back_mock() -> PlistNodeAttributePushBackMock {
         let lock = PLIST_NODE_ATTRIBUTE_PUSH_BACK_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         unsafe {
-            PLIST_NODE_ATTRIBUTE_COPY_CALL = None;
-            PLIST_NODE_ATTRIBUTE_COPY_END = core::ptr::null_mut();
-            PLIST_NODE_ATTRIBUTE_PUSH_BACK_OWNER = owner;
             PLIST_NODE_ATTRIBUTE_GROW_CALL = None;
             PLIST_NODE_ATTRIBUTE_GROW_PAIR = None;
             let previous =
                 core::ptr::addr_of!(PLIST_NODE_ATTRIBUTE_VECTOR_PUSH_BACK_OPS).read_volatile();
             core::ptr::addr_of_mut!(PLIST_NODE_ATTRIBUTE_VECTOR_PUSH_BACK_OPS).write_volatile(
                 PlistNodeAttributeVectorPushBackOps {
-                    copy: record_plist_node_attribute_pair_copy,
                     grow: record_plist_node_attribute_vector_grow,
                 },
             );
@@ -6304,18 +6263,10 @@ mod tests {
             end: slot,
             capacity: unsafe { slot.add(2) },
         };
-        let _mock = install_plist_node_attribute_push_back_mock(&mut owner);
 
         unsafe { plist_node_attribute_vector_push_back(&mut owner, &first, &second) };
 
         unsafe {
-            let Some((copy_destination, copy_source)) = PLIST_NODE_ATTRIBUTE_COPY_CALL else {
-                panic!("spare-capacity path must invoke the pair copy helper");
-            };
-            assert_eq!(copy_destination, slot);
-            assert_eq!(PLIST_NODE_ATTRIBUTE_COPY_END, slot.add(1));
-            assert_eq!((*copy_source).first, first);
-            assert_eq!((*copy_source).second, second);
             assert_eq!(slots[0].first, first);
             assert_eq!(slots[0].second, second);
             assert_eq!(owner.attributes.begin, slot, "push leaves begin intact");
@@ -6351,7 +6302,7 @@ mod tests {
             end,
             capacity: end,
         };
-        let _mock = install_plist_node_attribute_push_back_mock(&mut owner);
+        let _mock = install_plist_node_attribute_push_back_mock();
 
         unsafe { plist_node_attribute_vector_push_back(&mut owner, &first, &second) };
 
@@ -6364,7 +6315,6 @@ mod tests {
             assert_eq!((*grow_source).first, first);
             assert_eq!((*grow_source).second, second);
             assert_eq!(PLIST_NODE_ATTRIBUTE_GROW_PAIR, Some((first, second)));
-            assert_eq!(PLIST_NODE_ATTRIBUTE_COPY_CALL, None, "full vector does not copy directly");
             assert_eq!(owner.attributes.end, end, "growth helper owns all vector mutation");
         }
         assert_eq!(first_storage.rep.refcount, 0, "temporary reference is released after growth");
