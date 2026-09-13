@@ -91,6 +91,9 @@
 //!   so a host call cannot return. `cxx/list_splice.rs` leaves its own
 //!   `heap_panic` branch untested for the same reason.
 
+#[cfg(test)]
+extern crate std;
+
 use crate::heap::veneers::heap_panic;
 
 /// The service-manager singleton (original: the `+4` slot of the holder
@@ -99,6 +102,11 @@ use crate::heap::veneers::heap_panic;
 /// NULL until the unported constructor-getter @ 0x081655e0 publishes an
 /// instance, which is the pre-init state of the original word.
 pub static mut SERVICE_MANAGER_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// Serializes host tests that replace the singleton slot.
+#[cfg(test)]
+pub(crate) static SERVICE_MANAGER_INSTANCE_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
 
 /// service_manager_instance — original: `FUN_08165520` @ 0x08165520
 /// (24 bytes: five instructions plus the trailing holder literal @
@@ -663,15 +671,12 @@ mod tests {
     extern crate std;
     use super::*;
     use core::ptr;
-    use std::sync::Mutex;
 
-    /// Serializes the tests that write the one shared instance slot.
-    static INSTANCE_LOCK: Mutex<()> = Mutex::new(());
 
     /// Installs `instance` and returns the lock guard; the slot is
     /// restored to its NULL pre-init state by `clear`.
     fn publish(instance: *mut u8) -> std::sync::MutexGuard<'static, ()> {
-        let guard = INSTANCE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_INSTANCE), instance) };
         guard
     }
@@ -683,7 +688,7 @@ mod tests {
 
     #[test]
     fn the_slot_starts_null_like_the_uninitialized_holder_word() {
-        let guard = INSTANCE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert!(unsafe { ptr::read_volatile(ptr::addr_of!(SERVICE_MANAGER_INSTANCE)) }.is_null());
         drop(guard);
     }

@@ -75003,3 +75003,57 @@ functions:
       so the name records only the verified global-slot operation. Target
       builds read live runtime memory; host builds model its native-width
       pointer slot with a crate static.
+
+
+  # --- service-handler pending-event reset ---
+  - address: 0x0818fd78
+    ghidra: FUN_0818fd78
+    name: service_handler_pending_event_reset
+    size: 208
+    sig: "void service_handler_pending_event_reset(void *session, i32 selector, u32 request_lifecycle_state)"
+    module: app/service_handler_pending_event_reset
+    status: ported
+    renames:
+      param_1/r0/r8: session (pending-event queue owner)
+      param_2/r1/r4: selector (one of three service handlers)
+      param_3/r2/r6: request_lifecycle_state
+      DAT_0818fe48: service_handler_pending_event_records (0x08a255e4; 3 * 0x24 bytes)
+      DAT_0818fe4c: service_handler_pending_event_locks (0x08a25650; 3 * 0x1c bytes)
+      DAT_0818fe50: PENDING_EVENT_WILDCARD_TAG (0x0000ffff)
+      FUN_08163b18: empty_record_destructor (one-word bx lr; passes r0 to operator_delete)
+      FUN_08030f44: heap_panic (ported; selector >= 3)
+      thunk_FUN_082e8390: posix_mutex_lock (ported via alias veneer)
+      thunk_EXT_FUN_2200027c: memzero_aligned (ported IRAM mirror via 0x08037db8)
+      thunk_FUN_082e83d8: posix_mutex_unlock (ported via alias veneer)
+      FUN_08138f14: pending_event_take (ported)
+      FUN_082aad24: operator_delete (ported)
+      thunk_FUN_08165520: service_manager_instance_veneer (ported)
+      FUN_08138c80: service_handler_lifecycle_request_state (unported; reset-local seam)
+    notes: >-
+      Raw code is 52 ARM words from 0x0818fd78 through the pop at
+      0x0818fe44. The three following literal-pool words
+      0x08a255e4/0x08a25650/0x0000ffff occupy 0x0818fe48..0x0818fe50;
+      the distinct next function begins at 0x0818fe54. Thus Ghidra's
+      208-byte code size is right but excludes the 12-byte pool. Decoding
+      every ARM B/BL immediate in osos.dec found exactly seven inbound
+      direct calls, all unconditional plain bl and no predicated forms or
+      tail branches: 0x0818f0b0, 0x0818f3d0, 0x08190f48, 0x081929a0,
+      0x08192c84, 0x08193ba8, 0x08193d9c.
+      Signed selectors >= 3 terminate through heap_panic; negative selectors
+      deliberately retain the ARM's unchecked backwards addressing. For a
+      valid selector, lock its 0x1c-byte cell; when the 0x24-byte record's
+      first word is nonzero, call 0x08163b18 then operator_delete. Raw
+      0x08163b18 is exactly `bx lr`, so it leaves r0 unchanged for that
+      delete. Zero all 0x24 record bytes and unlock. Then
+      take-and-cancel queue events (selector, 0xffff, 0x14) and (selector,
+      0xffff, 0x17), ignoring both statuses. A nonzero third argument gets
+      the service-manager singleton and calls the real entry 0x08138c80 with
+      (manager, selector, 0); the return is discarded. That entry is not yet
+      ported, so a narrowly scoped volatile seam keeps target dispatch exact
+      and records host arguments. The IRAM memzero veneer is intentionally
+      represented by a volatile pointer load of the existing
+      memzero_aligned port, preventing LLVM from replacing it with a builtin.
+      Host tests prove only the selected record clears, both event tags and
+      wildcard reach the queue port in order, the record lock is released,
+      zero request suppresses lifecycle work, and every nonzero request
+      forwards the singleton, selector, and state zero.
