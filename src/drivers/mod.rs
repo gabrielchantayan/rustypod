@@ -36,6 +36,7 @@ pub mod pwrcon;
 pub mod pmu;
 pub mod sixteen_slot_identity_init;
 pub mod surface;
+pub mod surface_config_from_image;
 pub mod surface_new;
 pub mod setting_dispatcher;
 pub mod storage_device_operations;
