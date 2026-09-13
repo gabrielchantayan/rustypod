@@ -67521,6 +67521,35 @@ functions:
       decomp/c/021/081fa044_FUN_081fa044.c; raw assembly:
       osos.dec 0x081fa044.
 
+  # --- volume controller opaque byte +0x90 setter ---
+  - address: 0x081f9d90
+    ghidra: FUN_081f9d90
+    name: volume_controller_set_byte_at_90
+    size: 8
+    sig: "void volume_controller_set_byte_at_90(u8 *volume_controller, u8 value)"
+    module: app/volume_controller_set_byte_at_90
+    status: ported
+    renames:
+      param_1/r0: volume_controller
+      param_2/r1: value
+      param_1_plus_0x90: byte_at_0x90
+    notes: >-
+      Raw ARM establishes the full eight-byte extent
+      0x081f9d90..0x081f9d98: `strb r1,[r0,#0x90]; bx lr`; the separately
+      linked next function opens with `push {r4,r5,r6,r7,r8,lr}` at
+      0x081f9d98. It stores the low byte of r1 at volume_controller+0x90
+      without a NULL guard. Decoding every ARM B/BL word in osos.dec finds
+      exactly six direct inbound calls, all unconditional plain BL at
+      0x080fecf4, 0x081f74fc, 0x081f75a8, 0x081f7604, 0x0822caf4, and
+      0x0822cb88; there are no predicated BL forms or direct B tail callers.
+      The related accessor FUN_081fa044 and constructor FUN_081fa070 establish
+      this as a volume-controller byte. Direct callers write zero or one, but
+      neither proves its domain meaning, so the offset-based name deliberately
+      preserves that uncertainty. No deviations. Host tests cover every u8
+      input, neighboring-byte preservation, and an unaligned object. Reference
+      C: decomp/c/021/081f9d90_FUN_081f9d90.c; raw assembly:
+      osos.dec 0x081f9d90.
+
   # --- Global application tagged-string registry getter ---
   - address: 0x0819fdb0
     ghidra: FUN_0819fdb0
