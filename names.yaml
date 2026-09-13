@@ -30007,6 +30007,33 @@ functions:
       frame, register shuffling, and ALLOC_DENY_TOTAL addressed
       directly (no +0x18, documented deviation).
 
+  - address: 0x08377bf0
+    ghidra: FUN_08377bf0
+    name: expr_coll_seq
+    size: 148
+    sig: "CollSeq *sqlite3ExprCollSeq(Parse *parse, Expr *expr)"
+    module: sqlite/expr_coll_seq
+    status: ported
+    vars: {param_1: parse, param_2: expr, puVar2: coll, iVar1: coll_seq_verified, DAT_08377c84: NO_SUCH_COLLATION_SEQUENCE}
+    notes: >-
+      Exact raw extent is 0x08377bf0..0x08377c84: the return pop at
+      0x08377c80 is followed by the "no such collation sequence: %s"
+      format string. 6 direct bl call sites, binary-scanned over every ARM
+      B/BL word in osos.dec, all unconditional (no predicated forms):
+      0x082d7158, 0x082d7708, 0x083702cc, 0x083775e0, 0x08382458,
+      0x083961f8. SQLite 3.5.9's sqlite3ExprCollSeq: traverse Expr->pLeft
+      through TK_CAST (31) and TK_UPLUS ('V') nodes with no pColl; a
+      non-transparent node ends the scan even if its pColl is NULL. A found
+      pColl is validated through sqlite3GetCollSeq(db, pColl, pColl->zName,
+      -1), returning the original pColl only when validation succeeds.
+      Failure reports the format through ported sqlite_error_msg only when
+      Parse->nErr was zero, then increments nErr once more. The helper at
+      0x0837a17c is not ported, so the Rust port uses a volatile target seam
+      with its observed ABI and a host recorder; the exact stock call remains
+      live on target. Host tests cover NULL input, transparent-chain descent,
+      the non-transparent no-descent boundary, helper arguments, and both the
+      first-error reporting path and a failed validation after an existing error.
+
   - address: 0x08378ad0
     ghidra: FUN_08378ad0
     name: find_collation_encoding
