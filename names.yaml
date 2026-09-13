@@ -78316,3 +78316,35 @@ functions:
       guard. ARM calls the unported child reconciler at its fixed address; host
       tests use a recording seam. repr(C) named fields keep target-width fields
       distinct without overlapping 64-bit host pointers.
+
+  # --- SQLite UTF-8 scalar-result wrapper ---
+  - address: 0x08391220
+    ghidra: FUN_08391220
+    name: sqlite3_result_text
+    size: 24
+    sig: "void sqlite3_result_text(sqlite3_context *context, const char *text, int length, void (*destructor)(void *))"
+    module: sqlite/result_text
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: text
+      param_3/r2: length
+      param_4/r3: destructor
+      FUN_0838c158: vdbe_mem_set_str
+    notes: >-
+      Raw osos.dec confirms the exact 24-byte extent 0x08391220..0x08391238:
+      push {r3,lr}; spill the fourth argument as the fifth outgoing argument;
+      mov r3,#1; add r0,r0,#8; bl 0x0838c158; pop {r12,pc}. The separately
+      linked sibling starts at 0x08391238. Decoding every ARM B/BL-immediate
+      word finds six direct inbound BL calls, all unconditional: 0x082e8c5c,
+      0x083678f8, 0x083679dc, 0x08367dc0, 0x083922b8, and 0x08392898. Four
+      additional unconditional direct B tail entries target this wrapper at
+      0x082d26ac, 0x082d2b94, 0x082d8e28, and 0x08396698; there are no
+      predicated forms. This is SQLite 3.5's sqlite3_result_text: it has no
+      NULL checks, advances sqlite3_context to its embedded Mem at +0x08,
+      forces SQLITE_UTF8 (1), and forwards text, length, and destructor to
+      the already-ported vdbe_mem_set_str @ 0x0838c158. Host tests prove the
+      +0x08 result selection, negative-length terminator measurement, explicit
+      embedded-NUL length preservation, UTF-8 forcing, and destructor
+      forwarding. Deliberate deviations: none. match.py structural review
+      completed with its expected non-exact diff.
