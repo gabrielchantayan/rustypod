@@ -66,6 +66,7 @@ pub mod mode;
 pub mod object_flags;
 mod object_state;
 pub mod opaque_context_initialize;
+pub mod opaque_context_destroy;
 pub mod tagged_context_dispatch;
 pub mod parse_result_code;
 pub mod pair_header;
