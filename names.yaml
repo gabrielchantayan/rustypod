@@ -17736,6 +17736,32 @@ functions:
       comparison order uses a signed `bgt` split around 0xc420, but all
       unmatched values converge at the same zero return. No deviations.
 
+  - address: 0x0814d74c
+    ghidra: FUN_0814d74c
+    name: record_store_trailer_header
+    size: 28
+    sig: "void record_store_trailer_header(u32 *record, u32 header)"
+    module: util/record_store_trailer_header
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: header
+      FUN_0814d51c: record_body_size
+      iVar1/r0: body_size
+      param_1_plus_body_size_plus_0xc: trailer_header
+    notes: >-
+      Raw ARM is seven instructions from 0x0814d74c through 0x0814d768; the
+      next separately linked function starts at 0x0814d76c, so the true
+      extent is 28 bytes, not Ghidra's reported 32. Calls record_body_size
+      with align = 4, adds its low-24-bit body-size result and 12 to record,
+      then writes the full supplied header word to that trailer slot. Decoding
+      every ARM B/BL word in osos.dec finds six direct call sites, all
+      unconditional bl: 0x0814d5c8, 0x0814d69c, 0x0814d740, 0x0814d890,
+      0x0814d8c4, and 0x081a8618. One unconditional tail b at 0x0814d788
+      also enters this function; no predicated calls or aligned data-word
+      references occur. The record class and trailer field identity remain
+      unidentified, so the port names only this verified storage role. No
+      deliberate deviations.
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
     name: record_body_size

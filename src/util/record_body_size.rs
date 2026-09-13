@@ -21,6 +21,7 @@
 /// Returns the record body size: `record[0] & 0x00ff_ffff`, minus the
 /// alignment padding of `record + 12` up to `align` when `align > 4`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn record_body_size(record: *const u32, align: u32) -> u32 {
     let mut size = record.read();
     let mut padding = 0u32;
