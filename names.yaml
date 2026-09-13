@@ -21063,6 +21063,42 @@ functions:
       codepoint pair's difference (sub r0, r4, r0), 0 at a shared
       terminator. string_id_record_equals calls the port directly.
 
+  - address: 0x08276168
+    ghidra: FUN_08276168
+    name: string_object_casefold_payload
+    size: 108
+    sig: "void string_object_casefold_payload(StringObject *this)"
+    module: cxx/string_object
+    status: identified
+    renames:
+      param_1/r5: this
+      param_1+4: payload
+      r4: utf16_buffer
+      r2: utf16_cursor
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082aad74: operator_new_tag3
+      FUN_082767d8: utf8_to_utf16
+      FUN_08276fbc: unicode_casefold_byte
+      FUN_0827654c: string_object_assign_utf16_cstr
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec is exactly 27 ARM words from 0x08276168 through the tail
+      branch at 0x082761d0; the separately linked next function begins at
+      0x082761d4. A NULL payload returns before any call. Otherwise this
+      counts its UTF-8-like codepoints, allocates (count + 1) u16 elements
+      with the tag-3 allocator, decodes the payload into that temporary,
+      folds each nonzero u16 unit through unicode_casefold_byte, assigns the
+      transformed temporary through string_object_assign_utf16_cstr, then
+      frees it with the matching tag-3 delete. The six inbound direct BL
+      call sites were decoded from every ARM B/BL word in osos.dec:
+      0x0812dbe0, 0x0812e1ac, 0x082864e4, 0x08287008 and 0x08287a74 are
+      unconditional bl; 0x081daa94 is blne. The sole transform primitive
+      (FUN_08276fbc @ 0x08276fbc) remains identified: its sub-0x100 lookup
+      table is runtime-replaced or relocated, but its contents and update
+      mechanism are unresolved. Since every ASCII input can depend on that
+      unknown table, a Rust implementation or host behavior model would
+      fabricate observable output; this wrapper remains deliberately
+      unported until that table is recovered.
   - address: 0x08276214
     ghidra: FUN_08276214
     name: utf8_next_codepoint
