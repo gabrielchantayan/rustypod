@@ -81630,3 +81630,30 @@ functions:
       directly, while the documented host seam defaults to returning the
       allocation unchanged. Host tests prove invalid-index initialization
       ordering, both cache misses, constructor arguments, and cache hits.
+
+  # --- optional timer and embedded bit-set reset ---
+  - address: 0x081ccb78
+    ghidra: FUN_081ccb78
+    name: timer_stop_then_clear_bit_set
+    size: 36
+    sig: "void timer_stop_then_clear_bit_set(void *this)"
+    module: cxx/timer_stop_then_clear_bit_set
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x8e4: timer
+      param_1_plus_0x8e8: bit_set
+      FUN_0812c6b0: timer_stop
+      FUN_082747b8: bit_set_clear_all
+    notes: >-
+      Raw ARM confirms the 36-byte extent from 0x081ccb78 through the
+      tail branch at 0x081ccb98; the next independently linked function
+      starts at 0x081ccb9c. A complete ARM B/BL decode finds exactly six
+      direct callers, all unconditional bl at 0x081cc8ac, 0x081cc8dc,
+      0x081cc9e4, 0x081ccd08, 0x081ccdf8, and 0x081ccf64, with zero
+      predicated call sites. Loads this+0x8e4 and calls timer_stop only
+      when nonzero, then tail-branches with this+0x8e8 to the already
+      ported bit_set_clear_all. Ghidra's inferred memzero call is wrong:
+      the raw target is 0x082747b8. Rust represents that final tail
+      branch as an ordinary direct void call; no caller-observable result
+      changes.

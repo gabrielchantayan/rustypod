@@ -203,6 +203,10 @@ pub mod hints {
     // 0xce00_0000: dedicated to cxx/bit_set's clear-all fixture; fixture
     // mappings never unmap, so no other user may share this hint.
     pub const BIT_SET_CLEAR_ALL: usize = 0xce00_0000;
+    // 0xd900_0000: dedicated to cxx/timer_stop_then_clear_bit_set's raw-u32
+    // embedded bit-set and timer fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const TIMER_STOP_THEN_CLEAR_BIT_SET: usize = 0xd900_0000;
     // 0x6c00_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
