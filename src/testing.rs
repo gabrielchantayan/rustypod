@@ -759,6 +759,10 @@ pub mod hints {
     // 0x4400_0000: dedicated to sqlite/expr_worklist's parent-release
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_RELEASE_PARENTS: usize = 0x4400_0000;
+    // 0xe300_0000: dedicated to util/scoped_global_guard_destroy's target-width
+    // guard and allocation fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SCOPED_GLOBAL_GUARD_DESTROY: usize = 0xe300_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
