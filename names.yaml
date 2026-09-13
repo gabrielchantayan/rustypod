@@ -4417,6 +4417,35 @@ functions:
       frame (for example 0x083d217c follows a callee that explicitly clears
       r1), an unresolved binary/source anomaly. Status remains identified
       rather than inventing a callable function or a callee identity.
+  - address: 0x0826f658
+    ghidra: FUN_0826f658
+    name: pool_create
+    size: 68
+    sig: "PoolControl *pool_create(size_t size, const char *name)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: size
+      param_2/r1: name
+      FUN_082aadd4: operator_new
+      FUN_0826f79c: pool_init
+      FUN_0826f7e4: pool_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw extent is exactly 68 bytes (17 ARM words) from 0x0826f658 through
+      0x0826f69b, followed by the owned 0x418 control-size literal at
+      0x0826f69c; the distinct pool_alloc body starts at 0x0826f6a0. It
+      allocates 0x418 bytes through tag-2 operator_new, passes the allocation,
+      requested pool size, and name to pool_init, then reads the returned
+      control's ready byte at +0x414 before any NULL check. A nonzero ready
+      byte returns that control; a non-NULL unready control runs pool_destroy
+      then tag-2 operator_delete and returns NULL. Decoding every ARM B/BL
+      word in osos.dec finds exactly six direct call sites, all plain
+      unconditional BL: 0x080d397c, 0x081246f8, 0x081b5488, 0x081bba48,
+      0x081bba70, and 0x081bba80; there are no predicated BL or tail-B
+      references. The port routes the two heap calls through POOL_OPS so host
+      tests can observe them; target defaults are the already-ported direct
+      operator_new/operator_delete implementations.
   - address: 0x0826f580
     name: aligned_pool
     size: 612
