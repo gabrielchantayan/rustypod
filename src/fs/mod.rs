@@ -23,6 +23,8 @@ pub mod disk_block;
 pub mod cache_block_prepare;
 /// Cache-entry writeback through the storage-block writer @ 0x082e4b4c.
 pub mod cache_entry_flush;
+/// Clears cache-entry transient fields while retaining its context link @ 0x082e4b84.
+pub mod cache_entry_reset;
 /// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
 pub mod cache_page;
 /// Shared resident FAT-position value reader boundary at 0x082e0cac.
