@@ -82405,3 +82405,32 @@ functions:
       Target builds call the unported helper at its verified address; host
       tests install a recording seam and prove input forwarding, the +8 read,
       and the NULL-to-zero path. Deliberate deviations: none.
+
+
+  # --- application global-slot clear predicate ---
+  - address: 0x08157d6c
+    ghidra: FUN_08157d6c
+    name: application_global_slot_is_clear
+    size: 20
+    sig: "u32 application_global_slot_is_clear(void)"
+    module: app/application_global_slot_is_clear
+    status: ported
+    renames:
+      DAT_08157d80: application_global_slot (0x089d00e4)
+      r0: ignored_abi_argument
+      r0_return: is_global_slot_clear
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: `ldr r0,[pc,#12];
+      ldr r0,[r0]; rsbs r0,r0,#1; movcc r0,#0; bx lr` at
+      0x08157d6c..0x08157d7c, followed by its 0x089d00e4 literal-pool word
+      at 0x08157d80; the separately linked next function opens with
+      `push {r4,r5,r6,lr}` at 0x08157d84. It ignores r0 and returns one only
+      when the global slot is zero; `movcc` forces zero for every nonzero
+      unsigned value, including values above one. A complete full-image ARM
+      B/BL-immediate decode finds exactly six inbound direct callers, all
+      unconditional plain bl at 0x0815843c, 0x081b8cf0, 0x081baea0,
+      0x081f6c90, 0x0826ea20, and 0x08287d50; no predicated bl forms occur.
+      The slot's subsystem role is not recovered, so the port names only its
+      observed clear-state predicate. Firmware builds volatile-load fixed RAM;
+      host builds use a zero-initialized private word. Host tests cover zero,
+      one, two, and u32::MAX. Deliberate deviations: host backing only.
