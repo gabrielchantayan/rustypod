@@ -71678,6 +71678,30 @@ functions:
       mutex_unlock instead of reproducing the final ARM tail branch, and
       discards its scratch return.
 
+  # --- Status-flag priority selector ---
+  - address: 0x082b1fd4
+    ghidra: FUN_082b1fd4
+    name: status_flag_priority
+    size: 64
+    sig: "void status_flag_priority(void *object)"
+    module: util/status_flag_priority
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x1c": flags
+      "object+0x1e": priority
+    notes: >-
+      Raw ARM confirms the exact 64-byte extent 0x082b1fd4..0x082b2014:
+      `ldrh r1,[r0,#28]` selects the first set bit in priority order bit 0,
+      bit 2, bit 3, then bit 1, and `strb r1,[r0,#30]` stores codes 5, 1, 2,
+      3, or default 4. The next separately entered function begins at
+      0x082b2014. A full decode of ARM B/BL-immediate words finds six direct
+      inbound calls, all unconditional BL at 0x083875b8, 0x08387a28,
+      0x0838a624, 0x0838ab24, 0x0838adec, and 0x08391790; no predicated call
+      targets this entry. The raw body has no NULL guard. No semantic
+      deviation: the port uses volatile aligned u16/byte accesses to preserve
+      the external object load and store.
+
   # --- FAT directory cursor synchronizer ---
   - address: 0x082b2014
     ghidra: FUN_082b2014
