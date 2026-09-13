@@ -75,6 +75,7 @@ pub mod stream_read_be32;
 pub mod stream_read_core;
 pub mod stream_read_be32_or_zero;
 pub mod store_static_descriptor;
+pub mod store_four_u32s;
 pub mod stream_seek;
 pub mod stream_seek_tagged_entry;
 pub mod stream_tell;
