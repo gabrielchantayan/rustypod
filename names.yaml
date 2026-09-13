@@ -79308,3 +79308,38 @@ functions:
       unchanged. No NULL guard exists for a flagged page's cache pointer.
       Host tests cover inactive, head, interior, and tail pages using a
       dedicated target-width fixture. Deliberate deviations: none.
+  - address: 0x082b5ab4
+    ghidra: FUN_082b5ab4
+    name: btree_balance_page
+    size: 164
+    sig: "i32 btree_balance_page(MemPage *page, u32 insert)"
+    module: sqlite/btree_balance
+    status: ported
+    renames:
+      param_1/r0/r4: page
+      param_2/r1: insert
+      iVar2/r5: rc
+      FUN_0837ef64: page_write
+      FUN_082b5b58: balance_deeper
+      FUN_082b6a08: balance_shallower
+      FUN_082b5cb8: balance_nonroot
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec confirms the exact 164-byte body from 0x082b5ab4 through
+      pop {r4-r6,pc} at 0x082b5ab4+0xa0; the separately entered next function
+      starts at 0x082b5b58. Decoding every aligned ARM B/BL-immediate word
+      finds six direct inbound call sites, all plain unconditional bl at
+      0x082b67f8, 0x082b6a00, 0x0837110c, 0x0837112c, 0x08371170, and
+      0x083717ec; there are no predicated calls and no tail branches. Root
+      pages are made writable first, then overflow selects the deeper helper
+      and an empty root selects the shallower helper. Non-root pages select
+      non-root balancing for overflow, or only for a deletion (insert == 0)
+      whose nFree exceeds (usableSize * 2) / 3 using the ported unsigned
+      divider. The four direct callees remain retailOS-owned: target builds
+      call their verified addresses through fixed seam functions and host tests
+      use recorders. This documents their observed page-write and balance roles
+      without asserting unrecovered identities. Host tests cover write failure,
+      both root dispatches, the strict free-space threshold, insertion skip,
+      and overflow without consulting pBt. Deliberate deviations: resident
+      direct bl calls cross typed seams; status, order, arguments, and
+      short-circuiting are preserved.
