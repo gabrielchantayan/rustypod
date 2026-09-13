@@ -24889,6 +24889,38 @@ functions:
       literal-pool blx included), so match.py shows a larger body with
       the same guard/decrement/dispose/unlock/teardown structure.
 
+  - address: 0x0839d198
+    ghidra: FUN_0839d198
+    name: refcounted_body_attach_slot1
+    size: 60
+    sig: "void refcounted_body_attach_slot1(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1-r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x0839d198..0x0839d1d4: it ends with pop {r4,pc}, and the separately
+      linked slot-1 release helper begins immediately at 0x0839d1d4.
+      Decoding every A32 B/BL word finds six direct callers, all unconditional
+      plain bl at 0x0816251c, 0x08162708, 0x081c02f0, 0x081c04d0,
+      0x0839f10c, and 0x0839f13c; no predicated call or direct b site exists.
+      No aligned image word equals this address, so it is not virtually
+      dispatched. The helper stores body through dst before its NULL early
+      return. A non-NULL body loads and NULL-checks mutex at +8, locks it,
+      wrapping-increments signed refcount at +4, reloads and NULL-checks mutex,
+      then unlocks it. This is a separately linked copy of
+      refcounted_body_attach at 0x0839d370 modulo its two blne displacements;
+      the dedicated target-only section preserves a distinct hookable symbol.
+      Host tests prove the unconditional NULL store and i32::MAX to i32::MIN
+      refcount wrap. LLVM can inline the ported mutex helpers, so match.py
+      reports a larger but structurally equivalent body.
+
   - address: 0x0839d360
     ghidra: FUN_0839d360
     name: refcounted_body_mutex_unlock_owned
@@ -64491,8 +64523,7 @@ functions:
       with neither implementation nor mutex, the zero-underflow wrap, and
       the NULL-body early-out. Deviation: LLVM inlines the ported mutex
       operations where the original bl's the helpers; match.py shows the
-      same guard, decrement, dispatch and delete structure in a larger
-      body.
+      same guard, decrement, dispatch and delete structure in a larger body.
   # --- Refcounted handle copy assignment, virtual-slot-1 release ---
   - address: 0x0839f118
     ghidra: FUN_0839f118
@@ -64505,7 +64536,7 @@ functions:
       param_1/r5: dst
       param_2/r4: src
       FUN_0839d1d4: refcounted_body_release_slot1
-      FUN_0839d198: refcounted_body_attach
+      FUN_0839d198: refcounted_body_attach_slot1
     notes: >-
       Raw ARM confirms Ghidra's 48-byte extent: 0x0839f118..0x0839f148, where
       the separately linked refcounted_ptr_construct_variant begins. Decoding
@@ -64517,12 +64548,12 @@ functions:
       compares the slot addresses, then on inequality releases the old body
       with the slot-1 virtual-destructor instantiation, loads *src AFTER that
       release, attaches the loaded body, and returns dst. The direct attach
-      entry at 0x0839d198 is a separately entered 56-byte helper whose raw
-      body is byte-identical in behavior to the ported attach at 0x0839d370
-      modulo mutex branch displacements; this port deliberately calls the
-      canonical ported helper. Two host tests cover the same-slot no-op and
-      non-final release plus source attachment. match.py exit 1 is its
-      expected structural diff output; it confirms the slot-address guard,
+      entry at 0x0839d198 is ported as refcounted_body_attach_slot1 and called
+      through its distinct dispatch seam. Its raw body is byte-identical in
+      behavior to refcounted_body_attach at 0x0839d370 modulo mutex branch
+      displacements. Two host tests cover the same-slot no-op and non-final
+      release plus source attachment. match.py exit 1 is its expected
+      structural diff output; it confirms the slot-address guard,
       release/load/attach order, and returned destination.
   # --- "crts" string-pool entry copy between pools (util/string_pool) ---
   - address: 0x080be830
