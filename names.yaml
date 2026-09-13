@@ -79579,3 +79579,32 @@ functions:
       identity is inferred for the nested objects. Host tests map a unique
       below-4-GiB fixture and prove the primary-record payload is stored and
       reloaded on each call. Deliberate deviations: none.
+
+  # --- Relative scrolling-view position query ---
+  - address: 0x0829c438
+    ghidra: FUN_0829c438
+    name: view_scroll_position
+    size: 36
+    sig: "i32 view_scroll_position(void *view)"
+    module: ui/view_scroll_position
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      "*(view + 0x00)": vtable
+      "*(vtable + 0x114)": content_position_callback
+      "*(view + 0xac)": content_origin
+      iVar1/r0: callback_content_position
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte body
+      0x0829c438..0x0829c458; the separately linked next function is the
+      independent `bx lr` at 0x0829c45c. It preserves view in r4, invokes the
+      vtable's +0x114 callback with view unchanged, then returns callback
+      result - content_origin at view +0xac with ARM's wrapping subtraction.
+      Decoding every aligned ARM B/BL-immediate word finds exactly six inbound
+      direct calls, all unconditional plain bl at 0x0816ac88, 0x0816afd4,
+      0x0816b01c, 0x0816b668, 0x0816b700, and 0x0816b77c; there are no
+      predicated forms or direct tail B transfers. The surrounding class and
+      callback identity remain unknown, so the port represents only their
+      verified vtable slot and origin word. Host vtable slots are native-width
+      for valid callbacks; the 32-bit target offsets stay exact. Host tests
+      prove callback result/origin subtraction and the signed-wrap boundary.
