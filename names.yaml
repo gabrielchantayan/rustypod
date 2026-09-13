@@ -82578,3 +82578,34 @@ functions:
       zero and u32::MAX counts survive the two loads. Structural match review
       of this worktree archive found the same two ldr operations; LLVM adds a
       standard frame prologue and epilogue. Deliberate deviations: none.
+ 
+  # --- ESDS descriptor size-byte reader ---
+  - address: 0x0815404c
+    ghidra: FUN_0815404c
+    name: esds_read_descriptor_size_if_tag
+    size: 72
+    sig: "u32 esds_read_descriptor_size_if_tag(void *parser, u32 observed_tag, u32 expected_tag, const u8 *descriptor, u8 *size_out, u32 *cursor)"
+    module: mov/esds_descriptor_size
+    status: ported
+    renames:
+      param_1/r0: parser (unused)
+      param_2/r1: observed_tag
+      param_3/r2: expected_tag
+      param_4/r3: descriptor
+      param_5/stack+4: size_out
+      param_6/stack: cursor
+      iVar1/r1: scanned_size_index
+      iVar2/r2: output_size_index
+    notes: >-
+      Raw osos.dec establishes exactly 72 bytes from 0x0815404c through bx lr
+      at 0x08154090; the separately linked next function opens at 0x08154094.
+      A complete aligned ARM B/BL-immediate decode finds six direct inbound
+      calls, all plain unconditional bl at 0x08154468, 0x081544f4,
+      0x081545f4, 0x08154c2c, 0x08154cc0, and 0x08154dd8. There are no
+      predicated calls, direct B tail entries, or aligned raw-word references.
+      The MOV ESDS parser compares observed_tag against expected_tag; mismatch
+      returns one without pointer access. A match skips exact 0x80 bytes from
+      descriptor[*cursor], writes the first other byte to size_out, advances
+      cursor through it, and returns zero. In particular, 0x81 through 0xff
+      are sizes rather than general variable-length continuation bytes. No
+      deliberate deviations.
