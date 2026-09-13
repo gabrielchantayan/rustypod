@@ -29390,6 +29390,34 @@ functions:
       concrete xWrite implementation is runtime vtable data, so the port
       dispatches the supplied method table rather than inventing a callee.
 
+  # ---- SQLite OS sync forwarding wrapper, sqlite3OsSync (src/sqlite/os_sync.rs) ----
+  - address: 0x0837dbe0
+    ghidra: FUN_0837dbe0
+    name: sqlite_os_sync
+    size: 12
+    sig: "i32 sqlite_os_sync(sqlite3_file *file, u32 flags)"
+    module: sqlite/os_sync
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: flags
+      "file->pMethods": sqlite3_io_methods
+      "pMethods+0x14": xSync
+    notes: >-
+      Raw bytes are the three instructions at 0x0837dbe0..0x0837dbe8; the
+      next separately linked function begins at 0x0837dbec, so Ghidra's
+      12-byte extent is exact with no literal pool. The wrapper loads
+      file->pMethods and its xSync slot at +0x14, then tail-dispatches
+      xSync(file, flags), returning its i32 status unchanged. The adjacent
+      0x0837db44..0x0837dc18 forwarding family is SQLite
+      sqlite3_io_methods (version/xClose/xRead/xWrite/xTruncate/xSync),
+      establishing this identity. Decoding every ARM B/BL word in osos.dec
+      finds exactly 6 inbound calls, all unconditional plain bl
+      (0x082bd914, 0x082ddb54, 0x0837dfd8, 0x08392a74, 0x08392ac8,
+      0x083973c0), with no predicated call or tail branch. No aligned raw
+      data word targets the wrapper, so it is not dispatched virtually.
+      The concrete xSync implementation is runtime method-table data, so
+      the port dispatches the supplied table rather than inventing a callee.
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
     name: parse_expr

@@ -87,7 +87,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::sqlite::os_write::{SqliteCloseFn, SqliteIoMethods, SqliteReadFn, SqliteWriteFn};
+    use crate::sqlite::os_write::{
+        SqliteCloseFn, SqliteIoMethods, SqliteReadFn, SqliteSyncFn, SqliteTruncateFn, SqliteWriteFn,
+    };
     use parking_lot::Mutex;
 
     unsafe extern "C" fn unused_write(
@@ -108,12 +110,22 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_truncate(_file: *mut SqliteFile, _size: i64) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn unused_sync(_file: *mut SqliteFile, _flags: u32) -> i32 {
+        0
+    }
+
     fn methods(close: SqliteCloseFn) -> SqliteIoMethods {
         SqliteIoMethods {
             version: 2,
             close,
             read: unused_read as SqliteReadFn,
             write: unused_write as SqliteWriteFn,
+            truncate: unused_truncate as SqliteTruncateFn,
+            sync: unused_sync as SqliteSyncFn,
         }
     }
 

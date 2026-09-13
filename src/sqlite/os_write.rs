@@ -51,6 +51,10 @@ pub struct SqliteIoMethods {
     pub read: SqliteReadFn,
     /// `+0x0c`: `xWrite(file, buffer, amount, offset)`.
     pub write: SqliteWriteFn,
+    /// `+0x10`: `xTruncate(file, size)`.
+    pub truncate: SqliteTruncateFn,
+    /// `+0x14`: `xSync(file, flags)`.
+    pub sync: SqliteSyncFn,
 }
 
 /// ABI of SQLite's `sqlite3_io_methods::xClose` entry.
@@ -72,6 +76,12 @@ pub type SqliteWriteFn = unsafe extern "C" fn(
     i64,
 ) -> i32;
 
+/// ABI of SQLite's `sqlite3_io_methods::xTruncate` entry.
+pub type SqliteTruncateFn = unsafe extern "C" fn(*mut SqliteFile, i64) -> i32;
+
+/// ABI of SQLite's `sqlite3_io_methods::xSync` entry.
+pub type SqliteSyncFn = unsafe extern "C" fn(*mut SqliteFile, u32) -> i32;
+
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x04] = [0; core::mem::offset_of!(SqliteIoMethods, close)];
 
@@ -80,6 +90,12 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(SqliteIoMethods, read)];
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(SqliteIoMethods, write)];
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(SqliteIoMethods, truncate)];
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x14] = [0; core::mem::offset_of!(SqliteIoMethods, sync)];
 
 /// sqlite_os_write — original: `FUN_0837dbf8` @ `0x0837dbf8` (32 bytes;
 /// 13 unconditional direct `bl` call sites, binary-scanned).
@@ -156,6 +172,14 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_truncate(_file: *mut SqliteFile, _size: i64) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn unused_sync(_file: *mut SqliteFile, _flags: u32) -> i32 {
+        0
+    }
+
     #[test]
     fn forwards_buffer_amount_and_aligned_i64_offset_to_xwrite() {
         let _lock = LOCK.lock();
@@ -165,6 +189,8 @@ mod tests {
             close: unused_close,
             read: unused_read,
             write: recording_write,
+            truncate: unused_truncate,
+            sync: unused_sync,
         };
         let mut file = SqliteFile { methods: &methods };
         let buffer = [0xa5_u8, 0x5a];
