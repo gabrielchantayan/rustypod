@@ -75258,3 +75258,32 @@ functions:
       unconditional plain bl at 0x0806e7b8, 0x08296970, 0x082c6ee0,
       0x082c6f00, 0x082c6f20, 0x082c6f48, and 0x082c6f78; no predicated
       bl forms and no tail branches.
+
+  # --- Genius request readiness poll ---
+  - address: 0x0816ec88
+    ghidra: FUN_0816ec88
+    name: genius_request_wait_ready
+    size: 80
+    sig: "u32 genius_request_wait_ready(void *request)"
+    module: app/genius_request_wait_ready
+    status: ported
+    renames:
+      param_1/r0: request
+      FUN_0826c5e8: usec_timer_read_seconds
+      FUN_0816ecd8: genius_request_is_ready
+      FUN_0816ee74: genius_request_advance
+    notes: >-
+      Raw ARM extent is exactly 0x0816ec88..0x0816ecd8; 0x0816ecd8 begins
+      the separately linked readiness predicate. It samples the already
+      ported 0x0826c5e8 counter once, then loops: a nonzero 0x0816ecd8
+      result succeeds, a zero 0x0816ee74 result also succeeds, otherwise
+      an unsigned sample-start subtraction of at least 1000 fails. Decoding
+      every aligned ARM B/BL immediate in osos.dec finds exactly seven
+      direct BL callers (0x0821d994, 0x08222b5c, 0x08226008, 0x08226224,
+      0x08235448, 0x08238600, 0x082387e0), all unconditional; there are no
+      predicated BL or direct tail-B callers. Neither 0x0816ecd8 nor
+      0x0816ee74 has a port ledger entry, so target builds dispatch to their
+      stock addresses through a volatile seam and tests replace that seam.
+      The names state only their observed ready-predicate and advance roles;
+      no further callee identity is claimed. The Rust port directly calls
+      the ported Timer E reader and retains wrapping unsigned timeout math.
