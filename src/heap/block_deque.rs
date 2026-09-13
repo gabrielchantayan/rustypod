@@ -383,7 +383,7 @@ pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
     mailbox_slot_create: crate::kernel::kobj::mailbox_slot_create,
     mailbox_slot_delete: crate::kernel::kobj::mailbox_slot_delete,
     client_attach: crate::heap::pool_client::pool_client_attach,
-    client_reserve: stub_client_reserve,
+    client_reserve: crate::heap::client_reserve::client_reserve,
     client_avail: stub_client_avail,
     client_populate: stub_client_populate,
     client_erase: crate::heap::client_erase::client_erase,
