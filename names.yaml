@@ -82527,3 +82527,30 @@ functions:
       structural review against this worktree archive found 18 Rust versus 16
       retail instructions: the extra frame setup and literal `blx` preserve
       the vtable store, optional payload release, tag-2 delete, and return.
+
+
+  # --- nested container item count ---
+  - address: 0x08147600
+    ghidra: FUN_08147600
+    name: nested_container_item_count
+    size: 12
+    sig: "u32 nested_container_item_count(const u32 *owner)"
+    module: util/nested_container_item_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0xa4: nested_container
+      r0_return: item_count
+    notes: >-
+      Raw osos.dec disassembly establishes the exact 12-byte body at
+      0x08147600..0x08147608: `ldr r0,[r0,#0xa4]; ldr r0,[r0,#4]; bx lr`.
+      The separately linked next function starts at 0x0814760c. Complete
+      full-image ARM B/BL-immediate decoding finds exactly six inbound direct
+      callers, all unconditional plain bl and no predicated forms:
+      0x081a1b1c, 0x081a1ba0, 0x081a1c44, 0x081a1dac, 0x081a1e10, and
+      0x081a1e78. The function has no NULL guard: it follows the target-width
+      owner word at +0xa4 and returns the following aligned u32 item count.
+      Host tests use the dedicated below-4-GiB raw-u32 fixture to prove both
+      zero and u32::MAX counts survive the two loads. Structural match review
+      of this worktree archive found the same two ldr operations; LLVM adds a
+      standard frame prologue and epilogue. Deliberate deviations: none.
