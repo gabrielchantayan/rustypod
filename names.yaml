@@ -81396,3 +81396,27 @@ functions:
       tests install recorders. Host-native pointers require an adapter around
       the existing 32-bit base constructor that invokes the same resolver
       before applying its 32-bit result and flag bytes to named host fields.
+
+
+  # --- Iteration-index destructor ---
+  - address: 0x081f3ff0
+    ghidra: FUN_081f3ff0
+    name: empty_destructor_1f3ff0
+    size: 4
+    sig: "void *empty_destructor_1f3ff0(void *this)"
+    module: cxx/empty_destructor_1f3ff0
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      Raw osos.dec is precisely `bx lr` (0xe12fff1e) at 0x081f3ff0; the next
+      separately linked function begins at 0x081f3ff4, confirming the 4-byte
+      extent. Full-image decoding of every aligned ARM B/BL immediate finds
+      exactly six direct callers at 0x08121160, 0x0812118c, 0x081e6030,
+      0x081e606c, 0x0820c738, and 0x0820c7b4. Every caller is an
+      unconditional plain bl; no predicated bl forms or aligned raw-word
+      references target this entry. The callers destroy the single-byte
+      iteration index constructed by FUN_081f3fe8. The leaf neither reads nor
+      writes this and preserves r0, so it is ported as an empty C++ destructor
+      returning this rather than Ghidra's void prototype. Deliberate host
+      deviation: none; the target-only text section prevents LLVM body folding.
