@@ -50948,6 +50948,30 @@ functions:
       src/app/vtable_set.rs::kind2_block_constructs_five_words_without_a_diagnostic
       / kind2_block_reports_bad_descriptor_and_still_constructs.
 
+  # --- Ghidra false function: serialized UI label tail ---
+  - address: 0x08155b4c
+    ghidra: FUN_08155b4c
+    name: goto_main_menu_label_tail
+    size: 5
+    sig: "const char goto_main_menu_label_tail[5]"
+    module: app
+    status: identified
+    renames:
+      FUN_08155b4c: goto_main_menu_label_tail
+      DAT_08155b44: goto_main_menu_label
+    notes: >-
+      Not ported by design: 0x08155b4c is not an ARM function entry. Raw
+      osos.dec bytes at 0x08155b44..0x08155b50 are the NUL-terminated ASCII
+      label `GotoMainMenu`; the nominated address is its final `Menu\0`
+      five-byte tail. The preceding routine forms 0x08155b44 with
+      `add r1,pc,#0x28` at 0x08155b14 and passes the string to 0x083d835c.
+      The next executable entry is the independent empty `bx lr` at
+      0x08155b54, followed by a distinct routine opening at 0x08155b58.
+      Decoding every ARM B/BL word in osos.dec finds zero direct BL (plain
+      or predicated) and zero direct B targets at 0x08155b4c; no aligned raw
+      word references it either. This contradicts Ghidra's 28-byte function
+      and six call-site claims, which decode the embedded text as code.
+
   - address: 0x08155d6c
     ghidra: FUN_08155d6c
     name: iterator_state_next
