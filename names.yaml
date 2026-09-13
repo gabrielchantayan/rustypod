@@ -76606,3 +76606,31 @@ functions:
       fixed-address calls; host tests install deterministic seams for range
       forwarding, marker routing, zero scale, and negative Q16.16 sign
       extension. No deliberate behavioral deviations.
+
+  # --- Optional byte-output clearing ---
+  - address: 0x0805d9f0
+    ghidra: FUN_0805d9f0
+    name: clear_optional_byte
+    size: 20
+    sig: "i32 clear_optional_byte(u8 *output)"
+    module: util/clear_optional_byte
+    status: ported
+    renames:
+      param_1/r0/r1: output
+      DAT_0805da04: null_output_status
+    notes: >-
+      Raw osos.dec decoding confirms five ARM instructions from 0x0805d9f0
+      through bx lr at 0x0805da00: movs r1,r0; movne r0,#0; strbne
+      r0,[r1]; ldreq r0,[pc,#0]; bx lr. The immediately following
+      literal-pool word at 0x0805da04 is 0xffff5bd9 (-42023); the next
+      independently linked function starts with push {r0-r11,lr} at
+      0x0805da08. Thus a non-NULL output is cleared and returns 0, while a
+      NULL output is not dereferenced and returns -42023. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly seven inbound direct BL
+      calls: six unconditional bl at 0x082b25d0, 0x082b25d8, 0x082b25e0,
+      0x082b25e8, 0x082b25f8, and 0x082f623c, plus one predicated bleq at
+      0x0804ff38. The predicated caller is gated by its condition flags;
+      all other callers invoke the callee unconditionally. No tail branch
+      or data-word dispatch reference targets this entry. No deliberate
+      behavioral deviations; the own text section and #[inline(never)]
+      preserve a distinct device BL target.

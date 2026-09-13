@@ -10,6 +10,7 @@ pub mod berec;
 pub mod bitfield;
 pub mod checked_word_block;
 pub mod checked_byte_block;
+pub mod clear_optional_byte;
 pub mod bswap;
 pub mod context_field;
 pub mod copy_four_bytes;
