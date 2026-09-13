@@ -76710,3 +76710,38 @@ functions:
       deliberate behavioral deviation is needed. Host tests cover exact hit,
       every absent-key insertion boundary, reverse table order, and the
       empty-table no-dispatch path.
+
+  # --- Resource-record occurrence lookup ---
+  - address: 0x0805af24
+    ghidra: FUN_0805af24
+    name: resource_record_find_nth
+    size: 180
+    sig: "i32 resource_record_find_nth(u8 **table_slot, u32 directory_offset, u32 record_tag, u32 occurrence, u8 *out_record_value)"
+    module: util/resource_record_find_nth
+    status: ported
+    renames:
+      param_1/r0/r5: table_slot
+      param_2/r1/lr: directory_offset
+      param_3/r2/r4: record_tag
+      param_4/r3/ip: occurrence
+      param_5/[sp+0x28]/r7: out_record_value
+      FUN_0809a844: retail_record_find_nth
+      iVar2/r4: record
+      iVar3/r6: record_offset
+    notes: >-
+      Raw osos.dec fixes the exact extent at 0x0805af24..0x0805afd4:
+      push {r0-r8,lr} through pop {r4-r8,pc}; the separately linked sibling
+      begins at 0x0805afd8. It rejects a NULL table slot or occurrence zero,
+      then calls the unported record-table walker 0x0809a844 with
+      (table_slot, directory_offset, record_tag, occurrence, 0, NULL, 1).
+      A non-NULL result returns its signed byte offset from *table_slot. If
+      out_record_value is non-NULL, four calls to read_u32_le at record+8
+      assemble the stored big-endian word, which store_u32_le_last_byte writes
+      to the output. Decoding every ARM B/BL-immediate word in osos.dec finds
+      exactly seven inbound calls, all unconditional plain bl at 0x080445f0,
+      0x080447c4, 0x0805ae98, 0x080d8038, 0x080e1e70, 0x080e1ea8, and
+      0x080e35f0; no predicated forms or tail B transfers target this entry.
+      The port uses a literal veneer for 0x0809a844 on ARM and a host callback
+      seam. It deliberately represents the original's four redundant
+      non-volatile byte loads as one read_u32_le plus swap_bytes; ordinary
+      mapped record data has the same value.
