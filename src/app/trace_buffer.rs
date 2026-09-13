@@ -6,6 +6,10 @@
 //!   pool at `0x0814a10c..0x0814a118`; **20 unconditional `bl` call sites,
 //!   no predicated `bl` forms or tail branches**, verified by decoding every
 //!   ARM B/BL word in `osos.dec`).
+//! - [`trace_buffer_slot_acquire_global`] — original: `FUN_08149f48` @
+//!   `0x08149f48` (**32-byte raw extent**: seven instructions plus the final
+//!   tail branch; **six unconditional `bl` call sites, no predicated forms**).
+
 //!
 //! ## Stock algorithm
 //!
@@ -232,6 +236,29 @@ pub unsafe extern "C" fn trace_buffer_get() -> *mut u8 {
     result
 }
 
+/// trace_buffer_slot_acquire_global — original: `FUN_08149f48` @ `0x08149f48`
+/// (32 bytes, next distinct function at `0x08149f68`).
+///
+/// Retrieves the lazily initialized global trace buffer, then forwards the
+/// selector and output lock guard to [`trace_buffer_slot_acquire`]. Raw ARM
+/// uses one unconditional `bl` to `trace_buffer_get`, restores its saved
+/// registers, then tail-branches to the resolver. All six callers are
+/// unconditional `bl` instructions; none predicates this lookup.
+///
+/// Deliberate deviation: Rust calls and returns from the resolver instead of
+/// expressing the final ARM tail branch. The callee's pointer result and
+/// caller-owned output guard are otherwise forwarded unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.trace_buffer_slot_acquire_global")]
+pub unsafe extern "C" fn trace_buffer_slot_acquire_global(
+    selector: u32,
+    entry_guard: *mut *mut CountedMutex,
+) -> *mut TraceBufferEntry {
+    trace_buffer_slot_acquire(trace_buffer_get().cast::<TraceBuffer>(), selector, entry_guard)
+}
+
+
 /// trace_buffer_slot_acquire — original: `FUN_0814a130` @ `0x0814a130`
 /// (144 bytes, next distinct function at `0x0814a1c0`).
 ///
@@ -395,6 +422,29 @@ mod tests {
             assert_eq!(entry_guard, ptr::addr_of_mut!(last.access_lock));
             assert_eq!(last.access_lock.hold_count, 1, "selector six is in range");
             assert_eq!(buffer.entries_lock.hold_count, 0, "each lookup balances the table lock");
+            mutex_unlock_counted(entry_guard);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn global_slot_acquire_uses_cached_buffer_and_forwards_guard() {
+        let guard = reset();
+        unsafe {
+            let mut entry = trace_buffer_entry();
+            let mut buffer = initialized_trace_buffer();
+            buffer.entries[6] = ptr::addr_of_mut!(entry);
+            TRACE_STATIC_GUARD = 1;
+            TRACE_BUFFER_CACHE = ptr::addr_of_mut!(buffer).cast::<u8>();
+            let mut entry_guard = ptr::null_mut();
+
+            assert_eq!(
+                trace_buffer_slot_acquire_global(6, ptr::addr_of_mut!(entry_guard)),
+                ptr::addr_of_mut!(entry),
+            );
+            assert_eq!(entry_guard, ptr::addr_of_mut!(entry.access_lock));
+            assert_eq!(entry.access_lock.hold_count, 1, "the forwarding wrapper preserves lock ownership");
+            assert_eq!(buffer.entries_lock.hold_count, 0, "the tail resolver releases the table lock");
             mutex_unlock_counted(entry_guard);
         }
         restore(guard);
