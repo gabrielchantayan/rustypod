@@ -66,6 +66,7 @@
 //! | 0x08275b9c | [`object_cast_to_class`] | 20 | 414 `bl` + 17 `b` |
 //! | 0x08187ad0 | [`demo_mode_keyed_object`] | 20 | 29 `bl` |
 //! | 0x081883fc | [`demo_mode_instance`] | 28 | 328 `bl` |
+//! | 0x08188064 | [`demo_mode_class_7d80_payload`] | 24 | 6 `bl` |
 //! | 0x08172124 | [`instance_of_class_6000`] | 24 | 72 `bl` |
 //! | 0x08171ff8 | [`instance_6000_settings_block`] | 8 | 13 `bl` |
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
@@ -705,6 +706,57 @@ pub unsafe extern "C" fn demo_mode_keyed_object(
     let keyed_registry =
         core::ptr::read_volatile(core::ptr::addr_of!((*demo_mode).keyed_registry));
     resolve(demo_mode, keyed_registry, key)
+}
+
+/// A class-0x7d80 object returned by the `TCDemoMode` cast, modeled only to
+/// its payload word at +0x124.
+#[repr(C)]
+struct DemoModeClass7d80 {
+    framework: FrameworkObject,
+    unresolved_04: [u32; 72],
+    payload: u32,
+}
+
+// The target's vtable pointer is one word, so 0x04 + 72 words = 0x124.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x124] = [0; core::mem::offset_of!(DemoModeClass7d80, payload)];
+
+/// Class id from the literal pool at 0x0818807c.
+const DEMO_MODE_CLASS_ID_7D80: u32 = 0x7d80;
+
+/// demo_mode_class_7d80_payload — original: `FUN_08188064` @ 0x08188064
+/// (24 bytes; **6 unconditional `bl` call sites**, binary-scanned over
+/// osos.dec: 0x0817fc48, 0x0817fd38, 0x08181ea4, 0x0818268c, 0x08183da0,
+/// and 0x08183fd0).
+///
+/// ```text
+/// ldr r0,[r0,#0x30] ; TCDemoMode's keyed registry
+/// ldr r1,=0x7d80
+/// bl  object_cast_to_class
+/// ldr r0,[r0,#0x124]
+/// ```
+///
+/// Casts the manager's active keyed registry to its class-0x7d80 object,
+/// then returns that object's +0x124 payload word. The code extent is exact:
+/// the 0x0818807c literal-pool word supplies the class id and the next
+/// separately linked function starts at 0x08188080.
+///
+/// No NULL guard is added: a NULL keyed registry can be rejected by
+/// [`object_cast_to_class`], after which the original immediately loads
+/// +0x124 and faults. Deviation: Rust expresses the `bl` and following `ldr`
+/// as a normal call and aligned volatile read; the returned value and memory
+/// access order are unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_class_7d80_payload(demo_mode: *mut DemoMode) -> u32 {
+    let keyed_registry =
+        core::ptr::read_volatile(core::ptr::addr_of!((*demo_mode).keyed_registry));
+    let object = object_cast_to_class(
+        keyed_registry.cast::<FrameworkObject>(),
+        DEMO_MODE_CLASS_ID_7D80,
+    )
+    .cast::<DemoModeClass7d80>();
+    core::ptr::read_volatile(core::ptr::addr_of!((*object).payload))
 }
 
 /// instance_of_class_6000 — original: `FUN_08172124` @ 0x08172124
@@ -2048,6 +2100,69 @@ mod tests {
 
         unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(second), STOCK_KEY) };
         assert_eq!(unsafe { KEYED_ARGS }.0, ptr::addr_of_mut!(second) as usize);
+    }
+
+    // ---- demo_mode_class_7d80_payload (0x08188064) ----
+
+    static CLASS_7D80_LOCK: Mutex<()> = Mutex::new(());
+    static mut CLASS_7D80_OBJECT: *mut u8 = ptr::null_mut();
+    static mut CLASS_7D80_THIS: *mut FrameworkObject = ptr::null_mut();
+    static mut CLASS_7D80_REQUESTED_ID: u32 = 0;
+
+    unsafe extern "C" fn class_7d80_cast(
+        this: *mut FrameworkObject,
+        class_id: u32,
+    ) -> *mut u8 {
+        unsafe {
+            CLASS_7D80_THIS = this;
+            CLASS_7D80_REQUESTED_ID = class_id;
+            CLASS_7D80_OBJECT
+        }
+    }
+
+    #[test]
+    fn class_7d80_payload_uses_the_registry_cast_and_reloads_the_payload_word() {
+        let _lock = CLASS_7D80_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let cast_vtable = FrameworkObjectVtable {
+            unresolved_00: [0; 5],
+            cast_to_class: class_7d80_cast,
+        };
+        let demo_vtable = keyed_vtable(wrong_keyed_slot);
+        let mut object = DemoModeClass7d80 {
+            framework: FrameworkObject { vtable: &cast_vtable },
+            unresolved_04: [0xa5a5_a5a5; 72],
+            payload: 0xdec0_adde,
+        };
+        let mut demo = DemoMode {
+            vtable: &demo_vtable,
+            manager: [0x1111_1111; 11],
+            keyed_registry: ptr::addr_of_mut!(object).cast(),
+        };
+
+        unsafe {
+            CLASS_7D80_OBJECT = ptr::addr_of_mut!(object).cast();
+            CLASS_7D80_THIS = ptr::null_mut();
+            CLASS_7D80_REQUESTED_ID = 0;
+        }
+        assert_eq!(
+            unsafe { demo_mode_class_7d80_payload(ptr::addr_of_mut!(demo)) },
+            0xdec0_adde,
+        );
+        assert_eq!(unsafe { CLASS_7D80_THIS }, ptr::addr_of_mut!(object).cast());
+        assert_eq!(unsafe { CLASS_7D80_REQUESTED_ID }, DEMO_MODE_CLASS_ID_7D80);
+        assert_eq!(object.unresolved_04, [0xa5a5_a5a5; 72], "only +0x124 is read");
+        assert_eq!(demo.manager, [0x1111_1111; 11], "the manager itself is only read at +0x30");
+
+        object.payload = 0;
+        assert_eq!(
+            unsafe { demo_mode_class_7d80_payload(ptr::addr_of_mut!(demo)) },
+            0,
+            "the +0x124 word is reloaded rather than cached"
+        );
+        unsafe {
+            CLASS_7D80_OBJECT = ptr::null_mut();
+            CLASS_7D80_THIS = ptr::null_mut();
+        }
     }
 
     // ---- instance_6000_settings_block ----
