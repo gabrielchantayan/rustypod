@@ -78966,3 +78966,38 @@ functions:
       cover big-endian fallback decoding, reverse override priority, equality,
       skipped higher boundaries, and adjusted-index fallback. Deliberate
       deviations: none.
+
+  # --- SQLite first-column SQL executor ---
+  - address: 0x082ccec4
+    ghidra: FUN_082ccec4
+    name: sqlite3_exec_first_column_sql
+    size: 116
+    sig: "i32 sqlite3_exec_first_column_sql(sqlite3 *db, const char *query)"
+    module: sqlite/exec_first_column_sql
+    status: ported
+    renames:
+      param_1/r0/r5: db
+      param_2/r1: query
+      local_4/sp+4: statement
+      FUN_08390dcc: sqlite3_prepare_v2
+      FUN_08391470: sqlite3_step
+      FUN_0838fae4: sqlite3_column_text
+      FUN_082ccf38: execute_sql_to_completion
+      FUN_083906d4: sqlite3_finalize
+    notes: >-
+      Raw osos.dec confirms the exact 116-byte extent
+      0x082ccec4..0x082ccf38: push {r2-r6,lr} through pop {r2-r6,pc}; the
+      next separately linked function begins at 0x082ccf38. Decoding every
+      ARM B/BL-immediate word finds exactly six direct inbound calls, all
+      unconditional plain bl at 0x083829cc, 0x083829e0, 0x083829f4,
+      0x08382a08, 0x08382a1c, and 0x08382a30; no predicated calls or direct
+      tail branches target this entry. It calls sqlite3_prepare_v2 with
+      query, nByte=-1, and NULL zTail; each SQLITE_ROW obtains
+      sqlite3_column_text(statement, 0) and executes that text. A prepare
+      failure returns directly. A terminal step returns sqlite3_finalize's
+      result; a nonzero nested execution result is saved across and returned
+      after finalization. sqlite3_step and sqlite3_finalize were already
+      ported and are called directly. The still-unported prepare, column-text,
+      and nested-execution calls use target-only fixed-address volatile seams.
+      Host tests prove the prepare-error, empty-query, row/finalizer-result,
+      and nested-execution-error paths. Deliberate deviations: none.
