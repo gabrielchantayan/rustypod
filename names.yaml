@@ -10285,6 +10285,27 @@ functions:
     vars: {param_1: ptr}
     notes: Swaps the 2 bytes at ptr in place via one stack byte. 27 call sites.
 
+  - address: 0x082d32f0
+    ghidra: FUN_082d32f0
+    name: bswap_80_byte_record_inplace
+    size: 64
+    sig: "void bswap_80_byte_record_inplace(u8 *record)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: record}
+    notes: >-
+      Raw extent is exactly 64 bytes at 0x082d32f0..0x082d3330; the distinct
+      following function starts at 0x082d3334, correcting Ghidra's 68-byte
+      extent. Reverses bytes 0..7 as one 8-byte lane, then reverses each of
+      the eighteen 4-byte lanes at offsets 8..76. The first lane calls the
+      unported 0x0805dca8 helper; the remaining 18 calls use ported
+      bswap32_inplace @ 0x0805dd10 directly. Decoding every ARM B/BL word in
+      osos.dec finds six plain unconditional BL callers (0x082d3260,
+      0x082d3268, 0x082d33d4, 0x082d33dc, 0x082d33e4, 0x082d33ec) and one
+      unconditional tail B at 0x082d33f8, with no predicated callers. The
+      port deliberately uses byte-wise volatile accesses, so unaligned input
+      is defined; aligned records match the retail halfword-load helpers.
+
   - address: 0x0805cfb4
     ghidra: FUN_0805cfb4
     name: bzero
