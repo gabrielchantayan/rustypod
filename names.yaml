@@ -79034,3 +79034,35 @@ functions:
       and nested-execution calls use target-only fixed-address volatile seams.
       Host tests prove the prepare-error, empty-query, row/finalizer-result,
       and nested-execution-error paths. Deliberate deviations: none.
+
+  # --- SQLite b-tree cell deletion ---
+  - address: 0x082c6850
+    ghidra: FUN_082c6850
+    name: btree_drop_cell
+    size: 156
+    sig: "void btree_drop_cell(MemPage *page, i32 index, i32 cell_size)"
+    module: sqlite/btree_drop_cell
+    status: ported
+    renames:
+      param_1/r0/r5: page
+      param_2/r1/r7: index
+      param_3/r2: cell_size
+      r4: cell_pointer_entry
+      r6: page_data
+      FUN_082cf5c8: btree_free_cell_space
+    notes: >-
+      Raw osos.dec confirms the exact 156-byte body from 0x082c6850 through
+      pop {r4-r7,pc} at 0x082c68e8; the separately linked next function
+      starts at 0x082c68ec. Decoding every ARM B/BL-immediate word finds six
+      direct inbound call sites, all plain unconditional bl at 0x082b6148,
+      0x082b61bc, 0x08371074, 0x08371120, 0x08371164, and 0x08371790; there
+      are zero predicated forms and no direct B tail transfer. This is SQLite
+      3.5.x dropCell: read the selected big-endian pointer-array entry, pass
+      its offset and the incoming r2 cell size to FUN_082cf5c8, shift later
+      entries left, decrement nCell, write the header count big-endian, add
+      two to nFree, and set MemPage+0x01 to one. Ghidra incorrectly dropped
+      r2 from this function's signature even though the raw body preserves it
+      into its sole outbound bl. FUN_082cf5c8 is not ported, so the Rust call
+      crosses a volatile seam whose device default reaches the retail address
+      and whose host default panics until tests install a recorder. Deliberate
+      deviations: none. Reference C: decomp/c/030/082c6850_FUN_082c6850.c.

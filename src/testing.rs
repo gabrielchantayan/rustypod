@@ -623,6 +623,10 @@ pub mod hints {
     // reference, vtable, element, header, and slot fixtures; mappings never
     // unmap, so no other user may share this hint.
     pub const ELEMENT_REFERENCE_ITEM: usize = 0x8e00_0000;
+    // 0x9800_0000: dedicated to sqlite/btree_drop_cell's target-width
+    // MemPage aData fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const BTREE_DROP_CELL: usize = 0x9800_0000;
     // 0x5300_0000 and 0x5400_0000: dedicated to the cxx shared-handle
     // initializer and its vtable-owner constructor fixtures; mappings never
     // unmap, so each mapping site has its own hint.
