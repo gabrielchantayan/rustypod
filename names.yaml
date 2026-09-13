@@ -44880,6 +44880,36 @@ functions:
       stores preserve the observed vtable-then-kind sequence. Host test covers
       return-this and preservation of all unmodified bytes.
 
+
+  # --- Tagged value assignment (cxx/tagged_value) ---
+  - address: 0x08258d60
+    ghidra: FUN_08258d60
+    name: tagged_value_assign
+    size: 28
+    sig: "TaggedValue *tagged_value_assign(TaggedValue *this, const TaggedValue *source)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      r2: source_kind_then_auxiliary
+      r1: source_payload
+    notes: >-
+      Raw ARM establishes a 28-byte, seven-instruction extent at
+      0x08258d60..0x08258d78; 0x08258d7c starts the separately linked
+      payload-pair comparison helper. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly six incoming direct calls, all unconditional bl:
+      0x08179f24, 0x08179f84, 0x0817a0c0, 0x0817a120, 0x0817bb18, and
+      0x0819c070. There are zero predicated bl and zero direct tail b calls.
+      No aligned osos.dec word equals 0x08258d60, so no stored
+      function-pointer dispatch was found. It transfers the source kind byte,
+      payload word, and auxiliary word in raw ARM's exact load/store order,
+      preserving destination vtable and padding bytes. r0 remains this at
+      return, consistent with an assignment operator. Deliberate deviation:
+      volatile Rust accesses preserve this ordering, including for overlapping
+      storage. Host coverage proves return-this, state transfer, and all
+      preserved destination bytes.
+
   # --- Tagged value comparison (cxx/tagged_value) ---
   - address: 0x08258d7c
     ghidra: FUN_08258d7c
