@@ -627,6 +627,10 @@ pub mod hints {
     // MemPage aData fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const BTREE_DROP_CELL: usize = 0x9800_0000;
+    // 0xa400_0000: dedicated to sqlite/move_to_root's target-width cursor,
+    // Btree, and MemPage fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const BTREE_MOVE_TO_ROOT: usize = 0xa400_0000;
     // 0x5300_0000 and 0x5400_0000: dedicated to the cxx shared-handle
     // initializer and its vtable-owner constructor fixtures; mappings never
     // unmap, so each mapping site has its own hint.
