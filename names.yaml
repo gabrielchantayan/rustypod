@@ -57845,6 +57845,51 @@ functions:
       --lib <worktree>: identical skeleton, 51 instructions vs 39; the
       deltas are the ops-table ldrd/blx indirection, the crate fp
       prologue, and archive bl relocations.
+  - address: 0x0826d6e8
+    ghidra: FUN_0826d6e8
+    name: view_base_set_y_extent
+    size: 184
+    sig: "u32 view_base_set_y_extent(ViewBase *view, u32 extent)"
+    module: ui/set_y_extent
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: extent
+      local_20: bounds.x_start
+      local_1c: bounds.y_start
+      iStack_18: bounds.x_end
+      local_14: bounds.y_end
+      bVar1/r5: geometry_changed
+      FUN_0826db38: geometry_changed (unported, established seam)
+    notes: >-
+      Paired ViewBase y-axis extent setter. Extent is raw-byte verified as
+      exactly 184 bytes: push {r0-r6,lr} at 0x0826d6e8 through the branch
+      at 0x0826d79c; the next separately linked function begins bx lr at
+      0x0826d7a0 (an empty destructor). B/BL-word decoding of every ARM
+      instruction in osos.dec finds exactly 7 direct call sites: six plain
+      bl (0x0810233c, 0x0810adf4, 0x0815810c, 0x081b8844, 0x081da020,
+      0x082911b8) plus one blgt at 0x081f4310. No direct B tail branch or
+      data word targets this entry. The predicated caller clamps the new
+      extent and calls only when it is positive; the setter has no NULL
+      guard and calls its virtual slot whenever the current y extent
+      differs. It snapshots ViewBase+0x80 as {x_start,y_start,x_end,y_end};
+      equal y_end-y_start returns immediately. Otherwise the y-end mode at
+      geometry +0x78 (bit 0x20 ignored) selects relative
+      (0x80000001: store y_start+extent) or absolute (0x80000004: store
+      extent) end rules; otherwise the y-start absolute mode at +0x60
+      stores extent at +0x64 and moves the temporary y_start back from
+      y_end, or the generic mode adjusts only temporary y_end. It dispatches
+      vtable +0x68 as (view,&bounds,1), then calls geometry_changed unless
+      generic mode was selected. The final pop restores the snapshotted
+      x_start into r0, so the Rust ABI accurately returns that u32 despite
+      Ghidra's undefined8 result. Deliberate host deviation: reuse the
+      existing VIEW_BASE_SLOT_68 host seam (not a new dispatch seam); target
+      reads the live slot. Its grand-base target word 0x08105d0c points into
+      an instruction stream, so no callee identity is invented. The shared
+      unported geometry_changed helper at 0x0826db38 stays behind its
+      established target/host seam. Host test maps a dedicated low-u32 slab
+      and proves all four rule paths, bit-0x20 masking, equal-extent early
+      return, the raw x_start result, and the callback/changed-call gates.
   # --- vector<T>::push_back, 12-byte element ---
   - address: 0x0816caa4
     ghidra: FUN_0816caa4
