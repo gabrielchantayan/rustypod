@@ -78244,3 +78244,34 @@ functions:
       retains raw target-width u32 links so its repr(C) layout remains
       firmware-accurate on both ARM and 64-bit host fixtures; no deliberate
       behavioral deviation.
+
+  # --- child-table walker ---
+  - address: 0x083925cc
+    ghidra: FUN_083925cc
+    name: child_table_reconcile
+    size: 80
+    sig: "void child_table_reconcile(void *context, const ChildTable *children, u32 selector, void *replacement)"
+    module: app/child_table_reconcile
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: children
+      param_3/r2: selector
+      param_4/r3: replacement
+      r4: index
+    notes: >-
+      Raw osos.dec is exactly 80 bytes from 0x083925cc through the ldmia
+      return at 0x08392618; the next separately linked function starts at
+      0x0839261c. A NULL child table returns immediately. Otherwise the signed
+      count at +0x00 controls an ascending walk of the +0x0c entry array,
+      forwarding each entry's word +0x00 to the unported reconciler
+      FUN_08392498 at 0x08392498 with the unchanged context, selector, and
+      replacement arguments. Counts <= 0 do not load the entry pointer.
+      Decoding every ARM B/BL immediate finds exactly six direct inbound calls:
+      five unconditional BL at 0x082ce8dc, 0x082ce8fc, 0x08392644, 0x08392658,
+      and 0x0839266c, plus one BLNE at 0x082ce940; there are no direct B tails
+      or aligned raw-word references. The predicated call verifies that callers
+      sometimes gate execution themselves, while this routine retains its NULL
+      guard. ARM calls the unported child reconciler at its fixed address; host
+      tests use a recording seam. repr(C) named fields keep target-width fields
+      distinct without overlapping 64-bit host pointers.
