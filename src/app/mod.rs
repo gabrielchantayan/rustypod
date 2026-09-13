@@ -205,6 +205,7 @@ pub mod string_resolve;
 pub mod string_table;
 pub mod tag_handler_registry;
 pub mod type_handler_lookup;
+pub mod typed_handler_registry_lookup;
 pub mod stream_context_reset_notify;
 pub mod stream_cache_mass_storage_manager;
 pub mod string_owner_init;
