@@ -32,6 +32,7 @@ pub mod file_directory_entry;
 /// accessor in the codegen address block.
 pub mod field_10_low_u16;
 pub mod heap;
+pub mod module_owner;
 pub mod ir;
 /// `cg_emit_load_word_at_offset` @ 0x082605f0 — emission sugar the
 /// pipeline generators share; it lives in their address block, not the
