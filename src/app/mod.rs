@@ -123,6 +123,7 @@ pub mod message_kind_arena;
 pub mod member_release;
 pub mod negate_i32_in_place;
 pub mod node_list;
+pub mod child_table_reconcile;
 pub mod notes_dispatcher_status;
 pub mod no_content_layout_default;
 pub mod object_byte_at_5;
