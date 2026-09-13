@@ -4719,6 +4719,44 @@ functions:
       --lib) preserves the +0xc1 gate, +0xc4 timer path, +0xb0 literal-one
       activity call and final byte clear; LLVM inlines ported timer_stop.
 
+  # --- Controller context-scope virtual dispatch ---
+  - address: 0x0821995c
+    ghidra: FUN_0821995c
+    name: controller_context_scope_dispatch
+    size: 80
+    sig: "void controller_context_scope_dispatch(const BodyBearingController *controller)"
+    module: app/controller_context_scope_dispatch
+    status: ported
+    renames:
+      param_1/r0: controller
+      auStack_8/sp+0x18: refcounted body handle
+      auStack_1c/sp+0x04: context scope record
+      FUN_08218e04: refcounted_body_acquire_from_controller (already ported)
+      FUN_083d604c: handle_deref_or_null (already ported)
+      "implementation vtable+0x23c": unidentified context-scope virtual dispatch
+      FUN_0839cd98: refcounted_body_release (already ported)
+      FUN_08284034: unported scope-subject marker (direct volatile seam)
+      FUN_08284188: context_scope_drop (already ported empty destructor)
+    notes: >-
+      Raw ARM confirms Ghidra's complete 80-byte extent: push {lr} opens at
+      0x0821995c, pop {pc} closes at 0x082199a8, and the distinct next function
+      starts at 0x082199ac. Decoding every aligned ARM B/BL word in osos.dec
+      finds exactly six direct inbound calls, all unconditional plain bl at
+      0x0821948c, 0x0821961c, 0x082268dc, 0x082324e0, 0x08238ab8, and
+      0x08238c3c; there are no predicated or direct-tail callers. The body
+      acquires controller+0xb4, dereferences the temporary handle, invokes the
+      implementation vtable's unidentified slot 143 (+0x23c) on a 20-byte
+      context-scope record, releases the handle, calls unported 0x08284034 to
+      set subject+0x618, and calls the already ported empty scope destructor.
+      The only new seam is 0x08284034: target builds call that firmware address
+      and host tests install its observed byte-store behavior. The virtual target
+      is intentionally not invented. Host test uses the unique
+      CONTROLLER_CONTEXT_SCOPE_DISPATCH u32 slab to prove dispatch, reference
+      release, and final subject-byte marking. match.py against this worktree
+      archive reports the same acquire/handle/vtable-slot/release/marker order;
+      LLVM uses a larger frame and an indirect volatile seam for the unported
+      marker, so an instruction-exact match is not expected.
+
   - address: 0x082199bc
     ghidra: FUN_082199bc
     name: update_dispatch
