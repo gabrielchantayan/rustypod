@@ -38735,6 +38735,41 @@ functions:
       expected because LLVM emits the inlined scanner and volatile seam
       dispatch instead of the original sscanf bl.
 
+  - address: 0x08102194
+    ghidra: FUN_08102194
+    name: string_table_parse_u32_hex
+    size: 40
+    sig: "u32 string_table_parse_u32_hex(u8 *table, const u32 *key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_08101c14: string_table_value
+      FUN_0802f92c: sscanf
+      local_8: parsed_value
+    notes: >-
+      Resolves key through the unported string-table lookup FUN_08101c14,
+      reads the selected COW string's data-pointer word, scans one unsigned
+      long hexadecimal "%lx" conversion into a pre-zeroed local, and returns
+      its u32 value. Raw code is 0x08102194..0x081021b8; the trailing
+      "%lx\0" literal is at 0x081021bc..0x081021bf and the distinct sibling
+      starts at 0x081021c0, so Ghidra's 40-byte size is exact. Decoding every
+      aligned ARM B/BL word in osos.dec finds 7 direct bl call sites, all
+      unconditional, with zero predicated forms. FUN_08101c14 remains the
+      established volatile lookup seam whose device default transmutes the
+      verified target address; it returns the address of the mapped COW
+      string's target-width data-pointer word. The direct Rust sscanf veneer
+      cannot consume the original C-varargs output destination in r2, so this
+      port inlines the scanf integer worker's "%x" semantics: C whitespace,
+      optional sign, optional 0x/0X prefix, hexadecimal digit run,
+      modulo-2^32 accumulation, and zero on a matching failure. A dedicated
+      low-u32 host fixture proves lookup argument forwarding plus mixed-case,
+      signed, prefixed, overflow-wrapping, prefix-stopping, bare-prefix, and
+      nonnumeric inputs. match.py structural diff is expected because LLVM
+      emits the inlined scanner and volatile seam dispatch instead of the
+      original sscanf bl.
+
   - address: 0x08003e00
     ghidra: FUN_08003e00
     name: rom_task_start

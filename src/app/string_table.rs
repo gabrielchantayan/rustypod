@@ -301,6 +301,89 @@ unsafe fn scan_signed_decimal(input: *const u8) -> u32 {
         value
     }
 }
+/// Parses the exact single `"%lx"` conversion used by the original wrapper.
+///
+/// The scanf integer worker skips C whitespace, accepts one sign, recognizes
+/// a `0x`/`0X` prefix for base 16, collects hexadecimal digits with
+/// modulo-2^32 arithmetic, and leaves the caller's pre-zeroed output
+/// unchanged when no digit is present.
+#[inline(always)]
+unsafe fn scan_unsigned_hex(input: *const u8) -> u32 {
+    let mut cursor = input;
+    while matches!(cursor.read(), b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r') {
+        cursor = cursor.add(1);
+    }
+
+    let negative = match cursor.read() {
+        b'+' => {
+            cursor = cursor.add(1);
+            false
+        }
+        b'-' => {
+            cursor = cursor.add(1);
+            true
+        }
+        _ => false,
+    };
+
+    let mut value = 0u32;
+    let mut saw_digit = false;
+    if cursor.read() == b'0' {
+        saw_digit = true;
+        cursor = cursor.add(1);
+        if matches!(cursor.read(), b'x' | b'X') {
+            saw_digit = false;
+            cursor = cursor.add(1);
+        }
+    }
+
+    loop {
+        let byte = cursor.read();
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => break,
+        };
+        saw_digit = true;
+        value = value.wrapping_mul(16).wrapping_add(digit as u32);
+        cursor = cursor.add(1);
+    }
+
+    if saw_digit && negative {
+        value.wrapping_neg()
+    } else {
+        value
+    }
+}
+
+/// `string_table_parse_u32_hex` — original: `FUN_08102194` @ **0x08102194**
+/// (40 bytes of code, 0x08102194..0x081021b8; the trailing `"%lx\0"` literal
+/// occupies 0x081021bc..0x081021bf and the sibling function starts at
+/// 0x081021c0).
+///
+/// Decoding every aligned ARM B/BL word in `osos.dec` finds **7 direct `bl`
+/// call sites**, all unconditional; there are no predicated forms. Resolves
+/// `key` through `FUN_08101c14`, scans the resulting COW-string data as one
+/// unsigned-long hexadecimal `"%lx"` conversion into a zero-initialized local,
+/// and returns that 32-bit value. There is no NULL guard on either input or on
+/// the returned COW data pointer.
+///
+/// Deliberate deviation: the existing Rust `sscanf` veneer cannot consume its
+/// C-varargs destination (the original passes the local in r2), so this port
+/// inlines the already-ported scanf integer worker's `%x` behavior. The
+/// unported lookup remains the established `read_volatile` ops seam at its
+/// verified target address 0x08101c14.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_parse_u32_hex(
+    table: *mut u8,
+    key: *const u32,
+) -> u32 {
+    let value = unsafe { (string_table_parse_ops().lookup)(table, key).read() };
+    unsafe { scan_unsigned_hex(value as usize as *const u8) }
+}
+
 
 /// `string_table_parse_i32` — original: `FUN_08102168` @ **0x08102168**
 /// (40 bytes, 0x08102168..0x08102190; the trailing `"%d\0"` literal occupies
@@ -1779,4 +1862,47 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn parses_unsigned_hexadecimal_value_from_lookup_result() {
+        let (_guard, _seam) = lock();
+        let Some(base) = try_map_u32_slab(hints::STRING_TABLE_PARSE_U32_HEX, PARSE_SLAB_SIZE) else {
+            assert!(note_missing_u32_fixture("app/string_table"));
+            return;
+        };
+        let value_word = base.cast::<u32>();
+        let text = unsafe { base.add(PARSE_TEXT_OFFSET) };
+        let table = 0x1234usize as *mut u8;
+        let key = 0x5678usize as *const u32;
+        unsafe {
+            ptr::write_bytes(base, 0, PARSE_SLAB_SIZE);
+            value_word.write(text as usize as u32);
+            PARSE_VALUE_WORD = value_word;
+            PARSE_LOOKUP_CALLS = 0;
+            PARSE_LOOKUP_ARGUMENTS = None;
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_PARSE_OPS),
+                StringTableParseOps {
+                    lookup: mock_parse_value,
+                },
+            );
+
+            for (input, expected) in [
+                (&b"2a\0"[..], 0x2au32),
+                (&b" \t+deadBEEF trailing\0"[..], 0xdead_beef),
+                (&b"-2a\0"[..], 0xffff_ffd6),
+                (&b"0X10\0"[..], 0x10),
+                (&b"0x100000000\0"[..], 0),
+                (&b"12g\0"[..], 0x12),
+                (&b"0x\0"[..], 0),
+                (&b"nonnumeric\0"[..], 0),
+            ] {
+                ptr::write_bytes(text, 0, PARSE_SLAB_SIZE - PARSE_TEXT_OFFSET);
+                ptr::copy_nonoverlapping(input.as_ptr(), text, input.len());
+                assert_eq!(string_table_parse_u32_hex(table, key), expected, "{input:?}");
+            }
+            assert_eq!(PARSE_LOOKUP_CALLS, 8);
+            assert_eq!(PARSE_LOOKUP_ARGUMENTS, Some((table as usize, key as usize)));
+        }
+    }
 }
