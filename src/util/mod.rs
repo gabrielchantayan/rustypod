@@ -32,6 +32,7 @@ pub mod drive;
 pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod framed_word_buffer_decode;
+pub mod matrix_state_apply_transform;
 pub mod fixed_matrix_cursor;
 pub mod field_access;
 pub mod four_word_record;
