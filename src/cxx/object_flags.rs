@@ -889,6 +889,38 @@ pub unsafe extern "C" fn namespace_provider_at(
             .read_volatile()
     }
 }
+/// namespace_provider_set — original: `FUN_083697f8` @ `0x083697f8`
+/// (24 bytes, `0x083697f8..0x08369810`; the next independently linked
+/// function begins with `ldr r2,[r0,#16]` at `0x08369810`). Verified inbound
+/// branches: 6 `bl` calls, all unconditional; decoding every ARM B/BL word
+/// in osos.dec found 0 predicated forms.
+///
+/// Stores `value` to `table[index]`, where `table` is the provider-pointer
+/// table at `providers + 0x04`, and returns `value`. A NULL `providers`
+/// returns zero without dereferencing it. The raw `movs/moveq` guard does
+/// not validate the table pointer or index: a non-NULL object with an invalid
+/// table pointer faults on the indexed store, exactly as in retailOS.
+///
+/// Deviation: on 64-bit hosts the target's +0x04 pointer field is unaligned,
+/// so its load uses `read_unaligned`; ARM reads the aligned field directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_set(
+    providers: *mut u32,
+    index: u32,
+    value: u32,
+) -> u32 {
+    if providers.is_null() {
+        return 0;
+    }
+    #[cfg(target_os = "none")]
+    let table = providers.add(1).cast::<*mut u32>().read_volatile();
+    #[cfg(not(target_os = "none"))]
+    let table = core::ptr::read_unaligned(providers.add(1).cast::<*mut u32>());
+    table.wrapping_add(index as usize).write_volatile(value);
+    value
+}
+
 
 /// Word index of the entry count (`ldr/str [r4]` / `[r0]`). Pointer-sized
 /// word indexing: byte-exact on the 32-bit target, disjoint slots on a
@@ -2875,6 +2907,10 @@ mod tests {
         fn ptr(&self) -> *const u32 {
             self.0.as_ptr().cast()
         }
+
+        fn mut_ptr(&mut self) -> *mut u32 {
+            self.0.as_mut_ptr().cast()
+        }
     }
 
     #[test]
@@ -2918,6 +2954,30 @@ mod tests {
         );
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 2) }, table[2]);
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 3) }, table[3]);
+    }
+
+    #[test]
+    fn namespace_provider_set_null_returns_zero() {
+        assert_eq!(
+            unsafe { namespace_provider_set(core::ptr::null_mut(), 3, 0xfeed_face) },
+            0
+        );
+    }
+
+    #[test]
+    fn namespace_provider_set_writes_requested_table_entries_and_returns_value() {
+        let mut table = [0x1111_1111u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+        let mut providers = NamespaceProviders::new(4, table.as_ptr());
+
+        assert_eq!(
+            unsafe { namespace_provider_set(providers.mut_ptr(), 0, 0xa0a0_a0a0) },
+            0xa0a0_a0a0
+        );
+        assert_eq!(
+            unsafe { namespace_provider_set(providers.mut_ptr(), 3, 0xd0d0_d0d0) },
+            0xd0d0_d0d0
+        );
+        assert_eq!(table, [0xa0a0_a0a0, 0x2222_2222, 0x3333_3333, 0xd0d0_d0d0]);
     }
 
     /// Serializes namespace_provider_insert_at/push tests and their shared
