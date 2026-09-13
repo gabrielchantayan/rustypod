@@ -67752,6 +67752,32 @@ functions:
       order; the already-established raw I2C target/host seam uses an
       indirect blx call in place of the retail direct bl call.
 
+  # --- I2C slave 0x39 register-0 low-bit setter ---
+  - address: 0x0836e430
+    ghidra: FUN_0836e430
+    name: i2c_0x39_set_register0_low_bits
+    size: 16
+    sig: "i32 i2c_0x39_set_register0_low_bits(u32 value)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0/r2: value
+      FUN_0836e234: i2c_0x39_update_register_masked
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0836e430..0x0836e440: mov r2,r0;
+      mov r0,#0; mov r1,#3; b 0x0836e234. The next independently linked
+      function begins at 0x0836e440, with no literal pool. This tail wrapper
+      selects register 0 and mask 3, so it replaces only bits 0..1 with the
+      low two bits of value. The unported target reads the register, returns
+      its failure unchanged, otherwise writes (old & !mask) | (value & mask)
+      and returns that write status. Decoding every ARM B/BL immediate in
+      osos.dec finds six direct inbound calls, all unconditional plain bl and
+      no predicated forms: 0x0808467c, 0x08084690, 0x080846a0, 0x080e1818,
+      0x080e1828, and 0x082d9694. The Rust port inlines this fixed operation
+      through the already ported I2C register read/write wrappers rather than
+      tail-branching to the unported shared helper; transfer order and status
+      behavior are unchanged.
+
   # --- Encoded word block signed-shift dispatcher ---
   - address: 0x08342d70
     ghidra: FUN_08342d70
