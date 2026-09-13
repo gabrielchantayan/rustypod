@@ -75315,3 +75315,36 @@ functions:
       constructor pointer. Host tests
       prove tag-2 size 0x48 allocation and forwarding for zero, ordinary,
       high-bit, and u32::MAX argument values.
+
+  # --- UTF-16 query token scoring ---
+  - address: 0x08131734
+    ghidra: FUN_08131734
+    name: search_query_token_score
+    size: 168
+    sig: "u32 search_query_token_score(void *context, void *candidate, const u16 *query)"
+    module: app/search_query_token_score
+    status: ported
+    renames:
+      param_1/r0/r7: context
+      param_2/r1/r8: candidate
+      param_3/r2/r4: query
+      r3: token_length
+      r5: total_score
+      r6: is_first_token
+      FUN_0813305c: token_match_score
+    notes: >-
+      Raw ARM corrects the reported 164-byte extent: code occupies
+      0x08131734..0x081317d8 and the 10000 first-token-exact-score literal
+      is the final word at 0x081317d8, so the next separately linked function
+      starts at 0x081317dc and the true extent is 168 bytes. Splits the
+      NUL-terminated UTF-16 query on U+0020 only, forwarding every nonempty
+      token and its counted u16 length to the unported direct helper
+      0x0813305c. A zero helper score short-circuits to zero; otherwise scores
+      wrap-add, except an exact 1000 from the first token contributes 10000.
+      Raw ARM overwrites incoming r3 with the token length, so Ghidra's fourth
+      argument is dead. Decoding every aligned ARM B/BL immediate in osos.dec
+      finds exactly seven inbound direct calls, all unconditional plain bl at
+      0x08131950, 0x08131a74, 0x08131b94, 0x08131cbc, 0x08132884,
+      0x0813299c, and 0x08132ae8; no predicated bl forms. No ledger entry
+      exists for 0x0813305c, so the target port calls that verified retail
+      address and host tests replace it through a volatile seam.
