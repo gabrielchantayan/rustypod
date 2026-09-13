@@ -359,6 +359,9 @@ pub mod hints {
     // 0xd000_0000: dedicated to app/animation's destructor fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const ANIMATION_DESTROY: usize = 0xd000_0000;
+    // 0xd100_0000: dedicated to ui/operation_destroy's raw-u32 operation
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const UI_OPERATION_DESTROY: usize = 0xd100_0000;
     // 0x2f00_0000: dedicated to ui/plst_next's raw-u32 element and
     // chain-node fixture; mappings never unmap, so no other user may
     // share this hint.
