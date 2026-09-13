@@ -51709,6 +51709,46 @@ functions:
       the target layout and avoid host pointer/u32 overlap. Host tests cover
       failed lookup, a successful lookup's BMap kind/id/allocation/parser
       arguments, and the already-loaded no-op path.
+  - address: 0x082995a0
+    ghidra: FUN_082995a0
+    name: bitmap_draw_bottom_left_at
+    size: 136
+    sig: "void bitmap_draw_bottom_left_at(u8 *wrapper, u8 *ctx, const Point *anchor)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1/r0: wrapper
+      param_2/r1: ctx
+      param_3/r2: anchor
+      local_20: source_bounds
+      local_30: destination_bounds
+      FUN_082993b4: bitmap_ensure_loaded
+      FUN_082a1dbc: bitmap_object_read_bounds
+      FUN_0826c574: rect_offset
+      FUN_08262bdc: bitmap_draw_helper (BITMAP_HOOKS.draw seam)
+    notes: >-
+      Raw ARM confirms the 136-byte extent: push {r4,r5,r6,lr} at
+      0x082995a0 through pop {r4,r5,r6,pc} at 0x08299624; the distinct
+      sibling starts at 0x08299628. Decoding every ARM B/BL word in osos.dec
+      finds six direct incoming calls: five plain bl at 0x08186044,
+      0x08186098, 0x0826d104, 0x0828c370, and 0x0828c3f0, plus one blne at
+      0x0828c3b4. The predicated caller gates drawing on its own condition;
+      the callee has no matching flag test beyond wrapper.loaded. There are
+      no tail branches or aligned raw data-word references to this address.
+      Algorithm: always call bitmap_ensure_loaded(wrapper) first; return when
+      wrapper+0x08 remains zero. Read the parsed object's four bounds words
+      into source_bounds, copy them to destination_bounds, then call
+      rect_offset(destination_bounds, anchor.x,
+      anchor.y - (source_bounds.bottom - source_bounds.top)). Finally invoke
+      bitmap_draw_helper(ctx, wrapper+0xc4, source_bounds,
+      destination_bounds, 0xff, 0). The draw helper receives opacity 0xff
+      and a hard zero reserved word. The bottom-left name is inferred from
+      the translated BMap bounds: when the usual source top/left are zero,
+      the destination's bottom-left is anchor. Deliberate deviation: the
+      unported draw helper remains the existing volatile BITMAP_HOOKS.draw
+      seam with a no-op default; the loader, bounds getter, and rect offset
+      are called directly. Host tests cover the loaded translation, source
+      preservation, fixed trailing words, and unloaded skip path.
   # --- Tagged payload-word signed-field +0x52 getter ---
   - address: 0x0829be90
     ghidra: FUN_0829be90
