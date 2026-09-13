@@ -33954,6 +33954,32 @@ functions:
       fp frame and LLVM's argument setup order. No link_section needed:
       the body is not byte-identical to any sibling adapter.
 
+  - address: 0x081249f4
+    ghidra: FUN_081249f4
+    name: tbm_app_client_cache_get
+    size: 68
+    sig: "void *tbm_app_client_cache_get(u32 index)"
+    module: app/tbm_app_client_cache
+    status: ported
+    renames:
+      param_1/r0/r4: index
+      DAT_08124a30: tbm_app_client_cache_disabled
+      DAT_08124a34: tbm_app_client_cache
+      FUN_081246d8: tbm_app_client_cache_fill
+    notes: >-
+      Returns NULL while the byte global at 0x089cb2c4 is nonzero;
+      otherwise volatile-loads cache[index] from the two-word table whose
+      address is held at 0x089cb2dc. A NULL entry calls the unported real
+      initializer 0x081246d8 and reloads the slot, preserving a NULL result
+      if initialization fails. The raw extent is 68 bytes: Ghidra's reported
+      60 covers code 0x081249f4..0x08124a2c but excludes the two literal
+      words at 0x08124a30/0x08124a34; the separately linked next function
+      begins at 0x08124a38. Complete osos.dec ARM B/BL decoding finds seven
+      direct callers, all unconditional bl, with zero predicated bl forms or
+      direct tail-b callers. The unchecked index is retained. Firmware calls
+      the unported initializer through a literal veneer; host tests supply a
+      private fill seam and RAM mirror. match.py structural review expected.
+
   - address: 0x08124a38
     ghidra: FUN_08124a38
     name: pair_header_construct
