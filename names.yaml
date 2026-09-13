@@ -61185,6 +61185,33 @@ functions:
       deviations: none. Host coverage proves all three valid slot offsets,
       NULL propagation, and the uncached reload.
 
+  - address: 0x08193efc
+    ghidra: FUN_08193efc
+    name: service_manager_secondary_handler_kind_get
+    size: 20
+    sig: "u32 service_manager_secondary_handler_kind_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_1_plus_slot_times_0x20_plus_0x14: handler_kind
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x08193efc..0x08193f10: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; ldr r0,[r0,#20]; bx lr`; the
+      following `cmp r1,#3` at 0x08193f10 begins the paired setter. It
+      returns the full word at +0x14 from one of three 8-word secondary
+      handler records. The signed `blge` admits negative slots, which
+      address unchecked before the table exactly as retailOS does; slots >=3
+      terminate through ported non-returning heap_panic. Callers compare the
+      result against 1 and 0x13 to select handler behavior, so `kind`
+      records the verified role without inventing a concrete handler identity.
+      Decoding every ARM B/BL word in osos.dec found exactly 7 inbound direct
+      call sites — 0x0818e840, 0x0818f2e8, 0x08190e6c, 0x081924a8,
+      0x081d760c, 0x081f2e90, and 0x081f2f54 — all unconditional plain BL,
+      with no predicated forms or tail branches. Deliberate deviations: none.
+
   - address: 0x0819420c
     ghidra: FUN_0819420c
     name: service_manager_slot_flags_or
