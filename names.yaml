@@ -74785,3 +74785,34 @@ functions:
       statics with the stock all-zero pre-init state; the unported pool
       constructor uses this accessor's unique volatile seam, firmware default
       on target and a required test installation on host.
+
+  # --- Coordinate interpolation delta ---
+  - address: 0x081c99ec
+    ghidra: FUN_081c99ec
+    name: interpolate_coordinate_delta
+    size: 132
+    sig: "i32 interpolate_coordinate_delta(void *context, i32 start_x, i32 end_x, i32 sample_x, const CoordinateInterpolationBounds *bounds)"
+    module: fp/fp_interpolate
+    status: ported
+    renames:
+      param_1: context (dead in body)
+      param_2: start_x
+      param_3: end_x
+      param_4: sample_x
+      param_5: bounds
+      "bounds+0x4": start_y
+      "bounds+0xc": end_y
+      FUN_08031568: __rt_sdiv (ported, runtime/rt_div)
+    notes: >-
+      Raw osos.dec has exactly 33 ARM words from 0x081c99ec through the pop
+      at 0x081c9a6c; the separately linked helper starts at 0x081c9a70, so
+      Ghidra's 132-byte extent is exact. Decoding every ARM B/BL immediate in
+      osos.dec found seven direct inbound call sites, all unconditional plain
+      bl and none predicated: 0x081c9778, 0x081c9884, 0x081c9bd8,
+      0x081c9bf8, 0x081c9cac, 0x081c9df0, and 0x081ca0e0. For a nonzero
+      end_x-start_x, calculate ((end_y-start_y)*(sample_x-start_x)) /
+      (end_x-start_x) through the ported ADS signed divider, then keep and
+      sign-extend its low 16 bits. A zero horizontal span returns the
+      signed-low-16-bit vertical span only when end_x is nonzero, otherwise
+      zero. The pre-division subtraction and multiply wrap at 32 bits. The
+      first ABI argument is dead; the Rust name context documents that fact.
