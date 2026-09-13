@@ -43,5 +43,6 @@ pub mod stream_transfer;
 pub mod transfer_default_mode;
 pub mod timer;
 pub mod uart;
+pub mod usb_high_speed_mode;
 pub mod wheel;
 pub mod wmcodec;

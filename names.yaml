@@ -75643,3 +75643,25 @@ functions:
       singleton_class_8900's documented crate-cache and zeroing-constructor
       seam, so it is not hook-ready until FUN_081ee0c0 can construct the
       class-0x8900 resource store.
+
+  - address: 0x08107f04
+    ghidra: FUN_08107f04
+    name: usb_high_speed_mode_active
+    size: 24
+    sig: "u32 usb_high_speed_mode_active(void)"
+    module: drivers/usb_high_speed_mode
+    status: ported
+    renames:
+      _DAT_38400808: usb_link_status
+    notes: >-
+      Raw ARM is 24 code bytes at 0x08107f04..0x08107f1c; the independent
+      function at 0x08107f1c starts with `push {r4, r5, r6, lr}`. The routine
+      volatile-loads USB link status 0x38400808 and returns one exactly when
+      `(status & 6) == 0`. Its seven inbound direct calls are all
+      unconditional plain bl at 0x081085b4, 0x08293560, 0x08293820,
+      0x08294434, 0x08294584, 0x08294a2c, and 0x08294bf0; decoding every
+      aligned ARM B/BL immediate in osos.dec found no predicated forms. Callers
+      choose 0x200-byte versus 0x40-byte transfer packets from this result,
+      identifying the clear status as USB high-speed mode. Host tests replace
+      only the MMIO word with a volatile stand-in. #[inline(never)] and a
+      distinct link section preserve this direct-call hook target.
