@@ -80002,3 +80002,31 @@ functions:
       unaligned, and dangling pointers. Its target-only text section prevents
       identical-code folding with the other hookable empty-destructor exports.
       Host tests prove pointer preservation and that no object byte is stored.
+
+  - address: 0x082794b8
+    ghidra: FUN_082794b8
+    name: dispatch_stream_to_sink
+    size: 20
+    sig: "uint32_t dispatch_stream_to_sink(StreamSinkDispatchContext *context)"
+    module: util/stream_sink_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_1_plus_4: stream
+      param_1_plus_16: sink
+      r2: dispatch_stream
+    notes: >-
+      Raw osos.dec confirms the five-word 20-byte body at 0x082794b8, with
+      the next distinct function at 0x082794cc: it loads context+4 into r1,
+      context+16 into r0, dereferences sink then its vtable, and bx-dispatches
+      vtable slot +0 as dispatch(sink, stream). The concrete sink class and
+      slot-zero callee identity are not recovered, so the port names only the
+      observed dispatch role. A complete aligned ARM B/BL-immediate decode
+      finds exactly six direct inbound calls, all unconditional plain bl at
+      0x0827a2fc, 0x0827a448, 0x0827aa0c, 0x0827ab44, 0x0827ac78, and
+      0x0827adb0; there are no predicated forms. The original has no NULL
+      guards and tail-transfers the virtual result in r0. Rust uses a normal
+      call but propagates that u32 result; its host-only vtable view widens the
+      function pointer while the 32-bit target layout remains exact. Host tests
+      prove sink/stream forwarding, status propagation, and unguarded NULL
+      stream forwarding.
