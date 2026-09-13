@@ -32,6 +32,7 @@
 
 use crate::app::resource_chain::{resource_chain_find, ResourceKind, ResourceProvider};
 use crate::heap::veneers::operator_new;
+use crate::ui::rect::{rect_offset, Point, Rect};
 
 /// The target's 0xC8-byte bitmap-resource wrapper. `#[repr(C)]` preserves
 /// the target's four-byte resource-head field, id, flag, argument block, and
@@ -338,6 +339,54 @@ pub unsafe extern "C" fn bitmap_draw_in_rect(
         (hooks().draw)(ctx, object, rect_a, rect_b, alpha, 0);
     }
 }
+/// bitmap_draw_bottom_left_at — original: `FUN_082995a0` @ 0x082995a0
+/// (136 bytes; **5 plain `bl` and 1 predicated `blne` call sites**, no tail
+/// branches, binary-scanned from osos.dec).
+///
+/// Uses `anchor` as a bottom-left placement for the usual zero-origin bitmap
+/// bounds. It invokes the lazy loader first; an unresolved resource leaves the
+/// loaded flag clear and returns without drawing. A loaded bitmap contributes
+/// its source bounds as `rect_a`; the same bounds copied into `rect_b` are
+/// offset horizontally by `anchor.x` and vertically by
+/// `anchor.y - (bottom - top)`, preserving both spans. It then calls the bitmap
+/// draw helper with hard-coded opacity `0xff` and reserved word zero.
+///
+/// Deliberate deviation: `FUN_08262bdc` remains behind
+/// [`BitmapHooks::draw`], whose default is a no-op until the renderer is
+/// ported. The loader and bounds getter are existing direct ports.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitmap_draw_bottom_left_at(
+    wrapper: *mut u8,
+    ctx: *mut u8,
+    anchor: *const Point,
+) {
+    bitmap_ensure_loaded(wrapper);
+    let wrapper = &mut *wrapper_mut(wrapper);
+    if core::ptr::addr_of!(wrapper.loaded).read_volatile() == 0 {
+        return;
+    }
+
+    let object = core::ptr::addr_of!(wrapper.object).read_volatile();
+    let mut source = Rect::default();
+    bitmap_object_read_bounds(object, core::ptr::addr_of_mut!(source).cast());
+
+    let anchor = &*anchor;
+    let mut destination = source;
+    rect_offset(
+        &mut destination,
+        anchor.x,
+        anchor.y.wrapping_sub(source.bottom.wrapping_sub(source.top)),
+    );
+    (hooks().draw)(
+        ctx,
+        object,
+        core::ptr::addr_of!(source).cast(),
+        core::ptr::addr_of!(destination).cast(),
+        0xff,
+        0,
+    );
+}
 
 /// bitmap_get_loaded_object — original: `FUN_082991f0` @ 0x082991f0
 /// (28 bytes; **9 plain `bl` call sites**, no predicated or tail branches,
@@ -474,6 +523,8 @@ mod tests {
     static LAST_DRAW_RECT_B: AtomicUsize = AtomicUsize::new(usize::MAX);
     static LAST_DRAW_ALPHA: AtomicU32 = AtomicU32::new(u32::MAX);
     static LAST_DRAW_RESERVED: AtomicU32 = AtomicU32::new(u32::MAX);
+    static LAST_DRAW_RECT_A_WORDS: [AtomicU32; 4] = [const { AtomicU32::new(u32::MAX) }; 4];
+    static LAST_DRAW_RECT_B_WORDS: [AtomicU32; 4] = [const { AtomicU32::new(u32::MAX) }; 4];
 
     static mut BITMAP_RESOURCE: [u8; 1] = [0];
 
@@ -568,6 +619,12 @@ mod tests {
         LAST_DRAW_RECT_B.store(rect_b as usize, Ordering::SeqCst);
         LAST_DRAW_ALPHA.store(alpha, Ordering::SeqCst);
         LAST_DRAW_RESERVED.store(reserved, Ordering::SeqCst);
+        for (index, word) in LAST_DRAW_RECT_A_WORDS.iter().enumerate() {
+            word.store(rect_a.add(index).read(), Ordering::SeqCst);
+        }
+        for (index, word) in LAST_DRAW_RECT_B_WORDS.iter().enumerate() {
+            word.store(rect_b.add(index).read(), Ordering::SeqCst);
+        }
     }
 
 
@@ -852,6 +909,56 @@ mod tests {
             0,
             "the sixth word is the original's hard zero"
         );
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn bitmap_draw_bottom_left_at_offsets_bounds_and_forwards_fixed_draw_words() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        let mut parsed = ParsedBitmapFixture::new();
+        let mut inner = BitmapInner::new([10, 20, 30, 50]);
+        parsed.set_inner_object(inner.ptr());
+        wrapper.set_loaded(0x80);
+        wrapper.set_object(parsed.ptr());
+        let anchor = Point { x: -7, y: 41 };
+        let ctx = core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8;
+
+        unsafe { bitmap_draw_bottom_left_at(wrapper.ptr(), ctx, &anchor) };
+
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 1, "loaded bitmap is drawn");
+        assert_eq!(LAST_DRAW_CTX.load(Ordering::SeqCst), ctx as usize);
+        assert_eq!(LAST_DRAW_OBJECT.load(Ordering::SeqCst), parsed.ptr() as usize);
+        assert_eq!(
+            core::array::from_fn(|index| LAST_DRAW_RECT_A_WORDS[index].load(Ordering::SeqCst)),
+            [10, 20, 30, 50],
+            "the source bounds remain unmodified"
+        );
+        assert_eq!(
+            core::array::from_fn(|index| LAST_DRAW_RECT_B_WORDS[index].load(Ordering::SeqCst)),
+            [31, 13, 51, 43],
+            "destination translates vertically by anchor.y minus the source height"
+        );
+        assert_eq!(LAST_DRAW_ALPHA.load(Ordering::SeqCst), 0xff);
+        assert_eq!(LAST_DRAW_RESERVED.load(Ordering::SeqCst), 0);
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn bitmap_draw_bottom_left_at_skips_an_unloaded_wrapper() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        let anchor = Point { x: 0, y: 0 };
+
+        unsafe {
+            bitmap_draw_bottom_left_at(
+                wrapper.ptr(),
+                core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8,
+                &anchor,
+            )
+        };
+
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 0, "unresolved bitmap is not drawn");
         restore_hooks(guard);
     }
 
