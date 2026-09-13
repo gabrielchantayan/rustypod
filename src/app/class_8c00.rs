@@ -308,6 +308,35 @@ pub unsafe extern "C" fn class_8c00_rearm_timer_post_0x11(this: *mut u8, delay: 
 }
 
 
+/// class_8c00_post_event_code_2 — original: `FUN_081a55f4` @
+/// **0x081a55f4** (8 bytes exactly, `mov r1, #2; b 0x081de270`; the
+/// separately linked siblings at 0x081a55ec and 0x081a55fc select codes
+/// 1 and 42). **Six direct plain `bl` call sites**, all unconditional
+/// (0x0811bfa8, 0x0811c0ac, 0x0811c314, 0x0817c8cc, 0x0817ca20, and
+/// 0x0821df48), verified by decoding every immediate A32 B/BL word in
+/// osos.dec; there are no predicated or tail-branch call sites and no
+/// aligned data-word reference, so it is not virtually dispatched.
+///
+/// The algorithm only selects event code 2, then tail-branches to the
+/// ported [`event_code_queue_post`]. Ghidra incorrectly assigns that
+/// shared target's mutex-lock, queue-push, and mutex-unlock body to this
+/// eight-byte wrapper. Deliberate deviation: Rust uses a normal direct
+/// call rather than an ABI tail branch; the original return value is
+/// unobserved and the callee's void contract is retained.
+///
+/// # Safety
+///
+/// `this` must be the event-code-queue base of a live class-0x8c00 object
+/// (at least 0x3c bytes, word-aligned), with a callable installed queue
+/// enqueue hook.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.class_8c00_post_event_code_2")]
+pub unsafe extern "C" fn class_8c00_post_event_code_2(this: *mut EventCodeQueue) {
+    unsafe { event_code_queue_post(this, 2) };
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -721,6 +750,22 @@ mod tests {
         fn period(&self) -> u32 {
             self.word(TIMER_PERIOD_AT)
         }
+    }
+
+    /// The wrapper only selects code 2 and forwards the queue-base
+    /// pointer; its lock/enqueue/unlock behavior belongs to the shared
+    /// event_code_queue_post target.
+    #[test]
+    fn wrapper_posts_event_code_2_to_own_queue() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(0, 0);
+        let this = object.as_ptr();
+        let queue =
+            unsafe { ptr::addr_of_mut!((*(this as *mut EventCodeQueue)).queue) as *mut u8 };
+
+        unsafe { class_8c00_post_event_code_2(this.cast()) };
+
+        assert_eq!(rearm_calls(), [RearmCall::Enqueue(queue, 2)]);
     }
 
     /// Running timer, flag clear: the full stop/reprogram/restart
