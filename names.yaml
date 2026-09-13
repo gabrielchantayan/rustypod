@@ -20286,6 +20286,33 @@ functions:
       operator_new, and the blx-through-volatile-slot dispatch standing
       in for the direct bl 0x08259eac (the documented deviation).
 
+  - address: 0x0825c144
+    ghidra: FUN_0825c144
+    name: plist_node_attribute_vector_push_back
+    size: 92
+    sig: "void plist_node_attribute_vector_push_back(PlistNode *owner, char *const *first, char *const *second)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: first, param_3/r2: second, r4: second, r5: owner, iVar2: end}
+    renames: {FUN_083d8c30: cxx_string_copy_ctor, FUN_083d7e98: plist_node_attribute_pair_copy, FUN_083e35cc: plist_node_attribute_vector_grow, FUN_0825c8fc: cxx_string_pair_destroy}
+    notes: >-
+      Raw ARM is exactly 23 instructions at 0x0825c144-0x0825c19c;
+      FUN_0825c1a0 begins immediately afterward. It COW-copies first and
+      second into an 8-byte temporary pair, then appends it to the
+      {begin,end,capacity} attribute vector at owner+4. With spare
+      capacity it stores end+8 before calling the unported pair-copy
+      helper 0x083d7e98(destination, temporary); at capacity it delegates
+      all mutation to the unported growth helper
+      0x083e35cc(&owner->attributes, end, temporary). Both paths release
+      the temporary's second then first COW string through
+      cxx_string_pair_destroy. A complete raw B/BL-word decode finds seven
+      inbound plain bl sites (0x08272bfc, 0x08272c80, 0x08272d10,
+      0x08272da0, 0x08272e58, 0x08272ee8, 0x08273154), with no predicated
+      calls or incoming tail branch. The raw final destroy leaves an
+      invalid temporary-stack address in r0, but all callers discard it;
+      the port deliberately exposes a void API. The two unported helpers
+      use a volatile dispatch table: device builds call their verified
+      retailOS addresses and host tests install recording implementations.
   - address: 0x0825c1a0
     ghidra: FUN_0825c1a0
     name: plist_node_child_vector_push_back
