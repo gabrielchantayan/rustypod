@@ -34,6 +34,10 @@ use crate::sysinfo::board_version;
 const PMU_BOARD_0X11_STATUS_REGISTER: u32 = 0x4b;
 /// PCF50635 register read on every other board generation.
 const PMU_OTHER_BOARD_STATUS_REGISTER: u32 = 0x12;
+/// PCF50635 register selected by `FUN_082e53d8`; its semantic register name
+/// is not established from the retail image.
+const PMU_REGISTER_0X4B: u32 = 0x4b;
+
 
 /// pmu_board_version_status_bit — original: `FUN_082e5b64` @ `0x082e5b64`
 /// (76 bytes; 8 unconditional `bl` call sites, binary-verified).
@@ -67,6 +71,42 @@ pub unsafe extern "C" fn pmu_board_version_status_bit(
 
     ((status_byte as u32 >> ((1 - version_0x11) << 1)) & 1) as u32
 }
+
+/// pmu_register_0x4b_bit2 — original: `FUN_082e53d8` @ `0x082e53d8`
+/// (52 bytes; 6 unconditional `bl` call sites, binary-verified).
+///
+/// Acquires PMU transaction semaphores 17 then 5, reads one byte from
+/// PCF50635 register 0x4b, releases 5 then 17 unconditionally, and returns
+/// bit 2. Retail ignores the I2C status: a failed register write leaves the
+/// low byte of incoming r3 in the stack scratch byte, so its bit 2 is the
+/// result.
+///
+/// # Deviations
+///
+/// None. The retail ABI has no declared arguments but saves incoming r3 in
+/// the stack scratch byte. Rust exposes r0-r3 explicitly to preserve the
+/// failed-transfer result; the other words remain unused. All five direct
+/// callee targets are already-ported Rust functions.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_register_0x4b_bit2(
+    _incoming_r0: u32,
+    _incoming_r1: u32,
+    _incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+
+    let mut status_byte = incoming_r3 as u8;
+    pmu_i2c_read(PMU_REGISTER_0X4B, 1, &mut status_byte);
+
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+
+    ((status_byte & 4) >> 2) as u32
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -112,4 +152,27 @@ mod tests {
         assert!(reads.is_empty(), "a failed register write suppresses the read");
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
     }
+
+    #[test]
+    fn register_4b_bit_two_returns_sample_and_preserves_r3_after_write_error() {
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 0b0000_0100);
+
+            assert_eq!(unsafe { pmu_register_0x4b_bit2(0, 0, 0, 0) }, 1);
+            let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+            assert_eq!(writes, std::vec![(0x73, 1, PMU_REGISTER_0X4B as u8)]);
+            assert_eq!(reads.len(), 1, "a successful one-byte register read occurs");
+            assert_eq!(reads[0].0, 0x73);
+            assert_eq!(reads[0].1, 1);
+            assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+        assert_eq!(unsafe { pmu_register_0x4b_bit2(0, 0, 0, 4) }, 1);
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert_eq!(writes, std::vec![(0x73, 1, PMU_REGISTER_0X4B as u8)]);
+        assert!(reads.is_empty(), "a failed register write suppresses the read");
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
 }
