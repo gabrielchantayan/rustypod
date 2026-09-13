@@ -71952,6 +71952,37 @@ functions:
       and memcmp @ 0x08030f64; no new dispatch seam is introduced. Deliberate
       deviations: none.
 
+  # --- COW string ostream insertion wrapper (cxx/ostream_insert_string) ---
+  - address: 0x083ead34
+    ghidra: FUN_083ead34
+    name: ostream_insert_cxx_string
+    size: 68
+    sig: "void *ostream_insert_cxx_string(void *stream, const char *const *string)"
+    module: cxx/ostream_insert_string
+    status: ported
+    renames:
+      param_1/r0/r4: stream
+      param_2/r1: string
+      "(*string)-4": string_length
+      "stream+*(vptr-12)+12": width
+      FUN_083b5348: ostream_insert_core
+    notes: >-
+      Raw osos.dec confirms the exact 68-byte extent: push {r4,lr} at
+      0x083ead34 through pop {r4,pc} at 0x083ead74; the next separately
+      linked function begins with push {r4,r5,r6,lr} at 0x083ead78.
+      Decoding every ARM B/BL-immediate word finds exactly six direct inbound
+      calls, all unconditional plain bl at 0x0825c524, 0x0825c540,
+      0x0825c550, 0x0825c5cc, 0x0825c5e0, and 0x0825c5f4; there are no
+      predicated BL forms or tail branches. It obtains the COW string's data
+      pointer and `_Rep` length at data-4, forwards them with the current
+      ostream width word to unported FUN_083b5348, clears the returned
+      stream's adjusted width word, and returns the original stream. The
+      port calls that confirmed but unported callee through a volatile seam on
+      hosts and through its verified device address on target; its broader
+      identity is not inferred. Host tests prove forwarding of the data,
+      length, and width; zero-length forwarding; signed vptr adjustment; and
+      clearing only the core-returned object's width.
+
   # --- SQLite API-boundary result-code filter (sqlite/api_exit) ---
   - address: 0x0836f468
     ghidra: FUN_0836f468
