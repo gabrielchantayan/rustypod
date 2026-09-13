@@ -12,7 +12,7 @@
 //! # Algorithm
 //!
 //! Print the semihosting prompt `"\nTask (# or name)> "`, read at most 15 bytes
-//! into a 16-byte stack buffer through the unported debug-console line reader
+//! into a 16-byte stack buffer through the ported debug-console line reader
 //! @ `0x082d670c`, then print a newline. A leading `'-'` selects every task
 //! (`-1`). A leading digit is parsed by `atoi_dead_sign` and accepted only when
 //! it is in `1..=task_count` (the mutable task count at IRAM `0x22008a54`). Any
@@ -20,13 +20,14 @@
 //! every one-based task identifier; the matching identifier is returned, or 0
 //! when none matches.
 //!
-//! Deliberate deviations: none on target. Host tests replace the unported line
-//! reader, the semihosting SWI, the mutable task-count word, and the existing
-//! scheduler-label lookup seam. The raw helper is known only as a debug-console
-//! reader from its `:tt` SYS_OPEN and SYS_READ sequence; this port does not
+//! Deliberate deviations: none on target. Host tests replace the line-reader
+//! seam, the semihosting SWI, the mutable task-count word, and the existing
+//! scheduler-label lookup seam. The helper is known only as a debug-console
+//! reader from its `:tt` SYS_OPEN and SYS_READ sequence; the port does not
 //! assign it a broader firmware identity.
 
 use core::ptr;
+use super::debug_console_read::debug_console_read_line;
 
 use crate::libc::strcmp::strcmp;
 use crate::semihost::{semihost_swi, SYS_WRITE0};
@@ -37,27 +38,13 @@ const TASK_PROMPT: &[u8] = b"\nTask (# or name)> \0";
 const NEWLINE: &[u8] = b"\n\0";
 const TASK_COUNT_ADDRESS: *const i32 = 0x2200_8a54 as *const i32;
 
-/// ABI of the unported debug-console line reader @ `0x082d670c`.
+/// ABI of the debug-console line reader @ `0x082d670c`.
 pub type DebugConsoleReadFn = unsafe extern "C" fn(buffer: *mut u8, capacity: u32);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_debug_console_read(buffer: *mut u8, capacity: u32) {
-    let reader: DebugConsoleReadFn = unsafe { core::mem::transmute(0x082d_670cusize) };
-    unsafe { reader(buffer, capacity) };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_debug_console_read(_buffer: *mut u8, _capacity: u32) {
-    panic!("debug_task_selector requires debug-console reader 0x082d670c")
-}
-
-#[cfg(target_os = "none")]
-const DEFAULT_DEBUG_CONSOLE_READ: DebugConsoleReadFn = firmware_debug_console_read;
-#[cfg(not(target_os = "none"))]
-const DEFAULT_DEBUG_CONSOLE_READ: DebugConsoleReadFn = missing_debug_console_read;
+const DEFAULT_DEBUG_CONSOLE_READ: DebugConsoleReadFn = debug_console_read_line;
 
 /// The line reader called by the original after writing its task prompt.
-/// Target builds call `0x082d670c`; host tests install a fixture reader.
+/// It defaults to the port; host tests install a fixture reader.
 pub static mut DEBUG_CONSOLE_READ: DebugConsoleReadFn = DEFAULT_DEBUG_CONSOLE_READ;
 
 #[cfg(not(target_os = "none"))]
