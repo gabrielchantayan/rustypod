@@ -54979,6 +54979,42 @@ functions:
       without running day-number; the strict clamp; and out-of-range
       time-of-day bytes added verbatim with no validation.
 
+  # --- kernel: heap-owned pair-of-mutex teardown ---
+  - address: 0x08093ca0
+    ghidra: FUN_08093ca0
+    name: dual_mutex_owner_delete
+    size: 28
+    sig: "void dual_mutex_owner_delete(DualMutexOwner *owner)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      FUN_080a6bd0: dual_mutex_owner_destroy_members
+      FUN_0807f650: mutex_delete
+      FUN_080e7970: free_wrapper
+      r1: heap_tag (10)
+    notes: >-
+      Raw osos.dec is seven instruction words at 0x08093ca0..0x08093cbc:
+      push {r4,lr}; preserve owner; bl 0x080a6bd0; restore owner to r0;
+      pop {r4,lr}; mov r1,#10; b 0x080e7970. The following ldr r1,[r0] at
+      0x08093cbc begins the distinct next function, confirming Ghidra's
+      28-byte extent. The member destructor at 0x080a6bd0 is separately
+      decoded as two calls to mutex_delete: owner +0 and owner +0x2c.
+      Thus this deleting destructor clears both mutexes and unconditionally
+      tail-frees the owner through free_wrapper with tag 10. Decoding every
+      condition-coded ARM B/BL word in osos.dec finds seven direct BL-form
+      callers, no B tail callers: four unconditional bl at 0x08167264,
+      0x08223844, 0x08228338, and 0x08296788; and three caller-gated blne
+      at 0x080bbc24, 0x0812152c, and 0x08277900. It has no NULL guard; the
+      predicated callers explicitly gate it, and unconditional callers pass
+      a live owner. No aligned image data word equals this address, so it is
+      not virtually dispatched. Deviation: the unported 0x080a6bd0 member
+      destructor is inlined as two calls to ported mutex_delete, and Rust
+      makes the final tail branch a normal call to ported free_wrapper.
+      Host tests cover both live mutexes' ordered cleanup and the empty
+      mutex edge case, then verify the final free receives the owner and
+      tag 10.
+
   # --- time: unsigned Unix seconds -> packed calendar record ---
   - address: 0x080964cc
     ghidra: FUN_080964cc
