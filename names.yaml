@@ -81420,3 +81420,32 @@ functions:
       writes this and preserves r0, so it is ported as an empty C++ destructor
       returning this rather than Ghidra's void prototype. Deliberate host
       deviation: none; the target-only text section prevents LLVM body folding.
+  - address: 0x081e73f8
+    ghidra: FUN_081e73f8
+    name: registration_node_construct
+    size: 32
+    sig: "u8 *registration_node_construct(u8 *this, u32 owner, const u8 *name)"
+    module: heap/registration_node_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1/r4: owner
+      param_3/r2/r1: name
+      FUN_08207674: registration_node_base_construct (unported boundary)
+      DAT_081e7418: REGISTRATION_NODE_VTABLE (0x0898f1b4)
+      DAT_08207684: REGISTRATION_NODE_BASE_VTABLE (0x089919a8)
+    notes: >-
+      Raw osos.dec establishes seven instruction words at
+      0x081e73f8..0x081e7414 plus its vtable literal at 0x081e7418, for
+      32 bytes total; the distinct next function begins at 0x081e741c.
+      It saves owner in r4, rotates name into r1, invokes base constructor
+      0x08207674, stores vtable 0x0898f1b4 at the returned r0, stores owner
+      at returned r0+8, then returns that same base result. Full-image ARM
+      B/BL-immediate decoding finds exactly six inbound calls, all plain
+      unconditional bl at 0x0814c658, 0x081681cc, 0x081a7f68, 0x081ba770,
+      0x08236194, and 0x0828c010; no predicated forms or direct B tails.
+      The base remains unported, so a replaceable boundary defaults to its
+      verified four-instruction body: store name at +4, base vtable
+      0x089919a8 at +0, return this. Host tests prove the default layout,
+      untouched adjacent state, exact target-width owner word, and that
+      derived stores follow a divergent base return rather than input this.
