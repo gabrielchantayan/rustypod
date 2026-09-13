@@ -9699,6 +9699,36 @@ functions:
       board-version/read/5-then-17 release sequence; LLVM adds its frame and
       uses a conditional move plus variable shift instead of ARM predicates.
 
+  # --- PMU register 0x4b bit 2 (drivers/pmu) ---
+  - address: 0x082e53d8
+    ghidra: FUN_082e53d8
+    name: pmu_register_0x4b_bit2
+    size: 52
+    sig: "u32 pmu_register_0x4b_bit2(u32 incoming_r0, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      local_8/sp: status_byte_seeded_from_incoming_r3
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d3b8: pmu_i2c_read
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM extent is exactly 52 bytes, 0x082e53d8..0x082e5408: the
+      following push {r4,lr} at 0x082e540c begins the next sibling. Every
+      ARM B/BL word in osos.dec was decoded: six direct calls, all plain
+      unconditional bl (cond=e), at 0x0806089c, 0x08060910, 0x08060934,
+      0x080bfbdc, 0x080e369c, and 0x08392fec; zero predicated forms. The
+      function waits semaphores 17 then 5, reads one PCF50635 byte from
+      register 0x4b through pmu_i2c_read, signals 5 then 17 unconditionally,
+      and returns bit 2. It deliberately ignores the I2C status, so a failed
+      transfer returns bit 2 of the saved incoming-r3 byte. The port
+      explicitly declares the otherwise-undeclared incoming r0-r3 ABI words
+      so r3 preserves that error-path behavior; all five direct callee edges
+      resolve to already-ported Rust functions. Host tests cover a successful
+      sampled bit and the failed-write incoming-r3 result.
+
   # --- Mutexed PMU I2C register-block read (drivers/i2c) ---
   - address: 0x082e58f0
     ghidra: FUN_082e58f0
