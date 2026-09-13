@@ -78898,3 +78898,38 @@ functions:
       builds retain a fixed-address call to the unported helper; host builds
       use a volatile recording seam. Deliberate deviations: none. Reference
       C: decomp/c/032/083384d4_FUN_083384d4.c.
+
+  # --- Segmented entry lookup ---
+  - address: 0x082ce368
+    ghidra: FUN_082ce368
+    name: segmented_entry_lookup
+    size: 88
+    sig: "u8 *segmented_entry_lookup(const SegmentedEntryTable *table, i32 index)"
+    module: app/segmented_entry_lookup
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      uVar3/r2: override_index
+      iVar1/r0: entry_data
+      iVar2/r1: offset_table_index
+      uVar4/r12: override_boundary
+    notes: >-
+      Raw osos.dec confirms the complete 88-byte extent
+      0x082ce368..0x082ce3c0: the next separately linked sibling begins at
+      0x082ce3c0 with push {r0-r12,lr}; there is no literal pool. Decoding
+      every ARM B/BL immediate finds exactly six direct inbound calls, all
+      plain unconditional BL at 0x082b6080, 0x082b66d0, 0x082b67a4,
+      0x082b697c, 0x082e877c, and 0x083710f8; there are zero predicated
+      forms and no direct B tail transfers. The five recovered eight-byte
+      override slots begin at table+0x18: search them backwards from the
+      count byte at +0x02, return a slot's word +0x00 on boundary equality,
+      and decrement the requested index after every eligible non-equal
+      boundary. No matching override selects a big-endian u16 offset at
+      entry_data + table.u16@+0x0e + 2 * adjusted_index, returning
+      entry_data plus that offset; entry_data is the raw target-width word at
+      table+0x44. The signed bgt comparison means negative indices bypass
+      every nonnegative boundary, as retained by the i32 argument. Host tests
+      cover big-endian fallback decoding, reverse override priority, equality,
+      skipped higher boundaries, and adjusted-index fallback. Deliberate
+      deviations: none.
