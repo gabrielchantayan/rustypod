@@ -24889,6 +24889,34 @@ functions:
       literal-pool blx included), so match.py shows a larger body with
       the same guard/decrement/dispose/unlock/teardown structure.
 
+  - address: 0x0839d360
+    ghidra: FUN_0839d360
+    name: refcounted_body_mutex_unlock_owned
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_owned(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent
+      0x0839d360..0x0839d370: ldr r0,[r0,#8]; cmp r0,#0; bne
+      mutex_unlock @ 0x0807f6a0; bx lr. The separately linked
+      refcounted_body_attach starts at 0x0839d370. Decoding every A32 B/BL
+      word finds six direct callers, all unconditional plain bl at
+      0x0820bc7c, 0x0820bcb4, 0x082150b8, 0x082150f0, 0x0839d30c, and
+      0x0839d344; there are no predicated calls or direct b tail callers.
+      No aligned image word equals this address, so it is not virtually
+      dispatched. This helper loads RefcountedBody.mutex at +8 and
+      tail-branches only when it is non-NULL; body itself has no NULL guard.
+      It is the separately linked unlock half paired with
+      refcounted_body_mutex_lock_owned @ 0x0839d350 inside the owned release
+      template. Port is a direct Rust equivalent; a unique target-only text
+      section prevents LLVM from folding it into byte-identical helper
+      refcounted_body_mutex_unlock @ 0x0839d44c.
+
   - address: 0x0839d370
     ghidra: FUN_0839d370
     name: refcounted_body_attach
