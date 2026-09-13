@@ -72,6 +72,7 @@ pub mod tagged_context_dispatch;
 pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
+pub mod retain;
 pub mod resource_handle_release;
 pub mod return_forwarder;
 pub mod settings;
