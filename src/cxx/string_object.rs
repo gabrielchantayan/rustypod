@@ -1028,6 +1028,25 @@ pub unsafe extern "C" fn string_object_append_code_unit(this: *mut StringObject,
     string_object_insert_utf16(this, i32::MAX, &unit, 1);
 }
 
+/// string_object_append_code_unit_returning_this — original: `FUN_082774f0`
+/// @ 0x082774f0 (36 bytes; six direct `bl` call sites: five unconditional,
+/// one `blne`, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Spills `value`, appends its low UTF-16 code unit through bounded insertion
+/// at `INT_MAX`, then returns `this`. The high halfword is never consumed on
+/// little-endian ARM; zero still takes the preserving allocation path. The
+/// existing virtual allocator is the only unported boundary; no new deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.string_object_append_code_unit_returning_this")]
+pub unsafe extern "C" fn string_object_append_code_unit_returning_this(
+    this: *mut StringObject, value: u32,
+) -> *mut StringObject {
+    let unit = value as u16;
+    string_object_insert_utf16(this, i32::MAX, &unit, 1);
+    this
+}
+
 /// string_object_insert_cstr — original: `FUN_08276a18` @ 0x08276a18
 /// (68 bytes, all code — no literal-pool word; 61 `bl` call sites,
 /// binary-scanned).
@@ -4751,6 +4770,23 @@ pub(crate) mod tests {
             let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
             let _bench = insert_bench(out.as_mut_ptr());
             unsafe { string_object_append_code_unit(&mut object, value) };
+            assert_eq!(out[0], b'x');
+            assert_eq!(&out[1..1 + suffix.len()], suffix);
+            assert_eq!(out[1 + suffix.len()], 0xa5);
+            assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 1);
+        }
+    }
+
+    #[test]
+    fn append_code_unit_returning_this_truncates_and_returns_receiver() {
+        for (value, suffix) in [(0x1234_0041u32, &b"A\0"[..]), (0xdead_0000, &b"\0"[..]),
+            (0x1000_d800, &b"\xed\xa0\x80\0"[..])] {
+            let mut old = *b"x\0\0\0\0\0\0\0";
+            let mut out = [0xa5; 32];
+            let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+            let _bench = insert_bench(out.as_mut_ptr());
+            let returned = unsafe { string_object_append_code_unit_returning_this(&mut object, value) };
+            assert!(core::ptr::eq(returned, &mut object));
             assert_eq!(out[0], b'x');
             assert_eq!(&out[1..1 + suffix.len()], suffix);
             assert_eq!(out[1 + suffix.len()], 0xa5);
