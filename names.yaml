@@ -48,6 +48,7 @@ functions:
     ghidra: FUN_080005fc
     name: byte_copy
     size: 24
+
     sig: "void byte_copy(void *dst, const void *src, u32 len)"
     module: libc/byte_copy
     status: ported
@@ -69448,6 +69449,32 @@ functions:
       retailOS address while host tests install a recording seam. Tests cover
       both NULL exits, low-halfword device selection, argument forwarding, and
       return propagation.
+
+  # --- Filesystem cache-entry reset ---
+  - address: 0x082e4b84
+    ghidra: FUN_082e4b84
+    name: cache_entry_reset
+    size: 24
+    sig: "void cache_entry_reset(CacheEntry *entry)"
+    module: fs/cache_entry_reset
+    status: ported
+    renames:
+      param_1/r0: entry
+      entry[0]: state
+      entry[1]: position
+      entry[2]: context
+      entry[3]: block_index
+      entry[4]: references
+    notes: >-
+      Raw ARM confirms the 24-byte extent from 0x082e4b84 through
+      0x082e4b98; the separately entered next function begins at 0x082e4b9c.
+      The body stores zero to entry words 0, 1, 4, then 3, retaining word 2
+      (the cache-context link). Exactly six direct ARM B/BL words target this
+      entry: five unconditional bl at 0x082e110c, 0x082e12f0, 0x082e1310,
+      0x082e2800, and 0x082e28f4, plus one blne at 0x082e12cc. The predicated
+      call is gated by its caller's condition; the callee itself has neither
+      a NULL guard nor any conditional control flow. Host coverage verifies
+      each cleared word and preservation of the context link.
 
   # --- Filesystem cache-page halfword transfer ---
   - address: 0x082e1a34
