@@ -79251,3 +79251,31 @@ functions:
       completed with its expected non-exact diff. Deliberate deviations:
       retail direct BL calls cross fixed-address blx seams, while the ported
       low-bit setter is called normally; ordering and return behavior match.
+  - address: 0x082bdef0
+    ghidra: FUN_082bdef0
+    name: decode_word_buffer_frame
+    size: 124
+    sig: "u32 decode_word_buffer_frame(const u8 *frame, u32 available, FramedWordBuffer *destination)"
+    module: util/framed_word_buffer_decode
+    status: ported
+    renames:
+      param_1/r0: frame
+      param_2/r1/r3: available
+      param_3/r2: destination
+      uVar1/r4: payload_bytes
+      FUN_082c5f30: word_buffer_payload_packer
+    notes: >-
+      Raw osos.dec confirms the exact 124-byte body
+      0x082bdef0..0x082bdf6c; 0x082bdf6c begins the next separately linked
+      function. Decoding every aligned ARM B/BL-immediate word finds six
+      direct inbound calls, all plain unconditional bl at 0x080d4200,
+      0x082bdf84, 0x082bdfa4, 0x082be010, 0x082be038, and 0x082be058; there
+      are no predicated direct calls. It reads a big-endian u16 payload size,
+      requires the frame and enough target words (one even for an empty frame,
+      otherwise ceil(size / 4)), calls the unported FUN_082c5f30 to pack
+      reverse source groups into little-endian u32 words, and returns size + 2
+      with bit 16 cleared. The unported callee uses a literal veneer on
+      firmware and a volatile host callback seam.
+      Host tests cover header/frame rejection, word-capacity rejection, byte
+      packing, empty-payload clearing, and the 0xfffe length wrap quirk.
+      Deliberate deviations: none.

@@ -564,6 +564,10 @@ pub mod hints {
     // FAT-volume, and directory-entry fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const FAT_CURSOR_SYNCHRONIZE: usize = 0x8900_0000;
+    // 0x9000_0000: dedicated to util/framed_word_buffer_decode's raw-u32
+    // target-word output fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const FRAMED_WORD_BUFFER_DECODE: usize = 0x9000_0000;
     // 0xbd00_0000: dedicated to ui/object_state's raw-u32 selected-item
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const OBJECT_SELECTED_ITEM: usize = 0xbd00_0000;
