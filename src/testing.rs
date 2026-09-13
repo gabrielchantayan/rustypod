@@ -296,6 +296,10 @@ pub mod hints {
     // list/cursor fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LIST_CURSOR_INDEX: usize = 0x8200_0000;
+    // 0x81f0_0000: dedicated to cxx/list_cursor_base_index's raw-u32
+    // list/cursor fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LIST_CURSOR_BASE_INDEX: usize = 0x81f0_0000;
     // 0x9e00_0000: dedicated to util/attr_record's raw-u32
     // named-attribute table fixture; mappings never unmap, so no other user
     // may share this hint.
