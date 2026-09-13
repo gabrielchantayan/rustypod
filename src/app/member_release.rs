@@ -1,20 +1,23 @@
-//! `member_release_if_present` — original: `thunk_FUN_08214348` @
-//! `0x082201f4` (**4 bytes**, one `b 0x0822aa34`). Raw bytes show that
-//! veneer tail-branches again to `FUN_08214348` @ `0x08214348`; its 32-byte
+//! `member_release_if_present` — original veneers: `thunk_FUN_08214348` @
+//! `0x082201f4` and `0x0822aa34` (**4 bytes each**). The former is one
+//! `b 0x0822aa34`; the assigned veneer is one `b 0x08214348`, whose 32-byte
 //! body reads the owner word at `+0x14` and calls `FUN_081f0530` only when
-//! that word is non-NULL. The next separately linked function after the
-//! veneer begins at `0x082201f8`.
+//! that word is non-NULL. The next separately linked functions after the two
+//! veneers begin at `0x082201f8` and `0x0822aa38`, respectively.
 //!
-//! **12 direct `bl` call sites, all unconditional; zero predicated calls**,
-//! verified by decoding every ARM B/BL word in `osos.dec`: 0x081426c0,
-//! 0x081792d0, 0x081798cc, 0x08179a08, 0x0817a308, 0x0817a850, 0x0817bc94,
-//! 0x0817c71c, 0x0817d110, 0x0817d3fc, 0x0817d600, and 0x082a9c80. No image
-//! word equals the veneer address, so it is not directly dispatched as data.
+//! **The `0x0822aa34` veneer has 7 direct `bl` call sites, all unconditional,
+//! zero predicated**, verified by decoding every ARM B/BL word in `osos.dec`:
+//! 0x081b757c, 0x081cc8bc, 0x081cc8f0, 0x081cc9fc, 0x081cce0c, 0x081ccf6c,
+//! and 0x08220470. Its two inbound plain-B tails are 0x0820a45c and
+//! 0x082201f4; no aligned image word equals the veneer address, so it is not
+//! directly dispatched as data.
 //!
-//! The member is now known to be the list state accepted by the ported
+//! The member is the list state accepted by the ported
 //! [`crate::cxx::list_cursor_release::list_cursor_release`] operation. The
 //! stock destination leaves an otherwise unspecified `r4` in `r0` after the
-//! call; every verified caller ignores it, and this veneer remains `void`.
+//! call; every verified caller ignores it, and this Rust ABI is `void`.
+//! Deliberate deviation: both stock tail branches are flattened into this
+//! existing Rust body, avoiding a duplicate dispatch seam.
 
 /// Target-sized prefix of an object holding a releasable member at +0x14.
 /// Pointer-like target fields remain `u32` so this layout is 24 bytes on
