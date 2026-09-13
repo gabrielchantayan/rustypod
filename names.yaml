@@ -58,6 +58,7 @@ functions:
       forward-copy (not memmove) behavior.
 
   - address: 0x08038260
+
     ghidra: thunk_EXT_FUN_220005fc
     name: iram_byte_copy_veneer
     size: 8
@@ -12779,9 +12780,10 @@ functions:
       and no direct tail b: 0x0822748c, 0x08229d44, 0x0822a0ec, 0x0822a758,
       0x08231050, 0x08234168, 0x08234294, and 0x08260a10. The 0x0820a49c
       thunk tail-branches to the existing mode_selected_position port; the
-      0x0820a60c tail veneer reaches unported 0x0822ba50 through the existing
-      shared host seam. The virtual callee has no recovered identity and is
-      dispatched only at the observed vtable index. Host tests cover strict
+      0x0820a60c tail veneer reaches the ported 0x0822ba50 dispatcher, whose
+      two unported targets have shared host seams. The virtual callee has no
+      recovered identity and is dispatched only at the observed vtable index.
+      Host tests cover strict
       limit/delta mode, stale and NULL-handle mode-one forwarding, zero
       mode/delta send suppression, cache storage, virtual-slot selection, and
       setter return propagation.
@@ -73337,7 +73339,7 @@ functions:
       "state+0x8bc": lower_position
       "state+0x8c0": upper_position
       FUN_0822aecc: mode_selected_position
-      FUN_0822ba50: mode_selected_position_set (unported fixed-address seam)
+      FUN_0822ba50: mode_selected_position_set
       FUN_081cccac: mode_position_changed (unported fixed-address seam)
     notes: >-
       Raw osos.dec confirms the exact 96-byte extent: 24 ARM instruction
@@ -73345,19 +73347,49 @@ functions:
       linked function begins at 0x081cc618. The code applies signed ARM
       comparisons to clamp r1 to state+0x8bc..state+0x8c0, reads the active
       position with the already-ported mode_selected_position on state+0x1c,
-      calls unported 0x0822ba50 with r1=1 and r2=the clamped position only
-      when that active position differs, then updates state+0x8b8 and tail
-      calls unported 0x081cccac only when the cached position differs.
+      calls the ported mode_selected_position_set with r1=1 and r2=the clamped
+      position only when that active position differs, then updates state+0x8b8
+      and tail calls unported 0x081cccac only when the cached position differs.
       Decoding every ARM B/BL immediate finds exactly 10 direct bl callers:
       nine unconditional at 0x0819dbb4, 0x0819dcac, 0x081cba70, 0x081cbc3c,
       0x081cc944, 0x081cca64, 0x081cca78, 0x081cce74, and 0x081ccfec, plus
       one predicated blne at 0x081cbfdc. Two unconditional tail b transfers
       enter at 0x081cbbf0 and 0x081cd5b4; no aligned DATA word targets this
-      entry. Deliberate deviations: fixed-address stock continuations have
-      replaceable host seams, while ARM invokes their verified addresses.
+      entry. Deliberate deviations: the unported notification continuation has
+      a replaceable host seam, while ARM invokes its verified fixed address.
       Host tests cover signed lower and upper clamping, backend equality
       suppression, cached-position update, and independent notification
       suppression.
+
+  # --- Mode-selected position setter dispatch ---
+  - address: 0x0822ba50
+    ghidra: FUN_0822ba50
+    name: mode_selected_position_set
+    size: 24
+    sig: "u32 mode_selected_position_set(void *state, u32 mode, u32 position)"
+    module: app/mode_selected_position_set
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: mode
+      param_3/r2: position
+      "state+0x5f8": mode_flags
+      FUN_0820859c: clear-flag target (unported)
+      FUN_08214e78: set-flag target (unported)
+    notes: >-
+      Raw osos.dec corrects Ghidra's 144-byte extent: this function is the six
+      ARM words at 0x0822ba50..0x0822ba64, ending in a tail branch, and the
+      separately linked next function begins at 0x0822ba68. It tests bit 0 of
+      state+0x5f8; a clear bit tail-branches unchanged mode and position to
+      0x0820859c with state+0x330, while a set bit tail-branches to 0x08214e78
+      with state+0x38. Decoding every ARM B/BL immediate finds six direct bl
+      callers: three unconditional (0x081cd0ec, 0x0822034c, 0x0822b63c), one
+      bleq (0x081b6b98), and two blne (0x081cc5f8, 0x081cd394). Two further
+      unconditional tail b transfers enter at 0x0820a60c and 0x08220538; no
+      aligned DATA word targets this entry. Deliberate deviation: the two
+      unported target bodies are fixed-address calls on ARM and replaceable
+      host seams. Tests cover both flag paths, address adjustments, unchanged
+      zero and all-one arguments, and forwarded return values.
 
   # --- Registry-class-0x8780 dispatch state ---
   - address: 0x081a3ed4

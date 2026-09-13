@@ -113,6 +113,7 @@ pub mod media_ext;
 pub mod mode_selected_byte;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
+pub mod mode_selected_position_set;
 pub mod media_player;
 pub mod media_player_queue_refresh;
 pub mod media_player_pending_item;

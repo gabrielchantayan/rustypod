@@ -20,14 +20,14 @@
 //!
 //! Deliberate deviations: the retail thunk at `0x0820a49c` tail-branches to the
 //! already ported `mode_selected_position`; this port calls that canonical body
-//! directly. The final retail tail branch reaches the existing unported
-//! `0x0822ba50` setter seam, whose host replacement is shared with
-//! `set_clamped_mode_position`. The virtual slot has no recovered identity, so
-//! it is dispatched only by its observed vtable word index.
+//! directly. The final retail tail branch reaches the ported
+//! `mode_selected_position_set` dispatcher, whose unported targets have shared
+//! host seams. The virtual slot has no recovered identity, so it is dispatched
+//! only by its observed vtable word index.
 
 use super::{
-    clamped_mode_position::set_mode_position,
     mode_selected_position::mode_selected_position,
+    mode_selected_position_set::mode_selected_position_set,
     validated_singleton_0x89c::validated_singleton_0x89c_get,
 };
 use crate::cxx::handle::handle_deref_or_null;
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn app_screen_update_position(screen: *mut u8, requested_p
 
     screen.add(CACHED_POSITION_OFFSET).cast::<u32>().write(requested_position);
     if mode != 0 || position != 0 {
-        set_mode_position(singleton, mode, position)
+        mode_selected_position_set(singleton, mode, position)
     } else {
         0
     }
@@ -97,8 +97,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::app::clamped_mode_position::{
-        ModePositionSetter, MODE_POSITION_SETTER, MODE_POSITION_SETTER_TEST_LOCK,
+    use crate::app::mode_selected_position_set::{
+        ModeSelectedPositionSetPath, MODE_SELECTED_POSITION_SET_CLEAR,
+        MODE_SELECTED_POSITION_SET_SET, MODE_SELECTED_POSITION_SET_TEST_LOCK,
     };
     use crate::app::validated_singleton_0x89c::{
         VALIDATED_SINGLETON_0X89C, VALIDATED_SINGLETON_0X89C_TEST_LOCK,
@@ -108,6 +109,7 @@ mod tests {
     const MODE_POSITION_OFFSET: usize = 0x2ec;
     const DEFAULT_POSITION_OFFSET: usize = 0x5e4;
     const MODE_FLAGS_OFFSET: usize = 0x5f8;
+    const SINGLETON_BYTES: usize = 0x5f9;
     const SETTER_RETURN: u32 = 0x51e7_0001;
 
     static mut SETTER_STATE: *mut u8 = core::ptr::null_mut();
@@ -121,20 +123,29 @@ mod tests {
     #[repr(align(8))]
     struct Screen([u8; SCREEN_BYTES]);
 
+    #[repr(align(4))]
+    struct Singleton([u8; SINGLETON_BYTES]);
+
     #[repr(C)]
     struct VirtualObject {
         vtable: *const usize,
     }
 
     struct Reset {
-        old_setter: ModePositionSetter,
+        old_clear: ModeSelectedPositionSetPath,
+        old_set: ModeSelectedPositionSetPath,
         old_singleton: *mut u8,
     }
 
     impl Drop for Reset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::write_volatile(core::ptr::addr_of_mut!(MODE_POSITION_SETTER), self.old_setter);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(MODE_SELECTED_POSITION_SET_CLEAR), self.old_clear,
+                );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(MODE_SELECTED_POSITION_SET_SET), self.old_set,
+                );
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(VALIDATED_SINGLETON_0X89C),
                     self.old_singleton,
@@ -162,9 +173,11 @@ mod tests {
     }
 
     unsafe fn install(singleton: *mut u8) -> Reset {
-        let old_setter = core::ptr::read_volatile(core::ptr::addr_of!(MODE_POSITION_SETTER));
+        let old_clear = core::ptr::read_volatile(core::ptr::addr_of!(MODE_SELECTED_POSITION_SET_CLEAR));
+        let old_set = core::ptr::read_volatile(core::ptr::addr_of!(MODE_SELECTED_POSITION_SET_SET));
         let old_singleton = core::ptr::read_volatile(core::ptr::addr_of!(VALIDATED_SINGLETON_0X89C));
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(MODE_POSITION_SETTER), record_setter);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(MODE_SELECTED_POSITION_SET_CLEAR), record_setter);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(MODE_SELECTED_POSITION_SET_SET), record_setter);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(VALIDATED_SINGLETON_0X89C), singleton);
         SETTER_STATE = core::ptr::null_mut();
         SETTER_MODE = 0;
@@ -173,7 +186,7 @@ mod tests {
         LIMIT_OBJECT = core::ptr::null_mut();
         LIMIT_VALUE = 0;
         LIMIT_CALLS = 0;
-        Reset { old_setter, old_singleton }
+        Reset { old_clear, old_set, old_singleton }
     }
 
     unsafe fn write_word(screen: &mut Screen, offset: usize, value: u32) {
@@ -193,10 +206,10 @@ mod tests {
 
     #[test]
     fn matching_position_and_strict_limit_send_wrapping_delta_in_mode_zero() {
-        let _setter_guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
+        let _setter_guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
         let _singleton_guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         let mut screen = Screen([0; SCREEN_BYTES]);
-        let mut singleton = [0u8; 1];
+        let mut singleton = Singleton([0; SINGLETON_BYTES]);
         let mut vtable = [wrong_position_limit as usize; POSITION_LIMIT_VTABLE_INDEX + 1];
         vtable[POSITION_LIMIT_VTABLE_INDEX] = position_limit as usize;
         let mut object = VirtualObject { vtable: vtable.as_ptr() };
@@ -204,7 +217,7 @@ mod tests {
         let mut cell = &mut implementation as *mut *mut u8;
 
         unsafe {
-            let _reset = install(singleton.as_mut_ptr());
+            let _reset = install(singleton.0.as_mut_ptr());
             initialize_screen(&mut screen, 100, 100);
             install_handle(&mut screen, cell);
             LIMIT_VALUE = 170;
@@ -212,7 +225,7 @@ mod tests {
             assert_eq!(app_screen_update_position(screen.0.as_mut_ptr(), 130), SETTER_RETURN);
             assert_eq!(screen.0.as_ptr().add(CACHED_POSITION_OFFSET).cast::<u32>().read(), 130);
             assert_eq!(SETTER_CALLS, 1);
-            assert_eq!(SETTER_STATE, singleton.as_mut_ptr());
+            assert_eq!(SETTER_STATE, singleton.0.as_mut_ptr().add(0x330));
             assert_eq!(SETTER_MODE, 0);
             assert_eq!(SETTER_POSITION, 30);
             assert_eq!(LIMIT_CALLS, 1);
@@ -222,13 +235,13 @@ mod tests {
 
     #[test]
     fn stale_active_position_or_null_handle_forwards_requested_position_in_mode_one() {
-        let _setter_guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
+        let _setter_guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
         let _singleton_guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         let mut screen = Screen([0; SCREEN_BYTES]);
-        let mut singleton = [0u8; 1];
+        let mut singleton = Singleton([0; SINGLETON_BYTES]);
 
         unsafe {
-            let _reset = install(singleton.as_mut_ptr());
+            let _reset = install(singleton.0.as_mut_ptr());
             initialize_screen(&mut screen, 99, 100);
             install_handle(&mut screen, core::ptr::null_mut());
 
@@ -253,10 +266,10 @@ mod tests {
 
     #[test]
     fn zero_delta_suppresses_setter_but_stores_position() {
-        let _setter_guard = MODE_POSITION_SETTER_TEST_LOCK.lock();
+        let _setter_guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
         let _singleton_guard = VALIDATED_SINGLETON_0X89C_TEST_LOCK.lock();
         let mut screen = Screen([0; SCREEN_BYTES]);
-        let mut singleton = [0u8; 1];
+        let mut singleton = Singleton([0; SINGLETON_BYTES]);
         let mut vtable = [wrong_position_limit as usize; POSITION_LIMIT_VTABLE_INDEX + 1];
         vtable[POSITION_LIMIT_VTABLE_INDEX] = position_limit as usize;
         let mut object = VirtualObject { vtable: vtable.as_ptr() };
@@ -264,7 +277,7 @@ mod tests {
         let mut cell = &mut implementation as *mut *mut u8;
 
         unsafe {
-            let _reset = install(singleton.as_mut_ptr());
+            let _reset = install(singleton.0.as_mut_ptr());
             initialize_screen(&mut screen, 0, 0);
             install_handle(&mut screen, cell);
             LIMIT_VALUE = 1;
