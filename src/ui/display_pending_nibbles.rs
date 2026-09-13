@@ -30,6 +30,9 @@
 
 use core::ptr;
 
+#[cfg(test)]
+extern crate std;
+
 use crate::drivers::display::{display_get, Display, SECONDARY_DISPLAY_ID};
 
 /// ABI of the unported `FUN_081d8d0c`, which commits one selector and four
@@ -63,12 +66,15 @@ unsafe extern "C" fn missing_display_set_pending_nibbles(
 /// The retained `FUN_081d8d0c` boundary. Volatile loading prevents LLVM from
 /// replacing the device call with a known builtin or folding away host seams.
 #[cfg(target_os = "none")]
-static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = firmware_display_set_pending_nibbles;
+pub(crate) static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = firmware_display_set_pending_nibbles;
 #[cfg(not(target_os = "none"))]
-static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = missing_display_set_pending_nibbles;
+pub(crate) static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = missing_display_set_pending_nibbles;
+
+#[cfg(test)]
+pub(crate) static DISPLAY_PENDING_NIBBLES_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[inline(always)]
-unsafe fn set_display_pending_nibbles(display: *mut Display, selector: u8, nibbles: *const u8) {
+pub(crate) unsafe fn set_display_pending_nibbles(display: *mut Display, selector: u8, nibbles: *const u8) {
     let set = ptr::read_volatile(ptr::addr_of!(DISPLAY_SET_PENDING_NIBBLES));
     set(display, selector, nibbles);
 }
@@ -136,9 +142,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static PENDING_NIBBLES_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut FORWARDED: Option<(*mut Display, u8, [u8; 4])> = None;
 
     unsafe extern "C" fn record_pending_nibbles(
@@ -155,7 +159,7 @@ mod tests {
     }
 
     fn install_recorder() -> MutexGuard<'static, ()> {
-        let guard = PENDING_NIBBLES_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = DISPLAY_PENDING_NIBBLES_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             DISPLAY_PENDING_SELECTOR = 0;
             DISPLAY_PENDING_NIBBLES = [0; 4];

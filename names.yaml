@@ -74587,3 +74587,47 @@ functions:
       deliberately unnamed. Host fixtures use a native-width virtual pointer
       and getter seam, while the target calls the existing singleton accessor
       port directly and retains the target vtable offset.
+
+  # --- Secondary display layer setup ---
+  - address: 0x082058e0
+    ghidra: FUN_082058e0
+    name: configure_secondary_display_layers
+    size: 204
+    sig: "void configure_secondary_display_layers(SecondaryDisplayLayerSetup *setup)"
+    module: drivers/secondary_display_layers
+    status: ported
+    renames:
+      param_1/r4: setup
+      "setup+0x18": layer5_input
+      "setup+0x1c": layer0_input
+      "setup+0x20": layer0
+      "setup+0x24": layer5
+      "setup+0x28": surface_width
+      "setup+0x2c": surface_height
+      DAT_082059a8: secondary_display_clear_color_00108080
+      FUN_081d8870: display_get
+      FUN_081d9064: display_get_layer
+      FUN_08120604: surface_config_init
+      FUN_082059ac: copy_layer_format
+      FUN_08120978: layer_apply_config
+      FUN_081d8cfc: display_set_clear_color
+      FUN_081d8d0c: display_set_pending_nibbles (unported seam)
+      FUN_08120880: layer_set_global_alpha_blend
+    notes: >-
+      Raw osos.dec corrects Ghidra's 200-byte extent: 50 instruction words
+      run from 0x082058e0 through pop {r4,r5,pc} at 0x082059a4, and the ldr
+      at 0x0820595c consumes the owned 0x00108080 literal at 0x082059a8; the
+      separately linked helper opens at 0x082059ac. The true extent is thus
+      204 bytes. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      seven direct callers, all unconditional bl and none predicated:
+      0x08147b94, 0x08147cd8, 0x08147e40, 0x0815ed84, 0x081a26ac,
+      0x081b9fc0, and 0x081fb360. It obtains secondary display layers 0 and
+      5, stores them at setup+0x20/+0x24, initializes two 64-byte stack
+      descriptors, and feeds format byte input+8 plus setup width/height into
+      the separately linked descriptor copier. The descriptors are applied,
+      the display clear is set to 0x00108080, four pending nibbles
+      (15,0,0,0) are committed with selector 1, then layers 5 and 0 select
+      global-alpha blending. FUN_081d8d0c remains unported; its existing
+      verified-address seam is reused from ui/display_pending_nibbles. Host
+      tests record that boundary and prove both layer state, descriptor
+      geometry and format cases, the clear color, and its fixed arguments.
