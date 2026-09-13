@@ -664,6 +664,10 @@ pub mod hints {
     // 0xd800_0000: dedicated to sqlite/step's target-width Vdbe and
     // connection fixtures; mappings never unmap, so no other user may share it.
     pub const SQLITE_STEP: usize = 0xd800_0000;
+    // 0xd700_0000: dedicated to sqlite/exec_first_column_sql's target-width
+    // prepared statement and connection fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const SQLITE_EXEC_FIRST_COLUMN_SQL: usize = 0xd700_0000;
     // 0x4800_0000: dedicated to sqlite/pager_lookup's raw-u32 Pager,
     // bucket table, and page-hash chain fixture; mappings never unmap.
     pub const SQLITE_PAGER_LOOKUP: usize = 0x4800_0000;
