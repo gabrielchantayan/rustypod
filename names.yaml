@@ -75384,3 +75384,33 @@ functions:
       0x0813299c, and 0x08132ae8; no predicated bl forms. No ledger entry
       exists for 0x0813305c, so the target port calls that verified retail
       address and host tests replace it through a volatile seam.
+
+  # --- Opaque record payload accessor (app/opaque_record_payload) ---
+  - address: 0x081614c0
+    ghidra: FUN_081614c0
+    name: opaque_record_payload
+    size: 16
+    sig: "u32 opaque_record_payload(u32 *record, u32 **payload_out)"
+    module: app/opaque_record_payload
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      r0_return: status
+      param_1_plus_0x04: payload
+    notes: >-
+      Raw ARM establishes the exact 16-byte extent
+      0x081614c0..0x081614d0: add r0,r0,#4; str r0,[r1]; mov r0,#0;
+      bx lr. The separately linked successor begins at 0x081614d0.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly seven
+      direct inbound calls, all unconditional plain bl at 0x081e33dc,
+      0x081e375c, 0x08206184, 0x082063a4, 0x0820a1cc, 0x0821bef4, and
+      0x0821c080; there are no predicated BL forms or direct tail-B calls.
+      No aligned image word equals 0x081614c0, so it is not reached through
+      a stored data-pointer dispatch. The leaf writes the opaque record's
+      word-aligned payload start (record + 4 bytes) through payload_out and
+      returns zero; it neither reads nor writes the record itself. No NULL
+      guard exists for either pointer. No deliberate deviations: the Rust
+      export preserves the target-width pointer result, single pointer
+      store, and zero status. Host tests cover four distinct header values,
+      verify the exact +4 result, zero status, and record preservation.

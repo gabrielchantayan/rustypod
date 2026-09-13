@@ -128,6 +128,7 @@ pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
 pub mod opaque_collection_item_count;
 pub mod opaque_u16_pair_buffer;
+pub mod opaque_record_payload;
 pub mod opaque_record_source_item_count;
 pub mod opaque_collection_item_at;
 pub mod opaque_record_table_entry;
