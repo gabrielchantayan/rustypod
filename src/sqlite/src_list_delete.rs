@@ -31,10 +31,15 @@ pub(crate) unsafe extern "C" fn missing_table_release(_table: *mut u8) {}
 /// Active target for the 0x0837521c table-release call.
 pub static mut SQLITE_TABLE_RELEASE: TableReleaseFn = missing_table_release;
 
+/// Reads the active target for the 0x0837521c table-release call.
 #[inline(always)]
-fn table_release_op() -> TableReleaseFn {
+pub(crate) fn table_release_op() -> TableReleaseFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_TABLE_RELEASE)) }
 }
+
+/// Serializes test users of the process-global table-release seam.
+#[cfg(test)]
+pub(crate) static SQLITE_TABLE_RELEASE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// `SrcList`'s fixed header. Its `a[]` member begins immediately afterward.
 #[repr(C)]
 pub struct SrcList {
@@ -134,10 +139,9 @@ mod tests {
     use crate::heap::types::HeapDescriptorDescriptor;
     use crate::heap::veneers::{tests::mock_heap, HEAP_OPS};
     use crate::sqlite::id_list_delete::IdList;
-    use std::sync::Mutex;
+    use super::SQLITE_TABLE_RELEASE_TEST_LOCK;
     use std::vec::Vec;
 
-    static SLOT_LOCK: Mutex<()> = Mutex::new(());
     static mut FREED: Vec<(*mut u8, usize)> = Vec::new();
     static mut TABLES: Vec<*mut u8> = Vec::new();
 
@@ -248,7 +252,7 @@ mod tests {
     #[test]
     fn null_is_a_no_op() {
         let _heap = mock_heap();
-        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SQLITE_TABLE_RELEASE_TEST_LOCK.lock();
         unsafe { with_ops(|| src_list_delete(core::ptr::null_mut())) };
         assert!(freed().is_empty(), "NULL frees nothing");
         assert!(tables().is_empty(), "NULL reaches no table release");
@@ -257,7 +261,7 @@ mod tests {
     #[test]
     fn non_positive_count_skips_items_and_frees_header() {
         let _heap = mock_heap();
-        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SQLITE_TABLE_RELEASE_TEST_LOCK.lock();
         let mut header = TrackedBlock::new(0x30);
         let source_list = unsafe { source_list_in(&mut header, -1, &[]) };
         unsafe { with_ops(|| src_list_delete(source_list)) };
@@ -268,7 +272,7 @@ mod tests {
     #[test]
     fn releases_each_item_in_order_then_the_header() {
         let _heap = mock_heap();
-        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SQLITE_TABLE_RELEASE_TEST_LOCK.lock();
         let mut header = TrackedBlock::new(0x80);
         let mut database0 = TrackedBlock::new(8);
         let mut name0 = TrackedBlock::new(8);

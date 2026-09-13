@@ -146,6 +146,7 @@ pub mod select_height;
 pub mod select_dest_init;
 pub mod select_delete;
 pub mod src_list_delete;
+pub mod src_list_lookup;
 pub mod set_string;
 pub mod set_string_formatted;
 pub mod snprintf;
