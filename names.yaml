@@ -72829,6 +72829,36 @@ functions:
       target-address seam retains the stock call on device and lets host tests
       observe the zero/nonzero flag behavior. The stock tail branch to unlock
       becomes a normal Rust call after the conditional clear returns.
+  # --- Directory iterator next wrapper ---
+  - address: 0x081ef598
+    ghidra: FUN_081ef598
+    name: directory_iterator_next
+    size: 56
+    sig: "i32 directory_iterator_next(DirectoryIterator *iterator, StringObject *entry_path, u8 *is_special)"
+    module: app/directory_iterator
+    status: ported
+    renames:
+      param_1/r0: iterator
+      param_2/r1: entry_path
+      param_3/r2: is_special
+      FUN_081ef5d0: directory_iterator_next_extended (unported seam)
+      "sp+0x0c..sp+0x18": discarded_engine_scratch_words
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte, 14-instruction extent from
+      0x081ef598 through the return at 0x081ef5cc; the preceding function
+      ends at 0x081ef594 and the distinct extended engine starts at
+      0x081ef5d0. This wrapper allocates four uninitialized stack words and
+      calls the extended iterator-next engine with iterator, entry path, and
+      special-entry output in r0-r2, then the scratch pointers in descending
+      stack-address order (sp+0x18, +0x14, +0x10, +0x0c). It returns the
+      engine's status in r0 unchanged; Ghidra's void signature is wrong.
+      Decoding every immediate ARM B/BL word in osos.dec finds exactly seven
+      direct inbound calls, all unconditional plain bl at 0x08100ad4,
+      0x0813a4cc, 0x0813ae74, 0x081a2cd0, 0x081ee83c, 0x081ef564, and
+      0x081ef724; there are no predicated forms. The extended engine is
+      unported, so the Rust port retains it as a read-volatile fixed-address
+      seam on device and installs a host recorder for behavior tests. No
+      deliberate deviations.
   - address: 0x081ef9d8
     ghidra: FUN_081ef9d8
     name: directory_iterator_destroy
