@@ -81963,3 +81963,28 @@ functions:
       zeroing seam. The cache and host mutex are crate statics; target builds
       use the retail mutex address. Host tests cover lock scope, cold
       construction, post-construction ordering, cached hit, and NULL retry.
+
+
+  # --- Indexed slot pending-state reset ---
+  - address: 0x08193f24
+    ghidra: FUN_08193f24
+    name: clear_indexed_slot_pending_state
+    size: 20
+    sig: "void clear_indexed_slot_pending_state(IndexedSlotPendingState *state, i32 slot)"
+    module: app/indexed_slot_pending_reset
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: slot
+      param_1_plus_slot_times_0x20_plus_0x18: pending_state
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent at
+      0x08193f24..0x08193f38: cmp r1,#3; movlt r2,#0; addlt r0,r0,r1,lsl #5;
+      strlt r2,[r0,#0x18]; bx lr. The following distinct function begins at
+      0x08193f38. A full-image ARM B/BL-immediate decode finds exactly six
+      inbound direct call sites, all unconditional plain bl at 0x0818ea34,
+      0x0818f40c, 0x0818fcd0, 0x081908a4, 0x08192858, and 0x08193dac; no
+      predicated bl forms were found. The signed less-than check has no lower
+      bound: negative slot values address preceding 32-byte entries, faithfully
+      retained by the port. The field's semantic meaning is not otherwise
+      recovered; it is named pending_state from its reset behavior.
