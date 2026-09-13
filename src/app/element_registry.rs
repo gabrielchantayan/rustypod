@@ -251,6 +251,288 @@ pub unsafe extern "C" fn registry_element_secondary_dispatch(
     ((*vtable).dispatch_value)(collection, core::ptr::addr_of_mut!(slot));
 }
 
+/// Primary embedded collection of a registry element, as reached by
+/// [`registry_element_enqueue_animation`].
+#[repr(C)]
+pub struct RegistryElementAnimationCollection {
+    /// +0x00: runtime vtable.
+    pub vtable: *const RegistryElementAnimationCollectionVtable,
+}
+
+/// Recovered portion of the primary collection's runtime vtable.
+///
+/// Its +0x1c target is runtime vtable data. It has no valid static-image
+/// identity, so this is a structural dispatch model rather than a seam.
+#[repr(C)]
+pub struct RegistryElementAnimationCollectionVtable {
+    /// Slots +0x00..+0x18: not used by this wrapper.
+    pub unresolved_00_18: [usize; 7],
+    /// +0x1c: receives the collection and a stack slot containing the new
+    /// animation object. The callee may replace that slot; the wrapper does
+    /// not read it afterward.
+    pub enqueue_animation: unsafe extern "C" fn(
+        this: *mut RegistryElementAnimationCollection,
+        slot: *mut *mut u8,
+    ),
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(
+    RegistryElementAnimationCollectionVtable,
+    enqueue_animation
+)];
+
+/// Target layout through the primary collection at +0x18.
+#[cfg(target_os = "none")]
+#[repr(C)]
+pub struct RegistryElementAnimationDispatch {
+    /// +0x00..+0x0c: base object.
+    pub unresolved_00_0c: [u32; 4],
+    /// +0x10: element whose render state may be initialized.
+    pub render_element: u32,
+    /// +0x14: cached render context.
+    pub render_context: u32,
+    /// +0x18: primary collection receiving the animation.
+    pub primary_collection: RegistryElementAnimationCollection,
+    /// +0x1c..+0x50: primary collection state and other opaque fields.
+    pub unresolved_1c_50: [u8; 0x35],
+    /// +0x51: set after creating a missing render-state node.
+    pub render_state_created: u8,
+}
+
+#[cfg(target_os = "none")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(
+    RegistryElementAnimationDispatch,
+    render_element
+)];
+#[cfg(target_os = "none")]
+const _: [u8; 0x14] = [0; core::mem::offset_of!(
+    RegistryElementAnimationDispatch,
+    render_context
+)];
+#[cfg(target_os = "none")]
+const _: [u8; 0x18] = [0; core::mem::offset_of!(
+    RegistryElementAnimationDispatch,
+    primary_collection
+)];
+#[cfg(target_os = "none")]
+const _: [u8; 0x51] = [0; core::mem::offset_of!(
+    RegistryElementAnimationDispatch,
+    render_state_created
+)];
+
+
+/// Host form of [`RegistryElementAnimationDispatch`].
+///
+/// Native pointers cannot coexist at the target's +0x10/+0x14 offsets on a
+/// 64-bit host. Keeping them as distinct native fields makes the resolved
+/// context and collection dispatch testable; the device form above preserves
+/// the retail layout exactly.
+#[cfg(not(target_os = "none"))]
+#[repr(C)]
+pub struct RegistryElementAnimationDispatch {
+    pub unresolved_00_0f: [u8; 0x10],
+    pub render_element: *mut u8,
+    pub render_context: *mut u8,
+    pub primary_collection: RegistryElementAnimationCollection,
+    pub unresolved_after_primary: [u8; 0x29],
+    pub render_state_created: u8,
+}
+
+/// ABI of the unported render-state initializer at `FUN_0826db98`.
+pub type EnsureElementRenderState = unsafe extern "C" fn(*mut u8, u32, u32, u32);
+/// ABI of the unported render-context configuration routine at
+/// `FUN_0828c874`.
+pub type ConfigureRenderContextAnimation = unsafe extern "C" fn(*mut u8, *mut u8);
+
+/// The two unported direct dependencies of
+/// [`registry_element_enqueue_animation`].
+#[derive(Clone, Copy)]
+pub struct RegistryElementAnimationOps {
+    pub ensure_render_state: EnsureElementRenderState,
+    pub configure_render_context: ConfigureRenderContextAnimation,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_ensure_element_render_state(
+    element: *mut u8,
+    zero_1: u32,
+    zero_2: u32,
+    zero_3: u32,
+) {
+    let ensure: EnsureElementRenderState = unsafe { core::mem::transmute(0x0826_db98usize) };
+    unsafe { ensure(element, zero_1, zero_2, zero_3) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_configure_render_context(
+    render_context: *mut u8,
+    render_options: *mut u8,
+) {
+    let configure: ConfigureRenderContextAnimation =
+        unsafe { core::mem::transmute(0x0828_c874usize) };
+    unsafe { configure(render_context, render_options) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_ensure_element_render_state(
+    _element: *mut u8,
+    _zero_1: u32,
+    _zero_2: u32,
+    _zero_3: u32,
+) {
+    panic!("registry_element_enqueue_animation requires FUN_0826db98")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_configure_render_context(
+    _render_context: *mut u8,
+    _render_options: *mut u8,
+) {
+    panic!("registry_element_enqueue_animation requires FUN_0828c874")
+}
+
+#[cfg(target_os = "none")]
+const DEFAULT_REGISTRY_ELEMENT_ANIMATION_OPS: RegistryElementAnimationOps =
+    RegistryElementAnimationOps {
+        ensure_render_state: firmware_ensure_element_render_state,
+        configure_render_context: firmware_configure_render_context,
+    };
+
+#[cfg(not(target_os = "none"))]
+const DEFAULT_REGISTRY_ELEMENT_ANIMATION_OPS: RegistryElementAnimationOps =
+    RegistryElementAnimationOps {
+        ensure_render_state: missing_ensure_element_render_state,
+        configure_render_context: missing_configure_render_context,
+    };
+
+/// Direct dependency boundary: device defaults retain the stock routines
+/// until their own ports replace them.
+pub static mut REGISTRY_ELEMENT_ANIMATION_OPS: RegistryElementAnimationOps =
+    DEFAULT_REGISTRY_ELEMENT_ANIMATION_OPS;
+
+/// Host model of the byte table at 0x089d016c. The retail table is indexed
+/// without a bounds check; callers establish a valid property index.
+#[cfg(not(target_os = "none"))]
+static mut REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS: [u8; 256] = [0; 256];
+
+#[cfg(target_os = "none")]
+unsafe fn animation_render_enabled(property: usize) -> bool {
+    unsafe { (0x089d_016cusize as *const u8).add(property).read_volatile() != 0 }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn animation_render_enabled(property: usize) -> bool {
+    unsafe { REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS.as_ptr().add(property).read_volatile() != 0 }
+}
+
+#[cfg(target_os = "none")]
+unsafe fn render_state_is_missing(render_element: *mut u8) -> bool {
+    unsafe { render_element.add(0x3c).cast::<u32>().read() == 0 }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn render_state_is_missing(render_element: *mut u8) -> bool {
+    unsafe {
+        render_element
+            .add(0x3c)
+            .cast::<*mut u8>()
+            .read_unaligned()
+            .is_null()
+    }
+}
+
+/// registry_element_enqueue_animation — original: `FUN_0817e238` @
+/// 0x0817e238 (164 bytes).
+///
+/// Raw decoding confirms code through `pop {r3,r4,r5,r6,r7,pc}` at
+/// 0x0817e2d8, followed by its literal `0x089d016c`; the separately linked
+/// next function begins at 0x0817e2e0. Decoding every ARM B/BL-immediate word
+/// in osos.dec finds seven inbound direct call sites, all unconditional
+/// `bl` (0x08180b50, 0x08181a48, 0x0818205c, 0x08183168, 0x08183210,
+/// 0x0818328c, and 0x08184210), with no predicated form.
+///
+/// When the global byte at `0x089d016c + property` is nonzero, a non-NULL
+/// `render_element` with no +0x3c node is initialized and marks element +0x51;
+/// either node state then resolves and caches its render context before that
+/// context is configured with `render_options`.
+/// In all cases, pass a stack slot holding `animation` through the primary
+/// collection's runtime vtable slot +0x1c. The slot's target is not statically
+/// identifiable and remains structural. The two unported direct dependencies
+/// remain volatile seams: device defaults call their retail addresses; host
+/// tests install explicit callbacks. The host dispatch layout deliberately
+/// uses disjoint native pointer fields, while the device definition preserves
+/// the 32-bit +0x10/+0x14/+0x18 layout.
+///
+/// # Safety
+///
+/// `element` must point to this registry-element family and carry a valid
+/// primary-collection vtable. Its property index must address the firmware
+/// flag table. The original has no NULL guards.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_element_enqueue_animation(
+    element: *mut RegistryElementAnimationDispatch,
+    property: u32,
+    animation: *mut u8,
+    render_options: *mut u8,
+) {
+    if unsafe { animation_render_enabled(property as usize) } {
+        #[cfg(target_os = "none")]
+        let render_element = unsafe { (*element).render_element as usize as *mut u8 };
+        #[cfg(not(target_os = "none"))]
+        let render_element = unsafe { (*element).render_element };
+
+        if !render_element.is_null() {
+            if unsafe { render_state_is_missing(render_element) } {
+                let ops = unsafe {
+                    core::ptr::read_volatile(core::ptr::addr_of!(REGISTRY_ELEMENT_ANIMATION_OPS))
+                };
+                unsafe { (ops.ensure_render_state)(render_element, 0, 0, 0) };
+                let render_context =
+                    unsafe { crate::ui::render_context::ui_element_resolve_render_context(render_element) };
+
+                #[cfg(target_os = "none")]
+                unsafe {
+                    (*element).render_context = render_context as usize as u32;
+                }
+                #[cfg(not(target_os = "none"))]
+                unsafe {
+                    (*element).render_context = render_context;
+                }
+                unsafe {
+                    (*element).render_state_created = 1;
+                }
+            } else {
+                let render_context =
+                    unsafe { crate::ui::render_context::ui_element_resolve_render_context(render_element) };
+                #[cfg(target_os = "none")]
+                unsafe {
+                    (*element).render_context = render_context as usize as u32;
+                }
+                #[cfg(not(target_os = "none"))]
+                unsafe {
+                    (*element).render_context = render_context;
+                }
+            }
+        }
+
+        let ops = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(REGISTRY_ELEMENT_ANIMATION_OPS))
+        };
+        #[cfg(target_os = "none")]
+        let render_context = unsafe { (*element).render_context as usize as *mut u8 };
+        #[cfg(not(target_os = "none"))]
+        let render_context = unsafe { (*element).render_context };
+        unsafe { (ops.configure_render_context)(render_context, render_options) };
+    }
+
+    let collection = unsafe { core::ptr::addr_of_mut!((*element).primary_collection) };
+    let vtable = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*collection).vtable)) };
+    let mut slot = animation;
+    unsafe { ((*vtable).enqueue_animation)(collection, core::ptr::addr_of_mut!(slot)) };
+}
+
 /// element_registry_set_name_for_id — original: `FUN_0816e220` @
 /// 0x0816e220 (96 bytes; 20 `bl` call sites, binary-verified).
 ///
@@ -437,6 +719,8 @@ pub unsafe extern "C" fn registry_element_construct(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -728,6 +1012,241 @@ mod tests {
             "NULL is dispatched rather than filtered by a wrapper guard"
         );
     }
+
+    static REGISTRY_ELEMENT_ANIMATION_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static ENSURE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ENSURE_ELEMENT: AtomicUsize = AtomicUsize::new(0);
+    static ENSURE_ZEROES: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static ENSURE_RESULT_CONTEXT: AtomicUsize = AtomicUsize::new(0);
+    static CONFIGURE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static CONFIGURE_CONTEXT: AtomicUsize = AtomicUsize::new(0);
+    static CONFIGURE_OPTIONS: AtomicUsize = AtomicUsize::new(0);
+    static PRIMARY_ANIMATION_COLLECTION: AtomicUsize = AtomicUsize::new(0);
+    static PRIMARY_ANIMATION: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn recording_ensure_render_state(
+        element: *mut u8,
+        zero_1: u32,
+        zero_2: u32,
+        zero_3: u32,
+    ) {
+        ENSURE_CALLS.fetch_add(1, Ordering::SeqCst);
+        ENSURE_ELEMENT.store(element as usize, Ordering::SeqCst);
+        ENSURE_ZEROES.store((zero_1 | zero_2 | zero_3) as usize, Ordering::SeqCst);
+        element
+            .add(0x3c)
+            .cast::<*mut u8>()
+            .write_unaligned(ENSURE_RESULT_CONTEXT.load(Ordering::SeqCst) as *mut u8);
+    }
+
+    unsafe extern "C" fn recording_configure_render_context(
+        context: *mut u8,
+        options: *mut u8,
+    ) {
+        CONFIGURE_CALLS.fetch_add(1, Ordering::SeqCst);
+        CONFIGURE_CONTEXT.store(context as usize, Ordering::SeqCst);
+        CONFIGURE_OPTIONS.store(options as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_primary_animation_enqueue(
+        collection: *mut RegistryElementAnimationCollection,
+        slot: *mut *mut u8,
+    ) {
+        PRIMARY_ANIMATION_COLLECTION.store(collection as usize, Ordering::SeqCst);
+        PRIMARY_ANIMATION.store(slot.read() as usize, Ordering::SeqCst);
+        slot.write(core::ptr::null_mut());
+    }
+
+    static PRIMARY_ANIMATION_VT: RegistryElementAnimationCollectionVtable =
+        RegistryElementAnimationCollectionVtable {
+            unresolved_00_18: [0; 7],
+            enqueue_animation: recording_primary_animation_enqueue,
+        };
+
+    struct RegistryElementAnimationOpsGuard(RegistryElementAnimationOps);
+    impl Drop for RegistryElementAnimationOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(REGISTRY_ELEMENT_ANIMATION_OPS).write_volatile(self.0);
+                REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS.fill(0);
+            }
+        }
+    }
+
+    unsafe fn install_recording_animation_ops() -> RegistryElementAnimationOpsGuard {
+        let slot = core::ptr::addr_of_mut!(REGISTRY_ELEMENT_ANIMATION_OPS);
+        let original = slot.read_volatile();
+        slot.write_volatile(RegistryElementAnimationOps {
+            ensure_render_state: recording_ensure_render_state,
+            configure_render_context: recording_configure_render_context,
+        });
+        RegistryElementAnimationOpsGuard(original)
+    }
+
+    fn reset_animation_dispatch_log() {
+        ENSURE_CALLS.store(0, Ordering::SeqCst);
+        ENSURE_ELEMENT.store(0, Ordering::SeqCst);
+        ENSURE_ZEROES.store(usize::MAX, Ordering::SeqCst);
+        ENSURE_RESULT_CONTEXT.store(0, Ordering::SeqCst);
+        CONFIGURE_CALLS.store(0, Ordering::SeqCst);
+        CONFIGURE_CONTEXT.store(0, Ordering::SeqCst);
+        CONFIGURE_OPTIONS.store(0, Ordering::SeqCst);
+        PRIMARY_ANIMATION_COLLECTION.store(0, Ordering::SeqCst);
+        PRIMARY_ANIMATION.store(0, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn enqueue_animation_skips_render_setup_when_property_is_disabled() {
+        let _lock = REGISTRY_ELEMENT_ANIMATION_OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ops = unsafe { install_recording_animation_ops() };
+        reset_animation_dispatch_log();
+        unsafe { REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS.fill(0) };
+
+        let mut animation = 0u8;
+        let mut options = 0u8;
+        let mut entry = RegistryElementAnimationDispatch {
+            unresolved_00_0f: [0; 0x10],
+            render_element: core::ptr::null_mut(),
+            render_context: core::ptr::null_mut(),
+            primary_collection: RegistryElementAnimationCollection {
+                vtable: &PRIMARY_ANIMATION_VT,
+            },
+            unresolved_after_primary: [0; 0x29],
+            render_state_created: 0,
+        };
+        let collection = core::ptr::addr_of_mut!(entry.primary_collection);
+
+        unsafe {
+            registry_element_enqueue_animation(
+                core::ptr::addr_of_mut!(entry),
+                2,
+                core::ptr::addr_of_mut!(animation),
+                core::ptr::addr_of_mut!(options),
+            );
+        }
+
+        assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(CONFIGURE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(entry.render_context, core::ptr::null_mut());
+        assert_eq!(PRIMARY_ANIMATION_COLLECTION.load(Ordering::SeqCst), collection as usize);
+        assert_eq!(
+            PRIMARY_ANIMATION.load(Ordering::SeqCst),
+            core::ptr::addr_of_mut!(animation) as usize,
+            "the collection receives a stack slot holding the animation"
+        );
+    }
+
+    #[test]
+    fn enqueue_animation_initializes_and_configures_enabled_render_property() {
+        let _lock = REGISTRY_ELEMENT_ANIMATION_OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ops = unsafe { install_recording_animation_ops() };
+        reset_animation_dispatch_log();
+        unsafe {
+            REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS.fill(0);
+            REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS[3] = 1;
+        }
+
+        let mut context = 0u8;
+        let mut render_element = [0u8; 0x44];
+        ENSURE_RESULT_CONTEXT.store(core::ptr::addr_of_mut!(context) as usize, Ordering::SeqCst);
+        let mut animation = 0u8;
+        let mut options = 0u8;
+        let mut entry = RegistryElementAnimationDispatch {
+            unresolved_00_0f: [0; 0x10],
+            render_element: render_element.as_mut_ptr(),
+            render_context: core::ptr::null_mut(),
+            primary_collection: RegistryElementAnimationCollection {
+                vtable: &PRIMARY_ANIMATION_VT,
+            },
+            unresolved_after_primary: [0; 0x29],
+            render_state_created: 0,
+        };
+        let collection = core::ptr::addr_of_mut!(entry.primary_collection);
+
+        unsafe {
+            registry_element_enqueue_animation(
+                core::ptr::addr_of_mut!(entry),
+                3,
+                core::ptr::addr_of_mut!(animation),
+                core::ptr::addr_of_mut!(options),
+            );
+        }
+
+        assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            ENSURE_ELEMENT.load(Ordering::SeqCst),
+            render_element.as_mut_ptr() as usize
+        );
+        assert_eq!(ENSURE_ZEROES.load(Ordering::SeqCst), 0, "all three initializer words are zero");
+        assert_eq!(entry.render_state_created, 1, "creating a missing node sets element +0x51");
+        assert_eq!(entry.render_context, core::ptr::addr_of_mut!(context));
+        assert_eq!(CONFIGURE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            CONFIGURE_CONTEXT.load(Ordering::SeqCst),
+            core::ptr::addr_of_mut!(context) as usize
+        );
+        assert_eq!(
+            CONFIGURE_OPTIONS.load(Ordering::SeqCst),
+            core::ptr::addr_of_mut!(options) as usize
+        );
+        assert_eq!(PRIMARY_ANIMATION_COLLECTION.load(Ordering::SeqCst), collection as usize);
+        assert_eq!(PRIMARY_ANIMATION.load(Ordering::SeqCst), core::ptr::addr_of_mut!(animation) as usize);
+    }
+
+    #[test]
+    fn enqueue_animation_reuses_existing_render_state() {
+        let _lock = REGISTRY_ELEMENT_ANIMATION_OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ops = unsafe { install_recording_animation_ops() };
+        reset_animation_dispatch_log();
+        unsafe {
+            REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS.fill(0);
+            REGISTRY_ELEMENT_ANIMATION_RENDER_FLAGS[4] = 1;
+        }
+
+        let mut context = 0u8;
+        let mut render_element = [0u8; 0x44];
+        unsafe {
+            render_element
+                .as_mut_ptr()
+                .add(0x3c)
+                .cast::<*mut u8>()
+                .write_unaligned(core::ptr::addr_of_mut!(context));
+        }
+        let mut animation = 0u8;
+        let mut entry = RegistryElementAnimationDispatch {
+            unresolved_00_0f: [0; 0x10],
+            render_element: render_element.as_mut_ptr(),
+            render_context: core::ptr::null_mut(),
+            primary_collection: RegistryElementAnimationCollection {
+                vtable: &PRIMARY_ANIMATION_VT,
+            },
+            unresolved_after_primary: [0; 0x29],
+            render_state_created: 0,
+        };
+
+        unsafe {
+            registry_element_enqueue_animation(
+                core::ptr::addr_of_mut!(entry),
+                4,
+                core::ptr::addr_of_mut!(animation),
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 0, "a non-NULL +0x3c skips the initializer");
+        assert_eq!(entry.render_state_created, 0, "the creation marker remains unchanged");
+        assert_eq!(entry.render_context, core::ptr::addr_of_mut!(context));
+        assert_eq!(CONFIGURE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(CONFIGURE_CONTEXT.load(Ordering::SeqCst), core::ptr::addr_of_mut!(context) as usize);
+        assert_eq!(CONFIGURE_OPTIONS.load(Ordering::SeqCst), 0, "NULL options are forwarded");
+    }
+
     #[repr(C, align(4))]
     struct RegistryElementBytes([u8; 0x54]);
 
