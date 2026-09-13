@@ -594,6 +594,58 @@ fn owner_mode_index_does_not_narrow_before_matching() {
     assert_eq!(iap_packet_owner_mode_index(0xffff_ff04), 0xff);
 }
 
+/// iap_packet_owner_mode_from_index — original: `FUN_0819214c` @
+/// `0x0819214c` (**40 bytes, 0x0819214c..0x08192174** — 10 instructions,
+/// no literal pool; the next separately linked function starts at
+/// 0x08192174 with `push {r4-r9,lr}`). **6 direct `bl` call sites, all
+/// unconditional; no predicated forms**, verified by decoding every ARM
+/// branch word in `osos.dec`.
+///
+/// Inverts the valid portion of [`iap_packet_owner_mode_index`] for iAP
+/// service-table lookups: index 0 selects framing mode 1, index 1 selects
+/// mode 2, and index 3 selects mode 4. Every other full-width input,
+/// including the invalid index 2, yields mode 0. The original has no pointer
+/// access, state, or NULL handling.
+///
+/// # Deviations
+///
+/// None. The comparisons are over the full 32-bit input exactly as the ARM
+/// `cmp` instructions do; the result remains a `u32`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iap_packet_owner_mode_from_index")]
+pub extern "C" fn iap_packet_owner_mode_from_index(service_index: u32) -> u32 {
+    if service_index == 0 {
+        1
+    } else if service_index == 1 {
+        2
+    } else if service_index == 3 {
+        4
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn owner_mode_from_index_maps_only_recognized_indices() {
+    assert_eq!(iap_packet_owner_mode_from_index(0), 1);
+    assert_eq!(iap_packet_owner_mode_from_index(1), 2);
+    assert_eq!(iap_packet_owner_mode_from_index(3), 4);
+
+    for service_index in [2, 4, u32::MAX] {
+        assert_eq!(iap_packet_owner_mode_from_index(service_index), 0);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn owner_mode_from_index_does_not_narrow_before_matching() {
+    assert_eq!(iap_packet_owner_mode_from_index(0x0000_0100), 0);
+    assert_eq!(iap_packet_owner_mode_from_index(0x0000_0101), 0);
+    assert_eq!(iap_packet_owner_mode_from_index(0xffff_ff03), 0);
+}
+
 
 #[cfg(test)]
 mod tests {

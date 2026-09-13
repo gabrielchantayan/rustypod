@@ -79425,6 +79425,29 @@ functions:
       predicated forms: 0x0818dcf0, 0x0818f2f8, 0x0818fe84, 0x08190e30,
       0x08192458, 0x0819331c, and 0x08193538. No deviations: the Rust
       match preserves the ARM's full-width comparisons and u32 result.
+  # --- iAP packet owner-mode selection ---
+  - address: 0x0819214c
+    ghidra: FUN_0819214c
+    name: iap_packet_owner_mode_from_index
+    size: 40
+    sig: "u32 iap_packet_owner_mode_from_index(u32 service_index)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: service_index
+      r0: owner_mode
+    notes: >-
+      Raw ARM is exactly ten words from 0x0819214c through bx lr at
+      0x08192170; there is no literal pool, and the next separately linked
+      function starts at 0x08192174 with push {r4-r9,lr}. It maps valid iAP
+      service-table indices 0 -> framing mode 1, 1 -> 2, and 3 -> 4; every
+      other full-width input, including index 2, returns mode 0. Decoding
+      every ARM B/BL immediate in osos.dec found exactly six inbound direct
+      calls, all unconditional plain bl and no predicated forms: 0x08111e98,
+      0x081155c4, 0x08115648, 0x0818ee6c, 0x0818ee9c, and 0x08190ab8. No
+      deviations: the Rust comparisons retain the ARM's full-width u32
+      behavior and u32 result.
+
 
   # --- UI operation non-deleting destructor ---
   - address: 0x0816f050
