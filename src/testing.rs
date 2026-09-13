@@ -126,6 +126,9 @@ pub mod hints {
     // raw-u32 service-manager and handler fixture; mappings never unmap, so
     // no other user may share this hint.
     pub const SERVICE_HANDLER_MASKED_EVENT_DISPATCH: usize = 0x8600_0000;
+    // 0x8700_0000: dedicated to app/scoped_context's raw-u32 owner context
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const SCOPED_CONTEXT_OWNER_STRING: usize = 0x8700_0000;
     pub const CHARACTER_CLASS: usize = 0x3700_0000;
     pub const TIMER_RESET_4000: usize = 0x3800_0000;
     // 0x3900_0000, skipping 0x2e00_0000..0x3500_0000: sibling ports in

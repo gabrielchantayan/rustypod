@@ -21471,6 +21471,45 @@ functions:
       slot's output payload. Host vtable slots use native-width pointers;
       repr(C) keeps the target layout at the verified 32-bit word offsets.
 
+  - address: 0x082a38c4
+    ghidra: FUN_082a38c4
+    name: scoped_context_assign_owner_string
+    size: 96
+    sig: "void scoped_context_assign_owner_string(const ScopedContext *this, StringObject *out)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: out
+      iVar1/r0: validity
+      local_20c: counted
+      auStack_20a: utf16
+      FUN_080556cc: string_pool_read_counted_from_context
+      FUN_0827639c: string_object_assign_cstr
+      FUN_082765a8: string_object_assign_utf16
+    notes: >-
+      Raw ARM establishes a 96-byte extent at 0x082a38c4..0x082a3923:
+      Ghidra's reported 92 bytes are the 23 instruction words through the
+      branch at 0x082a391c, but it omits the four-byte NUL literal at
+      0x082a3920 used as the empty C string. The next separately linked
+      function starts at 0x082a3924. The function dispatches this->vtable
+      slot +0x08 as validity(this); a zero result calls
+      string_object_assign_cstr(out, "") and therefore reaches that class's
+      virtual clear boundary. A nonzero result reads the owner's counted
+      UTF-16 entry through string_pool_read_counted_from_context into the
+      stack layout {u16 count; u16 units[255]}, then calls
+      string_object_assign_utf16(out, units, count). Its six decoded direct
+      BL callers are 0x082228d8, 0x08222d20, 0x08225df0, 0x08226394,
+      0x08238398, and 0x082389a0; all are unconditional plain BL, with no
+      predicated calls or direct tail-B callers. The raw owner read is
+      deliberately gated only by the virtual validity result: a valid token
+      with a NULL owner faults just as stock does. The Rust port uses the
+      existing repr(C) ScopedContext model and directly calls the existing
+      string-pool and StringObject ports; their established downstream
+      dispatch seams are retained. Host coverage supplies a below-4-GiB
+      target-layout owner context, verifies pool +0x1c8, ID and 0x1fe cap,
+      UTF-16-to-UTF-8 assignment, and the invalid-token empty-string clear
+      path without an owner read.
   - address: 0x08277440
     ghidra: FUN_08277440
     name: string_default_construct
