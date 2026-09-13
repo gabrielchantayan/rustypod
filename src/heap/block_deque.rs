@@ -262,7 +262,7 @@ pub struct PoolBase {
     /// +0x3c — the memoized client handle (`pool_client_attach`).
     pub client_cache: *mut u8,
     /// +0x40 — parent word the ctor zeroes; unread here.
-    pub parent_reserved: usize,
+    pub parent_reserved: u32,
     pub fill_block_count: u32,
     pub fill_cap: u32,
     pub deque: BlockDeque,

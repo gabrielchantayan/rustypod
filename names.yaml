@@ -81217,3 +81217,28 @@ functions:
       there are no predicated BL forms or direct B tail calls. No deviations.
       Host tests cover orientation, cancellation, and the signed i32 extrema
       against an independent i128 arithmetic model.
+
+
+  # --- Block-manager pool-base parent-reserved accessor ---
+  - address: 0x081fbf68
+    ghidra: FUN_081fbf68
+    name: pool_parent_reserved_get
+    size: 8
+    sig: "u32 pool_parent_reserved_get(const PoolBase *this)"
+    module: heap/pool_parent_reserved
+    status: ported
+    renames:
+      FUN_081fbf68: pool_parent_reserved_get
+      param_1/r0: this
+      r0 return: parent_reserved
+    notes: >-
+      Raw osos.dec at 0x081fbf68..0x081fbf6c is exactly `ldr r0,
+      [r0, #0x40]; bx lr`; the separately linked next accessor begins at
+      0x081fbf70, confirming the 8-byte extent. It returns the pool base's
+      parent_reserved word without a NULL guard, matching the firmware's
+      unchecked load. Full-image decoding of every ARM B/BL-immediate word
+      finds exactly six direct inbound calls, all plain unconditional bl at
+      0x08207944, 0x082079b8, 0x08207b2c, 0x08207fa8, 0x0820802c, and
+      0x08208054; there are no predicated calls, direct tail branches, or
+      aligned raw-word references. No deliberate deviations. Host tests cover
+      zero, one, the high bit, and all bits set.
