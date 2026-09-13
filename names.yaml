@@ -28091,6 +28091,43 @@ functions:
       successful key clearing, and failure retention.
 
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
+  - address: 0x082d99d0
+    ghidra: FUN_082d99d0
+    name: btree_move_to_child
+    size: 100
+    sig: "i32 btree_move_to_child(BtCursor *cursor, u32 child_page)"
+    module: sqlite/move_to_child
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      param_2/r1: child_page
+      param_1+0x00: cursor->pBtree
+      param_1+0x18: cursor->pPage
+      param_1+0x1c: cursor->idx
+      param_1+0x3e: cursor->info.nSize
+      param_1+0x42: cursor->validNKey
+      param_1->pBtree+0x04: pBt
+      local_10/sp: replacement_page
+      replacement_page+0x10: parent_cell_index
+      replacement_page+0x14: nCell
+      FUN_082d05d0: getAndInitPage (BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam)
+      FUN_0836761c: release_via_field_0x48 (direct ported callee)
+    notes: >-
+      Raw ARM proves the exact 100-byte extent 0x082d99d0..0x082d9a30:
+      the next separately linked function starts at 0x082d9a34. Decoding
+      every ARM B/BL word in osos.dec finds exactly six inbound direct calls,
+      all unconditional bl at 0x082d9a74, 0x082d9ac4, 0x082d9bd4,
+      0x083721d4, 0x0837232c, and 0x083729bc; no predicated BL or tail B
+      targets this address. It calls getAndInitPage(shared, child_page,
+      &replacement, old_page) and returns its error untouched. On success it
+      writes cursor idx low 16 bits to replacement +0x10, clears old_page +1
+      before direct release, installs replacement, clears idx/info.nSize/
+      validNKey, and returns SQLITE_CORRUPT (11) precisely when replacement
+      nCell is zero. Deliberate deviation: unported getAndInitPage
+      @ 0x082d05d0 remains the existing volatile
+      BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam (retail target default,
+      explicit host mock); release_via_field_0x48 @ 0x0836761c is direct.
+
   - address: 0x082d9b00
     ghidra: FUN_082d9b00
     name: btree_move_to_root
@@ -28112,7 +28149,7 @@ functions:
       FUN_082d05d0: getAndInitPage (BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam)
       FUN_0836761c: release_via_field_0x48 (direct ported callee)
       FUN_0837a158: load_be32/sqlite3Get4byte (direct ported callee)
-      FUN_082d99d0: moveToChild (BTREE_MOVE_TO_ROOT_OPS.move_to_child seam)
+      FUN_082d99d0: btree_move_to_child (direct ported callee)
     notes: >-
       Raw ARM proves the 248-byte extent 0x082d9b00..0x082d9bf4: Ghidra's
       220-byte extent omits the 24-byte tail, while the next separately
@@ -28128,12 +28165,13 @@ functions:
       idx, info.nSize, atLast, and validNKey clear; an empty page with its
       raw +0x04 flag clear descends through the big-endian child word at
       aData + hdrOffset + 8; eState finally follows current pPage.nCell.
-      Deliberate deviation: unported sqlite3BtreeClearCursor @ 0x082c3528,
-      getAndInitPage @ 0x082d05d0, and moveToChild @ 0x082d99d0 share the
-      volatile BTREE_MOVE_TO_ROOT_OPS boundary (retail defaults on target,
-      explicit mocks on host). Ported release_via_field_0x48 @ 0x0836761c
-      and load_be32 @ 0x0837a158 remain direct calls. Host tests cover fault
-      precedence, seek clearing, page-acquisition failure with cache
+      Deliberate deviation: unported sqlite3BtreeClearCursor @ 0x082c3528
+      and getAndInitPage @ 0x082d05d0 share the volatile
+      BTREE_MOVE_TO_ROOT_OPS boundary (retail defaults on target, explicit
+      mocks on host). Ported release_via_field_0x48 @ 0x0836761c,
+      load_be32 @ 0x0837a158, and btree_move_to_child @ 0x082d99d0 are
+      direct calls. Host tests cover fault precedence, seek clearing,
+      page-acquisition failure with cache
       preservation, successful empty-root descent and big-endian child
       decoding, and the raw +0x04 no-descent gate.
 
