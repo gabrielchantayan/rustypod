@@ -18,6 +18,7 @@ pub mod copy_fourteen_bytes;
 pub mod copy_four_words;
 pub mod counted_wstr_eq;
 pub mod clock_pair;
+pub mod collection_unflagged_count;
 pub mod crc32;
 pub mod crts_object;
 pub mod crts_tag;

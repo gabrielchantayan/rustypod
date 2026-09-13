@@ -92,6 +92,7 @@ mod layout_checks {
 /// Binds `cursor` to `collection` and arms the "before first" sentinel,
 /// so the first [`cursor_advance`] fetches index 0.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cursor_init(cursor: *mut Cursor, collection: *mut Collection) {
     (*cursor).collection = collection;
     (*cursor).index = CURSOR_BEFORE_FIRST;
@@ -103,6 +104,7 @@ pub unsafe extern "C" fn cursor_init(cursor: *mut Cursor, collection: *mut Colle
 /// Marks the cursor exhausted without touching the collection. Callers
 /// run it at the end of a walk (and on every early exit).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cursor_invalidate(cursor: *mut Cursor) {
     (*cursor).index = CURSOR_EXHAUSTED;
 }
@@ -114,6 +116,7 @@ pub unsafe extern "C" fn cursor_invalidate(cursor: *mut Cursor) {
 /// +0x3c, and marks the cursor exhausted when the accessor returns 0.
 /// Returns the accessor's result: nonzero while `out` was filled.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cursor_advance(cursor: *mut Cursor, out: *mut u8) -> u32 {
     let next = if (*cursor).index == CURSOR_BEFORE_FIRST {
         0
