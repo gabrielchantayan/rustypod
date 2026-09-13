@@ -66072,6 +66072,46 @@ functions:
       u32::MAX-to-zero changes, store-before-callback order, and the
       untouched neighboring +0x4c field.
 
+  - address: 0x0817e238
+    ghidra: FUN_0817e238
+    name: registry_element_enqueue_animation
+    size: 164
+    sig: "void registry_element_enqueue_animation(RegistryElementAnimationDispatch *element, u32 property, void *animation, void *render_options)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: property
+      param_3/r2: animation
+      param_4/r3: render_options
+      "element+0x10": render_element
+      "element+0x14": render_context
+      "element+0x18": primary animation collection
+      DAT_0817e2dc: render-property flag table (0x089d016c)
+      FUN_0826db98: ensure_element_render_state
+      FUN_082a2670: ui_element_resolve_render_context
+      FUN_0828c874: configure_render_context_animation
+    notes: >-
+      Raw bytes establish the full 164-byte extent: code is 0x0817e238 through
+      pop {r3,r4,r5,r6,r7,pc} at 0x0817e2d8, followed by the literal
+      0x089d016c at 0x0817e2dc; the next separately linked function starts at
+      0x0817e2e0. Decoding every ARM B/BL-immediate in osos.dec finds exactly
+      seven inbound direct call sites, all unconditional bl
+      (0x08180b50, 0x08181a48, 0x0818205c, 0x08183168, 0x08183210,
+      0x0818328c, 0x08184210), with no predicated forms. A nonzero byte at
+      0x089d016c + property leaves a NULL render_element alone; otherwise a
+      missing +0x3c state invokes 0x0826db98, then resolves and stores its
+      render context at element+0x14 and sets byte +0x51. An existing +0x3c
+      state only resolves and stores that context. The flag path always
+      configures the cached context through 0x0828c874 with render_options,
+      including when render_element is NULL. Every path stack-slots animation
+      and blx-dispatches
+      element+0x18's runtime vtable slot +0x1c. That dynamic target has no
+      static-image identity, so the port keeps a structural dispatch rather
+      than inventing one. The two unported direct callees are explicit
+      volatile seams whose device defaults enter their retail addresses; host
+      tests install callbacks. Host layout uses disjoint native pointers where
+      64-bit pointers cannot coexist at the target's +0x10/+0x14 offsets.
   - address: 0x0817e2e0
     ghidra: FUN_0817e2e0
     name: registry_element_secondary_dispatch
