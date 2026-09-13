@@ -50,6 +50,10 @@ pub mod hints {
     // 0x6300_0000: dedicated to util/video_engine's target-width frame-slot
     // table fixture; mappings never unmap, so no other user may share it.
     pub const VIDEO_ENGINE_CURRENT_FRAME_SLOT: usize = 0x6300_0000;
+    // 0xcf00_0000: dedicated to util/video_engine's primary-frame table,
+    // record, and payload fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const VIDEO_ENGINE_FRAME_PAYLOAD: usize = 0xcf00_0000;
     // 0x6400_0000: dedicated to ATA command execution/submission's raw-u32
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;

@@ -226,6 +226,60 @@ pub unsafe extern "C" fn video_engine_current_frame_slot(
     (selected_word as usize as *const u32).read() as usize as *mut u8
 }
 
+/// Target-width fields traversed by [`video_engine_get_frame_payload`].
+///
+/// The video engine's `+0xa8c` table pointer, its primary-record pointer at
+/// `+0x34`, and the record's payload word at `+0x68` are each 32-bit firmware
+/// words, including on a 64-bit host.
+#[repr(C)]
+pub struct VideoEnginePrimaryFrameTable {
+    _before_primary_record: [u32; 0x34 / 4],
+    pub primary_record: u32,
+}
+
+#[repr(C)]
+pub struct VideoEnginePrimaryFrameRecord {
+    _before_payload: [u32; 0x68 / 4],
+    pub payload: u32,
+}
+
+const _: [u8; 0x34] =
+    [0; core::mem::offset_of!(VideoEnginePrimaryFrameTable, primary_record)];
+const _: [u8; 0x68] =
+    [0; core::mem::offset_of!(VideoEnginePrimaryFrameRecord, payload)];
+
+/// video_engine_get_frame_payload — retailOS `FUN_082d14e0` @ **0x082d14e0**
+/// (32 bytes, `0x082d14e0..0x082d14fc`). The next independently linked
+/// wrapper begins at `0x082d1500`, confirming the reported extent. A complete
+/// aligned ARM B/BL-immediate decode of `osos.dec` finds six direct inbound
+/// calls, all unconditional plain `bl` (0x08142708, 0x08152960, 0x08167470,
+/// 0x0816e66c, 0x0816e7ec, and 0x08295d54); no predicated call targets it.
+///
+/// Loads the video-engine singleton, then stores the payload word at
+/// `engine->frame_slot_table->primary_record->payload` to `output`. The raw
+/// field chain is `engine + 0xa8c`, then `+0x34`, then `+0x68`. It performs no
+/// NULL, alignment, or bounds check at any level.
+///
+/// # Deliberate deviations
+///
+/// None. Host tests map the two nested target-width objects below 4 GiB, so
+/// the recovered 32-bit field traversal remains intact.
+///
+/// # Safety
+///
+/// The installed video-engine singleton, its frame-slot table and primary
+/// record, and `output` must all be valid, aligned, writable/readable storage
+/// exactly as the unguarded retailOS loads and store require.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_get_frame_payload(output: *mut *mut u8) {
+    let engine = video_engine_get() as *const VideoEngineFrameSlotSelector;
+    let table = (*engine).frame_slot_table as usize as *const VideoEnginePrimaryFrameTable;
+    let record = (*table).primary_record as usize as *const VideoEnginePrimaryFrameRecord;
+    output.write((*record).payload as usize as *mut u8);
+}
+
+
 /// Firmware address of the property dispatcher the wrapper tail-calls
 /// (`FUN_08250498` @ 0x08250498, unported).
 #[cfg(target_arch = "arm")]
@@ -665,6 +719,22 @@ mod tests {
         }
     }
 
+    const FRAME_PAYLOAD_FIXTURE_LEN: usize = 0x1000;
+    static FRAME_PAYLOAD_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::VIDEO_ENGINE_FRAME_PAYLOAD, FRAME_PAYLOAD_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+
+    fn frame_payload_fixture() -> Option<*mut u8> {
+        let fixture = (*FRAME_PAYLOAD_FIXTURE)? as *mut u8;
+        unsafe {
+            ptr::write_bytes(fixture, 0, FRAME_PAYLOAD_FIXTURE_LEN);
+            Some(fixture)
+        }
+    }
+
+
+
 
     #[test]
     fn returns_null_before_any_instance_is_installed() {
@@ -741,6 +811,41 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn frame_payload_reads_primary_record_and_reloads_payload_word() {
+        let _guard = LOCK.lock();
+        let Some(fixture) = frame_payload_fixture() else {
+            assert!(note_missing_u32_fixture("util::video_engine frame payload"));
+            return;
+        };
+
+        unsafe {
+            let table = fixture.cast::<VideoEnginePrimaryFrameTable>();
+            let record = fixture.add(0x100).cast::<VideoEnginePrimaryFrameRecord>();
+            let first_payload = fixture.add(0x200);
+            let second_payload = fixture.add(0x300);
+            (*table).primary_record = record as usize as u32;
+            (*record).payload = first_payload as usize as u32;
+
+            let mut engine: VideoEngineFrameSlotSelector = core::mem::zeroed();
+            engine.frame_slot_table = table as usize as u32;
+            let mut output = ptr::null_mut();
+
+            set_mock_instance((&mut engine as *mut VideoEngineFrameSlotSelector).cast());
+            video_engine_get_frame_payload(&mut output);
+            set_mock_instance(ptr::null_mut());
+            assert_eq!(output, first_payload, "stores the primary record payload");
+
+            (*record).payload = second_payload as usize as u32;
+            set_mock_instance((&mut engine as *mut VideoEngineFrameSlotSelector).cast());
+            video_engine_get_frame_payload(&mut output);
+            set_mock_instance(ptr::null_mut());
+            assert_eq!(output, second_payload, "every call reloads the payload word");
+        }
+    }
+
+
 
     /// Serializes wrapper tests: MOCK_INSTANCE and their host dispatch seams
     /// are shared mutable state.
