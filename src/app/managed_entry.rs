@@ -215,6 +215,105 @@ pub unsafe extern "C" fn managed_entry_release_flagged(
     0
 }
 
+/// ABI prefix used to search a managed record's reverse offset table.
+///
+/// The target object stores its comparison callback at `+0x08` and the
+/// halfword one-past-end offset of its reverse `u16` table at `+0x1c`.
+/// Host pointer width makes the host layout different after `compare`; field
+/// accesses deliberately preserve the callback contract in host tests while
+/// retaining the exact target offsets.
+#[repr(C)]
+pub struct ManagedEntrySearchManager {
+    /// `+0x00..+0x04`: not recovered by this search helper.
+    pub opaque_00: u32,
+    pub opaque_04: u32,
+    /// `+0x08`: compares `(key, record + table_offset)`.
+    pub compare: ManagedEntrySearchCompare,
+    /// `+0x0c..+0x1b`: not recovered by this search helper.
+    pub opaque_0c: [u32; 4],
+    /// `+0x1c`: byte offset immediately after the reverse `u16` table.
+    pub reverse_offsets_end: u16,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(core::mem::offset_of!(ManagedEntrySearchManager, compare) == 8);
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(core::mem::offset_of!(ManagedEntrySearchManager, reverse_offsets_end) == 28);
+
+/// Callback used by [`managed_entry_search_key_index`].
+pub type ManagedEntrySearchCompare =
+    unsafe extern "C" fn(key: *const u8, candidate: *const u8) -> i32;
+
+/// Prefix of a managed record searched by [`managed_entry_search_key_index`].
+#[repr(C)]
+pub struct ManagedEntrySearchRecord {
+    /// `+0x00..+0x07`: opaque record identifier.
+    pub identifier: [u8; 8],
+    /// `+0x08`: special-state marker used by callers, not by this helper.
+    pub state: i8,
+    /// `+0x09`: record kind used by callers, not by this helper.
+    pub kind: u8,
+    /// `+0x0a`: number of offsets in the reverse table.
+    pub entry_count: u16,
+}
+
+/// managed_entry_search_key_index — original: `FUN_08066160` @ `0x08066160`
+/// (128 bytes, `0x08066160..0x080661e0`; the sibling function begins with
+/// `push {r4-r9,sl,fp,lr}` at `0x080661e0`). Seven direct `bl` call sites
+/// were verified by decoding every ARM B/BL immediate in `osos.dec`: all are
+/// unconditional (`0x08041df8`, `0x08041e88`, `0x08050858`, `0x080508d8`,
+/// `0x080509a4`, `0x08066248`, and `0x0806b774`), with no predicated calls.
+///
+/// Performs a lower-bound binary search of a managed record's reverse `u16`
+/// offset table.  Index `mid` is read from
+/// `record + manager->reverse_offsets_end - 2 - 2*mid`, then passed with the
+/// key to the manager's comparison callback. A negative result searches the
+/// lower half; a positive result searches the upper half. On equality it
+/// writes `mid` and returns one. Otherwise it writes the insertion index and
+/// returns zero. A zero count writes zero without calling the comparator.
+/// No deliberate deviations.
+///
+/// # Safety
+///
+/// `manager` must carry a valid comparison callback and a reverse-table end
+/// offset within `record`; `record` must contain `entry_count` aligned `u16`
+/// offsets immediately before that end, and every selected offset must name a
+/// callback-valid candidate. `out_index` must be writable. RetailOS provides
+/// no null guards for any of these pointers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn managed_entry_search_key_index(
+    manager: *const ManagedEntrySearchManager,
+    record: *const ManagedEntrySearchRecord,
+    key: *const u8,
+    out_index: *mut u16,
+) -> u32 {
+    let mut lower = 0i32;
+    let mut upper = (*record).entry_count as i32 - 1;
+    let record_bytes = record.cast::<u8>();
+
+    while lower <= upper {
+        let middle = (lower + upper) >> 1;
+        let offset_address = record_bytes
+            .add((*manager).reverse_offsets_end as usize)
+            .sub(2 + middle as usize * 2);
+        let candidate_offset = *offset_address.cast::<u16>() as usize;
+        let comparison = ((*manager).compare)(key, record_bytes.add(candidate_offset));
+
+        if comparison < 0 {
+            upper = middle - 1;
+        } else if comparison > 0 {
+            lower = middle + 1;
+        } else {
+            *out_index = middle as u16;
+            return 1;
+        }
+    }
+
+    *out_index = lower as u16;
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -397,5 +496,118 @@ mod tests {
         assert_eq!(manager.flagged_release_count, 0, "u32 wrap, no widening");
         assert!(entry.record.is_null());
         assert_eq!(entry.auxiliary, 0);
+    }
+
+    #[repr(C)]
+    struct SearchRecordFixture {
+        identifier: [u8; 8],
+        state: i8,
+        kind: u8,
+        entry_count: u16,
+        reverse_table: [u8; 20],
+        values: [u8; 3],
+    }
+
+    unsafe extern "C" fn compare_key_byte(key: *const u8, candidate: *const u8) -> i32 {
+        *key as i32 - *candidate as i32
+    }
+
+    unsafe extern "C" fn comparator_must_not_run(_: *const u8, _: *const u8) -> i32 {
+        panic!("zero entries must not invoke the comparator");
+    }
+
+    fn search_manager(compare: ManagedEntrySearchCompare) -> ManagedEntrySearchManager {
+        ManagedEntrySearchManager {
+            opaque_00: 0,
+            opaque_04: 0,
+            compare,
+            opaque_0c: [0; 4],
+            reverse_offsets_end: 18,
+        }
+    }
+
+    fn search_record() -> SearchRecordFixture {
+        let mut record = SearchRecordFixture {
+            identifier: [0; 8],
+            state: -1,
+            kind: 0,
+            entry_count: 3,
+            reverse_table: [0; 20],
+            values: [10, 20, 30],
+        };
+        let base = (&mut record as *mut SearchRecordFixture).cast::<u8>();
+        let values_offset = core::mem::offset_of!(SearchRecordFixture, values) as u16;
+        unsafe {
+            base.add(16).cast::<u16>().write(values_offset);
+            base.add(14).cast::<u16>().write(values_offset + 1);
+            base.add(12).cast::<u16>().write(values_offset + 2);
+        }
+        record
+    }
+
+    #[test]
+    fn search_finds_an_exact_key_through_the_reverse_offset_table() {
+        let manager = search_manager(compare_key_byte);
+        let record = search_record();
+        let key = 20u8;
+        let mut index = u16::MAX;
+
+        assert_eq!(
+            unsafe {
+                managed_entry_search_key_index(
+                    &manager,
+                    (&record as *const SearchRecordFixture).cast(),
+                    &key,
+                    &mut index,
+                )
+            },
+            1
+        );
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn search_returns_each_lower_bound_when_the_key_is_absent() {
+        let manager = search_manager(compare_key_byte);
+        let record = search_record();
+
+        for (key, expected_index) in [(5u8, 0u16), (25, 2), (35, 3)] {
+            let mut index = u16::MAX;
+            assert_eq!(
+                unsafe {
+                    managed_entry_search_key_index(
+                        &manager,
+                        (&record as *const SearchRecordFixture).cast(),
+                        &key,
+                        &mut index,
+                    )
+                },
+                0,
+                "key {key} must not match"
+            );
+            assert_eq!(index, expected_index, "key {key}");
+        }
+    }
+
+    #[test]
+    fn empty_search_writes_zero_without_dispatching() {
+        let manager = search_manager(comparator_must_not_run);
+        let mut record = search_record();
+        record.entry_count = 0;
+        let key = 0u8;
+        let mut index = u16::MAX;
+
+        assert_eq!(
+            unsafe {
+                managed_entry_search_key_index(
+                    &manager,
+                    (&record as *const SearchRecordFixture).cast(),
+                    &key,
+                    &mut index,
+                )
+            },
+            0
+        );
+        assert_eq!(index, 0);
     }
 }
