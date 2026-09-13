@@ -55,11 +55,10 @@
 //!
 //! Caveats / deviations:
 //!
-//! - `size_to_class` (0x22003eb0) is UNVERIFIED, as already documented in
-//!   heap/stats.rs: the ROM bytes are unavailable and the osos mirror @
-//!   0x08003eb0 is a 3-instruction pointer chase through ROM data
-//!   (0x2200acf4), not an arithmetic size->class mapping. The name comes
-//!   from the heap telemetry call sites.
+//! - `current_task_id` (0x22003eb0) is mirrored at 0x08003eb0: it loads the
+//!   current task record through 0x2200acf4, then returns the aligned u32 at
+//!   record +0x20. The seven unconditional callers use that value as a task
+//!   category/key; the target has no argument or NULL guard.
 //! - The task lock pair naming is project convention: the osos mirror of
 //!   0x22003ea0 is a table-indexed handle->pointer load (table @
 //!   0x08a24108) and 0x2200408c dispatches kernel op 3; 0x2200408c also
@@ -713,7 +712,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037e48, rom_target: 0x22003ea0, name: Some("task_lock") },
     RomThunk { thunk_addr: 0x08037e50, rom_target: 0x2200408c, name: Some("task_unlock") },
     RomThunk { thunk_addr: 0x08037e58, rom_target: 0x22003ec4, name: None },
-    RomThunk { thunk_addr: 0x08037e60, rom_target: 0x22003eb0, name: Some("size_to_class") },
+    RomThunk { thunk_addr: 0x08037e60, rom_target: 0x22003eb0, name: Some("current_task_id") },
     RomThunk { thunk_addr: 0x08037e68, rom_target: 0x22003be8, name: None },
     RomThunk { thunk_addr: 0x08037e70, rom_target: 0x22003d70, name: None },
     RomThunk { thunk_addr: 0x08037e78, rom_target: 0x220041cc, name: Some("signal_object") },
@@ -936,7 +935,7 @@ mod tests {
             (0x22003d44, "task_delay"),
             (0x22003dc8, "kernel_op_dispatch"),
             (0x22003ea0, "task_lock"),
-            (0x22003eb0, "size_to_class"),
+            (0x22003eb0, "current_task_id"),
             (0x22003fd0, "sem_wait"),
             (0x2200408c, "task_unlock"),
             (0x220042b4, "sem_signal"),

@@ -23,14 +23,13 @@
 //!
 //! Deviations / unverifiable parts:
 //!
-//! - **size -> class mapping is UNVERIFIED.** The original calls the boot
-//!   ROM at 0x22003eb0 through the literal veneer @ 0x08037e60
-//!   (`ldr pc, [pc, #-4]`); the ROM is not part of osos.dec, so the true
-//!   mapping cannot be recovered from the image. `size_to_class()` below
-//!   implements a documented stand-in: classes are log2-spaced over 8-byte
-//!   steps, i.e. `class = log2_floor(size / 8)` clamped to the descriptor's
-//!   0..79 range (`NUM_CLASSES - 1`). For any 32-bit size this yields
-//!   0..=28, so the clamp never fires — it only documents the contract.
+//! - **size -> class mapping is UNVERIFIED.** `size_to_class()` is this
+//!   port's local telemetry-class inference: classes are log2-spaced over
+//!   8-byte steps, i.e. `class = log2_floor(size / 8)` clamped to the
+//!   descriptor's 0..79 range (`NUM_CLASSES - 1`). It is not the unrelated
+//!   current-task-id ROM accessor at 0x22003eb0 / veneer 0x08037e60. For any
+//!   32-bit size this yields 0..=28, so the clamp never fires — it only
+//!   documents the contract.
 //! - **log2_floor's table is absent from the image.** The literal pool word
 //!   @ 0x080e83b4 points at 0x083e9b60, but osos.dec holds ADS library
 //!   *code* there (`mov r0, r5; pop {r4, r5, r6, pc}` — the table bytes
@@ -88,9 +87,9 @@ pub unsafe extern "C" fn log2_floor(mut value: u32) -> u32 {
     result
 }
 
-/// size -> telemetry class mapping. UNVERIFIED stand-in for the boot-ROM
-/// routine @ 0x22003eb0 (reached through veneer 0x08037e60); see the module
-/// header. log2-spaced over 8-byte steps, clamped to 0..NUM_CLASSES-1.
+/// Local size -> telemetry class mapping. This is a porting inference, not
+/// the current-task-id ROM target at 0x22003eb0. Log2-spaced over 8-byte
+/// steps, clamped to 0..NUM_CLASSES-1.
 /// `#[inline(never)]` keeps the original's call-a-helper shape.
 #[inline(never)]
 pub fn size_to_class(size: u32) -> u32 {
@@ -359,7 +358,7 @@ mod tests {
 
     #[test]
     fn size_to_class_is_log2_over_8_byte_steps() {
-        // UNVERIFIED stand-in (see module header): pin the documented shape.
+        // Local inference: pin the documented telemetry mapping.
         assert_eq!(size_to_class(0), 0);
         assert_eq!(size_to_class(8), 0); // 1 unit
         assert_eq!(size_to_class(15), 0);

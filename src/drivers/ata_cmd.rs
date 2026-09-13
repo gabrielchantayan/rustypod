@@ -1019,11 +1019,10 @@ static mut ERROR_RECORDS: ErrorRecords =
 /// [`ATA_ERROR_HOOKS`] for the default-stub policy.
 #[derive(Copy, Clone)]
 pub struct AtaErrorHooks {
-    /// Thunk 0x08037e60 -> ROM 0x22003eb0 (catalogued as the UNVERIFIED
-    /// "size_to_class" in kernel/thunks.rs): the id that owns a record —
+    /// Thunk 0x08037e60 -> ROM 0x22003eb0: current task-record word +0x20,
     /// the storage layer's per-task key. The stock call site sets no
-    /// argument of its own (r0 is whatever the caller left in it), so
-    /// this hook takes none.
+    /// argument of its own (r0 is ignored by the target), so this hook takes
+    /// none.
     pub current_id: unsafe extern "C" fn() -> u32,
 }
 

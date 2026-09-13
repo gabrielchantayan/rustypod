@@ -74,10 +74,9 @@
 //!   ROM 0x22003ec4, service 40, argument 0). When the kernel knows no
 //!   record (boot/foreign contexts), lazily claims a slot from a static
 //!   pool of 0x3c task records (counter @ 0x089cc8f4, pool @ 0x08ac5ccc):
-//!   `rec->id` comes from thunk 0x08037e60 called with the post-increment
-//!   counter value (the thunk 0x08037e60 target ROM 0x22003eb0 is
-//!   catalogued as the UNVERIFIED "size_to_class" — this call site is
-//!   evidence it is really an id/handle helper), `entry`/`context`/the
+//!   `rec->id` is the current-task id returned by thunk 0x08037e60 (the
+//!   target mirror loads the current-task record through 0x2200acf4 and
+//!   returns its +0x20 word; any r0 input is ignored), `entry`/`context`/the
 //!   name's first byte are zeroed (ONLY those — no full memzero), and the
 //!   record is gateway-registered with id 0 (`mov r0, #0` before the
 //!   0x08037e38 call — faithful quirk). A full pool returns NULL.
@@ -366,10 +365,11 @@ pub struct TaskHooks {
     /// kernel's current task record, NULL when it has none. The original
     /// always passes 0.
     pub rom_current_task: unsafe extern "C" fn(arg: u32) -> *mut TaskRecord,
-    /// Thunk 0x08037e60 -> ROM 0x22003eb0: id/handle for a freshly
-    /// claimed pool slot, called with the post-increment counter value
-    /// (catalogued as the unverified "size_to_class" in thunks.rs).
-    pub rom_slot_id: unsafe extern "C" fn(slot: u32) -> u32,
+    /// Thunk 0x08037e60 -> ROM 0x22003eb0: reads the current task record's
+    /// +0x20 id word and ignores incoming r0. The target default directly
+    /// uses the ported `current_task_id`; host defaults preserve the
+    /// no-kernel value 0.
+    pub current_task_id: unsafe extern "C" fn() -> u32,
     /// `FUN_0805665c` @ 0x0805665c: the current task's context word
     /// (record +0x08), 0 when absent. Defaults to the ported
     /// `current_task_context_word`.
@@ -524,9 +524,16 @@ unsafe extern "C" fn missing_rom_current_task(_arg: u32) -> *mut TaskRecord {
     core::ptr::null_mut()
 }
 
-/// Default stub: no kernel, no handles — 0.
-unsafe extern "C" fn missing_rom_slot_id(_slot: u32) -> u32 {
+/// The ported ROM mirror is only valid after its task-record global exists.
+/// Host/default pre-kernel operation instead reports the stock no-task value.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn default_current_task_id() -> u32 {
     0
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn default_current_task_id() -> u32 {
+    crate::kernel::task_lock::current_task_id()
 }
 
 /// Default adapter for `kernel_running_node`: the ported query returns
@@ -564,7 +571,7 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     heap_free: crate::kernel::os_heap::os_free,
     kernel_started: read_kernel_started,
     rom_current_task: missing_rom_current_task,
-    rom_slot_id: missing_rom_slot_id,
+    current_task_id: default_current_task_id,
     current_task_context: current_task_context_word,
     register_current_task,
     tagged_alloc: crate::heap::veneers::malloc_wrapper,
@@ -681,9 +688,9 @@ static mut TASK_POOL: [TaskRecord; TASK_POOL_CAP] = [TaskRecord::ZERO; TASK_POOL
 /// current_task_record — original: `FUN_080565f0` @ 0x080565f0 (96 bytes).
 ///
 /// The kernel's current task record; when the kernel has none, lazily
-/// claims a static pool slot (id from the ROM slot-id helper, only
-/// `entry`/`context`/`name[0]` cleared, gateway-registered under id 0 —
-/// all faithful). NULL once the pool is exhausted.
+/// claims a static pool slot (id from the no-argument current-task-id ROM
+/// accessor, only `entry`/`context`/`name[0]` cleared, gateway-registered
+/// under id 0 — all faithful). NULL once the pool is exhausted.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn current_task_record() -> *mut TaskRecord {
     let h = hooks();
@@ -697,7 +704,7 @@ pub unsafe extern "C" fn current_task_record() -> *mut TaskRecord {
     }
     let rec = core::ptr::addr_of_mut!(TASK_POOL[count as usize]);
     core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(count + 1);
-    (*rec).id = (h.rom_slot_id)(count + 1);
+    (*rec).id = (h.current_task_id)();
     (*rec).entry = 0;
     (*rec).context = 0;
     (*rec).name[0] = 0;
@@ -1123,7 +1130,7 @@ mod tests {
         CurrentTaskCtx,
         PoolCreate(u32),
         RomCurrentTask(u32),
-        RomSlotId(u32),
+        CurrentTaskId,
         RomYield(u32),
         RomTimedDelay { task: usize, ticks: usize },
         RomReschedule,
@@ -1320,9 +1327,9 @@ mod tests {
         ROM_TASK_RET
     }
 
-    unsafe extern "C" fn mock_rom_slot_id(slot: u32) -> u32 {
-        CALLS.lock().unwrap().push(Call::RomSlotId(slot));
-        0x9000 + slot
+    unsafe extern "C" fn mock_current_task_id() -> u32 {
+        CALLS.lock().unwrap().push(Call::CurrentTaskId);
+        0x9001
     }
 
     unsafe extern "C" fn mock_rom_yield(arg: u32) -> i32 {
@@ -1383,7 +1390,7 @@ mod tests {
                 heap_free: mock_free,
                 kernel_started: mock_kernel_started,
                 rom_current_task: mock_rom_current_task,
-                rom_slot_id: mock_rom_slot_id,
+                current_task_id: mock_current_task_id,
                 current_task_context: mock_current_task_context,
                 register_current_task: mock_register_current_task,
                 tagged_alloc: mock_tagged_alloc,
@@ -1664,7 +1671,8 @@ mod tests {
     fn current_task_lazily_claims_pool_slots() {
         let _guard = mock_hooks();
         unsafe {
-            // First claim: slot 0, id from rom_slot_id(1).
+            // First claim: slot 0, id from the no-argument current-task
+            // accessor. The raw target ignores the counter passed in r0.
             let rec = current_task_record();
             assert_eq!(rec, core::ptr::addr_of_mut!(TASK_POOL[0]));
             assert_eq!((*rec).id, 0x9001);
@@ -1675,15 +1683,15 @@ mod tests {
                 drain(),
                 vec![
                     Call::RomCurrentTask(0),
-                    Call::RomSlotId(1),
+                    Call::CurrentTaskId,
                     // Faithful quirk: registered under id 0, not rec->id.
                     Call::Register { id: 0, rec: rec as usize },
                 ]
             );
-            // Second claim advances to slot 1.
+            // Second claim advances to slot 1 but observes the same current id.
             let rec2 = current_task_record();
             assert_eq!(rec2, core::ptr::addr_of_mut!(TASK_POOL[1]));
-            assert_eq!((*rec2).id, 0x9002);
+            assert_eq!((*rec2).id, 0x9001);
             assert_eq!(core::ptr::addr_of!(TASK_POOL_COUNT).read(), 2);
         }
     }
