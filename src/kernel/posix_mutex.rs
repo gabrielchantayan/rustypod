@@ -89,16 +89,18 @@
 //!
 //! # Deviations
 //!
-//! - **Unported callees dispatch through [`POSIX_MUTEX_OPS`]** (house
-//!   ops-slot pattern, indirect `blx` in place of `bl`): the lazy
-//!   initializer @ 0x082e82f8, the running-thread query @ 0x080a3e68,
-//!   the three semaphore helpers @ 0x080a3c7c / 0x080a3ca4 /
-//!   0x080a3d30 and the clock read @ 0x082c372c all bottom out in the
-//!   mask-ROM kernel, which is not part of osos. The defaults model the
-//!   pre-kernel machine and are documented on each stub; together they
-//!   give a mutex that tracks ownership and recursion faithfully but
-//!   provides **no mutual exclusion** — exactly the contract the
+//! - **Still-unported callees dispatch through [`POSIX_MUTEX_OPS`]** (house
+//!   ops-slot pattern, indirect `blx` in place of `bl`): the lazy initializer
+//!   @ 0x082e82f8, the running-thread query @ 0x080a3e68, the two wait
+//!   helpers @ 0x080a3c7c / 0x080a3ca4 and the clock read @ 0x082c372c all
+//!   bottom out in the mask-ROM kernel, which is not part of osos. The
+//!   defaults model the pre-kernel machine and are documented on each stub;
+//!   together they give a mutex that tracks ownership and recursion faithfully
+//!   but provides **no mutual exclusion** — exactly the contract the
 //!   `REGION_MUTEX_OPS` no-op stubs this port replaces used to state.
+//! - **`semaphore_cell_signal`** @ 0x080a3d30 is ported below. It calls the
+//!   existing `rom_sem_signal` gateway wrapper, which remains a mask-ROM
+//!   dispatch seam.
 //! - **The initializer default does nothing and reports success.**
 //!   Without the ROM there is no semaphore to create; the object is
 //!   then used as it stands. In practice the slot never fires on host:
@@ -110,6 +112,8 @@
 //!   (deadline subtraction, the recursion decrement) uses the explicit
 //!   `wrapping_*` forms so a debug host build cannot panic where the
 //!   ARM code silently wraps.
+
+use crate::kernel::task_lock::rom_sem_signal;
 
 /// Width of the mutex's recursion counter, and the value at which one
 /// more acquire is refused (original: the `subs r12, r0, #0xff00` /
@@ -141,6 +145,10 @@ pub const ERR_WOULD_DEADLOCK: u32 = 0x0f;
 /// A recursive mutex acquired past [`RECURSION_LIMIT`] holds
 /// (original: `mov r5, #0x27`).
 pub const ERR_RECURSION_OVERFLOW: u32 = 0x27;
+
+/// A ROM semaphore signal returned a nonzero status (original:
+/// `movne r0, #0x27` in `semaphore_cell_signal`).
+pub const ERR_SEMAPHORE_RELEASE_FAILED: u32 = 0x27;
 
 /// Unlock attempted by a thread that does not own the mutex
 /// (original: `movne r5, #0x5`).
@@ -299,6 +307,41 @@ pub const DEFAULT_POSIX_MUTEX_OPS: PosixMutexOps = PosixMutexOps {
 /// The active implementation. Host tests install mocks; on target the
 /// kernel layer installs the real ROM helpers.
 pub static mut POSIX_MUTEX_OPS: PosixMutexOps = DEFAULT_POSIX_MUTEX_OPS;
+
+/// semaphore_cell_signal — original: `FUN_080a3d30` @ **0x080a3d30** (36
+/// bytes; **7 unconditional `bl` call sites** at 0x080cdedc, 0x080cdef8,
+/// 0x081e21a8, 0x081e2200, 0x082e81f0, 0x082e8204, and 0x082e8460; no
+/// predicated calls).
+///
+/// Loads the unchecked ROM semaphore handle from `cell`. A zero handle maps
+/// to 0x1a. Otherwise it signals that handle through the `rom_sem_signal`
+/// veneer; its zero status becomes success and every nonzero ROM status maps
+/// to 0x27. The ARM body is exactly nine instructions
+/// (`push; ldr; cmp; moveq; popeq; bl; movs; movne; pop`). Deliberate
+/// deviation: the mask-ROM veneer dispatches indirectly through
+/// [`crate::kernel::task_lock::ROM_KERNEL`] rather than tail-jumping to
+/// 0x220042b4. As in the original, `cell` is neither NULL-checked nor
+/// alignment-checked and must designate an aligned `u32`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn semaphore_cell_signal(cell: *mut u32) -> u32 {
+    semaphore_cell_signal_via(cell, rom_sem_signal)
+}
+
+#[inline(always)]
+unsafe fn semaphore_cell_signal_via(
+    cell: *mut u32,
+    signal: unsafe extern "C" fn(usize) -> usize,
+) -> u32 {
+    let handle = cell.read();
+    if handle == 0 {
+        ERR_INVALID_OBJECT
+    } else if signal(handle as usize) != 0 {
+        ERR_SEMAPHORE_RELEASE_FAILED
+    } else {
+        0
+    }
+}
 
 /// Reads the ops table (volatile — the slot is meant to be swapped at
 /// runtime, and LLVM would otherwise fold the indirect calls to the
@@ -489,6 +532,23 @@ mod tests {
     static mut RELEASE_RET: u32 = 0;
     static mut CLOCK_RET: u32 = 0;
     static mut CLOCK_NOW: TimeSpec = TimeSpec { sec: 0, nsec: 0 };
+    static mut SEM_SIGNAL_STATUS: usize = 0;
+    static mut SEM_SIGNAL_ARG: usize = usize::MAX;
+    static mut SEM_SIGNAL_CALLS: usize = 0;
+
+    unsafe extern "C" fn mock_sem_signal(handle: usize) -> usize {
+        SEM_SIGNAL_ARG = handle;
+        SEM_SIGNAL_CALLS += 1;
+        SEM_SIGNAL_STATUS
+    }
+
+    fn reset_sem_signal(status: usize) {
+        unsafe {
+            SEM_SIGNAL_STATUS = status;
+            SEM_SIGNAL_ARG = usize::MAX;
+            SEM_SIGNAL_CALLS = 0;
+        }
+    }
 
     unsafe extern "C" fn mock_init(mutex: *mut PosixMutex, attr: *mut u8) -> u32 {
         record(Ev::Init {
@@ -918,6 +978,36 @@ mod tests {
             assert_eq!(m.owner, 0, "a timeout claims nothing");
         }
         restore();
+    }
+
+    /// A null handle is rejected before dispatch; a live handle forwards as
+    /// an unchecked word and all ROM failures collapse to the fixed 0x27.
+    #[test]
+    fn semaphore_cell_signal_maps_handle_and_rom_status() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let mut cell = 0;
+            reset_sem_signal(0xfeed_cafe);
+            assert_eq!(
+                semaphore_cell_signal_via(&mut cell, mock_sem_signal),
+                ERR_INVALID_OBJECT
+            );
+            assert_eq!(SEM_SIGNAL_CALLS, 0, "zero handle must not dispatch");
+
+            cell = 0x12;
+            reset_sem_signal(0);
+            assert_eq!(semaphore_cell_signal_via(&mut cell, mock_sem_signal), 0);
+            assert_eq!(SEM_SIGNAL_CALLS, 1);
+            assert_eq!(SEM_SIGNAL_ARG, 0x12, "handle is passed unchanged");
+
+            reset_sem_signal(9);
+            assert_eq!(
+                semaphore_cell_signal_via(&mut cell, mock_sem_signal),
+                ERR_SEMAPHORE_RELEASE_FAILED
+            );
+            assert_eq!(SEM_SIGNAL_CALLS, 1);
+            assert_eq!(SEM_SIGNAL_ARG, 0x12);
+        }
     }
 
     /// The shipped defaults: a real lock/unlock cycle with no ROM

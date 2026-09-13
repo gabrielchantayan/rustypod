@@ -76319,6 +76319,34 @@ functions:
       uninstalled seam reports end-of-input rather than calling a target
       address.
 
+  - address: 0x080a3d30
+    ghidra: FUN_080a3d30
+    name: semaphore_cell_signal
+    size: 36
+    sig: "u32 semaphore_cell_signal(u32 *cell)"
+    module: kernel/posix_mutex
+    status: ported
+    renames:
+      param_1/r0: cell
+      param_1_deref/r0: sem_handle
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw osos.dec decoding establishes nine ARM words at 0x080a3d30 through
+      0x080a3d50; the independently linked successor begins at 0x080a3d54
+      with mov r0, #0x31, so Ghidra's 36-byte extent is exact. The function
+      loads the unchecked inline semaphore handle from cell. A zero handle
+      returns 0x1a without signalling; otherwise it calls the existing
+      rom_sem_signal veneer at 0x08037e10 (target 0x220042b4), returning 0
+      for its zero result and mapping every nonzero result to 0x27. Every
+      ARM B/BL-immediate word in osos.dec was decoded: exactly seven inbound
+      direct calls, all unconditional bl at 0x080cdedc, 0x080cdef8,
+      0x081e21a8, 0x081e2200, 0x082e81f0, 0x082e8204, and 0x082e8460;
+      there are no predicated forms. Deliberate deviation: the port reaches
+      the already ported rom_sem_signal gateway seam instead of tail-jumping
+      into mask-ROM; its default dispatch remains deliberately uninstalled.
+      Host tests prove zero-handle no-dispatch, unchanged nonzero forwarding,
+      success, and fixed-error mapping.
+
   - address: 0x080a3ea0
     ghidra: FUN_080a3ea0
     name: mov_atom_table_find
