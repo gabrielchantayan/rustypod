@@ -57,8 +57,8 @@ mod tests {
 
     use super::*;
     use crate::sqlite::os_write::{
-        SqliteCloseFn, SqliteIoMethods, SqliteReadFn, SqliteSyncFn, SqliteTruncateFn,
-        SqliteWriteFn,
+        SqliteCloseFn, SqliteFileSizeFn, SqliteIoMethods, SqliteReadFn, SqliteSyncFn,
+        SqliteTruncateFn, SqliteWriteFn,
     };
     use parking_lot::Mutex;
 
@@ -110,6 +110,10 @@ mod tests {
         panic!("unexpected xTruncate")
     }
 
+    unsafe extern "C" fn unused_file_size(_file: *mut SqliteFile, _size: *mut i64) -> i32 {
+        panic!("unexpected xFileSize")
+    }
+
     fn methods() -> SqliteIoMethods {
         SqliteIoMethods {
             version: 1,
@@ -118,6 +122,7 @@ mod tests {
             write: unused_write as SqliteWriteFn,
             truncate: unused_truncate as SqliteTruncateFn,
             sync: recording_sync as SqliteSyncFn,
+            file_size: unused_file_size as SqliteFileSizeFn,
         }
     }
 

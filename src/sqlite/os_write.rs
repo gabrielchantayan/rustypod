@@ -55,6 +55,8 @@ pub struct SqliteIoMethods {
     pub truncate: SqliteTruncateFn,
     /// `+0x14`: `xSync(file, flags)`.
     pub sync: SqliteSyncFn,
+    /// `+0x18`: `xFileSize(file, size)`.
+    pub file_size: SqliteFileSizeFn,
 }
 
 /// ABI of SQLite's `sqlite3_io_methods::xClose` entry.
@@ -82,6 +84,9 @@ pub type SqliteTruncateFn = unsafe extern "C" fn(*mut SqliteFile, i64) -> i32;
 /// ABI of SQLite's `sqlite3_io_methods::xSync` entry.
 pub type SqliteSyncFn = unsafe extern "C" fn(*mut SqliteFile, u32) -> i32;
 
+/// ABI of SQLite's `sqlite3_io_methods::xFileSize` entry.
+pub type SqliteFileSizeFn = unsafe extern "C" fn(*mut SqliteFile, *mut i64) -> i32;
+
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x04] = [0; core::mem::offset_of!(SqliteIoMethods, close)];
 
@@ -96,6 +101,9 @@ const _: [u8; 0x10] = [0; core::mem::offset_of!(SqliteIoMethods, truncate)];
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x14] = [0; core::mem::offset_of!(SqliteIoMethods, sync)];
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x18] = [0; core::mem::offset_of!(SqliteIoMethods, file_size)];
 
 /// sqlite_os_write — original: `FUN_0837dbf8` @ `0x0837dbf8` (32 bytes;
 /// 13 unconditional direct `bl` call sites, binary-scanned).
@@ -180,6 +188,10 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_file_size(_file: *mut SqliteFile, _size: *mut i64) -> i32 {
+        0
+    }
+
     #[test]
     fn forwards_buffer_amount_and_aligned_i64_offset_to_xwrite() {
         let _lock = LOCK.lock();
@@ -191,6 +203,7 @@ mod tests {
             write: recording_write,
             truncate: unused_truncate,
             sync: unused_sync,
+            file_size: unused_file_size,
         };
         let mut file = SqliteFile { methods: &methods };
         let buffer = [0xa5_u8, 0x5a];
