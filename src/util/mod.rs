@@ -31,6 +31,7 @@ pub mod error_latch;
 pub mod drive;
 pub mod fixed;
 pub mod fixed_matrix_identity;
+pub mod framed_word_buffer_decode;
 pub mod fixed_matrix_cursor;
 pub mod field_access;
 pub mod four_word_record;
