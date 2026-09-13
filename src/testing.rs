@@ -112,6 +112,10 @@ pub mod hints {
     // 0x7b00_0000: dedicated to app/service_manager's raw-u32 slot-handler
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SERVICE_MANAGER_SLOT_HANDLER: usize = 0x7b00_0000;
+    // 0x8600_0000: dedicated to app/service_handler_masked_event_dispatch's
+    // raw-u32 service-manager and handler fixture; mappings never unmap, so
+    // no other user may share this hint.
+    pub const SERVICE_HANDLER_MASKED_EVENT_DISPATCH: usize = 0x8600_0000;
     pub const CHARACTER_CLASS: usize = 0x3700_0000;
     pub const TIMER_RESET_4000: usize = 0x3800_0000;
     // 0x3900_0000, skipping 0x2e00_0000..0x3500_0000: sibling ports in
