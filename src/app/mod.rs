@@ -168,6 +168,7 @@ pub mod scoped_context;
 pub mod scoped_string_id_record_set;
 pub mod selection_position_at_or_past_item_count;
 pub mod service_manager;
+pub mod service_handler_masked_event_dispatch;
 pub mod service_state_synchronize;
 pub mod service_handler_availability;
 pub mod service_handler_pending_event_reset;

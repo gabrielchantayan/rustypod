@@ -75084,3 +75084,37 @@ functions:
       wildcard reach the queue port in order, the record lock is released,
       zero request suppresses lifecycle work, and every nonzero request
       forwards the singleton, selector, and state zero.
+
+  # --- service-handler masked event dispatch ---
+  - address: 0x0818f800
+    ghidra: FUN_0818f800
+    name: service_handler_masked_event_dispatch
+    size: 132
+    sig: "void service_handler_masked_event_dispatch(void *context, u32 slot, u32 mask)"
+    module: app/service_handler_masked_event_dispatch
+    status: ported
+    renames:
+      param_1/r0/r7: context
+      param_2/r1/r8: slot
+      param_3/r2/r5: mask
+      FUN_08030f44: heap_panic
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_08193ee8: service_manager_slot_handler_get
+      FUN_0818f230: unported masked-event tail dispatcher
+    notes: >-
+      Raw ARM establishes the exact 132-byte all-code extent
+      0x0818f800..0x0818f884: `push {r4-r8,lr}` through the tail `b
+      0x0818f230`; the next separately linked function begins at 0x0818f884.
+      Ghidra incorrectly folds the tail target's much larger body into this
+      function. Masks with any bit outside 0x1fbf take the predicated
+      `blne 0x08030f44` fatal path. A zero mask returns. Otherwise slots 1
+      through 12 are scanned in ascending order and each selected handler's
+      vtable +0x0c is called with `(handler, 8, mask)` before tail-dispatching
+      `(context, slot, 7, mask)` to unported 0x0818f230. Decoding every ARM
+      B/BL immediate in osos.dec found exactly seven direct inbound calls, all
+      unconditional plain bl and none predicated or tail branches:
+      0x0818e734, 0x0818fca4, 0x08191008, 0x081910bc, 0x0819265c,
+      0x08192a68, and 0x08192d7c. Target builds call 0x0818f230 directly;
+      host tests use a volatile tail seam and a vtable-dispatch seam because
+      native function pointers cannot fit in the firmware's four-byte vtable
+      slots. Those seams have no target effect.
