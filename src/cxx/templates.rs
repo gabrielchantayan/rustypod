@@ -1576,6 +1576,35 @@ pub unsafe extern "C" fn container_element_at_alias_68dc(this: *mut u8, index: u
     element_slot(this, index).read()
 }
 
+/// container_element_at_alias_6870 — original: `FUN_083d6870` @ 0x083d6870
+/// (24 bytes; 6 plain `bl` call sites — 0x0828527c, 0x08285320,
+/// 0x082853f8, 0x082854fc, 0x083cff18, and 0x083cff50; no predicated
+/// calls; plus one plain `b` tail-call at 0x082854e4).
+///
+/// A byte-identical instantiation of [`container_element_at`] @
+/// 0x083d5efc — `push {r4,lr}; ldr r2,[r0]; ldr r2,[r2,#0x40]; blx r2;
+/// ldr r0,[r0]; pop {r4,pc}`. It implements `T *operator[](size_t)`:
+/// dispatch through this container's vtable slot 0x40 to obtain an
+/// element-slot address, then load the element pointer from that slot.
+/// Ghidra omits r1, but the indirect call preserves the index. The raw
+/// body guards neither the virtual result nor its element slot. This
+/// independently hookable copy has a dedicated link section to prevent
+/// identical-function folding; otherwise there are no deliberate deviations.
+///
+/// # Safety
+/// Same contract as [`container_element_at`]: `this` must point at an object
+/// whose first word is a vtable with at least [`ELEMENT_SLOT_VTABLE_INDEX`] +
+/// 1 slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_6870")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_alias_6870(this: *mut u8, index: usize) -> *mut u8 {
+    let vtable = (this as *const *const ElementSlotFn).read();
+    let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
+    element_slot(this, index).read()
+}
+
+
 /// container_element_at_alias_689c — original: `FUN_083d689c` @ 0x083d689c
 /// (24 bytes; 6 plain `bl` call sites — 0x08123f60, 0x08298cf4,
 /// 0x08298d44, 0x08298da4, 0x083cffe4, and 0x083d0028; no predicated
@@ -4440,6 +4469,47 @@ mod tests {
             for index in 0..3 {
                 assert_eq!(
                     container_element_at_alias_68dc(this, index),
+                    container_element_at(this, index),
+                    "index {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn element_at_alias_6870_dispatches_through_slot_0x40_and_derefs() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            assert_eq!(container_element_at_alias_6870(this, 0), &mut a as *mut u8);
+            assert_eq!(LAST_INDEX, 0, "the index is passed through in r1");
+            assert_eq!(container_element_at_alias_6870(this, 1), &mut b as *mut u8);
+            assert!(container_element_at_alias_6870(this, 2).is_null(), "NULL element, not NULL slot");
+        }
+    }
+
+    /// Byte-identical bodies must agree on every dispatch: same vtable,
+    /// same index, same element out — including the NULL-element edge.
+    #[test]
+    fn element_at_alias_6870_matches_primary() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            let mut container = FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            };
+            let this = core::ptr::addr_of_mut!(container) as *mut u8;
+            for index in 0..3 {
+                assert_eq!(
+                    container_element_at_alias_6870(this, index),
                     container_element_at(this, index),
                     "index {index}"
                 );
