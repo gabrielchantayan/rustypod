@@ -1945,6 +1945,91 @@ pub unsafe extern "C" fn refcounted_body_release_retain_count(slot: *mut *mut Re
     slot.write(core::ptr::null_mut());
 }
 
+/// refcounted_ptr_release_dtor_copy — original: `FUN_0816ccb0` @
+/// 0x0816ccb0 (148 bytes — Ghidra's reported 140-byte extent omits the
+/// final `mov r0,r4` / `pop {r4,r5,r6,pc}`; the separately linked next
+/// function begins at 0x0816cd44). Decoding every ARM `B`/`BL` word in
+/// `osos.dec` finds exactly seven inbound direct calls, all unconditional
+/// `bl`: 0x081425e8, 0x08142604, 0x0826fa64, 0x0826fc0c, 0x082c7eb8,
+/// 0x082c7fa0, and 0x083d4590. No predicated calls, direct tail `b` sites,
+/// or word-aligned image references exist, so it is not virtually dispatched.
+///
+/// A separately linked copy of [`refcounted_ptr_release_dtor`] @ 0x0816cf24:
+/// a refcounted-handle destructor that returns its input slot. A NULL body
+/// leaves the slot untouched. Otherwise it locks the body's optional mutex,
+/// wrapping-decrements the signed refcount, and clears the slot. A non-final
+/// release only unlocks. A final release NULL-guardedly invokes the
+/// implementation vtable's plain destructor at word 1 (+4), never frees that
+/// implementation block, then unlocks, deletes and tag-2-frees the mutex,
+/// clears body+8, and tag-2-frees the body.
+///
+/// Deliberate codegen deviation: LLVM may inline the ported mutex and heap
+/// helpers instead of retaining the retailOS local-helper `bl`s; the
+/// guard/decrement/slot-1-dispatch/teardown order is unchanged. The dedicated
+/// target section preserves this separately hookable copy.
+///
+/// # Safety
+///
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, its mutex,
+/// implementation, and implementation vtable (with a live destructor at word
+/// index 1) must all be valid. As in retailOS, `slot` itself is not
+/// NULL-checked and the mutex helpers guard only the mutex word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_release_dtor_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_release_dtor_copy(
+    slot: *mut *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let body = slot.read();
+    if body.is_null() {
+        return slot;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            destructor(implementation);
+        }
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+    slot
+}
+
 /// refcounted_ptr_release — original: `FUN_0816cd44` @ 0x0816cd44
 /// (20 bytes; 90 `bl` call sites, mostly the 0x0822xxxx application
 /// layer releasing stack- and member-slot handles).
@@ -3910,6 +3995,81 @@ mod tests {
                     Event::Destructor(implementation_ptr as usize),
                     Event::Signal(0x61),
                     Event::Delete(0x61),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        /// The 0x0816ccb0 copy preserves the slot address on a NULL-body
+        /// early exit, then wraps a zero refcount to -1 without teardown.
+        #[test]
+        fn ptr_release_dtor_copy_null_and_wrapping_release_return_slot() {
+            let _bench = bench();
+            let mut empty_slot: *mut RefcountedBody = core::ptr::null_mut();
+            let empty_slot_ptr = &mut empty_slot as *mut *mut RefcountedBody;
+
+            assert_eq!(
+                unsafe { refcounted_ptr_release_dtor_copy(empty_slot_ptr) },
+                empty_slot_ptr
+            );
+
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            assert_eq!(
+                unsafe { refcounted_ptr_release_dtor_copy(slot_ptr) },
+                slot_ptr
+            );
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// The 0x0816ccb0 final release dispatches vtable word 1 and destroys
+        /// the mutex and body while retaining the implementation block.
+        #[test]
+        fn ptr_release_dtor_copy_final_reference_returns_slot_and_cleans_up() {
+            let _bench = bench();
+            let mut semaphore = 0x63;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut slot = body_ptr;
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe { refcounted_ptr_release_dtor_copy(slot_ptr) };
+
+            assert_eq!(returned, slot_ptr);
+            assert!(slot.is_null());
+            assert!(mutex.sem_cell.is_null());
+            assert!(body.mutex.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x63),
+                    Event::Destructor(implementation_ptr as usize),
+                    Event::Signal(0x63),
+                    Event::Delete(0x63),
                     Event::MutexCellFree(cell_ptr as usize),
                     Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
                     Event::HeapFree(body_ptr as *mut u8 as usize, 2),
