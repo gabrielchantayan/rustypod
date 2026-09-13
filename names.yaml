@@ -80059,3 +80059,28 @@ functions:
       function pointer while the 32-bit target layout remains exact. Host tests
       prove sink/stream forwarding, status propagation, and unguarded NULL
       stream forwarding.
+  - address: 0x0828a454
+    ghidra: FUN_0828a454
+    name: media_player_pending_item_append
+    size: 32
+    sig: "void media_player_pending_item_append(MediaPlayerPendingItems *player, u32 item)"
+    module: app/media_player_pending_item
+    status: ported
+    renames:
+      param_1/r0: player
+      param_2/r1: item
+      iVar1/r1: old_pending_item_count
+      r2: item_word
+    notes: >-
+      Raw osos.dec confirms the eight-word body at 0x0828a454; the next
+      distinct function begins at 0x0828a474. It reads the signed item count
+      at player+0xe0, and only when count < 256 increments that word before
+      storing the item word at player+0xe4+count*4. Thus malformed negative
+      counts pass the signed BLT predicate; count -1 increments to zero and
+      then stores through the count word itself. A complete aligned ARM
+      B/BL-immediate decode finds exactly six inbound calls: unconditional bl
+      at 0x081176b0, 0x0828a5ec, and 0x0828a630; predicated blne at
+      0x0828ac30, 0x0828ac48, and 0x0828b0a4. The three conditional callers
+      gate optional item insertion; this leaf has no NULL or count-validity
+      guard. Rust preserves the target-width words and signed count layout
+      with a repr(C) structure, including the negative-count store behavior.
