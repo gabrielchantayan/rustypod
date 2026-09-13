@@ -7683,6 +7683,39 @@ functions:
       entered==1 boundary; fixtures assert every word outside +0xe0 is
       untouched and +0xdc is never written.
 
+  - address: 0x082ddc40
+    ghidra: FUN_082ddc40
+    name: context_record_line_terminator
+    size: 60
+    sig: "u32 context_record_line_terminator(void *context, u32 result)"
+    module: cxx/context_line_terminator
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: result
+      "*(u8*)(context+0x0e)": parser_state
+      "*(u32*)(context+0x20)": pending_result
+      "*(u32*)(context+0x48)": nesting_depth
+      FUN_082de814: context_recover
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x082ddc40..0x082ddc78; the
+      next separately linked function starts with push {r4,lr} at
+      0x082ddc7c, so there is no trailing literal pool. It recognizes CR,
+      LF, and VT by result's low byte, stores the full result word at
+      context+0x20, and invokes context_recover only when the byte at
+      context+0x0e and word at +0x48 are both zero. It returns result
+      unchanged. Raw r0 remains unchanged across the test and is passed to
+      0x082de814, correcting Ghidra's dropped callee argument. Decoding
+      every ARM B/BL word in osos.dec finds six inbound plain unconditional
+      bl sites (0x082dd660, 0x082ddb64, 0x0837e104, 0x0837e81c,
+      0x0837ea38, 0x0837ebdc), no predicated bl sites, and one conditional
+      bne tail caller at 0x082dd4c0; no image data word equals this entry,
+      so it is not virtually dispatched. The recovery callee is unported:
+      target builds call its fixed address, while host tests use the
+      volatile CONTEXT_LINE_TERMINATOR_OPS seam. Tests cover each accepted
+      low byte while preserving high bits, a non-terminator, and each of
+      the two independent recovery gates.
+
   - address: 0x082ddd78
     ghidra: FUN_082ddd78
     name: pager_lookup
