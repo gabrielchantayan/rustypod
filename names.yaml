@@ -76083,3 +76083,34 @@ functions:
       varargs pointer, a deliberate diagnostic-only deviation. Host tests
       cover full-width packing and result-slot forwarding on success, plus the
       null result slot, failure return, and diagnostic pointer on failure.
+
+  # --- Encoded fixed-point value decode ---
+  - address: 0x080d4020
+    ghidra: FUN_080d4020
+    name: encoded_fixed_value
+    size: 56
+    sig: "u32 encoded_fixed_value(const EncodedValueRange *range)"
+    module: util/encoded_fixed_value
+    status: ported
+    renames:
+      param_1/r0: range
+      param_1[0]/r0: range.start
+      param_1[1]/r1: range.end
+      FUN_080a1b68: compact_token_value
+      FUN_0804d2cc: fixed_product
+      FUN_08087bf8: packed_decimal_value
+    notes: >-
+      Raw ARM decoding confirms 56 code bytes from 0x080d4020 through
+      0x080d4054; the next independently linked sibling begins with
+      `push {r4,r5,lr}` at 0x080d4058. The body loads the unchecked
+      start/end pair, then tail-branches to 0x08087bf8 with scale 3 when
+      start[0] is 0x1e. Otherwise it calls 0x080a1b68, shifts the resulting
+      compact token to Q16.16, and tail-branches to the signed Q16.16 product
+      helper 0x0804d2cc with multiplier 1000. Decoding every immediate ARM
+      B/BL word in osos.dec finds exactly seven inbound direct calls, all
+      unconditional bl and no predicated forms: 0x08087ed8, 0x080bfdac,
+      0x080bfdbc, 0x080bfdcc, 0x080bfddc, 0x080bfdec, and 0x080bfdf8.
+      The three helpers remain unported; target builds retain direct calls to
+      their verified load addresses, while host tests install deterministic
+      seams to prove marker routing, Q16 conversion, multiplier, and exact
+      range forwarding. No deliberate behavioral deviations.
