@@ -44250,6 +44250,43 @@ functions:
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  # --- Media-player interface status ---
+  - address: 0x0813921c
+    ghidra: FUN_0813921c
+    name: media_player_interface_status
+    size: 204
+    sig: "u32 media_player_interface_status(void *unused, u8 *status_out, u8 *reason_out)"
+    module: app/media_player_interface_status
+    renames:
+      param_1/r0: unused
+      param_2/r1: status_out
+      param_3/r2: reason_out
+      FUN_08259594: media_player_interface_get
+      FUN_08030f44: heap_panic
+      "vtable+0x10c": predicate_10c
+      "vtable+0x110": predicate_110
+      "vtable+0x114": predicate_114
+      "vtable+0x118": predicate_118
+      "vtable+0x120": predicate_120
+      "vtable+0x13c": status_byte
+    status: ported
+    notes: >-
+      Raw ARM establishes the exact 204-byte code extent
+      0x0813921c..0x081392e8; 0x081392e8 starts a separately linked
+      function. It gets the existing media-player interface, calls vtable
+      +0x13c and stores its low byte through the optional r1 output, then
+      checks +0x120, +0x114, +0x118, +0x10c, and +0x110 in priority order.
+      The optional r2 output is 0 for +0x120/nonzero or all-zero predicates,
+      otherwise 3, 4, 1, or 2 respectively. A NULL getter result reaches
+      the predicated `bleq heap_panic` path. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly six direct inbound bl sites
+      (0x0818f6dc, 0x081a9cdc, 0x081ab574, 0x081fda3c, 0x08200388,
+      0x08200568), all unconditional; no predicated direct callers and no
+      plain-B tail sites. The six body `blx` targets are dynamic vtable data,
+      so no callee identity is invented. Host uses native-width vtable
+      pointers plus a getter seam; target preserves the recovered 32-bit
+      offsets and directly calls the existing media_player_interface_get port.
+
   - address: 0x08138b84
     ghidra: FUN_08138b84
     name: service_handler_lifecycle_state
