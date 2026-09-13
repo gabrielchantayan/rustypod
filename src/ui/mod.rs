@@ -43,6 +43,7 @@ pub mod plst_counted_string;
 pub mod plst_element_teardown;
 pub mod plst_next;
 pub mod plst_slot_item;
+pub mod plst_slot_materialize;
 pub mod plst_linked_item_count;
 pub mod plst_slot_position;
 pub mod tdat_class_check;

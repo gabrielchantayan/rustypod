@@ -32,12 +32,6 @@ const SLOT_ITEMS_OFFSET: usize = 0x10;
 #[cfg(target_os = "none")]
 static NORMALIZE_SELECTOR_ADDRESS: usize = 0x080b_48dc;
 
-/// Stock slot materializer @ 0x080df1b8 (unported). Called with
-/// (element, selector) when the slot word is NULL; fills the slot on
-/// success, returns 0 or an error (~0x31 when selector >= 49). The
-/// original caller discards the return value and re-reads the slot.
-#[cfg(target_os = "none")]
-static MATERIALIZE_SLOT_ADDRESS: usize = 0x080d_f1b8;
 
 /// ABI of the selector normalizer at 0x080b48dc.
 pub type PlstNormalizeSelector =
@@ -55,10 +49,8 @@ unsafe extern "C" fn firmware_normalize_selector(
     normalize(element, selector, reverse_flag);
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_materialize_slot(element: *mut u8, selector: u32) -> u32 {
-    let materialize: PlstMaterializeSlot = core::mem::transmute(MATERIALIZE_SLOT_ADDRESS);
-    materialize(element, selector)
+unsafe extern "C" fn ported_materialize_slot(element: *mut u8, selector: u32) -> u32 {
+    crate::ui::plst_slot_materialize::materialize_plst_slot(element, selector)
 }
 
 /// Host default: the stock normalizer is the identity for every selector
@@ -71,18 +63,12 @@ unsafe extern "C" fn host_normalize_selector(
 ) {
 }
 
-/// Host default: nothing materializes; the slot stays NULL and the fetch
-/// returns 0. `0xffff_ffce` mirrors the stock `mvn r0, #0x31` error word.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_materialize_slot(_element: *mut u8, _selector: u32) -> u32 {
-    0xffff_ffce
-}
 
 /// Calls outside this one-function port.
 ///
-/// `normalize_selector` preserves the stock boundary at 0x080b48dc;
-/// `materialize_slot` the one at 0x080df1b8. Both are unported retailOS
-/// code; host tests replace them with mocks.
+/// `normalize_selector` preserves the stock boundary at 0x080b48dc. The
+/// materializer is now the Rust port at [`crate::ui::plst_slot_materialize`];
+/// host tests may still replace either call with mocks.
 #[derive(Clone, Copy)]
 pub struct PlstSlotItemOps {
     pub normalize_selector: PlstNormalizeSelector,
@@ -95,14 +81,11 @@ pub const DEFAULT_PLST_SLOT_ITEM_OPS: PlstSlotItemOps = PlstSlotItemOps {
     normalize_selector: firmware_normalize_selector,
     #[cfg(not(target_os = "none"))]
     normalize_selector: host_normalize_selector,
-    #[cfg(target_os = "none")]
-    materialize_slot: firmware_materialize_slot,
-    #[cfg(not(target_os = "none"))]
-    materialize_slot: host_materialize_slot,
+    materialize_slot: ported_materialize_slot,
 };
 
-/// Active call boundary. Target builds call the retailOS functions; host
-/// tests swap in recording mocks.
+/// Active call boundary. The default reaches the stock normalizer and Rust
+/// materializer; host tests swap in recording mocks.
 pub static mut PLST_SLOT_ITEM_OPS: PlstSlotItemOps = DEFAULT_PLST_SLOT_ITEM_OPS;
 
 #[inline(always)]
@@ -187,9 +170,9 @@ unsafe fn read_slot(element: *mut u8, selector: u32) -> *mut u8 {
 /// the fetch returns 0. Otherwise the word at slot+0x10+index*4 is
 /// returned verbatim.
 ///
-/// Deviations: the two unported callees sit behind
-/// [`PLST_SLOT_ITEM_OPS`]; on target they are the stock addresses, on
-/// host the defaults are identity-normalize / never-materialize. The
+/// Deviations: the stock normalizer remains behind [`PLST_SLOT_ITEM_OPS`];
+/// the materializer default now reaches [`crate::ui::plst_slot_materialize`].
+/// Host tests replace either seam with recording mocks. The
 /// original passes `sp+8` (the saved r2 word) as the flag pointer and the
 /// normalizer writes it with `strb`; the port narrows to the low byte
 /// before the call, which is bit-identical because only `strb`/`ldrb`

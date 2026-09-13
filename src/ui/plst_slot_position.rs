@@ -35,14 +35,6 @@ const SLOT_COUNT: u32 = 49;
 #[cfg(target_os = "none")]
 static NORMALIZE_SELECTOR_ADDRESS: usize = 0x080b_48dc;
 
-/// Stock slot materializer @ 0x080df1b8 (unported). Called with
-/// (element, selector) when the cached map is NULL and the normalized
-/// selector is in 1..49; fills the +0x3ac slot on success and returns 0,
-/// otherwise an error word (~0x31 when selector >= 49). Unlike
-/// `ui/plst_slot_item`, this caller CHECKS the return: the map builder
-/// only runs when it returns 0.
-#[cfg(target_os = "none")]
-static MATERIALIZE_SLOT_ADDRESS: usize = 0x080d_f1b8;
 
 /// Stock sorted-map builder @ 0x080ca00c (unported). Reads the u32 count
 /// at slot+0xc, allocates 16+count*8 bytes (via 0x805d1d4), copies the
@@ -81,10 +73,8 @@ unsafe extern "C" fn firmware_normalize_selector(
     normalize(element, selector, reverse_flag)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_materialize_slot(element: *mut u8, selector: u32) -> u32 {
-    let materialize: PlstMaterializeSlot = core::mem::transmute(MATERIALIZE_SLOT_ADDRESS);
-    materialize(element, selector)
+unsafe extern "C" fn ported_materialize_slot(element: *mut u8, selector: u32) -> u32 {
+    crate::ui::plst_slot_materialize::materialize_plst_slot(element, selector)
 }
 
 #[cfg(target_os = "none")]
@@ -113,25 +103,17 @@ unsafe extern "C" fn host_normalize_selector(
 ) {
 }
 
-/// Host default: nothing materializes; the cache stays NULL and the
-/// lookup returns -1. `0xffff_ffce` mirrors the stock `mvn r0, #0x31`
-/// error word.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_materialize_slot(_element: *mut u8, _selector: u32) -> u32 {
-    0xffff_ffce
-}
 
-/// Host default: unreachable with the never-materialize default (the
-/// original only calls the builder after a SUCCESSFUL materialize), so a
-/// call here means a test installed half a mock chain.
+/// Host default: unreachable because target-width host materialization fails
+/// allocation before this path. A call means a test installed half a mock
+/// chain.
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_build_position_map(_slot: *mut u8) -> *mut u8 {
     panic!("ui_plst_slot_item_position requires builder 0x080ca00c")
 }
 
-/// Host default: unreachable with the never-materialize default (the
-/// cache stays NULL), so a call here means a test fixture installed a
-/// cache word without installing the search mock.
+/// Host default: unreachable while the default materializer leaves no map.
+/// A call means a test fixture installed a cache word without the search mock.
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_slot_index_of(_key: *mut u8, _map: *mut u8, _reverse_flag: u32) -> u32 {
     panic!("ui_plst_slot_item_position requires index-of 0x080daad4")
@@ -139,10 +121,10 @@ unsafe extern "C" fn host_slot_index_of(_key: *mut u8, _map: *mut u8, _reverse_f
 
 /// Calls outside this one-function port.
 ///
-/// `normalize_selector` preserves the stock boundary at 0x080b48dc,
-/// `materialize_slot` the one at 0x080df1b8, `build_position_map` the one
-/// at 0x080ca00c, and `slot_index_of` the one at 0x080daad4. All four are
-/// unported retailOS code; host tests replace them with mocks.
+/// `normalize_selector`, `build_position_map`, and `slot_index_of` preserve
+/// their stock boundaries. The materializer is now the Rust port at
+/// [`crate::ui::plst_slot_materialize`]; host tests may still replace all
+/// calls with mocks.
 #[derive(Clone, Copy)]
 pub struct PlstSlotPositionOps {
     pub normalize_selector: PlstNormalizeSelector,
@@ -157,10 +139,7 @@ pub const DEFAULT_PLST_SLOT_POSITION_OPS: PlstSlotPositionOps = PlstSlotPosition
     normalize_selector: firmware_normalize_selector,
     #[cfg(not(target_os = "none"))]
     normalize_selector: host_normalize_selector,
-    #[cfg(target_os = "none")]
-    materialize_slot: firmware_materialize_slot,
-    #[cfg(not(target_os = "none"))]
-    materialize_slot: host_materialize_slot,
+    materialize_slot: ported_materialize_slot,
     #[cfg(target_os = "none")]
     build_position_map: firmware_build_position_map,
     #[cfg(not(target_os = "none"))]
@@ -171,8 +150,8 @@ pub const DEFAULT_PLST_SLOT_POSITION_OPS: PlstSlotPositionOps = PlstSlotPosition
     slot_index_of: host_slot_index_of,
 };
 
-/// Active call boundary. Target builds call the retailOS functions; host
-/// tests swap in recording mocks.
+/// Active call boundary. The default reaches stock helpers plus the Rust
+/// materializer; host tests swap in recording mocks.
 pub static mut PLST_SLOT_POSITION_OPS: PlstSlotPositionOps = DEFAULT_PLST_SLOT_POSITION_OPS;
 
 #[inline(always)]
@@ -260,14 +239,14 @@ unsafe fn read_table_word(element: *mut u8, table: usize, selector: u32) -> *mut
 /// through 0x80daad4 with the flag's low byte; its result (index or -1)
 /// is returned verbatim. A still-NULL map returns the pre-seeded -1.
 ///
-/// Deviations: the four unported callees sit behind
-/// [`PLST_SLOT_POSITION_OPS`]; on target they are the stock addresses, on
-/// host the defaults are identity-normalize / never-materialize /
-/// panic-on-reach. The normalize-selector and materialize-slot fn
-/// pointer types are reused from [`crate::ui::plst_slot_item`], which
-/// shares both stock boundaries. The original passes `sp+8` (the saved r2
-/// word) as the flag pointer and the normalizer writes it with `strb`;
-/// the port narrows to the low byte before the call, bit-identical
+/// Deviations: the stock normalizer, map builder, and index helper remain
+/// behind [`PLST_SLOT_POSITION_OPS`]; the materializer default now reaches
+/// [`crate::ui::plst_slot_materialize`]. Host tests replace all seams with
+/// mocks. The normalize-selector and materialize-slot fn-pointer types are
+/// reused from [`crate::ui::plst_slot_item`], which shares both boundaries.
+/// The original passes `sp+8` (the saved r2 word) as the flag pointer and
+/// normalizer writes it with `strb`; the port narrows to the low byte before
+/// the call, bit-identical
 /// because only `strb`/`ldrb` ever touch that slot. All table loads are
 /// aligned word loads like the original's `ldr`; no `read_unaligned`
 /// anywhere.
