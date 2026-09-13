@@ -417,6 +417,18 @@ pub struct StringObject {
     pub payload: *mut u8,
 }
 
+/// The decoded prefix of an otherwise unidentified record whose word-one
+/// member is a [`StringObject`]. On ARM this places `primary` at +0x04; the
+/// wider host pointer fields are intentionally represented by named fields,
+/// not target byte offsets.
+#[repr(C)]
+pub struct PrimaryStringRecord {
+    /// Undecoded leading word.
+    pub header: usize,
+    /// +0x04 on ARM — the record's primary StringObject member.
+    pub primary: StringObject,
+}
+
 /// string_default_construct — original: `FUN_08277440` @ 0x08277440
 /// (20 bytes, 280 `bl` call sites).
 ///
@@ -1710,6 +1722,28 @@ pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *cons
         return &STRING_OBJECT_EMPTY_CSTR;
     }
     payload
+}
+
+/// primary_string_record_c_str — original: `FUN_0829b180` @ 0x0829b180
+/// (8 bytes; **6 direct `bl` call sites**, all unconditional and zero
+/// predicated, binary-scanned: 0x081094d4, 0x0810a3c0, 0x081271e4,
+/// 0x08127e48, 0x08299a2c, and 0x08299a68).
+///
+/// The raw two-word thunk adds one word to `record`, then tail-branches to
+/// [`string_object_c_str`] @ 0x082a50b0. It therefore returns the NULL-safe
+/// C string of the embedded primary [`StringObject`] at record +0x04 (its
+/// payload is at record +0x08). The surrounding record's identity is not
+/// decoded, so [`PrimaryStringRecord`] intentionally models only this
+/// accessed prefix. There is no NULL guard: the original's tail target
+/// dereferences the shifted pointer, and so does the port.
+///
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn primary_string_record_c_str(
+    record: *const PrimaryStringRecord,
+) -> *const u8 {
+    string_object_c_str(&(*record).primary)
 }
 
 /// string_object_codepoint_ptr — original: FUN_082a50c4 @ 0x082a50c4
@@ -7885,4 +7919,25 @@ pub(crate) mod tests {
             assert_eq!(string_object_find_codepoint(&null_payload_object, 0, 0), -1);
         }
     }
+    #[test]
+    fn primary_string_record_c_str_reads_primary_or_empty_payload() {
+        let mut label = *b"label\0";
+        let mut record = PrimaryStringRecord {
+            header: 0,
+            primary: StringObject {
+                vtable: core::ptr::null(),
+                payload: label.as_mut_ptr(),
+            },
+        };
+
+        unsafe {
+            assert_eq!(primary_string_record_c_str(&record), label.as_ptr());
+
+            record.primary.payload = core::ptr::null_mut();
+            let empty = primary_string_record_c_str(&record);
+            assert!(!empty.is_null());
+            assert_eq!(*empty, 0, "NULL primary payload selects the empty C string");
+        }
+    }
+
 }

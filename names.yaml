@@ -21859,6 +21859,32 @@ functions:
       the unaligned u32 stores/loads to strb/ldrb quads on ARMv5TE (the
       sibling's accepted widening).
 
+  - address: 0x0829b180
+    ghidra: FUN_0829b180
+    name: primary_string_record_c_str
+    size: 8
+    sig: "const char *primary_string_record_c_str(const PrimaryStringRecord *record)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: record
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw osos.dec confirms exactly two ARM words at 0x0829b180..0x0829b184:
+      `add r0,r0,#4; b 0x082a50b0`. The next separately linked function starts
+      at 0x0829b188. Thus this is a tail-call accessor for the StringObject
+      embedded one word into an otherwise unidentified record; it returns that
+      member's payload at record +0x08, or string_object_c_str's shared empty
+      C string when the payload is NULL. Decoding every ARM B/BL word in
+      osos.dec finds exactly six direct calls, all unconditional bl
+      (0x081094d4, 0x0810a3c0, 0x081271e4, 0x08127e48, 0x08299a2c,
+      0x08299a68), zero predicated calls and zero tail-b callers. No data word
+      in osos.dec equals 0x0829b180, so it is not a serialized virtual
+      dispatch target. The record's larger identity is deliberately left
+      undecoded: the Rust PrimaryStringRecord models only its leading word and
+      embedded StringObject via repr(C) named fields, avoiding 32-bit byte
+      offsets on wider hosts. Host tests cover both a non-NULL payload and the
+      NULL-to-empty fallback through the direct existing c_str port.
   - address: 0x0829ba1c
     ghidra: FUN_0829ba1c
     name: string_object_differs_from_static_object
