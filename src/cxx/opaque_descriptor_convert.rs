@@ -18,45 +18,20 @@
 //! virtual dispatch target.
 //!
 //! The wrapper supplies the fixed opaque descriptor `0x089063e8` as r2 and
-//! tail-branches to the generic descriptor conversion engine at `0x0803b3b8`,
-//! forwarding its source and optional output-slot arguments and returning the
-//! engine's result unchanged. The descriptor's concrete type and the generic
-//! engine are not ported; their identities are therefore deliberately not
-//! invented.
+//! tail-branches to the ported generic descriptor conversion engine at
+//! `0x0803b3b8`, forwarding its source and optional output-slot arguments and
+//! returning the engine's result unchanged. The descriptor's concrete type
+//! remains unrecovered and is deliberately not invented.
 //!
 //! Deliberate deviation: none on ARM, where global assembly retains all three
-//! raw words and the tail edge. Hosts use a replaceable conversion-engine seam
-//! because the retail engine address is unmapped.
+//! raw words and the tail edge. Hosts call the Rust port, whose lower-engine
+//! seam replaces the former wrapper-local conversion seam.
 
 #[cfg(not(target_arch = "arm"))]
-use core::ptr;
+use crate::cxx::generic_descriptor_convert::generic_descriptor_convert;
 
 /// Fixed opaque descriptor loaded into r2 by the wrapper.
 pub const OPAQUE_DESCRIPTOR_CONVERT_DESCRIPTOR: usize = 0x0890_63e8;
-
-/// ABI of the unported generic descriptor conversion engine at `0x0803b3b8`.
-pub type OpaqueDescriptorConvertEngine =
-    unsafe extern "C" fn(source: *mut u8, output_slot: *mut *mut u8, descriptor: *const u8) -> i32;
-
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_opaque_descriptor_convert_engine(
-    _source: *mut u8,
-    _output_slot: *mut *mut u8,
-    _descriptor: *const u8,
-) -> i32 {
-    panic!("opaque descriptor conversion engine is unavailable on the host")
-}
-
-/// Host seam for the unported generic descriptor conversion engine.
-#[cfg(not(target_arch = "arm"))]
-pub static mut OPAQUE_DESCRIPTOR_CONVERT_ENGINE: OpaqueDescriptorConvertEngine =
-    missing_opaque_descriptor_convert_engine;
-
-#[cfg(not(target_arch = "arm"))]
-#[inline(always)]
-unsafe fn descriptor_convert_engine() -> OpaqueDescriptorConvertEngine {
-    unsafe { ptr::read_volatile(ptr::addr_of!(OPAQUE_DESCRIPTOR_CONVERT_ENGINE)) }
-}
 
 #[cfg(target_arch = "arm")]
 extern "C" {
@@ -65,13 +40,14 @@ extern "C" {
     pub fn opaque_descriptor_convert(source: *mut u8, output_slot: *mut *mut u8) -> i32;
 }
 
-/// Invokes the generic conversion engine with this wrapper's fixed descriptor.
+/// Invokes the now-ported generic conversion engine with this wrapper's fixed
+/// descriptor.
 ///
 /// # Safety
 ///
-/// `source` and `output_slot` follow the unvalidated ABI of the unported
-/// descriptor conversion engine. `output_slot` may be NULL; the wrapper does
-/// not inspect either argument.
+/// `source` and `output_slot` follow the unvalidated descriptor-conversion
+/// ABI. `output_slot` may be NULL; the wrapper does not inspect either
+/// argument.
 #[cfg(not(target_arch = "arm"))]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -80,7 +56,7 @@ pub unsafe extern "C" fn opaque_descriptor_convert(
     output_slot: *mut *mut u8,
 ) -> i32 {
     unsafe {
-        descriptor_convert_engine()(source, output_slot, OPAQUE_DESCRIPTOR_CONVERT_DESCRIPTOR as *const u8)
+        generic_descriptor_convert(source, output_slot, OPAQUE_DESCRIPTOR_CONVERT_DESCRIPTOR as *const u8)
     }
 }
 
@@ -95,7 +71,7 @@ core::arch::global_asm!(
     .type opaque_descriptor_convert, %function
 opaque_descriptor_convert:
     ldr     r2, [pc]
-    b       0x0803b3b8
+    b       generic_descriptor_convert
     .word   0x089063e8
     .size opaque_descriptor_convert, . - opaque_descriptor_convert
 "#
@@ -106,34 +82,43 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::Mutex;
+    use crate::cxx::generic_descriptor_convert::{
+        DescriptorConvertEngine, DescriptorConvertFrame, GenericDescriptorConvertOps,
+        GENERIC_DESCRIPTOR_CONVERT_OPS, GENERIC_DESCRIPTOR_CONVERT_TEST_LOCK,
+    };
+    use core::ptr;
 
-    static ENGINE_LOCK: Mutex<()> = Mutex::new(());
     static mut CALL_COUNT: u32 = 0;
     static mut RECORDED_SOURCE: usize = usize::MAX;
     static mut RECORDED_OUTPUT_SLOT: usize = usize::MAX;
     static mut RECORDED_DESCRIPTOR: usize = 0;
 
     unsafe extern "C" fn record_convert(
-        source: *mut u8,
+        frame: *mut DescriptorConvertFrame,
         output_slot: *mut *mut u8,
         descriptor: *const u8,
+        limit: i32,
+        state: *mut core::ffi::c_void,
     ) -> i32 {
         unsafe {
+            assert_eq!(limit, -1);
+            assert!(state.is_null());
             CALL_COUNT += 1;
-            RECORDED_SOURCE = source as usize;
+            RECORDED_SOURCE = (*frame).source as usize;
             RECORDED_OUTPUT_SLOT = output_slot as usize;
             RECORDED_DESCRIPTOR = descriptor as usize;
         }
         -0x351
     }
 
-    struct EngineReset(OpaqueDescriptorConvertEngine);
+    struct EngineReset(DescriptorConvertEngine);
 
     impl Drop for EngineReset {
         fn drop(&mut self) {
-            unsafe { OPAQUE_DESCRIPTOR_CONVERT_ENGINE = self.0 };
+            unsafe {
+                GENERIC_DESCRIPTOR_CONVERT_OPS =
+                    GenericDescriptorConvertOps { engine: self.0 };
+            }
         }
     }
 
@@ -143,15 +128,15 @@ mod tests {
             RECORDED_SOURCE = usize::MAX;
             RECORDED_OUTPUT_SLOT = usize::MAX;
             RECORDED_DESCRIPTOR = 0;
-            let previous = ptr::read_volatile(addr_of!(OPAQUE_DESCRIPTOR_CONVERT_ENGINE));
-            OPAQUE_DESCRIPTOR_CONVERT_ENGINE = record_convert;
+            let previous = ptr::read_volatile(ptr::addr_of!(GENERIC_DESCRIPTOR_CONVERT_OPS)).engine;
+            GENERIC_DESCRIPTOR_CONVERT_OPS = GenericDescriptorConvertOps { engine: record_convert };
             EngineReset(previous)
         }
     }
 
     #[test]
     fn null_arguments_are_forwarded_without_wrapper_guards() {
-        let _guard = ENGINE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _engine_guard = GENERIC_DESCRIPTOR_CONVERT_TEST_LOCK.lock();
         let _reset = install_recorder();
 
         let result = unsafe { opaque_descriptor_convert(ptr::null_mut(), ptr::null_mut()) };
@@ -167,18 +152,18 @@ mod tests {
 
     #[test]
     fn forwards_nonnull_source_and_output_slot_with_fixed_descriptor() {
-        let _guard = ENGINE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _engine_guard = GENERIC_DESCRIPTOR_CONVERT_TEST_LOCK.lock();
         let _reset = install_recorder();
         let source = 0x2a4c_1000usize as *mut u8;
-        let output_slot = 0x2a4c_2000usize as *mut *mut u8;
+        let mut output = 0x2a4c_2000usize as *mut u8;
 
-        let result = unsafe { opaque_descriptor_convert(source, output_slot) };
+        let result = unsafe { opaque_descriptor_convert(source, &mut output) };
 
         assert_eq!(result, -0x351);
         unsafe {
             assert_eq!(CALL_COUNT, 1);
             assert_eq!(RECORDED_SOURCE, source as usize);
-            assert_eq!(RECORDED_OUTPUT_SLOT, output_slot as usize);
+            assert_eq!(RECORDED_OUTPUT_SLOT, ptr::addr_of!(output) as usize);
             assert_eq!(RECORDED_DESCRIPTOR, OPAQUE_DESCRIPTOR_CONVERT_DESCRIPTOR);
         }
     }

@@ -77106,3 +77106,39 @@ functions:
       zero-fill veneer are all direct ports. Host tests cover shrink, retained
       capacity, initial allocation, reallocation, and failure without state
       mutation.
+  - address: 0x0803b3b8
+    ghidra: FUN_0803b3b8
+    name: generic_descriptor_convert
+    size: 176
+    sig: "i32 generic_descriptor_convert(void *source, void **output_slot, const void *descriptor)"
+    module: cxx/generic_descriptor_convert
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: output_slot
+      param_3/r2: descriptor
+      r4: allocation
+      r6: byte_count
+      FUN_0803b0a0: descriptor_convert_engine
+      FUN_08043c18: traced_alloc
+    notes: >-
+      Raw osos.dec confirms the 176-byte extent from 0x0803b3b8 through
+      0x0803b464; the separately linked successor begins at 0x0803b468 with
+      mov r1,#0. Decoding every ARM B/BL immediate finds exactly seven inbound
+      direct calls, all unconditional plain bl at 0x0803a8e0, 0x0803a944,
+      0x0803b4f4, 0x0805fd9c, 0x080607ec, 0x08099c38, and 0x08099c80; no
+      predicated BL form targets it. Four unconditional b tail transfers at
+      0x082d38e0, 0x082d38ec, 0x082d38f8, and 0x082d3904 also enter it.
+      The engine preserves {source, output_slot, descriptor} in its stack
+      frame. A NULL output_slot or a non-NULL *output_slot makes one direct
+      lower-engine call. For an empty slot it first calls the lower engine
+      with a NULL output to obtain byte_count; non-positive results return
+      unchanged. A positive size goes to traced_alloc(byte_count, 0, 0);
+      NULL allocation returns -1 without the second lower call. On success
+      the second lower call receives a local pointer initialized to allocation,
+      while the original allocation—not a value the lower call could write to
+      that local—is stored in *output_slot. The lower engine 0x0803b0a0 is
+      unported: target builds call its fixed address and host tests replace its
+      volatile seam. traced_alloc is already ported and remains direct. The
+      existing opaque_descriptor_convert wrapper now tail-branches directly to
+      this port rather than retaining its former engine seam.
