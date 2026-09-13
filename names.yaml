@@ -80528,3 +80528,36 @@ functions:
       seams. MatrixState keeps active_matrix as a u32 target address so its
       +0x34 offset remains correct on 64-bit hosts; this is layout fidelity,
       not a behavioral deviation.
+
+
+  # --- Unflagged collection item count (util/collection_unflagged_count) ---
+  - address: 0x0826b984
+    ghidra: FUN_0826b984
+    name: count_unflagged_collection_items
+    size: 76
+    sig: "u32 count_unflagged_collection_items(CollectionOwner *owner)"
+    module: util/collection_unflagged_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x04": collection
+      local_10: item
+      "item+0x04": flags
+      iVar2/r4: count
+    notes: >-
+      Raw osos.dec confirms the 76-byte extent from the push at 0x0826b984
+      through bx lr at 0x0826b9cc; the next separately linked function begins
+      at 0x0826b9d0. An exhaustive aligned ARM B/BL-immediate decode finds six
+      direct inbound calls, all unconditional plain bl at 0x08188700,
+      0x08188768, 0x08289114, 0x0828922c, 0x08289378, and 0x082893d8; there
+      are no predicated bl forms or direct B callers. It loads the collection
+      from owner+0x04, walks it with cursor_init/cursor_advance/
+      cursor_invalidate, and increments the result when the byte at item+0x04
+      has bit 0 clear. The byte test is the direct callee FUN_0829d3c0, whose
+      observed body is ldrb/mvn/and #1; its broader identity remains
+      unresolved. The port inlines this fully verified leaf rather than create
+      a speculative identity or new dispatch seam. Deliberate deviations: only
+      the owner prefix and item prefix read here are modeled, with named fields
+      preserving their target layout
+      despite wider host pointers. Host tests cover empty input and both
+      values of the tested status bit.
