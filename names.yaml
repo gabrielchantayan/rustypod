@@ -64708,6 +64708,35 @@ functions:
       LLVM identical-code folding with other empty destructor exports; host
       tests cover pointer preservation and no object writes. match.py
       structural diff reviewed after the ARM release build.
+
+  # --- empty C++ destructor veneer ---
+  - address: 0x081e741c
+    ghidra: thunk_FUN_08207688
+    name: empty_destructor_1e741c
+    size: 4
+    sig: "void *empty_destructor_1e741c(void *this)"
+    module: cxx/empty_destructor_1e741c
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      Raw extent is exactly 0x081e741c..0x081e7420: the single instruction
+      `b 0x08207688` (0xea008099) tail-branches to an exact one-word `bx lr`
+      empty C++ destructor at 0x08207688, while the next sibling starts at
+      0x081e7420 with `cmp r1,#0`. Decoding every ARM B/BL word in osos.dec
+      finds exactly six direct callers, all unconditional plain BL
+      (0x0814c73c, 0x081682c8, 0x081a8014, 0x081ba814, 0x08236268, and
+      0x0828c194), with no predicated BL forms or plain-B tail callers. No
+      aligned image word equals 0x081e741c, so no static vtable dispatch
+      reaches the veneer. Every direct caller consumes the r0 pass-through
+      (for example 0x0814c740 subtracts four from it), so the port returns
+      this rather than Ghidra's void signature and performs no reads or
+      writes. It deliberately collapses the tail branch and empty target to
+      the identical direct return; its dedicated text section preserves a
+      distinct hook target. Host tests cover NULL, unaligned, extreme pointer
+      values, pointer preservation, and no object writes; match.py structural
+      diff reviewed after the ARM release build.
   - address: 0x08166a3c
     ghidra: FUN_08166a3c
     name: empty_destructor_166a3c
