@@ -131,6 +131,87 @@ pub unsafe extern "C" fn metadata_record_read_u32(
         value
     }
 }
+/// Track-metadata fetch context fields recovered by
+/// `metadata_record_diagnostics_enabled`. `diagnostic_log` is the logging
+/// context passed as the first argument to the diagnostic formatter by all
+/// six direct callers.
+///
+/// `#[repr(C)]` preserves the three native-word fields at +0x00, +0x04,
+/// and +0x08 on the 32-bit target without treating host byte offsets as
+/// target offsets.
+#[repr(C)]
+pub struct MetadataRecordContext {
+    pub unresolved_00: *mut u8,
+    pub unresolved_04: *mut u8,
+    pub diagnostic_log: *mut u8,
+}
+
+/// metadata_record_diagnostics_enabled — original: `FUN_08268750` @
+/// `0x08268750` (16 bytes).
+///
+/// Raw ARM words at `0x08268750..0x08268760`:
+///
+/// ```text
+/// 08268750  ldr   r0, [r0, #8]    @ context->diagnostic_log
+/// 08268754  cmp   r0, #0
+/// 08268758  movne r0, #1
+/// 0826875c  bx    lr
+/// ```
+///
+/// Returns whether the metadata-fetch context has a diagnostic log. This
+/// gates the framework's verbose fetch-metadata, constraint-evaluation,
+/// and teardown logging; it does not inspect or alter the log object.
+///
+/// The next function starts at `0x08268760` with `push {r0, r1, r2, r4,
+/// r5, r6, r7, r8, r9, sl, fp, lr}`, so Ghidra's 16-byte extent is exact.
+/// A whole-image ARM branch-word decode found six references, all
+/// unconditional `bl` (0x082684dc, 0x0826852c, 0x082688c4, 0x08268918,
+/// 0x08268d84, 0x08268ed8), with zero predicated calls and zero tail `b`
+/// references. No firmware data word equals `0x08268750`, so it is not
+/// virtually dispatched.
+///
+/// Deliberate deviations: none. As stock, this has no NULL guard for
+/// `context`; dereferencing one faults.
+///
+/// # Safety
+///
+/// `context` must point to a live metadata-record fetch context. The
+/// original immediately reads its diagnostic-log field.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.metadata_record_diagnostics_enabled")]
+#[inline(never)]
+pub unsafe extern "C" fn metadata_record_diagnostics_enabled(
+    context: *const MetadataRecordContext,
+) -> bool {
+    unsafe { !(*context).diagnostic_log.is_null() }
+}
+
+#[cfg(test)]
+mod diagnostics_enabled_tests {
+    use super::*;
+
+    #[test]
+    fn false_when_diagnostic_log_is_null() {
+        let context = MetadataRecordContext {
+            unresolved_00: 0x10usize as *mut u8,
+            unresolved_04: 0x20usize as *mut u8,
+            diagnostic_log: core::ptr::null_mut(),
+        };
+
+        assert!(!unsafe { metadata_record_diagnostics_enabled(&context) });
+    }
+
+    #[test]
+    fn true_for_non_null_diagnostic_log_regardless_of_other_fields() {
+        let context = MetadataRecordContext {
+            unresolved_00: core::ptr::null_mut(),
+            unresolved_04: core::ptr::null_mut(),
+            diagnostic_log: 0x30usize as *mut u8,
+        };
+
+        assert!(unsafe { metadata_record_diagnostics_enabled(&context) });
+    }
+}
 
 #[cfg(test)]
 mod tests {
