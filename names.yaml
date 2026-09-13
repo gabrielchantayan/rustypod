@@ -21820,6 +21820,35 @@ functions:
       the unaligned u32 stores/loads to strb/ldrb quads on ARMv5TE (the
       sibling's accepted widening).
 
+  - address: 0x0829ba1c
+    ghidra: FUN_0829ba1c
+    name: string_object_differs_from_static_object
+    size: 40
+    sig: "int string_object_differs_from_static_object(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_0829ba44: STATIC_COMPARISON_OBJECT_ADDRESS (0x089ca8a0)
+      FUN_082a50b0: string_object_c_str
+      FUN_08276d64: utf8_strcmp_safe
+    notes: >-
+      Raw osos.dec confirms exactly 40 bytes of code at 0x0829ba1c..0x0829ba40:
+      it saves this in r4, loads 0x089ca8a0 from its literal pool, calls
+      string_object_c_str, then compares this->payload through
+      utf8_strcmp_safe and returns 1 only on a nonzero comparison. The next
+      separately linked function begins at 0x0829ba48, after the literal
+      word. Decoding every ARM B/BL word in osos.dec finds six direct calls,
+      all unconditional bl (0x08149370, 0x081496f0, 0x081497fc, 0x0814989c,
+      0x081498ec, 0x08149948); zero predicated calls. Anomaly: static-image
+      bytes at 0x089ca8a0 are the middle of a font-name C-string table, so
+      string_object_c_str reads its +4 word 0x4e00746e as a non-NULL pointer,
+      not a valid StringObject payload. The target Rust code preserves that
+      raw address and direct callee sequence without inventing an identity.
+      Host-only test state substitutes a valid StringObject to exercise the
+      direct c_str, UTF-8 comparison, inverted boolean and NULL-payload path
+      without dereferencing an unmapped firmware address.
+
   - address: 0x082a50b0
     ghidra: FUN_082a50b0
     name: string_object_c_str
