@@ -1182,8 +1182,8 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 
 /// equal_deref — originals: `FUN_083cf650` @ 0x083cf650,
 /// `FUN_083cf7a0` @ 0x083cf7a0, `FUN_083cf7b8` @ 0x083cf7b8,
-/// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8f0` @ 0x083cf8f0,
-/// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
+/// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8c0` @ 0x083cf8c0,
+/// `FUN_083cf8f0` @ 0x083cf8f0, `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
 /// `FUN_083cf968` @ 0x083cf968, `FUN_083cf980` @ 0x083cf980,
 /// `FUN_083cf9b0` @ 0x083cf9b0, and `FUN_083cf9c8` @ 0x083cf9c8 (24 bytes
@@ -1205,8 +1205,15 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
 /// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
 /// 0x083c7480, 0x083c7504, 0x083c75c8, and 0x083db8ac), with no predicated
-/// calls, tail branches, or aligned raw-word references. It finds 8 plain
-/// `bl` callers at 0x083cf8f0 (0x081bd33c, 0x0839bc54, 0x083c8fd0,
+/// calls, tail branches, or aligned raw-word references.
+/// The 0x083cf8c0 copy is 24 bytes through `bx lr` at 0x083cf8d4; the
+/// separately linked 0x083cf8d8 copy follows immediately. Its six direct
+/// callers are all unconditional `bl`: 0x083c7a3c, 0x083c7ea8, 0x083c7ec4,
+/// 0x083c7f48, 0x083c8028, and 0x083c8118. Decoding every ARM B/BL word finds
+/// no predicated call or tail branch. It has no NULL guard; routing this
+/// byte-identical copy to the established export is the deliberate deviation,
+/// avoiding a redundant dispatch seam.
+/// It finds 8 plain `bl` callers at 0x083cf8f0 (0x081bd33c, 0x0839bc54, 0x083c8fd0,
 /// 0x083c943c, 0x083c9458, 0x083c94dc, 0x083c95a0, 0x083db9c4), with no
 /// predicated calls, tail branches, or aligned raw-word references. It finds
 /// 8 plain `bl` callers at 0x083cf908 (0x081bea64, 0x0839bca8, 0x083c9a14,
@@ -4250,7 +4257,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f7a0_f7b8_f8a8_f8f0_f908_f920_f938_f950_f968_f980_c9b0_c9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f7a0_f7b8_f8a8_f8c0_f8f0_f908_f920_f938_f950_f968_f980_c9b0_c9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
