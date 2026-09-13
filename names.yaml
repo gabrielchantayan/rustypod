@@ -79580,6 +79580,36 @@ functions:
       below-4-GiB fixture and prove the primary-record payload is stored and
       reloaded on each call. Deliberate deviations: none.
 
+  - address: 0x082a4290
+    ghidra: FUN_082a4290
+    name: vtable_predicate_state_scaled_value
+    size: 56
+    sig: "u32 vtable_predicate_state_scaled_value(VtablePredicateObject *object)"
+    module: cxx/vtable_predicate_state_scaled_value
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "*(object + 0x00)": vtable
+      "*(vtable + 0x08)": predicate
+      "*(object + 0x08)": state
+      "*(state + 0x5c)": scaled_value
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec proves the exact 56-byte body from 0x082a4290 through
+      the final bx lr at 0x082a42c4; the separately linked next function
+      starts at 0x082a42c8. It calls opaque vtable slot +0x08 with object,
+      returns zero when that predicate returns zero, and otherwise divides
+      the u32 at state +0x5c by 1000 through a tail branch to __rt_udiv.
+      The virtual callee identity and state-word unit remain unknown, so the
+      port names only the verified predicate-gated scaling. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly six direct
+      inbound calls, all plain unconditional bl at 0x08114558, 0x08114dd4,
+      0x081153a0, 0x08176428, 0x08177368, and 0x0821f378; no predicated
+      form or direct B tail transfer targets the entry. Host tests prove
+      vtable slot selection, nonzero predicate treatment, the zero-predicate
+      short-circuit before state access, and quotient boundaries through
+      u32::MAX. No deliberate deviations.
+
   - address: 0x082a4380
     ghidra: FUN_082a4380
     name: vtable_predicate_state_flag_set
