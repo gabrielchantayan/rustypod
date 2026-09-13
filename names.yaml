@@ -75276,6 +75276,30 @@ functions:
       Deliberate deviation: the unported tail target is represented by the
       volatile VECTOR_PUSH_BACK_ELEM4_OPS seam on host tests while target
       builds dispatch to its verified retail address.
+  # --- std::vector<T> storage-head default constructor ---
+  - address: 0x083e688c
+    ghidra: FUN_083e688c
+    name: vector_storage_init
+    size: 20
+    sig: "void vector_storage_init(VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: zero
+    notes: >-
+      Raw osos.dec establishes the complete 20-byte extent from 0x083e688c
+      through 0x083e689c: mov r1,#0, three word stores to vector +0x00,
+      +0x04, and +0x08, then bx lr. The separately linked next function
+      begins with push {r4,lr} at 0x083e68a0. This is the default
+      constructor for the {begin, end, end_of_storage} storage head of a
+      std::vector<T>; it makes an empty vector without accessing any
+      allocation. Complete aligned ARM B/BL-immediate decoding finds exactly
+      six inbound direct bl calls, all unconditional, at 0x08177630,
+      0x0817763c, 0x08177648, 0x08177b94, 0x082ae80c, and 0x082ae824.
+      The Rust port writes the named repr(C) fields, preserving the target's
+      three 32-bit words without overlapping widened host pointers; there
+      are no deliberate deviations or dispatch seams.
   - address: 0x083dbedc
     ghidra: FUN_083dbedc
     name: container_end_cursor
