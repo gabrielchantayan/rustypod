@@ -74097,6 +74097,45 @@ functions:
       the seam `blx`, an fp frame, and LLVM's inverted fast-path branch.
 
   # --- Lazy singleton allocation getter ---
+  - address: 0x08257f04
+    ghidra: FUN_08257f04
+    name: lazy_singleton_0xd0
+    size: 44
+    sig: "void *lazy_singleton_0xd0(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_08257f30: SINGLETON_0XD0_CACHE_POOL (trailing pool word holding 0x089d03ac)
+      DAT_089d03ac: SINGLETON_0XD0_CACHE
+      FUN_082aadd4: operator_new
+      FUN_0825af98: singleton_0xd0_ctor
+    notes: >-
+      Raw osos.dec establishes 44 code bytes from 0x08257f04 through
+      pop {r4,pc} at 0x08257f2c plus the literal-pool word 0x089d03ac
+      at 0x08257f30; the separately linked sibling begins at 0x08257f34,
+      making the true extent 48 bytes. Full ARM B/BL decoding finds exactly
+      seven direct inbound BL calls, every one an unconditional plain bl:
+      0x0818e7a4, 0x0818e7bc, 0x0818e7d4, 0x0818ed48, 0x0818ed60,
+      0x0818ed78, and 0x08258070. There are no predicated forms or direct
+      plain-B tail sites. Algorithm: load cache 0x089d03ac; on NULL allocate
+      0xd0 bytes through the ported operator_new, call unported constructor
+      0x0825af98, store its return, reload, and return the cache. Six calls
+      are in the 0x0818e698 component-message handler and dispatch the
+      returned opaque object through vtable slots +0x30, +0x4c, and +0x28;
+      the seventh is the boot-time non-NULL checker 0x08258028. Neither
+      callers nor constructor recover a class name or registry id, so the
+      name records only the verified singleton shape and allocation extent.
+      Deliberate deviations: the unported ctor uses the
+      SINGLETON_CTORS.singleton_0xd0 seam with the family zeroing default,
+      and cache storage is the crate static rather than the runtime-
+      initialized firmware word; it is not hook-ready until the ctor is
+      ported. Host tests cover allocation and caching, pre-seeded cache,
+      NULL-return retry, post-constructor store order, and exact zeroing
+      extent. match.py structural review is expected to show the same cache
+      test, allocation, constructor dispatch, store, and reload, with
+      differences from the dispatch seam, frame layout, and branch polarity.
+
+  # --- Lazy singleton allocation getter ---
   - address: 0x08258ba0
     ghidra: FUN_08258ba0
     name: lazy_singleton_0x80
