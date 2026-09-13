@@ -76979,3 +76979,33 @@ functions:
       Host tests map a unique target-width context slab, prove its owner/id
       routing and the 510-byte cap, and prove a reader failure still writes
       zero units while preserving payload storage.
+  - address: 0x080422c0
+    ghidra: FUN_080422c0
+    name: strlcpy
+    size: 76
+    sig: "size_t strlcpy(char *dst, const char *src, size_t capacity)"
+    module: libc/strlcpy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: capacity
+      iVar2/r4: copied_len
+      iVar1/r0: source_len
+      r3: byte
+      FUN_08392478: strlen
+    notes: >-
+      Raw ARM establishes the exact 76-byte body from push {r4,lr} at
+      0x080422c0 through pop {r4,pc} at 0x08042308; the separately linked
+      sibling begins at 0x0804230c. It copies source bytes while capacity is
+      greater than one and the loaded byte is nonzero, writes a terminator
+      exactly when capacity is nonzero, then calls the already ported
+      unguarded strlen at 0x08392478 on the unconsumed source pointer and
+      adds that remainder length to the copied count. Therefore its return is
+      the complete source length, including when capacity is zero, and a
+      zero capacity neither reads nor writes dst. Decoding every immediate
+      ARM B/BL word in osos.dec finds exactly seven inbound direct calls:
+      six unconditional plain bl at 0x080422b4, 0x0805f1f4, 0x0805f29c,
+      0x0807be14, 0x0807c1a8, and 0x080d7770, plus one blgt at
+      0x0805f24c; no direct tail branch targets this entry. No deliberate
+      Rust deviations.
