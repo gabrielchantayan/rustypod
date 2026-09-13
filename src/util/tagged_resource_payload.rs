@@ -191,16 +191,85 @@ pub unsafe extern "C" fn resolve_tagged_cros_payload(
     }
 }
 
+/// Reads the target-width indirect u32 stored in a resource entry at `+0x08`.
+///
+/// The first load is deliberately a u32 even on hosts: retailOS stores this
+/// pointer in one ARM word, so host tests map its pointed-to value below 4 GiB.
+#[inline(always)]
+unsafe fn resource_indirect_value(resource: *const u8) -> u32 {
+    let value_address = unsafe {
+        (resource.add(ENTRY_PAYLOAD_OWNER_OFFSET) as *const u32).read_volatile()
+    };
+    unsafe { (value_address as usize as *const u32).read_volatile() }
+}
+
+
+/// resolve_tagged_cros_value — original: `FUN_081e011c` @ 0x081e011c
+/// (156 bytes including its literal pool; six verified inbound unconditional
+/// `bl` sites at 0x081e0a08, 0x081e0a24, 0x081e0a40, 0x081e0a70,
+/// 0x081e0a8c, and 0x081e0aa8).
+///
+/// Scans the explicit-length `entries` pointer vector. Each outer entry tagged
+/// `resource_tag` creates a temporary list; each `CROS` entry in that list
+/// writes the u32 indirectly referenced by its `+0x08` field to `value_out`.
+/// Later matches overwrite earlier values, while no match writes `value_out`.
+/// Both loop indices undergo the original `lsl #16; asr #16` conversion; the
+/// inner signed count is compared as unsigned, matching ARM `bcc`.
+///
+/// # Safety
+/// `entries` must identify an owner accepted by `ptr_vector_at` for every
+/// index below `entry_count`. Matching outer and inner entries must expose
+/// readable tags at `+0x04`; a matching inner entry must expose a readable
+/// pointer at `+0x08`, and that pointer must identify a readable u32.
+/// `value_out` must be writable whenever an inner `CROS` entry matches.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.resolve_tagged_cros_value")]
+#[inline(never)]
+pub unsafe extern "C" fn resolve_tagged_cros_value(
+    _context: *mut u8,
+    entries: *const u8,
+    entry_count: u32,
+    resource_tag: u32,
+    value_out: *mut u32,
+) {
+    for outer_index in 0..entry_count {
+        let vector_index = (outer_index as i16 as i32) as u32;
+        let entry = unsafe { ptr_vector_at(entries, vector_index) };
+        let entry_tag = unsafe { (entry.add(ENTRY_TAG_OFFSET) as *const u32).read_volatile() };
+        if entry_tag != resource_tag {
+            continue;
+        }
+
+        let mut resource_list = unsafe { clone_resource_list(entry) };
+        let resource_count = unsafe { resource_list_count(resource_list) } as u32;
+        for inner_index in 0..resource_count {
+            let vector_index = (inner_index as i16 as i32) as u32;
+            let resource = unsafe { ptr_vector_at(resource_list, vector_index) };
+            let inner_tag = unsafe { (resource.add(ENTRY_TAG_OFFSET) as *const u32).read_volatile() };
+            if inner_tag == CROS_RESOURCE_TAG {
+                unsafe { value_out.write(resource_indirect_value(resource)) };
+            }
+        }
+        unsafe { object_release_slot1(&mut resource_list) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use parking_lot::Mutex;
+    use std::sync::LazyLock;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut CLONE_CALLS: usize = 0;
     static mut COPY_INPUTS: [usize; 4] = [0; 4];
     static mut COPY_CALLS: usize = 0;
     static mut RELEASE_CALLS: usize = 0;
+    static INDIRECT_VALUE_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::TAGGED_RESOURCE_VALUE, 0x1000).map(|pointer| pointer as usize)
+    });
 
     const PTR: usize = core::mem::size_of::<*mut u8>();
     const VECTOR_OFFSET: usize = 0x14;
@@ -217,6 +286,13 @@ mod tests {
         unused: u32,
         tag: u32,
         payload_owner: *mut *mut u8,
+    }
+
+    #[repr(C)]
+    struct IndirectValueEntry {
+        unused: u32,
+        tag: u32,
+        value_address: u32,
     }
 
     #[repr(C)]
@@ -396,6 +472,106 @@ mod tests {
 
             assert_eq!((first_out, second_out), (0xa1a2_a3a4, 0xb1b2_b3b4));
             assert_eq!((CLONE_CALLS, COPY_CALLS, RELEASE_CALLS), (1, 0, 1));
+            restore();
+        }
+    }
+
+    #[test]
+    fn resolves_last_cros_indirect_value_and_releases_list() {
+        let _guard = OPS_LOCK.lock();
+        unsafe {
+            install();
+            let Some(slab) = *INDIRECT_VALUE_FIXTURE else {
+                assert!(note_missing_u32_fixture("util/tagged_resource_payload value"));
+                restore();
+                return;
+            };
+            let slab = slab as *mut u8;
+            core::ptr::write_bytes(slab, 0, 0x1000);
+            let first_value = slab.add(0x100).cast::<u32>();
+            let second_value = slab.add(0x104).cast::<u32>();
+            first_value.write(0x1122_3344);
+            second_value.write(0x5566_7788);
+            let ignored = slab.add(0x200).cast::<IndirectValueEntry>();
+            let first_cros = slab.add(0x20c).cast::<IndirectValueEntry>();
+            let second_cros = slab.add(0x218).cast::<IndirectValueEntry>();
+            ignored.write(IndirectValueEntry {
+                unused: 0,
+                tag: 0x4449_4e4b,
+                value_address: first_value as usize as u32,
+            });
+            first_cros.write(IndirectValueEntry {
+                unused: 0,
+                tag: CROS_RESOURCE_TAG,
+                value_address: first_value as usize as u32,
+            });
+            second_cros.write(IndirectValueEntry {
+                unused: 0,
+                tag: CROS_RESOURCE_TAG,
+                value_address: second_value as usize as u32,
+            });
+            let mut inner_slots = [ignored.cast::<u8>(), first_cros.cast::<u8>(), second_cros.cast::<u8>()];
+            let inner_begin = inner_slots.as_mut_ptr().cast::<u8>();
+            let vtable = [0usize, record_release as usize];
+            let mut list = Owner::with_vector(vtable.as_ptr(), inner_begin, inner_begin.add(12));
+            let mut outer = OuterEntry {
+                unused: 0,
+                tag: 0x1020_3040,
+                clone_result: list.ptr(),
+            };
+            let mut outer_slots = [(&mut outer as *mut OuterEntry).cast::<u8>()];
+            let outer_begin = outer_slots.as_mut_ptr().cast::<u8>();
+            let mut owner = Owner::with_vector(core::ptr::null(), outer_begin, outer_begin.add(4));
+            let mut value_out = 0xa1a2_a3a4;
+
+            resolve_tagged_cros_value(
+                core::ptr::null_mut(), owner.ptr(), 1, 0x1020_3040, &mut value_out,
+            );
+
+            assert_eq!(value_out, 0x5566_7788);
+            assert_eq!((CLONE_CALLS, RELEASE_CALLS), (1, 1));
+            restore();
+        }
+    }
+
+    #[test]
+    fn missing_cros_leaves_value_untouched_after_releasing_match() {
+        let _guard = OPS_LOCK.lock();
+        unsafe {
+            install();
+            let Some(slab) = *INDIRECT_VALUE_FIXTURE else {
+                assert!(note_missing_u32_fixture("util/tagged_resource_payload value"));
+                restore();
+                return;
+            };
+            let slab = slab as *mut u8;
+            core::ptr::write_bytes(slab, 0, 0x1000);
+            let ignored = slab.add(0x200).cast::<IndirectValueEntry>();
+            ignored.write(IndirectValueEntry {
+                unused: 0,
+                tag: 0x4449_4e4b,
+                value_address: 0,
+            });
+            let mut inner_slots = [ignored.cast::<u8>()];
+            let inner_begin = inner_slots.as_mut_ptr().cast::<u8>();
+            let vtable = [0usize, record_release as usize];
+            let mut list = Owner::with_vector(vtable.as_ptr(), inner_begin, inner_begin.add(4));
+            let mut outer = OuterEntry {
+                unused: 0,
+                tag: 0x1020_3040,
+                clone_result: list.ptr(),
+            };
+            let mut outer_slots = [(&mut outer as *mut OuterEntry).cast::<u8>()];
+            let outer_begin = outer_slots.as_mut_ptr().cast::<u8>();
+            let mut owner = Owner::with_vector(core::ptr::null(), outer_begin, outer_begin.add(4));
+            let mut value_out = 0xa1a2_a3a4;
+
+            resolve_tagged_cros_value(
+                core::ptr::null_mut(), owner.ptr(), 1, 0x1020_3040, &mut value_out,
+            );
+
+            assert_eq!(value_out, 0xa1a2_a3a4);
+            assert_eq!((CLONE_CALLS, RELEASE_CALLS), (1, 1));
             restore();
         }
     }

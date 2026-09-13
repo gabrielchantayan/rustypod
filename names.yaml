@@ -43197,6 +43197,47 @@ functions:
       pop / tail-branch shape; the diff is the ops-table indirection and
       the crate's fp frame.
 
+  - address: 0x081e011c
+    ghidra: FUN_081e011c
+    name: resolve_tagged_cros_value
+    size: 156
+    sig: "void resolve_tagged_cros_value(void *context, const u8 *entries, u32 entry_count, u32 resource_tag, u32 *value_out)"
+    module: util/tagged_resource_payload
+    renames:
+      param_1/r0: context
+      param_2/r1/r11: entries
+      param_3/r2/r9: entry_count
+      param_4/r3/r10: resource_tag
+      param_5/stack/r8: value_out
+      uVar5/r5: outer_index
+      iVar1/r0: entry_or_resource
+      local_28/sp: resource_list
+      uVar2/r6: resource_count
+      uVar4/r4: inner_index
+      DAT_081e01b8: CROS_RESOURCE_TAG
+      FUN_08184f98: ptr_vector_at
+      FUN_08184ed0: resource_list_clone_factory
+      FUN_08184f84: ptr_vector_count
+      FUN_083e7448: object_release_slot1
+    notes: >-
+      Raw ARM establishes the true 156-byte extent 0x081e011c..0x081e01b8:
+      the 152-byte instruction body is followed by the literal
+      0x534f5243 at 0x081e01b8, and the separately linked sibling
+      FUN_081e01bc begins at 0x081e01bc. Decoding every ARM B/BL word in
+      osos.dec finds six inbound calls, all unconditional bl at 0x081e0a08,
+      0x081e0a24, 0x081e0a40, 0x081e0a70, 0x081e0a8c, and 0x081e0aa8; no
+      predicated direct call reaches it. Its body makes five unconditional bl
+      calls: two each to ptr_vector_at and one each to
+      resource_list_clone_factory, ptr_vector_count, and object_release_slot1.
+      It scans its explicit outer pointer-vector range for resource_tag at
+      entry+4. Every match constructs and scans a temporary list for CROS at
+      entry+4, then stores the u32 indirectly referenced by entry+8 to
+      value_out. Later CROS matches overwrite prior values; no matching outer
+      or inner entry leaves value_out untouched. Both indices are
+      sign-extended from 16 bits; the inner signed count is compared unsigned.
+      resource_list_clone_factory remains an ARM literal veneer, while
+      host-only clone/count seams reproduce the target-width vector contract
+      in tests.
   - address: 0x081e01bc
     ghidra: FUN_081e01bc
     name: resolve_tagged_cros_payload
