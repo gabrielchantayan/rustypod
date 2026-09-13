@@ -4499,6 +4499,31 @@ functions:
       this is the deliberate indirect-dispatch deviation from the direct
       binary call.
 
+  - address: 0x0826f844
+    ghidra: FUN_0826f844
+    name: shared_reference_owner_destroy
+    size: 24
+    sig: "SharedReferenceOwner *shared_reference_owner_destroy(SharedReferenceOwner *owner)"
+    module: cxx/shared_reference_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0x10: shared_reference
+      FUN_0839d550: shared_reference_release
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x0826f844..0x0826f85c:
+      push {r4,lr}; preserve owner; add r0,#0x10; bl 0x0839d550; restore
+      owner; pop {r4,pc}. The separately linked next function starts at
+      0x0826f85c, with no literal pool. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly six inbound direct calls, all unconditional plain
+      bl at 0x0816306c, 0x08163080, 0x08163094, 0x081630a8, 0x081630bc, and
+      0x081630d0; there are no predicated forms. This is a C++ destructor
+      whose concrete owner type is unrecovered: it releases only the embedded
+      shared-reference word at +0x10 and returns owner. The release helper
+      0x0839d550 is not ported, so the Rust target boundary calls that resident
+      address directly; host tests use a volatile recorder solely to prove the
+      passed field address, write effect, and preserved owner return.
+
   - address: 0x082141bc
     ghidra: FUN_082141bc
     name: pool_base_construct
