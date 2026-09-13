@@ -154,6 +154,68 @@ pub unsafe extern "C" fn surface_new(
     unsafe { ctor(block, format, width, stride, height, flags, plane0, plane1, plane2, plane3) }
 }
 
+/// A rectangle consumed by the unported surface rasterizer
+/// `FUN_0810674c`. The original passes this four-word record as
+/// `{x_min, x_max, y_min, y_max}`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SurfaceRectangle {
+    pub x_min: u32,
+    pub x_max: u32,
+    pub y_min: u32,
+    pub y_max: u32,
+}
+
+/// The unported rectangle rasterizer at 0x0810674c. It takes the
+/// surface, pixel-color record, and inclusive rectangle.
+pub type SurfaceFillRect = unsafe extern "C" fn(*mut u8, *const u8, *const SurfaceRectangle);
+
+/// Default until `FUN_0810674c` is ported. It intentionally preserves
+/// memory, so [`surface_fill`] is not hook-ready by itself.
+unsafe extern "C" fn unported_surface_fill_rect(
+    _surface: *mut u8,
+    _color: *const u8,
+    _rect: *const SurfaceRectangle,
+) {
+}
+
+/// Active implementation of the direct `bl 0x0810674c`. Host tests
+/// replace this slot; a future rasterizer port replaces the default.
+pub static mut SURFACE_FILL_RECT: SurfaceFillRect = unported_surface_fill_rect;
+
+/// surface_fill — original: `FUN_0810671c` @ 0x0810671c (48 bytes; 7
+/// `bl` call sites, decoded over every ARM `bl` word in osos.dec).
+///
+/// Constructs the inclusive full-surface rectangle
+/// `{0, *(surface + 0x10) - 1, 0, *(surface + 0x0c) - 1}` on its stack,
+/// invokes the rectangle rasterizer at 0x0810674c with that rectangle
+/// and `color`, then returns the original surface pointer in r0. The
+/// callee itself validates its two maxima against those same fields; a
+/// zero extent intentionally wraps to `u32::MAX` before that validation.
+///
+/// The Ghidra extent is exact: 0x0810674c immediately opens the next
+/// function. Callers make one plain call (0x080cd184) and six `blne`
+/// calls (0x080cd19c, 0x081202f8, 0x08120308, 0x08120318, 0x08120330,
+/// 0x08120340), so the wrapper has no NULL guard and callers gate
+/// optional surfaces themselves.
+///
+/// Deliberate deviation: the direct rasterizer call uses
+/// [`SURFACE_FILL_RECT`] until that 560-byte callee is ported. Its
+/// default is a documented no-op, so this function is not hook-ready.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn surface_fill(surface: *mut u8, color: *const u8) -> *mut u8 {
+    let rect = SurfaceRectangle {
+        x_min: 0,
+        x_max: (surface.add(0x10) as *const u32).read_volatile().wrapping_sub(1),
+        y_min: 0,
+        y_max: (surface.add(0x0c) as *const u32).read_volatile().wrapping_sub(1),
+    };
+    let fill_rect = ptr::read_volatile(ptr::addr_of!(SURFACE_FILL_RECT));
+    fill_rect(surface, color, &rect);
+    surface
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -167,6 +229,48 @@ mod tests {
     /// Serializes every test that swaps the globals below (the
     /// cxx/settings.rs SETTINGS_LOCK pattern).
     static SURFACE_NEW_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serializes tests that replace [`SURFACE_FILL_RECT`].
+    static SURFACE_FILL_LOCK: Mutex<()> = Mutex::new(());
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct SurfaceFillCall {
+        surface: usize,
+        color: usize,
+        rect: SurfaceRectangle,
+    }
+
+    static mut SURFACE_FILL_CALLS: Vec<SurfaceFillCall> = Vec::new();
+
+    unsafe extern "C" fn recording_surface_fill_rect(
+        surface: *mut u8,
+        color: *const u8,
+        rect: *const SurfaceRectangle,
+    ) {
+        (*ptr::addr_of_mut!(SURFACE_FILL_CALLS)).push(SurfaceFillCall {
+            surface: surface as usize,
+            color: color as usize,
+            rect: ptr::read_volatile(rect),
+        });
+    }
+
+    fn mock_surface_fill() -> MutexGuard<'static, ()> {
+        let guard = SURFACE_FILL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            SURFACE_FILL_RECT = recording_surface_fill_rect;
+            (*ptr::addr_of_mut!(SURFACE_FILL_CALLS)).clear();
+        }
+        guard
+    }
+
+    fn restore_surface_fill(guard: MutexGuard<'static, ()>) {
+        unsafe { SURFACE_FILL_RECT = unported_surface_fill_rect };
+        drop(guard);
+    }
+
+    fn set_word(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
 
     /// The block the stub allocator hands out.
     static mut ARENA: [u8; SURFACE_SIZE] = [0xa5; SURFACE_SIZE];
@@ -322,5 +426,58 @@ mod tests {
             ARENA = [0xa5; SURFACE_SIZE];
         }
         drop(guard);
+    }
+
+    #[test]
+    fn fills_the_inclusive_surface_bounds_and_returns_surface() {
+        let guard = mock_surface_fill();
+        let mut surface = [0u8; 0x18];
+        set_word(&mut surface, 0x10, 320);
+        set_word(&mut surface, 0x0c, 240);
+        let color = [0x12, 0x34, 0x56, 0x78];
+        let surface_ptr = surface.as_mut_ptr();
+
+        unsafe {
+            assert_eq!(surface_fill(surface_ptr, color.as_ptr()), surface_ptr);
+            assert_eq!(
+                *ptr::addr_of!(SURFACE_FILL_CALLS),
+                std::vec![SurfaceFillCall {
+                    surface: surface_ptr as usize,
+                    color: color.as_ptr() as usize,
+                    rect: SurfaceRectangle {
+                        x_min: 0,
+                        x_max: 319,
+                        y_min: 0,
+                        y_max: 239,
+                    },
+                }],
+                "the wrapper forwards the full inclusive rectangle"
+            );
+        }
+        restore_surface_fill(guard);
+    }
+
+    #[test]
+    fn zero_extent_wraps_before_the_rasterizer_validates_it() {
+        let guard = mock_surface_fill();
+        let mut surface = [0u8; 0x18];
+        set_word(&mut surface, 0x10, 0);
+        set_word(&mut surface, 0x0c, 1);
+        let color = [0u8; 4];
+
+        unsafe {
+            surface_fill(surface.as_mut_ptr(), color.as_ptr());
+            assert_eq!(
+                (&*ptr::addr_of!(SURFACE_FILL_CALLS))[0].rect,
+                SurfaceRectangle {
+                    x_min: 0,
+                    x_max: u32::MAX,
+                    y_min: 0,
+                    y_max: 0,
+                },
+                "the two raw `sub #1` instructions do not guard zero"
+            );
+        }
+        restore_surface_fill(guard);
     }
 }
