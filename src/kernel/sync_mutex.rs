@@ -288,6 +288,40 @@ pub unsafe extern "C" fn mutex_delete(mutex: *mut Mutex) {
     (*mutex).sem_cell = core::ptr::null_mut();
 }
 
+/// A heap-owned object whose only identified members are two mutexes.
+///
+/// On the 32-bit target `secondary` starts at +0x2c: the 8-byte primary
+/// mutex followed by nine opaque words. Named fields deliberately express
+/// that layout without assuming host pointers are four bytes wide.
+#[repr(C)]
+pub struct DualMutexOwner {
+    pub primary: Mutex,
+    pub opaque: [u32; 9],
+    pub secondary: Mutex,
+}
+
+/// dual_mutex_owner_delete — original: `FUN_08093ca0` @ 0x08093ca0 (28
+/// bytes; 7 `bl` call sites: four plain `bl` and three `blne`, binary-scanned).
+///
+/// Runs the separate member-destructor at 0x080a6bd0, which deletes the
+/// primary mutex and the mutex at +0x2c, then tail-branches into
+/// `free_wrapper(this, 10)` @ 0x080e7970. There is no NULL guard: the three
+/// predicated callers provide one, while the four unconditional callers
+/// supply a live owner. The entry appears in no aligned image data word, so
+/// it is not a virtual dispatch target.
+///
+/// Deliberate deviation: inlines the unported 0x080a6bd0 member destructor
+/// as calls to the already ported [`mutex_delete`], and represents the
+/// firmware tail branch as a normal call to the already ported
+/// [`crate::heap::veneers::free_wrapper`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dual_mutex_owner_delete(owner: *mut DualMutexOwner) {
+    mutex_delete(core::ptr::addr_of_mut!((*owner).primary));
+    mutex_delete(core::ptr::addr_of_mut!((*owner).secondary));
+    crate::heap::veneers::free_wrapper(owner.cast(), 10);
+}
+
 /// Cell-destroy thunk @ 0x805646c, inlined: deletes the ROM semaphore,
 /// zeroes *cell, and frees the cell unless it is the shared static
 /// early-boot cell.
@@ -605,6 +639,7 @@ mod tests {
         sema_wait: mock_sema_wait,
         sema_signal: mock_sema_signal,
         sema_delete: mock_sema_delete,
+
         heap_early_flag: mock_early_flag,
         heap_alloc: mock_alloc,
         heap_free: mock_free,
@@ -638,6 +673,19 @@ mod tests {
             *core::ptr::addr_of_mut!(ROM_KERNEL) = MOCK_KERNEL;
         }
         guard
+    }
+
+    struct HeapOpsReset;
+
+    impl Drop for HeapOpsReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                    .write(crate::heap::veneers::DEFAULT_HEAP_OPS);
+                core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                    .write(core::ptr::null_mut());
+            }
+        }
     }
 
     #[test]
@@ -812,6 +860,70 @@ mod tests {
         );
         assert_eq!(unsafe { *cell }, 0, "cell is zeroed after delete");
         assert!(m.sem_cell.is_null(), "mutex cell pointer is NULLed");
+    }
+
+    #[test]
+    fn dual_mutex_owner_delete_releases_members_then_owner() {
+        let _kernel_guard = mock_kernel();
+        let _heap_guard = crate::heap::veneers::tests::mock_heap();
+        let _heap_ops_reset = HeapOpsReset;
+        let mut primary_cell = 0x31;
+        let mut secondary_cell = 0x47;
+        let mut owner = DualMutexOwner {
+            primary: Mutex {
+                sem_cell: &mut primary_cell,
+                unused: 0x1111_1111,
+            },
+            opaque: [0xfeed_face; 9],
+            secondary: Mutex {
+                sem_cell: &mut secondary_cell,
+                unused: 0x2222_2222,
+            },
+        };
+        let owner_ptr = core::ptr::addr_of_mut!(owner).cast::<u8>();
+
+        unsafe { dual_mutex_owner_delete(core::ptr::addr_of_mut!(owner)) };
+
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Delete(1, core::ptr::addr_of_mut!(primary_cell) as usize),
+                Call::Free(core::ptr::addr_of_mut!(primary_cell) as usize),
+                Call::Delete(1, core::ptr::addr_of_mut!(secondary_cell) as usize),
+                Call::Free(core::ptr::addr_of_mut!(secondary_cell) as usize),
+            ],
+            "the primary mutex is deleted before the +0x2c secondary mutex"
+        );
+        assert_eq!(primary_cell, 0);
+        assert_eq!(secondary_cell, 0);
+        assert!(owner.primary.sem_cell.is_null());
+        assert!(owner.secondary.sem_cell.is_null());
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (1, owner_ptr, 10),
+            "the owner reaches the final free wrapper with tag 10"
+        );
+
+        let mut empty_owner = DualMutexOwner {
+            primary: Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            },
+            opaque: [0; 9],
+            secondary: Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            },
+        };
+        let empty_owner_ptr = core::ptr::addr_of_mut!(empty_owner).cast::<u8>();
+        CALLS.lock().unwrap().clear();
+        unsafe { dual_mutex_owner_delete(core::ptr::addr_of_mut!(empty_owner)) };
+        assert_eq!(calls(), vec![], "empty member mutexes skip kernel cleanup");
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (2, empty_owner_ptr, 10),
+            "the final free is unconditional even when both mutexes are empty"
+        );
     }
 
     #[test]
