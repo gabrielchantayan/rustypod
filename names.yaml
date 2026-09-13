@@ -77210,6 +77210,38 @@ functions:
       nonzero index selection, record dereference, overflow shift arithmetic,
       and no table write.
 
+  # --- Embedded eight-byte vector size ---
+  - address: 0x0829c028
+    ghidra: FUN_0829c028
+    name: embedded_vector_size_elem8
+    size: 8
+    sig: "i32 embedded_vector_size_elem8(const EmbeddedVectorSizeElem8 *owner)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x0c": vector
+      FUN_083d76a4: vector_size_elem8
+    notes: >-
+      Raw osos.dec confirms the 8-byte extent exactly: `add r0,r0,#0xc; b
+      0x083d76a4` at 0x0829c028..0x0829c02c, followed by separately linked
+      code at 0x0829c030. It selects the owner’s embedded vector head at
+      +0x0c, then tail-branches to the already ported vector_size_elem8
+      implementation, yielding arithmetic `(end - begin) >> 3` with no
+      NULL, bounds, or alignment checks. Complete aligned ARM
+      B/BL-immediate decoding found exactly six direct inbound calls, all
+      unconditional plain bl at 0x08131ea4, 0x08131ebc, 0x08132084,
+      0x08132094, 0x081320e0, and 0x081321b8; there are no predicated calls.
+      The sole outbound branch is the tail transfer to the ported
+      FUN_083d76a4/vector_size_elem8 target, so no callee dispatch seam was
+      added. Rust represents the owner with repr(C) fields rather than a
+      literal host byte offset, which keeps the target’s 32-bit layout and
+      64-bit host pointer fields distinct; LLVM adds a frame prologue and
+      epilogue around its tail transfer, preserving the vector selection and
+      return value. Host tests cover
+      empty, whole, partial, and reversed spans and verify the prefix stays
+      unchanged.
+
   # --- Opaque object sentinel-word accessor ---
   - address: 0x082980dc
     ghidra: FUN_082980dc
