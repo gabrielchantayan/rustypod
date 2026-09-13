@@ -42937,6 +42937,39 @@ functions:
       successor, destruction ordering, and header bookkeeping. match.py:
       original 56 instructions vs Rust 55; same initial header sret,
       full-range predicate/destruction/reset, and advance-then-erase loop.
+  - address: 0x082a7fd8
+    ghidra: FUN_082a7fd8
+    name: event_list_tree_destruct
+    size: 136
+    sig: "void *event_list_tree_destruct(void *tree)"
+    module: app/event_list
+    status: ported
+    renames:
+      param_1/r0/r5: tree
+      r4: chunk
+      local_18: header
+      local_14: begin
+      param_2/param_3/param_4: >-
+        not arguments - Ghidra invents them from the
+        "push {r1,r2,r3,r4,r5,lr}" prologue, whose scratch words hold the
+        erase result and iterators. The function takes only tree.
+    notes: >-
+      Raw ARM confirms the Ghidra size exactly: 34 instructions from
+      0x082a7fd8 through 0x082a805c, with the next allocator-family sibling
+      at 0x082a8060. Decoding every ARM B/BL word in osos.dec finds six
+      direct, unconditional bl callers (0x08134f20, 0x081cdcb4, 0x081e0360,
+      0x081e03fc, 0x081e0498, 0x081e0c58), no predicated BL forms, and no
+      tail b callers. This is the non-deleting libstdc++ RB-tree destructor:
+      when tree+0x10 supplies a header, erase [header->left, header) through
+      the ported event_list_tree_erase_range @ 0x083c1c3c; re-read the header
+      and recycle its valueless sentinel through unported 0x083c1648; then
+      walk tree+0x00's 12-byte chunk records, unlinking each before releasing
+      its +0x08 block with capacity +0x04 and then the record itself through
+      cxx_array_dealloc. A null header skips every teardown stage. It returns
+      tree. The ARM build calls 0x083c1648 directly; the host test model
+      exposes that unported boundary through EVENT_LIST_OPS. The redundant
+      second pre-erase header read is compacted to one read, with no
+      intervening mutation.
 
   - address: 0x083c2130
     ghidra: FUN_083c2130
