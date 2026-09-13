@@ -8669,6 +8669,43 @@ functions:
       PLST_ELEMENT_TEARDOWN_OPS seam (stock address on target, recorder
       seam on host).
 
+  - address: 0x080df1b8
+    ghidra: FUN_080df1b8
+    name: materialize_plst_slot
+    size: 212
+    sig: "u32 materialize_plst_slot(u8 *element, u32 selector)"
+    module: ui/plst_slot_materialize
+    status: ported
+    renames:
+      param_1/r0/r6: element
+      param_2/r1/r7: selector
+      iVar3/r4: slot
+      iVar4/r8: slot_table_entry
+      FUN_080d8cac: allocate_slot_record_inlined
+      FUN_0806b604: resource_callback_dispatch
+      FUN_0805d070: free_tag4
+      FUN_080da6a0: clone_slot_source_inlined
+      FUN_0809ef6c: populate_slot_unported
+    notes: >-
+      Raw osos.dec decoding confirms 212 instruction bytes at
+      0x080df1b8..0x080df28c followed by the callback literal 0x080d9250;
+      0x080df290 starts the distinct next function, so the complete
+      code/literal extent is 216 bytes. Decoding every ARM B/BL word finds
+      exactly 7 inbound calls: 7 plain bl, no predicated bl, and no tail
+      branches. Selectors >=49 return -50 before touching element. A cached
+      +0x3ac selector word returns success. Selector 1 allocates a 20-byte
+      record with count from element->header(+0x40)+0x2e, dispatches
+      callback 0x080d9250 through resource_callback_dispatch, and retains
+      the record only if record+0x0c equals record+0x04; failures release it.
+      Other selectors recurse through slot 1, clone the element+0x3b0 source
+      buffer, call unported 0x0809ef6c, then cache the clone. The two small
+      allocation helpers are inlined from their verified bodies; target
+      builds use existing malloc_tag4/free_tag4 and resource_callback_dispatch.
+      The unported population routine remains behind PLST_SLOT_MATERIALIZE_OPS;
+      its target seam calls the known real entry 0x0809ef6c, never an
+      invented identity. The clone uses a volatile byte copy rather than the
+      stock generic-copy dispatch to prevent LLVM from substituting libc memcpy.
+
   - address: 0x08052728
     ghidra: FUN_08052728
     name: ui_plst_slot_item_at
@@ -8694,13 +8731,13 @@ functions:
       +0xc8; may force the flag to 0). A nonzero flag byte
       reverse-indexes: count-index-1. Slot = element word at
       +0x3ac+selector*4 (49 slots); NULL slots are lazily materialized
-      via unported 0x80df1b8 (return value discarded, like the
-      original), and a still-NULL slot returns 0. Result is the word
-      at slot+0x10+index*4, verbatim (callers such as 0x080aa498 use
-      it as a sub-element pointer). Ghidra's 172-byte extent is exact
-      (sibling prologue at 0x080527d4). Both unported callees sit
-      behind the PLST_SLOT_ITEM_OPS seam (stock addresses on target,
-      identity/never-materialize defaults on host). The port narrows
+      via materialize_plst_slot (0x080df1b8, now ported; return value
+      discarded, like the original), and a still-NULL slot returns 0.
+      Result is the word at slot+0x10+index*4, verbatim (callers such as
+      0x080aa498 use it as a sub-element pointer). Ghidra's 172-byte extent
+      is exact (sibling prologue at 0x080527d4). The stock normalizer remains
+      behind PLST_SLOT_ITEM_OPS; its materializer default now reaches the
+      Rust port. The port narrows
       the flag word to its low byte before the normalize call:
       bit-identical because the original only ever strb/ldrb that
       slot. match.py structural: LLVM fp frame, ldrd of the ops pair,
@@ -68013,7 +68050,7 @@ functions:
       param_2/r1: selector
       param_3/r2: reverse_flag
       FUN_080b48dc: normalize_selector_unported
-      FUN_080df1b8: materialize_slot_unported
+      FUN_080df1b8: materialize_plst_slot (ported, ui/plst_slot_materialize)
       FUN_080ca00c: build_position_map_unported
       FUN_080daad4: slot_index_of_unported
     notes: >-
@@ -68039,11 +68076,10 @@ functions:
       searched via 0x80daad4 (binary search + linear fallback, -1 on
       miss, reverse-adjusts a hit to count-index-1 when the flag byte is
       nonzero) with the handle ITSELF as key. All failure paths return
-      -1 (0xffffffff). All four callees are unported and sit behind the
-      PLST_SLOT_POSITION_OPS seam (stock addresses on target; host
-      defaults identity-normalize / never-materialize / panic-on-reach);
-      the normalize/materialize fn-pointer types are reused from
-      ui/plst_slot_item. The handle's pointer fields are read as u32
+      -1 (0xffffffff). The normalizer, map builder, and index helper remain
+      unported behind PLST_SLOT_POSITION_OPS; its materializer default now
+      reaches the Rust port. The normalize/materialize fn-pointer types are
+      reused from ui/plst_slot_item. The handle's pointer fields are read as u32
       target words and widened (native-width reads faulted the first
       host-test run). Host fixture hint PLST_SLOT_POSITION 0xd3000000,
       far clear of the sequential run. match.py structural: LLVM fp

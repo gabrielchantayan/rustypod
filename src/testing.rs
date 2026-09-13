@@ -135,6 +135,9 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_ITEM: usize = 0x4100_0000;
+    // 0x5e00_0000: dedicated to ui/plst_slot_materialize's raw-u32 element,
+    // header, slot-record, and source-buffer fixture; mappings never unmap.
+    pub const PLST_SLOT_MATERIALIZE: usize = 0x5e00_0000;
     // 0x4600_0000, skipping 0x4200_0000..0x4500_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
