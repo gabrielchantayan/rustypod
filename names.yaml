@@ -21200,6 +21200,44 @@ functions:
       match.py structural: NULL/empty branch, inclusive-size request,
       NULL-result return, source copy, and +0xc fallback are retained.
 
+  - address: 0x082764d8
+    ghidra: FUN_082764d8
+    name: string_object_assign_utf8_capped
+    size: 116
+    sig: "void string_object_assign_utf8_capped(StringObject *this, const char *text, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r6: text
+      param_3/r2/r1: max_codepoints
+      iVar4/r0/r5: requested_size
+      iVar5/r0/r4: destination
+    notes: >-
+      Raw osos.dec decodes from 0x082764d8 through 0x08276548, with
+      string_object_assign_utf16_cstr beginning at 0x0827654c: exactly
+      116 bytes, all code. Decoding every ARM B/BL word finds 6 direct
+      call sites, all unconditional bl and zero predicated:
+      0x08079f48, 0x08116074, 0x0817a694, 0x082773a4, 0x082a2884, and
+      0x082a5360. NULL text or max_codepoints <= 0 dispatches the
+      StringObject vtable +0xc clear method. Otherwise the bounded
+      private helper @ 0x08275e44 walks at most max_codepoints decoded
+      sequences, adds their utf8_codepoint_byte_width values plus one
+      NUL, and the function requests that exact size through vtable +0x8
+      as (this, requested_size, 0). A NULL allocation result returns;
+      success copies only requested_size - 1 leading RAW bytes through
+      __rt_memcpy @ 0x08037db0, then stores NUL. In particular, the
+      decoder's four-byte/malformed-lead result is zero after consuming
+      three bytes but is sized as width(0) == 1, so this assignment
+      retains only that lead byte before its NUL. The Rust port inlines
+      that private helper with the already ported decoder and width
+      classifier, calls the existing STRING_OBJECT_ASSIGN_CSTR_OPS
+      boundary for the ROM +0x8/+0xc virtual identities, and calls the
+      ported __rt_memcpy directly. Host tests cover NULL/nonpositive
+      clear dispatch, empty-source allocation, multibyte caps, allocation
+      failure, and the malformed-width quirk. match.py structural review
+      is expected to differ in frame layout and helper inlining.
+
   - address: 0x08275d00
     ghidra: FUN_08275d00
     name: utf8_strcpy_bounded
@@ -21970,39 +22008,27 @@ functions:
       the index must address an existing codepoint, not the terminator.
       Otherwise it resolves the codepoint's byte pointer
       (string_object_codepoint_ptr @ 0x082a50c4 - never NULL here, the
-      count guard precedes it) and tail-branches (pop + b) to the
+      count guard precedes it) and tail-branches (pop + b) to the ported
       capped UTF-8 assignment @ 0x082764d8 with (out, start,
-      max_codepoints). That tail (FUN_082764d8, 116 bytes, NOT ported):
-      NULL/max<=0-guards into vtable slot +0xc clear, else counts bytes
-      with the capped UTF-8 length helper @ 0x08275e44 (first
-      max_codepoints codepoints + 1 for the NUL), allocates through
-      vtable slot +0x8, memcpys @ 0x08037db0 and NUL-terminates - i.e.
-      out receives at most max_codepoints codepoints starting at
-      start_index, and max_codepoints <= 0 clears out. The early
-      returns fire AFTER construction: out always leaves with the class
-      vtable planted and a NULL payload. Ghidra's C for this function
-      is garbage (an UNRECOVERED_JUMPTABLE parameter and phantom
-      virtual dispatch from the unrelated jumptable at 0x082764fc
-      inside the tail callee); the raw ARM is unambiguous. Deviation:
-      the tail runs through the STRING_OBJECT_ASSIGN_UTF8_CAPPED
-      dispatch slot (the STRING_OBJECT_COPY_CONSTRUCT pattern) whose
-      default stub is a no-op - unlike string_object_assign_stub there
-      is no argument-only prefix worth reproducing, since even the
-      original's guard path dispatches the unportable +0xc virtual
-      clear; the real port of 0x082764d8 replaces the stub when it
-      lands. Minor codegen note: LLVM hoists the negative-index check
-      above the payload-NULL check (both are early pops on disjoint
-      conditions; the original reads [source+4] first, so a faulting
-      source with a negative index faults in the original and returns
-      quietly in the port). match.py structural: 22 original vs 27 Rust
-      instructions; same ctor-first guard set, unsigned count compare
-      and tail dispatch, the `b 0x082764d8` becoming a `bx` through the
-      ops slot. Host tests: construction precedes every guard exit
-      (NULL payload, negative index, index >= count incl. i32::MAX),
-      the happy path dispatches (out, payload+byte_offset,
-      max_codepoints) for each codepoint of a multibyte payload with
-      max_codepoints pass-through at -5/0/1/i32::MAX, and the wired
-      default stub leaves the fresh object untouched.
+      max_codepoints). The tail NULL/max<=0-guards into vtable slot +0xc
+      clear, else counts the first max_codepoints decoded widths plus a
+      NUL, allocates through vtable slot +0x8, memcpys @ 0x08037db0,
+      and NUL-terminates — out receives at most max_codepoints
+      codepoints starting at start_index. The early returns fire AFTER
+      construction: out always leaves with the class vtable planted and
+      a NULL payload. Ghidra's C for this function is garbage (an
+      UNRECOVERED_JUMPTABLE parameter and phantom virtual dispatch from
+      the unrelated jumptable at 0x082764fc inside the tail callee);
+      the raw ARM is unambiguous. No dispatch seam: the tail now calls
+      string_object_assign_utf8_capped directly through its existing
+      virtual-method boundary. Minor codegen note: LLVM hoists the
+      negative-index check above the payload-NULL check (both are early
+      pops on disjoint conditions; the original reads [source+4] first,
+      so a faulting source with a negative index faults in the original
+      and returns quietly in the port). match.py structural: same
+      ctor-first guard set, unsigned count compare and direct tail call.
+      Host tests cover construction before negative/past-end exits and
+      positive multibyte extraction through the ported tail.
 
   - address: 0x082a5170
     ghidra: FUN_082a5170
@@ -22095,13 +22121,13 @@ functions:
       ignored; malformed/four-byte leads count and may consume the string NUL
       before the next loop-header load. Nonpositive requests produce a zero
       selected_count and thus pass the terminator cursor plus zero, not the
-      original negative count. Deliberate deviation: 0x082764d8 remains
-      unported because its vtable +0x8/+0xc targets are ROM identities, so
-      the existing volatile STRING_OBJECT_ASSIGN_UTF8_CAPPED seam receives
-      the exact tail arguments. Host tests cover NULL construction, multibyte
-      suffixes, clamping, nonpositive counts, and malformed lead/NUL
-      consumption. match.py structural review is expected to differ in frame
-      layout and loop lowering.
+      original negative count. The capped assignment is now ported as
+      string_object_assign_utf8_capped and uses the existing
+      STRING_OBJECT_ASSIGN_CSTR_OPS boundary for its ROM virtual slots.
+      Host tests cover multibyte suffix selection and malformed
+      lead/NUL consumption through the real capped tail. match.py
+      structural review is expected to differ in frame layout and loop
+      lowering.
   - address: 0x082a50a8
     ghidra: FUN_082a50a8
     name: string_object_utf8_strcasecmp_safe

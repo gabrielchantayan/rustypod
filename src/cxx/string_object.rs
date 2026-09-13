@@ -363,22 +363,23 @@
 //! - `string_object_insert_cstr` calls the ported insertion body directly.
 //!   Its allocation virtual method still uses STRING_OBJECT_ASSIGN_CSTR_OPS;
 //!   that boundary must be wired before the insertion path is hook-ready.
-//! - `string_object_substring` tail-branches to the capped UTF-8
-//!   assignment @ 0x082764d8, which is NOT ported (its vtable-slot
-//!   +0x8/+0xc dispatches are ROM identities and its length helper @
-//!   0x08275e44 is unported), so the chain goes through the
-//!   [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] dispatch slot (the
-//!   [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). The default stub does
-//!   nothing at all — unlike `string_object_assign_stub` there is no
-//!   argument-only prefix worth reproducing, since even the original's
-//!   NULL/`max <= 0` guard path dispatches the unportable +0xc virtual
-//!   clear. The real port of 0x082764d8 replaces the stub when it
-//!   lands.
+//! - `string_object_assign_utf8_capped` — original: `FUN_082764d8` @
+//!   0x082764d8 (116 bytes, all code; 6 direct `bl` call sites, all
+//!   unconditional, binary-scanned). The bounded UTF-8 assignment reached by
+//!   substring and suffix selection: NULL text or a nonpositive bound
+//!   dispatches virtual clear (+0xc); otherwise it allocates the byte width of
+//!   at most the requested decoded sequences plus a NUL through slot +0x8,
+//!   copies that many leading raw bytes, then writes the NUL.
+//! - `string_object_substring` and `string_object_suffix` call the ported
+//!   capped assignment directly. Its virtual calls use the existing
+//!   `STRING_OBJECT_ASSIGN_CSTR_OPS` boundary, the same modeled +0x8/+0xc
+//!   slots used by the class's other assignment members.
 
 use core::mem::MaybeUninit;
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strcpy::strcpy;
+use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::memcmp::memcmp;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
@@ -1803,41 +1804,60 @@ pub unsafe extern "C" fn string_object_codepoint_at(this: *const StringObject, i
     if cursor.is_null() { 0 } else { utf8_next_codepoint(&mut cursor) }
 }
 
-/// Default [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] stub for the unported
-/// capped-assignment tail @ 0x082764d8. The original NULL-/`max <= 0`-guards
-/// into vtable slot +0xc (clear) and otherwise counts bytes with the capped
-/// UTF-8 length helper @ 0x08275e44, allocates through vtable slot +0x8,
-/// `memcpy`s @ 0x08037db0 and NUL-terminates. The vtable is a ROM identity
-/// on host (see [`STRING_OBJECT_VTABLE`]) and the length helper is
-/// unported, so the stub does nothing at all; the real port of 0x082764d8
-/// replaces it when it lands (the [`string_object_assign_stub`] precedent).
-unsafe extern "C" fn string_object_assign_utf8_capped_stub(
-    _this: *mut StringObject,
-    _text: *const u8,
-    _max_codepoints: i32,
-) {
-}
-
-/// Indirect dispatch for the unported capped-assignment tail @ 0x082764d8
-/// (the [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). Chained to by
-/// [`string_object_substring`]. Host tests install a recording mock; the
-/// real port of 0x082764d8 replaces the default stub when it lands.
-pub static mut STRING_OBJECT_ASSIGN_UTF8_CAPPED: unsafe extern "C" fn(
+/// string_object_assign_utf8_capped — original: `FUN_082764d8` @ 0x082764d8
+/// (116 bytes, all code; the next separately linked function begins at
+/// 0x0827654c). **6 direct `bl` call sites**, all unconditional and zero
+/// predicated, verified by decoding every ARM `B`/`BL` word in `osos.dec`:
+/// 0x08079f48, 0x08116074, 0x0817a694, 0x082773a4, 0x082a2884, and
+/// 0x082a5360.
+///
+/// Assigns up to `max_codepoints` decoded UTF-8-like sequences from `text`.
+/// A NULL text pointer or nonpositive maximum dispatches vtable slot +0xc
+/// with only `this`. Otherwise the stock helper @ 0x08275e44 walks while the
+/// bound remains positive and the current raw byte is nonzero, decodes each
+/// sequence, sums `utf8_codepoint_byte_width`, and adds one byte for the NUL.
+/// This port performs that private helper's loop inline with its already
+/// ported decoder and width classifier, then invokes slot +0x8 as
+/// `(this, byte_count, 0)`. A NULL allocation result returns untouched;
+/// otherwise the ROM `__rt_memcpy` copy receives exactly `byte_count - 1`
+/// leading raw bytes and this function writes the final NUL.
+///
+/// The byte count follows decoded widths rather than the decoder-advanced
+/// cursor. A four-byte or malformed lead therefore consumes three bytes in
+/// the helper yet counts as the zero codepoint's width of one: this routine
+/// copies only the leading raw byte before its NUL, exactly as retailOS does.
+/// The only representation deviation is the existing injectable
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`] boundary for the ROM vtable identities;
+/// no behavioral deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_utf8_capped(
     this: *mut StringObject,
     text: *const u8,
     max_codepoints: i32,
-) = string_object_assign_utf8_capped_stub;
-
-/// Reads the capped-assign slot (volatile — the slot is meant to be
-/// swapped at runtime, and a plain read lets LLVM const-fold the default
-/// away; the [`release_payload_op`] rationale).
-#[inline(always)]
-pub(crate) unsafe fn assign_utf8_capped_op() -> unsafe extern "C" fn(
-    *mut StringObject,
-    *const u8,
-    i32,
 ) {
-    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_UTF8_CAPPED))
+    if text.is_null() || max_codepoints <= 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let mut cursor = text;
+    let mut remaining = max_codepoints;
+    let mut byte_count = 0usize;
+    while remaining > 0 && cursor.read() != 0 {
+        byte_count = byte_count.wrapping_add(utf8_codepoint_byte_width(
+            utf8_next_codepoint(&mut cursor),
+        ) as usize);
+        remaining -= 1;
+    }
+
+    let requested_size = byte_count.wrapping_add(1);
+    let destination = assign_cstr_allocate_op()(this, requested_size, 0);
+    if destination.is_null() {
+        return;
+    }
+    __rt_memcpy(destination, text, byte_count);
+    destination.add(byte_count).write(0);
 }
 
 /// string_object_substring — original: `FUN_082a5118` @ 0x082a5118
@@ -1866,12 +1886,10 @@ pub(crate) unsafe fn assign_utf8_capped_op() -> unsafe extern "C" fn(
 /// `bl` ahead of every guard. No NULL guard on `out` or `source` — the
 /// original faults on either, and so does the port.
 ///
-/// Deviation (see the module header): the tail @ 0x082764d8 is NOT
-/// ported (its vtable-slot +0x8/+0xc dispatches are ROM identities and
-/// its length helper @ 0x08275e44 is unported), so it runs through the
-/// [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] dispatch slot whose default
-/// stub does nothing (the [`string_object_assign_stub`] precedent); the
-/// real port of 0x082764d8 replaces the stub when it lands.
+/// The tail @ 0x082764d8 is the ported
+/// [`string_object_assign_utf8_capped`], so this calls it directly. Its
+/// modeled virtual methods use [`STRING_OBJECT_ASSIGN_CSTR_OPS`]; no other
+/// deviations.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_object_substring(
@@ -1892,7 +1910,7 @@ pub unsafe extern "C" fn string_object_substring(
         return;
     }
     let start = string_object_codepoint_ptr(source, start_index);
-    assign_utf8_capped_op()(out, start, max_codepoints);
+    string_object_assign_utf8_capped(out, start, max_codepoints);
 }
 
 /// string_object_suffix — original: `FUN_082a52e8` @ 0x082a52e8 (128
@@ -1913,13 +1931,13 @@ pub unsafe extern "C" fn string_object_substring(
 /// A nonpositive request selects zero sequences, so the tail receives the
 /// terminator cursor and zero rather than the negative argument.
 ///
-/// The capped assignment tail @ 0x082764d8 is not ported because its virtual
-/// slots remain ROM identities; this calls the pre-existing volatile
-/// [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] boundary, exactly as
-/// [`string_object_substring`] does. No other deviations. `out` and `source`
-/// must be valid writable/readable StringObjects; a non-NULL payload must be
-/// readable through every forward/reverse decoder access, including the
-/// retail decoder's malformed-sequence overreads.
+/// The capped assignment tail @ 0x082764d8 is ported as
+/// [`string_object_assign_utf8_capped`] and uses the existing
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`] model of its virtual slots. No other
+/// deviations. `out` and `source` must be valid writable/readable
+/// StringObjects; a non-NULL payload must be readable through every
+/// forward/reverse decoder access, including the retail decoder's
+/// malformed-sequence overreads.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_object_suffix(
@@ -1945,7 +1963,7 @@ pub unsafe extern "C" fn string_object_suffix(
         utf8_prev_codepoint(&mut cursor);
         selected = selected.wrapping_add(1);
     }
-    assign_utf8_capped_op()(out, cursor, selected);
+    string_object_assign_utf8_capped(out, cursor, selected);
 }
 
 /// Keeps the searcher's comparison as an out-of-line call. Without this
@@ -3712,49 +3730,6 @@ pub(crate) mod tests {
 
     // ---- string_object_substring ------------------------------------
 
-    /// Serializes the tests that swap `STRING_OBJECT_ASSIGN_UTF8_CAPPED`
-    /// (the `COPY_SLOT_LOCK` precedent; a separate slot, a separate lock).
-    static SUBSTRING_SLOT_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Capped-assign dispatches observed by the recording mock:
-    /// (out, text, max_codepoints), in call order.
-    static mut SUBSTRING_CALLS: Vec<(usize, usize, i32)> = Vec::new();
-
-    unsafe extern "C" fn recording_assign_utf8_capped(
-        this: *mut StringObject,
-        text: *const u8,
-        max_codepoints: i32,
-    ) {
-        (*core::ptr::addr_of_mut!(SUBSTRING_CALLS))
-            .push((this as usize, text as usize, max_codepoints));
-    }
-
-    /// Restores the wired default stub on drop, even when a test panics.
-    struct SubstringSlotGuard;
-    impl Drop for SubstringSlotGuard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_UTF8_CAPPED)
-                    .write_volatile(string_object_assign_utf8_capped_stub);
-            }
-        }
-    }
-
-    /// Installs the recording mock; restores the wired default on drop.
-    fn substring_bench() -> (MutexGuard<'static, ()>, SubstringSlotGuard) {
-        let lock = SUBSTRING_SLOT_LOCK.lock().unwrap();
-        unsafe {
-            (*core::ptr::addr_of_mut!(SUBSTRING_CALLS)).clear();
-            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_UTF8_CAPPED)
-                .write_volatile(recording_assign_utf8_capped);
-        }
-        (lock, SubstringSlotGuard)
-    }
-
-    fn substring_calls() -> Vec<(usize, usize, i32)> {
-        unsafe { (*core::ptr::addr_of!(SUBSTRING_CALLS)).clone() }
-    }
-
     /// A garbage-filled destination; every path must replant the vtable
     /// and NULL the payload, because the original constructs `out`
     /// before its first guard.
@@ -3766,190 +3741,158 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn substring_constructs_out_then_returns_on_a_null_source_payload() {
-        let _bench = substring_bench();
-        let mut out = substring_garbage_out();
-        let source = StringObject {
-            vtable: core::ptr::null(),
-            payload: core::ptr::null_mut(),
-        };
-        let out_ptr: *mut StringObject = &mut out;
+    fn assign_utf8_capped_clears_null_and_nonpositive_inputs_without_allocating() {
+        let mut object = substring_garbage_out();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(0x1111_1111 as *mut u8);
         unsafe {
-            string_object_substring(out_ptr, &source, 0, 8);
+            string_object_assign_utf8_capped(this, core::ptr::null(), 1);
+            string_object_assign_utf8_capped(this, b"A\0".as_ptr(), 0);
+            string_object_assign_utf8_capped(this, b"A\0".as_ptr(), -1);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            assert_eq!(
+                (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).as_slice(),
+                &[this as usize; 3],
+            );
         }
-        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-        assert!(out.payload.is_null());
-        assert!(substring_calls().is_empty());
+        assert_eq!(object.payload, 0xcafe_f00d as *mut u8);
     }
 
     #[test]
-    fn substring_constructs_out_then_returns_on_a_negative_start_index() {
-        let _bench = substring_bench();
-        let mut payload = *b"A\0";
-        let source = StringObject {
-            vtable: core::ptr::null(),
-            payload: payload.as_mut_ptr(),
-        };
-        for index in [i32::MIN, -1] {
-            let mut out = substring_garbage_out();
-            unsafe {
-                string_object_substring(&mut out, &source, index, 8);
-            }
-            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-            assert!(out.payload.is_null());
-        }
-        assert!(substring_calls().is_empty());
+    fn assign_utf8_capped_sizes_by_codepoints_then_copies_raw_bytes_and_nul() {
+        let source = *b"A\xc2\xa9\xe2\x82\xacZ\0";
+        let mut destination = [0xa5u8; 16];
+        let mut object = substring_garbage_out();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_utf8_capped(this, source.as_ptr(), 2) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(this as usize, 4, 0)],
+        );
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(&destination[..4], b"A\xc2\xa9\0");
+        assert_eq!(&destination[4..], &[0xa5; 12]);
+        assert_eq!(object.payload, 0xcafe_f00d as *mut u8);
     }
 
     #[test]
-    fn substring_constructs_out_then_returns_when_start_passes_the_last_codepoint() {
-        let _bench = substring_bench();
-        // Three codepoints: 'A', U+00A9, U+20AC. Index 3 addresses the
-        // terminator — the original's unsigned `count <= index` pop
-        // rejects it along with every larger index.
+    fn assign_utf8_capped_allocates_for_empty_text_and_preserves_malformed_width_quirk() {
+        let mut empty_destination = [0xa5u8; 4];
+        let mut empty_object = substring_garbage_out();
+        let empty_this = core::ptr::addr_of_mut!(empty_object);
+        {
+            let _bench = assign_cstr_bench(empty_destination.as_mut_ptr());
+            unsafe { string_object_assign_utf8_capped(empty_this, b"\0".as_ptr(), i32::MAX) };
+            assert_eq!(
+                unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+                &[(empty_this as usize, 1, 0)],
+            );
+            assert_eq!(empty_destination, [0, 0xa5, 0xa5, 0xa5]);
+        }
+
+        // The decoder consumes F0 9F 98 and returns zero, but the private
+        // sizing helper charges its zero-codepoint width of one. The raw copy
+        // consequently retains only F0 before the explicit terminator.
+        let malformed = [0xf0u8, 0x9f, 0x98, b'Z', 0];
+        let mut malformed_destination = [0xa5u8; 4];
+        let mut malformed_object = substring_garbage_out();
+        let malformed_this = core::ptr::addr_of_mut!(malformed_object);
+        let _bench = assign_cstr_bench(malformed_destination.as_mut_ptr());
+        unsafe { string_object_assign_utf8_capped(malformed_this, malformed.as_ptr(), 1) };
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(malformed_this as usize, 2, 0)],
+        );
+        assert_eq!(malformed_destination, [0xf0, 0, 0xa5, 0xa5]);
+    }
+
+    #[test]
+    fn assign_utf8_capped_allocation_failure_skips_copy_and_clear() {
+        let mut object = substring_garbage_out();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe { string_object_assign_utf8_capped(this, b"A\0".as_ptr(), 1) };
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(this as usize, 2, 0)],
+        );
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(object.payload, 0xcafe_f00d as *mut u8);
+    }
+
+    #[test]
+    fn substring_constructs_before_guards_then_assigns_from_the_resolved_codepoint() {
         let mut payload = *b"A\xc2\xa9\xe2\x82\xac\0";
         let source = StringObject {
             vtable: core::ptr::null(),
             payload: payload.as_mut_ptr(),
         };
-        for index in [3, 4, i32::MAX] {
-            let mut out = substring_garbage_out();
-            unsafe {
-                string_object_substring(&mut out, &source, index, 8);
-            }
-            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-            assert!(out.payload.is_null());
-        }
-        assert!(substring_calls().is_empty());
-    }
-
-    #[test]
-    fn substring_dispatches_the_tail_with_the_resolved_codepoint_pointer() {
-        let _bench = substring_bench();
-        let mut payload = *b"A\xc2\xa9\xe2\x82\xac\0";
-        let source = StringObject {
-            vtable: core::ptr::null(),
-            payload: payload.as_mut_ptr(),
-        };
-        // Index 2 resolves to byte offset 3 (U+20AC). The max_codepoints
-        // guard lives inside the unported tail, so zero and negative
-        // caps still dispatch.
-        let mut expected = Vec::new();
-        for (index, offset) in [(0, 0), (1, 1), (2, 3)] {
-            for max_codepoints in [-5, 0, 1, i32::MAX] {
-                let mut out = substring_garbage_out();
-                let out_ptr: *mut StringObject = &mut out;
-                unsafe {
-                    string_object_substring(out_ptr, &source, index, max_codepoints);
-                }
-                assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-                assert!(out.payload.is_null());
-                expected.push((
-                    out_ptr as usize,
-                    unsafe { payload.as_ptr().add(offset) } as usize,
-                    max_codepoints,
-                ));
-            }
-        }
-        assert_eq!(substring_calls(), expected);
-    }
-
-    #[test]
-    fn substring_default_stub_leaves_the_fresh_object_untouched() {
-        // No mock: the wired default is the no-op stub, so a reachable
-        // tail constructs `out` and nothing more. Takes the lock so no
-        // sibling's swapped slot leaks in.
-        let _lock = SUBSTRING_SLOT_LOCK.lock().unwrap();
-        let mut payload = *b"A\xc2\xa9\0";
-        let source = StringObject {
-            vtable: core::ptr::null(),
-            payload: payload.as_mut_ptr(),
-        };
         let mut out = substring_garbage_out();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
         unsafe {
-            string_object_substring(&mut out, &source, 1, 4);
+            string_object_substring(&mut out, &source, -1, 1);
+            string_object_substring(&mut out, &source, 3, 1);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
         }
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+        drop(_bench);
+
+        let mut destination = [0xa5u8; 8];
+        let mut out = substring_garbage_out();
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        unsafe { string_object_substring(out_ptr, &source, 1, 1) };
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(out_ptr as usize, 3, 0)],
+        );
+        assert_eq!(&destination[..3], b"\xc2\xa9\0");
         assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
         assert!(out.payload.is_null());
     }
 
-    // ---- string_object_suffix ---------------------------------------
-
     #[test]
-    fn suffix_constructs_out_then_returns_on_a_null_source_payload() {
-        let _bench = substring_bench();
-        let mut out = substring_garbage_out();
-        let source = StringObject {
-            vtable: core::ptr::null(),
-            payload: core::ptr::null_mut(),
-        };
-        unsafe {
-            string_object_suffix(&mut out, &source, 1);
-        }
-        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-        assert!(out.payload.is_null());
-        assert!(substring_calls().is_empty());
-    }
-
-    #[test]
-    fn suffix_selects_the_last_requested_utf8_sequences_and_caps_the_request() {
-        let _bench = substring_bench();
+    fn suffix_selects_sequences_then_uses_the_capped_assignment() {
         let mut payload = *b"A\xc2\xa9\xe2\x82\xacZ\0";
         let source = StringObject {
             vtable: core::ptr::null(),
             payload: payload.as_mut_ptr(),
         };
-        let mut expected = Vec::new();
-        for (max_codepoints, offset, selected_count) in [
-            (-7, 7, 0),
-            (0, 7, 0),
-            (1, 6, 1),
-            (2, 3, 2),
-            (4, 0, 4),
-            (i32::MAX, 0, 4),
-        ] {
-            let mut out = substring_garbage_out();
-            let out_ptr: *mut StringObject = &mut out;
-            unsafe {
-                string_object_suffix(out_ptr, &source, max_codepoints);
-            }
-            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
-            assert!(out.payload.is_null());
-            expected.push((
-                out_ptr as usize,
-                unsafe { payload.as_ptr().add(offset) } as usize,
-                selected_count,
-            ));
-        }
-        assert_eq!(substring_calls(), expected);
-    }
+        let mut destination = [0xa5u8; 8];
+        let mut out = substring_garbage_out();
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        unsafe { string_object_suffix(out_ptr, &source, 2) };
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(out_ptr as usize, 5, 0)],
+        );
+        assert_eq!(&destination[..5], b"\xe2\x82\xacZ\0");
 
-    #[test]
-    fn suffix_counts_malformed_sequences_even_when_they_consume_the_terminator() {
-        let _bench = substring_bench();
-        // The F0 decoder consumes bytes 1..3, then the high-bit byte at 4
-        // consumes byte 6's NUL as its third byte. The padded zero at 7 is
-        // therefore the first loop-header terminator the retail walk sees.
-        let mut payload = [b'A', 0xf0, 0x9f, 0x98, 0x80, b'Z', 0, 0, 0, 0];
+        // The forward scan lets malformed sequences consume the following
+        // terminator; reverse selection nevertheless hands the raw 'Z' range
+        // to the capped tail.
+        let mut malformed = [b'A', 0xf0, 0x9f, 0x98, 0x80, b'Z', 0, 0, 0, 0];
         let source = StringObject {
             vtable: core::ptr::null(),
-            payload: payload.as_mut_ptr(),
+            payload: malformed.as_mut_ptr(),
         };
+        let mut destination = [0xa5u8; 4];
         let mut out = substring_garbage_out();
-        let out_ptr: *mut StringObject = &mut out;
-        unsafe {
-            string_object_suffix(out_ptr, &source, 2);
-        }
-        let calls = substring_calls();
-        assert_eq!(calls.len(), 1);
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        drop(_bench);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        unsafe { string_object_suffix(out_ptr, &source, 2) };
         assert_eq!(
-            calls[0],
-            (
-                out_ptr as usize,
-                unsafe { payload.as_ptr().add(5) } as usize,
-                2,
-            )
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(out_ptr as usize, 2, 0)],
         );
+        assert_eq!(destination, [b'Z', 0, 0xa5, 0xa5]);
     }
 
     /// A fresh object for the UTF-16 assignment tests; the payload word is a
