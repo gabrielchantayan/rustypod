@@ -24,6 +24,7 @@ pub mod cstr_dotted_prefix_compare;
 pub mod cursor;
 pub mod encoded_word_block;
 pub mod encoded_fixed_value;
+pub mod encoded_integer_value;
 pub mod encoded_word_block_shift;
 pub mod error_latch;
 pub mod drive;
