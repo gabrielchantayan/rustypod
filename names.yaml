@@ -37709,6 +37709,30 @@ functions:
       byte +0xe3c changes. match.py structural: the port is one byte store;
       its standard crate frame is the only expected delta.
 
+  - address: 0x08059c60
+    ghidra: FUN_08059c60
+    name: inner_get_transient_option
+    size: 8
+    sig: "u8 inner_get_transient_option(const u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+    notes: >-
+      Raw osos.dec words e5d00e3c e12fff1e decode to
+      `ldrb r0,[r0,#0xe3c]; bx lr`; the preceding function ends at
+      0x08059c48 and the separately entered next function begins at
+      0x08059c68, confirming the eight-byte extent. Decoding every aligned
+      ARM B/BL immediate in the image finds exactly seven inbound direct
+      call sites, all unconditional bl: 0x0812cb94, 0x08179aa4, 0x0817a278,
+      0x0817b3dc, 0x0817b418, 0x0817b44c, and 0x0829b110. There are no
+      predicated calls or data-word references. It reads, without a NULL
+      guard, the inner query object's +0xe3c transient-option byte. Query
+      flow at 0x0817a238 saves this byte and restores it with
+      inner_set_transient_option around a query operation; the option enum is
+      not recovered. Deliberate deviation: none. Host tests read every u8
+      value and prove the getter does not mutate the object.
+
   - address: 0x08067ca4
     ghidra: FUN_08067ca4
     name: inner_set_state
