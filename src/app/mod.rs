@@ -100,6 +100,7 @@ pub mod kinded_controller;
 pub mod image_format_descriptor_slot;
 pub mod lock_service;
 pub mod input_capabilities;
+pub mod input_delta_feedback_update;
 pub mod managed_entry;
 pub mod class_6600_byte_at_100;
 pub mod layout_state;

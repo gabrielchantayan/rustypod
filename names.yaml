@@ -72400,6 +72400,37 @@ functions:
       the table's runtime-mutability across calls. Host tests cover first,
       middle duplicate, final, absent, and full-width nonmatching keys.
 
+
+  # --- input-delta feedback level update ---
+  - address: 0x0829329c
+    ghidra: FUN_0829329c
+    name: input_delta_feedback_update
+    size: 128
+    sig: "void input_delta_feedback_update(InputFeedbackState *state, u32 delta)"
+    module: app/input_delta_feedback_update
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: delta
+      DAT_08293318: input_feedback_adjustment_base
+      uVar4/r1: adjusted_magnitude
+      iVar5/r2: feedback_level
+    notes: >-
+      Raw osos.dec establishes a 128-byte extent: 124 bytes of ARM code from
+      0x0829329c through the tail branch at 0x08293314, followed by the
+      PC-relative literal 0x089d049c at 0x08293318; the separately linked next
+      function starts at 0x0829331c. Ghidra's 124-byte size excludes that
+      literal. Decoding every ARM B/BL-immediate word finds exactly six inbound
+      direct call sites — 0x08293374, 0x08293680, 0x08293734, 0x08293b00,
+      0x08294b60, and 0x08294b84 — all unconditional plain bl, with zero
+      predicated forms and zero direct tail branches. It combines delta with
+      the halfword at 0x089d04a0, treating values at or above 0x8000 as a
+      two's-complement subtraction guarded against underflow; thresholds 100,
+      200, 500, and 1000 select feedback levels 4, 5, 6, and 7, otherwise 1.
+      It clears state + 0x61 via retail helper 0x08205fd4 and tail-dispatches
+      the level to unported 0x080cc978. Target builds retain both targets
+      through literal veneers; host tests use equivalent adjustment storage and
+      a dispatcher seam because neither retail address is host-mapped.
   # --- global callback unregistration ---
   - address: 0x082928d8
     ghidra: FUN_082928d8
