@@ -75,6 +75,23 @@ unsafe fn host_record_source_item_count(provider: *mut u8, selector: i32) -> i32
     item_count(provider, selector)
 }
 
+/// Calls the unported retail item-count helper without adding a provider guard.
+///
+/// Target builds invoke `0x081c1ee0`; host tests dispatch through the volatile
+/// seam shared by all ports that need this helper.
+///
+/// # Safety
+///
+/// `provider` must be valid for the retail helper. In particular, zero is not
+/// intercepted here.
+#[inline(always)]
+pub unsafe fn record_source_item_count_unchecked(provider: u32, selector: i32) -> i32 {
+    #[cfg(target_os = "none")]
+    return retail_record_source_item_count(provider as usize as *mut u8, selector);
+    #[cfg(not(target_os = "none"))]
+    return host_record_source_item_count(provider as usize as *mut u8, selector);
+}
+
 /// Returns the item count reported by the source's provider, or `-1` when the
 /// provider word is null.
 ///
@@ -97,10 +114,14 @@ pub unsafe extern "C" fn opaque_record_source_item_count(source: *const OpaqueRe
     }
 
     let selector = (*source).selector as i32;
-    #[cfg(target_os = "none")]
-    return retail_record_source_item_count(provider as usize as *mut u8, selector);
-    #[cfg(not(target_os = "none"))]
-    return host_record_source_item_count(provider as usize as *mut u8, selector);
+    record_source_item_count_unchecked(provider, selector)
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    extern crate std;
+
+    pub static RECORD_SOURCE_ITEM_COUNT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }
 
 #[cfg(test)]
@@ -110,14 +131,13 @@ mod tests {
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::{LazyLock, Mutex, MutexGuard};
+    use std::sync::{LazyLock, MutexGuard};
 
     const FIXTURE_LEN: usize = 0x1000;
     static PROVIDER_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::OPAQUE_RECORD_SOURCE_ITEM_COUNT, FIXTURE_LEN)
             .map(|pointer| pointer as usize)
     });
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut DISPATCH_CALL: Option<(*mut u8, i32)> = None;
     static mut DISPATCH_RESULT: i32 = 0;
 
@@ -127,7 +147,9 @@ mod tests {
     }
 
     fn install_recorder(result: i32) -> MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = test_support::RECORD_SOURCE_ITEM_COUNT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         unsafe {
             addr_of_mut!(DISPATCH_CALL).write(None);
             addr_of_mut!(DISPATCH_RESULT).write(result);
@@ -147,7 +169,9 @@ mod tests {
 
     #[test]
     fn null_provider_returns_negative_one_without_dispatching() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = test_support::RECORD_SOURCE_ITEM_COUNT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let source = OpaqueRecordSource {
             provider: 0,
             opaque_04_to_14: [0; 5],

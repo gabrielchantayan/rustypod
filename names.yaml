@@ -77660,6 +77660,40 @@ functions:
       use a volatile dispatch seam. The concrete provider type remains
       unrecovered, so the names record only the verified wrapper behavior.
 
+  # --- Opaque record-source indexed record copy ---
+  - address: 0x08284390
+    ghidra: FUN_08284390
+    name: opaque_record_source_copy_item
+    size: 100
+    sig: "i32 opaque_record_source_copy_item(const OpaqueRecordSource *source, usize index, u8 *output)"
+    module: app/opaque_record_source_copy_item
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: index
+      param_3/r2: output
+      "source+0x04": record_table
+      "record_table+0x50*index": record
+      "output+0x04": required_record_word
+      FUN_081c1ee0: record_source_item_count
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec confirms Ghidra's 100-byte extent exactly: push
+      {r4,r5,r6,lr}; source+0x1a selector and source provider feed
+      0x081c1ee0; unsigned cmp count,index; then a source+0x04 NULL guard,
+      0x50-byte bl to the IRAM memcpy veneer at 0x08037df8, and an output+4
+      NULL test that normalizes to 0 or -1. The next separately linked
+      function begins at 0x082843f4. Complete ARM B/BL-immediate decoding
+      finds exactly six direct inbound calls, all unconditional plain bl at
+      0x081a1b98, 0x081a1bf4, 0x081a1cfc, 0x081a1d88, 0x081a1e08, and
+      0x081a1ff4; there are no predicated calls or direct tail branches.
+      The unported item-count helper is invoked without adding the sibling
+      wrapper's provider guard: target builds call its fixed retailOS address,
+      while host tests use the shared volatile dispatch seam.
+      Tests prove the unsigned count-bound early exit, null-table no-copy
+      exit, every byte of a selected 80-byte record, and the copied word-1
+      success predicate.
+
   # --- Window-list lookup ---
   - address: 0x082775f4
     ghidra: FUN_082775f4
