@@ -77664,6 +77664,35 @@ functions:
       and that nonzero guard words remain untouched. Reference C:
       decomp/c/014/08158cf0_FUN_08158cf0.c; assembly: osos.dec 0x08158cf0.
 
+
+  # --- two consecutive word clear ---
+  - address: 0x081598a4
+    ghidra: FUN_081598a4
+    name: two_word_clear
+    size: 16
+    sig: "u32 *two_word_clear(u32 *target)"
+    module: cxx/two_word_clear
+    status: ported
+    renames:
+      param_1/r0: target
+      return/r0: target
+      "target+0x00": target_word_0
+      "target+0x04": target_word_1
+    notes: >-
+      Raw ARM establishes the exact 16-byte extent: `mov r1,#0`; zero stores
+      through +0x04; then `bx lr` at 0x081598b0. The next separately linked
+      function begins at 0x081598b4. Decoding every aligned ARM B/BL immediate
+      in osos.dec finds exactly six direct callers, all plain unconditional bl
+      (0x0826457c, 0x082645b0, 0x082645f4, 0x08264684, 0x08275064, and
+      0x08275558), with no predicated bl forms, tail b callers, or aligned
+      data-word references. The leaf has no NULL guard, reads no target words,
+      and writes only the two consecutive words at target +0x00/+0x04. Although
+      Ghidra declares void, raw r0 remains the input destination and the Rust
+      signature returns target to preserve that C++ constructor ABI behavior.
+      No deliberate deviations. Focused host test proves the returned
+      destination and that nonzero guard words remain untouched. Reference C:
+      decomp/c/014/081598a4_FUN_081598a4.c; assembly: osos.dec 0x081598a4.
+
   # --- pending-event queue take due ---
   - address: 0x081394b0
     ghidra: FUN_081394b0
