@@ -81720,3 +81720,40 @@ functions:
       stores i64::MAX at both state+0xc8 and state+0xd0 and zero at +0xd8.
       Host tests cover nonzero indexing, 64-bit unsigned division of a
       negative product bit pattern, and the exhausted-table sentinel.
+
+  # --- Indexed timestamp window bounds ---
+  - address: 0x081c4bb8
+    ghidra: FUN_081c4bb8
+    name: indexed_timestamp_window_bounds_update
+    size: 164
+    sig: "void indexed_timestamp_window_bounds_update(IndexedTimestampBoundsContext *context, IndexedTimestampWindowBoundsState *state)"
+    module: app/indexed_timestamp_window_bounds
+    status: ported
+    renames:
+      param_1/r0/r8: context
+      param_2/r1/r4: state
+      param_1_plus_0x64: time_divisor
+      param_2_plus_0x1c: entries_table
+      param_2_plus_0x7c: time_scale
+      param_2_plus_0xa4: current_index
+      param_2_plus_0xa8: timestamp
+      param_2_plus_0xb0: end_timestamp
+      param_2_plus_0xb8: scaled_value
+      FUN_0802eefc: __aeabi_uldivmod (ported direct callee)
+    notes: >-
+      Raw osos.dec establishes 164 instruction bytes from 0x081c4bb8 through
+      0x081c4c58; the distinct next function begins at 0x081c4c5c. A full-image
+      ARM B/BL-immediate decode finds exactly six inbound direct bl sites: five
+      unconditional at 0x081c3558, 0x081c593c, 0x081c5b80, 0x081c6618, and
+      0x081c6a50, plus one predicated blne at 0x081c5830. The predicated site
+      gates entry in its caller; the helper itself returns only when state is
+      null and otherwise has no bounds or divisor guard. It selects
+      current_index from a 24-byte table at state+0x1c, copies entry+8 to
+      state+0xa8, computes signed(entry+0) * time_scale, passes its bit pattern
+      with the unsigned context+0x64 divisor to the already ported
+      __aeabi_uldivmod at 0x0802eefc, stores the quotient at state+0xb8, and
+      stores entry+8 plus that quotient at state+0xb0. An exhausted table stores
+      i64::MAX at both state+0xa8 and state+0xb0 and zero at +0xb8. Host tests
+      cover the null-state guard, nonzero indexing with carry into the high word,
+      64-bit unsigned division of a negative product bit pattern, and the
+      exhausted-table sentinel. No deliberate deviations.

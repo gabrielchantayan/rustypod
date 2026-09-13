@@ -675,6 +675,10 @@ pub mod hints {
     // state, table, and entry fixtures; mappings never unmap, so no other
     // user may share this hint.
     pub const INDEXED_TIMESTAMP_BOUNDS: usize = 0x8d10_0000;
+    // 0x8d20_0000: dedicated to app/indexed_timestamp_window_bounds's raw-u32
+    // context, state, table, and entry fixtures; mappings never unmap, so no
+    // other user may share this hint.
+    pub const INDEXED_TIMESTAMP_WINDOW_BOUNDS: usize = 0x8d20_0000;
     // 0x9800_0000: dedicated to sqlite/btree_drop_cell's target-width
     // MemPage aData fixture; mappings never unmap, so no other user may
     // share this hint.
