@@ -76,7 +76,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::sqlite::os_write::{SqliteCloseFn, SqliteIoMethods, SqliteWriteFn};
+    use crate::sqlite::os_write::{
+        SqliteCloseFn, SqliteFileSizeFn, SqliteIoMethods, SqliteWriteFn,
+    };
 
     #[repr(C)]
     struct TestFile {
@@ -105,6 +107,10 @@ mod tests {
         panic!("unexpected xSync")
     }
 
+    unsafe extern "C" fn file_size_unused(_: *mut SqliteFile, _: *mut i64) -> i32 {
+        panic!("unexpected xFileSize")
+    }
+
     unsafe extern "C" fn read_recording(
         file: *mut SqliteFile,
         buffer: *mut u8,
@@ -130,6 +136,7 @@ mod tests {
             write: write_unused as SqliteWriteFn,
             truncate: truncate_unused,
             sync: sync_unused,
+            file_size: file_size_unused as SqliteFileSizeFn,
         }
     }
 

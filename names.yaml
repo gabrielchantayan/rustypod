@@ -29255,6 +29255,36 @@ functions:
       pMethods still set during the call and NULLed after (original
       ordering), and a second close on the same file is a no-op.
 
+  # ---- SQLite OS file-size forwarding wrapper, sqlite3OsFileSize (src/sqlite/os_file_size.rs) ----
+  - address: 0x0837db60
+    ghidra: FUN_0837db60
+    name: sqlite_os_file_size
+    size: 12
+    sig: "i32 sqlite_os_file_size(sqlite3_file *file, i64 *out_size)"
+    module: sqlite/os_file_size
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: out_size
+      r2: "file->pMethods, then xFileSize"
+      "*(code**)(*param_1 + 0x18)": sqlite3_io_methods::xFileSize
+    notes: >-
+      SQLite's sqlite3OsFileSize from os.c. Raw bytes are exactly three
+      instructions at 0x0837db60..0x0837db68; the next separately linked
+      function begins at 0x0837db6c, so Ghidra's 12-byte extent is exact
+      with no literal pool. It loads file->pMethods, loads its xFileSize
+      slot at +0x18, then tail-dispatches xFileSize(file, out_size), returning
+      its i32 status unchanged. The adjacent 0x0837db44..0x0837dc18
+      forwarding family matches SQLite's sqlite3_io_methods, establishing
+      this identity. Decoding every ARM B/BL word in osos.dec finds exactly
+      6 inbound calls, all unconditional plain bl (0x082dd8d8, 0x082ddf2c,
+      0x082de6f4, 0x08365bac, 0x0837e7fc, 0x08398ca0); no predicated BL
+      forms, direct tail branches, or aligned raw data words target this
+      wrapper. The concrete xFileSize implementation is runtime method-table
+      data, so the port dispatches the supplied table rather than inventing
+      a callee. Host test verifies exact file and output-pointer forwarding,
+      callee mutation to i64::MIN, and unchanged negative status propagation.
+
   # ---- SQLite file big-endian word reader (src/sqlite/read_be32.rs) ----
   - address: 0x08365598
     ghidra: FUN_08365598

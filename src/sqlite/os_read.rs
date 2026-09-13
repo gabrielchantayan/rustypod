@@ -68,7 +68,8 @@ mod tests {
 
     use super::*;
     use crate::sqlite::os_write::{
-        SqliteCloseFn, SqliteIoMethods, SqliteReadFn, SqliteSyncFn, SqliteTruncateFn, SqliteWriteFn,
+        SqliteCloseFn, SqliteFileSizeFn, SqliteIoMethods, SqliteReadFn, SqliteSyncFn,
+        SqliteTruncateFn, SqliteWriteFn,
     };
     use parking_lot::Mutex;
 
@@ -124,6 +125,10 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn unused_file_size(_file: *mut SqliteFile, _size: *mut i64) -> i32 {
+        0
+    }
+
     #[test]
     fn forwards_mutable_buffer_zero_amount_and_minimum_i64_offset_to_xread() {
         let _lock = LOCK.lock();
@@ -135,6 +140,7 @@ mod tests {
             write: unused_write as SqliteWriteFn,
             truncate: unused_truncate as SqliteTruncateFn,
             sync: unused_sync as SqliteSyncFn,
+            file_size: unused_file_size as SqliteFileSizeFn,
         };
         let mut file = SqliteFile { methods: &methods };
         let mut buffer = [0xa5_u8, 0x5a];
