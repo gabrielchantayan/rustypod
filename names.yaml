@@ -77819,3 +77819,32 @@ functions:
       invented. Rust uses host-sized vtable cells but the same word-16 selection
       and call/result-load sequence. Host coverage proves receiver/index
       forwarding, return-word propagation, and exclusive +0x40 dispatch.
+
+  # --- red-black tree in-order iterator increment ---
+  - address: 0x083b580c
+    ghidra: FUN_083b580c
+    name: red_black_tree_increment
+    size: 88
+    sig: "u32 red_black_tree_increment(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      r12: original_node
+      r1: next_node
+      r2: link_probe
+      r3: current_node
+    notes: >-
+      Raw osos.dec is exactly 88 bytes from 0x083b580c through the bx lr at
+      0x083b5860; the separately linked sibling begins at 0x083b5864. It is
+      the C++ red-black-tree in-order increment primitive: it descends to the
+      leftmost node of a right subtree, otherwise climbs parent links through
+      right-child edges and selects the first ancestor entered from a
+      left-child edge. The final right-link comparison preserves the header
+      sentinel case. Decoding every ARM B/BL word finds exactly six inbound
+      direct calls, all unconditional plain BL at 0x0825b890, 0x0825b940,
+      0x0825bb30, 0x0825bbc8, 0x0825bc70, and 0x0825bcec; no predicated BL
+      forms, direct B tails, or aligned data-word references target it. Rust
+      retains raw target-width u32 links so its repr(C) layout remains
+      firmware-accurate on both ARM and 64-bit host fixtures; no deliberate
+      behavioral deviation.
