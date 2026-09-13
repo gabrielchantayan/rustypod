@@ -87,6 +87,9 @@
 /// Byte offset of the inner-object pointer inside the query object.
 const INNER: usize = 0x40;
 
+/// Byte offset of the transient option inside the inner object.
+const TRANSIENT_OPTION: usize = 0xe3c;
+
 /// Byte offset of the state/mode word inside the inner object.
 const STATE: usize = 0xe38;
 
@@ -170,6 +173,30 @@ pub unsafe extern "C" fn inner_set_state_4(object: *mut u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn inner_set_state(inner: *mut u8, state: u32) {
     (inner.add(STATE) as *mut u32).write(state);
+}
+
+
+/// inner_set_transient_option — original: `FUN_08067c9c` @ `0x08067c9c`
+/// (8 bytes: `strb r1,[r0,#0xe3c]; bx lr`).
+///
+/// Raw decoding of every ARM immediate B/BL word in `osos.dec` finds seven
+/// direct callers, all unconditional `bl` at `0x0813c048`, `0x0813c6dc`,
+/// `0x0813c71c`, `0x0813d994`, `0x0813debc`, `0x0817a290`, and
+/// `0x0817a2bc`; two additional unconditional tail branches enter at
+/// `0x081113d4` and `0x0813d48c`. There are no predicated call forms.
+///
+/// Stores the supplied byte at `inner + 0xe3c`. Query setup callers clear
+/// the byte, while `FUN_0817a238` saves and restores it around a query
+/// operation; its exact enum is not recovered. Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `inner` must address writable storage at `+0xe3c`; as in stock, there is
+/// no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_set_transient_option(inner: *mut u8, option: u8) {
+    inner.add(TRANSIENT_OPTION).write(option);
 }
 
 /// inner_clear_cached_results — original: `FUN_08059a98` @ 0x08059a98
@@ -855,6 +882,36 @@ mod tests {
         for offset in 0..INNER_LEN {
             let expect = if (STATE..STATE + 4).contains(&offset) {
                 [3u8, 0, 0, 0][offset - STATE]
+            } else {
+                inner_before[offset]
+            };
+            assert_eq!(fixture.inner[offset], expect, "inner +{offset:#x}");
+        }
+    }
+
+    // ---- inner_set_transient_option ----------------------------------
+
+    #[test]
+    fn transient_option_setter_round_trips_full_byte_range() {
+        let mut fixture = Fixture::new();
+        let inner_base = fixture.inner.as_mut_ptr();
+        for option in 0..=u8::MAX {
+            unsafe { inner_set_transient_option(inner_base, option) };
+            assert_eq!(fixture.inner[TRANSIENT_OPTION], option);
+        }
+    }
+
+    #[test]
+    fn transient_option_setter_touches_only_its_byte() {
+        let mut fixture = Fixture::new();
+        let inner_before = fixture.inner;
+        let inner_base = fixture.inner.as_mut_ptr();
+
+        unsafe { inner_set_transient_option(inner_base, 0x7e) };
+
+        for offset in 0..INNER_LEN {
+            let expect = if offset == TRANSIENT_OPTION {
+                0x7e
             } else {
                 inner_before[offset]
             };

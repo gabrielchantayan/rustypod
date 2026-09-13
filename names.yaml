@@ -37593,6 +37593,28 @@ functions:
       seam-static ldrd/blx indirection, and LLVM's and/lsr lowering of
       the bit extract vs ADS lsl #29/lsr #31.
 
+  - address: 0x08067c9c
+    ghidra: FUN_08067c9c
+    name: inner_set_transient_option
+    size: 8
+    sig: "void inner_set_transient_option(u8 *inner, u8 option)"
+    module: util/inner_state
+    status: ported
+    vars: {param_1: inner, param_2: option}
+    notes: >-
+      Two-instruction byte setter `strb r1,[r0,#0xe3c]; bx lr`: writes the
+      supplied low byte to the inner query object's +0xe3c transient-option
+      field with no NULL guard. The exact enum is not recovered. Raw
+      decoding of every ARM immediate B/BL word in osos.dec verifies seven
+      unconditional bl call sites (0x0813c048, 0x0813c6dc, 0x0813c71c,
+      0x0813d994, 0x0813debc, 0x0817a290, 0x0817a2bc), no predicated call
+      forms, and two unconditional tail branches (0x081113d4, 0x0813d48c).
+      Query setup callers clear the byte; 0x0817a238 saves it through the
+      +0xe3c getter 0x08059c60 and restores it after a query operation.
+      Deviation: none. Host tests round-trip every u8 value and prove only
+      byte +0xe3c changes. match.py structural: the port is one byte store;
+      its standard crate frame is the only expected delta.
+
   - address: 0x08067ca4
     ghidra: FUN_08067ca4
     name: inner_set_state
