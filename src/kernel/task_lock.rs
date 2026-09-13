@@ -62,9 +62,9 @@
 //! - 0x08037e50 -> 0x2200408c `task_unlock` — see above.
 //! - 0x08037e58 -> 0x22003ec4 — gateway stub, service 40, r0 arg, returns a
 //!   result word. 1 caller (@ 0x080565f8, r0 = 0).
-//! - 0x08037e60 -> 0x22003eb0 `size_to_class` — UNVERIFIED (thunks.rs /
-//!   heap/stats.rs): mirror is a 3-instruction pointer chase
-//!   (`*(**0x2200acf4) + 0x20`), not an arithmetic mapping. 5 callers.
+//! - 0x08037e60 -> 0x22003eb0 `current_task_id` — returns word +0x20 from
+//!   the current-task record through global 0x2200acf4. 7 unconditional `bl`
+//!   callers; no predicated calls or tail branches.
 //! - 0x08037e68 -> 0x22003be8 — gateway stub, service 46, r0 arg plus a
 //!   stack argument; call sites pass (id, 4, size) e.g. (1, 4, 0x200) from
 //!   @ 0x08056680. 4 callers.
@@ -131,9 +131,9 @@
 //! stubs that spin: a ROM call made before the table is installed can produce
 //! neither a value nor a side effect, and hanging surfaces the
 //! misconfiguration (same philosophy as `missing_wait` in sync_sem.rs). Host
-//! tests swap in a mock kernel. The directly ported
-//! `mailbox_send_gateway_mode1` target at slot 3 instead calls the existing
-//! message-dispatch seam; it is intentionally absent from this table.
+//! tests swap in a mock kernel. The directly ported mailbox-send,
+//! current-task-id, and task-unlock targets are intentionally absent from this
+//! table.
 //!
 //! - Codegen for foreign targets deviates on purpose: an indirect call
 //!   through the table instead of the 8-byte `ldr pc` veneer. match.py diffs
@@ -162,8 +162,8 @@ pub const THUNK_STRIDE: u32 = 8;
 pub const WRAPPER_COUNT: usize = 32;
 /// Number of still-foreign ROM entries represented by [`RomThunkOps`].
 ///
-/// Slots 3 and 10 call their already ported mirror bodies directly.
-const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 2;
+/// Slots 3, 10, and 12 call their already ported mirror bodies directly.
+const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 3;
 
 /// The full span catalog: (thunk address, ROM target, exported symbol),
 /// in address order. Verified word-for-word against osos.dec.
@@ -180,7 +180,7 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037e48, 0x22003ea0, "task_lock"),
     (0x08037e50, 0x2200408c, "task_unlock"),
     (0x08037e58, 0x22003ec4, "rom_svc_22003ec4"),
-    (0x08037e60, 0x22003eb0, "size_to_class"),
+    (0x08037e60, 0x22003eb0, "current_task_id"),
     (0x08037e68, 0x22003be8, "rom_svc_22003be8"),
     (0x08037e70, 0x22003d70, "kernel_create_dispatch"),
     (0x08037e78, 0x220041cc, "rom_svc_220041cc"),
@@ -202,9 +202,8 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037ef8, 0x22003b08, "rom_svc_22003b08"),
 ];
 
-/// Indirect dispatch table for the remaining foreign ROM services in this
-/// span. The directly ported mailbox-send and task-unlock targets are not
-/// table entries.
+/// span. The directly ported mailbox-send, current-task-id, and task-unlock
+/// targets are not table entries.
 #[derive(Clone, Copy)]
 pub struct RomThunkOps {
     /// ROM memmove @ 0x220000d4: (dst, src, len) -> dst.
@@ -233,8 +232,6 @@ pub struct RomThunkOps {
     pub task_lock: unsafe extern "C" fn(id: usize) -> usize,
     /// ROM gateway service 40 @ 0x22003ec4.
     pub rom_svc_22003ec4: unsafe extern "C" fn(a0: usize) -> usize,
-    /// UNVERIFIED (thunks.rs): pointer chase @ 0x22003eb0.
-    pub size_to_class: unsafe extern "C" fn() -> usize,
     /// ROM gateway service 46 @ 0x22003be8.
     pub rom_svc_22003be8: unsafe extern "C" fn(
         a0: usize,
@@ -323,7 +320,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     kernel_op_dispatch: missing2,
     task_lock: missing1,
     rom_svc_22003ec4: missing1,
-    size_to_class: missing0,
     rom_svc_22003be8: missing4,
     kernel_create_dispatch: missing2,
     rom_svc_220041cc: missing1,
@@ -356,6 +352,16 @@ macro_rules! hook {
         core::ptr::addr_of!(ROM_KERNEL.$field).read_volatile()
     };
 }
+
+/// Location of the current task-record pointer in the IRAM kernel mirror.
+#[cfg(target_os = "none")]
+const CURRENT_TASK_RECORD_SLOT: *const u32 = 0x2200_acf4 as *const u32;
+
+/// Host counterpart to [`CURRENT_TASK_RECORD_SLOT`]. It deliberately retains
+/// the target's 32-bit pointer representation, so mapped test records must
+/// remain below 4 GiB.
+#[cfg(not(target_os = "none"))]
+static mut HOST_CURRENT_TASK_RECORD_WORD: u32 = 0;
 
 /// rom_memmove — original: thunk @ 0x08037e00 -> ROM 0x220000d4, the mask
 /// ROM's own copy of the ADS memmove (24 osos callers use it instead of the
@@ -679,12 +685,37 @@ pub unsafe extern "C" fn rom_svc_22003ec4(a0: usize) -> usize {
     (hook!(rom_svc_22003ec4))(a0)
 }
 
-/// size_to_class — original: thunk @ 0x08037e60 -> ROM 0x22003eb0.
-/// UNVERIFIED (kernel/thunks.rs): the mirror is a pointer chase
-/// (`*(**0x2200acf4) + 0x20`), not an arithmetic size->class mapping.
+/// current_task_id — original: `thunk_EXT_FUN_22003eb0` @ `0x08037e60`
+/// (Ghidra reports 4 bytes; verified extent 8 bytes: `ldr pc,[pc,#-4]` plus
+/// literal `0x22003eb0`). The mirrored target at `0x08003eb0` is 16 bytes:
+/// load the current-task-record pointer from `0x2200acf4`, then return its
+/// aligned u32 field at +0x20. Raw decoding finds exactly seven call sites,
+/// all unconditional `bl` (`0x08056628`, `0x080a3e6c`, `0x080b4c08`,
+/// `0x080b4c28`, `0x080ccbe0`, `0x0819d72c`, `0x082d0aec`); no predicated
+/// calls or tail branches. Callers use zero as the current-task fallback or
+/// as a task/category table key, so this target deliberately has no guard.
+///
+/// Deliberate deviation: device builds load the IRAM global directly; host
+/// builds substitute the same-width [`HOST_CURRENT_TASK_RECORD_WORD`] so the
+/// pointer chase can be exercised without mapping address `0x2200acf4`.
+#[cfg_attr(target_os = "none", link_section = ".text.current_task_id")]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn size_to_class() -> usize {
-    (hook!(size_to_class))()
+#[inline(never)]
+pub unsafe extern "C" fn current_task_id() -> u32 {
+    let record_word = {
+        #[cfg(target_os = "none")]
+        {
+            CURRENT_TASK_RECORD_SLOT.read_volatile()
+        }
+        #[cfg(not(target_os = "none"))]
+        {
+            core::ptr::addr_of!(HOST_CURRENT_TASK_RECORD_WORD).read_volatile()
+        }
+    };
+    (record_word as usize as *const u8)
+        .add(0x20)
+        .cast::<u32>()
+        .read_volatile()
 }
 
 /// rom_svc_22003be8 — original: thunk @ 0x08037e68 -> ROM gateway stub,
@@ -880,7 +911,8 @@ pub unsafe extern "C" fn rom_svc_22003b08() -> usize {
 pub(crate) mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex};
     use std::vec::Vec;
 
     /// Serializes tests that swap the global ROM_KERNEL table. pub(crate)
@@ -969,7 +1001,6 @@ pub(crate) mod tests {
     mock2!(m08, 8); // kernel_op_dispatch
     mock1!(m09, 9); // task_lock
     mock1!(m11, 11); // rom_svc_22003ec4
-    mock0!(m12, 12); // size_to_class
     mock4!(m13, 13); // rom_svc_22003be8
     mock2!(m14, 14); // kernel_create_dispatch
     mock1!(m15, 15); // rom_svc_220041cc
@@ -1001,7 +1032,6 @@ pub(crate) mod tests {
         kernel_op_dispatch: m08,
         task_lock: m09,
         rom_svc_22003ec4: m11,
-        size_to_class: m12,
         rom_svc_22003be8: m13,
         kernel_create_dispatch: m14,
         rom_svc_220041cc: m15,
@@ -1243,6 +1273,35 @@ pub(crate) mod tests {
         }
     }
 
+    const CURRENT_TASK_FIXTURE_LEN: usize = 0x1000;
+    static CURRENT_TASK_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::CURRENT_TASK_ID, CURRENT_TASK_FIXTURE_LEN).map(|p| p as usize)
+    });
+    static CURRENT_TASK_ID_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    /// The mirror does two exact dereferences with no fallback: global
+    /// 0x2200acf4 yields a task record, then task +0x20 yields its id. Zero
+    /// is observable (several retail callers use it as their fallback), as
+    /// are the table-limit and all-ones values.
+    #[test]
+    fn current_task_id_reads_current_record_word_20() {
+        let _guard = CURRENT_TASK_ID_LOCK.lock();
+        let Some(record) = *CURRENT_TASK_FIXTURE else {
+            assert!(note_missing_u32_fixture("kernel::task_lock::current_task_id"));
+            return;
+        };
+        unsafe {
+            let record = record as *mut u8;
+            core::ptr::write_bytes(record, 0, CURRENT_TASK_FIXTURE_LEN);
+            core::ptr::addr_of_mut!(HOST_CURRENT_TASK_RECORD_WORD).write(record as u32);
+            for id in [0, 0x4f, u32::MAX] {
+                record.add(0x20).cast::<u32>().write(id);
+                assert_eq!(current_task_id(), id);
+            }
+            core::ptr::addr_of_mut!(HOST_CURRENT_TASK_RECORD_WORD).write(0);
+        }
+    }
+
     /// The veneer is argument- and result-transparent for both the current
     /// task's smallest delay and arbitrary nonzero words.
     #[test]
@@ -1283,7 +1342,6 @@ pub(crate) mod tests {
             check(8, kernel_op_dispatch(1, 0x5000), &[1, 0x5000]);
             check(9, task_lock(0x27), &[0x27]);
             check(11, rom_svc_22003ec4(0), &[0]);
-            check(12, size_to_class(), &[]);
             check(13, rom_svc_22003be8(1, 4, 0x200, 0), &[1, 4, 0x200, 0]);
             check(14, kernel_create_dispatch(1, 0x6000), &[1, 0x6000]);
             check(15, rom_svc_220041cc(0x2e), &[0x2e]);

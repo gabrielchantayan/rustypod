@@ -3593,13 +3593,30 @@ functions:
     notes: 5-step binary-search CLZ; table @ 0x083e9b60 outside image
       (canonical table reconstructed, behavior exact). Returns 0 for input 0.
 
-  - address: 0x22003eb0
-    name: size_to_class
-    size: 0
-    module: heap/stats
+  - address: 0x08037e60
+    ghidra: thunk_EXT_FUN_22003eb0
+    name: current_task_id
+    size: 8
+    sig: "u32 current_task_id(void)"
+    module: kernel/task_lock
     status: ported
-    notes: ROM call (mask ROM, not in image) — reimplemented as documented
-      log2(size/8) clamped 0..79, UNVERIFIED.
+    renames:
+      thunk_EXT_FUN_22003eb0: current_task_id
+      EXT_FUN_22003eb0: current_task_id
+      DAT_08037e64: current_task_id_target
+      DAT_2200acf4: current_task_record_slot
+      r0_after_second_ldr: current_task_id
+    notes: >-
+      Raw osos.dec proves the 8-byte ADS veneer at 0x08037e60:
+      ldr pc,[pc,#-4] (0xe51ff004) and literal 0x22003eb0; the next veneer
+      begins at 0x08037e68. The IRAM mirror 0x08003eb0 has four instructions:
+      load 0x2200acf4, dereference the current-task record pointer, load its
+      aligned u32 at +0x20, and bx lr. Decoding every ARM B/BL word finds
+      seven unconditional bl callers (0x08056628, 0x080a3e6c, 0x080b4c08,
+      0x080b4c28, 0x080ccbe0, 0x0819d72c, 0x082d0aec), with zero predicated
+      calls or tail branches. Host tests replace only the fixed-address global
+      with a target-width pointer word; the device port performs the direct
+      pointer chase and intentionally has no NULL guard.
 
   - address: 0x080eb67c
     ghidra: FUN_080eb67c

@@ -641,6 +641,9 @@ pub mod hints {
     // entry-offset fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const TEXT_LAYOUT_APPLY_PENDING_OFFSETS: usize = 0x5100_0000;
+    // 0x5200_0000: dedicated to kernel/task_lock's raw-u32 current-task
+    // record fixture; mappings never unmap, so no other user may share it.
+    pub const CURRENT_TASK_ID: usize = 0x5200_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
