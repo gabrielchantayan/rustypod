@@ -53,6 +53,17 @@ pub type DirectoryIteratorQueueFront = unsafe extern "C" fn(*mut DirectoryIterat
 pub type DirectoryIteratorQueuePop = unsafe extern "C" fn(*mut DirectoryIteratorQueue);
 pub type DirectoryIteratorQueueDestroy = unsafe extern "C" fn(*mut DirectoryIteratorQueue) -> *mut DirectoryIteratorQueue;
 pub type DirectoryIteratorBaseDestroy = unsafe extern "C" fn(*mut DirectoryIterator) -> *mut DirectoryIterator;
+/// Extended iterator-next engine at `0x081ef5d0`. The four trailing
+/// scratch pointers are written by the engine but discarded by this wrapper.
+pub type DirectoryIteratorNextExtended = unsafe extern "C" fn(
+    *mut DirectoryIterator,
+    *mut StringObject,
+    *mut u8,
+    *mut u32,
+    *mut u32,
+    *mut u32,
+    *mut u32,
+) -> i32;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_queue_front(queue: *mut DirectoryIteratorQueue) -> *mut *mut u8 {
@@ -92,6 +103,45 @@ unsafe extern "C" fn firmware_base_destroy(iterator: *mut DirectoryIterator) -> 
     iterator
 }
 
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_next_extended(
+    iterator: *mut DirectoryIterator,
+    entry_path: *mut StringObject,
+    is_special: *mut u8,
+    scratch_24: *mut u32,
+    scratch_20: *mut u32,
+    scratch_16: *mut u32,
+    scratch_12: *mut u32,
+) -> i32 {
+    let function: DirectoryIteratorNextExtended = core::mem::transmute(0x081e_f5d0usize);
+    function(iterator, entry_path, is_special, scratch_24, scratch_20, scratch_16, scratch_12)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_next_extended(
+    _iterator: *mut DirectoryIterator,
+    _entry_path: *mut StringObject,
+    _is_special: *mut u8,
+    _scratch_24: *mut u32,
+    _scratch_20: *mut u32,
+    _scratch_16: *mut u32,
+    _scratch_12: *mut u32,
+) -> i32 {
+    panic!("directory_iterator_next requires a host seam")
+}
+
+/// The unported extended engine. Device builds retain its fixed retailOS
+/// target; host tests install a recorder.
+#[cfg(target_os = "none")]
+pub static mut DIRECTORY_ITERATOR_NEXT_EXTENDED: DirectoryIteratorNextExtended = firmware_next_extended;
+#[cfg(not(target_os = "none"))]
+pub static mut DIRECTORY_ITERATOR_NEXT_EXTENDED: DirectoryIteratorNextExtended = missing_next_extended;
+
+#[inline(always)]
+unsafe fn directory_iterator_next_extended() -> DirectoryIteratorNextExtended {
+    ptr::read_volatile(ptr::addr_of!(DIRECTORY_ITERATOR_NEXT_EXTENDED))
+}
+
 /// Unported queue and base-destruction boundaries. The facade accessor is
 /// already represented by `PATH_PROBE_FACADE_FETCH`, so this does not create
 /// a duplicate seam for `0x0818a0bc`.
@@ -118,6 +168,38 @@ unsafe fn directory_iterator_ops() -> DirectoryIteratorOps {
 #[inline(always)]
 unsafe fn facade_fetch() -> FacadeFetch {
     ptr::read_volatile(ptr::addr_of!(PATH_PROBE_FACADE_FETCH))
+}
+
+/// directory_iterator_next — original: `FUN_081ef598` @ `0x081ef598`
+/// (56 bytes, 14 ARM instructions). **7 direct `bl` call sites**, all plain
+/// unconditional calls: `0x08100ad4`, `0x0813a4cc`, `0x0813ae74`,
+/// `0x081a2cd0`, `0x081ee83c`, `0x081ef564`, and `0x081ef724`; no predicated
+/// forms.
+///
+/// Allocates four uninitialized word-sized scratch results and delegates to
+/// the extended iterator-next engine at `0x081ef5d0`, passing them in
+/// descending stack-address order. It propagates that engine's status result;
+/// Ghidra incorrectly reports this wrapper as `void` although raw ARM leaves
+/// the engine's `r0` untouched through return. The engine remains an opaque
+/// retailOS boundary, reached through a volatile target-address seam on device
+/// and a recorder on host. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn directory_iterator_next(
+    iterator: *mut DirectoryIterator,
+    entry_path: *mut StringObject,
+    is_special: *mut u8,
+) -> i32 {
+    let mut scratch = [core::mem::MaybeUninit::<u32>::uninit(); 4];
+    directory_iterator_next_extended()(
+        iterator,
+        entry_path,
+        is_special,
+        scratch.as_mut_ptr().add(3).cast(),
+        scratch.as_mut_ptr().add(2).cast(),
+        scratch.as_mut_ptr().add(1).cast(),
+        scratch.as_mut_ptr().cast(),
+    )
 }
 
 /// directory_iterator_destroy — original: `FUN_081ef9d8` @ `0x081ef9d8`
@@ -182,6 +264,63 @@ mod tests {
     use super::*;
     use crate::app::path_probe::tests::{restore_firmware_seams, PATH_PROBE_TEST_LOCK};
     use std::sync::MutexGuard;
+    use std::sync::Mutex;
+
+    static DIRECTORY_ITERATOR_NEXT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut NEXT_CALLS: usize = 0;
+    static mut NEXT_ITERATOR: *mut DirectoryIterator = ptr::null_mut();
+    static mut NEXT_PATH: *mut StringObject = ptr::null_mut();
+    static mut NEXT_FLAG: *mut u8 = ptr::null_mut();
+    static mut NEXT_SCRATCH: [*mut u32; 4] = [ptr::null_mut(); 4];
+
+    struct NextSeam {
+        _lock: MutexGuard<'static, ()>,
+        original: DirectoryIteratorNextExtended,
+    }
+
+    impl Drop for NextSeam {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(DIRECTORY_ITERATOR_NEXT_EXTENDED).write_volatile(self.original);
+            }
+        }
+    }
+
+    unsafe extern "C" fn record_next_extended(
+        iterator: *mut DirectoryIterator,
+        entry_path: *mut StringObject,
+        is_special: *mut u8,
+        scratch_24: *mut u32,
+        scratch_20: *mut u32,
+        scratch_16: *mut u32,
+        scratch_12: *mut u32,
+    ) -> i32 {
+        NEXT_CALLS += 1;
+        NEXT_ITERATOR = iterator;
+        NEXT_PATH = entry_path;
+        NEXT_FLAG = is_special;
+        NEXT_SCRATCH = [scratch_24, scratch_20, scratch_16, scratch_12];
+        scratch_24.write(0x24);
+        scratch_20.write(0x20);
+        scratch_16.write(0x16);
+        scratch_12.write(0x12);
+        -17
+    }
+
+    fn install_next_recorder() -> NextSeam {
+        let lock = DIRECTORY_ITERATOR_NEXT_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            let original = ptr::read_volatile(ptr::addr_of!(DIRECTORY_ITERATOR_NEXT_EXTENDED));
+            NEXT_CALLS = 0;
+            NEXT_ITERATOR = ptr::null_mut();
+            NEXT_PATH = ptr::null_mut();
+            NEXT_FLAG = ptr::null_mut();
+            NEXT_SCRATCH = [ptr::null_mut(); 4];
+            ptr::addr_of_mut!(DIRECTORY_ITERATOR_NEXT_EXTENDED).write_volatile(record_next_extended);
+            NextSeam { _lock: lock, original }
+        }
+    }
+
 
     const EVENT_RELEASE_FIRST: u8 = 1;
     const EVENT_POP_FIRST: u8 = 2;
@@ -313,6 +452,41 @@ mod tests {
             assert_eq!(&EVENTS[..EVENT_COUNT], &[EVENT_RELEASE_FIRST, EVENT_POP_FIRST, EVENT_RELEASE_SECOND, EVENT_POP_SECOND, EVENT_QUEUE_DESTROY, EVENT_BASE_DESTROY]);
             restore_ops();
             restore_firmware_seams();
+        }
+    }
+
+    #[test]
+    fn next_forwards_arguments_orders_distinct_scratch_words_and_returns_status() {
+        let _seam = install_next_recorder();
+        let mut iterator = DirectoryIterator {
+            vtable: 0,
+            interface: ptr::null_mut(),
+            base_flags: 0,
+            queue: DirectoryIteratorQueue { words: [0; 12] },
+            path: StringObject { vtable: ptr::null(), payload: ptr::null_mut() },
+        };
+        let mut entry_path = StringObject { vtable: ptr::null(), payload: ptr::null_mut() };
+        let mut is_special = 0u8;
+
+        let status = unsafe {
+            directory_iterator_next(
+                ptr::addr_of_mut!(iterator),
+                ptr::addr_of_mut!(entry_path),
+                ptr::addr_of_mut!(is_special),
+            )
+        };
+
+        unsafe {
+            assert_eq!(status, -17);
+            assert_eq!(NEXT_CALLS, 1);
+            assert_eq!(NEXT_ITERATOR, ptr::addr_of_mut!(iterator));
+            assert_eq!(NEXT_PATH, ptr::addr_of_mut!(entry_path));
+            assert_eq!(NEXT_FLAG, ptr::addr_of_mut!(is_special));
+            assert_eq!(NEXT_SCRATCH[0] as usize - NEXT_SCRATCH[1] as usize, 4);
+            assert_eq!(NEXT_SCRATCH[1] as usize - NEXT_SCRATCH[2] as usize, 4);
+            assert_eq!(NEXT_SCRATCH[2] as usize - NEXT_SCRATCH[3] as usize, 4);
+            assert!(NEXT_SCRATCH.iter().all(|scratch| !scratch.is_null()));
+            assert!(NEXT_SCRATCH.iter().all(|scratch| (*scratch as usize & 3) == 0));
         }
     }
 }
