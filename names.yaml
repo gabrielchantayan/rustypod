@@ -31516,19 +31516,49 @@ functions:
       0x082bf6c0, 0x08393e7c, 0x08393e98, 0x08393ea8, 0x08393eb8,
       0x0839400c, 0x0839401c, 0x08394054, 0x08394094. No osos data word
       equals the entry address, so it is never indirectly dispatched.
-      Semihost SYS_WRITE0 prints "\nTask (# or name)> ", then the unported
+      Semihost SYS_WRITE0 prints "\nTask (# or name)> ", then the ported
       debug-console reader 0x082d670c fills a 16-byte stack buffer and
-      SYS_WRITE0 prints "\n". The reader's raw body opens ":tt" and issues
-      SYS_READ; that establishes its narrow debug-console role but not a
-      broader identity. '-' returns -1; a leading decimal token goes through
+      SYS_WRITE0 prints "\n". The reader opens ":tt" and issues SYS_READ;
+      that establishes its narrow debug-console role but not a broader
+      identity. '-' returns -1; a leading decimal token goes through
       atoi_dead_sign and must be in 1..=the signed mutable task count at
       0x22008a54; every other token is matched case-sensitively against
       scheduler_label_lookup's one-based labels. The target port uses the
-      exact firmware reader, IRAM count word, semihost SWI, atoi, label
+      debug-console reader port, IRAM count word, semihost SWI, atoi, label
       lookup and strcmp; host tests substitute only the reader, mutable word,
       semihost SWI and existing label-lookup seam. match.py is structural:
       expected to differ because Rust expresses the semihost/read seam and
       loops differently.
+
+  - address: 0x082d670c
+    ghidra: FUN_082d670c
+    name: debug_console_read_line
+    size: 128
+    sig: "void debug_console_read_line(u8 *buffer, u32 capacity)"
+    module: kernel/debug_console_read
+    status: ported
+    renames:
+      param_1/r5: buffer
+      param_2/r6: capacity
+      DAT_082d678c + 8 (0x089ca3c8): debug_console_handle
+      DAT_082d6790: tty_name (":tt\\0", raw four-byte name extent)
+    notes: >-
+      Raw osos.dec has exactly 128 instruction bytes at
+      0x082d670c..0x082d678b, followed by its two-word literal pool at
+      0x082d678c..0x082d6793; the distinct next function starts at
+      0x082d6794. Decoding every ARM B/BL word finds exactly 6 direct call
+      sites, all plain unconditional bl and zero predicated forms:
+      0x082bf18c, 0x082bfaa4, 0x082d0b98, 0x08393d2c, 0x08393ee4, and
+      0x083940c0. No osos data word equals the entry address, so it is not
+      indirectly dispatched. The cache word at 0x089ca3c8 starts zero; the
+      first call issues Angel SYS_OPEN (r0=1) with block [":tt", 0, 4] and
+      caches r0, including -1. Every call then issues SYS_READ (r0=6) with
+      [handle, buffer, capacity - 1, 0] and writes zero to
+      buffer + capacity - unread - 2, preserving the unchecked wrapping
+      arithmetic. Target builds access the original cache word volatile;
+      host builds use a private static. Host tests prove the exact OPEN/READ
+      block order, raw filename extent, cache reuse, and NUL positions for
+      complete and partial reads.
 
   - address: 0x082d7870
     ghidra: FUN_082d7870
