@@ -42453,6 +42453,49 @@ functions:
       ldreq+unconditional-str fold of the streq/strne pair, and the
       crate's frame-pointer prologue.
 
+  # --- Silver UI framework: the shared range-value view constructor ---
+
+  - address: 0x0812b94c
+    ghidra: FUN_0812b94c
+    name: range_view_construct
+    size: 64
+    sig: "RangeView *range_view_construct(RangeView *view, ResourceProvider *resources, void *controller, void *parent, const RangeViewSpec *spec)"
+    module: ui/range_view
+    status: ported
+    renames:
+      param_1: view
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      param_5/in_stack_00000000: spec
+      FUN_0826f26c: view_base_construct (direct, already ported)
+      DAT_0812b988: RANGE_VIEW_VTABLE_ADDRESS
+    notes: >-
+      Raw ARM has 60 code bytes at 0x0812b94c..0x0812b988 and the
+      trailing vtable literal 0x08983928 at 0x0812b988; the separately
+      linked deleting destructor begins at 0x0812b98c, so the verified
+      extent is 64 bytes rather than Ghidra's 60. Decoding every ARM
+      B/BL word in osos.dec finds exactly six inbound direct calls, all
+      unconditional bl (0x0815c9b8, 0x0816bc74, 0x081860e8,
+      0x081ca15c, 0x0820fa64, 0x0828c444), matching Ghidra's count:
+      there are no predicated calls. The stacked fifth argument is the
+      0x68-byte range view spec; all five arguments are forwarded to
+      the already ported view_base_construct, then the range vtable is
+      planted and spec +0x58/+0x5c/+0x60/+0x64 are copied verbatim to
+      view +0xa4/+0xa8/+0xac/+0xb0. The preceding sibling clamps the
+      +0xa8 current value to the inclusive +0xac/+0xb0 bounds, naming
+      the latter three fields; +0xa4 remains an unrecovered config word.
+      Deviations: Ghidra drops the ABI arguments and return; raw ARM
+      forwards four register arguments plus the stacked spec and returns
+      the constructed view. The port retains `view` after the base call
+      instead of using its return, which is known to be the same pointer
+      but would not be safe 64-bit-host byte arithmetic. The vtable is
+      modeled as its target u32 address because the image bytes at
+      0x08983928 are stale RW data and this constructor never dispatches
+      through it. Host tests verify target offsets, verbatim zero,
+      maximum, and inverted-bound values, base-call arguments, vtable,
+      and return identity.
+
   # --- Silver UI framework: the container view constructor ---
 
   - address: 0x08158778
