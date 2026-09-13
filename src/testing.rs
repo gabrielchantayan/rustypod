@@ -654,6 +654,9 @@ pub mod hints {
     // 0x0400_0000: dedicated to sqlite/expr_worklist's target-width owner,
     // worklist, entry, and tracked-allocation fixtures; mappings never unmap.
     pub const SQLITE_EXPR_WORKLIST: usize = 0x0400_0000;
+    // 0xd800_0000: dedicated to sqlite/step's target-width Vdbe and
+    // connection fixtures; mappings never unmap, so no other user may share it.
+    pub const SQLITE_STEP: usize = 0xd800_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

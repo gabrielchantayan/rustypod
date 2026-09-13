@@ -60169,6 +60169,47 @@ functions:
       tail; deltas are the crate fp frame and register shuffling. 29
       instructions vs 21.
 
+  # --- SQLite public statement executor ---
+  - address: 0x08391470
+    ghidra: FUN_08391470
+    name: sqlite3_step
+    size: 188
+    sig: "int sqlite3_step(sqlite3_stmt *statement)"
+    module: sqlite/step
+    status: ported
+    renames:
+      param_1/r0/r4: statement
+      r6: db
+      r5: reprepare_count
+      r8: result_code
+      "statement+0x74": result_code
+      "statement+0xf4": error_message
+      "statement+0xff": expired
+      "statement+0x148": is_prepare_v2
+      FUN_08384a9c: sqlite3Step
+      FUN_083974cc: sqlite3Reprepare
+      FUN_083910a4: sqlite3_reset
+      FUN_0836f468: sqlite_api_exit
+    notes: >-
+      Raw osos.dec verifies the 188-byte extent: push {r4-r8,lr} at
+      0x08391470 through tail b sqlite_api_exit at 0x08391528; the next
+      separately linked function starts at 0x0839152c. Every ARM
+      B/BL-immediate word was decoded: exactly six inbound direct bl calls,
+      all unconditional (0x08215a60, 0x08215ba8, 0x082ccf20, 0x082ccf7c,
+      0x0838f428, 0x083903c0); no predicated calls. SQLite 3.5.9's public
+      sqlite3_step returns SQLITE_MISUSE (21) for NULL, otherwise runs
+      sqlite3Step; each SQLITE_SCHEMA (17) triggers up to five successful
+      reprepare/reset/expired-clear retries, for six step calls total. On
+      terminal schema, a prepare-v2 statement copies db->pErr text into
+      zErrMsg after freeing its old message, or stores SQLITE_NOMEM (7) and
+      clears zErrMsg when db->mallocFailed is set; every result then flows
+      through sqlite_api_exit. The three unported direct callees
+      sqlite3Step, sqlite3Reprepare, and sqlite3_reset use volatile seams;
+      conservative defaults terminate as SQLITE_MISUSE/SQLITE_ERROR rather
+      than inventing VDBE execution. Host tests cover NULL, non-schema result
+      masking, one schema retry with reset/expired clear, and the exact
+      five-reprepare cap.
+
   # --- UTF-16 tokenizer: next-token step ---
   - address: 0x081613d8
     ghidra: FUN_081613d8
