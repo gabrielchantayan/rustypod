@@ -28090,6 +28090,53 @@ functions:
       cover fault precedence, incrblob abort, exact movement arguments,
       successful key clearing, and failure retention.
 
+  # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
+  - address: 0x082d9b00
+    ghidra: FUN_082d9b00
+    name: btree_move_to_root
+    size: 248
+    sig: "i32 btree_move_to_root(BtCursor *cursor)"
+    module: sqlite/move_to_root
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      param_1+0x14: cursor->rootPage
+      param_1+0x18: cursor->pPage
+      param_1+0x1c: cursor->idx
+      param_1+0x3e: cursor->info.nSize
+      param_1+0x41: cursor->atLast
+      param_1+0x42: cursor->validNKey
+      param_1+0x43: cursor->eState
+      param_1+0x50: cursor->skip
+      FUN_082c3528: sqlite3BtreeClearCursor (BTREE_MOVE_TO_ROOT_OPS.clear_cursor seam)
+      FUN_082d05d0: getAndInitPage (BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam)
+      FUN_0836761c: release_via_field_0x48 (direct ported callee)
+      FUN_0837a158: load_be32/sqlite3Get4byte (direct ported callee)
+      FUN_082d99d0: moveToChild (BTREE_MOVE_TO_ROOT_OPS.move_to_child seam)
+    notes: >-
+      Raw ARM proves the 248-byte extent 0x082d9b00..0x082d9bf4: Ghidra's
+      220-byte extent omits the 24-byte tail, while the next separately
+      linked function starts at 0x082d9bf8. Decoding every ARM B/BL word in
+      osos.dec finds exactly six inbound direct BL call sites: three
+      unconditional bl (0x08371d40, 0x08371ed4, 0x08389b84), two caller-gated
+      bleq (0x08371180, 0x083717f8), and one caller-gated blne
+      (0x082c2920); no tail b and no image data word contains this address.
+      The predicated calls show that their callers, not this callee, gate
+      cursor-state work. This is SQLite 3.5.x moveToRoot: FAULT returns the
+      saved cursor rc; REQUIRESEEK first clears the cursor; an absent or
+      mismatched page is acquired for rootPage and the old one released;
+      idx, info.nSize, atLast, and validNKey clear; an empty page with its
+      raw +0x04 flag clear descends through the big-endian child word at
+      aData + hdrOffset + 8; eState finally follows current pPage.nCell.
+      Deliberate deviation: unported sqlite3BtreeClearCursor @ 0x082c3528,
+      getAndInitPage @ 0x082d05d0, and moveToChild @ 0x082d99d0 share the
+      volatile BTREE_MOVE_TO_ROOT_OPS boundary (retail defaults on target,
+      explicit mocks on host). Ported release_via_field_0x48 @ 0x0836761c
+      and load_be32 @ 0x0837a158 remain direct calls. Host tests cover fault
+      precedence, seek clearing, page-acquisition failure with cache
+      preservation, successful empty-root descent and big-endian child
+      decoding, and the raw +0x04 no-descent gate.
+
   # ---- B-tree cursor data/key-size accessors (src/sqlite/data_size.rs) ----
   - address: 0x08370e6c
     ghidra: FUN_08370e6c
