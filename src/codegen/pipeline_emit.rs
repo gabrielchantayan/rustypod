@@ -80,7 +80,21 @@ unsafe fn block_proc(block: *mut CgBlock) -> *mut CgProc {
 /// word comparison against 0x082605f0 differs only in the six relative
 /// call encodings; it shares this implementation and its host tests.
 ///
-/// `FUN_0826f4d8` @ 0x0826f4d8 is a fifth separately linked emission:
+/// `FUN_0826b220` @ 0x0826b220 is a fifth separately linked emission:
+/// 136 bytes / 34 instruction words from `push {r3-r9,lr}` through the
+/// `pop {r3-r9,pc}` at 0x0826b2a4; the next function starts at 0x0826b2a8.
+/// Decoding every ARM B/BL word in osos.dec finds seven direct callers, all
+/// unconditional `bl` (no predicated calls or tail branches), at 0x0824a624,
+/// 0x0824a638, 0x0824a64c, 0x0824a660, 0x0824a674, 0x0824a738, and
+/// 0x0824a74c, all in `FUN_0824a478`. It performs the same LDI / ADD / LDW
+/// algorithm described above and shares this implementation and its host
+/// edge-case tests. A word-by-word comparison against 0x082605f0 finds six
+/// differences, all relative `bl` encodings to the same factories. As with
+/// the primary emission, this port deliberately reads `block->proc` once
+/// rather than reloading it before each virtual-register creation; the field
+/// is not written between the original reads.
+///
+/// `FUN_0826f4d8` @ 0x0826f4d8 is a sixth separately linked emission:
 /// 136 bytes / 34 instruction words from `push {r3-r9,lr}` through the
 /// `pop {r3-r9,pc}` at 0x0826f55c; the next function starts at 0x0826f560.
 /// It differs from this implementation's retail body only in the six
