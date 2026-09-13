@@ -21,6 +21,8 @@
 //! - `fixed16_det2` — `FUN_0823627c` @ 0x0823627c (36 bytes; 9 call sites).
 //! - `raster_det2_i64` — `FUN_08260848` @ 0x08260848 (40 bytes; 6 call
 //!   sites).
+//! - `raster_mul_i64_i32_asr` — `FUN_08260820` @ 0x08260820 (40 bytes; 6
+//!   call sites).
 //! - `mul_shift_i32` — `FUN_08079a44` @ 0x08079a44 (20 bytes; 12 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
@@ -115,6 +117,60 @@ pub extern "C" fn fixed16_det2(a: i32, b: i32, c: i32, d: i32) -> i32 {
 #[cfg_attr(target_os = "none", link_section = ".text.raster_det2_i64")]
 pub extern "C" fn raster_det2_i64(a: i32, b: i32, c: i32, d: i32) -> i64 {
     (a as i64) * (d as i64) - (b as i64) * (c as i64)
+}
+
+/// raster_mul_i64_i32_asr — original: `FUN_08260820` @ 0x08260820 (40 bytes).
+///
+/// Forms the low 64 bits of `value * multiplier`, where `value` is signed
+/// 64-bit and `multiplier` is signed 32-bit, then applies the ARM runtime's
+/// arithmetic right shift. The ARM body uses `umull` plus two `mla`
+/// instructions to form the wrapped two-register product, then tail-branches
+/// to the ported `__aeabi_lasr` helper at 0x0802eed4.
+///
+/// Raw `osos.dec` establishes the exact 40-byte extent 0x08260820..0x08260844;
+/// the `push {r4,r5,r6,r7,r8,lr}` at 0x08260848 begins the next function.
+/// Decoding every ARM B/BL-immediate word finds exactly six direct inbound
+/// calls, all unconditional and unpredicated `bl`: 0x08240ee4, 0x08240f08,
+/// 0x08240fc4, 0x08240fe8, 0x082410b8, and 0x082410e8. Every caller passes
+/// shift 28. No deliberate Rust deviations: the branch and register-shift
+/// behavior for every `u32` shift count, including counts outside 0..63, is
+/// retained rather than relying on Rust's narrower shift semantics.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.raster_mul_i64_i32_asr")]
+pub extern "C" fn raster_mul_i64_i32_asr(value: i64, multiplier: i32, shift: u32) -> i64 {
+    let product = value.wrapping_mul(multiplier as i64);
+    let lo = product as u32;
+    let hi = (product >> 32) as i32;
+
+    if (shift.wrapping_sub(32) as i32) < 0 {
+        let amount = shift & 0xff;
+        let complement = 32u32.wrapping_sub(shift) & 0xff;
+        let shifted_lo = match amount {
+            0 => lo,
+            1..=31 => lo >> amount,
+            _ => 0,
+        };
+        let carried_hi = match complement {
+            0 => hi as u32,
+            1..=31 => (hi as u32) << complement,
+            _ => 0,
+        };
+        let shifted_hi = match amount {
+            0 => hi,
+            1..=31 => hi >> amount,
+            _ => hi >> 31,
+        };
+        ((u64::from(shifted_hi as u32) << 32) | u64::from(shifted_lo | carried_hi)) as i64
+    } else {
+        let amount = shift.wrapping_sub(32) & 0xff;
+        let shifted_lo = match amount {
+            0 => hi,
+            1..=31 => hi >> amount,
+            _ => hi >> 31,
+        };
+        ((u64::from((hi >> 31) as u32) << 32) | u64::from(shifted_lo as u32)) as i64
+    }
 }
 
 /// det2_i64 — original: `FUN_08261168` @ 0x08261168 (40 bytes).
@@ -767,12 +823,12 @@ mod tests {
         assert_eq!(raster_det2_i64(i32::MIN, i32::MAX, i32::MAX, i32::MIN),
                    (i32::MIN as i64).pow(2) - (i32::MAX as i64).pow(2));
     }
-    /// The `umull`/`mla` product and the tail-shift's signed branch must
-    /// remain bit-for-bit compatible. In particular, ARM uses only the low
-    /// byte of the register shift while choosing its path from the full
+    /// Both `umull`/`mla` raster helpers and their tail-shift's signed branch
+    /// must remain bit-for-bit compatible. In particular, ARM uses only the
+    /// low byte of the register shift while choosing its path from the full
     /// wrapping `shift - 32` subtraction.
     #[test]
-    fn mul_i64_i32_asr_matches_the_arm_register_sequence() {
+    fn i64_i32_asr_helpers_match_the_arm_register_sequence() {
         fn lsr(value: u32, amount: u32) -> u32 {
             match amount {
                 0 => value,
@@ -832,6 +888,11 @@ mod tests {
                 for &shift in &shifts {
                     assert_eq!(
                         mul_i64_i32_asr(value, multiplier, shift),
+                        reference(value, multiplier, shift),
+                        "value={value:#x} multiplier={multiplier:#x} shift={shift:#x}",
+                    );
+                    assert_eq!(
+                        raster_mul_i64_i32_asr(value, multiplier, shift),
                         reference(value, multiplier, shift),
                         "value={value:#x} multiplier={multiplier:#x} shift={shift:#x}",
                     );

@@ -57788,6 +57788,36 @@ functions:
       all three direct factories were already ported.
 
 
+
+  - address: 0x08260820
+    ghidra: FUN_08260820
+    name: raster_mul_i64_i32_asr
+    size: 40
+    sig: "i64 raster_mul_i64_i32_asr(i64 value, i32 multiplier, u32 shift)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: value low word
+      param_2/r1: value high word
+      param_3/r2: multiplier
+      param_4/r3/r4: shift
+      FUN_0802eed4: __aeabi_lasr
+    notes: >-
+      Raw ARM confirms the exact 40-byte extent 0x08260820..0x08260844: `push
+      {r4,lr}` through `pop {r4,lr}`, followed by a tail `b` to the already
+      ported __aeabi_lasr @ 0x0802eed4. The `push {r4,r5,r6,r7,r8,lr}` at
+      0x08260848 begins raster_det2_i64, so Ghidra's size is exact and there
+      is no literal pool. Decoding every ARM B/BL immediate in osos.dec finds
+      six direct callers, all unconditional and unpredicated `bl` (zero
+      predicated, zero tail `b`): 0x08240ee4, 0x08240f08, 0x08240fc4,
+      0x08240fe8, 0x082410b8, and 0x082410e8; every caller passes shift 28.
+      The body computes the low 64 bits of signed value * signed multiplier
+      with `umull` plus two `mla` instructions, then arithmetic-right-shifts
+      the result. The separate link section prevents this duplicate of
+      mul_i64_i32_asr @ 0x08261140 from folding into that export. No deliberate
+      Rust deviations; all u32 shift-count behavior is retained.
+
+
   - address: 0x08260848
     ghidra: FUN_08260848
     name: raster_det2_i64
