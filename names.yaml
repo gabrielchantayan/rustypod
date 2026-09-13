@@ -79514,3 +79514,31 @@ functions:
       Target builds use the fixed slow-helper address and host tests use a
       volatile seam. Host tests cover an in-range nonzero entry, a zero entry,
       an out-of-range index, and exact five-argument fallback forwarding.
+
+  - address: 0x082d14e0
+    ghidra: FUN_082d14e0
+    name: video_engine_get_frame_payload
+    size: 32
+    sig: "void video_engine_get_frame_payload(u8 **output)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0/r4: output
+      FUN_08252bec: video_engine_get
+      "*(engine + 0xa8c)": frame_slot_table
+      "*(frame_slot_table + 0x34)": primary_record
+      "*(primary_record + 0x68)": payload
+    notes: >-
+      Raw osos.dec proves the 32-byte extent from 0x082d14e0 through
+      0x082d14fc; the next independently linked wrapper begins at
+      0x082d1500. The body calls video_engine_get, then unconditionally
+      follows target-width words at engine +0xa8c, frame_slot_table +0x34,
+      and primary_record +0x68 before storing the final word through output.
+      A complete aligned ARM B/BL-immediate decode finds exactly six direct
+      inbound calls, all plain unconditional bl at 0x08142708, 0x08152960,
+      0x08167470, 0x0816e66c, 0x0816e7ec, and 0x08295d54; no predicated
+      call targets the entry. The wrapper has no NULL, alignment, or bounds
+      checks. The field roles name only the verified traversal; no stronger
+      identity is inferred for the nested objects. Host tests map a unique
+      below-4-GiB fixture and prove the primary-record payload is stored and
+      reloaded on each call. Deliberate deviations: none.
