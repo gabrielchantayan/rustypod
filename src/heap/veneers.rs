@@ -95,6 +95,10 @@
 //!   (8 bytes; Ghidra's 4-byte extent omits its unreachable `bx lr`; 11
 //!   predicated `bl` call sites). Calls `heap_panic` @ 0x08030f44, whose
 //!   terminate path does not return.
+//! - `heap_panic_nonreturn_entry` — original: `thunk_FUN_08030f44` @
+//!   0x080eba5c (4 bytes; six `bleq` and one `blne` call sites). A
+//!   separately linked fatal-path entry consisting solely of `bl
+//!   0x08030f44`; the immediately following word begins a different function.
 //!
 //! Heap-dispatch design (deviation, by necessity): instead of the
 //! originals' tail branches, these veneers dispatch indirectly through
@@ -794,6 +798,29 @@ pub unsafe extern "C" fn heap_panic_entry() -> ! {
     heap_panic()
 }
 
+/// heap_panic_nonreturn_entry — original: `thunk_FUN_08030f44` @
+/// 0x080eba5c (4 bytes; Ghidra extent verified by raw disassembly). Fatal,
+/// does not return.
+///
+/// The whole body is `bl 0x08030f44`; 0x080eba60 immediately starts the
+/// separately linked next function, so there is no return instruction. The
+/// seven direct calls are all caller-gated: six `bleq` at 0x0827bed8,
+/// 0x083d5834, 0x083d5898, 0x083d59d4, 0x083d5b04, and 0x083d5c48, plus one
+/// `blne` at 0x0827bf9c. There are no tail branches or aligned data-word
+/// references to this entry.
+///
+/// Calls the ported [`heap_panic`] fatal path. Deliberate deviation: invokes
+/// its Rust symbol rather than encoding a branch to retailOS address
+/// 0x08030f44.
+#[cfg_attr(target_os = "none", link_section = ".text.heap_panic_nonreturn_entry")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_panic_nonreturn_entry() -> ! {
+    heap_panic()
+}
+
+
+
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -843,6 +870,33 @@ pub(crate) mod tests {
     /// Fatal-path state for the isolated `heap_panic_entry` child process:
     /// 0 before raise, 1 after raise, 2 after exit.
     static PANIC_ENTRY_STEP: AtomicUsize = AtomicUsize::new(0);
+    /// Runs a fatal heap-panic entry in an isolated process and verifies its
+    /// `raise(1, 0) -> exit -> terminate(1)` sequence.
+    fn assert_heap_panic_entry_fatal_path(
+        child_env: &str,
+        test_name: &str,
+        entry: unsafe extern "C" fn() -> !,
+    ) {
+        if std::env::var_os(child_env).is_some() {
+            PANIC_ENTRY_STEP.store(0, Ordering::SeqCst);
+            unsafe {
+                core::ptr::addr_of_mut!(HEAP_OPS).write(HeapVeneerOps {
+                    raise: panic_entry_raise,
+                    exit: panic_entry_exit,
+                    terminate: panic_entry_terminate,
+                    ..MOCK_OPS
+                });
+                entry();
+            }
+        }
+
+        let status = Command::new(std::env::current_exe().expect("test executable path"))
+            .args(["--exact", test_name, "--nocapture"])
+            .env(child_env, "1")
+            .status()
+            .expect("spawn fatal-path test child");
+        assert!(status.success(), "fatal path completed out of order: {status}");
+    }
 
     unsafe extern "C" fn mock_create(
         desc: *mut HeapDescriptor,
@@ -1545,30 +1599,19 @@ pub(crate) mod tests {
 
     #[test]
     fn heap_panic_entry_runs_the_complete_fatal_path() {
-        const CHILD_ENV: &str = "RUSTYPOD_HEAP_PANIC_ENTRY_CHILD";
+        assert_heap_panic_entry_fatal_path(
+            "RUSTYPOD_HEAP_PANIC_ENTRY_CHILD",
+            "heap::veneers::tests::heap_panic_entry_runs_the_complete_fatal_path",
+            heap_panic_entry,
+        );
+    }
 
-        if std::env::var_os(CHILD_ENV).is_some() {
-            PANIC_ENTRY_STEP.store(0, Ordering::SeqCst);
-            unsafe {
-                core::ptr::addr_of_mut!(HEAP_OPS).write(HeapVeneerOps {
-                    raise: panic_entry_raise,
-                    exit: panic_entry_exit,
-                    terminate: panic_entry_terminate,
-                    ..MOCK_OPS
-                });
-                heap_panic_entry();
-            }
-        }
-
-        let status = Command::new(std::env::current_exe().expect("test executable path"))
-            .args([
-                "--exact",
-                "heap::veneers::tests::heap_panic_entry_runs_the_complete_fatal_path",
-                "--nocapture",
-            ])
-            .env(CHILD_ENV, "1")
-            .status()
-            .expect("spawn fatal-path test child");
-        assert!(status.success(), "fatal path completed out of order: {status}");
+    #[test]
+    fn heap_panic_nonreturn_entry_runs_the_complete_fatal_path() {
+        assert_heap_panic_entry_fatal_path(
+            "RUSTYPOD_HEAP_PANIC_NONRETURN_ENTRY_CHILD",
+            "heap::veneers::tests::heap_panic_nonreturn_entry_runs_the_complete_fatal_path",
+            heap_panic_nonreturn_entry,
+        );
     }
 }
