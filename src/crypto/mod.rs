@@ -53,6 +53,7 @@ pub mod bn_mod_mul_montgomery;
 pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
+pub mod digest_update_u32;
 pub mod evp_digest_init_ex;
 pub mod evp_digest_final_ex;
 pub mod evp_digest_update;
