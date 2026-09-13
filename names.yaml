@@ -80718,3 +80718,33 @@ functions:
       the byte range. match.py review finds the same kind gate, linked traversal,
       vtable call, and relative-or-absolute result choice; LLVM adds a frame and
       reaches the retained stock selector through its loaded function address.
+
+  - address: 0x0826713c
+    ghidra: FUN_0826713c
+    name: locale_guard_restore
+    size: 44
+    sig: "LocaleGuard *locale_guard_restore(LocaleGuard *guard)"
+    module: runtime/locale_guard
+    status: ported
+    renames:
+      param_1/r0/r4: guard
+      "guard+0x00": mask
+      "guard+0x04": saved_name
+      FUN_080307bc: setlocale_core (direct, ported in runtime/locale)
+      FUN_082aad14: operator_delete_tag3 (direct, ported in heap/veneers)
+    notes: >-
+      The exact 44-byte body is 0x0826713c..0x08267168, bounded by the
+      adjacent temporary-locale constructor at 0x082670e0 and its separately
+      linked next sibling at 0x08267168. Raw words are e92d4010 e5901004
+      e1a04000 e3510000 0a000003 e5940000 ebf72598 e5940004 eb010eec
+      e1a00004 e8bd8010. The two-word guard owns a locale-category mask and
+      an allocated copy of the prior locale spelling. If saved_name is
+      non-NULL it calls setlocale_core(mask, saved_name), then
+      operator_delete_tag3(saved_name), leaving both words untouched and
+      returning guard; NULL skips both calls. Full-image ARM immediate B/BL
+      decoding finds six direct inbound calls, all unconditional bl
+      (0x08267488, 0x082a7094, 0x082a71b8, 0x082a79ac, 0x082a7ba4,
+      0x082a8744), with no predicated bl or direct B tail calls. Rust makes
+      the ARM calls normal calls; tag-3 delete encapsulates its own target
+      tail branch. Host-only callbacks observe the two external effects
+      without adding a target dispatch seam or requiring the firmware heap.
