@@ -23134,6 +23134,36 @@ functions:
       (multiply/range guard, alias check, descending copy loop); its
       exit-1 mnemonic diff is expected.
 
+  - address: 0x0832bd54
+    ghidra: FUN_0832bd54
+    name: digest_update_u32
+    size: 84
+    sig: "void digest_update_u32(u32 value, DigestCtx *ctx)"
+    module: crypto/digest_update_u32
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: ctx
+      local_8..local_5: encoded_bytes
+      FUN_08338384: digest_update
+    notes: >-
+      Raw ARM establishes the exact 84-byte body
+      0x0832bd54..0x0832bda8; the next push-prologue at 0x0832bda8 is a
+      separate function. The wrapper extracts value big-endian, maps every
+      byte through the MBA form byte * -99 - 20 (mod 256; equivalently
+      byte * 157 + 236), and calls the unported digest_update worker
+      @ 0x08338384 with the transformed four-byte local and len 4. The
+      worker's two-stage MBA expression is an identity, so it digests those
+      transformed big-endian bytes unchanged. A complete raw B/BL scan finds
+      exactly six direct call sites, all unconditional bl at 0x08309020,
+      0x08319d80, 0x08319d94, 0x0834ad50, 0x08353ebc, and 0x08353ecc;
+      no predicated forms and no plain B tail calls. Deliberate deviation:
+      the unported worker dispatches through the volatile DIGEST_UPDATE
+      seam, whose target default is 0x08338384, preserving the call
+      boundary; host tests install a recorder. Host test exercises zero,
+      all-ones, mixed, and high-bit bytes, proving output byte order,
+      transform, ctx forwarding, and len 4.
+
   - address: 0x083555f8
     ghidra: FUN_083555f8
     name: encoded_word_block_set_int
