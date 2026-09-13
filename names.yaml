@@ -54541,6 +54541,45 @@ functions:
       tests cover zero and usize::MAX offsets, NULL bases, instruction
       wiring, append order and virtual-register creation order.
 
+  - address: 0x0826b220
+    ghidra: FUN_0826b220
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1/r5: base
+      param_3/r2/r6: offset
+      uVar1/r7: offset_reg
+      uVar2/r8: address_reg
+      uVar3/r9/r0: value_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18c4: cg_create_inst_load
+    notes: >-
+      Raw ARM confirms the 136-byte, 34-word extent from `push
+      {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0826b220 through `pop
+      {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x0826b2a4; the next function starts
+      at 0x0826b2a8 and there is no literal pool. Decoding every ARM B/BL
+      word in osos.dec finds seven direct callers, all unconditional `bl`
+      (zero predicated calls, zero tail `b`): 0x0824a624, 0x0824a638,
+      0x0824a64c, 0x0824a660, 0x0824a674, 0x0824a738 and 0x0824a74c, all
+      in FUN_0824a478. The body creates three general-purpose virtual
+      registers from block->proc, then emits LDI offset_reg, offset / ADD
+      address_reg, base, offset_reg / LDW value_reg, [address_reg], and
+      returns value_reg. A word-by-word raw comparison with
+      cg_emit_load_word_at_offset @ 0x082605f0 finds exactly six differing
+      words, exclusively the relative `bl` encodings to the same three
+      register creations and three instruction factories. Deliberate
+      deviation: no duplicate Rust body or export exists; the established
+      codegen/pipeline_emit seam is behaviorally identical and serves this
+      hook address. Its host tests cover zero and usize::MAX offsets, NULL
+      bases, instruction wiring, append order and virtual-register creation
+      order. The port reads block->proc once rather than reloading it before
+      each creation; the field is not written in between.
   - address: 0x0826f4d8
     ghidra: FUN_0826f4d8
     name: cg_emit_load_word_at_offset
