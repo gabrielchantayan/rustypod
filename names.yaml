@@ -33990,6 +33990,36 @@ functions:
       fp frame and LLVM's argument setup order. No link_section needed:
       the body is not byte-identical to any sibling adapter.
 
+  - address: 0x08124794
+    ghidra: FUN_08124794
+    name: tbm_app_client_cache_disable
+    size: 120
+    sig: "void tbm_app_client_cache_disable(u32 full_cleanup)"
+    module: app/tbm_app_client_cache
+    status: ported
+    renames:
+      param_1/r0/r6: full_cleanup
+      DAT_0812480c: tbm_app_client_cache_disabled
+      DAT_08124810: tbm_app_client_cache
+    notes: >-
+      Raw osos.dec establishes 120 code bytes from 0x08124794 through
+      0x08124808 and the two-word literal pool at 0x0812480c/0x08124810;
+      the distinct next function starts at 0x08124814. Decoding every ARM
+      B/BL immediate finds exactly seven inbound direct call sites, all
+      unconditional bl (0x080fee38, 0x080ff078, 0x080ff0e0, 0x0810bf34,
+      0x08115134, 0x08217c30, 0x0821df40), with no predicated forms or
+      direct tail branches. It returns immediately when the cache-gate byte
+      is set. Otherwise nonzero full_cleanup calls app_controller_get
+      (0x0817ee04, ported) then the unported direct helper at 0x0817f37c;
+      every path calls the unported direct helper at 0x08124814. It destroys
+      and tag-2 operator-deletes cache slot 0, and does the same for slot 1
+      only during full cleanup, then sets the cache gate. The two unported
+      calls use literal veneers on target and private host seams; the already
+      ported pool_destroy (0x0826f7e4) and operator_delete (0x082aad24)
+      remain direct. Host tests prove the non-full slot-1 bypass, disabled
+      idempotence, and full-cleanup controller argument. match.py structural
+      review expected.
+
   - address: 0x081249f4
     ghidra: FUN_081249f4
     name: tbm_app_client_cache_get
