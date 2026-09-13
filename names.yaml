@@ -76214,3 +76214,36 @@ functions:
       identity. Three host tests prove NULL forwarding, zero-count pointer
       advancement, UTF-16 byte forwarding, and the u32 widening required for
       a count of 0x8000 to become 0x10000 bytes.
+
+  # --- Adobe Font Metrics parser ---
+  - address: 0x080add84
+    ghidra: FUN_080add84
+    name: afm_next_statement_token
+    size: 176
+    sig: "u8 *afm_next_statement_token(AfmParser *parser, u32 next_line, u32 *length)"
+    module: util/afm_next_statement_token
+    status: ported
+    renames:
+      param_1/r0: parser
+      param_2/r1: next_line
+      param_3/r2: length
+      param_1_plus_4: scanner
+      scanner_plus_0: cursor
+      scanner_plus_8: end
+      scanner_plus_0xc: delimiter_state
+      FUN_080ade68: scan_token_to_delimiter
+      FUN_080c84a4: scan_to_line_end
+    notes: >-
+      Raw osos.dec decoding confirms the 176-byte extent from 0x080add84
+      through 0x080ade30, followed by the distinct function at 0x080ade34.
+      Whole-image decoding of ARM B/BL-immediate words finds exactly seven
+      inbound direct calls, all unconditional bl at 0x0809981c, 0x0809985c,
+      0x08099898, 0x08099928, 0x080999a4, 0x080b5f34, and 0x080b608c; there
+      are no predicated forms or tail-branch callers. The port advances an AFM
+      lexical cursor to the next semicolon-separated statement or, when
+      next_line is nonzero, past the current line, then returns the next
+      token and its exact byte length. FUN_080ade68 and FUN_080c84a4 remain
+      unported: target builds call their verified retail addresses; host
+      tests install faithful seams. Deliberate host-only deviation: an
+      uninstalled seam reports end-of-input rather than calling a target
+      address.
