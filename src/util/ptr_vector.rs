@@ -58,6 +58,7 @@ use crate::cxx::templates::{vector_size_elem4, VectorBounds};
 /// Returns the number of pointers in the vector embedded at +0x14 of
 /// `owner`, as `(end - begin) >> 2` with an *arithmetic* shift.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn ptr_vector_count(owner: *const u8) -> i32 {
     let begin = (owner.add(VECTOR_BEGIN) as *const i32).read_volatile();
     let end = (owner.add(VECTOR_END) as *const i32).read_volatile();
@@ -97,6 +98,7 @@ pub unsafe extern "C" fn ptr_vector_count(owner: *const u8) -> i32 {
 /// `owner` must point at a readable [`VectorBounds`] at +0x14; when
 /// the checks pass, `begin[index]` must be a readable pointer slot.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn ptr_vector_at(owner: *const u8, index: u32) -> *mut u8 {
     let vector = owner.add(VECTOR_BEGIN) as *const VectorBounds;
     if vector_size_elem4(vector) == 0 {
