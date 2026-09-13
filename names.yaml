@@ -74718,3 +74718,41 @@ functions:
       verified-address seam is reused from ui/display_pending_nibbles. Host
       tests record that boundary and prove both layer state, descriptor
       geometry and format cases, the clear color, and its fixed arguments.
+
+  # --- Message code 0x13 arena ---
+  - address: 0x081cd754
+    ghidra: FUN_081cd754
+    name: message_0x13_arena_pool
+    size: 100
+    sig: "FixedBlockPool *message_0x13_arena_pool(void)"
+    module: app/message_0x13_arena
+    status: ported
+    renames:
+      DAT_081cd7a4: message_0x13_arena_guard_base (0x089ca7fc)
+      DAT_081cd7a8: message_0x13_arena_guard (0x089ca83c)
+      DAT_081cd7ac: message_0x13_arena (0x08a1b1b8)
+      DAT_081cd7b0: dso_handle (0x089ca09c)
+      DAT_081cd7b4: pool_destructor_interior_instruction (0x082612d0)
+      FUN_0826c134: fixed_block_pool_construct (unported unique seam)
+      FUN_082ab31c: cxa_guard_acquire (ported, runtime/cxa_guard.rs)
+      FUN_082ab1c8: cxa_atexit (ported, runtime/shutdown_chain.rs)
+      FUN_082ab338: cxa_guard_release (ported, runtime/cxa_guard.rs)
+    notes: >-
+      Raw ARM corrects Ghidra's 80-byte code-only extent: the 20 instructions
+      at 0x081cd754..0x081cd7a4 are followed by five literal-pool words
+      through 0x081cd7b8; the separately linked message-code-0x13 constructor
+      starts there, so the true extent is 100 bytes. This is a standard ADS
+      static fixed-block-pool accessor: test guard bit 0, acquire, construct
+      16 blocks of 16 bytes at 0x08a1b1b8, register the constructor return
+      with cxa_atexit using __dso_handle 0x089ca09c, release, then return the
+      fixed object literal. The constructor's sibling stamps allocated objects
+      with message code 0x13. Decoding every ARM B/BL immediate in osos.dec
+      found exactly seven direct inbound call sites, all unconditional bl and
+      none predicated or tail branches: 0x0813322c, 0x08133610, 0x08133bbc,
+      0x08143918, 0x081cd820, 0x08212a38, and 0x08272310. The registered
+      0x082612d0 is not a function entry: it is an interior load in
+      FUN_08261190, so the host shutdown callback is deliberately a no-op.
+      Deviations: runtime-initialized .bss guard/object words become crate
+      statics with the stock all-zero pre-init state; the unported pool
+      constructor uses this accessor's unique volatile seam, firmware default
+      on target and a required test installation on host.

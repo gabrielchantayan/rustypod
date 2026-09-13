@@ -110,6 +110,7 @@ pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
 pub mod indexed_payload_lookup;
 pub mod message_arena;
+pub mod message_0x13_arena;
 pub mod message_kind;
 pub mod message_kind_arena;
 pub mod member_release;
