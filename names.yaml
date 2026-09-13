@@ -25516,6 +25516,35 @@ functions:
       port has a dedicated target section to prevent identical-code folding;
       LLVM may inline mutex_create rather than retain the original BL. Host
       tests cover NULL, unguarded, and mutex-backed construction.
+
+  - address: 0x0839f324
+    ghidra: FUN_0839f324
+    name: refcounted_ptr_copy_assign_retain_count
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_copy_assign_retain_count(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+      FUN_0839d498: refcounted_body_release_retain_count
+      FUN_0839d45c: refcounted_body_attach_retain_count
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent
+      0x0839f324..0x0839f354: `pop {r4,r5,r6,pc}` ends at 0x0839f350 and
+      a separately linked function begins at 0x0839f354. Decoding every ARM
+      B/BL word in osos.dec finds six direct callers, all unconditional bl:
+      0x08113ec4, 0x08113eec, 0x081172bc, 0x081172e4, 0x08211498, and
+      0x08211d8c; no predicated calls, tail b sites, or aligned image-word
+      references exist. This C++ refcounted-handle copy assignment compares
+      slot pointers; distinct slots release dst through the retain-count
+      sibling, then load *src and attach it, returning dst. Loading *src after
+      release reproduces the firmware's dangling-pointer aliasing hazard.
+      The 60-byte attach helper at 0x0839d45c is behavior-identical to
+      ported refcounted_body_attach @ 0x0839d370 except for branch
+      displacements, so the port calls the canonical helper rather than adding
+      a redundant dispatch seam. Host tests cover self-assignment and the
+      distinct-slot non-final release/attach transition.
   - address: 0x0816ccb0
     ghidra: FUN_0816ccb0
     name: refcounted_ptr_release_dtor_copy
