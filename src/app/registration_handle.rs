@@ -304,6 +304,10 @@ mod tests {
 
     use super::*;
     use core::ptr::{addr_of, addr_of_mut};
+    use crate::app::registration_handle_wrapper::{
+        registration_handle_wrapper_init, RegistrationHandleWrapper,
+        REGISTRATION_HANDLE_WRAPPER_VTABLE,
+    };
     use std::sync::{Mutex, MutexGuard};
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
@@ -522,6 +526,36 @@ mod tests {
 
         assert_eq!(registration.slot_index, -1);
         assert_eq!(unsafe { addr_of!(ACQUIRE_CALL).read() }, Some((owner, 0)));
+    }
+
+    #[test]
+    fn wrapper_init_offsets_context_and_acquires_first_selector_word() {
+        let _guard = install_init_recorder();
+        let mut context = [0u8; 0xa0d];
+        let mut wrapper = RegistrationHandleWrapper {
+            vtable: 0,
+            registration: RegistrationHandle {
+                vtable: 0,
+                owner: core::ptr::null_mut(),
+                slot_index: 9,
+            },
+        };
+
+        let returned = unsafe {
+            registration_handle_wrapper_init(&mut wrapper, context.as_mut_ptr(), 31, 0xfeed_face)
+        };
+        let expected_owner = unsafe { context.as_mut_ptr().add(0xa0c) };
+
+        assert!(core::ptr::eq(returned, &mut wrapper));
+        assert_eq!(wrapper.vtable, REGISTRATION_HANDLE_WRAPPER_VTABLE);
+        assert_eq!(wrapper.registration.vtable, REGISTRATION_HANDLE_VTABLE);
+        assert_eq!(wrapper.registration.owner, expected_owner);
+        assert_eq!(wrapper.registration.slot_index, 31);
+        assert_eq!(unsafe { addr_of!(FIND_CALL).read() }, None);
+        assert_eq!(
+            unsafe { addr_of!(ACQUIRE_CALL).read() },
+            Some((expected_owner, 31))
+        );
     }
 
 }
