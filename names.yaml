@@ -42762,6 +42762,36 @@ functions:
       unresolved anomaly, so substituting ASCII lowercasing or its arbitrary
       default seam would invent behavior. No Rust module or hook is added
       until the runtime table is established.
+  - address: 0x08178034
+    ghidra: FUN_08178034
+    name: string_object_find_and_erase_cstr
+    size: 88
+    sig: "u32 string_object_find_and_erase_cstr(void *context, StringObject *string, const char *token, int *out_index)"
+    module: app/token_parser
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1/r6: string
+      param_3/r2/r7: token
+      param_4/r3/r5: out_index
+      iVar1/r4: index
+      FUN_082a4f88: unresolved_string_object_token_lookup
+      FUN_08392478: strlen
+      FUN_08276900: string_object_erase
+    notes: >-
+      Raw ARM confirms the exact 88-byte body from 0x08178034 through
+      0x08178088; the next separately linked function begins at 0x0817808c.
+      A whole-image ARM B/BL decode finds six direct call sites, all plain
+      unconditional bl (zero predicated, zero tail branches): 0x08178468,
+      0x0817848c, 0x08178514, 0x0817858c, 0x08178604, and 0x08178620.
+      Calls unresolved 0x082a4f88 with (string, token, 0), stores its returned
+      index through out_index when non-NULL, and returns 0 only for -1. Any
+      other index causes the ported unguarded strlen to measure token, then
+      string_object_erase(string, index, byte_length), so a multibyte token
+      deletes byte_length codepoints. The lookup's semantic identity is not
+      established, so the target uses its known address and host tests use a
+      volatile typed seam rather than inventing a name. match.py structural
+      review is expected to differ at this indirect bridge.
 
 
   # --- Silver UI framework: root instance getter ---
