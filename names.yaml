@@ -70,6 +70,7 @@ functions:
       osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038260 and literal
       0x220005fc at 0x08038264; the next veneer starts at 0x08038268, so
       the true size is 8 bytes. Decoding every ARM B/BL word finds exactly
+
       10 direct calls, all unconditional bl (0x082e1b2c, 0x082e1b3c,
       0x082e1b4c, 0x082e1b5c, 0x082e1b6c, 0x082e1b84, 0x082e1bb0,
       0x082e1bd0, 0x082e1bf0, 0x082e1c08); no predicated call, tail branch,
@@ -81,6 +82,26 @@ functions:
       veneer forwards to that body through a volatile function pointer,
       retaining separate hook-target identity and preventing inlining/ICF;
       it preserves the void byte-copy ABI and forward overlap behavior.
+  - address: 0x0833dda8
+    ghidra: FUN_0833dda8
+    name: xor_6b_in_place
+    size: 48
+    sig: "void xor_6b_in_place(u8 *bytes, i32 len)"
+    module: util/xor_6b_in_place
+    status: ported
+    renames:
+      param_1/r0: bytes
+      param_2/r1: len
+      iVar1/r2: offset
+    notes: >-
+      XORs each byte in the signed range [0, len) with 0x6b. Raw ARM confirms
+      Ghidra's 48-byte extent: the next sibling opens at 0x0833ddd8. The
+      byte-at-a-time ldrb/eor/strb loop has no NULL guard and skips all memory
+      accesses when len <= 0. Decoding every B/BL word in osos.dec finds six
+      direct call sites at 0x0806e334, 0x0806e340, 0x0806e34c, 0x0806e358,
+      0x0806e364, and 0x0806e370: all are unconditional bl instructions, with
+      no predicated bl or direct B sites. Deliberate deviations: none.
+      Reference C: decomp/c/032/0833dda8_FUN_0833dda8.c.
 
   - address: 0x082c4f38
     ghidra: FUN_082c4f38
