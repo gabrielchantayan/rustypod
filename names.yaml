@@ -75757,3 +75757,38 @@ functions:
       identifying the clear status as USB high-speed mode. Host tests replace
       only the MMIO word with a volatile stand-in. #[inline(never)] and a
       distinct link section preserve this direct-call hook target.
+
+  # --- Runtime indexed-record resolver ---
+  - address: 0x080ffae8
+    ghidra: FUN_080ffae8
+    name: indexed_record_lookup
+    size: 60
+    sig: "void *indexed_record_lookup(u32 index)"
+    module: util/indexed_record_lookup
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080ffb24_plus_0x04: lookup_enabled
+      DAT_080ffb28: indexed_record_provider_slot
+      "provider+0x40": indexed_record_lookup_callback
+      callback_return: record_pointer_cell
+    notes: >-
+      Raw osos.dec establishes 60 instruction bytes at 0x080ffae8..0x080ffb24
+      followed by two four-byte literal-pool words at 0x080ffb24 and
+      0x080ffb28; the next separately linked function begins at 0x080ffb2c,
+      making the true extent 68 bytes despite Ghidra's 60-byte code extent.
+      Decoding every aligned ARM B/BL immediate finds exactly seven inbound
+      direct calls, all unconditional plain bl at 0x080ffb90, 0x0819ae84,
+      0x0819afb4, 0x08203b6c, 0x08203c44, 0x08203c80, and 0x08203dc0;
+      there are no predicated bl forms or direct tail-B transfers. A nonzero
+      word at 0x089cb44c enables indices 0..204. The function loads the
+      provider slot at 0x08a78c70, dispatches its runtime +0x40 callback as
+      (provider_slot,index), and returns the word from the callback's returned
+      pointer cell; it has no provider/callback/result-cell NULL guards. The
+      runtime callback does not decode as a static function entry, so its
+      identity is intentionally not inferred. Target code reads the two fixed
+      global addresses; private host backing permits tests of disabled and
+      out-of-range no-dispatch paths plus both valid boundary indices and the
+      callback's slot/index/result-cell contract. match.py's expected
+      structural diff reflects LLVM's separate bounds branch and frame,
+      preserving the guard, range, callback, and returned-word behavior.
