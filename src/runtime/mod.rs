@@ -18,6 +18,7 @@ pub mod i2c0_transfer;
 pub mod lib_init;
 pub mod ll_udiv10;
 pub mod locale;
+pub mod locale_guard;
 pub mod malloc_rt;
 pub mod object_word;
 pub mod message_0x17;
