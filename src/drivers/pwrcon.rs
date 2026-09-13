@@ -143,6 +143,52 @@ pub unsafe extern "C" fn pwrcon_update_masks(
     0
 }
 
+/// pwrcon_any_requested_clock_enabled — original: `FUN_0836aec4` @
+/// `0x0836aec4` (64 bytes).
+///
+/// Raw ARM decoding confirms **6 unconditional `bl` call sites**:
+/// `0x080c997c`, `0x08369dfc`, `0x0836a6c0`, `0x0836bff0`, `0x0836c8a4`,
+/// and `0x0836d88c`; there are no predicated calls. The function clears
+/// `enabled_out`, then tests whether either requested active-low PWRCON mask
+/// contains a bit that is presently clear (its clock is enabled). It writes
+/// the PWRCON0 result before reading PWRCON1, then writes their OR, and
+/// returns zero. This deliberately preserves the original's unguarded output
+/// pointer and observable intermediate stores. Target builds use volatile
+/// MMIO; host builds use the existing driver-local PWRCON read seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pwrcon_any_requested_clock_enabled(
+    pwrcon0_mask: u32,
+    pwrcon1_mask: u32,
+    enabled_out: *mut u32,
+) -> u32 {
+    unsafe {
+        *enabled_out = 0;
+
+        #[cfg(target_os = "none")]
+        let pwrcon0 = core::ptr::read_volatile(PWRCON0);
+        #[cfg(not(target_os = "none"))]
+        let pwrcon0 = {
+            let ops = core::ptr::read_volatile(core::ptr::addr_of!(HOST_PWRCON_OPS));
+            (ops.read_pwrcon0)()
+        };
+        let pwrcon0_enabled = (pwrcon0_mask & !pwrcon0 != 0) as u32;
+        *enabled_out = pwrcon0_enabled;
+
+        #[cfg(target_os = "none")]
+        let pwrcon1 = core::ptr::read_volatile(PWRCON1);
+        #[cfg(not(target_os = "none"))]
+        let pwrcon1 = {
+            let ops = core::ptr::read_volatile(core::ptr::addr_of!(HOST_PWRCON_OPS));
+            (ops.read_pwrcon1)()
+        };
+        *enabled_out = pwrcon0_enabled | (pwrcon1_mask & !pwrcon1 != 0) as u32;
+    }
+
+    0
+}
+
+
 /// iram_pwrcon_update_masks_veneer — original: `thunk_EXT_FUN_22000318` @
 /// 0x08037de8 (Ghidra reports 4 bytes; the real stub is **8** — the
 /// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037de8 plus the absolute
@@ -286,6 +332,40 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn reports_a_selected_pwrcon0_clock_that_is_already_enabled() {
+        let _ops = install(0xffff_fff7, 0xffff_ffff);
+        let mut enabled = u32::MAX;
+        unsafe {
+            assert_eq!(pwrcon_any_requested_clock_enabled(0x8, 0x4, &mut enabled), 0);
+            assert_eq!(enabled, 1);
+            assert_eq!(*addr_of!(CALL_LOG), ["read0", "read1"]);
+        }
+    }
+
+    #[test]
+    fn reports_a_selected_pwrcon1_clock_that_is_already_enabled() {
+        let _ops = install(0xffff_ffff, 0xffff_fffb);
+        let mut enabled = u32::MAX;
+        unsafe {
+            assert_eq!(pwrcon_any_requested_clock_enabled(0x8, 0x4, &mut enabled), 0);
+            assert_eq!(enabled, 1);
+            assert_eq!(*addr_of!(CALL_LOG), ["read0", "read1"]);
+        }
+    }
+
+    #[test]
+    fn ignores_enabled_clocks_outside_the_requested_masks() {
+        let _ops = install(0, 0);
+        let mut enabled = u32::MAX;
+        unsafe {
+            assert_eq!(pwrcon_any_requested_clock_enabled(0, 0, &mut enabled), 0);
+            assert_eq!(enabled, 0);
+            assert_eq!(*addr_of!(CALL_LOG), ["read0", "read1"]);
+        }
+    }
+
 
     #[test]
     fn zero_enable_sets_selected_bits_in_both_pwrcon_words() {

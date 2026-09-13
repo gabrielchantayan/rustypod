@@ -1571,6 +1571,29 @@ functions:
       them (enables clocks). Target uses volatile MMIO; host tests install a
       recording driver-local guard/MMIO seam.
 
+  - address: 0x0836aec4
+    ghidra: FUN_0836aec4
+    name: pwrcon_any_requested_clock_enabled
+    size: 64
+    sig: "u32 pwrcon_any_requested_clock_enabled(u32 pwrcon0_mask, u32 pwrcon1_mask, u32 *enabled_out)"
+    module: drivers/pwrcon
+    status: ported
+    renames: {param_1: pwrcon0_mask, param_2: pwrcon1_mask,
+      param_3: enabled_out, DAT_0836af04: pwrcon_base,
+      pwrcon_base_plus_0x48: pwrcon0, pwrcon_base_plus_0x4c: pwrcon1}
+    notes: >-
+      Raw osos.dec decoding confirms the 64-byte extent
+      0x0836aec4..0x0836af04: it zeroes *enabled_out, tests
+      pwrcon0_mask & ~PWRCON0, stores that Boolean, ORs it with
+      pwrcon1_mask & ~PWRCON1, stores the final Boolean, and returns zero.
+      PWRCON0/PWRCON1 at 0x3c500048/0x3c50004c are active-low clock-gate
+      masks, so a clear requested bit reports an already enabled clock.
+      Every ARM B/BL word was decoded: 6 direct, unconditional bl call
+      sites at 0x080c997c, 0x08369dfc, 0x0836a6c0, 0x0836bff0,
+      0x0836c8a4, and 0x0836d88c; no predicated calls. The target port
+      preserves the unguarded output pointer and intermediate PWRCON0
+      store with volatile MMIO; host tests use the existing PWRCON seam.
+
   - address: 0x08037df0
     ghidra: thunk_EXT_FUN_22001f38
     name: iram_msec_delay_veneer
