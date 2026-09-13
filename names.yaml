@@ -34911,6 +34911,34 @@ functions:
       prototype is wrong: r3 is never read. Rust calls and returns from
       STREAM_APPEND instead of tail-branching, matching the established
       formatted_message module deviation.
+
+  - address: 0x08123758
+    ghidra: FUN_08123758
+    name: formatted_message_emit_array
+    size: 68
+    sig: "void formatted_message_emit_array(MessageStream *stream, const char *key, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    renames:
+      param_1: stream
+      param_2: key
+      param_3: depth
+      param_4: unused
+    notes: >-
+      7 verified BL call sites, binary-scanned: all are unconditional plain
+      bl (zero predicated forms), so callers perform no conditional gating.
+      Raw bytes establish the exact 68-byte extent from 0x08123758 through
+      the tail branch at 0x08123798; the following word starts the adjacent
+      literal at 0x0812379c ("%s<key>%s</key>\n%s<array>\n"). Ghidra's
+      body is wrong: r3 is never read, and it spuriously incorporates
+      stream-append work after the tail branch. The body forwards stream +
+      depth to the ported indent_prepare @ 0x08123a54, then calls the ported
+      snprintf @ 0x0802f768 to write the literal into stream + 0x15 (512
+      bytes) with variadic words (indent, key, indent). It tail-branches to
+      the existing STREAM_APPEND boundary @ 0x08123c58. The Rust port uses
+      the shared INDENT_PREPARE / STREAM_APPEND slots and returns after the
+      append call rather than tail-branching; formatting and arguments are
+      preserved.
   - address: 0x0812395c
     ghidra: FUN_0812395c
     name: formatted_message_emit_boolean
