@@ -10210,6 +10210,36 @@ functions:
       after an unmapped character zero. Host tests cover both null gates,
       callback receiver and input, mutated-code propagation, and zero-index
       suppression.
+  # --- FreeType glyph loader ---
+  - address: 0x0804c9f4
+    ghidra: FUN_0804c9f4
+    name: ft_glyph_loader_rewind
+    size: 32
+    sig: "void ft_glyph_loader_rewind(FtGlyphLoader *loader)"
+    module: ft/cff_builder
+    status: ported
+    renames:
+      param_1/r0: loader
+      "[loader,#0x14]": base.outline
+      "[loader,#0x2c]": base.num_subglyphs
+      "[loader,#0x34]": current
+    notes: >-
+      FreeType 2.3 FT_GlyphLoader_Rewind (internal/ftgloadr.c). Raw
+      osos.dec confirms the complete 32-byte body at 0x0804c9f4 through
+      0x0804ca10; the next separately linked function starts at 0x0804ca14.
+      It clears base.outline.n_points (+0x16), base.outline.n_contours
+      (+0x14), and base.num_subglyphs (+0x2c), then tail-branches through
+      the already ported IRAM memcpy veneer at 0x08037df8 to copy the full
+      0x20-byte base glyph-load record at +0x14 to current at +0x34.
+      Decoding every ARM B/BL immediate in osos.dec finds seven inbound
+      direct calls: unconditional plain bl at 0x0808155c, 0x08085ad8,
+      0x08085b90, 0x08092830, 0x08099790, 0x08099db0, and 0x080b5d80;
+      none are predicated and there are no inbound tail b branches. The
+      Rust port assigns named 32-bit target fields rather than calling the
+      veneer; the original's memcpy return register is dead at all seven
+      callers. Host coverage proves zeroing both signed counts and the
+      subglyph count, copying every outline and tail field, and preserving
+      the loader header.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
