@@ -80657,3 +80657,31 @@ functions:
       match.py structural review against the worktree archive retains the three
       ldr/smull/Q16.16-recombine/add/str groups in order; LLVM only adds a
       frame and chooses different scratch registers.
+
+
+  # --- statically bound empty C++ destructor ---
+  - address: 0x08267b90
+    ghidra: FUN_08267b90
+    name: empty_destructor_08267b90
+    size: 4
+    sig: "void *empty_destructor_08267b90(void *object)"
+    module: cxx/empty_destructor_08267b90
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: object
+    notes: >-
+      Raw osos.dec establishes the exact 4-byte extent
+      0x08267b90..0x08267b94: e12fff1e (bx lr), after the separately linked
+      FUN_08267b84 ending at 0x08267b90 and before FUN_08267b94. This is an
+      empty C++ destructor, not a literal veneer or branch. Decoding every
+      immediate ARM B/BL word in the complete image finds exactly six inbound
+      direct calls, all unconditional plain bl at 0x0807a5d0, 0x0807a5f0,
+      0x08104254, 0x08104274, 0x08296904, and 0x0829694c; there are no
+      predicated bl forms or direct B tail calls. Every caller passes a stack
+      object and discards r0 after returning; no aligned image word equals this
+      address, so dispatch is static rather than virtual. The raw instruction
+      preserves r0, so Rust returns object unchanged, performs no reads or
+      writes, accepts NULL, unaligned, and dangling pointers, and has a unique
+      text section to prevent identical-code folding. Host tests cover pointer
+      preservation and prove that a live object has no modified byte.
