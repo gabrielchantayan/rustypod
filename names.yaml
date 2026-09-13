@@ -25332,6 +25332,38 @@ functions:
       copy into its byte-identical siblings; host tests cover null,
       unguarded, and mutex-backed construction.
 
+  - address: 0x0839f248
+    ghidra: FUN_0839f248
+    name: refcounted_ptr_assign_secondary_variant
+    size: 68
+    sig: "RefcountedBody **refcounted_ptr_assign_secondary_variant(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1: src
+      iVar1/r4: body
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x0839f248..0x0839f28c: `pop {r4,r5,r6,pc}` returns at 0x0839f288
+      and the next separately linked copy-assignment starts at 0x0839f28c.
+      Decoding every A32 B/BL word finds six direct BL callers, all
+      unconditional: 0x0810cea4, 0x0810cee8, 0x0810d0c0, 0x0810d104,
+      0x0811eeb8, and 0x0822afb8. One unconditional tail B at 0x0811ee8c
+      also enters this function; no predicated call form or aligned image
+      word reference exists, so it is not virtually dispatched. It copies
+      *src to *dst and, when body is non-NULL, increments its signed +4
+      refcount with a wrapping ADD. The optional mutex at +8 is loaded,
+      NULL-checked, and passed to mutex_lock; it is freshly loaded and
+      NULL-checked again after the increment before mutex_unlock. The body
+      is behaviorally byte-identical to refcounted_ptr_assign @ 0x0839eda0
+      except for PC-relative BL displacements. The dedicated target text
+      section prevents LLVM from folding the separately hookable entry; the
+      volatile aligned field accesses retain the stock load/guard/increment/
+      second-load/guard order while LLVM may still inline the mutex helpers.
+
   - address: 0x0839f1b0
     ghidra: FUN_0839f1b0
     name: refcounted_ptr_assign_owned

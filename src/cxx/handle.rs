@@ -649,6 +649,60 @@ pub unsafe extern "C" fn refcounted_ptr_construct_tertiary_variant(
 
 
 
+/// refcounted_ptr_assign_secondary_variant — original: `FUN_0839f248` @
+/// 0x0839f248 (68 bytes; 6 direct `bl` call sites, all unconditional:
+/// 0x0810cea4, 0x0810cee8, 0x0810d0c0, 0x0810d104, 0x0811eeb8, and
+/// 0x0822afb8). Decoding every ARM `B`/`BL` word in `osos.dec` also finds
+/// one unconditional tail `b` at 0x0811ee8c; there are no predicated calls
+/// or aligned image words equal to the entry, so it is not virtually
+/// dispatched. Raw ARM establishes the exact extent: the separately linked
+/// sibling begins at 0x0839f28c.
+///
+/// A separately linked C++ refcounted-handle copy assignment:
+/// `body = *src; *dst = body`. A non-NULL body has its signed refcount at
+/// target +4 incremented with ARM wrapping arithmetic under the optional
+/// mutex at +8. The mutex field is loaded and NULL-checked independently
+/// before locking and after incrementing before unlocking; a NULL mutex
+/// leaves the increment unguarded. The function returns `dst`.
+///
+/// The raw instructions are byte-identical in behavior to
+/// [`refcounted_ptr_assign`] @ 0x0839eda0 except for their PC-relative
+/// `blne` displacements. This separately hookable entry retains its own
+/// target text section, preventing LLVM from folding it with that sibling.
+/// Volatile aligned target-field accesses deliberately retain the stock
+/// load/guard/increment/second-load/guard sequence despite the compiler's
+/// otherwise-valid field-load hoisting; LLVM may still inline the mutex
+/// helpers rather than preserving the stock `blne` pair.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. A non-NULL `*src`
+/// must point to a readable/writable [`RefcountedBody`]. Neither slot pointer
+/// is NULL-checked by retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_assign_secondary_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_assign_secondary_variant(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let body = src.read();
+    dst.write(body);
+    if !body.is_null() {
+        let mutex = core::ptr::addr_of!((*body).mutex).read_volatile();
+        if !mutex.is_null() {
+            mutex_lock(mutex);
+        }
+        let refcount = core::ptr::addr_of!((*body).refcount).read_volatile();
+        core::ptr::addr_of_mut!((*body).refcount).write_volatile(refcount.wrapping_add(1));
+        let mutex = core::ptr::addr_of!((*body).mutex).read_volatile();
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+    dst
+}
+
 /// refcounted_ptr_assign — original: `FUN_0839eda0` @ 0x0839eda0
 /// (68 bytes; 78 `bl` call sites).
 ///
@@ -2457,6 +2511,45 @@ mod tests {
             assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, 8);
+        }
+    }
+
+    #[test]
+    fn secondary_assign_null_body_stores_null_and_returns_dst() {
+        unsafe {
+            let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
+            let src: *mut RefcountedBody = core::ptr::null_mut();
+
+            let ret = refcounted_ptr_assign_secondary_variant(&mut slot, &src);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert!(slot.is_null());
+        }
+    }
+
+    /// `add` is not checked or saturating; a real optional mutex exercises
+    /// both of the fresh mutex-field loads around the wrapping transition.
+    #[test]
+    fn secondary_assign_wraps_refcount_with_empty_mutex_cell() {
+        unsafe {
+            let mut mutex = Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: &mut mutex,
+            };
+            let src: *mut RefcountedBody = &mut body;
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            let ret = refcounted_ptr_assign_secondary_variant(&mut slot, &src);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
         }
     }
 
