@@ -25,9 +25,9 @@
 //! ```text
 //! sqlite3 (db):  +0x14 errCode (i32), +0x1e mallocFailed (u8),
 //!                +0xc8 pErr (*mut Mem)
-//! Vdbe:          +0x00 db,   +0x0c nOp,     +0x10 nOpAlloc, +0x14 aOp,
-//!                +0x18 nLabel, +0x1c nLabelAlloc, +0x20 aLabel,
-//!                +0xff expired
+//! Vdbe:          +0x00 db,   +0x08 pNext,   +0x0c nOp,
+//!                +0x10 nOpAlloc, +0x14 aOp, +0x18 nLabel,
+//!                +0x1c nLabelAlloc, +0x20 aLabel, +0xff expired
 //! VdbeOp (20 B): +0 opcode, +1 p4type, +2 opflags, +3 p5,
 //!                +4 p1, +8 p2, +12 p3, +16 p4
 //! Btree:         +0x00 db, +0x04 pBt, +0x08 inTrans, +0x09 sharable,
@@ -84,6 +84,7 @@ pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;
 pub mod error_msg;
+pub mod expire_prepared_statements;
 pub mod expr_affinity;
 pub mod expr_coll_seq;
 pub mod expr_code;
