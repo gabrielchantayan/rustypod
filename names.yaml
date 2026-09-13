@@ -80685,3 +80685,36 @@ functions:
       writes, accepts NULL, unaligned, and dangling pointers, and has a unique
       text section to prevent identical-code folding. Host tests cover pointer
       preservation and prove that a live object has no modified byte.
+  - address: 0x082435dc
+    ghidra: FUN_082435dc
+    name: predicate_list_find_matching_payload
+    size: 128
+    sig: "u32 predicate_list_find_matching_payload(void *list, u32 kind, void *query)"
+    module: util/predicate_list_find
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: kind
+      param_3/r2: query
+      r4: node
+      r5: predicate
+      r6: list
+      r7: kind
+      r8: query
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte body at 0x082435dc..0x08243658:
+      the following push {r4-r10,lr} at 0x0824365c begins the separately linked
+      sibling. Decoding every ARM B/BL immediate finds exactly six direct inbound
+      calls, all unconditional bl: 0x082409d8, 0x0824197c, 0x08241990,
+      0x082419a4, 0x08242c70, and 0x08253c0c. FUN_082432c8 selects one of six
+      runtime-initialized predicate objects, then this function walks list+0x10,
+      calls the selected vtable +0x04 predicate only when node+0xc8 equals kind,
+      and returns the first accepted node+0xbc either directly when node+0xc4 bit
+      1 is set or relative to list otherwise. FUN_082432c8 is retained as a stock
+      call: its returned tables at 0x08ac6cf0..0x08ac6d20 and 0x089cc940 are
+      outside osos.dec, so their identity is deliberately not invented. Host tests
+      replace that selector and cover kind gating, callback rejection and continued
+      traversal, relative versus absolute payloads, empty lists, and kinds above
+      the byte range. match.py review finds the same kind gate, linked traversal,
+      vtable call, and relative-or-absolute result choice; LLVM adds a frame and
+      reaches the retained stock selector through its loaded function address.
