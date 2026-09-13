@@ -63,14 +63,10 @@
 //! virtual slot `+0xd0`. The singleton getter is genuinely called twice
 //! (two separate `bl`s), not cached across the install.
 //!
-//! The three unported retailOS handler-context callees ride the
+//! The two unported retailOS handler-context callees ride the
 //! [`HANDLER_LIST_ACTIVATE_OPS`] `read_volatile` dispatch table (house
 //! pattern):
 //!
-//! - `handler_context_get` @ 0x081e8ca0 — the lazy-singleton getter of a
-//!   0x34-byte handler-context object (cache word 0x089cfe38, ctor
-//!   0x081e8ee8, `operator new(0x34)`); same four-step idiom as the
-//!   `app/singletons` family.
 //! - `handler_context_install_list` @ 0x081e8da0 — copies the supplied
 //!   HandlerList's `mode`/`state`/`state_flag` fields into the context's
 //!   embedded list at +0x18 (via 0x083e1450) and, when `state_flag != 0`
@@ -94,6 +90,7 @@
 //!   already ported and are called directly, matching the original's
 //!   direct `bl`s.
 
+use crate::app::handler_context::handler_context_get;
 use crate::app::singletons::{app_controller_get, command_dispatcher_get};
 use crate::app::command_dispatch::command_dispatch_by_resource;
 use crate::app::controller_pending_command::app_controller_begin_command;
@@ -130,12 +127,10 @@ pub struct HandlerListOwnerVtable {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0xd0] = [0; core::mem::offset_of!(HandlerListOwnerVtable, handlers_activated)];
 
-/// The retailOS dependencies of [`handler_list_activate`] — see the
+/// The unported retailOS dependencies of [`handler_list_activate`] — see the
 /// module header for what each does in the original.
 #[derive(Clone, Copy)]
 pub struct HandlerListActivateOps {
-    /// `FUN_081e8ca0` @ 0x081e8ca0 — handler-context singleton getter.
-    pub handler_context_get: unsafe extern "C" fn() -> *mut u8,
     /// `FUN_081e8da0` @ 0x081e8da0 — installs the caller's handler list
     /// into the context singleton.
     pub handler_context_install_list: unsafe extern "C" fn(*mut u8, *mut HandlerList),
@@ -144,16 +139,6 @@ pub struct HandlerListActivateOps {
     pub handler_context_active_state: unsafe extern "C" fn(*mut u8) -> u32,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_handler_context_get() -> *mut u8 {
-    let get: unsafe extern "C" fn() -> *mut u8 = unsafe { core::mem::transmute(0x081e_8ca0usize) };
-    unsafe { get() }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_handler_context_get() -> *mut u8 {
-    panic!("handler_list_activate requires handler-context getter 0x081e8ca0")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_handler_context_install_list(
@@ -190,7 +175,6 @@ unsafe extern "C" fn missing_handler_context_active_state(_context: *mut u8) -> 
 #[cfg(target_os = "none")]
 pub const DEFAULT_HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
     HandlerListActivateOps {
-        handler_context_get: firmware_handler_context_get,
         handler_context_install_list: firmware_handler_context_install_list,
         handler_context_active_state: firmware_handler_context_active_state,
     };
@@ -199,14 +183,12 @@ pub const DEFAULT_HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
     HandlerListActivateOps {
-        handler_context_get: missing_handler_context_get,
         handler_context_install_list: missing_handler_context_install_list,
         handler_context_active_state: missing_handler_context_active_state,
     };
 
-/// Active model of the unported handler-context dependencies. Target
-/// integration replaces these slots as 0x081e8ca0 / 0x081e8da0 /
-/// 0x081e8cd0 are ported; host tests install recording mocks.
+/// Active model of the two unported handler-context dependencies. Host tests
+/// install recording mocks.
 pub static mut HANDLER_LIST_ACTIVATE_OPS: HandlerListActivateOps =
     DEFAULT_HANDLER_LIST_ACTIVATE_OPS;
 
@@ -240,9 +222,9 @@ pub unsafe extern "C" fn handler_list_activate(
     handlers: *mut HandlerList,
 ) {
     let ops = activate_ops();
-    let context = (ops.handler_context_get)();
+    let context = handler_context_get();
     (ops.handler_context_install_list)(context, handlers);
-    let context = (ops.handler_context_get)();
+    let context = handler_context_get();
     let state = (ops.handler_context_active_state)(context);
     let controller = app_controller_get();
     app_controller_begin_command(
@@ -341,10 +323,6 @@ mod tests {
         unsafe { &mut *ptr::addr_of_mut!(EVENTS) }
     }
 
-    unsafe extern "C" fn mock_context_get() -> *mut u8 {
-        events().push("context-get");
-        CONTEXT
-    }
 
     unsafe extern "C" fn mock_context_install(context: *mut u8, handlers: *mut HandlerList) {
         events().push("install");
@@ -462,6 +440,7 @@ mod tests {
 
     struct Installed {
         _mine: MutexGuard<'static, ()>,
+        _context: MutexGuard<'static, ()>,
         _singletons: MutexGuard<'static, ()>,
         _heap: MutexGuard<'static, ()>,
     }
@@ -481,6 +460,9 @@ mod tests {
 
     unsafe fn install(state: u32, result: *mut u8) -> Installed {
         let mine = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let context = crate::app::handler_context::HANDLER_CONTEXT_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let singletons = crate::app::singletons::SINGLETON_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
@@ -498,10 +480,10 @@ mod tests {
 
         crate::app::singletons::APP_CONTROLLER = CONTROLLER;
         crate::app::singletons::COMMAND_DISPATCHER_INSTANCE = DISPATCHER;
+        crate::app::handler_context::HANDLER_CONTEXT_INSTANCE = CONTEXT;
 
         COMMAND_RECORD_SLOT = ptr::addr_of_mut!(COMMAND_RECORD);
         HANDLER_LIST_ACTIVATE_OPS = HandlerListActivateOps {
-            handler_context_get: mock_context_get,
             handler_context_install_list: mock_context_install,
             handler_context_active_state: mock_context_state,
         };
@@ -526,7 +508,7 @@ mod tests {
         (*heap_ops).free = arena_free;
         (*heap_ops).create = arena_create;
 
-        Installed { _mine: mine, _singletons: singletons, _heap: heap }
+        Installed { _mine: mine, _context: context, _singletons: singletons, _heap: heap }
     }
 
     unsafe fn restore() {
@@ -536,6 +518,7 @@ mod tests {
         COMMAND_RECORD_RESOLVER_OPS = DEFAULT_COMMAND_RECORD_RESOLVER_OPS;
         crate::app::singletons::APP_CONTROLLER = ptr::null_mut();
         crate::app::singletons::COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
+        crate::app::handler_context::HANDLER_CONTEXT_INSTANCE = ptr::null_mut();
         events().clear();
     }
 
@@ -553,9 +536,7 @@ mod tests {
             assert_eq!(
                 events().as_slice(),
                 [
-                    "context-get",
                     "install",
-                    "context-get",
                     "state",
                     "begin-command",
                     "alloc",
