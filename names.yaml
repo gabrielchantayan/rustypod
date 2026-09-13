@@ -6380,12 +6380,12 @@ functions:
       of sem_signal @ 0x08056710 (cmp r0,#0; ldrne r0,[r0]; cmpne
       r0,#0; bne), the only flag-gated reach: callers that hold a
       semaphore SLOT pointer guard it themselves before tail-branching,
-      the veneer itself has no NULL guard. No data word in osos holds
-      0x08037e10 - never dispatched virtually. kernel/thunks.rs
-      ROM_THUNKS name slot set to Some("sem_signal") on the same
-      evidence that named sem_wait (the sem_signal wrapper @ 0x08056710
-      tail-branches here once the slot pointer is non-NULL), lifting
-      the named-entry count test to 18. Deviation (module design):
+      0x08228270. Decoding every ARM B/BL word in osos.dec finds seven
+      direct inbound BL sites: six unconditional calls (0x081af724,
+      0x082063f8, 0x082064d8, 0x082066ec, 0x08206a3c, and 0x08206af4)
+      plus one predicated BLEQ at 0x08228124. An unconditional tail B at
+      0x08201a68 also reaches this function; the predicated site invokes
+      this cleanup only when its caller's preceding comparison is equal.
       dispatches through the ROM_KERNEL hook (volatile slot read)
       instead of jumping into the mask ROM; match.py structural: an
       indirect call through the hook slot, not the 8-byte ldr pc
@@ -63759,6 +63759,42 @@ functions:
       delay, and arms it. Rust calls the ported mutex/timer implementations
       directly rather than the two 4-byte mutex thunks 0x080cb81c/0x080cb824,
       which are plain B aliases; return is the raw function's explicit zero.
+
+  - address: 0x08228200
+    ghidra: FUN_08228200
+    name: stream_cache_mass_storage_manager_clear_timer_state
+    size: 108
+    sig: "u32 stream_cache_mass_storage_manager_clear_timer_state(StreamCacheMassStorageManagerTimer *this, u32 context, u32 timeout)"
+    module: app/stream_cache_mass_storage_manager
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: context
+      param_3/r2: timeout
+      DAT_0822826c: GATEWAY_PAYLOAD_SPECIAL_CONTEXT_NEGATED
+      FUN_080cb81c: mutex_lock
+      FUN_08047f40: gateway_request_timed
+      FUN_08076954: timer_trace_assert
+      FUN_080cb824: mutex_unlock
+    notes: >-
+      Raw ARM establishes the 108-byte extent: 104 bytes of code from
+      0x08228200 through 0x08228268 and the literal-pool word 0x9c978c9d
+      at 0x0822826c; the next separately linked function starts at
+      0x08228270. Decoding every ARM B/BL word in osos.dec finds seven
+      direct inbound BL sites: six unconditional calls (0x081af724,
+      0x082063f8, 0x082064d8, 0x082066ec, 0x08206a3c, and 0x08206af4)
+      plus one predicated BLEQ at 0x08228124. An unconditional tail B at
+      0x08201a68 also reaches this function; the predicated site invokes
+      this cleanup only when its caller's preceding comparison is equal.
+      Under the mutex at this+4, a nonzero gateway-requested byte +0x00
+      dispatches gateway_request_timed with payload 0x20 only when context
+      is 0x63687363, otherwise 0x1b, then clears that byte. It clears pending
+      byte +0x02 and trace-validates this+0x10 when pending, clears stopped
+      byte +0x01, unlocks, and returns zero. Deliberate deviation: Rust
+      calls the already ported mutex, gateway, and timer functions directly
+      instead of their retailOS entry addresses; their call ordering is
+      retained. Host tests exercise active and idle flags through the shared
+      gateway/timer recorder seams.
 
   # --- Fixed selector table-record address mapper ---
   - address: 0x08218aec
