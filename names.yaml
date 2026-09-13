@@ -62018,6 +62018,39 @@ functions:
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
 
+  - address: 0x08272840
+    ghidra: FUN_08272840
+    name: bitfield_replace
+    size: 76
+    sig: "void bitfield_replace(u32 *const *word_handle, u32 hi, u32 lo, u32 value)"
+    module: util/bitfield
+    status: ported
+    renames:
+      param_1/r0: word_handle
+      param_2/r1: hi
+      param_3/r2: lo
+      param_4/r3: value
+    notes: >-
+      Replaces bits lo..=hi of the word behind word_handle with the low
+      hi-lo+1 bits of value, preserving every other bit. The six callers
+      all pass &local where local holds an LCD controller register address:
+      FUN_080923bc @ 0x080923bc writes fields 10..8, 6..4, and 3..1 of
+      0x3c400040 and fields 11..10, 9..6, and 3..0 of 0x3c400044. Raw
+      bytes decoded: e92d4030 e590c000 e59ce000 e2810001 e3e04000
+      e1a00014 e2625020 e1a04534 e1840000 e00e0000 e0411002 e2811001
+      e3a0e001 e1a0111e e2411001 e0011003 e1800211 e58c0000 e8bd8030.
+      The 76-byte extent is exact: pop {r4,r5,pc} is at +0x48 and the
+      separate sibling FUN_0827288c begins at 0x0827288c. Decoding every
+      ARM B/BL word in osos.dec finds exactly six direct calls: all plain
+      unconditional bl, zero predicated forms, and zero tail B references;
+      all are the six sites in FUN_080923bc. Every shift is by register,
+      therefore the shift amount is its low byte and amounts 32..=255
+      yield zero while 256 wraps to zero. The port uses
+      berec::arm_lsl/arm_lsr for that behavior, and read_volatile /
+      write_volatile for the controller-register load-modify-store.
+      Deliberate deviation: explicit Rust volatile accesses preserve the
+      original observable hardware effect.
+
   - address: 0x0827288c
     ghidra: FUN_0827288c
     name: bitfield_test
