@@ -130,6 +130,7 @@ pub mod open_table;
 pub mod os_close;
 pub mod os_open;
 pub mod os_read;
+pub mod os_sync;
 pub mod os_write;
 pub mod read_be32;
 pub mod randomness;

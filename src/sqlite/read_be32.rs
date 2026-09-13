@@ -97,6 +97,14 @@ mod tests {
         panic!("unexpected xWrite")
     }
 
+    unsafe extern "C" fn truncate_unused(_: *mut SqliteFile, _: i64) -> i32 {
+        panic!("unexpected xTruncate")
+    }
+
+    unsafe extern "C" fn sync_unused(_: *mut SqliteFile, _: u32) -> i32 {
+        panic!("unexpected xSync")
+    }
+
     unsafe extern "C" fn read_recording(
         file: *mut SqliteFile,
         buffer: *mut u8,
@@ -120,6 +128,8 @@ mod tests {
             close: close_unused as SqliteCloseFn,
             read: read_recording,
             write: write_unused as SqliteWriteFn,
+            truncate: truncate_unused,
+            sync: sync_unused,
         }
     }
 
