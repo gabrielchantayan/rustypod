@@ -58181,6 +58181,49 @@ functions:
       ops-table blx indirection replacing the direct bl and the
       crate's fp frame, the accepted silver_controller profile.
 
+  - address: 0x08262974
+    ghidra: FUN_08262974
+    name: cxx_mutex_opaque_context_acquire
+    size: 80
+    sig: "u32 cxx_mutex_opaque_context_acquire(CxxMutexOpaqueContext *this)"
+    module: cxx/mutex_opaque_context_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "this+0x00": embedded PosixMutex
+      "this+0x1c": opaque_context
+      "this+0x38": signed active_context_count
+      FUN_08261e20: posix_mutex_lock veneer
+      FUN_08262914/FUN_082e7f78: opaque context activation (unported seam)
+      FUN_08261e24: posix_mutex_unlock veneer
+      iVar1/r0/r5: activation_status
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte instruction extent
+      0x08262974..0x082629c0: push {r4,r5,r6,lr}; lock through the
+      0x08261e20 veneer; load the signed word at this+0x38; add one and
+      store it before testing its prior sign; for a negative prior value
+      call the 0x08262914 veneer (b 0x082e7f78) with this+0x1c; on a
+      nonzero result reload the outer word and subtract one; unlock
+      through 0x08261e24; return the activation result. The following
+      push {r4,r5,r6,lr} at 0x082629c4 starts a separately linked sibling,
+      proving the extent and absence of a literal pool. Whole-image decoding
+      of every ARM B/BL immediate finds exactly six direct bl callers: five
+      unconditional at 0x0818aa84, 0x081d7080, 0x081d7f00, 0x081d80f4,
+      and 0x081e6aa4, plus one conditional bleq at 0x08153338; there are
+      no tail-b callers and no aligned data words equal to 0x08262974.
+      Algorithm: lock the embedded PosixMutex, increment the signed activity
+      count, and activate the opaque child only when the old count was
+      negative. A failed activation undoes one count increment and is the
+      returned status; both mutex statuses are ignored. The concrete object
+      identity and the target's full lifecycle meaning remain unrecovered,
+      so the structural name describes only the binary-proven acquire action.
+      Deliberate deviation: the unported 0x082e7f78 target is a fixed-address
+      indirect call on device and an injectable read_volatile host seam,
+      preserving its sole context argument, conditional call, result, and
+      failure rollback. Host tests cover a nonnegative count with no call,
+      a negative successful activation, and a failed activation restoring the
+      original count and returning the error status.
+
   - address: 0x08262a64
     ghidra: FUN_08262a64
     name: cxx_mutex_opaque_context_construct
