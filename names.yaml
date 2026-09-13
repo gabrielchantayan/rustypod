@@ -80987,3 +80987,28 @@ functions:
       disjoint. Host test supplies a real allocator, preserves an owner-prefix
       sentinel, proves the installed module points at a 4 KiB heap, and proves
       its first allocation consumed the requested eight-byte module record.
+
+  # --- Tagged three-word record initialization ---
+  - address: 0x0822c4d8
+    ghidra: FUN_0822c4d8
+    name: clear_u16_three_word_record
+    size: 24
+    sig: "U16ThreeWordRecord *clear_u16_three_word_record(U16ThreeWordRecord *record)"
+    module: util/clear_u16_three_word_record
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1_plus_0x0: tag
+      param_1_plus_0x4: first
+      param_1_plus_0x8: second
+      param_1_plus_0xc: third
+    notes: >-
+      Raw ARM spans six instructions at 0x0822c4d8..0x0822c4ec; the distinct
+      next function starts at 0x0822c4f0. It clears the u16 tag and three
+      aligned u32 fields at +4, +8, and +12, deliberately preserving bytes
+      +2..+3, then returns the input record unchanged in r0. Decoding every
+      ARM B/BL word in osos.dec finds exactly six direct inbound calls,
+      all plain unconditional bl at 0x081b2600, 0x081b261c, 0x081b2674,
+      0x081b26c8, 0x081b271c, and 0x081b2770; no predicated BL form or
+      direct tail branch targets it. Ghidra declares void, but the raw r0
+      preservation is represented by the Rust return type.
