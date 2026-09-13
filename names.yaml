@@ -55451,6 +55451,37 @@ functions:
       call, second store, and return sequence; LLVM adds its fp frame,
       loads the fixed retail address from a literal, and uses blx for the
       deliberate unported-callee boundary.
+  - address: 0x08262944
+    ghidra: FUN_08262944
+    name: destroy_opaque_context
+    size: 20
+    sig: "void *destroy_opaque_context(void *context)"
+    module: cxx/opaque_context_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      FUN_082e7dd0: opaque context teardown (unported host/target seam)
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte instruction extent
+      0x08262944..0x08262957: push {r4,lr}; mov r4,r0; bl
+      0x082e7dd0; mov r0,r4; pop {r4,pc}. The following separately
+      linked prologue at 0x08262958 pins the end and proves there is no
+      literal pool. Whole-image decoding of every ARM B/BL immediate
+      finds exactly seven direct unconditional bl callers, at
+      0x0818a2cc, 0x081d69c8, 0x081d7d6c, 0x08261c38, 0x08261ccc,
+      0x082628dc, and 0x08262a8c: 0 predicated calls and 0 tail b
+      calls. No aligned data word equals 0x08262944, so this is not
+      vtable-dispatched. It preserves context in r4, unconditionally
+      invokes the unported 0x082e7dd0 teardown, discards its status,
+      and returns the original pointer in r0. The concrete opaque
+      object type and the callee's semantic identity are unrecovered
+      and intentionally not invented. Deviation: the fixed-address
+      callee is an indirect target call and an injectable host seam;
+      this preserves the argument, unconditional invocation, ignored
+      status, and original-pointer return. Host tests cover a
+      non-NULL context, ignored nonzero status, absence of local
+      stores, and NULL forwarding without a wrapper guard.
+
 
 
   - address: 0x08262958
