@@ -915,6 +915,41 @@ pub unsafe extern "C" fn deque_iter_assign_alias_9fd4(dst: *mut u32, src: *const
     dst
 }
 
+/// deque_iter_assign_alias_a34c — original: `FUN_083da34c` @ 0x083da34c
+/// (36 bytes; 6 direct `bl` call sites, all plain and none predicated,
+/// verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// A byte-identical `deque_iter_assign` instantiation: it copies the four
+/// aligned words of a 16-byte deque iterator (`cur`, `seg_base`, `seg_end`,
+/// `seg_slot`) forward from `src` to `dst`, then returns `dst` unchanged.
+/// The separately linked `push {r4,r5,lr}` at 0x083da370 fixes this body at
+/// 36 bytes. Its six callers are 0x082156d8, 0x08215710, 0x0821575c,
+/// 0x08215768, 0x0821580c, and 0x083df4a4; none gates the call with an ARM
+/// predicate.
+///
+/// Deliberate deviation: none. This distinct export and text section keep
+/// the independently hookable retailOS address from being folded into the
+/// byte-identical [`deque_iter_assign`] or
+/// [`deque_iter_assign_alias_9fd4`] bodies.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; the
+/// original does not handle overlap (a plain forward word copy).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_a34c")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_a34c(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
+
 /// Firmware load address of the unported 4-byte deque iterator advance
 /// member `FUN_083da088`, called by [`deque_iter_advance_copy_elem4`].
 pub const DEQUE_ITER_ADVANCE_ELEM4_ADDRESS: usize = 0x083d_a088;
@@ -3570,6 +3605,19 @@ mod tests {
             assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
         }
     }
+
+    #[test]
+    fn iter_assign_alias_a34c_copies_four_words_and_returns_dst() {
+        unsafe {
+            let src: [u32; 4] = [0, 0xffff_ffff, 0x1357_9bdf, 0x2468_ace0];
+            let mut dst: [u32; 5] = [0xaaaa_aaaa; 5];
+            let ret = deque_iter_assign_alias_a34c(dst.as_mut_ptr(), src.as_ptr());
+            assert_eq!(ret, dst.as_mut_ptr());
+            assert_eq!(&dst[..4], &src, "including zero and all-ones words");
+            assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
+        }
+    }
+
 
     #[test]
     fn iter_init_elem4_anchors_on_the_slot_segment() {

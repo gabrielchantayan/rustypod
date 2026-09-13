@@ -31360,6 +31360,29 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083da34c
+    ghidra: FUN_083da34c
+    name: deque_iter_assign_alias_a34c
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_a34c(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+    notes: >-
+      Raw ARM fixes the 36-byte extent: four forward aligned word copies
+      from src to dst followed by bx lr, with the next separately linked
+      deque iterator initializer starting at 0x083da370. It is byte-identical
+      to deque_iter_assign at 0x083da458 and the separately exported
+      0x083d9fd4 copy, but retains its own Rust symbol and text section so
+      this independently hookable retailOS target cannot be folded away.
+      Decoding every ARM B/BL word in osos.dec finds six unconditional plain
+      bl callers at 0x082156d8, 0x08215710, 0x0821575c, 0x08215768,
+      0x0821580c, and 0x083df4a4; no predicated calls or tail branches target
+      it. The routine has no NULL or overlap guard: it performs its four
+      reads and writes in increasing word order and leaves dst in r0.
+
   - address: 0x083d9ff8
     ghidra: FUN_083d9ff8
     name: deque_iter_init_elem4_alias_9ff8
