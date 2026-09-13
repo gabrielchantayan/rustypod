@@ -65146,6 +65146,31 @@ functions:
       LLVM identical-code folding with other empty-destructor exports. Host
       tests cover pointer preservation and no object writes.
 
+  # --- screen layout-name accessor ---
+  - address: 0x081742f8
+    ghidra: FUN_081742f8
+    name: app_screen_layout_name
+    size: 8
+    sig: "StringObject *app_screen_layout_name(void *screen)"
+    module: app/screen_layout
+    status: ported
+    renames:
+      param_1/r0: screen
+    notes: >-
+      Raw extent is exactly 0x081742f8..0x08174300: `add r0, r0, #0x1c; bx
+      lr`; the next separately linked function begins at 0x08174300. A
+      complete aligned ARM B/BL decode of osos.dec finds exactly six direct
+      callers, all unconditional plain BL: 0x082254cc, 0x08225d74,
+      0x08229140, 0x0823241c, 0x082352dc, and 0x08260958. There are zero
+      predicated call forms, zero tail branches, and no aligned DATA word
+      references, so it is not virtually dispatched. The function returns
+      the app screen's embedded StringObject at +0x1c without reading,
+      writing, validating, or NULL-guarding screen. Callers hand that object
+      to string_object_assign; 0x08260958 reads its payload word. No
+      deliberate deviations. The dedicated text section prevents LLVM
+      identical-code folding. Host tests cover offsets 0..3 and prove the
+      address calculation leaves surrounding storage unchanged.
+
   # --- screen layout-name setter ---
   - address: 0x08174300
     ghidra: FUN_08174300
