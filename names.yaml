@@ -75414,3 +75414,28 @@ functions:
       export preserves the target-width pointer result, single pointer
       store, and zero status. Host tests cover four distinct header values,
       verify the exact +4 result, zero status, and record preservation.
+  - address: 0x0812b080
+    ghidra: FUN_0812b080
+    name: prid_checked_word_c0
+    size: 48
+    sig: "i32 prid_checked_word_c0(const PridCheckedWordState *this)"
+    module: app/prid_checked_word_c0
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      FUN_081eb0c4: singleton_class_8900
+      FUN_081ec2ec: class_8900_prid_first_byte
+    notes: >-
+      Raw ARM is exactly 48 code bytes at 0x0812b080..0x0812b0b0; the
+      separately linked FUN_0812b0b0 starts at 0x0812b0b0. It returns the
+      signed +0xc0 word unless byte +0xda is nonzero and the class-0x8900
+      ("prID", 0x60f0) first-byte query differs from one, in which case it
+      returns 37. Decoding every aligned ARM B/BL immediate in osos.dec finds
+      exactly seven inbound direct calls, all unconditional plain bl at
+      0x081289a0, 0x0812935c, 0x0812b1f8, 0x0812b2c8, 0x0812b300,
+      0x0812b4b4, and 0x0812b4ec; there are no predicated bl forms, tail
+      branches, or aligned data words targeting this entry. No new dispatch
+      seam is introduced: both direct callees already have ports. It inherits
+      singleton_class_8900's documented crate-cache and zeroing-constructor
+      seam, so it is not hook-ready until FUN_081ee0c0 can construct the
+      class-0x8900 resource store.
