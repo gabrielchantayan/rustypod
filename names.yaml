@@ -74584,6 +74584,37 @@ functions:
       this function directly instead of retaining its fixed-address seam.
       match.py is structural review only.
 
+  # --- UI transient-slot reset ---
+  - address: 0x08146600
+    ghidra: FUN_08146600
+    name: ui_element_reset_transient_slot
+    size: 72
+    sig: "void ui_element_reset_transient_slot(void *element, u32 slot)"
+    module: ui/element_slot_reset
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: slot
+      iVar1/r4: slot_base
+      vtable_plus_0x04: dispose_method
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x08146600..0x08146648: the next separately linked constructor begins
+      at 0x08146648. Whole-image decoding of every ARM B/BL immediate finds
+      exactly six inbound branches, all unconditional plain bl at 0x08144df8,
+      0x08144ee4, 0x08144ef0, 0x08144efc, 0x08144fb0, and 0x08145024; there
+      are no predicated calls or tail-b transfers. The function selects a
+      target-width UI-element slot at element + slot*4. A non-NULL handle at
+      +0x10 is disposed through its vtable +0x04 method before the word is
+      cleared; the state word at +0x74 becomes -1, and bytes +0x88 and +0x8d
+      become zero. The raw body inlines that vtable +0x04 dispatch, so the
+      port likewise has no dispatch seam; it does not call the semantically
+      similar but separately linked vtable_slot_04_dispose port. Host fixtures
+      retain the target-width u32 handle field while storing native-width
+      pointers only in the object and vtable used by the C++ dispatch. Host
+      tests cover a populated handle with its live slot visible to the vtable
+      method and an empty slot that skips disposal. No deliberate deviations.
+
   # --- UI first collection-item bounds accessor ---
   - address: 0x08146c94
     ghidra: FUN_08146c94

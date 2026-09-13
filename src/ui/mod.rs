@@ -85,3 +85,4 @@ pub mod set_y_extent;
 pub mod layout_apply_pending_offsets;
 pub mod view_scroll_position;
 pub mod texture_upload;
+pub mod element_slot_reset;
