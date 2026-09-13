@@ -69419,6 +69419,37 @@ functions:
       ported callees are called directly rather than re-stubbed.
 
 
+  # --- SQLite expression-worklist completed-parent release ---
+  - address: 0x082c635c
+    ghidra: FUN_082c635c
+    name: expr_worklist_release_completed_parents
+    size: 104
+    sig: "void expr_worklist_release_completed_parents(ExprWorklistReleaseContext *context, ExprWorkItem *item)"
+    module: sqlite/expr_worklist
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: item
+      param_1_plus_0xc: deferred_release_guard
+      param_2_plus_0xc: control
+      param_2_plus_0xd: pending_child_count
+      param_2_plus_0x10: owner
+      item_plus_4: parent_index
+      FUN_082c635c: expr_worklist_release_completed_parents
+    notes: >-
+      Raw osos.dec corrects Ghidra's 108-byte extent: the body is 104 bytes
+      from 0x082c635c through bx lr at 0x082c63c4 and the separately linked
+      next function starts at 0x082c63c8. Decoding every ARM B/BL immediate
+      finds six inbound direct calls, all unconditional plain bl
+      (0x082c3ed8, 0x0838e2e4, 0x0838e49c, 0x0838e52c, 0x0838ea04,
+      0x0838ea10), no predicated calls, and no external tail branches. It
+      stops for NULL/already-released items; otherwise the context gate admits
+      only expression headers with bit 0 at +0x02, marks the item control
+      byte with bit 2, follows its signed parent index through its owner's
+      40-byte ExprWorkItem table, and decrements the parent's pending-child
+      byte. A zero result propagates upward; nonzero, negative index, or byte
+      underflow stops exactly as stock. Deliberate deviations: none.
+
   # --- Four-slot disk block-read gate ---
   - address: 0x082c6244
     ghidra: FUN_082c6244
