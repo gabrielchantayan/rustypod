@@ -25089,6 +25089,42 @@ functions:
       port has a dedicated target section to prevent identical-code folding;
       LLVM may inline mutex_create rather than retain the original BL. Host
       tests cover NULL, unguarded, and mutex-backed construction.
+  - address: 0x0816ccb0
+    ghidra: FUN_0816ccb0
+    name: refcounted_ptr_release_dtor_copy
+    size: 148
+    sig: "RefcountedBody **refcounted_ptr_release_dtor_copy(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      vtable_plus_0x4: virtual_destructor_slot_1
+      FUN_0839cc50: refcounted_body_mutex_lock_copy
+      FUN_0839cc60: refcounted_body_mutex_unlock_copy
+    notes: >-
+      Raw ARM establishes the 148-byte extent 0x0816ccb0..0x0816cd44; the
+      separately linked refcounted_ptr_release begins immediately afterward.
+      Ghidra's 140-byte extent drops the final return pair. Decoding every ARM
+      B/BL word in osos.dec finds exactly seven inbound direct calls, all
+      unconditional bl: 0x081425e8, 0x08142604, 0x0826fa64, 0x0826fc0c,
+      0x082c7eb8, 0x082c7fa0, and 0x083d4590; no predicated forms, direct
+      tail b sites, or aligned image data-word references exist, so it is not
+      virtually dispatched. This is a separately linked copy of
+      refcounted_ptr_release_dtor @ 0x0816cf24: NULL body returns slot
+      unchanged; otherwise it locks optional body+8, wrapping-decrements
+      body+4, and NULLs slot. A non-final drop only unlocks; final drop
+      NULL-guardedly dispatches implementation vtable word 1, never frees the
+      implementation, then unlocks and deletes/frees the mutex, clears
+      body+8, and frees body. Rust calls the existing mutex and heap ports
+      directly; LLVM may inline them rather than retain retailOS local-helper
+      BLs, but ordering is unchanged. Its target section prevents identical
+      code folding. Host tests cover NULL return identity, zero-to-minus-one
+      wrapping without teardown, final vtable dispatch, teardown ordering, and
+      retention of the implementation block.
   - address: 0x0816cd44
     ghidra: FUN_0816cd44
     name: refcounted_ptr_release
