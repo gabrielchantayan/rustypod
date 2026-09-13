@@ -76406,3 +76406,30 @@ functions:
       the retail release/free/clear order. Host tests cover disk-frame release
       before offset release, memory-stream frame forgetfulness, and the
       null-stream early return.
+
+  - address: 0x080873f0
+    ghidra: FUN_080873f0
+    name: event_code_dispatch_unflagged
+    size: 8
+    sig: "void event_code_dispatch_unflagged(u32 event_code)"
+    module: app/event_code_dispatch
+    status: ported
+    renames:
+      param_1/r0: event_code
+      r1: worker_flag
+      FUN_080873f8: event_code_dispatch_worker
+    notes: >-
+      Raw extent is exactly the two instructions at 0x080873f0..0x080873f8:
+      mov r1,#0 followed by the ABI-neutral mov r0,r0; 0x080873f8 is a
+      separately linked 88-byte shared worker, not part of this entry. A full
+      osos.dec ARM B/BL-immediate scan finds seven direct bl callers: six
+      unconditional (0x080fac50, 0x080fc7a0, 0x080fc7c4, 0x08149100,
+      0x081e2340, 0x083934d4) and one bleq (0x0814911c); its predicate is
+      caller-owned. Four unconditional b transfers enter the entry at
+      0x0809eab4, 0x080c6924, 0x0811f814, and 0x081e2324. No aligned DATA word
+      references it. It clears the shared worker's second argument, then falls
+      through. The worker maps the event through unported FUN_080e4d44, polls
+      0x089ca864+2 while sleeping one RTXC tick, then calls unported
+      FUN_08064820 with mapped code and zero flag. Deliberate deviation: ARM
+      code uses a literal tail veneer to the retail worker because the payload
+      cannot fall through; host tests use a volatile worker seam.
