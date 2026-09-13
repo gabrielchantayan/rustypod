@@ -57210,6 +57210,43 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x0823a6ac
+    ghidra: FUN_0823a6ac
+    name: cg_emit_component_transform
+    size: 156
+    sig: "void cg_emit_component_transform(cg_proc_t *proc, cg_block_t *block, cg_virtual_reg_t *source, cg_virtual_reg_t *destination, cg_virtual_reg_t *alternate, S32 mode)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r7: proc
+      param_2/r1/r4: block
+      param_3/r2/r9: source
+      param_4/r3/r5: destination
+      param_5/stack0/r8: alternate
+      param_6/stack1/r0: mode
+      uVar1/r6: zero_reg
+      uVar2/r7: selected_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM confirms the 156-byte, 39-word extent from `push
+      {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0823a6ac through `pop
+      {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x0823a744. The next function begins
+      with its own push at 0x0823a748, so there is no literal pool and
+      Ghidra's size is exact. Decoding every condition-coded ARM B/BL word
+      in osos.dec finds six direct callers, all unconditional bl with zero
+      predicated calls and zero tail b calls: 0x0823d0d8, 0x0823d100,
+      0x0823d65c, 0x0823d684, 0x0823d6ac, and 0x0823d6d4. A nonzero mode
+      appends one opcode-2 binary record for destination, source, alternate.
+      Zero mode creates zero_reg then selected_reg, emits LDI zero_reg,0,
+      opcode 15 selected_reg,source,alternate, and opcode 16
+      destination,selected_reg,zero_reg. The dispatcher emits
+      condition-code-dependent move pairs for opcodes 15 and 16; opcode 2
+      has no established Rust identity, so the port preserves all three
+      verified numeric opcodes rather than inventing names. The signed-byte
+      mode is sign-extended by every caller but only compared with zero.
+
   - address: 0x0823a830
     ghidra: FUN_0823a830
     name: cg_emit_load_word_at_offset

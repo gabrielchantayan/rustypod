@@ -239,6 +239,57 @@ pub unsafe extern "C" fn cg_emit_load_matrix4x4_word(
 
     value_reg
 }
+/// cg_emit_component_transform — original: `FUN_0823a6ac` @ 0x0823a6ac
+/// (156 bytes: 39 instruction words, from `push {r3-r9,lr}` through the
+/// `pop`; the next function starts at 0x0823a748 with its own `push`).
+///
+/// Six direct call sites, all unconditional `bl` (no predicated forms or
+/// tail branches), verified by decoding every ARM B/BL word in osos.dec:
+/// 0x0823d0d8, 0x0823d100, 0x0823d65c, 0x0823d684, 0x0823d6ac, and
+/// 0x0823d6d4.
+///
+/// Emits the component transform selected by `mode`. A nonzero mode appends
+/// one binary instruction with opcode 2, `destination`, `source`, and
+/// `alternate`. A zero mode creates `zero_reg` and `selected_reg`, appends
+/// `LDI zero_reg, 0`, then binary opcodes 15 and 16:
+///
+/// ```text
+/// opcode 15  selected_reg, source, alternate
+/// opcode 16  destination, selected_reg, zero_reg
+/// ```
+///
+/// The opcode names cannot yet be recovered reliably: the backend's opcode
+/// 15/16 paths emit condition-code-dependent move pairs, while opcode 2 has
+/// no established name in the Rust IR ledger. The port retains their
+/// verified numeric values rather than inventing identities.
+///
+/// # Deviations
+///
+/// None. The original receives `mode` as a signed byte at all six callers,
+/// but only compares it with zero; this ABI-preserving Rust signature accepts
+/// the sign-extended `i32`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_component_transform(
+    proc: *mut CgProc,
+    block: *mut CgBlock,
+    source: *mut CgVirtualReg,
+    destination: *mut CgVirtualReg,
+    alternate: *mut CgVirtualReg,
+    mode: i32,
+) {
+    if mode != 0 {
+        cg_create_inst_binary(block, 2, destination, source, alternate);
+        return;
+    }
+
+    let zero_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let selected_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, zero_reg, 0);
+    cg_create_inst_binary(block, 15, selected_reg, source, alternate);
+    cg_create_inst_binary(block, 16, destination, selected_reg, zero_reg);
+}
+
 
 /// cg_emit_subtract — original: `FUN_0824035c` @ 0x0824035c
 /// (60 bytes: 15 instruction words, 0x0824035c-0x082403598; raw bytes
@@ -556,6 +607,79 @@ mod tests {
         }
         assert!(inst.is_null(), "the block holds exactly three instructions");
         out
+    }
+
+    #[test]
+    fn component_transform_nonzero_mode_emits_one_opaque_binary_op() {
+        const SOURCE: usize = 0x1234_0000;
+        const DESTINATION: usize = 0x2345_0000;
+        const ALTERNATE: usize = 0x3456_0000;
+
+        let mut f = Fixture::new();
+        let proc = f.proc.as_mut_ptr() as *mut CgProc;
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_component_transform(
+                proc,
+                block,
+                SOURCE as *mut CgVirtualReg,
+                DESTINATION as *mut CgVirtualReg,
+                ALTERNATE as *mut CgVirtualReg,
+                -1,
+            );
+
+            let inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(inst), 2);
+            assert_eq!(field(inst, CG_INST_BINARY_DEST), DESTINATION);
+            assert_eq!(field(inst, CG_INST_BINARY_SOURCE0), SOURCE);
+            assert_eq!(field(inst, CG_INST_BINARY_SOURCE1), ALTERNATE);
+            assert_eq!(field(inst, CG_INST_NEXT), 0);
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 0);
+    }
+
+    #[test]
+    fn component_transform_zero_mode_materializes_and_wires_two_registers() {
+        const SOURCE: usize = 0x4567_0000;
+        const DESTINATION: usize = 0x5678_0000;
+        const ALTERNATE: usize = 0x6789_0000;
+
+        let mut f = Fixture::new();
+        let proc = f.proc.as_mut_ptr() as *mut CgProc;
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_component_transform(
+                proc,
+                block,
+                SOURCE as *mut CgVirtualReg,
+                DESTINATION as *mut CgVirtualReg,
+                ALTERNATE as *mut CgVirtualReg,
+                0,
+            );
+
+            let [ldi, select, merge] = emitted(&mut f);
+            let zero_reg = field(ldi, CG_INST_LOAD_IMMED_DEST);
+            let selected_reg = field(select, CG_INST_BINARY_DEST);
+
+            assert_eq!(inst_kind(ldi), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(ldi, CG_INST_LOAD_IMMED_VALUE), 0);
+            assert_eq!(field(zero_reg as *mut u8, CG_VREG_NO), 0);
+
+            assert_eq!(inst_kind(select), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(select), 15);
+            assert_eq!(field(selected_reg as *mut u8, CG_VREG_NO), 1);
+            assert_eq!(field(select, CG_INST_BINARY_SOURCE0), SOURCE);
+            assert_eq!(field(select, CG_INST_BINARY_SOURCE1), ALTERNATE);
+
+            assert_eq!(inst_kind(merge), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(merge), 16);
+            assert_eq!(field(merge, CG_INST_BINARY_DEST), DESTINATION);
+            assert_eq!(field(merge, CG_INST_BINARY_SOURCE0), selected_reg);
+            assert_eq!(field(merge, CG_INST_BINARY_SOURCE1), zero_reg);
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 2);
     }
     #[test]
     fn emits_subtract_with_opaque_context_and_operands() {
