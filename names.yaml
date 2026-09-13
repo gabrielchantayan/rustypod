@@ -77762,3 +77762,34 @@ functions:
       NULL guard and verify slot +0x04, object forwarding, unchanged slot
       contents, and returned address. match.py exit 1 is its expected structural
       diff output.
+
+  # --- virtual-slot-40 result-word wrapper ---
+  - address: 0x083d5fec
+    ghidra: FUN_083d5fec
+    name: vtable_slot_40_result_word
+    size: 24
+    sig: "u32 vtable_slot_40_result_word(void *receiver, u32 index)"
+    module: cxx/vtable_slot_40_result_word
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: index
+      receiver_deref: vtable
+      vtable_plus_0x40: unresolved_result_method
+      method_return/r0: result
+      result_plus_0x0: result_word
+    notes: >-
+      Raw ARM confirms the 24-byte extent 0x083d5fec..0x083d6004: push
+      {r4,lr}; load receiver vtable; blx vtable+0x40; load result+0x00; pop
+      {r4,pc}. The separate sibling begins at 0x083d6004. The raw body leaves
+      r1 untouched across its indirect call, so index is a real forwarded
+      virtual-method argument even though Ghidra drops it from the prototype.
+      It returns the first word of the virtual result without a NULL guard on
+      receiver, vtable, method result, or result word. A full osos.dec ARM
+      immediate B/BL decode finds exactly six direct inbound calls, all
+      unconditional bl at 0x0811b910, 0x0811b954, 0x0811bafc, 0x0811bb40,
+      0x0839c9b4, and 0x0839c9f8; zero predicated bl forms and zero direct
+      tail branches. The vtable target identity is not established and is not
+      invented. Rust uses host-sized vtable cells but the same word-16 selection
+      and call/result-load sequence. Host coverage proves receiver/index
+      forwarding, return-word propagation, and exclusive +0x40 dispatch.

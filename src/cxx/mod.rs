@@ -129,6 +129,7 @@ pub mod opaque_descriptor_convert;
 pub mod generic_descriptor_convert;
 pub mod value_compare;
 pub mod vtable;
+pub mod vtable_slot_40_result_word;
 pub mod vtable_word_callback;
 pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
