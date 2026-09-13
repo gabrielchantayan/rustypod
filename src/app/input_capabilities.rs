@@ -52,14 +52,17 @@ mod tests {
     use super::*;
     use core::ptr;
 
-    static mut ARENA: [u8; core::mem::size_of::<u32>()] = [0; core::mem::size_of::<u32>()];
+    #[repr(align(4))]
+    struct AlignedArena([u8; core::mem::size_of::<u32>()]);
+
+    static mut ARENA: AlignedArena = AlignedArena([0; core::mem::size_of::<u32>()]);
 
     #[test]
     fn allocates_one_word_plants_vtable_and_caches_instance() {
         let guard = crate::heap::veneers::tests::mock_heap();
         unsafe {
             let arena = ptr::addr_of_mut!(ARENA).cast::<u8>();
-            ARENA = [0; core::mem::size_of::<u32>()];
+            ARENA.0 = [0; core::mem::size_of::<u32>()];
             INPUT_CAPABILITIES_INSTANCE = ptr::null_mut();
             crate::heap::veneers::tests::set_alloc_ret(arena);
 

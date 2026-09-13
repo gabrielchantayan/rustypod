@@ -74059,6 +74059,44 @@ functions:
       constructor dispatch, store, and reload; expected differences are
       the seam `blx`, an fp frame, and LLVM's inverted fast-path branch.
 
+  # --- Lazy singleton allocation getter ---
+  - address: 0x08258ba0
+    ghidra: FUN_08258ba0
+    name: lazy_singleton_0x80
+    size: 44
+    sig: "void *lazy_singleton_0x80(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_08258bcc: SINGLETON_0X80_CACHE_POOL (trailing pool word holding 0x089d00b8)
+      DAT_089d00b8: SINGLETON_0X80_CACHE
+      FUN_082aadd4: operator_new
+      FUN_082590e0: singleton_0x80_ctor
+    notes: >-
+      Raw osos.dec establishes 44 code bytes from 0x08258ba0 through
+      pop {r4,pc} at 0x08258bc8 plus its literal-pool word 0x089d00b8
+      at 0x08258bcc; the separately linked input-capabilities getter
+      begins at 0x08258bd0, so the true extent is 48 bytes. Full ARM B/BL
+      decoding finds exactly seven direct inbound BL calls, all
+      unconditional and no predicated forms or plain-B tail sites:
+      0x081a9c30, 0x081aa500, 0x081aa5f0, 0x081add54, 0x081ec384,
+      0x081ed9ec, and 0x08289d6c. Algorithm: load cache 0x089d00b8;
+      on NULL allocate 0x80 bytes through operator_new, call the
+      unported constructor 0x082590e0, store its return, then reload and
+      return the cache. Callers use the opaque result through vtable
+      slots +0x20 and +0x24, but neither they nor its constructor recover
+      a class name or registry id, so the name records only the verified
+      singleton shape and allocation extent. Deliberate deviations:
+      constructor dispatch uses the SINGLETON_CTORS.singleton_0x80 seam
+      with the zeroing default, and the cache is the crate static rather
+      than the runtime-initialized firmware word; it is not hook-ready
+      until the constructor is ported. Host tests cover allocation and
+      caching, pre-seeded cache, NULL-return retry, and post-constructor
+      store order. match.py structural review shows the same cache test,
+      allocation, dispatch, store, and reload; expected differences are
+      the seam blx, extra frame/save register, and LLVM's split
+      fast-path return.
+
   # --- draw-state text-range renderer adapter ---
   - address: 0x08262cbc
     ghidra: FUN_08262cbc
