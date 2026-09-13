@@ -73352,6 +73352,38 @@ functions:
       review finds the same cursor loop, conditional copy, and 24-byte step;
       its extra setup and indirect call are the deliberate veneer deviation.
 
+  # --- vector<u32> range-copy template ---
+  - address: 0x083e9418
+    ghidra: thunk_FUN_083e9430
+    name: vector_copy_range_u32
+    size: 40
+    sig: "u32 *vector_copy_range_u32(const u32 *first, const u32 *last, u32 *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: unused_vector
+      r12: word
+      return/r0: output_cursor
+    notes: >-
+      Although Ghidra reports a 4-byte thunk at 0x083e9418, raw osos.dec
+      shows the entry's b 0x083e9430 enters its own scheduled compare/loop
+      header; the backward bne reaches the loop body at 0x083e941c, and the
+      function returns at 0x083e943c. Its complete extent is therefore
+      0x083e9418..0x083e9440, with the separately linked next function at
+      0x083e9440. It forward-copies aligned u32 words from [first, last) when
+      the current output cursor is nonzero, then advances both cursors by four
+      bytes and returns output. An initially NULL output skips only the first
+      source read and advances to address 4. Complete aligned ARM B/BL
+      immediate decoding finds exactly six inbound direct calls, all
+      unconditional plain bl at 0x083e65a4, 0x083e65e0, 0x083e6698,
+      0x083e66ec, 0x083e676c, and 0x083e67ac; there are no predicated calls.
+      r3 is never read and is omitted from the Rust ABI. Host tests cover
+      copying and the exclusive range end, the empty range, and the NULL
+      output one-word path.
+
   - address: 0x083e78b4
     ghidra: FUN_083e78b4
     name: vtable_shared_handle_construct
