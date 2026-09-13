@@ -65072,6 +65072,55 @@ functions:
       only their own link word and retain arbitrary link patterns, while
       128, 129, 0x80000000, and 0xffffffff leave the table unchanged.
 
+  - address: 0x0820ccc0
+    ghidra: FUN_0820ccc0
+    name: mov_chain_table_lookup_tagged_value
+    size: 136
+    sig: "i32 mov_chain_table_lookup_tagged_value(MovChainTableManager *manager, u32 *out, i32 index, u32 match_value)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: manager
+      param_2/r1: out
+      param_3/r2: index
+      param_4/r3: match_value
+      field_00: value
+      field_10: match_value
+    notes: >-
+      Raw ARM establishes the exact 136-byte extent 0x0820ccc0..0x0820cd48:
+      push {r4-r8,lr}; load the lock service at this+0xa08 and mutex at
+      this+0xa00; lock; inspect an in-range twenty-byte entry; unlock; then
+      return. The separately linked sibling at 0x0820cd48 begins mov r1,#0,
+      confirming Ghidra's extent and that no literal pool belongs here.
+      Decoding every ARM B/BL word in osos.dec finds seven direct call
+      sites, all unconditional plain bl at 0x081e32c8, 0x081e3338,
+      0x081e3454, 0x081e3704, 0x081e3864, 0x081e3a9c, and 0x081e48dc;
+      zero predicated forms and zero tail branches. No aligned osos.dec DATA
+      word holds 0x0820ccc0, so it is not dispatched virtually.
+      With a successful lock, signed indexes below 128 except -1 inspect the
+      entry at this + index*20; this deliberately admits negative values
+      other than -1, exactly as the bge then cmn r5,#1 sequence does. The
+      direct callers provide ordinary table indexes or the -1 sentinel. The
+      entry tag at +0x08 must equal 3 before its +0x10 word compares with r3.
+      On a match, the entry +0x00 word always stores to *out before its
+      nonzero value changes the result from 2 to 0. Therefore a matching zero
+      word writes zero but returns 2; mismatches and rejected indexes (-1 or
+      >=128) leave *out untouched. The lock/unlock adapters always return
+      zero today, but the stock early lock-failure and final unlock-failure
+      returns of 2 are retained. The zero predicated-call count is
+      behavioural: every direct caller relies on this function's lock and
+      signed bounds checks rather than guarding them first. No deviations or
+      NULL guards.
+      Host tests cover a matching nonzero entry, tag/value mismatches plus
+      -1, 128, and i32::MAX rejected boundaries leaving *out unchanged, the
+      admitted -2 predecessor entry, and a matching zero value storing zero
+      while returning 2. match.py structural review emits an equivalent signed
+      cmp #127 / bgt filter for stock's cmp #128 / bge, followed by cmn
+      index,#1, entry *5*4 addressing, store-before-zero-test, and paired
+      lock-service calls after ARM release compilation. The Rust service
+      pointer read is volatile so LLVM retains stock's this+0xa08 load even
+      though the paired adapters always return zero.
+
   - address: 0x0835206c
     ghidra: FUN_0835206c
     name: xor_f6_in_place
