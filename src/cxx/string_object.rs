@@ -146,6 +146,11 @@
 //!   @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs the count+1
 //!   strlen variant over it, while the 0x08279338 neighbor scans the
 //!   class's characters for the path separators ':', '/' and '\\'.
+//! - `string_object_suffix` — original: `FUN_082a52e8` @ 0x082a52e8
+//!   (128 bytes, all code; 6 plain `bl` call sites, binary-scanned). It
+//!   default-constructs `out`, reverse-walks a source payload by no more than
+//!   the requested number of decoded sequences, then assigns that suffix
+//!   through the existing capped UTF-8 assignment boundary.
 //! - `string_object_find_utf8_prefix` — original: `FUN_082a5170` @
 //!   0x082a5170 (176 bytes, all code; 26 plain `bl` call sites,
 //!   binary-scanned). Searches a payload from a codepoint index. The
@@ -1835,6 +1840,59 @@ pub unsafe extern "C" fn string_object_substring(
     }
     let start = string_object_codepoint_ptr(source, start_index);
     assign_utf8_capped_op()(out, start, max_codepoints);
+}
+
+/// string_object_suffix — original: `FUN_082a52e8` @ 0x082a52e8 (128
+/// bytes, all code; the next separately linked function begins at
+/// 0x082a5368). **6 direct `bl` call sites**, all unconditional, zero
+/// predicated, verified by decoding every ARM `B`/`BL` word in `osos.dec`:
+/// 0x08130d28, 0x081bcf24, 0x0827904c, 0x08279398, 0x082a225c, and
+/// 0x082a5570.
+///
+/// Default-constructs `out` first. A NULL source payload then returns, leaving
+/// that empty object. Otherwise it walks source bytes forward until a literal
+/// NUL at its loop header, counting decoder invocations, caps a positive
+/// `max_codepoints` at that count, walks back that many sequences with
+/// [`utf8_prev_codepoint`], and hands `(out, cursor, selected_count)` to
+/// capped assignment @ 0x082764d8. The decoder's return value is deliberately
+/// ignored during the forward scan: malformed/four-byte leads still advance
+/// and count, and can consume a string's NUL before the next loop-header load.
+/// A nonpositive request selects zero sequences, so the tail receives the
+/// terminator cursor and zero rather than the negative argument.
+///
+/// The capped assignment tail @ 0x082764d8 is not ported because its virtual
+/// slots remain ROM identities; this calls the pre-existing volatile
+/// [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] boundary, exactly as
+/// [`string_object_substring`] does. No other deviations. `out` and `source`
+/// must be valid writable/readable StringObjects; a non-NULL payload must be
+/// readable through every forward/reverse decoder access, including the
+/// retail decoder's malformed-sequence overreads.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_suffix(
+    out: *mut StringObject,
+    source: *const StringObject,
+    max_codepoints: i32,
+) {
+    let out = string_default_construct(out);
+    let mut cursor = (*source).payload as *const u8;
+    if cursor.is_null() {
+        return;
+    }
+
+    let mut count = 0i32;
+    while *cursor != 0 {
+        utf8_next_codepoint(&mut cursor);
+        count = count.wrapping_add(1);
+    }
+    let selected_count = if max_codepoints > count { count } else { max_codepoints };
+
+    let mut selected = 0i32;
+    while selected < selected_count {
+        utf8_prev_codepoint(&mut cursor);
+        selected = selected.wrapping_add(1);
+    }
+    assign_utf8_capped_op()(out, cursor, selected);
 }
 
 /// Keeps the searcher's comparison as an out-of-line call. Without this
@@ -3691,6 +3749,85 @@ pub(crate) mod tests {
         }
         assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
         assert!(out.payload.is_null());
+    }
+
+    // ---- string_object_suffix ---------------------------------------
+
+    #[test]
+    fn suffix_constructs_out_then_returns_on_a_null_source_payload() {
+        let _bench = substring_bench();
+        let mut out = substring_garbage_out();
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            string_object_suffix(&mut out, &source, 1);
+        }
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+        assert!(substring_calls().is_empty());
+    }
+
+    #[test]
+    fn suffix_selects_the_last_requested_utf8_sequences_and_caps_the_request() {
+        let _bench = substring_bench();
+        let mut payload = *b"A\xc2\xa9\xe2\x82\xacZ\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let mut expected = Vec::new();
+        for (max_codepoints, offset, selected_count) in [
+            (-7, 7, 0),
+            (0, 7, 0),
+            (1, 6, 1),
+            (2, 3, 2),
+            (4, 0, 4),
+            (i32::MAX, 0, 4),
+        ] {
+            let mut out = substring_garbage_out();
+            let out_ptr: *mut StringObject = &mut out;
+            unsafe {
+                string_object_suffix(out_ptr, &source, max_codepoints);
+            }
+            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(out.payload.is_null());
+            expected.push((
+                out_ptr as usize,
+                unsafe { payload.as_ptr().add(offset) } as usize,
+                selected_count,
+            ));
+        }
+        assert_eq!(substring_calls(), expected);
+    }
+
+    #[test]
+    fn suffix_counts_malformed_sequences_even_when_they_consume_the_terminator() {
+        let _bench = substring_bench();
+        // The F0 decoder consumes bytes 1..3, then the high-bit byte at 4
+        // consumes byte 6's NUL as its third byte. The padded zero at 7 is
+        // therefore the first loop-header terminator the retail walk sees.
+        let mut payload = [b'A', 0xf0, 0x9f, 0x98, 0x80, b'Z', 0, 0, 0, 0];
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let mut out = substring_garbage_out();
+        let out_ptr: *mut StringObject = &mut out;
+        unsafe {
+            string_object_suffix(out_ptr, &source, 2);
+        }
+        let calls = substring_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            (
+                out_ptr as usize,
+                unsafe { payload.as_ptr().add(5) } as usize,
+                2,
+            )
+        );
     }
 
     /// A fresh object for the UTF-16 assignment tests; the payload word is a

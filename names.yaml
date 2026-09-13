@@ -21971,6 +21971,43 @@ functions:
       starts, absent/empty/NULL payload results, start-at-terminator, and
       malformed-lead zero matching. match.py structural review is expected
       to differ in frame and loop lowering.
+
+  - address: 0x082a52e8
+    ghidra: FUN_082a52e8
+    name: string_object_suffix
+    size: 128
+    sig: "void string_object_suffix(StringObject *out, const StringObject *source, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r7: out
+      param_2/r1/r4: source
+      param_3/r2/r6: max_codepoints
+      local_18/sp: cursor
+      r5: selected_count
+      r4: sequence_count
+    notes: >-
+      Raw osos.dec decodes exactly 32 ARM words from 0x082a52e8 through
+      0x082a5364; the next separately linked function begins at 0x082a5368,
+      so Ghidra's 128-byte extent is exact. Decoding every ARM B/BL word
+      finds 6 direct call sites, all unconditional bl and zero predicated:
+      0x08130d28, 0x081bcf24, 0x0827904c, 0x08279398, 0x082a225c, and
+      0x082a5570. This is StringObject suffix extraction: it default
+      constructs out first, returns if source->payload is NULL, counts every
+      forward UTF-8 decoder invocation while the cursor's loop-header byte is
+      nonzero, clamps a positive requested count to that count, reverse
+      decodes the selected tail, then calls capped assignment @ 0x082764d8
+      with (out, cursor, selected_count). Forward decode return values are
+      ignored; malformed/four-byte leads count and may consume the string NUL
+      before the next loop-header load. Nonpositive requests produce a zero
+      selected_count and thus pass the terminator cursor plus zero, not the
+      original negative count. Deliberate deviation: 0x082764d8 remains
+      unported because its vtable +0x8/+0xc targets are ROM identities, so
+      the existing volatile STRING_OBJECT_ASSIGN_UTF8_CAPPED seam receives
+      the exact tail arguments. Host tests cover NULL construction, multibyte
+      suffixes, clamping, nonpositive counts, and malformed lead/NUL
+      consumption. match.py structural review is expected to differ in frame
+      layout and loop lowering.
   - address: 0x082a50a8
     ghidra: FUN_082a50a8
     name: string_object_utf8_strcasecmp_safe
