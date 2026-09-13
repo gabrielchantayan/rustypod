@@ -74519,3 +74519,41 @@ functions:
       member_release_if_present Rust body rather than adding a duplicate
       dispatch seam; the target's unspecified post-release r0 is represented
       by the void Rust ABI, because every verified caller ignores it.
+
+  # --- Identified vtable flagged-pair constructor ---
+  - address: 0x08205a38
+    ghidra: FUN_08205a38
+    name: identified_vtable_flagged_pair_construct
+    size: 56
+    sig: "void *identified_vtable_flagged_pair_construct(void *this, u32 input_at_16, u32 input_at_20, u8 flag_at_60)"
+    module: cxx/identified_vtable_flagged_pair_construct
+    status: ported
+    renames:
+      param_1/r0: this (aligned writable derived-object prefix, returned through base r0)
+      param_2/r1: input_at_16
+      param_3/r2: input_at_20
+      param_4/r3: flag_at_60
+      DAT_08205a70: derived_vtable_089918bc
+      FUN_08274f10: identified_vtable_base_construct (unported exact default behind existing ops seam)
+      DAT_08274f3c: base_vtable_089a5f98
+      DAT_08274f40: base_id_counter_08a09f00
+    notes: >-
+      Raw osos.dec establishes 52 code bytes from 0x08205a38 through pop
+      {r4,r5,r6,pc} at 0x08205a6c, followed by the owned 0x089918bc vtable
+      literal at 0x08205a70; the next separately linked function begins at
+      0x08205a74 with cmp r0,#0. The 56-byte raw extent agrees with Ghidra's
+      reported size. Decoding every ARM B/BL immediate finds exactly seven
+      direct inbound call sites, all unconditional bl (0x08147c1c,
+      0x08147d1c, 0x08147e90, 0x0815ef1c, 0x081a2708, 0x081ba010, and
+      0x081fb3cc), with zero predicated forms and zero direct plain-B tails;
+      no aligned raw image word equals the entry. The constructor calls
+      0x08274f10, installs the derived vtable through its r0 return, clears
+      words +0x34/+0x38, writes r3's low byte at +0x3c, and writes r1/r2 at
+      +0x10/+0x14. The broader class identity is unestablished, so the name
+      records only that verified vtable, pair, and flag behavior. Deliberate
+      deviation: 0x08274f10 remains unported; this port reuses
+      cxx/identified_vtable_object_construct's existing faithful ops seam,
+      whose default performs the decoded base vtable, zero, identifier, and
+      counter-increment operations. Host tests verify the base and derived
+      fields, untouched bytes, and that every derived store targets the base
+      constructor's returned pointer.
