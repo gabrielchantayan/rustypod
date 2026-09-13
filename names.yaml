@@ -46714,6 +46714,32 @@ functions:
       NULL forwarding. match.py structural review records the expected
       blx-through-dispatch difference.
 
+  - address: 0x082621dc
+    ghidra: FUN_082621dc
+    name: mutex_destroy_return_this
+    size: 20
+    sig: "void *mutex_destroy_return_this(void *this)"
+    module: cxx/mutex_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_082e82a4: pthread_mutex_destroy (unported)
+    notes: >-
+      Raw osos.dec extent is exactly 20 bytes: five ARM words from
+      0x082621dc through `pop {r4,pc}` at 0x082621ec; the separately linked
+      next function opens at 0x082621f0. It saves this, calls
+      pthread_mutex_destroy @ 0x082e82a4 on the embedded mutex at +0,
+      discards the status, and returns this unchanged. Decoding every ARM
+      B/BL word finds exactly six direct call sites, all unconditional bl
+      (0x0817dbd4, 0x081f00d0, 0x081f15d4, 0x081fc970, 0x08280520,
+      0x0828e758); no predicated bl or direct B site exists. Deliberate
+      deviation: pthread_mutex_destroy is unported, so the direct target
+      crosses the pre-existing CXX_MUTEX_DESTROY_OPS volatile seam, whose
+      default returns success. The unique target text section preserves this
+      byte-identical C++ wrapper as a distinct hook target from
+      cxx_mutex_destroy @ 0x08261e54. Host tests prove forwarding, ignored
+      status, unchanged storage, and NULL forwarding. match.py review is
+      expected to show the volatile indirect call instead of raw `bl`.
   - address: 0x082621a8
     ghidra: (veneer)
     name: posix_mutex_lock_veneer_b

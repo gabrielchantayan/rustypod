@@ -1,7 +1,9 @@
-//! `cxx_mutex_destroy` — original: `FUN_08261e54` @ 0x08261e54.
+//! C++ mutex-destroy wrappers.
 //!
-//! The raw ARM extent is 20 bytes of code (0x08261e54..0x08261e68; the
-//! next function begins at 0x08261e68), with no literal pool:
+//! `cxx_mutex_destroy` is `FUN_08261e54` @ `0x08261e54`; its sibling
+//! `mutex_destroy_return_this` is `FUN_082621dc` @ `0x082621dc`. Both are
+//! 20-byte wrappers that destroy the POSIX mutex embedded at `this`, discard
+//! the native status, and return `this`. They remain distinct hook targets.
 //!
 //! ```text
 //! push {r4, lr}
@@ -11,17 +13,13 @@
 //! pop  {r4, pc}
 //! ```
 //!
-//! Binary-decoding every ARM B/BL word finds 19 unconditional `bl` callers,
-//! zero predicated calls, and four tail `b` callers; no image word equals this
-//! address, so it is not a data-dispatched virtual target. The wrapper calls
-//! pthread_mutex_destroy on its embedded mutex at offset zero, discards that
-//! function's status, and returns `this` unchanged. It deliberately has no
-//! NULL guard: NULL reaches the callee, whose native error status is then
-//! discarded.
+//! `FUN_082621dc` has six direct unconditional `bl` callers and no direct
+//! tail branches or predicated call forms. No aligned image word equals its
+//! address, so it is not a data-dispatched virtual target.
 //!
-//! Deviation: pthread_mutex_destroy @ 0x082e82a4 is not ported. The call
-//! therefore crosses [`CXX_MUTEX_DESTROY_OPS`] and defaults to an inert,
-//! success-returning stub. This wrapper is not hook-ready until that callee is
+//! Deviation: pthread_mutex_destroy @ 0x082e82a4 is not ported. The calls
+//! therefore cross [`CXX_MUTEX_DESTROY_OPS`], whose default is an inert,
+//! success-returning stub. Neither wrapper is hook-ready until that callee is
 //! ported; the dispatch retains the exact one-call and return-this contract.
 
 /// Indirect callee for the unresolved pthread_mutex_destroy @ 0x082e82a4.
@@ -52,6 +50,25 @@ pub static mut CXX_MUTEX_DESTROY_OPS: CxxMutexDestroyOps = DEFAULT_CXX_MUTEX_DES
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cxx_mutex_destroy(this: *mut u8) -> *mut u8 {
+    let mutex_destroy = core::ptr::read_volatile(core::ptr::addr_of!(CXX_MUTEX_DESTROY_OPS.mutex_destroy));
+    mutex_destroy(this);
+    this
+}
+
+/// mutex_destroy_return_this — original: `FUN_082621dc` @ `0x082621dc`
+/// (20 bytes; six unconditional `bl` call sites, no predicated calls or
+/// direct tail branches, binary-scanned).
+///
+/// Calls pthread_mutex_destroy on the mutex at `this`, discards its status,
+/// and returns `this` unchanged. Like the raw ARM body, this wrapper has no
+/// NULL guard: NULL reaches the native destroy boundary. It deliberately
+/// reuses the existing unported native-destroy seam; its unique target text
+/// section preserves this separately linked wrapper's hook identity despite
+/// its byte-identical sibling [`cxx_mutex_destroy`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mutex_destroy_return_this")]
+#[inline(never)]
+pub unsafe extern "C" fn mutex_destroy_return_this(this: *mut u8) -> *mut u8 {
     let mutex_destroy = core::ptr::read_volatile(core::ptr::addr_of!(CXX_MUTEX_DESTROY_OPS.mutex_destroy));
     mutex_destroy(this);
     this
@@ -114,6 +131,29 @@ mod tests {
         let _ops = install_destroy_recorder();
 
         let returned = unsafe { cxx_mutex_destroy(core::ptr::null_mut()) };
+
+        assert!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read().is_null() }, "NULL reaches pthread_mutex_destroy");
+        assert!(returned.is_null(), "the unchanged NULL this pointer is returned");
+    }
+
+    #[test]
+    fn sibling_destroy_forwards_this_discards_status_and_returns_this() {
+        let mut wrapper = [0xa5u8; 0x1c];
+        let this = wrapper.as_mut_ptr();
+        let _ops = install_destroy_recorder();
+
+        let returned = unsafe { mutex_destroy_return_this(this) };
+
+        assert_eq!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read() }, this, "the only call receives the embedded mutex at this+0");
+        assert_eq!(returned, this, "the native status is discarded and mov r0, r4 returns this");
+        assert_eq!(wrapper, [0xa5u8; 0x1c], "the wrapper itself performs no writes");
+    }
+
+    #[test]
+    fn sibling_destroy_forwards_null_without_a_wrapper_guard() {
+        let _ops = install_destroy_recorder();
+
+        let returned = unsafe { mutex_destroy_return_this(core::ptr::null_mut()) };
 
         assert!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read().is_null() }, "NULL reaches pthread_mutex_destroy");
         assert!(returned.is_null(), "the unchanged NULL this pointer is returned");
