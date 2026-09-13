@@ -76634,3 +76634,42 @@ functions:
       or data-word dispatch reference targets this entry. No deliberate
       behavioral deviations; the own text section and #[inline(never)]
       preserve a distinct device BL target.
+
+  # --- Managed entry reverse-offset index search ---
+  - address: 0x08066160
+    ghidra: FUN_08066160
+    name: managed_entry_search_key_index
+    size: 128
+    sig: "u32 managed_entry_search_key_index(const ManagedEntrySearchManager *manager, const ManagedEntrySearchRecord *record, const void *key, u16 *out_index)"
+    module: app/managed_entry
+    status: ported
+    renames:
+      param_1/r0: manager
+      param_1_plus_0x08/r9: manager.compare
+      param_1_plus_0x1c/r0: manager.reverse_offsets_end
+      param_2/r7: record
+      param_2_plus_0x0a/r1: record.entry_count
+      param_3/r11: key
+      param_4/r10: out_index
+      iVar4/r5: lower_index
+      iVar5/r6: upper_index
+      iVar1/r4: middle_index
+      pcVar6/r9: compare
+    notes: >-
+      Raw ARM is exactly 32 instructions from 0x08066160 through the pop at
+      0x080661dc; the separately linked sibling starts with push
+      {r4-r9,sl,fp,lr} at 0x080661e0, so Ghidra's 128-byte extent is exact.
+      Decoding every immediate ARM B/BL word in osos.dec finds exactly seven
+      direct inbound calls, all unconditional plain bl at 0x08041df8,
+      0x08041e88, 0x08050858, 0x080508d8, 0x080509a4, 0x08066248, and
+      0x0806b774; there are no predicated forms. It binary-searches the
+      reverse u16 offset table ending at manager+0x1c, invokes the object
+      callback at manager+0x08 with (key, record + selected_offset), and
+      returns 1 for equality or 0 after writing the lower-bound insertion
+      index. A zero entry count writes zero and makes no callback. The
+      manager/record domain beyond these observed fields is not recovered or
+      invented. Rust uses repr(C) target overlays and preserves the
+      object-carried comparison callback directly; no dispatch seam or
+      deliberate behavioral deviation is needed. Host tests cover exact hit,
+      every absent-key insertion boundary, reverse table order, and the
+      empty-table no-dispatch path.
