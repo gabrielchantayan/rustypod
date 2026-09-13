@@ -6778,6 +6778,28 @@ functions:
       than retail bl targets and LLVM unrolling the fixed ten-counter group;
       both retain the same 24 attempted increments and ignored results.
 
+  - address: 0x0806c030
+    ghidra: FUN_0806c030
+    name: positive_counter_decrement
+    size: 20
+    sig: "void positive_counter_decrement(u8 *object)"
+    module: util/positive_counter_decrement
+    status: ported
+    renames:
+      param_1/r0: object
+      "*(param_1 + 0x14)": positive_counter
+    notes: >-
+      Raw ARM extent is exactly 0x0806c030..0x0806c040; the next separately
+      entered function begins at 0x0806c044. The five instructions load the
+      signed word at object +0x14, compare it to zero, and conditionally
+      decrement and store only positive values. Decoding every ARM B/BL-immediate
+      word in osos.dec confirms seven inbound direct call sites, all unconditional
+      bl: 0x0803bc80, 0x080488b8, 0x08048974, 0x08058aa8, 0x08058b54,
+      0x08064728, and 0x080681bc; there are no predicated forms or tail branches.
+      The field's higher-level identity is unresolved, so the port uses the
+      directly observed positive-counter behavior and adds no dispatch seam.
+      No deliberate deviations.
+
   - address: 0x0806c0b8
     ghidra: FUN_0806c0b8
     name: tdat_element_release_counters
