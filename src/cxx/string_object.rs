@@ -1765,6 +1765,33 @@ pub unsafe extern "C" fn primary_string_record_c_str(
 ) -> *const u8 {
     string_object_c_str(&(*record).primary)
 }
+/// primary_string_record_assign_from_string_object — original:
+/// `FUN_0826bcf0` @ 0x0826bcf0 (32 bytes; **6 direct `bl` call sites**,
+/// all unconditional and zero predicated, binary-scanned: 0x0811850c,
+/// 0x08178ba8, 0x08178c50, 0x08178e80, 0x0828b934, and 0x0828bd14).
+///
+/// Decoded from raw `osos.dec`: retain the destination record across
+/// `string_object_c_str(source)`, then tail-branch to
+/// `string_object_assign_payload(&record.primary, source_c_str)`. The
+/// destination's first word is untouched; its embedded `StringObject` begins
+/// at +0x04 on ARM. A NULL source payload becomes the shared empty C string,
+/// so the assignment follows its empty-payload virtual-clear path. Neither
+/// record nor source is NULL-guarded.
+///
+/// Deliberate deviations: none. The opaque record prefix is represented by
+/// [`PrimaryStringRecord`] so its embedded field remains correctly separated
+/// from the leading target word on both ARM and widened-pointer hosts.
+#[cfg_attr(target_os = "none", link_section = ".text.primary_string_record_assign_from_string_object")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn primary_string_record_assign_from_string_object(
+    record: *mut PrimaryStringRecord,
+    source: *const StringObject,
+) {
+    let source_payload = string_object_c_str(source);
+    string_object_assign_payload(core::ptr::addr_of_mut!((*record).primary), source_payload);
+}
+
 
 /// string_object_codepoint_ptr — original: FUN_082a50c4 @ 0x082a50c4
 /// (84 bytes, all code; seven BL references). Negative indices return NULL
@@ -3593,6 +3620,76 @@ pub(crate) mod tests {
             std::vec![this as usize, this as usize]
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn primary_string_record_assignment_forwards_the_source_c_string() {
+        let source_payload = *b"album\0";
+        let mut destination = [0xa5u8; 16];
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: source_payload.as_ptr() as *mut u8,
+        };
+        let mut record = PrimaryStringRecord {
+            header: 0x1234_5678,
+            primary: StringObject {
+                vtable: core::ptr::null(),
+                payload: 0xcafe_f00d as *mut u8,
+            },
+        };
+        let primary = core::ptr::addr_of_mut!(record.primary);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe {
+            primary_string_record_assign_from_string_object(
+                core::ptr::addr_of_mut!(record),
+                core::ptr::addr_of!(source),
+            );
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(primary as usize, source_payload.len(), 0)],
+            "the embedded object receives the NULL-safe source C string"
+        );
+        assert_eq!(&destination[..source_payload.len()], &source_payload);
+        assert_eq!(source_payload, *b"album\0", "source remains caller-owned");
+        assert_eq!(record.header, 0x1234_5678, "the leading record word is untouched");
+    }
+
+    #[test]
+    fn primary_string_record_assignment_clears_when_source_payload_is_null() {
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut record = PrimaryStringRecord {
+            header: 0x1234_5678,
+            primary: StringObject {
+                vtable: core::ptr::null(),
+                payload: 0xcafe_f00d as *mut u8,
+            },
+        };
+        let primary = core::ptr::addr_of_mut!(record.primary);
+        let _bench = assign_cstr_bench(0x1111_1111 as *mut u8);
+
+        unsafe {
+            primary_string_record_assign_from_string_object(
+                core::ptr::addr_of_mut!(record),
+                core::ptr::addr_of!(source),
+            );
+        }
+
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "the shared empty string does not allocate"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![primary as usize],
+            "the embedded object alone reaches virtual slot +0xc"
+        );
+        assert_eq!(record.header, 0x1234_5678);
     }
 
     // ---- string_object_assign_utf16 ---------------------------------

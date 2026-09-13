@@ -80465,3 +80465,33 @@ functions:
       20-byte target layout by storing the embedded StringObject as two u32
       words; this is the required host-pointer-width representation, not a
       behavioral deviation.
+
+  # --- Primary-string record assignment (cxx/string_object) ---
+  - address: 0x0826bcf0
+    ghidra: FUN_0826bcf0
+    name: primary_string_record_assign_from_string_object
+    size: 32
+    sig: "void primary_string_record_assign_from_string_object(PrimaryStringRecord *record, const StringObject *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      param_2/r1/r0: source
+      FUN_082a50b0: string_object_c_str
+      FUN_08276474: string_object_assign_payload
+      "record+0x04": primary
+    notes: >-
+      Raw osos.dec has exactly eight ARM instructions from 0x0826bcf0 through
+      the tail b at 0x0826bd0c; the next separately linked function begins at
+      0x0826bd10. An exhaustive aligned ARM B/BL-immediate decode finds six
+      inbound calls, all unconditional plain bl: 0x0811850c, 0x08178ba8,
+      0x08178c50, 0x08178e80, 0x0828b934, and 0x0828bd14; there are no
+      predicated calls or direct tail branches. It saves record, gets source's
+      NULL-safe C string through string_object_c_str, then tail-branches to
+      string_object_assign_payload with the embedded StringObject at record
+      +0x04. Thus a NULL source payload becomes the shared empty C string and
+      takes the assignment helper's virtual-clear path; no pointer guard is
+      present. PrimaryStringRecord deliberately models only the common
+      leading-word plus embedded-string prefix, with named fields to preserve
+      the target's 4-byte word separation on widened-pointer hosts. No
+      behavioral deviations.
