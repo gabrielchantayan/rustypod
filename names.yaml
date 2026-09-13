@@ -79279,3 +79279,32 @@ functions:
       Host tests cover header/frame rejection, word-capacity rejection, byte
       packing, empty-payload clearing, and the 0xfffe length wrap quirk.
       Deliberate deviations: none.
+
+  - address: 0x082d906c
+    ghidra: FUN_082d906c
+    name: pcache_remove_from_lru_list
+    size: 68
+    sig: "void pcache_remove_from_lru_list(PgHdr *page)"
+    module: sqlite/pcache_remove_from_lru_list
+    status: ported
+    vars: {param_1: page}
+    renames:
+      param_1/r0: page
+      "*(u8*)(page+0x1d)": page->isOnLruList
+      "*(PgHdr**)(page+0x24)": page->pLruPrev
+      "*(PgHdr**)(page+0x28)": page->pLruNext
+      "*(PCache**)page": page->pCache
+      "*(PgHdr**)(page->pCache+0x90)": page->pCache->pLruHead
+    notes: >-
+      Raw osos.dec confirms the exact 68-byte body from 0x082d906c through
+      0x082d90ac; the next separately linked function begins at 0x082d90b0.
+      Decoding every aligned ARM B/BL-immediate word finds exactly six inbound
+      direct calls, all plain unconditional bl at 0x082dd108, 0x082de2e4,
+      0x082de3c4, 0x082de7e4, 0x0837e178, and 0x0837e230. There are no
+      predicated call sites and no direct B tail transfer. This is SQLite
+      pcacheRemoveFromLruList: if page->isOnLruList is nonzero, clear that
+      byte, splice pLruPrev and pLruNext, and replace pCache->pLruHead when
+      removing the head. It deliberately leaves the removed page's link words
+      unchanged. No NULL guard exists for a flagged page's cache pointer.
+      Host tests cover inactive, head, interior, and tail pages using a
+      dedicated target-width fixture. Deliberate deviations: none.

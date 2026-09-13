@@ -687,6 +687,10 @@ pub mod hints {
     // 0x4800_0000: dedicated to sqlite/pager_lookup's raw-u32 Pager,
     // bucket table, and page-hash chain fixture; mappings never unmap.
     pub const SQLITE_PAGER_LOOKUP: usize = 0x4800_0000;
+    // 0x9500_0000: dedicated to sqlite/pcache_remove_from_lru_list's raw-u32
+    // cache and three-page LRU fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const SQLITE_PCACHE_REMOVE_FROM_LRU_LIST: usize = 0x9500_0000;
     // 0x4400_0000: dedicated to sqlite/expr_worklist's parent-release
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_RELEASE_PARENTS: usize = 0x4400_0000;
