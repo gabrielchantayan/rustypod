@@ -77142,3 +77142,44 @@ functions:
       volatile seam. traced_alloc is already ported and remains direct. The
       existing opaque_descriptor_convert wrapper now tail-branches directly to
       this port rather than retaining its former engine seam.
+
+  # --- OpenSSL BN_mod_mul_montgomery ---
+  - address: 0x08040018
+    ghidra: FUN_08040018
+    name: bn_mod_mul_montgomery
+    size: 152
+    sig: "int bn_mod_mul_montgomery(BigNum *result, const BigNum *a, const BigNum *b, const MontgomeryContext *mont, TaggedWordBufferPool *ctx)"
+    module: crypto/bn_mod_mul_montgomery
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: a
+      param_3/r2: b
+      param_4/r3: mont
+      param_5/stack: ctx
+      iVar1/r4: temporary
+      uVar3/r5: succeeded
+      FUN_0803dec8: tagged_word_buffer_pool_push
+      FUN_0803de0c: tagged_word_buffer_pool_take
+      FUN_08040884: bn_sqr
+      FUN_080400b0: bn_mul
+      FUN_0803ef28: bn_from_montgomery
+      FUN_0803dd84: tagged_word_buffer_pool_pop
+    notes: >-
+      Raw ARM establishes the exact 152-byte body
+      0x08040018..0x080400b0: the prior function returns at 0x08040014 and
+      the independent BN_mul body begins with push at 0x080400b0. This is
+      OpenSSL BN_mod_mul_montgomery: push ctx, take a temporary BIGNUM, call
+      BN_sqr when a and b are pointer-identical or BN_mul otherwise, then
+      BN_from_montgomery(result, temporary, mont, ctx); release ctx and
+      return one only when both selected arithmetic and reduction return
+      nonzero. A NULL temporary skips both workers but still pops ctx. Full
+      decoding of every ARM B/BL immediate in osos.dec found exactly seven
+      inbound calls, all unconditional BL (0x0803f700, 0x0803f75c,
+      0x0803f7a8, 0x0803f7e8, 0x0803f834, 0x0803f8ac, 0x0803f8e8), with no
+      predicated form or tail branch; no aligned image word equals the entry,
+      so it is not data-dispatched. BN_sqr, BN_mul, and BN_from_montgomery
+      are unported, so Rust uses volatile worker slots whose target defaults
+      call their retail addresses; host tests record branch selection, exact
+      forwarding, worker-failure gating, exhausted-pool behavior, and
+      unconditional pool restoration.

@@ -49,6 +49,7 @@ pub mod bio_ctrl;
 pub mod bio_copy_next_retry;
 pub mod bn_num_bits;
 pub mod bn_add;
+pub mod bn_mod_mul_montgomery;
 pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod digest_init;
