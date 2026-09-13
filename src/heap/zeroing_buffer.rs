@@ -4,7 +4,8 @@
 //! first word is retained without interpretation; destruction only consumes
 //! the allocation and byte-count words.
 
-use crate::drivers::ata_cmd::traced_free;
+use crate::drivers::ata_cmd::{traced_alloc, traced_free};
+use crate::kernel::diag_ring_record::diag_ring_record;
 use crate::libc::iram_veneers::iram_memzero_veneer;
 
 /// Target-layout record whose owned payload is cleared before release.
@@ -23,6 +24,39 @@ pub struct ZeroingBuffer {
 const _: [u8; 0x04] = [0; core::mem::offset_of!(ZeroingBuffer, data)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::size_of::<ZeroingBuffer>()];
+/// zeroing_buffer_create — original: `FUN_080421d4` @ `0x080421d4`
+/// (76 bytes exactly, `0x080421d4..0x08042220`; the independently linked
+/// successor begins with `push {r3,r4,r5,r6,r7,lr}` at `0x08042220`).
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` finds seven direct inbound
+/// calls, all unconditional `bl`: `0x0805fc0c`, `0x0806f620`, `0x0807bdc8`,
+/// `0x0809d7c4`, `0x080a1258`, `0x080ec004`, and `0x080efd10`. There are no
+/// predicated call forms or direct tail branches.
+///
+/// Allocates the three target-word [`ZeroingBuffer`] record through
+/// `traced_alloc(12, 0, 0)`. Allocation failure records diagnostic
+/// `(7, 0x65, 0x41, 0, 0)` and returns NULL. On success it clears
+/// `{state, data, byte_len}` in the retail store order `state, byte_len,
+/// data`, returning an empty owning buffer.
+///
+/// No deliberate deviations: both `traced_alloc` and `diag_ring_record` are
+/// already ported direct callees.
+#[cfg_attr(target_os = "none", link_section = ".text.zeroing_buffer_create")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn zeroing_buffer_create() -> *mut ZeroingBuffer {
+    let buffer = traced_alloc(12, 0, 0).cast::<ZeroingBuffer>();
+    if buffer.is_null() {
+        diag_ring_record(7, 0x65, 0x41, 0, 0);
+        return core::ptr::null_mut();
+    }
+
+    core::ptr::addr_of_mut!((*buffer).state).write_volatile(0);
+    core::ptr::addr_of_mut!((*buffer).byte_len).write_volatile(0);
+    core::ptr::addr_of_mut!((*buffer).data).write_volatile(core::ptr::null_mut());
+    buffer
+}
+
 
 /// zeroing_buffer_destroy — original: `FUN_0804202c` @ `0x0804202c`
 /// (52 bytes exactly, `0x0804202c..0x08042060`; the independently linked
@@ -160,5 +194,117 @@ mod tests {
         assert!(inspected.is_empty());
         assert_eq!(data, [0x44, 0x55]);
         assert_eq!(freed, [data.as_mut_ptr() as usize, &mut buffer as *mut ZeroingBuffer as usize]);
+    }
+}
+
+#[cfg(test)]
+mod create_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::drivers::ata_cmd::{TracedAllocHooks, TRACED_ALLOC_HOOKS};
+    use crate::kernel::diag_ring_record::{DiagEventRing, DIAG_RING_BLOCK_GETTER};
+    use crate::testing::{DIAG_RING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
+    use std::boxed::Box;
+    use std::sync::MutexGuard;
+
+    static mut ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut ALLOC_REQUEST: Option<(i32, u32, u32)> = None;
+    static mut DIAG_RING: *mut DiagEventRing = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+        ALLOC_REQUEST = Some((size, tag1, tag2));
+        ALLOC_RESULT
+    }
+
+    unsafe extern "C" fn ring_getter() -> *mut DiagEventRing {
+        DIAG_RING
+    }
+
+    struct CreateFixture {
+        _diag_guard: MutexGuard<'static, ()>,
+        _alloc_guard: MutexGuard<'static, ()>,
+        saved_alloc_hooks: TracedAllocHooks,
+        saved_ring_getter: Option<unsafe extern "C" fn() -> *mut DiagEventRing>,
+        storage: Box<ZeroingBuffer>,
+        ring: Box<DiagEventRing>,
+    }
+
+    impl CreateFixture {
+        fn new(allocation_succeeds: bool) -> Self {
+            let diag_guard = DIAG_RING_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let mut storage = Box::new(ZeroingBuffer {
+                state: 0xa5a5_a5a5,
+                data: 1usize as *mut u8,
+                byte_len: 0xa5a5_a5a5,
+            });
+            let mut ring = Box::new(unsafe { core::mem::zeroed::<DiagEventRing>() });
+            unsafe {
+                ALLOC_REQUEST = None;
+                ALLOC_RESULT = if allocation_succeeds {
+                    (storage.as_mut() as *mut ZeroingBuffer).cast::<u8>()
+                } else {
+                    core::ptr::null_mut()
+                };
+                DIAG_RING = ring.as_mut();
+                let saved_alloc_hooks = core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS));
+                let saved_ring_getter = core::ptr::read_volatile(core::ptr::addr_of!(DIAG_RING_BLOCK_GETTER));
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                    TracedAllocHooks { alloc: recording_alloc, trace: None },
+                );
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER), Some(ring_getter));
+                Self {
+                    _diag_guard: diag_guard,
+                    _alloc_guard: alloc_guard,
+                    saved_alloc_hooks,
+                    saved_ring_getter,
+                    storage,
+                    ring,
+                }
+            }
+        }
+    }
+
+    impl Drop for CreateFixture {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS), self.saved_alloc_hooks);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER),
+                    self.saved_ring_getter,
+                );
+                ALLOC_RESULT = core::ptr::null_mut();
+                ALLOC_REQUEST = None;
+                DIAG_RING = core::ptr::null_mut();
+            }
+        }
+    }
+
+    #[test]
+    fn create_requests_three_words_and_clears_every_field() {
+        let fixture = CreateFixture::new(true);
+        let buffer = unsafe { zeroing_buffer_create() };
+
+        assert_eq!(buffer, fixture.storage.as_ref() as *const ZeroingBuffer as *mut ZeroingBuffer);
+        assert_eq!(unsafe { ALLOC_REQUEST }, Some((12, 0, 0)));
+        assert_eq!(unsafe { (*buffer).state }, 0);
+        assert!(unsafe { (*buffer).data }.is_null());
+        assert_eq!(unsafe { (*buffer).byte_len }, 0);
+        assert_eq!(fixture.ring.head, 0, "success does not record a diagnostic");
+    }
+
+    #[test]
+    fn create_failure_records_allocation_diagnostic() {
+        let fixture = CreateFixture::new(false);
+        let buffer = unsafe { zeroing_buffer_create() };
+
+        assert!(buffer.is_null());
+        assert_eq!(unsafe { ALLOC_REQUEST }, Some((12, 0, 0)));
+        assert_eq!(fixture.ring.head, 1);
+        assert_eq!(fixture.ring.tags[1], 0x0706_5041);
+        assert_eq!(fixture.ring.data0[1], 0);
+        assert_eq!(fixture.ring.data1[1], 0);
     }
 }

@@ -73,6 +73,7 @@ functions:
       10 direct calls, all unconditional bl (0x082e1b2c, 0x082e1b3c,
       0x082e1b4c, 0x082e1b5c, 0x082e1b6c, 0x082e1b84, 0x082e1bb0,
       0x082e1bd0, 0x082e1bf0, 0x082e1c08); no predicated call, tail branch,
+
       or aligned raw word references this thunk, so it is neither
       caller-gated nor virtually dispatched. The relocator at 0x080046e0
       copies osos 0x08000000..0x0800aed8 into IRAM 0x22000000, making
@@ -77009,3 +77010,27 @@ functions:
       0x0807be14, 0x0807c1a8, and 0x080d7770, plus one blgt at
       0x0805f24c; no direct tail branch targets this entry. No deliberate
       Rust deviations.
+
+  - address: 0x080421d4
+    ghidra: FUN_080421d4
+    name: zeroing_buffer_create
+    size: 76
+    sig: "ZeroingBuffer *zeroing_buffer_create(void)"
+    module: heap/zeroing_buffer
+    status: ported
+    renames:
+      r0: buffer
+      r1: zero
+      r2: zero
+      FUN_08043c18: traced_alloc
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw ARM extent is exactly 0x080421d4..0x08042220; the separately linked
+      successor begins at 0x08042220 with push {r3,r4,r5,r6,r7,lr}. It calls
+      traced_alloc(12, 0, 0), records diagnostic (7, 0x65, 0x41, 0, 0) and
+      returns NULL on allocation failure, otherwise clears the three target
+      words {state, data, byte_len} in store order state, byte_len, data.
+      Decoding every ARM B/BL word in osos.dec verifies exactly seven direct
+      inbound calls, all unconditional bl at 0x0805fc0c, 0x0806f620,
+      0x0807bdc8, 0x0809d7c4, 0x080a1258, 0x080ec004, and 0x080efd10; no
+      predicated call forms or direct tail branches target this constructor.
