@@ -19,6 +19,7 @@ pub mod heap_poison;
 pub mod managed_handle;
 pub mod memh_handle;
 pub mod object_destroy_dispatch;
+pub mod fixa;
 pub mod mailbox_receive_gateway;
 pub mod mailbox_receive_timed_gateway;
 pub mod mailbox_send_gateway;

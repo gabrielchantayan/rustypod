@@ -3918,6 +3918,41 @@ functions:
       match.py structural review found the expected ABI frame plus a final
       branch relocation for the Rust call in place of the retail tail branch.
 
+  - address: 0x08048f48
+    ghidra: FUN_08048f48
+    name: fixa_owner_destroy
+    size: 60
+    sig: "void fixa_owner_destroy(FixaOwner *owner)"
+    module: heap/fixa
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x00": fixa_magic
+      "owner+0x0c": first_fixl
+      FUN_080d21d0: validate_fixa_magic
+      FUN_080d8750: unlink_and_destroy_fixl
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x08048f48..0x08048f84: the next separately linked function starts at
+      0x08048f84 with push {r4-r6,lr}. Decoding every aligned ARM B/BL
+      immediate finds seven inbound direct calls: five unconditional bl
+      (0x080492ec, 0x080d712c, 0x080da97c, 0x080da990, 0x080e4334) and two
+      blne (0x08049184, 0x08049190); the predicated callers independently
+      gate destruction. The initial unported 0x080d21d0 call is NULL-safe and
+      returns one only when owner[0] equals its literal 0x46697841 ("FixA").
+      While owner+0x0c is nonzero, the body calls unported 0x080d8750 with
+      that head. Its raw literal is 0x4669784c ("FixL"); a valid node is
+      unlinked and released through the already ported free_tag4, while an
+      invalid nonzero head makes no progress, so the retail loop does not
+      terminate. After draining, the function clears owner+0x00 and
+      tail-branches to free_tag4 for the owner. The Rust target retains
+      address-based calls for both unported entries; host tests use explicit
+      seams. The descriptive FixA/FixL names derive only from those verified
+      magic words, not an inferred subsystem identity. Structural review of
+      the worktree archive confirms LLVM retains the final free_tag4 tail
+      branch (R_ARM_JUMP24); only the unresolved direct calls are BLX seams.
+
   - address: 0x0805d028
     ghidra: FUN_0805d028
     name: memh_handle_destroy

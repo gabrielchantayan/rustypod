@@ -595,6 +595,9 @@ pub mod hints {
     // owner/state/list fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CONTEXT_CALLBACK_DISPATCH: usize = 0xa200_0000;
+    // 0xa300_0000: dedicated to heap/fixa's raw-u32 owner and FixL-link
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const FIXA_OWNER_DESTROY: usize = 0xa300_0000;
 
 
     // 0x9300_0000: dedicated to util/inner_state's selected-resource table
