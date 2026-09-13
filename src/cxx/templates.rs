@@ -1722,6 +1722,15 @@ pub struct VectorBounds {
     /// One past the last element.
     pub end: *mut u8,
 }
+/// An owner whose embedded `vector<T>` begins after three target words.
+/// `#[repr(C)]` makes the vector start at +0x0c on ARM while preserving
+/// pointer-field separation on 64-bit host tests.
+#[repr(C)]
+pub struct EmbeddedVectorSizeElem8 {
+    _prefix: [u32; 3],
+    pub vector: VectorBounds,
+}
+
 /// vector_is_empty — original: `FUN_083d7810` @ 0x083d7810
 /// (24 bytes; `ipod-decomp/decomp/c/037/083d7810_FUN_083d7810.c`).
 ///
@@ -2136,6 +2145,29 @@ pub unsafe extern "C" fn vector_size_elem2_clamped(vector: *const VectorBounds) 
 pub unsafe extern "C" fn vector_size_elem8(vector: *const VectorBounds) -> i32 {
     vector_size(vector, 3)
 }
+/// embedded_vector_size_elem8 — original: `FUN_0829c028` @ 0x0829c028
+/// (8 bytes; 6 direct, unconditional `bl` call sites: 0x08131ea4,
+/// 0x08131ebc, 0x08132084, 0x08132094, 0x081320e0, and 0x081321b8).
+///
+/// Advances past the owner's three-word prefix, then tail-branches to the
+/// existing byte-identical `vector_size_elem8` body at 0x083d76a4. Thus it
+/// returns `(vector.end - vector.begin) >> 3`, using ARM's arithmetic shift.
+/// Raw aligned ARM B/BL decoding found no predicated inbound calls.
+///
+/// Deliberate deviation: LLVM adds a frame prologue and epilogue around its
+/// tail transfer; the vector selection and return value are unchanged.
+///
+/// # Safety
+/// `owner.vector` must contain readable `{begin, end}` bounds.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.embedded_vector_size_elem8_0829c028")]
+#[inline(never)]
+pub unsafe extern "C" fn embedded_vector_size_elem8(
+    owner: *const EmbeddedVectorSizeElem8,
+) -> i32 {
+    vector_size_elem8(core::ptr::addr_of!((*owner).vector))
+}
+
 
 /// vector_size_elem16 — original: `FUN_083d7884` @ 0x083d7884
 /// (16 bytes; 19 `bl` call sites there, 78 across 6 byte-identical
@@ -4818,6 +4850,34 @@ mod tests {
             // -16 bytes / asr #3 = -2 — the 0x083d7664 copy's exact body.
             assert_eq!(vector_size_elem8(&reversed), -2);
             assert_eq!(vector_size_elem16(&reversed), -1);
+        }
+    }
+
+    #[test]
+    fn embedded_vector_size_elem8_uses_the_owner_vector_after_three_words() {
+        unsafe {
+            let storage = [0u8; 64];
+            let begin = storage.as_ptr() as *mut u8;
+            for (end, expected) in [
+                (begin, 0),
+                (begin.add(8), 1),
+                (begin.add(23), 2),
+                (begin.add(15), 1),
+            ] {
+                let owner = EmbeddedVectorSizeElem8 {
+                    _prefix: [0x1111_1111, 0x2222_2222, 0x3333_3333],
+                    vector: VectorBounds { begin, end },
+                };
+                assert_eq!(embedded_vector_size_elem8(&owner), expected);
+                assert_eq!(owner._prefix, [0x1111_1111, 0x2222_2222, 0x3333_3333]);
+            }
+
+            let reversed = EmbeddedVectorSizeElem8 {
+                _prefix: [0x4444_4444, 0x5555_5555, 0x6666_6666],
+                vector: VectorBounds { begin: begin.add(15), end: begin },
+            };
+            // ARM `asr #3` rounds a negative partial span down.
+            assert_eq!(embedded_vector_size_elem8(&reversed), -2);
         }
     }
 
