@@ -82460,3 +82460,42 @@ functions:
       observed clear-state predicate. Firmware builds volatile-load fixed RAM;
       host builds use a zero-initialized private word. Host tests cover zero,
       one, two, and u32::MAX. Deliberate deviations: host backing only.
+
+
+  # --- scoped global guard destruction ---
+  - address: 0x08155b6c
+    ghidra: FUN_08155b6c
+    name: scoped_global_guard_destroy
+    size: 64
+    sig: "void *scoped_global_guard_destroy(void *this)"
+    module: util/scoped_global_guard_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08155ba8: scoped_global_guard_vtable (0x08986aa0)
+      param_1_plus_4: allocation
+      FUN_0820c268: scoped_global_guard_release (role only; identity unrecovered)
+      FUN_082aad24: operator_delete
+      FUN_0820c334: verified_empty_tail_destructor
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: instructions occupy
+      0x08155b6c..0x08155ba4, the vtable literal 0x08986aa0 is at
+      0x08155ba8, and the distinct sibling begins at 0x08155bac. The
+      destructor restores that vtable, then if its +4 allocation word is
+      non-NULL, passes the allocation's first word to the real but
+      identity-unrecovered function entry 0x0820c268, tag-2-deletes the
+      allocation through ported operator_delete at 0x082aad24, and returns
+      this. The final raw `b 0x0820c334` targets a separately omitted
+      function whose complete body is `bx lr`, so it preserves this in r0.
+      Full-image decoding of every ARM B/BL immediate finds exactly six
+      inbound calls, all unconditional plain bl at 0x0813c504, 0x0813c768,
+      0x08168894, 0x08168958, 0x08168a1c, and 0x08168a7c; no predicated
+      direct calls or inbound tail branches occur. Host tests use a fresh
+      below-4-GiB two-word fixture, prove the NULL path only resets the
+      vtable, and prove the non-NULL path forwards the payload to the
+      release seam before tag-2 operator delete. Deliberate deviation: Rust
+      returns normally instead of tail-branching to the verified-empty
+      0x0820c334; the observable returned this pointer is unchanged. match.py
+      structural review against this worktree archive found 18 Rust versus 16
+      retail instructions: the extra frame setup and literal `blx` preserve
+      the vtable store, optional payload release, tag-2 delete, and return.
