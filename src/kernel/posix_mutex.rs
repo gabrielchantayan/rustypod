@@ -501,8 +501,9 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes the tests that swap the global ops table.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that mutate the semaphore-signal recorder state.
+    static SEM_SIGNAL_LOCK: Mutex<()> = Mutex::new(());
+
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Ev {
@@ -598,7 +599,7 @@ mod tests {
 
     /// Installs the recording mocks and resets every knob.
     fn install() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = crate::testing::POSIX_MUTEX_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             THREAD_ID = 7;
@@ -984,7 +985,7 @@ mod tests {
     /// an unchecked word and all ROM failures collapse to the fixed 0x27.
     #[test]
     fn semaphore_cell_signal_maps_handle_and_rom_status() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SEM_SIGNAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             let mut cell = 0;
             reset_sem_signal(0xfeed_cafe);
@@ -1015,7 +1016,7 @@ mod tests {
     /// not (the module header's contract).
     #[test]
     fn the_wired_defaults_track_ownership_without_excluding() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::testing::POSIX_MUTEX_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         restore();
         let mut m = live(MutexKind::Recursive);
         unsafe {
@@ -1036,7 +1037,7 @@ mod tests {
     /// statically-initialized one.
     #[test]
     fn a_zeroed_object_locks_and_unlocks_cleanly_on_the_defaults() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::testing::POSIX_MUTEX_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         restore();
         let mut m: PosixMutex = unsafe { core::mem::zeroed() };
         unsafe {

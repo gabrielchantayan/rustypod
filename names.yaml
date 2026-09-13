@@ -46794,6 +46794,35 @@ functions:
       original is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
 
+  - address: 0x08262110
+    ghidra: FUN_08262110
+    name: resource_handle_initialize_for_current_thread
+    size: 40
+    sig: "ResourceHandle *resource_handle_initialize_for_current_thread(ResourceHandle *handle)"
+    module: cxx/resource_handle_initialize
+    status: ported
+    renames:
+      param_1: handle
+      thunk_FUN_080a3e68: running-thread query tail veneer
+      FUN_080a3e68: mask-ROM running-thread query
+    notes: >-
+      Raw extent is exactly 40 bytes (0x08262110..0x08262138): push
+      {r4,lr}; preserve handle; bl 0x082e8530; store its running-thread
+      result at +0; clear the u32 operation-status field at +4; set the
+      skip-release byte at +8; return handle; pop. The distinct next
+      function opens at 0x08262138 with push {r4,lr}; no literal pool.
+      Decoding every ARM B/BL word in osos.dec finds six direct call sites,
+      all unconditional plain bl at 0x08165310, 0x081654a0, 0x08193990,
+      0x081d7768, 0x081d77d8, and 0x0820117c; no predicated B/BL calls and
+      no word-aligned DATA references exist. The target bl reaches the
+      0x082e8530 pure tail veneer, which branches to the mask-ROM
+      running-thread query at 0x080a3e68. Target code invokes that verified
+      ROM entry directly; host tests reuse the pre-existing volatile
+      POSIX_MUTEX_OPS.current_thread seam. Tests prove every target-layout
+      field is overwritten, return-pointer identity, and one query per
+      initialization. match.py structural review is expected to show the
+      direct ROM-call path rather than the retail veneer.
+
   - address: 0x08262138
     ghidra: FUN_08262138
     name: resource_handle_release_if_owned

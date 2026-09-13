@@ -925,3 +925,8 @@ pub static SCHEDULER_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::n
 /// seam, so a module-private lock would race selector restoration.
 pub static OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
+
+/// Serializes every host test that replaces
+/// `kernel::posix_mutex::POSIX_MUTEX_OPS`. The mutex port and callers that
+/// query the mask-ROM running-thread entry share this one dispatch table.
+pub static POSIX_MUTEX_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -78,6 +78,7 @@ pub mod pair_header;
 pub mod release;
 pub mod retain;
 pub mod resource_handle_release;
+pub mod resource_handle_initialize;
 pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;
