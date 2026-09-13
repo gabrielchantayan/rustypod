@@ -312,7 +312,7 @@ pub unsafe extern "C" fn vdbe_mem_set_str(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use super::super::value_new::{MEM_NULL, SQLITE_NULL};
@@ -321,6 +321,11 @@ mod tests {
 
     /// Serializes tests that replace this module's grow/BOM pair.
     static OPS_LOCK: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn ops_lock() -> &'static Mutex<()> {
+        &OPS_LOCK
+    }
+
     static mut GROW_CALLS: u32 = 0;
     static mut GROW_ARG: usize = 0;
     static mut GROW_SIZE: i32 = 0;

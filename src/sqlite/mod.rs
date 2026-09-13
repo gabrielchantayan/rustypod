@@ -167,6 +167,7 @@ pub mod value_new;
 pub mod value_set_str;
 pub mod value_text;
 pub mod result_text;
+pub mod result_error;
 pub mod step;
 pub mod vdbe;
 pub mod vdbe_mem_apply_affinity;
