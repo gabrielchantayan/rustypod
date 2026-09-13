@@ -1181,13 +1181,13 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 }
 
 /// equal_deref — originals: `FUN_083cf650` @ 0x083cf650,
-/// `FUN_083cf7a0` @ 0x083cf7a0, `FUN_083cf7b8` @ 0x083cf7b8,
+/// `FUN_083cf788` @ 0x083cf788, `FUN_083cf7a0` @ 0x083cf7a0, `FUN_083cf7b8` @ 0x083cf7b8,
 /// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8c0` @ 0x083cf8c0,
 /// `FUN_083cf8f0` @ 0x083cf8f0, `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
 /// `FUN_083cf968` @ 0x083cf968, `FUN_083cf980` @ 0x083cf980,
 /// `FUN_083cf9b0` @ 0x083cf9b0, and `FUN_083cf9c8` @ 0x083cf9c8 (24 bytes
-/// each). Raw bytes show all thirteen are the same six-word leaf. At
+/// each). Raw bytes show all fourteen are the same six-word leaf. At
 /// 0x083cf650, the next separately linked copy begins at 0x083cf668,
 /// confirming the extent. Decoding every ARM B/BL word
 /// in `osos.dec` finds exactly 7 plain `bl` callers there: 0x08109d10,
@@ -1198,6 +1198,14 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// It finds 7 plain `bl` callers at 0x083cf7a0 (0x08124e54, 0x08124ea8,
 /// 0x083bc0c4, 0x083bc530, 0x083bc54c, 0x083bc5d0, and 0x083bc694), with no
 /// predicated calls, tail branches, or aligned raw-word references.
+/// `FUN_083cf788` is 24 bytes through `bx lr` at 0x083cf79c; the next
+/// separately linked copy starts at 0x083cf7a0. It loads each aligned operand
+/// word and returns the normalized 0/1 result of `*a == *b`. Decoding every
+/// ARM B/BL word in `osos.dec` finds six unconditional plain `bl` callers:
+/// 0x083ba0f4, 0x083ba564, 0x083ba580, 0x083ba604, 0x083ba6c8, and
+/// 0x083d72ac; there are no predicated calls or tail branches. This
+/// byte-identical copy deliberately hooks the established export instead of
+/// adding a redundant dispatch seam.
 /// Decoding every ARM B/BL word in `osos.dec` finds 8
 /// plain `bl` callers at 0x083cf7b8 (0x0809dcf4, 0x0809e074, 0x083bcb08,
 /// 0x083bcf74, 0x083bcf90, 0x083bd014, 0x083bd0d8, and 0x083db1fc), with no
@@ -1255,10 +1263,10 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// The 0x083cf968 callers are container-iteration loops: they
 /// stack-materialize a cursor iterator and the list/deque end iterator and
 /// compare their FIRST words (the current-node pointer) through this helper,
-/// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf7b8,
-/// 0x083cf908, 0x083cf920, 0x083cf938, 0x083cf950, 0x083cf980, 0x083cf9b0, and
-/// 0x083cf9c8 copies have the same raw body and ABI, so their ledger entries
-/// deliberately hook this established export instead of introducing redundant
+/// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf788,
+/// 0x083cf7b8, 0x083cf908, 0x083cf920, 0x083cf938, 0x083cf950, 0x083cf980,
+/// 0x083cf9b0, and 0x083cf9c8 copies have the same raw body and ABI, so their
+/// ledger entries deliberately hook this established export instead of introducing redundant
 /// dispatch seams.
 ///
 /// The body is byte-identical to `fixed16_eq_indirect` @ 0x082a1834
@@ -4257,7 +4265,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f7a0_f7b8_f8a8_f8c0_f8f0_f908_f920_f938_f950_f968_f980_c9b0_c9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f788_f7a0_f7b8_f8a8_f8c0_f8f0_f908_f920_f938_f950_f968_f980_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
