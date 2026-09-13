@@ -96,6 +96,47 @@ unsafe fn heap_free_fn() -> HeapFree {
     core::ptr::read_volatile(core::ptr::addr_of!(HEAP_FREE))
 }
 
+/// Initialize a field-query result block.
+///
+/// RetailOS `FUN_081bfb20` at load address `0x081bfb20`, exactly 48 bytes;
+/// raw ARM places the next distinct function at `0x081bfb50`. Decoding every
+/// ARM B/BL word in `osos.dec` finds six direct call sites, all unconditional
+/// plain `bl` (no predicated forms). It clears the 44-byte result tail at
+/// `+0x208` through the `0x08037db8` IRAM `memzero_aligned` veneer, redundantly
+/// clears the flags halfword at `+0x208`, sets the text word at `+0x210` to the
+/// inline text buffer at `+0x214`, then returns the original block pointer.
+///
+/// Deliberate deviation: calls the ported `memzero_aligned` body through a
+/// volatile function-pointer load rather than the retail veneer. This prevents
+/// LLVM recognizing the fill as a builtin while preserving a real call.
+///
+/// # Safety
+///
+/// `result` must be a non-null, four-byte-aligned writable field-query result
+/// block of at least 0x234 bytes. As on the ARM target, the text pointer is a
+/// four-byte target word even when host pointers are wider.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.field_query_result_initialize")]
+#[inline(never)]
+pub unsafe extern "C" fn field_query_result_initialize(
+    result: *mut FieldQueryResult,
+) -> *mut FieldQueryResult {
+    type MemzeroAligned = unsafe extern "C" fn(*mut u8, usize) -> *mut u8;
+
+    let memzero = unsafe {
+        core::ptr::read_volatile(
+            &(crate::libc::memzero::memzero_aligned as MemzeroAligned),
+        )
+    };
+    unsafe { memzero(result.cast::<u8>().add(0x208), 0x2c) };
+    unsafe { (result.cast::<u8>().add(0x208) as *mut u16).write(0) };
+    unsafe {
+        (result.cast::<u8>().add(0x210) as *mut u32)
+            .write(result.cast::<u8>().add(0x214) as usize as u32)
+    };
+    result
+}
+
 /// field_query_result_release — original: `FUN_081bfb50` @ `0x081bfb50`
 /// (60 bytes; 16 verified direct `bl` call sites, all unconditional).
 ///
@@ -128,7 +169,10 @@ pub unsafe extern "C" fn field_query_result_release(
 mod tests {
     extern crate std;
 
-    use super::{firmware_heap_free, field_query_result_release, FieldQueryResult, HEAP_FREE};
+    use super::{
+        field_query_result_initialize, firmware_heap_free, field_query_result_release,
+        FieldQueryResult, HEAP_FREE,
+    };
     use core::ptr;
     use parking_lot::{Mutex, MutexGuard};
 
@@ -171,6 +215,30 @@ mod tests {
             _reserved: [0; 4],
             text: ptr::null_mut(),
         }
+    }
+
+    /// The initializer operates on target-word offsets, not Rust's host-sized
+    /// pointer layout: it clears exactly 0x2c bytes, then stores the inline
+    /// buffer address as a four-byte target word.
+    #[test]
+    fn initializer_clears_tail_sets_inline_text_and_returns_block() {
+        #[repr(align(4))]
+        struct RawBlock([u8; 0x238]);
+
+        let mut block = RawBlock([0xa5; 0x238]);
+        let result = block.0.as_mut_ptr().cast::<FieldQueryResult>();
+
+        let returned = unsafe { field_query_result_initialize(result) };
+
+        assert_eq!(returned, result);
+        assert_eq!(&block.0[..0x208], &[0xa5; 0x208]);
+        assert_eq!(&block.0[0x208..0x210], &[0; 8]);
+        assert_eq!(
+            &block.0[0x210..0x214],
+            &((block.0.as_ptr() as usize + 0x214) as u32).to_le_bytes()
+        );
+        assert_eq!(&block.0[0x214..0x234], &[0; 0x20]);
+        assert_eq!(&block.0[0x234..], &[0xa5; 4]);
     }
 
     #[test]
