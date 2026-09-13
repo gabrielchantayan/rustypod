@@ -229,6 +229,43 @@ pub unsafe extern "C" fn timer_step_value_init(
     timing_wheel_insert(table, this.cast());
     this
 }
+ 
+/// timer_step_value_set_values — retailOS `FUN_08167980` @ `0x08167980`
+/// (120 bytes including the trailing scheduler-global pool word at
+/// 0x081679f4; six binary-verified, plain unconditional `bl` call sites).
+///
+/// Rebinds an already-constructed two-value timing-wheel node: unlink it,
+/// retain `driver` then `step`, release the prior driver and step slots when
+/// present, store the replacement pointers, set `rank` to one plus their
+/// unsigned maximum aux word with wrapping arithmetic, then relink it. The
+/// stock body reloads the scheduler-global word for each wheel operation;
+/// this port does the same. There are no deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timer_step_value_set_values(
+    this: *mut TimerStepValue,
+    driver: *mut FixedValue,
+    step: *mut FixedValue,
+) {
+    timing_wheel_remove(scheduler_table(), this.cast());
+    retain_value(driver.cast());
+    retain_value(step.cast());
+
+    let old_driver = (*this).driver_value;
+    if old_driver != 0 {
+        release_refcounted_value(old_driver as usize as *mut u8);
+    }
+    let old_step = (*this).step_value;
+    if old_step != 0 {
+        release_refcounted_value(old_step as usize as *mut u8);
+    }
+
+    (*this).driver_value = driver as usize as u32;
+    (*this).step_value = step as usize as u32;
+    (*this).rank = value_aux_max(step, driver).wrapping_add(1);
+    timing_wheel_insert(scheduler_table(), this.cast());
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -251,6 +288,8 @@ mod tests {
         peer: *mut TimerStepValue,
         driver: *mut FixedValue,
         step: *mut FixedValue,
+        old_driver: *mut FixedValue,
+        old_step: *mut FixedValue,
         table: *mut u32,
     }
 
@@ -272,6 +311,8 @@ mod tests {
                 peer: base.add(0x60).cast::<TimerStepValue>(),
                 driver: base.add(0x28).cast::<FixedValue>(),
                 step: base.add(0x40).cast::<FixedValue>(),
+                old_driver: base.add(0x80).cast::<FixedValue>(),
+                old_step: base.add(0x98).cast::<FixedValue>(),
                 table: scheduler_table(),
             }
         };
@@ -558,6 +599,75 @@ mod tests {
             assert_eq!((*f.node).wheel_prev, 0);
             assert_eq!((*f.node).wheel_next, 0);
             assert_eq!((*f.node).flags & 1, 1);
+        }
+    }
+    #[test]
+    fn setter_releases_old_slots_recomputes_rank_and_relinks() {
+        let _lock = take_lock();
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::timer_step_value");
+            return;
+        };
+        unsafe {
+            dirty_node(f.node);
+            counted_scalar(f.driver, 4);
+            counted_scalar(f.step, 1);
+            counted_scalar(f.old_driver, 0);
+            counted_scalar(f.old_step, 0);
+            (*f.old_driver).flags = 0b1110;
+            (*f.old_step).flags = 0b1110;
+            (*f.node).rank = 2;
+            (*f.node).flags = 1;
+            (*f.node).wheel_prev = 0;
+            (*f.node).wheel_next = 0;
+            (*f.node).driver_value = f.old_driver as usize as u32;
+            (*f.node).step_value = f.old_step as usize as u32;
+            *f.table.add(1) = f.node as usize as u32;
+
+            timer_step_value_set_values(f.node, f.driver, f.step);
+
+            assert_eq!((*f.node).vtable, 0xdead_beef);
+            assert_eq!((*f.node).opaque_04, 0x1111_1111);
+            assert_eq!((*f.driver).flags, 0b1010);
+            assert_eq!((*f.step).flags, 0b1010);
+            assert_eq!((*f.old_driver).flags, 0b1010);
+            assert_eq!((*f.old_step).flags, 0b1010);
+            assert_eq!((*f.node).driver_value, f.driver as usize as u32);
+            assert_eq!((*f.node).step_value, f.step as usize as u32);
+            assert_eq!((*f.node).rank, 5);
+            assert_eq!(*f.table.add(1), 0);
+            assert_eq!(*f.table.add(4), f.node as usize as u32);
+            assert_eq!((*f.node).wheel_prev, 0);
+            assert_eq!((*f.node).wheel_next, 0);
+            assert_eq!((*f.node).flags, 1);
+        }
+    }
+
+    #[test]
+    fn setter_preserves_wheel_links_when_wrapping_rank_cannot_be_bucketed() {
+        let _lock = take_lock();
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::timer_step_value");
+            return;
+        };
+        unsafe {
+            dirty_node(f.node);
+            counted_scalar(f.driver, u32::MAX);
+            counted_scalar(f.step, 2);
+            (*f.node).driver_value = 0;
+            (*f.node).step_value = 0;
+
+            timer_step_value_set_values(f.node, f.driver, f.step);
+
+            assert_eq!((*f.node).rank, 0);
+            assert_eq!((*f.node).wheel_prev, 0x2222_2222);
+            assert_eq!((*f.node).wheel_next, 0x3333_3333);
+            assert_eq!((*f.node).flags, 0xffff_fffe);
+            assert!(
+                core::slice::from_raw_parts(f.table, TIMING_WHEEL_BUCKETS)
+                    .iter()
+                    .all(|bucket| *bucket == 0)
+            );
         }
     }
 }
