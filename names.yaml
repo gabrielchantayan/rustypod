@@ -57525,7 +57525,7 @@ functions:
       FUN_082738e0: timing_wheel_remove (ported in app/animation)
       FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
-      FUN_08273898: wheel_insert (unported, existing ANIMATION_INIT_OPS seam)
+      FUN_08273898: timing_wheel_insert (direct, ported in app/animation)
     notes: >-
       The true code extent is the 43 instruction words
       0x08166a40..0x08166ae8 (172 bytes); its separately linked pool word
@@ -57539,10 +57539,9 @@ functions:
       order, stores from/to/current with stm at +0x18, sets rank +0x08 to
       max(from->aux, to->aux, current->aux) + 1 with unsigned comparisons
       and wrapping addition, then reloads the scheduler global and
-      tail-branches to wheel_insert. FixedValue arguments have no NULL
-      guard: each +0x08 load is unconditional. timing_wheel_remove is now a
-      direct port; wheel_insert remains the volatile ANIMATION_INIT_OPS seam,
-      and retain and release are direct ports.
+      tail-branches to timing_wheel_insert. FixedValue arguments have no NULL
+      guard: each +0x08 load is unconditional. timing_wheel_remove,
+      timing_wheel_insert, retain, and release are direct ports.
 
   # --- UI animation current-value setter ---
   - address: 0x08166b2c
@@ -57559,7 +57558,7 @@ functions:
       FUN_082738e0: timing_wheel_remove (ported in app/animation)
       FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
-      FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
+      FUN_08273898: timing_wheel_insert (direct, ported in app/animation)
     notes: >-
       True extent is the 22 instruction words 0x08166b2c..0x08166b80
       (88 bytes); the separately linked 4-byte literal pool at
@@ -57571,11 +57570,10 @@ functions:
       releases the previous +0x20 current-value slot, stores value, and
       updates +0x08 only if its unsigned rank is below value->aux + 1
       (the ARM add wraps), then reloads the scheduler global and
-      tail-branches to wheel_insert. value has no NULL guard: the stock
-      ldr [value, #8] is unconditional. timing_wheel_remove, retain, and
-      release are direct ports; wheel_insert remains the ANIMATION_INIT_OPS
-      seam. Remove and insert each reload the scheduler-global word,
-      matching the two original ldr instructions.
+      tail-branches to timing_wheel_insert. value has no NULL guard: the stock
+      ldr [value, #8] is unconditional. timing_wheel_remove, retain, release,
+      and timing_wheel_insert are direct ports. Remove and insert each reload
+      the scheduler-global word, matching the two original ldr instructions.
 
   # --- UI animation constructor over three refcounted scalars ---
   - address: 0x08166b88
@@ -57596,7 +57594,7 @@ functions:
       FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_082738e0: timing_wheel_remove (ported in app/animation)
-      FUN_08273898: wheel_insert (unported, ops-seam default)
+      FUN_08273898: timing_wheel_insert (direct, ported in app/animation)
     notes: >-
       Full constructor of the UI animation object that binds three
       refcounted Q16.16 scalars (animated value + from/to endpoints) and
@@ -57636,16 +57634,8 @@ functions:
       heads. retain 0x08273a14 is flags-bit-1-gated += 4; release
       0x082739e0 is flags-bit-1-gated -= 4 on the +0x14 word, dispatching
       the deleting destructor through vtable +0x04 when the count drains.
-      timing_wheel_remove is now a direct port. The remaining wheel_insert
-      callee uses the ANIMATION_INIT_OPS read_volatile seam
-      (pending_event_take pattern): target default transmutes the ROM
-      address; host default is inert; the scheduler word is loaded once
-      instead of twice (nothing between the two stock loads can change it).
-      The stale 0x0898xxxx page caveat applies to the vtable (address
-      constant only); LLVM emits an fp prologue, direct call for removal,
-      inverted beq+blx forms for the three dead releases and an indirect
-      insertion seam call. match.py --lib <worktree>: identical skeleton,
-      63 instructions vs 51.
+      timing_wheel_remove and timing_wheel_insert are direct ports. The stale
+      0x0898xxxx page caveat applies to the vtable (address constant only).
 
   # --- UI animation default constructor ---
   - address: 0x08166c5c
@@ -57753,7 +57743,7 @@ functions:
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_08273a40: value_aux_max (direct, ported in app/fixed_value)
       FUN_082738e0: timing_wheel_remove (direct, ported in app/animation)
-      FUN_08273898: wheel_insert (unported, TIMER_STEP_VALUE_OPS seam)
+      FUN_08273898: timing_wheel_insert (direct, ported in app/animation)
     notes: >-
       Constructor of the two-value timing-wheel node that couples a
       retained driver value with a retained step scalar and is then used
@@ -57791,15 +57781,9 @@ functions:
       0x08989b48) is word-for-word the same body; 0x081679d8 /
       0x8181060 / 0x8197744 share the aux-max leaf. The vtable lives on
       the stale 0x0898xxxx page (app/registry.rs caveat; its bytes there
-      are RTTI strings), so it is an address constant only. Deviations:
-      wheel insert dispatches through the TIMER_STEP_VALUE_OPS
-      read_volatile seam (target transmutes 0x08273898, host default
-      inert); the scheduler word is loaded once instead of twice
-      (nothing between the two stock loads can change it). match.py
-      --lib (worktree archive): identical skeleton, 45 instructions vs
-      36 - LLVM adds the crate fp prologue, loads the ops slot
-      volatiles early, inverts the first dead release into beq+bl, and
-      calls the insert seam with blx.
+      are RTTI strings), so it is an address constant only. Timing-wheel
+      insertion is the direct timing_wheel_insert port; the scheduler word is
+      loaded once, as in the original.
 
   - address: 0x0826d64c
     ghidra: FUN_0826d64c
@@ -59795,6 +59779,42 @@ functions:
       landing in z_err_msg, nErr wrapping i32::MAX -> i32::MIN like the
       plain ARM add, the default stub, and poison checks proving nothing
       outside rc/nErr/z_err_msg is written.
+  - address: 0x08273898
+    ghidra: FUN_08273898
+    name: timing_wheel_insert
+    size: 72
+    sig: "void timing_wheel_insert(u32 *table, u32 *node)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: node
+      uVar2/r2: bucket_index
+      uVar1/r3: old_bucket_head
+    notes: >-
+      Raw ARM is exactly the 18 instruction words 0x08273898..0x082738dc
+      (72 bytes); the next separately linked function begins at 0x082738e0,
+      so Ghidra's reported size is exact. Decoding every ARM B/BL word in
+      osos.dec finds seven direct call sites — 0x08160820, 0x08166c48,
+      0x08167af0, 0x08181074, 0x08197848, 0x081a0fb8, and 0x08224a74 — all
+      plain unconditional bl; there are no predicated BL forms. Seven
+      unconditional B tail callers (0x080fe5f4, 0x08166ae8, 0x08166b80,
+      0x081679f0, 0x0819775c, 0x081af454, 0x08273998) target it too, and no
+      aligned raw DATA word contains its address. The function subtracts one
+      from node->rank, returns when that word is signed negative, or when the
+      signed-nonnegative node has flags bit 0 set; otherwise it prepends node
+      to the selected bucket: prev = 0, next = old head, table[bucket] = node,
+      flags |= 1, then old_head->prev = node when present. Like ARM it has no
+      NULL or bounds guard in the insertion path; a nonnegative out-of-range
+      index is caller-invalid. The port
+      uses word indexes for the shared 32-bit wheel prefix
+      (+0x08/+0x0c/+0x10/+0x14), allowing every former volatile seam caller
+      to direct-call it. Host tests cover empty and occupied bucket insertion,
+      the linked no-op, and rank-zero signed-negative no-op. match.py against
+      the worktree archive reports the same control-flow and list-update
+      skeleton in 21 Rust instructions versus 18 ARM instructions. There are
+      no deliberate deviations.
+
 
   - address: 0x082738e0
     ghidra: FUN_082738e0
@@ -59823,10 +59843,9 @@ functions:
       while retaining every other flags/refcount bit and both node link words.
       The port uses word indexes for the shared 32-bit wheel prefix
       (+0x08/+0x0c/+0x10/+0x14), so Animation and TimedTransition callers
-      now direct-call it; wheel insertion remains their existing volatile
-      seam. Host tests cover the unlinked no-op, a head with successor, a
-      terminal head that must clear its bucket word, and an interior splice.
-      There are no deliberate deviations.
+      direct-call both wheel operations. Host tests cover the unlinked no-op,
+      a head with successor, a terminal head that must clear its bucket word,
+      and an interior splice. There are no deliberate deviations.
 
   - address: 0x0827398c
     ghidra: FUN_0827398c
@@ -59838,7 +59857,7 @@ functions:
     renames:
       param_1/r0: node
       DAT_0827399c: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
-      FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
+      FUN_08273898: timing_wheel_insert
     notes: >-
       Raw ARM has four instruction words at 0x0827398c..0x08273998 followed
       by its separately linked literal-pool word 0x089cc7e0 at 0x0827399c,
@@ -59851,12 +59870,11 @@ functions:
       unconditional B tail callers at 0x081448c4 and 0x08144a9c use this
       wrapper, and no raw DATA word references its address. The wrapper copies
       node from r0 to r1, loads the live timing-wheel table pointer from global
-      0x089cc7e0 into r0, then unconditionally tail-branches to wheel_insert.
-      wheel_insert remains unported, so this port calls the established
-      ANIMATION_INIT_OPS volatile seam and scheduler_table host model. Host
-      testing records exactly one forwarding call for rank 12 (the last wheel
-      bucket), the live scheduler table, and the unmodified node links/flags.
-      There are no other deliberate deviations.
+      0x089cc7e0 into r0, then unconditionally tail-branches to the direct
+      timing_wheel_insert port through scheduler_table's host model. Host
+      testing inserts rank 12 (the last wheel bucket), repairs the new head,
+      and preserves the table's other buckets. There are no deliberate
+      deviations.
 
   - address: 0x082739e0
     ghidra: FUN_082739e0

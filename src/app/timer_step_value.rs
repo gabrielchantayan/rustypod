@@ -74,33 +74,28 @@
 //!
 //! ## Deviations
 //!
-//! - Timing-wheel remove 0x082738e0 is the direct
-//!   [`crate::app::animation::timing_wheel_remove`] port. Wheel insert
-//!   0x08273898 remains unported and dispatches through
-//!   [`TIMER_STEP_VALUE_OPS`] (the per-class seam pattern of
-//!   `app/timed_transition.rs`): target builds transmute ROM address
-//!   0x08273898; the host default is inert and tests install a
-//!   recording model.
+//! - Timing-wheel remove 0x082738e0 and insert 0x08273898 are the
+//!   direct [`crate::app::animation::timing_wheel_remove`] and
+//!   [`crate::app::animation::timing_wheel_insert`] ports.
 //! - Retain 0x08273a14, release 0x082739e0 and the aux-max leaf
 //!   0x08273a40 are direct ports
 //!   ([`crate::app::refcounted_value`], [`value_aux_max`]).
 //! - The scheduler pointer is loaded once through the live global word
 //!   0x089cc7e0 on target where the stock body loads it twice (before
 //!   remove and before insert); nothing between the two stock loads can
-//!   change it. Host builds hand the seam a house-static 12-bucket
-//!   table modelled on the lazy allocator @ 0x082739a0.
+//!   change it. Host builds use a house-static 12-bucket table modelled
+//!   on the lazy allocator @ 0x082739a0.
 //! - [`TIMER_STEP_VALUE_VTABLE`] is an address constant only: it lives
 //!   on the stale 0x0898xxxx page (the `app/registry.rs` caveat — its
 //!   bytes there are RTTI strings, not code), so the port reproduces
 //!   the stored pointer value, never the table's contents.
 
-use core::ptr::addr_of;
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of_mut;
 
-use crate::app::animation::timing_wheel_remove;
+use crate::app::animation::{timing_wheel_insert, timing_wheel_remove};
 #[cfg(target_os = "none")]
-use crate::app::animation::{SCHEDULER_SINGLETON_GLOBAL, WHEEL_INSERT_ADDRESS};
+use crate::app::animation::SCHEDULER_SINGLETON_GLOBAL;
 #[cfg(not(target_os = "none"))]
 use crate::app::animation::TIMING_WHEEL_BUCKETS;
 use crate::app::fixed_value::{refcounted_base_init, value_aux_max, FixedValue};
@@ -123,7 +118,8 @@ pub struct TimerStepValue {
     /// +0x04: not written by any function of this family.
     pub opaque_04: u32,
     /// +0x08: the timing-wheel rank: one past the larger argument aux
-    /// word (unsigned). Insert buckets the node at `rank - 1`.
+    /// word (unsigned). Insert buckets the node at `rank - 1` when that
+    /// subtraction is signed-nonnegative.
     pub rank: u32,
     /// +0x0c: wheel link, written only by insert/remove (u32 target ptr).
     pub wheel_prev: u32,
@@ -149,40 +145,6 @@ const _: () = assert!(core::mem::offset_of!(TimerStepValue, flags) == 0x14);
 const _: () = assert!(core::mem::offset_of!(TimerStepValue, step_value) == 0x18);
 const _: () = assert!(core::mem::offset_of!(TimerStepValue, driver_value) == 0x1c);
 
-/// Indirect dispatch for the unported wheel insertion callee (see the
-/// module header). Host tests install a recording model; a later port
-/// replaces its default without touching these callers.
-#[derive(Clone, Copy)]
-pub struct TimerStepValueOps {
-    /// Timing-wheel insert 0x08273898 `(table, node)`: push `node` at
-    /// the head of bucket `node->rank - 1` and set the linked flag.
-    pub wheel_insert: unsafe extern "C" fn(table: *mut u8, node: *mut TimerStepValue),
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut TimerStepValue) {
-    let f: unsafe extern "C" fn(*mut u8, *mut TimerStepValue) =
-        core::mem::transmute(WHEEL_INSERT_ADDRESS);
-    f(table, node)
-}
-
-/// Host default: inert.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_wheel_insert(_table: *mut u8, _node: *mut TimerStepValue) {}
-
-/// Wired default: the ROM insert address on target and an inert stub on host.
-pub const DEFAULT_TIMER_STEP_VALUE_OPS: TimerStepValueOps = TimerStepValueOps {
-    wheel_insert: firmware_wheel_insert,
-};
-
-/// The active callee set, read through `read_volatile` so LLVM cannot
-/// fold the indirect call to the default.
-pub static mut TIMER_STEP_VALUE_OPS: TimerStepValueOps = DEFAULT_TIMER_STEP_VALUE_OPS;
-
-#[inline(always)]
-fn timer_step_value_ops() -> TimerStepValueOps {
-    unsafe { core::ptr::read_volatile(addr_of!(TIMER_STEP_VALUE_OPS)) }
-}
 
 /// The first argument both wheel callees receive: the word stored at
 /// the scheduler singleton global. On target that is the live singleton
@@ -190,8 +152,8 @@ fn timer_step_value_ops() -> TimerStepValueOps {
 /// state with a house-static bucket array.
 #[cfg(target_os = "none")]
 #[inline(always)]
-fn scheduler_table() -> *mut u8 {
-    unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *const u32) as *mut u8 }
+fn scheduler_table() -> *mut u32 {
+    unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *const u32) as *mut u32 }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -200,8 +162,8 @@ static mut HOST_TIMER_STEP_VALUE_WHEEL_BUCKETS: [u32; TIMING_WHEEL_BUCKETS] =
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-fn scheduler_table() -> *mut u8 {
-    unsafe { addr_of_mut!(HOST_TIMER_STEP_VALUE_WHEEL_BUCKETS).cast::<u8>() }
+fn scheduler_table() -> *mut u32 {
+    addr_of_mut!(HOST_TIMER_STEP_VALUE_WHEEL_BUCKETS).cast::<u32>()
 }
 
 /// timer_step_value_init — original: `FUN_08167a6c` @ 0x08167a6c (152
@@ -224,7 +186,6 @@ pub unsafe extern "C" fn timer_step_value_init(
     driver: *mut FixedValue,
     step: *mut FixedValue,
 ) -> *mut TimerStepValue {
-    let ops = timer_step_value_ops();
     let table = scheduler_table();
 
     // 08167a78: bl 0x08138460 — the shared refcounted base constructor.
@@ -237,7 +198,7 @@ pub unsafe extern "C" fn timer_step_value_init(
 
     // 08167a98..08167aa0: defensive unlink — +0x14 just cleared means
     // the firmware body returns on its first flag test; kept for parity.
-    timing_wheel_remove(table.cast(), this.cast());
+    timing_wheel_remove(table, this.cast());
 
     // 08167aa4..08167ab0: retain(driver), retain(step).
     retain_value(driver.cast());
@@ -265,7 +226,7 @@ pub unsafe extern "C" fn timer_step_value_init(
     (*this).rank = value_aux_max(step, driver).wrapping_add(1);
 
     // 08167ae8..08167af0: link into the timing wheel at bucket rank-1.
-    (ops.wheel_insert)(table, this);
+    timing_wheel_insert(table, this.cast());
     this
 }
 
@@ -277,70 +238,6 @@ mod tests {
     use crate::testing::{note_missing_u32_fixture, try_map_u32_slab, SCHEDULER_TABLE_TEST_LOCK};
     use std::sync::{LazyLock, MutexGuard};
 
-    /// Restores the ops seam even if a test panics mid-run.
-    struct SeamGuard;
-
-    impl Drop for SeamGuard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(TIMER_STEP_VALUE_OPS)
-                    .write_volatile(DEFAULT_TIMER_STEP_VALUE_OPS);
-            }
-        }
-    }
-
-    const EVENT_WHEEL_INSERT: u32 = 4;
-
-    /// One observed seam call: kind, node address, table address, and
-    /// the node's rank at call time.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    struct Event {
-        kind: u32,
-        node: usize,
-        table: usize,
-        rank_at_insert: u32,
-    }
-
-    static mut LOG: [Event; 8] = [Event { kind: 0, node: 0, table: 0, rank_at_insert: 0 }; 8];
-    static mut LOG_LEN: usize = 0;
-
-    unsafe fn record(event: Event) {
-        let slot = LOG_LEN;
-        assert!(slot < LOG.len(), "event log overflow");
-        LOG[slot] = event;
-        LOG_LEN = slot + 1;
-    }
-
-    fn reset_log() {
-        unsafe {
-            LOG_LEN = 0;
-        }
-    }
-
-    fn log() -> std::vec::Vec<Event> {
-        unsafe {
-            let len = LOG_LEN;
-            std::vec::Vec::from(core::slice::from_raw_parts(
-                core::ptr::addr_of!(LOG).cast::<Event>(),
-                len,
-            ))
-        }
-    }
-
-    unsafe extern "C" fn recording_wheel_insert(table: *mut u8, node: *mut TimerStepValue) {
-        record(Event {
-            kind: EVENT_WHEEL_INSERT,
-            node: node as usize,
-            table: table as usize,
-            rank_at_insert: (*node).rank,
-        });
-    }
-
-    unsafe fn install_recording_ops() {
-        core::ptr::addr_of_mut!(TIMER_STEP_VALUE_OPS).write_volatile(TimerStepValueOps {
-            wheel_insert: recording_wheel_insert,
-        });
-    }
 
     fn take_lock() -> MutexGuard<'static, ()> {
         SCHEDULER_TABLE_TEST_LOCK
@@ -348,30 +245,38 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// Fixture addresses inside the low-4-GiB slab, so the node's u32
-    /// target pointers round-trip exactly.
     #[derive(Clone, Copy)]
     struct Fixture {
         node: *mut TimerStepValue,
+        peer: *mut TimerStepValue,
         driver: *mut FixedValue,
         step: *mut FixedValue,
-        table: *mut u8,
+        table: *mut u32,
     }
 
     static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(crate::testing::hints::TIMER_STEP_VALUE, 0x1000).map(|p| p as usize)
     });
 
+    unsafe fn clear_wheel_table(table: *mut u32) {
+        for bucket in 0..TIMING_WHEEL_BUCKETS {
+            table.add(bucket).write(0);
+        }
+    }
+
     fn fixture() -> Option<Fixture> {
         let base = (*FIXTURE)? as *mut u8;
-        Some(unsafe {
+        let fixture = unsafe {
             Fixture {
                 node: base.cast::<TimerStepValue>(),
+                peer: base.add(0x60).cast::<TimerStepValue>(),
                 driver: base.add(0x28).cast::<FixedValue>(),
                 step: base.add(0x40).cast::<FixedValue>(),
                 table: scheduler_table(),
             }
-        })
+        };
+        unsafe { clear_wheel_table(fixture.table) };
+        Some(fixture)
     }
 
     /// A scalar with flag bit 1 set ("refcounted") and count 1 — what
@@ -392,9 +297,8 @@ mod tests {
         at
     }
 
-    /// Dirty storage so every write the constructor performs (and every
-    /// field it must NOT touch) is observable. Clear the linked flag:
-    /// these caller tests do not construct a real wheel chain.
+    /// Dirty storage so every non-wheel write the constructor performs
+    /// (and every field it must NOT touch) is observable.
     fn dirty_node(at: *mut TimerStepValue) {
         unsafe {
             core::ptr::write(
@@ -416,13 +320,11 @@ mod tests {
     #[test]
     fn it_returns_the_storage_it_was_given() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
@@ -433,15 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn it_installs_the_derived_vtable_and_the_base_ctor_zeroes_flags() {
+    fn it_installs_the_derived_vtable_and_ends_linked() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
@@ -450,20 +350,18 @@ mod tests {
 
             let node = &*f.node;
             assert_eq!(node.vtable, TIMER_STEP_VALUE_VTABLE, "0x0898806c, the 0x08167afc pool word");
-            assert_eq!(node.flags, 0, "the base ctor zeroes +0x14 and retains touch only the arguments");
+            assert_eq!(node.flags, 1, "the base ctor zeroes +0x14 before insert sets only the linked bit");
         }
     }
 
     #[test]
     fn value_slots_hold_step_then_driver_in_target_order() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
@@ -485,13 +383,11 @@ mod tests {
     #[test]
     fn rank_is_one_plus_the_unsigned_max_of_the_two_aux_words() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             // (driver, step) aux tuples: plain scalars, mixed values,
             // ties, high-bit values proving the compares are unsigned,
             // and the wrapping edge 0xffff_ffff + 1 == 0.
@@ -505,7 +401,7 @@ mod tests {
                 (0xffff_ffff, 0xffff_ffff),
                 (0xffff_fffe, 0x8000_0000),
             ] {
-                reset_log();
+                clear_wheel_table(f.table);
                 dirty_node(f.node);
                 counted_scalar(f.driver, drv);
                 counted_scalar(f.step, stp);
@@ -514,57 +410,66 @@ mod tests {
 
                 let expected = drv.max(stp).wrapping_add(1);
                 assert_eq!((*f.node).rank, expected, "aux ({drv:#x}, {stp:#x})");
-                assert_eq!(
-                    log().last().unwrap().rank_at_insert,
-                    expected,
-                    "the node enters the wheel already carrying its rank"
-                );
+                if expected.wrapping_sub(1) as i32 >= 0 {
+                    assert_eq!(
+                        *f.table.add(expected as usize - 1),
+                        f.node as usize as u32,
+                        "the node enters the wheel at its rank-selected bucket"
+                    );
+                } else {
+                    assert!(
+                        core::slice::from_raw_parts(f.table, TIMING_WHEEL_BUCKETS)
+                            .iter()
+                            .all(|bucket| *bucket == 0),
+                        "a signed-negative rank - 1 leaves the wheel untouched"
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn direct_retain_calls_precede_wheel_insertion() {
+    fn direct_retain_calls_precede_real_wheel_linkage() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
-            reset_log();
             dirty_node(f.node);
-            counted_scalar(f.driver, 0xa0_0000);
+            dirty_node(f.peer);
+            (*f.peer).rank = 4;
+            (*f.peer).wheel_prev = 0;
+            (*f.peer).wheel_next = 0;
+            (*f.peer).flags = 1;
+            f.table.add(3).write(f.peer as usize as u32);
+            counted_scalar(f.driver, 3);
             counted_scalar(f.step, 0);
 
             timer_step_value_init(f.node, f.driver, f.step);
 
-            let seen = log();
-            assert_eq!(
-                seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_INSERT]
-            );
-            assert_eq!(seen[0].node, f.node as usize, "insert targets this");
             assert_eq!(
                 [(*f.driver).flags, (*f.step).flags],
                 [0b1010; 2],
                 "the direct retain port receives driver, then step"
             );
-            assert_eq!(seen[0].table, f.table as usize, "insert receives the scheduler-table word");
+            assert_eq!((*f.node).rank, 4);
+            assert_eq!(*f.table.add(3), f.node as usize as u32);
+            assert_eq!((*f.node).wheel_prev, 0);
+            assert_eq!((*f.node).wheel_next, f.peer as usize as u32);
+            assert_eq!((*f.node).flags & 1, 1, "insert marks the node linked");
+            assert_eq!((*f.peer).wheel_prev, f.node as usize as u32);
         }
     }
 
     #[test]
     fn constructor_releases_no_slots_after_clearing_them() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
@@ -581,42 +486,37 @@ mod tests {
     }
 
     #[test]
-    fn untouched_fields_keep_their_sentinels() {
+    fn opaque_field_keeps_its_sentinel() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
 
             timer_step_value_init(f.node, f.driver, f.step);
 
-            let node = &*f.node;
-            assert_eq!(node.opaque_04, 0x1111_1111, "+0x04 is not written");
-            assert_eq!(node.wheel_prev, 0x2222_2222, "+0x0c belongs to the wheel ops");
-            assert_eq!(node.wheel_next, 0x3333_3333, "+0x10 belongs to the wheel ops");
+            assert_eq!((*f.node).opaque_04, 0x1111_1111, "+0x04 is not written");
         }
     }
 
     #[test]
     fn construction_produces_the_exact_final_word_image() {
         let _lock = take_lock();
-        let _restore = SeamGuard;
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            install_recording_ops();
             dirty_node(f.node);
-            counted_scalar(f.driver, 0x00a0_0000);
-            counted_scalar(f.step, 0x0000_0002);
+            counted_scalar(f.driver, u32::MAX);
+            counted_scalar(f.step, 2);
 
+            // rank wraps to zero, so rank - 1 is signed-negative and the
+            // direct port leaves the wheel fields untouched.
             timer_step_value_init(f.node, f.driver, f.step);
 
             let words = core::slice::from_raw_parts(f.node.cast::<u32>(), 8);
@@ -625,7 +525,7 @@ mod tests {
                 &[
                     TIMER_STEP_VALUE_VTABLE, // +0x00
                     0x1111_1111,             // +0x04 sentinel survives
-                    0x00a0_0001,             // +0x08 rank = max(0xa0_0000, 2) + 1
+                    0,                       // +0x08 rank = max(u32::MAX, 2) + 1
                     0x2222_2222,             // +0x0c sentinel
                     0x3333_3333,             // +0x10 sentinel
                     0,                       // +0x14 flags/refcount
@@ -638,15 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn default_host_wheel_seam_is_inert() {
+    fn default_host_wheel_port_links_the_constructed_node() {
         let _lock = take_lock();
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::timer_step_value");
             return;
         };
         unsafe {
-            // No recording ops installed: the host default must simply
-            // not fire, while the direct retains still run.
             dirty_node(f.node);
             counted_scalar(f.driver, 0);
             counted_scalar(f.step, 0);
@@ -656,6 +554,10 @@ mod tests {
             assert_eq!((*f.node).vtable, TIMER_STEP_VALUE_VTABLE);
             assert_eq!((*f.driver).flags, 0b1010);
             assert_eq!((*f.step).flags, 0b1010);
+            assert_eq!(*f.table, f.node as usize as u32);
+            assert_eq!((*f.node).wheel_prev, 0);
+            assert_eq!((*f.node).wheel_next, 0);
+            assert_eq!((*f.node).flags & 1, 1);
         }
     }
 }

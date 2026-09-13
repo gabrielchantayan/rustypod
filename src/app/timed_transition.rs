@@ -15,19 +15,18 @@
 //!
 //! ## Deviations
 //!
-//! - Timing-wheel remove `0x082738e0` is now the direct
-//!   [`crate::app::animation::timing_wheel_remove`] port. Insertion
-//!   `0x08273898` remains a host seam; target builds transmute its ROM address.
+//! - Timing-wheel remove `0x082738e0` and insertion `0x08273898` are the
+//!   direct [`crate::app::animation::timing_wheel_remove`] and
+//!   [`crate::app::animation::timing_wheel_insert`] ports.
 //! - The reciprocal is routed through the already-ported
 //!   [`crate::util::fixed::fixed16_recip_unguarded`]; no extra seam is needed.
 
-use core::ptr::addr_of;
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of_mut;
 
-use crate::app::animation::timing_wheel_remove;
+use crate::app::animation::{timing_wheel_insert, timing_wheel_remove};
 #[cfg(target_os = "none")]
-use crate::app::animation::{SCHEDULER_SINGLETON_GLOBAL, WHEEL_INSERT_ADDRESS};
+use crate::app::animation::SCHEDULER_SINGLETON_GLOBAL;
 #[cfg(not(target_os = "none"))]
 use crate::app::animation::TIMING_WHEEL_BUCKETS;
 use crate::app::fixed_value::refcounted_base_init;
@@ -84,45 +83,10 @@ const _: () = assert!(core::mem::offset_of!(TimedTransition, owner_or_self) == 0
 const _: () = assert!(core::mem::offset_of!(TimedTransition, armed) == 0x2c);
 const _: () = assert!(core::mem::offset_of!(TimedTransition, inverse_duration_q16) == 0x30);
 
-/// Wheel insertion helper for the timed-transition node.
-#[derive(Clone, Copy)]
-pub struct TimedTransitionWheelOps {
-    /// Timing-wheel insert `0x08273898` `(table, node)`.
-    pub wheel_insert: unsafe extern "C" fn(table: *mut u8, node: *mut TimedTransition),
-}
-
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut TimedTransition) {
-    let f: unsafe extern "C" fn(*mut u8, *mut TimedTransition) =
-        core::mem::transmute(WHEEL_INSERT_ADDRESS);
-    f(table, node)
-}
-
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_wheel_insert(_table: *mut u8, _node: *mut TimedTransition) {}
-
-/// Wired default: ROM insertion address on target, inert stub on host.
-pub const DEFAULT_TIMED_TRANSITION_WHEEL_OPS: TimedTransitionWheelOps =
-    TimedTransitionWheelOps {
-        wheel_insert: firmware_wheel_insert,
-    };
-
-/// The active wheel callee set, read through `read_volatile` so LLVM cannot
-/// fold the default in and delete the dispatch.
-pub static mut TIMED_TRANSITION_WHEEL_OPS: TimedTransitionWheelOps =
-    DEFAULT_TIMED_TRANSITION_WHEEL_OPS;
-
-#[inline(always)]
-fn timed_transition_ops() -> TimedTransitionWheelOps {
-    unsafe { core::ptr::read_volatile(addr_of!(TIMED_TRANSITION_WHEEL_OPS)) }
-}
-
 #[cfg(target_os = "none")]
 #[inline(always)]
-fn scheduler_table() -> *mut u8 {
-    unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *const u32) as *mut u8 }
+fn scheduler_table() -> *mut u32 {
+    unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *const u32) as *mut u32 }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -131,8 +95,8 @@ static mut HOST_TIMED_TRANSITION_WHEEL_BUCKETS: [u32; TIMING_WHEEL_BUCKETS] =
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-fn scheduler_table() -> *mut u8 {
-    unsafe { addr_of_mut!(HOST_TIMED_TRANSITION_WHEEL_BUCKETS).cast::<u8>() }
+fn scheduler_table() -> *mut u32 {
+    addr_of_mut!(HOST_TIMED_TRANSITION_WHEEL_BUCKETS).cast::<u32>()
 }
 
 /// timed_transition_init — original: `FUN_081607b0` @ 0x081607b0 (120 bytes;
@@ -152,10 +116,9 @@ pub unsafe extern "C" fn timed_transition_init(
     aux_value: u32,
     owner_or_self: u32,
 ) -> *mut TimedTransition {
-    let ops = timed_transition_ops();
     let table = scheduler_table();
 
-    timing_wheel_remove(table.cast(), this.cast());
+    timing_wheel_remove(table, this.cast());
     (*this).armed = 0;
     (*this).wheel_rank = 1;
     (*this).duration_ms = duration_ms;
@@ -169,7 +132,7 @@ pub unsafe extern "C" fn timed_transition_init(
     } else {
         owner_or_self
     };
-    (ops.wheel_insert)(table, this);
+    timing_wheel_insert(table, this.cast());
     this
 }
 
@@ -184,9 +147,7 @@ pub unsafe extern "C" fn timed_transition_init(
 /// `this`.
 ///
 /// Deliberate deviations: this composes the independently ported
-/// [`refcounted_base_init`] and [`timed_transition_init`]. The timing-wheel
-/// seam and its host behavior therefore remain those documented by
-/// `timed_transition_init`.
+/// [`refcounted_base_init`] and [`timed_transition_init`].
 ///
 /// # Safety
 ///
@@ -221,17 +182,9 @@ mod tests {
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::{LazyLock, Mutex};
-    use std::vec;
-    use std::vec::Vec;
 
     const SLAB_LEN: usize = 0x1000;
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum Event {
-        Insert { table: usize, node: usize },
-    }
-
-    static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
@@ -250,44 +203,10 @@ mod tests {
         })
     }
 
-    fn record(event: Event) {
-        EVENTS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .push(event);
-    }
-
-    fn events() -> Vec<Event> {
-        EVENTS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clone()
-    }
-
-
-    unsafe extern "C" fn recording_wheel_insert(table: *mut u8, node: *mut TimedTransition) {
-        record(Event::Insert {
-            table: table as usize,
-            node: node as usize,
-        });
-    }
-
-    struct OpsRestore(TimedTransitionWheelOps);
-
-    impl Drop for OpsRestore {
-        fn drop(&mut self) {
-            unsafe {
-                TIMED_TRANSITION_WHEEL_OPS = self.0;
-            }
-        }
-    }
-
-    fn install_ops(ops: TimedTransitionWheelOps) -> OpsRestore {
-        let previous = unsafe { TIMED_TRANSITION_WHEEL_OPS };
+    fn reset_scheduler_table() {
         unsafe {
-            TIMED_TRANSITION_WHEEL_OPS = ops;
+            core::ptr::write_bytes(scheduler_table(), 0, TIMING_WHEEL_BUCKETS);
         }
-        OpsRestore(previous)
     }
 
     fn map_or_skip() -> Option<Fixture> {
@@ -306,6 +225,7 @@ mod tests {
             None => return,
         };
 
+        let old_head = unsafe { fixture.transition.add(1) };
         unsafe {
             core::ptr::write_bytes(
                 fixture.transition.cast::<u8>(),
@@ -314,15 +234,17 @@ mod tests {
             );
             (*fixture.transition).flags = 0xa5a5_a5a4;
         }
-        EVENTS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
+        reset_scheduler_table();
+        unsafe {
+            (*old_head).wheel_rank = 1;
+            (*old_head).wheel_prev = 0;
+            (*old_head).wheel_next = 0;
+            (*old_head).flags = 1;
+        }
 
-        let _ops = install_ops(TimedTransitionWheelOps {
-            wheel_insert: recording_wheel_insert,
-        });
-
+        unsafe {
+            *scheduler_table() = old_head as usize as u32;
+        }
         let target_value = 0x1111_2222;
         let duration_ms = 1000;
         let start_value = 0x3333_4444;
@@ -340,13 +262,6 @@ mod tests {
         };
 
         assert_eq!(returned, fixture.transition);
-        assert_eq!(events(), {
-            let table = scheduler_table() as usize;
-            vec![Event::Insert {
-                table,
-                node: fixture.transition as usize,
-            }]
-        });
 
         let transition = unsafe { &*fixture.transition };
         assert_eq!(transition.wheel_rank, 1);
@@ -362,9 +277,14 @@ mod tests {
         );
         assert_eq!(transition.vtable, 0xa5a5_a5a5);
         assert_eq!(transition.opaque_04, 0xa5a5_a5a5);
-        assert_eq!(transition.wheel_prev, 0xa5a5_a5a5);
-        assert_eq!(transition.wheel_next, 0xa5a5_a5a5);
-        assert_eq!(transition.flags, 0xa5a5_a5a4);
+        assert_eq!(transition.wheel_prev, 0);
+        assert_eq!(transition.wheel_next, old_head as usize as u32);
+        assert_eq!(transition.flags, 0xa5a5_a5a5);
+        assert_eq!(unsafe { (*old_head).wheel_prev }, fixture.transition as usize as u32);
+        assert_eq!(
+            unsafe { *scheduler_table() },
+            fixture.transition as usize as u32,
+        );
     }
 
     #[test]
@@ -382,14 +302,7 @@ mod tests {
                 core::mem::size_of::<TimedTransition>(),
             );
         }
-        EVENTS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
-
-        let _ops = install_ops(TimedTransitionWheelOps {
-            wheel_insert: recording_wheel_insert,
-        });
+        reset_scheduler_table();
 
         let owner = 0x1234_5678;
         unsafe {
@@ -400,11 +313,13 @@ mod tests {
         assert_eq!(transition.owner_or_self, owner);
         assert_eq!(transition.wheel_rank, 1);
         assert_eq!(transition.armed, 0);
-        assert_eq!(events().len(), 1);
-        assert_eq!(events()[0], Event::Insert {
-            table: scheduler_table() as usize,
-            node: fixture.transition as usize,
-        });
+        assert_eq!(transition.wheel_prev, 0);
+        assert_eq!(transition.wheel_next, 0);
+        assert_eq!(transition.flags, 0x5c5c_5c5d);
+        assert_eq!(
+            unsafe { *scheduler_table() },
+            fixture.transition as usize as u32,
+        );
     }
 
     #[test]
@@ -422,13 +337,7 @@ mod tests {
                 core::mem::size_of::<TimedTransition>(),
             );
         }
-        EVENTS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
-        let _ops = install_ops(TimedTransitionWheelOps {
-            wheel_insert: recording_wheel_insert,
-        });
+        reset_scheduler_table();
 
         let returned = unsafe {
             timed_transition_construct(
@@ -444,10 +353,9 @@ mod tests {
         assert_eq!(returned, fixture.transition);
         let transition = unsafe { &*fixture.transition };
         assert_eq!(transition.vtable, TIMED_TRANSITION_VTABLE);
-        assert_eq!(transition.flags, 0);
-        assert_eq!(transition.opaque_04, u32::MAX);
-        assert_eq!(transition.wheel_rank, 1);
-        assert_eq!(transition.armed, 0);
+        assert_eq!(transition.wheel_prev, 0);
+        assert_eq!(transition.wheel_next, 0);
+        assert_eq!(transition.flags, 1);
         assert_eq!(transition.start_value, 0x5566_7788);
         assert_eq!(transition.target_value, 0x1122_3344);
         assert_eq!(transition.duration_ms, 1);
@@ -458,11 +366,8 @@ mod tests {
             fixed16_recip_unguarded(65) as u32,
         );
         assert_eq!(
-            events(),
-            vec![Event::Insert {
-                table: scheduler_table() as usize,
-                node: fixture.transition as usize,
-            }]
+            unsafe { *scheduler_table() },
+            fixture.transition as usize as u32,
         );
     }
 }
