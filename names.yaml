@@ -25485,6 +25485,38 @@ functions:
       byte-identical siblings. Host tests cover NULL, unguarded, and
       mutex-backed construction paths and allocation ordering.
 
+  - address: 0x0839ef84
+    ghidra: FUN_0839ef84
+    name: refcounted_ptr_construct_secondary
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_secondary(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2/r0: mutex
+    notes: >-
+      Raw ARM establishes the exact 104-byte body 0x0839ef84..0x0839efec:
+      twenty-six instruction words end with `pop {r4-r8,pc}` at 0x0839efe8,
+      and the next separately linked function begins at 0x0839efec. A full
+      decode of every A32 B/BL word in osos.dec finds exactly six direct BL
+      callers, all unconditional: 0x081624e0, 0x08162540, 0x081626cc,
+      0x0816272c, 0x081fcb04, and 0x081fd098. There are no predicated BL
+      forms, direct tail B transfers, or aligned image words equal to this
+      address, so no virtual-dispatch seam is invented. This separately linked
+      C++ template copy clears slot first; a non-NULL implementation receives
+      tag-2 operator_new(12) as RefcountedBody { implementation, refcount = 1,
+      mutex = NULL }. A nonzero want_mutex adds a zeroed tag-2
+      operator_new(8) Mutex, stores it at body+8, calls mutex_create, then
+      publishes body last and returns slot. The port reuses the existing direct
+      operator_new and mutex_create ports; host tests cover the NULL fast path,
+      mutex-backed construction, and allocation/create ordering. Deliberate
+      codegen deviation: LLVM may inline mutex_create, while a dedicated target
+      text section preserves this distinct callable sibling.
+
   - address: 0x0839f28c
     ghidra: FUN_0839f28c
     name: refcounted_ptr_copy_assign
