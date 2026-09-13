@@ -67316,6 +67316,39 @@ functions:
       vtable store, mode gate, conditional call, and result forwarding;
       extra instructions are the two-function seam dispatch.
 
+
+  # --- Opaque indexed handle initialization ---
+  - address: 0x0813e624
+    ghidra: FUN_0813e624
+    name: opaque_indexed_handle_initialize
+    size: 64
+    sig: "void opaque_indexed_handle_initialize(OpaqueIndexedHandle *output, const OpaqueIndexedHandleSource *source, u32 index)"
+    module: cxx/opaque_indexed_handle_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: output
+      param_2/r1: source
+      param_3/r2: index
+      source_plus_0x40: indexed_provider
+      FUN_08052560: indexed_provider_lookup
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw ARM confirms the supplied 64-byte extent exactly:
+      0x0813e624..0x0813e660 (push {r2-r6,lr} through
+      pop {r2-r6,pc}); the next separately linked function starts at
+      0x0813e664. Ghidra invents an unused fourth parameter by treating the
+      stack local's upper bytes as call arguments. The function clears the
+      five-byte output {entry pointer, tag} to NULL/zero, loads source+0x40,
+      calls 0x08052560 with that opaque provider and the unsigned index, then
+      copies the returned pointer plus a zero tag through the already ported
+      0x08037df8 IRAM memcpy veneer. The provider and entry types remain
+      unrecovered, so the Rust port keeps them opaque and uses one
+      target-address/host-swappable provider-lookup seam. Host pointer width
+      makes the test-only tag follow a native pointer instead of target +4;
+      target repr(C) layout is exactly five bytes. Decoding every ARM
+      B/BL-immediate in osos.dec finds exactly six direct callers, all
+      unconditional plain bl and none predicated: 0x081433fc, 0x0814a950,
+      0x081b7630, 0x0822411c, 0x0829df58, and 0x082c8548.
   # --- Global trace-buffer slot resolver ---
   - address: 0x08149f48
     ghidra: FUN_08149f48
