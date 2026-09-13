@@ -44262,6 +44262,36 @@ functions:
       token succeeds, and absent or mismatched registry tokens fail when
       owner_valid is zero.
 
+  - address: 0x082a3e74
+    ghidra: FUN_082a3e74
+    name: string_construct_from_vtable_slot_58
+    size: 36
+    sig: "void string_construct_from_vtable_slot_58(StringObject *out, StringSlot58Source *source)"
+    module: cxx/string_from_vtable_slot_58
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      FUN_08277440: string_default_construct
+      "*(source->vtable + 0x58)": string_slot_58_write
+    notes: >-
+      Exact raw extent is 36 bytes / nine ARM instructions from 0x082a3e74
+      through the tail `bx r2` at 0x082a3e94; the separately linked next
+      function begins at 0x082a3e98. It saves source in r4, calls the ported
+      string_default_construct at 0x08277440 for out, then loads source's
+      vtable and tail-dispatches its opaque +0x58 word as slot(source, out).
+      The virtual callee has no established function identity, so this port
+      preserves it as a raw typed vtable call rather than inventing a name or
+      a replacement seam. Direct B/BL decoding across osos.dec found exactly
+      six direct callers at 0x081124ec, 0x081322ac, 0x08174e44, 0x081753ac,
+      0x081768dc, and 0x08176e60: every one is a plain unconditional bl;
+      none is predicated and no direct b references the entry. Each caller
+      treats the interface as void despite the tail branch. Host coverage
+      proves default construction happens before precisely one +0x58 dispatch,
+      forwards the exact source pointer, and preserves the slot's output
+      payload. Host vtable slots use native-width pointers; repr(C) keeps the
+      target layout at the verified 32-bit word offsets.
+
   - address: 0x082a3fc4
     ghidra: FUN_082a3fc4
     name: scoped_context_owner_flags_bit_3
