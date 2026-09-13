@@ -30594,6 +30594,39 @@ functions:
       forwarder. The child pointer field is addressed by word index 18 in
       host fixtures so widened pointers do not overlap adjacent fields.
 
+  - address: 0x0837e8dc
+    ghidra: FUN_0837e8dc
+    name: retain_object
+    size: 68
+    sig: "u32 retain_object(Object *object)"
+    module: cxx/retain
+    status: ported
+    vars: {param_1/r4: object, r0: context, r1: activity}
+    renames:
+      param_1/r4: object
+      "*(int*)object": object->context
+      "*(short*)(object+0x22)": object->refcount, a plain u16 reference count
+      "*(u32*)(context+0xe0)": context->activity, the volatile activity lease count
+    notes: >-
+      Extent verified from raw words: 0x0837e8dc..0x0837e920, with the next
+      separately linked function beginning at 0x0837e920 (push
+      {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}); no literal pool. Decoding every
+      ARM B/BL word in osos.dec finds exactly six direct call sites: four
+      unconditional plain bl (0x082b5e08, 0x082b68e0, 0x08367bcc,
+      0x08371e30) and two blne (0x08371030, 0x083714d0); no tail b. The
+      predicated sites show that their callers perform the object NULL
+      gating. No aligned image data word equals the address, so it is not
+      virtually dispatched. Algorithm: acquire context activity through
+      ported context_activity_enter (0x082dd3d8), then if object+0x22 is
+      nonzero increment its u16 reference count inline; otherwise call
+      FUN_082b1520 (still retailOS-owned) for its zero-transition context
+      bookkeeping and increment. Unconditionally decrement the volatile
+      context+0xe0 activity lease and return zero. ARM's ldrsh/add/strh
+      sequence has the same low-16-bit wrapping result as u16::wrapping_add.
+      Deliberate deviation: target builds transmute-call 0x082b1520; host
+      builds use a private recording seam solely to exercise that unported
+      zero path. Tests cover the zero delegation, all signed/unsigned
+      refcount boundaries, and activity-count wraparound.
   - address: 0x0837ee98
     ghidra: FUN_0837ee98
     name: release_object
