@@ -74,6 +74,39 @@ pub unsafe extern "C" fn random() -> i32 {
     (sum & 0x7fff_ffff) as i32
 }
 
+/// Firmware seed cell used by [`ansi_rand`] (literal pool word at 0x080e7a60).
+///
+/// This is mutable so host tests can replace the target-only BSS address with
+/// a local word.
+pub static mut ANSI_RAND_STATE: *mut u32 = 0x089c_a89cusize as *mut u32;
+
+/// ansi_rand — original: `FUN_080e7a38` @ 0x080e7a38 (40 instruction bytes;
+/// literal pool at 0x080e7a60..0x080e7a68; next function starts 0x080e7a68).
+///
+/// Verified call count: seven plain `bl` sites at 0x0810cbc8, 0x08159d80,
+/// 0x081b7958, 0x081bc030, 0x081db3d4, 0x081db4ac, and 0x08214e08; no
+/// predicated calls. Advances the independently stored ANSI-C LCG seed using
+/// `seed * 0x41c64e6d + 0x3039`, writes the wrapped result back, and returns
+/// bits 16..30 (0..=32767).
+///
+/// # Deliberate deviations
+///
+/// The target dereferences its fixed BSS seed cell at 0x089ca89c. Host builds
+/// use the replaceable [`ANSI_RAND_STATE`] pointer so the exact update and
+/// return behavior is testable without mapping target RAM.
+///
+/// # Safety
+///
+/// [`ANSI_RAND_STATE`] must identify a readable and writable aligned `u32`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ansi_rand() -> u32 {
+    let state = ANSI_RAND_STATE;
+    let next = state.read().wrapping_mul(0x41c6_4e6d).wrapping_add(0x3039);
+    state.write(next);
+    (next >> 16) & 0x7fff
+}
+
 /// rand — alias of `random` (no separate original; same generator).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rand() -> i32 {
@@ -90,7 +123,7 @@ pub unsafe extern "C" fn srand(seed: u32) {
 pub(crate) mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// All tests share the one global generator state — serialize them.
     /// Shared with runtime/lib_init.rs, whose init walk seeds the state.
@@ -99,8 +132,8 @@ pub(crate) mod tests {
     /// Locks the generator state for a test outside this module
     /// (lib_init.rs's full-init test; raise.rs's `TEST_SIGNAL_LOCK`
     /// precedent).
-    pub(crate) fn lock_state() -> std::sync::MutexGuard<'static, ()> {
-        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    pub(crate) fn lock_state() -> parking_lot::MutexGuard<'static, ()> {
+        LOCK.lock()
     }
 
     /// Reference implementation, re-derived independently from the ARM
@@ -137,7 +170,7 @@ pub(crate) mod tests {
 
     #[test]
     fn matches_reference_seed_1_first_100() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         let mut reference = Reference::seeded(1);
         unsafe {
             srandom(1);
@@ -149,7 +182,7 @@ pub(crate) mod tests {
 
     #[test]
     fn matches_reference_seed_42() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         let mut reference = Reference::seeded(42);
         unsafe {
             srandom(42);
@@ -161,7 +194,7 @@ pub(crate) mod tests {
 
     #[test]
     fn reseed_reproduces_sequence() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         unsafe {
             srandom(7);
             let first: std::vec::Vec<i32> = (0..50).map(|_| random()).collect();
@@ -175,7 +208,7 @@ pub(crate) mod tests {
 
     #[test]
     fn output_is_masked_to_31_bits() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         unsafe {
             srandom(0xdead_beef);
             for _ in 0..1000 {
@@ -187,7 +220,7 @@ pub(crate) mod tests {
 
     #[test]
     fn aliases_match_primary_entry_points() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         unsafe {
             srandom(99);
             let expected: std::vec::Vec<i32> = (0..20).map(|_| random()).collect();
@@ -199,7 +232,7 @@ pub(crate) mod tests {
 
     #[test]
     fn thunk_seeds_with_one() {
-        let _g = LOCK.lock().unwrap();
+        let _g = LOCK.lock();
         unsafe {
             srandom(1);
             let expected: std::vec::Vec<i32> = (0..20).map(|_| random()).collect();
@@ -207,5 +240,28 @@ pub(crate) mod tests {
             let via_thunk: std::vec::Vec<i32> = (0..20).map(|_| random()).collect();
             assert_eq!(expected, via_thunk);
         }
+    }
+
+    #[test]
+    fn ansi_rand_updates_seed_and_masks_high_word() {
+        let _g = LOCK.lock();
+        let mut seed = 0xffff_ffffu32;
+        let first_state = seed.wrapping_mul(0x41c6_4e6d).wrapping_add(0x3039);
+        let second_state = first_state.wrapping_mul(0x41c6_4e6d).wrapping_add(0x3039);
+        let expected = [
+            (first_state >> 16) & 0x7fff,
+            (second_state >> 16) & 0x7fff,
+        ];
+        let observed;
+        let final_state;
+        unsafe {
+            let original_state = ANSI_RAND_STATE;
+            ANSI_RAND_STATE = core::ptr::addr_of_mut!(seed);
+            observed = [ansi_rand(), ansi_rand()];
+            final_state = seed;
+            ANSI_RAND_STATE = original_state;
+        }
+        assert_eq!(observed, expected, "each result is bits 16..30");
+        assert_eq!(final_state, second_state, "the wrapped seed is stored after every step");
     }
 }
