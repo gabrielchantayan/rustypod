@@ -277,6 +277,37 @@ pub unsafe extern "C" fn i2c_0x39_write_register(reg: u32, value: u32) -> i32 {
     status
 }
 
+/// i2c_0x39_set_register0_low_bits — original: `FUN_0836e430` @
+/// 0x0836e430 (16 bytes; 6 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Reads register 0 from I2C slave 0x39, replaces only its low two bits with
+/// the low two bits of `value`, and writes the result back. A read failure is
+/// returned unchanged and skips the write; otherwise the write status is
+/// returned. The next independently linked function begins at 0x0836e440.
+///
+/// # Deviation
+///
+/// Retail is a tail-call wrapper: `mov r2,r0; mov r0,#0; mov r1,#3; b
+/// 0x0836e234`. That unported shared helper reads a byte, computes
+/// `(old & !mask) | (value & mask)`, and writes it. This port inlines that
+/// fixed register-0/mask-3 instance through the existing ported I2C wrappers,
+/// preserving the transfer order and status behavior while using ordinary
+/// Rust calls rather than the tail branch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2c_0x39_set_register0_low_bits(value: u32) -> i32 {
+    let mut register_value = 0u8;
+    let status = i2c_0x39_read_register(0, &mut register_value);
+    if status != 0 {
+        return status;
+    }
+
+    let updated = (register_value & !0x03) | (value as u8 & 0x03);
+    i2c_0x39_write_register(0, updated as u32)
+}
+
+
 
 /// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
 /// bytes; 17 plain `bl` call sites, 0 predicated `bl`,
@@ -741,6 +772,52 @@ pub(crate) mod tests {
         }
         restore_0x39_read(state);
     }
+
+    #[test]
+    fn peripheral_0x39_low_bits_preserves_upper_register_bits() {
+        let state = install_0x39_read(0, 0);
+        unsafe {
+            *addr_of_mut!(RAW_READ_VALUE) = 0xac;
+            assert_eq!(i2c_0x39_set_register0_low_bits(0xfeed_bee3), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0], std::vec![0, 0xaf]],
+                "register zero is read, then its low two bits become 3"
+            );
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                ],
+                "the read and write each retain their retail semaphore bracket"
+            );
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_low_bits_read_error_skips_update_write() {
+        let state = install_0x39_read(0, -5);
+        unsafe {
+            assert_eq!(i2c_0x39_set_register0_low_bits(2), -5);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0]],
+                "only the register-select write for the failed read occurs"
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 1);
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![(0, PMU_I2C_INNER_SEM), (1, PMU_I2C_INNER_SEM)],
+                "the failed read still signals semaphore 5"
+            );
+        }
+        restore_0x39_read(state);
+    }
+
 
     #[test]
     fn bank_mux_selects_time_then_alarm_block() {
