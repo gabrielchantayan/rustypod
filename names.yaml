@@ -76023,3 +76023,38 @@ functions:
       unported: target builds call its verified entry 0x082bc7c4 directly,
       while host tests install an explicit seam and use target-width words
       for the fixed RAM objects; no narrowed host address is dereferenced.
+
+  # --- ATA task-file register read ---
+  - address: 0x080d7314
+    ghidra: FUN_080d7314
+    name: ata_taskfile_register_read
+    size: 76
+    sig: "u32 ata_taskfile_register_read(u32 register_selector, u32 *result)"
+    module: drivers/ata_taskfile_register_read
+    status: ported
+    renames:
+      param_1/r0: register_selector
+      param_2/r1: result
+      DAT_080d7354: ata_taskfile_read_context
+      DAT_080d7358: ata_taskfile_register_read_command
+      DAT_080d735c: ata_taskfile_register_read_failure_format
+      FUN_08077490: ata_taskfile_transaction
+      FUN_082bd4a8: debug_printf
+    notes: >-
+      Raw osos.dec confirms 64 instruction bytes at 0x080d7314..0x080d7353,
+      followed by the three-word literal pool at 0x080d7354..0x080d735f;
+      0x080d7360 starts the independently linked sibling. Whole-image ARM
+      B/BL-immediate decoding finds exactly seven direct inbound sites, all
+      unconditional plain bl with no predicated forms: 0x080a973c, 0x080c495c,
+      0x080c4978, 0x080c49a0, 0x080c49bc, 0x080cdf74, and 0x080cdf9c. The
+      body passes fixed command 0x000400a7 to FUN_08077490, combines the raw
+      context +0x0c word as `word << 16 | register_selector << 8`, forwards
+      result as r2 and context +0x14 as the timeout r3, then returns one for
+      any nonzero result. A zero result calls debug_printf with literal
+      0x088f8cf4 and returns zero. FUN_08077490 remains unported, so target
+      code uses a literal veneer to its verified address and host tests inject
+      a volatile seam. The stock diagnostic receives unspecified volatile
+      registers from that worker; Rust instead supplies debug_printf a null
+      varargs pointer, a deliberate diagnostic-only deviation. Host tests
+      cover full-width packing and result-slot forwarding on success, plus the
+      null result slot, failure return, and diagnostic pointer on failure.
