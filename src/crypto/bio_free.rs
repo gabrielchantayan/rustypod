@@ -21,32 +21,28 @@
 //!
 //! # Deliberate deviations
 //!
-//! `CRYPTO_free_ex_data` at `0x080439e0` is not ported. Target builds call its
-//! verified entry directly; host builds use [`BIO_FREE_OPS`]. The callback is
-//! likewise a raw target-width code word, so host builds use that same narrow
-//! dispatch model. The final `destroy` word is deliberately only inspected:
+//! The raw target-width callback word uses a host dispatch boundary. Its
+//! ex-data release now calls the ported [`crypto_free_ex_data`] directly.
 //! raw ARM calls `traced_free` conditionally and never invokes that slot.
 
 use core::ffi::c_void;
 use core::ptr;
 
 use crate::crypto::add_lock::crypto_add_lock;
-use crate::crypto::bio_ctrl::{Bio, BioExData, BioMethod};
+use crate::crypto::bio_ctrl::{Bio, BioMethod};
+use crate::crypto::free_ex_data::crypto_free_ex_data;
 use crate::drivers::ata_cmd::traced_free;
 
-const CRYPTO_FREE_EX_DATA_ADDRESS: usize = 0x0804_39e0;
 const CRYPTO_LOCK_BIO: i32 = 0x15;
 const BIO_CB_FREE: u32 = 1;
 
 type BioFreeCallback = unsafe extern "C" fn(*mut Bio, u32, *mut c_void, i32, i32, i32) -> i32;
-type CryptoFreeExData = unsafe extern "C" fn(i32, *mut Bio, *mut BioExData);
 
-/// Host model for the two indirect boundaries in [`bio_free`].
+/// Host model for the raw BIO callback boundary in [`bio_free`].
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct BioFreeOps {
     pub callback: BioFreeCallback,
-    pub free_ex_data: CryptoFreeExData,
 }
 
 #[cfg(not(target_os = "none"))]
@@ -62,20 +58,12 @@ unsafe extern "C" fn missing_bio_free_callback(
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_crypto_free_ex_data(
-    _class_index: i32,
-    _bio: *mut Bio,
-    _ex_data: *mut BioExData,
-) {
-    panic!("bio_free requires installed host BIO_FREE_OPS for ex-data")
-}
 
-/// Host-only execution model for the unported ex-data helper and raw callback
-/// word. Target builds call their original addresses directly.
+/// Host-only execution model for the raw callback word. Target builds invoke
+/// the target-width callback directly.
 #[cfg(not(target_os = "none"))]
 pub static mut BIO_FREE_OPS: BioFreeOps = BioFreeOps {
     callback: missing_bio_free_callback,
-    free_ex_data: missing_crypto_free_ex_data,
 };
 
 #[inline(always)]
@@ -100,20 +88,6 @@ unsafe fn invoke_callback(
     }
 }
 
-#[inline(always)]
-unsafe fn free_ex_data(bio: *mut Bio) {
-    #[cfg(target_os = "none")]
-    {
-        let free_ex_data: CryptoFreeExData = unsafe { core::mem::transmute(CRYPTO_FREE_EX_DATA_ADDRESS) };
-        unsafe { free_ex_data(0, bio, ptr::addr_of_mut!((*bio).ex_data)) };
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let ops = unsafe { ptr::read_volatile(ptr::addr_of!(BIO_FREE_OPS)) };
-        unsafe { (ops.free_ex_data)(0, bio, ptr::addr_of_mut!((*bio).ex_data)) };
-    }
-}
 
 /// bio_free — original: `FUN_0803d3c8` @ 0x0803d3c8 (140 bytes; 6 direct
 /// `bl` and 2 `blne` call sites, binary-verified from `osos.dec`).
@@ -146,7 +120,13 @@ pub unsafe extern "C" fn bio_free(bio: *mut Bio) -> i32 {
         return 0;
     }
 
-    unsafe { free_ex_data(bio) };
+    unsafe {
+        crypto_free_ex_data(
+            0,
+            bio.cast(),
+            ptr::addr_of_mut!((*bio).ex_data).cast(),
+        )
+    };
 
     let method = unsafe { (*bio).method as usize as *const BioMethod };
     if !method.is_null() && unsafe { (*method).destroy } != 0 {
@@ -165,6 +145,9 @@ mod tests {
     use crate::kernel::resource_op::{
         missing_registry_acquire, missing_registry_release, ResourceOpHooks,
         RESOURCE_OP_HOOKS, RESOURCE_OP_HOOKS_TEST_LOCK,
+    };
+    use crate::crypto::free_ex_data::{
+        CryptoExDataOps, CRYPTO_EX_DATA_OPS, CRYPTO_EX_DATA_OPS_TEST_LOCK,
     };
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use parking_lot::{Mutex, MutexGuard};
@@ -201,9 +184,15 @@ mod tests {
         CALLBACK_RESULT.load(Ordering::SeqCst)
     }
 
-    unsafe extern "C" fn recording_ex_data(class_index: i32, bio: *mut Bio, ex_data: *mut BioExData) {
+    unsafe extern "C" fn recording_ex_data(class_index: i32, bio: *mut c_void, ex_data: *mut c_void) {
         EVENTS.lock().push(Event::ExData(class_index, bio as usize, ex_data as usize));
     }
+
+    unsafe extern "C" fn ex_data_initialized() -> bool {
+        true
+    }
+
+    unsafe extern "C" fn initialize_ex_data() {}
 
     unsafe extern "C" fn recording_free(block: *mut u8) {
         EVENTS.lock().push(Event::Free(block as usize));
@@ -219,7 +208,6 @@ mod tests {
             unsafe {
                 ptr::addr_of_mut!(BIO_FREE_OPS).write(BioFreeOps {
                     callback: recording_callback,
-                    free_ex_data: recording_ex_data,
                 });
             }
             Self { saved }
@@ -229,6 +217,32 @@ mod tests {
     impl Drop for BioFreeOpsGuard {
         fn drop(&mut self) {
             unsafe { ptr::addr_of_mut!(BIO_FREE_OPS).write(self.saved) };
+        }
+    }
+
+    struct CryptoExDataOpsGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: CryptoExDataOps,
+    }
+
+    impl CryptoExDataOpsGuard {
+        unsafe fn install() -> Self {
+            let lock = CRYPTO_EX_DATA_OPS_TEST_LOCK.lock();
+            let saved = unsafe { ptr::read_volatile(ptr::addr_of!(CRYPTO_EX_DATA_OPS)) };
+            unsafe {
+                ptr::addr_of_mut!(CRYPTO_EX_DATA_OPS).write(CryptoExDataOps {
+                    is_initialized: ex_data_initialized,
+                    initialize: initialize_ex_data,
+                    free_ex_data: recording_ex_data,
+                });
+            }
+            Self { _lock: lock, saved }
+        }
+    }
+
+    impl Drop for CryptoExDataOpsGuard {
+        fn drop(&mut self) {
+            unsafe { ptr::addr_of_mut!(CRYPTO_EX_DATA_OPS).write(self.saved) };
         }
     }
 
@@ -297,8 +311,15 @@ mod tests {
         }
     }
 
-    fn install() -> (ResourceHooksGuard, FreeHooksGuard, BioFreeOpsGuard) {
-        unsafe { (ResourceHooksGuard::install(), FreeHooksGuard::install(), BioFreeOpsGuard::install()) }
+    fn install() -> (ResourceHooksGuard, FreeHooksGuard, CryptoExDataOpsGuard, BioFreeOpsGuard) {
+        unsafe {
+            (
+                ResourceHooksGuard::install(),
+                FreeHooksGuard::install(),
+                CryptoExDataOpsGuard::install(),
+                BioFreeOpsGuard::install(),
+            )
+        }
     }
 
     fn reset_events(callback_result: i32) {
@@ -309,7 +330,7 @@ mod tests {
     #[test]
     fn null_bio_returns_zero_without_any_dispatch() {
         let _serial = BIO_FREE_TEST_LOCK.lock();
-        let (_resource, _free, _ops) = install();
+        let (_resource, _free, _crypto, _ops) = install();
         reset_events(1);
 
         assert_eq!(unsafe { bio_free(ptr::null_mut()) }, 0);
@@ -319,7 +340,7 @@ mod tests {
     #[test]
     fn shared_bio_decrements_reference_without_teardown() {
         let _serial = BIO_FREE_TEST_LOCK.lock();
-        let (_resource, _free, _ops) = install();
+        let (_resource, _free, _crypto, _ops) = install();
         let Some((bio, _method)) = fixture() else {
             note_missing_u32_fixture("crypto::bio_free");
             return;
@@ -335,7 +356,7 @@ mod tests {
     #[test]
     fn callback_can_cancel_final_release_after_reference_reaches_zero() {
         let _serial = BIO_FREE_TEST_LOCK.lock();
-        let (_resource, _free, _ops) = install();
+        let (_resource, _free, _crypto, _ops) = install();
         let Some((bio, _method)) = fixture() else {
             note_missing_u32_fixture("crypto::bio_free");
             return;
@@ -357,7 +378,7 @@ mod tests {
     #[test]
     fn final_release_orders_callback_ex_data_then_free_when_destroy_word_exists() {
         let _serial = BIO_FREE_TEST_LOCK.lock();
-        let (_resource, _free, _ops) = install();
+        let (_resource, _free, _crypto, _ops) = install();
         let Some((bio, method)) = fixture() else {
             note_missing_u32_fixture("crypto::bio_free");
             return;
@@ -384,7 +405,7 @@ mod tests {
     #[test]
     fn missing_method_or_destroy_skips_only_the_final_free() {
         let _serial = BIO_FREE_TEST_LOCK.lock();
-        let (_resource, _free, _ops) = install();
+        let (_resource, _free, _crypto, _ops) = install();
         let Some((bio, method)) = fixture() else {
             note_missing_u32_fixture("crypto::bio_free");
             return;

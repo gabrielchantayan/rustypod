@@ -30999,6 +30999,38 @@ functions:
       ordinary Rust calls; host tests prove both fallback lock arguments and
       order, i32 wrapping, and callback replacement without fallback writes.
 
+  - address: 0x080439e0
+    ghidra: FUN_080439e0
+    name: crypto_free_ex_data
+    size: 60
+    sig: "void crypto_free_ex_data(i32 class_index, void *object, void *ex_data)"
+    module: crypto/free_ex_data
+    status: ported
+    renames:
+      r0/r5: class_index
+      r1/r6: object
+      r2/r7: ex_data
+      r3: ex_data_free_slot
+      r4: ex_data_singleton
+      FUN_08075914: initialize_crypto_ex_data
+    notes: >-
+      OpenSSL CRYPTO_free_ex_data dispatch shim. Raw ARM confirms the
+      60-byte extent: 56 bytes of instructions at 0x080439e0..0x08043a1b
+      and the singleton-object literal 0x08a0e9e0 at 0x08043a1c; the
+      separately linked sibling begins at 0x08043a20. Decoding every ARM
+      B/BL word in osos.dec finds exactly 7 direct inbound calls, all
+      unconditional bl (0x0803d430, 0x0803d940, 0x080623c0, 0x0806254c,
+      0x0806fe88, 0x08070560, 0x080ec2b0), with zero predicated direct
+      calls. It reads the singleton vtable word, calls the unported lazy
+      initializer FUN_08075914 only when that word is zero, reloads it, then
+      tail-dispatches (class_index, object, ex_data) through vtable slot
+      +0x14. The slot target does not decode as a statically named function
+      at this wrapper, so the port preserves it as an indirect call. Target
+      builds call the verified initializer address; host tests use the
+      CRYPTO_EX_DATA_OPS singleton model and prove both unchanged argument
+      forwarding and the post-initializer vtable reload. The target tail bx
+      is an ordinary returning Rust call.
+
   - address: 0x08043c18
     ghidra: FUN_08043c18
     name: traced_alloc
