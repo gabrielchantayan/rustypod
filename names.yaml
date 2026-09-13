@@ -76282,3 +76282,32 @@ functions:
       tests install faithful seams. Deliberate host-only deviation: an
       uninstalled seam reports end-of-input rather than calling a target
       address.
+
+  - address: 0x080a3ea0
+    ghidra: FUN_080a3ea0
+    name: mov_atom_table_find
+    size: 168
+    sig: "MovAtomNode *mov_atom_table_find(MovAtomNode *root, u32 fourcc, u32 populate)"
+    module: mov/atom_table
+    status: ported
+    renames:
+      param_1/r0/r4: root
+      param_2/r1/r5: fourcc
+      param_3/r2/r6: populate
+      puVar2/r4: node
+      puVar1/r0: found_or_created
+      FUN_080b3d40: mov_atom_node_new
+    notes: >-
+      Fourcc-keyed MOV atom-table search, raw-decoded as exactly 168 bytes
+      from 0x080a3ea0 through 0x080a3f44; the independently linked next
+      function begins at 0x080a3f48 with push {r2, r3, r4, lr}. Seven direct
+      bl callers are all unconditional: self at 0x080a3f1c and 0x080a3f34,
+      then 0x081c20c0, 0x081c2194, 0x081c8054, 0x081d8360, 0x081f3eb4;
+      binary-scanned by decoding every B/BL word in osos.dec. No aligned DATA
+      word references the entry. Matching populated nodes, or any match with
+      populate != 0, return immediately. A matching -1/-1 offset placeholder
+      walks dup_chain (+0x08), then creates and stores a mov_atom_node_new
+      placeholder at the terminal link. Nonmatches recurse into child_b
+      (+0x04) before child_a (+0x00). No deviations: the duplicate chain is
+      iterative like stock's back-edge and all target pointer words remain
+      u32.
