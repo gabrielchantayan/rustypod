@@ -1140,6 +1140,52 @@ pub unsafe extern "C" fn refcounted_body_attach(
         mutex_unlock(mutex);
     }
 }
+/// refcounted_body_attach_slot1 — original: `FUN_0839d198` @ load address
+/// 0x0839d198 (60 bytes; 6 direct `bl` call sites, all unconditional:
+/// 0x0816251c, 0x08162708, 0x081c02f0, 0x081c04d0, 0x0839f10c, and
+/// 0x0839f13c). Decoding every A32 `B`/`BL` word in `osos.dec` finds no
+/// predicated calls or direct `b` sites; no aligned image word equals this
+/// address, so it is not virtually dispatched. The next separately linked
+/// function starts at 0x0839d1d4.
+///
+/// The slot-1 refcounted-handle family's separately linked shared-body attach
+/// helper. It stores `body` into `dst` unconditionally, then, when non-NULL,
+/// locks the optional mutex at target +8, wrapping-increments the signed
+/// refcount at +4, reloads and NULL-checks the mutex, then unlocks it. The
+/// two mutex loads intentionally remain distinct, matching the ARM sequence.
+///
+/// Deliberate deviations: LLVM may inline the ported mutex helpers rather
+/// than retain the stock two `blne` instructions. A dedicated target section
+/// prevents this hookable template instance from folding into the
+/// behavior-identical [`refcounted_body_attach`] @ 0x0839d370.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned pointer slot; when `body` is non-NULL it
+/// must point at a readable/writable [`RefcountedBody`]. Like the firmware,
+/// neither pointer is NULL-checked before its respective dereference.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_attach_slot1")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_attach_slot1(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 
 /// refcounted_ptr_copy_assign — original: `FUN_0839f28c` @ 0x0839f28c
 /// (48 bytes; 14 `bl` call sites, all unconditional — verified by
@@ -1265,18 +1311,18 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign_retain_count(
 /// at `0x0839d1d4`, then load `*src`, attach it to `dst`, and return `dst`.
 /// The source load intentionally follows the release, as in the ARM.
 ///
-/// Deliberate deviation: the source calls the separately entered attach helper
-/// at `0x0839d198`; raw bytes show it is byte-identical to the already ported
-/// [`refcounted_body_attach`] at `0x0839d370` modulo branch displacements, so
-/// this port uses that canonical helper. The target-only section preserves
-/// this hookable template instance independently.
+/// The source calls the separately entered slot-1 attach helper
+/// [`refcounted_body_attach_slot1`] at `0x0839d198`, now ported at its exact
+/// dispatch seam. The target-only sections preserve both hookable template
+/// instances independently.
 ///
 /// # Safety
 ///
 /// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL bodies
 /// and associated mutexes, implementations, and vtables must meet
-/// [`refcounted_body_release_slot1`]'s and [`refcounted_body_attach`]'s safety
-/// requirements. The firmware does not NULL-check either slot pointer.
+/// [`refcounted_body_release_slot1`]'s and
+/// [`refcounted_body_attach_slot1`]'s safety requirements. The firmware does
+/// not NULL-check either slot pointer.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_assign_slot1")]
 #[inline(never)]
@@ -1286,7 +1332,7 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign_slot1(
 ) -> *mut *mut RefcountedBody {
     if dst != src.cast_mut() {
         refcounted_body_release_slot1(dst);
-        refcounted_body_attach(dst, src.read());
+        refcounted_body_attach_slot1(dst, src.read());
     }
     dst
 }
@@ -2783,6 +2829,39 @@ mod tests {
             refcounted_body_attach(&mut slot, &mut body);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, 4);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// The separately linked slot-1 attach copy stores a NULL body before
+    /// taking its early return, replacing an existing destination value.
+    #[test]
+    fn attach_slot1_null_body_stores_null() {
+        unsafe {
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_attach_slot1(&mut slot, core::ptr::null_mut());
+
+            assert!(slot.is_null());
+        }
+    }
+
+    /// Its refcount bump is the raw ARM wrapping `add`, not a checked or
+    /// saturating increment.
+    #[test]
+    fn attach_slot1_bumps_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            refcounted_body_attach_slot1(&mut slot, &mut body);
+
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
             assert_eq!(body.opaque0, 0x1111_2222);
         }
     }
