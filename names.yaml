@@ -43074,6 +43074,46 @@ functions:
       propagation, and the current default stubs' exact record and guard
       bytes.
 
+  - address: 0x082645a0
+    ghidra: FUN_082645a0
+    name: draw_state_construct_with_bound_surface
+    size: 72
+    sig: "u8 *draw_state_construct_with_bound_surface(u8 *record, u8 *surface, const u8 *resource)"
+    module: cxx/draw_state
+    status: ported
+    renames:
+      param_1/r0: record (0x44-byte draw-state record allocation)
+      param_2/r1: surface (0xb8-byte PairHeaderBase surface descriptor)
+      param_3/r2: resource (resolved payload descriptor)
+      r4: record (embedded member constructor result minus 0x20)
+      r5: resource
+      r6: surface
+      FUN_081598a4: embedded_pair_construct
+      FUN_082630f0: body_init
+      FUN_0810e6b4: pair_header_base_bind_payload
+      FUN_08264518: surface_attach
+    notes: >-
+      Raw ARM confirms the full 72-byte extent: 0x082645a0 begins
+      `push {r4,r5,r6,lr}` and the distinct copy constructor starts at
+      0x082645e8, with no literal pool between. Decoding every ARM B/BL
+      immediate in osos.dec found exactly seven unconditional bl call
+      sites (0x0810ae90, 0x0815c16c, 0x0819b79c, 0x081b4328,
+      0x081c9ab4, 0x081ca750, 0x082993ec), zero predicated bl, zero tail
+      b, and no aligned DATA word holding the entry address: all callers
+      bind directly. The constructor first invokes the embedded two-word
+      member constructor on record+0x20, derives the effective record from
+      its r0 result minus 0x20, initializes that body, binds resource into
+      surface through pair_header_base_bind_payload(surface, resource, 0, 0),
+      then attaches the newly bound surface to the record. The existing
+      DRAW_STATE_CONSTRUCT_OPS boundary is deliberately reused for the
+      unported body initializer rather than adding a duplicate seam; the
+      binder and surface attacher are already ported direct calls. Host test
+      proves return-derived record propagation, release/load binder operands,
+      literal-zero tag/context, descriptor copy before attachment,
+      origin-moved clip, and guard preservation. match.py structural review
+      should show the three-call constructor chain, with the shared
+      body-initializer dispatch emitting an indirect call.
+
   - address: 0x082645e8
     ghidra: FUN_082645e8
     name: draw_state_copy_construct

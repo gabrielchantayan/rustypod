@@ -1469,11 +1469,10 @@ mod base_bind_payload_tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
-    /// The bind table is one global; serialize the tests that swap it.
-    static BIND_LOCK: Mutex<()> = Mutex::new(());
+    /// The bind table is one global; callers share the crate-level lock.
     static mut CALLS: Vec<Call> = Vec::new();
     /// Forces the loader's return value so the forwarding test proves the
     /// port works off the callee's r0.
@@ -1523,7 +1522,9 @@ mod base_bind_payload_tests {
     }
 
     fn mock() -> MutexGuard<'static, ()> {
-        let guard = BIND_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = crate::testing::PAIR_HEADER_BASE_BIND_PAYLOAD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         unsafe {
             core::ptr::addr_of_mut!(PAIR_HEADER_BASE_BIND_PAYLOAD_OPS).write_volatile(
                 PairHeaderBaseBindPayloadOps {

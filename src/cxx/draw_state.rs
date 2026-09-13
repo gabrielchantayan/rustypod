@@ -84,6 +84,8 @@ use crate::cxx::draw_state_color::{
     DRAW_STATE_FOREGROUND_COLOR_OFFSET,
     DRAW_STATE_STYLE_OFFSET,
 };
+use crate::cxx::draw_state_surface::surface_attach;
+use crate::cxx::pair_header::pair_header_base_bind_payload;
 
 /// Byte size of the draw-state record (the +0x40 word is the highest
 /// field `body_init` writes; call-site stack frames confirm — see the
@@ -233,6 +235,37 @@ pub unsafe extern "C" fn draw_state_construct_with_surface(
     this
 }
 
+/// draw_state_construct_with_bound_surface — original: `FUN_082645a0` @
+/// **0x082645a0** (72 bytes, 0x082645a0..0x082645e8; **7 unconditional
+/// `bl` call sites**, zero predicated `bl` and zero tail `b`, binary-scanned
+/// from osos.dec).
+///
+/// Constructs the 0x44-byte draw-state record at `record`, binds `resource`
+/// into its `surface` descriptor with a zero tag and context, then attaches
+/// that now-bound surface to the record. The member constructor's return
+/// minus 0x20 remains the effective record pointer for every later call and
+/// the returned value. Neither pointer has a NULL guard, matching the
+/// unconditional ARM accesses and calls.
+///
+/// Deliberate deviation: the existing [`DRAW_STATE_CONSTRUCT_OPS`] boundary
+/// still models the unported body initializer at 0x082630f0 for host tests;
+/// this function uses the already-ported payload binder and surface attacher
+/// directly rather than adding another dispatch seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_construct_with_bound_surface(
+    record: *mut u8,
+    surface: *mut u8,
+    resource: *const u8,
+) -> *mut u8 {
+    let member = embedded_pair_construct_op()(record.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET));
+    let record = member.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET);
+    body_init_op()(record);
+    pair_header_base_bind_payload(surface.cast(), resource.cast(), 0, 0);
+    surface_attach(record, surface);
+    record
+}
+
 /// draw_state_copy_construct — original: `FUN_082645e8` @ 0x082645e8
 /// (148 bytes, 0x082645e8..0x0826467c; 11 unconditional `bl` call sites,
 /// no predicated calls or `b`, binary-scanned).
@@ -328,6 +361,72 @@ mod tests {
     static mut INIT_CALLS: Vec<(&'static str, usize, usize)> = Vec::new();
     /// Canned return for the embedded-pair recorder.
     static mut PAIR_RESULT: *mut u8 = core::ptr::null_mut();
+    /// Calls made below the resource binder while this constructor's test has
+    /// installed its host model.
+    static mut BIND_CALLS: Vec<(&'static str, usize, usize, u32)> = Vec::new();
+
+    unsafe extern "C" fn recording_bind_release(base: *mut u32) {
+        (*core::ptr::addr_of_mut!(BIND_CALLS)).push((
+            "release",
+            base as usize,
+            base.add(0x98 / 4).read() as usize,
+            0,
+        ));
+    }
+
+    unsafe extern "C" fn recording_bind_load(
+        grand_base: *mut u32,
+        descriptor_fields: *const u32,
+        _descriptor: *const u32,
+        _base: *mut u32,
+        context: u32,
+    ) -> u32 {
+        (*core::ptr::addr_of_mut!(BIND_CALLS)).push((
+            "load",
+            grand_base as usize,
+            descriptor_fields as usize,
+            context,
+        ));
+        0
+    }
+
+    /// Restores the binder's previous host dispatch after its shared test lock
+    /// is released.
+    struct BindPayloadOpsGuard {
+        old: crate::cxx::pair_header::PairHeaderBaseBindPayloadOps,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for BindPayloadOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::cxx::pair_header::PAIR_HEADER_BASE_BIND_PAYLOAD_OPS)
+                    .write_volatile(self.old);
+            }
+        }
+    }
+
+    fn bind_payload_bench() -> BindPayloadOpsGuard {
+        let lock = crate::testing::PAIR_HEADER_BASE_BIND_PAYLOAD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            let old = core::ptr::addr_of!(crate::cxx::pair_header::PAIR_HEADER_BASE_BIND_PAYLOAD_OPS)
+                .read_volatile();
+            core::ptr::addr_of_mut!(crate::cxx::pair_header::PAIR_HEADER_BASE_BIND_PAYLOAD_OPS)
+                .write_volatile(crate::cxx::pair_header::PairHeaderBaseBindPayloadOps {
+                    release_owned_payload: recording_bind_release,
+                    load_payload: recording_bind_load,
+                });
+            (*core::ptr::addr_of_mut!(BIND_CALLS)).clear();
+            BindPayloadOpsGuard { old, _lock: lock }
+        }
+    }
+
+    fn bind_calls() -> Vec<(&'static str, usize, usize, u32)> {
+        unsafe { (*core::ptr::addr_of!(BIND_CALLS)).clone() }
+    }
+
 
     unsafe extern "C" fn recording_pair_construct(member: *mut u8) -> *mut u8 {
         (*core::ptr::addr_of_mut!(INIT_CALLS)).push(("pair", member as usize, 0));
@@ -527,6 +626,79 @@ mod tests {
             .copy_from_slice(&surface.to_ne_bytes());
         expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
         assert_eq!(record, expected);
+    }
+
+    #[test]
+    fn construct_with_bound_surface_rebinds_before_attaching_and_returns_derived_record() {
+        let mut record_words = [0xa5a5_a5a5u32; (DRAW_STATE_SIZE + 8 + 0x10) / 4];
+        let entry_record = record_words.as_mut_ptr().cast::<u8>();
+        let pair_result = unsafe {
+            entry_record.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET + 8)
+        };
+        let expected_record = unsafe { pair_result.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET) };
+
+        let mut surface_words = [0xa5a5_a5a5u32; 0xb8 / 4];
+        let surface = surface_words.as_mut_ptr().cast::<u8>();
+        let mut resource_words = [0u32; 0x18 / 4];
+        resource_words[2..].copy_from_slice(&[
+            (-4i32) as u32,
+            7,
+            16,
+            30,
+        ]);
+        let resource = resource_words.as_ptr().cast::<u8>();
+        unsafe {
+            surface_words[0x98 / 4] = 0xdead_beef;
+        }
+
+        let _draw_state_bench = draw_state_bench(pair_result);
+        let _bind_payload_bench = bind_payload_bench();
+        let returned = unsafe {
+            draw_state_construct_with_bound_surface(entry_record, surface, resource)
+        };
+
+        assert_eq!(returned, expected_record, "the pair constructor's r0 controls return");
+        assert_eq!(
+            init_calls(),
+            std::vec![
+                ("pair", unsafe { entry_record.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET) } as usize, 0),
+                ("body", expected_record as usize, 0),
+            ],
+            "the record member and body initialize before the direct binder call"
+        );
+        assert_eq!(
+            bind_calls(),
+            std::vec![
+                ("release", surface as usize, 0xdead_beef, 0),
+                ("load", unsafe { surface.cast::<u32>().add(1) } as usize,
+                    unsafe { resource.cast::<u32>().add(2) } as usize, 0),
+            ],
+            "binder receives the surface/resource pair and the original's zero context"
+        );
+        assert_eq!(surface_words[0xa8 / 4], 0, "the constructor passes tag zero");
+        assert_eq!(
+            &surface_words[0x98 / 4..0xa8 / 4],
+            &resource_words[2..6],
+            "binder installs resource descriptor fields before surface_attach snapshots them"
+        );
+        assert_eq!(
+            unsafe { (expected_record.add(DRAW_STATE_SURFACE_OFFSET) as *const u32).read() },
+            surface as u32,
+            "surface_attach records the same surface the binder updated"
+        );
+        assert_eq!(
+            unsafe { (expected_record.add(0x34) as *const crate::ui::rect::Rect).read() },
+            crate::ui::rect::Rect { top: 0, left: 0, bottom: 20, right: 23 },
+            "the attached clip is derived from the just-bound resource rect"
+        );
+        assert!(
+            unsafe {
+                core::slice::from_raw_parts(entry_record.add(8 + DRAW_STATE_SIZE), 0x10)
+            }
+            .iter()
+            .all(|&byte| byte == 0xa5),
+            "the record guard stays untouched"
+        );
     }
     #[test]
     fn copy_construct_copies_fields_and_preserves_record_padding_and_guard() {

@@ -672,6 +672,13 @@ pub static BTREE_CELL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(()
 /// teardown restore defaults under the other's mock.
 pub static CPP_ARRAY_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes every host test that replaces
+/// `cxx::pair_header::PAIR_HEADER_BASE_BIND_PAYLOAD_OPS`. The base binder's
+/// own tests and callers that bind a resource through it must share this
+/// lock, or one test can restore the panic defaults while another is running.
+pub static PAIR_HEADER_BASE_BIND_PAYLOAD_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 /// Serializes every host test that installs a fixture block into
 /// `kernel::diag_ring_record::DIAG_RING_BLOCK_GETTER`. That seam is one
 /// shared mutable global pointing at the per-task diagnostic ring, and
