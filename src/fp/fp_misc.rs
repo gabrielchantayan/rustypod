@@ -666,7 +666,7 @@ use crate::cxx::string_object::{
 };
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
-use crate::runtime::rt_div::__rt_sdiv;
+use crate::runtime::rt_div::{__rt_sdiv, __rt_sdivmod};
 
 /// Byte size of the stack-local query object the constructor
 /// `FUN_0813e474` builds (the original's frame reserves `sp+0x8` ..
@@ -2549,6 +2549,33 @@ pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
     let millis_part = __rt_sdiv(nsec, 1_000_000);
     let sec = core::ptr::read_unaligned(ts);
     (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
+}
+
+/// milliseconds_to_timespec — original: `FUN_08261e94` @ 0x08261e94
+/// (**40 bytes**: nine instructions through `pop {r4,pc}` at
+/// 0x08261eb8 plus the 0x000f4240 literal at 0x08261ebc; the next
+/// function starts at 0x08261ec0). A complete ARM B/BL-immediate
+/// decode of osos.dec verifies **6 unconditional `bl` sites**
+/// (0x0816531c, 0x081654ac, 0x081d6e4c, 0x081d6ec8, 0x081d7774,
+/// 0x081d77e4), zero predicated calls, and no data-word references.
+///
+/// Divides signed `milliseconds` by 1000. It writes the truncating
+/// quotient to `out[0]` (seconds) and the signed remainder multiplied
+/// by 1_000_000 to `out[1]` (nanoseconds). There is no NULL guard,
+/// matching the two aligned stack-word stores in the original.
+///
+/// Deliberate deviation: ADS returns quotient and remainder in r0/r1
+/// from its one `bl 0x08031568` signed-divide call. Rust observes that
+/// pair through the existing [`__rt_sdivmod`] out-parameter instead;
+/// the output words and signed truncation behavior are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.milliseconds_to_timespec")]
+#[inline(never)]
+pub unsafe extern "C" fn milliseconds_to_timespec(out: *mut i32, milliseconds: i32) {
+    let mut remainder = 0;
+    let seconds = __rt_sdivmod(milliseconds, 1000, &mut remainder);
+    out.write(seconds);
+    out.add(1).write(remainder.wrapping_mul(1_000_000));
 }
 
 /// timespec_subtract — original: `FUN_08262ab8` @ `0x08262ab8`
@@ -5824,6 +5851,36 @@ mod tests {
         assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
         assert_eq!(unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) }, 0);
         assert_eq!(out, 0x01);
+    }
+
+    // ---- milliseconds_to_timespec ----
+
+    fn millis_to_timespec(milliseconds: i32) -> [i32; 2] {
+        let mut out = [0x5a5a_5a5a; 2];
+        unsafe { milliseconds_to_timespec(out.as_mut_ptr(), milliseconds) };
+        out
+    }
+
+    #[test]
+    fn milliseconds_to_timespec_splits_signed_milliseconds_at_seconds() {
+        for (milliseconds, expected) in [
+            (0, [0, 0]),
+            (999, [0, 999_000_000]),
+            (1000, [1, 0]),
+            (1999, [1, 999_000_000]),
+            (-1, [0, -1_000_000]),
+            (-999, [0, -999_000_000]),
+            (-1000, [-1, 0]),
+            (-1999, [-1, -999_000_000]),
+        ] {
+            assert_eq!(millis_to_timespec(milliseconds), expected, "{milliseconds}");
+        }
+    }
+
+    #[test]
+    fn milliseconds_to_timespec_keeps_signed_division_at_i32_bounds() {
+        assert_eq!(millis_to_timespec(i32::MAX), [2_147_483, 647_000_000]);
+        assert_eq!(millis_to_timespec(i32::MIN), [-2_147_483, -648_000_000]);
     }
 
     // ---- timespec_to_milliseconds ----

@@ -189,8 +189,8 @@ pub unsafe extern "C" fn iap_incoming_process_thread_instance_veneer() -> *mut u
     iap_incoming_process_thread_instance()
 }
 
+use crate::fp::fp_misc::milliseconds_to_timespec;
 use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock, PosixMutex};
-use crate::runtime::rt_div::__rt_sdivmod;
 
 /// Offset of the registration-table mutex inside the 0x240-byte
 /// context object (original `add r4, r0, #0x114`). A C++ mutex wrapper
@@ -292,11 +292,11 @@ fn iap_thread_register_client_ops() -> IapThreadRegistrationOps {
 /// -1. The raw wrapper carries `unread_seed` into r3 even though that body
 /// never reads it; this port forwards it unchanged.
 ///
-/// Deliberate deviation: the original calls the unported eight-byte
-/// conversion helper @ 0x08261e94. Its verified body is reproduced inline
-/// using the already-ported [`__rt_sdivmod`], while its unported registry
-/// body @ 0x081d6dbc remains behind [`IAP_THREAD_REGISTER_CLIENT_OPS`]:
-/// target builds reach the stock body; host tests install a recorder.
+/// The conversion is the directly ported
+/// [`milliseconds_to_timespec`] helper @ 0x08261e94; the unported
+/// registry body @ 0x081d6dbc remains behind
+/// [`IAP_THREAD_REGISTER_CLIENT_OPS`]: target builds reach the stock
+/// body; host tests install a recorder.
 ///
 /// # Safety
 ///
@@ -311,12 +311,11 @@ pub unsafe extern "C" fn iap_incoming_process_thread_register_client(
     client: *mut u8,
     unread_seed: u32,
 ) -> i32 {
-    let mut remainder = 0;
-    let seconds = __rt_sdivmod(timeout_millis, 1000, &mut remainder);
-    let deadline = IapThreadRegistrationDeadline {
-        seconds,
-        nanos: remainder.wrapping_mul(1_000_000),
-    };
+    let mut deadline = IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
+    milliseconds_to_timespec(
+        (&mut deadline as *mut IapThreadRegistrationDeadline).cast(),
+        timeout_millis,
+    );
     (iap_thread_register_client_ops().register_client)(thread, &deadline, client, unread_seed)
 }
 
