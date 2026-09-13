@@ -56517,6 +56517,20 @@ functions:
     notes: >-
       Five unconditional BL and nine conditional BLNE references. Original spills r1 and passes its address to bounded UTF-16 insertion with count 1 and index INT_MAX. On little-endian ARM only the low halfword is read; the Rust u16 local preserves that truncation on all hosts. Zero still requests preserving allocation, unlike empty append_cstr. Existing virtual allocator remains unported; no new seam. ARM review: 10 versus 6 instructions; halfword stack store and call relocation confirm truncation and bounded insertion.
 
+  - address: 0x082774f0
+    ghidra: FUN_082774f0
+    name: string_object_append_code_unit_returning_this
+    size: 36
+    sig: "StringObject *string_object_append_code_unit_returning_this(StringObject *this, unsigned int value)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "value"
+      local_10: "unit"
+    notes: >-
+      Six direct BL references, decoded from every ARM B/BL word in osos.dec: five unconditional and one BLNE. Spills value, forwards its low halfword as a one-unit bounded UTF-16 insertion at index INT_MAX, and returns this. Thus zero still requests a preserving allocation while the high halfword is ignored on little-endian ARM. Reuses the existing ported bounded insertion and its sole virtual allocator boundary; no new seam or deviation. ARM review is structural only: the Rust local and call/return sequence preserve the stack-local source, count 1, and receiver return.
+
   - address: 0x08275f48
     ghidra: FUN_08275f48
     name: string_object_insert_bytes
