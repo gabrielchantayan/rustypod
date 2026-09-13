@@ -79579,3 +79579,31 @@ functions:
       identity is inferred for the nested objects. Host tests map a unique
       below-4-GiB fixture and prove the primary-record payload is stored and
       reloaded on each call. Deliberate deviations: none.
+
+  - address: 0x082a4380
+    ghidra: FUN_082a4380
+    name: vtable_predicate_state_flag_set
+    size: 52
+    sig: "u32 vtable_predicate_state_flag_set(VtablePredicateObject *object)"
+    module: cxx/vtable_predicate_state_flag
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "*(object + 0x00)": vtable
+      "*(vtable + 0x08)": predicate
+      "*(object + 0x08)": state
+      "*(state + 0xbc)": state_flags
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte body from 0x082a4380
+      through 0x082a43b0; the next separately linked function begins at
+      0x082a43b4. The body calls opaque vtable slot +0x08 with object, then
+      only on a nonzero result loads state at object +0x08 and returns whether
+      state_flags at +0xbc contains bit 0x8000. The virtual callee has no
+      established identity, so the port preserves it as a typed raw vtable
+      call rather than inventing a target. Decoding every aligned ARM
+      B/BL-immediate word across osos.dec found exactly six direct inbound
+      calls, all plain unconditional bl at 0x0817d8b8, 0x081a6be4,
+      0x0821706c, 0x0821d254, 0x0821f35c, and 0x0821f42c; no predicated form
+      targets the entry. Host tests prove slot selection, this forwarding,
+      nonzero predicate treatment, flag boundaries, and the zero-result
+      short-circuit before state access. Deliberate deviations: none.
