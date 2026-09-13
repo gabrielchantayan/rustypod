@@ -29515,6 +29515,35 @@ functions:
       data word targets the wrapper, so it is not dispatched virtually.
       The concrete xSync implementation is runtime method-table data, so
       the port dispatches the supplied table rather than inventing a callee.
+
+  # ---- SQLite identifier-expression helper (src/sqlite/parse_expr.rs) ----
+  - address: 0x08373ccc
+    ghidra: FUN_08373ccc
+    name: parse_identifier_expr
+    size: 48
+    sig: "Expr *parse_identifier_expr(Parse *parse, const char *text)"
+    module: sqlite/parse_expr
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: text
+      local+0x04: token
+    notes: >-
+      SQLite grammar helper which creates a TK_ID (0x17) expression from
+      NUL-terminated identifier text. Raw bytes at 0x08373ccc..0x08373cf8
+      are twelve ARM instructions; the separately linked function at
+      0x08373cfc confirms the 48-byte extent with no literal pool. The
+      prologue saves r1..r5 but the body consumes only r0 (Parse *) and r1
+      (text), contrary to Ghidra's four-parameter signature. It initializes
+      a stack Token at sp+4 through 0x08369074, yielding text verbatim and
+      strlen(text) << 1 with the dynamic bit clear, then invokes parse_expr
+      @ 0x0837dc18 as parse_expr(parse, 0x17, NULL, NULL, &token) and
+      returns its Expr * unchanged. The token initializer is unported, so
+      its verified volatile byte-length loop and two-word initialization are
+      inlined in this port; no dispatch seam was added. Decoding every ARM
+      B/BL word in osos.dec finds exactly six inbound direct calls, all
+      unconditional plain bl at 0x082b2dbc, 0x082b2dcc, 0x082b2de4,
+      0x082b2dfc, 0x08396330, and 0x083963b4; none are predicated.
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
     name: parse_expr

@@ -56,7 +56,7 @@ pub struct Parse {
     pub db: *mut u8,
 }
 
-use super::expr_new::expr_new;
+use super::expr_new::{expr_new, Token};
 
 /// The expression constructor: `sqlite3Expr(db, op, left, right,
 /// token)` @ 0x08376808. Returns the new `Expr *`, or NULL when its
@@ -122,6 +122,51 @@ pub unsafe extern "C" fn parse_expr(
     (expr_new_op())((*parse).db, op, left, right, token)
 }
 
+/// parse_identifier_expr — original: `FUN_08373ccc` @ 0x08373ccc
+/// (48 bytes; 6 `bl` call sites, binary-scanned).
+///
+/// SQLite grammar helper for an identifier expression. It initializes a
+/// stack `Token` from the NUL-terminated `text`: `z` is retained verbatim
+/// and `n_dyn` is the byte length shifted left one (dynamic ownership bit
+/// clear). It then constructs `TK_ID` (`0x17`) with no operands through
+/// [`parse_expr`], returning that constructor result unchanged.
+///
+/// Raw ARM contains two unconditional calls: the token initializer at
+/// 0x08369074 and [`parse_expr`] at 0x0837dc18. The former is not separately
+/// ported, so its verified byte-at-a-time `strlen` and two-word `Token`
+/// initialization are inlined here; volatile byte loads keep LLVM from
+/// replacing that loop with an unavailable libc `strlen`. The raw scan finds
+/// six inbound calls, all unconditional plain `bl`: 0x082b2dbc,
+/// 0x082b2dcc, 0x082b2de4, 0x082b2dfc, 0x08396330, and 0x083963b4.
+///
+/// Register usage: r0 = `Parse *`, r1 = identifier text. r2/r3 are saved
+/// incidentally by the prologue and otherwise unused.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn parse_identifier_expr(parse: *mut Parse, text: *const u8) -> *mut u8 {
+    let mut token = Token {
+        z: text,
+        n_dyn: 0,
+    };
+    if !text.is_null() {
+        let mut cursor = text;
+        loop {
+            if core::ptr::read_volatile(cursor) == 0 {
+                break;
+            }
+            token.n_dyn = token.n_dyn.wrapping_add(2);
+            cursor = cursor.add(1);
+        }
+    }
+    parse_expr(
+        parse,
+        0x17,
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+        core::ptr::addr_of!(token) as *const u8,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -133,6 +178,8 @@ mod tests {
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
 
     static mut CALLS: Vec<(usize, i32, usize, usize, usize)> = Vec::new();
+
+    static mut IDENTIFIER_CALLS: Vec<(usize, i32, usize, usize, usize, u32)> = Vec::new();
 
     /// Records every argument and hands back a fixed "new node".
     unsafe extern "C" fn recording_expr_new(
@@ -165,6 +212,42 @@ mod tests {
 
     fn calls() -> Vec<(usize, i32, usize, usize, usize)> {
         unsafe { (*core::ptr::addr_of!(CALLS)).clone() }
+    }
+
+    /// Records the complete token synthesized by `parse_identifier_expr`.
+    unsafe extern "C" fn recording_identifier_expr_new(
+        db: *mut u8,
+        op: i32,
+        left: *mut u8,
+        right: *mut u8,
+        token: *const u8,
+    ) -> *mut u8 {
+        let token = &*(token as *const Token);
+        (*core::ptr::addr_of_mut!(IDENTIFIER_CALLS)).push((
+            db as usize,
+            op,
+            left as usize,
+            right as usize,
+            token.z as usize,
+            token.n_dyn,
+        ));
+        0x600dc0de as *mut u8
+    }
+
+    fn install_identifier_recorder() -> MutexGuard<'static, ()> {
+        let guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(IDENTIFIER_CALLS)).clear();
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(SQLITE_EXPR_NEW),
+                recording_identifier_expr_new,
+            );
+        }
+        guard
+    }
+
+    fn identifier_calls() -> Vec<(usize, i32, usize, usize, usize, u32)> {
+        unsafe { (*core::ptr::addr_of!(IDENTIFIER_CALLS)).clone() }
     }
 
     /// Puts the shipped default — the real `sqlite3Expr` port — back.
@@ -225,6 +308,42 @@ mod tests {
 
         assert_eq!(calls(), std::vec![(0, 0x17, 0, 0, 0)]);
         assert_eq!(node, 0x600dc0de as *mut u8);
+        restore_default();
+    }
+
+    #[test]
+    fn identifier_text_stops_at_nul_and_packs_its_length() {
+        let _guard = install_identifier_recorder();
+        let mut db = [0u8; 8];
+        let mut parse = Parse { db: db.as_mut_ptr() };
+        let text = *b"row\0ignored";
+
+        let node = unsafe { parse_identifier_expr(&mut parse, text.as_ptr()) };
+
+        assert_eq!(node, 0x600dc0de as *mut u8);
+        assert_eq!(
+            identifier_calls(),
+            std::vec![(db.as_mut_ptr() as usize, 0x17, 0, 0, text.as_ptr() as usize, 6)],
+            "the token initializer retains z and stores strlen(z) << 1"
+        );
+        restore_default();
+    }
+
+    #[test]
+    fn null_identifier_text_remains_a_present_empty_token() {
+        let _guard = install_identifier_recorder();
+        let mut parse = Parse {
+            db: core::ptr::null_mut(),
+        };
+
+        let node = unsafe { parse_identifier_expr(&mut parse, core::ptr::null()) };
+
+        assert_eq!(node, 0x600dc0de as *mut u8);
+        assert_eq!(
+            identifier_calls(),
+            std::vec![(0, 0x17, 0, 0, 0, 0)],
+            "the wrapper passes &Token even when Token.z is NULL"
+        );
         restore_default();
     }
 
