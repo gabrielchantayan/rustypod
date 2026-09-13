@@ -75182,3 +75182,40 @@ functions:
       predicated forms: 0x0818dcf0, 0x0818f2f8, 0x0818fe84, 0x08190e30,
       0x08192458, 0x0819331c, and 0x08193538. No deviations: the Rust
       match preserves the ARM's full-width comparisons and u32 result.
+
+  # --- UI operation non-deleting destructor ---
+  - address: 0x0816f050
+    ghidra: FUN_0816f050
+    name: ui_operation_destroy
+    size: 68
+    sig: "UiOperationPrefix *ui_operation_destroy(UiOperationPrefix *operation)"
+    module: ui/operation_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: operation
+      "operation+0x14": element_reference/context_scope
+      "operation+0x38": owned_allocation
+      "operation+0x44": string_object
+      FUN_0816eb70: operation_release_resources (unported target boundary)
+      FUN_082a6620: ui_element_reference_is_current
+      FUN_08284044: element_reference_release_if_current (unported target boundary)
+      FUN_0802edc8: free
+      FUN_08277484: string_object_destroy
+      FUN_08284188: context_scope_drop
+    notes: >-
+      Raw ARM establishes the exact 68-byte extent from the push at
+      0x0816f050 through pop {r4,pc} at 0x0816f090; the next separately
+      linked function begins at 0x0816f094. It first calls the unported
+      operation cleanup 0x0816eb70. It then evaluates the ported UI-element
+      reference staleness predicate at operation+0x14 and conditionally calls
+      the real entry 0x08284044 only for any nonzero result. It frees the
+      nullable allocation word at +0x38, destroys the string object at +0x44,
+      drops the empty context-scope base at +0x14, and returns operation.
+      Full-image aligned ARM B/BL decoding found exactly seven direct calls,
+      all unconditional plain bl: 0x0812cd84, 0x0812ce48, 0x0819c320,
+      0x0819c348, 0x0819c488, 0x081b6170, and 0x081b6288; there are no
+      predicated bl or direct tail-b entries. The two dependencies not yet
+      ported retain narrow volatile host seams while device builds dispatch to
+      their verified firmware addresses. Host tests prove both the zero and
+      arbitrary-nonzero predicate paths, exact child order, operands, and the
+      preserved operation return.
