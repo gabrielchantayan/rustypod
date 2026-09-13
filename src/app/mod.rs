@@ -150,6 +150,7 @@ pub mod once_initializer;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;
 pub mod parse_result;
+pub mod parse_diagnostic;
 pub mod path_exists;
 pub mod path_component_query;
 pub mod path_component_query_worker;

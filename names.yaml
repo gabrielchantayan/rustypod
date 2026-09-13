@@ -80288,3 +80288,35 @@ functions:
       port uses target-address seams for its three unported GL helpers and
       inert host defaults; host tests record both upload paths and prove that
       dimensions above u16::MAX redefine every call after truncation.
+
+  # --- Parse diagnostic constructor (app/parse_diagnostic) ---
+  - address: 0x0826fcf4
+    ghidra: FUN_0826fcf4
+    name: parse_diagnostic_construct
+    size: 28
+    sig: "ParseDiagnostic *parse_diagnostic_construct(ParseDiagnostic *out, u8 kind, u32 start, u32 end)"
+    module: app/parse_diagnostic
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: kind
+      param_3/r2: start
+      param_4/r3: end
+      "out+0x0c": message
+      FUN_08277440: string_default_construct
+    notes: >-
+      Raw osos.dec establishes exactly seven ARM instructions / 28 bytes from
+      0x0826fcf4 through the pop {pc} at 0x0826fd0c; the separately linked
+      next function starts at 0x0826fd10. A complete aligned ARM
+      B/BL-immediate decode finds six direct inbound calls, all unconditional
+      plain bl at 0x08119300, 0x081196bc, 0x08119724, 0x08119b18,
+      0x08119b58, and 0x0812e070; no direct tail b reaches this constructor.
+      It writes kind as one byte, leaves the following three padding bytes
+      untouched, stores start/end at +0x04/+0x08, then default-constructs the
+      embedded two-word StringObject at +0x0c through ported
+      string_default_construct and subtracts 12 from its returned pointer to
+      return out. Call sites use the record for malformed-data, oversized-note,
+      undefined-anchor, and incomplete-tag parse diagnostics. Rust retains the
+      20-byte target layout by storing the embedded StringObject as two u32
+      words; this is the required host-pointer-width representation, not a
+      behavioral deviation.
