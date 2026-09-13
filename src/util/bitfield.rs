@@ -37,6 +37,49 @@
 
 use super::berec::{arm_lsl, arm_lsr};
 
+/// bitfield_replace — original: `FUN_08272840` @ 0x08272840 (76 bytes;
+/// 6 `bl` call sites, binary-scanned: all unconditional from the LCD
+/// controller setup `FUN_080923bc`).
+///
+/// Replaces bits `lo..=hi` of the volatile word behind `word_handle` with
+/// the low `(hi - lo + 1)` bits of `value`, preserving the other bits. The
+/// caller passes a handle (`&local`, where `local` is the register address),
+/// so the original reaches the destination by one indirection before its
+/// volatile load-modify-store:
+///
+/// ```text
+/// preserved = word & ((~0 >> (32 - lo)) | (~0 << (hi + 1)))
+/// inserted = (value & ((1 << (hi - lo + 1)) - 1)) << lo
+/// *word_handle = preserved | inserted
+/// ```
+///
+/// Every shift is by register. `arm_lsl`/`arm_lsr` retain ARM's low-byte
+/// shift count semantics: counts 32..=255 yield zero and 256 wraps to zero.
+/// The raw 76-byte extent ends at the `pop {r4, r5, pc}` at 0x08272888;
+/// the next function opens at 0x0827288c. Deliberate deviations: volatile
+/// accesses make the hardware-register side effect explicit without changing
+/// the load/store sequence.
+///
+/// # Safety
+///
+/// `word_handle` must point to a readable word pointer, which must point to
+/// a readable and writable aligned word. The original has no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitfield_replace(
+    word_handle: *mut *mut u32,
+    hi: u32,
+    lo: u32,
+    value: u32,
+) {
+    let word_ptr = *word_handle;
+    let word = word_ptr.read_volatile();
+    let preserved = word
+        & (arm_lsr(!0, 32u32.wrapping_sub(lo)) | arm_lsl(!0, hi.wrapping_add(1)));
+    let field = arm_lsl(1, hi.wrapping_sub(lo).wrapping_add(1)).wrapping_sub(1);
+    word_ptr.write_volatile(preserved | arm_lsl(field & value, lo));
+}
+
 /// bitfield_extract — original: `FUN_082728a8` @ 0x082728a8 (36 bytes).
 ///
 /// Returns the `hi..=lo` bit field of the word behind `word_handle`:
@@ -250,5 +293,75 @@ mod extract_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    /// Uses the handle ABI from the firmware callers: a local holds the
+    /// address of the word to modify.
+    unsafe fn replace(word: u32, hi: u32, lo: u32, value: u32) -> u32 {
+        let mut word = word;
+        let mut word_address = &mut word as *mut u32;
+        bitfield_replace(&mut word_address, hi, lo, value);
+        word
+    }
+
+    #[test]
+    fn replaces_each_valid_field_and_preserves_its_neighbors() {
+        let patterns = [0u32, !0u32, 0xaaaa_5555, 0x0123_4567, 0x89ab_cdef];
+        let values = [0u32, !0u32, 0x1357_9bdf, 0x2468_ace0];
+        for &word in &patterns {
+            for hi in 0..32 {
+                for lo in 0..=hi {
+                    let width = hi - lo + 1;
+                    let field_mask = if width == 32 { !0 } else { (1 << width) - 1 };
+                    for &value in &values {
+                        let expect = (word & !(field_mask << lo)) | ((value & field_mask) << lo);
+                        assert_eq!(
+                            unsafe { replace(word, hi, lo, value) },
+                            expect,
+                            "{word:#x}[{hi}:{lo}] <- {value:#x}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn configures_the_real_lcd_controller_field_sequence() {
+        let mut register_40 = 0u32;
+        let mut register_44 = 0u32;
+        let mut register_40_handle = &mut register_40 as *mut u32;
+        let mut register_44_handle = &mut register_44 as *mut u32;
+
+        unsafe {
+            bitfield_replace(&mut register_40_handle, 10, 8, 3);
+            bitfield_replace(&mut register_40_handle, 6, 4, 4);
+            bitfield_replace(&mut register_40_handle, 3, 1, 3);
+            bitfield_replace(&mut register_44_handle, 11, 10, 3);
+            bitfield_replace(&mut register_44_handle, 9, 6, 0xf);
+            bitfield_replace(&mut register_44_handle, 3, 0, 0xf);
+        }
+
+        assert_eq!(register_40, 0x0000_0346);
+        assert_eq!(register_44, 0x0000_0fcf);
+    }
+
+    #[test]
+    fn full_width_and_out_of_range_fields_follow_arm_shifts() {
+        assert_eq!(unsafe { replace(0xdead_beef, 31, 0, 0x0123_4567) }, 0x0123_4567);
+        // lo = 32: the incoming register shift yields zero, while the
+        // preservation mask retains the original word.
+        assert_eq!(unsafe { replace(0x89ab_cdef, 31, 32, !0) }, 0x89ab_cdef);
+        // hi = 33 and lo = 2 produces a width of 32, then shifts the
+        // replacement by two; only the original low two bits survive.
+        assert_eq!(
+            unsafe { replace(0xffff_fffd, 33, 2, 0x1234_5678) },
+            0x48d1_59e1
+        );
     }
 }
