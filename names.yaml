@@ -57558,6 +57558,41 @@ functions:
       the factor-8 immediate, the returned final add register, and all seven
       general-register sequence numbers.
 
+  - address: 0x082408dc
+    ghidra: FUN_082408dc
+    name: cg_emit_masked_offset_bias
+    size: 216
+    sig: "cg_virtual_reg_t *cg_emit_masked_offset_bias(void *ctx, cg_block_t *block, cg_virtual_reg_t *source)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/r6: source
+      param_4/r3: unused (dead)
+      uVar1/r7: masked_reg
+      uVar2/r8: mask_reg
+      uVar3/r9: sum_reg
+      uVar4/sl: bias_reg
+      uVar5/r5: result
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM confirms the 216-byte, 54-word extent from `push
+      {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}` at 0x082408dc through the `pop`
+      at 0x082409b0; the next sibling starts at 0x082409b4. Decoding every
+      ARM B/BL word in osos.dec finds six direct callers, all unconditional
+      BL (zero predicated and zero tail B): 0x08240414, 0x08240428,
+      0x08240450, 0x08240464, 0x082404a8, and 0x082404bc. Algorithm:
+      create `masked`, `mask`, emit LDI 7; create `sum`, `bias`, emit LDI
+      128; create `result`; then append `masked = source AND mask`,
+      `sum = source + masked`, and `result = sum - bias`, returning result.
+      The leading ctx and fourth r3 argument are dead; the Rust ABI keeps
+      only ctx, which it never dereferences. No dispatch seam was added:
+      all three direct factories were already ported.
+
+
   - address: 0x0826087c
     ghidra: FUN_0826087c
     name: view_event_apply_localized_flags

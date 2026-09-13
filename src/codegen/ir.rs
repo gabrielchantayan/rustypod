@@ -574,6 +574,8 @@ pub const CG_INST_OPCODE_LDW: u32 = 41;
 pub const CG_INST_OPCODE_STW: u32 = 44;
 /// Integer-add opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_ADD: u32 = 1;
+/// Bitwise-AND opcode of the binary instruction kind.
+pub const CG_INST_OPCODE_AND: u32 = 7;
 /// Integer-subtract opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_SUB: u32 = 13;
 /// Reverse-subtract opcode: `dest = 0 - source0`; the binary record's
