@@ -221,6 +221,7 @@ pub mod update_dispatch;
 pub mod trace_buffer;
 pub mod track_extras_cache;
 pub mod ui_flag_update_forwarder;
+pub mod tbm_app_client_cache;
 pub mod volume_controller_byte_at_90;
 pub mod vtable_set;
 pub mod view_event;
