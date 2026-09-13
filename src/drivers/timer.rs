@@ -206,6 +206,33 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
     }
 }
 
+/// usec_timer_read_thunk — original: `thunk_FUN_0836af80` @ 0x08056658
+/// (**4 bytes**, 0x08056658..0x0805665c; the next function starts with
+/// `push {r4,lr}` at 0x0805665c, binary-decoded).
+///
+/// **7 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 0 tail `b` call sites**, verified by decoding every ARM `B`/`BL`
+/// word in `work/firmware/osos.dec`.
+///
+/// The sole `b 0x0836af80` transfers without changing `lr`, arguments, or
+/// stack. Its target is the separately linked three-instruction Timer E
+/// `TECNT` reader at 0x0836af80..0x0836af8c: load 0x3c70_0000 from its
+/// literal pool, load `+0xb4`, then `bx lr`. The target is behaviorally the
+/// already-ported [`usec_timer_read`], so this thunk returns that one raw
+/// counter sample unchanged.
+///
+/// No deliberate deviation: the source call inherits the stock tail-transfer
+/// ABI (no arguments, `lr` preserved, and the reader's `r0` result returned).
+/// The dedicated section prevents LLVM from folding this independently
+/// hookable 0x08056658 seam into [`usec_timer_read`] or a byte-identical
+/// timer-reader veneer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.usec_timer_read_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn usec_timer_read_thunk() -> u32 {
+    unsafe { usec_timer_read() }
+}
+
 /// read_usec_timer_into — original: `FUN_08086e24` @ 0x08086e24 (20 bytes,
 /// 0x08086e24..0x08086e38, binary-decoded).
 ///
@@ -219,14 +246,13 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
 /// reads 0x3c70_00b4 and returns the sample in r0 before the final store.
 /// There is deliberately no NULL guard.
 ///
-/// Deviation: calls the already-ported [`usec_timer_read`] directly rather
-/// than creating a dispatch seam for the branch thunk. The raw target still
-/// performs exactly one volatile Timer E read before its ordinary word store.
+/// Calls the ported [`usec_timer_read_thunk`], preserving the stock's one
+/// volatile Timer E sample and one ordinary word store.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn read_usec_timer_into(out: *mut u32) {
     unsafe {
-        out.write_volatile(usec_timer_read());
+        out.write_volatile(usec_timer_read_thunk());
     }
 }
 
@@ -247,20 +273,19 @@ pub unsafe extern "C" fn read_usec_timer_into(out: *mut u32) {
 /// pointer. Its callers use it for the same elapsed-time instrumentation as
 /// the twin's; there is deliberately no NULL guard.
 ///
-/// Deviations: calls the already-ported [`usec_timer_read`] directly rather
-/// than creating a dispatch seam for the branch thunk (same single volatile
-/// sample, same word store). A dedicated `link_section` keeps LLVM's
-/// identical-code folding from collapsing this independently hookable copy
-/// onto the byte-identical [`read_usec_timer_into`] body — the 0x08086e38
-/// hook seam is the point of the separate export.
+/// Calls the ported [`usec_timer_read_thunk`]. A dedicated `link_section`
+/// keeps LLVM's identical-code folding from collapsing this independently
+/// hookable copy onto the byte-identical [`read_usec_timer_into`] body — the
+/// 0x08086e38 hook seam is the point of the separate export.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.read_usec_timer_into_2")]
 #[inline(never)]
 pub unsafe extern "C" fn read_usec_timer_into_2(out: *mut u32) {
     unsafe {
-        out.write_volatile(usec_timer_read());
+        out.write_volatile(usec_timer_read_thunk());
     }
 }
+
 
 /// usec_to_millis — original: `FUN_0826c5d0` @ 0x0826c5d0 (**24 bytes**,
 /// 0x0826c5d0..0x0826c5e8, binary-decoded; the next separately linked
@@ -301,14 +326,14 @@ pub unsafe extern "C" fn usec_to_millis(counter_usec: *const u32) -> u32 {
 /// loads 1000, then tail-branches to the ported unsigned ADS divider
 /// [`crate::runtime::rt_div::__rt_udiv`] @ 0x08036f14.
 ///
-/// Deviation: the unported out-pointer helper is collapsed to the already
-/// ported [`usec_timer_read`], because raw disassembly shows both paths take
-/// exactly one volatile read of Timer E `TECNT` @ 0x3c7000b4. The divider is
-/// called directly; Rust has no representation of the original tail branch.
+/// Deviation: the out-pointer helper remains collapsed, but its sample now
+/// flows through the ported [`usec_timer_read_thunk`] exactly as the raw
+/// helper does. The divider is called directly; Rust has no representation of
+/// the original tail branch.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn usec_timer_read_seconds() -> u32 {
-    unsafe { crate::runtime::rt_div::__rt_udiv(usec_timer_read(), 1_000) }
+    unsafe { crate::runtime::rt_div::__rt_udiv(usec_timer_read_thunk(), 1_000) }
 }
 /// tick_millis — original: `FUN_081bb384` @ 0x081bb384 (**28 bytes**,
 /// 0x081bb384..0x081bb3a0, binary-decoded; the next separately linked
@@ -620,6 +645,23 @@ mod usec_timer_tests {
         for count in [0, 1, 0x1234_5678, u32::MAX] {
             HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
             assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+
+    #[test]
+    fn timer_read_thunk_forwards_one_counter_sample() {
+        let _guard = configure_usec_timer(0, 1);
+
+        for count in [0, 1, 0x1234_5678, u32::MAX] {
+            HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+
+            assert_eq!(unsafe { usec_timer_read_thunk() }, count);
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed),
+                count.wrapping_add(1)
+            );
         }
     }
 
