@@ -77542,3 +77542,35 @@ functions:
       The unported lookup remains a typed fixed-address target call and
       volatile host seam; tests prove exact five-argument forwarding,
       unchanged result propagation, and deliberate absence of a NULL guard.
+
+  # --- virtual-slot-1 object release wrapper ---
+  - address: 0x083e7448
+    ghidra: FUN_083e7448
+    name: object_release_slot1
+    size: 36
+    sig: "void **object_release_slot1(void **slot)"
+    module: util/object_release_slot1
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_1_deref: object
+      object_plus_0x0: vtable
+      vtable_plus_0x4: unresolved_release_method
+    notes: >-
+      Raw ARM confirms the 36-byte extent 0x083e7448..0x083e746c; the separately
+      linked sibling FUN_083e746c begins immediately afterward. The wrapper reads
+      an object pointer from the caller-owned slot, skips the dispatch only when
+      that object is NULL, then loads its vtable and calls entry +0x04 with the
+      object itself in r0. After the indirect call it returns slot, not the
+      method's return register. Decoding every ARM B/BL word in osos.dec finds
+      exactly six inbound direct calls, all unconditional plain BL at 0x081857c8,
+      0x0819ef14, 0x081e01a4, 0x081e0264, 0x081ea724, and 0x081eaf48; no
+      predicated BL forms or plain B tails target this address. The vtable target
+      cannot be decoded to a real function entry from the static image, so its
+      identity is deliberately not invented; the port performs the same vtable
+      dispatch directly, with no added seam. Deliberate deviation: Rust returns
+      after the indirect method rather than emitting blxne; mov r0,r4; both
+      discard its return value and return the original slot. Host tests cover the
+      NULL guard and verify slot +0x04, object forwarding, unchanged slot
+      contents, and returned address. match.py exit 1 is its expected structural
+      diff output.
