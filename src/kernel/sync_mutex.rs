@@ -236,6 +236,19 @@ pub unsafe extern "C" fn mutex_lock(mutex: *mut Mutex) {
     }
 }
 
+/// mutex_lock_veneer — original: `thunk_FUN_0807f5c4` @ 0x080cb81c (4
+/// bytes; 7 unconditional `bl` call sites).
+///
+/// A one-instruction tail branch (`b 0x0807f5c4`) to [`mutex_lock`]. The
+/// veneer adds no guard or transformation: it passes its mutex argument
+/// unchanged to the canonical lock port. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_lock_veneer(mutex: *mut Mutex) {
+    mutex_lock(mutex);
+}
+
+
 /// mutex_unlock — original: `FUN_0807f6a0` @ 0x0807f6a0 (8 bytes), with
 /// the guard thunk @ 0x8056710 inlined. The mutexes are non-recursive
 /// counting semaphores: unlocking an unlocked mutex just signals.
@@ -752,6 +765,33 @@ mod tests {
             mutex_unlock_veneer(&mut zero_handle);
         }
         assert_eq!(calls(), vec![Call::Signal(0x7c)]);
+    }
+
+    /// The 0x080cb81c tail veneer preserves the target's NULL/zero-handle
+    /// guards and forwards a live semaphore handle unchanged.
+    #[test]
+    fn lock_veneer_delegates_to_mutex_lock() {
+        let _lock = mock_kernel();
+        let mut live_cell: u32 = 0x3d;
+        let mut live = Mutex {
+            sem_cell: &mut live_cell,
+            unused: 0,
+        };
+        let mut null_cell = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        let mut zero_handle_cell: u32 = 0;
+        let mut zero_handle = Mutex {
+            sem_cell: &mut zero_handle_cell,
+            unused: 0,
+        };
+        unsafe {
+            mutex_lock_veneer(&mut live);
+            mutex_lock_veneer(&mut null_cell);
+            mutex_lock_veneer(&mut zero_handle);
+        }
+        assert_eq!(calls(), vec![Call::Wait(0x3d)]);
     }
 
 

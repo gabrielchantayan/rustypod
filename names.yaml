@@ -5957,6 +5957,31 @@ functions:
     module: kernel/sync_mutex
     status: ported
 
+  - address: 0x080cb81c
+    ghidra: thunk_FUN_0807f5c4
+    name: mutex_lock_veneer
+    size: 4
+    sig: "void mutex_lock_veneer(Mutex *mutex)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: mutex
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      One instruction, `b 0x0807f5c4` (0xeafecf68): a true 4-byte
+      tail-branch veneer to the already ported mutex_lock, not an ldr-pc
+      veneer, empty destructor, or the sibling unlock veneer at 0x080cb824.
+      Raw extent is exactly 0x080cb81c..0x080cb820: 0x080cb818 is a
+      preceding literal-pool word and 0x080cb820 begins the distinct
+      condvar_broadcast tail veneer. Decoding every A32 B/BL word in
+      osos.dec finds 7 direct call sites, all unconditional plain `bl`
+      (no predicated forms and no tail `b`): 0x0820a150, 0x0821be1c,
+      0x0821bf74, 0x0821c000, 0x082280e0, 0x08228174, and 0x08228214.
+      No word-aligned image data equals 0x080cb81c, so this veneer is not
+      virtually dispatched. Ported as an inline-never forwarding symbol
+      rather than an alias, so a hook at this entry reaches a real
+      tail-call veneer; it delegates unchanged to mutex_lock, preserving
+      the target's cell and handle guards.
   - address: 0x080cb824
     ghidra: FUN_080cb824
     name: mutex_unlock_veneer
