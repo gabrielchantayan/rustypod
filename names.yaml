@@ -17885,6 +17885,48 @@ functions:
     sig: "void *lazy_singleton_0x3c(void)"
     module: app/singletons
     status: ported
+  # --- Class-0x9400 current-item versus media-player predicate ---
+  - address: 0x081b5e64
+    ghidra: FUN_081b5e64
+    name: class_9400_current_item_matches_media_player
+    size: 196
+    sig: "bool class_9400_current_item_matches_media_player(Class9400CurrentItemOwner *this)"
+    module: app/class_9400_current_item_matches_media_player
+    status: ported
+    renames:
+      param_1/r0: class-0x9400 owner
+      r5: owner mutex at +0x220
+      r4: media player singleton
+      r6: payload-pair equality result
+      "vtable+0xa4": class current UI element
+      "vtable+0x140": media player current item
+      "item-vtable+0x08": item TaggedValue constructor
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0817ceb4: media_player_get
+      FUN_082840e8: context_scope_init
+      FUN_08284188: context_scope_drop
+      FUN_082a6620: ui_element_reference_is_current
+      FUN_0828407c: tagged_value_from_optional_word4
+      FUN_08258d7c: tagged_value_payload_pair_equal
+    notes: >-
+      Raw ARM establishes the exact 196-byte extent from push {r4,r5,r6,lr}
+      at 0x081b5e64 through pop {r4,r5,r6,pc} at 0x081b5f24; the next
+      separately linked function begins with push {r4,r5,r6,lr} at
+      0x081b5f28. Decoding every ARM B/BL immediate in osos.dec finds six
+      direct inbound calls, all unconditional bl: 0x08179170, 0x0817a814,
+      0x0817b114, 0x0817d6c0, 0x081f87f8, and 0x0821dc64. There are no
+      predicated call forms or direct tail branches. The class-0x9400
+      receiver's final CountedMutex (+0x220 in its 0x22c allocation) protects
+      a scope over the vtable+0xa4 UI element. The scope is checked for
+      staleness before and after media_player_get; only then does the function
+      compare the scope optional-subject TaggedValue with the media player's
+      vtable+0x140 item's vtable+0x08 TaggedValue. ContextScope drop and
+      mutex unlock run on every exit. Target builds directly call the eight
+      ported dependencies and retain all three raw vtable dispatches. Host
+      operations model firmware app state solely to test both stale exits,
+      cleanup order, matching payload pairs, and auxiliary-word mismatch.
+
     notes: >-
       38 bl call sites (binary-scanned; the earlier note said 36). Same
       getter idiom - SIZE 0x3c, cache slot 0x089d0124 + 0xc, ctor
