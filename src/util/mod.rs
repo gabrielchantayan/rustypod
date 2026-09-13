@@ -50,6 +50,7 @@ pub mod indexed_record_lookup;
 pub mod le_read;
 pub mod linked_list_count;
 pub mod list_find;
+pub mod predicate_list_find;
 pub mod lazy_slot_table_entry;
 pub mod least_common_multiple;
 pub mod mapped_subobject_for_slot;
