@@ -631,6 +631,10 @@ pub mod hints {
     // 0x3000_0000: dedicated to ui/view_base's render-state release fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const VIEW_BASE_RENDER_STATE_RELEASE: usize = 0x3000_0000;
+    // 0x5100_0000: dedicated to ui/layout_apply_pending_offsets' raw-u32
+    // entry-offset fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const TEXT_LAYOUT_APPLY_PENDING_OFFSETS: usize = 0x5100_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

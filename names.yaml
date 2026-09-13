@@ -76799,3 +76799,31 @@ functions:
       seam. It deliberately represents the original's four redundant
       non-volatile byte loads as one read_u32_le plus swap_bytes; ordinary
       mapped record data has the same value.
+
+  # --- Text-layout queued offset application ---
+  - address: 0x0804c5c8
+    ghidra: FUN_0804c5c8
+    name: layout_apply_pending_offsets
+    size: 112
+    sig: "void layout_apply_pending_offsets(TextLayoutPendingState *state)"
+    module: ui/layout_apply_pending_offsets
+    status: ported
+    renames:
+      param_1/r0: state
+      sVar1/lr: previous_offset
+      sVar2/r4: pending_entry_count
+      uVar3/r1: entry_index
+      psVar4/r3: entry_offset
+      FUN_0804c94c: layout_finalize_pending
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte body from cmp r0,#0 at
+      0x0804c5c8 through the tail b 0x0804c94c at 0x0804c634; the distinct
+      sibling begins with push {r1-r11,lr} at 0x0804c638. Decoding every
+      ARM B/BL immediate finds seven inbound bl calls: six unconditional at
+      0x080993a8, 0x080afc64, 0x080afc8c, 0x080c0f14, 0x080de740, and
+      0x080e0d9c, plus one bleq at 0x080afa94. With a non-NULL state, the
+      body accumulates queued entry, offset, and record counts; shifts each
+      queued u16 entry offset by the preceding current offset; then transfers
+      to unported 0x0804c94c. The port exposes that tail transfer as a
+      volatile target seam, whose host default is inert; the state identity
+      is deliberately not inferred beyond fields verified by the raw body.
