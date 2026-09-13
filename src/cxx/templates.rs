@@ -45,6 +45,8 @@
 //!   copies the trailing word of each 12-byte record in a half-open range.
 //! - [`advance_string_object_word_cursor`] — advances a cursor through the
 //!   12-byte StringObject-and-word records used by the range-copy template.
+//! - [`vector_copy_range_u32`] — copies a half-open range of 4-byte
+//!   trivially-copyable vector elements into initialized output storage.
 //! - [`cxx_vector_find_equal`] — searches the COW-string-keyed records
 //!   within the `{unknown, begin, end}` owner shape used by the UI data.
 //! - [`vector_size_elem2`] / [`vector_size_elem4`] /
@@ -3169,6 +3171,50 @@ pub unsafe extern "C" fn vector_copy_range_elem24(
         }
         first = first.wrapping_add(24);
         output = output.wrapping_add(24);
+    }
+    output
+}
+
+/// vector_copy_range_u32 — original: `thunk_FUN_083e9430` @ 0x083e9418
+/// (40 bytes; raw extent 0x083e9418..0x083e9440, with the separately linked
+/// next function opening at 0x083e9440). Six direct `bl` call sites are all
+/// unconditional: 0x083e65a4, 0x083e65e0, 0x083e6698, 0x083e66ec,
+/// 0x083e676c, and 0x083e67ac; no predicated calls target this entry.
+///
+/// Copies the half-open `[first, last)` range of aligned 4-byte vector
+/// elements into `output`, advancing both cursors by one word per element and
+/// returning the resulting output cursor. The ARM loop predicates its load and
+/// store on `output != NULL`; an initially NULL output skips only the first
+/// source word, then advances to address 4.
+///
+/// Ghidra splits the scheduled ARM loop header at 0x083e9430 and calls the
+/// four-byte entry at 0x083e9418 a thunk. Raw bytes show that entry branches
+/// into its own compare/loop header, whose backward branch enters the loop
+/// body at 0x083e941c; the 40-byte extent is one function. The unused r3
+/// vector argument is omitted from the Rust ABI, as Ghidra also reports.
+///
+/// There are no deliberate behavior deviations: raw pointer wrapping preserves
+/// the target's cursor arithmetic even for the supported one-word NULL-output
+/// path.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous, aligned readable `u32` words.
+/// When `output` is non-NULL, it must be writable for the same number of
+/// words. The original has no overlap guard and therefore copies forward.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_u32(
+    mut first: *const u32,
+    last: *const u32,
+    mut output: *mut u32,
+) -> *mut u32 {
+    while first != last {
+        if !output.is_null() {
+            output.write(first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
     }
     output
 }
@@ -6367,6 +6413,40 @@ mod tests {
         };
 
         assert_eq!(returned, 24usize as *mut u8, "skipped record still advances output");
+    }
+
+    #[test]
+    fn vector_copy_range_u32_copies_words_and_returns_advanced_output() {
+        let source = [0x0102_0304u32, 0x1112_1314, 0x2122_2324];
+        let mut destination = [0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe { vector_copy_range_u32(source.as_ptr(), source.as_ptr().add(3), output) };
+
+        assert_eq!(&destination[..3], &source);
+        assert_eq!(destination[3], 0xdddd_dddd, "range end is exclusive");
+        assert_eq!(returned, unsafe { output.add(3) });
+    }
+
+    #[test]
+    fn vector_copy_range_u32_empty_range_leaves_output_unchanged() {
+        let source = [0x0102_0304u32];
+        let mut destination = [0xaaaa_aaaa];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe { vector_copy_range_u32(source.as_ptr(), source.as_ptr(), output) };
+
+        assert_eq!(returned, output);
+        assert_eq!(destination, [0xaaaa_aaaa]);
+    }
+
+    #[test]
+    fn vector_copy_range_u32_null_output_skips_one_word_without_reading_source() {
+        let returned = unsafe {
+            vector_copy_range_u32(core::ptr::null(), 4usize as *const u32, core::ptr::null_mut())
+        };
+
+        assert_eq!(returned, 4usize as *mut u32, "skipped word still advances output");
     }
     #[test]
     fn container_end_cursor_returns_the_opaque_end_word() {
