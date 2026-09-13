@@ -36116,6 +36116,27 @@ functions:
       descriptor/tag store, and the seven-word decoder ABI; its extra
       instructions preserve volatile-call inputs and the forwarded result.
 
+  - address: 0x0813eec4
+    ghidra: FUN_0813eec4
+    name: opaque_header_literal_construct
+    size: 16
+    sig: "u8 *opaque_header_literal_construct(u8 *this)"
+    module: cxx/opaque_header_literal_construct
+    status: ported
+    vars: {param_1/r0: this, DAT_0813eed0: opaque_header_literal}
+    notes: >-
+      Raw ARM is exactly `ldr r1,[pc,#4]; str r1,[r0]; bx lr`, followed by
+      its literal-pool word 0x089851dc at 0x0813eed0; the next separately
+      linked function starts at 0x0813eed4. Ghidra's 12-byte size excludes
+      that pool word, so this entry records the 16-byte code-plus-literal
+      extent. Decoding every ARM B/BL immediate in osos.dec found exactly six
+      inbound calls: unconditional bl at 0x0827be64, 0x0827bea4, 0x0827bee8,
+      0x0827bf1c, 0x0827bf44, and 0x083d5854; zero predicated bl forms and no
+      plain-b tail calls. The function address appears in no aligned data word,
+      so every recovered use is direct rather than virtual dispatch. It
+      unconditionally stores its literal at this+0 and returns this. Literal
+      0x089851dc points into opaque data whose first words do not decode as
+      function pointers; its semantic identity is deliberately not invented.
   - address: 0x0813eee0
     ghidra: FUN_0813eee0
     name: pair_header_grand_base_construct
