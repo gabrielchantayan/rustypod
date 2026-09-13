@@ -76455,3 +76455,38 @@ functions:
       FUN_08064820 with mapped code and zero flag. Deliberate deviation: ARM
       code uses a literal tail veneer to the retail worker because the payload
       cannot fall through; host tests use a volatile worker seam.
+
+  # --- Render-cell visibility state update ---
+  - address: 0x08084ae8
+    ghidra: FUN_08084ae8
+    name: update_render_cell_state
+    size: 156
+    sig: "void update_render_cell_state(RenderCellState *state, i32 column, i32 row)"
+    module: ui/render_cell_state
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1/r5: column
+      param_3/r2/r6: row
+      r7: outside_visible_range
+      r8: clear_pending
+      FUN_0809b13c: flush_pending_cell
+    notes: >-
+      Raw osos.dec decoding confirms 39 ARM instructions from 0x08084ae8
+      through pop {r4,r5,r6,r7,r8,pc} at 0x08084b80: 156 bytes exactly.
+      The next independently linked function begins at 0x08084b84 with
+      push {r1,r2,r3,r4,r5,lr}. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly seven inbound BL calls, all unconditional:
+      0x0807c67c, 0x0809b2a8, 0x0809b2e4, 0x0809b39c, 0x0809b420,
+      0x080b6a88, and 0x080b6b08. There are no predicated BL callers; the
+      separate beq tail transfer at 0x080b69d4 is not a call. The routine
+      considers a cell visible when row is in [first_row,row_limit) and
+      column is below column_limit, canonicalizing visible columns below
+      first_column to first_column-1. It conditionally flushes the pending
+      cell through unported FUN_0809b13c, clears the two pending words when
+      required, then records visibility and the canonical coordinates. The
+      sole outbound call is predicated blne. Target code reaches the
+      unported flush at its verified fixed address; host tests use a volatile
+      replacement seam. Tests cover entry, unchanged visible and invisible
+      states, canonicalization, pending-word clearing, and inclusive/exclusive
+      bounds.
