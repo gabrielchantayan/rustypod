@@ -622,6 +622,9 @@ pub mod hints {
     // 0x5600_0000: dedicated to app/opaque_record_source_item_count's raw-u32
     // provider fixture; mappings never unmap, so no other user may share it.
     pub const OPAQUE_RECORD_SOURCE_ITEM_COUNT: usize = 0x5600_0000;
+    // 0x5800_0000: dedicated to heap/memh_handle's target-width handle
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const MEMH_HANDLE_DESTROY: usize = 0x5800_0000;
     // 0x5700_0000: dedicated to util/mapped_subobject_for_slot's raw-u32
     // context and selected-subobject fixture; mappings never unmap.
     pub const MAPPED_SUBOBJECT_FOR_SLOT: usize = 0x5700_0000;

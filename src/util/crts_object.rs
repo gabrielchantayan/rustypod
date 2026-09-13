@@ -44,11 +44,11 @@
 //! - The verified tag guard at 0x080a7714 is ported as
 //!   [`crate::util::crts_tag::crts_has_tag`] and called directly; it needs no
 //!   replaceable dispatch seam.
-//! - The two unported non-trivial callees dispatch through the volatile
-//!   seams [`MEMH_HANDLE_DESTROY`] and [`CRTS_TABLE_TEARDOWN`]; their
-//!   target defaults transmute the retail addresses 0x0805d028 and
-//!   0x080d86b0, so the port is hook-ready on device, while host tests
-//!   install recording mocks.
+//! - The table teardown dispatches through the volatile [`CRTS_TABLE_TEARDOWN`]
+//!   seam because it remains unported; its target default transmuted the
+//!   retail address 0x080d86b0, so the port remains hook-ready on device while
+//!   host tests install a recording mock. The `"MemH"` destructor is now the
+//!   direct, ported [`crate::heap::memh_handle::memh_handle_destroy`] call.
 //! - 0x0805cfb4 is already ported as [`crate::libc::bzero::bzero`]; it is
 //!   reached through the volatile [`CRTS_OBJECT_ZERO`] slot (wired default:
 //!   the port) so LLVM cannot inline the 76-byte fill and erase the stock
@@ -70,14 +70,8 @@ pub const ERR_INVALID_OBJECT: i32 = -50;
 /// Total object extent zeroed by the destructor, in bytes.
 pub const CRTS_OBJECT_SIZE: usize = 0x58;
 
-/// RetailOS load address of the unported `"MemH"` handle destructor.
-pub const MEMH_HANDLE_DESTROY_ADDRESS: usize = 0x0805_d028;
-
 /// RetailOS load address of the unported table teardown.
 pub const CRTS_TABLE_TEARDOWN_ADDRESS: usize = 0x080d_86b0;
-
-/// ABI of the `"MemH"` managed-buffer destructor at 0x0805d028.
-pub type MemhHandleDestroy = unsafe extern "C" fn(handle: u32);
 
 /// ABI of the object table teardown at 0x080d86b0. Its status is
 /// discarded by the destructor, exactly as in the original.
@@ -106,16 +100,6 @@ pub struct CrtsObject {
     pub opaque_14: [u32; 17],
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_memh_handle_destroy(handle: u32) {
-    let body: MemhHandleDestroy = core::mem::transmute(MEMH_HANDLE_DESTROY_ADDRESS);
-    body(handle);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_memh_handle_destroy(_handle: u32) {
-    panic!("crts_object_destroy requires MemH destructor 0x0805d028")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_crts_table_teardown(this: *mut CrtsObject, force: u32) -> i32 {
@@ -128,18 +112,8 @@ unsafe extern "C" fn missing_crts_table_teardown(_this: *mut CrtsObject, _force:
     panic!("crts_object_destroy requires table teardown 0x080d86b0")
 }
 
-/// Active boundary for the unported `"MemH"` handle destructor. On the
-/// target it calls directly into retailOS; host tests replace it with a
-/// recording implementation.
-#[cfg(target_os = "none")]
-pub static mut MEMH_HANDLE_DESTROY: MemhHandleDestroy = retail_memh_handle_destroy;
 
-/// Active host boundary for the unported `"MemH"` handle destructor.
-#[cfg(not(target_os = "none"))]
-pub static mut MEMH_HANDLE_DESTROY: MemhHandleDestroy = missing_memh_handle_destroy;
-
-/// Active boundary for the unported table teardown, same policy as
-/// [`MEMH_HANDLE_DESTROY`].
+/// Active boundary for the unported table teardown.
 #[cfg(target_os = "none")]
 pub static mut CRTS_TABLE_TEARDOWN: CrtsTableTeardown = retail_crts_table_teardown;
 
@@ -147,10 +121,6 @@ pub static mut CRTS_TABLE_TEARDOWN: CrtsTableTeardown = retail_crts_table_teardo
 #[cfg(not(target_os = "none"))]
 pub static mut CRTS_TABLE_TEARDOWN: CrtsTableTeardown = missing_crts_table_teardown;
 
-#[inline(always)]
-unsafe fn memh_handle_destroy() -> MemhHandleDestroy {
-    ptr::read_volatile(ptr::addr_of!(MEMH_HANDLE_DESTROY))
-}
 
 #[inline(always)]
 unsafe fn crts_table_teardown() -> CrtsTableTeardown {
@@ -184,15 +154,21 @@ pub unsafe extern "C" fn crts_object_destroy(this: *mut CrtsObject) -> i32 {
     }
     let handle = (*this).handle_08;
     if handle != 0 {
-        memh_handle_destroy()(handle);
+        crate::heap::memh_handle::memh_handle_destroy(
+            handle as usize as *mut crate::heap::memh_handle::MemhHandle,
+        );
     }
     let handle = (*this).handle_0c;
     if handle != 0 {
-        memh_handle_destroy()(handle);
+        crate::heap::memh_handle::memh_handle_destroy(
+            handle as usize as *mut crate::heap::memh_handle::MemhHandle,
+        );
     }
     let handle = (*this).handle_10;
     if handle != 0 {
-        memh_handle_destroy()(handle);
+        crate::heap::memh_handle::memh_handle_destroy(
+            handle as usize as *mut crate::heap::memh_handle::MemhHandle,
+        );
     }
     let _ = crts_table_teardown()(this, 1);
     crts_object_zero()(this as *mut u8, CRTS_OBJECT_SIZE as i32);
@@ -208,17 +184,11 @@ mod tests {
     use std::vec::Vec;
 
     static DESTROY_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Handles observed by the recording MemH destructor, in call order.
-    static mut DESTROYED: Vec<u32> = Vec::new();
     /// (this, force) pairs observed by the recording teardown.
     static mut TEARDOWN_CALLS: Vec<(usize, u32)> = Vec::new();
     /// Status the recording teardown returns.
     static mut TEARDOWN_STATUS: i32 = 0;
 
-    unsafe extern "C" fn recording_memh_handle_destroy(handle: u32) {
-        DESTROYED.push(handle);
-    }
 
     unsafe extern "C" fn recording_crts_table_teardown(this: *mut CrtsObject, force: u32) -> i32 {
         TEARDOWN_CALLS.push((this as usize, force));
@@ -230,20 +200,17 @@ mod tests {
     impl Drop for Reset {
         fn drop(&mut self) {
             unsafe {
-                MEMH_HANDLE_DESTROY = missing_memh_handle_destroy;
                 CRTS_TABLE_TEARDOWN = missing_crts_table_teardown;
-                DESTROYED = Vec::new();
                 TEARDOWN_CALLS = Vec::new();
                 TEARDOWN_STATUS = 0;
             }
         }
     }
 
-    /// Installs the recording seams and returns the lock and reset guard.
+    /// Installs the unported table-teardown recorder and returns its guard.
     fn mock() -> (std::sync::MutexGuard<'static, ()>, Reset) {
         let guard = DESTROY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            MEMH_HANDLE_DESTROY = recording_memh_handle_destroy;
             CRTS_TABLE_TEARDOWN = recording_crts_table_teardown;
         }
         (guard, Reset)
@@ -298,20 +265,12 @@ mod tests {
     }
 
     #[test]
-    fn valid_object_destroys_handles_in_offset_order_then_teardowns_then_zeroes() {
+    fn valid_object_teardowns_then_zeroes_when_no_memh_handles_are_present() {
         let (_lock, _reset) = mock();
         let mut object = canary_object();
-        object.handle_08 = 0x0810_0008;
-        object.handle_0c = 0x0810_000c;
-        object.handle_10 = 0x0810_0010;
         let this = &mut object as *mut CrtsObject;
         unsafe {
             assert_eq!(crts_object_destroy(this), 0);
-            assert_eq!(
-                DESTROYED,
-                [0x0810_0008, 0x0810_000c, 0x0810_0010],
-                "handles are destroyed in +0x08, +0x0c, +0x10 order"
-            );
             assert_eq!(TEARDOWN_CALLS, [(this as usize, 1)], "teardown runs once, forced");
         }
         let bytes: &[u8] =
@@ -323,11 +282,9 @@ mod tests {
     fn absent_handles_skip_the_destroy_but_teardown_still_runs() {
         let (_lock, _reset) = mock();
         let mut object = canary_object();
-        object.handle_0c = 0x0bad_f00d;
         let this = &mut object as *mut CrtsObject;
         unsafe {
             assert_eq!(crts_object_destroy(this), 0);
-            assert_eq!(DESTROYED, [0x0bad_f00d], "only the present handle is destroyed");
             assert_eq!(TEARDOWN_CALLS.len(), 1);
         }
     }
