@@ -79182,3 +79182,32 @@ functions:
       crosses a volatile seam whose device default reaches the retail address
       and whose host default panics until tests install a recorder. Deliberate
       deviations: none. Reference C: decomp/c/030/082c6850_FUN_082c6850.c.
+
+  # --- Vincent ARM immediate operand encoder ---
+  - address: 0x082be96c
+    ghidra: FUN_082be96c
+    name: cg_arm_immediate_rotation
+    size: 72
+    sig: "i32 cg_arm_immediate_rotation(u32 literal)"
+    module: codegen/arm_immediate_rotation
+    status: ported
+    renames:
+      param_1/r0/r3: literal
+      r1: rotation
+      r2: rotation_mask
+      r0: result
+    notes: >-
+      Raw osos.dec confirms the exact 72-byte extent
+      0x082be96c..0x082be9b4: the next separately linked function starts at
+      0x082be9b4. For each even rotation from zero through 30 it forms
+      ROR(0xff, rotation), returning rotation when literal has no bits outside
+      that mask, or -(rotation + 2) when literal is all ones outside it. The
+      latter marks a complement/MVN encoding. It returns the non-encodable
+      sentinel one after all sixteen rotations. The raw body has no calls.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds six
+      direct inbound plain unconditional bl calls at 0x082b482c, 0x082cb668,
+      0x082cb8d8, 0x082cbd4c, 0x082cc944, and 0x082d72fc; zero predicated
+      calls and no tail branches. Ghidra incorrectly reports void because it
+      drops all r0 return paths. Host tests cover direct markers, non-encodable
+      patterns, and every byte/complement at each ARM rotation. Deliberate
+      deviations: none.
