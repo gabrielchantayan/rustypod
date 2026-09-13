@@ -2490,6 +2490,27 @@ pub struct VectorStorage {
     /// One past the allocated storage.
     pub end_of_storage: *mut u8,
 }
+/// vector_storage_init — original: `FUN_083e688c` @ `0x083e688c`
+/// (20 bytes, 6 direct `bl` call sites — 0x08177630, 0x0817763c,
+/// 0x08177648, 0x08177b94, 0x082ae80c, and 0x082ae824; all
+/// unconditional).
+///
+/// Default-constructs a `std::vector<T>` storage head by writing zero to
+/// its `{begin, end, end_of_storage}` words. Raw `osos.dec` confirms the
+/// three `str r1,[r0,#offset]` stores at +0, +4, and +8, with `r1` set to
+/// zero once. No deliberate deviations.
+///
+/// # Safety
+/// `vector` must point at a writable, aligned [`VectorStorage`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_storage_init")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_storage_init(vector: *mut VectorStorage) {
+    (*vector).begin = core::ptr::null_mut();
+    (*vector).end = core::ptr::null_mut();
+    (*vector).end_of_storage = core::ptr::null_mut();
+}
+
 
 /// vector_capacity — original: `FUN_083d7760` @ 0x083d7760
 /// (20 bytes, 6 `bl` call sites; names.yaml's size: 16 is stale,
@@ -3269,6 +3290,34 @@ mod tests {
     use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
     use std::sync::MutexGuard;
     use std::vec::Vec;
+    #[repr(C)]
+    struct GuardedVectorStorage {
+        left_guard: usize,
+        vector: VectorStorage,
+        right_guard: usize,
+    }
+
+    #[test]
+    fn vector_storage_init_clears_all_three_words_without_touching_guards() {
+        let mut guarded = GuardedVectorStorage {
+            left_guard: 0x1eed_c0de,
+            vector: VectorStorage {
+                begin: 0x1111usize as *mut u8,
+                end: 0x2222usize as *mut u8,
+                end_of_storage: 0x3333usize as *mut u8,
+            },
+            right_guard: 0xdec0_adde,
+        };
+
+        unsafe { vector_storage_init(&mut guarded.vector) };
+
+        assert!(guarded.vector.begin.is_null());
+        assert!(guarded.vector.end.is_null());
+        assert!(guarded.vector.end_of_storage.is_null());
+        assert_eq!(guarded.left_guard, 0x1eed_c0de);
+        assert_eq!(guarded.right_guard, 0xdec0_adde);
+    }
+
 
     static mut STRING_OBJECT_RELEASES: Vec<usize> = Vec::new();
 
