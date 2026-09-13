@@ -21022,6 +21022,34 @@ functions:
       osos.dec finds 10 static bl call sites, all unconditional. The two
       unported direct callees use their existing volatile seams: fixed raw
       firmware addresses on target and test-installed host callbacks.
+  - address: 0x0825d384
+    ghidra: FUN_0825d384
+    name: xml_peek_skip_whitespace
+    size: 76
+    sig: "unsigned int xml_peek_skip_whitespace(void **reader_slot)"
+    module: util/xml_peek_skip_whitespace
+    status: ported
+    renames:
+      param_1/r0/r4: reader_slot
+      r6: position
+      r5/r0: codepoint
+      FUN_0825d4e0: xml_reader_position_before_current (unported seam)
+      FUN_0825d354: xml_skip_whitespace (ported)
+      FUN_0825d318: xml_decode_skip_whitespace (ported)
+      FUN_0825d580: xml_reader_restore_position (unported seam)
+    notes: >-
+      Raw ARM is exactly 0x0825d384..0x0825d3cf: it saves the input position
+      adjusted to precede the decoder's active codepoint, calls the reset
+      whitespace helper and discards its result, then calls the raw
+      whitespace helper and returns that codepoint after restoring the saved
+      signed position. The restore call receives r1=0, r2=position,
+      r3=position>>31, and stack argument zero; its raw callee clears decoder
+      state before invoking the reader's vtable +0x10 method. The following
+      function begins at 0x0825d3d0. Decoding every B/BL word in osos.dec
+      finds 6 static bl call sites, all unconditional: 0x0825ca24,
+      0x0825cf84, 0x0825cfcc, 0x0825cfdc, 0x0825d08c, and 0x0825d144.
+      The two unported direct callees use volatile seams: their fixed raw
+      firmware addresses on target and test-installed host callbacks.
 
   - address: 0x0825d354
     ghidra: FUN_0825d354
