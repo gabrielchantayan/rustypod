@@ -647,6 +647,10 @@ pub mod hints {
     // entry-offset fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const TEXT_LAYOUT_APPLY_PENDING_OFFSETS: usize = 0x5100_0000;
+    // 0x6100_0000: dedicated to app/segmented_entry_lookup's raw-u32 table
+    // and entry-data fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SEGMENTED_ENTRY_LOOKUP: usize = 0x6100_0000;
     // 0x5200_0000: dedicated to kernel/task_lock's raw-u32 current-task
     // record fixture; mappings never unmap, so no other user may share it.
     pub const CURRENT_TASK_ID: usize = 0x5200_0000;
