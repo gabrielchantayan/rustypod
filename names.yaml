@@ -81833,3 +81833,38 @@ functions:
       cover the null-state guard, nonzero indexing with carry into the high word,
       64-bit unsigned division of a negative product bit pattern, and the
       exhausted-table sentinel. No deliberate deviations.
+
+  # --- Settings-item update state singleton ---
+  - address: 0x081bbde8
+    ghidra: FUN_081bbde8
+    name: settings_item_update_state_get
+    size: 88
+    sig: "SettingsItemUpdateState *settings_item_update_state_get(void)"
+    module: app/settings_item_update_state
+    status: ported
+    renames:
+      DAT_081bbe30: settings_item_update_state_guard
+      DAT_081bbe34: settings_item_update_state
+      DAT_081bbe38: __dso_handle
+      DAT_081bbe3c: malformed_destructor_target
+      FUN_081bbf5c: settings_item_update_state_initialize
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+      "r0 return": settings_item_update_state
+    notes: >-
+      Raw osos.dec establishes an 88-byte extent: 72 instruction bytes from
+      0x081bbde8 through pop {r4,pc} at 0x081bbe2c, followed by the four-word
+      literal pool through 0x081bbe3c; the distinct next function starts at
+      0x081bbe40. A full-image ARM B/BL-immediate decode finds exactly six
+      inbound direct call sites, all unconditional plain bl
+      (0x0829610c, 0x08296334, 0x082c6f9c, 0x082c72e8, 0x082ca564, and
+      0x082ca57c), with no predicated bl forms and no tail branch. It is an ADS
+      function-local-static accessor for the six-byte update state at
+      0x089ca334: bit-0 guard test, cxa_guard_acquire, initialize value=-1 and
+      two flags=0, cxa_atexit(state, 0x081b109c, __dso_handle 0x089ca09c), then
+      cxa_guard_release and return the fixed state. The destructor literal
+      0x081b109c decodes as an interior add r0,r4,#4 instruction rather than a
+      function entry; it cannot form a valid shutdown callback. The Rust port
+      uses crate statics for the fixed cells, inlines the three writes of
+      unported sibling FUN_081bbf5c, and registers a safe no-op destructor.

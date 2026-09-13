@@ -200,6 +200,7 @@ pub mod stage_progress;
 pub mod singletons;
 pub mod singleton_selection_predecessor;
 pub mod settings_item;
+pub mod settings_item_update_state;
 pub mod settings_mode_set;
 pub mod validated_singleton_0x89c;
 pub mod showcase_queue_has_pending_entry;
