@@ -75828,3 +75828,33 @@ functions:
       callback's slot/index/result-cell contract. match.py's expected
       structural diff reflects LLVM's separate bounds branch and frame,
       preserving the guard, range, callback, and returned-word behavior.
+
+  # --- Permissive UTF-8 codepoint counter ---
+  - address: 0x080f0048
+    ghidra: FUN_080f0048
+    name: utf8_codepoint_count_permissive
+    size: 72
+    sig: "u32 utf8_codepoint_count_permissive(const u8 *text)"
+    module: util/utf8_codepoint_count_permissive
+    status: ported
+    renames:
+      param_1/r0: text
+      param_2/r1: codepoint_count
+      r2: lead_byte
+      r3: consumed_byte
+    notes: >-
+      Raw osos.dec establishes 72 code bytes from 0x080f0048 through
+      0x080f008c; the separately linked next function starts with
+      `push {r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}` at 0x080f0090.
+      Decoding every aligned ARM B/BL immediate in osos.dec finds exactly seven
+      inbound direct call sites, all unconditional plain bl at 0x0808f54c,
+      0x08187a08, 0x082631c8, 0x08263408, 0x08263930, 0x08263e9c, and
+      0x0826406c; there are no predicated forms. The routine counts ASCII,
+      0xc0..=0xdf, and 0xe0..=0xef lead bytes while consuming one, two, or
+      three bytes respectively. Every other high-bit lead consumes three bytes
+      and contributes no count; no continuation, overlong, or surrogate
+      validation occurs. It has no NULL or bounds guard, so an incomplete
+      high-bit sequence may read past the NUL terminator. No deliberate
+      deviations. Host tests cover empty and ASCII strings, valid two- and
+      three-byte sequences, malformed continuations, and unsupported high-bit
+      leads.
