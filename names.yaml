@@ -3918,6 +3918,43 @@ functions:
       match.py structural review found the expected ABI frame plus a final
       branch relocation for the Rust call in place of the retail tail branch.
 
+  - address: 0x0805d028
+    ghidra: FUN_0805d028
+    name: memh_handle_destroy
+    size: 68
+    sig: "void memh_handle_destroy(MemhHandle *handle)"
+    module: heap/memh_handle
+    status: ported
+    renames:
+      param_1/r0: handle
+      DAT_0805d06c: MEMH_MAGIC
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Raw osos.dec confirms a 64-byte instruction body followed by its
+      0x4d656d48 ("MemH") literal at 0x0805d06c; 0x0805d070 begins the
+      separate free_tag4 veneer, making Ghidra's 68-byte extent correct but
+      its apparent inline heap-free body wrong. NULL returns immediately.
+      A non-NULL handle whose +0x04 word is not "MemH" returns untouched.
+      For a matching handle, retailOS conditionally calls
+      free_wrapper(handle +0x00, 4), stores zero at +0x04, then
+      tail-branches to free_wrapper(handle, 4). Decoding every ARM B/BL word
+      finds exactly seven direct BL-form callers: three unconditional bl
+      (0x0805a584, 0x080a65b0, 0x080e2818) and four blne
+      (0x08048240, 0x0809e180, 0x0809e18c, 0x0809e198); the predicated
+      calls confirm that some callers add their own NULL gate, while this
+      destructor also guards NULL. No direct tail-branch caller or aligned
+      raw data-word reference targets the entry, so it is not virtually
+      dispatched. The Rust port uses a target-width u32 payload field to
+      retain +0x04 field spacing on 64-bit hosts, calls the already ported
+      free_tag4 wrapper (behaviorally the same tag-4 free_wrapper path), and
+      migrates crts_object_destroy off its former MEMH_HANDLE_DESTROY seam.
+      Host tests cover NULL, wrong magic, absent payload, and payload-present
+      release paths through a unique low-address fixture. Deliberate
+      deviation: ordinary Rust calls through free_tag4 replace the retail
+      conditional BL and final direct tail branch to free_wrapper; free_tag4
+      dispatches through HEAP_OPS rather than branching directly to
+      0x080e7970.
+
   - address: 0x0805d070
     ghidra: FUN_0805d070
     name: free_tag4
