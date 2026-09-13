@@ -81963,3 +81963,34 @@ functions:
       zeroing seam. The cache and host mutex are crate statics; target builds
       use the retail mutex address. Host tests cover lock scope, cold
       construction, post-construction ordering, cached hit, and NULL retry.
+
+  # --- Showcase slot pending-queue lookup ---
+  - address: 0x081b6d4c
+    ghidra: FUN_081b6d4c
+    name: showcase_slot_pending_queue
+    size: 60
+    sig: "const u32 *showcase_slot_pending_queue(const u32 *showcase, u32 slot)"
+    module: app/showcase_slot_pending_queue
+    status: ported
+    renames:
+      param_1/r0: showcase
+      param_2/r1: slot
+      r2: showcase_ready
+      r4: slot_record
+      FUN_08030f44: heap_panic
+      FUN_081b7f9c: showcase_queue_has_pending_entry
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte all-code extent
+      0x081b6d4c..0x081b6d88: push {r4,lr}, ready-byte check and bleq
+      heap_panic, unsigned slot < 4 check, queue calculation
+      showcase + slot * 0x18 + 0x88, pending-entry predicate call, then
+      conditional queue return or NULL. The following push {r4,r5,r6,lr} at
+      0x081b6d88 begins a separately linked function; there is no literal
+      pool. A full-image ARM B/BL-immediate decode finds exactly six direct
+      inbound calls at 0x081b6b34, 0x081b6b5c, 0x081b7188, 0x081b7324,
+      0x081b782c, and 0x081b7f24. All are unconditional plain bl with no
+      predicated forms. The concrete Showcase type remains unrecovered, so the
+      port retains the verified 32-bit word layout and uses raw u32 pointers
+      rather than a host-width pointer struct. It calls the existing heap_panic
+      Rust port instead of branching to the retailOS address. Host tests cover
+      every valid slot, empty queues, and both out-of-range boundaries.
