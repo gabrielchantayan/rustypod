@@ -262,6 +262,25 @@ pub unsafe extern "C" fn tick_accumulator_step(
     (*accumulator).update_result
 }
 
+/// tick_accumulator_set_scale_factor_limit — original: `FUN_081bb28c` @
+/// `0x081bb28c` (**8 bytes**, `0x081bb28c..0x081bb294`; the separately
+/// linked sibling begins at `0x081bb294`).
+///
+/// **7 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`.
+///
+/// Stores `scale_factor_limit` at the aligned 32-bit field `accumulator + 0x1c`.
+/// It deliberately has no NULL or range guard, exactly like `str r1,[r0,#28]`;
+/// callers use limits 2, 0x10, 0x20, and 0x40. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_accumulator_set_scale_factor_limit(
+    accumulator: *mut TickAccumulator,
+    scale_factor_limit: u32,
+) {
+    (*accumulator).scale_factor_limit = scale_factor_limit;
+}
+
 /// tick_accumulator_rejects_rate — original: `FUN_081bb410` @ `0x081bb410`
 /// (**40 bytes**, `0x081bb410..0x081bb438`; the next separately linked
 /// function begins at `0x081bb438`).
@@ -483,6 +502,51 @@ mod tests {
             assert_eq!(accumulator.update_result, 0);
             assert_eq!(accumulator.last_tick_ms, u32::MAX);
             assert_eq!(result, 0);
+        }
+    }
+
+    #[test]
+    fn scale_factor_limit_setter_overwrites_only_the_limit() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator.last_tick_ms = 1;
+            accumulator.backoff_deadline_ms = 2;
+            accumulator.next_update_ms = 3;
+            accumulator.scale_factor = 4;
+            accumulator.scaled_input = 5;
+            accumulator.remainder = 6;
+            accumulator.input_divisor = 7;
+            accumulator.scale_factor_limit = 8;
+            accumulator.update_result = 9;
+            accumulator.mode_enabled = 10;
+            accumulator.scale_suppressed = 11;
+            accumulator.lower_input_bound = 12;
+            accumulator.upper_input_bound = 13;
+            accumulator.backoff_interval_ms = 14;
+
+            tick_accumulator_set_scale_factor_limit(addr_of_mut!(accumulator), 0);
+            assert_eq!(accumulator.scale_factor_limit, 0);
+            assert_eq!(
+                [
+                    accumulator.last_tick_ms,
+                    accumulator.backoff_deadline_ms,
+                    accumulator.next_update_ms,
+                    accumulator.scale_factor,
+                    accumulator.scaled_input,
+                    accumulator.remainder,
+                    accumulator.input_divisor,
+                    accumulator.update_result,
+                    accumulator.lower_input_bound,
+                    accumulator.upper_input_bound,
+                    accumulator.backoff_interval_ms,
+                ],
+                [1, 2, 3, 4, 5, 6, 7, 9, 12, 13, 14],
+            );
+            assert_eq!(accumulator.mode_enabled, 10);
+            assert_eq!(accumulator.scale_suppressed, 11);
+
+            tick_accumulator_set_scale_factor_limit(addr_of_mut!(accumulator), u32::MAX);
+            assert_eq!(accumulator.scale_factor_limit, u32::MAX);
         }
     }
 
