@@ -14,6 +14,9 @@
 //! any other unported function in osos.
 pub mod block;
 pub mod block_ref;
+/// `cg_arm_immediate_rotation` @ 0x082be96c — recognizes literals the
+/// Vincent ARM code generator can encode as an immediate or its complement.
+pub mod arm_immediate_rotation;
 /// `cg_exp_golomb_ue_read` @ 0x082c5df0 — the H.264 decoder's `ue(v)`
 /// Exp-Golomb reader. Not IR either, but it sits inside the JIT's
 /// address block (0x082c5dxx), one function away from `se(v)` @
