@@ -37,6 +37,7 @@ use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
 use crate::drivers::timer::{timer_arm, timer_set_delay};
 use crate::kernel::gateway_request_blocking::gateway_request_blocking;
+use crate::kernel::gateway_request::gateway_request_timed;
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
 /// The worker at `FUN_082280c0` reads the final word at `this + 0x30`.
@@ -193,6 +194,59 @@ pub unsafe extern "C" fn stream_cache_mass_storage_manager_update_timer(
     0
 }
 
+/// stream_cache_mass_storage_manager_clear_timer_state — original:
+/// `FUN_08228200` @ `0x08228200` (108 bytes: 104 bytes of code plus the
+/// literal-pool word at `0x0822826c`; the next separately linked entry opens
+/// at `0x08228270`). Seven direct inbound `bl` call sites comprise six
+/// unconditional calls at 0x081af724, 0x082063f8, 0x082064d8, 0x082066ec,
+/// 0x08206a3c, and 0x08206af4, plus one predicated `bleq` at 0x08228124.
+/// One unconditional tail `b` at 0x08201a68 also reaches this function; the
+/// predicated call invokes this cleanup only when its caller's preceding
+/// comparison is equal.
+///
+/// Under the controller mutex, a pending gateway request posts the timed
+/// gateway message (payload 0x20 only for the special context, otherwise
+/// 0x1b) and is cleared. A pending embedded timer is cleared and
+/// trace-validated, then the stopped byte is cleared. The raw function
+/// explicitly returns zero.
+///
+/// Deliberate deviations: this calls the ported mutex, timed-gateway, and
+/// timer-trace implementations directly rather than their retailOS call
+/// addresses. The behavior and call ordering are preserved.
+///
+/// # Safety
+///
+/// `this` must point to a valid [`StreamCacheMassStorageManagerTimer`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.stream_cache_mass_storage_manager_clear_timer_state")]
+pub unsafe extern "C" fn stream_cache_mass_storage_manager_clear_timer_state(
+    this: *mut StreamCacheMassStorageManagerTimer,
+    context: u32,
+    timeout: u32,
+) -> u32 {
+    mutex_lock(core::ptr::addr_of_mut!((*this).mutex));
+
+    if (*this).gateway_requested != 0 {
+        let payload = if context == GATEWAY_PAYLOAD_SPECIAL_CONTEXT {
+            GATEWAY_PAYLOAD_SPECIAL
+        } else {
+            GATEWAY_PAYLOAD_DEFAULT
+        };
+        gateway_request_timed(payload, timeout as usize);
+        (*this).gateway_requested = 0;
+    }
+
+    if (*this).timer_pending != 0 {
+        (*this).timer_pending = 0;
+        crate::drivers::timer::timer_trace_assert((*this).timer.as_mut_ptr());
+    }
+
+    (*this).stopped = 0;
+    mutex_unlock(core::ptr::addr_of_mut!((*this).mutex));
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -219,11 +273,14 @@ mod tests {
     use std::vec::Vec;
 
     static TIMER_TRACE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static GATEWAY_DISPATCH_CALLS: AtomicUsize = AtomicUsize::new(0);
+
 
     unsafe extern "C" fn ready_gateway() {}
 
-    unsafe extern "C" fn ignore_gateway_dispatch(_request: *mut u32) {}
-
+    unsafe extern "C" fn ignore_gateway_dispatch(_request: *mut u32) {
+        GATEWAY_DISPATCH_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
     unsafe extern "C" fn ignore_gateway_semaphore(_semaphore: usize) -> usize {
         0
     }
@@ -263,6 +320,7 @@ mod tests {
         let timer_lock = TIMER_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             TIMER_TRACE_CALLS.store(0, Ordering::SeqCst);
+            GATEWAY_DISPATCH_CALLS.store(0, Ordering::SeqCst);
             let dispatch = MESSAGE_DISPATCH_VENEER_OPS;
             MESSAGE_DISPATCH_VENEER_OPS = MessageDispatchVeneerOps {
                 dispatch: ignore_gateway_dispatch,
@@ -351,6 +409,45 @@ mod tests {
         assert_eq!(controller.context, 0xabcd_1234, "stopped controller ignores later schedules");
         assert_eq!(timer_delay(&controller.timer), 99);
         assert_eq!(TIMER_TRACE_CALLS.load(Ordering::SeqCst), 5);
+    }
+
+    #[test]
+    fn clear_timer_state_posts_pending_gateway_and_clears_every_flag() {
+        let _restore = install_timer_update_recorders();
+        let mut controller = StreamCacheMassStorageManagerTimer {
+            gateway_requested: 1,
+            stopped: 1,
+            timer_pending: 1,
+            _padding: 0,
+            mutex: crate::kernel::sync_mutex::Mutex {
+                sem_cell: ptr::null_mut(),
+                unused: 0,
+            },
+            timer_service: 0,
+            timer: [0; 0x20],
+            context: 0,
+        };
+
+        unsafe {
+            assert_eq!(
+                stream_cache_mass_storage_manager_clear_timer_state(
+                    &mut controller, GATEWAY_PAYLOAD_SPECIAL_CONTEXT, 0,
+                ),
+                0
+            );
+        }
+        assert_eq!(GATEWAY_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(TIMER_TRACE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            [controller.gateway_requested, controller.stopped, controller.timer_pending],
+            [0, 0, 0],
+        );
+
+        unsafe {
+            stream_cache_mass_storage_manager_clear_timer_state(&mut controller, 0, u32::MAX);
+        }
+        assert_eq!(GATEWAY_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(TIMER_TRACE_CALLS.load(Ordering::SeqCst), 1);
     }
     static MANAGER_LOCK: Mutex<()> = Mutex::new(());
     static mut CTOR_CALLS: Vec<*mut u8> = Vec::new();
