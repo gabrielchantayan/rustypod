@@ -15796,6 +15796,31 @@ functions:
       same load order and tail dispatch; LLVM adds the usual {fp,lr}
       frame that decoder_poll and object_cast_to_class also carry.
 
+  - address: 0x08188064
+    ghidra: FUN_08188064
+    name: demo_mode_class_7d80_payload
+    size: 24
+    sig: "u32 demo_mode_class_7d80_payload(DemoMode *demo_mode)"
+    module: app/registry
+    status: ported
+    vars: {param_1: demo_mode, DAT_0818807c: DEMO_MODE_CLASS_ID_7D80}
+    notes: >-
+      Raw osos.dec is six ARM instructions from 0x08188064 through
+      0x08188078; the next separately linked function begins at
+      0x08188080 and the intervening word at 0x0818807c is the literal
+      class id 0x7d80. It loads TCDemoMode's active keyed-registry field
+      at +0x30, calls object_cast_to_class (0x08275b9c) with that fixed
+      id, then returns the cast result's aligned +0x124 word. Exactly six
+      inbound direct ARM bl instructions exist in osos.dec, all
+      unconditional: 0x0817fc48, 0x0817fd38, 0x08181ea4, 0x0818268c,
+      0x08183da0, and 0x08183fd0; no predicated form reaches it. The
+      class's recovered identity does not survive in the firmware, so
+      the name retains its verified class id rather than inventing one.
+      The original has no guard after the checked cast: a NULL keyed
+      registry or rejected class reaches the +0x124 load and faults.
+      Rust retains that behavior, expressing the call/load pair as an
+      object_cast_to_class call followed by an aligned volatile read.
+
   - address: 0x081883fc
     ghidra: FUN_081883fc
     name: demo_mode_instance
