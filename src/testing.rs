@@ -176,6 +176,9 @@ pub mod hints {
     // 0x6e00_0000: dedicated to heap/word_buffer's raw-u32 singleton-reset
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const WORD_BUFFER_RESET_OPTIONAL_SINGLETON: usize = 0x6e00_0000;
+    // 0x6f00_0000: dedicated to app/service_handler_pending_event_reset's
+    // session fixture; mappings never unmap, so no other test may reuse it.
+    pub const SERVICE_HANDLER_PENDING_EVENT_RESET: usize = 0x6f00_0000;
     // 0x7c00_0000: dedicated to heap/word_buffer's raw-u32 assignment
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const MARKED_WORD_BUFFER_ASSIGN: usize = 0x7c00_0000;
