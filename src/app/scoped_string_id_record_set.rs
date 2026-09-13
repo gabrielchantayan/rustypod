@@ -1,4 +1,13 @@
-//! Plain destructor for an unidentified 0x6c-byte application aggregate.
+//! Constructor and plain destructor for an unidentified 0x6c-byte application
+//! aggregate.
+//!
+//! `scoped_string_id_record_set_construct` — original: `FUN_081979dc` @
+//! **0x081979dc** (**80 bytes: 76 code + the 4-byte literal-pool word @
+//! 0x08197a2c**; **7 direct, unconditional `bl` call sites**, no predicated
+//! forms, binary-scanned by decoding every ARM `B`/`BL` word in `osos.dec).
+//! It plants descriptor 0x08989b60, constructs the 20-byte context scope at
+//! +0x04, default-constructs five StringIdRecords at +0x18 through +0x58, and
+//! zeroes the trailing word at +0x68.
 //!
 //! `scoped_string_id_record_set_destroy` — original: `FUN_08197a30` @
 //! **0x08197a30** (**68 bytes: 64 code + the 4-byte literal-pool word @
@@ -11,8 +20,10 @@
 //! and an untouched word at +0x68. Its non-deleting destructor reinstalls the
 //! literal-pool descriptor `0x08989b60`, destroys the five string/id members
 //! in reverse declaration order, drops the context scope, and returns `this`.
-//! All six helper calls are direct retailOS calls: `string_id_record_destroy`
-//! @ 0x08258c80 five times and `context_scope_drop` @ 0x08284188 once.
+//! All constructor and destructor helper calls are direct retailOS calls:
+//! `context_scope_init` @ 0x082840e8, `string_id_record_default_construct` @
+//! 0x08258c58, `string_id_record_destroy` @ 0x08258c80 five times, and
+//! `context_scope_drop` @ 0x08284188 once.
 //!
 //! The class's semantic identity is not established. The descriptor literal
 //! points at the binary string `TransitionAddonI28TSilverMediaListCntlr_GeniusE`;
@@ -22,16 +33,22 @@
 //! Deliberate deviations: the ROM descriptor pointer is represented by the
 //! static [`SCOPED_STRING_ID_RECORD_SET_DESCRIPTOR`] rather than an absolute
 //! host pointer. `repr(C)` has the retail layout on ARM; its pointer fields are
-//! wider on host, so destruction uses named members instead of literal byte
-//! offsets while preserving the retail order. A target-only volatile read of
-//! the `context_scope_drop` function pointer retains its mandatory call:
-//! LLVM otherwise sees the empty body and removes it, so the retail `bl`
-//! becomes a documented `blx` code-generation deviation.
+//! wider on host, so construction and destruction use named members instead of
+//! literal byte offsets while preserving the retail call and store order. A
+//! target-only volatile read of the `context_scope_drop` function pointer
+//! retains its mandatory call: LLVM otherwise sees the empty body and removes
+//! it, so the retail `bl` becomes a documented `blx` code-generation
+//! deviation.
 
-use crate::app::context_scope::CONTEXT_SCOPE_SIZE;
+use crate::app::context_scope::{context_scope_init, CONTEXT_SCOPE_SIZE};
 #[cfg(not(target_os = "none"))]
 use crate::app::context_scope::context_scope_drop;
-use crate::cxx::string_object::{string_id_record_destroy, StringIdRecord};
+use crate::cxx::string_object::{
+    string_id_record_default_construct, string_id_record_destroy, StringIdRecord,
+};
+use core::ptr;
+use core::ptr::null_mut;
+
 
 #[cfg(target_os = "none")]
 unsafe extern "C" {
@@ -72,6 +89,48 @@ pub struct ScopedStringIdRecordSet {
     pub records: [StringIdRecord; 5],
     /// +0x68 — copied by the sibling copy constructor; untouched here.
     pub trailing_word: u32,
+}
+/// scoped_string_id_record_set_construct — original: `FUN_081979dc` @
+/// 0x081979dc (**80 bytes: 76 code + the 4-byte descriptor literal @
+/// 0x08197a2c; 7 direct, unconditional `bl` call sites**, no predicated
+/// forms, binary-scanned over every ARM `B`/`BL` word in `osos.dec`).
+///
+/// Plants the aggregate descriptor, default-constructs its embedded
+/// ContextScope with a NULL subject and clear flag, then default-constructs
+/// all five StringIdRecord members in ascending declaration order. The final
+/// store clears +0x68. The ContextScope's byte-sized flag leaves its three
+/// trailing padding bytes untouched. It returns `this` in the ADS constructor
+/// convention.
+///
+/// The original chains its callee results through `add r0,#20` and five
+/// `add r0,#16` instructions before deriving `this` for the +0x68 store. The
+/// Rust port addresses named members instead so the same stores remain correct
+/// on 64-bit hosts, whose pointer-wide fields change the aggregate layout.
+///
+/// # Safety
+///
+/// `this` must point to writable raw storage for a
+/// [`ScopedStringIdRecordSet`]. The constructor has no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_string_id_record_set_construct(
+    this: *mut ScopedStringIdRecordSet,
+) -> *mut ScopedStringIdRecordSet {
+    ptr::addr_of_mut!((*this).descriptor)
+        .write(SCOPED_STRING_ID_RECORD_SET_DESCRIPTOR.as_ptr());
+
+    let scope = ptr::addr_of_mut!((*this).scope).cast::<u8>();
+    context_scope_init(scope, null_mut(), 0);
+
+    let records = ptr::addr_of_mut!((*this).records).cast::<StringIdRecord>();
+    string_id_record_default_construct(records.add(0));
+    string_id_record_default_construct(records.add(1));
+    string_id_record_default_construct(records.add(2));
+    string_id_record_default_construct(records.add(3));
+    string_id_record_default_construct(records.add(4));
+
+    ptr::addr_of_mut!((*this).trailing_word).write(0);
+    this
 }
 
 /// scoped_string_id_record_set_destroy — original: `FUN_08197a30` @
@@ -133,6 +192,44 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn constructs_every_member_from_dirty_raw_storage() {
+        let mut storage = core::mem::MaybeUninit::<ScopedStringIdRecordSet>::uninit();
+        unsafe {
+            core::ptr::write_bytes(
+                storage.as_mut_ptr().cast::<u8>(),
+                0xa5,
+                core::mem::size_of::<ScopedStringIdRecordSet>(),
+            );
+            let this = storage.as_mut_ptr();
+            assert_eq!(scoped_string_id_record_set_construct(this), this);
+
+            let object = storage.assume_init();
+            assert_eq!(
+                object.descriptor,
+                SCOPED_STRING_ID_RECORD_SET_DESCRIPTOR.as_ptr(),
+                "the constructor plants the aggregate descriptor"
+            );
+
+            let mut expected_scope = [0; CONTEXT_SCOPE_SIZE];
+            expected_scope[..4].copy_from_slice(
+                &crate::app::context_scope::CONTEXT_SCOPE_DESCRIPTOR.to_ne_bytes(),
+            );
+            expected_scope[17..].fill(0xa5);
+            assert_eq!(
+                object.scope, expected_scope,
+                "the embedded scope has a NULL subject and clear flag"
+            );
+            assert_eq!(object.trailing_word, 0, "the final word is explicitly cleared");
+            for record in object.records {
+                assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+                assert_eq!(record.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+                assert!(record.string.payload.is_null());
+                assert_eq!(record.id, -1);
+            }
+        }
+    }
+
 
     #[test]
     fn restores_descriptor_and_destroys_members_in_reverse_order() {
