@@ -10402,6 +10402,46 @@ functions:
       coordinates, both tags, no-store counting pass, negative indexing,
       and i16 count wrap.
 
+  # --- FreeType 2 SFNT table directory ---
+  - address: 0x080bb7d4
+    ghidra: FUN_080bb7d4
+    name: tt_face_lookup_table
+    size: 176
+    sig: "TtTableRecord *tt_face_lookup_table(TtFace *face, u32 tag)"
+    module: ft/sfnt
+    status: ported
+    renames:
+      param_1/r0: face
+      param_2/r1: tag
+      "face+0x98": num_tables
+      "face+0x9c": table_records
+      "record+0x00": tag
+      "record+0x0c": length
+      DAT_080bb880: trace_levels
+    notes: >-
+      FreeType ttpload.c tt_face_lookup_table. Raw ARM decodes 43
+      instructions from 0x080bb7d4 through the final pop at 0x080bb87c
+      (172 bytes), followed by the required trace-level-address literal
+      0x08b209dc at 0x080bb880, for a 176-byte extent. Ghidra's reported
+      168-byte body omits the final return instruction. When
+      trace_levels+0x48 > 3, it logs the face and tag as four signed
+      characters, then linearly scans num_tables 16-byte TT_TableRec
+      directory entries. The first matching tag whose length word is
+      nonzero is returned; a zero-length match is skipped. It logs found
+      or missing and returns NULL when no eligible match exists. Seven
+      call sites verified by decoding every ARM B/BL word in osos.dec:
+      unconditional bl at 0x0808b690, 0x0808b6a4, 0x0808c08c, 0x0808c0a0,
+      0x0808c0b4, 0x0809cd8c, and 0x080a9f8c; no predicated or tail
+      branches. No DATA word holds 0x080bb7d4, so it is not virtually
+      dispatched. On target the port directly reads the original
+      0x08b209dc+0x48 trace word; host tests model that unmapped word.
+      The pre-existing ft_error_trace port exposes only r0-r3, so the
+      lookup trace cannot forward its final two stacked %c arguments to
+      an installed host trace sink; lookup and outcome behavior are
+      otherwise unchanged. Focused host tests cover first eligible match,
+      skipped zero-length match, empty directory with null records, and
+      trace-gated probe/success output.
+
   # --- FreeType 2 ftoutln outline helpers ---
   - address: 0x0804fe08
     ghidra: FUN_0804fe08
