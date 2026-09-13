@@ -82139,3 +82139,33 @@ functions:
       bound: negative slot values address preceding 32-byte entries, faithfully
       retained by the port. The field's semantic meaning is not otherwise
       recovered; it is named pending_state from its reset behavior.
+
+  - address: 0x0818eef8
+    ghidra: FUN_0818eef8
+    name: service_handler_slot_state_reset
+    size: 64
+    sig: "void service_handler_slot_state_reset(void *context, u32 selector)"
+    module: app/service_handler_slot_state_reset
+    status: ported
+    renames:
+      param_1/r0: context (unused)
+      param_2/r1: selector
+      DAT_0818ef38: service_handler_slot_activity_flags
+      DAT_0818ef3c: service_handler_slot_states
+      DAT_0818ef40: service_handler_slot_pending_flags
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent:
+      60 instruction bytes at 0x0818eef8..0x0818ef34 followed by three
+      literal-pool words at 0x0818ef38..0x0818ef40; 0x0818ef44 begins the
+      distinct next function. The body ignores r0 and resets the selected
+      service-handler slot's activity and pending flags, sets its 20-byte
+      record's state byte to 15 and timeout word to 100, stores selector at
+      +8, and clears the words at +12 and +16. A complete full-image ARM
+      B/BL-immediate decode finds six inbound direct calls, all unconditional
+      plain bl at 0x0818ed24, 0x0818f204, 0x0818f318, 0x08191254,
+      0x08192cf0, and 0x08193dc4; no predicated calls or inbound tail
+      branches occur. Host builds isolate the three fixed RAM tables; the
+      retail no-bounds-check precondition is retained. match.py structural
+      review: identical indexed flag and 20-byte record stores; LLVM derives
+      the second flag table's +3 address from the first literal and adds a
+      prologue/epilogue.

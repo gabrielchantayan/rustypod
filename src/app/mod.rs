@@ -196,6 +196,7 @@ pub mod service_handler_availability;
 pub mod service_handler_status;
 pub mod service_handler_pending_event_reset;
 pub mod service_handler_slot_bit_update;
+pub mod service_handler_slot_state_reset;
 pub mod silver_controller;
 pub mod silver_list_table;
 pub mod silver_list_table_resource;
