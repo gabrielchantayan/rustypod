@@ -307,6 +307,96 @@ pub unsafe extern "C" fn i2c_0x39_set_register0_low_bits(value: u32) -> i32 {
     i2c_0x39_write_register(0, updated as u32)
 }
 
+/// ABI of the two unported peripheral-0x39 helpers reached by
+/// `peripheral_0x39_mode_action`.
+type Peripheral0x39PrepareFn = unsafe extern "C" fn() -> i32;
+type Peripheral0x39ApplyModeFn = unsafe extern "C" fn(mode: u32) -> i32;
+
+const PERIPHERAL_0X39_PREPARE_ADDRESS: usize = 0x0836_e400;
+const PERIPHERAL_0X39_APPLY_MODE_ADDRESS: usize = 0x0836_e298;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn peripheral_0x39_prepare() -> i32 {
+    let prepare: Peripheral0x39PrepareFn = core::mem::transmute(PERIPHERAL_0X39_PREPARE_ADDRESS);
+    prepare()
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
+    let apply_mode: Peripheral0x39ApplyModeFn =
+        core::mem::transmute(PERIPHERAL_0X39_APPLY_MODE_ADDRESS);
+    apply_mode(mode)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_peripheral_0x39_prepare() -> i32 {
+    panic!("peripheral_0x39_mode_action requires 0x0836e400")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_peripheral_0x39_apply_mode(_mode: u32) -> i32 {
+    panic!("peripheral_0x39_mode_action requires 0x0836e298")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PERIPHERAL_0X39_PREPARE: Peripheral0x39PrepareFn = missing_peripheral_0x39_prepare;
+#[cfg(not(target_os = "none"))]
+static mut PERIPHERAL_0X39_APPLY_MODE: Peripheral0x39ApplyModeFn =
+    missing_peripheral_0x39_apply_mode;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn peripheral_0x39_prepare() -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PERIPHERAL_0X39_PREPARE))()
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PERIPHERAL_0X39_APPLY_MODE))(mode)
+}
+
+/// peripheral_0x39_mode_action — original: `FUN_082d967c` @ `0x082d967c`
+/// (120 bytes; 4 plain `bl` and 2 `blne` call sites, binary-verified by
+/// decoding every B/BL word in osos.dec).
+///
+/// For action 1, invokes the peripheral preparation helper at 0x0836e400,
+/// then replaces register 0's low two bits with 1 through the ported
+/// [`i2c_0x39_set_register0_low_bits`]. Action 0 returns zero. For every
+/// other action, mode 0 selects unported helper mode 1; modes 2 and 3 select
+/// helper mode 2; mode 1 selects helper mode 1 only for actions 3, 4, 5, 8,
+/// and 10. All other pairs return zero without dispatch. The next
+/// independently linked function begins at 0x082d96f4.
+///
+/// # Deviation
+///
+/// The preparation and mode helpers at 0x0836e400 and 0x0836e298 remain
+/// unported. Target builds reach their verified fixed addresses through
+/// indirect `blx` calls; host tests replace the volatile function-pointer
+/// seams. The action-1 low-bit update directly calls its existing Rust port
+/// rather than retail's direct `bl`; call ordering and returned status match.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn peripheral_0x39_mode_action(action: i32, mode: i32) -> i32 {
+    if action == 1 {
+        peripheral_0x39_prepare();
+        return i2c_0x39_set_register0_low_bits(1);
+    }
+    if action == 0 {
+        return 0;
+    }
+
+    let helper_mode = match mode {
+        0 => 1,
+        1 if matches!(action, 3 | 4 | 5 | 8 | 10) => 1,
+        2 | 3 => 2,
+        _ => return 0,
+    };
+    peripheral_0x39_apply_mode(helper_mode)
+}
+
 
 
 /// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
@@ -405,6 +495,42 @@ pub(crate) mod tests {
     static mut READ_LOG: Vec<(u32, usize)> = Vec::new();
     /// Status the register-block read mock hands back.
     static mut READ_STATUS: i32 = 0;
+    /// Calls made through the two unported helpers used by the mode-action port:
+    /// 0 = prepare, 1 = apply mode.
+    static mut PERIPHERAL_0X39_LOG: Vec<(u8, u32)> = Vec::new();
+    static mut PERIPHERAL_0X39_PREPARE_STATUS: i32 = 0;
+    static mut PERIPHERAL_0X39_APPLY_STATUS: i32 = 0;
+
+    unsafe extern "C" fn mock_peripheral_0x39_prepare() -> i32 {
+        (*addr_of_mut!(PERIPHERAL_0X39_LOG)).push((0, 0));
+        *addr_of!(PERIPHERAL_0X39_PREPARE_STATUS)
+    }
+
+    unsafe extern "C" fn mock_peripheral_0x39_apply_mode(mode: u32) -> i32 {
+        (*addr_of_mut!(PERIPHERAL_0X39_LOG)).push((1, mode));
+        *addr_of!(PERIPHERAL_0X39_APPLY_STATUS)
+    }
+
+    fn install_peripheral_0x39_mode_action() -> MutexGuard<'static, ()> {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            *addr_of_mut!(PERIPHERAL_0X39_PREPARE_STATUS) = 0;
+            *addr_of_mut!(PERIPHERAL_0X39_APPLY_STATUS) = 0;
+            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(mock_peripheral_0x39_prepare);
+            addr_of_mut!(PERIPHERAL_0X39_APPLY_MODE).write(mock_peripheral_0x39_apply_mode);
+        }
+        guard
+    }
+
+    fn restore_peripheral_0x39_mode_action(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(missing_peripheral_0x39_prepare);
+            addr_of_mut!(PERIPHERAL_0X39_APPLY_MODE).write(missing_peripheral_0x39_apply_mode);
+        }
+        drop(guard);
+    }
+
 
     unsafe extern "C" fn mock_i2c_write(slave: u32, len: u32, buf: *const u8) -> i32 {
         (*addr_of_mut!(RAW_WRITE_LOG)).push((slave, len, buf.read()));
@@ -818,6 +944,65 @@ pub(crate) mod tests {
         restore_0x39_read(state);
     }
 
+
+    #[test]
+    fn peripheral_0x39_mode_action_one_prepares_then_updates_low_bits() {
+        let state = install_0x39_read(0, 0);
+        unsafe {
+            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            *addr_of_mut!(PERIPHERAL_0X39_PREPARE_STATUS) = -5;
+            *addr_of_mut!(RAW_READ_VALUE) = 0xac;
+            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(mock_peripheral_0x39_prepare);
+
+            assert_eq!(peripheral_0x39_mode_action(1, 0x7fff_ffff), 0);
+            assert_eq!((*addr_of!(PERIPHERAL_0X39_LOG)).clone(), std::vec![(0, 0)]);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0], std::vec![0, 0xad]],
+                "prepare status is ignored before register 0's low bits become 1"
+            );
+
+            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(missing_peripheral_0x39_prepare);
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_mode_action_routes_only_the_verified_pairs() {
+        let guard = install_peripheral_0x39_mode_action();
+        unsafe {
+            *addr_of_mut!(PERIPHERAL_0X39_APPLY_STATUS) = -7;
+
+            for action in [3, 4, 5, 8, 10] {
+                assert_eq!(peripheral_0x39_mode_action(action, 1), -7);
+            }
+            assert_eq!(
+                (*addr_of!(PERIPHERAL_0X39_LOG)).clone(),
+                std::vec![(1, 1), (1, 1), (1, 1), (1, 1), (1, 1)],
+                "only the five enumerated actions route through mode 1"
+            );
+
+            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            assert_eq!(peripheral_0x39_mode_action(i32::MIN, 0), -7);
+            assert_eq!(peripheral_0x39_mode_action(-1, 2), -7);
+            assert_eq!(peripheral_0x39_mode_action(6, 3), -7);
+            assert_eq!(
+                (*addr_of!(PERIPHERAL_0X39_LOG)).clone(),
+                std::vec![(1, 1), (1, 2), (1, 2)],
+                "mode 0 accepts every nonzero action; modes 2 and 3 select helper mode 2"
+            );
+
+            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            for (action, mode) in [(0, 0), (0, 2), (2, 1), (3, 4), (6, 1), (-1, -1)] {
+                assert_eq!(peripheral_0x39_mode_action(action, mode), 0);
+            }
+            assert!(
+                (*addr_of!(PERIPHERAL_0X39_LOG)).is_empty(),
+                "zero actions and unsupported pairs make no helper call"
+            );
+        }
+        restore_peripheral_0x39_mode_action(guard);
+    }
 
     #[test]
     fn bank_mux_selects_time_then_alarm_block() {

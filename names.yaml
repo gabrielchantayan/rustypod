@@ -79211,3 +79211,43 @@ functions:
       drops all r0 return paths. Host tests cover direct markers, non-encodable
       patterns, and every byte/complement at each ARM rotation. Deliberate
       deviations: none.
+
+  # --- Peripheral I2C mode-action dispatcher ---
+  - address: 0x082d967c
+    ghidra: FUN_082d967c
+    name: peripheral_0x39_mode_action
+    size: 120
+    sig: "i32 peripheral_0x39_mode_action(i32 action, i32 mode)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: action
+      param_2/r1: mode
+      FUN_0836e400: peripheral_0x39_prepare_helper
+      FUN_0836e430: i2c_0x39_set_register0_low_bits
+      FUN_0836e298: peripheral_0x39_apply_mode_helper
+    notes: >-
+      Raw osos.dec confirms the exact 120-byte extent
+      0x082d967c..0x082d96f4: the next separately linked sibling begins at
+      0x082d96f4 with push {r4,r5,r6,lr}; there is no literal pool. Decoding
+      every aligned ARM B/BL-immediate word finds exactly six direct inbound
+      calls: plain unconditional BL at 0x081f484c, 0x081f48d4, 0x0839365c,
+      and 0x08393750; plus BLNE at 0x081a590c and 0x081a61b4. The predicated
+      callers first test the nonzero action themselves. No direct B tail
+      transfer targets this entry. Action one calls the unported
+      0x0836e400 helper, then the already ported low-bit setter with value
+      one; its return is the setter status. Action zero returns zero. For
+      every other action, mode zero selects unported 0x0836e298 with helper
+      mode one, modes two and three select helper mode two, and mode one
+      selects helper mode one only for actions 3, 4, 5, 8, and 10. Other
+      pairs return zero without a call. The identities of the action/mode
+      domains and both unported helpers are not established from the image,
+      so names describe only verified I2C roles. Target builds call both
+      unported helpers at their fixed addresses through indirect blx seams;
+      host tests install volatile recorders. Host coverage proves action-one
+      preparation-before-register-update and its ignored preparation status,
+      every accepted mode-one action, signed nonzero mode-zero routing,
+      modes two/three, and all no-dispatch pairs. match.py structural review
+      completed with its expected non-exact diff. Deliberate deviations:
+      retail direct BL calls cross fixed-address blx seams, while the ported
+      low-bit setter is called normally; ordering and return behavior match.
