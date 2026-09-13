@@ -42827,6 +42827,44 @@ functions:
       record and guard bytes untouched. match.py structural review is run
       against draw_state_move_to; the expected diff is the crate frame
       around the two stores and return.
+  - address: 0x0826421c
+    ghidra: FUN_0826421c
+    name: draw_state_set_font
+    size: 44
+    sig: "void draw_state_set_font(u8 *record, const u32 *font_handle)"
+    module: cxx/draw_state_font
+    status: ported
+    renames:
+      param_1/r0: record (the 0x44-byte scoped draw-state record)
+      param_2/r1: font_handle (aligned two-word current-font handle)
+      uVar2/r2: font_object (first handle word with its low-bit tag cleared)
+      bVar1/r2: style (font object byte +0x4c, optionally ORed with 4)
+    notes: >-
+      Whole function binary-verified: 0x0826421c begins
+      `ldm r1,{r2,r3}` and the next distinct function begins at
+      0x08264248 with `push {r4,r5,r6,r7,lr}`; Ghidra's 44-byte extent
+      has no swallowed literal pool or sibling. Every direct B/BL word in
+      osos.dec was decoded: exactly 7 unconditional bl call sites, zero
+      predicated forms, and zero tail b calls (0x0809071c, 0x0812874c,
+      0x08128a54, 0x08148c68, 0x08186940, 0x08186ba4, 0x0826e160).
+      The scoped draw-state current-font setter copies both input words to
+      +0x20/+0x24 before looking at the first. A zero first word writes a
+      zero byte to +0x28; otherwise its low-bit-cleared value addresses a
+      font object whose byte +0x4c is written there, with bit 2 ORed in
+      when the original first word has bit 0. The call sites name
+      Helvetica, MonoHope LCD, and MonoHope TV through the immediately
+      preceding font-handle lookup, establishing font semantics. No
+      dispatch seam is needed: this is a leaf with no calls. Deliberate
+      deviation: fixed-width named offsets and u32 target words replace
+      raw pointer arithmetic; their alignment matches the original ldm,
+      stm, and ldr. Host tests (2) prove null-handle style normalization
+      plus both-word storage/record preservation, and untagged/tagged
+      object style derivation with tag bit 2.
+      match.py structural review against the worktree archive reports the
+      same two source loads, two target-word stores, null branch, +0x4c
+      byte load, low-tag-to-bit-2 derivation, and final byte store; LLVM
+      reverses the independent pair-store order and adds a non-null-only
+      frame, so its mnemonic diff is expected.
   - address: 0x0826412c
     ghidra: FUN_0826412c
     name: draw_state_line
