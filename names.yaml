@@ -74915,3 +74915,28 @@ functions:
       signed-low-16-bit vertical span only when end_x is nonzero, otherwise
       zero. The pre-division subtraction and multiply wrap at 32 bits. The
       first ABI argument is dead; the Rust name context documents that fact.
+
+  # --- Opaque global holder +4 accessor ---
+  - address: 0x081b21bc
+    ghidra: FUN_081b21bc
+    name: global_slot_4_get
+    size: 12
+    sig: "void *global_slot_4_get(void)"
+    module: app/global_slot_4_get
+    status: ported
+    renames:
+      DAT_081b21c8: global_slot_4_holder (0x089cfd64)
+      "holder+0x4": opaque_global_slot_4
+    notes: >-
+      Raw ARM has three code words at 0x081b21bc..0x081b21c4 followed by
+      literal-pool word 0x089cfd64 at 0x081b21c8; the next separately linked
+      function starts at 0x081b21cc, so the true extent is 16 bytes despite
+      Ghidra's 12-byte code-only size. It returns the holder's +4 word
+      unchanged, with no construction, NULL guard, or validation. Decoding
+      every ARM B/BL immediate in osos.dec found exactly seven direct inbound
+      call sites, all unconditional bl and none predicated or tail branches:
+      0x0812551c, 0x08202b54, 0x08202b70, 0x0820a6c4, 0x0820a764,
+      0x082284d4, and 0x0829f498. The concrete object identity is unresolved,
+      so the name records only the verified global-slot operation. Target
+      builds read live runtime memory; host builds model its native-width
+      pointer slot with a crate static.
