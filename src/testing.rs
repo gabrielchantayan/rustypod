@@ -720,6 +720,10 @@ pub mod hints {
     // 0x3000_0000: dedicated to ui/view_base's render-state release fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const VIEW_BASE_RENDER_STATE_RELEASE: usize = 0x3000_0000;
+    // 0x4e00_0000: dedicated to ui/element_slot_reset's raw-u32 element and
+    // transient-object fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const UI_ELEMENT_SLOT_RESET: usize = 0x4e00_0000;
     // 0x5100_0000: dedicated to ui/layout_apply_pending_offsets' raw-u32
     // entry-offset fixture; mappings never unmap, so no other user may
     // share this hint.
