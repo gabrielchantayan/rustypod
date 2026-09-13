@@ -75799,6 +75799,30 @@ functions:
       load-and-compare shape; the port uses its own target-only text section
       to retain a distinct symbol if LLVM otherwise merges identical bodies.
 
+  - address: 0x083cf728
+    ghidra: FUN_083cf728
+    name: u32_deref_equal
+    size: 24
+    sig: "u32 u32_deref_equal(const u32 *left_word, const u32 *right_word)"
+    module: util/u32_deref_equal
+    status: ported
+    renames:
+      param_1/r0: left_word
+      param_2/r1: right_word
+    notes: >-
+      Raw osos.dec confirms the 24-byte body from 0x083cf728 through bx lr at
+      0x083cf73c; the separately linked next function starts at 0x083cf740.
+      It performs two aligned ldr operations and returns 1 only when their
+      u32 results are equal, otherwise 0. There is deliberately no NULL
+      guard, matching the retail load-before-compare behavior. Complete
+      aligned ARM B/BL-immediate decoding finds exactly six inbound direct
+      calls, all unconditional plain bl and no predicated forms:
+      0x083b7578, 0x083b79e4, 0x083b7a00, 0x083b7a84, 0x083b7b64, and
+      0x083b7c54. No aligned raw word references this address, so it is not
+      dispatched through a data table. The target-only text section retains a
+      distinct symbol if LLVM otherwise merges this byte-identical body with
+      neighbouring equality helpers. Deliberate deviations: none.
+
   # --- SQLite two-part name resolver (src/sqlite/two_part_name.rs) ---
   - address: 0x0838527c
     ghidra: FUN_0838527c
