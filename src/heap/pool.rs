@@ -357,11 +357,16 @@ fn ready_flag(pool: *mut PoolControl) -> *mut u8 {
 
 /// pool_create — original: `FUN_0826f658` @ 0x0826f658 (68 bytes).
 ///
-/// Allocates the 0x418-byte control struct and initializes it. Returns
-/// the pool on success; on init failure destroys and deletes it and
-/// returns NULL. `name` is the pool name string handed to the base
-/// subobject.
+/// Allocates the 0x418-byte control struct and initializes it. Returns the
+/// pool only when its ready byte is nonzero; otherwise destroys and deletes
+/// the control block, then returns NULL. `name` is handed to the base
+/// subobject. Decoding every ARM B/BL word in osos.dec found six plain,
+/// unconditional BL call sites and no predicated BL or tail-B references.
+/// Host calls route the two heap operations through `POOL_OPS`; its target
+/// defaults call the already-ported tag-2 `operator_new` and
+/// `operator_delete`, preserving the direct retail call chain.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_create(size: usize, name: *const u8) -> *mut PoolControl {
     let mem = (op!(new_control))(POOL_CONTROL_SIZE) as *mut PoolControl;
     let pool = pool_init(mem, size, name);
@@ -383,6 +388,7 @@ pub unsafe extern "C" fn pool_create(size: usize, name: *const u8) -> *mut PoolC
 /// clears the ready flag and seeds the regions; seed success sets the
 /// flag. Always returns the control struct.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_init(
     mem: *mut PoolControl,
     size: usize,
