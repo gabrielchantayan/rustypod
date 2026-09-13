@@ -41803,6 +41803,41 @@ functions:
       the dispatch-slot ldr/blx standing in for the direct
       `bl 0x0826fda0` documented deviation.
 
+  - address: 0x082703d0
+    ghidra: FUN_082703d0
+    name: scoped_context_construct_from_source
+    size: 64
+    sig: "ScopedContext *scoped_context_construct_from_source(ScopedContext *this, const ScopedContext *source, u8 mode)"
+    module: app/scoped_context
+    renames:
+      param_1: this
+      param_2: source
+      param_3: mode
+      DAT_08270410: SCOPED_CONTEXT_VTABLE_ADDRESS
+      FUN_0826fd24: scoped_context_adopt_source_owner
+      FUN_0826fda0: capture_context_fields
+    status: ported
+    notes: >-
+      The raw 64-byte extent is exactly the sixteen ARM instructions at
+      0x082703d0..0x0827040c; the following word at 0x08270410 is the
+      0x089a5b30 vtable literal, and the next function begins at
+      0x08270414. Binary-scanning every ARM B/BL word in osos.dec finds
+      exactly seven direct callers, all unconditional bl (0x0813d7c4,
+      0x0817bdf0, 0x0817bfc8, 0x081f799c, 0x081f813c, 0x081f8f30, and
+      0x081f91c0); there are no predicated or direct tail-b callers. It
+      installs the scoped-context vtable, clears the remaining five
+      fields, calls 0x0826fd24, writes the mode byte last, and returns
+      this. Raw decoding establishes that 0x0826fd24 is a 20-byte
+      selector veneer: it reads only source+4's low byte, selects
+      source+8 or NULL, then tail-branches to the already ported
+      capture_context_fields at 0x0826fda0. The port expresses that
+      selector directly and calls capture_context_fields, rather than
+      adding a dispatch seam for the unported veneer. This retains the
+      raw NULL-fault behavior for source and the capture callee's
+      unguarded root walk for an adopted owner. Host tests prove low-byte
+      validity (including 0x00000100), all output fields, both adoption
+      paths, mode edge values, and the precise root-access gate.
+
   - address: 0x08270414
     ghidra: FUN_08270414
     name: scoped_context_destroy
