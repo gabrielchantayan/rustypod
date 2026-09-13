@@ -77372,3 +77372,32 @@ functions:
       constant. This changes those two device calls from bl to blx without
       changing their targets or observable behavior. Host tests cover a live
       segment, spent-segment re-anchor, and final segment plus map retirement.
+
+  - address: 0x083eab08
+    ghidra: FUN_083eab08
+    name: type_handler_lookup
+    size: 40
+    sig: "void *type_handler_lookup(void **registry)"
+    module: app/type_handler_lookup
+    status: ported
+    renames:
+      param_1/r0: registry
+      FUN_082a7280: typed_handler_registry_lookup
+      DAT_083eab2c: handler_type_id
+      DAT_083eab28: default_handler_entry
+    notes: >-
+      Raw ARM establishes the 40-byte extent 0x083eab08..0x083eab30: the
+      Ghidra-reported 32-byte code ends at pop {ip,pc} 0x083eab24, followed
+      by the two literal-pool words 0x083ab410 and 0x08a0fbe0; the separately
+      linked sibling wrapper begins at 0x083eab30. It forwards registry to
+      the unported typed-handler lookup 0x082a7280 with the exact type-ID
+      pointer 0x08a0fbe0, direction 1, flags 0x20, and fallback entry
+      0x083ab410, returning its r0 unchanged. The identity of that fallback
+      entry is not established; raw 0x083ab410 decodes as pop {ip,pc}, so the
+      port forwards the address without inventing a target. Decoding every
+      ARM B/BL immediate in osos.dec found six inbound direct calls, all
+      unconditional bl (0x083d8dd8, 0x083d8e08, 0x083d8f1c, 0x083d923c,
+      0x083d9408, 0x083d9610), with no predicated forms or tail branch.
+      The unported lookup remains a typed fixed-address target call and
+      volatile host seam; tests prove exact five-argument forwarding,
+      unchanged result propagation, and deliberate absence of a NULL guard.
