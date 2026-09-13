@@ -10,9 +10,9 @@
 use super::ir::{
     cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed, cg_create_inst_store,
     cg_virtual_reg_create, CgBlock, CgInst, CgProc, CgVirtualReg, CG_BLOCK_PROC,
-    CG_INST_OPCODE_ADD, CG_INST_OPCODE_ASR, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW,
-    CG_INST_OPCODE_MUL, CG_INST_OPCODE_RSB, CG_INST_OPCODE_STW, CG_INST_OPCODE_SUB,
-    CG_REG_TYPE_GENERAL,
+    CG_INST_OPCODE_ADD, CG_INST_OPCODE_AND, CG_INST_OPCODE_ASR, CG_INST_OPCODE_LDI,
+    CG_INST_OPCODE_LDW, CG_INST_OPCODE_MUL, CG_INST_OPCODE_RSB, CG_INST_OPCODE_STW,
+    CG_INST_OPCODE_SUB, CG_REG_TYPE_GENERAL,
 };
 
 /// The procedure owning `block` (`cg_block_t + 0x04`).
@@ -310,6 +310,59 @@ pub unsafe extern "C" fn cg_emit_negated_sum(
     let result = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
     cg_create_inst_binary(block, CG_INST_OPCODE_ADD, sum_reg, lhs, rhs);
     cg_create_inst_binary(block, CG_INST_OPCODE_RSB, result, sum_reg, mask_reg);
+    result
+}
+
+/// cg_emit_masked_offset_bias — original: `FUN_082408dc` @ 0x082408dc
+/// (216 bytes: 54 instruction words, from `push {r3-r9,sl,fp,lr}` through
+/// `pop {r3-r9,sl,fp,pc}` at 0x082409b0; the next function begins at
+/// 0x082409b4).
+///
+/// Six direct call sites, all unconditional `bl` (no predicated forms or
+/// tail branches), verified by decoding every ARM B/BL word in osos.dec:
+/// 0x08240414, 0x08240428, 0x08240450, 0x08240464, 0x082404a8, and
+/// 0x082404bc.
+///
+/// Emits the five-register, five-instruction offset-bias idiom and returns
+/// its result:
+///
+/// ```text
+/// LDI  mask_reg, 7
+/// LDI  bias_reg, 128
+/// AND  masked_reg, source, mask_reg
+/// ADD  sum_reg, source, masked_reg
+/// SUB  result, sum_reg, bias_reg
+/// ```
+///
+/// Register creation and instruction emission intentionally interleave in
+/// retail order: `masked`, `mask`, LDI; `sum`, `bias`, LDI; `result`; then
+/// the three binary records.
+///
+/// # Deviations
+///
+/// The leading r0 context and r3 input are dead on arrival: neither is read
+/// after the prologue. The port retains only the context ABI parameter and
+/// intentionally never dereferences it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_masked_offset_bias(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    source: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let proc = block_proc(block);
+    let masked_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let mask_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, mask_reg, 7);
+
+    let sum_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let bias_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, bias_reg, 128);
+
+    let result = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_AND, masked_reg, source, mask_reg);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, sum_reg, source, masked_reg);
+    cg_create_inst_binary(block, CG_INST_OPCODE_SUB, result, sum_reg, bias_reg);
     result
 }
 
@@ -1045,5 +1098,75 @@ mod tests {
             }
         }
         assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 7);
+    }
+    #[test]
+    fn emits_masked_offset_bias_in_retail_creation_order() {
+        const SOURCE: usize = 0x1234_5678;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let result = unsafe {
+            cg_emit_masked_offset_bias(
+                usize::MAX as *mut u8,
+                block,
+                SOURCE as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut instructions = [core::ptr::null_mut(); 5];
+            for slot in instructions.iter_mut() {
+                assert!(!inst.is_null(), "the five-step offset bias was appended");
+                *slot = inst;
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert!(inst.is_null(), "no extra IR instruction was appended");
+
+            let [mask_constant, bias_constant, mask, sum, subtract] = instructions;
+            let mask_reg = field(mask_constant, CG_INST_LOAD_IMMED_DEST);
+            let bias_reg = field(bias_constant, CG_INST_LOAD_IMMED_DEST);
+            let masked_reg = field(mask, CG_INST_BINARY_DEST);
+            let sum_reg = field(sum, CG_INST_BINARY_DEST);
+
+            assert_eq!(inst_kind(mask_constant), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(mask_constant), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(mask_constant, CG_INST_LOAD_IMMED_VALUE), 7);
+            assert_eq!(inst_kind(bias_constant), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(bias_constant), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(bias_constant, CG_INST_LOAD_IMMED_VALUE), 128);
+
+            assert_eq!(inst_kind(mask), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(mask), CG_INST_OPCODE_AND as u8);
+            assert_eq!(field(mask, CG_INST_BINARY_SOURCE0), SOURCE);
+            assert_eq!(field(mask, CG_INST_BINARY_SOURCE1), mask_reg);
+            assert_eq!(inst_kind(sum), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(sum), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(sum, CG_INST_BINARY_SOURCE0), SOURCE);
+            assert_eq!(field(sum, CG_INST_BINARY_SOURCE1), masked_reg);
+            assert_eq!(inst_kind(subtract), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(subtract), CG_INST_OPCODE_SUB as u8);
+            assert_eq!(field(subtract, CG_INST_BINARY_DEST), result as usize);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE0), sum_reg);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE1), bias_reg);
+
+            for (number, register) in [
+                masked_reg,
+                mask_reg,
+                sum_reg,
+                bias_reg,
+                result as usize,
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert_eq!(field(*register as *mut u8, CG_VREG_NO), number);
+                assert_eq!(
+                    (*register as *mut u8).add(CG_VREG_TYPE * WORD).read(),
+                    CG_REG_TYPE_GENERAL as u8
+                );
+            }
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 5);
     }
 }
