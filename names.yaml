@@ -31581,6 +31581,35 @@ functions:
       deliberately preserves the raw NULL-base + 0x80 result without
       Rust's in-bounds pointer-arithmetic requirement.
 
+  - address: 0x083da50c
+    ghidra: FUN_083da50c
+    name: deque_iter_increment_elem4
+    size: 76
+    sig: "DequeIter *deque_iter_increment_elem4(DequeIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, iVar1: segment_capacity, iVar2: next_base}
+    renames:
+      FUN_083da450: deque_seg_capacity
+      param_1: iter
+      iVar1: segment_capacity
+      iVar2: next_base
+    notes: >-
+      Raw ARM establishes the exact 76-byte body 0x083da50c..0x083da554:
+      the next separately linked flag helper begins at 0x083da558. It advances
+      iter->cur by four and compares against iter->seg_end; on equality it
+      calls the adjacent capacity member at 0x083da450, advances iter->seg_slot
+      by one 32-bit map entry, loads the next segment base, then writes it to
+      seg_base and cur before writing seg_end = base + 0x20 * 4. Decoding every
+      ARM B/BL word in osos.dec finds exactly six direct incoming calls: five
+      plain unconditional bl forms at 0x083dfd1c, 0x083dfd24, 0x083ea864,
+      0x083ea8d0, and 0x083ea92c, plus one predicated blne at 0x083ea924;
+      there are zero tail b sites. The predicated caller performs a guarded
+      element copy immediately before the call; this member itself has no NULL
+      or bounds guard. The port preserves the raw null-next-segment result
+      (cur/base NULL, end 0x80) with wrapping_add, and loads the existing
+      deque_seg_capacity export through read_volatile so LLVM retains the
+      stock capacity-call boundary rather than folding its constant result.
   - address: 0x083d9fd4
     ghidra: FUN_083d9fd4
     name: deque_iter_assign_alias_9fd4

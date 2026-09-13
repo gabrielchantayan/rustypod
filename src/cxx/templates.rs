@@ -17,6 +17,8 @@
 //!   as the deque template's out-of-line members.
 //! - [`deque_iter_init_elem4`] — initializes the 4-byte-element deque
 //!   iterator's four fields, including a 128-byte segment end.
+//! - [`deque_iter_increment_elem4`] — advances a 4-byte deque iterator,
+//!   switching its segment-map slot at the segment boundary.
 //! - [`less_signed`] / [`less_unsigned`] / [`less_unsigned_byte`] —
 //!   `std::less`-shaped comparators taking their operands by
 //!   reference, 1, 12 and 2 copies, 45, 73 and 13 call sites.
@@ -448,6 +450,47 @@ pub unsafe extern "C" fn deque_iter_init_elem4(
         (*iter).seg_end = slot.read().wrapping_add(deque_seg_capacity() * 4);
     }
     (*iter).seg_slot = slot;
+    iter
+}
+
+/// deque_iter_increment_elem4 — original: `FUN_083da50c` @ `0x083da50c`
+/// (76 bytes; 6 direct `bl` call sites: five unconditional and one
+/// `blne` at 0x083ea924, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Advances a 4-byte deque iterator in place. It first advances `cur` by
+/// four. Only when that equals `seg_end` does it call the adjacent segment
+/// capacity member, advance `seg_slot` by one map entry, load the next
+/// segment base, and reset `cur` and `seg_base` there with
+/// `seg_end = base + 0x20 * 4`. The raw body has no null or bounds guard:
+/// the one predicated incoming call is gated by its caller's element-compare,
+/// not by this iterator member.
+///
+/// Deliberate deviation: the existing [`deque_seg_capacity`] export is loaded
+/// through `read_volatile` so LLVM retains the stock capacity-call boundary
+/// instead of folding its constant result into this independently hookable body.
+///
+/// # Safety
+/// `iter` must be a valid [`DequeIter`]. When its advanced `cur` equals
+/// `seg_end`, `seg_slot + 1` must be a valid, aligned segment-map entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_increment_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mut DequeIter {
+    let advanced_cur = (*iter).cur.wrapping_add(4);
+    (*iter).cur = advanced_cur;
+    if advanced_cur == (*iter).seg_end {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let segment_capacity = capacity_fn();
+        let next_slot = (*iter).seg_slot.add(1);
+        (*iter).seg_slot = next_slot;
+        let next_base = next_slot.read();
+        (*iter).seg_base = next_base;
+        (*iter).cur = next_base;
+        (*iter).seg_end = next_base.wrapping_add(segment_capacity * 4);
+    }
     iter
 }
 
@@ -3448,6 +3491,71 @@ mod tests {
             assert!(iter.seg_end.is_null());
             assert!(iter.seg_slot.is_null());
         }
+    }
+
+    #[test]
+    fn iter_increment_elem4_advances_within_its_segment() {
+        let mut segment = [0u8; 0x80];
+        let mut slots = [segment.as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: unsafe { segment.as_mut_ptr().add(0x14) },
+            seg_base: segment.as_mut_ptr(),
+            seg_end: unsafe { segment.as_mut_ptr().add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+
+        unsafe {
+            let ret = deque_iter_increment_elem4(&mut iter);
+            assert_eq!(ret, &mut iter as *mut DequeIter);
+        }
+
+        assert_eq!(iter.cur, unsafe { segment.as_mut_ptr().add(0x18) });
+        assert_eq!(iter.seg_base, segment.as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { segment.as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, slots.as_mut_ptr());
+    }
+
+    #[test]
+    fn iter_increment_elem4_switches_to_the_next_segment_at_the_boundary() {
+        let mut first = [0u8; 0x80];
+        let mut second = [0u8; 0x80];
+        let mut slots = [first.as_mut_ptr(), second.as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: unsafe { first.as_mut_ptr().add(0x7c) },
+            seg_base: first.as_mut_ptr(),
+            seg_end: unsafe { first.as_mut_ptr().add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+
+        unsafe {
+            deque_iter_increment_elem4(&mut iter);
+        }
+
+        assert_eq!(iter.cur, second.as_mut_ptr());
+        assert_eq!(iter.seg_base, second.as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { second.as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+    }
+
+    #[test]
+    fn iter_increment_elem4_keeps_the_raw_null_next_segment_behavior() {
+        let mut first = [0u8; 0x80];
+        let mut slots = [first.as_mut_ptr(), core::ptr::null_mut()];
+        let mut iter = DequeIter {
+            cur: unsafe { first.as_mut_ptr().add(0x7c) },
+            seg_base: first.as_mut_ptr(),
+            seg_end: unsafe { first.as_mut_ptr().add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+
+        unsafe {
+            deque_iter_increment_elem4(&mut iter);
+        }
+
+        assert!(iter.cur.is_null());
+        assert!(iter.seg_base.is_null());
+        assert_eq!(iter.seg_end, 0x80 as *mut u8);
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
     }
 
     #[test]
