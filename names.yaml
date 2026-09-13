@@ -75219,3 +75219,42 @@ functions:
       their verified firmware addresses. Host tests prove both the zero and
       arbitrary-nonzero predicate paths, exact child order, operands, and the
       preserved operation return.
+  - address: 0x08149648
+    ghidra: FUN_08149648
+    name: four_slot_buffer_pool_get
+    size: 112
+    sig: "*mut u32 four_slot_buffer_pool_get(void)"
+    module: app/four_slot_buffer_pool
+    status: ported
+    renames:
+      DAT_081496a4: FOUR_SLOT_BUFFER_POOL_GUARD
+      DAT_081496a8: FOUR_SLOT_BUFFER_POOL
+      DAT_081496ac: __dso_handle
+      DAT_081496b0: interior_slot_destructor_word
+      DAT_081496b4: interior_slot_initializer_word
+      FUN_082ab234: cpp_array_construct
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes the 112-byte extent: 21 ARM instructions
+      from 0x08149648 through the pop at 0x081496a0, followed by the
+      five-word literal pool at 0x081496a4..0x081496b4; the distinct next
+      function starts at 0x081496b8. Ghidra's 92-byte extent omits the
+      20-byte pool. This ADS local-static accessor tests bit zero of guard
+      0x089ca324, then on acquisition calls cpp_array_construct with fixed
+      storage 0x08a10728, count 4, element size 0x24, and raw initializer
+      word 0x0813ead0. It clears the word at the returned pointer +0x90,
+      registers that returned pointer through cxa_atexit with raw callback
+      word 0x0813e6f8 and __dso_handle 0x089ca09c, releases the guard, and
+      always returns the fixed storage pointer. Raw ARM proves both callback
+      words anomalous: 0x0813ead0 is an interior instruction in the body
+      beginning at 0x0813eac0, while 0x0813e6f8 is an interior pop; neither
+      is assigned an invented callee identity or a new dispatch seam. The
+      existing cpp_array_construct helper seam models initialization. Host
+      storage and an inert host shutdown handler deliberately replace fixed
+      firmware RAM and the uncallable callback. Decoding every ARM B/BL
+      immediate in osos.dec found exactly seven inbound direct calls: seven
+      unconditional plain bl at 0x0806e7b8, 0x08296970, 0x082c6ee0,
+      0x082c6f00, 0x082c6f20, 0x082c6f48, and 0x082c6f78; no predicated
+      bl forms and no tail branches.
