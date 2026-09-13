@@ -98,6 +98,7 @@ pub mod expr_list_append;
 pub mod expr_list_height;
 pub mod expr_new;
 pub mod expr_span;
+pub mod fix_expr;
 pub mod walk_expr;
 pub mod find_element_given_hash;
 pub mod finalize;

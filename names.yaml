@@ -30396,6 +30396,37 @@ functions:
       through the loaded slots instead of direct bl's, plus LLVM frame
       setup.
 
+  - address: 0x08379598
+    ghidra: FUN_08379598
+    name: sqlite_fix_expr
+    size: 104
+    sig: "int sqlite3FixExpr(DbFixer *fixer, Expr *expr)"
+    module: sqlite/fix_expr
+    status: ported
+    renames:
+      param_1/r5: fixer
+      param_2/r4: expr
+      FUN_08379694: sqlite3FixSelect
+      FUN_08379600: sqlite3FixExprList
+    notes: >-
+      SQLite 3.5.x sqlite3FixExpr. Raw ARM establishes the 104-byte
+      extent 0x08379598..0x08379600: push {r4,r5,r6,lr} starts at the
+      entry, pop {r4,r5,r6,pc} ends at 0x083795fc, and the independently
+      linked sqlite3FixExprList prologue begins at 0x08379600. Decoding
+      every aligned ARM B/BL immediate in osos.dec finds exactly six
+      inbound direct BL sites, all unconditional: 0x08379398, 0x083795d8,
+      0x08379624, 0x083796d4, 0x083796e8, and 0x0837979c. No predicated
+      BL or tail B reaches this entry. It returns 0 for NULL, otherwise
+      validates Expr.pSelect +0x38 through sqlite3FixSelect @ 0x08379694,
+      Expr.pList +0x10 through sqlite3FixExprList @ 0x08379600, and
+      Expr.pRight +0x0c recursively; a nonzero result short-circuits with
+      1. The final Expr.pLeft +0x08 assignment is the tail-loop iteration,
+      preserving the original right-before-left traversal. On target the
+      two unported callees remain exact absolute calls. Host tests use the
+      FIX_EXPR_OPS boundary to record and control them; its no-op defaults
+      reproduce their NULL-input result but deliberately do not model
+      arbitrary non-NULL unported subtrees.
+
   - address: 0x0837acf4
     ghidra: FUN_0837acf4
     name: get_vdbe
