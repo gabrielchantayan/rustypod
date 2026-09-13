@@ -64343,6 +64343,40 @@ functions:
       stale runtime data.
 
 
+
+  # --- registration-handle wrapper initializer ---
+  - address: 0x081c877c
+    ghidra: FUN_081c877c
+    name: registration_handle_wrapper_init
+    size: 68
+    sig: "RegistrationHandleWrapper *registration_handle_wrapper_init(RegistrationHandleWrapper *wrapper, void *context, unsigned int selector_first, unsigned int selector_second)"
+    module: app/registration_handle_wrapper
+    status: ported
+    renames:
+      param_1/r5: wrapper
+      param_2/r4: context
+      param_3/r2: selector_first
+      param_4/r3: selector_second
+      DAT_081c87c0: registration_handle_wrapper_vtable (0x089a74ac)
+      FUN_081d9698: selector_pair_init
+      FUN_081d96a0: registration_handle_init
+      r0: wrapper
+    notes: >-
+      Raw ARM confirms a 64-byte code extent at 0x081c877c..0x081c87bc,
+      followed by the 0x089a74ac vtable literal at 0x081c87c0; the separately
+      linked registration_handle_wrapper_destroy begins at 0x081c87c4. It
+      installs the wrapper vtable, writes the two selector arguments into a
+      local pair through FUN_081d9698, converts a non-NULL context to its
+      context+0xa0c registration owner (preserving NULL), then initializes the
+      embedded handle at +4 with selector kind 2 and returns the wrapper.
+      Decoding every ARM B/BL word in osos.dec finds exactly seven direct
+      inbound calls, all unconditional BL: 0x0820cf64, 0x0820d0c0, 0x0820d388,
+      0x0820d414, 0x0820d4a8, 0x0820d5b0, and 0x0820d608. There are no
+      predicated BL forms or direct B tail callers. Deliberate deviation:
+      the unported two-word FUN_081d9698 leaf becomes a local Rust array, and
+      the target +4 base and target +0xa0c owner displacements use named
+      fields and typed pointer addition so host pointer widening cannot
+      overlap fields.
   # --- registration-handle wrapper destructor ---
   - address: 0x081c87c4
     ghidra: FUN_081c87c4
