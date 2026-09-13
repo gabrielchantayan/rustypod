@@ -1267,6 +1267,14 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1`
 /// — the matching EQUALITY functor of [`not_equal_deref`], without that
 /// family's redundant final `eor`.
+/// `FUN_083cf740` @ 0x083cf740 is a separately linked 24-byte copy with
+/// exactly six direct `bl` callers (0x083b8160, 0x083b85cc, 0x083b85e8,
+/// 0x083b866c, 0x083b8730, and 0x083daffc), all unconditional in the
+/// binary scan. It performs the same two aligned word loads, comparison, and
+/// normalized 0/1 result as this export. Its byte-identical body reuses this
+/// established implementation rather than introducing a redundant dispatch
+/// seam; hook 0x083cf740 to [`equal_deref`].
+///
 ///
 /// The 0x083cf968 callers are container-iteration loops: they
 /// stack-materialize a cursor iterator and the list/deque end iterator and
