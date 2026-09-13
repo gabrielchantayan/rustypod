@@ -91,6 +91,7 @@ pub mod stream_read;
 pub mod stream_write;
 pub mod stream_write_exact;
 pub mod stream_write_cstr;
+pub mod ostream_insert_cstr;
 pub mod ostream_insert_string;
 pub mod stream_write_owner_construct;
 pub mod string_object;
