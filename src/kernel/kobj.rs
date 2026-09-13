@@ -45,6 +45,10 @@
 //!   ctor @ 0x08214210 and the parent-class ctor @ 0x081f0074).
 //!   `*slot = mailbox_create()` — installs a fresh mailbox block into a
 //!   caller-owned pointer slot.
+//! - `mailbox_slot_create_thunk` — `thunk_FUN_0808e294` @ 0x080df2b8
+//!   (4 bytes; 7 direct unconditional `bl` call sites). Pure branch alias
+//!   of `mailbox_slot_create`: the instruction `eafebbf5` is
+//!   `b 0x0808e294`.
 //! - `mailbox_slot_delete` — `FUN_080a6bec` @ 0x080a6bec (32 bytes;
 //!   28 call sites, binary-verified — among them the pool base-subobject
 //!   dtor @ 0x08214240). NULL-guarded teardown twin: deletes `*slot` via
@@ -280,9 +284,31 @@ pub unsafe extern "C" fn waiter_wake(id: u32) {
 /// (20 bytes; 46 call sites).
 ///
 /// Installs a freshly created mailbox block into the caller-owned slot.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mailbox_slot_create(slot: *mut *mut Mailbox) {
     *slot = mailbox_create();
+}
+
+/// mailbox_slot_create_thunk — original: `thunk_FUN_0808e294` @
+/// 0x080df2b8 (4 bytes: `eafebbf5` = `b 0x0808e294`; the next word,
+/// `ldr r1, [r0, #20]` @ 0x080df2bc, starts the following function).
+///
+/// The linker veneer forwards the caller-owned mailbox slot unchanged to
+/// [`mailbox_slot_create`]. Decoding every ARM B/BL word in osos.dec finds
+/// exactly seven inbound calls, all unconditional `bl` at 0x081492a8,
+/// 0x081b0a18, 0x081bbd70, 0x081bbd78, 0x081bbd80, 0x081c17bc, and
+/// 0x0827ddd8; there are no predicated calls or tail branches and no aligned
+/// DATA word references this entry.
+///
+/// Deliberate deviations: none. The forwarding Rust call compiles as a
+/// relocation-safe tail transfer; the caller-visible slot store and the
+/// callee's no-NULL-guard behavior are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mailbox_slot_create_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_slot_create_thunk(slot: *mut *mut Mailbox) {
+    mailbox_slot_create(slot);
 }
 
 /// mailbox_slot_delete — original: `FUN_080a6bec` @ 0x080a6bec
@@ -602,6 +628,20 @@ pub(crate) mod tests {
             assert_eq!((*slot).id, MOCK_ID);
             let calls = drain();
             assert_eq!(calls.len(), 2, "one alloc + one ROM create");
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_create_thunk_forwards_the_slot_unchanged() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut slot: *mut Mailbox = core::ptr::null_mut();
+            let slot_address = core::ptr::addr_of_mut!(slot);
+            mailbox_slot_create_thunk(slot_address);
+            assert_eq!(slot, core::ptr::addr_of_mut!(ALLOC_CELL));
+            assert_eq!((*slot).state, 0);
+            assert_eq!((*slot).id, MOCK_ID);
+            assert_eq!(drain().len(), 2, "one alloc + one ROM create");
         }
     }
 
