@@ -5883,6 +5883,28 @@ functions:
       and the private helper - both verified in the archive symbol
       table).
 
+  - address: 0x081a8388
+    ghidra: FUN_081a8388
+    name: block_count_byte_size
+    size: 48
+    sig: "u32 block_count_byte_size(LockedBlockCount *counter)"
+    module: heap/block_mgr
+    vars: {param_1: counter, iVar1: block_size, iVar2: block_count}
+    status: ported
+    notes: >-
+      48 bytes exactly, 0x081a8388..0x081a83b8, 12 instructions and no
+      literal pool. Six direct plain bl call sites @ 0x081a8408,
+      0x081f05dc, 0x081f05f4, 0x0821b4b0, 0x0821b82c, and 0x0821b868;
+      no predicated calls, binary-scanned by decoding every ARM B/BL word
+      in osos.dec. Locks the opaque counter's C++ recursive mutex at +0x28
+      through the ported 0x082621a8/0x082621ac aliases
+      (REGION_MUTEX_OPS), reads its +0x24 block count while locked, calls
+      region_block_size @ 0x0818a364, returns the low 32 bits of their
+      product, then unlocks; both mutex verdicts are discarded. The
+      LockedBlockCount repr(C) view has only these source fields and keeps
+      their u32-word positions on host and target. Deviation: none. Host
+      test covers lock/read/unlock ordering and a wrapping product.
+
   - address: 0x0818b0c4
     ghidra: FUN_0818b0c4
     name: manager_take_blocks

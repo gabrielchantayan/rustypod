@@ -119,6 +119,7 @@ pub unsafe extern "C" fn block_manager_get() -> *mut u8 {
 /// Per-region block size: the word at manager + 0x30, or 0 when no block
 /// manager exists.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn region_block_size() -> u32 {
     let mgr = block_manager();
     if mgr.is_null() {
@@ -126,6 +127,7 @@ pub unsafe extern "C" fn region_block_size() -> u32 {
     }
     (mgr.add(BLOCK_SIZE_OFFSET) as *const u32).read()
 }
+
 
 /// Reads one u32 word of the opaque manager/list/node layout (the
 /// objects are unported-ctor layouts — literal byte offsets,
@@ -236,6 +238,36 @@ macro_rules! mutex_op {
             ))
         }
     };
+}
+/// Opaque target layout consumed by [`block_count_byte_size`]. The two
+/// fields are contiguous u32 words on both target and host: count is at
+/// +0x24 and the C++ recursive mutex begins at +0x28.
+#[repr(C)]
+pub struct LockedBlockCount {
+    _prefix: [u32; 9],
+    pub block_count: u32,
+    mutex: [u32; 7],
+}
+
+/// block_count_byte_size — original: `FUN_081a8388` @ 0x081a8388 (48
+/// bytes; 6 direct, plain `bl` call sites @ 0x081a8408, 0x081f05dc,
+/// 0x081f05f4, 0x0821b4b0, 0x0821b82c, and 0x0821b868; binary-verified).
+///
+/// Locks the counter's C++ recursive mutex, reads its block count, gets the
+/// current manager region block size, unlocks, and returns their wrapping
+/// 32-bit product. The lock and unlock status words are discarded.
+///
+/// Deviation: none. [`LockedBlockCount`] represents only the source fields
+/// this function reads, preserving their target word layout on the host.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn block_count_byte_size(counter: *mut LockedBlockCount) -> u32 {
+    let mutex = core::ptr::addr_of_mut!((*counter).mutex).cast::<u8>();
+    (mutex_op!(lock))(mutex);
+    let count = core::ptr::addr_of!((*counter).block_count).read();
+    let bytes = region_block_size().wrapping_mul(count);
+    (mutex_op!(unlock))(mutex);
+    bytes
 }
 
 /// take_blocks_body — original: `FUN_0818b108` @ 0x0818b108 (264
@@ -769,6 +801,7 @@ pub(crate) mod tests {
                     last: mgr_node(1) as usize,
                 }]
             );
+
             assert_eq!(word(owner(0), OWNER_NODE_OFFSET), client_node(0) as u32);
         }
         restore_body(_guard);
@@ -799,5 +832,39 @@ pub(crate) mod tests {
             assert_eq!(word(owner(0), OWNER_NODE_OFFSET), 0xdead_beef);
         }
         restore_body(_guard);
+    }
+    #[test]
+    fn block_count_byte_size_locks_reads_and_wraps_the_product() {
+        let _guard = install_ops();
+        let mut counter = LockedBlockCount {
+            _prefix: [0; 9],
+            block_count: 7,
+            mutex: [0; 7],
+        };
+        unsafe {
+            let mgr = core::ptr::addr_of_mut!(FAKE_MGR) as *mut u8;
+            (mgr.add(BLOCK_SIZE_OFFSET) as *mut u32).write(0x2000);
+            BLOCK_MANAGER = mgr;
+            let mutex = core::ptr::addr_of_mut!(counter.mutex).cast::<u8>();
+
+            assert_eq!(block_count_byte_size(&mut counter), 0xe000);
+            assert_eq!(
+                events(),
+                std::vec![Ev::Lock(mutex as usize), Ev::Unlock(mutex as usize)],
+                "the count is read inside one mutex bracket"
+            );
+
+            (*core::ptr::addr_of_mut!(EVENTS)).clear();
+            counter.block_count = u32::MAX;
+            (mgr.add(BLOCK_SIZE_OFFSET) as *mut u32).write(2);
+            assert_eq!(block_count_byte_size(&mut counter), u32::MAX - 1);
+            assert_eq!(
+                events(),
+                std::vec![Ev::Lock(mutex as usize), Ev::Unlock(mutex as usize)],
+                "ARM mul returns the low 32 bits"
+            );
+            BLOCK_MANAGER = core::ptr::null_mut();
+        }
+        restore_ops(_guard);
     }
 }
