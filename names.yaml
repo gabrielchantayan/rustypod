@@ -80220,3 +80220,35 @@ functions:
       gate optional item insertion; this leaf has no NULL or count-validity
       guard. Rust preserves the target-width words and signed count layout
       with a repr(C) structure, including the negative-count store behavior.
+
+  # --- Texture image upload (ui/texture_upload) ---
+  - address: 0x08281194
+    ghidra: FUN_08281194
+    name: texture_upload_pixels
+    size: 116
+    sig: "void texture_upload_pixels(Texture *texture, const void *pixels, u32 width, u32 height)"
+    module: ui/texture_upload
+    status: ported
+    renames:
+      param_1/r0/r4: texture
+      param_2/r1/r7: pixels
+      param_3/r2/r5: width
+      param_4/r3/r6: height
+      FUN_08281140: texture_activate
+      FUN_08281208: texture_define_image
+      FUN_082812c4: texture_update_subimage
+    notes: >-
+      Raw osos.dec confirms the 29-instruction, 116-byte body from the push
+      at 0x08281194 through the pop at 0x08281204; the next distinct
+      function starts at 0x08281208. It activates the texture, compares
+      full-width requested dimensions against the descriptor's u16 width and
+      height at +0x06/+0x08, and either stores the low halves then defines
+      the complete image, or updates the same-size image from origin. The
+      complete-image helper receives the untruncated requested dimensions as
+      two stack arguments, which Ghidra omitted. An exhaustive aligned ARM
+      B/BL-immediate decode finds six inbound calls: plain bl at 0x0827bae8,
+      0x0827bb74, 0x0827bbe0, 0x0827bc64, and 0x0828db08; plus blne at
+      0x082727f4. No tail branch or data-word dispatch references exist. The
+      port uses target-address seams for its three unported GL helpers and
+      inert host defaults; host tests record both upload paths and prove that
+      dimensions above u16::MAX redefine every call after truncation.
