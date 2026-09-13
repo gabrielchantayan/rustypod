@@ -100,6 +100,7 @@ use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
 use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
 use crate::heap::block_deque::BlockDeque;
+use crate::heap::veneers::cxx_array_dealloc;
 
 /// The five-word owner shape consumed by [`container_end_cursor`].
 ///
@@ -591,6 +592,93 @@ pub unsafe extern "C" fn deque_iter_init_elem4_alias_9ff8(
     }
     (*iter).seg_slot = slot;
     iter
+}
+
+/// deque_pop_front_elem4 — original: `FUN_083dfdec` @ 0x083dfdec
+/// (204 bytes; raw extent 0x083dfdec..0x083dfeb8).
+///
+/// Removes the first four-byte element from a block deque. It advances the
+/// begin cursor and decrements the count. When that consumes a segment (or
+/// empties the deque), it frees the spent 32-element segment, advances the
+/// segment-map slot, and either re-anchors begin on the next segment or
+/// resets both iterators and frees the map. The entry's initial 16-byte
+/// stack copy of begin has no subsequent consumer, but is retained through
+/// the existing [`deque_iter_assign`] port.
+///
+/// Raw ARM has six direct calls: iterator copy @ 0x083da458, capacity @
+/// 0x083da450, `cxx_array_dealloc` @ 0x08266f2c twice, and iterator init @
+/// 0x083da47c twice. Decoding every ARM B/BL immediate in `osos.dec` finds
+/// six inbound calls, all unconditional plain `bl` (0x08143e4c, 0x08144180,
+/// 0x081de32c, 0x082e7da4, 0x082e7fe0, and 0x083dff24); no predicated form
+/// targets this entry. The independent `push {r4,r5,r6,lr}` at 0x083dfeb8
+/// starts the adjacent push member and fixes the 204-byte extent.
+///
+/// # Deliberate deviations
+///
+/// LLVM otherwise erases the unused trivial iterator copy and folds the
+/// capacity constant. Volatile function-pointer loads retain both existing
+/// call boundaries; target code uses indirect calls rather than the retail
+/// direct `bl` forms. The private helper receives deallocation as a callback
+/// solely to make both retirement paths observable in host tests; this export
+/// passes the existing direct `cxx_array_dealloc` port.
+///
+/// # Safety
+///
+/// `deque` must point to a writable valid four-byte-element [`BlockDeque`].
+/// Its count, iterators, and map must describe a nonempty deque; the active
+/// segment slot and, when needed, its successor must be readable. Retired
+/// segments and the map must meet `cxx_array_dealloc`'s ownership contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_pop_front_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_pop_front_elem4(deque: *mut BlockDeque) {
+    deque_pop_front_elem4_with(deque, |ptr, count, elem_size| {
+        cxx_array_dealloc(ptr, count, elem_size);
+    });
+}
+
+unsafe fn deque_pop_front_elem4_with<F>(deque: *mut BlockDeque, mut deallocate: F)
+where
+    F: FnMut(*mut u8, usize, usize),
+{
+    // The original copies begin to sp+20 before it performs the pop. Its
+    // destructor is trivial, so no later instruction consumes this local.
+    let mut discarded_begin = DequeIter::NULL;
+    let iter_assign = core::ptr::read_volatile(
+        &(deque_iter_assign as unsafe extern "C" fn(*mut u32, *const u32) -> *mut u32),
+    );
+    iter_assign(
+        (&mut discarded_begin as *mut DequeIter).cast::<u32>(),
+        deque.cast::<u32>(),
+    );
+
+    let d = &mut *deque;
+    d.begin.cur = d.begin.cur.wrapping_add(4);
+    d.count = d.count.wrapping_sub(1);
+    if d.count != 0 && d.begin.cur != d.begin.seg_end {
+        return;
+    }
+
+    let old_slot = d.begin.seg_slot;
+    d.begin.seg_slot = old_slot.add(1);
+    let segment_capacity = core::ptr::read_volatile(&(deque_seg_capacity as unsafe extern "C" fn() -> usize));
+    deallocate(old_slot.read(), segment_capacity(), 0);
+
+    if d.count != 0 {
+        let mut next_begin = DequeIter::NULL;
+        deque_iter_init_elem4(&mut next_begin, d.begin.seg_slot.read(), d.begin.seg_slot);
+        d.begin = next_begin;
+    } else {
+        let mut empty = DequeIter::NULL;
+        deque_iter_init_elem4(
+            &mut empty,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        );
+        d.end = empty;
+        d.begin = d.end;
+        deallocate(d.map.cast::<u8>(), d.map_cap as usize, 0);
+    }
 }
 
 /// deque_back_elem4 — original: `FUN_083e0044` @ 0x083e0044 (220 bytes;
@@ -6026,6 +6114,116 @@ mod tests {
         };
 
         assert_eq!(unsafe { container_end_cursor(&owner) }, 0);
+    }
+
+    #[test]
+    fn deque_pop_front_elem4_keeps_a_live_segment() {
+        let mut segment = [0u32; 32];
+        let base = segment.as_mut_ptr().cast::<u8>();
+        let mut map = [base];
+        let begin = DequeIter {
+            cur: base.wrapping_add(12),
+            seg_base: base,
+            seg_end: base.wrapping_add(0x80),
+            seg_slot: map.as_mut_ptr(),
+        };
+        let mut deque = BlockDeque {
+            begin,
+            end: DequeIter::NULL,
+            count: 2,
+            map: map.as_mut_ptr(),
+            map_cap: 1,
+        };
+        let mut frees = Vec::new();
+
+        unsafe {
+            deque_pop_front_elem4_with(&mut deque, |ptr, count, elem_size| {
+                frees.push((ptr, count, elem_size));
+            });
+        }
+
+        assert_eq!(deque.count, 1);
+        assert_eq!(deque.begin.cur, base.wrapping_add(16));
+        assert_eq!(deque.begin.seg_base, base);
+        assert_eq!(deque.begin.seg_end, base.wrapping_add(0x80));
+        assert_eq!(deque.begin.seg_slot, map.as_mut_ptr());
+        assert!(frees.is_empty(), "an unspent live segment is retained");
+    }
+
+    #[test]
+    fn deque_pop_front_elem4_retires_spent_segment_and_reanchors() {
+        let mut old_segment = [0u32; 32];
+        let mut next_segment = [0u32; 32];
+        let old_base = old_segment.as_mut_ptr().cast::<u8>();
+        let next_base = next_segment.as_mut_ptr().cast::<u8>();
+        let mut map = [old_base, next_base];
+        let begin = DequeIter {
+            cur: old_base.wrapping_add(0x7c),
+            seg_base: old_base,
+            seg_end: old_base.wrapping_add(0x80),
+            seg_slot: map.as_mut_ptr(),
+        };
+        let mut deque = BlockDeque {
+            begin,
+            end: DequeIter::NULL,
+            count: 2,
+            map: map.as_mut_ptr(),
+            map_cap: 2,
+        };
+        let mut frees = Vec::new();
+
+        unsafe {
+            deque_pop_front_elem4_with(&mut deque, |ptr, count, elem_size| {
+                frees.push((ptr, count, elem_size));
+            });
+        }
+
+        assert_eq!(frees, std::vec![(old_base, 0x20, 0)]);
+        assert_eq!(deque.count, 1);
+        assert_eq!(deque.begin.cur, next_base);
+        assert_eq!(deque.begin.seg_base, next_base);
+        assert_eq!(deque.begin.seg_end, next_base.wrapping_add(0x80));
+        assert_eq!(deque.begin.seg_slot, unsafe { map.as_mut_ptr().add(1) });
+        assert_eq!(deque.end.cur, core::ptr::null_mut(), "end is untouched");
+    }
+
+    #[test]
+    fn deque_pop_front_elem4_last_element_resets_iterators_and_frees_map() {
+        let mut segment = [0u32; 32];
+        let base = segment.as_mut_ptr().cast::<u8>();
+        let mut map = [base];
+        let begin = DequeIter {
+            cur: base.wrapping_add(0x7c),
+            seg_base: base,
+            seg_end: base.wrapping_add(0x80),
+            seg_slot: map.as_mut_ptr(),
+        };
+        let mut deque = BlockDeque {
+            begin,
+            end: begin,
+            count: 1,
+            map: map.as_mut_ptr(),
+            map_cap: 7,
+        };
+        let map_ptr = deque.map.cast::<u8>();
+        let mut frees = Vec::new();
+
+        unsafe {
+            deque_pop_front_elem4_with(&mut deque, |ptr, count, elem_size| {
+                frees.push((ptr, count, elem_size));
+            });
+        }
+
+        assert_eq!(frees, std::vec![(base, 0x20, 0), (map_ptr, 7, 0)]);
+        assert_eq!(deque.count, 0);
+        assert!(deque.begin.cur.is_null());
+        assert!(deque.begin.seg_base.is_null());
+        assert!(deque.begin.seg_end.is_null());
+        assert!(deque.begin.seg_slot.is_null());
+        assert!(deque.end.cur.is_null());
+        assert!(deque.end.seg_base.is_null());
+        assert!(deque.end.seg_end.is_null());
+        assert!(deque.end.seg_slot.is_null());
     }
 
 }

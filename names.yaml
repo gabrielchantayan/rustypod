@@ -77284,3 +77284,35 @@ functions:
       call their retail addresses; host tests record branch selection, exact
       forwarding, worker-failure gating, exhausted-pool behavior, and
       unconditional pool restoration.
+
+  - address: 0x083dfdec
+    ghidra: FUN_083dfdec
+    name: deque_pop_front_elem4
+    size: 204
+    sig: "void deque_pop_front_elem4(BlockDeque *deque)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1: deque
+      FUN_083da458: deque_iter_assign
+      FUN_083da450: deque_seg_capacity
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_083da47c: deque_iter_init_elem4
+    notes: >-
+      Raw ARM establishes the exact 204-byte body 0x083dfdec..0x083dfeb8:
+      the adjacent 4-byte deque push member starts at 0x083dfeb8. Decoding
+      every ARM B/BL immediate in osos.dec finds six inbound direct calls,
+      all unconditional plain bl at 0x08143e4c, 0x08144180, 0x081de32c,
+      0x082e7da4, 0x082e7fe0, and 0x083dff24; there are no predicated or
+      tail-branch entries. The function advances begin.cur by four,
+      decrements count, and returns while a live segment remains. Otherwise
+      it advances begin.seg_slot, deallocates the spent 32-element segment,
+      and either re-anchors begin on the next segment or zeroes both
+      iterators and deallocates the map. Its six direct calls are
+      deque_iter_assign, deque_seg_capacity, cxx_array_dealloc twice, and
+      deque_iter_init_elem4 twice. The initial iterator stack copy has no
+      subsequent consumer but is retained through a volatile pointer call;
+      capacity likewise uses a volatile pointer call so LLVM cannot fold its
+      constant. This changes those two device calls from bl to blx without
+      changing their targets or observable behavior. Host tests cover a live
+      segment, spent-segment re-anchor, and final segment plus map retirement.
