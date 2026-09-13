@@ -1,4 +1,4 @@
-//! The twenty-eight lazily-constructed framework singletons. Every one is the
+//! The twenty-nine lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -12,6 +12,7 @@
 //! | 0x0817ee04 | [`app_controller_get`] | 0xe8 | 0x089cc648 | 0x081847fc | **1108** |
 //! | 0x08173848 | [`app_screen_get`] | 0x850 | 0x089cc1bc | 0x08177a78 | 140 |
 //! | 0x0817ceb4 | [`media_player_get`] | 0xa6c | 0x089ca7cc | 0x0817d970 | 101 |
+//! | 0x0819bea8 | [`genius_mixes_task_get`] | 0x68 | 0x089cc168 | 0x0819c1d4 | 6 |
 //! | 0x081eb0c4 | [`singleton_class_8900`] | 0x380 | 0x089cc3ac | 0x081ee0c0 | 88 |
 //! | 0x0810a7b8 | [`singleton_class_6200`] | 0xd0 | 0x089cb308 | 0x0810ab3c | 47 |
 //! | 0x081b803c | [`singleton_class_7f80`] | 0x1d4 | 0x089cc61c | 0x081b80b4 | 38 |
@@ -148,27 +149,24 @@
 //!   word (DAT_081f77d0 = 0x089cc26c, so the cache is 0x089cc288),
 //!   and the size is an immediate (`mov r0, #0x3bc`).
 //!
-//! - The 0x58 object is the newest arrival and sits in a **shared
-//!   three-slot globals block** rather than a private cache word: the
-//!   pool literal @ 0x0812c758 is 0x089cc168, and the block's `+0x00`
-//!   (a 0x68 object, getter @ 0x0819bea8, ctor @ 0x0819c1d4) and
-//!   `+0x08` (a 0x22c object, getter @ 0x081b5440, ctor @ 0x081b6628)
-//!   are two more singletons of exactly this shape — the `+0x08` slot
-//!   is ported as [`singleton_class_9400`] below, only `+0x00` remains
-//!   stock. Its ctor @ 0x0812ce88 is unusually small (44
-//!   bytes): base ctor @ 0x0819c550, vtable literal 0x08983b7c at
-//!   +0x00, a sub-object initialized at +0x3c (`FUN_08270394(this +
-//!   0x3c, 0, 0)`, the same three-argument initializer the base ctor
-//!   runs at its own +0x18) and a flag byte zeroed at +0x54 — which is
-//!   what makes 0x58 the allocation size. **Class NOT named**: neither
-//!   the ctor nor the base ctor reaches a name factory or the by-id
-//!   registry, and the vtable address falls in the region where the
-//!   decrypted image holds the C++ mangled-name blob instead (the same
-//!   page mismatch app/registry.rs records), so the vtable cannot be
-//!   read for a name either. The 46 call sites use it purely as a
-//!   `this` for virtual dispatch (slots +0x94, +0xac, +0x190) and as
-//!   the first argument of the neighbouring free functions @
-//!   0x0812ce60 / 0x0812ce74 / 0x0812c75c, clustered in the
+//! - The 0x58 object sits in a **shared three-slot globals block** rather
+//!   than a private cache word: the pool literal @ 0x0812c758 is
+//!   0x089cc168. The block's `+0x00` holds the 0x68
+//!   [`genius_mixes_task_get`] object and `+0x08` holds the 0x22c
+//!   [`singleton_class_9400`] object; all three getters are ported. The
+//!   0x58 ctor @ 0x0812ce88 is unusually small (44 bytes): base ctor @
+//!   0x0819c550, vtable literal 0x08983b7c at +0x00, a sub-object
+//!   initialized at +0x3c (`FUN_08270394(this + 0x3c, 0, 0)`, the same
+//!   three-argument initializer the base ctor runs at its own +0x18) and
+//!   a flag byte zeroed at +0x54 — which is what makes 0x58 the
+//!   allocation size. **Class NOT named**: neither the ctor nor the base
+//!   ctor reaches a name factory or the by-id registry, and the vtable
+//!   address falls in the region where the decrypted image holds the C++
+//!   mangled-name blob instead (the same page mismatch app/registry.rs
+//!   records), so the vtable cannot be read for a name either. The 46
+//!   call sites use it purely as a `this` for virtual dispatch (slots
+//!   +0x94, +0xac, +0x190) and as the first argument of neighbouring free
+//!   functions @ 0x0812ce60 / 0x0812ce74 / 0x0812c75c, clustered in the
 //!   0x0822xxxx-0x0823xxxx UI/menu code. Size is the only identifying
 //!   fact, so — like [`lazy_singleton_0x3c`] — the symbol says exactly
 //!   that.
@@ -246,7 +244,9 @@
 //!   those RW pages are runtime-initialized; the image holds stale UI
 //!   strings there). All cache slots default to NULL, exactly the pre-init
 //!   state.
-
+use crate::kernel::sync_mutex::{mutex_lock_counted, mutex_unlock_counted, CountedMutex};
+#[cfg(not(target_os = "none"))]
+use crate::kernel::sync_mutex::Mutex;
 use crate::heap::veneers::operator_new;
 
 /// Allocation size of the application controller (`mov r0, #0xe8`).
@@ -308,6 +308,9 @@ pub const VOLUME_CONTROLLER_SIZE: usize = 0x3bc;
 /// Allocation size of the unidentified 0x58 singleton
 /// (`mov r0, #0x58`).
 pub const SINGLETON_0X58_SIZE: usize = 0x58;
+/// Allocation size of the GeniusMixesTask object (`mov r0, #0x68`).
+pub const GENIUS_MIXES_TASK_SIZE: usize = 0x68;
+
 
 /// Allocation size of the unidentified 0x44 singleton (`mov r0, #0x44`).
 pub const SINGLETON_0X44_SIZE: usize = 0x44;
@@ -351,6 +354,9 @@ pub const PHOTO_BROWSE_SLIDESHOW_SIZE: usize = 0x8fc;
 
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
+/// Post-construction body at 0x082906b4; its identity is not yet recovered.
+pub type GeniusMixesTaskAfterConstruct = unsafe extern "C" fn(this: *mut u8);
+
 /// The PhotoBrowse slideshow constructor's second argument is an optional
 /// base object; the getter passes NULL.
 pub type PhotoBrowseSlideshowConstructor =
@@ -393,6 +399,9 @@ pub struct SingletonCtors {
     pub volume_controller: Constructor,
     /// The 0x58 object's ctor @ 0x0812ce88.
     pub singleton_0x58: Constructor,
+    /// GeniusMixesTask ctor @ 0x0819c1d4.
+    pub genius_mixes_task: Constructor,
+
     /// The 0x40 object's ctor @ 0x0825bd20.
     pub singleton_0x40: Constructor,
     /// The 0x44 object's ctor @ 0x0825aa58.
@@ -447,6 +456,7 @@ zeroing_ctor!(zeroing_singleton_0x80_ctor, SINGLETON_0X80_SIZE);
 zeroing_ctor!(zeroing_command_dispatcher_ctor, COMMAND_DISPATCHER_SIZE);
 zeroing_ctor!(zeroing_volume_controller_ctor, VOLUME_CONTROLLER_SIZE);
 zeroing_ctor!(zeroing_singleton_0x58_ctor, SINGLETON_0X58_SIZE);
+zeroing_ctor!(zeroing_genius_mixes_task_ctor, GENIUS_MIXES_TASK_SIZE);
 zeroing_ctor!(zeroing_singleton_0x40_ctor, SINGLETON_0X40_SIZE);
 zeroing_ctor!(zeroing_singleton_0x44_ctor, SINGLETON_0X44_SIZE);
 zeroing_ctor!(zeroing_class_6280_ctor, CLASS_6280_SIZE);
@@ -495,6 +505,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     volume_controller: zeroing_volume_controller_ctor,
     singleton_0x80: zeroing_singleton_0x80_ctor,
     singleton_0x58: zeroing_singleton_0x58_ctor,
+    genius_mixes_task: zeroing_genius_mixes_task_ctor,
     singleton_0x40: zeroing_singleton_0x40_ctor,
     singleton_0x44: zeroing_singleton_0x44_ctor,
     class_6280: zeroing_class_6280_ctor,
@@ -590,6 +601,57 @@ pub static mut VOLUME_CONTROLLER_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// the `+4` slot of the shared globals block @ 0x089cc168 — the pool
 /// literal @ 0x0812c758).
 pub static mut SINGLETON_0X58: *mut u8 = core::ptr::null_mut();
+/// The GeniusMixesTask singleton (original: the `+0x00` slot of the shared
+/// globals block @ 0x089cc168, reached through pool word @ 0x0819bef4).
+pub static mut GENIUS_MIXES_TASK_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// Host mirror of the counted mutex at 0x08a78e98 that serializes
+/// GeniusMixesTask construction.
+#[cfg(not(target_os = "none"))]
+pub static mut GENIUS_MIXES_TASK_LOCK: CountedMutex = CountedMutex {
+    mutex: Mutex {
+        sem_cell: core::ptr::null_mut(),
+        unused: 0,
+    },
+    hold_count: 0,
+};
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn genius_mixes_task_lock() -> *mut CountedMutex {
+    0x08a7_8e98 as *mut CountedMutex
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn genius_mixes_task_lock() -> *mut CountedMutex {
+    core::ptr::addr_of_mut!(GENIUS_MIXES_TASK_LOCK)
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_genius_mixes_task_after_construct(_this: *mut u8) {}
+
+/// Host seam for the direct, still-unported call at 0x082906b4.
+#[cfg(not(target_os = "none"))]
+pub static mut GENIUS_MIXES_TASK_AFTER_CONSTRUCT: GeniusMixesTaskAfterConstruct =
+    missing_genius_mixes_task_after_construct;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn genius_mixes_task_after_construct(this: *mut u8) {
+    let after_construct: GeniusMixesTaskAfterConstruct = core::mem::transmute(0x0829_06b4usize);
+    after_construct(this);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn genius_mixes_task_after_construct(this: *mut u8) {
+    let after_construct = core::ptr::read_volatile(
+        core::ptr::addr_of!(GENIUS_MIXES_TASK_AFTER_CONSTRUCT)
+    );
+    after_construct(this);
+}
+
+
 
 /// The unidentified 0x40 singleton (original: the word @ 0x089cc94c,
 /// the pool literal @ 0x0825b6ac — the next word after the settings
@@ -961,6 +1023,45 @@ pub unsafe extern "C" fn lazy_singleton_0x28() -> *mut u8 {
 pub unsafe extern "C" fn lazy_singleton_0x58() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(SINGLETON_0X58);
     lazy_singleton(cache, SINGLETON_0X58_SIZE, || unsafe { ctor!(singleton_0x58) })
+}
+
+/// genius_mixes_task_get — original: `FUN_0819bea8` @ **0x0819bea8**
+/// (**72 code bytes** plus pool words @ 0x0819bef0/0x0819bef4 =
+/// **80 bytes** true extent; **6 `bl` call sites, all unconditional — 0
+/// predicated, 0 plain `b`**, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Acquires the counted mutex at 0x08a78e98, returns the cached +0x00
+/// member of the globals block at 0x089cc168 when non-NULL, otherwise
+/// allocates 0x68 bytes and runs `FUN_0819c1d4`. The constructor's name
+/// literal, `GeniusMixesTask`, identifies the object. It stores the result,
+/// calls the still-unidentified post-construction body at 0x082906b4, then
+/// re-loads the cache before releasing the mutex; a NULL result retries
+/// allocation and construction on the next call.
+///
+/// Deviation: the cache and host lock are crate statics rather than the
+/// runtime-initialized words at 0x089cc168/0x08a78e98; target builds use
+/// the retail mutex address and direct post-construction call. The host
+/// callback seam preserves that call's ordering without inventing its
+/// identity. The unported constructor uses the `genius_mixes_task`
+/// [`SINGLETON_CTORS`] slot and its documented zeroing default, so this
+/// getter is not hook-ready until that constructor is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn genius_mixes_task_get() -> *mut u8 {
+    let lock = genius_mixes_task_lock();
+    let lock_counted: unsafe extern "C" fn(*mut CountedMutex) = mutex_lock_counted;
+    core::ptr::read_volatile(core::ptr::addr_of!(lock_counted))(lock);
+    let cache = core::ptr::addr_of_mut!(GENIUS_MIXES_TASK_INSTANCE);
+    if core::ptr::read_volatile(cache).is_null() {
+        let object = (ctor!(genius_mixes_task))(operator_new(GENIUS_MIXES_TASK_SIZE));
+        core::ptr::write_volatile(cache, object);
+        genius_mixes_task_after_construct(object);
+    }
+    let object = core::ptr::read_volatile(cache);
+    let unlock_counted: unsafe extern "C" fn(*mut CountedMutex) = mutex_unlock_counted;
+    core::ptr::read_volatile(core::ptr::addr_of!(unlock_counted))(lock);
+    object
 }
 
 /// singleton_class_8c00 — original: `FUN_081a5500` @ 0x081a5500
@@ -1858,6 +1959,7 @@ mod tests {
                 command_dispatcher: recording_ctor,
                 volume_controller: recording_ctor,
                 singleton_0x58: recording_ctor,
+                genius_mixes_task: recording_ctor,
                 singleton_0x40: recording_ctor,
                 singleton_0x44: recording_ctor,
                 class_6280: recording_ctor,
@@ -1872,6 +1974,7 @@ mod tests {
                 event_listener_kind_10: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
+            GENIUS_MIXES_TASK_AFTER_CONSTRUCT = missing_genius_mixes_task_after_construct;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
             (*ptr::addr_of_mut!(CTOR_BLOCKS)).clear();
             (*ptr::addr_of_mut!(CTOR_BASES)).clear();
@@ -1910,6 +2013,7 @@ mod tests {
         COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
         VOLUME_CONTROLLER_INSTANCE = ptr::null_mut();
         SINGLETON_0X58 = ptr::null_mut();
+        GENIUS_MIXES_TASK_INSTANCE = ptr::null_mut();
         SINGLETON_0X40 = ptr::null_mut();
         SINGLETON_0X44 = ptr::null_mut();
         CLASS_6280_INSTANCE = ptr::null_mut();
@@ -3453,6 +3557,55 @@ mod tests {
             singleton_class_9400();
             assert!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0X58)).is_null(), "untouched");
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![CLASS_9400_SIZE]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn genius_mixes_task_get_locks_allocates_constructs_and_caches() {
+        unsafe extern "C" fn lock_inspecting_ctor(this: *mut u8) -> *mut u8 {
+            assert_eq!(GENIUS_MIXES_TASK_LOCK.hold_count, 1, "constructor runs while locked");
+            recording_ctor(this)
+        }
+        unsafe extern "C" fn recording_after_construct(this: *mut u8) {
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(GENIUS_MIXES_TASK_INSTANCE)),
+                constructed(),
+                "the cache store precedes the retail post-construction call"
+            );
+            assert_eq!(GENIUS_MIXES_TASK_LOCK.hold_count, 1, "post-construction remains locked");
+            assert_eq!(this, constructed());
+        }
+
+
+        let guard = mock(constructed());
+        unsafe {
+            SINGLETON_CTORS.genius_mixes_task = lock_inspecting_ctor;
+            GENIUS_MIXES_TASK_AFTER_CONSTRUCT = recording_after_construct;
+            assert_eq!(genius_mixes_task_get(), constructed());
+            assert_eq!(genius_mixes_task_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![GENIUS_MIXES_TASK_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(GENIUS_MIXES_TASK_LOCK.hold_count, 0, "unlock follows the cache reload");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(GENIUS_MIXES_TASK_INSTANCE)),
+                constructed()
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_genius_mixes_task_ctor_is_retried_under_the_lock() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(genius_mixes_task_get().is_null());
+            assert!(genius_mixes_task_get().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![GENIUS_MIXES_TASK_SIZE, GENIUS_MIXES_TASK_SIZE]
+            );
+            assert_eq!(GENIUS_MIXES_TASK_LOCK.hold_count, 0);
         }
         restore(guard);
     }

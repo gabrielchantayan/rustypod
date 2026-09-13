@@ -81897,3 +81897,41 @@ functions:
       function entry; it cannot form a valid shutdown callback. The Rust port
       uses crate statics for the fixed cells, inlines the three writes of
       unported sibling FUN_081bbf5c, and registers a safe no-op destructor.
+
+  # --- Genius Mixes task singleton ---
+  - address: 0x0819bea8
+    ghidra: FUN_0819bea8
+    name: genius_mixes_task_get
+    size: 80
+    sig: "void *genius_mixes_task_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0819bef0: genius_mixes_task_lock
+      DAT_0819bef4: genius_mixes_task_cache
+      FUN_08094404: mutex_lock_counted
+      FUN_082aadd4: operator_new
+      FUN_0819c1d4: genius_mixes_task_construct
+      FUN_082906b4: post_construction_body_unidentified
+      FUN_0809449c: mutex_unlock_counted
+      r0: genius_mixes_task
+    notes: >-
+      Raw osos.dec establishes the 80-byte true extent: 72 instruction bytes
+      from 0x0819bea8 through pop {r4,r5,r6,pc} at 0x0819beec, followed by
+      lock and cache pool words at 0x0819bef0 and 0x0819bef4; the distinct
+      next function opens at 0x0819bef8. A full-image ARM B/BL-immediate
+      decode finds exactly six inbound direct bl sites at 0x0817b128,
+      0x0817c264, 0x081b5768, 0x081b5fb0, 0x081b5fdc, and 0x081b6028, all
+      unconditional with no predicated bl or direct b entry. The getter takes
+      the counted mutex at 0x08a78e98, reads the +0x00 cache word of the
+      shared 0x089cc168 globals block, then on NULL calls operator_new(0x68),
+      constructs GeniusMixesTask through FUN_0819c1d4, stores its result,
+      calls the still-unidentified 0x082906b4 body with that result in r0,
+      re-loads the cache, and releases the mutex. The constructor's
+      GeniusMixesTask string establishes the name. Direct mutex and allocator
+      callees are ported; target code calls 0x082906b4 directly while host
+      tests use an ordering seam rather than inventing its identity. The
+      constructor uses the documented SINGLETON_CTORS.genius_mixes_task
+      zeroing seam. The cache and host mutex are crate statics; target builds
+      use the retail mutex address. Host tests cover lock scope, cold
+      construction, post-construction ordering, cached hit, and NULL retry.
