@@ -139,6 +139,28 @@ functions:
       pointers), guard-byte integrity across len 0..64 against an
       independent slice reference model, and forward-overlap behavior.
 
+  - address: 0x080e7a38
+    ghidra: FUN_080e7a38
+    name: ansi_rand
+    size: 40
+    sig: "u32 ansi_rand(void)"
+    module: runtime/random
+    status: ported
+    renames:
+      DAT_080e7a60: ansi_rand_state (target RAM @ 0x089ca89c)
+      DAT_080e7a64: ansi_rand_multiplier
+    notes: >-
+      Raw osos.dec has ten ARM instructions from 0x080e7a38 through
+      0x080e7a5c, followed by the two literal-pool words at 0x080e7a60 and
+      0x080e7a64; the distinct next function begins at 0x080e7a68. Advances
+      the target BSS seed with ANSI-C LCG `seed * 0x41c64e6d + 0x3039`
+      (wrapping u32), stores it, then returns `(seed >> 16) & 0x7fff`.
+      Every ARM BL decode finds seven direct callers, all unconditional:
+      0x0810cbc8, 0x08159d80, 0x081b7958, 0x081bc030, 0x081db3d4,
+      0x081db4ac, and 0x08214e08; there are no predicated forms. The Rust
+      host seam replaces only the fixed seed-cell address with a test word;
+      target behavior retains the fixed BSS cell.
+
   # --- stack-sensitive literal tail dispatch ---
   - address: 0x08003818
     ghidra: FUN_08003818
