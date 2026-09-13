@@ -72492,6 +72492,35 @@ functions:
       the sequence word, so the later copy overwrites the incremented word;
       this port preserves that instruction order. No deliberate deviations.
 
+  # --- Image-format descriptor slots initialization ---
+  - address: 0x081d5ff8
+    ghidra: FUN_081d5ff8
+    name: image_format_descriptor_slots_initialize
+    size: 56
+    sig: "u32 *image_format_descriptor_slots_initialize(u32 *slots)"
+    module: app/image_format_descriptor_slots_initialize
+    status: ported
+    renames:
+      param_1/r0: slots
+      DAT_081d602c: image_format_descriptor_slots_vtable
+      "slots+0x024+slot*0x24": record_sentinel
+      "slots+0x28c": sentinel
+      "slots+0x290": sequence
+      "r0 return": slots
+    notes: >-
+      Raw osos.dec confirms the 56-byte extent from 0x081d5ff8 through the
+      literal-pool word at 0x081d602c; the separately linked next function
+      begins at 0x081d6030. Ghidra's 52-byte body omits that trailing literal.
+      The 52 instruction bytes store literal 0x0898dfe4 at word 0, clear word
+      164, set word 163 to -1, then set word 0 of each of 18 nine-word records
+      beginning at word 9 to -1. The raw code leaves r0 unchanged despite
+      Ghidra's void signature, so the port returns slots. Decoding every ARM
+      B/BL immediate finds exactly six direct inbound calls, all unconditional
+      plain bl and none predicated or plain-b tails: 0x081b7d7c, 0x081cd20c,
+      0x081fd088, 0x0820a4d0, 0x0822020c, and 0x0822bab0. Callers use the
+      initialized storage with image_format_descriptor_slot_set, establishing
+      the descriptor-slots role. No deliberate behavioral deviations.
+
   # --- iAP packet event callback dispatch (app/iap_packet_event_dispatch) ---
   - address: 0x081a9728
     ghidra: FUN_081a9728
