@@ -61395,6 +61395,40 @@ functions:
       guarded releases; the 0x08987f00 pool word is emitted and the
       symbol resolves standalone in the archive (no folding).
 
+  # --- UI two-value wheel-node rebinding ---
+  - address: 0x08167980
+    ghidra: FUN_08167980
+    name: timer_step_value_set_values
+    size: 120
+    sig: "void timer_step_value_set_values(TimerStepValue *this, FixedValue *driver, FixedValue *step)"
+    module: app/timer_step_value
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: driver
+      param_3/r2: step
+      DAT_081679f4: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_082738e0: timing_wheel_remove (direct, ported in app/animation)
+      FUN_08273a14: retain_value (direct, ported in app/refcounted_value)
+      FUN_082739e0: release_refcounted_value (direct, ported in app/refcounted_value)
+      FUN_08273a40: value_aux_max (direct, ported in app/fixed_value)
+      FUN_08273898: timing_wheel_insert (tail branch, ported in app/animation)
+    notes: >-
+      Raw ARM has 29 instruction words at 0x08167980..0x081679f0 followed
+      by the separately linked scheduler-global pool word 0x089cc7e0 at
+      0x081679f4, for a true extent of 120 bytes; the next function opens
+      push {r0-r6,lr} at 0x081679f8. Decoding every ARM B/BL word in
+      osos.dec finds exactly six direct call sites at 0x08152668,
+      0x08152aa4, 0x08152b58, 0x08152ea4, 0x08152f70, and 0x081530c4:
+      all are plain unconditional bl, with no predicated BL forms, direct
+      B tail callers, or aligned raw DATA-word references. Rebinds an
+      existing two-value timing-wheel node: remove it using the scheduler
+      global, retain driver then step, conditionally release the old driver
+      (+0x1c) then step (+0x18), replace those slots, store rank as
+      value_aux_max(step, driver) + 1 with wrapping arithmetic, reload the
+      scheduler global, and tail-branch to timing_wheel_insert. All direct
+      callees are ported; no seam or deliberate deviation is required.
+
   # --- UI two-value wheel-node constructor (driver + step scalar) ---
   - address: 0x08167a6c
     ghidra: FUN_08167a6c
