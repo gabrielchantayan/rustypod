@@ -874,6 +874,44 @@ static mut STRING_TABLE_MAP_OPS: StringTableMapOps = StringTableMapOps {
     map_operation: missing_string_table_map_operation,
 };
 
+/// The in-order iterator increment at 0x083b5cac, the only remaining
+/// dependency of [`string_table_copy_current_to_peer`].
+#[derive(Clone, Copy)]
+struct StringTableCopyOps {
+    iterator_next: unsafe extern "C" fn(iterator: *mut u32),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_iterator_next(iterator: *mut u32) {
+    let iterator_next: unsafe extern "C" fn(*mut u32) =
+        unsafe { core::mem::transmute(0x083b_5cacusize) };
+    unsafe { iterator_next(iterator) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_iterator_next(_iterator: *mut u32) {
+    panic!("string_table_copy_current_to_peer requires iterator increment 0x083b5cac")
+}
+
+/// Active ABI model for the unported in-order iterator increment. Target
+/// builds retain the retail call boundary; host tests install a recorder.
+#[cfg(target_os = "none")]
+static mut STRING_TABLE_COPY_OPS: StringTableCopyOps = StringTableCopyOps {
+    iterator_next: firmware_string_table_iterator_next,
+};
+
+/// Active ABI model for the unported in-order iterator increment. The host
+/// default fails closed until a test supplies the iterator behavior.
+#[cfg(not(target_os = "none"))]
+static mut STRING_TABLE_COPY_OPS: StringTableCopyOps = StringTableCopyOps {
+    iterator_next: missing_string_table_iterator_next,
+};
+
+#[inline(always)]
+unsafe fn string_table_copy_ops() -> StringTableCopyOps {
+    unsafe { core::ptr::addr_of!(STRING_TABLE_COPY_OPS).read_volatile() }
+}
+
 /// The literal at 0x083db700, seeded into the original's first stack string
 /// object before its COW copy. It is outside osos.dec, so its contents remain
 /// opaque; its later release proves it is a live retailOS string object.
@@ -968,6 +1006,74 @@ pub unsafe extern "C" fn string_table_fallback_value_slot(
         crate::cxx::string::cxx_string_release(core::ptr::addr_of_mut!(default_value));
     }
     node.wrapping_add(NODE_VALUE_OFFSET).cast()
+}
+
+/// `string_table_copy_current_to_peer` — original: `FUN_08101dc4` @
+/// **0x08101dc4** (216 bytes, 0x08101dc4..0x08101e9c; the next distinct
+/// function starts with `push {r4,lr}` at 0x08101e9c).
+///
+/// Decoding every aligned ARM B/BL word in `osos.dec` finds **9 direct `bl`
+/// call sites**, all unconditional, and no predicated forms: one each to
+/// `cxx_string_empty`, the unported map operation, iterator increment, and
+/// iterator equality; two each to the current peer-map selector and
+/// `string_table_fallback_value_slot`; and one to `cxx_string_assign`.
+///
+/// A non-empty `key` selects its mapped COW-string value from the current
+/// 0x1c-byte table and assigns it into the same key in the other selectable
+/// table (`(current_index + 1) % 2`). An empty `key` walks every current-map
+/// node in-order and invokes the map operation to insert that node's
+/// `(key,value)` pair into the peer table. There is no NULL guard on either
+/// argument.
+///
+/// Deliberate deviation: the unported map operation @ 0x083c4884 remains the
+/// established volatile ABI seam. The unported iterator increment @
+/// 0x083b5cac adds the matching target/host seam rather than duplicating its
+/// red-black-tree traversal; its target default calls the verified retail
+/// address. Ordinary locals replace the original's stack iterator records.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_copy_current_to_peer(
+    table: *mut u8,
+    key: *mut *mut u8,
+) {
+    unsafe {
+        if !crate::cxx::string::cxx_string_empty(key) {
+            let current_map =
+                table.add(word(table, CURRENT_TABLE_INDEX_WORD) as usize * TABLE_STRIDE);
+            let source = string_table_fallback_value_slot(current_map, key);
+            let peer_map = table.add(
+                ((word(table, CURRENT_TABLE_INDEX_WORD) + 1) % 2) as usize * TABLE_STRIDE,
+            );
+            let destination = string_table_fallback_value_slot(peer_map, key);
+            crate::cxx::string::cxx_string_assign(destination, source);
+            return;
+        }
+
+        let peer_map =
+            table.add(((word(table, CURRENT_TABLE_INDEX_WORD) + 1) % 2) as usize * TABLE_STRIDE);
+        let current_map =
+            table.add(word(table, CURRENT_TABLE_INDEX_WORD) as usize * TABLE_STRIDE);
+        let header = word(current_map, MAP_HEADER_WORD) as usize as *mut u8;
+        let mut iterator = word(header, 2);
+
+        let header_word = header as usize as u32;
+        while crate::cxx::templates::iterator_equal(&iterator, &header_word) != 1 {
+            let mut result = StringTableInsertResult {
+                node: core::ptr::null_mut(),
+                inserted: 0,
+            };
+            let map_operation =
+                core::ptr::addr_of!(STRING_TABLE_MAP_OPS.map_operation).read_volatile();
+            map_operation(
+                &mut result,
+                peer_map,
+                (iterator as usize as *const u8)
+                    .add(0x10)
+                    .cast::<StringTableStringPair>(),
+            );
+            (string_table_copy_ops().iterator_next)(&mut iterator);
+        }
+    }
 }
 
 /// string_table_set_hex — original: `FUN_08101f94` @ 0x08101f94 (84 bytes,
@@ -1230,10 +1336,10 @@ mod set_hex_tests {
     use core::ffi::c_void;
     use core::ptr;
     use std::ffi::CStr;
-    use std::sync::{Mutex, MutexGuard};
+    use crate::testing::STRING_TABLE_MAP_OPS_TEST_LOCK;
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut LOOKUP: Option<(usize, Vec<u8>, usize)> = None;
     static mut SEEN_KEY_REFCOUNT: i32 = -2;
 
@@ -1349,7 +1455,7 @@ mod set_hex_tests {
     }
 
     fn install() -> (MutexGuard<'static, ()>, OpsGuard) {
-        let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let lock = STRING_TABLE_MAP_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             let guard = OpsGuard {
                 map: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_MAP_OPS)),
@@ -1903,6 +2009,201 @@ mod tests {
             }
             assert_eq!(PARSE_LOOKUP_CALLS, 8);
             assert_eq!(PARSE_LOOKUP_ARGUMENTS, Some((table as usize, key as usize)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod copy_current_to_peer_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, STRING_TABLE_MAP_OPS_TEST_LOCK,
+    };
+    use core::ptr;
+    use std::sync::MutexGuard;
+    use std::vec::Vec;
+
+    const SLAB_SIZE: usize = 0x1000;
+    const MAP1: usize = TABLE_STRIDE;
+    const HEADER: usize = 0x100;
+    const NODE_A: usize = 0x180;
+    const NODE_B: usize = 0x1c0;
+
+    static mut MAP_CALLS: Vec<(usize, usize)> = Vec::new();
+    static mut ITERATOR_CALLS: Vec<u32> = Vec::new();
+    static mut RESULT_NODES: Vec<usize> = Vec::new();
+    static mut NODE_B_ADDRESS: u32 = 0;
+    static mut HEADER_ADDRESS: u32 = 0;
+
+    struct OpsGuard {
+        map: StringTableMapOps,
+        copy: StringTableCopyOps,
+    }
+
+    impl Drop for OpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_MAP_OPS), self.map);
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_COPY_OPS), self.copy);
+            }
+        }
+    }
+
+    fn install() -> (MutexGuard<'static, ()>, OpsGuard) {
+        let lock = STRING_TABLE_MAP_OPS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let restore = OpsGuard {
+                map: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_MAP_OPS)),
+                copy: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_COPY_OPS)),
+            };
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_MAP_OPS),
+                StringTableMapOps {
+                    map_operation: record_map_operation,
+                },
+            );
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_COPY_OPS),
+                StringTableCopyOps {
+                    iterator_next: record_iterator_next,
+                },
+            );
+            MAP_CALLS.clear();
+            ITERATOR_CALLS.clear();
+            RESULT_NODES.clear();
+            (lock, restore)
+        }
+    }
+
+    unsafe extern "C" fn record_map_operation(
+        result: *mut StringTableInsertResult,
+        map: *mut u8,
+        pair: *const StringTableStringPair,
+    ) {
+        unsafe {
+            let call = MAP_CALLS.len();
+            MAP_CALLS.push((map as usize, pair as usize));
+            (*result).node = RESULT_NODES
+                .get(call)
+                .copied()
+                .unwrap_or_default() as *mut u8;
+            (*result).inserted = 1;
+        }
+    }
+
+    unsafe extern "C" fn record_iterator_next(iterator: *mut u32) {
+        unsafe {
+            let current = iterator.read();
+            ITERATOR_CALLS.push(current);
+            iterator.write(if current == NODE_B_ADDRESS {
+                HEADER_ADDRESS
+            } else {
+                NODE_B_ADDRESS
+            });
+        }
+    }
+
+    #[repr(C, align(4))]
+    struct FakeString {
+        rep: crate::cxx::string::StringRep,
+        data: [u8; 8],
+    }
+
+    fn fake_string() -> FakeString {
+        FakeString {
+            rep: crate::cxx::string::StringRep {
+                refcount: 0,
+                capacity: 7,
+                length: 3,
+            },
+            data: *b"foo\0\0\0\0\0",
+        }
+    }
+
+    /// The node address is four bytes into aligned storage so its raw
+    /// +0x14 COW-string word remains eight-byte aligned on the host.
+    #[repr(C, align(8))]
+    struct NodeStorage([u8; 0x30]);
+
+    unsafe fn node_value_slot(storage: *mut NodeStorage) -> *mut *mut u8 {
+        unsafe { ptr::addr_of_mut!((*storage).0).cast::<u8>().add(4 + NODE_VALUE_OFFSET).cast() }
+    }
+
+    #[repr(align(4))]
+    struct Table([u8; 0x58]);
+
+    #[test]
+    fn named_key_copies_current_value_to_selected_peer() {
+        let (_lock, _restore) = install();
+        let mut table = Table([0; 0x58]);
+        let mut source_node = NodeStorage([0; 0x30]);
+        let mut destination_node = NodeStorage([0; 0x30]);
+        let mut key = fake_string();
+        let mut source = fake_string();
+        unsafe {
+            let table = table.0.as_mut_ptr();
+            let mut key_data = ptr::addr_of_mut!(key.data).cast::<u8>();
+            let source_data = ptr::addr_of_mut!(source.data).cast::<u8>();
+            let source_slot = node_value_slot(ptr::addr_of_mut!(source_node));
+            let destination_slot = node_value_slot(ptr::addr_of_mut!(destination_node));
+            source_slot.write(source_data);
+            destination_slot.write(crate::cxx::string::empty_rep_data());
+            (table.add(CURRENT_TABLE_INDEX_WORD * 4) as *mut u32).write(1);
+            RESULT_NODES.extend_from_slice(&[
+                ptr::addr_of_mut!(source_node.0).cast::<u8>().add(4) as usize,
+                ptr::addr_of_mut!(destination_node.0).cast::<u8>().add(4) as usize,
+            ]);
+
+            string_table_copy_current_to_peer(table, &mut key_data);
+
+            assert_eq!(
+                MAP_CALLS
+                    .iter()
+                    .map(|(map, _)| *map)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                &[table.add(MAP1) as usize, table as usize],
+            );
+            assert_eq!(destination_slot.read(), source_data);
+            crate::cxx::string::cxx_string_release(destination_slot);
+            assert_eq!(source.rep.refcount, 0);
+            assert_eq!(key.rep.refcount, 0);
+        }
+    }
+
+    #[test]
+    fn empty_key_copies_all_current_entries_to_peer() {
+        let (_lock, _restore) = install();
+        let Some(base) = try_map_u32_slab(hints::STRING_TABLE_COPY_CURRENT_TO_PEER, SLAB_SIZE)
+        else {
+            assert!(note_missing_u32_fixture("app/string_table copy current to peer"));
+            return;
+        };
+        unsafe {
+            ptr::write_bytes(base, 0, SLAB_SIZE);
+            let table = base;
+            let header = base.add(HEADER);
+            let node_a = base.add(NODE_A);
+            let node_b = base.add(NODE_B);
+            (table.add(CURRENT_TABLE_INDEX_WORD * 4) as *mut u32).write(1);
+            (table.add(MAP1 + MAP_HEADER_WORD * 4) as *mut u32).write(header as usize as u32);
+            (header.add(8) as *mut u32).write(node_a as usize as u32);
+            NODE_B_ADDRESS = node_b as usize as u32;
+            HEADER_ADDRESS = header as usize as u32;
+
+            let mut empty_key = crate::cxx::string::empty_rep_data();
+            string_table_copy_current_to_peer(table, &mut empty_key);
+
+            assert_eq!(
+                MAP_CALLS.as_slice(),
+                &[
+                    (table as usize, node_a.add(0x10) as usize),
+                    (table as usize, node_b.add(0x10) as usize),
+                ],
+            );
+            assert_eq!(ITERATOR_CALLS.as_slice(), &[node_a as usize as u32, node_b as usize as u32]);
         }
     }
 }

@@ -434,6 +434,9 @@ pub mod hints {
     // fixture for the unsigned-hexadecimal getter; mappings never unmap, so
     // no other user may share this hint.
     pub const STRING_TABLE_PARSE_U32_HEX: usize = 0xcafe_0000;
+    // 0xe600_0000: dedicated to app/string_table's current-to-peer copy
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const STRING_TABLE_COPY_CURRENT_TO_PEER: usize = 0xe600_0000;
     // 0xb300_0000: dedicated to cxx/nested_object_value's raw-u32
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
@@ -724,6 +727,9 @@ pub static VIEW_EVENT_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// Derived view-event handlers use the real membership port through this
 /// seam, so they share this lock with string-table's own tests.
 pub static STRING_TABLE_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes host tests that swap `app::string_table::STRING_TABLE_MAP_OPS`.
+pub static STRING_TABLE_MAP_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that swaps `drivers::timer::TIMER_OPS`.
 /// The timer module and view-timer callers both drive the ported timer

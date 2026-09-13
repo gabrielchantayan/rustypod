@@ -38568,6 +38568,42 @@ functions:
       propagation into the assignment seam. match.py structural report
       differs as expected (exit 1).
 
+  - address: 0x08101dc4
+    ghidra: FUN_08101dc4
+    name: string_table_copy_current_to_peer
+    size: 216
+    sig: "void string_table_copy_current_to_peer(u8 *table, char **key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_083d6f0c: cxx_string_empty
+      FUN_08101bf4: string_table_peer_map
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8d1c: cxx_string_assign
+      FUN_083c4884: string_table_map_operation
+      FUN_083b5cac: string_table_iterator_next
+      FUN_083cf848: iterator_equal
+    notes: >-
+      Raw extent is 0x08101dc4..0x08101e9c: code returns at 0x08101e64
+      and at 0x08101e98, and the next distinct entry opens with
+      push {r4,lr} at 0x08101e9c. Decoding every aligned ARM B/BL word in
+      osos.dec finds 9 direct bl call sites, all unconditional and zero
+      predicated forms: cxx_string_empty once; the peer-map selector
+      0x08101bf4 twice; string_table_fallback_value_slot twice; and
+      cxx_string_assign, map operation 0x083c4884, iterator increment
+      0x083b5cac, and iterator_equal once each. A non-empty key copies its
+      mapped COW string from the current selected map to the other selectable
+      map, while an empty key walks the current map in-order and inserts each
+      node's key/value pair into that peer. The known lookup, assignment,
+      empty, and equality callees are direct Rust ports. The remaining map
+      operation keeps its existing volatile ABI seam; the unported iterator
+      increment gains a matching target-address/host-recorder seam rather
+      than a guessed tree traversal. Host tests cover the selected-peer
+      keyed copy and a two-node empty-key iteration. match.py structural
+      output differs as expected (exit 1).
+
   - address: 0x08101f94
     ghidra: FUN_08101f94
     name: string_table_set_hex
