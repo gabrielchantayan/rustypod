@@ -74313,3 +74313,30 @@ functions:
       the unsafe port has the same successful-allocation precondition. Host
       test covers the exact four-byte tag-2 allocation, vtable store, and
       cached no-allocation path.
+
+  # --- Four-word direct record store ---
+  - address: 0x082486e0
+    ghidra: FUN_082486e0
+    name: store_four_u32s
+    size: 12
+    sig: "u32 *store_four_u32s(u32 *dst, u32 first, u32 second, u32 third, u32 fourth) -> dst"
+    module: util/store_four_u32s
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: first
+      param_3/r2: second
+      param_4/r3: third
+      param_5/[sp]: fourth
+    notes: >-
+      Raw osos.dec proves the 12-byte extent: `ldr ip,[sp]; stm
+      r0,{r1,r2,r3,ip}; bx lr`, and 0x082486ec immediately begins the distinct
+      zero_four_words helper. The fifth C-ABI argument is read from the stack,
+      then all four supplied values are stored in ascending contiguous-word
+      order through the unchecked, aligned destination. r0 remains dst and is
+      the actual return value despite Ghidra's void signature. Decoding every
+      ARM B/BL word finds exactly seven direct callers, all unconditional bl
+      (0x0824c4ec, 0x0824c534, 0x0824c57c, 0x082562f4, 0x08256344,
+      0x08256d14, 0x0829f89c), with zero predicated BL forms and zero direct
+      B tail branches; no aligned raw image word holds this address. No
+      deliberate deviations.
