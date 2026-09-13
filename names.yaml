@@ -14123,6 +14123,32 @@ functions:
       timer_start_after, and timer_restart plus their ops-table paths,
       but retains the stock lazy load/test/allocation/store ordering.
 
+  - address: 0x0810e090
+    ghidra: FUN_0810e090
+    name: view_timer_rearm
+    size: 8
+    sig: "void view_timer_rearm(u8 *view)"
+    module: app/view_timer
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: delay
+      param_1_plus_0x54: saved_delay
+      FUN_0810e02c: view_timer_start_after (ported)
+    notes: >-
+      Exact 8-byte extent verified from raw osos.dec: `ldr r1, [r0, #0x54]`
+      at 0x0810e090 followed by `b 0x0810e02c`; the next sibling begins
+      `cmp r1, #0` at 0x0810e098. A complete ARM B/BL-word scan finds seven
+      direct call sites, all unconditional bl (0x08125dc0, 0x0812612c,
+      0x081590a0, 0x081caaf0, 0x082165c0, 0x08217a44, 0x08229c7c), with no
+      predicated BL or tail B callers. It loads the saved re-arm delay at
+      view+0x54 and tail-branches to the already ported
+      view_timer_start_after(view, delay) at 0x0810e02c. Rust spells the tail
+      branch as a normal call and uses a volatile target-layout field load;
+      no dispatch seam was added. Host test covers an installed timer and
+      u32::MAX saved delay, proving no allocation and that +0x54 reaches the
+      timer programming path.
+
   - address: 0x0810de48
     ghidra: FUN_0810de48
     name: view_event_apply_mapped_staged_flags

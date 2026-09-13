@@ -73,6 +73,30 @@ unsafe fn set_delay(view: *mut u8, value: u32) {
     }
 }
 
+#[inline(always)]
+unsafe fn stored_delay(view: *mut u8) -> u32 {
+    unsafe { addr_of!((*view.cast::<ViewTimerFields>()).delay).read_volatile() }
+}
+
+/// view_timer_rearm — original: `FUN_0810e090` @ 0x0810e090 (8 bytes;
+/// seven unconditional `bl` call sites).
+///
+/// Loads the saved `view.delay` word at +0x54, then transfers control to
+/// [`view_timer_start_after`] with the same view and that delay. The raw ARM
+/// body is `ldr r1, [r0, #0x54]; b 0x0810e02c`; its branch is represented as
+/// a normal Rust call. The direct branch-word scan found no predicated or
+/// tail-branch call sites.
+///
+/// # Safety
+///
+/// `view` must meet [`view_timer_start_after`]'s requirements and be readable
+/// through +0x57.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_timer_rearm(view: *mut u8) {
+    unsafe { view_timer_start_after(view, stored_delay(view)) };
+}
+
 /// view_timer_start_after — original: `FUN_0810e02c` @ 0x0810e02c
 /// (92 bytes; 39 `bl` = 38 unconditional + 1 `bleq`, plus 2 tail `b`
 /// call sites).
@@ -363,6 +387,51 @@ mod tests {
                 addr_of!((*fixture.timer_a).state).read_volatile(),
                 0x1111_1111,
                 "the stale pre-stop timer is not restarted"
+            );
+        }
+    }
+    #[test]
+    fn rearm_loads_the_saved_delay_without_allocating() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _view_lock = VIEW_EVENT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _heap_lock = mock_heap();
+        let Some(fixture) = fixture() else {
+            assert!(note_missing_u32_fixture("app::view_timer"));
+            return;
+        };
+        unsafe {
+            reset_fixture(fixture, core::ptr::null_mut());
+            addr_of_mut!((*fixture.view).timer).write_volatile(fixture.timer_b as u32);
+            addr_of_mut!((*fixture.view).delay).write_volatile(u32::MAX);
+            let _restore = install_recording_ops();
+
+            view_timer_rearm(fixture.view.cast());
+
+            assert_eq!(alloc_log().0, 0, "an installed timer bypasses operator_new");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Stop(fixture.view as usize),
+                    Event::Trace(fixture.timer_b as usize),
+                    Event::Trace(fixture.timer_b as usize),
+                    Event::Trace(fixture.timer_b as usize),
+                    Event::Arm(fixture.timer_b as usize),
+                ],
+                "the saved delay reaches start-after and restart"
+            );
+            assert_eq!(addr_of!((*fixture.view).delay).read_volatile(), u32::MAX);
+            assert_eq!(
+                addr_of!((*fixture.timer_b).period).read_volatile(),
+                u32::MAX,
+                "the +0x54 delay is reloaded rather than supplied by a caller"
+            );
+            assert_eq!(
+                addr_of!((*fixture.timer_b).state).read_volatile(),
+                TIMER_STATE_RUNNING
             );
         }
     }
