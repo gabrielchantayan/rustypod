@@ -2544,6 +2544,44 @@ pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
     (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
 }
 
+/// timespec_subtract — original: `FUN_08262ab8` @ `0x08262ab8`
+/// (96 bytes, binary-verified: 92 bytes of code through `pop
+/// {r3,ip,pc}` at `0x08262b14`, then the `0x3b9aca00` literal at
+/// `0x08262b18`; the next function begins at `0x08262b1c`). Seven
+/// direct, unconditional `bl` call sites; no predicated call forms.
+///
+/// Subtracts the aligned `{ sec, nsec }` pair at `subtrahend` from
+/// `minuend`, writing the result to `out`. It wraps both 32-bit
+/// subtracts, then repeatedly borrows one second while the nanosecond
+/// field is negative, adding the original's 1_000_000_000 literal.
+/// All input words are loaded before either output word, preserving the
+/// original's behavior when `out` aliases an input pair.
+///
+/// Deliberate deviations: named locals replace the stack-resident
+/// temporary pair used by the ADS code; aligned word loads and stores
+/// retain its ABI alignment requirement. `black_box` is a codegen fence
+/// only, preserving the firmware's branch loop instead of LLVM replacing
+/// it with a division.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.timespec_subtract")]
+#[inline(never)]
+pub unsafe extern "C" fn timespec_subtract(
+    out: *mut i32,
+    minuend: *const i32,
+    subtrahend: *const i32,
+) {
+    let mut seconds = minuend.read().wrapping_sub(subtrahend.read());
+    let mut nanoseconds = minuend.add(1).read().wrapping_sub(subtrahend.add(1).read());
+
+    while nanoseconds < 0 {
+        seconds = seconds.wrapping_sub(1);
+        nanoseconds = core::hint::black_box(nanoseconds.wrapping_add(1_000_000_000));
+    }
+
+    out.write(seconds);
+    out.add(1).write(nanoseconds);
+}
+
 /// timespec_is_nonzero — original: `FUN_082a1c5c` @ 0x082a1c5c
 /// (28 bytes per functions.csv, binary-verified against osos.dec:
 /// seven instructions `ldr r1,[r0,#0x0]; cmp r1,#0x0; ldreq
@@ -5853,6 +5891,46 @@ mod tests {
         assert!(nonzero(1, -1), "not a sum test: 1 + -1 == 0 is still nonzero");
         assert!(nonzero(i32::MIN, i32::MIN));
         assert!(nonzero(42, i32::MIN));
+    }
+
+    // ---- timespec_subtract ----
+
+    fn subtract(minuend: [i32; 2], subtrahend: [i32; 2]) -> [i32; 2] {
+        let mut out = [0x5a5a_5a5a; 2];
+        unsafe {
+            timespec_subtract(out.as_mut_ptr(), minuend.as_ptr(), subtrahend.as_ptr());
+        }
+        out
+    }
+
+    #[test]
+    fn timespec_subtract_preserves_fields_without_a_borrow() {
+        assert_eq!(
+            subtract([7, 800_000_000], [3, 500_000_000]),
+            [4, 300_000_000]
+        );
+    }
+
+    #[test]
+    fn timespec_subtract_borrows_until_nanoseconds_are_nonnegative() {
+        assert_eq!(subtract([7, 100], [3, 200]), [3, 999_999_900]);
+        // No validation precedes the assembly's `blt` loop. An invalid
+        // source nsec therefore borrows three times and wraps seconds.
+        assert_eq!(
+            subtract([i32::MIN, i32::MIN], [0, 0]),
+            [i32::MAX - 2, 852_516_352]
+        );
+    }
+
+    #[test]
+    fn timespec_subtract_loads_inputs_before_writing_an_aliased_output() {
+        let mut minuend = [5, 100];
+        let subtrahend = [2, 200];
+        let out = minuend.as_mut_ptr();
+        unsafe {
+            timespec_subtract(out, out.cast_const(), subtrahend.as_ptr());
+        }
+        assert_eq!(minuend, [2, 999_999_900]);
     }
 
     // ---- query_object_destroy_port ----

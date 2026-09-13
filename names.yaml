@@ -55494,6 +55494,43 @@ functions:
       ops-table blx indirection replacing the direct bl and the
       crate's fp frame, the accepted silver_controller profile.
 
+  - address: 0x08262ab8
+    ghidra: FUN_08262ab8
+    name: timespec_subtract
+    size: 96
+    sig: "void timespec_subtract(i32 *out, const i32 *minuend, const i32 *subtrahend)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: minuend
+      param_3/r2: subtrahend
+      local_c: seconds
+      local_8: nanoseconds
+      DAT_08262b18: NANOSECONDS_PER_SECOND (literal 0x3b9aca00 = 1000000000)
+    notes: >-
+      Binary-verified extent: 92 bytes of instructions from 0x08262ab8
+      through "pop {r3,ip,pc}" at 0x08262b14 and the one-word literal
+      pool 0x3b9aca00 at 0x08262b18, giving the requested 96 bytes; the
+      next function begins at 0x08262b1c. Whole-image decoding of every
+      ARM B/BL immediate finds exactly 7 direct unconditional bl callers
+      (0x08195ef0, 0x08195f60, 0x08196214, 0x08196224, 0x081fe57c,
+      0x081fe5cc, and 0x0826274c), 0 predicated call forms, and no call
+      instruction inside this leaf. Algorithm: load both words of the
+      minuend before either result store, subtract sec and nsec with
+      32-bit wrapping arithmetic, then while nsec is negative subtract
+      one from sec and add the 1000000000 literal to nsec; store the
+      normalized pair. This load-before-store order permits out to alias
+      either input pair. Deliberate deviations: named locals replace the
+      original's stack-resident temporary pair; the original's ldm/ldr/str
+      instructions and the port both require ABI-aligned word pointers;
+      `black_box` is a codegen fence only, preserving the branch loop
+      instead of LLVM replacing it with a division. Host tests cover
+      no-borrow subtraction, one and repeated borrows including 32-bit
+      seconds wrapping, and aliased output. match.py structural review
+      differs in LLVM register allocation and frame setup while retaining
+      the subtract and negative-nsec borrow loop.
+
   # --- display: the two-panel singleton table ---
   - address: 0x081d8870
     ghidra: FUN_081d8870
