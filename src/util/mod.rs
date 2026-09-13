@@ -89,6 +89,7 @@ pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod table_transform_fixed_selector;
 pub mod tagged_counter;
+pub mod positive_counter_decrement;
 pub mod tagged_payload_address;
 pub mod tagged_payload_read_signed_field_0x52;
 pub mod tagged_payload_read_signed_field_0x54;
