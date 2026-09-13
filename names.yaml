@@ -78354,6 +78354,35 @@ functions:
       tests use a recording seam. repr(C) named fields keep target-width fields
       distinct without overlapping 64-bit host pointers.
 
+  # --- SQLite scalar-error result wrapper ---
+  - address: 0x08391144
+    ghidra: FUN_08391144
+    name: sqlite3_result_error
+    size: 36
+    sig: "void sqlite3_result_error(sqlite3_context *context, const char *text, int length)"
+    module: sqlite/result_error
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: text
+      param_3/r2: length
+      FUN_0838c158: vdbe_mem_set_str
+    notes: >-
+      Raw osos.dec confirms the exact 36-byte extent 0x08391144..0x08391168:
+      push {r3,lr}; mov r3,#1; str r3,[r0,#0x34]; mvn r3,#0; str r3,[sp];
+      mov r3,#1; add r0,r0,#8; bl 0x0838c158; pop {r12,pc}. The separately
+      linked sibling begins at 0x08391168. Decoding every ARM B/BL-immediate
+      word finds exactly six direct inbound calls, all unconditional BL at
+      0x082b5584, 0x082b55a4, 0x082c617c, 0x082d7f38, 0x082d8130, and
+      0x0837cab8; there are no predicated BL forms. This is SQLite 3.5's
+      sqlite3_result_error: it sets sqlite3_context.isError at +0x34, then
+      unconditionally forwards the caller's text and length to the already
+      ported vdbe_mem_set_str at the embedded Mem +0x08 with SQLITE_UTF8 (1)
+      and SQLITE_TRANSIENT (-1). It neither validates a NULL context/text nor
+      propagates the callee's result. Host coverage proves error marking plus
+      negative-length terminated copying and explicit embedded-NUL length
+      forwarding. Deliberate deviations: none.
+
   # --- SQLite UTF-8 scalar-result wrapper ---
   - address: 0x08391220
     ghidra: FUN_08391220
