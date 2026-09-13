@@ -56903,6 +56903,43 @@ functions:
       cover null rejection, marked depth-first traversal, root/direct/nested
       failure propagation, skipped siblings, and context forwarding.
 
+
+  # --- Shared settings mode setter ---
+  - address: 0x0806b880
+    ghidra: FUN_0806b880
+    name: settings_mode_set
+    size: 136
+    sig: "u32 settings_mode_set(u32 requested_mode)"
+    module: app/settings_mode_set
+    status: ported
+    renames:
+      param_1/r5: requested_mode
+      DAT_0806b908/r6: settings_mode_state
+      bVar1/r8: previous_mode
+      FUN_081533ec: settings_item_get
+      FUN_08153534: settings_item_select
+      piVar4/r4: selected_target
+      r7: callback_mode
+    notes: >-
+      Raw ARM instructions are 0x0806b880..0x0806b907 (136 bytes), followed
+      by the 0x089ca5e0 mode-state literal at 0x0806b908; the next
+      independently entered function begins at 0x0806b90c. The saved active
+      byte is returned unless selector 1 of the lazily initialized settings
+      item is null, in which case the function reloads and returns the live
+      active byte. When the selected target exists and its active byte differs
+      from requested_mode, zero writes 1 at state+8, calls the unrecovered
+      vtable +0x20 target with 0, then calls vtable +0x10 with 0. A nonzero
+      request writes 0 at state+8 and calls only vtable +0x10 with canonical
+      1. Both paths store the low requested byte as the new active byte.
+      Decoding every ARM B/BL word in osos.dec found exactly seven direct BL
+      callers, all unconditional and zero predicated: 0x08067f60, 0x081a59e8,
+      0x081a5c34, 0x081a5f00, 0x081a6200, 0x081a6780, and 0x081a69c4.
+      settings_item_get @ 0x081533ec is already ported; the selector
+      0x08153534 remains retailOS behind a target-only direct pointer and a
+      host override seam. The virtual targets have no recovered identities
+      and are modeled only by their verified vtable offsets. Focused host
+      tests cover zero-mode ordering, nonzero truncation/canonical callback
+      flag, unchanged mode, and a null selector that changes the live byte.
   # --- Current UTC offset applied to seconds timestamp (time/utc_adjust) ---
   - address: 0x0806ba5c
     ghidra: FUN_0806ba5c
