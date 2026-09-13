@@ -33140,6 +33140,36 @@ functions:
       physical copy to the established equal_deref export rather than add
       a redundant dispatch seam.
 
+  - address: 0x083cf9c8
+    ghidra: FUN_083cf9c8
+    name: equal_deref_c9c8_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf9c8: equal_deref_c9c8_copy
+      param_1: a
+      param_2: b
+    notes: >-
+      Raw osos.dec from 0x083cf9c8 through bx lr at 0x083cf9dc is exactly
+      `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1; bx
+      lr`; the separately linked inequality twin begins at 0x083cf9e0,
+      confirming the 24-byte extent. It aligned-loads both u32 operands,
+      compares them, and returns normalized 1 or 0 for equality without a
+      NULL guard. Decoding every ARM B/BL word in osos.dec finds exactly six
+      inbound direct calls: five unconditional plain bl at 0x083ced9c,
+      0x083cf208, 0x083cf224, 0x083cf2a8, and 0x083cf36c, plus one
+      predicated blhi at 0x088a976c; there are no direct B tail calls. The
+      byte-identical established equal_deref @ 0x083cf968 provides the Rust
+      implementation, so this ledger-only alias deliberately adds no
+      redundant dispatch seam; hook 0x083cf9c8 to equal_deref. Its shared
+      host test proves equal values at distinct addresses, unequal values in
+      both orders, zero, all-bits-set, and that iterator-shaped records read
+      only their first word. Deliberate deviation: the predicated caller
+      controls whether it reaches this no-guard leaf; Rust preserves the
+      leaf's unguarded two aligned loads.
+
   - address: 0x083cf848
     ghidra: FUN_083cf848
     name: iterator_equal
