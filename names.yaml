@@ -57584,6 +57584,43 @@ functions:
       the factor-8 immediate, the returned final add register, and all seven
       general-register sequence numbers.
 
+  - address: 0x082407a8
+    ghidra: FUN_082407a8
+    name: cg_emit_lerp_u8_from_immediate
+    size: 88
+    sig: "cg_virtual_reg_t *cg_emit_lerp_u8_from_immediate(void *ctx, cg_block_t *block, U32 start, cg_virtual_reg_t *end, cg_virtual_reg_t *factor)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r6: ctx (forwarded, not dereferenced)
+      param_2/r1/r4: block
+      param_3/r2: start
+      param_4/r3/r7: end
+      param_5/stack0/r8: factor
+      uVar1/r5: start_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_08240738: cg_emit_lerp_u8
+    notes: >-
+      Raw ARM confirms the 88-byte, 22-word extent from
+      `push {r3,r4,r5,r6,r7,r8,r9,lr}` at 0x082407a8 through
+      `pop {r3,r4,r5,r6,r7,r8,r9,pc}` at 0x082407fc. The next function
+      begins with its own `push` at 0x08240800, so Ghidra's extent is
+      exact and there is no literal pool. Decoding every ARM B/BL word in
+      osos.dec finds six direct callers, all unconditional BL (zero
+      predicated, zero tail B): 0x0823e668, 0x0823e690, 0x0823e6b8,
+      0x0823e7fc, 0x0823e824, and 0x0823e84c. All are in
+      FUN_0823dac4. The helper creates one general virtual register from
+      block->proc, emits LDI start_reg,start (opcode 40), then calls
+      cg_emit_lerp_u8(ctx,block,start_reg,end,factor) and returns its
+      result. The port forwards but never dereferences ctx, matching both
+      retail functions. No dispatch seam was added: all three direct
+      callees are already ported. Host coverage proves zero and full-width
+      immediate starts, opaque end and factor registers, the initial LDI,
+      its connection to the interpolation subtraction, exact append order,
+      result forwarding, and sixteen consecutively numbered general
+      registers across two calls.
+
   - address: 0x082408dc
     ghidra: FUN_082408dc
     name: cg_emit_masked_offset_bias

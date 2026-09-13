@@ -430,6 +430,39 @@ pub unsafe extern "C" fn cg_emit_lerp_u8(
     cg_create_inst_binary(block, CG_INST_OPCODE_ADD, result, start, scaled);
     result
 }
+/// cg_emit_lerp_u8_from_immediate — original: `FUN_082407a8` @ 0x082407a8
+/// (88 bytes: 22 instruction words, 0x082407a8-0x082407fc; the next
+/// function begins at 0x08240800 with its own `push`).
+///
+/// Six direct call sites, all unconditional `bl` (no predicated forms or
+/// tail branches), verified by decoding every ARM B/BL word in osos.dec:
+/// 0x0823e668, 0x0823e690, 0x0823e6b8, 0x0823e7fc, 0x0823e824, and
+/// 0x0823e84c. All six sit in `FUN_0823dac4`, which supplies component
+/// interpolation constants.
+///
+/// Materializes `start` as an LDI immediate, then emits
+/// [`cg_emit_lerp_u8`] with that new register, the supplied `end`, and
+/// `factor`; returns the interpolation result.
+///
+/// # Deviations
+///
+/// The leading context is not dereferenced; it is forwarded to
+/// `cg_emit_lerp_u8` exactly as in retailOS, whose implementation also
+/// treats it as dead.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_lerp_u8_from_immediate(
+    ctx: *mut u8,
+    block: *mut CgBlock,
+    start: usize,
+    end: *mut CgVirtualReg,
+    factor: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let start_reg = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, start_reg, start);
+    cg_emit_lerp_u8(ctx, block, start_reg, end, factor)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1099,6 +1132,71 @@ mod tests {
         }
         assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 7);
     }
+    #[test]
+    fn lerp_from_immediate_materializes_full_width_start_before_interpolating() {
+        const END: usize = 0x2222_0000;
+        const FACTOR: usize = 0x3333_0000;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let zero_result = unsafe {
+            cg_emit_lerp_u8_from_immediate(
+                usize::MAX as *mut u8,
+                block,
+                0,
+                END as *mut CgVirtualReg,
+                FACTOR as *mut CgVirtualReg,
+            )
+        };
+        let max_result = unsafe {
+            cg_emit_lerp_u8_from_immediate(
+                1 as *mut u8,
+                block,
+                usize::MAX,
+                END as *mut CgVirtualReg,
+                FACTOR as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut instructions = [core::ptr::null_mut(); 16];
+            for slot in instructions.iter_mut() {
+                assert!(!inst.is_null(), "each call emits an LDI and seven lerp records");
+                *slot = inst;
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert!(inst.is_null(), "the two calls append exactly sixteen records");
+
+            let first_ldi = instructions[0];
+            let first_subtract = instructions[1];
+            assert_eq!(inst_kind(first_ldi), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(first_ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(first_ldi, CG_INST_LOAD_IMMED_VALUE), 0);
+            assert_eq!(field(first_subtract, CG_INST_BINARY_SOURCE0), END);
+            assert_eq!(
+                field(first_subtract, CG_INST_BINARY_SOURCE1),
+                field(first_ldi, CG_INST_LOAD_IMMED_DEST),
+                "the interpolation starts from the materialized constant"
+            );
+            assert_eq!(field(instructions[7], CG_INST_BINARY_DEST), zero_result as usize);
+            assert_eq!(field(instructions[15], CG_INST_BINARY_DEST), max_result as usize);
+
+            let mut immediates = std::vec::Vec::new();
+            for instruction in instructions.iter() {
+                if inst_kind(*instruction) == CG_INST_KIND_LOAD_IMMED as u8 {
+                    immediates.push(field(*instruction, CG_INST_LOAD_IMMED_VALUE));
+                }
+            }
+            assert_eq!(
+                immediates,
+                std::vec![0, 8, usize::MAX, 8],
+                "each start constant precedes its divide-by-255 shift constant"
+            );
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 16);
+    }
+
     #[test]
     fn emits_masked_offset_bias_in_retail_creation_order() {
         const SOURCE: usize = 0x1234_5678;
