@@ -68844,6 +68844,42 @@ functions:
       so the incidental ARM index return is deliberately not exposed. No
       behavioral deviations.
 
+  - address: 0x081979dc
+    ghidra: FUN_081979dc
+    name: scoped_string_id_record_set_construct
+    size: 80
+    sig: "ScopedStringIdRecordSet *scoped_string_id_record_set_construct(ScopedStringIdRecordSet *this)"
+    module: app/scoped_string_id_record_set
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08197a2c: SCOPED_STRING_ID_RECORD_SET_DESCRIPTOR_ADDRESS
+      FUN_082840e8: context_scope_init
+      FUN_08258c58: string_id_record_default_construct
+    notes: >-
+      Raw osos.dec confirms the 80-byte extent: 19 code words from
+      0x081979dc through the return at 0x08197a28, followed by the descriptor
+      literal at 0x08197a2c (= 0x08989b60); the separately linked destructor
+      begins at 0x08197a30. Whole-image ARM B/BL-immediate decoding found
+      seven direct calls, all unconditional BL and no predicated forms or tail
+      B: 0x08177d3c, 0x08177d44, 0x0817a3a8, 0x0817da40, 0x08218eb0,
+      0x082197bc, and 0x08219aac. This is the default constructor of the
+      0x6c-byte structural aggregate destroyed by
+      scoped_string_id_record_set_destroy (0x08197a30): store descriptor at
+      +0x00, call the ported context_scope_init (0x082840e8) with its +0x04
+      member, NULL subject and zero flag, default-construct five ported
+      StringIdRecords (0x08258c58) at +0x18/+0x28/+0x38/+0x48/+0x58, then
+      write zero at +0x68. Its pointer-chained r0 arithmetic is represented
+      through named members so the source behavior remains correct on a
+      64-bit host where pointer fields widen; the descriptor is modeled by the
+      existing static rather than its ROM address. The context scope stores
+      only its flag byte at +0x10, leaving its +0x11..+0x13 padding untouched;
+      the host test begins with dirty raw storage and proves that detail. No
+      replaceable dispatch seam was introduced because both direct callees are
+      existing Rust ports. match.py review is expected to differ in host-layout
+      addressing while retaining descriptor, scope, five constructor calls,
+      and final zero-store structure.
+
   - address: 0x08197a30
     ghidra: FUN_08197a30
     name: scoped_string_id_record_set_destroy
