@@ -41919,6 +41919,34 @@ functions:
       and unguarded full-width inputs. match.py is structurally expected to
       differ because Rust calls the dispatcher seam rather than tail-loading
       PC from the veneer literal.
+
+  - address: 0x08037f10
+    ghidra: thunk_EXT_FUN_22003e1c
+    name: iram_timer_free_veneer
+    size: 8
+    sig: "void iram_timer_free_veneer(void *timer)"
+    module: heap/timer_free_gateway
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003e1c: iram_timer_free_veneer
+      EXT_FUN_22003e1c: timer_free_gateway
+      DAT_08037f14: iram_timer_free_target
+    notes: >-
+      Raw osos.dec proves this Ghidra 4-byte function is an 8-byte ADS literal
+      veneer: e51ff004 (ldr pc,[pc,#-4]) at 0x08037f10, followed by target
+      word 0x22003e1c at 0x08037f14; the next veneer begins at 0x08037f18.
+      The relocator at 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+      0x22000000, so the target is the IRAM mirror of the already ported
+      timer_free_gateway at 0x08003e1c. Decoding every ARM B/BL word finds
+      exactly seven direct calls, all unconditional bl at 0x080845b4,
+      0x08084c30, 0x080e1854, 0x082d9664, 0x08393588, 0x083935b8, and
+      0x08393878; no predicated call or tail branch reaches it. No raw aligned
+      word holds the thunk address, so it has no observed virtual dispatch.
+      The retail veneer tail-loads PC with r0 unchanged. The port volatile-loads
+      the existing body and calls it, preserving behavior while keeping this
+      distinct exported call target; host tests prove the null no-dispatch and
+      non-null selector-0x11 delegation cases. match.py structural difference
+      is expected for the Rust indirect call frame.
   - address: 0x08037f58
     ghidra: thunk_EXT_FUN_220060e0
     name: lazy_singleton_106dc_acquire

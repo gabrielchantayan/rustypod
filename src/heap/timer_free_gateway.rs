@@ -43,6 +43,37 @@ pub unsafe extern "C" fn timer_free_gateway(timer: *mut u8) {
     gateway_dispatch()(request_words);
 }
 
+/// iram_timer_free_veneer — original: `thunk_EXT_FUN_22003e1c` @
+/// `0x08037f10` (8 bytes: `ldr pc,[pc,#-4]` / `0xe51ff004`, followed by the
+/// `0x22003e1c` target literal; Ghidra's 4-byte extent excludes that word).
+///
+/// Raw `osos.dec` decoding proves the following veneer begins at `0x08037f18`.
+/// The relocator at `0x080046e0` copies `0xaed8` bytes from `0x08000000` to
+/// `0x22000000`, so the target is the IRAM mirror of
+/// [`timer_free_gateway`] @ `0x08003e1c`. Decoding every ARM B/BL word finds
+/// exactly seven direct calls, all unconditional `bl` at `0x080845b4`,
+/// `0x08084c30`, `0x080e1854`, `0x082d9664`, `0x08393588`, `0x083935b8`, and
+/// `0x08393878`; there are no predicated direct calls, tail branches, or raw
+/// word references to the thunk.
+///
+/// The original tail-loads PC, preserving the opaque timer argument unchanged.
+/// This port volatile-loads the already ported body and calls it instead;
+/// that extra call/return is the deliberate code-generation deviation needed
+/// to keep this exported veneer as a distinct target.
+///
+/// # Safety
+/// Same as [`timer_free_gateway`]: `timer` is an opaque RTXC timer handle.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_timer_free_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_timer_free_veneer(timer: *mut u8) {
+    let body = core::ptr::read_volatile(
+        &(timer_free_gateway as unsafe extern "C" fn(*mut u8)),
+    );
+    body(timer);
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -100,6 +131,21 @@ mod tests {
         unsafe {
             timer_free_gateway(timer);
             assert_eq!(addr_of!(CALLS).read(), 1, "delegates exactly once");
+            assert_eq!(addr_of!(SELECTOR).read(), 0x11);
+            assert_eq!(addr_of!(TIMER).read(), timer as usize as u32);
+        }
+        restore(guard);
+    }
+    #[test]
+    fn iram_veneer_preserves_timer_free_null_and_dispatch_behavior() {
+        let guard = install_recorder();
+        let timer = 0x2468_ace0usize as *mut u8;
+        unsafe {
+            iram_timer_free_veneer(core::ptr::null_mut());
+            assert_eq!(addr_of!(CALLS).read(), 0, "null remains a no-op");
+
+            iram_timer_free_veneer(timer);
+            assert_eq!(addr_of!(CALLS).read(), 1, "non-null delegates once");
             assert_eq!(addr_of!(SELECTOR).read(), 0x11);
             assert_eq!(addr_of!(TIMER).read(), timer as usize as u32);
         }
