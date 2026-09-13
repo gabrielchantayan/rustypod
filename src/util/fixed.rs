@@ -93,6 +93,26 @@ pub extern "C" fn fixed16_det2(a: i32, b: i32, c: i32, d: i32) -> i32 {
     let bc = (((b as i64) * (c as i64)) >> 16) as i32;
     ad.wrapping_sub(bc)
 }
+/// det2_i64 — original: `FUN_08261168` @ 0x08261168 (40 bytes).
+///
+/// Computes the signed, widened two-by-two determinant `a*d - b*c`. The
+/// original issues `smull` for each product, then `subs`/`sbc` subtract the
+/// low and high halves as one 64-bit result. The mathematical result of two
+/// signed i32 products always fits in i64, so Rust's signed i64 arithmetic
+/// is bit-identical to that two-register subtraction.
+///
+/// Raw `osos.dec` establishes the exact extent 0x08261168..0x0826118c; the
+/// `push {r4-r11,lr}` at 0x08261190 begins a separately linked sibling.
+/// Decoding every ARM B/BL-immediate word finds six direct inbound calls, all
+/// unconditional and unpredicated `bl`: 0x08241e0c, 0x08241e30, 0x08241ef4,
+/// 0x08241f18, 0x08241ff4, and 0x08242028. No deliberate Rust deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.det2_i64")]
+pub extern "C" fn det2_i64(a: i32, b: i32, c: i32, d: i32) -> i64 {
+    (a as i64) * (d as i64) - (b as i64) * (c as i64)
+}
+
 
 /// fixed16_dot3 — original: `FUN_082a014c` @ 0x082a014c (64 bytes).
 ///
@@ -610,6 +630,30 @@ mod tests {
             }
         }
         assert_ne!(fixed16_det2(1, -1, 1, 1), (((1i64 * 1) - (-1i64 * 1)) >> 16) as i32);
+    }
+
+    /// The unscaled determinant returns both `smull` halves, unlike
+    /// fixed16_det2 which discards each product's low 16 bits first.
+    #[test]
+    fn det2_i64_matches_exact_widened_arm_products() {
+        fn reference(a: i32, b: i32, c: i32, d: i32) -> i64 {
+            ((a as i128) * (d as i128) - (b as i128) * (c as i128)) as i64
+        }
+
+        let values = [i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX - 1, i32::MAX];
+        for &a in &values {
+            for &b in &values {
+                for &c in &values {
+                    for &d in &values {
+                        assert_eq!(det2_i64(a, b, c, d), reference(a, b, c, d),
+                                   "a={a:#x} b={b:#x} c={c:#x} d={d:#x}");
+                    }
+                }
+            }
+        }
+
+        assert_eq!(det2_i64(3, 2, 5, 7), 11);
+        assert_eq!(det2_i64(i32::MAX, 0, 0, i32::MAX), (i32::MAX as i64).pow(2));
     }
     /// The three products and both additions are sequenced exactly as the
     /// original, including signed fixed-point truncation and u32-style sum

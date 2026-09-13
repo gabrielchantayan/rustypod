@@ -81038,3 +81038,30 @@ functions:
       0x081b26c8, 0x081b271c, and 0x081b2770; no predicated BL form or
       direct tail branch targets it. Ghidra declares void, but the raw r0
       preservation is represented by the Rust return type.
+
+
+  # --- Signed widened two-by-two determinant ---
+  - address: 0x08261168
+    ghidra: FUN_08261168
+    name: det2_i64
+    size: 40
+    sig: "i64 det2_i64(i32 a, i32 b, i32 c, i32 d)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      param_3/r2: c
+      param_4/r3: d
+      r0:r1 return: determinant
+    notes: >-
+      Raw osos.dec establishes the 40-byte body at 0x08261168..0x0826118c:
+      it smull-multiplies a*d and c*b, then subtracts their low and high
+      halves with subs/sbc to return the exact signed 64-bit determinant
+      a*d - b*c. The next separately linked function begins at 0x08261190.
+      Full-image decoding of every ARM B/BL-immediate word finds six direct
+      inbound calls, all unconditional unpredicated bl at 0x08241e0c,
+      0x08241e30, 0x08241ef4, 0x08241f18, 0x08241ff4, and 0x08242028;
+      there are no predicated BL forms or direct B tail calls. No deviations.
+      Host tests cover orientation, cancellation, and the signed i32 extrema
+      against an independent i128 arithmetic model.
