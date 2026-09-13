@@ -64917,6 +64917,42 @@ functions:
       the non-NULL store, exact preservation of every other field, and the
       no-dereference NULL-child path.
 
+  - address: 0x0820c338
+    ghidra: FUN_0820c338
+    name: double_buffer_get
+    size: 104
+    sig: "u8 *double_buffer_get(void)"
+    module: app/double_buffer
+    status: ported
+    renames:
+      DAT_0820c390: double_buffer_state (ready byte 0x08a09d2c, guard word +4)
+      DAT_0820c394: double_buffer (fixed state 0x08adc768)
+      DAT_0820c398: __dso_handle (0x089ca09c)
+      DAT_0820c39c: invalid_double_buffer_destructor_word (0x08201778)
+      FUN_0820c5dc: double_buffer_constructor (unported DOUBLE_BUFFER_CTOR seam)
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes a 104-byte extent: 22 instructions at
+      0x0820c338..0x0820c390 followed by four literal-pool words through
+      0x0820c3a0; the separately linked next function begins at 0x0820c3a0,
+      correcting Ghidra's code-only 88-byte size. ADS function-local-static
+      accessor for a fixed 0x40-byte double-buffer state: guard bit 0 clear
+      calls cxa_guard_acquire, then constructor 0x0820c5dc, cxa_atexit with
+      its returned pointer, and cxa_guard_release; it then sets the adjacent
+      ready byte only if clear and reloads/returns the fixed object literal.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly seven direct
+      inbound call sites, all unconditional bl (0x081677d8, 0x08197284,
+      0x081973bc, 0x081af954, 0x081af99c, 0x081af9dc, 0x081afaec), with zero
+      predicated bl forms and zero tail b forms; no aligned DATA word contains
+      this address. cxa_guard_acquire/release and cxa_atexit are direct ports.
+      The constructor remains the new DOUBLE_BUFFER_CTOR seam: device builds
+      call its verified raw entry while host tests install a model. The handler
+      word 0x08201778 is an interior instruction sequence (it immediately
+      reads r1+0xc and uses live r6/r8/sp), not a function entry; its registered
+      Rust handler is deliberately a no-op.
+
   - address: 0x0814d28c
     ghidra: FUN_0814d28c
     name: mov_atom_node_set_child_a_if_present
