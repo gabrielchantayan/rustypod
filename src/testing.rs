@@ -374,6 +374,10 @@ pub mod hints {
     // 0xd100_0000: dedicated to ui/operation_destroy's raw-u32 operation
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const UI_OPERATION_DESTROY: usize = 0xd100_0000;
+    // 0xd200_0000: dedicated to app/event_list's raw-u32 event-tree
+    // destructor fixture; fixture mappings never unmap, so no other user
+    // may share this hint.
+    pub const EVENT_LIST_TREE_DESTRUCT: usize = 0xd200_0000;
     // 0x2f00_0000: dedicated to ui/plst_next's raw-u32 element and
     // chain-node fixture; mappings never unmap, so no other user may
     // share this hint.

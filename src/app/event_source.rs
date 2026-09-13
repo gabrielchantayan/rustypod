@@ -292,15 +292,13 @@ pub unsafe extern "C" fn event_source_construct(
     source
 }
 
-/// Sub-object teardowns the destructor calls through. Like the
-/// construction table above, each is a distinct unported firmware routine
-/// and each pointer-returning one returns its own `this`.
+/// Sub-object teardowns the destructor calls through. The event-tree
+/// destructor is now ported; the remaining entries are distinct unported
+/// firmware routines and each pointer-returning one returns its own `this`.
 #[derive(Clone, Copy)]
 pub struct EventSourceDestructOps {
-    /// Original 0x082a7fd8: destroys the event tree at +0x38. Its body is
-    /// instruction-for-instruction the same tree teardown this function
-    /// inlines for the child collection, but bound to the other node
-    /// allocator family (0x083c1c3c / 0x083c1648).
+    /// Original 0x082a7fd8: destroys the event tree at +0x38 through the
+    /// ported `event_list_tree_destruct`.
     pub destroy_event_list: unsafe extern "C" fn(*mut u8) -> *mut u8,
     /// Original 0x083ba534: the child collection's range erase,
     /// `erase(result, tree, first, last)`. `result` is the four-byte
@@ -317,12 +315,6 @@ pub struct EventSourceDestructOps {
     pub destroy_declaration_vector: unsafe extern "C" fn(*mut u8) -> *mut u8,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_destroy_event_list(tree: *mut u8) -> *mut u8 {
-    let destroy: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        unsafe { core::mem::transmute(0x082a_7fd8usize) };
-    unsafe { destroy(tree) }
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_erase_child_range(
@@ -358,10 +350,6 @@ unsafe extern "C" fn firmware_destroy_declaration_vector(vector: *mut u8) -> *mu
 /// by returning `this`: every one of them frees storage, and a silent
 /// no-op would let a test claim a teardown happened that did not. Tests
 /// install recording replacements; anything else is a bug worth a panic.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_destroy_event_list(_tree: *mut u8) -> *mut u8 {
-    panic!("event_source_destruct requires event-tree teardown 0x082a7fd8")
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_erase_child_range(
@@ -390,7 +378,7 @@ unsafe extern "C" fn missing_destroy_declaration_vector(_vector: *mut u8) -> *mu
 /// Active sub-object teardowns for [`event_source_destruct`].
 #[cfg(target_os = "none")]
 pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDestructOps {
-    destroy_event_list: firmware_destroy_event_list,
+    destroy_event_list: crate::app::event_list::event_list_tree_destruct,
     erase_child_range: firmware_erase_child_range,
     recycle_child_node: firmware_recycle_child_node,
     destroy_declaration_vector: firmware_destroy_declaration_vector,
@@ -398,7 +386,7 @@ pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDe
 
 #[cfg(not(target_os = "none"))]
 pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDestructOps {
-    destroy_event_list: missing_destroy_event_list,
+    destroy_event_list: crate::app::event_list::event_list_tree_destruct,
     erase_child_range: missing_erase_child_range,
     recycle_child_node: missing_recycle_child_node,
     destroy_declaration_vector: missing_destroy_declaration_vector,
@@ -824,7 +812,7 @@ mod destruct_tests {
         unsafe {
             core::ptr::addr_of_mut!(EVENT_SOURCE_DESTRUCT_OPS).write_volatile(
                 EventSourceDestructOps {
-                    destroy_event_list: missing_destroy_event_list,
+                    destroy_event_list: crate::app::event_list::event_list_tree_destruct,
                     erase_child_range: missing_erase_child_range,
                     recycle_child_node: missing_recycle_child_node,
                     destroy_declaration_vector: missing_destroy_declaration_vector,

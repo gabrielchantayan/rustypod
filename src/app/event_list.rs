@@ -242,6 +242,9 @@ pub struct EventListOps {
     /// Original 0x083c1f10: post-order tree destruction, including the
     /// allocator/value cleanup performed by 0x083c1648 for each node.
     pub destroy_subtree: unsafe extern "C" fn(tree: *mut u8, root: u32),
+    /// Original 0x083c1648: restores and recycles the valueless header node
+    /// after a complete tree erase.
+    pub recycle_header_node: unsafe extern "C" fn(tree: *mut u8, node: *mut u8, destroy_value: u32),
     /// Original 0x083c1e9c: recursively allocates and clones a source
     /// subtree below `destination_header`, returning its new root.
     pub copy_subtree: unsafe extern "C" fn(tree: *mut u8, source_root: u32, destination_header: u32) -> u32,
@@ -255,6 +258,13 @@ unsafe extern "C" fn missing_erase_node(out: *mut u32, _tree: *mut u8, _node: *m
 }
 unsafe extern "C" fn missing_destroy_subtree(_tree: *mut u8, _root: u32) {}
 unsafe extern "C" fn missing_copy_subtree(_tree: *mut u8, _source_root: u32, _destination_header: u32) -> u32 { 0 }
+unsafe extern "C" fn missing_recycle_header_node(
+    _tree: *mut u8,
+    _node: *mut u8,
+    _destroy_value: u32,
+) {
+    panic!("event_list_tree_destruct requires header recycle 0x083c1648")
+}
 
 /// Wired defaults for [`EVENT_LIST_OPS`].
 pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
@@ -262,6 +272,7 @@ pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
     erase_node: missing_erase_node,
     destroy_subtree: missing_destroy_subtree,
     copy_subtree: missing_copy_subtree,
+    recycle_header_node: missing_recycle_header_node,
 };
 
 /// Active model for the erase port's lower runtime dependencies. Tests
@@ -282,6 +293,68 @@ unsafe fn erase_node_op() -> unsafe extern "C" fn(*mut u32, *mut u8, *mut u32) {
 unsafe fn destroy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.destroy_subtree)) }
 }
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe fn advance_iterator(iterator: *mut u32) {
+    let advance: unsafe extern "C" fn(*mut u32) =
+        unsafe { core::mem::transmute(0x083b_5bb0usize) };
+    unsafe { advance(iterator) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn advance_iterator(iterator: *mut u32) {
+    unsafe { (advance_iterator_op())(iterator) }
+}
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe fn erase_node(out: *mut u32, tree: *mut u8, node: *mut u32) {
+    let erase: unsafe extern "C" fn(*mut u32, *mut u8, *mut u32) =
+        unsafe { core::mem::transmute(0x083c_17d8usize) };
+    unsafe { erase(out, tree, node) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn erase_node(out: *mut u32, tree: *mut u8, node: *mut u32) {
+    unsafe { (erase_node_op())(out, tree, node) }
+}
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe fn destroy_subtree(tree: *mut u8, root: u32) {
+    let destroy: unsafe extern "C" fn(*mut u8, u32) =
+        unsafe { core::mem::transmute(0x083c_1f10usize) };
+    unsafe { destroy(tree, root) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn destroy_subtree(tree: *mut u8, root: u32) {
+    unsafe { (destroy_subtree_op())(tree, root) }
+}
+
+#[inline(always)]
+unsafe fn recycle_header_node_op() -> unsafe extern "C" fn(*mut u8, *mut u8, u32) {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.recycle_header_node)) }
+}
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe extern "C" fn recycle_header_node(tree: *mut u8, node: *mut u8, destroy_value: u32) {
+    let recycle: unsafe extern "C" fn(*mut u8, *mut u8, u32) =
+        unsafe { core::mem::transmute(0x083c_1648usize) };
+    unsafe { recycle(tree, node, destroy_value) }
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe extern "C" fn recycle_header_node(tree: *mut u8, node: *mut u8, destroy_value: u32) {
+    unsafe { (recycle_header_node_op())(tree, node, destroy_value) }
+}
+
 
 #[inline(always)]
 unsafe fn copy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32, u32) -> u32 {
@@ -429,7 +502,7 @@ pub unsafe extern "C" fn event_list_tree_erase_range(
         let root = unsafe {
             word((header as usize as *const u8).add(TREE_ROOT_OFFSET))
         };
-        unsafe { (destroy_subtree_op())(tree, root) };
+        unsafe { destroy_subtree(tree, root) };
         unsafe {
             let header_ptr = header as usize as *mut u8;
             header_ptr.add(TREE_LEFTMOST_OFFSET).cast::<u32>().write(header);
@@ -446,12 +519,92 @@ pub unsafe extern "C" fn event_list_tree_erase_range(
 
     while unsafe { first.read() } != unsafe { last.read() } {
         let mut node = unsafe { first.read() };
-        unsafe { (advance_iterator_op())(first) };
+        unsafe { advance_iterator(first) };
         let mut successor = 0;
-        unsafe { (erase_node_op())(&mut successor, tree, &mut node) };
+        unsafe { erase_node(&mut successor, tree, &mut node) };
         unsafe { out.write(successor) };
     }
     out
+}
+
+/// event_list_tree_destruct — original: `FUN_082a7fd8` @ 0x082a7fd8
+/// (136 bytes).
+///
+/// Raw ARM establishes the exact body as 0x082a7fd8..0x082a805c; the next
+/// allocator-family sibling starts at 0x082a8060. Decoding every ARM
+/// branch-with-link word in `osos.dec` finds six direct, unconditional `bl`
+/// call sites (0x08134f20, 0x081cdcb4, 0x081e0360, 0x081e03fc, 0x081e0498,
+/// and 0x081e0c58), with no predicated forms.
+///
+/// If the tree owns a header, erase its complete `[begin(), end())` range,
+/// recycle the re-read header sentinel through 0x083c1648, then drain its
+/// embedded node-pool chunks. Each 12-byte record is unlinked before its
+/// block and then the record itself are released through `cxx_array_dealloc`.
+/// A null header skips all three stages. Returns the input tree.
+///
+/// The port preserves the post-erase header reload. It deliberately uses one
+/// read to form the initial `end()` iterator rather than the ARM's redundant
+/// second read, and models the unported header-recycle runtime through
+/// `EVENT_LIST_OPS` only on hosts; ARM calls 0x083c1648 directly.
+///
+/// # Safety
+///
+/// `tree` must name a writable, target-layout libstdc++ tree. Its header,
+/// nodes, and chunk records must remain valid through their respective
+/// teardown calls.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.event_list_tree_destruct")]
+#[inline(never)]
+pub unsafe extern "C" fn event_list_tree_destruct(tree: *mut u8) -> *mut u8 {
+    unsafe {
+        event_list_tree_destruct_with(
+            tree,
+            event_list_tree_erase_range,
+            recycle_header_node,
+            crate::heap::veneers::cxx_array_dealloc,
+        )
+    }
+}
+
+unsafe fn event_list_tree_destruct_with(
+    tree: *mut u8,
+    erase_range: unsafe extern "C" fn(*mut u32, *mut u8, *mut u32, *mut u32) -> *mut u32,
+    recycle_node: unsafe extern "C" fn(*mut u8, *mut u8, u32),
+    dealloc: unsafe extern "C" fn(*mut u8, usize, usize),
+) -> *mut u8 {
+    let mut header = unsafe { word(tree.add(TREE_HEADER_OFFSET)) };
+    if header != 0 {
+        let mut begin = unsafe {
+            word((header as usize as *const u8).add(TREE_LEFTMOST_OFFSET))
+        };
+        let mut erased = core::mem::MaybeUninit::<u32>::uninit();
+        unsafe { erase_range(erased.as_mut_ptr(), tree, &mut begin, &mut header) };
+
+        let sentinel = unsafe { word(tree.add(TREE_HEADER_OFFSET)) };
+        unsafe { recycle_node(tree, sentinel as usize as *mut u8, 0) };
+
+        loop {
+            let chunk = unsafe { word(tree.add(TREE_POOL_CHUNKS_OFFSET)) };
+            if chunk == 0 {
+                break;
+            }
+            let chunk = chunk as usize as *mut u8;
+            let next = unsafe { word(chunk.add(CHUNK_NEXT_OFFSET)) };
+            unsafe {
+                tree
+                    .add(TREE_POOL_CHUNKS_OFFSET)
+                    .cast::<u32>()
+                    .write(next);
+                dealloc(
+                    word(chunk.add(CHUNK_BLOCK_OFFSET)) as usize as *mut u8,
+                    word(chunk.add(CHUNK_CAPACITY_OFFSET)) as usize,
+                    0,
+                );
+                dealloc(chunk, 1, 0);
+            }
+        }
+    }
+    tree
 }
 
 /// event_list_tree_assign — original: `FUN_083c2130` @ 0x083c2130
@@ -579,6 +732,8 @@ mod tests {
         Erase { tree: usize, node: u32 },
         Destroy { tree: usize, root: u32 },
         Copy { tree: usize, source_root: u32, destination_header: u32 },
+        Recycle { tree: usize, node: u32 },
+        Dealloc { ptr: usize, count: usize, elem: usize },
     }
 
     unsafe extern "C" fn recording_registry() -> *mut u8 {
@@ -651,6 +806,30 @@ mod tests {
             });
         }
     }
+    unsafe extern "C" fn recording_recycle_header_node(
+        tree: *mut u8,
+        node: *mut u8,
+        destroy_value: u32,
+    ) {
+        assert_eq!(destroy_value, 0);
+        unsafe {
+            EVENTS.push(Call::Recycle {
+                tree: tree as usize,
+                node: node as usize as u32,
+            });
+        }
+    }
+
+    unsafe extern "C" fn recording_dealloc(ptr: *mut u8, count: usize, elem: usize) {
+        unsafe {
+            EVENTS.push(Call::Dealloc {
+                ptr: ptr as usize,
+                count,
+                elem,
+            });
+        }
+    }
+
 
     unsafe extern "C" fn recording_copy_subtree(
         tree: *mut u8,
@@ -702,6 +881,7 @@ mod tests {
                 erase_node: recording_erase_node,
                 destroy_subtree: recording_destroy_subtree,
                 copy_subtree: recording_copy_subtree,
+                recycle_header_node: recording_recycle_header_node,
             };
         }
         Bench { _lock: lock }
@@ -718,11 +898,19 @@ mod tests {
     static SLAB: LazyLock<Option<usize>> =
         LazyLock::new(|| try_map_u32_slab(SLAB_HINT, SLAB_LEN).map(|p| p as usize));
 
+    const TREE_DESTRUCT_SLAB_HINT: usize = crate::testing::hints::EVENT_LIST_TREE_DESTRUCT;
+    static TREE_DESTRUCT_SLAB: LazyLock<Option<usize>> =
+        LazyLock::new(|| try_map_u32_slab(TREE_DESTRUCT_SLAB_HINT, SLAB_LEN).map(|p| p as usize));
+
     /// One low mapping serves every target-pointer fixture. The lock held by
     /// each test makes reuse safe.
     fn try_slab() -> Option<*mut u8> {
         (*SLAB).map(|p| p as *mut u8)
     }
+    fn try_tree_destruct_slab() -> Option<*mut u8> {
+        (*TREE_DESTRUCT_SLAB).map(|p| p as *mut u8)
+    }
+
 
     unsafe fn put_word(at: *mut u8, value: u32) {
         unsafe { at.cast::<u32>().write(value) };
@@ -1062,6 +1250,100 @@ mod tests {
         );
         assert_eq!(unsafe { word(destination.add(TREE_NODE_COUNT_OFFSET)) }, 0);
     }
+    #[test]
+    fn tree_destruct_erases_recycles_and_unlinks_every_pool_chunk() {
+        let _bench = bench();
+        let Some(tree) = try_tree_destruct_slab() else {
+            assert!(note_missing_u32_fixture("app::event_list tree destructor"));
+            return;
+        };
+        unsafe {
+            core::ptr::write_bytes(tree, 0, SLAB_LEN);
+            let header = tree.add(0x100);
+            let node = tree.add(0x180);
+            let first_chunk = tree.add(0x200);
+            let second_chunk = tree.add(0x220);
+            let first_block = tree.add(0x300);
+            let second_block = tree.add(0x340);
+
+            put_word(tree.add(TREE_HEADER_OFFSET), header as usize as u32);
+            put_word(tree.add(TREE_NODE_COUNT_OFFSET), 1);
+            put_word(tree.add(TREE_POOL_CHUNKS_OFFSET), first_chunk as usize as u32);
+            put_word(header.add(TREE_ROOT_OFFSET), node as usize as u32);
+            put_word(header.add(TREE_LEFTMOST_OFFSET), node as usize as u32);
+            put_word(header.add(TREE_RIGHTMOST_OFFSET), node as usize as u32);
+            put_word(first_chunk.add(CHUNK_NEXT_OFFSET), second_chunk as usize as u32);
+            put_word(first_chunk.add(CHUNK_CAPACITY_OFFSET), 3);
+            put_word(first_chunk.add(CHUNK_BLOCK_OFFSET), first_block as usize as u32);
+            put_word(second_chunk.add(CHUNK_NEXT_OFFSET), 0);
+            put_word(second_chunk.add(CHUNK_CAPACITY_OFFSET), 5);
+            put_word(second_chunk.add(CHUNK_BLOCK_OFFSET), second_block as usize as u32);
+
+            assert_eq!(
+                event_list_tree_destruct_with(
+                    tree,
+                    event_list_tree_erase_range,
+                    recording_recycle_header_node,
+                    recording_dealloc,
+                ),
+                tree,
+            );
+            assert_eq!(word(tree.add(TREE_POOL_CHUNKS_OFFSET)), 0);
+            assert_eq!(word(tree.add(TREE_NODE_COUNT_OFFSET)), 0);
+            assert_eq!(word(header.add(TREE_ROOT_OFFSET)), 0);
+            assert_eq!(word(header.add(TREE_LEFTMOST_OFFSET)), header as usize as u32);
+            assert_eq!(word(header.add(TREE_RIGHTMOST_OFFSET)), header as usize as u32);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Call::Destroy {
+                        tree: tree as usize,
+                        root: node as usize as u32,
+                    },
+                    Call::Recycle {
+                        tree: tree as usize,
+                        node: header as usize as u32,
+                    },
+                    Call::Dealloc {
+                        ptr: first_block as usize,
+                        count: 3,
+                        elem: 0,
+                    },
+                    Call::Dealloc {
+                        ptr: first_chunk as usize,
+                        count: 1,
+                        elem: 0,
+                    },
+                    Call::Dealloc {
+                        ptr: second_block as usize,
+                        count: 5,
+                        elem: 0,
+                    },
+                    Call::Dealloc {
+                        ptr: second_chunk as usize,
+                        count: 1,
+                        elem: 0,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn tree_destruct_skips_pool_when_the_header_is_null() {
+        let _bench = bench();
+        let Some(tree) = try_tree_destruct_slab() else {
+            assert!(note_missing_u32_fixture("app::event_list tree destructor"));
+            return;
+        };
+        unsafe {
+            core::ptr::write_bytes(tree, 0, SLAB_LEN);
+            put_word(tree.add(TREE_POOL_CHUNKS_OFFSET), 0xdead_beef);
+            assert_eq!(event_list_tree_destruct(tree), tree);
+        }
+        assert!(events().is_empty());
+    }
+
     #[test]
     fn erase_empty_range_returns_header_without_runtime_calls() {
         let _bench = bench();
