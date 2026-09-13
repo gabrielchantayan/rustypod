@@ -17,15 +17,16 @@
 //! `MemPage + 0x04` is zero. The final state is VALID exactly when the
 //! current page's `nCell` halfword at `+0x14` is nonzero.
 //!
-//! Deliberate deviations: `sqlite3BtreeClearCursor` @ 0x082c3528,
-//! `getAndInitPage` @ 0x082d05d0, and `moveToChild` @ 0x082d99d0 remain
-//! unported and use one volatile dispatch boundary. Existing ports
-//! `release_via_field_0x48` @ 0x0836761c and `load_be32` @ 0x0837a158 are
+//! Deliberate deviations: `sqlite3BtreeClearCursor` @ 0x082c3528 and
+//! `getAndInitPage` @ 0x082d05d0 remain unported and use one volatile
+//! dispatch boundary. Existing ports `release_via_field_0x48` @ 0x0836761c,
+//! `load_be32` @ 0x0837a158, and `btree_move_to_child` @ 0x082d99d0 are
 //! direct calls. Cursor, Btree, and MemPage pointer fields remain target
 //! `u32` words so their ARM offsets do not widen on a 64-bit host.
 
 use crate::cxx::release::release_via_field_0x48;
 use crate::util::beload::load_be32;
+use crate::sqlite::move_to_child::btree_move_to_child;
 
 const CUR_BTREE: usize = 0x00;
 const CUR_ROOT_PAGE: usize = 0x14;
@@ -49,14 +50,12 @@ const CURSOR_FAULT: u8 = 3;
 
 pub type ClearCursorFn = unsafe extern "C" fn(cursor: *mut u8);
 pub type GetAndInitPageFn = unsafe extern "C" fn(shared: u32, page_number: u32, page_out: *mut u32, flags: u32) -> i32;
-pub type MoveToChildFn = unsafe extern "C" fn(cursor: *mut u8, child_page: u32) -> i32;
 
-/// Unported calls reached by [`btree_move_to_root`].
+/// Unported calls reached by the b-tree cursor movement ports.
 #[derive(Clone, Copy)]
 pub struct BtreeMoveToRootOps {
     pub clear_cursor: ClearCursorFn,
     pub get_and_init_page: GetAndInitPageFn,
-    pub move_to_child: MoveToChildFn,
 }
 
 #[cfg(target_os = "none")]
@@ -71,11 +70,6 @@ unsafe extern "C" fn retail_get_and_init_page(shared: u32, page_number: u32, pag
     get_and_init_page(shared, page_number, page_out, flags)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_move_to_child(cursor: *mut u8, child_page: u32) -> i32 {
-    let move_to_child: MoveToChildFn = core::mem::transmute(0x082d_99d0usize);
-    move_to_child(cursor, child_page)
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_clear_cursor(_cursor: *mut u8) {
@@ -87,31 +81,30 @@ unsafe extern "C" fn missing_get_and_init_page(_shared: u32, _page_number: u32, 
     panic!("btree_move_to_root requires getAndInitPage @ 0x082d05d0")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_move_to_child(_cursor: *mut u8, _child_page: u32) -> i32 {
-    panic!("btree_move_to_root requires moveToChild @ 0x082d99d0")
-}
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = BtreeMoveToRootOps {
     clear_cursor: retail_clear_cursor,
     get_and_init_page: retail_get_and_init_page,
-    move_to_child: retail_move_to_child,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = BtreeMoveToRootOps {
     clear_cursor: missing_clear_cursor,
     get_and_init_page: missing_get_and_init_page,
-    move_to_child: missing_move_to_child,
 };
 
-/// Active dispatch boundary for the three still-stock cursor services.
+/// Active dispatch boundary for the two still-stock b-tree cursor services.
 pub static mut BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = DEFAULT_BTREE_MOVE_TO_ROOT_OPS;
 
 #[inline(always)]
 unsafe fn move_to_root_ops() -> BtreeMoveToRootOps {
     core::ptr::read_volatile(core::ptr::addr_of!(BTREE_MOVE_TO_ROOT_OPS))
+}
+
+#[inline(always)]
+pub(crate) unsafe fn get_and_init_page(shared: u32, page_number: u32, page_out: *mut u32, flags: u32) -> i32 {
+    (move_to_root_ops().get_and_init_page)(shared, page_number, page_out, flags)
 }
 
 #[inline(always)]
@@ -128,6 +121,9 @@ unsafe fn read_u32(base: *const u8, offset: usize) -> u32 {
 unsafe fn write_u32(base: *mut u8, offset: usize, value: u32) {
     base.add(offset).cast::<u32>().write(value.to_le());
 }
+
+#[cfg(test)]
+pub(crate) static BTREE_MOVE_TO_ROOT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// `btree_move_to_root` — original: `FUN_082d9b00` @ 0x082d9b00 (248 bytes;
 /// six verified inbound direct call sites: three `bl`, two caller-gated
@@ -153,7 +149,7 @@ pub unsafe extern "C" fn btree_move_to_root(cursor: *mut u8) -> i32 {
         let btree = read_u32(cursor, CUR_BTREE) as usize as *const u8;
         let shared = read_u32(btree, BTREE_SHARED);
         let mut replacement = page as usize as u32;
-        let rc = (move_to_root_ops().get_and_init_page)(shared, root_page, &mut replacement, 0);
+        let rc = get_and_init_page(shared, root_page, &mut replacement, 0);
         if rc != 0 {
             cursor.add(CUR_E_STATE).write(CURSOR_INVALID);
             return rc;
@@ -174,7 +170,7 @@ pub unsafe extern "C" fn btree_move_to_root(cursor: *mut u8) -> i32 {
         let header_offset = page.add(PAGE_HEADER_OFFSET).read() as usize;
         let child_page = load_be32(data.add(header_offset + 8));
         cursor.add(CUR_E_STATE).write(CURSOR_VALID);
-        rc = (move_to_root_ops().move_to_child)(cursor, child_page);
+        rc = btree_move_to_child(cursor, child_page);
     }
 
     let current_page = read_u32(cursor, CUR_PAGE) as usize as *const u8;
@@ -209,12 +205,11 @@ mod tests {
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::BTREE_MOVE_TO_ROOT, SLAB_LEN).map(|pointer| pointer as usize)
     });
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static MOCK: Mutex<Mock> = Mutex::new(Mock {
         events: Vec::new(),
         get_result: 0,
         replacement: 0,
-        child_result: 0,
+        child_request: 0,
         child_replacement: 0,
     });
 
@@ -222,14 +217,13 @@ mod tests {
     enum Event {
         Clear,
         Get { shared: u32, page: u32, flags: u32 },
-        Child(u32),
     }
 
     struct Mock {
         events: Vec<Event>,
         get_result: i32,
         replacement: u32,
-        child_result: i32,
+        child_request: u32,
         child_replacement: u32,
     }
 
@@ -241,18 +235,13 @@ mod tests {
         let mut mock = MOCK.lock();
         mock.events.push(Event::Get { shared, page, flags });
         if mock.get_result == 0 {
-            out.write(mock.replacement);
+            out.write(if page == mock.child_request {
+                mock.child_replacement
+            } else {
+                mock.replacement
+            });
         }
         mock.get_result
-    }
-
-    unsafe extern "C" fn mock_move_to_child(cursor: *mut u8, child: u32) -> i32 {
-        let mut mock = MOCK.lock();
-        mock.events.push(Event::Child(child));
-        if mock.child_replacement != 0 {
-            write_u32(cursor, CUR_PAGE, mock.child_replacement);
-        }
-        mock.child_result
     }
 
     struct OpsGuard(BtreeMoveToRootOps);
@@ -268,7 +257,6 @@ mod tests {
         BTREE_MOVE_TO_ROOT_OPS = BtreeMoveToRootOps {
             clear_cursor: mock_clear_cursor,
             get_and_init_page: mock_get_and_init_page,
-            move_to_child: mock_move_to_child,
         };
         OpsGuard(old)
     }
@@ -302,7 +290,7 @@ mod tests {
         mock.events.clear();
         mock.get_result = 0;
         mock.replacement = 0;
-        mock.child_result = 0;
+        mock.child_request = 0;
         mock.child_replacement = 0;
     }
 
@@ -312,7 +300,7 @@ mod tests {
 
     #[test]
     fn fault_cursor_returns_saved_error_without_observing_state() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = BTREE_MOVE_TO_ROOT_TEST_LOCK.lock();
         let _ops = unsafe { install_mocks() };
         reset_mock();
         let Some(cursor) = (unsafe { fixture() }) else {
@@ -332,7 +320,7 @@ mod tests {
 
     #[test]
     fn seek_required_cursor_is_cleared_then_revalidated_on_its_root() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = BTREE_MOVE_TO_ROOT_TEST_LOCK.lock();
         let _ops = unsafe { install_mocks() };
         reset_mock();
         let Some(cursor) = (unsafe { fixture() }) else {
@@ -360,7 +348,7 @@ mod tests {
 
     #[test]
     fn page_acquisition_failure_invalidates_without_clearing_cell_cache() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = BTREE_MOVE_TO_ROOT_TEST_LOCK.lock();
         let _ops = unsafe { install_mocks() };
         reset_mock();
         let Some(cursor) = (unsafe { fixture() }) else {
@@ -385,13 +373,14 @@ mod tests {
 
     #[test]
     fn empty_root_acquisition_descends_to_its_big_endian_first_child() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = BTREE_MOVE_TO_ROOT_TEST_LOCK.lock();
         let _ops = unsafe { install_mocks() };
         reset_mock();
         let Some(cursor) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture(module_path!()));
             return;
         };
+        let expected_child_flags = unsafe { cursor.add(NEW_PAGE) as usize as u32 };
         unsafe {
             let old = page(cursor, OLD_PAGE, 4, 1, 1);
             let new = page(cursor, NEW_PAGE, 9, 0, 0);
@@ -403,6 +392,7 @@ mod tests {
             write_u32(cursor, CUR_PAGE, old as usize as u32);
             MOCK.lock().replacement = new as usize as u32;
             MOCK.lock().child_replacement = child as usize as u32;
+            MOCK.lock().child_request = 0x1234_5678;
             assert_eq!(btree_move_to_root(cursor), 0);
             assert_eq!(read_u32(cursor, CUR_PAGE), child as usize as u32);
             assert_eq!(cursor.add(CUR_E_STATE).read(), CURSOR_VALID);
@@ -411,14 +401,14 @@ mod tests {
             events(),
             vec![
                 Event::Get { shared: SHARED, page: 9, flags: 0 },
-                Event::Child(0x1234_5678),
+                Event::Get { shared: SHARED, page: 0x1234_5678, flags: expected_child_flags },
             ]
         );
     }
 
     #[test]
     fn empty_root_with_set_raw_flag_stays_invalid_without_descending() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = BTREE_MOVE_TO_ROOT_TEST_LOCK.lock();
         let _ops = unsafe { install_mocks() };
         reset_mock();
         let Some(cursor) = (unsafe { fixture() }) else {
