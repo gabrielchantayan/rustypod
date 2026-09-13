@@ -612,6 +612,40 @@ pub unsafe extern "C" fn path_facade_slot_5c_from_cstr(
     string_object_destroy_veneer(storage);
     status
 }
+/// path_facade_slot_5c_for_entry — original: `FUN_082dcfac` @
+/// **0x082dcfac** (52 instruction bytes plus its literal-pool word; **6
+/// direct `bl` call sites**, all unconditional: 0x082db858, 0x0832405c,
+/// 0x08329a5c, 0x08329ca0, 0x0832a1a4, and 0x0832a724).
+///
+/// Rejects a null opaque entry with `0xffffffce`; otherwise, takes the
+/// sign-extended byte at entry + 0x0c as the facade base hint and passes the
+/// inline path at entry + 0x04 to [`path_facade_slot_5c`]. The facade status
+/// 0 and 7 are successful and map to 0; every other status maps to the
+/// literal-pool failure code `0xffff5b82`. Raw decoding shows no predicated
+/// calls, tail branches, or aligned raw-word references to this entry.
+///
+/// # Deliberate deviations
+///
+/// `entry` remains an opaque byte pointer: callers establish only this
+/// embedded-path layout, not an owning record type. The already ported
+/// [`path_facade_slot_5c`] is called directly, so this adds no dispatch seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.path_facade_slot_5c_for_entry")]
+pub unsafe extern "C" fn path_facade_slot_5c_for_entry(entry: *const u8) -> u32 {
+    if entry.is_null() {
+        return 0xffff_ffce;
+    }
+
+    let base_hint = *entry.add(12) as i8 as i32 as u32;
+    let status = path_facade_slot_5c(entry.add(4), base_hint);
+    if status == 0 || status == 7 {
+        0
+    } else {
+        0xffff_5b82
+    }
+}
+
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1180,4 +1214,40 @@ pub(crate) mod tests {
             assert_eq!((*lock).hold_count, 0, "the paired destructor releases it");
         }
     }
+    #[test]
+    fn entry_wrapper_rejects_null_forwards_signed_hint_and_normalizes_status() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            assert_eq!(
+                path_facade_slot_5c_for_entry(core::ptr::null()),
+                0xffff_ffce,
+                "the cmp/mvneq early return must not enter the facade chain"
+            );
+            assert_eq!(EVENT_COUNT, 0, "a null entry does not construct a guard");
+
+            let mut entry = [0u8; 16];
+            entry[4..12].copy_from_slice(b"entry\0\0\0");
+            entry[12] = 0x80;
+            let entry_ptr = entry.as_ptr();
+            for (slot_status, expected) in [(0, 0), (7, 0), (8, 0xffff_5b82)] {
+                install_recording();
+                (*core::ptr::addr_of_mut!(MOCK_VTABLE)).slots[FACADE_PATH_SLOT_5C_INDEX] =
+                    recording_path_facade_slot_5c as usize;
+                QUERY_RESULT = slot_status;
+
+                assert_eq!(path_facade_slot_5c_for_entry(entry_ptr), expected);
+                assert_eq!(EVENT_COUNT, 4, "the normal path is scoped through the facade");
+                assert_eq!(
+                    &EVENTS[..4],
+                    &[EVENT_GUARD_CTOR, EVENT_FETCH, EVENT_QUERY, EVENT_GUARD_DTOR]
+                );
+                assert_eq!(QUERY_PATH, entry_ptr.add(4), "r0 advances to the inline path");
+                assert_eq!(CTOR_HINT, 0xffff_ff80, "ldrsb sign-extends entry + 0x0c");
+                assert_eq!(FETCH_SELECTOR, FACADE_SELECTOR);
+            }
+        }
+    }
+
 }

@@ -70626,6 +70626,39 @@ functions:
       graph remains a retailOS boundary. Host tests prove base-hint forwarding,
       slot selection, path identity, guard ordering, and verbatim statuses.
 
+  # --- Opaque entry facade-slot +0x5c status normalizer ---
+  - address: 0x082dcfac
+    ghidra: FUN_082dcfac
+    name: path_facade_slot_5c_for_entry
+    size: 52
+    sig: "u32 path_facade_slot_5c_for_entry(const u8 *entry)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: entry (opaque record with inline path at +0x04)
+      "*(i8 *)(entry + 0x0c)/r1": base_hint
+      FUN_08084d58: path_facade_slot_5c
+      DAT_082dcfe0: PATH_ENTRY_FACADE_FAILURE (0xffff5b82)
+    notes: >-
+      Raw osos.dec decoding confirms Ghidra's 52 instruction-byte extent
+      (0x082dcfac..0x082dcfdc), followed by its literal-pool word
+      0xffff5b82 at 0x082dcfe0; the distinct next function starts at
+      0x082dcfe4. A NULL entry returns 0xffffffce before any callee. For a
+      non-NULL entry, ldrsb reads +0x0c into r1, add r0,#4 selects its
+      inline path, and bl calls the already ported path_facade_slot_5c.
+      Statuses 0 and 7 return 0; every other status returns the literal
+      0xffff5b82. Decoding every ARM B/BL immediate finds exactly six
+      inbound direct calls, all unconditional bl at 0x082db858, 0x0832405c,
+      0x08329a5c, 0x08329ca0, 0x0832a1a4, and 0x0832a724; no predicated
+      BL, tail B, or aligned raw word reference targets the entry. The
+      opaque byte pointer faithfully models only the proven embedded-path
+      layout; no record type or new dispatch seam is invented. Host tests
+      cover NULL early return, signed hint forwarding, inline-path forwarding,
+      the scoped facade call order, and status normalization for 0, 7, and 8.
+      match.py (--size 52 with this worktree's archive) confirms the NULL
+      early return, signed-byte/path argument preparation, direct callee
+      branch, and 0/7-versus-other result selection; LLVM uses a different
+      conditional sequence and omits the stock r4 save.
   - address: 0x0806ea5c
     ghidra: FUN_0806ea5c
     name: x509v3_add_value
