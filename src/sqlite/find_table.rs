@@ -169,6 +169,10 @@ pub const DEFAULT_FIND_TABLE_HOOKS: FindTableHooks = FindTableHooks {
 /// Host tests replace the slots to observe the exact arguments.
 pub static mut FIND_TABLE_HOOKS: FindTableHooks = DEFAULT_FIND_TABLE_HOOKS;
 
+/// Serializes test users of the process-global table-finder hook table.
+#[cfg(test)]
+pub(crate) static FIND_TABLE_HOOKS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Reads the `str_icmp` slot. Volatile so LLVM cannot constant-fold
 /// the load to the default (the house pattern — `sqlite/blob_to_hex.rs`).
 #[inline(always)]
@@ -261,12 +265,9 @@ mod tests {
     use std::sync::LazyLock;
     use std::vec::Vec;
 
-    /// Serializes the tests that swap [`FIND_TABLE_HOOKS`] (the
-    /// static is private to this module, so a module-local lock
-    /// suffices — the `hash_find` precedent).
-    static HOOK_LOCK: Mutex<()> = Mutex::new(());
-    /// Serializes the fixture slab users; [`HOOK_LOCK`] is always
-    /// taken first, never the reverse.
+    use super::FIND_TABLE_HOOKS_TEST_LOCK;
+    /// Serializes the fixture slab users; [`FIND_TABLE_HOOKS_TEST_LOCK`] is
+    /// always taken first, never the reverse.
     static SLAB_LOCK: Mutex<()> = Mutex::new(());
 
     /// Number of `Db` entries in the fixture array.
@@ -321,7 +322,7 @@ mod tests {
 
     /// Installs the mock hooks and clears the call logs; the returned
     /// guard restores the defaults on drop. Caller must hold
-    /// [`HOOK_LOCK`].
+    /// [`FIND_TABLE_HOOKS_TEST_LOCK`].
     struct HookGuard;
     impl Drop for HookGuard {
         fn drop(&mut self) {
@@ -412,7 +413,7 @@ mod tests {
         if try_slab().is_none() {
             return; // host cannot map below 4 GiB; skip
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             build_fixture(2);
@@ -440,7 +441,7 @@ mod tests {
         if try_slab().is_none() {
             return;
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             build_fixture(4);
@@ -470,7 +471,7 @@ mod tests {
         if try_slab().is_none() {
             return;
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             build_fixture(4);
@@ -494,7 +495,7 @@ mod tests {
         if try_slab().is_none() {
             return;
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             build_fixture(2);
@@ -512,7 +513,7 @@ mod tests {
         if try_slab().is_none() {
             return;
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             // The real ported str_icmp @ 0x08384f14 as the filter, the
@@ -535,7 +536,7 @@ mod tests {
         if try_slab().is_none() {
             return;
         }
-        let _hook_guard = HOOK_LOCK.lock();
+        let _hook_guard = FIND_TABLE_HOOKS_TEST_LOCK.lock();
         let _hooks = with_mock_hooks();
         unsafe {
             for n_db in [0, -1] {

@@ -29641,6 +29641,43 @@ functions:
       inline-item loop, seven cleanup calls, and final free; LLVM adds its
       frame and emits blx through the two unported-release seams.
 
+  - address: 0x08384570
+    ghidra: FUN_08384570
+    name: src_list_lookup
+    size: 104
+    sig: "Table *src_list_lookup(Parse *parse, SrcList *source_list)"
+    module: sqlite/src_list_lookup
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: source_list
+      r4: item
+      r5: table
+      r6: index
+      "item+0x00": z_database
+      "item+0x04": z_name
+      "item+0x0c": p_table
+      "table+0x1c": n_ref
+    notes: >-
+      SQLite 3.5.x's sqlite3SrcListLookup. Raw ARM fixes the true 104-byte
+      code extent at 0x08384570..0x083845d8; Ghidra's reported 108 bytes
+      swallows the separately linked next function beginning at 0x083845dc.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly six
+      direct inbound call sites (0x0836fddc, 0x0836fe54, 0x08373d90,
+      0x08374b2c, 0x0837ba7c, and 0x08385430), all unconditional plain BL;
+      there are zero predicated BL forms and no tail branches. It starts with
+      a NULL result, then re-reads signed SrcList.n_src (+0x00) for a
+      pre-tested bgt loop over inline 0x30-byte items beginning at +0x08.
+      Each pass calls ported sqlite_locate_table @ 0x0837d250 as
+      (parse, 0, item->zName, item->zDatabase), releases the previous
+      item->pTab through the established volatile table-release seam at
+      0x0837521c, stores the result, and increments its nRef word +0x1c
+      only when non-NULL. The last resolved Table pointer is returned.
+      The shared seam preserves the unported release target without
+      inventing a duplicate stub. Host tests cover a nonpositive count and
+      a resolved table's release/store/reference-wrap/return sequence using
+      a unique low-address target-pointer fixture.
+
   - address: 0x08383c88
     ghidra: FUN_08383c88
     name: select_delete
