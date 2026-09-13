@@ -82692,3 +82692,33 @@ functions:
       call rather than the stock direct bl, but preserves its seven argument
       ABI and call order. Host tests record ordinary and signed-extreme
       coordinate words, opaque handle bits, indexes, and the two 180 extents.
+
+
+  # --- Display surface configuration from image bounds ---
+  - address: 0x08144994
+    ghidra: FUN_08144994
+    name: surface_config_from_image
+    size: 156
+    sig: "void *surface_config_from_image(void *context, const u8 *image, u8 *config) -> context"
+    module: drivers/surface_config_from_image
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: image
+      param_3/r2: config
+      iVar2/r1: width
+      iVar4/r1: height
+    notes: >-
+      Raw osos.dec confirms the 156-byte extent from 0x08144994 through the
+      pop at 0x08144a2c; the distinct next function begins at 0x08144a30.
+      It has no outgoing calls. A complete aligned ARM B/BL decode finds six
+      direct inbound calls, all unconditional bl at 0x081444f8, 0x08145cec,
+      0x08146040, 0x08146274, 0x08146534, and 0x0814658c; there are no
+      predicated forms or direct B tail entries. It writes config byte +1 = 3,
+      selects byte +0 = 2 for source format halfword 0x0565, byte +0 = 3 for
+      0x1888, or byte +0 = 0 with config byte +0x30 = 0x80 otherwise. It
+      copies the wrapping spans source[+0xa0] - source[+0x98] and
+      source[+0xa4] - source[+0x9c] into the size and buffer-size pairs,
+      clears origin/source-offset fields and byte +0x2d, and preserves r0.
+      The format-2 path clears only the low halfword at config +0x30; the
+      other source/config bytes are deliberately untouched. No deviations.
