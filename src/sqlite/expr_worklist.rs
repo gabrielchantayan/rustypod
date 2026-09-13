@@ -57,10 +57,13 @@ pub struct ExprWorkItem {
     pub parent_index: i16,
     /// +0x06..+0x0b: filled by the expression compiler.
     pub _before_control: [u8; 6],
-    /// +0x0c: caller's control byte.
+    /// +0x0c: caller's control byte. Bit 2 marks work items released from
+    /// the deferred-expression chain.
     pub control: u8,
-    /// +0x0d..+0x0f: filled by the expression compiler.
-    pub _after_control: [u8; 3],
+    /// +0x0d: outstanding children that retain this work item.
+    pub pending_child_count: u8,
+    /// +0x0e..+0x0f: filled by the expression compiler.
+    pub _after_pending_child_count: [u8; 2],
     /// +0x10: back-pointer to the containing worklist.
     pub owner: u32,
     /// +0x14..+0x27: filled by the expression compiler.
@@ -72,7 +75,72 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(ExprWorklist, count)];
 const _: [u8; 0x10] = [0; core::mem::offset_of!(ExprWorklist, entries)];
 const _: [u8; EXPR_WORK_ITEM_SIZE] = [0; core::mem::size_of::<ExprWorkItem>()];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(ExprWorkItem, control)];
+const _: [u8; 0x0d] = [0; core::mem::offset_of!(ExprWorkItem, pending_child_count)];
 const _: [u8; 0x10] = [0; core::mem::offset_of!(ExprWorkItem, owner)];
+
+/// Context field inspected by [`expr_worklist_release_completed_parents`].
+#[repr(C)]
+pub struct ExprWorklistReleaseContext {
+    /// +0x00..+0x0b: owned by the expression compiler.
+    pub _before_deferred_release_guard: [u8; 12],
+    /// +0x0c: when nonzero, only expression headers with bit 0 at +0x02 may
+    /// enter the deferred-release chain.
+    pub deferred_release_guard: u32,
+}
+
+const _: [u8; 0x10] = [0; core::mem::size_of::<ExprWorklistReleaseContext>()];
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(ExprWorklistReleaseContext, deferred_release_guard)];
+
+/// `expr_worklist_release_completed_parents` — original `FUN_082c635c` @
+/// `0x082c635c` (104 bytes, `0x082c635c..0x082c63c4`; the distinct following
+/// function begins at `0x082c63c8`; Ghidra's 108-byte extent is four bytes
+/// long).
+///
+/// Raw ARM scan finds six direct call sites, all unconditional `bl`
+/// instructions (`0x082c3ed8`, `0x0838e2e4`, `0x0838e49c`, `0x0838e52c`,
+/// `0x0838ea04`, and `0x0838ea10`); no predicated call or external tail
+/// branch targets it. It marks an eligible work item as released (control bit
+/// 2), follows its signed parent index through the owner's 40-byte item
+/// table, and decrements each parent's pending-child byte. A zero decrement
+/// continues upward; a nonzero result, negative parent index, prior release,
+/// or context/expression gate stops the walk. Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `context` and every traversed item must point to the target-width,
+/// word-aligned storage required by the retail routine. `expression` and
+/// `owner` are intentionally not NULL-guarded after their stock guards pass.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn expr_worklist_release_completed_parents(
+    context: *const ExprWorklistReleaseContext,
+    mut item: *mut ExprWorkItem,
+) {
+    while !item.is_null() {
+        if (*item).control & 4 != 0 {
+            return;
+        }
+        if (*context).deferred_release_guard != 0 {
+            let expression_flags = (((*item).expression as usize as *const u8).add(2).cast::<u16>()).read();
+            if expression_flags & 1 == 0 {
+                return;
+            }
+        }
+
+        (*item).control |= 4;
+        let parent_index = (*item).parent_index;
+        if parent_index < 0 {
+            return;
+        }
+
+        let worklist = (*item).owner as usize as *const ExprWorklist;
+        item = ((*worklist).entries as usize as *mut ExprWorkItem).add(parent_index as usize);
+        (*item).pending_child_count = (*item).pending_child_count.wrapping_sub(1);
+        if (*item).pending_child_count != 0 {
+            return;
+        }
+    }
+}
 
 /// `expr_worklist_push` — original `FUN_083987f8` @ `0x083987f8` (196 bytes;
 /// 6 direct `bl` call sites, all unconditional).
@@ -141,6 +209,7 @@ mod tests {
     use crate::sqlite::mem::{ALLOC_DENY_SCHEDULE, DEFAULT_ALLOC_PRESSURE_OPS, ALLOC_PRESSURE_OPS};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
+    use parking_lot::Mutex;
     use std::sync::LazyLock;
 
     const SLAB_LEN: usize = 0x3000;
@@ -154,6 +223,18 @@ mod tests {
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::SQLITE_EXPR_WORKLIST, SLAB_LEN).map(|pointer| pointer as usize)
     });
+    const RELEASE_SLAB_LEN: usize = 0x1000;
+    const RELEASE_CONTEXT_OFFSET: usize = 0x000;
+    const RELEASE_EXPRESSION_OFFSET: usize = 0x100;
+    const RELEASE_ROOT_OFFSET: usize = 0x200;
+    const RELEASE_ENTRIES_OFFSET: usize = 0x400;
+    const RELEASE_WORKLIST_OFFSET: usize = 0x800;
+
+    static RELEASE_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::SQLITE_EXPR_WORKLIST_RELEASE_PARENTS, RELEASE_SLAB_LEN)
+            .map(|pointer| pointer as usize)
+    });
+    static RELEASE_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
     static mut ARENA_BASE: *mut u8 = ptr::null_mut();
     static mut ARENA_FAIL: bool = false;
     static mut FREED_RAW: *mut u8 = ptr::null_mut();
@@ -237,6 +318,36 @@ mod tests {
         worklist
     }
 
+    unsafe fn release_fixture(
+        base: *mut u8,
+    ) -> (
+        *mut ExprWorklistReleaseContext,
+        *mut u8,
+        *mut ExprWorkItem,
+        *mut ExprWorkItem,
+    ) {
+        ptr::write_bytes(base, 0, RELEASE_SLAB_LEN);
+        let context = base.add(RELEASE_CONTEXT_OFFSET).cast::<ExprWorklistReleaseContext>();
+        let expression = base.add(RELEASE_EXPRESSION_OFFSET);
+        let root = base.add(RELEASE_ROOT_OFFSET).cast::<ExprWorkItem>();
+        let entries = base.add(RELEASE_ENTRIES_OFFSET).cast::<ExprWorkItem>();
+        let worklist = base.add(RELEASE_WORKLIST_OFFSET).cast::<ExprWorklist>();
+        worklist.write(ExprWorklist {
+            owner: 0,
+            _reserved: 0,
+            count: 2,
+            capacity: 2,
+            entries: target_pointer(entries.cast()),
+            _inline_padding: 0,
+        });
+        (*root).expression = target_pointer(expression);
+        (*entries.add(1)).expression = target_pointer(expression);
+        (*root).owner = target_pointer(worklist.cast());
+        (*root).parent_index = 1;
+        (*entries.add(1)).parent_index = -1;
+        (context, expression, root, entries)
+    }
+
     #[test]
     fn appends_into_inline_capacity_with_target_width_fields() {
         let Some(base) = *SLAB else {
@@ -309,6 +420,50 @@ mod tests {
             assert_eq!((*worklist).count, 1);
             assert_eq!((*worklist).capacity, 1);
             assert_eq!(FREED_RAW, expression_raw, "control bit 0 destroys the rejected expression");
+        }
+    }
+
+    #[test]
+    fn releases_only_eligible_completed_parent_chains() {
+        unsafe {
+            expr_worklist_release_completed_parents(ptr::null(), ptr::null_mut());
+
+            let _guard = RELEASE_FIXTURE_LOCK.lock();
+            let Some(base) = *RELEASE_SLAB else {
+                assert!(note_missing_u32_fixture("sqlite/expr_worklist release parents"));
+                return;
+            };
+            let (context, expression, root, entries) = release_fixture(base as *mut u8);
+
+            (*root).control = 4;
+            expr_worklist_release_completed_parents(ptr::null(), root);
+            assert_eq!((*root).control, 4, "already released items skip the context");
+
+            (*root).control = 0;
+            (*context).deferred_release_guard = 1;
+            (expression.add(2).cast::<u16>()).write(0);
+            expr_worklist_release_completed_parents(context, root);
+            assert_eq!((*root).control, 0, "guard rejects expression headers without bit 0");
+
+            (expression.add(2).cast::<u16>()).write(1);
+            (*entries.add(1)).pending_child_count = 1;
+            expr_worklist_release_completed_parents(context, root);
+            assert_eq!((*root).control, 4);
+            assert_eq!((*entries.add(1)).pending_child_count, 0);
+            assert_eq!((*entries.add(1)).control, 4, "zero completion reaches the parent");
+
+            let (_context, _expression, root, entries) = release_fixture(base as *mut u8);
+            (*entries.add(1)).pending_child_count = 2;
+            expr_worklist_release_completed_parents(context, root);
+            assert_eq!((*root).control, 4);
+            assert_eq!((*entries.add(1)).pending_child_count, 1);
+            assert_eq!((*entries.add(1)).control, 0, "nonzero completion stops before parent release");
+
+            let (_context, _expression, root, entries) = release_fixture(base as *mut u8);
+            (*entries.add(1)).pending_child_count = 0;
+            expr_worklist_release_completed_parents(context, root);
+            assert_eq!((*entries.add(1)).pending_child_count, u8::MAX);
+            assert_eq!((*entries.add(1)).control, 0, "stock byte decrement wraps instead of propagating");
         }
     }
 }
