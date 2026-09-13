@@ -199,6 +199,32 @@ pub unsafe extern "C" fn inner_set_transient_option(inner: *mut u8, option: u8) 
     inner.add(TRANSIENT_OPTION).write(option);
 }
 
+/// inner_get_transient_option — original: `FUN_08059c60` @ `0x08059c60`
+/// (8 bytes: `ldrb r0,[r0,#0xe3c]; bx lr`).
+///
+/// The true extent is exactly two instructions: the preceding function returns
+/// at `0x08059c48`, and the separately entered next function starts at
+/// `0x08059c68`. Decoding every immediate ARM B/BL in `osos.dec` finds seven
+/// direct, unconditional `bl` callers (`0x0812cb94`, `0x08179aa4`,
+/// `0x0817a278`, `0x0817b3dc`, `0x0817b418`, `0x0817b44c`, and
+/// `0x0829b110`), with no predicated call forms or data-word references.
+///
+/// Reads the inner query object's transient option byte at `+0xe3c`. Query
+/// flow at `FUN_0817a238` saves this byte and restores it through
+/// [`inner_set_transient_option`] around an operation; the option's enum is
+/// not recovered. Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `inner` must address readable storage at `+0xe3c`; as in stock, there is
+/// no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_get_transient_option(inner: *const u8) -> u8 {
+    inner.add(TRANSIENT_OPTION).read()
+}
+
+
 /// inner_clear_cached_results — original: `FUN_08059a98` @ 0x08059a98
 /// (60 bytes; 17 verified `bl` call sites, all unconditional).
 ///
@@ -744,6 +770,21 @@ mod tests {
             u32::from_le_bytes(self.inner[STATE..STATE + 4].try_into().unwrap())
         }
     }
+
+    #[test]
+    fn transient_option_getter_reads_every_byte_without_mutating_inner() {
+        let mut inner = [SENTINEL; INNER_LEN];
+
+        for option in 0u8..=u8::MAX {
+            inner[TRANSIENT_OPTION] = option;
+            let before = inner;
+            let result = unsafe { inner_get_transient_option(inner.as_ptr()) };
+
+            assert_eq!(result, option, "option={option:#04x}");
+            assert_eq!(inner, before, "getter must not mutate inner storage");
+        }
+    }
+
 
     #[test]
     fn query_object_create_allocates_72_bytes_and_forwards_mode() {
