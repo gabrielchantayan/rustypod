@@ -71952,6 +71952,37 @@ functions:
       and memcmp @ 0x08030f64; no new dispatch seam is introduced. Deliberate
       deviations: none.
 
+  # --- C-string ostream insertion wrapper (cxx/ostream_insert_cstr) ---
+  - address: 0x083eace4
+    ghidra: FUN_083eace4
+    name: ostream_insert_cstr
+    size: 80
+    sig: "void *ostream_insert_cstr(void *stream, const char *source)"
+    module: cxx/ostream_insert_cstr
+    status: ported
+    renames:
+      param_1/r0/r4: stream
+      param_2/r1/r5: source
+      r2: source_length
+      "stream+*(vptr-12)+12": width
+      FUN_08392478: strlen
+      FUN_083b5348: ostream_insert_core
+    notes: >-
+      Raw osos.dec confirms the exact 80-byte body from push {r4,r5,r6,lr}
+      at 0x083eace4 through pop {r4,r5,r6,pc} at 0x083ead30; the next
+      separately linked function starts at 0x083ead34. Decoding every ARM
+      B/BL-immediate word finds exactly six inbound calls, all unconditional
+      plain bl at 0x0825c51c, 0x0825c538, 0x0825c548, 0x0825c558,
+      0x0825c574, and 0x0825c5ec; there are no predicated BL forms or
+      direct plain-B tail callers. It calls the ported unguarded strlen
+      @ 0x08392478 on source, passes source, its length, and the current
+      width to unported FUN_083b5348, clears the width of the core-returned
+      stream subobject, and returns the original stream. Deliberate
+      deviation: it reuses ostream_insert_string's existing volatile core
+      bridge rather than adding a second seam; host tests replace that
+      boundary and prove NUL handling, forwarded arguments, and signed
+      vptr adjustment.
+
   # --- COW string ostream insertion wrapper (cxx/ostream_insert_string) ---
   - address: 0x083ead34
     ghidra: FUN_083ead34

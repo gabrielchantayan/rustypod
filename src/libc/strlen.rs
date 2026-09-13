@@ -19,6 +19,7 @@
 /// Length of the NUL-terminated string at `s`. No NULL guard, matching the
 /// original — original @ 0x08392478.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
     let mut p = s;
     let mut len = 0usize;
