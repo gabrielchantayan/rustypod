@@ -12710,6 +12710,44 @@ functions:
       vtables. Ghidra incorrectly declared this pointer-returning body
       void.
 
+  - address: 0x0817f1c0
+    ghidra: FUN_0817f1c0
+    name: resource_arena_set_active
+    size: 204
+    sig: "void resource_arena_set_active(ResourceArenaState *state, u32 active)"
+    module: app/resource/lifecycle
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1: active
+      "state+0x14": lazy_handle
+      "state+0x18": resource_pool
+      "state+0x1c": arena
+      FUN_081818b4: resource_arena_prepare_unported
+      FUN_081bbff0: lazy_handle_acquire_unported
+      FUN_081bc07c: lazy_handle_release_unported
+      DAT_0817f288: resource_arena_extent_word_address
+    notes: >-
+      True raw extent is 204 bytes: fifty instruction words at
+      0x0817f1c0..0x0817f284 and the owned literal word at 0x0817f288;
+      the separately linked next function starts at 0x0817f28c. Complete
+      osos.dec ARM B/BL decode finds six direct, unconditional BL callers
+      (0x0810bf2c, 0x0810d3b0, 0x0810d418, 0x08125688, 0x0817f3ac,
+      0x081b9d8c), no predicated BL forms, and one direct tail B caller
+      (0x0817f3bc). Nonzero active acquires a lazy handle only when its
+      field is -1, then allocates a 0x398-byte heap descriptor over the
+      acquired region. Zero active first calls the unported prepare helper,
+      then destroys/deletes a non-NULL descriptor, releases the reloaded
+      lazy handle, and frees a non-NULL pool allocation when cache index 1
+      is available. Raw code falls through after operator_delete despite
+      Ghidra's non-returning claim. The extent literal points to 0x083e235c,
+      which contains ARM instruction word 0xe5941004 rather than identified
+      data; the target port volatile-reads it without inventing an identity.
+      The three unported direct helpers use fixed firmware entries on ARM and
+      replaceable host operations. Host tests cover activation idempotence,
+      acquire failure, absent deactivation, descriptor cleanup ordering, and
+      no-descriptor cleanup.
+
   - address: 0x0817f6b0
     ghidra: FUN_0817f6b0
     name: app_controller_opaque_item_vector_nonempty
