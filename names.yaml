@@ -37796,6 +37796,32 @@ functions:
       Host tests cover three releases and all writes, NULL releases with an
       empty vector, and the raw signed-division result for a partial span.
 
+  - address: 0x08059820
+    ghidra: FUN_08059820
+    name: inner_clear_selection_cache
+    size: 80
+    sig: "void inner_clear_selection_cache(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw osos.dec decoding at load address 0x08059820 confirms 19 ARM
+      instructions (76 bytes) through `pop {r4,r5,r6,pc}` at 0x08059868,
+      followed by the 0x0000042c literal at 0x0805986c; the next independent
+      function begins at 0x08059870, making the true extent 80 bytes.
+      Decoding every ARM immediate B/BL word finds exactly seven direct call
+      sites, all unconditional bl (0x080665ec, 0x080667a0, 0x080668cc,
+      0x08066a38, 0x08066b68, 0x08068eb8, 0x0813d018); no predicated call
+      enters. A nonzero primary selection-cache pointer at inner+0xe70 is
+      released by free_tag4 then cleared; only that path inspects, releases
+      when nonzero, and clears the secondary +0xe74 word. It always stores
+      -1 at +0x14, clears +0xe78, and clears the u16 at +0x42c. The existing
+      target dispatch seam in object_select_resource_index was removed for a
+      direct Rust call. Deliberate deviation: none. Host tests prove full
+      release and exact writes, plus the NULL-primary case preserving a
+      nonzero secondary allocation.
   - address: 0x08059a98
     ghidra: FUN_08059a98
     name: inner_clear_cached_results
