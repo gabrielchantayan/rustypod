@@ -70876,6 +70876,39 @@ functions:
       structure; LLVM emits the independent stores in descending component
       order after all loads.
 
+  # --- Four-input component pixel average (util/four_component_pixel_average_four) ---
+  - address: 0x0824bdf0
+    ghidra: FUN_0824bdf0
+    name: average_four_component_pixels
+    size: 172
+    sig: "void average_four_component_pixels(u8 *dst, const u8 *first, const u8 *second, const u8 *third, const u8 *fourth)"
+    module: util/four_component_pixel_average_four
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: first
+      param_3/r2: second
+      param_4/r3: third
+      param_5/stack: fourth
+      FUN_0824bf5c: store_four_components (unported trivial store helper)
+    notes: >-
+      Raw ARM confirms Ghidra's 172-byte extent: 0x0824bdf0 begins with
+      push {r3,r4,r5,r6,r7,lr}, the fifth argument is read from sp+24 after
+      that push, and the next separately linked RGB565 expansion function
+      begins at 0x0824be9c. It loads all components from all four inputs before
+      its sole bl 0x0824bf5c, then stores each floor average
+      (first[i] + second[i] + third[i] + fourth[i]) >> 2 through that helper.
+      The ARM's intermediate & 0x3ff is behaviorally redundant because four
+      bytes sum to at most 0x3fc. Full-image decoding of every aligned ARM
+      B/BL immediate finds exactly six direct call sites, all unconditional
+      bl: 0x08250948, 0x08250a1c, 0x08250ae4, 0x08250bb8, 0x08250c88, and
+      0x08250d58. There are zero predicated bl call sites and zero direct
+      plain-B tails. No NULL, alignment, or bounds guard exists. Deliberate
+      deviation: Rust retains every source byte then performs the helper's
+      equivalent four ordered stores directly, avoiding a dispatch seam for
+      the unported 24-byte store helper. Host tests cover floor rounding,
+      every attainable four-byte component sum, and dst aliasing each source.
+
   # --- Fixed fourteen-byte copy helper (util/copy_fourteen_bytes) ---
   - address: 0x082231c0
     ghidra: FUN_082231c0

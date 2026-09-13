@@ -39,6 +39,7 @@ pub mod four_word_record;
 pub mod four_word_sentinel_init;
 pub mod first_entry_payload;
 pub mod four_component_pixel_average;
+pub mod four_component_pixel_average_four;
 pub mod global_state;
 pub mod highest_set_bit;
 pub mod inner_state;
