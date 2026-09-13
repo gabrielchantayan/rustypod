@@ -676,6 +676,103 @@ callback_target_getter:
 "#
 );
 
+/// Instruction word and literal in the r7-context table-dispatch veneer.
+pub const R7_CONTEXT_TABLE_DISPATCH_VENEER_INSN: u32 = 0xe51f_f004;
+pub const R7_CONTEXT_TABLE_DISPATCH_VENEER_TARGET: u32 = 0x081f_f130;
+
+/// ABI of the target reached by [`r7_context_table_dispatch_veneer`].
+///
+/// This is not a normal C entry: the literal lands at `0x081ff130`, two
+/// instructions after `FUN_081ff130`'s prologue saved the incoming `r0` in
+/// callee-saved `r7`. Retail callers consequently supply the required context
+/// in `r7`; the literal veneer itself preserves it and returns the target's
+/// `r0` result.
+pub type R7ContextTableDispatchFn = unsafe extern "C" fn() -> *mut u8;
+
+/// Host/target dispatch boundary for the unported r7-context continuation.
+#[derive(Clone, Copy)]
+pub struct R7ContextTableDispatchOps {
+    pub dispatch: R7ContextTableDispatchFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_r7_context_table_dispatch() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_R7_CONTEXT_TABLE_DISPATCH_OPS: R7ContextTableDispatchOps =
+    R7ContextTableDispatchOps {
+        dispatch: missing_r7_context_table_dispatch,
+    };
+
+/// Host replacement for the literal target, which cannot consume a host
+/// caller's ARM `r7` register.
+#[cfg(not(target_arch = "arm"))]
+pub static mut R7_CONTEXT_TABLE_DISPATCH_OPS: R7ContextTableDispatchOps =
+    DEFAULT_R7_CONTEXT_TABLE_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn r7_context_table_dispatch_target() -> R7ContextTableDispatchFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            R7_CONTEXT_TABLE_DISPATCH_OPS.dispatch
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// r7_context_table_dispatch_veneer — original:
+    /// `thunk_FUN_081ff130` @ 0x08003798 (8 bytes; Ghidra's reported 4-byte
+    /// extent omits the literal word, and the next distinct veneer starts at
+    /// 0x080037a0).
+    ///
+    /// Raw ARM is `ldr pc, [pc, #-4]` followed by `0x081ff130`. It tail-jumps
+    /// into the interior of the function whose real entry is 0x081ff128,
+    /// after `mov r7, r0`; that continuation walks seventeen r7-relative
+    /// table entries, conditionally invokes their callbacks, then returns a
+    /// result pointer in r0. The veneer itself has no algorithm beyond
+    /// preserving every register and LR across that tail transfer.
+    ///
+    /// A complete ARM B/BL decode finds exactly seven direct `bl` call sites
+    /// (0x08005538, 0x08005710, 0x08005730, 0x08005950, 0x080061fc,
+    /// 0x08006570, 0x080065c0), all unconditional; there are no predicated
+    /// forms. This is caller-side context setup, not a NULL guard.
+    ///
+    /// Deliberate deviation: none on ARM. The host seam represents only the
+    /// observable call-and-return edge because x86-64 has no compatible r7
+    /// continuation ABI.
+    pub fn r7_context_table_dispatch_veneer() -> *mut u8;
+}
+
+/// Host implementation of the r7-context table-dispatch veneer.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn r7_context_table_dispatch_veneer() -> *mut u8 {
+    r7_context_table_dispatch_target()()
+}
+
+// `ldr pc` preserves r7 and LR. The literal deliberately enters a continuation
+// rather than a normal function entry, so materializing a Rust function
+// pointer would not reproduce the firmware ABI.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl r7_context_table_dispatch_veneer
+    .type r7_context_table_dispatch_veneer, %function
+r7_context_table_dispatch_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x081ff130
+    .size r7_context_table_dispatch_veneer, . - r7_context_table_dispatch_veneer
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -1361,6 +1458,43 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             assert!(callback_target_getter().is_null());
+        }
+        drop(guard);
+    }
+
+    static mut R7_CONTEXT_TABLE_DISPATCH_CALLS: u32 = 0;
+    static mut R7_CONTEXT_TABLE_DISPATCH_SENTINEL: u8 = 0;
+
+    unsafe extern "C" fn record_r7_context_table_dispatch() -> *mut u8 {
+        R7_CONTEXT_TABLE_DISPATCH_CALLS += 1;
+        core::ptr::addr_of_mut!(R7_CONTEXT_TABLE_DISPATCH_SENTINEL)
+    }
+
+    #[test]
+    fn r7_context_table_dispatch_veneer_matches_literal_and_forwards_result() {
+        assert_eq!(R7_CONTEXT_TABLE_DISPATCH_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(R7_CONTEXT_TABLE_DISPATCH_VENEER_TARGET, 0x081f_f130);
+        assert_eq!(R7_CONTEXT_TABLE_DISPATCH_VENEER_TARGET & 3, 0);
+
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(R7_CONTEXT_TABLE_DISPATCH_CALLS).write(0);
+            core::ptr::addr_of_mut!(R7_CONTEXT_TABLE_DISPATCH_OPS).write(
+                R7ContextTableDispatchOps {
+                    dispatch: record_r7_context_table_dispatch,
+                },
+            );
+            let result = r7_context_table_dispatch_veneer();
+            assert_eq!(
+                core::ptr::addr_of!(R7_CONTEXT_TABLE_DISPATCH_CALLS).read(),
+                1
+            );
+            assert_eq!(
+                result,
+                core::ptr::addr_of!(R7_CONTEXT_TABLE_DISPATCH_SENTINEL).cast_mut(),
+            );
+            core::ptr::addr_of_mut!(R7_CONTEXT_TABLE_DISPATCH_OPS)
+                .write(DEFAULT_R7_CONTEXT_TABLE_DISPATCH_OPS);
         }
         drop(guard);
     }

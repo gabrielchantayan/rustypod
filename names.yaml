@@ -450,6 +450,31 @@ functions:
       ignored. The Rust target implementation keeps the exact `ldr pc`
       veneer; the host seam calls an injected `unsafe extern "C" fn()`,
       whose direct test proves a single call and ordinary return.
+
+  - address: 0x08003798
+    ghidra: thunk_FUN_081ff130
+    name: r7_context_table_dispatch_veneer
+    size: 8
+    sig: "void *r7_context_table_dispatch_veneer(void) [r7=context]"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_FUN_081ff130: r7_context_table_dispatch_veneer
+      DAT_0800379c: r7_context_table_dispatch_target
+      FUN_081ff130: r7_context_table_dispatch_continuation
+    notes: >-
+      Ghidra's four-byte extent omits the target word: raw osos.dec has
+      `ldr pc,[pc,#-4]` (0xe51ff004) at 0x08003798 and literal 0x081ff130
+      at 0x0800379c; the next distinct veneer begins at 0x080037a0, so this
+      port's true extent is eight bytes. The literal is anomalous: it lands
+      two instructions after the real entry 0x081ff128, after that routine's
+      `mov r7,r0`; it is a continuation requiring the caller's r7 context,
+      not a standalone C entry. Complete ARM B/BL decoding found seven direct
+      calls, all unconditional bl at 0x08005538, 0x08005710, 0x08005730,
+      0x08005950, 0x080061fc, 0x08006570, and 0x080065c0; no predicated
+      calls. The ARM port preserves the literal tail transfer exactly, while
+      host tests use a replaceable no-argument seam because host callers
+      cannot supply ARM r7; they verify one call and unchanged pointer result.
   # --- event callback dispatch ---
   - address: 0x08005094
     ghidra: FUN_08005094
