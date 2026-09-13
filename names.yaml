@@ -78710,3 +78710,41 @@ functions:
       embedded-NUL length preservation, UTF-8 forcing, and destructor
       forwarding. Deliberate deviations: none. match.py structural review
       completed with its expected non-exact diff.
+
+  # --- Encoded record entry payload length ---
+  - address: 0x083384d4
+    ghidra: FUN_083384d4
+    name: record_entry_payload_length
+    size: 228
+    sig: "i32 record_entry_payload_length(u32 requested_offset, u32 *out_payload_length, const u8 * const *record_source)"
+    module: util/record_entry_payload_length
+    status: ported
+    renames:
+      param_1/r0: requested_offset
+      param_2/r1: out_payload_length
+      param_3/r2: record_source
+      uVar1/r0: entry_offset
+      DAT_083385ac: missing_record_source_error
+      DAT_083385b0: invalid_entry_offset_error
+      DAT_083385b4: payload_length_multiplier
+      FUN_08350954: validate_record_offset
+    notes: >-
+      Raw osos.dec confirms Ghidra's 216-byte instruction body
+      (0x083384d4..0x083385ac), followed by three literal-pool words at
+      0x083385ac..0x083385b8; the separately linked sibling begins at
+      0x083385b8, so the true full extent is 228 bytes. Decoding every ARM
+      B/BL word finds exactly six direct inbound calls, all unconditional bl:
+      0x082f2644, 0x082f5978, 0x083144dc, 0x083267dc, 0x083401e8, and
+      0x0834f644. There are no predicated calls or direct B tail transfers.
+      A NULL record-source slot or NULL source byte pointer returns
+      0xffff5bd9. The unported FUN_08350954 @ 0x08350954 validates the
+      requested entry offset; zero returns 0xffff5b1e, and every nonzero
+      result selects an entry. The first four selected bytes are individually
+      multiplied by 0x17 modulo 256 and collected big-endian; subtracting the
+      20-byte header then multiplying by 0xbd7d7cff yields the optional
+      payload length. Host tests cover both missing-source forms, the
+      zero-result error without an output write, nonzero validation with a
+      nonzero offset and wrapping decode, and a NULL optional output. Target
+      builds retain a fixed-address call to the unported helper; host builds
+      use a volatile recording seam. Deliberate deviations: none. Reference
+      C: decomp/c/032/083384d4_FUN_083384d4.c.
