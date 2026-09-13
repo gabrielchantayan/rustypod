@@ -112,6 +112,60 @@ pub extern "C" fn fixed16_det2(a: i32, b: i32, c: i32, d: i32) -> i32 {
 pub extern "C" fn det2_i64(a: i32, b: i32, c: i32, d: i32) -> i64 {
     (a as i64) * (d as i64) - (b as i64) * (c as i64)
 }
+/// mul_i64_i32_asr — original: `FUN_08261140` @ 0x08261140 (40 bytes).
+///
+/// Forms the low 64 bits of `value * multiplier`, where `value` is signed
+/// 64-bit and `multiplier` is signed 32-bit, then applies the ARM runtime's
+/// arithmetic right shift. The retail body uses `umull` plus two `mla`
+/// instructions to form the wrapped two-register product, then tail-branches
+/// to the 64-bit shift helper at 0x0802eed4.
+///
+/// Raw `osos.dec` establishes the exact extent 0x08261140..0x08261164; the
+/// following `push {r4-r7,lr}` at 0x08261168 begins `det2_i64`. Decoding
+/// every ARM B/BL-immediate word finds exactly six direct inbound calls, all
+/// unconditional and unpredicated `bl`: 0x08241e18, 0x08241e3c, 0x08241f00,
+/// 0x08241f24, 0x08242000, and 0x08242034. Every caller passes shift 28.
+/// There are no deliberate Rust deviations: the branch and register-shift
+/// behavior for every `u32` shift count, including counts outside 0..63, is
+/// retained rather than relying on Rust's narrower shift semantics.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mul_i64_i32_asr")]
+pub extern "C" fn mul_i64_i32_asr(value: i64, multiplier: i32, shift: u32) -> i64 {
+    let product = value.wrapping_mul(multiplier as i64);
+    let lo = product as u32;
+    let hi = (product >> 32) as i32;
+
+    if (shift.wrapping_sub(32) as i32) < 0 {
+        let amount = shift & 0xff;
+        let complement = 32u32.wrapping_sub(shift) & 0xff;
+        let shifted_lo = match amount {
+            0 => lo,
+            1..=31 => lo >> amount,
+            _ => 0,
+        };
+        let carried_hi = match complement {
+            0 => hi as u32,
+            1..=31 => (hi as u32) << complement,
+            _ => 0,
+        };
+        let shifted_hi = match amount {
+            0 => hi,
+            1..=31 => hi >> amount,
+            _ => hi >> 31,
+        };
+        ((u64::from(shifted_hi as u32) << 32) | u64::from(shifted_lo | carried_hi)) as i64
+    } else {
+        let amount = shift.wrapping_sub(32) & 0xff;
+        let shifted_lo = match amount {
+            0 => hi,
+            1..=31 => hi >> amount,
+            _ => hi >> 31,
+        };
+        ((u64::from((hi >> 31) as u32) << 32) | u64::from(shifted_lo as u32)) as i64
+    }
+}
+
 
 
 /// fixed16_dot3 — original: `FUN_082a014c` @ 0x082a014c (64 bytes).
@@ -655,6 +709,79 @@ mod tests {
         assert_eq!(det2_i64(3, 2, 5, 7), 11);
         assert_eq!(det2_i64(i32::MAX, 0, 0, i32::MAX), (i32::MAX as i64).pow(2));
     }
+    /// The `umull`/`mla` product and the tail-shift's signed branch must
+    /// remain bit-for-bit compatible. In particular, ARM uses only the low
+    /// byte of the register shift while choosing its path from the full
+    /// wrapping `shift - 32` subtraction.
+    #[test]
+    fn mul_i64_i32_asr_matches_the_arm_register_sequence() {
+        fn lsr(value: u32, amount: u32) -> u32 {
+            match amount {
+                0 => value,
+                1..=31 => value >> amount,
+                _ => 0,
+            }
+        }
+
+        fn lsl(value: u32, amount: u32) -> u32 {
+            match amount {
+                0 => value,
+                1..=31 => value << amount,
+                _ => 0,
+            }
+        }
+
+        fn asr(value: i32, amount: u32) -> i32 {
+            match amount {
+                0 => value,
+                1..=31 => value >> amount,
+                _ => value >> 31,
+            }
+        }
+
+        fn reference(value: i64, multiplier: i32, shift: u32) -> i64 {
+            let product = (value as i128) * (multiplier as i128);
+            let lo = product as u32;
+            let hi = ((product as u64) >> 32) as i32;
+            let (out_lo, out_hi) = if (shift.wrapping_sub(32) as i32) < 0 {
+                let amount = shift & 0xff;
+                (
+                    lsr(lo, amount) | lsl(hi as u32, 32u32.wrapping_sub(shift) & 0xff),
+                    asr(hi, amount),
+                )
+            } else {
+                (asr(hi, shift.wrapping_sub(32) & 0xff) as u32, asr(hi, 31))
+            };
+            ((u64::from(out_hi as u32) << 32) | u64::from(out_lo)) as i64
+        }
+
+        let values = [
+            i64::MIN,
+            i64::MIN + 1,
+            -0x1234_5678_9abc_def,
+            -1,
+            0,
+            1,
+            0x1234_5678_9abc_def,
+            i64::MAX - 1,
+            i64::MAX,
+        ];
+        let multipliers = [i32::MIN, i32::MIN + 1, -1, 0, 1, 0x1000_0000, i32::MAX];
+        let shifts = [0, 1, 16, 28, 31, 32, 33, 63, 64, 255, 0x8000_0000, u32::MAX];
+
+        for &value in &values {
+            for &multiplier in &multipliers {
+                for &shift in &shifts {
+                    assert_eq!(
+                        mul_i64_i32_asr(value, multiplier, shift),
+                        reference(value, multiplier, shift),
+                        "value={value:#x} multiplier={multiplier:#x} shift={shift:#x}",
+                    );
+                }
+            }
+        }
+    }
+
     /// The three products and both additions are sequenced exactly as the
     /// original, including signed fixed-point truncation and u32-style sum
     /// wrapping.
