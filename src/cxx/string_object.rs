@@ -2051,6 +2051,46 @@ pub unsafe extern "C" fn string_object_equals(
         0
     }
 }
+/// string_object_differs_from_static_object — original: `FUN_0829ba1c` @
+/// 0x0829ba1c (40 bytes, all code; six direct `bl` call sites, all
+/// unconditional, binary-scanned by decoding every ARM B/BL word in
+/// osos.dec).
+///
+/// Read this object's raw payload word, then compare it through the ported
+/// UTF-8 comparator against the C string returned by [`string_object_c_str`]
+/// for the literal-pool object address 0x089ca8a0. Return 1 only when the
+/// comparator is nonzero; no pointer guard exists on `this`.
+///
+/// The decoded static image's 0x089ca8a0 points into a font-name C-string
+/// table, not a valid two-word [`StringObject`]: its +4 word is
+/// 0x4e00746e. The target port deliberately preserves that literal address
+/// and direct callee sequence rather than assigning an identity to the
+/// anomalous object. Host tests replace the address with a valid object so
+/// they can prove the compare-and-invert path without dereferencing the
+/// unmapped firmware address.
+#[cfg(test)]
+static mut STRING_OBJECT_DIFFERS_STATIC_OBJECT: *const StringObject = core::ptr::null();
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_differs_from_static_object(
+    this: *const StringObject,
+) -> i32 {
+    #[cfg(test)]
+    let comparison_object = core::ptr::read_volatile(
+        core::ptr::addr_of!(STRING_OBJECT_DIFFERS_STATIC_OBJECT),
+    );
+    #[cfg(not(test))]
+    let comparison_object = 0x089ca8a0usize as *const StringObject;
+
+    let comparison_cstr = string_object_c_str(comparison_object);
+    if utf8_strcmp_safe((*this).payload as *const u8, comparison_cstr) != 0 {
+        1
+    } else {
+        0
+    }
+}
+
 
 /// string_object_len_plus1 — original: `FUN_082a50a0` @ 0x082a50a0
 /// (8 bytes, 1 `bl` call site, binary-scanned).
@@ -3172,6 +3212,35 @@ pub(crate) mod tests {
     /// The dispatch slot is process-global, so sibling C++ module tests use
     /// this lock alongside this module's own destruction tests.
     pub(crate) static STRING_OBJECT_OPS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    static STRING_OBJECT_DIFFERS_STATIC_OBJECT_TEST_LOCK: parking_lot::Mutex<()> =
+        parking_lot::Mutex::new(());
+
+    struct StaticComparisonObjectGuard(*const StringObject);
+
+    impl Drop for StaticComparisonObjectGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(STRING_OBJECT_DIFFERS_STATIC_OBJECT),
+                    self.0,
+                );
+            }
+        }
+    }
+
+    unsafe fn install_static_comparison_object(
+        object: *const StringObject,
+    ) -> StaticComparisonObjectGuard {
+        let prior = core::ptr::read_volatile(
+            core::ptr::addr_of!(STRING_OBJECT_DIFFERS_STATIC_OBJECT),
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(STRING_OBJECT_DIFFERS_STATIC_OBJECT),
+            object,
+        );
+        StaticComparisonObjectGuard(prior)
+    }
 
 
     #[test]
@@ -5723,6 +5792,41 @@ pub(crate) mod tests {
             assert_eq!(string_object_equals(&empty, &text), 0);
             assert_eq!(string_object_equals(&text, &empty), 0);
         }
+    }
+
+    #[test]
+    fn static_object_comparison_inverts_utf8_equality_and_keeps_null_payload_safe() {
+        let _lock = STRING_OBJECT_DIFFERS_STATIC_OBJECT_TEST_LOCK.lock();
+        let mut comparison_payload = *b"caf\xc3\xa9\0";
+        let comparison = StringObject {
+            vtable: core::ptr::null(),
+            payload: comparison_payload.as_mut_ptr(),
+        };
+        let _restore = unsafe { install_static_comparison_object(&comparison) };
+
+        let mut matching_payload = *b"caf\xc3\xa9\0";
+        let mut differing_payload = *b"caf\xc3\xa8\0";
+        let matching = StringObject {
+            vtable: core::ptr::null(),
+            payload: matching_payload.as_mut_ptr(),
+        };
+        let differing = StringObject {
+            vtable: core::ptr::null(),
+            payload: differing_payload.as_mut_ptr(),
+        };
+        let null_payload = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_differs_from_static_object(&matching), 0);
+            assert_eq!(string_object_differs_from_static_object(&differing), 1);
+            assert_eq!(string_object_differs_from_static_object(&null_payload), 1);
+        }
+        assert_eq!(comparison_payload, *b"caf\xc3\xa9\0");
+        assert_eq!(matching_payload, *b"caf\xc3\xa9\0");
+        assert_eq!(differing_payload, *b"caf\xc3\xa8\0");
     }
 
     #[test]
