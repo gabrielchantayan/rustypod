@@ -26,6 +26,36 @@ use crate::app::registry::{object_cast_to_class, registry_lookup_by_id, Framewor
 use crate::app::resource_chain::{resource_chain_find_string, ResourceProvider};
 use crate::app::string_owner_init::string_owner_embedded_init;
 use crate::cxx::string_object::{string_object_assign, string_object_destroy, StringObject};
+/// app_screen_layout_name — original: `FUN_081742f8` @ `0x081742f8`
+/// (**8 bytes**, `0x081742f8..0x08174300`; the next separately linked entry
+/// begins at `0x08174300`). Decoding every aligned ARM `B`/`BL` immediate in
+/// `work/firmware/osos.dec` finds exactly six direct inbound `bl` calls, all
+/// unconditional: `0x082254cc`, `0x08225d74`, `0x08229140`, `0x0823241c`,
+/// `0x082352dc`, and `0x08260958`. There are no predicated call forms, direct
+/// tail `b` transfers, or aligned data-word references to this address.
+///
+/// # Algorithm
+///
+/// Return the address of the app screen's embedded [`StringObject`] at
+/// `screen + 0x1c`. The two-instruction retail body is `add r0, r0, #0x1c;
+/// bx lr`; it does not read, write, validate, or NULL-guard `screen`.
+///
+/// # Deliberate deviations
+///
+/// None.
+///
+/// # Safety
+///
+/// `screen` must be valid for pointer arithmetic through `+0x1c`. The
+/// resulting pointer has the alignment and validity requirements of a
+/// [`StringObject`] only if it is dereferenced.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.app_screen_layout_name")]
+pub unsafe extern "C" fn app_screen_layout_name(screen: *mut u8) -> *mut StringObject {
+    unsafe { screen.add(0x1c).cast::<StringObject>() }
+}
+
 
 /// The class id `app_screen_set_layout_from_resource` downcasts the
 /// registered instance to before asking it for a string (`mov r4, #5` @
@@ -592,5 +622,19 @@ mod tests {
         );
         assert!(unsafe { (*core::ptr::addr_of!(FIND_CALLS)).is_empty() });
         assert_eq!(CALLBACK_SCREEN.load(Ordering::SeqCst), screen as usize);
+    }
+    #[test]
+    fn layout_name_accessor_returns_offset_without_reading_or_writing() {
+        let mut backing = [0xa5u8; 64];
+
+        for screen_offset in 0..4 {
+            let before = backing;
+            let screen = unsafe { backing.as_mut_ptr().add(screen_offset) };
+
+            let layout = unsafe { app_screen_layout_name(screen) };
+
+            assert_eq!(layout.cast::<u8>() as usize, screen as usize + 0x1c);
+            assert_eq!(backing, before);
+        }
     }
 }
