@@ -114,8 +114,10 @@ pub struct VdbeOp {
 pub struct Vdbe {
     /// +0x00: the owning connection (`sqlite3 *`).
     pub db: *mut u8,
-    /// +0x04..+0x0c: unmodeled.
-    pub _gap_04: [u8; 8],
+    /// +0x04..+0x08: unmodeled.
+    pub _gap_04: [u8; 4],
+    /// +0x08: next statement on the owning connection's live-statement list.
+    pub p_next: *mut Vdbe,
     /// +0x0c: number of ops emitted so far.
     pub n_op: i32,
     /// +0x10: number of ops `a_op` has room for.
@@ -209,6 +211,8 @@ pub const COLNAME_N: i32 = 2;
 const _VDBE_OP_SIZE: [u8; 20] = [0; core::mem::size_of::<VdbeOp>()];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_N_OP_OFFSET: [u8; 0x0c] = [0; core::mem::offset_of!(Vdbe, n_op)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_P_NEXT_OFFSET: [u8; 0x08] = [0; core::mem::offset_of!(Vdbe, p_next)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_A_OP_OFFSET: [u8; 0x14] = [0; core::mem::offset_of!(Vdbe, a_op)];
 #[cfg(target_pointer_width = "32")]
@@ -645,7 +649,8 @@ mod tests {
             let mut db = std::boxed::Box::new(db);
             let vdbe = Vdbe {
                 db: db.ptr(),
-                _gap_04: [0; 8],
+                _gap_04: [0; 4],
+                p_next: core::ptr::null_mut(),
                 n_op: 0,
                 n_op_alloc: 0,
                 a_op: core::ptr::null_mut(),

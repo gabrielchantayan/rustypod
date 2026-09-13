@@ -25920,6 +25920,29 @@ functions:
       sets destination dyn even when allocation failed. The port uses the
       shared repr(C) Token type and directly calls the already ported
       tracked_free and db_str_ndup; no dispatch seam was introduced.
+  # ---- Prepared-statement expiration (src/sqlite/expire_prepared_statements.rs) ----
+  - address: 0x083767ec
+    ghidra: FUN_083767ec
+    name: sqlite3_expire_prepared_statements
+    size: 28
+    sig: "void sqlite3_expire_prepared_statements(Connection *connection)"
+    module: sqlite/expire_prepared_statements
+    status: ported
+    renames:
+      param_1/r0: connection
+      iVar1/r0: statement
+    notes: >-
+      SQLite's sqlite3ExpirePreparedStatements. Raw ARM decoding fixes the
+      exact 28-byte extent at 0x083767ec..0x08376808: the bx lr is at
+      0x08376804 and a separately linked function begins at 0x08376808.
+      Every immediate ARM B/BL word in osos.dec finds 6 inbound direct BLs,
+      all unconditional, at 0x082c52b0, 0x08373c24, 0x08382544, 0x08388b28,
+      0x08388bbc, and 0x083912c4; there are no predicated or tail-branch
+      callers. It dereferences connection->pVdbe (+0x8c), follows each
+      Vdbe.pNext (+0x08), and stores one to Vdbe.expired (+0xff), without a
+      NULL guard for connection. The Rust port uses named repr(C) fields
+      instead of target byte offsets, preserving distinct host pointers.
+
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x083867f8
     ghidra: FUN_083867f8

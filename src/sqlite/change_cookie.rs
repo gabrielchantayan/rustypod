@@ -189,8 +189,9 @@ mod tests {
         });
         let mut vdbe_connection = VdbeConnection::healthy();
         vdbe.write(Vdbe {
-            db: vdbe_connection.ptr(),
-            _gap_04: [0; 8],
+            db: core::ptr::null_mut(),
+            _gap_04: [0; 4],
+            p_next: core::ptr::null_mut(),
             n_op: 0,
             n_op_alloc: OPS_LEN as i32,
             a_op: ops,
