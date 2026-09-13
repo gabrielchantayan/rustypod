@@ -76083,3 +76083,38 @@ functions:
       varargs pointer, a deliberate diagnostic-only deviation. Host tests
       cover full-width packing and result-slot forwarding on success, plus the
       null result slot, failure return, and diagnostic pointer on failure.
+
+  # --- "crts" string-pool counted-string intern (util/string_pool) ---
+  - address: 0x080c9ff8
+    ghidra: FUN_080c9ff8
+    name: string_pool_intern_counted
+    size: 20
+    sig: "int string_pool_intern_counted(StringPool *pool, const uint16_t *counted, int *id_out)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: counted (u16-length-prefixed UTF-16 string)
+      param_3/r2: id_out
+      r3: id_out forwarded to interning writer
+      r2: data pointer then byte length
+      FUN_080c5a94: string_pool_intern seam (unported)
+    notes: >-
+      Raw osos.dec verifies exactly five ARM words from 0x080c9ff8 through
+      0x080ca008: mov r3,r2; movs r2,r1; ldrhne r2,[r1],#2; lslne r2,r2,#1;
+      b 0x080c5a94. The separately linked successor starts at 0x080ca00c
+      with push {r4,r5,r6,lr}, so Ghidra's claimed 20-byte extent is right
+      although its C incorrectly swallows the tail target's body. A non-NULL
+      counted string becomes data = counted + 1 and len = (*counted as u32)
+      << 1; a NULL input leaves data NULL and len zero. The thunk itself has
+      no pool, id_out, or string guards and does not write id_out. Whole-image
+      ARM B/BL-immediate decoding finds exactly seven inbound direct sites,
+      all unconditional plain bl at 0x08068584, 0x0809604c, 0x080960b8,
+      0x0809611c, 0x08096190, 0x080be520, and 0x080be688; there are no
+      predicated calls or data-word references, plus the tail b to
+      0x080c5a94. Deliberate deviation: dispatches through the existing
+      volatile STRING_POOL_INTERN seam whose target default is the verified
+      retail address, permitting host ABI tests without inventing a callee
+      identity. Three host tests prove NULL forwarding, zero-count pointer
+      advancement, UTF-16 byte forwarding, and the u32 widening required for
+      a count of 0x8000 to become 0x10000 bytes.

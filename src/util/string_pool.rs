@@ -581,6 +581,64 @@ pub unsafe extern "C" fn string_pool_store_counted(
     string_pool_store_seam()(pool, data, len, id_out)
 }
 
+/// string_pool_intern_counted — original: `FUN_080c9ff8` @ 0x080c9ff8
+/// (20 bytes; **7 direct `bl` call sites, all unconditional, plus one tail
+/// `b`; no data-word references** — binary-verified by decoding every ARM
+/// B/BL word and every word equal to the address in `osos.dec`).
+///
+/// Interns a u16-length-prefixed UTF-16 string without releasing the id
+/// already held in `id_out`. The entire body is a five-instruction
+/// argument-mangling thunk. The next separately linked function begins at
+/// 0x080ca00c (`push {r4,r5,r6,lr}`), so the five words from 0x080c9ff8
+/// through 0x080ca008 are the complete extent; Ghidra instead attaches the
+/// 0x080c5a94 interning body to this address:
+///
+/// ```text
+/// mov     r3, r2              ; id_out
+/// movs    r2, r1              ; counted, setting Z on NULL
+/// ldrhne  r2, [r1], #2        ; len = *counted, data = counted + 1
+/// lslne   r2, r2, #1          ; len in bytes = u16 unit count * 2
+/// b       0x080c5a94          ; tail: intern(pool, data, len, id_out)
+/// ```
+///
+/// A non-NULL `counted` forwards the bytes after its length prefix and a
+/// byte length of `*counted * 2`. A NULL `counted` forwards NULL and zero,
+/// leaving the interning writer to apply its documented zero-length
+/// behavior. The thunk performs no validation or writes of its own.
+///
+/// The seven direct callers are 0x08068584, 0x0809604c, 0x080960b8,
+/// 0x0809611c, 0x08096190, 0x080be520, and 0x080be688; all are plain `bl`.
+///
+/// # Deliberate deviation
+///
+/// The unported tail target dispatches through the volatile
+/// [`STRING_POOL_INTERN`] seam, whose target default is retailOS
+/// 0x080c5a94. This makes the thunk hook-ready on-device and lets host tests
+/// observe the exact forwarded ABI without assigning an unverified identity
+/// to the interning writer beyond [`StringPoolIntern`].
+///
+/// # Safety
+///
+/// `counted` must be NULL or point to a readable `u16` length followed by
+/// that many `u16` units. `pool` and `id_out` are forwarded unchecked to the
+/// retail interning writer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_intern_counted(
+    pool: *mut StringPool,
+    counted: *const u16,
+    id_out: *mut i32,
+) -> i32 {
+    let mut data = counted as *const u8;
+    let mut len = 0u32;
+    if !counted.is_null() {
+        len = (counted.read() as u32) << 1;
+        data = counted.add(1) as *const u8;
+    }
+    string_pool_intern_seam()(pool, data, len, id_out)
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -835,6 +893,7 @@ mod tests {
     #[derive(Clone, PartialEq, Debug)]
     struct InternCall {
         pool: usize,
+        data: usize,
         bytes: Vec<u8>,
         id_out: usize,
     }
@@ -882,8 +941,12 @@ mod tests {
         len: u32,
         id_out: *mut i32,
     ) -> i32 {
-        let bytes = std::slice::from_raw_parts(data, len as usize).to_vec();
-        INTERN_CALLS.push(InternCall { pool: pool as usize, bytes, id_out: id_out as usize });
+        let bytes = if data.is_null() || len == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data, len as usize).to_vec()
+        };
+        INTERN_CALLS.push(InternCall { pool: pool as usize, data: data as usize, bytes, id_out: id_out as usize });
         if !id_out.is_null() {
             *id_out = INTERN_NEW_ID;
         }
@@ -975,6 +1038,7 @@ mod tests {
                 INTERN_CALLS,
                 std::vec![InternCall {
                     pool: DST_POOL,
+                    data: READ_CALLS[1].dst,
                     bytes: b"hello".to_vec(),
                     id_out: &mut out_id as *mut i32 as usize,
                 }]
@@ -1102,6 +1166,88 @@ mod tests {
             assert!(INTERN_CALLS[0].bytes.is_empty());
         }
         assert_eq!(alloc_log().0, 0);
+    }
+
+    /// Installs the recording interning seam for
+    /// [`string_pool_intern_counted`]. The shared lock prevents concurrent
+    /// replacement of the global function-pointer seam.
+    fn intern_mock() -> (MutexGuard<'static, ()>, Reset) {
+        let intern_guard = STRING_POOL_SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            STRING_POOL_INTERN = recording_pool_intern;
+        }
+        (intern_guard, Reset)
+    }
+
+    #[test]
+    fn intern_counted_null_forwards_null_data_and_zero_length() {
+        let (_intern_guard, _reset) = intern_mock();
+        unsafe {
+            INTERN_STATUS = PARAM_ERR;
+            INTERN_NEW_ID = 23;
+            let mut slot = -1i32;
+            let status = string_pool_intern_counted(
+                SRC_POOL as *mut StringPool,
+                ptr::null(),
+                &mut slot,
+            );
+            assert_eq!(status, PARAM_ERR, "the interning status passes through");
+            assert_eq!(slot, 23, "the thunk never owns the output slot");
+            assert_eq!(
+                INTERN_CALLS,
+                std::vec![InternCall {
+                    pool: SRC_POOL,
+                    data: 0,
+                    bytes: Vec::new(),
+                    id_out: &mut slot as *mut i32 as usize,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn intern_counted_empty_string_starts_after_the_length_word() {
+        let (_intern_guard, _reset) = intern_mock();
+        let counted = [0u16];
+        unsafe {
+            let status = string_pool_intern_counted(
+                DST_POOL as *mut StringPool,
+                counted.as_ptr(),
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(
+                INTERN_CALLS,
+                std::vec![InternCall {
+                    pool: DST_POOL,
+                    data: counted.as_ptr() as usize + 2,
+                    bytes: Vec::new(),
+                    id_out: 0,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn intern_counted_forwards_utf16_bytes_and_widens_the_count() {
+        let (_intern_guard, _reset) = intern_mock();
+        let mut counted = std::vec![0u16; 0x8001];
+        counted[0] = 0x8000;
+        counted[1] = 0x0061;
+        counted[2] = 0x20ac;
+        unsafe {
+            let status = string_pool_intern_counted(
+                ptr::null_mut(),
+                counted.as_ptr(),
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(INTERN_CALLS.len(), 1);
+            assert_eq!(INTERN_CALLS[0].pool, 0, "the thunk does not guard pool");
+            assert_eq!(INTERN_CALLS[0].data, counted.as_ptr() as usize + 2);
+            assert_eq!(INTERN_CALLS[0].bytes.len(), 0x10000);
+            assert_eq!(&INTERN_CALLS[0].bytes[..4], &[0x61, 0, 0xac, 0x20]);
+        }
     }
 
     // --- string_pool_store_counted seam-mock scaffolding ---
