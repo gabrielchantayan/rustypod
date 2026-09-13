@@ -92,6 +92,86 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+/// Firmware entry of the video-engine type-continuation dispatcher
+/// (`FUN_0825359c`, unported).
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_TYPE_CONTINUATION_ADDR: usize = 0x0825_359c;
+
+/// ABI of the unported dispatcher: engine, type selector, and opaque
+/// continuation word.
+type VideoEngineTypeContinuation = unsafe extern "C" fn(*mut u8, u32, u32);
+
+/// Host-test stand-in for `FUN_0825359c`.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_TYPE_CONTINUATION: Option<VideoEngineTypeContinuation> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_set_type_continuation`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_type_continuation(
+    dispatch: Option<VideoEngineTypeContinuation>,
+) {
+    core::ptr::addr_of_mut!(MOCK_TYPE_CONTINUATION).write(dispatch);
+}
+
+/// Transfers a type selector and opaque continuation word to the original
+/// video-engine dispatcher.
+fn set_type_continuation(engine: *mut u8, type_selector: u32, continuation: u32) {
+    #[cfg(target_os = "none")]
+    unsafe {
+        let dispatch: VideoEngineTypeContinuation =
+            core::mem::transmute(VIDEO_ENGINE_TYPE_CONTINUATION_ADDR);
+        dispatch(engine, type_selector, continuation);
+    }
+    #[cfg(not(target_os = "none"))]
+    unsafe {
+        match core::ptr::addr_of!(MOCK_TYPE_CONTINUATION).read() {
+            Some(dispatch) => dispatch(engine, type_selector, continuation),
+            None => panic!(
+                "video_engine_set_type_continuation requires dispatcher 0x0825359c"
+            ),
+        }
+    }
+}
+
+/// video_engine_set_type_continuation — retailOS `FUN_082d1f6c` @
+/// **0x082d1f6c** (40 bytes, `0x082d1f6c..0x082d1f90`).
+///
+/// The raw body loads the video-engine singleton, silently returns when it is
+/// NULL, and otherwise tail-branches with `(engine, type_selector,
+/// continuation)` to `FUN_0825359c`. The next independently linked wrapper
+/// begins at `0x082d1f94`; Ghidra's 144-byte extent incorrectly includes that
+/// and two following wrappers. A complete B/BL-immediate decode of `osos.dec`
+/// finds six inbound calls, all unconditional plain `bl` (0x0825bf4c,
+/// 0x0825bf5c, 0x0825bf78, 0x0825bf84, 0x0825c044, and 0x0825c074), with no
+/// predicated form. The body itself makes one `bl` to `video_engine_get` and
+/// one conditional tail `bne` to the dispatcher.
+///
+/// The known selectors 0x8a0a, 0x8a0b, and 0x8a0c identify dispatcher slots
+/// 3, 4, and 5. Its nonzero continuation inputs are opaque code addresses:
+/// callers supply 0x0802d400, 0x0802d510, 0x0802d410, 0x0802d5b4,
+/// 0x0802d68c, and 0x0802d850, all interior continuation locations rather
+/// than verified function entries. A zero word removes the selected
+/// continuation. The wrapper performs no selector or continuation validation.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0825359c` is unported. Target builds transfer to its resident
+/// firmware entry; host tests install a recording mock. The NULL-session path
+/// never reaches that seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_type_continuation(
+    type_selector: u32,
+    continuation: u32,
+) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    set_type_continuation(engine, type_selector, continuation);
+}
+
 
 /// Target-width fields read by [`video_engine_current_frame_slot`].
 ///
@@ -662,12 +742,87 @@ mod tests {
         }
     }
 
+    /// Serializes wrapper tests: MOCK_INSTANCE and their host dispatch seams
+    /// are shared mutable state.
+    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    // --- video_engine_set_type_continuation (FUN_082d1f6c) ---
+
+    static mut TYPE_CONTINUATION_RECORDED: Option<(*mut u8, u32, u32)> = None;
+
+    unsafe extern "C" fn recording_type_continuation(
+        engine: *mut u8,
+        type_selector: u32,
+        continuation: u32,
+    ) {
+        *addr_of_mut!(TYPE_CONTINUATION_RECORDED) =
+            Some((engine, type_selector, continuation));
+    }
+
+    struct TypeContinuationReset {
+        instance: *mut u8,
+        dispatch: Option<VideoEngineTypeContinuation>,
+    }
+
+    impl Drop for TypeContinuationReset {
+        fn drop(&mut self) {
+            unsafe {
+                set_mock_instance(self.instance);
+                set_mock_type_continuation(self.dispatch);
+            }
+        }
+    }
+
+    unsafe fn record_type_continuation() -> TypeContinuationReset {
+        let reset = TypeContinuationReset {
+            instance: video_engine_get(),
+            dispatch: addr_of!(MOCK_TYPE_CONTINUATION).read(),
+        };
+        set_mock_type_continuation(Some(recording_type_continuation));
+        *addr_of_mut!(TYPE_CONTINUATION_RECORDED) = None;
+        reset
+    }
+
+    #[test]
+    fn type_continuation_null_instance_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        let _reset = unsafe { record_type_continuation() };
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            video_engine_set_type_continuation(0x8a0a, 0);
+            assert_eq!(
+                TYPE_CONTINUATION_RECORDED,
+                None,
+                "the NULL session path must not reach the dispatcher"
+            );
+        }
+    }
+
+    #[test]
+    fn type_continuation_prepends_instance_and_preserves_raw_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        let _reset = unsafe { record_type_continuation() };
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr());
+            for &(type_selector, continuation) in &[
+                (0x8a0a, 0x0802_d400),
+                (0x8a0c, 0),
+                (u32::MAX, u32::MAX),
+            ] {
+                *addr_of_mut!(TYPE_CONTINUATION_RECORDED) = None;
+                video_engine_set_type_continuation(type_selector, continuation);
+                assert_eq!(
+                    TYPE_CONTINUATION_RECORDED,
+                    Some((engine.as_mut_ptr(), type_selector, continuation)),
+                    "the wrapper validates neither selector nor opaque continuation word"
+                );
+            }
+        }
+    }
+
     // --- video_engine_set_property (FUN_082d2314) ---
 
-    /// Serializes the set_property tests: MOCK_INSTANCE is shared with
-    /// the getter tests above and MOCK_DISPATCH/RECORDED are shared
-    /// between these tests.
-    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     static mut RECORDED: Option<(*mut u8, u32, u32, u32)> = None;
 

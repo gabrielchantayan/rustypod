@@ -22992,6 +22992,38 @@ functions:
       expected) should retain the recovered load/load/add/ldr leaf
       structure, with ordinary LLVM frame differences.
 
+  - address: 0x082d1f6c
+    ghidra: FUN_082d1f6c
+    name: video_engine_set_type_continuation
+    size: 40
+    sig: "void video_engine_set_type_continuation(u32 type_selector, u32 continuation)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: type_selector
+      param_2/r1: continuation
+      FUN_08252bec: video_engine_get
+      FUN_0825359c: video_engine_type_continuation_dispatch
+    notes: >-
+      Raw ARM proves Ghidra's 144-byte extent is wrong: this wrapper is
+      exactly 40 bytes at 0x082d1f6c..0x082d1f90, ending in `pop
+      {r4,r5,r6,pc}`; the next separately linked wrapper starts at
+      0x082d1f94. It saves both input words, calls video_engine_get, and
+      silently returns for a NULL session. Otherwise it restores
+      `(engine,type_selector,continuation)` in r0-r2 and tail-branches
+      (`bne`) to unported FUN_0825359c. Complete ARM B/BL-immediate decoding
+      finds exactly six inbound sites, all unconditional plain bl:
+      0x0825bf4c, 0x0825bf5c, 0x0825bf78, 0x0825bf84, 0x0825c044, and
+      0x0825c074; no predicated form targets it. The dispatcher recognizes
+      selectors 0x8a0a/0x8a0b/0x8a0c as slots 3/4/5. Its nonzero
+      continuation words are opaque addresses 0x0802d400, 0x0802d510,
+      0x0802d410, 0x0802d5b4, 0x0802d68c, and 0x0802d850, all interior
+      continuation locations rather than verified function entries; zero
+      removes the selected continuation. Deliberate deviation: dispatcher
+      FUN_0825359c remains unported, so target Rust calls its resident
+      address and host tests use a recording seam. No selector or
+      continuation validation is added.
+
   - address: 0x082d2314
     ghidra: FUN_082d2314
     name: video_engine_set_property
