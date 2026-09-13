@@ -7,6 +7,7 @@
 //!
 //! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
+//! - [`scoped_context_construct_from_source`] — `FUN_082703d0` @ 0x082703d0.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //! - [`scoped_context_copy_fields`] — `FUN_08270418` @ 0x08270418.
 //! - [`copy_service_context_selection`] — `FUN_0812c75c` @ 0x0812c75c.
@@ -49,7 +50,7 @@
 //! | 0x08270394 | **109** + 2 `b` | ctor `(this, owner, mode)` — **ported here** |
 //! | 0x08270414 | **175** | trivial destructor — **ported here** |
 //! | 0x08270418 | 15 | field copy: `dst[+4..+0x14] = src[+4..+0x14]`, vtable untouched |
-//! | 0x082703d0 | 7 | ctor that adopts another token's owner through 0x0826fd24 |
+//! | 0x082703d0 | 7 | ctor that adopts another token's owner through 0x0826fd24 — **ported here** |
 //! | 0x08270320 | 2 | a third ctor variant |
 //!
 //! `0x08270414` really is this class's destructor and not a generic
@@ -363,6 +364,68 @@ pub unsafe extern "C" fn scoped_context_construct(
     // exists to be swapped at runtime, so the default must not be
     // constant-folded in.
     ptr::read_volatile(ptr::addr_of!(CAPTURE_CONTEXT_FIELDS))(this, owner);
+
+    (*this).mode = mode;
+    this
+}
+
+/// scoped_context_construct_from_source — original: `FUN_082703d0` @
+/// 0x082703d0 (**64 bytes**: sixteen instructions ending at 0x0827040c;
+/// the next word, its vtable literal 0x089a5b30 at 0x08270410, is not
+/// code; **7 unconditional `bl` call sites**, no predicated forms or
+/// tail-`b` sites, binary-scanned over the whole decrypted image).
+///
+/// Initializes a [`ScopedContext`] with the class vtable and zero payload,
+/// then adopts `source.owner` only when the low byte of
+/// `source.owner_valid` is nonzero. Finally stores `mode` after the
+/// adoption and returns `this`.
+///
+/// ```text
+/// 082703d0  mov   r3, r0
+/// 082703d4  ldr   r0, [0x08270410]    @ 0x089a5b30
+/// 082703d8  push  {r4, lr}
+/// 082703dc  str   r0, [r3]
+/// 082703e0  mov   r0, #0
+/// 082703e4  str   r0, [r3, #4]
+/// 082703e8  str   r0, [r3, #8]
+/// 082703ec  str   r0, [r3, #12]
+/// 082703f0  str   r0, [r3, #16]
+/// 082703f4  strb  r0, [r3, #20]
+/// 082703f8  mov   r0, r3
+/// 082703fc  mov   r4, r2
+/// 08270400  bl    0x0826fd24
+/// 08270404  mov   r0, r3
+/// 08270408  strb  r4, [r3, #20]
+/// 0827040c  pop   {r4, pc}
+/// ```
+///
+/// Deliberate deviation: the direct callee is the 20-byte selector veneer
+/// `FUN_0826fd24` (`ldrb source+4; ldrne source+8; moveq #0; b
+/// 0x0826fda0`), whose tail target is the already ported
+/// [`capture_context_fields`]. This port expresses that verified selector
+/// directly and calls the ported tail target, rather than adding a dispatch
+/// seam for the unported veneer. The source is intentionally unguarded:
+/// ARM's first `ldrb` faults for NULL or unreadable input.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_construct_from_source(
+    this: *mut ScopedContext,
+    source: *const ScopedContext,
+    mode: u8,
+) -> *mut ScopedContext {
+    (*this).vtable = &SCOPED_CONTEXT_VTABLE;
+    (*this).owner_valid = 0;
+    (*this).owner = ptr::null_mut();
+    (*this).service_context = ptr::null_mut();
+    (*this).registry_token = ptr::null_mut();
+    (*this).mode = 0;
+
+    let owner = if ((*source).owner_valid as u8) == 0 {
+        ptr::null_mut()
+    } else {
+        (*source).owner
+    };
+    capture_context_fields(this, owner);
 
     (*this).mode = mode;
     this
@@ -1210,6 +1273,70 @@ mod tests {
             let mut token = poisoned_token();
             unsafe { scoped_context_construct(&mut token, ptr::null_mut(), mode) };
             assert_eq!(token.mode, mode);
+        }
+    }
+
+    #[test]
+    fn construct_from_source_uses_only_the_source_validity_low_byte() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _restore = SlotGuard;
+
+        let cached_token = 0x4242_4242usize as *mut u8;
+        let mut registry = registry_with_token(cached_token);
+        let mut service_context: Vec<*mut u8> = vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
+        let mut root: Vec<*mut u8> = vec![ptr::null_mut(); ROOT_SERVICE_CONTEXT_SLOT + 1];
+        root[ROOT_SERVICE_CONTEXT_SLOT] = service_context.as_mut_ptr() as *mut u8;
+        unsafe {
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(root.as_mut_ptr() as *mut u8);
+        }
+
+        let owner = 0x0011_2233usize as *mut u8;
+        for (source_owner_valid, should_adopt, mode) in [
+            (0u32, false, 0x00u8),
+            (0x0000_0100, false, 0x80),
+            (1, true, 0x7f),
+            (0x0000_00ff, true, 0xff),
+        ] {
+            let source = ScopedContext {
+                vtable: ptr::null(),
+                owner_valid: source_owner_valid,
+                owner,
+                service_context: ptr::null_mut(),
+                registry_token: ptr::null_mut(),
+                mode: 0,
+            };
+            let mut destination = poisoned_token();
+            unsafe {
+                CAPTURE_ROOT_READS = 0;
+            }
+
+            let returned = unsafe {
+                scoped_context_construct_from_source(&mut destination, &source, mode)
+            };
+
+            assert_eq!(returned, &mut destination as *mut ScopedContext);
+            assert_eq!(destination.vtable, &SCOPED_CONTEXT_VTABLE as *const ScopedContextVtable);
+            assert_eq!(destination.owner_valid, 0);
+            assert_eq!(destination.mode, mode);
+            assert_eq!(destination.owner, if should_adopt { owner } else { ptr::null_mut() });
+            assert_eq!(
+                destination.service_context,
+                if should_adopt {
+                    service_context.as_mut_ptr() as *mut u8
+                } else {
+                    ptr::null_mut()
+                }
+            );
+            assert_eq!(
+                destination.registry_token,
+                if should_adopt { cached_token } else { ptr::null_mut() }
+            );
+            assert_eq!(
+                unsafe { ptr::addr_of!(CAPTURE_ROOT_READS).read() },
+                should_adopt as u32,
+                "owner-valid {source_owner_valid:#010x}"
+            );
         }
     }
 
