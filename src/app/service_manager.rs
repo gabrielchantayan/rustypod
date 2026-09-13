@@ -5,6 +5,7 @@
 //! | address | name | size | `bl` sites |
 //! |---|---|---|---|
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
+//! | 0x08165558 | [`service_manager_initialization_state_get`] | 36 | 6 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
@@ -29,8 +30,10 @@
 //! this file. Its observed layout:
 //!
 //! ```text
-//! +0x00  u8    constructed   (set to 1 by the ctor @ 0x0816566c)
-//! +0x01  u8    ready         (set to 1 by the ctor)
+//! +0x00  u8    constructed   (set to 1 by the ctor; read by
+//!                              service_manager_initialization_state_get)
+//! +0x01  u8    ready         (set to 1 by the ctor; read by
+//!                              service_manager_initialization_state_get)
 //! +0x04  ptr   instance      <- what this module returns
 //! +0x08  u32   hardware model id (0xffffffff when >= 26)
 //! +0x0c  u32   capability mask
@@ -103,6 +106,61 @@ use crate::heap::veneers::heap_panic;
 /// NULL until the unported constructor-getter @ 0x081655e0 publishes an
 /// instance, which is the pre-init state of the original word.
 pub static mut SERVICE_MANAGER_INSTANCE: *mut u8 = core::ptr::null_mut();
+/// The constructed byte of the service-manager holder at `0x089ca948`.
+///
+/// The unported constructor writes this to 1. It is separate from the
+/// pointer slot because target pointers are four bytes while host pointers
+/// are eight bytes.
+pub static mut SERVICE_MANAGER_CONSTRUCTED: u8 = 0;
+
+/// The ready byte of the service-manager holder at `0x089ca949`.
+///
+/// The unported constructor writes this to 1 after construction.
+pub static mut SERVICE_MANAGER_READY: u8 = 0;
+
+/// service_manager_initialization_state_get — original: `FUN_08165558` @
+/// 0x08165558 (36 bytes; 6 direct `bl` call sites: 5 unconditional and
+/// one `bleq` at 0x08138538).
+///
+/// The complete body ends at 0x0816557b; 0x0816557c is its literal-pool
+/// address, not an instruction. It ignores `unused_instance`, rejects either
+/// NULL output pointer through [`heap_panic`], then copies the two bytes at
+/// `0x089ca948` and `0x089ca949` into `constructed` and `ready`,
+/// respectively. Raw ARM: `cmp r1,#0; cmpne r2,#0; bleq 0x08030f44; ldr
+/// r3,[pc,#16]; ldrb/strb +0; ldrb/strb +1; bx lr`.
+///
+/// The direct-call count was binary-scanned by decoding every ARM `B`/`BL`
+/// word in `osos.dec`: 0x080cc2d4, 0x0818e818, 0x0819400c, 0x08195454, and
+/// 0x081fdedc are plain `bl`; 0x08138538 is `bleq`. The predicated call
+/// confirms the callee itself enforces both non-NULL output pointers. The
+/// caller-supplied service-manager pointer is dead input in the raw body.
+///
+/// Deliberate deviations: the two runtime-RW holder bytes are modeled by
+/// separate statics rather than an in-place holder, because the host's
+/// eight-byte pointers cannot share the target's 32-bit holder layout. The
+/// fatal NULL-output path is not host-tested because [`heap_panic`] never
+/// returns.
+///
+/// # Safety
+///
+/// `constructed` and `ready` must each be valid, writable byte pointers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_initialization_state_get(
+    _unused_instance: *mut u8,
+    constructed: *mut u8,
+    ready: *mut u8,
+) {
+    if constructed.is_null() || ready.is_null() {
+        heap_panic();
+    }
+
+    let constructed_value = core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_MANAGER_CONSTRUCTED));
+    let ready_value = core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_MANAGER_READY));
+    core::ptr::write_volatile(constructed, constructed_value);
+    core::ptr::write_volatile(ready, ready_value);
+}
+
 
 /// Serializes host tests that replace the singleton slot.
 #[cfg(test)]
@@ -773,6 +831,72 @@ mod tests {
     fn clear(guard: std::sync::MutexGuard<'static, ()>) {
         unsafe { ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_INSTANCE), ptr::null_mut()) };
         drop(guard);
+    }
+
+    fn publish_initialization_state(
+        constructed: u8,
+        ready: u8,
+    ) -> std::sync::MutexGuard<'static, ()> {
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_CONSTRUCTED), constructed);
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_READY), ready);
+        }
+        guard
+    }
+
+    fn clear_initialization_state(guard: std::sync::MutexGuard<'static, ()>) {
+        unsafe {
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_CONSTRUCTED), 0);
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_READY), 0);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn initialization_state_copies_each_holder_byte_without_touching_guards() {
+        let guard = publish_initialization_state(0xff, 0x01);
+        let mut constructed = [0xa5, 0, 0x5a];
+        let mut ready = [0x3c, 0, 0xc3];
+
+        unsafe {
+            service_manager_initialization_state_get(
+                ptr::null_mut(),
+                constructed.as_mut_ptr().add(1),
+                ready.as_mut_ptr().add(1),
+            );
+        }
+
+        assert_eq!(constructed, [0xa5, 0xff, 0x5a]);
+        assert_eq!(ready, [0x3c, 0x01, 0xc3]);
+        clear_initialization_state(guard);
+    }
+
+    #[test]
+    fn initialization_state_ignores_instance_and_reloads_both_bytes() {
+        let guard = publish_initialization_state(0, 0xff);
+        let mut constructed = 0xa5;
+        let mut ready = 0x5a;
+
+        unsafe {
+            service_manager_initialization_state_get(
+                core::ptr::dangling_mut::<u8>(),
+                &mut constructed,
+                &mut ready,
+            );
+            assert_eq!((constructed, ready), (0, 0xff));
+
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_CONSTRUCTED), 1);
+            ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_READY), 0);
+            service_manager_initialization_state_get(
+                ptr::null_mut(),
+                &mut constructed,
+                &mut ready,
+            );
+        }
+
+        assert_eq!((constructed, ready), (1, 0));
+        clear_initialization_state(guard);
     }
 
     #[test]

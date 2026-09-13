@@ -44151,6 +44151,33 @@ functions:
       global load / `cmp r0,#0` / `bxne lr` / fatal-call shape, the port
       adding only the cold-path frame push.
 
+  - address: 0x08165558
+    ghidra: FUN_08165558
+    name: service_manager_initialization_state_get
+    size: 36
+    sig: "void service_manager_initialization_state_get(void *unused_instance, u8 *constructed, u8 *ready)"
+    module: app/service_manager
+    renames:
+      param_1/r0: unused_instance (dead input)
+      param_2/r1: constructed (output byte)
+      param_3/r2: ready (output byte)
+      DAT_0816557c: service_manager_holder (global @ 0x089ca948)
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Exact 36-byte holder-status accessor. Raw ARM checks both output pointers
+      (`cmp r1,#0; cmpne r2,#0; bleq 0x08030f44`), then ldrb/strb-copies the
+      holder's constructed and ready bytes at +0/+1, ignoring r0. 0x0816557c is
+      the trailing literal-pool word and 0x08165580 starts the next function, so
+      the Ghidra extent is exact. Every ARM B/BL word in osos.dec decodes to six
+      direct call sites: 0x080cc2d4, 0x0818e818, 0x0819400c, 0x08195454, and
+      0x081fdedc are unconditional bl; 0x08138538 is bleq. The predicated call
+      is caller-side gating, while the callee has its own NULL checks. The host
+      port uses separate constructed/ready statics for the runtime-RW holder
+      because host pointers are eight bytes; it reads and writes volatile bytes
+      and preserves the unused first argument. NULL outputs retain heap_panic's
+      non-returning behavior.
+
   - address: 0x081391ec
     ghidra: thunk_FUN_08165520
     name: service_manager_instance_veneer
