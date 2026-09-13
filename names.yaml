@@ -80748,3 +80748,35 @@ functions:
       the ARM calls normal calls; tag-3 delete encapsulates its own target
       tail branch. Host-only callbacks observe the two external effects
       without adding a target dispatch seam or requiring the firmware heap.
+  - address: 0x082432ac
+    ghidra: FUN_082432ac
+    name: cg_module_owner_initialize
+    size: 28
+    sig: "void cg_module_owner_initialize(CgModuleOwner *owner)"
+    module: codegen/module_owner
+    status: ported
+    renames:
+      param_1/r0: owner
+      "[owner + 0x04]": module
+      FUN_082c1a78: cg_heap_create
+      FUN_082c1dc4: cg_module_create_from_heap
+      "[module + 0x00]": heap
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte body at 0x082432ac through
+      0x082432c4: `push {r4,lr}; mov r4,r0; mov r0,#0x1000; bl
+      0x082c1a78; bl 0x082c1dc4; str r0,[r4,#4]; pop {r4,pc}`. The next
+      separately linked function begins at 0x082432c8, so Ghidra's reported
+      size is exact. Decoding every aligned ARM B/BL word in the complete
+      osos.dec finds exactly six inbound calls, all unconditional plain bl at
+      0x08246598, 0x0824855c, 0x082493d8, 0x0824a454, 0x0824af70, and
+      0x0824bd58; there are no predicated forms or tail-B callers. It creates
+      a 0x1000-byte cg_heap, then FUN_082c1dc4 carves an eight-byte cg_module
+      from it through cg_heap_alloc and stores the heap pointer at module +0.
+      The resulting module pointer is installed at owner +4, without reading
+      or changing owner +0. The port calls already-ported cg_heap_alloc
+      directly for FUN_082c1dc4's exact allocation-and-store sequence, so it
+      adds no duplicate dispatch seam. CgModuleOwner is repr(C) with named
+      pointer fields: the target offsets remain +0/+4 while host fields stay
+      disjoint. Host test supplies a real allocator, preserves an owner-prefix
+      sentinel, proves the installed module points at a 4 KiB heap, and proves
+      its first allocation consumed the requested eight-byte module record.
