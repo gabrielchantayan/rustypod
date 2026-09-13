@@ -14524,6 +14524,26 @@ functions:
       load/modify/store - no lock, no LDREX, no interrupt guard, exactly
       as in the original.
 
+  - address: 0x081fc6f0
+    ghidra: FUN_081fc6f0
+    name: state_flags_overlap
+    size: 16
+    sig: "u32 state_flags_overlap(u8 *object, u32 mask)"
+    module: util/state_flags
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: mask
+    notes: >-
+      Loads the +0x44 state word, ANDs it with mask, and normalizes the
+      result to 1 or 0: "does any requested bit occur?"  Raw extent is
+      0x081fc6f0..0x081fc700; the next function starts at 0x081fc700.
+      A complete ARM B/BL decode finds 7 inbound sites, all unconditional
+      bl: 0x081fc8c0, 0x082078c4, 0x0820792c, 0x08207b14, 0x08207be0,
+      0x08207f60, and 0x08207f7c. No data word points at this address, so
+      it is not a virtual dispatch target. Empty masks return 0. No
+      deliberate deviations.
+
   - address: 0x08184b24
     ghidra: FUN_08184b24
     name: load_cros_resource_list
