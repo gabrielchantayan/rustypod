@@ -75960,3 +75960,35 @@ functions:
       deviations. Host tests cover empty and ASCII strings, valid two- and
       three-byte sequences, malformed continuations, and unsupported high-bit
       leads.
+
+  # --- Lazy storage-backend selection ---
+  - address: 0x080e4b6c
+    ghidra: FUN_080e4b6c
+    name: storage_backend_prepare
+    size: 76
+    sig: "u32 storage_backend_prepare(void)"
+    module: drivers/storage_backend_prepare
+    status: ported
+    renames:
+      DAT_080e4bb8: storage_backend_state (target RAM @ 0x089caae4)
+      DAT_080e4bbc: storage_backend_fallback (target RAM @ 0x089cab24)
+      FUN_082bc7c4: storage_backend_status
+      iVar1/r4: state
+      iVar2/r0: status
+      iVar3/r0: selected_backend
+    notes: >-
+      Raw osos.dec verifies 19 ARM instruction words from 0x080e4b6c
+      (`push {r4,lr}`) through 0x080e4bb4 (`pop {r4,pc}`), for 76 code
+      bytes. The following words 0x089caae4 and 0x089cab24 at
+      0x080e4bb8/0x080e4bbc are this function's literal pool; the next
+      separately entered function starts at 0x080e4bc0. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly seven inbound direct
+      calls, all unconditional bl at 0x082bcb04, 0x082bcc10, 0x082bcc50,
+      0x082bcc94, 0x082bccec, 0x082bcda0, and 0x082bce54; no predicated
+      forms or direct tail branches. If state+4 is zero, status 2 from
+      FUN_082bc7c4 stores state+12, status 3 stores 0x089cab24, status 4
+      succeeds without a store, and all other statuses return 0x13. A
+      nonzero state+4 bypasses the query. The status selector remains
+      unported: target builds call its verified entry 0x082bc7c4 directly,
+      while host tests install an explicit seam and use target-width words
+      for the fixed RAM objects; no narrowed host address is dereferenced.
