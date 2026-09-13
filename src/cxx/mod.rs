@@ -142,6 +142,7 @@ pub mod transition_addon;
 pub mod typed_allocation_release;
 pub mod opaque_allocation_release;
 pub mod opaque_descriptor_lookup;
+pub mod opaque_indexed_handle_initialize;
 pub mod opaque_descriptor_convert;
 pub mod generic_descriptor_convert;
 pub mod value_compare;
