@@ -68677,6 +68677,37 @@ functions:
       lcd_write_value; device loads/stores are volatile and host builds use
       atomic MMIO models.
       Reference C: decomp/c/007/080d4b14_FUN_080d4b14.c.
+  # --- LCD command transaction begin ---
+  - address: 0x080dbdb8
+    ghidra: FUN_080dbdb8
+    name: lcd_begin_command_transaction
+    size: 100
+    sig: "u32 lcd_begin_command_transaction(void)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      DAT_080dbe1c: LCD_CONTROLLER_BASE
+      puVar1/r4: lcd_controller
+      uVar3/r5: saved_control
+      uVar2/r0: display_mode_or_control
+    notes: >-
+      Raw ARM confirms Ghidra's 100-byte extent: 0x080dbdb8..0x080dbe18
+      saves LCD control +0x00 in r5, polls status +0x1c until bit 1 is set,
+      calls the already-ported 1-us iram_usec_delay_veneer
+      (0x08037ef0), then calls the unported FUN_080a3f48. Modes 0/1 store
+      (saved_control & 0x80000007) | 0xc20; modes 2/3 instead use 0xda8;
+      every other value returns the saved word without a store. The literal
+      0x38300000 at 0x080dbe1c is its pool, and the separately linked paired
+      restore helper begins at 0x080dbe20. Full-image decoding of every ARM
+      B/BL immediate finds exactly seven inbound direct BL calls, all
+      unconditional (zero predicated): 0x080bb500, 0x080bb540, 0x080dbee4,
+      0x080ddd38, 0x080e3344, 0x080e61cc, and 0x080e696c. FUN_080a3f48 is
+      absent from names.yaml and its identity is not inferred; target builds
+      call that verified address while host tests replace it through the
+      LCD_COMMAND_MODE seam. Deliberate deviation: target MMIO loads/stores
+      remain volatile; host tests use atomic controller words. Focused tests
+      cover modes 0..3, unsupported modes, preservation of the exact saved
+      value, and blocking until command-ready.
   # --- LCD controller data-port write ---
   - address: 0x080bb5f4
     ghidra: FUN_080bb5f4
