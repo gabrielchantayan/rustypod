@@ -1347,6 +1347,43 @@ pub unsafe extern "C" fn object_selected_item(object: *const u8) -> *const u8 {
     secondary_item as usize as *const u8
 }
 
+/// Byte offset of the resource-selection flags (`ldrb/strb r?,[r1,#0x1ad]`).
+const RESOURCE_SELECTION_FLAGS_OFFSET: usize = 0x1ad;
+
+/// set_resource_selected — original: `FUN_08067450` @ `0x08067450` (40
+/// bytes; next independently linked function starts at `0x08067478`).
+///
+/// Raw ARM decoding finds seven direct inbound `bl` calls, all unconditional:
+/// `0x08059b08`, `0x0805cda4`, `0x080668f4`, `0x08066b90`, `0x0809dc3c`,
+/// `0x0809dfc8`, and `0x080e2908`; there are no predicated call sites.
+///
+/// Clears the bit selected by `object + 1` in `inner + 0x1ad`, writes that
+/// intermediate byte, then ORs the same bit position shifted from `selected`
+/// and writes again. The ARM register shifts yield zero for indices at least
+/// 32; indices 8 through 31 also leave the byte unchanged after truncation.
+/// There is no null, bounds, or boolean-value guard. Deliberate deviations:
+/// none.
+///
+/// # Safety
+///
+/// `inner + 0x1ad` and `object + 1` must be readable; the flags byte must be
+/// writable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn set_resource_selected(selected: u32, inner: *mut u8, object: *const u8) {
+    let flags = inner.add(RESOURCE_SELECTION_FLAGS_OFFSET);
+    let clear_bit = object.add(1).read();
+    let clear_mask = if clear_bit < 32 { 1u32 << clear_bit } else { 0 };
+    let cleared = flags.read() & !(clear_mask as u8);
+    flags.write(cleared);
+
+    let set_bit = object.add(1).read();
+    let set_mask = if set_bit < 32 { selected << set_bit } else { 0 };
+    flags.write(cleared | set_mask as u8);
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -3068,6 +3105,31 @@ mod tests {
             assert!(
                 unsafe { object_backend_for_kind(object.as_ptr()) }.is_null(),
                 "kind {kind:#04x} falls to `movne r0,#0x0`"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_resource_updates_the_byte_for_arm_shift_edge_cases() {
+        let mut inner = [0u8; RESOURCE_SELECTION_FLAGS_OFFSET + 1];
+        let mut object = [0u8; 2];
+
+        for (selected, bit, before, expected) in [
+            (0, 0, 0xff, 0xfe),
+            (1, 7, 0x00, 0x80),
+            (3, 2, 0xf0, 0xfc),
+            (1, 8, 0x5a, 0x5a),
+            (1, 31, 0xa5, 0xa5),
+            (1, 32, 0x3c, 0x3c),
+        ] {
+            inner[RESOURCE_SELECTION_FLAGS_OFFSET] = before;
+            object[1] = bit;
+
+            unsafe { set_resource_selected(selected, inner.as_mut_ptr(), object.as_ptr()) };
+
+            assert_eq!(
+                inner[RESOURCE_SELECTION_FLAGS_OFFSET], expected,
+                "selected={selected}, bit={bit}"
             );
         }
     }

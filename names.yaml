@@ -37536,6 +37536,33 @@ functions:
       reported-equal, and accepted-change behavior plus the exact notification
       tuple.
 
+
+  # --- UI resource selection-bit setter (ui/object_state) ---
+  - address: 0x08067450
+    ghidra: FUN_08067450
+    name: set_resource_selected
+    size: 40
+    sig: "void set_resource_selected(u32 selected, u8 *inner, const u8 *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: selected
+      param_2/r1: inner
+      param_3/r2: object
+      param_2_plus_0x1ad: resource_selection_flags
+      param_3_plus_0x1: selection_bit_index
+    notes: >-
+      Raw ARM covers 0x08067450 through the return at 0x08067474; the
+      next independently linked function begins at 0x08067478, confirming
+      Ghidra's 40-byte extent. Decoding every ARM B/BL immediate in
+      osos.dec finds seven direct callers, all unconditional bl:
+      0x08059b08, 0x0805cda4, 0x080668f4, 0x08066b90, 0x0809dc3c,
+      0x0809dfc8, and 0x080e2908. There are no predicated call sites.
+      It clears bit object+1 in inner+0x1ad, writes that intermediate byte,
+      then writes it ORed with selected shifted by the reloaded object+1
+      index. ARM register shifts at 32 or above yield zero; indices 8..31
+      also leave the stored byte unchanged after truncation. There are no
+      NULL, bounds, or boolean-value guards. No deliberate deviations.
   - address: 0x08067b4c
     ghidra: FUN_08067b4c
     name: tdat_element_set_flag_20_bit_2
