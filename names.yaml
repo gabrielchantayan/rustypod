@@ -81449,3 +81449,38 @@ functions:
       0x089919a8 at +0, return this. Host tests prove the default layout,
       untouched adjacent state, exact target-width owner word, and that
       derived stores follow a divergent base return rather than input this.
+
+
+  # --- Storage-device accessor ---
+  - address: 0x081f1b2c
+    ghidra: FUN_081f1b2c
+    name: storage_device_get
+    size: 112
+    sig: "u8 *storage_device_get(u32 index)"
+    module: drivers/storage_device_get
+    status: ported
+    renames:
+      param_1/r0/r4: index
+      DAT_081f1b94: storage_device_condition_slot (0x089d03b0)
+      DAT_081f1b98: storage_device_cache (0x089d03b4)
+      FUN_082aadd4: operator_new
+      FUN_0807f680: condvar_init
+      FUN_0814e2dc: storage_device_construct (unported boundary)
+    notes: >-
+      Raw osos.dec establishes 26 instruction words at 0x081f1b2c..0x081f1b90,
+      then literal-pool words at 0x081f1b94 and 0x081f1b98; the distinct next
+      function begins at 0x081f1b9c, so the true extent is 112 bytes rather
+      than Ghidra's 104 instruction bytes. Full-image ARM B/BL-immediate
+      decoding finds six inbound calls, all unconditional plain bl at
+      0x08064a68, 0x08064b80, 0x08076400, 0x080c685c, 0x082bcaa0, and
+      0x08393044; no predicated bl forms or direct B tails target this entry.
+      It also occurs as an aligned data word at 0x0899bd48, in a table whose
+      type is unverified. Before rejecting index >= 2, it lazily allocates 12
+      bytes, condvar-initializes the result, and caches it at 0x089d03b0. Each
+      of the two device cache slots at 0x089d03b4 then lazily allocates 32
+      bytes, passes (allocation, index, condition) to constructor 0x0814e2dc,
+      stores the constructor result, and returns it; neither allocation has a
+      NULL guard. The constructor remains unported: target builds call it
+      directly, while the documented host seam defaults to returning the
+      allocation unchanged. Host tests prove invalid-index initialization
+      ordering, both cache misses, constructor arguments, and cache hits.
