@@ -68833,12 +68833,12 @@ functions:
     ghidra: FUN_0809b678
     name: path_component_query
     size: 48
-    sig: "u32 path_component_query(const u8 *path, u32 unused)"
+    sig: "u32 path_component_query(const u8 *path, u32 base_hint)"
     module: app/path_component_query
     status: ported
     renames:
       param_1/r0: path (NUL-terminated path C string)
-      param_2/r1/r4: unused (forwarded to 0x0809b6a8, then discarded)
+      param_2/r1/r4: base_hint (forwarded to 0x0809b6a8 guard construction)
       r4: query status across path-object destruction
       r2/r3 spill: StringObject stack storage
     notes: >-
@@ -68856,15 +68856,50 @@ functions:
       0x08195754, 0x081967ac, 0x081b0004, and 0x0826631c; there are zero
       predicated bl and zero direct B tail calls. Every recovered caller passes
       a path string and zero as arg2, and branches on the returned status.
-      Raw decoding of helper 0x0809b6a8 shows it overwrites saved r4 from r0
-      and never reads r1, so arg2 is dead in the complete retail composition.
-      Its 0x08149e38 callee's exact facade-slot identity is not established;
-      the port therefore names only the observed component-query role.
-      Deliberate deviation: that unresolved helper is a volatile dispatch
-      boundary, calling its fixed retailOS address on device and failing closed
-      to 0 on host. Host tests prove construction/query/destruction ordering,
-      argument forwarding for 0, 1, and 0x5a5af00d, derived/base vtable
-      transitions, and verbatim statuses 0, 13, and 53.
+      Raw decoding shows r1 remains live through `mov r0, sp` into the
+      helper's guard constructor, so arg2 is its base_hint even though the
+      later facade query receives only the constructed path object. The
+      helper is now ported as path_component_query_worker; its 0x08149e38
+      callee's exact facade-operation identity remains unestablished, so that
+      narrower callee alone is a device boundary. Host tests prove
+      construction/query/destruction ordering, base-hint forwarding for 0, 1,
+      and 0x5a5af00d, derived/base vtable transitions, and verbatim statuses
+      0, 13, and 53.
+
+  # --- Scoped path-component facade query ---
+  - address: 0x0809b6a8
+    ghidra: FUN_0809b6a8
+    name: path_component_query_worker
+    size: 60
+    sig: "u32 path_component_query_worker(StringObject *path_object, u32 base_hint)"
+    module: app/path_component_query_worker
+    status: ported
+    renames:
+      param_1/r0/r4: path_object (preserved for facade query)
+      param_2/r1: base_hint (live into interface-guard construction)
+      r0 after 0x0818a0bc: facade
+      r4 after 0x08149e38: facade query status
+    notes: >-
+      Raw osos.dec decoding confirms the exact 60-byte extent: fifteen ARM
+      instructions occupy 0x0809b6a8..0x0809b6e0, followed immediately by a
+      distinct function at 0x0809b6e4. Full-image decoding of every ARM B/BL
+      immediate finds exactly seven inbound direct calls, all unconditional
+      plain bl at 0x0809b690, 0x0813ac64, 0x0815e880, 0x081a29bc,
+      0x081ee7f0, 0x0825878c, and 0x08285774; there are zero predicated bl
+      and zero direct B tail calls. The r0-r3 spill is a 16-byte
+      InterfaceGuard: construct it through ported path_probe_guard_construct
+      @ 0x08206e40 with the live r1 base_hint, fetch facade selector 1
+      through ported facade_for_selector @ 0x0818a0bc, call unresolved
+      0x08149e38 with (facade, path_object), preserve its status in r4,
+      destroy the guard through ported path_probe_guard_destroy @ 0x08206e6c,
+      and return the saved status verbatim. The 0x08149e38 operation consumes
+      those two observed arguments, but its semantic identity is not
+      established. Deliberate deviation: it is a read-volatile device
+      boundary at its fixed retailOS address and fails closed with 0 on host;
+      guard/facade/destruction reuse their existing ported seams. Host tests
+      prove guard/facade/query/destruction ordering, r1 base-hint forwarding,
+      facade/path argument forwarding, derived path-object construction, base
+      vtable restoration, and statuses 0, 13, and 53.
 
   # --- C-string-to-path facade slot +0x5c wrapper ---
   - address: 0x08084d28

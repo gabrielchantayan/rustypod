@@ -145,6 +145,7 @@ pub mod pair_header_destruct;
 pub mod parse_result;
 pub mod path_exists;
 pub mod path_component_query;
+pub mod path_component_query_worker;
 pub mod path_object_construct;
 pub mod path_probe;
 pub mod playlist_pointer_marker;
