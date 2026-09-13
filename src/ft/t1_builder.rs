@@ -94,10 +94,174 @@ pub unsafe extern "C" fn t1_builder_add_point(
     (*outline).n_points = (*outline).n_points.wrapping_add(1);
 }
 
+/// Firmware load address of the unported Type 1 contour finalizer
+/// `t1_builder_add_contour` @ 0x080c9a6c.
+pub const T1_BUILDER_ADD_CONTOUR_ADDRESS: usize = 0x080c_9a6c;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_t1_builder_add_contour(builder: *mut T1Builder) -> i32 {
+    let add_contour: unsafe extern "C" fn(*mut T1Builder) -> i32 =
+        core::mem::transmute(T1_BUILDER_ADD_CONTOUR_ADDRESS);
+    add_contour(builder)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_t1_builder_add_contour(_builder: *mut T1Builder) -> i32 {
+    panic!("t1_builder_start_point requires t1_builder_add_contour 0x080c9a6c")
+}
+
+/// Direct-call boundary for the unported `t1_builder_add_contour` @
+/// 0x080c9a6c. It finalizes the preceding outline contour and grows
+/// storage if required.
+#[cfg(target_os = "none")]
+pub static mut T1_BUILDER_ADD_CONTOUR: unsafe extern "C" fn(*mut T1Builder) -> i32 =
+    firmware_t1_builder_add_contour;
+
+#[cfg(not(target_os = "none"))]
+pub static mut T1_BUILDER_ADD_CONTOUR: unsafe extern "C" fn(*mut T1Builder) -> i32 =
+    missing_t1_builder_add_contour;
+
+/// Firmware load address of the unported capacity-checking on-curve point
+/// wrapper at 0x080c4ce0.
+pub const T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT_ADDRESS: usize = 0x080c_4ce0;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_t1_builder_check_and_add_on_curve_point(
+    builder: *mut T1Builder,
+    x: i32,
+    y: i32,
+) -> i32 {
+    let add_point: unsafe extern "C" fn(*mut T1Builder, i32, i32) -> i32 =
+        core::mem::transmute(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT_ADDRESS);
+    add_point(builder, x, y)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_t1_builder_check_and_add_on_curve_point(
+    _builder: *mut T1Builder,
+    _x: i32,
+    _y: i32,
+) -> i32 {
+    panic!("t1_builder_start_point requires point wrapper 0x080c4ce0")
+}
+
+/// Direct-call boundary for the unported 0x080c4ce0 wrapper. It checks
+/// capacity for one point, then invokes [`t1_builder_add_point`] with
+/// `on_curve = 1` when that check succeeds.
+#[cfg(target_os = "none")]
+pub static mut T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT:
+    unsafe extern "C" fn(*mut T1Builder, i32, i32) -> i32 =
+    firmware_t1_builder_check_and_add_on_curve_point;
+
+#[cfg(not(target_os = "none"))]
+pub static mut T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT:
+    unsafe extern "C" fn(*mut T1Builder, i32, i32) -> i32 =
+    missing_t1_builder_check_and_add_on_curve_point;
+
+/// Type 1 `t1_builder_start_point` (t1gload.c) — original:
+/// `FUN_080c9af4` @ 0x080c9af4 (88 bytes,
+/// 0x080c9af4..0x080c9b48; the following `mov r3,r0 / mov r0,r1` starts
+/// a separate function at 0x080c9b4c). Seven unconditional `bl` call
+/// sites are verified by decoding every ARM B/BL word in `osos.dec`:
+/// 0x080de328, 0x080de898, 0x080de8e8, 0x080de96c, 0x080dea94,
+/// 0x080deb30, and 0x080debb8. There are no predicated call forms and
+/// no raw DATA word references to this entry.
+///
+/// A builder with `parse_state == 3` already has a path and succeeds without
+/// touching it. Only state 2 (a preceding `moveto`) may begin a path; every
+/// other state returns syntax error 3. The accepted path becomes state 3,
+/// finalizes its preceding contour, then checks capacity and records `(x,y)`
+/// as an on-curve point. Errors from either callee propagate, and the state
+/// remains 3 after a contour or capacity failure.
+///
+/// Deliberate deviation: after the contour call, the ARM restores its
+/// arguments and tail-branches to the unported 0x080c4ce0 wrapper. Rust
+/// returns the direct seam call's value; this preserves the wrapper's
+/// observable error and point-recording behavior without reifying the tail
+/// branch.
+///
+/// # Safety
+/// `builder` and the structures required by the selected seam must be valid.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn t1_builder_start_point(
+    builder: *mut T1Builder,
+    x: i32,
+    y: i32,
+) -> i32 {
+    if (*builder).parse_state == 3 {
+        return 0;
+    }
+    if (*builder).parse_state != 2 {
+        return 3;
+    }
+    (*builder).parse_state = 3;
+    let add_contour = core::ptr::addr_of!(T1_BUILDER_ADD_CONTOUR).read_volatile();
+    let error = add_contour(builder);
+    if error != 0 {
+        return error;
+    }
+    let add_point =
+        core::ptr::addr_of!(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT).read_volatile();
+    add_point(builder, x, y)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
+    use parking_lot::Mutex;
+
+    static START_POINT_LOCK: Mutex<()> = Mutex::new(());
+    static ADD_CONTOUR_CALLS: Mutex<std::vec::Vec<usize>> = Mutex::new(std::vec::Vec::new());
+    static ADD_POINT_CALLS: Mutex<std::vec::Vec<(usize, i32, i32)>> =
+        Mutex::new(std::vec::Vec::new());
+
+    unsafe extern "C" fn record_add_contour(builder: *mut T1Builder) -> i32 {
+        ADD_CONTOUR_CALLS.lock().push(builder as usize);
+        0
+    }
+
+    unsafe extern "C" fn fail_add_contour(builder: *mut T1Builder) -> i32 {
+        ADD_CONTOUR_CALLS.lock().push(builder as usize);
+        0x23
+    }
+
+    unsafe extern "C" fn record_add_point(builder: *mut T1Builder, x: i32, y: i32) -> i32 {
+        ADD_POINT_CALLS.lock().push((builder as usize, x, y));
+        0
+    }
+
+    unsafe extern "C" fn fail_add_point(builder: *mut T1Builder, x: i32, y: i32) -> i32 {
+        ADD_POINT_CALLS.lock().push((builder as usize, x, y));
+        0x2a
+    }
+
+    fn with_start_point_seams(
+        add_contour: unsafe extern "C" fn(*mut T1Builder) -> i32,
+        add_point: unsafe extern "C" fn(*mut T1Builder, i32, i32) -> i32,
+        body: impl FnOnce(),
+    ) {
+        let _lock = START_POINT_LOCK.lock();
+        ADD_CONTOUR_CALLS.lock().clear();
+        ADD_POINT_CALLS.lock().clear();
+        let saved_contour =
+            unsafe { core::ptr::addr_of!(T1_BUILDER_ADD_CONTOUR).read_volatile() };
+        let saved_point = unsafe {
+            core::ptr::addr_of!(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT).read_volatile()
+        };
+        unsafe {
+            core::ptr::addr_of_mut!(T1_BUILDER_ADD_CONTOUR).write_volatile(add_contour);
+            core::ptr::addr_of_mut!(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT)
+                .write_volatile(add_point);
+        }
+        body();
+        unsafe {
+            core::ptr::addr_of_mut!(T1_BUILDER_ADD_CONTOUR).write_volatile(saved_contour);
+            core::ptr::addr_of_mut!(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT)
+                .write_volatile(saved_point);
+        }
+    }
 
     struct Fixture {
         points: [FtVector; 8],
@@ -193,5 +357,64 @@ mod tests {
         let mut fixture = Fixture::new(i16::MAX, 0, 0);
         unsafe { t1_builder_add_point(&mut fixture.builder, 0, 0, 1) };
         assert_eq!(fixture.outline.n_points, i16::MIN);
+    }
+
+    #[test]
+    fn existing_path_returns_success_without_calling_seams() {
+        let mut fixture = Fixture::new(0, 1, 0);
+        fixture.builder.parse_state = 3;
+        with_start_point_seams(record_add_contour, record_add_point, || {
+            let rc = unsafe { t1_builder_start_point(&mut fixture.builder, 9, -4) };
+            assert_eq!(rc, 0);
+            assert!(ADD_CONTOUR_CALLS.lock().is_empty());
+            assert!(ADD_POINT_CALLS.lock().is_empty());
+        });
+        assert_eq!(fixture.builder.parse_state, 3);
+    }
+
+    #[test]
+    fn state_without_moveto_returns_syntax_error_without_calling_seams() {
+        let mut fixture = Fixture::new(0, 1, 0);
+        fixture.builder.parse_state = 1;
+        with_start_point_seams(record_add_contour, record_add_point, || {
+            let rc = unsafe { t1_builder_start_point(&mut fixture.builder, 9, -4) };
+            assert_eq!(rc, 3);
+            assert!(ADD_CONTOUR_CALLS.lock().is_empty());
+            assert!(ADD_POINT_CALLS.lock().is_empty());
+        });
+        assert_eq!(fixture.builder.parse_state, 1);
+    }
+
+    #[test]
+    fn contour_failure_starts_path_and_propagates_without_point_call() {
+        let mut fixture = Fixture::new(0, 1, 0);
+        fixture.builder.parse_state = 2;
+        let builder = &mut fixture.builder as *mut T1Builder as usize;
+        with_start_point_seams(fail_add_contour, record_add_point, || {
+            let rc = unsafe { t1_builder_start_point(&mut fixture.builder, 0x1234, -0x5678) };
+            assert_eq!(rc, 0x23);
+            assert_eq!(ADD_CONTOUR_CALLS.lock().as_slice(), [builder]);
+            assert!(ADD_POINT_CALLS.lock().is_empty());
+        });
+        assert_eq!(fixture.builder.parse_state, 3);
+    }
+
+    #[test]
+    fn starts_path_then_forwards_coordinates_and_point_error() {
+        let mut fixture = Fixture::new(0, 1, 0);
+        fixture.builder.parse_state = 2;
+        let builder = &mut fixture.builder as *mut T1Builder as usize;
+        with_start_point_seams(record_add_contour, fail_add_point, || {
+            let rc = unsafe {
+                t1_builder_start_point(&mut fixture.builder, 0x1234_5678, -0x1234_567)
+            };
+            assert_eq!(rc, 0x2a);
+            assert_eq!(ADD_CONTOUR_CALLS.lock().as_slice(), [builder]);
+            assert_eq!(
+                ADD_POINT_CALLS.lock().as_slice(),
+                [(builder, 0x1234_5678, -0x1234_567)]
+            );
+        });
+        assert_eq!(fixture.builder.parse_state, 3);
     }
 }

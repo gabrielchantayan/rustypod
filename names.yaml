@@ -63880,6 +63880,33 @@ functions:
       dispatched. Host builds model only the fixed MMIO ready register with an
       atomic word so the readiness gate can be tested; device builds retain
       the volatile physical read.
+  - address: 0x080c9af4
+    ghidra: FUN_080c9af4
+    name: t1_builder_start_point
+    size: 88
+    sig: "i32 t1_builder_start_point(T1Builder *builder, i32 x, i32 y)"
+    module: ft/t1_builder
+    status: ported
+    renames:
+      param_1/r0: builder
+      param_2/r1: x
+      param_3/r2: y
+      FUN_080c9a6c: t1_builder_add_contour
+      FUN_080c4ce0: t1_builder_check_and_add_on_curve_point
+    notes: >-
+      Raw ARM occupies 0x080c9af4..0x080c9b48; 0x080c9b4c begins a
+      separate mov-r3,r0 / mov-r0,r1 function, confirming Ghidra's
+      88-byte extent. The builder's +0x50 parse_state returns zero unchanged
+      when already 3, rejects any value except 2 with error 3, otherwise
+      becomes 3 before calling t1_builder_add_contour @ 0x080c9a6c. On
+      success, the raw code restores (builder, x, y), pops its frame, and
+      tail-branches to 0x080c4ce0, which checks capacity then calls the
+      ported t1_builder_add_point with on_curve = 1. Rust returns that
+      wrapper seam's value rather than reproducing the tail branch.
+      Decoding every ARM B/BL word in osos.dec finds exactly 7 unconditional
+      bl call sites at 0x080de328, 0x080de898, 0x080de8e8, 0x080de96c,
+      0x080dea94, 0x080deb30, and 0x080debb8; no predicated forms or raw
+      DATA-word references target this entry.
 
   - address: 0x0821754c
     ghidra: FUN_0821754c
