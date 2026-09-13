@@ -74098,3 +74098,36 @@ functions:
       unsigned-wrap arithmetic, plus a positive adjustment and NULL text
       forwarding. match.py structural review is expected to differ in the two
       veneer calls, LLVM frame, and field-load order.
+  - address: 0x08258bd0
+    ghidra: FUN_08258bd0
+    name: input_capabilities_get
+    size: 56
+    sig: "void *input_capabilities_get(void)"
+    module: app/input_capabilities
+    status: ported
+    renames:
+      DAT_08258c00: INPUT_CAPABILITIES_CACHE_POOL (trailing pool word holding 0x089d0298)
+      DAT_089d0298: INPUT_CAPABILITIES_CACHE
+      DAT_08258c04: INPUT_CAPABILITIES_VTABLE (0x089a778c)
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec establishes 48 code bytes from 0x08258bd0 through the
+      pop {r4,pc} at 0x08258bfc, then two owned literal-pool words
+      (0x089d0298 at 0x08258c00 and 0x089a778c at 0x08258c04); separately
+      linked string_id_record_construct_from_string_id begins at 0x08258c08,
+      making the true extent 56 bytes rather than Ghidra's 48-byte code-only
+      report. Full-image decoding of every ARM B/BL word finds exactly seven
+      inbound direct BL call sites, all unconditional (zero predicated, zero
+      direct plain-B tails): 0x081658f4, 0x0818e37c, 0x0819061c,
+      0x08191488, 0x0819189c, 0x081ff2e8, and 0x081ff42c. Algorithm: load
+      cache 0x089d0298; on NULL allocate four bytes through operator_new,
+      store vtable word 0x089a778c at allocation+0, cache the allocation,
+      reload and return it. Callers use slots +0x14 through +0x2c as
+      input-capability probes, which is the only recovered identity. Several
+      vtable words land inside the 0x08105b58 instruction/jump-table stream,
+      not verified function entries, so no callee identity is invented.
+      Deliberate deviation: the firmware cache is represented by crate static
+      INPUT_CAPABILITIES_INSTANCE. The no-NULL-check vtable store is retained;
+      the unsafe port has the same successful-allocation precondition. Host
+      test covers the exact four-byte tag-2 allocation, vtable store, and
+      cached no-allocation path.

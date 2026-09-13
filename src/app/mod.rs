@@ -92,6 +92,7 @@ pub mod image_format;
 pub mod kinded_controller;
 pub mod image_format_descriptor_slot;
 pub mod lock_service;
+pub mod input_capabilities;
 pub mod managed_entry;
 pub mod layout_state;
 pub mod lazy_handle_manager;
