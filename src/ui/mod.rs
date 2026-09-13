@@ -8,6 +8,7 @@ pub mod display_pending_nibbles;
 pub mod color;
 pub mod rgb565_pack;
 pub mod rgba4444_pack;
+pub mod rgb555a1_pack;
 pub mod content_bounds;
 pub mod first_collection_item_bounds;
 pub mod collection_current_item_word;
