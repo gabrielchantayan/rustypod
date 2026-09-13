@@ -128,6 +128,13 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const SET_STRING: usize = 0x3900_0000;
+    // 0x5000_0000: dedicated to app/typed_handler_registry_lookup's raw-u32
+    // registry and table fixture; mappings never unmap, so no other test may
+    // reuse this hint.
+    pub const TYPED_HANDLER_REGISTRY_LOOKUP: usize = 0x5000_0000;
+    // 0x5100_0000: dedicated to app/type_handler_lookup's raw-u32 registry
+    // fixture; mappings never unmap, so no other test may reuse this hint.
+    pub const TYPE_HANDLER_LOOKUP_WRAPPER: usize = 0x5100_0000;
     // 0x3a00_0000: sibling ports in flight take the sequential slots,
     // and a collision skips tests silently on every host.
     pub const KINDED_CONTROLLER: usize = 0x3a00_0000;

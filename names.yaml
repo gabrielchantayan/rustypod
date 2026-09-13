@@ -79451,3 +79451,34 @@ functions:
       and overflow without consulting pBt. Deliberate deviations: resident
       direct bl calls cross typed seams; status, order, arguments, and
       short-circuiting are preserved.
+
+  - address: 0x082a7280
+    ghidra: FUN_082a7280
+    name: typed_handler_registry_lookup
+    size: 72
+    sig: "void *typed_handler_registry_lookup(void **registry, const uint32_t *type_id, uint32_t direction, uint32_t flags, uintptr_t default_entry)"
+    module: app/typed_handler_registry_lookup
+    status: ported
+    renames:
+      param_1/r0: registry
+      param_2/r1: type_id
+      param_3/r2: direction
+      param_4/r3: flags
+      param_5/stack: default_entry
+      iVar1/lr: handler
+      FUN_082a72c8: typed_handler_registry_slow_lookup
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte body
+      0x082a7280..0x082a72c8: the next separately linked function starts at
+      0x082a72c8. Ghidra omitted direction, flags, and default_entry, but ARM
+      preserves and forwards all five arguments to the slow lookup. The first
+      type_id word indexes registry word-2's u32 handler table when it is
+      strictly below registry word-3's count; a nonzero table entry returns
+      directly, while a zero or out-of-range entry calls the unported
+      0x082a72c8 helper. Decoding every aligned ARM B/BL-immediate word finds
+      exactly six inbound direct calls, all plain unconditional bl at
+      0x083b5484, 0x083b6ce4, 0x083e7954, 0x083eaaf8, 0x083eab20, and
+      0x083eab48; there are no predicated forms or direct B tail transfers.
+      Target builds use the fixed slow-helper address and host tests use a
+      volatile seam. Host tests cover an in-range nonzero entry, a zero entry,
+      an out-of-range index, and exact five-argument fallback forwarding.
