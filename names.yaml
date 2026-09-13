@@ -75287,3 +75287,31 @@ functions:
       The names state only their observed ready-predicate and advance roles;
       no further callee identity is claimed. The Rust port directly calls
       the ported Timer E reader and retains wrapping unsigned timeout math.
+  - address: 0x0813c938
+    ghidra: FUN_0813c938
+    name: query_object_create_with_id
+    size: 36
+    sig: "u8 *query_object_create_with_id(u32 id, u32 mode)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0/r5: id
+      param_2/r1/r4: mode
+      r0: allocated_query_object
+      FUN_082aadd4: operator_new
+      FUN_0813e474: query_object_construct
+    notes: >-
+      RAW EXTENT CORRECTED: Ghidra folds the tail constructor into this
+      wrapper. The exact nine-word body is 0x0813c938..0x0813c958: it saves
+      id and mode, calls tag-2 operator_new with size 0x48, restores the
+      values as constructor r1/r2, and tail-branches to
+      query_object_construct at 0x0813e474. The separately linked successor
+      begins at 0x0813c95c. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds exactly seven inbound direct calls, all unconditional
+      plain bl at 0x0819c4a4, 0x0821d2e8, 0x0822677c, 0x08226868,
+      0x08226a78, 0x0822f048, and 0x08232b28; there are no predicated forms.
+      Release ARM retains the tail transfer as bx through the
+      0x0813e474 literal, preserving the allocation, id, mode, and returned
+      constructor pointer. Host tests
+      prove tag-2 size 0x48 allocation and forwarding for zero, ordinary,
+      high-bit, and u32::MAX argument values.

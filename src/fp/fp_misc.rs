@@ -779,6 +779,29 @@ pub(crate) unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) 
     construct(query, id, mode)
 }
 
+/// query_object_create_with_id — original: `FUN_0813c938` @ 0x0813c938
+/// (36 bytes, exactly `0x0813c938..0x0813c95b`; successor starts at
+/// 0x0813c95c).
+///
+/// Raw ARM decoding finds seven direct call sites, all unconditional `bl`
+/// (0x0819c4a4, 0x0821d2e8, 0x0822677c, 0x08226868, 0x08226a78,
+/// 0x0822f048, and 0x08232b28); no predicated forms reach it.
+///
+/// Allocates the 0x48-byte query object through tag-2 `operator new`, then
+/// forwards the allocation, caller-supplied id, and mode to the query-object
+/// constructor at 0x0813e474. LLVM retains the original tail transfer as a
+/// `bx` through the constructor address literal; deliberate deviations: none.
+///
+/// Sources: raw `osos.dec` words at 0x0813c938 and
+/// `decomp/c/012/0813c938_FUN_0813c938.c`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.query_object_create_with_id")]
+pub unsafe extern "C" fn query_object_create_with_id(id: u32, mode: u32) -> *mut u8 {
+    let query = crate::heap::veneers::operator_new(0x48);
+    query_object_construct(query, id, mode)
+}
+
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn query_object_name(out: *mut StringObject, query: *const u8) {
@@ -4066,12 +4089,17 @@ mod tests {
     static mut QUERY_ARENA_USED: usize = 0;
     /// Every (pointer, tag) the arena `free` slot recorded, in order.
     static mut QUERY_FREES: Vec<(*mut u8, usize)> = Vec::new();
+    /// Last `(size, tag)` handed to the arena allocation slot.
+    static mut QUERY_ALLOCATION: Option<(usize, usize)> = None;
+
 
     unsafe extern "C" fn query_arena_alloc(
         _heap: *mut HeapDescriptorDescriptor,
         size: usize,
         _tag: usize,
     ) -> *mut u8 {
+        QUERY_ALLOCATION = Some((size, _tag));
+
         let used = QUERY_ARENA_USED;
         let aligned = (size + 7) & !7;
         if used + aligned > QUERY_ARENA_SIZE {
@@ -4161,6 +4189,8 @@ mod tests {
         let heap_lock = crate::heap::veneers::tests::mock_heap();
         unsafe {
             QUERY_ARENA_USED = 0;
+            QUERY_ALLOCATION = None;
+
             (*core::ptr::addr_of_mut!(QUERY_FREES)).clear();
             (*core::ptr::addr_of_mut!(QUERY_EVENTS)).clear();
             CONSTRUCT_QUERY = core::ptr::null_mut();
@@ -4210,6 +4240,26 @@ mod tests {
     unsafe fn produced_rep(data: *mut u8) -> (i32, u32, u32) {
         let rep = crate::cxx::string::data_rep(data);
         ((*rep).refcount, (*rep).capacity, (*rep).length)
+    }
+
+    #[test]
+    fn query_object_create_with_id_allocates_then_forwards_every_u32_argument() {
+        let _mocks = install_query_mocks();
+
+        for (id, mode) in [(0, 0), (1, 2), (u32::MAX, 0x8000_0000)] {
+            unsafe {
+                (*core::ptr::addr_of_mut!(QUERY_EVENTS)).clear();
+                QUERY_ALLOCATION = None;
+
+                let query = query_object_create_with_id(id, mode);
+
+                assert_eq!(QUERY_ALLOCATION, Some((0x48, 2)), "tag-2 operator new");
+                assert_eq!(*core::ptr::addr_of!(QUERY_EVENTS), Vec::from(["construct"]));
+                assert_eq!(CONSTRUCT_QUERY, query, "constructor receives the allocation");
+                assert_eq!(CONSTRUCT_ID, id);
+                assert_eq!(CONSTRUCT_MODE, mode);
+            }
+        }
     }
 
     #[test]
