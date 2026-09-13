@@ -10,6 +10,9 @@
 //! - `formatted_message_open_dict` — original: `FUN_081236f8` @
 //!   0x081236f8 (68 bytes; 28 `bl` call sites, binary-scanned, all plain
 //!   `bl`).
+//! - `formatted_message_emit_array` — original: `FUN_08123758` @
+//!   0x08123758 (68 bytes; 7 `bl` call sites, binary-scanned, all plain
+//!   `bl`).
 //! - `formatted_message_emit_boolean` — original: `FUN_0812395c` @
 //!   0x0812395c (88 bytes; 58 `bl` call sites, binary-scanned).
 //! - `formatted_message_close_dict` — original: `FUN_081239d4` @
@@ -123,6 +126,11 @@ const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n
 /// after its 68-byte body). Consumes three argument words: indent, key,
 /// indent.
 const PLIST_DICT_OPEN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<dict>\n\0";
+
+/// The array-opening emitter's format literal @ 0x0812379c (immediately
+/// after its 68-byte body). Consumes three argument words: indent, key,
+/// indent.
+const PLIST_ARRAY_OPEN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<array>\n\0";
 
 /// The boolean-sibling format literal @ 0x081239b8 (addressed by the
 /// original with `adr r2, 0x81239b8`, right after the 88-byte body and
@@ -472,6 +480,44 @@ pub unsafe extern "C" fn formatted_message_open_dict(
         stream.buf.as_mut_ptr(),
         stream.buf.len(),
         PLIST_DICT_OPEN_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
+/// formatted_message_emit_array — original: `FUN_08123758` @
+/// 0x08123758 (68 bytes; verified 7 `bl` call sites, all unconditional
+/// plain `bl` — no caller-side gating).
+///
+/// Emit one indented `<key>key</key>` followed by an opening `<array>` tag:
+/// prepare the indentation for `depth`, format into the stream's 512-byte
+/// inline buffer with [`PLIST_ARRAY_OPEN_FORMAT`], and append the buffer to
+/// the stream output. Raw ARM bytes establish the extent through the tail
+/// branch at 0x08123798; the adjacent literal begins at 0x0812379c.
+///
+/// Deliberate deviation: the original tail-branches to stream append @
+/// 0x08123c58; this port calls the existing swappable [`STREAM_APPEND`] slot
+/// and returns, preserving the observable formatting and arguments.
+///
+/// Register usage: r0 = stream, r1 = key, r2 = depth; r3 is overwritten with
+/// the prepared indent for `snprintf`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_emit_array(
+    stream: *mut MessageStream,
+    key: *const u8,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    // The original's argument area: r3 = indent, stack = {key, indent}.
+    let args: [u32; 3] = [indent as u32, key as u32, indent as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_ARRAY_OPEN_FORMAT.as_ptr(),
         args.as_ptr(),
     );
     let text = stream.buf.as_ptr();
@@ -926,6 +972,58 @@ mod tests {
                 (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
             assert_eq!(app_stream, stream);
             assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn open_array_prepares_formats_and_appends_in_order() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"Tracks\0";
+        unsafe {
+            with_mocks(snapshot_open_dict_engine, || {
+                formatted_message_emit_array(stream, key.as_ptr(), 0);
+            });
+            let (prep_stream, prep_depth) = PREPARE_LEG.expect("indent prepared");
+            assert_eq!(prep_stream, stream, "preparer saw the stream");
+            assert_eq!(prep_depth, 0, "preparer saw the depth (original r2)");
+
+            let (fmt, cursor, end, words) =
+                (*core::ptr::addr_of_mut!(OPEN_DICT_FORMAT_LEG)).take().expect("formatter ran");
+            let buf = (*stream).buf.as_mut_ptr();
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(fmt, PLIST_ARRAY_OPEN_FORMAT.as_ptr());
+            assert_eq!(cursor, buf as usize, "snprintf target is the inline buffer at +0x15");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "bounded at +0x15 + 0x200");
+            assert_eq!(
+                words,
+                [indent as u32, key.as_ptr() as u32, indent as u32],
+                "argument area: (indent, key, indent)"
+            );
+
+            let (app_stream, app_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(app_stream, stream);
+            assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn open_array_formats_the_array_tag_end_to_end() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(echo_engine, || {
+                formatted_message_emit_array(stream, b"Tracks\0".as_ptr(), 1);
+            });
+            // The echo engine emits the literal without expanding `%s`; the
+            // append receives precisely the formatter's product.
+            let (_, _, text) = (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(text, &PLIST_ARRAY_OPEN_FORMAT[..PLIST_ARRAY_OPEN_FORMAT.len() - 1]);
+            let stream = &*stream;
+            assert_eq!(&stream.indent[..3], b"\t\t\0".as_slice(), "preparer's product in place");
         }
     }
 
