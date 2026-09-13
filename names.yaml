@@ -60515,6 +60515,34 @@ functions:
       focused host tests cover every flag byte, a zero payload, and payload
       suppression when bit 0 is set.
 
+  # --- adaptive tick accumulator scale-factor limit setter ---
+  - address: 0x081bb28c
+    ghidra: FUN_081bb28c
+    name: tick_accumulator_set_scale_factor_limit
+    size: 8
+    sig: "void tick_accumulator_set_scale_factor_limit(TickAccumulator *accumulator, u32 scale_factor_limit)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      param_2/r1: scale_factor_limit
+      param_1_plus_0x1c: scale_factor_limit
+    notes: >-
+      Raw ARM establishes an exact 8-byte extent,
+      0x081bb28c..0x081bb294: `str r1,[r0,#28]; bx lr`; the separately linked
+      sibling begins at 0x081bb294. Decoding every ARM B/BL word in
+      work/firmware/osos.dec finds exactly seven direct call sites
+      (0x0811a4a0, 0x0816a93c, 0x081f6138, 0x081f981c, 0x082033c4,
+      0x0820d8e4, 0x08286474), all plain unconditional bl, with zero
+      predicated BL forms and zero direct tail-B forms. Aligned-word scanning
+      finds no data references. It unconditionally stores its second argument
+      to the TickAccumulator scale_factor_limit field at +0x1c; callers use
+      limits 2, 0x10, 0x20, and 0x40. The Rust port uses the existing
+      #[repr(C)] TickAccumulator field, so it preserves the target's 32-bit
+      aligned layout without a host-size-dependent byte offset. No deliberate
+      deviations. Host tests cover zero and u32::MAX limits and prove that
+      every adjacent state field is unchanged.
+
   # --- Timer E microsecond counter to millisecond tick ---
   - address: 0x081bb384
     ghidra: FUN_081bb384
