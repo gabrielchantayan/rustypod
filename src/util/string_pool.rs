@@ -637,6 +637,51 @@ pub unsafe extern "C" fn string_pool_intern_counted(
     }
     string_pool_intern_seam()(pool, data, len, id_out)
 }
+/// string_pool_read_counted_from_context — original: `FUN_080556cc` @
+/// `0x080556cc` (20 bytes; **7 direct `bl` call sites** — five plain `bl`,
+/// two `blne`; no tail branches or data-word references).
+///
+/// Raw ARM establishes the complete five-word tail wrapper: it runs from
+/// `0x080556cc` through `b 0x080bd8bc` at `0x080556dc`; the separately linked
+/// sibling begins with `push {r4,lr}` at `0x080556e0`. The tail target reads a
+/// UTF-16 payload from a `"crts"` pool with a fixed 510-byte limit, writes its
+/// byte count to a stack local, then stores half that count into the output's
+/// leading `u16`.
+///
+/// `context[0]` is a target-width pointer to an owner whose `"crts"` pool is
+/// at `+0x1c8`; `context + 0x34` is the signed pool entry id. The wrapper
+/// writes bytes beginning at `counted + 1`, then replaces `*counted` with the
+/// copied byte length divided by two. It deliberately ignores the reader
+/// status, as does retailOS. The reader zeros its non-NULL length output
+/// before any failure path, so the initialized local below is equivalent to
+/// the raw stack path.
+///
+/// The seven inbound calls are `bl` at 0x080463b8, 0x08047924, 0x0817b1e4,
+/// 0x0817b844, and 0x082a3908, plus `blne` at 0x0817b0a8 and 0x0817b754.
+/// Those conditional calls are caller-side gates, not NULL guards: this
+/// wrapper dereferences both arguments unconditionally.
+///
+/// # Safety
+///
+/// `context` must be 4-byte aligned and point to readable target-layout
+/// words at `+0x00` and `+0x34`; its first word must name an owner with a
+/// valid pool at `+0x1c8`. `counted` must point to writable storage for one
+/// leading `u16` plus 255 UTF-16 units. The unported reader validates its
+/// pool/id inputs but is otherwise called unchecked.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_read_counted_from_context(
+    context: *const u8,
+    counted: *mut u16,
+) {
+    let owner = context.cast::<u32>().read() as usize as *mut u8;
+    let pool = owner.add(0x1c8).cast::<StringPool>();
+    let entry_id = context.add(0x34).cast::<i32>().read();
+    let mut byte_len = 0u32;
+    let _ = string_pool_read_seam()(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
+    counted.write((byte_len >> 1) as u16);
+}
+
 
 
 #[cfg(test)]
@@ -646,6 +691,9 @@ mod tests {
     use super::*;
     use std::boxed::Box;
     use std::vec::Vec;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::LazyLock;
+
 
     /// A pool whose two handles resolve to owned arrays. The cells hold the
     /// master pointers, so the fixture must not move once wired — hence the
@@ -1403,6 +1451,73 @@ mod tests {
             assert_eq!(STORE_CALLS.len(), 1, "the thunk guards nothing itself");
             assert_eq!(STORE_CALLS[0].pool, 0, "even a NULL pool is forwarded");
             assert_eq!(STORE_CALLS[0].bytes, utf16_bytes(&counted[1..]));
+        }
+    }
+    const COUNTED_CONTEXT_FIXTURE_LEN: usize = 0x1000;
+    const COUNTED_CONTEXT_OWNER_OFFSET: usize = 0x100;
+
+    static COUNTED_CONTEXT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::STRING_POOL_READ_COUNTED_CONTEXT, COUNTED_CONTEXT_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+
+    /// Maps the raw target-layout context: its first u32 points to an owner,
+    /// and the reader's `"crts"` pool starts 0x1c8 bytes into that owner.
+    fn counted_context(entry_id: i32) -> Option<*mut u8> {
+        let base = (*COUNTED_CONTEXT_FIXTURE)? as *mut u8;
+        unsafe {
+            ptr::write_bytes(base, 0, COUNTED_CONTEXT_FIXTURE_LEN);
+            let owner = base.add(COUNTED_CONTEXT_OWNER_OFFSET);
+            base.cast::<u32>().write(owner as usize as u32);
+            base.add(0x34).cast::<i32>().write(entry_id);
+        }
+        Some(base)
+    }
+
+    #[test]
+    fn read_counted_uses_context_pool_and_clips_to_510_bytes() {
+        let (_read_guard, _heap_guard, _reset) = mock();
+        let Some(context) = counted_context(-17) else {
+            assert!(note_missing_u32_fixture("util/string_pool counted context"));
+            return;
+        };
+        let mut counted = [0xdeadu16; 256];
+        unsafe {
+            PAYLOAD = (0..512).map(|byte| byte as u8).collect();
+            string_pool_read_counted_from_context(context, counted.as_mut_ptr());
+
+            assert_eq!(counted[0], 255, "the 510-byte cap becomes 255 u16 units");
+            assert_eq!(counted[1], 0x0100);
+            assert_eq!(counted[255], 0xfdfc);
+            assert_eq!(
+                READ_CALLS,
+                std::vec![ReadCall {
+                    pool: context.add(COUNTED_CONTEXT_OWNER_OFFSET + 0x1c8) as usize,
+                    id: -17,
+                    dst: counted.as_ptr() as usize + 2,
+                    max_len: 0x1fe,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn read_counted_discards_reader_failure_status_and_zeroes_count() {
+        let (_read_guard, _heap_guard, _reset) = mock();
+        let Some(context) = counted_context(3) else {
+            assert!(note_missing_u32_fixture("util/string_pool counted context"));
+            return;
+        };
+        let mut counted = [0xabcdu16; 256];
+        unsafe {
+            READ_COPY_STATUS = PARAM_ERR;
+            string_pool_read_counted_from_context(context, counted.as_mut_ptr());
+
+            assert_eq!(counted[0], 0, "the reader clears its non-NULL length output");
+            assert_eq!(counted[1], 0xabcd, "a failed read leaves the payload alone");
+            assert_eq!(READ_CALLS.len(), 1);
+            assert_eq!(READ_CALLS[0].id, 3);
+            assert_eq!(READ_CALLS[0].max_len, 0x1fe);
         }
     }
 }

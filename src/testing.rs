@@ -82,6 +82,9 @@ pub mod hints {
     pub const STRING_RECORD: usize = 0x1d00_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
+    // 0x5f00_0000: dedicated to util/string_pool's target-width context
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const STRING_POOL_READ_COUNTED_CONTEXT: usize = 0x5f00_0000;
     // 0x6700_0000: dedicated to app/registry's raw-u32 owner field
     // fixture for field_dc_as_class_4a80; mappings never unmap, so no other
     // user may share this hint.

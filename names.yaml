@@ -76943,3 +76943,39 @@ functions:
       to unported 0x0804c94c. The port exposes that tail transfer as a
       volatile target seam, whose host default is inert; the state identity
       is deliberately not inferred beyond fields verified by the raw body.
+
+  # --- Counted UTF-16 pool read through owner context ---
+  - address: 0x080556cc
+    ghidra: FUN_080556cc
+    name: string_pool_read_counted_from_context
+    size: 20
+    sig: "void string_pool_read_counted_from_context(const u8 *context, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: counted
+      "context+0x00": pool_owner
+      "context+0x34": entry_id
+      FUN_080bd8bc: string_pool_read_counted_limited
+      FUN_080b4318: string_pool_read seam
+    notes: >-
+      Raw ARM confirms the exact 20-byte extent: mov r2,r1 at 0x080556cc
+      through b 0x080bd8bc at 0x080556dc, followed by a separately linked
+      push {r4,lr} at 0x080556e0. The wrapper ignores its incoming r2/r3,
+      reads the target-width owner word at context+0, reads entry_id at
+      context+0x34, and tail-transfers to the limited counted read. That
+      helper calls the unported 0x080b4318 reader with dst=counted+2,
+      len_out on its stack and max_len=0x1fe, then stores len_out >> 1 at
+      *counted; reader status is intentionally discarded. The reader
+      unconditionally clears its non-NULL len_out before every error path,
+      making the Rust zero-initialized length equivalent. Decoding every ARM
+      B/BL immediate in osos.dec finds seven inbound direct calls: plain bl
+      at 0x080463b8, 0x08047924, 0x0817b1e4, 0x0817b844, and 0x082a3908,
+      plus blne at 0x0817b0a8 and 0x0817b754; the two predicated callers are
+      caller-side gates, not NULL guards. No tail branch or image data word
+      targets this address. The existing volatile STRING_POOL_READ seam
+      supplies the unported reader on host and jumps to 0x080b4318 on target.
+      Host tests map a unique target-width context slab, prove its owner/id
+      routing and the 510-byte cap, and prove a reader failure still writes
+      zero units while preserving payload storage.
