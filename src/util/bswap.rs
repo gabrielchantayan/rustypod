@@ -20,6 +20,11 @@
 //!   halfword loads), then stores them back reversed byte by byte.
 //! - `bswap16_inplace` — `FUN_0805dd68` @ 0x0805dd68 (36 bytes; 27 call
 //!   sites). Swaps the 2 bytes at `ptr` via one stack byte.
+//! - `bswap_80_byte_record_inplace` — `FUN_082d32f0` @ 0x082d32f0 (64
+//!   bytes; 6 plain `bl` callers plus one tail `b`). Reverses a fixed
+//!   80-byte record: its first 8 bytes as one lane, followed by eighteen
+//!   32-bit lanes.
+
 //!
 //! Deviation: `bswap32_inplace`'s original reads with `ldrh`, which on the
 //! ARM926EJ-S requires `ptr` to be 2-byte aligned (a misaligned `ldrh` is
@@ -49,6 +54,7 @@ pub extern "C" fn bswap16(value: u32) -> u32 {
 /// Reverses the 4 bytes at `ptr` in place (see the module header for the
 /// `ldrh` alignment deviation).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn bswap32_inplace(ptr: *mut u8) {
     let bytes = [
         ptr.read_volatile(),
@@ -70,6 +76,42 @@ pub unsafe extern "C" fn bswap16_inplace(ptr: *mut u8) {
     let second = ptr.add(1).read_volatile();
     ptr.write_volatile(second);
     ptr.add(1).write_volatile(first);
+}
+
+/// bswap_80_byte_record_inplace — original: `FUN_082d32f0` @ 0x082d32f0
+/// (64 bytes; 6 plain unconditional `bl` callers and one unconditional tail
+/// `b`, no predicated forms).
+///
+/// Reverses the first eight bytes of the fixed 80-byte record, then reverses
+/// each of the eighteen consecutive 32-bit fields at offsets 8 through 76.
+/// The raw extent ends at 0x082d3330; the distinct next function starts at
+/// 0x082d3334. The first 8-byte lane is the original's `bswap64` helper
+/// (0x0805dca8), which remains unported; the remaining fields call the
+/// ported [`bswap32_inplace`] helper (0x0805dd10).
+///
+/// Deliberate deviation: the retail helpers load halfwords and require
+/// 2-byte alignment on ARMv5. This port uses byte-wise volatile accesses, so
+/// it is defined for unaligned pointers too; aligned records behave
+/// identically.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bswap_80_byte_record_inplace(record: *mut u8) {
+    let first_eight = [
+        record.read_volatile(),
+        record.add(1).read_volatile(),
+        record.add(2).read_volatile(),
+        record.add(3).read_volatile(),
+        record.add(4).read_volatile(),
+        record.add(5).read_volatile(),
+        record.add(6).read_volatile(),
+        record.add(7).read_volatile(),
+    ];
+    for (offset, byte) in first_eight.into_iter().enumerate() {
+        record.add(7 - offset).write_volatile(byte);
+    }
+    for offset in (8..80).step_by(4) {
+        bswap32_inplace(record.add(offset));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +315,27 @@ mod tests {
         let mut buf = [0x12u8, 0x34, 0x99];
         unsafe { bswap16_inplace(buf.as_mut_ptr()) };
         assert_eq!(buf, [0x34, 0x12, 0x99], "third byte untouched");
+    }
+
+    #[test]
+    fn bswap_80_byte_record_reverses_8_then_18_word_lanes() {
+        let mut fixture = [0xaau8; 82];
+        for (offset, byte) in fixture[1..81].iter_mut().enumerate() {
+            *byte = (offset + 1) as u8;
+        }
+        let original = fixture;
+        let mut expected = fixture;
+        expected[1..9].reverse();
+        for offset in (9..81).step_by(4) {
+            expected[offset..offset + 4].reverse();
+        }
+
+        // The +1 record start also proves the documented byte-wise deviation.
+        unsafe { bswap_80_byte_record_inplace(fixture.as_mut_ptr().add(1)) };
+        assert_eq!(fixture, expected, "only the 80-byte record is transformed");
+
+        unsafe { bswap_80_byte_record_inplace(fixture.as_mut_ptr().add(1)) };
+        assert_eq!(fixture, original, "the lane transform is an involution");
     }
 
     /// Over the whole 16-bit domain the 0x08076f48 form is exactly a u16
