@@ -20,6 +20,8 @@
 //!   forms**, verified by decoding every ARM B/BL word in `osos.dec`:
 //!   0x081e451c, 0x081e4748, 0x081e4ce4, 0x081e4cfc, 0x081e4fd4,
 //!   0x081e4fec, 0x081e51e8, and 0x081e5378.
+//! - [`mov_chain_table_lookup_tagged_value`] — original: `FUN_0820ccc0` @
+//!   0x0820ccc0 (136 bytes; **7 call sites, all unconditional `bl`**).
 //!
 //! # What it is
 //!
@@ -90,6 +92,11 @@
 //! bare `0`/`2` as in the original (the walkers compare against 0; the
 //! error propagates as 2 up through the cluster).
 
+use core::ffi::c_void;
+
+use crate::app::lock_service::{lock_service_lock, lock_service_unlock};
+use crate::kernel::sync_mutex::Mutex;
+
 /// Number of slots in the fixed table: the bound tested at 0x0820c8a0
 /// and the scan limit at 0x0820c890 both use 128.
 pub const MOV_CHAIN_TABLE_SLOTS: usize = 128;
@@ -119,6 +126,20 @@ const _: () = assert!(core::mem::size_of::<MovChainEntry>() == 20);
 pub struct MovChainTable {
     pub entries: [MovChainEntry; MOV_CHAIN_TABLE_SLOTS],
 }
+
+/// The table-bearing prefix of the MOV playback manager as accessed by
+/// `mov_chain_table_lookup_tagged_value`. On target, `mutex` and
+/// `lock_service` are at `this + 0xa00` and `this + 0xa08`, respectively.
+#[repr(C)]
+pub struct MovChainTableManager {
+    pub table: MovChainTable,
+    pub mutex: Mutex,
+    pub lock_service: *mut c_void,
+}
+
+#[cfg(target_os = "none")]
+const _: () = assert!(core::mem::size_of::<MovChainTableManager>() == 0xa0c);
+
 
 /// Status: link read and valid (chain continues or ends cleanly).
 pub const MOV_CHAIN_TABLE_OK: i32 = 0;
@@ -196,6 +217,70 @@ pub unsafe extern "C" fn mov_chain_table_set_next(
     }
 }
 
+/// mov_chain_table_lookup_tagged_value — original: `FUN_0820ccc0` @
+/// 0x0820ccc0 (136 bytes, 0x0820ccc0..0x0820cd48; **7 call sites, all
+/// unconditional `bl`, 0 predicated forms and no tail `b`** — counted by
+/// decoding every ARM B/BL word in `osos.dec`: 0x081e32c8, 0x081e3338,
+/// 0x081e3454, 0x081e3704, 0x081e3864, 0x081e3a9c, and 0x081e48dc).
+///
+/// Locks the manager's table, then examines the entry at `manager + index`
+/// when signed `index < 128` and `index != -1`. Therefore stock admits
+/// negative indexes other than -1; ordinary callers use table indexes or
+/// the -1 sentinel. A matching entry has `tag == 3` and its +0x10 word equal
+/// to `match_value`. Its +0x00 word is always stored in `*out`; a nonzero
+/// stored value returns [`MOV_CHAIN_TABLE_OK`], while zero returns
+/// [`MOV_CHAIN_TABLE_ERR`]. All nonmatches, rejected indexes, lock failures,
+/// and unlock failures return [`MOV_CHAIN_TABLE_ERR`] and leave `*out`
+/// untouched.
+///
+/// No behavioral deviations. `lock_service` is read volatile so the device
+/// binary keeps stock's load at `this + 0xa08` even though the already-ported
+/// lock adapters deliberately ignore their `service` argument.
+///
+/// # Safety
+///
+/// `manager` must point to a live [`MovChainTableManager`]. If `index < 128`
+/// and `index != -1`, the `MovChainEntry` at `manager + index` must be
+/// readable; `out` must be writable if that entry matches. Neither pointer
+/// is NULL-checked, matching stock.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_chain_table_lookup_tagged_value")]
+pub unsafe extern "C" fn mov_chain_table_lookup_tagged_value(
+    manager: *mut MovChainTableManager,
+    out: *mut u32,
+    index: i32,
+    match_value: u32,
+) -> i32 {
+    let mutex = unsafe { core::ptr::addr_of_mut!((*manager).mutex) };
+    let lock_service = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*manager).lock_service)) };
+    if unsafe { lock_service_lock(lock_service, mutex) } != MOV_CHAIN_TABLE_OK {
+        return MOV_CHAIN_TABLE_ERR;
+    }
+
+    let mut status = MOV_CHAIN_TABLE_ERR;
+    if index < MOV_CHAIN_TABLE_SLOTS as i32 && index != -1 {
+        let entries = unsafe { core::ptr::addr_of!((*manager).table.entries).cast::<MovChainEntry>() };
+        let entry = entries.wrapping_offset(index as isize);
+        let tag = unsafe { core::ptr::read(core::ptr::addr_of!((*entry).tag)) };
+        let entry_match_value = unsafe { core::ptr::read(core::ptr::addr_of!((*entry).field_10)) };
+        if tag == 3 && entry_match_value == match_value {
+            let value = unsafe { core::ptr::read(core::ptr::addr_of!((*entry).field_00)) };
+            unsafe { core::ptr::write(out, value) };
+            if value != 0 {
+                status = MOV_CHAIN_TABLE_OK;
+            }
+        }
+    }
+
+    if unsafe { lock_service_unlock(lock_service, mutex) } != MOV_CHAIN_TABLE_OK {
+        MOV_CHAIN_TABLE_ERR
+    } else {
+        status
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -208,6 +293,29 @@ mod tests {
             entries: [const {
                 MovChainEntry { field_00: 0, field_04: 0, tag: 0, pad_09: [0; 3], next: 0, field_10: 0 }
             }; MOV_CHAIN_TABLE_SLOTS],
+        }
+    }
+
+    fn fresh_manager() -> MovChainTableManager {
+        MovChainTableManager {
+            table: fresh_table(),
+            mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
+            lock_service: core::ptr::null_mut(),
+        }
+    }
+
+    #[repr(C)]
+    struct ManagerWithPrefix {
+        prefix: [MovChainEntry; 2],
+        manager: MovChainTableManager,
+    }
+
+    fn fresh_manager_with_prefix() -> ManagerWithPrefix {
+        ManagerWithPrefix {
+            prefix: [const {
+                MovChainEntry { field_00: 0, field_04: 0, tag: 0, pad_09: [0; 3], next: 0, field_10: 0 }
+            }; 2],
+            manager: fresh_manager(),
         }
     }
 
@@ -373,5 +481,82 @@ mod tests {
 
         assert_eq!(table.entries[0].next, 10);
         assert_eq!(table.entries[127].next, 20);
+    }
+
+    /// The +0x00 value is returned only for a tag-3 entry whose +0x10 word
+    /// matches, and the lookup preserves the other entries.
+    #[test]
+    fn lookup_tagged_value_returns_matching_nonzero_entry() {
+        let mut manager = fresh_manager();
+        manager.table.entries[17].field_00 = 0x1234_5678;
+        manager.table.entries[17].tag = 3;
+        manager.table.entries[17].field_10 = 0xa5a5_5a5a;
+        manager.table.entries[18].field_00 = 0xfeed_face;
+        manager.table.entries[18].tag = 3;
+        manager.table.entries[18].field_10 = 0xa5a5_5a5a;
+        let mut out = POISON;
+
+        let rc = unsafe {
+            mov_chain_table_lookup_tagged_value(&mut manager, &mut out, 17, 0xa5a5_5a5a)
+        };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_OK);
+        assert_eq!(out, 0x1234_5678);
+        assert_eq!(manager.table.entries[18].field_00, 0xfeed_face);
+    }
+
+    /// A tag mismatch, value mismatch, the -1 sentinel, and high indexes
+    /// all skip the +0x00 store.
+    #[test]
+    fn lookup_tagged_value_nonmatches_and_boundaries_store_nothing() {
+        let mut manager = fresh_manager();
+        manager.table.entries[0].field_00 = 1;
+        manager.table.entries[0].tag = 2;
+        manager.table.entries[0].field_10 = 0x55;
+        manager.table.entries[127].field_00 = 2;
+        manager.table.entries[127].tag = 3;
+        manager.table.entries[127].field_10 = 0x66;
+
+        for (index, match_value) in [(0, 0x55), (127, 0x77), (-1, 0), (128, 0), (i32::MAX, 0)] {
+            let mut out = POISON;
+            let rc = unsafe {
+                mov_chain_table_lookup_tagged_value(&mut manager, &mut out, index, match_value)
+            };
+            assert_eq!(rc, MOV_CHAIN_TABLE_ERR, "index {index}");
+            assert_eq!(out, POISON, "index {index} must not store");
+        }
+    }
+
+    /// The signed `bge` rejects only indexes >= 128; the separate `cmn`
+    /// rejects -1 alone, so -2 addresses the second preceding entry.
+    #[test]
+    fn lookup_tagged_value_accepts_negative_index_except_minus_one() {
+        let mut fixture = fresh_manager_with_prefix();
+        fixture.prefix[0].field_00 = 0x2468_ace0;
+        fixture.prefix[0].tag = 3;
+        fixture.prefix[0].field_10 = 0x77;
+        let mut out = POISON;
+
+        let rc = unsafe {
+            mov_chain_table_lookup_tagged_value(&mut fixture.manager, &mut out, -2, 0x77)
+        };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_OK);
+        assert_eq!(out, 0x2468_ace0);
+    }
+
+    /// A matching null +0x00 word is still stored before the status remains
+    /// 2, exactly as `str r0, [r7]` precedes `movne r6, #0` in stock.
+    #[test]
+    fn lookup_tagged_value_stores_zero_but_reports_error() {
+        let mut manager = fresh_manager();
+        manager.table.entries[4].tag = 3;
+        manager.table.entries[4].field_10 = 0x99;
+        let mut out = POISON;
+
+        let rc = unsafe { mov_chain_table_lookup_tagged_value(&mut manager, &mut out, 4, 0x99) };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_ERR);
+        assert_eq!(out, 0);
     }
 }
