@@ -11760,6 +11760,26 @@ functions:
       the LBA28 flows also cap the count at 0x100 (0x082798e4).
       #[inline(never)].
 
+  - address: 0x08121344
+    ghidra: FUN_08121344
+    name: ata_cmd_set_device_head
+    size: 8
+    sig: "void ata_cmd_set_device_head(u8 *cmd, u8 device_head)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: device_head}
+    notes: >-
+      `strb r1, [r0, #0x19]`. The legacy ATA taskfile device/head byte:
+      non-LBA command builders pass `(device_index & 0xf) << 4`, while
+      LBA28 builders OR that nibble with 0xe0 before this setter. The
+      LBA28 packer writes the same field itself. Decoding every ARM B/BL
+      word in osos.dec finds seven direct inbound callers, all
+      unconditional bl: 0x081665e8, 0x08279524, 0x0827989c, 0x08279ca8,
+      0x0827a3e0, 0x0827a434, and 0x0827a510. No predicated BL forms,
+      tail branches, or validation: the original is the one byte store
+      plus `bx lr`. #[inline(never)] and its own link_section preserve an
+      independent hook target rather than folding with sibling byte setters.
+
   - address: 0x081211bc
     ghidra: FUN_081211bc
     name: ata_cmd_set_command

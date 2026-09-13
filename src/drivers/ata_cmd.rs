@@ -407,6 +407,27 @@ pub unsafe extern "C" fn ata_cmd_set_sector_count(cmd: *mut u8, count: u8) {
     set_byte(cmd, SECTOR_COUNT, count);
 }
 
+/// ata_cmd_set_device_head — original: `FUN_08121344` @ 0x08121344
+/// (8 bytes; 7 direct call sites, verified by decoding every ARM B/BL
+/// word in `osos.dec`: all are unconditional `bl`, at 0x081665e8,
+/// 0x08279524, 0x0827989c, 0x08279ca8, 0x0827a3e0, 0x0827a434, and
+/// 0x0827a510).
+///
+/// Stores the legacy ATA taskfile's device/head byte at +0x19. The
+/// builders pass `(device_index & 0xf) << 4` for non-LBA commands, or
+/// OR it with 0xe0 for LBA28 commands; the LBA28 packer writes this same
+/// field itself. No validation or NULL guard, matching the lone `strb`
+/// and the callers' unconditional direct calls. No deliberate semantic
+/// deviations; the custom section prevents identical-code folding with
+/// sibling byte setters so this remains an independent hook target.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_cmd_set_device_head")]
+pub unsafe extern "C" fn ata_cmd_set_device_head(cmd: *mut u8, device_head: u8) {
+    set_byte(cmd, DEVICE_HEAD, device_head);
+}
+
+
 /// ata_cmd_set_feature — original: `FUN_081211ec` @ 0x081211ec (8
 /// bytes; 4 call sites, binary-scanned).
 ///
@@ -1441,6 +1462,21 @@ mod tests {
         for other in 0..block.0.len() {
             if other != SECTOR_COUNT {
                 assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_device_head_setter_writes_only_the_device_head_byte() {
+        let mut block = poisoned();
+        for device_head in [0, 0x10, 0xe0, 0xff] {
+            block.0.fill(0xa5);
+            unsafe { ata_cmd_set_device_head(block.0.as_mut_ptr(), device_head) };
+            assert_eq!(block.0[DEVICE_HEAD], device_head);
+            for other in 0..block.0.len() {
+                if other != DEVICE_HEAD {
+                    assert_eq!(block.0[other], 0xa5, "value {device_head:#x} spilled onto +{other:#x}");
+                }
             }
         }
     }
