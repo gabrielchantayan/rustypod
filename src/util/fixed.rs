@@ -19,6 +19,8 @@
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `fixed16_dot3` — `FUN_082a014c` @ 0x082a014c (64 bytes; 9 call sites).
 //! - `fixed16_det2` — `FUN_0823627c` @ 0x0823627c (36 bytes; 9 call sites).
+//! - `raster_det2_i64` — `FUN_08260848` @ 0x08260848 (40 bytes; 6 call
+//!   sites).
 //! - `mul_shift_i32` — `FUN_08079a44` @ 0x08079a44 (20 bytes; 12 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
@@ -93,6 +95,28 @@ pub extern "C" fn fixed16_det2(a: i32, b: i32, c: i32, d: i32) -> i32 {
     let bc = (((b as i64) * (c as i64)) >> 16) as i32;
     ad.wrapping_sub(bc)
 }
+/// raster_det2_i64 — original: `FUN_08260848` @ 0x08260848 (40 bytes).
+///
+/// Computes the signed, widened two-by-two determinant `a*d - b*c` for the
+/// rasterizer's unscaled coordinate deltas. The ARM body forms each signed
+/// 32-by-32 product with `smull`, then uses `subs`/`sbc` to subtract their
+/// low and high halves as one 64-bit result. The mathematical result fits
+/// in i64, so this signed widened calculation is bit-identical to the
+/// two-register subtraction.
+///
+/// Raw `osos.dec` confirms the exact 40-byte extent 0x08260848..0x0826086c;
+/// the `cmp r1,#0` at 0x08260870 starts a separately linked sibling.
+/// Decoding every ARM B/BL-immediate word finds six direct inbound calls, all
+/// unconditional, unpredicated `bl`: 0x08240ed8, 0x08240efc, 0x08240fb8,
+/// 0x08240fdc, 0x082410ac, and 0x082410dc. It is an unguarded leaf with no
+/// deliberate Rust deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.raster_det2_i64")]
+pub extern "C" fn raster_det2_i64(a: i32, b: i32, c: i32, d: i32) -> i64 {
+    (a as i64) * (d as i64) - (b as i64) * (c as i64)
+}
+
 /// det2_i64 — original: `FUN_08261168` @ 0x08261168 (40 bytes).
 ///
 /// Computes the signed, widened two-by-two determinant `a*d - b*c`. The
@@ -708,6 +732,40 @@ mod tests {
 
         assert_eq!(det2_i64(3, 2, 5, 7), 11);
         assert_eq!(det2_i64(i32::MAX, 0, 0, i32::MAX), (i32::MAX as i64).pow(2));
+    }
+    /// FUN_08260848 returns the exact signed `smull` determinant in r0:r1.
+    /// Its `subs` / `sbc` pair must propagate the low-word borrow into r1.
+    #[test]
+    fn raster_det2_i64_matches_the_arm_register_sequence() {
+        fn smull_words(lhs: i32, rhs: i32) -> (u32, u32) {
+            let product = (lhs as i64).wrapping_mul(rhs as i64) as u64;
+            (product as u32, (product >> 32) as u32)
+        }
+
+        fn reference(a: i32, b: i32, c: i32, d: i32) -> i64 {
+            let (ad_low, ad_high) = smull_words(a, d);
+            let (bc_low, bc_high) = smull_words(b, c);
+            let low = ad_low.wrapping_sub(bc_low);
+            let high = ad_high.wrapping_sub(bc_high).wrapping_sub((ad_low < bc_low) as u32);
+            ((u64::from(high) << 32) | u64::from(low)) as i64
+        }
+
+        let values = [i32::MIN, i32::MIN + 1, -0x1234_5678, -1, 0, 1,
+                      0x1234_5678, i32::MAX - 1, i32::MAX];
+        for &a in &values {
+            for &b in &values {
+                for &c in &values {
+                    for &d in &values {
+                        assert_eq!(raster_det2_i64(a, b, c, d), reference(a, b, c, d),
+                                   "a={a:#x} b={b:#x} c={c:#x} d={d:#x}");
+                    }
+                }
+            }
+        }
+
+        assert_eq!(raster_det2_i64(3, 2, 5, 7), 11);
+        assert_eq!(raster_det2_i64(i32::MIN, i32::MAX, i32::MAX, i32::MIN),
+                   (i32::MIN as i64).pow(2) - (i32::MAX as i64).pow(2));
     }
     /// The `umull`/`mla` product and the tail-shift's signed branch must
     /// remain bit-for-bit compatible. In particular, ARM uses only the low

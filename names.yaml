@@ -57750,6 +57750,32 @@ functions:
       all three direct factories were already ported.
 
 
+  - address: 0x08260848
+    ghidra: FUN_08260848
+    name: raster_det2_i64
+    size: 40
+    sig: "i64 raster_det2_i64(i32 a, i32 b, i32 c, i32 d)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1/r7: b
+      param_3/r2: c
+      param_4/r3: d
+    notes: >-
+      Raw ARM confirms the exact 40-byte extent 0x08260848..0x0826086c: `push
+      {r4,r5,r6,r7,r8,lr}` through `pop {r4,r5,r6,r7,r8,pc}`. The next
+      function begins at 0x08260870 with `cmp r1,#0`, so Ghidra's size is
+      exact and there is no literal pool. Decoding every ARM B/BL immediate
+      in osos.dec finds six direct callers, all unconditional and unpredicated
+      `bl` (zero predicated, zero tail `b`): 0x08240ed8, 0x08240efc,
+      0x08240fb8, 0x08240fdc, 0x082410ac, and 0x082410dc. It computes the
+      signed widened two-by-two determinant `a*d - b*c`: two `smull` products
+      followed by `subs`/`sbc` subtracting the low/high halves. The result fits
+      in i64, so the Rust widened arithmetic is bit-identical. The separate
+      link section prevents this duplicate of det2_i64 @ 0x08261168 from
+      folding into that export. No deliberate Rust deviations.
+
   - address: 0x0826087c
     ghidra: FUN_0826087c
     name: view_event_apply_localized_flags
