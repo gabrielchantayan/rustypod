@@ -65250,6 +65250,43 @@ functions:
       pointer read is volatile so LLVM retains stock's this+0xa08 load even
       though the paired adapters always return zero.
 
+  - address: 0x081e32a8
+    ghidra: FUN_081e32a8
+    name: mov_chain_table_load_span
+    size: 80
+    sig: "i32 mov_chain_table_load_span(MovPlaybackManagerChainState *state, i32 chain_index, u32 *start, u32 *length)"
+    module: mov/chain_value_span
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: chain_index
+      param_3/r2: start
+      param_4/r3: length
+      field_1060: chain_table_manager
+      field_1394: chain_match_value
+      field_7fff4: start
+      field_7fff0: length
+    notes: >-
+      Raw ARM confirms Ghidra's 80-byte extent exactly: the 20 instructions at
+      0x081e32a8..0x081e32f8 end in pop {r3,r4,r5,pc}, and the separately
+      linked sibling begins add r0,r0,#0x1000 at 0x081e32f8. Decoding every
+      ARM B/BL immediate in osos.dec finds seven direct inbound call sites,
+      all unconditional plain bl with zero predicated forms: 0x081e4020,
+      0x081e4088, 0x081e43f8, 0x081e4430, 0x081e4eb0, 0x081e4ecc, and
+      0x081e4f6c. The absence of predication is behavioural: callers delegate
+      their chain-index, tag, and match-value validation to this wrapper and
+      its already-ported mov_chain_table_lookup_tagged_value callee. On lookup
+      success it reads the u32 record pointer and stores record+0x7fff4 to
+      *start before record+0x7fff0 to *length; lookup failure returns 3 before
+      either output store. No aligned osos.dec DATA word holds 0x081e32a8, so
+      the function is only directly called. No deviations or NULL guards.
+      Host tests map a unique low-u32 record fixture, prove the distinct
+      high-offset start/length words and store order, and prove tag mismatch,
+      -1, and 128 failures preserve both output sentinels. match.py is used
+      for structural review; the stock wrapper's one table lookup, error
+      branch, two high-offset loads, ordered stores, and 0/3 returns are the
+      intended comparison.
+
   - address: 0x0835206c
     ghidra: FUN_0835206c
     name: xor_f6_in_place
