@@ -82640,3 +82640,34 @@ functions:
       cursor through it, and returns zero. In particular, 0x81 through 0xff
       are sizes rather than general variable-length continuation bytes. No
       deliberate deviations.
+
+  # --- UI three-item clip refresh ---
+  - address: 0x08144cb4
+    ghidra: FUN_08144cb4
+    name: ui_refresh_three_item_clips
+    size: 68
+    sig: "void ui_refresh_three_item_clips(void *owner)"
+    module: ui/three_item_clips
+    status: ported
+    renames:
+      param_1/r0: owner
+      iVar2/r4: item_index
+      iVar1/r0: indexed_slot_base
+      FUN_08144568: refresh_item_clip
+      param_2/r1: item_handle
+      param_4/r3: horizontal
+      param_5/stack: vertical
+    notes: >-
+      Raw osos.dec extent is 68 bytes, from push {r1,r2,r3,r4,r5,lr} at
+      0x08144cb4 through pop {r1,r2,r3,r4,r5,pc} at 0x08144cf4; the distinct
+      next function starts at 0x08144cf8. For each index 1 through 3 it reads
+      item handle +0x38+index*4, horizontal +0x4c+index*4, and vertical
+      +0x60+index*4, then calls the unported 0x08144568 with those values,
+      the index, and fixed width and height 0xb4. Decoding every ARM B/BL
+      word in osos.dec finds exactly six direct call sites, all unconditional
+      bl (0x08145030, 0x0814595c, 0x08145be4, 0x08145f3c, 0x08145fc0, and
+      0x08146210), with zero predicated forms. The port uses a volatile
+      firmware/host dispatch seam for 0x08144568; this is an ordinary Rust
+      call rather than the stock direct bl, but preserves its seven argument
+      ABI and call order. Host tests record ordinary and signed-extreme
+      coordinate words, opaque handle bits, indexes, and the two 180 extents.
