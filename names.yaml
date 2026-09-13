@@ -74058,3 +74058,43 @@ functions:
       match.py structural review shows the same cache test, allocation,
       constructor dispatch, store, and reload; expected differences are
       the seam `blx`, an fp frame, and LLVM's inverted fast-path branch.
+
+  # --- draw-state text-range renderer adapter ---
+  - address: 0x08262cbc
+    ghidra: FUN_08262cbc
+    name: draw_state_draw_text
+    size: 124
+    sig: "void draw_state_draw_text(DrawStateTextDrawFields *draw_state, const char *text)"
+    module: cxx/draw_state_text
+    status: ported
+    renames:
+      param_1/r0: draw_state
+      param_2/r1: text
+      FUN_0829be90: tagged_layout_vertical_adjustment
+      FUN_08077170: text_range_renderer
+      param_1_plus_0x1c: renderer
+      param_1_plus_0x20: layout_state
+      param_1_plus_0x28: layout_flags
+      param_1_plus_0x2c: x_offset
+      param_1_plus_0x30: y_offset
+      param_1_plus_0x34: clip_rect
+    notes: >-
+      Raw osos.dec confirms 124 bytes of code from 0x08262cbc through the
+      pop {r4,r5,r6,pc} at 0x08262d34; the separately linked next entry
+      starts at 0x08262d38. Decoding every ARM B/BL immediate finds exactly
+      seven inbound direct calls, each an unconditional bl with no predicated
+      form: 0x0809074c, 0x08140f84, 0x08148c98, 0x081ca6d0, 0x08263a14,
+      0x08263a68, and 0x08263a74. No aligned raw data word references this
+      address. The adapter reads its 0x44-byte draw-state record, calls
+      0x0829be90 on its embedded tagged layout state, then calls 0x08077170
+      with the draw target, text, layout state, byte-widened flags/style,
+      foreground/background colors, adjusted coordinates, and clip rectangle.
+      It stores the renderer's returned x coordinate minus x_offset at +0x00.
+      Deliberate deviation: both dependencies are unported; target builds
+      reach their resident entries through absolute veneers and host tests
+      replace them with DRAW_STATE_TEXT_DRAW_OPS recorders. The repr(C) record
+      keeps firmware pointer fields as u32 so its +0x1c through +0x43 layout
+      does not widen on 64-bit hosts. Host tests cover negative-adjustment and
+      unsigned-wrap arithmetic, plus a positive adjustment and NULL text
+      forwarding. match.py structural review is expected to differ in the two
+      veneer calls, LLVM frame, and field-load order.

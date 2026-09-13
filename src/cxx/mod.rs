@@ -34,6 +34,7 @@ pub mod tagged_record;
 pub mod draw_state;
 pub mod draw_state_font;
 pub mod draw_state_text_width;
+pub mod draw_state_text;
 pub mod draw_state_color;
 pub mod draw_state_fill;
 pub mod draw_state_line;
