@@ -62632,6 +62632,38 @@ functions:
       block plus all nine args forwarded in order and the ctor result
       returned; distinct values 11..99 prove no argument shuffling;
       default stub zeroes the whole 0x54-byte block and returns it.
+  - address: 0x0810671c
+    ghidra: FUN_0810671c
+    name: surface_fill
+    size: 48
+    sig: "u8 *surface_fill(u8 *surface, const u8 *color)"
+    module: drivers/surface_new
+    status: ported
+    renames:
+      param_1: surface (display surface object; rectangle bounds read from +0x10 and +0x0c)
+      param_2: color (pixel-color record forwarded unchanged to the rasterizer)
+      FUN_0810674c: surface_fill_rect (unported 560-byte format-aware inclusive-rectangle rasterizer; SURFACE_FILL_RECT dispatch slot)
+    notes: >-
+      Ghidra's 48-byte extent is exact: the adjacent 0x0810674c opens
+      the separately linked rectangle rasterizer. The wrapper builds the
+      four-word inclusive rectangle {0, surface[+0x10]-1, 0,
+      surface[+0x0c]-1}, calls that rasterizer with the surface and color
+      record, then restores and returns the original surface pointer in
+      r0. The subtractions are unguarded; a zero source extent wraps to
+      0xffffffff and the rasterizer subsequently rejects it. Decoding
+      every ARM BL word in osos.dec found exactly seven callers:
+      0x080cd184 is plain bl, while 0x080cd19c, 0x081202f8,
+      0x08120308, 0x08120318, 0x08120330, and 0x08120340 are blne.
+      Those six callers first test an optional surface pointer, so the
+      port deliberately has no NULL guard. The rasterizer is not yet
+      ported, therefore its direct call is a volatile SURFACE_FILL_RECT
+      dispatch slot with a documented no-op default; surface_fill is not
+      hook-ready until it is replaced. Host tests prove normal 320x240
+      bounds plus surface/color forwarding and the zero-extent wrapping
+      edge case. match.py (using the worktree archive) reports the same
+      rectangle construction and tail r0 return; LLVM adds a frame plus
+      the volatile dispatch-slot load and blx, so its exit-1 diff is expected.
+
 
   # --- tag -> handler registry: set-if-unset (src/app/tag_handler_registry.rs) ---
   - address: 0x081e11a8
