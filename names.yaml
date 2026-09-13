@@ -55494,6 +55494,48 @@ functions:
       ops-table blx indirection replacing the direct bl and the
       crate's fp frame, the accepted silver_controller profile.
 
+  - address: 0x08262a64
+    ghidra: FUN_08262a64
+    name: cxx_mutex_opaque_context_construct
+    size: 32
+    sig: "CxxMutexOpaqueContext *cxx_mutex_opaque_context_construct(CxxMutexOpaqueContext *this, usize mutex_param_2, usize scope_word0, usize scope_word1)"
+    module: cxx/mutex_opaque_context_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: mutex_param_2 (passed through to cxx_mutex_construct)
+      param_3/r2: scope_word0
+      param_4/r3: scope_word1
+      "this+0x00..+0x1b": mutex_wrapper
+      "this+0x1c..+0x37": opaque_context
+      "this+0x38": initialization_status
+      FUN_08261e28: cxx_mutex_construct
+      FUN_0826291c: initialize_opaque_context
+    notes: >-
+      Raw osos.dec establishes the exact eight-instruction, 32-byte extent
+      0x08262a64..0x08262a80: push {r4,lr}; bl 0x08261e28; add r0,r0,#0x1c;
+      bl 0x0826291c; sub r0,r0,#0x1c; mov r1,#0; str r1,[r0,#0x38];
+      pop {r4,pc}. The following push {r4,lr} at 0x08262a84 starts the
+      separately linked sibling and no literal pool is present. Whole-image
+      decoding of every ARM B/BL immediate finds exactly seven direct,
+      unconditional bl callers at 0x0815335c, 0x08165100, 0x08196ee8,
+      0x081d6910, 0x081d7cb4, 0x081d8198, and 0x081e6b60: 0 predicated
+      calls and 0 tail b calls. It forwards r1/r2/r3 unchanged to the
+      ported C++ mutex-wrapper constructor, applies the ported opaque-context
+      initializer to the immediately following seven-u32-word child, then
+      clears the outer word at +0x38 and returns the original object. The
+      object type remains intentionally structural: its two children are
+      opaque beyond their binary-established size and order. No deviation:
+      both direct callees are ported and called in the retailOS order. The
+      repr(C) u32-only model is 0x3c bytes on both ARM and host. Host tests
+      prove scope-register forwarding through the mutex child, opaque child
+      clear-before-call and NULL selector behaviour, returned child status,
+      final outer clear ordering, pointer return, and zero-status paths.
+      match.py structural review against this worktree's archive (exit-1 diff
+      expected) preserves the two direct child calls, +0x1c address
+      adjustment, final +0x38 clear, and pointer return. LLVM adds its frame,
+      saves this in r4, and materializes the final zero in r0 rather than r1.
+
   - address: 0x08262ab8
     ghidra: FUN_08262ab8
     name: timespec_subtract
