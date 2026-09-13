@@ -33679,6 +33679,42 @@ functions:
       zero-fill. match.py structural review is expected to differ at the
       seam's indirect call.
 
+  - address: 0x0810ea78
+    ghidra: FUN_0810ea78
+    name: pair_header_base_construct_with_owned_payload
+    size: 84
+    sig: "u32 *pair_header_base_construct_with_owned_payload(u32 *base, const u32 *descriptor, u32 payload, u32 tag, u32 context)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      param_1/r4: base
+      param_2/r5: descriptor
+      param_3/r6: payload
+      param_4/r7: tag
+      param_5/r8: context
+      iVar1/r0: grand_base
+    notes: >-
+      Ghidra's 84-byte extent is correct: the raw ARM begins with
+      `push {r3-r9,lr}` at 0x0810ea78, has twenty instructions through
+      0x0810eac8, and ends with its vtable literal 0x08981630 at
+      0x0810eacc; the next distinct function begins at 0x0810ead0.
+      Decoding every ARM B/BL word in osos.dec finds exactly seven direct,
+      unconditional bl callers (0x0810f074, 0x0810f0c0, 0x0810f674,
+      0x08198d34, 0x081b2cbc, 0x0826cee4, 0x0826d304), with no predicated
+      or plain-b tail callers. It plants the PairHeaderBase vtable, calls
+      the ported grand-base constructor at base+4, rebases its result by
+      -4, clears base+0xac/base+0xb0 and the ownership byte at +0xb4, then
+      calls unported 0x0810e824 with (base, descriptor, payload, tag,
+      context), returning base. The callee allocates and initializes an
+      owned payload, but its deeper dependency identities are deliberately
+      not inferred. The port uses an explicit five-word operations seam:
+      target defaults call the retail entry and host defaults panic rather
+      than pretending initialization succeeded. Focused host coverage
+      proves the grand-base chain, field-clear-before-initializer ordering,
+      exact ABI forwarding, returned base, and absent +4 zero-fill.
+      match.py structural review is expected to differ at the indirect
+      operations seam.
+
   - address: 0x0810ebbc
     ghidra: FUN_0810ebbc
     name: pair_header_base_construct
