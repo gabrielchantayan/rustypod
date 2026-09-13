@@ -58710,6 +58710,33 @@ functions:
       that still report success, the Mutex object is left byte-for-byte
       untouched, and repeated unlocks signal every time.
 
+  # --- kernel: task sleep callback adapter ---
+  - address: 0x08228418
+    ghidra: FUN_08228418
+    name: task_sleep_callback
+    size: 20
+    sig: "i32 task_sleep_callback(usize context, u32 ticks)"
+    module: kernel/task
+    status: ported
+    renames: {param_1/r0: context, param_2/r1: ticks, thunk_FUN_080568e8: task_sleep_thunk, return/r0: status}
+    notes: >-
+      Raw osos.dec confirms exactly five instructions at
+      0x08228418..0x0822842c: push {r4,lr}; mov r0,r1; bl 0x080e9eb0;
+      mov r0,#0; pop {r4,pc}. The next function starts with push {r4,lr} at
+      0x0822842c, confirming Ghidra's 20-byte extent. The callback ignores
+      context and forwards ticks through the ported task_sleep_thunk, discards
+      its result, and returns zero. A complete ARM B/BL immediate scan found
+      six inbound direct calls: unconditional bl at 0x081e3b98, 0x081e45ac,
+      0x081e4674, 0x081e5090, and 0x081e5474; predicated blne at 0x081e3f7c.
+      The predicated caller gates its 1000-tick delay with tst r2,r3, so the
+      adapter has no guard. No DATA word equals 0x08228418; it is not an
+      indirect or virtual dispatch target. Callers use 10, 20, 100, or 1000
+      ticks while polling. Deviation: direct Rust calls the already-ported
+      task_sleep_thunk instead of the stock 0x080e9eb0 address, preserving its
+      zero-tick reschedule behavior while deliberately dropping its result.
+      Host tests use invalid and null-like contexts, all observed tick values,
+      and zero to prove forwarding, the reschedule path, and zero status.
+
   # --- sqlite: VDBE result-column names ---
   - address: 0x0838d004
     ghidra: FUN_0838d004

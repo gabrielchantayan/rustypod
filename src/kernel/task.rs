@@ -1040,6 +1040,29 @@ pub unsafe extern "C" fn task_sleep_thunk(ticks: u32) -> usize {
     task_sleep(ticks)
 }
 
+/// task_sleep_callback — original: `FUN_08228418` @ 0x08228418 (20 bytes,
+/// 0x08228418..0x0822842c; **6 direct `bl` call sites**: five unconditional
+/// and one `blne` @ 0x081e3f7c).
+///
+/// Adapt a two-word service callback to the kernel sleep interface. The
+/// callback context in r0 is dead: `mov r0,r1` forwards only `ticks` to the
+/// 0x080e9eb0 `task_sleep_thunk`, discards that call's result, and returns
+/// success (`0`). The six callers supply 10, 20, 100, or 1000 ticks while
+/// polling; the predicated call is gated by the caller's flag test, so this
+/// adapter has no guard of its own. No DATA word refers to this address.
+///
+/// Deviation: the already-ported thunk is called directly rather than through
+/// the stock ROM address; it preserves the thunk's zero-tick reschedule path
+/// while this adapter intentionally discards its return value.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.task_sleep_callback")]
+#[inline(never)]
+pub unsafe extern "C" fn task_sleep_callback(_context: usize, ticks: u32) -> i32 {
+    task_sleep_thunk(ticks);
+    0
+}
+
+
 /// task_notify — original: `FUN_08060f80` @ 0x08060f80 (72 bytes).
 ///
 /// Returns 0 while the kernel-started byte is clear. Otherwise, when the
@@ -1651,6 +1674,33 @@ mod tests {
                 drain();
                 assert_eq!(task_sleep_thunk(ticks), via_callee, "ticks={ticks}");
                 drain();
+            }
+        }
+    }
+
+    // ---- task_sleep_callback (0x08228418) ------------------------------
+
+    /// The callback's context is dead, every observed nonzero delay reaches
+    /// the timed service, zero still reaches the thunk's reschedule path, and
+    /// the callee's nonzero result is discarded for the required zero status.
+    #[test]
+    fn sleep_callback_forwards_ticks_ignores_context_and_returns_success() {
+        let _guard = mock_hooks();
+        unsafe {
+            for (context, ticks) in [
+                (usize::MAX, 0u32),
+                (0xdead_beef, 10),
+                (0, 20),
+                (0x1234_5678, 100),
+                (0xfeed_face, 1000),
+            ] {
+                assert_eq!(task_sleep_callback(context, ticks), 0, "ticks={ticks}");
+                let expected = if ticks == 0 {
+                    vec![Call::RomReschedule]
+                } else {
+                    vec![Call::RomTimedDelay { task: 0, ticks: ticks as usize }]
+                };
+                assert_eq!(drain(), expected, "ticks={ticks}");
             }
         }
     }
