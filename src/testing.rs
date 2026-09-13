@@ -505,6 +505,10 @@ pub mod hints {
     // 0xd500_0000: dedicated to app/opaque_keyed_collection_find_item_by_id's
     // raw-u32 vector, entry table, and item fixtures; mappings never unmap.
     pub const OPAQUE_KEYED_COLLECTION_FIND_ITEM_BY_ID: usize = 0xd500_0000;
+    // 0xd600_0000: dedicated to util/matrix_state_apply_transform's raw-u32
+    // active-matrix fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const MATRIX_STATE_APPLY_TRANSFORM: usize = 0xd600_0000;
     
     // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
     // object/payload fixture; mappings never unmap, so no other user may share it.

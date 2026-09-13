@@ -80465,3 +80465,38 @@ functions:
       20-byte target layout by storing the embedded StringObject as two u32
       words; this is the required host-pointer-width representation, not a
       behavioral deviation.
+
+  # --- Matrix-state transform application (util/matrix_state_apply_transform) ---
+  - address: 0x0824d548
+    ghidra: FUN_0824d548
+    name: matrix_state_apply_transform
+    size: 28
+    sig: "void matrix_state_apply_transform(MatrixState *state, const FixedMatrix4x4 *transform)"
+    module: util/matrix_state_apply_transform
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: transform
+      "state+0x34": active_matrix
+      FUN_08242da4: fixed_matrix_multiply
+      FUN_08252124: matrix_state_refresh
+    notes: >-
+      Raw osos.dec decoding establishes exactly seven ARM instructions / 28
+      bytes from the push at 0x0824d548 through the tail b at 0x0824d560; the
+      next separately linked function begins at 0x0824d564. It loads the
+      target-width active-matrix pointer from state+0x34, calls the recovered
+      Q16.16 4x4 matrix-multiplication helper at 0x08242da4 with the supplied
+      transform in r1, restores state to r0, and tail-enters 0x08252124. A
+      complete aligned ARM B/BL-immediate decode finds six direct inbound
+      calls: unconditional plain bl at 0x0824e068, 0x0824f31c, 0x0825411c,
+      0x0825418c, 0x0825478c, and 0x08254f9c; there are no predicated call
+      forms or direct tail-b callers. The aligned data word at 0x089b25a4
+      references this entry amid an undecoded dispatch table, so direct-call
+      decoding does not establish the indirect-call count. The post-
+      multiplication target decodes as a separately linked real function but
+      has no stronger recovered identity; matrix_state_refresh names only its
+      observed role. The ARM port uses literal target veneers for the two
+      unported routines, while host tests replace both with ordered callback
+      seams. MatrixState keeps active_matrix as a u32 target address so its
+      +0x34 offset remains correct on 64-bit hosts; this is layout fidelity,
+      not a behavioral deviation.
