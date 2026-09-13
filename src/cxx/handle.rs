@@ -1033,9 +1033,10 @@ pub unsafe extern "C" fn refcounted_body_attach(
 /// Both callees are ported: the slot-1 teardown
 /// [`refcounted_body_release_dtor_variant`] @ 0x0839d3ac, and
 /// [`refcounted_body_attach`] @ 0x0839d370 ported alongside this
-/// function. A byte-similar sibling copy-assign @ 0x0839f324 (6 `bl`
-/// sites) pairs two different helpers (release 0x0839d498, attach
-/// 0x0839d45c, both unported) and remains unported.
+/// function. The byte-similar retain-count sibling
+/// [`refcounted_ptr_copy_assign_retain_count`] @ 0x0839f324 uses
+/// [`refcounted_body_release_retain_count`] @ 0x0839d498 and the
+/// behavior-identical attachment helper originally at 0x0839d45c.
 ///
 /// Codegen deviation: LLVM emits the two calls as `bl`s to the ported
 /// symbols (both are `#[inline(never)]` exports), matching the
@@ -1060,6 +1061,57 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign(
     }
     dst
 }
+///
+/// refcounted_ptr_copy_assign_retain_count — original: `FUN_0839f324` @
+/// 0x0839f324 (48 bytes; 6 direct `bl` call sites, all unconditional:
+/// 0x08113ec4, 0x08113eec, 0x081172bc, 0x081172e4, 0x08211498, and
+/// 0x08211d8c). Decoding every ARM `B`/`BL` word in `osos.dec` finds no
+/// predicated calls or direct tail `b` sites; no aligned image word equals
+/// this address. Raw instructions end with `pop {r4,r5,r6,pc}` at
+/// 0x0839f350; the separately linked next function begins at 0x0839f354.
+///
+/// The retain-count variant of the C++ refcounted-handle copy assignment:
+///
+/// ```text
+/// if (dst != src) {
+///     refcounted_body_release_retain_count(dst);
+///     refcounted_body_attach_retain_count(dst, *src);
+/// }
+/// return dst;
+/// ```
+///
+/// The guard compares SLOT POINTERS, not bodies, and `*src` is loaded after
+/// the release. Thus it preserves the retail aliasing hazard where two
+/// distinct slots name the same final-reference body: release destroys it,
+/// then attachment reuses its dangling pointer. Self-assignment bypasses
+/// both calls and always returns `dst`.
+///
+/// Deliberate deviation: the attachment helper at 0x0839d45c is not exported
+/// separately. Its 60-byte raw ARM body is behavior-identical to the ported
+/// [`refcounted_body_attach`] @ 0x0839d370 except for direct-branch
+/// displacements, so this port calls that canonical helper. This preserves
+/// the store, optional lock, wrapping increment, fresh optional unlock, and
+/// return behavior while avoiding an unnecessary dispatch seam.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned body-pointer slots. Their non-NULL
+/// bodies, implementations, and optional mutexes must satisfy
+/// [`refcounted_body_release_retain_count`] and [`refcounted_body_attach`]'s
+/// requirements. The retail function does not NULL-check either slot pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign_retain_count(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_retain_count(dst);
+        refcounted_body_attach(dst, src.read());
+    }
+    dst
+}
+
 ///
 /// refcounted_ptr_copy_assign_slot1 — original: `FUN_0839f118` @
 /// `0x0839f118` (48 bytes). Raw decoding establishes the exact extent:
@@ -2734,6 +2786,54 @@ mod tests {
             assert_eq!(dst, &mut new as *mut RefcountedBody);
             assert_eq!(old.refcount, 1, "non-final drop, body survives");
             assert_eq!(old.opaque0, 0x1111_2222);
+            assert_eq!(new.refcount, 2);
+        }
+    }
+
+    /// The retain-count copy-assignment guard compares slot pointers, so a
+    /// self-assignment neither releases nor increments the body.
+    #[test]
+    fn retain_count_copy_assign_same_slot_is_a_no_op() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_ptr_copy_assign_retain_count(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
+        }
+    }
+
+    /// A distinct destination releases its old non-final body before loading
+    /// and attaching the source body. NULL mutexes make both transitions
+    /// observable without kernel fixtures.
+    #[test]
+    fn retain_count_copy_assign_releases_then_attaches_source() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut dst: *mut RefcountedBody = &mut old;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = refcounted_ptr_copy_assign_retain_count(&mut dst, &src);
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1, "non-final release leaves the body live");
             assert_eq!(new.refcount, 2);
         }
     }
