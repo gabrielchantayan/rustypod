@@ -75753,6 +75753,33 @@ functions:
       relocate this 256-byte table at runtime, but that mechanism and its
       contents are unresolved; modeling the static bytes would be fabricated
       behavior.
+  - address: 0x08276fd4
+    ghidra: FUN_08276fd4
+    name: vtable_slot_12_tail_dispatch
+    size: 12
+    sig: "void vtable_slot_12_tail_dispatch(void *receiver)"
+    module: cxx/vtable_slot_12_tail_dispatch
+    status: ported
+    renames:
+      FUN_08276fd4: vtable_slot_12_tail_dispatch
+      param_1/r0: receiver
+      "*receiver": vtable
+      "vtable+0x0c": slot_12
+    notes: >-
+      Raw osos.dec establishes the true 12-byte extent: ldr r1,[r0];
+      ldr r1,[r1,#0xc]; bx r1 at 0x08276fd4..0x08276fdc, with the separately
+      linked next function beginning at 0x08276fe0. It tail-dispatches
+      receiver's vtable slot +0x0c, retaining r0 as the virtual method's
+      receiver and making no NULL checks. Decoding every aligned immediate ARM
+      B/BL word finds exactly six inbound direct calls, all unconditional bl
+      at 0x081f79fc, 0x081f8208, 0x081f826c, 0x081f8384, 0x081f9410, and
+      0x081fa18c; there are no predicated forms or direct tail branches. No
+      aligned raw data word references this wrapper, so it is not itself
+      virtual-dispatched. The concrete slot target is unrecovered and is not
+      invented. Host tests prove slot-three selection and receiver forwarding.
+      match.py against the worktree archive reports the expected structural
+      difference: Rust adds a frame prologue/epilogue around the same two
+      loads and final bx.
   - address: 0x0826ed98
     ghidra: FUN_0826ed98
     name: ui_element_set_render_owner_clip
