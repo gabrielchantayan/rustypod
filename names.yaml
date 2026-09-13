@@ -46714,6 +46714,32 @@ functions:
       NULL forwarding. match.py structural review records the expected
       blx-through-dispatch difference.
 
+
+  - address: 0x08261e94
+    ghidra: FUN_08261e94
+    name: milliseconds_to_timespec
+    size: 40
+    sig: "void milliseconds_to_timespec(i32 *out, i32 milliseconds)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1: out
+      param_2: milliseconds
+      FUN_08031568: __rt_sdiv (quotient in r0, remainder in r1)
+      DAT_08261ebc: nanoseconds_per_millisecond (1000000)
+    notes: >-
+      Raw osos.dec is nine ARM instructions from 0x08261e94 through the
+      pop at 0x08261eb8 plus the 0x000f4240 literal at 0x08261ebc;
+      the next function begins at 0x08261ec0, so the true extent is 40
+      bytes. Divides signed milliseconds by 1000 through ADS __rt_sdiv,
+      then stores quotient seconds at out+0 and signed remainder * 1000000
+      nanoseconds at out+4. Decoding every B/BL immediate in osos.dec
+      finds exactly 6 direct call sites, all unconditional bl
+      (0x0816531c, 0x081654ac, 0x081d6e4c, 0x081d6ec8, 0x081d7774,
+      0x081d77e4), with zero predicated forms and no data-word references.
+      Deliberate deviation: Rust gets the ADS r1 remainder through the
+      ported __rt_sdivmod out-parameter; output and signed truncation match.
+
   - address: 0x082621dc
     ghidra: FUN_082621dc
     name: mutex_destroy_return_this
