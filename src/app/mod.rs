@@ -122,6 +122,7 @@ pub mod media_player_pending_item;
 pub mod media_player_interface_slot_11c;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
+pub mod indexed_timestamp_bounds;
 pub mod indexed_payload_lookup;
 pub mod segmented_entry_lookup;
 pub mod message_arena;

@@ -67,7 +67,9 @@ pub fn uldivmod_full(num: u64, den: u64) -> (u64, u64) {
 /// Unsigned 64/64 division. The original returns quotient in r0:r1 and
 /// remainder in r2:r3; the Rust ABI can only return one u64 (r0:r1), so
 /// this returns the quotient. Use `uldivmod_full` for the remainder.
+/// Kept out-of-line so direct retail call boundaries remain visible to ports.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __aeabi_uldivmod(num: u64, den: u64) -> u64 {
     uldivmod_core(num, den).0
 }
