@@ -33640,6 +33640,44 @@ functions:
       drop the rotation and branch to the timer pointer - the port
       reads the fn-pointer field directly to sidestep it.
 
+  - address: 0x0810e9c0
+    ghidra: FUN_0810e9c0
+    name: pair_header_base_construct_with_pooled_owned_payload
+    size: 84
+    sig: "u32 *pair_header_base_construct_with_pooled_owned_payload(u32 *base, const u32 *descriptor, u32 decoder_argument, u32 tag, u32 context, u32 payload_pool)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      param_1/r0: base
+      param_2/r5: descriptor
+      param_3/r6: decoder_argument
+      param_4/r7: tag
+      param_5/r8: context
+      param_6/r9: payload_pool
+      iVar1/r4: grand_base
+    notes: >-
+      Ghidra's 84-byte extent is correct: raw ARM begins with `push
+      {r3-r9,lr}` at 0x0810e9c0, has twenty instructions through
+      0x0810ea10, and ends with its vtable literal 0x08981630 at
+      0x0810ea14; the next distinct function starts at 0x0810ea18.
+      Decoding every ARM B/BL word in osos.dec finds exactly seven direct,
+      unconditional bl callers (0x08142740, 0x0816af98, 0x0817fc2c,
+      0x08183d20, 0x081f6c60, 0x0828c784, 0x0828cc80), with no predicated
+      calls, plain-b tail callers, or data-word occurrences. It plants the
+      PairHeaderBase vtable, calls the ported grand-base constructor at
+      base+4, rebases its result by -4, clears base+0xac, stores
+      payload_pool at +0xb0, clears the ownership byte at +0xb4, then calls
+      unported 0x0810e6f8 with (base, descriptor, decoder_argument, tag,
+      context), returning base. The named initializer releases any existing
+      owned payload, copies descriptor fields, allocates through the installed
+      pool, and invokes the decoder; its deeper dependencies are deliberately
+      not inferred. The port uses an explicit five-word operations seam:
+      target defaults call the retail entry and host defaults panic rather
+      than pretending allocation and decode succeeded. Focused host coverage
+      proves the grand-base chain, vtable-before-initializer ordering, exact
+      ABI forwarding, return pointer, pool and clear ordering, and absent
+      +4 zero-fill. match.py structural review is expected to differ at the
+      operations seam's indirect call.
   - address: 0x0810ea18
     ghidra: FUN_0810ea18
     name: pair_header_base_construct_with_payload

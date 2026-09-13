@@ -296,6 +296,106 @@ pub unsafe extern "C" fn pair_header_base_construct_with_owned_payload(
     initialize(object, descriptor, payload, tag, context);
     object
 }
+/// Host/test and target dispatch for the still-unported `FUN_0810e6f8`
+/// pooled owned-payload initializer.
+///
+/// The initializer releases any prior payload, copies descriptor fields, then
+/// allocates and decodes through the pool already installed at +0xb0. Its
+/// exact five-word ABI is all this constructor needs to preserve.
+#[derive(Clone, Copy)]
+pub struct PairHeaderBasePooledOwnedPayloadInitializeOps {
+    pub initialize: unsafe extern "C" fn(
+        base: *mut u32,
+        descriptor: *const u32,
+        decoder_argument: u32,
+        tag: u32,
+        context: u32,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_initialize_pooled_owned_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    decoder_argument: u32,
+    tag: u32,
+    context: u32,
+) {
+    let initialize: unsafe extern "C" fn(*mut u32, *const u32, u32, u32, u32) =
+        core::mem::transmute(0x0810_e6f8usize);
+    initialize(base, descriptor, decoder_argument, tag, context);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_initialize_pooled_owned_payload(
+    _base: *mut u32,
+    _descriptor: *const u32,
+    _decoder_argument: u32,
+    _tag: u32,
+    _context: u32,
+) {
+    panic!("pair_header_base_construct_with_pooled_owned_payload requires initializer 0x0810e6f8")
+}
+
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS:
+    PairHeaderBasePooledOwnedPayloadInitializeOps =
+    PairHeaderBasePooledOwnedPayloadInitializeOps {
+        initialize: firmware_initialize_pooled_owned_payload,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS:
+    PairHeaderBasePooledOwnedPayloadInitializeOps =
+    PairHeaderBasePooledOwnedPayloadInitializeOps {
+        initialize: missing_initialize_pooled_owned_payload,
+    };
+
+/// pair_header_base_construct_with_pooled_owned_payload — original:
+/// `FUN_0810e9c0` @ **0x0810e9c0** (84 bytes: 20 instructions through
+/// 0x0810ea10 plus the four-byte vtable literal at 0x0810ea14; the next
+/// distinct function starts at 0x0810ea18).
+///
+/// Seven direct, unconditional `bl` call sites (0x08142740, 0x0816af98,
+/// 0x0817fc2c, 0x08183d20, 0x081f6c60, 0x0828c784, and 0x0828cc80), with no
+/// predicated calls or `b` tail calls, were verified by decoding every ARM
+/// B/BL word in osos.dec. The constructor plants the shared PairHeaderBase
+/// vtable, constructs its grand base at +4, clears +0xac, installs
+/// `payload_pool` at +0xb0, clears the ownership byte at +0xb4, then calls
+/// 0x0810e6f8 with its five recovered ABI words. The ARM return is the
+/// grand-base result rebased by one word to `base`.
+///
+/// Deliberate deviation: 0x0810e6f8 is not ported. Its five-word ABI is
+/// explicit in [`PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS`];
+/// target builds call the exact retail entry, while host defaults panic rather
+/// than silently skip allocation and payload initialization.
+///
+/// # Safety
+///
+/// `base` must point to word-aligned, writable 0xb8-byte PairHeaderBase
+/// storage, and `descriptor` must remain valid for the external initializer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_construct_with_pooled_owned_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    decoder_argument: u32,
+    tag: u32,
+    context: u32,
+    payload_pool: u32,
+) -> *mut u32 {
+    base.write(PAIR_HEADER_BASE_VTABLE);
+    let object = pair_header_grand_base_construct(base.add(1)).sub(1);
+    object.add(0xac / 4).write(0);
+    object.add(0xb0 / 4).write(payload_pool);
+    object.cast::<u8>().add(0xb4).write(0);
+    let initialize =
+        core::ptr::addr_of!(PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS.initialize)
+            .read_volatile();
+    initialize(object, descriptor, decoder_argument, tag, context);
+    object
+}
+
 
 
 /// Host/test and target dispatch for the two still-unported dependencies of
@@ -980,6 +1080,29 @@ mod tests {
             }
         }
     }
+    struct PooledOwnedPayloadInitializeOpsGuard;
+
+    impl PooledOwnedPayloadInitializeOpsGuard {
+        fn install(ops: PairHeaderBasePooledOwnedPayloadInitializeOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS)
+                    .write_volatile(ops);
+            }
+            PooledOwnedPayloadInitializeOpsGuard
+        }
+    }
+
+    impl Drop for PooledOwnedPayloadInitializeOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_INITIALIZE_OPS)
+                    .write_volatile(PairHeaderBasePooledOwnedPayloadInitializeOps {
+                        initialize: missing_initialize_pooled_owned_payload,
+                    });
+            }
+        }
+    }
+
 
 
 
@@ -1005,6 +1128,13 @@ mod tests {
     static mut SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE: u32 = 0;
     static mut SEEN_OWNED_PAYLOAD_INITIALIZE_POOL: u32 = 0;
     static mut SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP: u8 = 0;
+    static mut POOLED_OWNED_PAYLOAD_INITIALIZE_CALLS: usize = 0;
+    static mut SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_ARGS: [usize; 5] = [0; 5];
+    static mut SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_VTABLE: u32 = 0;
+    static mut SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_RELEASE: u32 = 0;
+    static mut SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_POOL: u32 = 0;
+    static mut SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP: u8 = 0;
+
 
 
 
@@ -1031,6 +1161,14 @@ mod tests {
         core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_POOL).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP).write_volatile(0);
+        core::ptr::addr_of_mut!(POOLED_OWNED_PAYLOAD_INITIALIZE_CALLS).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_ARGS)
+            .write_volatile([0; 5]);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_VTABLE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_RELEASE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_POOL).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP).write_volatile(0);
+
 
     }
 
@@ -1145,6 +1283,32 @@ mod tests {
         core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP)
             .write_volatile(base.cast::<u8>().add(0xb4).read());
     }
+    unsafe extern "C" fn recording_pooled_owned_payload_initialize(
+        base: *mut u32,
+        descriptor: *const u32,
+        decoder_argument: u32,
+        tag: u32,
+        context: u32,
+    ) {
+        let calls = core::ptr::addr_of!(POOLED_OWNED_PAYLOAD_INITIALIZE_CALLS).read_volatile();
+        core::ptr::addr_of_mut!(POOLED_OWNED_PAYLOAD_INITIALIZE_CALLS).write_volatile(calls + 1);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_ARGS).write_volatile([
+            base as usize,
+            descriptor as usize,
+            decoder_argument as usize,
+            tag as usize,
+            context as usize,
+        ]);
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_VTABLE)
+            .write_volatile(base.read());
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_RELEASE)
+            .write_volatile(base.add(0xac / 4).read());
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_POOL)
+            .write_volatile(base.add(0xb0 / 4).read());
+        core::ptr::addr_of_mut!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP)
+            .write_volatile(base.cast::<u8>().add(0xb4).read());
+    }
+
 
 
 
@@ -1428,6 +1592,78 @@ mod tests {
             assert_eq!(this.cast::<u8>().add(0xb4).read(), 0x7d);
         }
     }
+    /// `FUN_0810e9c0` builds the shared base chain, installs its allocator
+    /// pool, performs only its two word/byte trailing clears, and forwards all
+    /// five ABI words to the pooled owned-payload initializer.
+    #[test]
+    fn pooled_owned_payload_constructor_clears_then_forwards_initializer_abi() {
+        let _lock = lock_ops();
+        let _array_guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: recording_element_array_reset,
+        });
+        let _initializer_guard = PooledOwnedPayloadInitializeOpsGuard::install(
+            PairHeaderBasePooledOwnedPayloadInitializeOps {
+                initialize: recording_pooled_owned_payload_initialize,
+            },
+        );
+        unsafe {
+            reset_recording();
+            let mut base = vec![FILL; BASE_WORDS];
+            let descriptor = [0x1111_2222, 0x3333_4444, 0x5555_6666, 0x7777_8888];
+            let this = base.as_mut_ptr();
+
+            let returned = pair_header_base_construct_with_pooled_owned_payload(
+                this,
+                descriptor.as_ptr(),
+                0x1020_3040,
+                0x5060_7080,
+                0x90a0_b0c0,
+                0x2468_ace0,
+            );
+
+            assert_eq!(returned, this);
+            assert_eq!(core::ptr::addr_of!(ARRAY_CALLS).read_volatile(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(POOLED_OWNED_PAYLOAD_INITIALIZE_CALLS).read_volatile(),
+                1
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_ARGS).read_volatile(),
+                [
+                    this as usize,
+                    descriptor.as_ptr() as usize,
+                    0x1020_3040,
+                    0x5060_7080,
+                    0x90a0_b0c0,
+                ]
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_VTABLE).read_volatile(),
+                PAIR_HEADER_BASE_VTABLE,
+                "the vtable precedes the initializer"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_RELEASE).read_volatile(),
+                0,
+                "the initializer observes the cleared release field"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_POOL).read_volatile(),
+                0x2468_ace0,
+                "the initializer observes the installed pool"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_POOLED_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP).read_volatile(),
+                0,
+                "ownership stays clear until the initializer claims the payload"
+            );
+            assert_eq!(base[1], FILL, "this variant does not zero +4");
+            assert_eq!(base[0xac / 4], 0);
+            assert_eq!(base[0xb0 / 4], 0x2468_ace0);
+            assert_eq!(this.cast::<u8>().add(0xb4).read(), 0);
+        }
+    }
+
     /// `FUN_0810ea78` builds the shared base chain, performs only its three
     /// trailing clears, and forwards all five recovered ABI words to the
     /// unported owned-payload initializer.
