@@ -76527,3 +76527,33 @@ functions:
       replacement seam. Tests cover entry, unchanged visible and invisible
       states, canonicalization, pending-word clearing, and inclusive/exclusive
       bounds.
+
+  # --- Encoded integer value decode ---
+  - address: 0x080834a4
+    ghidra: FUN_080834a4
+    name: encoded_integer_value
+    size: 48
+    sig: "u32 encoded_integer_value(const EncodedValueRange *range)"
+    module: util/encoded_integer_value
+    status: ported
+    renames:
+      param_1/r0/r1: range
+      param_1[0]/r0: range.start
+      param_1[1]/r1: range.end
+      FUN_080a1b68: compact_token_value
+      FUN_08087bf8: packed_decimal_value
+    notes: >-
+      Raw ARM decoding confirms 48 instruction bytes from 0x080834a4 through
+      0x080834d0; the next independently linked sibling begins at 0x080834d4
+      with push {r4,lr}. Decoding every immediate ARM B/BL word in osos.dec
+      finds exactly seven inbound direct calls, all unconditional bl and no
+      predicated forms: 0x08087ec0, 0x08087f28, 0x080a1b38, 0x080a1b48,
+      0x080a1b54, 0x080c8b24, and 0x080c8b30. The unchecked start/end pair
+      is loaded before the marker check. A leading 0x1e calls the unported
+      packed_decimal_value entry at 0x08087bf8 with scale zero, arithmetically
+      shifts its Q16.16 result right by 16, and returns it. Any other marker
+      tail-branches through the caller-owned bne to unported
+      compact_token_value at 0x080a1b68. Target builds retain both verified
+      fixed-address calls; host tests install deterministic seams for range
+      forwarding, marker routing, zero scale, and negative Q16.16 sign
+      extension. No deliberate behavioral deviations.
