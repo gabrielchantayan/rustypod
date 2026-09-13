@@ -44,6 +44,9 @@ pub mod hints {
     pub const CXX_STREAM_READ: usize = 0x0100_0000;
     pub const HEAP_INTEGRATION: usize = 0x0900_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
+    // 0x6300_0000: dedicated to util/video_engine's target-width frame-slot
+    // table fixture; mappings never unmap, so no other user may share it.
+    pub const VIDEO_ENGINE_CURRENT_FRAME_SLOT: usize = 0x6300_0000;
     // 0x6400_0000: dedicated to ATA command execution/submission's raw-u32
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;

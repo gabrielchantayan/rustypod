@@ -93,6 +93,59 @@ pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
 
+/// Target-width fields read by [`video_engine_current_frame_slot`].
+///
+/// The frame-slot table pointer at `+0xa8c` and index at `+0x24c` are
+/// 32-bit firmware words even when host tests run on a 64-bit machine.
+#[repr(C)]
+pub struct VideoEngineFrameSlotSelector {
+    _before_frame_table_index: [u32; 0x24c / 4],
+    pub frame_table_index: u32,
+    _before_frame_slot_table: [u32; (0xa8c - 0x250) / 4],
+    pub frame_slot_table: u32,
+}
+
+const _: [u8; 0x24c] = [0; core::mem::offset_of!(VideoEngineFrameSlotSelector, frame_table_index)];
+const _: [u8; 0xa8c] = [0; core::mem::offset_of!(VideoEngineFrameSlotSelector, frame_slot_table)];
+const _: [u8; 0xa90] = [0; core::mem::size_of::<VideoEngineFrameSlotSelector>()];
+
+/// video_engine_current_frame_slot — retailOS `FUN_08252bfc` @ **0x08252bfc**
+/// (20 bytes, `0x08252bfc..0x08252c0c`; the next separately linked function
+/// begins at `0x08252c10`, confirming Ghidra's reported extent).
+///
+/// Raw ARM is `ldr r1,[r0,#0xa8c]; ldr r0,[r0,#0x24c]; add r0,r1,r0,lsl#2;
+/// ldr r0,[r0,#0x38]; bx lr`. A complete aligned B/BL-immediate decode of
+/// `osos.dec` finds seven inbound calls, all unconditional plain `bl` (at
+/// 0x0824df0c, 0x082504b8, 0x08250688, 0x082507c8, 0x082516c8, 0x08252994,
+/// and 0x08252c38); no caller-gated forms occur.
+///
+/// Returns `*(engine->frame_slot_table + engine->frame_table_index * 4 +
+/// 0x38)`: the current frame-slot pointer. The retailOS body deliberately
+/// performs no NULL, range, or table-validity check.
+///
+/// # Deliberate deviations
+///
+/// None. The target-width table pointer stays a `u32`; host tests map its
+/// fixture below 4 GiB so the recovered word-level access is unchanged.
+///
+/// # Safety
+///
+/// `engine` must identify readable [`VideoEngineFrameSlotSelector`] storage.
+/// Its `frame_slot_table` word must identify readable, aligned storage through
+/// the selected table word at `+0x38`; no pointer or bounds validation occurs.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_current_frame_slot(
+    engine: *const VideoEngineFrameSlotSelector,
+) -> *mut u8 {
+    let frame_slot_table = (*engine).frame_slot_table;
+    let frame_table_index = (*engine).frame_table_index;
+    let selected_word = frame_slot_table
+        .wrapping_add(frame_table_index.wrapping_mul(4))
+        .wrapping_add(0x38);
+    (selected_word as usize as *const u32).read() as usize as *mut u8
+}
+
 /// Firmware address of the property dispatcher the wrapper tail-calls
 /// (`FUN_08250498` @ 0x08250498, unported).
 #[cfg(target_arch = "arm")]
@@ -511,8 +564,27 @@ pub unsafe extern "C" fn video_frame_dispatch_operation(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
     use core::ptr;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::LazyLock;
+
+    const FRAME_SLOT_FIXTURE_LEN: usize = 0x1000;
+    static FRAME_SLOT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::VIDEO_ENGINE_CURRENT_FRAME_SLOT, FRAME_SLOT_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+
+    fn frame_slot_table() -> Option<*mut u32> {
+        let table = (*FRAME_SLOT_FIXTURE)? as *mut u8;
+        unsafe {
+            ptr::write_bytes(table, 0, FRAME_SLOT_FIXTURE_LEN);
+            Some(table.cast())
+        }
+    }
+
 
     #[test]
     fn returns_null_before_any_instance_is_installed() {
@@ -556,6 +628,37 @@ mod tests {
             set_mock_instance(object.as_mut_ptr());
             assert_eq!(video_engine_get(), object.as_mut_ptr());
             assert_eq!(object, [0u8; 16], "the object is untouched");
+        }
+    }
+
+    #[test]
+    fn current_frame_slot_uses_selected_target_width_table_word() {
+        let _guard = LOCK.lock();
+        let Some(table) = frame_slot_table() else {
+            assert!(note_missing_u32_fixture("util::video_engine current frame slot"));
+            return;
+        };
+
+        unsafe {
+            let first_slot = table.add(0x100).cast::<u8>();
+            let ninth_slot = table.add(0x180).cast::<u8>();
+            table.add(0x38 / 4).write(first_slot as usize as u32);
+            table.add((0x38 / 4) + 9).write(ninth_slot as usize as u32);
+
+            let mut engine: VideoEngineFrameSlotSelector = core::mem::zeroed();
+            engine.frame_slot_table = table as usize as u32;
+            assert_eq!(
+                video_engine_current_frame_slot(&engine),
+                first_slot,
+                "index zero reads the table's +0x38 word"
+            );
+
+            engine.frame_table_index = 9;
+            assert_eq!(
+                video_engine_current_frame_slot(&engine),
+                ninth_slot,
+                "each call re-reads the index and advances in four-byte words"
+            );
         }
     }
 

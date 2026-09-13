@@ -22378,6 +22378,32 @@ functions:
       two-load leaf plus the usual LLVM fp frame; exit-1 diff is the
       frame only.
 
+  - address: 0x08252bfc
+    ghidra: FUN_08252bfc
+    name: video_engine_current_frame_slot
+    size: 20
+    sig: "u8 *video_engine_current_frame_slot(const VideoEngineFrameSlotSelector *engine)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: engine
+    notes: >-
+      Raw ARM extent is 20 bytes (0x08252bfc..0x08252c0c); the next
+      separately linked function begins at 0x08252c10, confirming
+      Ghidra's reported extent. The leaf loads the target-width frame-slot
+      table pointer at engine+0xa8c, then the current table index at
+      engine+0x24c, and returns the word at table + index*4 + 0x38. A
+      complete aligned ARM B/BL-immediate scan of osos.dec verifies seven
+      inbound calls, all unconditional plain bl (0x0824df0c, 0x082504b8,
+      0x08250688, 0x082507c8, 0x082516c8, 0x08252994, 0x08252c38), with
+      zero predicated forms. The raw body has no NULL, bounds, or
+      table-validity guard; callers must maintain those invariants. No
+      deliberate behavior deviation: the Rust frame-slot table field is a
+      u32 on both target and host, and tests map its fixture below 4 GiB
+      before selecting entries zero and nine. match.py (exit 1 diff
+      expected) should retain the recovered load/load/add/ldr leaf
+      structure, with ordinary LLVM frame differences.
+
   - address: 0x082d2314
     ghidra: FUN_082d2314
     name: video_engine_set_property
