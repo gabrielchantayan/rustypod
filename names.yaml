@@ -77066,3 +77066,43 @@ functions:
       inbound calls, all unconditional bl at 0x0805fc0c, 0x0806f620,
       0x0807bdc8, 0x0809d7c4, 0x080a1258, 0x080ec004, and 0x080efd10; no
       predicated call forms or direct tail branches target this constructor.
+
+  - address: 0x08042114
+    ghidra: FUN_08042114
+    name: zeroing_buffer_resize
+    size: 192
+    sig: "i32 zeroing_buffer_resize(ZeroingBuffer *buffer, i32 requested)"
+    module: heap/zeroing_buffer
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: requested
+      r4: requested_saved
+      "buffer+0x00": state
+      "buffer+0x04": data
+      "buffer+0x08": byte_len
+      r7: allocation_size
+      FUN_08031568: __rt_sdiv
+      FUN_08043c18: traced_alloc
+      FUN_08043ff8: traced_realloc
+      FUN_08037dc8: iram_memzero_veneer
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw ARM establishes the exact 192-byte body from push {r3,r4-r9,lr} at
+      0x08042114 through the internal branch at 0x080421d0, followed by the
+      separately linked zeroing_buffer_create at 0x080421d4. It maintains the
+      three target words {state, data, byte_len}: shrinking zeroes
+      data+requested for state-requested bytes; growing zeroes
+      data+old_state for requested-old_state bytes. Growth beyond byte_len
+      computes 4 * trunc((requested+3)/3) through signed __rt_sdiv, then uses
+      traced_alloc for NULL data or traced_realloc otherwise; a NULL result
+      records (7, 100, 0x41, 0, 0) and leaves every record word unchanged.
+      Successful paths store requested to state and return it. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly seven direct inbound calls,
+      all unconditional bl at 0x0805fcdc, 0x0807b578, 0x080a12a4,
+      0x080a13ac, 0x080bfa30, 0x080effe4, and 0x080f4c90; no predicated BL,
+      tail branch, or aligned image data word targets the entry. No deliberate
+      Rust deviations: allocator, reallocator, diagnostic logger, and IRAM
+      zero-fill veneer are all direct ports. Host tests cover shrink, retained
+      capacity, initial allocation, reallocation, and failure without state
+      mutation.
