@@ -631,6 +631,9 @@ pub mod hints {
     // MemPage aData fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const BTREE_DROP_CELL: usize = 0x9800_0000;
+    // 0x6200_0000: dedicated to sqlite/btree_balance's target-width MemPage
+    // and BtShared fixture; mappings never unmap, so no other user may share it.
+    pub const BTREE_BALANCE_PAGE: usize = 0x6200_0000;
     // 0xa400_0000: dedicated to sqlite/move_to_root's target-width cursor,
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.

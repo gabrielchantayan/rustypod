@@ -75,6 +75,7 @@ pub mod bitvec;
 pub mod btree_lock;
 pub mod btree_get_meta;
 pub mod btree_drop_cell;
+pub mod btree_balance;
 pub mod move_to_child;
 pub mod move_to_root;
 pub mod cell_size;
