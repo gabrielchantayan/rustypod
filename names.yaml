@@ -63900,6 +63900,33 @@ functions:
       identity remains unknown. DEVIATION: target calls the retail getter at
       its fixed address while host tests use a getter seam.
 
+  # --- field-query result block initializer ---
+  - address: 0x081bfb20
+    ghidra: FUN_081bfb20
+    name: field_query_result_initialize
+    size: 48
+    sig: "FieldQueryResult *field_query_result_initialize(FieldQueryResult *result)"
+    module: util/field_query_result_release
+    status: ported
+    renames:
+      param_1/r0/r4: result
+      FUN_08037db8: iram_memzero_aligned_veneer
+      FUN_0800027c: memzero_aligned
+    notes: >-
+      EXTENT: raw ARM establishes exactly 48 bytes from 0x081bfb20 through
+      0x081bfb50; the separate scope-exit cleanup function starts immediately
+      at 0x081bfb50. CALL COUNT: decoding every ARM B/BL word in
+      work/firmware/osos.dec finds exactly six direct call sites, all
+      unconditional plain bl and zero predicated forms. BEHAVIOUR: clears the
+      44-byte tail at result + 0x208 through the ported 0x08037db8 IRAM veneer
+      to memzero_aligned, redundantly zeroes the flags halfword at +0x208,
+      writes the inline-text buffer address result + 0x214 to the target word
+      at +0x210, and returns result. DEVIATION: the port volatile-loads the
+      ported memzero_aligned body directly instead of calling its retail
+      veneer, preventing LLVM from recognizing the fixed fill as a builtin;
+      it writes the text address as an explicit u32 target word so host
+      eight-byte pointers cannot alter bytes beyond the firmware field.
+
   # --- field-query result block scope-exit cleanup ---
   - address: 0x081bfb50
     ghidra: FUN_081bfb50
