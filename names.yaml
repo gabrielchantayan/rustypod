@@ -79410,6 +79410,36 @@ functions:
       zero request suppresses lifecycle work, and every nonzero request
       forwards the singleton, selector, and state zero.
 
+  # --- service-handler status query ---
+  - address: 0x0818f8a0
+    ghidra: FUN_0818f8a0
+    name: service_handler_status
+    size: 96
+    sig: "i32 service_handler_status(u32 selector)"
+    module: app/service_handler_status
+    status: ported
+    renames:
+      param_1/r0/r4: selector
+      local_18/sp: status
+      DAT_0818f900: service-handler status lock table
+      DAT_0818f904: service-handler status query-object table
+      thunk_FUN_082e8390: posix_mutex_lock_veneer_a
+      FUN_081637fc: unported service-handler status query
+      thunk_FUN_082e83d8: posix_mutex_unlock_veneer_a
+    notes: >-
+      Raw ARM is exactly 96 bytes from the push at 0x0818f8a0 through the
+      pop at 0x0818f8fc, followed by the two literal table addresses at
+      0x0818f900 and 0x0818f904; the next separately linked function starts
+      at 0x0818f908. Ghidra's 96-byte extent is exact. Decoding every ARM
+      B/BL immediate in osos.dec finds six inbound direct calls, all
+      unconditional plain bl and no predicated forms or tail branches:
+      0x08163b88, 0x0818e430, 0x0818e91c, 0x081917e0, 0x0819205c, and
+      0x081956fc. Selectors 0..2 lock a 28-byte table entry, query its
+      optional object with unported 0x081637fc, and always unlock. A NULL
+      object or nonzero query status returns 0x7fffffff; zero query status
+      returns the callee-written stack word. Target calls the unported query
+      directly; host tests use a volatile seam with no target effect.
+
   # --- service-handler masked event dispatch ---
   - address: 0x0818f800
     ghidra: FUN_0818f800
