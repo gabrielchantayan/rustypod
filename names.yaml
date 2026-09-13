@@ -68778,6 +68778,41 @@ functions:
       LLVM's recursive call and list-helper slot call need not reproduce ADS
       instruction selection exactly.
 
+  # --- SQLite expression worklist append ---
+  - address: 0x083987f8
+    ghidra: FUN_083987f8
+    name: expr_worklist_push
+    size: 196
+    sig: "i32 expr_worklist_push(ExprWorklist *worklist, Expr *expression, u8 control)"
+    module: sqlite/expr_worklist
+    status: ported
+    renames:
+      param_1/r4: worklist
+      param_2/r7: expression
+      param_3/r6: control
+      iVar1/r0: replacement_entries
+      puVar2/r5: previous_entries
+      FUN_08390b14: sqlite3_malloc
+      FUN_08377e00: expr_delete
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec fixes the exact 196-byte extent at 0x083987f8..0x083988b8:
+      the next separately linked function starts at 0x083988bc with push
+      {r4,r5,r6,lr}. It appends a 40-byte expression work item, initializing
+      expression +0x00, parent index -1 at +0x04, control at +0x0c, and the
+      worklist back-pointer at +0x10. A full worklist allocates capacity * 80
+      through sqlite3_malloc, copies count * 40 bytes through the already
+      ported IRAM memcpy veneer, frees only a non-inline old entry buffer, and
+      doubles capacity. OOM writes db->mallocFailed (+0x1e), conditionally
+      destroys expression when control bit 0 is set, restores the old entries
+      pointer, and returns zero. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly six inbound direct call sites, all unconditional
+      plain bl and none predicated: 0x082cd18c, 0x082cd2dc, 0x082cd54c,
+      0x082cd69c, 0x082cd6e8, and 0x082cd804. Deliberate deviation:
+      pointer fields are target-width u32 words in Rust, while the four direct
+      ported callees are called directly rather than re-stubbed.
+
 
   # --- Four-slot disk block-read gate ---
   - address: 0x082c6244
