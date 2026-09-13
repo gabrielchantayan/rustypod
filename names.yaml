@@ -77659,6 +77659,41 @@ functions:
       indices, all selector outcomes including sentinel 4, the zero-index
       guard, and the pre-dereference out-of-range guard.
 
+  # --- Opaque record-source lazy getter ---
+  - address: 0x082841c8
+    ghidra: FUN_082841c8
+    name: opaque_record_source_get
+    size: 48
+    sig: "OpaqueRecordSource *opaque_record_source_get(void)"
+    module: app/opaque_record_source_get
+    status: ported
+    renames:
+      DAT_082841f4: OPAQUE_RECORD_SOURCE_CACHE_LITERAL
+      "0x08a0e140": OPAQUE_RECORD_SOURCE_CACHE
+      FUN_082aadd4: operator_new
+      FUN_08284534: opaque_record_source_construct
+      piVar1/r4: cache
+      iVar2/r0: source
+    notes: >-
+      Raw ARM establishes 44 instruction bytes from 0x082841c8 through
+      0x082841f0 plus the owned cache-word literal 0x08a0e140 at
+      0x082841f4, for a true 48-byte extent; the separately linked next
+      function starts at 0x082841f8. Complete decoding of every ARM B/BL
+      immediate in osos.dec finds exactly six direct inbound BL calls, all
+      unconditional at 0x081a1aa8, 0x081a1f38, 0x081c4784, 0x081c5c40,
+      0x081c79bc, and 0x081c7ed0, plus an unconditional tail B thunk at
+      0x080b43e4; there are no predicated inbound branches. On a NULL cache
+      it calls operator_new(0x20) at 0x082aadd4, calls the unported
+      constructor at 0x08284534 with the returned allocation even if NULL,
+      stores the constructor's r0 unconditionally, then reloads and returns
+      the cache. The constructor's raw 40-byte body clears the 28-byte
+      OpaqueRecordSource prefix (six words, byte +0x18, halfword +0x1a) and
+      returns this unchanged. operator_new is already ported and called
+      directly. The unported constructor has no names.yaml entry, so target
+      builds use its fixed address through a volatile slot and host tests
+      install a recorder; the firmware cache word is represented by crate
+      static storage.
+
   # --- Opaque record-source item-count wrapper ---
   - address: 0x082841f8
     ghidra: FUN_082841f8
