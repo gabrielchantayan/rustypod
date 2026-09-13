@@ -71,6 +71,89 @@ pub unsafe extern "C" fn f32_to_fixed16_sat(x: u32) -> i32 {
     }
     __f2i(__fscalb(x, FIXED16_SHIFT))
 }
+ 
+/// Fields read by [`fixed16_fog_factor`] from its opaque renderer state.
+/// `repr(C)` preserves the 32-bit target's source offsets when host fixtures
+/// allocate the state; no field is accessed through an integer byte offset.
+#[repr(C)]
+struct FogFactorState {
+    _before_mode: [u8; 0x8b8],
+    mode: u8,
+    _between_mode_and_scale: [u8; 7],
+    scale: i32,
+    linear_base: i32,
+    linear_multiplier: i32,
+    linear_shift: u8,
+}
+
+/// fixed16_fog_factor — original: `FUN_082a0558` @ 0x082a0558 (124 bytes).
+///
+/// Selects a Q16.16 fog factor from an opaque renderer state and signed
+/// distance. Mode 1 returns `exp(-distance * scale)`; mode 2 applies the
+/// same exponential to the squared product; every other mode takes the
+/// linear `fixed16_mul((linear_base - distance) >> linear_shift,
+/// linear_multiplier)` path. It rounds by adding 0x80, then clamps the
+/// returned Q16.16 factor to `[0, 1]`.
+///
+/// The exponential path negates with ARM wrapping semantics, converts the
+/// scaled Q16.16 value to float, evaluates retailOS `expf`, then converts
+/// back through the same `__fscalb(..., 16)` / `__f2i` sequence as
+/// `f32_to_fixed16_sat`, including its asymmetric `32767.5` / `-32768.0`
+/// saturation thresholds.
+///
+/// Raw `osos.dec` confirms the full extent 0x082a0558..0x082a05d3: the
+/// `stmdb` at 0x082a05d4 starts the next sibling, and no literal pool
+/// intervenes. Decoding every ARM B/BL-immediate word finds exactly six
+/// inbound call sites, all unconditional `bl` (none predicated):
+/// 0x0824d7dc, 0x0824d808, 0x0824f520, 0x08251c6c, 0x08251ca4, and
+/// 0x08251cc4. No deliberate behavioral deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_fog_factor")]
+pub unsafe extern "C" fn fixed16_fog_factor(state: *const u8, distance: i32) -> i32 {
+    let state = unsafe { &*state.cast::<FogFactorState>() };
+    let factor = match state.mode {
+        1 => fixed16_exp_neg(crate::util::fixed::fixed16_mul(distance, state.scale)),
+        2 => {
+            let scaled = crate::util::fixed::fixed16_mul(distance, state.scale);
+            fixed16_exp_neg(crate::util::fixed::fixed16_mul(scaled, scaled))
+        }
+        _ => crate::util::fixed::fixed16_mul(
+            arm_asr(state.linear_base.wrapping_sub(distance), state.linear_shift),
+            state.linear_multiplier,
+        ),
+    };
+    let rounded = factor.wrapping_add(0x80);
+    if rounded < 0 {
+        0
+    } else if rounded > 0x1_0000 {
+        0x1_0000
+    } else {
+        rounded
+    }
+}
+
+/// Evaluates the exponential portion of modes 1 and 2.
+///
+/// The original's `__i2d` / double scaling / `__d2f` sequence is
+/// result-equivalent to `__i2f` then a power-of-two `__fscalb`: rounding an
+/// integer to binary32 commutes with an exact exponent adjustment.
+fn fixed16_exp_neg(n: i32) -> i32 {
+    unsafe {
+        let scaled_neg_n = crate::fp::fp_scalb::__fscalb(
+            crate::fp::fp_fconv::__i2f(n.wrapping_neg()),
+            -FIXED16_SHIFT,
+        );
+        f32_to_fixed16_sat(crate::libm::sqrt::expf(scaled_neg_n))
+    }
+}
+
+/// ARM register arithmetic right shift, which uses only the low byte of the
+/// shift count and yields sign fill for counts of 32 or greater.
+fn arm_asr(value: i32, shift: u8) -> i32 {
+    let shift = u32::from(shift);
+    if shift < 32 { value >> shift } else if value < 0 { -1 } else { 0 }
+}
 
 #[cfg(test)]
 mod tests {
@@ -200,5 +283,83 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 2000, "sweep covered only {checked} cases");
+    }
+    fn fog(state: &FogFactorState, distance: i32) -> i32 {
+        unsafe { fixed16_fog_factor((state as *const FogFactorState).cast(), distance) }
+    }
+
+    fn fog_state(mode: u8, scale: i32, linear_base: i32, linear_multiplier: i32, linear_shift: u8) -> FogFactorState {
+        FogFactorState {
+            _before_mode: [0; 0x8b8],
+            mode,
+            _between_mode_and_scale: [0; 7],
+            scale,
+            linear_base,
+            linear_multiplier,
+            linear_shift,
+        }
+    }
+
+    fn fixed16_mul_reference(a: i32, b: i32) -> i32 {
+        (((a as i64) * (b as i64)) >> 16) as i32
+    }
+
+    fn finish_fog_reference(factor: i32) -> i32 {
+        let rounded = factor.wrapping_add(0x80);
+        if rounded < 0 {
+            0
+        } else if rounded > 0x1_0000 {
+            0x1_0000
+        } else {
+            rounded
+        }
+    }
+
+    #[test]
+    fn fog_state_fields_match_retailos_offsets() {
+        let state = fog_state(2, 3, 4, 5, 6);
+        let base = (&state as *const FogFactorState) as usize;
+        assert_eq!((&state.mode as *const u8) as usize - base, 0x8b8);
+        assert_eq!((&state.scale as *const i32) as usize - base, 0x8c0);
+        assert_eq!((&state.linear_base as *const i32) as usize - base, 0x8c4);
+        assert_eq!((&state.linear_multiplier as *const i32) as usize - base, 0x8c8);
+        assert_eq!((&state.linear_shift as *const u8) as usize - base, 0x8cc);
+    }
+
+    #[test]
+    fn fog_linear_mode_scales_shifts_rounds_and_clamps() {
+        let state = fog_state(0, 0, 0x1_8000, 0x1_0000, 0);
+        assert_eq!(fog(&state, 0x1_0000), 0x8080);
+        assert_eq!(fog(&state, 0), 0x1_0000);
+
+        let shifted = fog_state(3, 0, 0x4_0000, 0x1_0000, 2);
+        assert_eq!(fog(&shifted, 0x2_0000), 0x8080);
+
+        let negative = fog_state(0, 0, 0, 0x1_0000, 0);
+        assert_eq!(fog(&negative, 0x1_0000), 0);
+    }
+
+    #[test]
+    fn fog_exponential_modes_cover_identity_decay_and_extremes() {
+        let exp = fog_state(1, 0x1_0000, 0, 0, 0);
+        assert_eq!(fog(&exp, 0), 0x1_0000);
+        assert_eq!(fog(&exp, 0x1_0000), 0x5ead);
+        assert_eq!(fog(&exp, i32::MAX), 0x80);
+        assert_eq!(fog(&exp, i32::MIN), 0x80);
+        assert_eq!(fog(&exp, -1), 0x1_0000);
+
+        let exp2 = fog_state(2, 0x1_0000, 0, 0, 0);
+        assert_eq!(fog(&exp2, 0x1_0000), 0x5ead);
+        assert_eq!(fog(&exp2, 0x2_0000), 0x530);
+    }
+
+    #[test]
+    fn fog_linear_mode_matches_independent_fixed_reference() {
+        let state = fog_state(7, 0, 0x5_0000, -0x8000, 5);
+        for distance in [-0x2_0000, -1, 0, 1, 0x1_0000, 0x7fff_ffff, i32::MIN] {
+            let shifted = arm_asr(state.linear_base.wrapping_sub(distance), state.linear_shift);
+            let factor = fixed16_mul_reference(shifted, state.linear_multiplier);
+            assert_eq!(fog(&state, distance), finish_fog_reference(factor), "distance {distance:#x}");
+        }
     }
 }

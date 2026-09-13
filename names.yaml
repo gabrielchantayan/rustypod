@@ -74098,6 +74098,43 @@ functions:
       signed Q16.16 products, fractional truncation, and overflow of an
       intermediate dot-product sum.
 
+  - address: 0x082a0558
+    ghidra: FUN_082a0558
+    name: fixed16_fog_factor
+    size: 124
+    sig: "i32 fixed16_fog_factor(const u8 *state, i32 distance)"
+    module: fp/fp_fixed16
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: distance
+      "*(u8 *)(param_1 + 0x8b8)/r2": mode
+      "*(i32 *)(param_1 + 0x8c0)": scale
+      "*(i32 *)(param_1 + 0x8c4)": linear_base
+      "*(i32 *)(param_1 + 0x8c8)": linear_multiplier
+      "*(u8 *)(param_1 + 0x8cc)": linear_shift
+      FUN_080e9878: fixed16_mul
+      FUN_0825d82c: fixed16_exp_neg_sat
+    notes: >-
+      Raw osos.dec confirms the 124-byte body 0x082a0558..0x082a05d3:
+      push {r4,lr} starts the body and the stmdb at 0x082a05d4 begins the
+      separately linked next function, with no literal pool between them.
+      This is the Q16.16 fog-factor selector: mode 1 computes
+      exp(-fixed16_mul(distance, scale)); mode 2 squares that product before
+      the same decay; every other mode computes fixed16_mul((linear_base -
+      distance) ASR linear_shift, linear_multiplier). It then adds 0x80 and
+      clamps to [0, 0x10000]. The original exponential helper @ 0x0825d82c
+      converts -n * 2^-16 to float, calls the already ported expf
+      @ 0x08031ec8, then converts to saturated Q16.16; the port uses existing
+      __i2f/__fscalb/expf/f32_to_fixed16_sat ports, which are
+      result-equivalent for this exact power-of-two scale. Decoding every
+      ARM B/BL-immediate word finds exactly six inbound calls, all
+      unconditional bl: 0x0824d7dc, 0x0824d808, 0x0824f520, 0x08251c6c,
+      0x08251ca4, and 0x08251cc4; no predicated bl or tail branch. No
+      deliberate behavioral deviations. Host tests verify the field layout,
+      linear selector (including ASR and saturation), both exponential modes,
+      and i32 extrema.
+
   # --- rendering request descriptor conversion ---
   - address: 0x0826b2a8
     ghidra: FUN_0826b2a8
