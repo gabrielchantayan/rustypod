@@ -25,6 +25,7 @@ pub mod stream_read_capped;
 pub mod stream_skip;
 pub mod system;
 pub mod selection;
+pub mod sfnt;
 pub mod trace;
 pub mod trig;
 pub mod word_cursor;

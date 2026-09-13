@@ -43,6 +43,9 @@ pub mod hints {
     // complete-owner state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ: usize = 0x0100_0000;
     pub const HEAP_INTEGRATION: usize = 0x0900_0000;
+    // 0x5500_0000: dedicated to ft/sfnt's raw-u32 TT_Face table-directory
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const TT_FACE_LOOKUP: usize = 0x5500_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
     // 0x6300_0000: dedicated to util/video_engine's target-width frame-slot
     // table fixture; mappings never unmap, so no other user may share it.
