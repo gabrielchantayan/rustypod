@@ -116,6 +116,45 @@ pub unsafe extern "C" fn tagged_value_default_construct(this: *mut TaggedValue) 
     this
 }
 
+/// Assigns the non-vtable state of a tagged value — original:
+/// `FUN_08258d60` @ `0x08258d60` (28 bytes).
+///
+/// Raw ARM establishes a seven-instruction extent at 0x08258d60..0x08258d78;
+/// 0x08258d7c begins the separate payload-pair comparison helper. Decoding
+/// every ARM `B`/`BL` word in `osos.dec` finds exactly six direct callers:
+/// six unconditional `bl` at 0x08179f24, 0x08179f84, 0x0817a0c0, 0x0817a120,
+/// 0x0817bb18, and 0x0819c070; no predicated `bl` or direct tail `b`.
+///
+/// # Algorithm
+///
+/// It copies the source kind byte, payload word, and auxiliary word to `this`
+/// in that exact load/store order. The destination vtable and its three
+/// padding bytes are untouched. `this` remains in r0 at return, as expected
+/// for a C++ assignment operator. Deliberate deviation: volatile accesses
+/// retain the firmware's observable operation ordering, including for
+/// overlapping storage.
+///
+/// # Safety
+///
+/// `this` must point to writable, four-byte-aligned [`TaggedValue`] storage,
+/// and `source` to readable, four-byte-aligned storage. Neither pointer is
+/// NULL-checked, matching the original ARM body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_value_assign")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_value_assign(
+    this: *mut TaggedValue,
+    source: *const TaggedValue,
+) -> *mut TaggedValue {
+    let kind = core::ptr::read_volatile(core::ptr::addr_of!((*source).kind));
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).kind), kind);
+    let auxiliary = core::ptr::read_volatile(core::ptr::addr_of!((*source).auxiliary));
+    let payload = core::ptr::read_volatile(core::ptr::addr_of!((*source).payload));
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).payload), payload);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).auxiliary), auxiliary);
+    this
+}
+
 
 /// Constructs a tagged value from the source's word at byte offset +0x04.
 ///
@@ -395,6 +434,60 @@ mod tests {
         }
         assert_eq!(destination, [TAGGED_VALUE_VTABLE, 0xa4b3_c200, 0x1122_3344, 0x5566_7788]);
     }
+
+    #[test]
+    fn assignment_copies_state_but_preserves_destination_vtable_and_padding() {
+        let source = TaggedValue {
+            vtable: 0x1234_5678,
+            kind: 0x5e,
+            padding: [0xaa, 0xbb, 0xcc],
+            payload: 0x1122_3344,
+            auxiliary: 0x5566_7788,
+        };
+        let mut destination: [u32; 4] = [
+            0xdead_beef,
+            0xa4b3_c2d1,
+            0xaabb_ccdd,
+            0xeeff_0011,
+        ];
+        let this = destination.as_mut_ptr().cast::<TaggedValue>();
+
+        unsafe {
+            assert_eq!(tagged_value_assign(this, &source), this);
+        }
+        assert_eq!(
+            destination,
+            [0xdead_beef, 0xa4b3_c25e, 0x1122_3344, 0x5566_7788]
+        );
+    }
+
+    #[test]
+    fn assignment_preserves_the_firmware_load_store_order_when_storage_overlaps() {
+        let mut words: [u32; 5] = [
+            0xdead_beef,
+            0x1122_3344,
+            0x5566_7788,
+            0x99aa_bbcc,
+            0xddee_ff00,
+        ];
+        let source = words.as_mut_ptr().cast::<TaggedValue>();
+        let this = unsafe { words.as_mut_ptr().add(1).cast::<TaggedValue>() };
+
+        unsafe {
+            assert_eq!(tagged_value_assign(this, source), this);
+        }
+        assert_eq!(
+            words,
+            [
+                0xdead_beef,
+                0x1122_3344,
+                0x5566_7744,
+                0x5566_7744,
+                0x99aa_bbcc,
+            ]
+        );
+    }
+
 
     #[test]
     fn payload_pair_comparison_ignores_metadata_and_requires_both_words() {
