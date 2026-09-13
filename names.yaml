@@ -82722,3 +82722,42 @@ functions:
       clears origin/source-offset fields and byte +0x2d, and preserves r0.
       The format-2 path clears only the low halfword at config +0x30; the
       other source/config bytes are deliberately untouched. No deviations.
+
+  # --- Surface-plane owner release ---
+  - address: 0x0814492c
+    ghidra: FUN_0814492c
+    name: surface_release_owned_planes
+    size: 104
+    sig: "void surface_release_owned_planes(SurfacePlaneOwner *owner)"
+    module: drivers/surface_plane_owner
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      field_20: surface
+      FUN_082978bc: surface_plane_address
+      FUN_080e7970: free_wrapper
+      vtable_4: surface_release
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte body from 0x0814492c
+      through pop {r4,pc} at 0x08144990; 0x08144994 begins the distinct
+      next function. The +0x20 surface slot is NULL-guarded. A live surface
+      has its plane addresses 0, 2, and 3 retrieved by the already ported
+      surface_plane_address (0x082978bc); each answer unconditionally enters
+      the already ported free_wrapper (0x080e7970) with tag 0x35, including
+      NULL answers. The body then calls the surface vtable's +0x04 slot via
+      blx and clears owner +0x20. The concrete vtable target is not
+      established: its runtime-initialized table is modeled by the existing
+      SurfaceVtable.release slot rather than inventing an address. Complete
+      aligned ARM B/BL-immediate decoding finds six inbound direct plain bl
+      calls, all unconditional: 0x0811a1d8, 0x08145cbc, 0x08145e28,
+      0x08146010, 0x08146244, and 0x0814638c; no predicated direct calls
+      target it. The body itself has six direct unconditional bl calls (three
+      lookup/free pairs) plus the virtual blx. Host tests cover the NULL
+      return, a planar three-free release, and the format-1 path where missing
+      planar components still reach free_wrapper; all use a dedicated
+      below-4-GiB target-word fixture. Deliberate deviation: host surface and
+      vtable pointers are native-width, while the repr(C) owner field remains
+      at +0x20 and plane words stay u32.
+      match.py structural review against the worktree archive reports the
+      same NULL fast path, three lookup/free pairs, virtual release, and
+      final clear; Rust keeps two additional callee-preserving registers.

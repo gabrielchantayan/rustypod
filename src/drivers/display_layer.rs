@@ -665,6 +665,7 @@ const SURFACE_PLANE_C: usize = 0x2c;
 ///   format == 1` gate as two predicated flag bytes ORed together; the
 ///   port is the plain boolean it computes.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn surface_plane_address(surface: *mut u8, index: u32) -> u32 {
     let format = surface.add(SURFACE_FORMAT).read_volatile();
     let plane = |offset: usize| (surface.add(offset) as *const u32).read_volatile();

@@ -770,6 +770,10 @@ pub mod hints {
     // 0x2300_0000: dedicated to util/nested_container_item_count's raw-u32
     // owner and nested-container fixture; mappings never unmap.
     pub const NESTED_CONTAINER_ITEM_COUNT: usize = 0x2300_0000;
+    // 0xda00_0000: dedicated to drivers/surface_plane_owner's raw-u32
+    // surface-plane fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SURFACE_PLANE_OWNER_RELEASE: usize = 0xda00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

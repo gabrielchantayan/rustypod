@@ -375,6 +375,7 @@ pub unsafe extern "C" fn calloc_wrapper(size: usize, tag: usize) -> *mut u8 {
 /// Frees `ptr` back to the default heap with caller tag `tag`. No NULL
 /// guard at this level: `heap_free` @ 0x0819d4dc ignores NULL itself.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn free_wrapper(ptr: *mut u8, tag: usize) {
     lazy_init_default_heap();
     (heap_ops().free)(default_heap(), ptr, tag)
