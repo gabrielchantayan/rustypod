@@ -47,6 +47,7 @@ pub mod heap_string;
 pub mod list_splice;
 pub mod list_item_count;
 pub mod identified_vtable_object_construct;
+pub mod identified_vtable_flagged_pair_construct;
 pub mod list_cursor_index;
 pub mod list_cursor_release;
 pub mod locked_vtable_slot_16_dispatch;
