@@ -31988,6 +31988,32 @@ functions:
       byte-identical body. Host tests:
       src/cxx/templates.rs::element_at_alias_6bc0_dispatches_through_slot_0x40_and_derefs
       / element_at_alias_6bc0_matches_primary.
+  - address: 0x083d6bec
+    ghidra: FUN_083d6bec
+    name: container_element_at_alias_6bec
+    size: 24
+    sig: "void *container_element_at_alias_6bec(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      ALIAS — byte-identical instantiation of container_element_at @
+      0x083d5efc. Raw osos.dec is exactly `push {r4,lr}; ldr r2,[r0]; ldr
+      r2,[r2,#0x40]; blx r2; ldr r0,[r0]; pop {r4,pc}` from 0x083d6bec
+      through 0x083d6c00; the next separately linked helper begins at
+      0x083d6c04. It implements `T *operator[](size_t)` by dispatching
+      through the container's own vtable slot 0x40 for an element-slot
+      address, then loading that slot's element pointer. Ghidra drops r1
+      from its signature, but the `blx r2` passes the index through. Every
+      direct ARM B/BL decode finds exactly 6 call sites, all plain
+      unconditional bl (no predicated forms): 0x0820152c, 0x082016a0,
+      0x08201ad4, 0x0829ef7c, 0x083d1b34, and 0x083d1b78. The raw body has
+      no NULL guard; callers must handle NULL elements. The existing vtable
+      slot-index dispatch seam is reused, and a distinct link section keeps
+      this separately hookable export from byte-identical siblings. Host
+      tests prove virtual dispatch, index forwarding, slot dereference, NULL
+      element propagation, and parity with the primary accessor.
+
 
   - address: 0x083d48dc
     ghidra: FUN_083d48dc
