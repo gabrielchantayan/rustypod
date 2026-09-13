@@ -57700,6 +57700,43 @@ functions:
       no NULL guard for tracker. Deviation: the unported setter is called at
       its retail veneer on target; host tests use the StageProgressOps seam.
 
+  # --- Stage progress advance ---
+  - address: 0x081fa2e8
+    ghidra: FUN_081fa2e8
+    name: stage_progress_advance
+    size: 84
+    sig: "void stage_progress_advance(StageProgressTracker *tracker, uint stage)"
+    module: app/stage_progress
+    status: ported
+    renames:
+      param_1: tracker
+      param_2: stage
+      FUN_081fa3ec: stage_progress_wait
+      FUN_081fa378: stage_progress_set
+      thunk_FUN_0815940c: set_running_deadline
+    notes: >-
+      EXTENT: raw ARM establishes the assigned 84-byte code extent
+      0x081fa2e8..0x081fa33c. It opens `push {r4,r5,r6,lr}` and the
+      separately linked sibling FUN_081fa33c opens immediately at
+      0x081fa33c with `mov r1,#0`; no literal-pool word belongs to this
+      entry. CALL COUNT: exactly seven direct inbound calls, all plain
+      unconditional bl at 0x08068628, 0x080686cc, 0x08068718, 0x08068750,
+      0x080687d4, 0x08068d14, and 0x081b99b8; decoding every ARM B/BL word
+      in work/firmware/osos.dec found zero predicated forms and zero plain
+      B tail callers. ALGORITHM: first call stage_progress_wait on the
+      current tracker, store the requested stage's low byte at +0x00, clear
+      progress +0x04 and completed-base +0x08, then sum each preceding
+      budget word from +0x10 into completed-base. It tail-branches into
+      stage_progress_set with zero progress, which publishes completed-base
+      through the deadline setter only when the new budget is non-negative.
+      There is no NULL or range guard: the loop's signed comparison and the
+      tail call retain the full u32 stage even though the tracker field is a
+      byte. Callers advance the database commit through stages 0..4 and the
+      copy path enters stage 6. Deviations: the unported wait uses retail
+      entry 0x081fa3ec on target; the unported deadline setter remains its
+      retail veneer 0x081b9154. Both use deterministic StageProgressOps
+      fixtures on the host. match.py: expected structural differences from
+      LLVM's operation-table indirection and frame layout.
   # --- Stage progress tracker lazy singleton ---
   - address: 0x081fa3b0
     ghidra: FUN_081fa3b0

@@ -32,9 +32,13 @@ const _: () = assert!(core::mem::offset_of!(StageProgressTracker, stage_budgets)
 /// 0x081b9154. It stores the supplied deadline into the keeper when present.
 pub type SetRunningDeadline = unsafe extern "C" fn(u32);
 
+/// Waits until the active stage has consumed its current budget.
+pub type WaitForCurrentStage = unsafe extern "C" fn(*mut StageProgressTracker);
+
 #[derive(Clone, Copy)]
 pub struct StageProgressOps {
     pub set_running_deadline: SetRunningDeadline,
+    pub wait_for_current_stage: WaitForCurrentStage,
 }
 
 #[cfg(target_os = "none")]
@@ -44,18 +48,31 @@ unsafe extern "C" fn retail_set_running_deadline(deadline: u32) {
 }
 
 #[cfg(target_os = "none")]
+unsafe extern "C" fn retail_wait_for_current_stage(tracker: *mut StageProgressTracker) {
+    let wait: WaitForCurrentStage = core::mem::transmute(0x081fa3ecusize);
+    wait(tracker);
+}
+
+#[cfg(target_os = "none")]
 pub const DEFAULT_STAGE_PROGRESS_OPS: StageProgressOps = StageProgressOps {
     set_running_deadline: retail_set_running_deadline,
+    wait_for_current_stage: retail_wait_for_current_stage,
 };
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_set_running_deadline(_: u32) {
-    panic!("install stage progress host operations before incrementing")
+    panic!("install stage progress host operations before updating the deadline")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_wait_for_current_stage(_: *mut StageProgressTracker) {
+    panic!("install stage progress host operations before advancing the stage")
 }
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_STAGE_PROGRESS_OPS: StageProgressOps = StageProgressOps {
     set_running_deadline: missing_set_running_deadline,
+    wait_for_current_stage: missing_wait_for_current_stage,
 };
 
 /// Host-side dependency seam for the unported deadline-keeper setter.
@@ -124,6 +141,56 @@ pub unsafe extern "C" fn stage_progress_increment(
     let operations = ops();
     (operations.set_running_deadline)((*tracker).completed_base.wrapping_add(next_progress));
 }
+/// stage_progress_advance — original: `FUN_081fa2e8` @ **0x081fa2e8**
+/// (**84 bytes**; **7 `bl` call sites, all unconditional — 0 predicated and
+/// 0 plain `b`** — verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Waits for the active stage to finish, sets `stage` as the active byte,
+/// clears its progress and accumulated base, then sums every earlier stage
+/// budget into the base. The tail call into `FUN_081fa378` publishes that
+/// base as the running deadline when the new stage's signed budget is
+/// non-negative. The next sibling starts at 0x081fa33c, confirming the
+/// assigned extent 0x081fa2e8..0x081fa33c.
+///
+/// Like the ARM entry, this has no NULL or stage-range guard. `stage` remains
+/// a `u32`: the original writes only its low byte to `current_stage`, but uses
+/// the full signed value for the preceding-budget loop and the tail call.
+///
+/// Deviation: `FUN_081fa3ec` and `FUN_0815940c` are unported, so the wait and
+/// deadline publication respectively use their retail entry/veneer on device
+/// and deterministic operation-table fixtures on the host.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stage_progress_advance(
+    tracker: *mut StageProgressTracker,
+    stage: u32,
+) {
+    let operations = ops();
+    (operations.wait_for_current_stage)(tracker);
+
+    (*tracker).current_stage = stage as u8;
+    (*tracker).progress = 0;
+    (*tracker).completed_base = 0;
+
+    let budgets = core::ptr::addr_of!((*tracker).stage_budgets).cast::<u32>();
+    let mut prior_stage = 0i32;
+    while prior_stage < stage as i32 {
+        (*tracker).completed_base = (*tracker)
+            .completed_base
+            .wrapping_add(budgets.wrapping_add(prior_stage as usize).read());
+        prior_stage = prior_stage.wrapping_add(1);
+    }
+
+    // This is the tail-called `FUN_081fa378` path with a freshly cleared
+    // progress word. It deliberately retains the original signed budget test.
+    if (*tracker).current_stage as u32 != stage {
+        return;
+    }
+    if (budgets.wrapping_add(stage as usize).read() as i32) < 0 {
+        return;
+    }
+    (operations.set_running_deadline)((*tracker).completed_base);
+}
 
 #[cfg(test)]
 extern crate std;
@@ -141,6 +208,16 @@ mod tests {
         DEADLINE_CALLS += 1;
     }
 
+    static mut WAIT_CALLS: u32 = 0;
+    static mut WAIT_STAGE: u8 = 0;
+    static mut WAIT_PROGRESS: u32 = 0;
+
+    unsafe extern "C" fn record_wait(tracker: *mut StageProgressTracker) {
+        WAIT_CALLS += 1;
+        WAIT_STAGE = (*tracker).current_stage;
+        WAIT_PROGRESS = (*tracker).progress;
+    }
+
     fn tracker(stage: u8, progress: u32, base: u32, budgets: [u32; 7]) -> StageProgressTracker {
         StageProgressTracker {
             current_stage: stage,
@@ -156,9 +233,13 @@ mod tests {
         let saved = STAGE_PROGRESS_OPS;
         STAGE_PROGRESS_OPS = StageProgressOps {
             set_running_deadline: record_deadline,
+            wait_for_current_stage: record_wait,
         };
         DEADLINE = 0;
         DEADLINE_CALLS = 0;
+        WAIT_CALLS = 0;
+        WAIT_STAGE = 0;
+        WAIT_PROGRESS = 0;
         saved
     }
 
@@ -219,6 +300,55 @@ mod tests {
 
             assert_eq!(value.progress, u32::MAX);
             assert_eq!(DEADLINE_CALLS, 0);
+            STAGE_PROGRESS_OPS = saved;
+        }
+    }
+
+    #[test]
+    fn advance_waits_then_resets_stage_and_publishes_prior_budget_total() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            let saved = install_recording_ops();
+            let mut value = tracker(1, 7, 99, [2, 3, 4, 5, 6, 7, 8]);
+
+            stage_progress_advance(&mut value, 2);
+
+            assert_eq!((WAIT_CALLS, WAIT_STAGE, WAIT_PROGRESS), (1, 1, 7));
+            assert_eq!((value.current_stage, value.progress, value.completed_base), (2, 0, 5));
+            assert_eq!(value.total_budget, 35, "advance leaves the total budget intact");
+            assert_eq!((DEADLINE_CALLS, DEADLINE), (1, 5));
+            STAGE_PROGRESS_OPS = saved;
+        }
+    }
+
+    #[test]
+    fn advance_to_zero_publishes_zero_after_discarding_existing_progress() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            let saved = install_recording_ops();
+            let mut value = tracker(6, 8, 21, [0, 3, 4, 5, 6, 7, 8]);
+
+            stage_progress_advance(&mut value, 0);
+
+            assert_eq!(WAIT_CALLS, 1);
+            assert_eq!((value.current_stage, value.progress, value.completed_base), (0, 0, 0));
+            assert_eq!((DEADLINE_CALLS, DEADLINE), (1, 0));
+            STAGE_PROGRESS_OPS = saved;
+        }
+    }
+
+    #[test]
+    fn advance_with_negative_new_budget_resets_but_skips_deadline() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            let saved = install_recording_ops();
+            let mut value = tracker(0, 1, 0, [4, 0x8000_0000, 0, 0, 0, 0, 0]);
+
+            stage_progress_advance(&mut value, 1);
+
+            assert_eq!(WAIT_CALLS, 1);
+            assert_eq!((value.current_stage, value.progress, value.completed_base), (1, 0, 4));
+            assert_eq!(DEADLINE_CALLS, 0, "the ARM `bxlt` rejects negative budgets");
             STAGE_PROGRESS_OPS = saved;
         }
     }
