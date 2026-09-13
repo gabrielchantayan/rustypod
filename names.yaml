@@ -79818,3 +79818,29 @@ functions:
       verified vtable slot and origin word. Host vtable slots are native-width
       for valid callbacks; the 32-bit target offsets stay exact. Host tests
       prove callback result/origin subtraction and the signed-wrap boundary.
+
+  - address: 0x082a1ebc
+    ghidra: FUN_082a1ebc
+    name: empty_destructor_2a1ebc
+    size: 4
+    sig: "void *empty_destructor_2a1ebc(void *this)"
+    module: cxx/empty_destructor_2a1ebc
+    status: ported
+    renames:
+      param_1/r0: this
+      r0_after_return: this
+    notes: >-
+      Raw osos.dec confirms the exact four-byte body at 0x082a1ebc:
+      e12fff1e (`bx lr`). The prior leaf ends at this entry and the distinct
+      next leaf starts at 0x082a1ec0 with `ldr r0,[r0,#8]`; this is an empty
+      body rather than a literal veneer. A complete aligned ARM B/BL-immediate
+      decode finds exactly six direct inbound calls, all unconditional plain
+      bl (condition AL), at 0x081042fc, 0x08104308, 0x08104328, 0x08104344,
+      0x08104624, and 0x08104708. There are no predicated call forms, direct
+      B tail transfers, or aligned raw data-word references. The callers pass
+      object pointers in r0 and consume the unchanged r0 result, establishing
+      an empty C++ destructor despite Ghidra's void prototype. The port reads
+      and writes nothing and returns this unchanged; it accepts NULL,
+      unaligned, and dangling pointers. Its target-only text section prevents
+      identical-code folding with the other hookable empty-destructor exports.
+      Host tests prove pointer preservation and that no object byte is stored.
