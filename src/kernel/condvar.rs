@@ -396,6 +396,7 @@ pub unsafe extern "C" fn task_yield_thunk() {
 ///
 /// Creates the kernel object block and empties the wait queue.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn condvar_init(condvar: *mut CondVar) {
     (*condvar).lock_obj = (hooks().object_create)();
     (*condvar).waiters.head = null_mut();

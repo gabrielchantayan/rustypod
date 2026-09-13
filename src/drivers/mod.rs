@@ -39,6 +39,7 @@ pub mod surface;
 pub mod surface_new;
 pub mod setting_dispatcher;
 pub mod storage_device_operations;
+pub mod storage_device_get;
 pub mod storage_backend_prepare;
 pub mod stream_buffer_context;
 pub mod stream_transfer;
