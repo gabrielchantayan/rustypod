@@ -74557,3 +74557,33 @@ functions:
       counter-increment operations. Host tests verify the base and derived
       fields, untouched bytes, and that every derived store targets the base
       constructor's returned pointer.
+  - address: 0x081fe2f0
+    ghidra: FUN_081fe2f0
+    name: refresh_media_interface_slot_4c_result
+    size: 56
+    sig: "void refresh_media_interface_slot_4c_result(void *state)"
+    module: app/media_interface_slot_4c_result
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      FUN_0825a0c0: lazy_singleton_0x8c_interface_get (ported)
+      "interface->vtable+0x4c": result_query (dynamic target unidentified)
+      "state+0x2d4": result
+      "state+0x2d8": result_was_0x100
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x081fe2f0..0x081fe328:
+      save state in r4, call lazy_singleton_0x8c_interface_get, load its
+      vtable slot +0x4c, and call it with the interface in r0. The returned
+      u32 is first stored at state+0x2d4; the exact (result == 0x100)
+      predicate is stored at state+0x2d8; then only the 0x100 result is
+      overwritten with 0xff at state+0x2d4. The next separately linked
+      function begins with push {r4-r7,lr} at 0x081fe328. Full-image decoding
+      of every ARM B/BL immediate finds exactly seven direct inbound bl sites,
+      all unconditional and zero predicated: 0x081ff814, 0x081ffbdc,
+      0x081ffc3c, 0x08200af4, 0x08200c0c, 0x08200c2c, and 0x08200c98.
+      There are no direct plain-B tails or aligned image words equal to this
+      entry. The recovered static descriptor's slot +0x4c is zero in the disk
+      image, not a decodable function entry; the dynamic callee is therefore
+      deliberately unnamed. Host fixtures use a native-width virtual pointer
+      and getter seam, while the target calls the existing singleton accessor
+      port directly and retains the target vtable offset.
