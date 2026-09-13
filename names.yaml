@@ -67271,6 +67271,34 @@ functions:
       vtable store, mode gate, conditional call, and result forwarding;
       extra instructions are the two-function seam dispatch.
 
+  # --- Global trace-buffer slot resolver ---
+  - address: 0x08149f48
+    ghidra: FUN_08149f48
+    name: trace_buffer_slot_acquire_global
+    size: 32
+    sig: "TraceBufferEntry *trace_buffer_slot_acquire_global(u32 selector, CountedMutex **entry_guard)"
+    module: app/trace_buffer
+    status: ported
+    renames:
+      param_1/r0/r5: selector
+      param_2/r1/r4: entry_guard
+      FUN_0814a08c: trace_buffer_get
+      FUN_0814a130: trace_buffer_slot_acquire
+    notes: >-
+      Raw ARM is exactly 32 instruction bytes at 0x08149f48..0x08149f64;
+      the separately linked selector validator begins at 0x08149f68. It
+      saves selector and entry_guard, BLs trace_buffer_get, restores the
+      arguments as r1/r2 with the returned global buffer in r0, then
+      tail-branches to trace_buffer_slot_acquire. Decoding every ARM B/BL
+      word in osos.dec finds exactly six direct callers, all unconditional
+      BL: 0x0813a33c, 0x0813a3d8, 0x0813a434, 0x0813a52c, 0x0813a6cc, and
+      0x0813a9b8; there are no predicated forms. No aligned data word equals
+      0x08149f48, so it is not a virtual-dispatch target. The Rust wrapper
+      uses a call/return instead of the ARM tail branch while preserving the
+      selected entry and caller-owned lock guard. Host tests cover global
+      cached-buffer selection, argument forwarding, guard ownership, and
+      table-lock balancing.
+
   # --- Trace-buffer local-static accessor ---
   - address: 0x0814a08c
     ghidra: FUN_0814a08c
