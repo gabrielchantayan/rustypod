@@ -541,6 +541,59 @@ pub unsafe extern "C" fn iap_packet_owner_mode(packet: *const u8) -> u32 {
     }
     mode
 }
+///
+/// iap_packet_owner_mode_index — original: `FUN_08192124` @ `0x08192124`
+/// (**40 bytes, 0x08192124..0x0819214c** — 10 instructions, no literal
+/// pool; the next distinct function starts at 0x0819214c with `cmp r0,#0`).
+/// **7 direct `bl` call sites, all unconditional; no predicated forms**,
+/// verified by decoding every ARM branch word in `osos.dec`.
+///
+/// Maps the iAP packet owner's framing mode into the compact index used by
+/// the iAP service tables: mode 1 becomes 0, 2 becomes 1, and 4 becomes 3.
+/// Every other full-width input, including the in-range modes 0 and 3,
+/// returns the `0xff` invalid-index sentinel. The original has no pointer
+/// access, state, or NULL handling.
+///
+/// # Deviations
+///
+/// None. The comparisons are over the full 32-bit input exactly as the ARM
+/// `cmp` instructions do; the result remains a `u32` rather than being
+/// narrowed to its byte-sized sentinel representation.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iap_packet_owner_mode_index")]
+pub extern "C" fn iap_packet_owner_mode_index(owner_mode: u32) -> u32 {
+    if owner_mode == 1 {
+        0
+    } else if owner_mode == 2 {
+        1
+    } else if owner_mode == 4 {
+        3
+    } else {
+        0xff
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn owner_mode_index_maps_only_recognized_modes() {
+    assert_eq!(iap_packet_owner_mode_index(1), 0);
+    assert_eq!(iap_packet_owner_mode_index(2), 1);
+    assert_eq!(iap_packet_owner_mode_index(4), 3);
+
+    for owner_mode in [0, 3, 5, u32::MAX] {
+        assert_eq!(iap_packet_owner_mode_index(owner_mode), 0xff);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn owner_mode_index_does_not_narrow_before_matching() {
+    assert_eq!(iap_packet_owner_mode_index(0x0000_0101), 0xff);
+    assert_eq!(iap_packet_owner_mode_index(0x0000_0102), 0xff);
+    assert_eq!(iap_packet_owner_mode_index(0xffff_ff04), 0xff);
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -75118,3 +75118,27 @@ functions:
       host tests use a volatile tail seam and a vtable-dispatch seam because
       native function pointers cannot fit in the firmware's four-byte vtable
       slots. Those seams have no target effect.
+
+  # --- iAP packet owner-mode index ---
+  - address: 0x08192124
+    ghidra: FUN_08192124
+    name: iap_packet_owner_mode_index
+    size: 40
+    sig: "u32 iap_packet_owner_mode_index(u32 owner_mode)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: owner_mode
+      r0: owner_mode_index
+    notes: >-
+      Raw ARM is exactly 10 words from 0x08192124 through the bx lr at
+      0x08192148; there is no literal pool, and the separately linked next
+      function starts at 0x0819214c with cmp r0,#0. It maps iAP packet owner
+      framing modes 1 -> 0, 2 -> 1, and 4 -> 3; every other full-width
+      value, including modes 0 and 3, returns 0xff. This is the compact
+      service-table index consumed after iap_packet_owner_mode
+      (0x080f6b3c). Decoding every ARM B/BL immediate in osos.dec found
+      exactly seven inbound direct calls, all unconditional plain bl and no
+      predicated forms: 0x0818dcf0, 0x0818f2f8, 0x0818fe84, 0x08190e30,
+      0x08192458, 0x0819331c, and 0x08193538. No deviations: the Rust
+      match preserves the ARM's full-width comparisons and u32 result.
