@@ -1,11 +1,10 @@
-//! The two accessors for the **state-flag word at +0x44** of the
-//! 0x081fbxxx state-machine class — `FUN_081fc3f4` @ 0x081fc3f4 and
-//! `FUN_081fc524` @ 0x081fc524.
+//! The three accessors for the **state-flag word at +0x44** of the
+//! 0x081fbxxx state-machine class — `FUN_081fc3f4` @ 0x081fc3f4,
+//! `FUN_081fc524` @ 0x081fc524, and `FUN_081fc6f0` @ 0x081fc6f0.
 //!
-//! Every user of that class reaches its flag word through these two
-//! functions (plus open-coded `|=` / `&= ~` in the class's own methods),
-//! and always with a single-bit mask. The bits seen at the 34 `bl` sites
-//! of the test accessor:
+//! Every user of that class reaches its flag word through these accessors
+//! (plus open-coded `|=` / `&= ~` in the class's own methods), and all
+//! call-site masks seen for the containment accessor are single-bit:
 //!
 //! ```text
 //! 0x00000001  20x   0x00040000  20x   0x00080000   1x
@@ -59,6 +58,18 @@ unsafe fn flags(object: *mut u8) -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn state_flags_contain(object: *mut u8, mask: u32) -> u32 {
     u32::from(mask & !flags(object) == 0)
+}
+
+/// state_flags_overlap — original: `FUN_081fc6f0` @ 0x081fc6f0
+/// (16 bytes; 7 verified plain `bl` call sites, no predicated calls).
+///
+/// Loads the +0x44 state word, ANDs it with `mask`, and returns 1 when
+/// any bit overlaps, else 0. Thus an empty mask always returns 0. No
+/// deliberate deviations from the `ldr`/`ands`/`movne` original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn state_flags_overlap(object: *mut u8, mask: u32) -> u32 {
+    u32::from(flags(object) & mask != 0)
 }
 
 /// state_flags_set — original: `FUN_081fc524` @ 0x081fc524 (24 bytes;
@@ -132,6 +143,20 @@ mod tests {
         assert_eq!(unsafe { state_flags_contain(full.ptr(), 0xffff_ffff) }, 1);
         let mut nearly = Object::with_flags(0xffff_fffe);
         assert_eq!(unsafe { state_flags_contain(nearly.ptr(), 0xffff_ffff) }, 0);
+    }
+
+    #[test]
+    fn an_overlap_needs_any_bit_not_every_bit() {
+        let mut object = Object::with_flags(0x20000);
+        assert_eq!(unsafe { state_flags_overlap(object.ptr(), 0x60000) }, 1);
+        assert_eq!(unsafe { state_flags_overlap(object.ptr(), 0x10000) }, 0);
+    }
+
+    #[test]
+    fn an_empty_mask_never_overlaps_and_the_word_is_unchanged() {
+        let mut object = Object::with_flags(0xffff_ffff);
+        assert_eq!(unsafe { state_flags_overlap(object.ptr(), 0) }, 0);
+        assert_eq!(object.flags(), 0xffff_ffff);
     }
 
     #[test]
