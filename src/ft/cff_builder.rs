@@ -43,6 +43,7 @@
 //! `builder->loader`.
 
 use crate::ft::types::{FtOutline, FtVector};
+use core::ffi::c_void;
 
 /// `FT_CURVE_TAG_ON` (ftimage.h) — the point lies on the curve.
 pub const FT_CURVE_TAG_ON: u8 = 1;
@@ -140,25 +141,34 @@ pub unsafe extern "C" fn cff_builder_add_point(
     (*outline).n_points = (*outline).n_points.wrapping_add(1);
 }
 
-/// `FT_GlyphLoaderRec` (internal/ftgloadr.h) sliced to the members
-/// [`cff_check_points`] reads, at their firmware offsets: `memory` @
-/// +0x00, `max_points` @ +0x04, then the two embedded glyph-load
-/// records: `base` @ +0x14 (its `outline.n_points` @ +0x16) and
-/// `current` @ +0x34 (its `outline.n_points` @ +0x36). The +0x08..+0x13
-/// span (max_contours, max_subglyphs, use_extra) and each record's tail
-/// (extra_points, num_subglyphs, subglyphs) are opaque to this port.
-///
-/// The outlines are inline [`FtOutline`]s (this is the loader RECORD,
-/// not the pointer typedef), so the firmware layout is exact only on
-/// the 32-bit target; host accesses are by field name.
+/// `FT_GlyphLoadRec` (internal/ftgloadr.h), as configured in the retail
+/// FreeType build. Each embedded load occupies 32 bytes: its 20-byte outline,
+/// then the auxiliary point pointer, subglyph count, and subglyph pointer.
+/// `FT_GlyphLoader_Rewind` copies the complete record, so these tail fields
+/// are represented instead of treated as opaque.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FtGlyphLoad {
+    pub outline: FtOutline,
+    pub extra_points: *mut FtVector,
+    pub num_subglyphs: u32,
+    pub subglyphs: *mut c_void,
+}
+
+// Firmware layout: exact only where pointers are 32-bit.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::size_of::<FtGlyphLoad>()];
+
+/// `FT_GlyphLoaderRec` (internal/ftgloadr.h), including its two 32-byte
+/// embedded glyph-load records. `base` starts at +0x14 and `current` at
+/// +0x34 on the retail ARM ABI.
 #[repr(C)]
 pub struct FtGlyphLoader {
     _reserved_00: u32,
     pub max_points: u32,
     _reserved_08: [u32; 3],
-    pub base: FtOutline,
-    _reserved_28: [u32; 3],
-    pub current: FtOutline,
+    pub base: FtGlyphLoad,
+    pub current: FtGlyphLoad,
 }
 
 // Firmware layout: exact only where pointers are 32-bit.
@@ -169,7 +179,38 @@ const _: [u8; 0x14] = [0; core::mem::offset_of!(FtGlyphLoader, base)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x34] = [0; core::mem::offset_of!(FtGlyphLoader, current)];
 #[cfg(target_pointer_width = "32")]
-const _: [u8; 0x48] = [0; core::mem::size_of::<FtGlyphLoader>()];
+const _: [u8; 0x54] = [0; core::mem::size_of::<FtGlyphLoader>()];
+/// `FT_GlyphLoader_Rewind` (FreeType internal/ftgloadr.c) — original:
+/// `FUN_0804c9f4` @ `0x0804c9f4`, 32 bytes
+/// (`0x0804c9f4..0x0804ca14`; the next `push {r4,r5,r6,lr}` confirms the
+/// extent). Seven direct callers verified by decoding every ARM B/BL immediate
+/// in `osos.dec`: seven unconditional `bl`, no predicated calls, and no tail
+/// `b`.
+///
+/// Resets the base outline's signed contour and point counts, clears its
+/// subglyph count, then copies the complete 32-byte base glyph-load record
+/// into `current`. The three pointer-sized fields are assigned by name, which
+/// preserves the 32-bit target layout without overlapping widened host
+/// pointers.
+///
+/// Deliberate deviation: the original tail-branches to the IRAM memcpy veneer
+/// at `0x08037df8`, whose return leaves `r0 = current + 0x20`; this typed
+/// `void` port uses a fieldwise copy. Every verified caller overwrites or
+/// ignores `r0` immediately after the call, so the differing dead return
+/// register is unobservable.
+///
+/// # Safety
+/// `loader` must be a valid, writable [`FtGlyphLoader`]. The retail routine
+/// has no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_glyph_loader_rewind(loader: *mut FtGlyphLoader) {
+    let loader = unsafe { &mut *loader };
+    loader.base.outline.n_contours = 0;
+    loader.base.outline.n_points = 0;
+    loader.base.num_subglyphs = 0;
+    loader.current = loader.base;
+}
 
 /// Firmware load address of the unported glyph-loader grow path
 /// `FT_GlyphLoader_CheckPoints` @ 0x0804c638, which [`cff_check_points`]
@@ -266,8 +307,8 @@ pub unsafe extern "C" fn cff_check_points(builder: *mut CffBuilder, count: i32) 
         return 0;
     }
     let loader: *mut FtGlyphLoader = (*builder).loader;
-    let need = ((*loader).base.n_points as i32)
-        .wrapping_add((*loader).current.n_points as i32)
+    let need = ((*loader).base.outline.n_points as i32)
+        .wrapping_add((*loader).current.outline.n_points as i32)
         .wrapping_add(count);
     if need > (*loader).max_points as i32 {
         let check = core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile();
@@ -525,14 +566,23 @@ mod tests {
                     _reserved_00: 0xdeadbeef,
                     max_points,
                     _reserved_08: [0xdeadbeef; 3],
-                    base: FtOutline {
-                        n_points: base_points,
-                        ..blank_outline
+                    base: FtGlyphLoad {
+                        outline: FtOutline {
+                            n_points: base_points,
+                            ..blank_outline
+                        },
+                        extra_points: core::ptr::null_mut(),
+                        num_subglyphs: 0xdeadbeef,
+                        subglyphs: core::ptr::null_mut(),
                     },
-                    _reserved_28: [0xdeadbeef; 3],
-                    current: FtOutline {
-                        n_points: current_points,
-                        ..blank_outline
+                    current: FtGlyphLoad {
+                        outline: FtOutline {
+                            n_points: current_points,
+                            ..blank_outline
+                        },
+                        extra_points: core::ptr::null_mut(),
+                        num_subglyphs: 0xdeadbeef,
+                        subglyphs: core::ptr::null_mut(),
                     },
                 },
                 builder: CffBuilder {
@@ -613,22 +663,31 @@ mod tests {
                     _reserved_00: 0xdeadbeef,
                     max_points,
                     _reserved_08: [0xdeadbeef; 3],
-                    base: FtOutline {
-                        n_contours: 0,
-                        n_points: 0,
-                        points: core::ptr::null_mut(),
-                        tags: core::ptr::null_mut(),
-                        contours: core::ptr::null_mut(),
-                        flags: 0,
+                    base: FtGlyphLoad {
+                        outline: FtOutline {
+                            n_contours: 0,
+                            n_points: 0,
+                            points: core::ptr::null_mut(),
+                            tags: core::ptr::null_mut(),
+                            contours: core::ptr::null_mut(),
+                            flags: 0,
+                        },
+                        extra_points: core::ptr::null_mut(),
+                        num_subglyphs: 0xdeadbeef,
+                        subglyphs: core::ptr::null_mut(),
                     },
-                    _reserved_28: [0xdeadbeef; 3],
-                    current: FtOutline {
-                        n_contours: 0,
-                        n_points: 0,
-                        points: core::ptr::null_mut(),
-                        tags: core::ptr::null_mut(),
-                        contours: core::ptr::null_mut(),
-                        flags: 0,
+                    current: FtGlyphLoad {
+                        outline: FtOutline {
+                            n_contours: 0,
+                            n_points: 0,
+                            points: core::ptr::null_mut(),
+                            tags: core::ptr::null_mut(),
+                            contours: core::ptr::null_mut(),
+                            flags: 0,
+                        },
+                        extra_points: core::ptr::null_mut(),
+                        num_subglyphs: 0xdeadbeef,
+                        subglyphs: core::ptr::null_mut(),
                     },
                 },
                 builder: CffBuilder {
@@ -788,5 +847,64 @@ mod tests {
         assert_eq!(fx.outline.n_points, 0);
         assert_eq!(fx.points[0], FtVector { x: -777, y: 888 });
         assert_eq!(fx.tags[0], 0xaa);
+    }
+    // --- ft_glyph_loader_rewind ---
+
+    #[test]
+    fn rewind_clears_base_counts_and_clones_every_base_load_field() {
+        let mut points = [FtVector { x: 1, y: -1 }; 2];
+        let mut tags = [0xa5u8; 2];
+        let mut contours = [7i16; 2];
+        let mut subglyphs = [0x55u8; 4];
+        let base = FtGlyphLoad {
+            outline: FtOutline {
+                n_contours: -2,
+                n_points: -3,
+                points: points.as_mut_ptr(),
+                tags: tags.as_mut_ptr(),
+                contours: contours.as_mut_ptr(),
+                flags: 0x1234_5678,
+            },
+            extra_points: points.as_mut_ptr(),
+            num_subglyphs: 0xfeed_beef,
+            subglyphs: subglyphs.as_mut_ptr().cast(),
+        };
+        let mut loader = FtGlyphLoader {
+            _reserved_00: 0xdeadbeef,
+            max_points: 99,
+            _reserved_08: [0xdeadbeef; 3],
+            base,
+            current: FtGlyphLoad {
+                outline: FtOutline {
+                    n_contours: 44,
+                    n_points: 55,
+                    points: core::ptr::null_mut(),
+                    tags: core::ptr::null_mut(),
+                    contours: core::ptr::null_mut(),
+                    flags: 0,
+                },
+                extra_points: core::ptr::null_mut(),
+                num_subglyphs: 66,
+                subglyphs: core::ptr::null_mut(),
+            },
+        };
+
+        unsafe { ft_glyph_loader_rewind(&mut loader) };
+
+        assert_eq!(loader.base.outline.n_contours, 0);
+        assert_eq!(loader.base.outline.n_points, 0);
+        assert_eq!(loader.base.num_subglyphs, 0);
+        assert_eq!(loader.current.outline.n_contours, 0);
+        assert_eq!(loader.current.outline.n_points, 0);
+        assert_eq!(loader.current.outline.points, points.as_mut_ptr());
+        assert_eq!(loader.current.outline.tags, tags.as_mut_ptr());
+        assert_eq!(loader.current.outline.contours, contours.as_mut_ptr());
+        assert_eq!(loader.current.outline.flags, 0x1234_5678);
+        assert_eq!(loader.current.extra_points, points.as_mut_ptr());
+        assert_eq!(loader.current.num_subglyphs, 0);
+        assert_eq!(loader.current.subglyphs, subglyphs.as_mut_ptr().cast());
+        assert_eq!(loader.max_points, 99);
+        assert_eq!(loader._reserved_00, 0xdeadbeef);
+        assert_eq!(loader._reserved_08, [0xdeadbeef; 3]);
     }
 }
