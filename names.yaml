@@ -81657,3 +81657,37 @@ functions:
       the raw target is 0x082747b8. Rust represents that final tail
       branch as an ordinary direct void call; no caller-observable result
       changes.
+
+  # --- Indexed timestamp bounds ---
+  - address: 0x081c4c5c
+    ghidra: FUN_081c4c5c
+    name: indexed_timestamp_bounds_update
+    size: 148
+    sig: "void indexed_timestamp_bounds_update(IndexedTimestampBoundsState *state)"
+    module: app/indexed_timestamp_bounds
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_1_plus_0x38: entries_table
+      param_1_plus_0x64: time_divisor
+      param_1_plus_0x9c: time_scale
+      param_1_plus_0xc4: current_index
+      param_1_plus_0xc8: timestamp
+      param_1_plus_0xd0: end_timestamp
+      param_1_plus_0xd8: scaled_value
+      FUN_0802eefc: __aeabi_uldivmod (ported direct callee)
+    notes: >-
+      Raw osos.dec establishes 148 instruction bytes from 0x081c4c5c through
+      0x081c4cec; the distinct next function begins at 0x081c4cf0. A
+      full-image ARM B/BL-immediate decode finds exactly six inbound direct
+      bl sites: five unconditional at 0x081c2634, 0x081c5fa8, 0x081c6328,
+      0x081c6df8, and 0x081c73ec, plus one predicated blne at 0x081c5d90.
+      The predicated site gates entry in its caller; this helper has no null,
+      bounds, or divisor guard. It selects current_index from a 24-byte table,
+      copies entry+8 to state+0xc8, computes signed(entry+0) * time_scale,
+      passes its bit pattern with an unsigned time_divisor to the already
+      ported __aeabi_uldivmod at 0x0802eefc, stores the quotient at state+0xd8,
+      and stores entry+8 plus that quotient at state+0xd0. An exhausted table
+      stores i64::MAX at both state+0xc8 and state+0xd0 and zero at +0xd8.
+      Host tests cover nonzero indexing, 64-bit unsigned division of a
+      negative product bit pattern, and the exhausted-table sentinel.

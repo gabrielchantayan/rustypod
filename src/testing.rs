@@ -671,6 +671,10 @@ pub mod hints {
     // reference, vtable, element, header, and slot fixtures; mappings never
     // unmap, so no other user may share this hint.
     pub const ELEMENT_REFERENCE_ITEM: usize = 0x8e00_0000;
+    // 0x8d10_0000: dedicated to app/indexed_timestamp_bounds's raw-u32
+    // state, table, and entry fixtures; mappings never unmap, so no other
+    // user may share this hint.
+    pub const INDEXED_TIMESTAMP_BOUNDS: usize = 0x8d10_0000;
     // 0x9800_0000: dedicated to sqlite/btree_drop_cell's target-width
     // MemPage aData fixture; mappings never unmap, so no other user may
     // share this hint.
