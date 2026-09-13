@@ -204,6 +204,99 @@ pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 
     core::ptr::write_bytes(grand_base.cast::<u8>(), 0, 0x94);
     object
 }
+/// Host/test and target dispatch for the still-unported `FUN_0810e824`
+/// owned-payload initializer.
+///
+/// Its allocation and decoder dependencies remain unidentified, but its
+/// recovered five-word ABI is required by
+/// [`pair_header_base_construct_with_owned_payload`].
+#[derive(Clone, Copy)]
+pub struct PairHeaderBaseOwnedPayloadInitializeOps {
+    pub initialize: unsafe extern "C" fn(
+        base: *mut u32,
+        descriptor: *const u32,
+        payload: u32,
+        tag: u32,
+        context: u32,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_initialize_owned_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    payload: u32,
+    tag: u32,
+    context: u32,
+) {
+    let initialize: unsafe extern "C" fn(*mut u32, *const u32, u32, u32, u32) =
+        core::mem::transmute(0x0810_e824usize);
+    initialize(base, descriptor, payload, tag, context);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_initialize_owned_payload(
+    _base: *mut u32,
+    _descriptor: *const u32,
+    _payload: u32,
+    _tag: u32,
+    _context: u32,
+) {
+    panic!("pair_header_base_construct_with_owned_payload requires initializer 0x0810e824")
+}
+
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS:
+    PairHeaderBaseOwnedPayloadInitializeOps = PairHeaderBaseOwnedPayloadInitializeOps {
+        initialize: firmware_initialize_owned_payload,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS:
+    PairHeaderBaseOwnedPayloadInitializeOps = PairHeaderBaseOwnedPayloadInitializeOps {
+        initialize: missing_initialize_owned_payload,
+    };
+
+/// pair_header_base_construct_with_owned_payload — original: `FUN_0810ea78`
+/// @ **0x0810ea78** (84 bytes: 20 instructions and the four-byte literal at
+/// 0x0810eacc; the next function starts at 0x0810ead0).
+///
+/// Seven direct, unconditional `bl` call sites (0x0810f074, 0x0810f0c0,
+/// 0x0810f674, 0x08198d34, 0x081b2cbc, 0x0826cee4, and 0x0826d304), with no
+/// predicated calls or `b` tail calls, were verified by decoding every ARM
+/// branch word in osos.dec. The constructor plants the shared PairHeaderBase
+/// vtable, constructs its grand base at +4, clears +0xac/+0xb0 and the low
+/// byte at +0xb4, then initializes its owned payload through 0x0810e824.
+/// The ARM return is the grand-base result rebased by one word to `base`.
+///
+/// Deliberate deviation: 0x0810e824 is not ported. Its five-word ABI is
+/// explicit in [`PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS`]; target
+/// builds call the exact retail entry, while host defaults panic rather than
+/// silently skip allocation and payload initialization.
+///
+/// # Safety
+/// `base` must point to word-aligned, writable 0xb8-byte PairHeaderBase
+/// storage, and `descriptor` must remain valid for the external initializer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_construct_with_owned_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    payload: u32,
+    tag: u32,
+    context: u32,
+) -> *mut u32 {
+    base.write(PAIR_HEADER_BASE_VTABLE);
+    let object = pair_header_grand_base_construct(base.add(1)).sub(1);
+    object.add(0xac / 4).write(0);
+    object.add(0xb0 / 4).write(0);
+    object.cast::<u8>().add(0xb4).write(0);
+    let initialize = core::ptr::addr_of!(PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS.initialize)
+        .read_volatile();
+    initialize(object, descriptor, payload, tag, context);
+    object
+}
+
 
 /// Host/test and target dispatch for the two still-unported dependencies of
 /// [`pair_header_base_initialize_payload`].
@@ -865,6 +958,29 @@ mod tests {
             }
         }
     }
+    struct OwnedPayloadInitializeOpsGuard;
+
+    impl OwnedPayloadInitializeOpsGuard {
+        fn install(ops: PairHeaderBaseOwnedPayloadInitializeOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS)
+                    .write_volatile(ops);
+            }
+            OwnedPayloadInitializeOpsGuard
+        }
+    }
+
+    impl Drop for OwnedPayloadInitializeOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OWNED_PAYLOAD_INITIALIZE_OPS)
+                    .write_volatile(PairHeaderBaseOwnedPayloadInitializeOps {
+                        initialize: missing_initialize_owned_payload,
+                    });
+            }
+        }
+    }
+
 
 
     static mut ARRAY_CALLS: usize = 0;
@@ -883,6 +999,13 @@ mod tests {
     static mut SEEN_PAYLOAD_LOAD_VTABLE: u32 = 0;
     static mut SEEN_PAYLOAD_LOAD_POOL: u32 = 0;
     static mut SEEN_PAYLOAD_LOAD_OWNERSHIP: u8 = 0;
+    static mut OWNED_PAYLOAD_INITIALIZE_CALLS: usize = 0;
+    static mut SEEN_OWNED_PAYLOAD_INITIALIZE_ARGS: [usize; 5] = [0; 5];
+    static mut SEEN_OWNED_PAYLOAD_INITIALIZE_VTABLE: u32 = 0;
+    static mut SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE: u32 = 0;
+    static mut SEEN_OWNED_PAYLOAD_INITIALIZE_POOL: u32 = 0;
+    static mut SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP: u8 = 0;
+
 
 
     unsafe fn reset_recording() {
@@ -902,6 +1025,13 @@ mod tests {
         core::ptr::addr_of_mut!(SEEN_PAYLOAD_LOAD_VTABLE).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_PAYLOAD_LOAD_POOL).write_volatile(0);
         core::ptr::addr_of_mut!(SEEN_PAYLOAD_LOAD_OWNERSHIP).write_volatile(0);
+        core::ptr::addr_of_mut!(OWNED_PAYLOAD_INITIALIZE_CALLS).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_ARGS).write_volatile([0; 5]);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_VTABLE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_POOL).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP).write_volatile(0);
+
     }
 
     unsafe extern "C" fn recording_element_array_reset(
@@ -991,6 +1121,31 @@ mod tests {
             .write_volatile(base.cast::<u8>().add(0xb4).read());
         0xfedc_ba98
     }
+    unsafe extern "C" fn recording_owned_payload_initialize(
+        base: *mut u32,
+        descriptor: *const u32,
+        payload: u32,
+        tag: u32,
+        context: u32,
+    ) {
+        let calls = core::ptr::addr_of!(OWNED_PAYLOAD_INITIALIZE_CALLS).read_volatile();
+        core::ptr::addr_of_mut!(OWNED_PAYLOAD_INITIALIZE_CALLS).write_volatile(calls + 1);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_ARGS).write_volatile([
+            base as usize,
+            descriptor as usize,
+            payload as usize,
+            tag as usize,
+            context as usize,
+        ]);
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_VTABLE).write_volatile(base.read());
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE)
+            .write_volatile(base.add(0xac / 4).read());
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_POOL)
+            .write_volatile(base.add(0xb0 / 4).read());
+        core::ptr::addr_of_mut!(SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP)
+            .write_volatile(base.cast::<u8>().add(0xb4).read());
+    }
+
 
 
     unsafe fn seen_array_args() -> [usize; 11] {
@@ -1273,6 +1428,76 @@ mod tests {
             assert_eq!(this.cast::<u8>().add(0xb4).read(), 0x7d);
         }
     }
+    /// `FUN_0810ea78` builds the shared base chain, performs only its three
+    /// trailing clears, and forwards all five recovered ABI words to the
+    /// unported owned-payload initializer.
+    #[test]
+    fn owned_payload_constructor_clears_then_forwards_initializer_abi() {
+        let _lock = lock_ops();
+        let _array_guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: recording_element_array_reset,
+        });
+        let _initializer_guard =
+            OwnedPayloadInitializeOpsGuard::install(PairHeaderBaseOwnedPayloadInitializeOps {
+                initialize: recording_owned_payload_initialize,
+            });
+        unsafe {
+            reset_recording();
+            let mut base = vec![FILL; BASE_WORDS];
+            let descriptor = [0x1111_2222, 0x3333_4444, 0x5555_6666, 0x7777_8888];
+            let this = base.as_mut_ptr();
+
+            let returned = pair_header_base_construct_with_owned_payload(
+                this,
+                descriptor.as_ptr(),
+                0x1020_3040,
+                0x5060_7080,
+                0x90a0_b0c0,
+            );
+
+            assert_eq!(returned, this);
+            assert_eq!(core::ptr::addr_of!(ARRAY_CALLS).read_volatile(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(OWNED_PAYLOAD_INITIALIZE_CALLS).read_volatile(),
+                1
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_OWNED_PAYLOAD_INITIALIZE_ARGS).read_volatile(),
+                [
+                    this as usize,
+                    descriptor.as_ptr() as usize,
+                    0x1020_3040,
+                    0x5060_7080,
+                    0x90a0_b0c0,
+                ]
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_OWNED_PAYLOAD_INITIALIZE_VTABLE).read_volatile(),
+                PAIR_HEADER_BASE_VTABLE,
+                "the vtable precedes the initializer"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_OWNED_PAYLOAD_INITIALIZE_RELEASE).read_volatile(),
+                0,
+                "the initializer observes the cleared release field"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_OWNED_PAYLOAD_INITIALIZE_POOL).read_volatile(),
+                0,
+                "the initializer observes a null pool"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_OWNED_PAYLOAD_INITIALIZE_OWNERSHIP).read_volatile(),
+                0,
+                "the initializer observes ownership clear"
+            );
+            assert_eq!(base[1], FILL, "this variant does not zero +4");
+            assert_eq!(base[0xac / 4], 0);
+            assert_eq!(base[0xb0 / 4], 0);
+            assert_eq!(this.cast::<u8>().add(0xb4).read(), 0);
+        }
+    }
+
 
 
     /// The derived constructor now calls the concrete base port and retains
