@@ -8276,6 +8276,28 @@ functions:
       pool + 0x78) and the pool parent-class ctor (bl @ 0x081f0074,
       slot = parent + 0x24).
 
+  - address: 0x080df2b8
+    ghidra: thunk_FUN_0808e294
+    name: mailbox_slot_create_thunk
+    size: 4
+    sig: "void mailbox_slot_create_thunk(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0808e294: mailbox_slot_create (already ported, kernel/kobj.rs)
+    notes: >-
+      One-word pure dispatch alias: eafebbf5 = `b 0x0808e294`, forwarding the
+      caller-owned Mailbox pointer slot unchanged to mailbox_slot_create. Raw
+      extent is exactly 4 bytes because the next word at 0x080df2bc (`ldr
+      r1,[r0,#20]`) starts the following function. Decoding every ARM B/BL
+      word in osos.dec finds 7 inbound sites, all unconditional bl
+      (0x081492a8, 0x081b0a18, 0x081bbd70/78/80, 0x081c17bc, 0x0827ddd8);
+      no predicated or tail branch reaches it, and no aligned DATA word holds
+      the address. The forwarding Rust call compiles as a relocation-safe tail
+      transfer to the already ported mailbox_slot_create; the slot store and
+      no-NULL-guard behavior are identical.
+
   - address: 0x080a6bec
     ghidra: FUN_080a6bec
     name: mailbox_slot_delete
