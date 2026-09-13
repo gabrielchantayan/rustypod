@@ -625,6 +625,9 @@ pub mod hints {
     // unmap, so each mapping site has its own hint.
     pub const SHARED_HANDLE_INITIALIZE: usize = 0x5300_0000;
     pub const VTABLE_SHARED_HANDLE_CONSTRUCT: usize = 0x5400_0000;
+    // 0x9900_0000: dedicated to cxx/templates' raw-u32 cursor-state
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const CONTAINER_BEGIN_CURSOR: usize = 0x9900_0000;
     // 0x5600_0000: dedicated to app/opaque_record_source_item_count's raw-u32
     // provider fixture; mappings never unmap, so no other user may share it.
     pub const OPAQUE_RECORD_SOURCE_ITEM_COUNT: usize = 0x5600_0000;

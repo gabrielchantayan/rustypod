@@ -102,6 +102,60 @@ use crate::heap::block_deque::{deque_seg_capacity, DequeIter};
 use crate::heap::block_deque::BlockDeque;
 use crate::heap::veneers::cxx_array_dealloc;
 
+/// The five-word owner shape consumed by [`container_begin_cursor`].
+///
+/// `cursor_state` is a raw 32-bit retailOS pointer. Its target's word at
+/// byte offset +0x8 is the cursor returned by the member.
+#[repr(C)]
+pub struct ContainerBeginCursorOwner {
+    pub unknown_0: u32,
+    pub unknown_4: u32,
+    pub unknown_8: u32,
+    pub unknown_c: u32,
+    pub cursor_state: u32,
+}
+
+#[repr(C)]
+pub struct ContainerCursorState {
+    pub unknown_0: u32,
+    pub unknown_4: u32,
+    pub begin_cursor: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(ContainerBeginCursorOwner, cursor_state)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 8] = [0; core::mem::offset_of!(ContainerCursorState, begin_cursor)];
+
+/// container_begin_cursor — original: `FUN_083dbeec` @ 0x083dbeec
+/// (20 bytes; Ghidra reports 20).
+///
+/// Loads the raw cursor-state pointer at `owner + 0x10`, then returns its raw
+/// cursor word at `cursor_state + 0x8`. Raw `osos.dec` fixes the complete
+/// body as five instructions: `push {r3,lr}; ldr r0,[r0,#0x10]; ldr
+/// r0,[r0,#8]; str r0,[sp]; pop {ip,pc}`. Decoding every aligned ARM B/BL
+/// word finds six inbound unconditional `bl` calls at 0x0825b864, 0x0825b910,
+/// 0x0825bb08, 0x0825bba0, 0x0825bc44, and 0x0825bcc0; there are no
+/// predicated calls or tail branches.
+///
+/// Its callers compare this cursor against the preceding sibling's
+/// `owner + 0x10` cursor and advance until equal, establishing this value as
+/// the begin cursor without identifying either containing type. The raw u32
+/// result and cursor-state field preserve the target ABI; there are no
+/// deliberate deviations.
+///
+/// # Safety
+///
+/// `owner` and its non-null `cursor_state` target must be readable. The
+/// retailOS body performs no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_begin_cursor")]
+#[inline(never)]
+pub unsafe extern "C" fn container_begin_cursor(owner: *const ContainerBeginCursorOwner) -> u32 {
+    let cursor_state = (*owner).cursor_state as usize as *const ContainerCursorState;
+    (*cursor_state).begin_cursor
+}
+
 /// The five-word owner shape consumed by [`container_end_cursor`].
 ///
 /// The retailOS member reads only `end_cursor` at target byte offset +0x10.
@@ -6114,6 +6168,37 @@ mod tests {
         };
 
         assert_eq!(unsafe { container_end_cursor(&owner) }, 0);
+    }
+
+    #[test]
+    fn container_begin_cursor_returns_nested_cursor_word() {
+        let Some(cursor_state) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::CONTAINER_BEGIN_CURSOR,
+            core::mem::size_of::<ContainerCursorState>(),
+        ) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx::templates"));
+            return;
+        };
+        unsafe {
+            cursor_state.cast::<ContainerCursorState>().write(ContainerCursorState {
+                unknown_0: 0x0102_0304,
+                unknown_4: 0x1112_1314,
+                begin_cursor: 0xfedc_ba98,
+            });
+        }
+        let owner = ContainerBeginCursorOwner {
+            unknown_0: 0x2122_2324,
+            unknown_4: 0x3132_3334,
+            unknown_8: 0x4142_4344,
+            unknown_c: 0x5152_5354,
+            cursor_state: cursor_state as usize as u32,
+        };
+
+        assert_eq!(
+            unsafe { container_begin_cursor(&owner) },
+            0xfedc_ba98,
+            "the member loads only cursor-state word +0x8"
+        );
     }
 
     #[test]

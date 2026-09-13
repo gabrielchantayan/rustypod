@@ -75136,6 +75136,31 @@ functions:
       0x083dbedc, so it is not used as a data-dispatched target. The Rust
       port returns u32 rather than inventing a pointer type, preserving the
       target-word ABI and the opaque cursor representation on host tests.
+  - address: 0x083dbeec
+    ghidra: FUN_083dbeec
+    name: container_begin_cursor
+    size: 20
+    sig: "u32 container_begin_cursor(const ContainerBeginCursorOwner *owner)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: owner
+      field_10: cursor_state
+      field_8: begin_cursor
+    notes: >-
+      Raw osos.dec confirms the 20-byte extent: 0x083dbeec through
+      0x083dbefc, then separately linked code opens at 0x083dbf00. The body
+      loads the raw cursor-state word at owner + 0x10 and returns the raw
+      cursor word at cursor_state + 0x8; it has no NULL guard. The preceding
+      sibling at 0x083dbedc returns owner + 0x10 directly, while all callers
+      compare this nested cursor to that sibling result and advance toward it,
+      establishing this as a begin cursor despite the opaque types. Decoding
+      every aligned ARM B/BL immediate in osos.dec finds exactly six inbound
+      unconditional bl calls: 0x0825b864, 0x0825b910, 0x0825bb08,
+      0x0825bba0, 0x0825bc44, and 0x0825bcc0. There are no predicated forms,
+      tail branches, or aligned raw-word references to 0x083dbeec. The Rust
+      port uses a raw u32 cursor-state field and result to preserve the
+      target-word ABI; there are no deliberate deviations.
 
   # --- Stream-buffer slot consumption ---
   - address: 0x083daf50
