@@ -157,6 +157,7 @@ pub mod parse_expr;
 pub mod ptrmap_pageno;
 pub mod ptrmap_check_pages;
 pub mod ptrmap_put;
+pub mod ptrmap_put_overflow_cell;
 pub mod read_schema;
 pub mod release_mem_array;
 pub mod schema_to_index;

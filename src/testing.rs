@@ -1023,6 +1023,10 @@ pub mod hints {
     // and Btree fixture for sqlite3BtreeLeaveAll; mappings never unmap, so
     // no other user may share this hint.
     pub const BTREE_LEAVE_ALL: usize = 0x4242_0000;
+    // 0x3e00_0000: dedicated to sqlite/ptrmap_put_overflow_cell's raw-u32
+    // segmented-entry table and entry-data fixture; mappings never unmap, so
+    // no other user may share this hint.
+    pub const SQLITE_PTRMAP_PUT_OVERFLOW_CELL: usize = 0x3e00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
