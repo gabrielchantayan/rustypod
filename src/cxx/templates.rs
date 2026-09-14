@@ -2748,6 +2748,41 @@ pub struct VectorStorage {
     /// One past the allocated storage.
     pub end_of_storage: *mut u8,
 }
+/// vector_clear_elem4 — original: `FUN_083e6808` @ `0x083e6808`
+/// (84 bytes, `0x083e6808..0x083e685c`; the next separately linked function
+/// starts `ldr r2,[r0,#8]` at `0x083e685c`).
+///
+/// Clears a `std::vector<T>` whose four-byte elements have trivial
+/// destruction. The ARM body loads `begin` and `end`; an empty head returns
+/// immediately. For a non-empty head, its apparent range-copy loop is
+/// unreachable because it compares `end` to a register that was just set to
+/// `end`; its following walk has no side effects and it stores `begin` into
+/// `end`. Thus no element is read, written, or destroyed, and the allocation
+/// remains owned by the vector.
+///
+/// **Call count:** complete aligned ARM B/BL-immediate decoding of
+/// `osos.dec` finds five direct, unconditional `bl` callers at
+/// `0x0813d8e8`, `0x0813e1b8`, `0x0813e21c`, `0x08177614`, and `0x081778fc`;
+/// there are no predicated forms. A sixth inbound branch is the unconditional
+/// tail transfer at `0x0813d8f4`, not a call.
+///
+/// # Deliberate deviations
+///
+/// None.
+///
+/// # Safety
+///
+/// `vector` must point to a writable, aligned [`VectorStorage`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_clear_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_clear_elem4(vector: *mut VectorStorage) {
+    let begin = (*vector).begin;
+    if begin != (*vector).end {
+        (*vector).end = begin;
+    }
+}
+
 /// vector_storage_init — original: `FUN_083e688c` @ `0x083e688c`
 /// (20 bytes, 6 direct `bl` call sites — 0x08177630, 0x0817763c,
 /// 0x08177648, 0x08177b94, 0x082ae80c, and 0x082ae824; all
@@ -7317,4 +7352,42 @@ mod tests {
             assert_eq!(deque_iter_equal(&first_end, &third_begin), 0);
         }
     }
+    #[test]
+    fn vector_clear_elem4_discards_live_words_without_releasing_storage() {
+        let mut elements = [0x0102_0304u32, 0x1112_1314, 0x2122_2324, 0x3132_3334];
+        let begin = elements.as_mut_ptr().cast::<u8>();
+        let capacity = unsafe { begin.add(core::mem::size_of_val(&elements)) };
+        let mut vector = VectorStorage {
+            begin,
+            end: unsafe { begin.add(12) },
+            end_of_storage: capacity,
+        };
+
+        unsafe { vector_clear_elem4(&mut vector) };
+
+        assert_eq!(vector.begin, begin);
+        assert_eq!(vector.end, begin);
+        assert_eq!(vector.end_of_storage, capacity);
+        assert_eq!(elements, [0x0102_0304, 0x1112_1314, 0x2122_2324, 0x3132_3334]);
+    }
+
+    #[test]
+    fn vector_clear_elem4_keeps_an_empty_head_unchanged() {
+        let mut elements = [0xaaaa_aaaau32; 2];
+        let begin = elements.as_mut_ptr().cast::<u8>();
+        let capacity = unsafe { begin.add(core::mem::size_of_val(&elements)) };
+        let mut vector = VectorStorage {
+            begin,
+            end: begin,
+            end_of_storage: capacity,
+        };
+
+        unsafe { vector_clear_elem4(&mut vector) };
+
+        assert_eq!(vector.begin, begin);
+        assert_eq!(vector.end, begin);
+        assert_eq!(vector.end_of_storage, capacity);
+        assert_eq!(elements, [0xaaaa_aaaa; 2]);
+    }
+
 }
