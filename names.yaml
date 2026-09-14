@@ -27757,6 +27757,33 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839eba4
+    ghidra: FUN_0839eba4
+    name: derived_observable_array_construct
+    size: 32
+    sig: "DerivedObservableArray *derived_observable_array_construct(DerivedObservableArray *this)"
+    module: cxx/derived_observable_array_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      puVar1/r0: constructed_object
+      DAT_0839ebc0: DERIVED_OBSERVABLE_ARRAY_VTABLE
+    notes: >-
+      Raw ARM has seven code words (28 bytes) at 0x0839eba4..0x0839ebbc
+      followed by its literal-pool word 0x0898872c at 0x0839ebc0, for a true
+      32-byte extent; the next separately linked sibling begins at 0x0839ebc4.
+      It calls the ported observable_array_construct @ 0x08271cec, overwrites
+      the returned object's +0x00 word with the literal, clears its +0x10 word,
+      and returns that child-constructor result. Every immediate ARM B/BL word
+      in osos.dec yields exactly five direct inbound calls, all unconditional
+      bl (0x080f02f0, 0x0813ed40, 0x08148658, 0x081d179c, 0x081dead4); no
+      predicated calls, tail b sites, or aligned image data-word references
+      exist. Although callers use the result through virtual slot +0x1c, the
+      installed literal points into a type-name string region rather than a
+      statically decodable vtable, so the derived class identity is deliberately
+      not invented. Rust retains target-width layout, volatile store order, and
+      addressing off the returned child pointer. Deliberate deviations: none.
+
   - address: 0x0839eb8c
     ghidra: FUN_0839eb8c
     name: vtable_word_callback
