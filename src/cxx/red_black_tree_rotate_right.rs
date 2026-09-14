@@ -16,6 +16,11 @@
 //! becomes that child's right subtree. Deliberate deviations: none; links use
 //! target-width `u32` words so the 32-bit target layout and host fixtures are
 //! identical.
+//!
+//! `FUN_083c6530` at load address `0x083c6530` is a byte-identical 84-byte
+//! copy: 21 ARM words through `bx lr` at `0x083c6580`, followed by the next
+//! function at `0x083c6584`. It has five inbound direct calls—four plain
+//! `bl` and one `bleq`—so this shared export is also its faithful port.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
