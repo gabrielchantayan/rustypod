@@ -82953,3 +82953,31 @@ functions:
       from zero, the 31 limit, and preservation of u32::MAX. Deliberate
       deviations: none; only the verified state prefix and action-index field
       are modeled.
+  # --- output-buffer reset ---
+  - address: 0x08123c20
+    ghidra: FUN_08123c20
+    name: output_buffer_reset
+    size: 24
+    sig: "void output_buffer_reset(OutputBufferState *state)"
+    module: app/output_buffer_reset
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+4": data
+      "state+8": capacity
+      "state+0xc": write_count
+      "state+0x10": overflow_count
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: six ARM instructions
+      from ldr r2,[r0,#4] at 0x08123c20 through bx lr at 0x08123c34, then the
+      separately linked constructor helper opens at 0x08123c38. Decoding every
+      aligned ARM B/BL-immediate word finds six direct inbound bl calls, all
+      unconditional, at 0x080b57a4, 0x080b5840, 0x080b58f4, 0x08123c40,
+      0x08123cd8, and 0x081502c0; zero are predicated. An additional
+      unconditional tail b at 0x08123680 reaches this body. It stores a NUL
+      byte through state+4 and clears state+0xc and state+0x10, leaving the
+      header and capacity words untouched. The concrete owner type remains
+      unidentified, so the port uses the behavioral output-buffer name rather
+      than inventing a class identity. Host tests map the target-width data
+      pointer, prove the exact NUL store, and preserve adjacent bytes and
+      untouched words. Deliberate deviations: none.
