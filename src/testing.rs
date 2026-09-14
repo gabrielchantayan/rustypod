@@ -663,6 +663,10 @@ pub mod hints {
     // 0xa300_0000: dedicated to heap/fixa's raw-u32 owner and FixL-link
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const FIXA_OWNER_DESTROY: usize = 0xa300_0000;
+    // 0xb000_0000: dedicated to heap/fixa_owner_create's raw-u32 output
+    // slot and owner fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const FIXA_OWNER_CREATE: usize = 0xb000_0000;
 
 
     // 0x9300_0000: dedicated to util/inner_state's selected-resource table

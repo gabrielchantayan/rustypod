@@ -4144,6 +4144,38 @@ functions:
       the worktree archive confirms LLVM retains the final free_tag4 tail
       branch (R_ARM_JUMP24); only the unresolved direct calls are BLX seams.
 
+  - address: 0x0805df24
+    ghidra: FUN_0805df24
+    name: fixa_owner_create
+    size: 92
+    sig: "i32 fixa_owner_create(u32 requested_capacity, u32 payload, u32 *out_owner)"
+    module: heap/fixa_owner_create
+    status: ported
+    renames:
+      param_1/r0/r4: requested_capacity
+      param_2/r1/r7: payload
+      param_3/r2/r5: out_owner
+      DAT_0805df80: fixa_magic
+      FUN_0805d1dc: calloc_tag4
+    notes: >-
+      Raw ARM has 92 bytes of instructions at 0x0805df24..0x0805df80 plus
+      the required 4-byte literal pool at 0x0805df80 (0x46697841, "FixA");
+      the next independently linked function begins at 0x0805df84 with push
+      {r4,r5,r6,lr}. It clamps requested capacity to four bytes, calls the
+      already ported calloc_tag4(16), stores that result through out_owner
+      before testing it, and returns -108 (0xffffff94) on allocation failure.
+      A successful allocation gets the FixA magic, capacity rounded up to a
+      16-byte boundary with target-u32 wrapping arithmetic, and payload at
+      word two; calloc leaves word three zero as the empty FixL-list head.
+      Decoding every aligned ARM B/BL immediate in osos.dec found exactly six
+      inbound bl calls, all unconditional (0x0805ddac, 0x0805e1f0,
+      0x0805e208, 0x0805e2c4, 0x080cb204, 0x080d2700), no predicated bl, and
+      one additional beq tail branch at 0x080d2718 after a first success.
+      Deliberate deviation: Rust directly calls the existing calloc_tag4 port;
+      its host build dispatches through HEAP_OPS rather than branching to the
+      retail address. The FixA description derives only from the verified
+      literal, not an inferred subsystem identity.
+
   - address: 0x0805d028
     ghidra: FUN_0805d028
     name: memh_handle_destroy

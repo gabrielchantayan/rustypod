@@ -1054,6 +1054,11 @@ pub(crate) mod tests {
         unsafe { (ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG) }
     }
 
+    /// (calls, size, tag) of the last mock zerofill allocation.
+    pub(crate) fn alloc_zero_log() -> (usize, usize, usize) {
+        unsafe { (ALLOC_ZERO_CALLS, LAST_ALLOC_ZERO_SIZE, LAST_ALLOC_ZERO_TAG) }
+    }
+
     /// Overrides the pointer the mock alloc returns (new_handler.rs's
     /// operator_new_checked tests force allocation failure this way).
     pub(crate) fn set_alloc_ret(ptr: *mut u8) {
