@@ -17,6 +17,32 @@
 base: 0x08000000
 
 functions:
+  # --- big-endian word bit-index conversion ---
+  - address: 0x0836b698
+    ghidra: FUN_0836b698
+    name: big_endian_word_bit_index
+    size: 32
+    sig: "u32 big_endian_word_bit_index(u32 bit_index, u32 *out_bit_index)"
+    module: util/big_endian_word_bit_index
+    status: ported
+    renames:
+      param_1/r0: bit_index
+      param_2/r1: out_bit_index
+      r2: byte_index
+      r0: bit_in_byte_then_output_bit_index
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: eight ARM words from
+      lsl r2,r0,#27 at 0x0836b698 through bx lr at 0x0836b6b4; the separately
+      linked next function begins at 0x0836b6b8. It uses only bit_index[4:0],
+      preserves bits [2:0], reverses the four byte positions, stores the
+      resulting physical bit index, and returns zero. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly five inbound direct
+      calls, all unconditional bl at 0x080643a0, 0x0836b588, 0x0836b60c,
+      0x0836b648, and 0x0836b710; there are no predicated calls or direct
+      tail-B callers. This supports bit numbering for a big-endian 32-bit word
+      represented on the little-endian CPU. match.py structural review and host
+      tests cover every byte boundary plus high input bits. Deliberate
+      deviations: none.
   # --- u32 maximum-sentinel predicate ---
   - address: 0x083b4788
     ghidra: FUN_083b4788
