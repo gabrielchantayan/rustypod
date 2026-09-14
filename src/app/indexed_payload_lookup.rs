@@ -104,6 +104,63 @@ pub unsafe extern "C" fn indexed_payload_lookup(
     }
 }
 
+/// indexed_payload_lookup_mode_one — original: `FUN_080d6e50` @ `0x080d6e50`
+/// (24 bytes).
+///
+/// Raw ARM establishes the exact extent `0x080d6e50..0x080d6e68`; the
+/// following `push {r4-r8,lr}` begins a separate function. The wrapper is:
+///
+/// ```text
+/// 080d6e50  push {r3, lr}
+/// 080d6e54  str  r3, [sp]
+/// 080d6e58  mov  r3, r2
+/// 080d6e5c  mov  r2, #1
+/// 080d6e60  bl   0x080d6d94
+/// 080d6e64  pop  {ip, pc}
+/// ```
+///
+/// Decoding every ARM B/BL immediate in `osos.dec` finds exactly six inbound
+/// direct call sites, all unconditional plain `bl` at `0x0804437c`,
+/// `0x080443d0`, `0x08044448`, `0x0804449c`, `0x080444f0`, and
+/// `0x083d64b8`; there are no predicated calls or tail branches.
+///
+/// # Algorithm
+///
+/// Move the third ABI argument to the fourth argument register, put the
+/// original fourth argument in the fifth stack slot, force the third argument
+/// of `0x080d6d94` to one, then return that backend's status unchanged.
+///
+/// # Deliberate deviations
+///
+/// The backend's concrete identity remains unestablished. Target builds call
+/// its verified retail address; host tests replace only that edge through
+/// [`INDEXED_PAYLOAD_LOOKUP_BACKEND`].
+///
+/// # Safety
+///
+/// The backend owns all pointer validity requirements. This function has no
+/// NULL guards; its output pointers may be NULL only if the backend accepts
+/// NULL output pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn indexed_payload_lookup_mode_one(
+    index: *mut u8,
+    entry: u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        retail_indexed_payload_lookup_backend(index, entry, 1, payload_out, encoded_length_out)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let backend = core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_PAYLOAD_LOOKUP_BACKEND));
+        backend(index, entry, 1, payload_out, encoded_length_out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -193,6 +250,51 @@ mod tests {
             assert_eq!(SEEN_MODE, 0);
             assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
             assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn mode_one_forces_mode_and_forwards_outputs_and_status() {
+        let index = 0x0123_4000usize as *mut u8;
+        let expected_payload = 0x7fff_f000usize as *mut u8;
+        let (guard, _reset) = arrange(0xffff_ffce, expected_payload, 0x8000_0001);
+        let mut payload = ptr::null_mut();
+        let mut encoded_length = 0;
+
+        let status = unsafe {
+            indexed_payload_lookup_mode_one(index, u32::MAX, &mut payload, &mut encoded_length)
+        };
+
+        assert_eq!(status, 0xffff_ffce);
+        assert_eq!(payload, expected_payload);
+        assert_eq!(encoded_length, 0x8000_0001);
+        unsafe {
+            assert_eq!(SEEN_INDEX, index as usize);
+            assert_eq!(SEEN_ENTRY, u32::MAX);
+            assert_eq!(SEEN_MODE, 1);
+            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
+            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn mode_one_forwards_null_optional_outputs() {
+        let index = 0xffff_f000usize as *mut u8;
+        let (guard, _reset) = arrange(0, ptr::null_mut(), 0);
+
+        let status = unsafe {
+            indexed_payload_lookup_mode_one(index, 0, ptr::null_mut(), ptr::null_mut())
+        };
+
+        assert_eq!(status, 0);
+        unsafe {
+            assert_eq!(SEEN_INDEX, index as usize);
+            assert_eq!(SEEN_ENTRY, 0);
+            assert_eq!(SEEN_MODE, 1);
+            assert_eq!(SEEN_PAYLOAD_OUT, 0);
+            assert_eq!(SEEN_LENGTH_OUT, 0);
         }
         drop(guard);
     }

@@ -10168,6 +10168,43 @@ functions:
       backend is invoked directly at 0x080d6d94; host builds substitute
       INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
 
+  # --- indexed payload lookup mode-one wrapper (app) ---
+  - address: 0x080d6e50
+    ghidra: FUN_080d6e50
+    name: indexed_payload_lookup_mode_one
+    size: 24
+    sig: "u32 indexed_payload_lookup_mode_one(void *index, u32 entry, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: entry
+      param_3/r2: payload_out
+      param_4/r3: encoded_length_out
+      r2_at_callee: one_mode
+      FUN_080d6d94: indexed_payload_lookup_backend (unported; concrete identity unknown)
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent
+      0x080d6e50..0x080d6e68: push {r3,lr}; str r3,[sp]; mov r3,r2;
+      mov r2,#1; bl 0x080d6d94; pop {ip,pc}. The following push
+      {r4-r8,lr} at 0x080d6e68 begins a separately linked function, so
+      there is no literal pool. It is a wrapper, not a veneer: forwards
+      index and entry, shifts its third/fourth ABI arguments into the
+      backend's fourth/fifth positions, forces the backend mode argument
+      to one, and returns the backend status unchanged. The backend's
+      concrete identity is not established; its observed role is an
+      indexed-payload lookup with optional payload/encoded-length outputs.
+      Decoding every ARM B/BL word in osos.dec finds exactly six direct
+      unconditional bl call sites at 0x0804437c, 0x080443d0, 0x08044448,
+      0x0804449c, 0x080444f0, and 0x083d64b8, with zero predicated calls
+      and no tail branches. Host tests cover a nonzero backend error,
+      u32::MAX entry, output mutation, exact mode-one forcing, and both
+      NULL optional outputs. On target the still-unported backend is invoked
+      directly at 0x080d6d94; host builds substitute
+      INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review found the
+      expected LLVM frame and literal indirect call in place of ADS's
+      direct bl; argument shuffle, mode forcing, and return path match.
+
   # --- BCD datetime -> (days, seconds-of-day) converter (time/civil) ---
   - address: 0x0809e3e8
     ghidra: FUN_0809e3e8
