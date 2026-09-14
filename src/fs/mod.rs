@@ -27,6 +27,8 @@ pub mod cache_entry_flush;
 pub mod cache_entry_reset;
 /// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
 pub mod cache_page;
+/// Format-specific default cache-position value writer @ 0x082e3bcc.
+pub mod cache_position_default_value;
 /// Shared resident FAT-position value reader boundary at 0x082e0cac.
 pub(crate) mod cache_position_value;
 /// FAT next-cluster reader and reserved-value filter @ 0x082e0378.
