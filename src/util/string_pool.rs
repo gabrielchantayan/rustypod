@@ -637,6 +637,47 @@ pub unsafe extern "C" fn string_pool_intern_counted(
     }
     string_pool_intern_seam()(pool, data, len, id_out)
 }
+/// string_pool_read_counted — original: `FUN_080bd8bc` @ 0x080bd8bc
+/// (52 bytes including its trailing literal-pool word; **6 direct `bl` call
+/// sites, all unconditional** — binary-verified by decoding every ARM B/BL
+/// word in `osos.dec`).
+///
+/// Reads one pool entry as a u16-length-prefixed byte payload. The blob reader
+/// writes at `counted + 1` with its fixed 510-byte cap, then the wrapper
+/// stores the copied byte count divided by two in `*counted`. It deliberately
+/// discards the reader status. The fourth ABI argument initializes the stack
+/// length local before the reader call, but the reader unconditionally clears
+/// its non-NULL length output before any validation; it therefore has no
+/// observable effect.
+///
+/// Raw ARM establishes the true extent: `push {r2,r3,r4,lr}` starts at
+/// 0x080bd8bc, the return `pop {r2,r3,r4,pc}` is at 0x080bd8e8, its
+/// `0x000001fe` literal pool word is at 0x080bd8ec, and the separately linked
+/// next function begins with `ldr r2,[pc,#92]` at 0x080bd8f0. Ghidra's
+/// reported 48-byte body excludes the literal pool. The six direct callers
+/// are 0x080530fc, 0x080537e0, 0x08095da8, 0x0809603c, 0x080dcafc, and
+/// 0x0813db6c; none is predicated. No deviation: the already-established
+/// volatile [`STRING_POOL_READ`] seam reaches the unported reader at
+/// 0x080b4318 on device and records its ABI in host tests.
+///
+/// # Safety
+///
+/// `pool`, `counted`, and `entry_id` are forwarded unchecked to the pool
+/// reader. `counted` must have writable space for its leading count and up to
+/// 510 payload bytes; the original dereferences it unconditionally.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_read_counted(
+    pool: *mut StringPool,
+    entry_id: i32,
+    counted: *mut u16,
+    initial_byte_len: u32,
+) {
+    let mut byte_len = initial_byte_len;
+    let _ = string_pool_read_seam()(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
+    counted.write((byte_len >> 1) as u16);
+}
+
 /// string_pool_read_counted_from_context — original: `FUN_080556cc` @
 /// `0x080556cc` (20 bytes; **7 direct `bl` call sites** — five plain `bl`,
 /// two `blne`; no tail branches or data-word references).
@@ -964,6 +1005,10 @@ mod tests {
         len_out: *mut u32,
         max_len: u32,
     ) -> i32 {
+        if !len_out.is_null() {
+            *len_out = 0;
+        }
+
         READ_CALLS.push(ReadCall { pool: pool as usize, id, dst: dst as usize, max_len });
         if dst.is_null() {
             if READ_QUERY_STATUS == 0 && !len_out.is_null() {
@@ -1453,6 +1498,53 @@ mod tests {
             assert_eq!(STORE_CALLS[0].bytes, utf16_bytes(&counted[1..]));
         }
     }
+    #[test]
+    fn read_counted_forwards_its_abi_and_floors_an_odd_byte_length() {
+        let (_read_guard, _heap_guard, _reset) = mock();
+        let mut counted = [0xdeadu16; 4];
+        unsafe {
+            PAYLOAD = std::vec![0x41, 0x00, 0x42, 0x00, 0x43];
+            string_pool_read_counted(
+                SRC_POOL as *mut StringPool,
+                -17,
+                counted.as_mut_ptr(),
+                0x7654_3210,
+            );
+
+            assert_eq!(counted, [2, 0x0041, 0x0042, 0xde43]);
+            assert_eq!(
+                READ_CALLS,
+                std::vec![ReadCall {
+                    pool: SRC_POOL,
+                    id: -17,
+                    dst: counted.as_ptr() as usize + 2,
+                    max_len: 0x1fe,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn read_counted_ignores_reader_failure_after_its_length_clear() {
+        let (_read_guard, _heap_guard, _reset) = mock();
+        let mut counted = [0xabcdu16; 2];
+        unsafe {
+            READ_COPY_STATUS = PARAM_ERR;
+            string_pool_read_counted(
+                core::ptr::null_mut(),
+                3,
+                counted.as_mut_ptr(),
+                u32::MAX,
+            );
+
+            assert_eq!(counted, [0, 0xabcd]);
+            assert_eq!(READ_CALLS.len(), 1);
+            assert_eq!(READ_CALLS[0].pool, 0, "the wrapper guards no arguments");
+            assert_eq!(READ_CALLS[0].id, 3);
+            assert_eq!(READ_CALLS[0].max_len, 0x1fe);
+        }
+    }
+
     const COUNTED_CONTEXT_FIXTURE_LEN: usize = 0x1000;
     const COUNTED_CONTEXT_OWNER_OFFSET: usize = 0x100;
 
