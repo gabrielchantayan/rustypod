@@ -64,23 +64,25 @@
 //!
 //! ## Deviations
 //!
-//! Five unported callees ride the [`CLASS_8C00_COMMIT_SEAMS`] dispatch table
+//! Four unported callees ride the [`CLASS_8C00_COMMIT_SEAMS`] dispatch table
 //! (the `SINGLETON_CTORS` house pattern), read slot-by-slot through
-//! `read_volatile`. The settings-item getter is now the direct port
-//! [`settings_item_get`](crate::app::settings_item::settings_item_get). The
-//! wired defaults are inert but never invent behavior: the broadcast default
+//! `read_volatile`. The settings-item getter and value scaler are direct ports:
+//! [`settings_item_get`](crate::app::settings_item::settings_item_get) and
+//! [`settings_value_scale`](crate::app::settings_value_scale::settings_value_scale).
+//! The wired defaults are inert but never invent behavior: the broadcast default
 //! returns 11, exactly the original's service-absent path (the `+4` slot of
 //! the global @ `0x089ca458` NULL → `mov r0, #11; bx lr`); the settings-item
 //! store default returns 0, the original's constant return; the global-mode
 //! default returns the mode unchanged, exactly the original's rejection path
-//! for modes outside {1, 4}. The property reader and scale defaults (0,
-//! identity) are documented stubs. The app-root word follows the crate-static
+//! for modes outside {1, 4}. The property reader default returns 0. The
+//! app-root word follows the crate-static
 //! [`APP_ROOT_OBJECT`](crate::app::context_scope::APP_ROOT_OBJECT) deviation
 //! (the image's `0x089cxxxx` page holds stale bytes).
 
 use crate::app::context_scope::app_root_object;
 use crate::app::event_code_queue::{event_code_queue_post, EventCodeQueue};
 use crate::app::settings_item::settings_item_get;
+use crate::app::settings_value_scale::settings_value_scale;
 use crate::drivers::timer::{
     timer_is_running, timer_restart, timer_start_after, timer_stop,
 };
@@ -102,7 +104,7 @@ const TAIL_MODE_NO_REFRESH: u32 = 1;
 /// Tail mode after a refresh (`mov r0, #4`).
 const TAIL_MODE_REFRESHED: u32 = 4;
 
-/// The six unported callees, one slot each, in call order.
+/// The four unported callees, one slot each, in call order.
 #[derive(Copy, Clone)]
 pub struct Class8c00CommitSeams {
     /// Original @ `0x0836afc0`: posts `code` through the service at the
@@ -113,8 +115,6 @@ pub struct Class8c00CommitSeams {
     /// class-0x6000 instance. Takes the app root in r0 but never reads
     /// it — the ABI argument is kept so the signature matches.
     pub read_property_6056: unsafe extern "C" fn(*mut u8) -> u32,
-    /// Original @ `0x080e676c`: piecewise-linear 0..100 → 6..55 scale.
-    pub scale_value: unsafe extern "C" fn(u32) -> u32,
     /// Original @ `0x081534b8`: stores `value` at record `+8`, notifies
     /// `(*item)->vtable[+0x18]`, always returns 0.
     pub settings_item_store: unsafe extern "C" fn(*mut u8, u32) -> u32,
@@ -136,11 +136,6 @@ unsafe extern "C" fn seam_read_property_stub(_root: *mut u8) -> u32 {
     0
 }
 
-/// Stub: the scale is not ported; identity keeps the value in range of
-/// whatever the reader stub produced.
-unsafe extern "C" fn seam_scale_identity(value: u32) -> u32 {
-    value
-}
 
 
 /// Stub: writes nothing; the 0 return matches the original's constant
@@ -161,7 +156,6 @@ pub(crate) const DEFAULT_CLASS_8C00_COMMIT_SEAMS: Class8c00CommitSeams =
     Class8c00CommitSeams {
         broadcast_event: seam_broadcast_absent,
         read_property_6056: seam_read_property_stub,
-        scale_value: seam_scale_identity,
         settings_item_store: seam_settings_item_store_stub,
         commit_global_mode: seam_commit_global_mode_passthrough,
     };
@@ -214,7 +208,7 @@ pub unsafe extern "C" fn class_8c00_commit_mode(
     } else {
         let root = app_root_object();
         let value = seam!(read_property_6056)(root);
-        let scaled = seam!(scale_value)(value);
+        let scaled = settings_value_scale(value);
         let item = settings_item_get();
         seam!(settings_item_store)(item, scaled);
         TAIL_MODE_REFRESHED
@@ -354,7 +348,6 @@ mod tests {
     enum Call {
         Broadcast(u32),
         ReadProperty(*mut u8),
-        Scale(u32),
         ItemStore(*mut u8, u32),
         CommitGlobal(u32),
     }
@@ -362,7 +355,6 @@ mod tests {
     static mut CALLS: Vec<Call> = Vec::new();
     static mut BROADCAST_RESULT: u32 = 0;
     static mut PROPERTY_RESULT: u32 = 0;
-    static mut SCALE_DELTA: u32 = 0;
     static mut COMMIT_RESULT: u32 = 0;
 
     unsafe extern "C" fn recording_broadcast(code: u32) -> u32 {
@@ -375,10 +367,6 @@ mod tests {
         ptr::read_volatile(ptr::addr_of!(PROPERTY_RESULT))
     }
 
-    unsafe extern "C" fn recording_scale(value: u32) -> u32 {
-        (*ptr::addr_of_mut!(CALLS)).push(Call::Scale(value));
-        value.wrapping_add(ptr::read_volatile(ptr::addr_of!(SCALE_DELTA)))
-    }
 
 
     unsafe extern "C" fn recording_item_store(item: *mut u8, value: u32) -> u32 {
@@ -408,13 +396,11 @@ mod tests {
             CLASS_8C00_COMMIT_SEAMS = Class8c00CommitSeams {
                 broadcast_event: recording_broadcast,
                 read_property_6056: recording_read_property,
-                scale_value: recording_scale,
                 settings_item_store: recording_item_store,
                 commit_global_mode: recording_commit_global,
             };
             BROADCAST_RESULT = broadcast_result;
             PROPERTY_RESULT = 0x1234;
-            SCALE_DELTA = 0x10;
             COMMIT_RESULT = commit_result;
             APP_ROOT_OBJECT = ptr::addr_of_mut!(FAKE_ROOT) as *mut u8;
             (*ptr::addr_of_mut!(CALLS)).clear();
@@ -549,15 +535,15 @@ mod tests {
         assert_eq!(result, 0xbeef);
         let recorded = calls();
         assert_eq!(
-            &recorded[..2],
-            [Call::ReadProperty(root), Call::Scale(0x1234)],
-            "the refresh path reads then scales before resolving the fixed item"
+            recorded[0],
+            Call::ReadProperty(root),
+            "the refresh path reads before scaling and resolving the fixed item"
         );
         assert!(
-            matches!(recorded[2], Call::ItemStore(item, 0x1244) if !item.is_null()),
-            "the direct accessor returns a real settings-item record"
+            matches!(recorded[1], Call::ItemStore(item, 0x106c) if !item.is_null()),
+            "the direct accessor receives the retail-scaled value"
         );
-        assert_eq!(recorded[3], Call::CommitGlobal(TAIL_MODE_REFRESHED));
+        assert_eq!(recorded[2], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
@@ -569,8 +555,8 @@ mod tests {
         unsafe { class_8c00_commit_mode(object.as_ptr(), 0, 1) };
         let recorded = calls();
 
-        assert_eq!(recorded.len(), 4, "any refresh != 1 refreshes");
-        assert_eq!(recorded[3], Call::CommitGlobal(TAIL_MODE_REFRESHED));
+        assert_eq!(recorded.len(), 3, "any refresh != 1 refreshes");
+        assert_eq!(recorded[2], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
@@ -584,7 +570,7 @@ mod tests {
         assert_eq!(object.mode(), 1);
         let recorded = calls();
         assert_eq!(recorded[0], Call::Broadcast(BROADCAST_CODE_MODE_1));
-        assert_eq!(recorded[4], Call::CommitGlobal(TAIL_MODE_REFRESHED));
+        assert_eq!(recorded[3], Call::CommitGlobal(TAIL_MODE_REFRESHED));
         restore(guard);
     }
 
