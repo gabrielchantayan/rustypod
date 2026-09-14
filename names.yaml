@@ -84812,3 +84812,36 @@ functions:
       match.py structural review used this worktree archive; its default
       sibling-repository archive lookup could not see this branch. Deliberate
       deviations: host seam only.
+
+
+  # --- ImageLibrary word-one class check ---
+  - address: 0x08057bb4
+    ghidra: FUN_08057bb4
+    name: liti_field_class_check
+    size: 40
+    sig: "u32 liti_field_class_check(const u8 *object)"
+    module: app/liti_field_class_check
+    status: ported
+    renames:
+      param_1/r0: object
+      field_4/r0: target
+      FUN_08057c2c: image_library_is_liti_class
+    notes: >-
+      Raw ARM establishes the exact 40-byte extent 0x08057bb4..0x08057bdc:
+      the next separately linked function FUN_08057bdc begins at 0x08057bdc.
+      Decoding every aligned ARM B/BL word in osos.dec finds exactly six
+      inbound direct calls, all unconditional plain BL at 0x08048f8c,
+      0x08050398, 0x08052368, 0x080525c4, 0x08053b84, and 0x0806bf8c, with
+      zero predicated BL forms; 0x081070a0 is one distinct unconditional
+      plain-B tail caller. The function returns 0 for a NULL object; otherwise
+      it loads the aligned target-width word at object+4, calls
+      image_library_is_liti_class, and canonicalizes a nonzero result to 1.
+      The enclosing object and its field identity are otherwise unknown, so
+      Rust accesses the verified field as word index 1. No deliberate
+      deviations: the aligned word load and strict 0/1 result match the
+      original. Host tests cover a NULL object, a NULL field, a word-one
+      pointer to a 'liti' object, and a different class tag. match.py
+      structural review differs because LLVM proves the canonical predicate
+      already yields 0/1 and tail-branches to it after the word-one load; the
+      observable result and NULL guard remain identical. Reference C:
+      decomp/c/004/08057bb4_FUN_08057bb4.c.

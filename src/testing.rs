@@ -807,6 +807,10 @@ pub mod hints {
     // container and nested-class fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const NESTED_LITI_FIELD_CHECK: usize = 0xa1b0_0000;
+    // 0xa1c0_0000: dedicated to app/liti_field_class_check's raw-u32 object
+    // and class-target fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LITI_FIELD_CLASS_CHECK: usize = 0xa1c0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

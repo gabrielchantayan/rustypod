@@ -93,6 +93,7 @@ pub mod handler_context;
 pub mod framework_root_message_post;
 pub mod framework_root;
 pub mod liti_class_check;
+pub mod liti_field_class_check;
 pub mod nested_liti_class_check;
 pub mod h264_decode_forwarder;
 pub mod handle_slot_18_predicate_and_state_is_two;
