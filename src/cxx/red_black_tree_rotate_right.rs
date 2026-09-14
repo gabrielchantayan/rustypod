@@ -104,6 +104,20 @@
 //! callers exist. Its selected left-child pivot makes the shared no-NULL-guard
 //! right rotation faithful. Deliberate deviations: none; the existing host
 //! tests cover the root, middle-subtree, and both parent-child-slot cases.
+//!
+//! `FUN_083c01e8` at load address `0x083c01e8` is another byte-identical,
+//! 84-byte (21-word) copy: it starts at `ldr r2,[r1,#8]`, ends with `bx lr`
+//! at `0x083c0238`, and the separately linked next function begins at
+//! `0x083c023c`. A complete aligned ARM B/BL-immediate scan finds exactly five
+//! inbound direct calls: unconditional `bl` at `0x083c05d0`, `0x083c0648`,
+//! `0x083c0734`, and `0x083c0af8`, plus predicated `bleq` at `0x083c0b48`;
+//! there are no direct tail-`B` callers. Its callers select the non-null left
+//! child before this intentionally unguarded routine rotates it above the
+//! pivot, transfers the child's right subtree to the pivot's left link, and
+//! relinks the old parent or header root slot. This alias deliberately reuses
+//! the established dispatch seam; the shared host test covers root, both
+//! parent-child slots, and the transferred middle subtree. Deliberate
+//! deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
