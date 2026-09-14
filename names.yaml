@@ -84863,3 +84863,33 @@ functions:
       already yields 0/1 and tail-branches to it after the word-one load; the
       observable result and NULL guard remain identical. Reference C:
       decomp/c/004/08057bb4_FUN_08057bb4.c.
+
+  # --- retained-destination forward byte copy ---
+  - address: 0x080571ec
+    ghidra: FUN_080571ec
+    name: forward_byte_copy_returning_dst
+    size: 36
+    sig: "void *forward_byte_copy_returning_dst(void *dst, const void *src, u32 len) -> dst"
+    module: libc/forward_byte_copy_returning_dst
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: len
+      r3: dst_cursor
+      r12: index
+      return/r0: dst
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      0x080571ec through pop {pc} at 0x0805720c; the separately linked next
+      function starts at 0x08057210. The function preserves dst in r0,
+      advances r3 as a byte destination cursor, and copies while the unsigned
+      index r12 remains below len. It returns dst; len zero dereferences
+      neither pointer. Overlap deliberately retains forward propagation rather
+      than memmove behavior. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly six direct BL call sites: four unconditional bl at
+      0x08056b9c, 0x08056c14, 0x080e6f54, and 0x080e7048; blne at
+      0x08056bb0; and blgt at 0x08056c28. There are no direct B sites.
+      The predicated calls show their callers gate the no-NULL-guard leaf.
+      Deliberate deviation: volatile byte accesses and a target-only unique
+      text section retain a separate non-intrinsic, non-folded target.
