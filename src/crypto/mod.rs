@@ -40,6 +40,7 @@
 //! [`bn_ucmp`] ports its unsigned magnitude comparison from the same
 //! file.
 pub mod add_lock;
+pub mod buffered_writer_write;
 pub mod base64_encode;
 pub mod bio_printf;
 pub mod bio_new;
