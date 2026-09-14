@@ -17,6 +17,7 @@ pub mod memory;
 pub mod module;
 pub mod metrics;
 pub mod outline;
+pub mod offset_buffer;
 pub mod service;
 pub mod size;
 pub mod service_metadata;

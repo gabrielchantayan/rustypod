@@ -84511,3 +84511,39 @@ functions:
       Host tests cover initialization and table reload, masking bit 15,
       exact allocator requests, successful insert, replacement notification
       and release, initializer failure, and lhash node-allocation failure.
+
+  - address: 0x08048ab0
+    ghidra: FUN_08048ab0
+    name: ft_compact_offset_buffer_range
+    size: 132
+    sig: void ft_compact_offset_buffer_range(u8 *cursor, u8 *buffer, u32 entry_count)
+    module: ft/offset_buffer
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: buffer
+      param_3/r2: entry_count
+      '[cursor,#0x1c]': active_entry_end
+      '[buffer,#0x0a]': offset_entry_count
+      '[entry_end,-2]': offset_after_removed_range
+      '[entry_start,-2]': removed_range_end
+      '[entry_start,-4]': removed_range_start
+    notes: >-
+      Raw osos.dec confirms the complete 132-byte ARM body at
+      0x08048ab0..0x08048b34; the next independently linked function opens
+      at 0x08048b34. It reads a signed offset pair from the reverse offset
+      table ending at cursor+0x1c, moves the trailing payload down through
+      the already-ported ROM memmove mirror (0x08037e00 -> 0x220000d4 ->
+      osos memmove 0x080000d4) when nonempty, invokes the unported table
+      maintenance helper FUN_08048994, then zeroes the vacated signed range
+      through the ROM memzero mirror (0x08044e24 -> 0x08037dc8 ->
+      0x220002d4 -> osos memzero 0x080002d4). Decoding every ARM B/BL
+      immediate in osos.dec finds six inbound direct calls, all
+      unconditional plain bl: 0x08041ca8, 0x08048ba4, 0x08048d90,
+      0x08058fd8, 0x08064eb4, and 0x0806b824; no predicated calls or
+      inbound tail branches. The offset-buffer type and FUN_08048994's
+      upstream identity remain unclassified, so the port uses descriptive
+      raw-buffer names and preserves its direct-call boundary as a
+      target-address seam. Host tests install a source-equivalent helper to
+      prove payload movement, reverse-table adjustment, and clearing of the
+      reclaimed range.
