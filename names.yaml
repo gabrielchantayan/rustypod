@@ -18,6 +18,25 @@ base: 0x08000000
 
 functions:
   # --- C++ red-black-tree left rotation ---
+  - address: 0x083c6f28
+    ghidra: FUN_083c6f28
+    name: red_black_tree_rotate_left_nineteenth
+    size: 84
+    sig: "void red_black_tree_rotate_left_nineteenth(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_left_nineteenth
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08: left_child
+      param_2_plus_0x0c/r2: right_child
+      right_child: promoted_node
+      right_child_plus_0x08: middle_subtree
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from ldr r2,[r1,#0xc] at 0x083c6f28 through bx lr at 0x083c6f78; the separately linked right-rotation sibling begins at 0x083c6f7c. The right child replaces the pivot under its old parent (or header +0x04), its left subtree becomes the pivot's right subtree, and the pivot becomes that child's left subtree. Decoding every aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound direct calls: unconditional bl at 0x083c7264, 0x083c7304, 0x083c73f0, and 0x083c7878, plus predicated bleq at 0x083c77e0; there are no direct tail-B callers. The predicated caller selects the pivot's right child before calling, consistent with this function's intentionally absent NULL guards. A dedicated text section prevents LLVM identical-code folding from hiding this hook target.
+  # --- C++ red-black-tree left rotation ---
   - address: 0x083c796c
     ghidra: FUN_083c796c
     name: red_black_tree_rotate_left_seventeenth
