@@ -83689,3 +83689,29 @@ functions:
       cover both segment boundaries, truncation, signed comparison, and
       overflow bit patterns. match.py review is structural, not
       instruction-exact.
+
+
+  - address: 0x080bdb74
+    ghidra: FUN_080bdb74
+    name: load_be32
+    size: 36
+    sig: "u32 load_be32(const u8 *p)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: p
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte body from 0x080bdb74 through
+      bx lr at 0x080bdb94; the separately linked sibling starts at
+      0x080bdb98. It uses four ldrb instructions and ORR/LSL assembly to
+      return p[0]<<24 | p[1]<<16 | p[2]<<8 | p[3], accepting unaligned input
+      and adding no NULL guard. Decoding every aligned ARM B/BL immediate
+      finds exactly six inbound direct calls, all unconditional plain bl at
+      0x080e7238, 0x080e7244, 0x080e7250, 0x080e725c, 0x080e7280, and
+      0x080e72ac; no predicated BL targets it. All are in the XTEA state
+      decryptor FUN_080e7134, which restores four fixed and two variable
+      state words from its decrypted big-endian buffer. This instruction
+      ordering differs from, but is behaviorally identical to, the other
+      load_be32 originals in util/beload, so the existing exported symbol and
+      its host alignment and boundary tests serve this address too. Deliberate
+      deviations: none. match.py review is structural, not instruction-exact.

@@ -1,14 +1,15 @@
 //! Alignment-free big-endian 32-bit accessors.
 //!
-//! - `load_be32` — originals: `FUN_081f3b30` @ 0x081f3b30 (36 bytes;
+//! - `load_be32` — originals: `FUN_080bdb74` @ 0x080bdb74 (36 bytes;
+//!   6 direct `bl` call sites, all unconditional, in the XTEA state
+//!   decryptor @ 0x080e7134), `FUN_081f3b30` @ 0x081f3b30 (36 bytes;
 //!   4 call sites, binary-scanned, all in the format-header parser
-//!   cluster immediately after it @ 0x081f3b54..0x081f3c80) **and**
+//!   cluster immediately after it @ 0x081f3b54..0x081f3c80), **and**
 //!   `FUN_0837a158` @ 0x0837a158 (36 bytes; 59 `bl` call sites), which
 //!   is SQLite's `sqlite3Get4byte` — the b-tree page-header reader.
-//!   The two are byte-identical: all 36 bytes at both addresses match
-//!   exactly, so they are one function the linker emitted twice (once
-//!   into the media-format parser's unit, once into SQLite's). One Rust
-//!   symbol serves both; both addresses hook it.
+//!   All assemble the four input bytes as `p[0]<<24 | p[1]<<16 |
+//!   p[2]<<8 | p[3]`; the 0x080bdb74 instruction order differs but has
+//!   the same result. One Rust symbol serves all three; all addresses hook it.
 //! - `store_be32` — original: `FUN_083816cc` @ 0x083816cc (32 bytes;
 //!   38 `bl` call sites). SQLite's `sqlite3Put4byte`, the write twin of
 //!   the above: four `strb`s, most significant byte first.
