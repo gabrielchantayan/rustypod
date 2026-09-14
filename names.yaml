@@ -90007,3 +90007,37 @@ functions:
       word, all explicit ports, and the default-to-port-three path. Deliberate
       deviations: hardware names for the control word and bit 17 remain
       unverified, so the source uses behavior-oriented recovery names.
+
+  # --- Format-specific default cache-position value writer ---
+  - address: 0x082e3bcc
+    ghidra: FUN_082e3bcc
+    name: cache_position_write_default_value
+    size: 20
+    sig: "u32 cache_position_write_default_value(void *cache, u32 position, u32 unused, u32 packed_value)"
+    module: fs/cache_position_default_value
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: position
+      param_3/r2: unused
+      param_4/r3: packed_value
+      "cache+0x6c": format
+      FUN_082e39f4: cache_position_write_unported
+    notes: >-
+      Raw ARM establishes 20 instruction bytes from 0x082e3bcc through
+      0x082e3bdc, followed by the literal 0x0000ffff at 0x082e3be0; the next
+      separately linked function begins at 0x082e3be4. The ldrh reads cache+0x6c,
+      selects 0x0000ffff except when format == 8, where mvneq yields
+      0x0fffffff, then tail-branches to the common writer entry 0x082e39f4.
+      Every ARM B/BL word in osos.dec was decoded: exactly five incoming direct
+      calls, all unconditional plain bl at 0x082e0028, 0x082e022c, 0x082e02d8,
+      0x082e6140, and 0x082e67a4; there are no predicated forms or direct-B
+      tail callers. Incoming r2 is dead because the wrapper overwrites it;
+      r3 passes unchanged to the common writer. FUN_082e39f4 has no ported
+      ledger entry, so target Rust dispatches directly to its verified address
+      and host tests use a recording seam; its cache-update behavior is not
+      inferred. Host tests cover the format-8 exceptional value, non-8 values,
+      r2 replacement, r3 preservation, argument forwarding, and result
+      propagation. match.py against this worktree archive exits 1 with the
+      expected structural diff: LLVM adds the crate frame, synthesizes 0xffff
+      with mov/orr, and loads the unported tail target before bx.
