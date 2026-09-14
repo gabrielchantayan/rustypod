@@ -7385,6 +7385,30 @@ functions:
       separate port exists; hook this address to the rom_svc_22001cbc
       symbol (the container_is_empty alias precedent).
 
+  - address: 0x080769a0
+    ghidra: FUN_080769a0
+    name: debug_console_writec
+    size: 24
+    sig: "i32 debug_console_writec(i32 ch)"
+    module: stdio/semihost
+    status: ported
+    renames:
+      r0: ch
+      r1: char_word
+    notes: >-
+      Raw body extent 0x080769a0..0x080769b8: push {r3,lr}; str r0,[sp];
+      mov r0,#3; mov r1,sp; svc 0x123456; pop {ip,pc}. This is Angel
+      SYS_WRITEC: r1 points directly at the stack word holding ch and the
+      unspecified SVC result is returned in r0. Ghidra's undefined8 result
+      is incorrect. Binary branch scan found six unconditional bl callers
+      (0x0807a350, 0x0807a35c, 0x0807a368, 0x0808e2dc, 0x08396f54, and
+      0x08396f78), plus the unconditional tail b at 0x0807a374; there are
+      no predicated callers. The four calls in the FourCC/debug-print paths
+      and two mini-printf calls establish its debug-console output role.
+      The port reuses the existing SEMIHOST_SWI dispatch seam, deliberately
+      replacing the inlined svc; its own target link section prevents
+      byte-identical-body folding with _sys_writec (0x08036d48).
+
   - address: 0x080769b8
     ghidra: FUN_080769b8
     name: os_malloc

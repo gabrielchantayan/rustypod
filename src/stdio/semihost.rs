@@ -195,6 +195,23 @@ pub unsafe extern "C" fn _sys_writec(ch: i32) -> i32 {
     let block = [ch as usize];
     semihost_swi()(SYS_WRITEC, block.as_ptr())
 }
+/// `debug_console_writec` — `FUN_080769a0` @ load address `0x080769a0`
+/// (24 bytes; six unconditional `bl` call sites plus one unconditional tail
+/// `b`, binary-scanned from `osos.dec`; no predicated callers).
+///
+/// Parks `ch` in a stack word, then issues Angel semihosting SYS_WRITEC
+/// (operation 3) with r1 pointing at that word. The Angel result remains in
+/// r0 and is returned unchanged. Deliberate deviation: this uses the
+/// already-ported [`SEMIHOST_SWI`] dispatch seam rather than embedding an
+/// `svc 0x123456`; the emitted body has the same operation and stack-word
+/// parameter semantics.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.debug_console_writec")]
+#[inline(never)]
+pub unsafe extern "C" fn debug_console_writec(ch: i32) -> i32 {
+    let block = [ch as usize];
+    semihost_swi()(SYS_WRITEC, block.as_ptr())
+}
 
 /// sys_stub_ret0 — original @ 0x0803202c (8 bytes): `mov r0, #0; ret`.
 /// Weak semihost stub (tmpnam/ensure family).
@@ -384,6 +401,20 @@ pub(crate) mod tests {
         // The block's first word IS the character value: r1 points at the
         // word whose little-endian first byte is the character.
         assert_eq!(l[0].1, std::vec![b'Q' as usize]);
+        restore_swi();
+    }
+
+    #[test]
+    fn debug_console_writec_preserves_the_full_stack_word_and_swi_result() {
+        let _guard = mock_swi(&[-0x1234]);
+        unsafe {
+            assert_eq!(debug_console_writec(0x7faa_5500), -0x1234);
+        }
+        assert_eq!(
+            log(),
+            std::vec![(SYS_WRITEC, std::vec![0x7faa_5500])],
+            "r1 points at the original r0 word"
+        );
         restore_swi();
     }
 
