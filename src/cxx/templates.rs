@@ -1150,6 +1150,37 @@ pub unsafe extern "C" fn less_unsigned_alias_7404(
 ) -> u32 {
     u32::from(a.read() < b.read())
 }
+/// less_unsigned_alias_744c — original: `FUN_083d744c` @ 0x083d744c
+/// (24 bytes; 5 `bl` call sites, all unconditional: 0x083bd064,
+/// 0x083bd188, 0x083bd25c, 0x083db1cc, and 0x083db21c; verified by
+/// decoding every ARM B/BL-immediate word in `osos.dec`).
+///
+/// Byte-identical `std::less<unsigned>::operator()(const unsigned &a,
+/// const unsigned &b)` instantiation: loads both aligned referenced words,
+/// unsigned-compares them, and returns 1 when `*a < *b`, otherwise 0. Raw
+/// ARM is `ldr r0,[r1]; ldr r1,[r2]; cmp r0,r1; movcs r0,#0; movcc r0,#1;
+/// bx lr`; it neither reads `this` nor guards either operand. The next
+/// independently linked sibling begins at 0x083d7464, confirming the
+/// 24-byte extent.
+///
+/// This predicate drives red-black-tree lookup and insertion over node keys
+/// at `+0x10`. Its own text section preserves this independently hookable
+/// retail branch target against LLVM identical-function folding. No deliberate
+/// deviations.
+///
+/// # Safety
+/// `a` and `b` must be valid, aligned `u32` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.less_unsigned_alias_744c")]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_alias_744c(
+    _this: *const u8,
+    a: *const u32,
+    b: *const u32,
+) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
 /// less_unsigned_alias_7464 — original: `FUN_083d7464` @ 0x083d7464
 /// (24 bytes; 5 `bl` call sites, all unconditional: 0x083bd4ac,
 /// 0x083bd4e8, 0x083bdb48, 0x083bdc6c, and 0x083bdd38; verified by
@@ -4815,6 +4846,23 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn less_unsigned_alias_744c_matches_unsigned_reference_edges() {
+        unsafe {
+            let values = [0, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX];
+            let ignored_this = 0u8;
+            for a in values {
+                for b in values {
+                    assert_eq!(
+                        less_unsigned_alias_744c(&ignored_this, &a, &b),
+                        u32::from(a < b),
+                        "{a:#010x} < {b:#010x}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn less_unsigned_alias_7464_matches_unsigned_reference_edges() {
         unsafe {
