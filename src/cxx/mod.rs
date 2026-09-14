@@ -133,6 +133,7 @@ pub mod red_black_tree_node_pool_acquire;
 pub mod red_black_tree_rotate_right;
 pub mod red_black_tree_rotate_right_second;
 pub mod red_black_tree_rotate_right_third;
+pub mod red_black_tree_rotate_right_fourth;
 pub mod red_black_tree_rotate_right_alt;
 pub mod red_black_tree_rotate_left_fourth;
 pub mod red_black_tree_rotate_left;
