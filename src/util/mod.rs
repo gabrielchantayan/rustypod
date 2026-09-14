@@ -80,6 +80,7 @@ pub mod record_entry_payload_length;
 pub mod record_fields_configure;
 pub mod resource_record_find_nth;
 pub mod raster_profile;
+pub mod replace_owned_pointer;
 pub mod range_state;
 pub mod service_manager_get;
 pub mod selector_record_address;

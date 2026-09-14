@@ -85786,3 +85786,32 @@ functions:
       volatile seams for the two unported helpers and native-width callback,
       proving direct and fallback facet paths, exact fallback arguments,
       reference-count wrapping, and field initialization.
+
+  # --- owned pointer replacement ---
+  - address: 0x083e75f4
+    ghidra: FUN_083e75f4
+    name: replace_owned_pointer
+    size: 36
+    sig: "void replace_owned_pointer(void **slot, void *replacement)"
+    module: util/replace_owned_pointer
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: replacement
+      r4: slot_saved
+      r5: replacement_saved
+      param_1_deref: old_pointer
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,r5,r6,lr} at 0x083e75f4 through pop {r4,r5,r6,pc} at
+      0x083e7614; the separately linked next function starts at 0x083e7618.
+      Ghidra's 28-byte extent incorrectly marks operator_delete as
+      non-returning and loses the live trailing str r5,[r4]. Decoding every
+      aligned immediate ARM B/BL word in osos.dec finds exactly five inbound
+      calls, all plain unconditional bl at 0x081a9b24, 0x081aa270,
+      0x081abee8, 0x081ad6d4, and 0x081ad740; there are no predicated forms
+      or direct tail branches. The function compares *slot to replacement;
+      equal values leave the slot unchanged, while unequal values pass the old
+      value to the already ported NULL-guarded tag-2 operator_delete then
+      store replacement. Deliberate deviations: none.
