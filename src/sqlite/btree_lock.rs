@@ -1,11 +1,13 @@
-//! The B-tree shared-cache lock counter — SQLite's `sqlite3BtreeEnter` /
-//! `sqlite3BtreeLeave` pair, called around every b-tree operation the
-//! engine performs.
+//! The B-tree shared-cache lock counter — SQLite's `sqlite3BtreeEnter`,
+//! `sqlite3BtreeLeave`, and `sqlite3BtreeLeaveAll`, called around every
+//! b-tree operation the engine performs.
 //!
 //! - `btree_enter` — original: `FUN_0837118c` @ 0x0837118c (28 bytes;
 //!   36 `bl` call sites, binary-scanned).
 //! - `btree_leave` — original: `FUN_08371da4` @ 0x08371da4 (36 bytes;
 //!   41 `bl` + 1 tail `b`).
+//! - `btree_leave_all` — original: `FUN_08371dc8` @ 0x08371dc8 (80 bytes;
+//!   5 `bl` call sites, binary-scanned).
 //!
 //! `Btree` layout, pinned by the two functions agreeing on all three
 //! fields (and matching SQLite's own struct order `db, pBt, inTrans,
@@ -83,9 +85,107 @@ pub unsafe extern "C" fn btree_leave(btree: *mut u8) {
     }
 }
 
+/// sqlite3 `nDb` field, the signed number of `Db` records.
+const DB_COUNT_OFFSET: usize = 0x04;
+/// sqlite3 `aDb` field, a target-width pointer to 24-byte `Db` records.
+const DATABASES_OFFSET: usize = 0x08;
+/// Size of one SQLite `Db` record on the ARM target.
+const DATABASE_RECORD_SIZE: usize = 0x18;
+/// `Db.pBt`, a target-width pointer to its B-tree handle.
+const DATABASE_BTREE_OFFSET: usize = 0x04;
+
+/// Read an aligned target-width pointer.
+///
+/// `sqlite3.aDb` and `Db.pBt` are both 32-bit words in retailOS. Keeping
+/// their target width avoids host-pointer widening changing the recovered
+/// offsets.
+#[inline(always)]
+unsafe fn target_pointer(at: *const u8) -> *mut u8 {
+    at.cast::<u32>().read() as usize as *mut u8
+}
+
+/// btree_leave_all — original: `FUN_08371dc8` @ 0x08371dc8 (80 bytes;
+/// 5 unconditional plain `bl` call sites, binary-scanned).
+///
+/// `sqlite3BtreeLeaveAll`: scan the signed `sqlite3.nDb` count and, for
+/// each non-null `Db.pBt`, release one shared-cache nesting reference when
+/// its `Btree.sharable` flag is set. The retail body inlines
+/// `sqlite3BtreeLeave`, so this port does likewise rather than adding a
+/// call edge. A zero or negative count performs no iteration. As in the
+/// original, the `locked` byte is cleared only when decrementing reaches
+/// exactly zero.
+///
+/// Deliberate host-only adaptation: `aDb` and `pBt` remain target-width
+/// `u32` words. Host tests map their fixture below 4 GiB before encoding
+/// those pointers; device behavior and every target offset are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn btree_leave_all(database: *mut u8) {
+    let mut index = 0i32;
+    while index < database.add(DB_COUNT_OFFSET).cast::<i32>().read() {
+        let record = target_pointer(database.add(DATABASES_OFFSET))
+            .add(index as usize * DATABASE_RECORD_SIZE);
+        let btree = target_pointer(record.add(DATABASE_BTREE_OFFSET));
+        if !btree.is_null() && btree.add(SHARABLE_OFFSET).read() != 0 {
+            let depth = want_to_lock(btree);
+            let remaining = depth.read().wrapping_sub(1);
+            depth.write(remaining);
+            if remaining == 0 {
+                btree.add(LOCKED_OFFSET).write(0);
+            }
+        }
+        index = index.wrapping_add(1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex};
+
+    const LEAVE_ALL_FIXTURE_LEN: usize = 0x1000;
+    const LEAVE_ALL_DATABASE_OFFSET: usize = 0x100;
+    const LEAVE_ALL_RECORDS_OFFSET: usize = 0x200;
+    const LEAVE_ALL_BTREE0_OFFSET: usize = 0x400;
+    const LEAVE_ALL_BTREE1_OFFSET: usize = 0x440;
+    const LEAVE_ALL_BTREE2_OFFSET: usize = 0x480;
+    static LEAVE_ALL_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::BTREE_LEAVE_ALL, LEAVE_ALL_FIXTURE_LEN).map(|pointer| pointer as usize)
+    });
+    static LEAVE_ALL_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
+
+    unsafe fn initialize_leave_all_fixture(count: i32) -> Option<(*mut u8, *mut u8)> {
+        let base = (*LEAVE_ALL_FIXTURE)? as *mut u8;
+        base.write_bytes(0xa5, LEAVE_ALL_FIXTURE_LEN);
+        let database = base.add(LEAVE_ALL_DATABASE_OFFSET);
+        let records = base.add(LEAVE_ALL_RECORDS_OFFSET);
+        database.add(DB_COUNT_OFFSET).cast::<i32>().write(count);
+        database.add(DATABASES_OFFSET).cast::<u32>().write(records as usize as u32);
+        Some((database, records))
+    }
+
+    unsafe fn set_record_btree(records: *mut u8, index: usize, btree: *mut u8) {
+        records
+            .add(index * DATABASE_RECORD_SIZE + DATABASE_BTREE_OFFSET)
+            .cast::<u32>()
+            .write(btree as usize as u32);
+    }
+
+    unsafe fn initialize_raw_btree(
+        base: *mut u8,
+        offset: usize,
+        sharable: u8,
+        locked: u8,
+        depth: i32,
+    ) -> *mut u8 {
+        let btree = base.add(offset);
+        btree.add(SHARABLE_OFFSET).write(sharable);
+        btree.add(LOCKED_OFFSET).write(locked);
+        want_to_lock(btree).write(depth);
+        btree
+    }
 
     /// A `Btree` handle: word-aligned so the counter load is aligned,
     /// as it is on target.
@@ -179,6 +279,58 @@ mod tests {
             if !touched {
                 assert_eq!(*byte, 0xa5, "byte {i:#x} was clobbered");
             }
+        }
+    }
+    #[test]
+    fn leave_all_skips_null_and_non_shared_handles() {
+        let _guard = LEAVE_ALL_FIXTURE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some((database, records)) = (unsafe { initialize_leave_all_fixture(4) }) else {
+            assert!(note_missing_u32_fixture("sqlite/btree_lock leave_all"));
+            return;
+        };
+        let base = (*LEAVE_ALL_FIXTURE).unwrap() as *mut u8;
+        unsafe {
+            let non_shared = initialize_raw_btree(base, LEAVE_ALL_BTREE0_OFFSET, 0, 0x7c, 5);
+            let outermost = initialize_raw_btree(base, LEAVE_ALL_BTREE1_OFFSET, 1, 0x6c, 1);
+            let wrapped = initialize_raw_btree(base, LEAVE_ALL_BTREE2_OFFSET, 1, 0x5c, i32::MIN);
+            set_record_btree(records, 0, core::ptr::null_mut());
+            set_record_btree(records, 1, non_shared);
+            set_record_btree(records, 2, outermost);
+            set_record_btree(records, 3, wrapped);
+
+            btree_leave_all(database);
+
+            assert_eq!(want_to_lock(non_shared).read(), 5);
+            assert_eq!(non_shared.add(LOCKED_OFFSET).read(), 0x7c);
+            assert_eq!(want_to_lock(outermost).read(), 0);
+            assert_eq!(outermost.add(LOCKED_OFFSET).read(), 0);
+            assert_eq!(want_to_lock(wrapped).read(), i32::MAX);
+            assert_eq!(wrapped.add(LOCKED_OFFSET).read(), 0x5c);
+        }
+    }
+
+    #[test]
+    fn leave_all_does_not_iterate_non_positive_counts() {
+        let _guard = LEAVE_ALL_FIXTURE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some((database, records)) = (unsafe { initialize_leave_all_fixture(0) }) else {
+            assert!(note_missing_u32_fixture("sqlite/btree_lock leave_all"));
+            return;
+        };
+        let base = (*LEAVE_ALL_FIXTURE).unwrap() as *mut u8;
+        unsafe {
+            let btree = initialize_raw_btree(base, LEAVE_ALL_BTREE0_OFFSET, 1, 0x4b, 1);
+            set_record_btree(records, 0, btree);
+
+            btree_leave_all(database);
+            database.add(DB_COUNT_OFFSET).cast::<i32>().write(-1);
+            btree_leave_all(database);
+
+            assert_eq!(want_to_lock(btree).read(), 1);
+            assert_eq!(btree.add(LOCKED_OFFSET).read(), 0x4b);
         }
     }
 }
