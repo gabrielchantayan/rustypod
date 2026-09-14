@@ -89439,3 +89439,36 @@ functions:
       exponent plus nonzero fraction representation, avoiding the helper's
       CPSR-flags ABI. This is equivalent for self-comparison even when
       __dcmpeq flushes denormals: all non-NaN values still compare equal.
+
+
+  # --- Observable element array clear ---
+  - address: 0x0839c258
+    ghidra: FUN_0839c258
+    name: observable_element_array_clear
+    size: 24
+    sig: "void observable_element_array_clear(ObservableArray *this)"
+    module: cxx/observable_element_array_clear
+    status: ported
+    renames:
+      param_1/r0: this
+      r4: this
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: push {r4,lr}; mov
+      r4,r0; bl 0x0839c1c8; mov r0,r4; pop {r4,lr}; b 0x08271c84 at
+      0x0839c258..0x0839c26c. The next separately linked function begins at
+      0x0839c270 and no literal pool follows. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly five inbound direct calls:
+      unconditional bl at 0x08126c7c, 0x08127458, 0x08127780, and 0x08127fa0,
+      plus predicated blne at 0x08128094; there are no direct B tail sites.
+      The sole predicated caller first checks its external state flag, while
+      this wrapper itself has no NULL or state guard. It calls unported
+      FUN_0839c1c8, whose observed behaviour conditionally walks indexed
+      elements and dispatches each non-NULL element's vtable +0x04 slot, then
+      tail-branches to the ported observable_array_clear @ 0x08271c84. The
+      first callee has no established class identity and remains an explicit
+      direct-call seam at its verified load address, rather than receiving an
+      invented identity. Host tests install a first-stage recorder and a
+      concrete clear vtable, proving call order and wrapping length edge cases
+      for zero and u32::MAX lengths. Deliberate deviation: the stock direct
+      bl is an indirect seam for host modeling; target builds invoke its
+      verified retailOS address.
