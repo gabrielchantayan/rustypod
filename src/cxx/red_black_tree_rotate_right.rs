@@ -85,6 +85,15 @@
 //! predicated `bleq` at `0x083b94a8`; no direct tail-`B` callers exist. The
 //! predicated caller selects the left child before calling, so reusing this
 //! no-guard right rotation is faithful. Deliberate deviations: none.
+//!
+//! `FUN_083b74fc` at load address `0x083b74fc` is another byte-identical,
+//! 84-byte (21-word) copy, ending at `0x083b754c` before the separately linked
+//! next function at `0x083b7550`. Raw B/BL decoding finds exactly five inbound
+//! direct calls: four unconditional `bl` at `0x083b7848`, `0x083b78c0`,
+//! `0x083b79ac`, and `0x083b7e90`, plus a predicated `bleq` at `0x083b7ee0`;
+//! there are no direct tail-`B` callers. The predicated caller selects the left
+//! child before calling, so the shared no-NULL-guard implementation and host
+//! tests apply without a redundant dispatch seam. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
