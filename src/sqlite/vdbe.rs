@@ -132,13 +132,31 @@ pub struct Vdbe {
     pub n_label_alloc: i32,
     /// +0x20: label -> address table (`-1` while unresolved).
     pub a_label: *mut i32,
-    /// +0x24: unmodeled.
+    /// +0x24..+0x28: unmodeled.
     pub _gap_24: [u8; 4],
     /// +0x28: the column-name/decltype array — `n_res_column *
     /// COLNAME_N` [`Mem`]s laid end to end (`aColName`).
     pub a_col_name: *mut Mem,
-    /// +0x2c..+0xec: unmodeled.
-    pub _gap_2c: [u8; 0xec - 0x2c],
+    /// +0x2c: the register-value array (`aMem`).
+    pub a_mem: *mut Mem,
+    /// +0x30: unmodeled argument-value array (`apArg`).
+    pub ap_arg: *mut *mut Mem,
+    /// +0x34: number of host parameters (`nVar`).
+    pub n_var: i32,
+    /// +0x38: host-parameter values (`aVar`).
+    pub a_var: *mut Mem,
+    /// +0x3c: unmodeled cursor array (`apCsr`).
+    pub ap_csr: *mut u8,
+    /// +0x40: unmodeled cursor count (`nCursor`).
+    pub n_cursor: i32,
+    /// +0x44: execution-state sentinel (`magic`).
+    pub magic: u32,
+    /// +0x48..+0x70: unmodeled.
+    pub _gap_48: [u8; 0x70 - 0x48],
+    /// +0x70: program counter. Negative means the statement has not run.
+    pub pc: i32,
+    /// +0x74..+0xec: unmodeled.
+    pub _gap_74: [u8; 0xec - 0x74],
     /// +0xec: number of result columns the statement produces
     /// (`nResColumn`), the stride between the two `a_col_name` planes.
     pub n_res_column: i32,
@@ -221,6 +239,14 @@ const _VDBE_A_OP_OFFSET: [u8; 0x14] = [0; core::mem::offset_of!(Vdbe, a_op)];
 const _VDBE_A_LABEL_OFFSET: [u8; 0x20] = [0; core::mem::offset_of!(Vdbe, a_label)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_A_COL_NAME_OFFSET: [u8; 0x28] = [0; core::mem::offset_of!(Vdbe, a_col_name)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_N_VAR_OFFSET: [u8; 0x34] = [0; core::mem::offset_of!(Vdbe, n_var)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_A_VAR_OFFSET: [u8; 0x38] = [0; core::mem::offset_of!(Vdbe, a_var)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_MAGIC_OFFSET: [u8; 0x44] = [0; core::mem::offset_of!(Vdbe, magic)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_PC_OFFSET: [u8; 0x70] = [0; core::mem::offset_of!(Vdbe, pc)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_N_RES_COLUMN_OFFSET: [u8; 0xec] = [0; core::mem::offset_of!(Vdbe, n_res_column)];
 #[cfg(target_pointer_width = "32")]
@@ -687,7 +713,16 @@ mod tests {
                 a_label: core::ptr::null_mut(),
                 _gap_24: [0; 4],
                 a_col_name: core::ptr::null_mut(),
-                _gap_2c: [0; 0xec - 0x2c],
+                a_mem: core::ptr::null_mut(),
+                ap_arg: core::ptr::null_mut(),
+                n_var: 0,
+                a_var: core::ptr::null_mut(),
+                ap_csr: core::ptr::null_mut(),
+                n_cursor: 0,
+                magic: 0,
+                _gap_48: [0; 0x70 - 0x48],
+                pc: 0,
+                _gap_74: [0; 0xec - 0x74],
                 n_res_column: 0,
                 _gap_f0: [0; 8],
                 p_result_set: core::ptr::null_mut(),

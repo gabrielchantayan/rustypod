@@ -89629,3 +89629,40 @@ functions:
       cover all NULL combinations without dereferencing the surviving operand
       and construction of a token-less conjunction node with both operands.
       Deliberate deviations: none.
+
+  # --- SQLite prepared-statement parameter clear ---
+  - address: 0x083974e4
+    ghidra: FUN_083974e4
+    name: vdbe_unbind
+    size: 160
+    sig: "int vdbe_unbind(Vdbe *statement, int parameter_index)"
+    module: sqlite/vdbe_unbind
+    status: ported
+    renames:
+      param_1/r0: statement
+      param_2/r1: parameter_index
+      r4: statement
+      r5: parameter_value
+      DAT_08397584: VDBE_MAGIC_RUN
+      FUN_0838c04c: mem_release
+      FUN_083766f4: sqlite_error
+    notes: >-
+      Raw osos.dec establishes the exact 160-byte extent: push
+      {r4,r5,r6,lr} at 0x083974e4 through pop {r4,r5,r6,pc} at
+      0x08397580, followed by literal VDBE_MAGIC_RUN (0xbdf20da3) at
+      0x08397584 and the next separately linked function at 0x08397588.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds five
+      inbound plain bl calls at 0x082b78dc, 0x0838ef4c, 0x0838ef98,
+      0x0838f0f0, and 0x0838f134, plus tail b at 0x0838efc8; no call is
+      predicated. This is SQLite 3.5's vdbeUnbind: a NULL statement, a
+      mismatched magic, or non-negative pc reports SQLITE_MISUSE (21); an
+      index outside one-based 1..=nVar reports SQLITE_RANGE (25). Otherwise
+      it releases aVar[index-1], assigns that Mem's flags to MEM_Null (1),
+      reports SQLITE_OK through sqlite_error(db, rc, NULL, 0), and returns rc.
+      The Rust target default directly reaches the existing mem_release port;
+      its host test seam records that release because the raw target-offset
+      function cannot safely consume a widened host Mem. Host tests cover the
+      NULL handle, magic/pc misuse gates, signed index extremes, one-based
+      endpoints, selected-cell-only release, the assigned flags, and database
+      error reporting. Deliberate deviations: the existing MEM_SET_OPS seam
+      replaces the target direct bl only for host-layout safety.
