@@ -72527,6 +72527,34 @@ functions:
       fixture. Host tests prove timestamp/active stores occur before both a
       successful and failing completion, including sub-millisecond truncation.
 
+  # --- Q16 signed three-way clamp (util/signed_clamp_i32) ---
+  - address: 0x080f0f44
+    ghidra: FUN_080f0f44
+    name: signed_clamp_i32_q16
+    size: 32
+    sig: "i32 signed_clamp_i32_q16(i32 value, i32 lower, i32 upper)"
+    module: util/signed_clamp_i32
+    status: ported
+    renames:
+      param_1/r0/r3: value
+      param_2/r1: lower
+      param_3/r2: upper
+    notes: >-
+      Raw ARM establishes the exact 32-byte extent 0x080f0f44..0x080f0f64:
+      mov r3,r0; cmp r3,r1; movlt r0,r1; bxlt lr; cmp r3,r2; movle r0,r3;
+      movgt r0,r2; bx lr. The separately linked entries at 0x080f0f64 and
+      0x080f0f84 are byte-identical siblings; smull at 0x080f0fa4 begins the
+      next function. The lower signed comparison wins: value below lower
+      returns lower, otherwise value through upper returns unchanged, and
+      only a greater value returns upper. Full-image decoding of every ARM
+      B/BL immediate finds exactly six inbound calls, all unconditional plain
+      bl (zero predicated): 0x0824e120, 0x08256254, 0x0829f7e0, 0x0829f7f8,
+      0x0829f810, and 0x0829f828. Every caller passes lower=0 and
+      upper=0x10000, so this is the Q16-use sibling. The distinct Rust text
+      section retains an independently hookable symbol despite the
+      byte-identical 0x080f0f84 port. No deliberate deviations; host tests
+      cover Q16 extrema, inclusive endpoints, and inverted-bound precedence.
+
   # --- Signed three-way clamp (util/signed_clamp_i32) ---
   - address: 0x080f0f84
     ghidra: FUN_080f0f84
