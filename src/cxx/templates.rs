@@ -19,6 +19,9 @@
 //!   iterator's four fields, including a 128-byte segment end.
 //! - [`deque_iter_increment_elem4`] — advances a 4-byte deque iterator,
 //!   switching its segment-map slot at the segment boundary.
+//! - [`deque_iter_equal`] — equality for the 4-byte deque iterator,
+//!   including the representation where a segment end aliases the following
+//!   segment's base.
 //! - [`less_signed`] / [`less_unsigned`] / [`less_unsigned_byte`] —
 //!   `std::less`-shaped comparators taking their operands by
 //!   reference, 1, 12 and 2 copies, 45, 73 and 13 call sites.
@@ -497,6 +500,54 @@ pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mu
     }
     iter
 }
+
+/// deque_iter_equal — original: `FUN_083eaca0` @ 0x083eaca0.
+///
+/// **68 bytes**, exactly 17 ARM instructions from 0x083eaca0 through
+/// 0x083eace0; the next separately linked function begins at 0x083eace4.
+/// Decoding every ARM B/BL-immediate word in `osos.dec` finds five inbound
+/// direct calls, all unconditional `bl`: 0x083dfbd4, 0x083dfd30, 0x083ea870,
+/// 0x083ea8bc, and 0x083ea938. There are no predicated direct calls.
+///
+/// Returns the widened C++ bool 1 when two 4-byte deque iterators denote the
+/// same position, else 0. Equal `cur` fields are immediately equal. Distinct
+/// cursors can only match at a segment boundary, where the original delegates
+/// to `FUN_083eade0`: its raw arithmetic treats the end of one segment and
+/// the base of the adjacent segment as the same logical position.
+///
+/// Deliberate deviation: `FUN_083eade0` has no ledger port, so its verified
+/// 4-byte-deque distance arithmetic is reproduced here rather than adding an
+/// unported target-address dispatch seam. This preserves the callee result
+/// used by this function without assigning that callee any broader identity.
+///
+/// # Safety
+/// `left` and `right` must be valid [`DequeIter`] objects. For the
+/// non-identical cursor path, their segment pointers and slots must describe
+/// elements in their respective valid segment and map allocations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_equal(left: *const DequeIter, right: *const DequeIter) -> u32 {
+    let left = &*left;
+    let right = &*right;
+    if left.cur != right.cur {
+        if left.cur != left.seg_base && right.cur != right.seg_base {
+            return 0;
+        }
+
+        let distance = if left.seg_slot != right.seg_slot {
+            (left.seg_slot.offset_from(right.seg_slot) - 1) * 0x20
+                + (left.cur.offset_from(left.seg_base) >> 2)
+                + (right.seg_end.offset_from(right.cur) >> 2)
+        } else {
+            left.cur.offset_from(right.cur) >> 2
+        };
+        if distance != 0 {
+            return 0;
+        }
+    }
+    1
+}
+
 
 /// deque_iter_init_elem4_alias_a3e4 — original: `FUN_083da3e4` @
 /// 0x083da3e4 (64 bytes; 9 plain `bl` call sites, no predicated forms,
@@ -7072,4 +7123,75 @@ mod tests {
         assert!(deque.end.seg_slot.is_null());
     }
 
+    #[test]
+    fn deque_iter_equal_handles_identical_and_distinct_interior_positions() {
+        let mut segment = [0u32; 32];
+        let base = segment.as_mut_ptr().cast::<u8>();
+        let mut slots = [base];
+        let left = DequeIter {
+            cur: unsafe { base.add(12) },
+            seg_base: base,
+            seg_end: unsafe { base.add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+        let same_position = DequeIter {
+            cur: left.cur,
+            seg_base: base,
+            seg_end: left.seg_end,
+            seg_slot: slots.as_mut_ptr(),
+        };
+        let different_position = DequeIter {
+            cur: unsafe { base.add(16) },
+            seg_base: base,
+            seg_end: left.seg_end,
+            seg_slot: slots.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(deque_iter_equal(&left, &same_position), 1);
+            assert_eq!(deque_iter_equal(&left, &different_position), 0);
+        }
+    }
+
+    #[test]
+    fn deque_iter_equal_aliases_adjacent_segment_boundary_only() {
+        let mut first_segment = [0u32; 32];
+        let mut second_segment = [0u32; 32];
+        let mut third_segment = [0u32; 32];
+        let first_base = first_segment.as_mut_ptr().cast::<u8>();
+        let second_base = second_segment.as_mut_ptr().cast::<u8>();
+        let third_base = third_segment.as_mut_ptr().cast::<u8>();
+        let mut slots = [first_base, second_base, third_base];
+        let first_end = DequeIter {
+            cur: unsafe { first_base.add(0x80) },
+            seg_base: first_base,
+            seg_end: unsafe { first_base.add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+        let second_begin = DequeIter {
+            cur: second_base,
+            seg_base: second_base,
+            seg_end: unsafe { second_base.add(0x80) },
+            seg_slot: unsafe { slots.as_mut_ptr().add(1) },
+        };
+        let second_interior = DequeIter {
+            cur: unsafe { second_base.add(4) },
+            seg_base: second_base,
+            seg_end: second_begin.seg_end,
+            seg_slot: second_begin.seg_slot,
+        };
+        let third_begin = DequeIter {
+            cur: third_base,
+            seg_base: third_base,
+            seg_end: unsafe { third_base.add(0x80) },
+            seg_slot: unsafe { slots.as_mut_ptr().add(2) },
+        };
+
+        unsafe {
+            assert_eq!(deque_iter_equal(&first_end, &second_begin), 1);
+            assert_eq!(deque_iter_equal(&second_begin, &first_end), 1);
+            assert_eq!(deque_iter_equal(&first_end, &second_interior), 0);
+            assert_eq!(deque_iter_equal(&first_end, &third_begin), 0);
+        }
+    }
 }

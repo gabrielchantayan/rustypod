@@ -85507,3 +85507,40 @@ functions:
       frame setup/teardown. The existing host-only resolver seam proves the
       substituted descriptor, preserved context, and zero result for zero and
       negative statuses.
+
+
+  # --- Deque iterator boundary equality ---
+  - address: 0x083eaca0
+    ghidra: FUN_083eaca0
+    name: deque_iter_equal
+    size: 68
+    sig: "u32 deque_iter_equal(const DequeIter *left, const DequeIter *right)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      param_1_plus_0x00/r2: left.cur
+      param_2_plus_0x00/r3: right.cur
+      param_1_plus_0x04/ip: left.seg_base
+      param_2_plus_0x04/r2: right.seg_base
+      return/r0: equal
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte body: 17 ARM instructions
+      from push {r4,lr} at 0x083eaca0 through pop {r4,pc} at 0x083eace0;
+      the next independently linked function begins at 0x083eace4. Decoding
+      every immediate ARM B/BL word finds exactly five inbound direct calls,
+      all unconditional bl at 0x083dfbd4, 0x083dfd30, 0x083ea870,
+      0x083ea8bc, and 0x083ea938; there are no predicated call sites. Equal
+      current pointers return 1 immediately. Distinct currents return 0 when
+      neither is its segment base. Otherwise the function calls unported
+      FUN_083eade0 and returns 1 only when its deque-iterator distance is
+      zero, making a segment end equal to the following segment base. The
+      callee's raw body computes the 4-byte-element distance from segment-map
+      slots, segment bases, ends, and cursors; it calls the verified capacity
+      member at 0x083da450 for 0x20 elements. Deliberate deviation: the Rust
+      port reproduces that verified arithmetic locally instead of adding an
+      unported target-address dispatch seam, preserving precisely this
+      function's observed equality result without claiming a broader callee
+      identity. Host tests cover equal positions, unequal interior positions,
+      both directions of adjacent-boundary aliasing, and nonadjacent segments.
