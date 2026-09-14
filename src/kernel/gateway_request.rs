@@ -45,6 +45,9 @@ const REQUEST_LOCK: usize = 9;
 /// Tag byte identifying this helper's request flavor (frame word 4).
 const REQUEST_TAG: usize = 2;
 
+/// Tag byte identifying the argument-free request flavor at 0x08047fa8.
+const EMPTY_REQUEST_TAG: u32 = 4;
+
 /// Mailbox passed to the mode-1 mailbox-send gateway body (`mov r0, #1`).
 const GATEWAY_MAILBOX: u32 = 1;
 
@@ -74,6 +77,44 @@ pub unsafe extern "C" fn gateway_request_timed(payload: usize, timeout: usize) {
         payload,
         timeout.wrapping_add(1), // the original's `add r0, r4, #1`
         0,                       // padding (uninitialized in the original)
+        0,
+    ];
+    task_lock::rom_sem_wait(REQUEST_LOCK);
+    mailbox_send_gateway_mode1(
+        GATEWAY_MAILBOX,
+        frame.as_ptr() as usize as u32,
+        GATEWAY_PRIORITY,
+        GATEWAY_SEMAPHORE,
+    );
+    task_lock::rom_sem_signal(REQUEST_LOCK);
+}
+
+/// gateway_request_empty_tag4 — original: FUN_08047fa8 @ 0x08047fa8
+/// (88 bytes, six unconditional `bl` call sites).
+///
+/// Posts the argument-free tag-4 gateway request: a nine-word frame with
+/// zero words 0..3 and 5..8, and tag byte 4 at word 4. Kernel semaphore 9
+/// brackets the mode-1 mailbox-send gateway body with `(1, &frame, 5, 6)`.
+/// Raw ARM establishes all six callers as unconditional `bl` at 0x08067e60,
+/// 0x08067f88, 0x080f9dc0, 0x0813a820, 0x081e62d8, and 0x08392f64; there are
+/// no predicated calls or tail branches. The tag's service-level meaning is
+/// not established, so the name records only the verified empty tag-4 ABI.
+///
+/// Deliberate deviation: ARM leaves frame words 5..7 uninitialized; this
+/// port zeroes them. Its callers and the declared message length do not read
+/// them.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_request_empty_tag4() {
+    let frame: [u32; FRAME_SLOTS] = [
+        0,
+        0,
+        0,
+        0,
+        EMPTY_REQUEST_TAG,
+        0,
+        0,
+        0,
         0,
     ];
     task_lock::rom_sem_wait(REQUEST_LOCK);
@@ -191,6 +232,32 @@ mod tests {
             assert_eq!(*addr_of!(WAIT_ARG), 9);
             assert_eq!(*addr_of!(SIGNAL_ARG), 9);
             assert_eq!(*addr_of!(DISPATCH_COUNT), 1, "exactly one dispatch");
+            let request = *addr_of!(DISPATCH_REQUEST);
+            assert_eq!(request[0], 4, "mailbox-send selector");
+            assert_eq!(request[2], 6, "preserved r3 semaphore");
+            assert_eq!(request[3], 1, "mailbox");
+            assert_eq!(request[5], 5, "priority");
+            assert_ne!(request[6], 0, "frame pointer");
+            assert_eq!(request[7], 1, "mode");
+            assert_eq!(request[8], 0, "trailing mode word");
+        }
+    }
+
+    /// The argument-free tag-4 request keeps the same semaphore and mailbox
+    /// ABI as timed requests, including when posted repeatedly.
+    #[test]
+    fn posts_empty_tag4_frame_under_semaphore_9() {
+        let _installed = install();
+        unsafe {
+            gateway_request_empty_tag4();
+            gateway_request_empty_tag4();
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["wait", "dispatch", "signal", "wait", "dispatch", "signal"]
+            );
+            assert_eq!(*addr_of!(WAIT_ARG), 9);
+            assert_eq!(*addr_of!(SIGNAL_ARG), 9);
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 2);
             let request = *addr_of!(DISPATCH_REQUEST);
             assert_eq!(request[0], 4, "mailbox-send selector");
             assert_eq!(request[2], 6, "preserved r3 semaphore");
