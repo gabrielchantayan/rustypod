@@ -25862,6 +25862,33 @@ functions:
       request remains the target's 8-byte cell size.
 
 
+  # --- shared-cell handle primary copy constructor ---
+  - address: 0x083b50c8
+    ghidra: FUN_083b50c8
+    name: shared_cell_copy_construct_primary
+    size: 28
+    sig: "SharedCell **shared_cell_copy_construct_primary(SharedCell **dst, const SharedCell **src)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar1/r1: cell
+      iVar2/r2: refcount
+    notes: >-
+      Raw ARM extent is exactly 28 bytes from 0x083b50c8 through 0x083b50e0,
+      ending immediately before the distinct copy-assignment sibling at
+      0x083b50e4. It copies the source slot's cell pointer into dst and, for a
+      non-NULL cell, increments its signed 32-bit intrusive refcount with ARM
+      wrapping ADD; r0 remains dst, so the ABI return is dst despite Ghidra's
+      void prototype. A full decode of every ARM B/BL word in osos.dec found
+      exactly five incoming BL calls, all unconditional, with zero predicated
+      BL forms; an additional unconditional tail B at 0x0822b05c reaches this
+      entry. The Rust port represents the host-only payload word as usize so
+      host pointers remain representable, while the target slot and refcount
+      semantics remain one 32-bit word each. Its target-only text section
+      preserves this byte-identical sibling as a device-callable symbol.
+
   # --- shared-cell handle copy assignment ---
   - address: 0x083b50e4
     ghidra: FUN_083b50e4
