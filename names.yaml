@@ -83246,3 +83246,43 @@ functions:
       tests cover zero and u32::MAX callback results and prove slot-100 selection
       plus the sub-object receiver. match.py review is structural, not
       instruction-exact.
+
+  # --- opaque function-local static accessor ---
+  - address: 0x08104c84
+    ghidra: FUN_08104c84
+    name: lazy_static_object_get
+    size: 72
+    sig: "u8 *lazy_static_object_get(void)"
+    module: app/lazy_static_object
+    status: ported
+    renames:
+      DAT_08104ccc: static_state_base
+      DAT_08104cd0: static_guard
+      DAT_08104cd4: static_object
+      DAT_08104cd8: dso_handle
+      DAT_08104cdc: static_destructor_word
+      FUN_08105378: static_constructor
+    notes: >-
+      Raw osos.dec establishes the 72-byte instruction body at
+      0x08104c84..0x08104cc8, followed by its five-word literal pool at
+      0x08104ccc..0x08104cdc; the next separately linked function starts at
+      0x08104ce0. The fast path loads static_state_base 0x089d0554 and tests
+      its guard word at +0x18 (0x089d056c) only for bit 0. When clear,
+      cxa_guard_acquire accepts the whole word before static_constructor
+      0x08105378 receives fixed object 0x08ad8424; cxa_atexit registers the
+      constructor result with raw handler word 0x080fa520 and
+      __dso_handle 0x089ca09c; cxa_guard_release follows. Every path returns
+      the fixed object literal, not the constructor result. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly six inbound direct
+      calls, all unconditional bl at 0x08104e8c, 0x08104ebc, 0x08104ecc,
+      0x08104ed8, 0x08104efc, and 0x08294fa8; there are no predicated forms.
+      The body itself has four direct bl calls, to cxa_guard_acquire,
+      static_constructor, cxa_atexit, and cxa_guard_release. The constructor
+      is unported, so Rust reaches its fixed retailOS address on target and
+      uses a recording host seam. The handler word is not a function entry:
+      it is ldr r1,[r1,#0x24] inside a preceding routine, followed by blx r1;
+      its identity is deliberately not invented. Target registration retains
+      that exact word; host registration uses an inert handler because calling
+      the interior instruction as a shutdown callback is invalid. Fixed
+      firmware storage is modeled by host statics. match.py review is
+      structural, not instruction-exact.
