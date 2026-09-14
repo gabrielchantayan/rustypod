@@ -85922,3 +85922,32 @@ functions:
       equal values leave the slot unchanged, while unequal values pass the old
       value to the already ported NULL-guarded tag-2 operator_delete then
       store replacement. Deliberate deviations: none.
+
+
+  # --- returning three-word clear helper ---
+  - address: 0x083e5aec
+    ghidra: FUN_083e5aec
+    name: three_word_clear_return
+    size: 20
+    sig: "u32 *three_word_clear_return(u32 *target)"
+    module: cxx/three_word_clear_return
+    status: ported
+    renames:
+      param_1/r0: target
+      r1: zero
+      param_1_plus_0x00: first_word
+      param_1_plus_0x04: second_word
+      param_1_plus_0x08: third_word
+      return/r0: target
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM instructions
+      from mov r1,#0 at 0x083e5aec through bx lr at 0x083e5afc; the separately
+      linked next function begins at 0x083e5b00. Decoding every aligned ARM
+      B/BL immediate in osos.dec finds exactly five inbound direct calls, all
+      unconditional plain bl at 0x08197a88, 0x082aaf50, 0x082ab00c,
+      0x082ab028, and 0x083db348; there are no predicated forms or direct tail
+      branches. The function materializes zero in r1, stores it at target+0,
+      target+4, and target+8, and preserves r0. Ghidra incorrectly declares
+      void and supplies a spurious second argument: callers 0x08197a88 and
+      0x083db348 consume the preserved target, so the Rust port returns it.
+      Deliberate deviations: none.
