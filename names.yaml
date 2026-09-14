@@ -84216,3 +84216,35 @@ functions:
       aligned raw data-word references. Recovered callers pass zero r1 and
       provide bitmap bit-depth fields in r0; the zero override path supplies
       their default format tag. Deliberate deviations: none.
+
+
+  # --- checked runtime multiplier scaling ---
+  - address: 0x0808432c
+    ghidra: FUN_0808432c
+    name: scale_by_runtime_multiplier_checked
+    size: 52
+    sig: "u32 scale_by_runtime_multiplier_checked(u32 value, u32 *output)"
+    module: util/checked_runtime_scale
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: output
+      DAT_08084360: runtime_multiplier_record
+      DAT_08a09b94: runtime_multiplier
+      uVar2/r0: status
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: 12 ARM instructions
+      from push {r4,r5,r6,lr} at 0x0808432c through pop {r4,r5,r6,pc} at
+      0x0808435c, followed by the literal 0x08a09b90 at 0x08084360; the next
+      separately linked function begins at 0x08084364. It volatile-loads the
+      runtime multiplier word at 0x08a09b94, computes value times multiplier
+      as an unsigned 64-bit product, and writes the low word only when the
+      high word is zero. It otherwise returns 0x55 and leaves output unchanged.
+      Decoding every immediate ARM B/BL word in osos.dec finds exactly six
+      inbound direct calls, all unconditional plain bl at 0x08088c84,
+      0x08088ccc, 0x08088d44, 0x08088da8, 0x08088dec, and 0x08088e78; there
+      are no predicated call forms. The surrounding configuration builder
+      establishes that this is a runtime scale factor, but not its owning
+      subsystem, which is deliberately not invented. Host builds use private
+      backing for the fixed firmware RAM word; target builds volatile-load the
+      retail address. Deliberate deviations: host backing only.
