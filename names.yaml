@@ -78784,6 +78784,38 @@ functions:
       helper veneer; control-flow order and status predicates are preserved.
 
   # --- Context callback dispatch depth ---
+  - address: 0x080aa3a8
+    ghidra: FUN_080aa3a8
+    name: invoke_queued_entry_primary_callbacks
+    size: 96
+    sig: "void invoke_queued_entry_primary_callbacks(CallbackDispatchContext *context, void *entry)"
+    module: app/context_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: entry
+      "context+0x24": state
+      "context+0x90": callback_argument
+      "state+0x00": callback_list_anchor
+      "state+0x54": dispatch_depth
+      "callback_list_anchor+0x10": first_primary_callback_node
+      "primary_callback_node+0x00": callback_word
+      "primary_callback_node+0x10": next_primary_callback_node
+    notes: >-
+      Raw osos.dec confirms the exact 96-byte extent 0x080aa3a8..0x080aa408:
+      the next separately linked function begins at 0x080aa408 with
+      `push {r4,lr}`. Decoding every aligned ARM B/BL immediate finds six
+      inbound direct callers, all unconditional plain bl at 0x08074910,
+      0x080d2150, 0x080ea8d8, 0x080eb0dc, 0x080f19dc, and 0x080f3108; there
+      are no predicated forms. When state+0 is nonzero, this walks its
+      circular primary node list beginning at +0x10, skips zero callback
+      words, and calls each remaining word with `(context+0x90, entry,
+      (i32)state+0x54 > 0)`. Target builds invoke the callback word directly;
+      host builds use a volatile callback seam because target-width callback
+      words cannot contain host function pointers. Tests cover circular order,
+      zero-word suppression, entry forwarding, and the signed high-bit depth
+      edge.
+
   - address: 0x080d6b14
     ghidra: FUN_080d6b14
     name: context_dispatch_callbacks_and_advance
