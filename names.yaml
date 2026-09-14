@@ -89697,3 +89697,35 @@ functions:
       endpoints, selected-cell-only release, the assigned flags, and database
       error reporting. Deliberate deviations: the existing MEM_SET_OPS seam
       replaces the target direct bl only for host-layout safety.
+
+  # --- SQLite connectionless variadic formatter ---
+  - address: 0x08390c6c
+    ghidra: FUN_08390c6c
+    name: sqlite_mprintf
+    size: 28
+    sig: "char *sqlite_mprintf(const char *format, va_list args)"
+    module: sqlite/mprintf
+    status: ported
+    renames:
+      param_1/r0: format
+      param_2/r1: args
+      FUN_083918a4: sqlite_vmprintf
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: push {r0-r3} at
+      0x08390c6c through ldr pc,[sp],#20 at 0x08390c84. The separately linked
+      next function begins at 0x08390c88; no literal pool follows.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional bl at 0x0837cf60,
+      0x0837d06c, 0x08390898, 0x083909e0, and 0x08390a2c; there are no
+      predicated calls or direct tail-B sites. SQLite 3.5.9's sqlite3_mprintf:
+      spill r0-r3, reload the format from spilled r0, pass &spilled-r1 as
+      va_list to sqlite3_vmprintf @ 0x083918a4, and return its heap-owned
+      NUL-terminated result or NULL unchanged. The helper is unported but is
+      behaviorally the NULL-db path of ported sqlite_vm_printf @ 0x08386454:
+      its stock 1,000,000,000-byte StrAccum, sqlite3VXPrintf dispatch, and
+      StrAccumFinish are reused directly without introducing another dispatch
+      seam. Deliberate deviation: stable Rust receives the house explicit
+      VaList pointer rather than C varargs, so firmware callers require the
+      documented variadic trampoline. Host tests prove format/argument
+      forwarding, the stock configuration, heap result pass-through, and the
+      empty-format allocation-failure NULL path.
