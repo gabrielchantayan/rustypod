@@ -25798,6 +25798,34 @@ functions:
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
 
+  - address: 0x083989f8
+    ghidra: FUN_083989f8
+    name: sqlite_write32bits
+    size: 52
+    sig: "i32 sqlite_write32bits(sqlite3_file *file, i64 offset, u32 value)"
+    module: sqlite/write32bits
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: AAPCS alignment padding before offset
+      param_3/r2: offset low word
+      param_4/r3: offset high word
+      stack_arg_1: value
+      FUN_083816cc: store_be32
+      FUN_0837dbf8: sqlite_os_write
+    notes: >-
+      Raw osos.dec bytes are 13 ARM instructions from 0x083989f8 through
+      0x08398a28; the separately linked next function begins at 0x08398a2c.
+      It writes the stack-passed value into a four-byte local buffer through
+      SQLite's store_be32, then forwards that buffer with fixed length 4 and
+      the aligned i64 offset to sqlite_os_write, returning its status unchanged.
+      Decoding every ARM B/BL word verifies five inbound direct calls, all
+      unconditional plain BL at 0x082deab4, 0x082deb18, 0x082dec68,
+      0x08392a9c, and 0x08398bfc; no predicated call or tail branch targets
+      this entry. Host tests cover zero, mixed-byte, and all-one values at
+      i64::MIN, a negative offset, and i64::MAX, asserting encoded bytes,
+      fixed amount, exact offset, file pointer, and unchanged error status.
+
   - address: 0x0839944c
     ghidra: FUN_0839944c
     name: path_entry_probe_and_mark_present
