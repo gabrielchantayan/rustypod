@@ -13830,13 +13830,38 @@ functions:
       source and original disassembly show direct calls to unsigned div/mod
       0x08036f14, bounded output 0x08280f7c, padding 0x080ec120, and length
       scan 0x08392478; literal pool 0x080e95fc contains 0x083ecb4c for the
-      digit-byte lookup. The three unported external helpers are volatile
-      formatter seams in printf/printf_radix_integer; focused host tests
-      install deterministic counterparts and cover INT_MIN, sign/zero
-      precision, leading/trailing width padding, radix conversion, count,
-      and callback order. match.py confirms the same signed-magnitude,
-      division/reverse-buffer, precision, sign, pre/output/post control
-      flow; indirect seams make the Rust body longer than the direct BLs.
+      digit-byte lookup. The unported divide helper remains a volatile
+      formatter seam; focused host tests install a deterministic counterpart
+      and cover INT_MIN, sign/zero precision, leading/trailing width padding,
+      radix conversion, count, and callback order. match.py confirms the same
+      signed-magnitude, division/reverse-buffer, precision, sign,
+      pre/output/post control flow.
+
+  - address: 0x080ec120
+    ghidra: FUN_080ec120
+    name: format_field_padding
+    size: 72
+    sig: "void format_field_padding(u32 phase, RadixFormatSpec *spec)"
+    module: printf/format_field_padding
+    status: ported
+    renames:
+      param_1/r0: phase
+      param_2/r1/r4: spec
+      param_2_plus_0x10: padding_enabled
+      param_2_plus_0x20: text_len
+      param_2_plus_0x24: width
+      param_2_plus_0x2c: fill
+    notes: >-
+      True raw ARM extent is 72 bytes, exactly 18 instructions from
+      0x080ec120 through 0x080ec164; the separately linked sibling starts at
+      0x080ec168. Decoding every ARM B/BL immediate in osos.dec finds six
+      inbound direct bl callers, all unconditional and no predicated forms:
+      0x08077e84, 0x08077ec8, 0x080e95c8, 0x080e95f0, 0x080ec0e8, and
+      0x080ec110. The helper returns unless padding_enabled and phase are
+      both nonzero, then signed-compares text_len with width and emits fill
+      through ported format_bounded_byte until local position reaches width.
+      Accounting and output truncation are consequently owned by the bounded
+      output helper; stock has no NULL guard. No deliberate deviations.
 
   - address: 0x080e9600
     ghidra: FUN_080e9600
