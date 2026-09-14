@@ -2398,30 +2398,10 @@ mod tests {
             .map(|pointer| pointer as usize)
         });
     static OWNER_STRING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    static mut OWNER_STRING_POOL_CALLS: u32 = 0;
-    static mut OWNER_STRING_POOL: usize = 0;
-    static mut OWNER_STRING_ID: i32 = 0;
-    static mut OWNER_STRING_MAX_LEN: u32 = 0;
     static mut OWNER_STRING_ALLOCATE_CALLS: u32 = 0;
     static mut OWNER_STRING_CLEAR_CALLS: u32 = 0;
     static mut OWNER_STRING_OUTPUT: [u8; 8] = [0; 8];
 
-    unsafe extern "C" fn recording_owner_string_pool_read(
-        pool: *mut crate::util::string_pool::StringPool,
-        id: i32,
-        dst: *mut u8,
-        len_out: *mut u32,
-        max_len: u32,
-    ) -> i32 {
-        OWNER_STRING_POOL_CALLS += 1;
-        OWNER_STRING_POOL = pool as usize;
-        OWNER_STRING_ID = id;
-        OWNER_STRING_MAX_LEN = max_len;
-        dst.cast::<u16>().write(0x0041);
-        dst.cast::<u16>().add(1).write(0x00e9);
-        len_out.write(4);
-        0
-    }
 
     unsafe extern "C" fn recording_owner_string_allocate(
         _this: *mut StringObject,
@@ -2437,22 +2417,16 @@ mod tests {
     }
 
     struct OwnerStringOpsGuard {
-        pool_read: crate::util::string_pool::StringPoolRead,
         string_ops: crate::cxx::string_object::StringObjectAssignCstrOps,
     }
 
     impl OwnerStringOpsGuard {
         unsafe fn install() -> Self {
             let guard = Self {
-                pool_read: ptr::read_volatile(ptr::addr_of!(
-                    crate::util::string_pool::STRING_POOL_READ
-                )),
                 string_ops: ptr::read_volatile(ptr::addr_of!(
                     crate::cxx::string_object::STRING_OBJECT_ASSIGN_CSTR_OPS
                 )),
             };
-            ptr::addr_of_mut!(crate::util::string_pool::STRING_POOL_READ)
-                .write_volatile(recording_owner_string_pool_read);
             ptr::addr_of_mut!(crate::cxx::string_object::STRING_OBJECT_ASSIGN_CSTR_OPS)
                 .write_volatile(crate::cxx::string_object::StringObjectAssignCstrOps {
                     allocate_payload: recording_owner_string_allocate,
@@ -2465,22 +2439,32 @@ mod tests {
     impl Drop for OwnerStringOpsGuard {
         fn drop(&mut self) {
             unsafe {
-                ptr::addr_of_mut!(crate::util::string_pool::STRING_POOL_READ)
-                    .write_volatile(self.pool_read);
                 ptr::addr_of_mut!(crate::cxx::string_object::STRING_OBJECT_ASSIGN_CSTR_OPS)
                     .write_volatile(self.string_ops);
             }
         }
     }
 
-    fn owner_string_context(entry_id: i32) -> Option<*mut u8> {
+
+    unsafe fn owner_string_context(
+        entry_id: i32,
+        entries: *mut crate::util::string_pool::PoolEntry,
+        payload: *mut u8,
+    ) -> Option<*mut u8> {
         let base = (*OWNER_STRING_FIXTURE)? as *mut u8;
-        unsafe {
-            ptr::write_bytes(base, 0, OWNER_STRING_FIXTURE_LEN);
-            let context_owner = base.add(OWNER_STRING_CONTEXT_OWNER_OFFSET);
-            base.cast::<u32>().write(context_owner as usize as u32);
-            base.add(0x34).cast::<i32>().write(entry_id);
-        }
+        ptr::write_bytes(base, 0, OWNER_STRING_FIXTURE_LEN);
+        let context_owner = base.add(OWNER_STRING_CONTEXT_OWNER_OFFSET);
+        base.cast::<u32>().write(context_owner as usize as u32);
+        base.add(0x34).cast::<i32>().write(entry_id);
+        let pool = context_owner.add(0x1c8).cast::<crate::util::string_pool::StringPool>();
+        let entries_cell = context_owner.add(0x400).cast::<*mut crate::util::string_pool::PoolEntry>();
+        let payload_cell = context_owner.add(0x408).cast::<*mut u8>();
+        entries_cell.write(entries);
+        payload_cell.write(payload);
+        (*pool).tag = 0x7374_7263;
+        (*pool).entries = entries_cell;
+        (*pool).payload = payload_cell;
+        (*pool).entry_count = 1;
         Some(base)
     }
 
@@ -2492,22 +2476,22 @@ mod tests {
         let _validity_lock = SLOT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _pool_lock = crate::util::string_pool::STRING_POOL_SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _assign_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(context) = owner_string_context(-42) else {
+        let mut entries = [crate::util::string_pool::PoolEntry {
+            blob_offset: 0,
+            length: 4,
+        }];
+        let mut payload = [0x41, 0x00, 0xe9, 0x00];
+        let Some(context) = (unsafe {
+            owner_string_context(1, entries.as_mut_ptr(), payload.as_mut_ptr())
+        }) else {
             assert!(crate::testing::note_missing_u32_fixture(module_path!()));
             return;
         };
         let _restore = unsafe { OwnerStringOpsGuard::install() };
         unsafe {
-            OWNER_STRING_POOL_CALLS = 0;
-            OWNER_STRING_POOL = 0;
-            OWNER_STRING_ID = 0;
-            OWNER_STRING_MAX_LEN = 0;
             OWNER_STRING_ALLOCATE_CALLS = 0;
             OWNER_STRING_CLEAR_CALLS = 0;
             OWNER_STRING_OUTPUT = [0xa5; 8];
@@ -2534,13 +2518,6 @@ mod tests {
         unsafe {
             assert_eq!(VALIDITY_CALLS, 1);
             assert_eq!(VALIDITY_TOKEN as usize, &token as *const ScopedContext as usize);
-            assert_eq!(OWNER_STRING_POOL_CALLS, 1);
-            assert_eq!(
-                OWNER_STRING_POOL,
-                context.add(OWNER_STRING_CONTEXT_OWNER_OFFSET + 0x1c8) as usize
-            );
-            assert_eq!(OWNER_STRING_ID, -42);
-            assert_eq!(OWNER_STRING_MAX_LEN, 0x1fe);
             assert_eq!(OWNER_STRING_ALLOCATE_CALLS, 1);
             assert_eq!(OWNER_STRING_CLEAR_CALLS, 0);
             assert_eq!(&OWNER_STRING_OUTPUT[..4], b"A\xc3\xa9\0");
@@ -2550,7 +2527,6 @@ mod tests {
             VALIDITY_RESULT = 0;
             scoped_context_assign_owner_string(&token, &mut out);
             assert_eq!(VALIDITY_CALLS, 2);
-            assert_eq!(OWNER_STRING_POOL_CALLS, 1, "invalidity skips the owner read");
             assert_eq!(OWNER_STRING_ALLOCATE_CALLS, 1);
             assert_eq!(OWNER_STRING_CLEAR_CALLS, 1, "the empty literal reaches clear");
         }

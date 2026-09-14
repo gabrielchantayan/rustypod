@@ -23437,6 +23437,48 @@ functions:
       returning its computed rate and a pre-captured sample preserving an
       arbitrary full-width (0xfffffffe) rate without invoking either helper.
 
+  - address: 0x080b4318
+    ghidra: FUN_080b4318
+    name: string_pool_read
+    size: 204
+    sig: "i32 string_pool_read(StringPool *pool, i32 id, u8 *dst, u32 *len_out, u32 max_len)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: id
+      param_3/r2: dst
+      param_4/r3: len_out
+      param_5/[sp+0x20]: max_len
+      r5: entry
+      r6: copied_len
+      FUN_080a7714: crts_has_tag (ported)
+      FUN_0808e16c: tagged_counter_try_increment (ported)
+      FUN_080ac160: unported entry acceptance predicate
+      FUN_08042cbc: bcopy (ported)
+      FUN_0809f744: tagged_counter_try_decrement (ported)
+    notes: >-
+      Raw ARM establishes the 204-byte extent exactly: push {r4-r9,sl,lr} at
+      0x080b4318 through pop {r4-r9,sl,pc} at 0x080b43e0; the separately
+      linked next function starts with b 0x082841c8 at 0x080b43e4. Decoding
+      every ARM B/BL word in osos.dec finds six direct callers, all plain bl:
+      0x080523a4, 0x080bd8d4, 0x080be858, 0x080be8a0, 0x082a2a14, and
+      0x082a2a6c; there are no predicated BL forms or data-word references.
+      The reader zeroes non-NULL len_out before validation, validates the
+      crts tag and positive in-range id, increments the +0x30 counter, accepts
+      an entry only if blob_offset is non-negative and length positive, then
+      copies min(length, max_len interpreted signed) for non-NULL dst, writes
+      the copied length, and decrements the counter. The exact two-word
+      predicate from unported 0x080ac160 is inlined without assigning a
+      semantic callee identity. Existing tag/counter ports are called directly;
+      bcopy is loaded volatile to preserve its call target instead of an AEABI
+      builtin. Host tests cover mandatory length clearing, id-zero no-op,
+      malformed entries, signed clipping, NULL output, and lock restoration.
+      Deliberate host-only deviation: native handle pointers move lock_depth
+      away from +0x30, so the host model updates that field directly; target
+      builds call the two ported counter functions. match.py structural exit-1
+      diff is expected and reviewed.
+
   - address: 0x080bd8bc
     ghidra: FUN_080bd8bc
     name: string_pool_read_counted
@@ -23450,7 +23492,7 @@ functions:
       param_3/r2: counted
       param_4/r3: initial_byte_len
       local_c: byte_len
-      FUN_080b4318: string_pool_read seam
+      FUN_080b4318: string_pool_read (ported)
       DAT_080bd8ec: max_read_bytes (510)
     notes: >-
       Raw ARM establishes the 52-byte extent: the 12 instruction words run
@@ -23461,15 +23503,12 @@ functions:
       six direct callers, all unconditional bl at 0x080530fc, 0x080537e0,
       0x08095da8, 0x0809603c, 0x080dcafc, and 0x0813db6c; no predicated
       forms, tail branches, or aligned raw data-word references occur.
-      The wrapper calls the unported string_pool_read seam with destination
+      The wrapper calls ported string_pool_read directly with destination
       counted+1, byte-length output local, and fixed max_len 510, then writes
       floor(byte_len / 2) into counted[0], ignoring the status. The r3 input
       initializes the local, but reader 0x080b4318 clears its non-NULL length
-      output before validation, so it is unobservable. No new seam: the
-      existing volatile STRING_POOL_READ boundary remains the target call
-      through retail 0x080b4318. Host tests cover odd-length flooring, exact
-      forwarded arguments, and failure after the reader's mandatory length
-      clear. match.py structural exit-1 diff is expected and reviewed.
+      output before validation, so it is unobservable. match.py structural
+      exit-1 diff is expected and reviewed.
 
   - address: 0x080bd8f0
     ghidra: FUN_080bd8f0
@@ -67285,7 +67324,7 @@ functions:
       param_2/r1-r6: src_id
       param_3/r2-r7: dst
       param_4/r3-r8: dst_id_out
-      FUN_080b4318: string_pool_read seam (pool blob reader, unported)
+      FUN_080b4318: string_pool_read (ported)
       FUN_080c5a94: string_pool_intern seam (pool interning writer, unported)
       FUN_0805d1d4: malloc_tag4
       FUN_0805d070: free_tag4
@@ -67294,7 +67333,7 @@ functions:
       "0xffffff94": MEM_FULL_ERR (-108, Mac OS memFullErr)
     notes: >-
       Copies one entry between two "crts" pools: queries the payload
-      length of entry src_id in src through the unported reader
+      length of entry src_id in src through ported string_pool_read
       0x080b4318 (dst NULL, max_len 0x7fffffff), stages the payload
       through a 512-byte stack buffer when it fits (unsigned cmp, so
       exactly 512 stays on the stack) or a malloc_tag4 allocation
@@ -67313,24 +67352,15 @@ functions:
       0x0806ad74, whose final +0x8a8 slot open-codes this exact sequence
       inline and confirms the semantics, plus one in 0x080d189c), and
       one tail b at 0x0806b03c; the address occurs in no data word, so
-      it is never dispatched virtually. Deliberate deviations: the two
-      unported pool callees dispatch through the volatile STRING_POOL_READ
-      / STRING_POOL_INTERN seams whose target defaults transmute the
-      retail addresses (the util/crts_object.rs precedent — no identity
-      beyond the verified behaviour is invented for either), while the
-      already-ported malloc_tag4/free_tag4 are called directly per
-      util/inner_state.rs; the scratch buffer is MaybeUninit so no memset
-      appears where the original has none, and the free condition
-      (blob != stack blob) is computed from the allocation choice, which
-      is equivalent. match.py structural (exit-1 diff expected): same
-      query/allocate/copy/intern/free shape with the same mvn #107
-      failure path; differs by the crate fp frame and blx dispatch
-      through the volatile seams. Eight host tests through recording
-      read/intern seams and the shared mock heap prove query-failure
-      short-circuit, stack staging at 5 and exactly 512 bytes, the 513
-      byte heap round trip with tag-4 alloc and free, memFullErr on
-      allocation failure, copy-read and intern failure propagation with
-      the heap buffer still freed, and the zero-length blob.
+      it is never dispatched virtually. Deliberate deviations: ported
+      string_pool_read is called directly; only the unported interning writer
+      uses the volatile STRING_POOL_INTERN seam. The already-ported
+      malloc_tag4/free_tag4 are called directly per util/inner_state.rs; the
+      scratch buffer is MaybeUninit so no memset appears where the original
+      has none, and the free condition is computed from the allocation choice,
+      which is equivalent. match.py structural (exit-1 diff expected): same
+      query/allocate/copy/intern/free shape with the same mvn #107 failure
+      path; differs by the crate frame and the remaining intern seam.
 
   # --- "crts" string-pool counted-string store (util/string_pool) ---
   - address: 0x080be81c

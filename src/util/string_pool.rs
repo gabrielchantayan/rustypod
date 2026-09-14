@@ -97,6 +97,14 @@
 use core::mem::{offset_of, MaybeUninit};
 use core::ptr;
 use crate::util::crts_tag::crts_has_tag;
+#[cfg(target_pointer_width = "32")]
+use crate::util::tagged_counter::{tagged_counter_try_decrement, tagged_counter_try_increment};
+
+type BcopyPort = unsafe extern "C" fn(*const u8, *mut u8, usize);
+
+/// A volatile load prevents LLVM from recognizing bcopy's memmove tail and
+/// replacing the call with an AEABI builtin.
+static BCOPY_PORT: BcopyPort = crate::libc::bcopy::bcopy;
 #[cfg(test)]
 use crate::util::crts_tag::CRTS_TAG;
 #[cfg(test)]
@@ -159,8 +167,11 @@ pub struct StringPool {
     /// +0x0c — handle to the parallel `i32` refcount array. Read only when
     /// [`FLAG_REFCOUNTED`] is set.
     pub refcounts: *mut *mut i32,
-    /// +0x10..+0x1c — blob handle and the two hash-index arrays.
-    payload_and_index: [u32; 3],
+    /// +0x10 — handle to the byte blob. The reader dereferences this
+    /// master pointer only when copying payload bytes.
+    pub payload: *mut *mut u8,
+    /// +0x14..+0x1c — the two hash-index arrays and entry count.
+    hash_indices: [u32; 2],
     /// +0x1c — number of entries the arrays hold; the largest valid id.
     pub entry_count: i32,
     /// +0x20..+0x30 — free-list head, blob accounting and growth steps.
@@ -178,7 +189,7 @@ pub struct StringPool {
 const _: () = {
     assert!(offset_of!(StringPool, entries) == 0x08);
     assert!(offset_of!(StringPool, refcounts) == 0x0c);
-    assert!(offset_of!(StringPool, entry_count) == 0x1c);
+    assert!(offset_of!(StringPool, payload) == 0x10);
     assert!(offset_of!(StringPool, lock_depth) == 0x30);
     assert!(offset_of!(StringPool, reclaimable_bytes) == 0x34);
     assert!(core::mem::size_of::<PoolEntry>() == 8);
@@ -257,8 +268,87 @@ pub const STACK_BLOB_CAPACITY: usize = 512;
 /// length, there is no buffer to clip to".
 pub const QUERY_MAX_LEN: u32 = 0x7fff_ffff;
 
-/// RetailOS load address of the unported pool blob reader (204 bytes).
-pub const STRING_POOL_READ_ADDRESS: usize = 0x080b_4318;
+/// string_pool_read — original: `FUN_080b4318` @ 0x080b4318 (204 bytes;
+/// **6 direct `bl` call sites, all unconditional**, binary-scanned).
+///
+/// Raw ARM establishes the exact extent: `push {r4-r9,sl,lr}` begins at
+/// 0x080b4318, `pop {r4-r9,sl,pc}` returns at 0x080b43e0, and the next
+/// separately linked function begins with `b 0x082841c8` at 0x080b43e4.
+/// It first clears non-NULL `len_out`, then validates the `"crts"` tag and
+/// a positive 1-based `id` in range. It increments the pool's +0x30 counter,
+/// accepts an entry only when both signed words are positive/non-negative,
+/// copies `min(entry.length, max_len as i32)` bytes only for non-NULL `dst`,
+/// writes that length, and decrements the counter on both entry outcomes.
+///
+/// The separately linked 0x080ac160 acceptance predicate is unported. Its
+/// verified two-word condition is inlined; no semantic identity is assigned
+/// to that callee. Existing 0x080a7714 / 0x0808e16c / 0x0809f744 ports are
+/// called directly. The bcopy function pointer is read volatile to prevent
+/// LLVM replacing its memmove tail with an AEABI builtin; there is no seam.
+///
+/// On 64-bit hosts, `StringPool` uses native handle pointers, so its
+/// `lock_depth` is not at the target's +0x30. The host build updates that
+/// modeled field directly; 32-bit firmware calls the two counter ports.
+///
+/// # Safety
+///
+/// A tag-valid pool with an accepted id must carry live entry and payload
+/// handles. `dst`, when non-NULL, must have room for the signed-clamped
+/// length; retailOS deliberately has no guard for a negative `max_len`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_read(
+    pool: *mut StringPool,
+    id: i32,
+    dst: *mut u8,
+    len_out: *mut u32,
+    max_len: u32,
+) -> i32 {
+    if !len_out.is_null() {
+        len_out.write(0);
+    }
+    if crts_has_tag(pool.cast()) == 0 {
+        return PARAM_ERR;
+    }
+    if id == 0 {
+        return 0;
+    }
+    if id < 0 || id > (*pool).entry_count {
+        return PARAM_ERR;
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    let _ = tagged_counter_try_increment(pool.cast());
+    #[cfg(not(target_pointer_width = "32"))]
+    {
+        (*pool).lock_depth = (*pool).lock_depth.wrapping_add(1);
+    }
+    let entry = (*(*pool).entries).add((id - 1) as usize);
+    let status = if ((*entry).blob_offset as i32) < 0 || (*entry).length <= 0 {
+        PARAM_ERR
+    } else {
+        let copied_len = (*entry).length.min(max_len as i32);
+        if !dst.is_null() {
+            let payload = *(*pool).payload;
+            ptr::read_volatile(ptr::addr_of!(BCOPY_PORT))(
+                payload.add((*entry).blob_offset as usize),
+                dst,
+                copied_len as usize,
+            );
+        }
+        if !len_out.is_null() {
+            len_out.write(copied_len as u32);
+        }
+        0
+    };
+    #[cfg(target_pointer_width = "32")]
+    let _ = tagged_counter_try_decrement(pool.cast());
+    #[cfg(not(target_pointer_width = "32"))]
+    if (*pool).lock_depth > 0 {
+        (*pool).lock_depth -= 1;
+    }
+    status
+}
 
 /// RetailOS load address of the unported pool interning writer
 /// (824 bytes).
@@ -268,23 +358,6 @@ pub const STRING_POOL_INTERN_ADDRESS: usize = 0x080c_5a94;
 /// [`string_pool_store_counted`] tail-branches into (76 bytes; the
 /// `bx lr` at 0x080b4eb0 is inter-function alignment padding, not body).
 pub const STRING_POOL_STORE_ADDRESS: usize = 0x080b_4e60;
-
-/// ABI of the pool blob reader @ 0x080b4318, decoded from raw bytes.
-/// With `dst` NULL it reports the payload length of entry `id` through
-/// `len_out` without copying; otherwise it copies
-/// `min(entry_len, max_len)` bytes (signed compare) into `dst`, re-locks
-/// the pool's +0x30 counter around the read, and stores the copied length
-/// to `len_out`. Returns 0 on success (id 0 is an immediate success
-/// no-op), [`PARAM_ERR`] (-50) for a NULL or foreign-tagged pool, a
-/// negative or out-of-range id, or a non-live entry. A NULL `len_out`
-/// is tolerated.
-pub type StringPoolRead = unsafe extern "C" fn(
-    pool: *mut StringPool,
-    id: i32,
-    dst: *mut u8,
-    len_out: *mut u32,
-    max_len: u32,
-) -> i32;
 
 /// ABI of the pool interning writer @ 0x080c5a94. Stores `len` bytes
 /// from `data` as a pool entry — first searching live entries for an
@@ -311,29 +384,6 @@ pub type StringPoolIntern = unsafe extern "C" fn(
 pub type StringPoolStore = StringPoolIntern;
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn retail_string_pool_read(
-    pool: *mut StringPool,
-    id: i32,
-    dst: *mut u8,
-    len_out: *mut u32,
-    max_len: u32,
-) -> i32 {
-    let body: StringPoolRead = core::mem::transmute(STRING_POOL_READ_ADDRESS);
-    body(pool, id, dst, len_out, max_len)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_pool_read(
-    _pool: *mut StringPool,
-    _id: i32,
-    _dst: *mut u8,
-    _len_out: *mut u32,
-    _max_len: u32,
-) -> i32 {
-    panic!("string_pool_copy_entry requires pool reader 0x080b4318")
-}
-
-#[cfg(target_os = "none")]
 unsafe extern "C" fn retail_string_pool_intern(
     pool: *mut StringPool,
     data: *const u8,
@@ -343,6 +393,7 @@ unsafe extern "C" fn retail_string_pool_intern(
     let body: StringPoolIntern = core::mem::transmute(STRING_POOL_INTERN_ADDRESS);
     body(pool, data, len, id_out)
 }
+
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_string_pool_intern(
@@ -375,18 +426,8 @@ unsafe extern "C" fn missing_string_pool_store(
     panic!("string_pool_store_counted requires replace-and-intern wrapper 0x080b4e60")
 }
 
-/// Active boundary for the unported pool blob reader. On the target it
-/// calls directly into retailOS @ 0x080b4318; host tests replace it with
-/// a recording implementation.
-#[cfg(target_os = "none")]
-pub static mut STRING_POOL_READ: StringPoolRead = retail_string_pool_read;
-
-/// Active host boundary for the unported pool blob reader.
-#[cfg(not(target_os = "none"))]
-pub static mut STRING_POOL_READ: StringPoolRead = missing_string_pool_read;
-
-/// Active boundary for the unported pool interning writer, same policy
-/// as [`STRING_POOL_READ`]; retail target 0x080c5a94.
+/// Active boundary for the unported pool interning writer; host tests replace
+/// it with a recording implementation.
 #[cfg(target_os = "none")]
 pub static mut STRING_POOL_INTERN: StringPoolIntern = retail_string_pool_intern;
 
@@ -394,18 +435,14 @@ pub static mut STRING_POOL_INTERN: StringPoolIntern = retail_string_pool_intern;
 #[cfg(not(target_os = "none"))]
 pub static mut STRING_POOL_INTERN: StringPoolIntern = missing_string_pool_intern;
 
-#[inline(always)]
-unsafe fn string_pool_read_seam() -> StringPoolRead {
-    ptr::read_volatile(ptr::addr_of!(STRING_POOL_READ))
-}
 
 #[inline(always)]
 unsafe fn string_pool_intern_seam() -> StringPoolIntern {
     ptr::read_volatile(ptr::addr_of!(STRING_POOL_INTERN))
 }
 
-/// Active boundary for the unported replace-and-intern wrapper, same
-/// policy as [`STRING_POOL_READ`]; retail target 0x080b4e60.
+/// Active boundary for the unported replace-and-intern wrapper; retail target
+/// 0x080b4e60.
 #[cfg(target_os = "none")]
 pub static mut STRING_POOL_STORE: StringPoolStore = retail_string_pool_store;
 
@@ -456,13 +493,9 @@ unsafe fn string_pool_store_seam() -> StringPoolStore {
 ///
 /// # Deliberate deviations
 ///
-/// - The two unported pool callees dispatch through the volatile seams
-///   [`STRING_POOL_READ`] and [`STRING_POOL_INTERN`]; their target
-///   defaults transmute the retail addresses 0x080b4318 / 0x080c5a94, so
-///   the port is hook-ready on device, while host tests install
-///   recording mocks (the `util/crts_object.rs` precedent). No identity
-///   beyond the verified behaviour documented on the ABI types is
-///   invented for either.
+/// - The reader @ 0x080b4318 is now ported as [`string_pool_read`] and is
+///   called directly. The unported interning writer continues to use
+///   [`STRING_POOL_INTERN`] so host tests can record its ABI.
 /// - `malloc_tag4` / `free_tag4` are already ported
 ///   (`crate::heap::veneers`); they are called directly, matching
 ///   `util/inner_state.rs`.
@@ -487,7 +520,7 @@ pub unsafe extern "C" fn string_pool_copy_entry(
     dst_id_out: *mut i32,
 ) -> i32 {
     let mut len: u32 = 0;
-    let status = string_pool_read_seam()(src, src_id, ptr::null_mut(), &mut len, QUERY_MAX_LEN);
+    let status = string_pool_read(src, src_id, ptr::null_mut(), &mut len, QUERY_MAX_LEN);
     if status != 0 {
         return status;
     }
@@ -501,7 +534,7 @@ pub unsafe extern "C" fn string_pool_copy_entry(
     if blob.is_null() {
         return MEM_FULL_ERR;
     }
-    let mut status = string_pool_read_seam()(src, src_id, blob, &mut len, len);
+    let mut status = string_pool_read(src, src_id, blob, &mut len, len);
     if status == 0 {
         status = string_pool_intern_seam()(dst, blob, len, dst_id_out);
     }
@@ -656,9 +689,8 @@ pub unsafe extern "C" fn string_pool_intern_counted(
 /// next function begins with `ldr r2,[pc,#92]` at 0x080bd8f0. Ghidra's
 /// reported 48-byte body excludes the literal pool. The six direct callers
 /// are 0x080530fc, 0x080537e0, 0x08095da8, 0x0809603c, 0x080dcafc, and
-/// 0x0813db6c; none is predicated. No deviation: the already-established
-/// volatile [`STRING_POOL_READ`] seam reaches the unported reader at
-/// 0x080b4318 on device and records its ABI in host tests.
+/// 0x0813db6c; none is predicated. No deviation: it calls the ported
+/// [`string_pool_read`] directly.
 ///
 /// # Safety
 ///
@@ -674,7 +706,7 @@ pub unsafe extern "C" fn string_pool_read_counted(
     initial_byte_len: u32,
 ) {
     let mut byte_len = initial_byte_len;
-    let _ = string_pool_read_seam()(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
+    let _ = string_pool_read(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
     counted.write((byte_len >> 1) as u16);
 }
 
@@ -707,7 +739,7 @@ pub unsafe extern "C" fn string_pool_read_counted(
 /// `context` must be 4-byte aligned and point to readable target-layout
 /// words at `+0x00` and `+0x34`; its first word must name an owner with a
 /// valid pool at `+0x1c8`. `counted` must point to writable storage for one
-/// leading `u16` plus 255 UTF-16 units. The unported reader validates its
+/// leading `u16` plus 255 UTF-16 units; [`string_pool_read`] validates the
 /// pool/id inputs but is otherwise called unchecked.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -719,7 +751,7 @@ pub unsafe extern "C" fn string_pool_read_counted_from_context(
     let pool = owner.add(0x1c8).cast::<StringPool>();
     let entry_id = context.add(0x34).cast::<i32>().read();
     let mut byte_len = 0u32;
-    let _ = string_pool_read_seam()(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
+    let _ = string_pool_read(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
     counted.write((byte_len >> 1) as u16);
 }
 
@@ -732,8 +764,6 @@ mod tests {
     use super::*;
     use std::boxed::Box;
     use std::vec::Vec;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::LazyLock;
 
 
     /// A pool whose two handles resolve to owned arrays. The cells hold the
@@ -742,8 +772,10 @@ mod tests {
     struct Fixture {
         entries: Vec<PoolEntry>,
         refcounts: Vec<i32>,
+        payload: Vec<u8>,
         entries_cell: *mut PoolEntry,
         refcounts_cell: *mut i32,
+        payload_cell: *mut u8,
         pool: StringPool,
     }
 
@@ -754,14 +786,17 @@ mod tests {
         let mut fixture = Box::new(Fixture {
             entries,
             refcounts,
+            payload: Vec::new(),
             entries_cell: core::ptr::null_mut(),
             refcounts_cell: core::ptr::null_mut(),
+            payload_cell: core::ptr::null_mut(),
             pool: StringPool {
                 tag: CRTS_TAG,
                 flags,
                 entries: core::ptr::null_mut(),
                 refcounts: core::ptr::null_mut(),
-                payload_and_index: [0; 3],
+                payload: core::ptr::null_mut(),
+                hash_indices: [0; 2],
                 entry_count,
                 allocator_state: [0; 4],
                 lock_depth: 0,
@@ -770,8 +805,20 @@ mod tests {
         });
         fixture.entries_cell = fixture.entries.as_mut_ptr();
         fixture.refcounts_cell = fixture.refcounts.as_mut_ptr();
+        fixture.payload_cell = fixture.payload.as_mut_ptr();
         fixture.pool.entries = core::ptr::addr_of_mut!(fixture.entries_cell);
         fixture.pool.refcounts = core::ptr::addr_of_mut!(fixture.refcounts_cell);
+        fixture.pool.payload = core::ptr::addr_of_mut!(fixture.payload_cell);
+        fixture
+    }
+
+    fn payload_fixture(payload: Vec<u8>) -> Box<Fixture> {
+        let mut fixture = fixture(0, std::vec![PoolEntry {
+            blob_offset: 0,
+            length: payload.len() as i32,
+        }], Vec::new());
+        fixture.payload = payload;
+        fixture.payload_cell = fixture.payload.as_mut_ptr();
         fixture
     }
 
@@ -958,27 +1005,11 @@ mod tests {
         assert_eq!(f.entries[0].blob_offset, 0, "the old block is not touched");
     }
 
-    // --- string_pool_copy_entry seam-mock scaffolding ---
-
-    use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
     use std::sync::MutexGuard;
 
-    /// Sentinel pool pointers; the copy function never dereferences them
-    /// and the recording mocks only compare them.
     const SRC_POOL: usize = 0x5000_0000;
     const DST_POOL: usize = 0x5000_0100;
 
-    /// One observed reader call. `dst == 0` marks the size query.
-    #[derive(Clone, PartialEq, Debug)]
-    struct ReadCall {
-        pool: usize,
-        id: i32,
-        dst: usize,
-        max_len: u32,
-    }
-
-    /// One observed intern call, with the payload bytes captured at call
-    /// time (the scratch buffer is dead by assert time).
     #[derive(Clone, PartialEq, Debug)]
     struct InternCall {
         pool: usize,
@@ -987,46 +1018,9 @@ mod tests {
         id_out: usize,
     }
 
-    static mut READ_CALLS: Vec<ReadCall> = Vec::new();
-    static mut READ_QUERY_STATUS: i32 = 0;
-    static mut READ_COPY_STATUS: i32 = 0;
-    /// Payload the mock reader reports and copies.
-    static mut PAYLOAD: Vec<u8> = Vec::new();
-
     static mut INTERN_CALLS: Vec<InternCall> = Vec::new();
     static mut INTERN_STATUS: i32 = 0;
-    /// Id the mock intern writes through `id_out`.
     static mut INTERN_NEW_ID: i32 = 0;
-
-    unsafe extern "C" fn recording_pool_read(
-        pool: *mut StringPool,
-        id: i32,
-        dst: *mut u8,
-        len_out: *mut u32,
-        max_len: u32,
-    ) -> i32 {
-        if !len_out.is_null() {
-            *len_out = 0;
-        }
-
-        READ_CALLS.push(ReadCall { pool: pool as usize, id, dst: dst as usize, max_len });
-        if dst.is_null() {
-            if READ_QUERY_STATUS == 0 && !len_out.is_null() {
-                *len_out = PAYLOAD.len() as u32;
-            }
-            READ_QUERY_STATUS
-        } else {
-            if READ_COPY_STATUS != 0 {
-                return READ_COPY_STATUS;
-            }
-            let n = core::cmp::min(PAYLOAD.len(), max_len as usize);
-            ptr::copy_nonoverlapping(PAYLOAD.as_ptr(), dst, n);
-            if !len_out.is_null() {
-                *len_out = n as u32;
-            }
-            0
-        }
-    }
 
     unsafe extern "C" fn recording_pool_intern(
         pool: *mut StringPool,
@@ -1051,15 +1045,8 @@ mod tests {
     impl Drop for Reset {
         fn drop(&mut self) {
             unsafe {
-                STRING_POOL_READ = missing_string_pool_read;
                 STRING_POOL_INTERN = missing_string_pool_intern;
                 STRING_POOL_STORE = missing_string_pool_store;
-                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
-                    .write(crate::heap::veneers::DEFAULT_HEAP_OPS);
-                READ_CALLS = Vec::new();
-                READ_QUERY_STATUS = 0;
-                READ_COPY_STATUS = 0;
-                PAYLOAD = Vec::new();
                 INTERN_CALLS = Vec::new();
                 INTERN_STATUS = 0;
                 INTERN_NEW_ID = 0;
@@ -1069,198 +1056,85 @@ mod tests {
         }
     }
 
-    /// Installs the recording seams and the mock heap; returns the locks
-    /// (copy lock first, heap lock second — the inner_state.rs order) and
-    /// the reset guard.
-    fn mock() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, Reset) {
-        let copy_guard = STRING_POOL_SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let heap_guard = mock_heap();
+    #[test]
+    fn reader_clears_length_before_tag_validation() {
+        let mut len = 0xdead_beefu32;
         unsafe {
-            STRING_POOL_READ = recording_pool_read;
-            STRING_POOL_INTERN = recording_pool_intern;
+            assert_eq!(string_pool_read(core::ptr::null_mut(), 1, ptr::null_mut(), &mut len, 1), PARAM_ERR);
         }
-        (copy_guard, heap_guard, Reset)
+        assert_eq!(len, 0);
     }
 
     #[test]
-    fn query_failure_returns_status_and_calls_nothing_else() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
+    fn reader_zero_id_is_a_tagged_no_op() {
+        let mut fixture = payload_fixture(b"payload".to_vec());
+        let mut len = 9u32;
+        let mut dst = [0xa5u8; 2];
         unsafe {
-            READ_QUERY_STATUS = PARAM_ERR;
-            let mut out_id = -1i32;
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                3,
-                DST_POOL as *mut StringPool,
-                &mut out_id,
-            );
-            assert_eq!(status, PARAM_ERR);
-            assert_eq!(out_id, -1, "the intern never ran");
-            assert_eq!(
-                READ_CALLS,
-                std::vec![ReadCall { pool: SRC_POOL, id: 3, dst: 0, max_len: QUERY_MAX_LEN }],
-                "one size query with a NULL buffer"
-            );
-            assert!(INTERN_CALLS.is_empty());
+            assert_eq!(string_pool_read(&mut fixture.pool, 0, dst.as_mut_ptr(), &mut len, 2), 0);
         }
-        assert_eq!(alloc_log().0, 0, "no scratch allocation on query failure");
-        assert_eq!(free_log().0, 0);
+        assert_eq!(len, 0);
+        assert_eq!(dst, [0xa5; 2]);
+        assert_eq!(fixture.pool.lock_depth, 0);
     }
 
     #[test]
-    fn small_blob_copies_through_the_stack_buffer() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
+    fn reader_rejects_negative_offset_or_nonpositive_length_without_locking() {
+        let mut fixture = payload_fixture(b"payload".to_vec());
+        let mut len = 7u32;
+        fixture.pool.lock_depth = 11;
+        fixture.entries[0].blob_offset = 0x8000_0000;
         unsafe {
-            PAYLOAD = b"hello".to_vec();
-            INTERN_NEW_ID = 7;
-            let mut out_id = -1i32;
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                3,
-                DST_POOL as *mut StringPool,
-                &mut out_id,
-            );
-            assert_eq!(status, 0);
-            assert_eq!(out_id, 7);
-            assert_eq!(READ_CALLS.len(), 2, "query then copy");
-            assert_eq!(READ_CALLS[0].dst, 0);
-            assert_eq!(READ_CALLS[0].max_len, QUERY_MAX_LEN);
-            assert_ne!(READ_CALLS[1].dst, 0, "the copy read gets a real buffer");
-            assert_eq!(READ_CALLS[1].max_len, 5, "clipped to the queried length");
-            assert_eq!(
-                INTERN_CALLS,
-                std::vec![InternCall {
-                    pool: DST_POOL,
-                    data: READ_CALLS[1].dst,
-                    bytes: b"hello".to_vec(),
-                    id_out: &mut out_id as *mut i32 as usize,
-                }]
-            );
+            assert_eq!(string_pool_read(&mut fixture.pool, 1, ptr::null_mut(), &mut len, 6), PARAM_ERR);
         }
-        assert_eq!(alloc_log().0, 0, "512 bytes and under stay on the stack");
-        assert_eq!(free_log().0, 0);
+        assert_eq!(len, 0);
+        assert_eq!(fixture.pool.lock_depth, 11);
+        fixture.entries[0].blob_offset = 0;
+        fixture.entries[0].length = 0;
+        len = 7;
+        unsafe {
+            assert_eq!(string_pool_read(&mut fixture.pool, 1, ptr::null_mut(), &mut len, 6), PARAM_ERR);
+        }
+        assert_eq!(len, 0);
+        assert_eq!(fixture.pool.lock_depth, 11);
     }
 
     #[test]
-    fn exactly_512_bytes_stays_on_the_stack() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
+    fn reader_copies_signed_clamped_payload_and_restores_lock_depth() {
+        let mut fixture = payload_fixture(b"_hello!".to_vec());
+        fixture.entries[0].blob_offset = 1;
+        fixture.entries[0].length = 5;
+        fixture.pool.lock_depth = 7;
+        let mut len = 0u32;
+        let mut dst = [0u8; 3];
         unsafe {
-            PAYLOAD = std::vec![0xab; STACK_BLOB_CAPACITY];
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                1,
-                DST_POOL as *mut StringPool,
-                ptr::null_mut(),
-            );
-            assert_eq!(status, 0);
-            assert_eq!(INTERN_CALLS.len(), 1);
-            assert_eq!(INTERN_CALLS[0].bytes.len(), STACK_BLOB_CAPACITY);
-            assert_eq!(INTERN_CALLS[0].id_out, 0, "a NULL id_out passes through");
+            assert_eq!(string_pool_read(&mut fixture.pool, 1, dst.as_mut_ptr(), &mut len, 3), 0);
         }
-        assert_eq!(alloc_log().0, 0, "the original's compare is unsigned ls");
+        assert_eq!(dst, *b"hel");
+        assert_eq!(len, 3);
+        assert_eq!(fixture.pool.lock_depth, 7);
     }
 
     #[test]
-    fn larger_blob_round_trips_through_the_tag4_heap() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
-        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 1];
+    fn reader_applies_signed_maximum_to_null_destination_query() {
+        let mut fixture = payload_fixture(b"payload".to_vec());
+        let mut len = 0u32;
         unsafe {
-            PAYLOAD = (0..=STACK_BLOB_CAPACITY).map(|i| (i & 0xff) as u8).collect();
-            set_alloc_ret(backing.as_mut_ptr());
-            let mut out_id = 0i32;
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                2,
-                DST_POOL as *mut StringPool,
-                &mut out_id,
-            );
-            assert_eq!(status, 0);
-            assert_eq!(INTERN_CALLS.len(), 1);
-            assert_eq!(INTERN_CALLS[0].bytes, PAYLOAD);
+            assert_eq!(string_pool_read(&mut fixture.pool, 1, ptr::null_mut(), &mut len, u32::MAX), 0);
         }
-        assert_eq!(alloc_log(), (1, (STACK_BLOB_CAPACITY + 1) as usize, 4));
-        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4), "scratch freed");
+        assert_eq!(len, u32::MAX, "cmp/movgt treats max_len as signed");
+        assert_eq!(fixture.pool.lock_depth, 0);
     }
 
     #[test]
-    fn allocation_failure_is_mem_full_err() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
+    fn reader_tolerates_a_null_length_output() {
+        let mut fixture = payload_fixture(b"payload".to_vec());
+        let mut dst = [0u8; 7];
         unsafe {
-            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
-            set_alloc_ret(ptr::null_mut());
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                2,
-                DST_POOL as *mut StringPool,
-                ptr::null_mut(),
-            );
-            assert_eq!(status, MEM_FULL_ERR);
-            assert_eq!(READ_CALLS.len(), 1, "no copy read without a buffer");
-            assert!(INTERN_CALLS.is_empty());
+            assert_eq!(string_pool_read(&mut fixture.pool, 1, dst.as_mut_ptr(), ptr::null_mut(), 7), 0);
         }
-        assert_eq!(alloc_log().0, 1);
-        assert_eq!(free_log().0, 0, "nothing to free");
+        assert_eq!(&dst, b"payload");
     }
-
-    #[test]
-    fn copy_read_failure_propagates_and_frees_the_heap_buffer() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
-        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 88];
-        unsafe {
-            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
-            READ_COPY_STATUS = PARAM_ERR;
-            set_alloc_ret(backing.as_mut_ptr());
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                2,
-                DST_POOL as *mut StringPool,
-                ptr::null_mut(),
-            );
-            assert_eq!(status, PARAM_ERR);
-            assert_eq!(READ_CALLS.len(), 2);
-            assert!(INTERN_CALLS.is_empty(), "no intern after a failed read");
-        }
-        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4), "freed on the way out");
-    }
-
-    #[test]
-    fn intern_failure_propagates_and_still_frees() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
-        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 88];
-        unsafe {
-            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
-            INTERN_STATUS = PARAM_ERR;
-            set_alloc_ret(backing.as_mut_ptr());
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                2,
-                DST_POOL as *mut StringPool,
-                ptr::null_mut(),
-            );
-            assert_eq!(status, PARAM_ERR);
-            assert_eq!(INTERN_CALLS.len(), 1);
-        }
-        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4));
-    }
-
-    #[test]
-    fn zero_length_blob_interns_zero_bytes_from_the_stack() {
-        let (_copy_guard, _heap_guard, _reset) = mock();
-        unsafe {
-            PAYLOAD = Vec::new();
-            let status = string_pool_copy_entry(
-                SRC_POOL as *mut StringPool,
-                9,
-                DST_POOL as *mut StringPool,
-                ptr::null_mut(),
-            );
-            assert_eq!(status, 0);
-            assert_eq!(INTERN_CALLS.len(), 1);
-            assert!(INTERN_CALLS[0].bytes.is_empty());
-        }
-        assert_eq!(alloc_log().0, 0);
-    }
-
     /// Installs the recording interning seam for
     /// [`string_pool_intern_counted`]. The shared lock prevents concurrent
     /// replacement of the global function-pointer seam.
@@ -1496,120 +1370,6 @@ mod tests {
             assert_eq!(STORE_CALLS.len(), 1, "the thunk guards nothing itself");
             assert_eq!(STORE_CALLS[0].pool, 0, "even a NULL pool is forwarded");
             assert_eq!(STORE_CALLS[0].bytes, utf16_bytes(&counted[1..]));
-        }
-    }
-    #[test]
-    fn read_counted_forwards_its_abi_and_floors_an_odd_byte_length() {
-        let (_read_guard, _heap_guard, _reset) = mock();
-        let mut counted = [0xdeadu16; 4];
-        unsafe {
-            PAYLOAD = std::vec![0x41, 0x00, 0x42, 0x00, 0x43];
-            string_pool_read_counted(
-                SRC_POOL as *mut StringPool,
-                -17,
-                counted.as_mut_ptr(),
-                0x7654_3210,
-            );
-
-            assert_eq!(counted, [2, 0x0041, 0x0042, 0xde43]);
-            assert_eq!(
-                READ_CALLS,
-                std::vec![ReadCall {
-                    pool: SRC_POOL,
-                    id: -17,
-                    dst: counted.as_ptr() as usize + 2,
-                    max_len: 0x1fe,
-                }]
-            );
-        }
-    }
-
-    #[test]
-    fn read_counted_ignores_reader_failure_after_its_length_clear() {
-        let (_read_guard, _heap_guard, _reset) = mock();
-        let mut counted = [0xabcdu16; 2];
-        unsafe {
-            READ_COPY_STATUS = PARAM_ERR;
-            string_pool_read_counted(
-                core::ptr::null_mut(),
-                3,
-                counted.as_mut_ptr(),
-                u32::MAX,
-            );
-
-            assert_eq!(counted, [0, 0xabcd]);
-            assert_eq!(READ_CALLS.len(), 1);
-            assert_eq!(READ_CALLS[0].pool, 0, "the wrapper guards no arguments");
-            assert_eq!(READ_CALLS[0].id, 3);
-            assert_eq!(READ_CALLS[0].max_len, 0x1fe);
-        }
-    }
-
-    const COUNTED_CONTEXT_FIXTURE_LEN: usize = 0x1000;
-    const COUNTED_CONTEXT_OWNER_OFFSET: usize = 0x100;
-
-    static COUNTED_CONTEXT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
-        try_map_u32_slab(hints::STRING_POOL_READ_COUNTED_CONTEXT, COUNTED_CONTEXT_FIXTURE_LEN)
-            .map(|pointer| pointer as usize)
-    });
-
-    /// Maps the raw target-layout context: its first u32 points to an owner,
-    /// and the reader's `"crts"` pool starts 0x1c8 bytes into that owner.
-    fn counted_context(entry_id: i32) -> Option<*mut u8> {
-        let base = (*COUNTED_CONTEXT_FIXTURE)? as *mut u8;
-        unsafe {
-            ptr::write_bytes(base, 0, COUNTED_CONTEXT_FIXTURE_LEN);
-            let owner = base.add(COUNTED_CONTEXT_OWNER_OFFSET);
-            base.cast::<u32>().write(owner as usize as u32);
-            base.add(0x34).cast::<i32>().write(entry_id);
-        }
-        Some(base)
-    }
-
-    #[test]
-    fn read_counted_uses_context_pool_and_clips_to_510_bytes() {
-        let (_read_guard, _heap_guard, _reset) = mock();
-        let Some(context) = counted_context(-17) else {
-            assert!(note_missing_u32_fixture("util/string_pool counted context"));
-            return;
-        };
-        let mut counted = [0xdeadu16; 256];
-        unsafe {
-            PAYLOAD = (0..512).map(|byte| byte as u8).collect();
-            string_pool_read_counted_from_context(context, counted.as_mut_ptr());
-
-            assert_eq!(counted[0], 255, "the 510-byte cap becomes 255 u16 units");
-            assert_eq!(counted[1], 0x0100);
-            assert_eq!(counted[255], 0xfdfc);
-            assert_eq!(
-                READ_CALLS,
-                std::vec![ReadCall {
-                    pool: context.add(COUNTED_CONTEXT_OWNER_OFFSET + 0x1c8) as usize,
-                    id: -17,
-                    dst: counted.as_ptr() as usize + 2,
-                    max_len: 0x1fe,
-                }]
-            );
-        }
-    }
-
-    #[test]
-    fn read_counted_discards_reader_failure_status_and_zeroes_count() {
-        let (_read_guard, _heap_guard, _reset) = mock();
-        let Some(context) = counted_context(3) else {
-            assert!(note_missing_u32_fixture("util/string_pool counted context"));
-            return;
-        };
-        let mut counted = [0xabcdu16; 256];
-        unsafe {
-            READ_COPY_STATUS = PARAM_ERR;
-            string_pool_read_counted_from_context(context, counted.as_mut_ptr());
-
-            assert_eq!(counted[0], 0, "the reader clears its non-NULL length output");
-            assert_eq!(counted[1], 0xabcd, "a failed read leaves the payload alone");
-            assert_eq!(READ_CALLS.len(), 1);
-            assert_eq!(READ_CALLS[0].id, 3);
-            assert_eq!(READ_CALLS[0].max_len, 0x1fe);
         }
     }
 }
