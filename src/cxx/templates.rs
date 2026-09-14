@@ -1603,6 +1603,13 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// raw body and ABI, so their ledger entries deliberately hook this established
 /// export instead of introducing redundant dispatch seams.
 ///
+/// `FUN_083cf710` @ 0x083cf710 is a separately linked 24-byte copy with five
+/// direct, unconditional `bl` callers (0x08211b64, 0x083b6e88, 0x083b72fc,
+/// 0x083b7318, and 0x083b739c). Its two aligned loads compare dereferenced
+/// words and return normalized equality, with no NULL guard. It deliberately
+/// reuses this byte-identical export: no behavioral deviation or duplicate
+/// dispatch seam is introduced.
+///
 /// `FUN_083cf7d0` @ 0x083cf7d0 is a separately linked 24-byte copy with five
 /// direct, unconditional `bl` callers (0x083c1790, 0x083c1800, 0x083c1c6c,
 /// 0x083c1c88, and 0x083c1d0c); its two aligned loads compare the dereferenced
