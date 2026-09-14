@@ -78005,6 +78005,41 @@ functions:
       A Rust function cannot preserve and consume this continuation contract
       faithfully, so retain status identified until the containing routine can
       be ported as one coherent state machine.
+
+  # --- selective 8-byte vector-record range-copy template ---
+  - address: 0x083e89d0
+    ghidra: thunk_FUN_083e89fc
+    name: vector_copy_range_record8
+    size: 60
+    sig: "VectorRecord8 *vector_copy_range_record8(const VectorRecord8 *first, const VectorRecord8 *last, VectorRecord8 *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: unused_vector
+      r3: copied_byte_or_halfword
+      r12: copied_word
+      return/r0: output_cursor
+    notes: >-
+      Ghidra's 4-byte thunk at 0x083e89d0 is the entry of one 60-byte
+      scheduled range-copy loop: its b 0x083e89fc reaches the compare header,
+      whose backward bne returns to the body at 0x083e89d4; bx lr is at
+      0x083e8a08 and the next separately linked function starts at 0x083e8a0c.
+      Every aligned ARM B/BL immediate in osos.dec decodes to five inbound
+      direct calls, all unconditional plain bl at 0x083e0834, 0x083e0884,
+      0x083e08f4, 0x083e0934, and 0x083e0a4c; there are no predicated calls or
+      direct tail branches. The loop conditionally copies the target fields at
+      record offsets +0 (u32), +4 (u8), and +6 (u16), deliberately leaving
+      byte +5 untouched, advances both cursors by eight, and returns output.
+      An initially NULL output skips only one record's source reads before
+      becoming address 8. The unused r3 vector argument is omitted from Rust.
+      Host tests prove multi-record field copying and padding preservation, an
+      empty range, and that a one-record NULL output does not read a NULL
+      source. match.py confirms the cursor loop, conditional stores, and
+      eight-byte stride; Rust field stores replace the raw ldrb/ldrh sequence.
+
   - address: 0x083e8ba0
     ghidra: FUN_083e8ba0
     name: vector_copy_range_elem24

@@ -50,6 +50,8 @@
 //!   12-byte StringObject-and-word records used by the range-copy template.
 //! - [`vector_copy_range_u32`] — copies a half-open range of 4-byte
 //!   trivially-copyable vector elements into initialized output storage.
+//! - [`vector_copy_range_record8`] — copies the named fields of 8-byte
+//!   vector records while leaving their padding byte intact.
 //! - [`cxx_vector_find_equal`] — searches the COW-string-keyed records
 //!   within the `{unknown, begin, end}` owner shape used by the UI data.
 //! - [`vector_size_elem2`] / [`vector_size_elem4`] /
@@ -3486,6 +3488,71 @@ pub unsafe extern "C" fn vector_copy_range_elem24(
     }
     output
 }
+/// An 8-byte vector record whose +5 byte is padding left untouched by the
+/// retailOS copy assignment.
+///
+/// The raw transfer uses `ldr/str` at +0, `ldrb/strb` at +4, and
+/// `ldrh/strh` at +6. Named fields retain those 32-bit-target offsets and
+/// prevent host pointer width from creating an overlapping representation.
+#[repr(C)]
+pub struct VectorRecord8 {
+    pub word: u32,
+    pub byte: u8,
+    pub padding: u8,
+    pub halfword: u16,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 8] = [0; core::mem::size_of::<VectorRecord8>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 4] = [0; core::mem::offset_of!(VectorRecord8, byte)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 6] = [0; core::mem::offset_of!(VectorRecord8, halfword)];
+
+/// vector_copy_range_record8 — original: `thunk_FUN_083e89fc` @ 0x083e89d0
+/// (60 bytes; Ghidra reports 4).
+///
+/// Copies the non-padding fields of every 8-byte [`VectorRecord8`] in the
+/// half-open `[first, last)` range into `output`, then returns the advanced
+/// output cursor. The original's scheduled loop stores the word at +0, byte
+/// at +4, and halfword at +6, deliberately leaving byte +5 unchanged. Its
+/// five inbound direct calls are all unconditional plain `bl` at 0x083e0834,
+/// 0x083e0884, 0x083e08f4, 0x083e0934, and 0x083e0a4c; decoding every aligned
+/// ARM B/BL word in `osos.dec` finds no predicated calls or tail branches.
+///
+/// Ghidra splits the scheduled loop at 0x083e89fc and calls the four-byte
+/// entry a thunk. Raw bytes show `b 0x083e89fc` at 0x083e89d0 enters this
+/// function's compare header, whose backward `bne` reaches the body at
+/// 0x083e89d4; `bx lr` at 0x083e8a08 and the next independent `push` at
+/// 0x083e8a0c fix the complete 60-byte extent. There are no deliberate
+/// deviations: `wrapping_add` preserves ARM cursor arithmetic, including the
+/// one-record NULL-output path, where neither source nor output is read.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous, aligned [`VectorRecord8`]
+/// records. When `output` is non-NULL, it must designate writable records for
+/// the same range. The original is a forward field copy with no overlap guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_range_record8")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_record8(
+    mut first: *const VectorRecord8,
+    last: *const VectorRecord8,
+    mut output: *mut VectorRecord8,
+) -> *mut VectorRecord8 {
+    while first != last {
+        if !output.is_null() {
+            (*output).word = (*first).word;
+            (*output).byte = (*first).byte;
+            (*output).halfword = (*first).halfword;
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
 
 /// vector_copy_range_u32 — original: `thunk_FUN_083e9430` @ 0x083e9418
 /// (40 bytes; raw extent 0x083e9418..0x083e9440, with the separately linked
@@ -6951,6 +7018,62 @@ mod tests {
         };
 
         assert_eq!(returned, 4usize as *mut u32, "skipped word still advances output");
+    }
+    #[test]
+    fn vector_copy_range_record8_copies_fields_preserves_padding_and_returns_end() {
+        let source = [
+            VectorRecord8 { word: 0x0102_0304, byte: 0x11, padding: 0x12, halfword: 0x1314 },
+            VectorRecord8 { word: 0x2122_2324, byte: 0x31, padding: 0x32, halfword: 0x3334 },
+            VectorRecord8 { word: 0x4142_4344, byte: 0x51, padding: 0x52, halfword: 0x5354 },
+        ];
+        let mut destination = [
+            VectorRecord8 { word: 0xaaaa_aaaa, byte: 0xaa, padding: 0xa1, halfword: 0xaaaa },
+            VectorRecord8 { word: 0xbbbb_bbbb, byte: 0xbb, padding: 0xb2, halfword: 0xbbbb },
+            VectorRecord8 { word: 0xcccc_cccc, byte: 0xcc, padding: 0xc3, halfword: 0xcccc },
+            VectorRecord8 { word: 0xdddd_dddd, byte: 0xdd, padding: 0xd4, halfword: 0xdddd },
+        ];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe {
+            vector_copy_range_record8(source.as_ptr(), source.as_ptr().add(3), output)
+        };
+
+        for index in 0..3 {
+            assert_eq!(destination[index].word, source[index].word);
+            assert_eq!(destination[index].byte, source[index].byte);
+            assert_eq!(destination[index].halfword, source[index].halfword);
+        }
+        assert_eq!([destination[0].padding, destination[1].padding, destination[2].padding], [0xa1, 0xb2, 0xc3]);
+        assert_eq!(destination[3].word, 0xdddd_dddd, "range end is exclusive");
+        assert_eq!(returned, unsafe { output.add(3) });
+    }
+
+    #[test]
+    fn vector_copy_range_record8_empty_range_leaves_output_unchanged() {
+        let source = [VectorRecord8 { word: 1, byte: 2, padding: 3, halfword: 4 }];
+        let mut destination = [VectorRecord8 { word: 5, byte: 6, padding: 7, halfword: 8 }];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe { vector_copy_range_record8(source.as_ptr(), source.as_ptr(), output) };
+
+        assert_eq!(returned, output);
+        assert_eq!(destination[0].word, 5);
+        assert_eq!(destination[0].byte, 6);
+        assert_eq!(destination[0].padding, 7);
+        assert_eq!(destination[0].halfword, 8);
+    }
+
+    #[test]
+    fn vector_copy_range_record8_null_output_skips_one_record_without_reading_source() {
+        let returned = unsafe {
+            vector_copy_range_record8(
+                core::ptr::null(),
+                8usize as *const VectorRecord8,
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(returned, 8usize as *mut VectorRecord8, "skipped record still advances output");
     }
     #[test]
     fn container_end_cursor_returns_the_opaque_end_word() {
