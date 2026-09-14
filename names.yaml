@@ -87622,3 +87622,35 @@ functions:
       child as the pivot. No deliberate deviations: u32 link words preserve the
       target-width layout, and host tests cover root replacement, the transferred
       middle subtree, and both parent-child slots.
+
+  # --- libstdc++ red-black tree left rotation ---
+  - address: 0x083beaa0
+    ghidra: FUN_083beaa0
+    name: red_black_tree_rotate_left_tenth
+    size: 84
+    sig: "void red_black_tree_rotate_left_tenth(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_left_tenth
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08/ip: left
+      param_2_plus_0x0c/r2: right
+      right_plus_0x08/ip: middle
+      header_plus_0x04/r3: root
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#12] at 0x083beaa0 through bx lr at 0x083beaf0; the separately
+      linked right-rotation sibling begins at 0x083beaf4. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly five inbound direct calls:
+      four unconditional plain bl at 0x083beddc, 0x083bee7c, 0x083bef68, and
+      0x083bf3e8, plus predicated bleq at 0x083bf350; there are no direct tail-B
+      callers. This is libstdc++ _Rb_tree_rotate_left: node's right child replaces
+      node under its old parent or header root, transfers its left subtree to node's
+      right, and adopts node as its left child. The predicated caller reaches this
+      no-NULL-guard operation only after selecting that right child as the pivot.
+      No deliberate deviations: u32 link words preserve the target-width layout,
+      and host tests cover root replacement, the transferred middle subtree, and
+      both parent-child slots.
