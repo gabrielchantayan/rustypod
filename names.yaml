@@ -4132,6 +4132,45 @@ functions:
       match.py structural review found the expected ABI frame plus a final
       branch relocation for the Rust call in place of the retail tail branch.
 
+  - address: 0x08048a0c
+    ghidra: FUN_08048a0c
+    name: plst_task_complete
+    size: 160
+    sig: "i32 plst_task_complete(u32 *task)"
+    module: ui/plst_task_complete
+    status: ported
+    renames:
+      param_1/r0: task
+      "task+0x00": element
+      "task+0x04": child_list
+      "task+0x10": active_link
+      "task+0x1d": task_flags
+      "element+0x1ac": activity_flags
+      "element+0x1b0": activity_nonzero
+      FUN_08061650: plst_task_is_active
+      FUN_08066bb8: tagged_list_notify
+      FUN_080d8678: flagged_task_handler
+      FUN_080a7b60: detach_task_children
+      FUN_080da878: remove_task
+      FUN_08048eb8: release_element_resource
+    notes: >-
+      Raw ARM starts at 0x08048a0c and ends with pop {r3,r4,r5,pc} at
+      0x08048aa8; literal event key 0x64706c69 at 0x08048aac makes the
+      verified extent 160 bytes, and the next independently linked function
+      starts at 0x08048ab0. Decoding every B/BL word in osos.dec confirms six inbound direct calls, all
+      unconditional bl: 0x080477f0, 0x08064650, 0x080646a4, 0x080c5fd8,
+      0x080d8690, and 0x08283f18. The
+      helper at 0x08061650 gates completion on a non-NULL task, a 'plst'
+      element word, and nonzero task+0x10, returning -50 otherwise. Success
+      notifies element+0x48 with the literal key and zero flags; unflagged
+      tasks conditionally set element+0x1ac bit 1, while flagged tasks call
+      0x080d8678. It then conditionally detaches task children, removes the
+      task, and releases the resource at element+0x3c. Deliberate deviation:
+      the small gate is directly expressed with the existing class predicate;
+      all remaining unported callees dispatch through the volatile
+      PLST_TASK_COMPLETE_OPS seam with retail-address defaults. No callee
+      identity beyond the observed role is claimed.
+
   - address: 0x08048f48
     ghidra: FUN_08048f48
     name: fixa_owner_destroy

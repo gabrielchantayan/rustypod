@@ -44,6 +44,7 @@ pub mod object_packed_field;
 pub mod plst_class_check;
 pub mod plst_counted_string;
 pub mod plst_element_teardown;
+pub mod plst_task_complete;
 pub mod plst_next;
 pub mod plst_slot_item;
 pub mod plst_slot_materialize;
