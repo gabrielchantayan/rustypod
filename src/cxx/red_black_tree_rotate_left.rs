@@ -47,6 +47,17 @@
 //! before invoking this no-guard rotation. It deliberately reuses this
 //! dispatch seam; the shared host test exercises every parent-placement branch
 //! and the transferred middle subtree.
+//!
+//! `FUN_083b95c0` at load address `0x083b95c0` is another byte-identical,
+//! 84-byte (21-word) ported alias, ending at `0x083b9610` before the
+//! separately linked right-rotation sibling at `0x083b9614`. Raw branch
+//! decoding verifies five inbound direct calls: unconditional `bl` at
+//! `0x083b98fc`, `0x083b999c`, `0x083b9a88`, and `0x083b9f10`, plus predicated
+//! `bleq` at `0x083b9e78`; there are no direct tail-B callers. The predicated
+//! caller selects the pivot's right child before reaching this no-guard
+//! rotation. Its right-child promotion, middle-subtree transfer, and
+//! target-width links therefore reuse this implementation without a redundant
+//! dispatch seam. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
