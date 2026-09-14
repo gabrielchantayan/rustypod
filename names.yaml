@@ -84248,3 +84248,36 @@ functions:
       subsystem, which is deliberately not invented. Host builds use private
       backing for the fixed firmware RAM word; target builds volatile-load the
       retail address. Deliberate deviations: host backing only.
+
+
+  # --- stream length-prefixed COW string read ---
+  - address: 0x080745b8
+    ghidra: FUN_080745b8
+    name: stream_read_cxx_string
+    size: 84
+    sig: "void stream_read_cxx_string(StreamReadOwner *owner, char **string)"
+    module: cxx/stream_read_cxx_string
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: string
+      local_104: byte_length
+      auStack_100: c_string_bytes
+      FUN_083d8134: stream_read
+      FUN_08030f44: heap_panic
+      FUN_083d8ca0: cxx_string_assign_cstr
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte all-code extent from push
+      {r4,r5,lr} at 0x080745b8 through pop {r4,r5,pc} at 0x08074608; the
+      separately linked next function starts at 0x0807460c. It reads a
+      little-endian u32 length through stream_read, rejects length > 255 via
+      the non-returning heap_panic path, reads exactly length bytes into a
+      256-byte stack buffer, writes the NUL at buffer[length], then assigns
+      the resulting C string to the destination COW string. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly six inbound calls,
+      all unconditional bl at 0x082aae3c, 0x082aaeb0, 0x082aaedc,
+      0x082aaf44, 0x082ab000, and 0x082ab0e8; there are no predicated or
+      tail-branch forms. Host coverage uses the existing stream-read seam and
+      a unique target-width fixture to prove the zero, one-byte, and maximum
+      255-byte cases, including both reads, the completed count, COW length,
+      payload, and terminator. Deliberate deviations: none.
