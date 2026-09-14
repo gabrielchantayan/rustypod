@@ -75,6 +75,84 @@
 use crate::heap::veneers::operator_new;
 use core::ptr;
 
+
+/// Prefix of the 0x54-byte display surface reached by
+/// [`surface_set_external_planes_if_empty`].
+///
+/// The class constructor stores the format at `+0x08`; its external plane
+/// base words begin at `+0x24`. The byte arrays deliberately name and retain
+/// the unrecovered fields while keeping the target's 32-bit word layout on
+/// 64-bit host test builds.
+#[repr(C)]
+struct SurfacePlaneSlots {
+    _before_format: [u8; 0x08],
+    format: u8,
+    _before_planes: [u8; 0x1b],
+    plane0: u32,
+    plane1: u32,
+    plane2: u32,
+}
+
+const _: [u8; 0x30] = [0; core::mem::size_of::<SurfacePlaneSlots>()];
+const _: [u8; 0x08] = [0; core::mem::offset_of!(SurfacePlaneSlots, format)];
+const _: [u8; 0x24] = [0; core::mem::offset_of!(SurfacePlaneSlots, plane0)];
+const _: [u8; 0x28] = [0; core::mem::offset_of!(SurfacePlaneSlots, plane1)];
+const _: [u8; 0x2c] = [0; core::mem::offset_of!(SurfacePlaneSlots, plane2)];
+
+/// `surface_set_external_planes_if_empty` — original: `FUN_081065dc` @
+/// `0x081065dc` (160 bytes; 6 verified `bl` call sites).
+///
+/// Raw ARM spans `0x081065dc..0x0810667c`; the next separately linked
+/// function opens at `0x0810667c` with `push {r4-r6, lr}`. It accepts only
+/// format 0 (three planar bases) or format 1 (two bases). In either case,
+/// all three stored plane slots must first be zero. Format 0 then requires
+/// three nonzero input bases and a zero fourth argument before writing all
+/// three slots; format 1 requires two nonzero bases and zero third/fourth
+/// arguments before writing its first two slots. Every other combination
+/// leaves the surface untouched.
+///
+/// Decoding every ARM `BL` immediate in osos.dec found six unconditional
+/// calls (0x0811eb94, 0x08144c18, 0x08199b64, 0x08199bb4, 0x081f5b10,
+/// 0x081f5ed4) and no predicated calls. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn surface_set_external_planes_if_empty(
+    surface: *mut u8,
+    plane0: u32,
+    plane1: u32,
+    plane2: u32,
+    plane3: u32,
+) {
+    let surface = surface.cast::<SurfacePlaneSlots>();
+    let format = unsafe { ptr::addr_of!((*surface).format).read_volatile() };
+    if format != 0 && format != 1 {
+        return;
+    }
+
+    let has_planes = unsafe {
+        ptr::addr_of!((*surface).plane0).read_volatile() != 0
+            || ptr::addr_of!((*surface).plane1).read_volatile() != 0
+            || ptr::addr_of!((*surface).plane2).read_volatile() != 0
+    };
+    if has_planes {
+        return;
+    }
+
+    if format == 0 {
+        if plane0 != 0 && plane1 != 0 && plane2 != 0 && plane3 == 0 {
+            unsafe {
+                ptr::addr_of_mut!((*surface).plane0).write_volatile(plane0);
+                ptr::addr_of_mut!((*surface).plane1).write_volatile(plane1);
+                ptr::addr_of_mut!((*surface).plane2).write_volatile(plane2);
+            }
+        }
+    } else if plane0 != 0 && plane1 != 0 && plane2 == 0 && plane3 == 0 {
+        unsafe {
+            ptr::addr_of_mut!((*surface).plane0).write_volatile(plane0);
+            ptr::addr_of_mut!((*surface).plane1).write_volatile(plane1);
+        }
+    }
+}
 /// Allocation size of the surface object (`mov r0, #0x54`).
 pub const SURFACE_SIZE: usize = 0x54;
 
@@ -270,6 +348,17 @@ mod tests {
 
     fn set_word(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn plane_slots(format: u8, plane0: u32, plane1: u32, plane2: u32) -> SurfacePlaneSlots {
+        SurfacePlaneSlots {
+            _before_format: [0; 0x08],
+            format,
+            _before_planes: [0; 0x1b],
+            plane0,
+            plane1,
+            plane2,
+        }
     }
 
     /// The block the stub allocator hands out.
@@ -479,5 +568,88 @@ mod tests {
             );
         }
         restore_surface_fill(guard);
+    }
+
+    #[test]
+    fn planar_surface_installs_three_nonzero_planes_once() {
+        let mut surface = plane_slots(0, 0, 0, 0);
+
+        unsafe {
+            surface_set_external_planes_if_empty(
+                (&mut surface as *mut SurfacePlaneSlots).cast(),
+                0x1111_0000,
+                0x2222_0000,
+                0x3333_0000,
+                0,
+            );
+        }
+
+        assert_eq!(
+            (surface.plane0, surface.plane1, surface.plane2),
+            (0x1111_0000, 0x2222_0000, 0x3333_0000),
+            "format 0 accepts precisely its three required plane words"
+        );
+    }
+
+    #[test]
+    fn two_plane_surface_requires_unused_inputs_and_empty_all_slots() {
+        let mut surface = plane_slots(1, 0, 0, 0);
+        unsafe {
+            surface_set_external_planes_if_empty((&mut surface as *mut SurfacePlaneSlots).cast(), 0x4444_0000, 0x5555_0000, 0, 0);
+        }
+        assert_eq!(
+            (surface.plane0, surface.plane1, surface.plane2),
+            (0x4444_0000, 0x5555_0000, 0),
+            "format 1 owns only the first two slots"
+        );
+
+        let mut nonempty = plane_slots(1, 0, 0, 0x9999_0000);
+        unsafe {
+            surface_set_external_planes_if_empty((&mut nonempty as *mut SurfacePlaneSlots).cast(), 1, 2, 0, 0);
+        }
+        assert_eq!(
+            (nonempty.plane0, nonempty.plane1, nonempty.plane2),
+            (0, 0, 0x9999_0000),
+            "even its unused third plane blocks a second allocation"
+        );
+
+        let mut unexpected_plane = plane_slots(1, 0, 0, 0);
+        unsafe {
+            surface_set_external_planes_if_empty((&mut unexpected_plane as *mut SurfacePlaneSlots).cast(), 1, 2, 3, 0);
+        }
+        assert_eq!(
+            (unexpected_plane.plane0, unexpected_plane.plane1, unexpected_plane.plane2),
+            (0, 0, 0),
+            "format 1 rejects third-plane input"
+        );
+    }
+
+    #[test]
+    fn unsupported_or_incomplete_plane_sets_leave_the_surface_unchanged() {
+        let mut unsupported = plane_slots(2, 0, 0, 0);
+        let mut missing_planar_plane = plane_slots(0, 0, 0, 0);
+        let mut unexpected_fourth_plane = plane_slots(0, 0, 0, 0);
+
+        unsafe {
+            surface_set_external_planes_if_empty((&mut unsupported as *mut SurfacePlaneSlots).cast(), 1, 2, 3, 0);
+            surface_set_external_planes_if_empty((&mut missing_planar_plane as *mut SurfacePlaneSlots).cast(), 1, 0, 3, 0);
+            surface_set_external_planes_if_empty((&mut unexpected_fourth_plane as *mut SurfacePlaneSlots).cast(), 1, 2, 3, 4);
+        }
+
+        assert_eq!(
+            (unsupported.plane0, unsupported.plane1, unsupported.plane2),
+            (0, 0, 0),
+            "formats other than 0 and 1 return before considering inputs"
+        );
+        assert_eq!(
+            (missing_planar_plane.plane0, missing_planar_plane.plane1, missing_planar_plane.plane2),
+            (0, 0, 0),
+            "format 0 requires every supplied plane to be nonzero"
+        );
+        assert_eq!(
+            (unexpected_fourth_plane.plane0, unexpected_fourth_plane.plane1, unexpected_fourth_plane.plane2),
+            (0, 0, 0),
+            "format 0 requires its fourth argument to remain zero"
+        );
     }
 }
