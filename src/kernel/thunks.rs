@@ -772,6 +772,68 @@ r7_context_table_dispatch_veneer:
 "#
 );
 
+/// Osos load address of the shared context-value commit veneer.
+pub const CONTEXT_VALUE_COMMIT_VENEER: u32 = 0x0800_37d0;
+
+/// Instruction word and literal in the shared context-value commit veneer.
+pub const CONTEXT_VALUE_COMMIT_VENEER_INSN: u32 = 0xe51f_f004;
+pub const CONTEXT_VALUE_COMMIT_VENEER_TARGET: u32 = 0x080e_cfa4;
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// context_value_commit_veneer — original: `thunk_FUN_080ecfa4` @
+    /// `0x080037d0` (8 bytes: `ldr pc,[pc,#-4]` and its target literal; Ghidra's
+    /// reported 4-byte extent excludes the literal word, and the next distinct
+    /// veneer starts at 0x080037d8).
+    ///
+    /// The literal enters the shared epilogue of `FUN_080ece68`: it stores r5
+    /// at r4 + 4, then pops `{r3,r4,r5,r6,r7,r8,r9,pc}`. The tail transfer
+    /// therefore commits the caller's callee-saved context value and returns
+    /// directly from that caller, never to the instruction after its `bl`.
+    ///
+    /// A complete ARM B/BL decode finds exactly six inbound calls, all plain
+    /// unconditional `bl` at 0x08005804, 0x08005824, 0x08005924, 0x080059f8,
+    /// 0x08006314, and 0x08006330; there are no predicated forms. No aligned
+    /// data word in osos.dec holds this veneer address, so there is no vtable
+    /// dispatch.
+    ///
+    /// Deliberate deviation: none on ARM; it retains the raw literal tail
+    /// transfer. The host-only function accepts the otherwise implicit r4/r5
+    /// operands explicitly and returns normally, so tests can verify the only
+    /// data-side effect without pretending that an x86 frame can be
+    /// ARM-unwound.
+    pub fn context_value_commit_veneer() -> !;
+}
+
+/// Host model of the context-value commit tail transfer.
+///
+/// `context` and `value` model the r4 and r5 operands respectively. The ARM
+/// target has no NULL guard; callers must provide a valid, word-aligned
+/// context containing the +4 field.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_value_commit_veneer(context: *mut u32, value: u32) {
+    context.add(1).write(value);
+}
+
+// The literal target consumes the immediate caller's full saved frame. Keep
+// this fixed ARM veneer verbatim: a Rust wrapper cannot preserve that ABI.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl context_value_commit_veneer
+    .type context_value_commit_veneer, %function
+context_value_commit_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x080ecfa4
+    .size context_value_commit_veneer, . - context_value_commit_veneer
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -1496,5 +1558,24 @@ mod tests {
                 .write(DEFAULT_R7_CONTEXT_TABLE_DISPATCH_OPS);
         }
         drop(guard);
+    }
+
+    #[test]
+    fn context_value_commit_veneer_matches_literal_and_commits_only_offset_four() {
+        assert_eq!(CONTEXT_VALUE_COMMIT_VENEER, 0x080037d0);
+        assert_eq!(CONTEXT_VALUE_COMMIT_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(CONTEXT_VALUE_COMMIT_VENEER_TARGET, 0x080ecfa4);
+        assert_eq!(CONTEXT_VALUE_COMMIT_VENEER_TARGET & 3, 0);
+
+        let mut context = [0x1122_3344, 0, 0x5566_7788];
+        unsafe {
+            context_value_commit_veneer(context.as_mut_ptr(), u32::MAX);
+        }
+        assert_eq!(context, [0x1122_3344, u32::MAX, 0x5566_7788]);
+
+        unsafe {
+            context_value_commit_veneer(context.as_mut_ptr(), 0);
+        }
+        assert_eq!(context, [0x1122_3344, 0, 0x5566_7788]);
     }
 }

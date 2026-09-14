@@ -85330,3 +85330,32 @@ functions:
       diag_ring_record. Host tests cover both diagnostics, pre-callback
       rejection, initialization order, post-callback result replacement,
       positive-counter wraparound, and non-positive no-count behavior.
+
+  # --- shared context-value commit tail veneer ---
+  - address: 0x080037d0
+    ghidra: thunk_FUN_080ecfa4
+    name: context_value_commit_veneer
+    size: 8
+    sig: "noreturn context_value_commit_veneer(void) [ARM r4: context, r5: value]"
+    module: kernel/thunks
+    status: ported
+    renames:
+      r4: context
+      r5: value
+      context_plus_0x04: committed_value
+      return: caller_frame_pop
+    notes: >-
+      Raw osos.dec establishes the true 8-byte veneer extent: ldr pc,[pc,#-4]
+      at 0x080037d0 followed by literal 0x080ecfa4 at 0x080037d4. Ghidra's
+      4-byte extent omits the literal; the next distinct veneer starts at
+      0x080037d8. The literal enters the shared FUN_080ece68 epilogue at
+      0x080ecfa4, which stores r5 at r4+4 then pops
+      {r3,r4,r5,r6,r7,r8,r9,pc}; this commits the callee-saved context value
+      and returns directly from the veneer caller, never to its following
+      instruction. Decoding every immediate ARM B/BL word in osos.dec finds
+      exactly six inbound calls, all plain unconditional bl at 0x08005804,
+      0x08005824, 0x08005924, 0x080059f8, 0x08006314, and 0x08006330; there
+      are no predicated forms. No aligned data word contains 0x080037d0, so
+      this is not virtual dispatch. Deliberate deviation: none on ARM; the
+      host model takes the implicit r4/r5 operands explicitly and returns
+      normally to verify the sole store without simulating an ARM frame pop.
