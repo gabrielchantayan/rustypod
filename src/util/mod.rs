@@ -7,6 +7,7 @@ pub mod align;
 pub mod be_read;
 pub mod beload;
 pub mod berec;
+pub mod ber_tlv_encoded_size;
 pub mod bitfield;
 pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
