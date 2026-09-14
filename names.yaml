@@ -67138,6 +67138,38 @@ functions:
       the same two loads and the same `bx r3` tail branch, with a
       `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
       pointers add around them; the dispatch structure is identical.
+  # --- six-bit padded encoder ---
+  - address: 0x0804a734
+    ghidra: FUN_0804a734
+    name: base64_encode
+    size: 196
+    sig: "int base64_encode(u8 *output, const u8 *input, i32 length)"
+    module: crypto/base64_encode
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input
+      param_3/r2: length
+      iVar4/r4: base64_alphabet
+      iVar8/r12: encoded_length
+      DAT_0804a7f8: base64_alphabet
+    notes: >-
+      Raw ARM code spans 0x0804a734..0x0804a7f8 (49 instruction words),
+      followed by its four-byte alphabet-address literal 0x0891fbb4 at
+      0x0804a7f8; the next independently linked function starts at
+      0x0804a7fc. A complete raw-image decode of every ARM B/BL immediate
+      finds exactly six inbound calls, all unconditional bl at 0x0804a824,
+      0x0804a914, 0x0804a938, 0x080ee6ec, 0x080f3f24, and 0x080f3f74,
+      with no predicated calls or direct tail b calls. The body has no NULL
+      or capacity guard: while signed length is positive it reads up to three
+      source bytes, converts their four six-bit groups through the 64-byte
+      table at 0x0891fbb4, stores four output bytes, and advances input by
+      three and output by four. A one-byte tail uses two '=' pad bytes; a
+      two-byte tail uses one; it always writes a trailing NUL and returns the
+      output count. The raw alphabet has non-printable bytes, so it is copied
+      verbatim from osos.dec instead of assuming conventional ASCII base64.
+      Host tests cover one-, two-, three-, and four-byte groups plus zero,
+      negative, and i32::MIN lengths, including the exact trailing-NUL write.
   # --- vendored OpenSSL: EVP_MD_CTX teardown ---
   - address: 0x0804ac2c
     ghidra: FUN_0804ac2c
