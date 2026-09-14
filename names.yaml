@@ -33937,6 +33937,33 @@ functions:
       unsigned values.
 
 
+  - address: 0x083d74ac
+    ghidra: FUN_083d74ac
+    name: less_unsigned_alias_74ac
+    size: 24
+    sig: "u32 less_unsigned_alias_74ac(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: a
+      param_3/r2: b
+      return/r0: a_is_less_than_b
+    notes: >-
+      Byte-identical `std::less<unsigned>::operator()` instantiation of
+      less_unsigned @ 0x083d7598. Raw osos.dec establishes the exact 24-byte
+      extent: six ARM instructions from ldr r0,[r1] at 0x083d74ac through bx lr
+      at 0x083d74c0; the separately linked next sibling starts at 0x083d74c4.
+      It ignores this, dereferences aligned u32 operands without NULL guards,
+      and returns 1 only when *a is unsigned-less than *b. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional plain bl at 0x083bfb58, 0x083bfb94,
+      0x083bfc70, 0x083bfd94, and 0x083bfecc; there are no predicated forms,
+      direct tail branches, or aligned raw data-word references. The callers
+      use this predicate for red-black-tree bound walks and node insertion over
+      keys at node +0x10. This independently hookable target has a dedicated
+      text section so LLVM cannot fold it into another identical instantiation.
+      Deliberate deviations: none.
   - address: 0x083d74dc
     ghidra: FUN_083d74dc
     name: less_unsigned_alias_74dc
