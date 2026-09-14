@@ -30582,6 +30582,37 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- Schema-cookie verification marker (deferred) ----
+  - address: 0x083734bc
+    ghidra: FUN_083734bc
+    name: code_verify_schema
+    size: 144
+    sig: "void code_verify_schema(Parse *parse, int database_index)"
+    module: sqlite/code_verify_schema
+    status: identified
+    renames:
+      param_1: parse
+      param_2: database_index
+    notes: >-
+      SQLite 3.5.9 sqlite3CodeVerifySchema. Raw ARM verifies exactly 144
+      bytes (0x083734bc..0x0837354b): the sibling function starts at
+      0x0837354c, despite Ghidra extending its C through later code. Five
+      unconditional BL call sites reach this address (0x08370244,
+      0x08380860, 0x0838dd78, 0x0838dffc, and 0x08399018); no predicated
+      BL forms reach it. The body calls sqlite3GetVdbe @ 0x0837acf4 and
+      sqlite3VdbeAddOp2 @ 0x08386824, initializes Parse.cookieGoto
+      (+0x108) to the OP_Goto (0x5b) address plus one, records the
+      database bit in cookieMask (+0x104), and snapshots
+      aDb[database_index].pSchema->schema_cookie into cookieValue
+      (+0x10c + 4*database_index). For database_index == 1 it tail-branches
+      to 0x0837da54, the raw body of SQLite's sqlite3OpenTempDatabase; that
+      target conditionally creates the temp B-tree through unported
+      0x0837126c before calling unported 0x0837e1a0. Neither target has a
+      ledger entry or Rust implementation. A dispatch seam would require an
+      invented default for physical temp-database creation, so no partial
+      port was added; BEGIN_WRITE_OPS retains its existing documented
+      no-op until sqlite3OpenTempDatabase is ported.
+
   # ---- Schema-cookie increment emitter (src/sqlite/change_cookie.rs) ----
   - address: 0x08372e54
     ghidra: FUN_08372e54
