@@ -1897,6 +1897,66 @@ pub type ElementSlotFn = unsafe extern "C" fn(this: *mut u8, index: usize) -> *m
 /// [r2, #0x40]`, i.e. slot 16 on the 32-bit target. Indexed by slot,
 /// not by byte offset, so the port is correct on a 64-bit test host too.
 pub const ELEMENT_SLOT_VTABLE_INDEX: usize = 0x40 / 4;
+/// ARMv5TE vtable word indices for the two container methods this wrapper
+/// dispatches: lookup at `+0x4c`, then removal at `+0x2c`.
+const CONTAINER_ELEMENT_LOOKUP_SLOT: usize = 0x4c / 4;
+const CONTAINER_REMOVE_AT_SLOT: usize = 0x2c / 4;
+
+/// ABI of the unrecovered element-lookup virtual method at vtable `+0x4c`.
+pub type ContainerElementLookupFn = unsafe extern "C" fn(*mut u8, *mut u8) -> i32;
+
+/// ABI of the unrecovered remove-at-index virtual method at vtable `+0x2c`.
+pub type ContainerRemoveAtFn = unsafe extern "C" fn(*mut u8, i32);
+
+/// container_remove_element — original: `FUN_083d125c` @ **0x083d125c**
+/// (64 bytes). Raw ARM establishes the complete extent from `push {r0,r1,r4,
+/// r5,r6,lr}` at `0x083d125c` through `pop {r2,r3,r4,r5,r6,pc}` at
+/// `0x083d1298`; the next separately linked function begins at `0x083d129c`.
+///
+/// Decoding every aligned immediate ARM `B`/`BL` word in `osos.dec` finds
+/// exactly five inbound direct calls, all unconditional plain `bl` at
+/// `0x0816dff4`, `0x0816e114`, `0x0816e18c`, `0x0816e1ec`, and `0x0816e214`.
+/// There are no predicated calls or direct tail branches.
+///
+/// # Algorithm
+///
+/// Calls the container's unrecovered vtable `+0x4c` lookup with `element`.
+/// A `-1` result is returned without removing anything; every other signed
+/// result is passed to vtable `+0x2c` to remove that index, then returned.
+/// The container's vtable is re-read between the calls exactly as retailOS
+/// does. No pointer or callback is NULL-checked.
+///
+/// # Deliberate deviation
+///
+/// Target vtable entries are 32-bit words, whereas host function pointers are
+/// wider. The port selects the same word indices in a host-sized vtable and
+/// performs equivalent typed virtual calls. The concrete method identities
+/// remain unrecovered and are deliberately not invented.
+///
+/// # Safety
+///
+/// `container` must contain a readable vtable pointer whose lookup and, on a
+/// nonnegative result, remove-at entries are valid for their documented ABIs.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_remove_element")]
+#[inline(never)]
+pub unsafe extern "C" fn container_remove_element(
+    container: *mut u8,
+    element: *mut u8,
+) -> i32 {
+    let vtable = (container as *const *const usize).read();
+    let lookup_entry = vtable.add(CONTAINER_ELEMENT_LOOKUP_SLOT).read();
+    let lookup: ContainerElementLookupFn = core::mem::transmute(lookup_entry);
+    let index = lookup(container, element);
+    if index != -1 {
+        let vtable = (container as *const *const usize).read();
+        let remove_entry = vtable.add(CONTAINER_REMOVE_AT_SLOT).read();
+        let remove: ContainerRemoveAtFn = core::mem::transmute(remove_entry);
+        remove(container, index);
+    }
+    index
+}
+
 
 /// container_element_at — original: `FUN_083d5efc` @ 0x083d5efc
 /// (24 bytes; 13 `bl` call sites there, 154 across all 30
@@ -8383,4 +8443,113 @@ mod tests {
         assert_eq!(elements, [0xaaaa_aaaa; 2]);
     }
 
+    #[test]
+    fn container_remove_element_uses_lookup_result_and_rereads_the_vtable() {
+        static mut LOOKUP_CONTAINER: usize = 0;
+        static mut LOOKUP_ELEMENT: usize = 0;
+        static mut LOOKUP_CALLS: u32 = 0;
+        static mut LOOKUP_RESULT: i32 = 0;
+        static mut REMOVE_CONTAINER: usize = 0;
+        static mut REMOVE_INDEX: i32 = 0;
+        static mut REMOVE_CALLS: u32 = 0;
+        static mut WRONG_SLOT_CALLS: u32 = 0;
+        static mut REPLACEMENT_VTABLE: *const usize = core::ptr::null();
+
+        #[repr(C)]
+        struct Container {
+            vtable: *const usize,
+        }
+
+        unsafe extern "C" fn wrong_lookup(_container: *mut u8, _element: *mut u8) -> i32 {
+            WRONG_SLOT_CALLS += 1;
+            i32::MIN
+        }
+
+        unsafe extern "C" fn record_lookup(container: *mut u8, element: *mut u8) -> i32 {
+            LOOKUP_CONTAINER = container as usize;
+            LOOKUP_ELEMENT = element as usize;
+            LOOKUP_CALLS += 1;
+            LOOKUP_RESULT
+        }
+
+        unsafe extern "C" fn replace_vtable_and_lookup(
+            container: *mut u8,
+            element: *mut u8,
+        ) -> i32 {
+            LOOKUP_CONTAINER = container as usize;
+            LOOKUP_ELEMENT = element as usize;
+            LOOKUP_CALLS += 1;
+            (container as *mut *const usize).write(REPLACEMENT_VTABLE);
+            LOOKUP_RESULT
+        }
+
+        unsafe extern "C" fn record_remove(container: *mut u8, index: i32) {
+            REMOVE_CONTAINER = container as usize;
+            REMOVE_INDEX = index;
+            REMOVE_CALLS += 1;
+        }
+
+        unsafe extern "C" fn wrong_remove(_container: *mut u8, _index: i32) {
+            WRONG_SLOT_CALLS += 1;
+        }
+
+        unsafe {
+            LOOKUP_CONTAINER = 0;
+            LOOKUP_ELEMENT = 0;
+            LOOKUP_CALLS = 0;
+            LOOKUP_RESULT = 23;
+            REMOVE_CONTAINER = 0;
+            REMOVE_INDEX = 0;
+            REMOVE_CALLS = 0;
+            WRONG_SLOT_CALLS = 0;
+
+            let mut vtable = [wrong_lookup as usize; CONTAINER_ELEMENT_LOOKUP_SLOT + 1];
+            vtable[CONTAINER_ELEMENT_LOOKUP_SLOT] = record_lookup as usize;
+            vtable[CONTAINER_REMOVE_AT_SLOT] = record_remove as usize;
+            let mut container = Container {
+                vtable: vtable.as_ptr(),
+            };
+            let mut element = 0u8;
+            let container_ptr = (&mut container as *mut Container).cast::<u8>();
+
+            assert_eq!(container_remove_element(container_ptr, &mut element), 23);
+            assert_eq!(LOOKUP_CALLS, 1);
+            assert_eq!(LOOKUP_CONTAINER, container_ptr as usize);
+            assert_eq!(LOOKUP_ELEMENT, core::ptr::addr_of_mut!(element) as usize);
+            assert_eq!(REMOVE_CALLS, 1);
+            assert_eq!(REMOVE_CONTAINER, container_ptr as usize);
+            assert_eq!(REMOVE_INDEX, 23);
+            assert_eq!(WRONG_SLOT_CALLS, 0, "only vtable slots +0x4c and +0x2c dispatch");
+
+            LOOKUP_CALLS = 0;
+            LOOKUP_RESULT = 7;
+            REMOVE_CALLS = 0;
+            WRONG_SLOT_CALLS = 0;
+            let mut replacement = [wrong_lookup as usize; CONTAINER_ELEMENT_LOOKUP_SLOT + 1];
+            replacement[CONTAINER_REMOVE_AT_SLOT] = record_remove as usize;
+            REPLACEMENT_VTABLE = replacement.as_ptr();
+            vtable[CONTAINER_ELEMENT_LOOKUP_SLOT] = replace_vtable_and_lookup as usize;
+            vtable[CONTAINER_REMOVE_AT_SLOT] = wrong_remove as usize;
+            container.vtable = vtable.as_ptr();
+
+            assert_eq!(container_remove_element(container_ptr, &mut element), 7);
+            assert_eq!(LOOKUP_CALLS, 1);
+            assert_eq!(REMOVE_CALLS, 1, "the lookup's replacement vtable is re-read");
+            assert_eq!(REMOVE_INDEX, 7);
+            assert_eq!(WRONG_SLOT_CALLS, 0, "the old vtable's remove slot is not reused");
+
+            LOOKUP_CALLS = 0;
+            LOOKUP_RESULT = -1;
+            REMOVE_CALLS = 0;
+            WRONG_SLOT_CALLS = 0;
+            vtable[CONTAINER_ELEMENT_LOOKUP_SLOT] = record_lookup as usize;
+            vtable[CONTAINER_REMOVE_AT_SLOT] = wrong_remove as usize;
+            container.vtable = vtable.as_ptr();
+
+            assert_eq!(container_remove_element(container_ptr, &mut element), -1);
+            assert_eq!(LOOKUP_CALLS, 1);
+            assert_eq!(REMOVE_CALLS, 0, "-1 skips the remove dispatch");
+            assert_eq!(WRONG_SLOT_CALLS, 0);
+        }
+    }
 }

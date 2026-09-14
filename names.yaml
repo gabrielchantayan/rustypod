@@ -87399,3 +87399,36 @@ functions:
       u32 link words preserve the target-width layout, and host tests cover
       root replacement, the transferred middle subtree, and both parent-child
       slots.
+
+
+  # --- generic C++ container element removal ---
+  - address: 0x083d125c
+    ghidra: FUN_083d125c
+    name: container_remove_element
+    size: 64
+    sig: "i32 container_remove_element(void *container, void *element)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1: element
+      return/r0: index
+      vtable_plus_0x4c/r2: lookup_element
+      vtable_plus_0x2c/r2: remove_at
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: 16 ARM words from
+      push {r0,r1,r4,r5,r6,lr} at 0x083d125c through pop {r2,r3,r4,r5,r6,pc}
+      at 0x083d1298; the next separately linked function begins at
+      0x083d129c. Decoding every aligned ARM B/BL-immediate word in osos.dec
+      finds exactly five inbound direct calls, all unconditional plain bl at
+      0x0816dff4, 0x0816e114, 0x0816e18c, 0x0816e1ec, and 0x0816e214; there
+      are no predicated calls or direct tail-B callers. The container's
+      unrecovered virtual +0x4c method receives container and element and
+      returns an index. If that index is not -1, retailOS re-reads the
+      container vtable and calls its unrecovered +0x2c method with container
+      and the index; the index is always returned. No deliberate behavioral
+      deviations: host-sized vtable entries preserve target word-index
+      selection without overlapping function pointers. Host tests cover
+      forwarding, the -1 no-removal edge, exact slots, and re-reading a
+      vtable replaced by lookup. match.py confirms the lookup/test/remove
+      branch structure; LLVM emits a different prologue.
