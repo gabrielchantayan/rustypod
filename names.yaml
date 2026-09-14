@@ -40,6 +40,37 @@ functions:
       0x08098598, 0x080985a4, 0x080985d8, 0x080985e4, 0x080caea4, and
       0x080cb048; there are no predicated forms or direct tail branches.
       Deliberate deviations: none.
+  # --- intrusive linked-list lookup and promotion ---
+  - address: 0x08053850
+    ghidra: FUN_08053850
+    name: linked_list_find_and_promote
+    size: 84
+    sig: "i32 linked_list_find_and_promote(u32 key, LinkedListHeader *list, u8 **output)"
+    module: util/linked_list_find_and_promote
+    status: ported
+    renames:
+      param_1/r0: key
+      param_2/r1: list
+      param_3/r2: output
+      param_2_plus_0x0c: list_front
+      node_plus_0x00: next
+      node_plus_0x0c: node_key
+      node_plus_0x14: payload_start
+      FUN_08058b60: move_entry_to_front
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent from push {r4,r5,lr}
+      at 0x08053850 through pop {r4,r5,pc} at 0x080538a0; the independent
+      accessor at 0x080538a4 begins immediately afterward. It walks list +0x0c
+      through node +0x00 links, ignores every node whose +0x0c key is
+      0xffffffff, and on a match calls FUN_08058b60 before returning node +0x14
+      through output. A miss returns -123 and does not write output. Decoding
+      every immediate ARM B/BL word in osos.dec finds exactly six inbound
+      calls, all plain unconditional bl at 0x080516d0, 0x08059130, 0x08059dbc,
+      0x08065ec4, 0x0806d908, and 0x081c0034; there are no predicated forms or
+      direct tail branches. FUN_08058b60 has no ledger entry, so the target
+      calls that verified address through a volatile operation seam while host
+      tests install a recorder; its identity is deliberately not claimed beyond
+      moving the entry to the list front.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760
