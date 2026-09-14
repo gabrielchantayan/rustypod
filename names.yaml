@@ -79441,6 +79441,35 @@ functions:
       worktree archive reports the expected 8-vs-11 instruction diff: LLVM
       returns the NULL case early and saves fp instead of retailOS's unused r4.
 
+  # --- SQLite adaptive Bitvec constructor ---
+  - address: 0x0837056c
+    ghidra: FUN_0837056c
+    name: sqlite3_bitvec_create
+    size: 28
+    sig: "Bitvec *sqlite3BitvecCreate(u32 iSize)"
+    module: sqlite/bitvec
+    status: ported
+    renames:
+      param_1/r0/r4: size
+      puVar1/r0: bitvec
+      FUN_0837d38c: sqlite3_malloc_zero
+      "*bitvec": size
+    notes: >-
+      Raw osos.dec confirms the exact 28-byte extent at
+      0x0837056c..0x08370588: push {r4,lr}, preserve iSize, allocate the
+      fixed 0x200-byte target node through sqlite3_malloc_zero @ 0x0837d38c,
+      store iSize at +0 only if the allocation is non-NULL, and return that
+      same pointer. The next separately linked sibling, sqlite3BitvecDestroy,
+      starts at 0x08370588. Decoding every ARM B/BL-immediate word finds
+      exactly five direct BL callers, all unconditional plain bl (zero
+      predicated): 0x082dd760, 0x082dddd4, 0x083702f8, 0x08370638, and
+      0x0837dd54. This is SQLite 3.5.9's sqlite3BitvecCreate. The Rust port
+      uses the ported sqlite3_malloc_zero directly and retains the literal
+      0x200 request rather than size_of::<Bitvec>(), whose host child-pointer
+      view is wider than the 32-bit target node. Host tests prove zero, one,
+      and u32::MAX capacities update only the first word after a 512-byte
+      zeroed allocation, and allocation failure returns NULL without a store.
+
   # --- SQLite adaptive Bitvec destructor ---
   - address: 0x08370588
     ghidra: FUN_08370588
