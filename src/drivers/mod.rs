@@ -41,6 +41,7 @@ pub mod surface_new;
 pub mod surface_plane_owner;
 pub mod setting_dispatcher;
 pub mod storage_device_operations;
+pub mod status_gate_ready;
 pub mod storage_device_get;
 pub mod storage_backend_prepare;
 pub mod stream_buffer_context;
