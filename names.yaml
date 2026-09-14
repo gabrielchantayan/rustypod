@@ -89377,3 +89377,32 @@ functions:
       two_word_clear @ 0x081598a4, but its dedicated text section preserves an
       independently hookable target. Host tests cover exact bounds, nonzero
       inputs, and the preserved destination result. Deliberate deviations: none.
+
+
+  # --- SQLite binary64 NaN predicate ---
+  - address: 0x0837cb44
+    ghidra: FUN_0837cb44
+    name: sqlite_is_nan
+    size: 28
+    sig: "int sqlite_is_nan(double value)"
+    module: sqlite/is_nan
+    status: ported
+    renames:
+      param_1/r0: value_low
+      param_2/r1: value_high
+      r2: value_low_copy
+      r3: value_high_copy
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: stmdb sp!,{r4,lr};
+      mov r3,r1; mov r2,r0; bl __dcmpeq @ 0x083eb748; movne r0,#1; moveq
+      r0,#0; ldmia sp!,{r4,pc} at 0x0837cb44..0x0837cb5c. The next separately
+      linked function begins at 0x0837cb60. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly five inbound direct calls,
+      all unconditional plain bl: 0x082c40d8, 0x083879c0, 0x0838c0dc,
+      0x0838cda4, and 0x08397e68; there are no predicated or plain-B tail
+      calls. This is SQLite 3.5's sqlite3IsNaN: compare a binary64 value to
+      itself through ADS __dcmpeq, then normalize NE (unordered) into 1 and
+      equality into 0. The Rust port directly recognizes the same all-ones
+      exponent plus nonzero fraction representation, avoiding the helper's
+      CPSR-flags ABI. This is equivalent for self-comparison even when
+      __dcmpeq flushes denormals: all non-NaN values still compare equal.
