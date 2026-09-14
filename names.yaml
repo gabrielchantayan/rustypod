@@ -60338,6 +60338,36 @@ functions:
       for 1970-01-01, Rata Die 719163, and the converter's final write.
 
 
+  # --- Current Macintosh-epoch timestamp with UTC correction ---
+  - address: 0x08054fc4
+    ghidra: FUN_08054fc4
+    name: current_mac_epoch_seconds_with_utc_offset
+    size: 8
+    sig: "i32 current_mac_epoch_seconds_with_utc_offset(void)"
+    module: time/current_mac_epoch_seconds
+    status: ported
+    renames:
+      r0: apply_utc_offset (constant 1)
+      FUN_08051d98: current_mac_epoch_seconds (unported shared tail target)
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_080aad6c: datetime_to_mac_epoch_seconds
+    notes: >-
+      Raw osos.dec establishes the complete 8-byte body: mov r0,#1 at
+      0x08054fc4 then b 0x08051d98 at 0x08054fc8; the next separately linked
+      function begins at 0x08054fcc with push {r2,r3,r4,lr}. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly six inbound calls, all
+      unconditional plain bl at 0x0803c120, 0x08050ef0, 0x08057f90,
+      0x0805d9d8, 0x0806c8c0, and 0x0806caac; there are no predicated bl or
+      direct b tail callers. The shared unported target uses the nonzero r0
+      flag to obtain a normalized current DateTime then converts it to signed
+      Macintosh-epoch seconds with the current UTC/daylight offset. The port
+      faithfully inlines that target's two already ported calls rather than
+      creating a new fixed-address dispatch seam. Its raw stack record carries
+      caller-saved residue; Rust zero-initializes its equivalent because the
+      callee reads only calendar fields it itself writes. Host tests prove the
+      fixed nonzero offset flag and preserve negative and i32::MIN timestamps.
+
+
   # --- Macintosh epoch timestamp to local packed calendar record ---
   - address: 0x080aa95c
     ghidra: FUN_080aa95c

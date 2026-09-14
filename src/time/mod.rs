@@ -1,6 +1,7 @@
 //! Time library (mktime/localtime/gmtime).
 pub mod civil;
 pub mod current_day_and_seconds;
+pub mod current_mac_epoch_seconds;
 pub mod current_datetime;
 pub mod datetime;
 pub mod datetime_to_mac_epoch;
