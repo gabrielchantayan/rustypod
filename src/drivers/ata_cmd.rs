@@ -363,6 +363,22 @@ pub unsafe extern "C" fn ata_cmd_set_transfer_len(cmd: *mut u8, length: u32) {
     set_word(cmd, TRANSFER_LEN, length);
 }
 
+/// ata_cmd_set_opaque_48_49 — original: `FUN_081212ac` @ 0x081212ac
+/// (12 bytes; **6 `bl` call sites**, binary-scanned — all unconditional,
+/// at 0x082832b0, 0x08283758, 0x08283858, 0x0828386c, 0x08283924, and
+/// 0x08283938).
+///
+/// Stores the two adjacent opaque command bytes at +0x48 and +0x49 in
+/// register order. Callers use (0x50, 0), (0x51, 0x40), or values supplied
+/// by their request object; no caller NULL-checks the command block, matching
+/// the original's two `strb` instructions. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_opaque_48_49(cmd: *mut u8, first: u8, second: u8) {
+    set_byte(cmd, OPAQUE_BYTE_48, first);
+    set_byte(cmd, OPAQUE_BYTE_49, second);
+}
+
 /// ata_cmd_set_buffer — original: `FUN_08121480` @ 0x08121480 (8 bytes;
 /// 16 call sites, binary-scanned).
 ///
@@ -1412,6 +1428,21 @@ mod tests {
         for other in 0..block.0.len() {
             if !(TRANSFER_LEN..TRANSFER_LEN + 4).contains(&other) {
                 assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_48_49_setter_writes_the_pair_in_order_without_spilling() {
+        for (first, second) in [(0, 0), (0x50, 0), (0x51, 0x40), (0xff, 0xff)] {
+            let mut block = poisoned();
+            unsafe { ata_cmd_set_opaque_48_49(block.0.as_mut_ptr(), first, second) };
+            assert_eq!(block.0[OPAQUE_BYTE_48], first);
+            assert_eq!(block.0[OPAQUE_BYTE_49], second);
+            for other in 0..block.0.len() {
+                if other != OPAQUE_BYTE_48 && other != OPAQUE_BYTE_49 {
+                    assert_eq!(block.0[other], 0xa5, "values {first:#x}/{second:#x} spilled onto +{other:#x}");
+                }
             }
         }
     }
