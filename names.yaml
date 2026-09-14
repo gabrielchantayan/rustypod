@@ -327,6 +327,31 @@ functions:
       target behavior retains the fixed BSS cell.
 
   # --- stack-sensitive literal tail dispatch ---
+  - address: 0x08003728
+    ghidra: thunk_FUN_082aad24
+    name: state_terminal_continuation_veneer
+    size: 8
+    sig: "noreturn state_terminal_continuation_veneer(u32 state)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: state
+      DAT_0800372c: state_terminal_continuation_target
+    notes: >-
+      Ghidra's four-byte extent omits the owned literal word. Raw osos.dec is
+      exactly `ldr pc, [pc, #-4]` (0xe51ff004) followed by 0x081cd998, so
+      this is a literal tail dispatch, not Ghidra's inferred indirect call and
+      return. A full aligned ARM B/BL decode finds exactly six inbound direct
+      calls, all unconditional plain bl: 0x08005194, 0x080051a8, 0x080051bc,
+      0x08005344, 0x080059ac, and 0x080059c4; there are no predicated forms,
+      tail branches, or aligned data-word references to 0x08003728. The
+      literal enters 0x081cd998, an inner continuation whose first instruction
+      calls the already ported operator_delete @ 0x082aad24, then consumes
+      r4-r6 and the caller's saved frame before tail-branching onward. Its
+      ordinary C ABI is therefore deliberately not invented. The ARM port is
+      verbatim global assembly; the host-only noreturn shim is the deliberate
+      deviation because a normal host call cannot supply that ARM context.
+
   - address: 0x08003818
     ghidra: FUN_08003818
     name: kernel_indirect_dispatch

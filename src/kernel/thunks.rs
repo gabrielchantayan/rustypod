@@ -143,6 +143,65 @@ kernel_indirect_dispatch:
     .size kernel_indirect_dispatch, . - kernel_indirect_dispatch
 "#
 );
+
+/// Load address and literal contents of the opaque state-terminal continuation
+/// veneer `thunk_FUN_082aad24` @ `0x08003728` (8 bytes: 4-byte instruction
+/// plus its target word; Ghidra reports only the instruction).
+///
+/// Raw `osos.dec` is `ldr pc, [pc, #-4]` / literal `0x081cd998`. Every
+/// immediate ARM B/BL decode finds exactly six direct callers, all
+/// unconditional `bl` (0x08005194, 0x080051a8, 0x080051bc, 0x08005344,
+/// 0x080059ac, and 0x080059c4); there are no aligned data-word references.
+///
+/// The literal deliberately enters an inner continuation rather than a normal
+/// function entry. Its first word is `bl 0x082aad24`, then it consumes r4-r6
+/// and the immediate caller's saved frame before tail-branching onward. The
+/// only normal register value established by all recovered callers is the
+/// state word in r0; its remaining ABI is intentionally not inferred.
+pub const STATE_TERMINAL_CONTINUATION_VENEER: u32 = 0x0800_3728;
+pub const STATE_TERMINAL_CONTINUATION_INSN: u32 = 0xe51f_f004;
+pub const STATE_TERMINAL_CONTINUATION_TARGET: u32 = 0x081c_d998;
+
+// The literal target consumes the immediate caller's full saved frame. Keep
+// this transfer verbatim: a Rust wrapper cannot preserve its register/stack
+// ABI. There is no deliberate ARM deviation.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// state_terminal_continuation_veneer — original:
+    /// `thunk_FUN_082aad24` @ 0x08003728 (8 bytes).
+    ///
+    /// Tail-dispatches to the opaque continuation with the caller's r0 state
+    /// word and unmodified remaining machine context; it does not return to
+    /// its immediate caller.
+    pub fn state_terminal_continuation_veneer(state: u32) -> !;
+}
+
+/// Host-only stand-in for the stack-sensitive state-terminal transfer.
+///
+/// The retail continuation is unmapped on hosts and consumes ARM callee-saved
+/// registers plus its caller's frame. It therefore cannot be called through a
+/// normal host ABI; terminating is the faithful non-return contract.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn state_terminal_continuation_veneer(state: u32) -> ! {
+    let _ = state;
+    unreachable!("state_terminal_continuation_veneer target unavailable on host")
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl state_terminal_continuation_veneer
+    .type state_terminal_continuation_veneer, %function
+state_terminal_continuation_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x081cd998
+    .size state_terminal_continuation_veneer, . - state_terminal_continuation_veneer
+"#
+);
 /// Instruction word and literal in the fixed event-callback target veneer
 /// at 0x08003708.
 pub const EVENT_CALLBACK_DISPATCH_INSN: u32 = 0xe51f_f004;
@@ -1282,6 +1341,16 @@ mod tests {
         assert_eq!(KERNEL_INDIRECT_DISPATCH_INSN, 0xe51f_f004);
         assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET, 0x0815_ca7c);
         assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET & 3, 0);
+    }
+
+    /// The target is an opaque continuation, but the veneer bytes and its
+    /// complete direct-call census are independently fixed by osos.dec.
+    #[test]
+    fn state_terminal_continuation_veneer_matches_literal_transfer() {
+        assert_eq!(STATE_TERMINAL_CONTINUATION_VENEER, 0x0800_3728);
+        assert_eq!(STATE_TERMINAL_CONTINUATION_INSN, 0xe51f_f004);
+        assert_eq!(STATE_TERMINAL_CONTINUATION_TARGET, 0x081c_d998);
+        assert_eq!(STATE_TERMINAL_CONTINUATION_TARGET & 3, 0);
     }
 
     static OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
