@@ -2207,3 +2207,264 @@ mod copy_current_to_peer_tests {
         }
     }
 }
+// Clear or erase an indexed string-keyed map — retailOS `FUN_08102130` at
+// 0x08102130 (56 bytes; 0x08102130..0x08102168).
+//
+// Raw ARM begins with `push {r4-r6,lr}` and ends with the conditional tail
+// branches at 0x0810215c and 0x08102164. The next independently linked body
+// opens at 0x08102168 (`mov r2,#0; push {r3,lr}`), so Ghidra's much larger C
+// body is an overrun. Decoding every aligned ARM B/BL immediate in `osos.dec`
+// finds six inbound call sites, all unconditional plain `bl` (0x0821636c,
+// 0x08217c98, 0x08217d34, 0x08217dbc, 0x08229a70, and 0x0823b3a0); no
+// predicated calls or direct tail branches reach this wrapper.
+//
+// Algorithm: read the u32 index at table+0x54, form `table + index * 28`,
+// then test whether the supplied COW `basic_string` is empty. An empty key
+// tail-calls the map clear body at 0x083db604; any nonempty key tail-calls the
+// string-keyed tree erase-by-key body at 0x083c4778. The returned r0 is passed
+// through unchanged (the clear path returns its map pointer; erase returns its
+// removal count), although all six direct callers discard it.
+//
+// Deliberate deviation: those two map operations remain retailOS-owned. Target
+// builds invoke their verified function entries directly; host builds expose
+// callbacks for behavioural tests. The target path has no behavioural
+// deviation, null check, or bounds check.
+
+use crate::cxx::string::cxx_string_empty;
+
+#[cfg(target_os = "none")]
+const RETAIL_STRING_KEY_MAP_ERASE: usize = 0x083c_4778;
+#[cfg(target_os = "none")]
+const RETAIL_STRING_KEY_MAP_CLEAR: usize = 0x083d_b604;
+
+/// The only table field read by the wrapper, at the original word offset 21.
+#[repr(C)]
+struct IndexedStringMapTable {
+    _before_entry_index: [u32; 21],
+    entry_index: u32,
+}
+
+/// One opaque string-keyed map slot. The 28-byte size is the raw `index * 28`
+/// stride, represented as seven target words rather than a host-size pointer
+/// layout.
+#[repr(C)]
+struct StringKeyMapSlot {
+    _words: [u32; 7],
+}
+
+const _: [(); 28] = [(); core::mem::size_of::<StringKeyMapSlot>()];
+
+/// Host boundary for the two retailOS-owned string-keyed map operations.
+#[cfg(not(target_os = "none"))]
+#[derive(Clone, Copy)]
+pub struct IndexedStringMapOps {
+    pub erase: unsafe extern "C" fn(*mut StringKeyMapSlot, *const *mut u8) -> u32,
+    pub clear: unsafe extern "C" fn(*mut StringKeyMapSlot) -> u32,
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_erase(_map: *mut StringKeyMapSlot, _key: *const *mut u8) -> u32 {
+    0
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_clear(_map: *mut StringKeyMapSlot) -> u32 {
+    0
+}
+
+/// Host callback seam. Target builds call 0x083c4778 and 0x083db604 directly.
+#[cfg(not(target_os = "none"))]
+pub static mut INDEXED_STRING_MAP_OPS: IndexedStringMapOps = IndexedStringMapOps {
+    erase: missing_erase,
+    clear: missing_clear,
+};
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn string_key_map_erase(map: *mut StringKeyMapSlot, key: *const *mut u8) -> u32 {
+    let erase: unsafe extern "C" fn(*mut StringKeyMapSlot, *const *mut u8) -> u32 =
+        core::mem::transmute(RETAIL_STRING_KEY_MAP_ERASE);
+    erase(map, key)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn string_key_map_erase(map: *mut StringKeyMapSlot, key: *const *mut u8) -> u32 {
+    let erase = core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_STRING_MAP_OPS.erase));
+    erase(map, key)
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn string_key_map_clear(map: *mut StringKeyMapSlot) -> u32 {
+    let clear: unsafe extern "C" fn(*mut StringKeyMapSlot) -> u32 =
+        core::mem::transmute(RETAIL_STRING_KEY_MAP_CLEAR);
+    clear(map)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn string_key_map_clear(map: *mut StringKeyMapSlot) -> u32 {
+    let clear = core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_STRING_MAP_OPS.clear));
+    clear(map)
+}
+
+/// string_table_clear_or_erase — original: `FUN_08102130` @ 0x08102130
+/// (56 bytes; 6 plain `bl` call sites, no predicated calls).
+///
+/// Dispatches `table[table->entry_index]`: an empty COW string clears that
+/// string-keyed map, while a nonempty one erases entries matching the key. The
+/// original's r0 from the selected tail target is returned unchanged.
+///
+/// Deliberate deviation: the two unported map operations are fixed-address
+/// calls on target and recording callbacks on host; no target behaviour is
+/// changed.
+///
+/// # Safety
+///
+/// `table` must identify a live table with an aligned u32 at +0x54 and a live
+/// 28-byte map slot at the selected index. `key` must be a valid COW string
+/// object accepted by `cxx_string_empty`; neither argument is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.string_table_clear_or_erase")]
+#[inline(never)]
+pub unsafe extern "C" fn string_table_clear_or_erase(
+    table: *mut u8,
+    key: *const *mut u8,
+) -> u32 {
+    let entry_index = (*(table as *const IndexedStringMapTable)).entry_index as usize;
+    let map = table.cast::<StringKeyMapSlot>().add(entry_index);
+    if cxx_string_empty(key) {
+        string_key_map_clear(map)
+    } else {
+        string_key_map_erase(map, key)
+    }
+}
+
+#[cfg(test)]
+mod clear_or_erase_tests {
+    use super::*;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use parking_lot::Mutex;
+
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static CLEAR_ENTRY: AtomicUsize = AtomicUsize::new(0);
+    static ERASE_ENTRY: AtomicUsize = AtomicUsize::new(0);
+    static ERASE_KEY: AtomicUsize = AtomicUsize::new(0);
+
+    #[repr(C)]
+    struct StringFixture {
+        _refcount: i32,
+        _capacity: u32,
+        length: u32,
+        data: [u8; 1],
+    }
+
+    #[repr(C)]
+    struct TableFixture {
+        table: IndexedStringMapTable,
+        _following_words: [u32; 28],
+    }
+
+    unsafe extern "C" fn record_erase(map: *mut StringKeyMapSlot, key: *const *mut u8) -> u32 {
+        ERASE_ENTRY.store(map as usize, Ordering::SeqCst);
+        ERASE_KEY.store(key as usize, Ordering::SeqCst);
+        3
+    }
+
+    unsafe extern "C" fn record_clear(map: *mut StringKeyMapSlot) -> u32 {
+        CLEAR_ENTRY.store(map as usize, Ordering::SeqCst);
+        0x0bad_c0de
+    }
+
+    struct OpsRestore(IndexedStringMapOps);
+
+    impl Drop for OpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(INDEXED_STRING_MAP_OPS).write(self.0);
+            }
+        }
+    }
+
+    unsafe fn install_recording_ops() -> OpsRestore {
+        let ops = core::ptr::addr_of_mut!(INDEXED_STRING_MAP_OPS);
+        let previous = ops.read();
+        ops.write(IndexedStringMapOps { erase: record_erase, clear: record_clear });
+        OpsRestore(previous)
+    }
+
+    fn fixture(entry_index: u32) -> TableFixture {
+        TableFixture {
+            table: IndexedStringMapTable {
+                _before_entry_index: [0; 21],
+                entry_index,
+            },
+            _following_words: [0; 28],
+        }
+    }
+
+    #[test]
+    fn empty_key_clears_indexed_map_and_forwards_clear_result() {
+        let _lock = OPS_LOCK.lock();
+        unsafe {
+            let _restore = install_recording_ops();
+            CLEAR_ENTRY.store(0, Ordering::SeqCst);
+            ERASE_ENTRY.store(0, Ordering::SeqCst);
+            let mut table = fixture(2);
+            let mut key_storage = StringFixture {
+                _refcount: 0,
+                _capacity: 0,
+                length: 0,
+                data: [0],
+            };
+            let key = key_storage.data.as_mut_ptr();
+            let expected_map = core::ptr::addr_of_mut!(table.table)
+                .cast::<StringKeyMapSlot>()
+                .add(2) as usize;
+
+            assert_eq!(
+                string_table_clear_or_erase(
+                    core::ptr::addr_of_mut!(table.table).cast(),
+                    &key,
+                ),
+                0x0bad_c0de,
+            );
+            assert_eq!(CLEAR_ENTRY.load(Ordering::SeqCst), expected_map);
+            assert_eq!(ERASE_ENTRY.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn nonempty_key_erases_indexed_map_and_preserves_key_address() {
+        let _lock = OPS_LOCK.lock();
+        unsafe {
+            let _restore = install_recording_ops();
+            CLEAR_ENTRY.store(0, Ordering::SeqCst);
+            ERASE_ENTRY.store(0, Ordering::SeqCst);
+            ERASE_KEY.store(0, Ordering::SeqCst);
+            let mut table = fixture(1);
+            let mut key_storage = StringFixture {
+                _refcount: -1,
+                _capacity: 1,
+                length: u32::MAX,
+                data: [0],
+            };
+            let key = key_storage.data.as_mut_ptr();
+            let expected_map = core::ptr::addr_of_mut!(table.table)
+                .cast::<StringKeyMapSlot>()
+                .add(1) as usize;
+
+            assert_eq!(
+                string_table_clear_or_erase(
+                    core::ptr::addr_of_mut!(table.table).cast(),
+                    &key,
+                ),
+                3,
+            );
+            assert_eq!(CLEAR_ENTRY.load(Ordering::SeqCst), 0);
+            assert_eq!(ERASE_ENTRY.load(Ordering::SeqCst), expected_map);
+            assert_eq!(ERASE_KEY.load(Ordering::SeqCst), &key as *const *mut u8 as usize);
+        }
+    }
+}
