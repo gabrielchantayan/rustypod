@@ -760,6 +760,10 @@ pub mod hints {
     // cache and three-page LRU fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const SQLITE_PCACHE_REMOVE_FROM_LRU_LIST: usize = 0x9500_0000;
+    // 0x9d20_0000: dedicated to app/bool_message_dispatch's raw-u32
+    // message and vtable fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const BOOL_MESSAGE_DISPATCH: usize = 0x9d20_0000;
     // 0x4400_0000: dedicated to sqlite/expr_worklist's parent-release
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_RELEASE_PARENTS: usize = 0x4400_0000;

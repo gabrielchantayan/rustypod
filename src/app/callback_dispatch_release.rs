@@ -22,6 +22,14 @@
 
 use core::ptr::addr_of;
 
+#[cfg(test)]
+extern crate std;
+
+/// Serializes host tests that replace the shared value-dispatch seam.
+#[cfg(test)]
+pub(crate) static CALLBACK_DISPATCH_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+
 const RETAIL_VALUE_DISPATCH: usize = 0x0812_4ff4;
 
 /// Object whose first word points to a vtable with a finalization entry.
@@ -139,9 +147,8 @@ mod tests {
 
     use super::*;
     use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut DISPATCH_CALL: Option<(*mut u8, *mut DispatchValue, u32, u32, u32)> = None;
     static mut FINALIZE_CALL: *mut DispatchValue = core::ptr::null_mut();
     static mut ORDER: [u8; 2] = [0; 2];
@@ -175,7 +182,7 @@ mod tests {
     };
 
     fn install_recorder() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = CALLBACK_DISPATCH_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             addr_of_mut!(DISPATCH_CALL).write(None);
             addr_of_mut!(FINALIZE_CALL).write(core::ptr::null_mut());
