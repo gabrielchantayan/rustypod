@@ -131,7 +131,8 @@ pub struct BTreeControlBlock {
     pub reserved_08: [u8; 0x14],
     /// Byte size of one node.
     pub node_size: u16,
-    pub reserved_1e: u16,
+    /// Fixed key length used when the variable-index-keys attribute is clear.
+    pub max_key_length: u16,
     /// Node count; a node number must be strictly below it.
     pub total_nodes: u32,
     pub reserved_24: [u8; 0x0c],
@@ -475,7 +476,7 @@ mod tests {
             fork: 0xdead_beef,
             reserved_08: [0xa5; 0x14],
             node_size: 4096,
-            reserved_1e: 0xa5a5,
+            max_key_length: 0xa5a5,
             total_nodes: 8,
             reserved_24: [0xa5; 0x0c],
             attributes: 0,
