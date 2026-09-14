@@ -78,6 +78,36 @@ pub extern "C" fn apply_current_utc_offset_seconds(seconds: u32) -> u32 {
     }
 }
 
+/// `subtract_current_utc_offset_seconds` — original: `FUN_0805be78` @
+/// `0x0805be78` (**32 bytes; 6 unconditional `bl` callers and no predicated
+/// `bl` callers**).
+///
+/// Raw ARM preserves a zero timestamp without calling the calendar provider.
+/// Otherwise `FUN_08054fcc` supplies the negated signed sum of the current
+/// base and daylight-saving minute offsets; its `rsb`/`add` sequence adds that
+/// value times 60, equivalently subtracting the signed minute sum modulo
+/// `2^32`. A failed UTC-offset query therefore leaves the timestamp unchanged.
+///
+/// Deliberate deviation: `FUN_08054fcc` is unported, but its fully decoded
+/// adapter body only invokes the existing `current_utc_offset_query`; this
+/// implementation calls that port directly and applies its inverse arithmetic.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn subtract_current_utc_offset_seconds(seconds: u32) -> u32 {
+    if seconds == 0 {
+        return 0;
+    }
+
+    let mut base_utc_offset_minutes = 0i16;
+    let mut daylight_saving_minutes = 0u8;
+    if unsafe { utc_offset_query(&mut base_utc_offset_minutes, &mut daylight_saving_minutes) } != 0 {
+        let offset_minutes = (base_utc_offset_minutes as i32).wrapping_add((daylight_saving_minutes as i8) as i32);
+        seconds.wrapping_sub(offset_minutes.wrapping_mul(60) as u32)
+    } else {
+        seconds
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -109,6 +139,13 @@ mod tests {
         base_utc_offset_minutes.write(-480);
         daylight_saving_minutes.write(60);
         0
+    }
+
+    unsafe extern "C" fn valid_east_offset(base_utc_offset_minutes: *mut i16, daylight_saving_minutes: *mut u8) -> i32 {
+        QUERY_COUNT.fetch_add(1, Ordering::Relaxed);
+        base_utc_offset_minutes.write(120);
+        daylight_saving_minutes.write(0);
+        1
     }
 
     unsafe extern "C" fn unexpected_utc_offset(_base_utc_offset_minutes: *mut i16, _daylight_saving_minutes: *mut u8) -> i32 {
@@ -182,4 +219,54 @@ mod tests {
 
         unsafe { restore(installed) };
     }
+    #[test]
+    fn subtract_zero_skips_utc_offset_query() {
+        let installed = unsafe { install(unexpected_utc_offset) };
+
+        assert_eq!(subtract_current_utc_offset_seconds(0), 0);
+        assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 0);
+
+        unsafe { restore(installed) };
+    }
+
+    #[test]
+    fn subtract_successful_query_removes_base_and_daylight_minutes_as_seconds() {
+        let installed = unsafe { install(valid_pacific_offset) };
+
+        assert_eq!(subtract_current_utc_offset_seconds(86_400), 111_600);
+        assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 1);
+
+        unsafe { restore(installed) };
+    }
+
+    #[test]
+    fn subtract_treats_daylight_saving_byte_as_signed() {
+        let installed = unsafe { install(valid_negative_daylight_offset) };
+
+        assert_eq!(subtract_current_utc_offset_seconds(123), 123);
+        assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 1);
+
+        unsafe { restore(installed) };
+    }
+
+    #[test]
+    fn subtract_failed_query_ignores_written_offsets() {
+        let installed = unsafe { install(invalid_pacific_offset) };
+
+        assert_eq!(subtract_current_utc_offset_seconds(0xffff_ffff), 0xffff_ffff);
+        assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 1);
+
+        unsafe { restore(installed) };
+    }
+
+    #[test]
+    fn subtract_positive_offset_wraps_u32_timestamp() {
+        let installed = unsafe { install(valid_east_offset) };
+
+        assert_eq!(subtract_current_utc_offset_seconds(1_000), 0xffff_e7c8);
+        assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 1);
+
+        unsafe { restore(installed) };
+    }
 }
+
