@@ -24,6 +24,8 @@
 //!   a validity-gated predicate over bit 0 of the token owner's byte +0x8f.
 //! - [`scoped_context_owner_flags_bit_21`] — `FUN_082a45a4` @ 0x082a45a4,
 //!   a validity-gated predicate over bit 21 of the token owner's flags word.
+//! - [`scoped_context_member_owner_byte_8f_bit_0`] — `FUN_08113438` @
+//!   0x08113438, a tail-dispatching wrapper for a member token at +0x38.
 //! - [`scoped_context_owner_u64_110`] — `FUN_082a368c` @ 0x082a368c, a
 //!   validity-gated getter returning the token owner's 64-bit word pair at
 //!   +0x110/+0x114.
@@ -206,6 +208,16 @@ pub struct ScopedContext {
     pub registry_token: *mut u8,
     /// +0x14 — the caller's mode byte, written last.
     pub mode: u8,
+}
+
+/// An opaque receiver whose scoped-context token begins at target offset
+/// +0x38. The preceding words have no recovered semantic identity.
+#[repr(C)]
+pub struct ScopedContextMemberOwner {
+    /// +0x00..+0x34 — fourteen unrecovered target words.
+    pub preceding_words: [u32; 14],
+    /// +0x38 — the token forwarded to the capability predicate.
+    pub scoped_context: ScopedContext,
 }
 
 /// An opaque provider whose +0x30 word points at its service context.
@@ -942,6 +954,28 @@ pub unsafe extern "C" fn scoped_context_owner_byte_8f_bit_0(
         return 0;
     }
     (((*this).owner as *const u8).add(OWNER_BYTE_8F_OFFSET).read() & 1) as u32
+}
+
+/// scoped_context_member_owner_byte_8f_bit_0 — original: `FUN_08113438` @
+/// 0x08113438 (8 bytes, exact: `add r0, r0, #0x38; b 0x082a4574`; the next
+/// separately linked function begins at 0x08113440). **6 `bl` call sites**,
+/// all unconditional and binary-scanned by decoding every B/BL word in
+/// osos.dec: 0x081f40c0, 0x081f4204, 0x081f4278, 0x081f4438, 0x081f4488,
+/// and 0x081f44d4. There are no predicated forms or aligned raw data-word
+/// references.
+///
+/// The wrapper selects its receiver's [`ScopedContext`] member at +0x38 and
+/// tail-dispatches [`scoped_context_owner_byte_8f_bit_0`], preserving that
+/// predicate's validity gate and 0-or-1 result.
+///
+/// Deliberate deviations: none. Although expressed as a Rust call, the
+/// release ARM build lowers it to the original tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_member_owner_byte_8f_bit_0(
+    receiver: *const ScopedContextMemberOwner,
+) -> u32 {
+    scoped_context_owner_byte_8f_bit_0(core::ptr::addr_of!((*receiver).scoped_context))
 }
 
 
@@ -1737,6 +1771,73 @@ mod tests {
             (fixture.owner.as_mut_ptr() as *mut u8)
                 .add(OWNER_BYTE_8F_OFFSET)
                 .write(value);
+        }
+    }
+
+    struct MemberPredicateFixture {
+        vtable: ScopedContextVtable,
+        owner: [u8; OWNER_BYTE_8F_OFFSET + 1],
+        receiver: ScopedContextMemberOwner,
+    }
+
+    fn member_predicate_fixture() -> MemberPredicateFixture {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        MemberPredicateFixture {
+            vtable: ScopedContextVtable { slots },
+            owner: [0; OWNER_BYTE_8F_OFFSET + 1],
+            receiver: ScopedContextMemberOwner {
+                preceding_words: [0xa5a5_5a5a; 14],
+                scoped_context: ScopedContext {
+                    vtable: ptr::null(),
+                    owner_valid: 1,
+                    owner: ptr::null_mut(),
+                    service_context: ptr::null_mut(),
+                    registry_token: ptr::null_mut(),
+                    mode: 0,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn member_predicate_forwards_the_token_at_target_offset_38() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut fixture = member_predicate_fixture();
+        fixture.receiver.scoped_context.vtable = &fixture.vtable;
+        fixture.receiver.scoped_context.owner = fixture.owner.as_mut_ptr();
+        fixture.owner[OWNER_BYTE_8F_OFFSET] = 0x81;
+        reset_validity_recording(0xffff_ffff);
+
+        let receiver = &fixture.receiver as *const ScopedContextMemberOwner;
+        let token = &fixture.receiver.scoped_context as *const ScopedContext;
+        assert_eq!(token as usize - receiver as usize, 0x38);
+        let result = unsafe { scoped_context_member_owner_byte_8f_bit_0(receiver) };
+
+        assert_eq!(result, 1);
+        assert_eq!(fixture.receiver.preceding_words, [0xa5a5_5a5a; 14]);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, token as usize);
+        }
+    }
+
+    #[test]
+    fn member_predicate_preserves_the_validity_short_circuit() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut fixture = member_predicate_fixture();
+        fixture.receiver.scoped_context.vtable = &fixture.vtable;
+        reset_validity_recording(0);
+
+        let result = unsafe { scoped_context_member_owner_byte_8f_bit_0(&fixture.receiver) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(
+                VALIDITY_TOKEN as usize,
+                &fixture.receiver.scoped_context as *const _ as usize
+            );
         }
     }
 
