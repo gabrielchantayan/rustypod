@@ -3,10 +3,13 @@
 //! `f32_to_fixed16_sat` — original: `FUN_080a67dc` @ 0x080a67dc (48 bytes
 //! of code at 0x080a67dc..0x080a680b plus one literal word at 0x080a680c).
 //!
-//! retailOS is SOFT-FLOAT: a float travels as its raw IEEE-754 bit pattern
-//! in r0, which is why the argument is a `u32` and not an `f32`. This module
-//! does pure integer work; the float manipulation is delegated to the ported
-//! ADS runtime helpers `__fscalb` (0x083ed150) and `__f2i` (0x083ec898).
+//! `fixed16_to_f32` — original: `FUN_080a6810` @ 0x080a6810 (24 bytes).
+//!
+//! retailOS is SOFT-FLOAT: each f32 travels as its raw IEEE-754 bit pattern
+//! in r0. The f32-to-fixed input is therefore `u32`, as is the
+//! fixed-to-f32 result; the Q16.16 argument itself is a signed `i32`.
+//! This module does pure integer work; its float manipulation delegates to
+//! ported ADS runtime helpers.
 //!
 //! Algorithm (decoded from osos.dec, not from Ghidra — Ghidra falsely marks
 //! this function no-return and truncates its callers):
@@ -42,8 +45,9 @@
 //! original does exactly this; the port reproduces it. (names.yaml recorded
 //! this literal as 32767.984375; the raw word 0x46ffff00 decodes to 32767.5.)
 
-use crate::fp::fp_fconv::__f2i;
-use crate::fp::fp_scalb::__fscalb;
+use crate::fp::fp_dconv::__i2d;
+use crate::fp::fp_fconv::{__d2f, __f2i};
+use crate::fp::fp_scalb::{__dscalb, __fscalb};
 
 /// Literal at 0x080a680c: 0x46ffff00 = 32767.5f. Compared SIGNED.
 const POS_SAT_THRESHOLD: i32 = 0x46ff_ff00;
@@ -53,6 +57,22 @@ const NEG_SAT_THRESHOLD: u32 = 0xc700_0000;
 
 /// Number of fractional bits in the Q16.16 result.
 const FIXED16_SHIFT: i32 = 16;
+
+/// fixed16_to_f32 — original: `FUN_080a6810` @ 0x080a6810 (24 bytes).
+///
+/// Converts a Q16.16 signed fixed-point value to an IEEE-754 f32 bit pattern.
+/// The retail sequence converts the integer exactly with `__i2d`, scales that
+/// double by 2^-16 through `__dscalb`, then tail-branches to `__d2f`; the
+/// final narrowing therefore rounds to nearest-even. Raw `osos.dec` confirms
+/// exactly six inbound calls, all unconditional `bl` (none predicated):
+/// 0x0824ed3c, 0x082501bc, 0x082501c8, 0x082501d4, 0x082501e0, and
+/// 0x0825d818. No deliberate behavioral deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_to_f32")]
+pub unsafe extern "C" fn fixed16_to_f32(x: i32) -> u32 {
+    __d2f(__dscalb(__i2d(x), -FIXED16_SHIFT))
+}
 
 /// f32_to_fixed16_sat — original: `FUN_080a67dc` @ 0x080a67dc (48 bytes).
 ///
@@ -175,6 +195,41 @@ mod tests {
 
     fn of(value: f32) -> i32 {
         convert(value.to_bits())
+    }
+
+    /// Independent oracle: Q16.16 is exactly representable in f64, then the
+    /// cast supplies the required IEEE round-to-nearest-even narrowing.
+    fn fixed16_to_float_reference(x: i32) -> u32 {
+        (((x as f64) / 65536.0) as f32).to_bits()
+    }
+
+    fn fixed_to_float(x: i32) -> u32 {
+        unsafe { fixed16_to_f32(x) }
+    }
+
+    #[test]
+    fn fixed16_to_float_scales_sign_extremes_and_rounding_boundaries() {
+        for x in [
+            i32::MIN,
+            -0x7fff_ffc0,
+            -0x1_8000,
+            -0x1,
+            0,
+            1,
+            0x1_8000,
+            0x1234_5678,
+            0x7fff_ffbf,
+            0x7fff_ffc0,
+            i32::MAX,
+        ] {
+            assert_eq!(fixed_to_float(x), fixed16_to_float_reference(x), "x {x:#010x}");
+        }
+
+        // Adjacent Q16.16 values straddle the midpoint between the final two
+        // binary32 values below 32768; the midpoint selects the even 32768.
+        assert_eq!(fixed_to_float(0x7fff_ffbf), 0x46ff_ffff);
+        assert_eq!(fixed_to_float(0x7fff_ffc0), 0x4700_0000);
+        assert_eq!(fixed_to_float(i32::MIN), 0xc700_0000);
     }
 
     #[test]

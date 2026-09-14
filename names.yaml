@@ -40404,6 +40404,33 @@ functions:
       top-byte `lsr #24; cmp #0xc6; bhi` for the unsigned 0xc7000000
       one - exactly as the earlier pass predicted.
 
+  - address: 0x080a6810
+    ghidra: FUN_080a6810
+    name: fixed16_to_f32
+    size: 24
+    sig: "u32 fixed16_to_f32(i32 x)"
+    module: fp/fp_fixed16
+    status: ported
+    renames:
+      r0: x
+      FUN_083eb908: __i2d
+      FUN_083ed0dc: __dscalb
+      FUN_083eae74: __d2f
+    notes: >-
+      Q16.16 signed fixed-point x in r0 -> IEEE-754 f32 bit pattern in r0.
+      Raw osos.dec verifies the full 24-byte extent 0x080a6810..0x080a6827:
+      push {r4,lr}; bl __i2d; r2 = -16; bl __dscalb; pop {r4,lr}; tail
+      b __d2f. Decoding every ARM B/BL-immediate word finds exactly six
+      inbound calls, all unconditional BL and none predicated: 0x0824ed3c,
+      0x082501bc, 0x082501c8, 0x082501d4, 0x082501e0, 0x0825d818. All three
+      helpers were already ported, so this port calls them directly without a
+      dispatch seam. No deliberate behavioral deviations. Host tests cover
+      zero, signs, fractional values, i32 extrema, and the nearest-even
+      boundary immediately below 32768 against an independent f64 oracle.
+      match.py structural review confirms the operation sequence; LLVM inlined
+      the three helpers into a 100-instruction body rather than preserving
+      the retail six-instruction call/tail-call shape.
+
   - address: 0x080e9310
     ghidra: FUN_080e9310
     name: scan_decimal_cursor
