@@ -10,7 +10,7 @@
 //! - +0x28c..+0x2b8 12 saved `slot_count` words.
 //! - +0x2bc `overflow_reported` — latch for the one-shot diagnostic.
 
-use crate::heap::tagged_word_buffer::TaggedWordBuffer;
+use crate::heap::tagged_word_buffer::{tagged_word_buffer_destroy, TaggedWordBuffer};
 use crate::kernel::diag_ring_record::diag_ring_record;
 use crate::drivers::ata_cmd::traced_alloc;
 use crate::libc::memzero::memzero_aligned;
@@ -41,6 +41,9 @@ pub struct TaggedWordBufferPool {
     /// +0x2bc: one-shot overflow diagnostic latch.
     pub overflow_reported: u32,
 }
+
+/// `flags` bit 0: release the complete pool after destroying its slots.
+pub const TAGGED_WORD_BUFFER_POOL_FLAG_DELETE_THIS: u32 = 1;
 /// tagged_word_buffer_pool_push — original: `FUN_0803dec8` @ 0x0803dec8
 /// (36 bytes; 11 direct `bl` call sites).
 ///
@@ -108,6 +111,37 @@ pub unsafe extern "C" fn tagged_word_buffer_pool_pop(pool: *mut TaggedWordBuffer
     }
 }
 
+/// tagged_word_buffer_pool_destroy — original: `FUN_0803ddc8` @
+/// 0x0803ddc8 (68 bytes; **6 direct `bl` call sites**, binary-verified:
+/// 0x08062360 is `blne`; 0x0808e9d0, 0x080c6f90, 0x080c7264, 0x080cbac4,
+/// and 0x080cbe08 are unconditional `bl`).
+///
+/// Raw bytes span exactly 0x0803ddc8..0x0803de0c; the separately linked
+/// `tagged_word_buffer_pool_take` starts at 0x0803de0c. NULL returns without
+/// touching anything. Otherwise destroys all 32 embedded tagged-word buffers
+/// in ascending address order, then reloads `flags` at +0x284 and releases
+/// the complete pool through `traced_free` when bit 0 is set.
+///
+/// Deliberate deviations: none. Release compilation retains the final
+/// conditional tail branch to `traced_free`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tagged_word_buffer_pool_destroy(pool: *mut TaggedWordBufferPool) {
+    if pool.is_null() {
+        return;
+    }
+
+    let slots = core::ptr::addr_of_mut!((*pool).slots).cast::<TaggedWordBuffer>();
+    for slot_index in 0..TAGGED_WORD_BUFFER_POOL_CAPACITY {
+        unsafe { tagged_word_buffer_destroy(slots.add(slot_index)) };
+    }
+
+    let flags = unsafe { core::ptr::addr_of!((*pool).flags).read_volatile() };
+    if flags & TAGGED_WORD_BUFFER_POOL_FLAG_DELETE_THIS != 0 {
+        unsafe { crate::drivers::ata_cmd::traced_free(pool.cast::<u8>()) };
+    }
+}
+
 /// tagged_word_buffer_pool_take — original: `FUN_0803de0c` @ 0x0803de0c
 /// (100 bytes; 22 `bl` call sites).
 ///
@@ -172,13 +206,18 @@ mod tests {
 
     use super::*;
     use std::mem::{size_of, zeroed};
-    use crate::drivers::ata_cmd::{TracedAllocHooks, TRACED_ALLOC_HOOKS};
+    use crate::drivers::ata_cmd::{
+        TracedAllocHooks, TracedFreeHooks, LARGE_ALLOC_TAG, TRACED_ALLOC_HOOKS,
+        TRACED_FREE_HOOKS, TRACED_FREE_TEST_LOCK,
+    };
     use crate::kernel::diag_ring_record::{
         BlockGetter, DiagEventRing, DIAG_RING_BLOCK_GETTER,
     };
     use crate::testing::{DIAG_RING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
     use core::mem::MaybeUninit;
+    use std::sync::Mutex;
     use std::slice;
+    use std::vec::Vec;
 
     #[repr(align(4))]
     struct FactoryStorage([u8; TAGGED_WORD_BUFFER_POOL_SIZE]);
@@ -186,6 +225,12 @@ mod tests {
     static mut FACTORY_STORAGE: FactoryStorage =
         FactoryStorage([0; TAGGED_WORD_BUFFER_POOL_SIZE]);
     static mut FACTORY_RING: MaybeUninit<DiagEventRing> = MaybeUninit::uninit();
+
+    static DESTROYED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+    unsafe extern "C" fn record_destroyed(block: *mut u8) {
+        DESTROYED.lock().unwrap_or_else(|poison| poison.into_inner()).push(block as usize);
+    }
 
     unsafe extern "C" fn factory_alloc(
         _size: i32,
@@ -285,6 +330,54 @@ mod tests {
         assert_eq!(pool.slot_count, 0x1234_5678);
         assert_eq!(pool.nesting_depth, 0);
         assert_eq!(pool.saved_slot_counts[0], 0x1234_5678);
+    }
+
+    #[test]
+    fn destroy_ignores_a_null_pool() {
+        unsafe { tagged_word_buffer_pool_destroy(core::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn destroy_releases_each_embedded_slot_before_owned_pool() {
+        let _alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _free_guard = TRACED_FREE_TEST_LOCK.lock();
+        let old_free_hooks = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(TRACED_FREE_HOOKS))
+        };
+        let old_tag = unsafe { core::ptr::addr_of!(LARGE_ALLOC_TAG).read_volatile() };
+        unsafe {
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_FREE_HOOKS),
+                TracedFreeHooks { free: record_destroyed, trace: None },
+            );
+            core::ptr::addr_of_mut!(LARGE_ALLOC_TAG).write_volatile(0x61);
+        }
+        DESTROYED.lock().unwrap_or_else(|poison| poison.into_inner()).clear();
+
+        let mut pool = unsafe { zeroed::<TaggedWordBufferPool>() };
+        pool.flags = TAGGED_WORD_BUFFER_POOL_FLAG_DELETE_THIS;
+        for slot in &mut pool.slots {
+            slot.flags = crate::heap::tagged_word_buffer::FLAG_DELETE_THIS;
+        }
+        let pool_ptr = core::ptr::addr_of_mut!(pool);
+        let first_slot = core::ptr::addr_of_mut!(pool.slots).cast::<TaggedWordBuffer>();
+
+        unsafe { tagged_word_buffer_pool_destroy(pool_ptr) };
+
+        let mut expected: Vec<usize> = (0..TAGGED_WORD_BUFFER_POOL_CAPACITY)
+            .map(|slot_index| unsafe { first_slot.add(slot_index) as usize })
+            .collect();
+        expected.push(pool_ptr as usize);
+        assert_eq!(
+            *DESTROYED.lock().unwrap_or_else(|poison| poison.into_inner()),
+            expected,
+            "all 32 embedded scalar-deleting destructors precede the owner release",
+        );
+
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(TRACED_FREE_HOOKS), old_free_hooks);
+            core::ptr::addr_of_mut!(LARGE_ALLOC_TAG).write_volatile(old_tag);
+        }
     }
 
     #[test]
