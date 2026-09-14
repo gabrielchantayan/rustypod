@@ -21,6 +21,7 @@ pub mod class_8900_work_queue;
 pub mod class_8900_queued_work_construct;
 pub mod clamped_mode_position;
 pub mod class_8c00;
+pub mod settings_value_scale;
 pub mod buffer_refill_request;
 pub mod byte_source;
 pub mod buffer_transition_controller;

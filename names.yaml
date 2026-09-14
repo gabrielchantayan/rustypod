@@ -83620,3 +83620,35 @@ functions:
       the wrapper's field-read role. Target code reaches the unported helper
       at its verified fixed address; host tests use a volatile seam proving
       every forwarded argument, both fixed defaults, and result preservation.
+
+  # --- settings-item two-segment value scale ---
+  - address: 0x080e676c
+    ghidra: FUN_080e676c
+    name: settings_value_scale
+    size: 100
+    sig: "u32 settings_value_scale(u32 value)"
+    module: app/settings_value_scale
+    status: ported
+    renames:
+      param_1/r0/r5: value
+      FUN_080539cc: lower_value_get
+      FUN_08051e30: midpoint_value_get
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte body from push
+      {r4,r5,r6,lr} at 0x080e676c through pop {r4,r5,r6,pc} at
+      0x080e67cc; the separately linked next function opens at 0x080e67d0.
+      Decoding every aligned ARM B/BL immediate finds exactly six direct
+      inbound calls, all unconditional bl at 0x0816fc78, 0x08170e3c,
+      0x081a5420, 0x081bbe60, 0x081bbea4, and 0x081bbf08; no predicated
+      calls or tail branches target this entry. It maps signed input values
+      through 0..50: 6 + value*(55-6)/50 and values above 50 through
+      100 - (100-value)*(100-55)/50, using wrapping i32 arithmetic and
+      __rt_sdiv's truncation toward zero. The two callee getters are
+      immutable constant leaves (6 and 55) and remain unported, so the Rust
+      port embeds their raw-verified values rather than introducing dispatch
+      seams; the stock upper==100 arm is unreachable. The existing Rust
+      class_8c00_commit_mode caller now invokes this direct port. Host tests
+      cover both segment boundaries, truncation, signed comparison, and
+      overflow bit patterns. match.py review is structural, not
+      instruction-exact.
