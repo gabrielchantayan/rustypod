@@ -5492,6 +5492,40 @@ functions:
       MODE_STATE_OBJECT_TABLE target-global seam; no bounds or null checks
       are present in the original or port.
 
+  # --- indexed UI mode-substate status ---
+  - address: 0x080dd2a0
+    ghidra: FUN_080dd2a0
+    name: indexed_mode_substate_code
+    size: 36
+    sig: "u32 indexed_mode_substate_code(i16 index, u32 selector)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: selector
+      DAT_080dd2c4: mode_state_object_table
+      iVar1/r0: selected_substate
+      return/r0: substate_code
+    notes: >-
+      Raw osos.dec establishes a 40-byte extent: the 36-byte instruction
+      sequence at 0x080dd2a0..0x080dd2c0 is followed by its literal table
+      pointer at 0x080dd2c4, and the separately linked next function begins
+      at 0x080dd2c8. smulbb uses the signed low halfword of index with 99 to
+      select an object-pointer-table record at 0x08b2f648 + index * 0x18c.
+      It calls unported FUN_080e1cc8 with selector, which selects offsets
+      0x00/0x20/0x40/0x60 for selectors 0..3 and
+      0x100/0x180/0x200/0x230 for 4..7; it then reads the selected
+      substate's word +0x14 and masks it with 7. Invalid selectors make the
+      stock helper return null and the following load fault, so they remain
+      outside the Rust unsafe contract. Decoding every immediate ARM B/BL
+      word in osos.dec finds six inbound direct calls, all unconditional bl
+      at 0x080a61ac, 0x080df660, 0x080df688, 0x080df69c, 0x080df6dc, and
+      0x080df6f0; no predicated forms or direct tail branches reach it.
+      Rust deliberately inlines FUN_080e1cc8's verified selector mapping,
+      rather than adding a dispatch seam for an unported callee. Host tests
+      cover every selector and low-three-bit masking. match.py structural
+      review is recorded after the required ARM build.
+
   - address: 0x08037cc0
     ghidra: FUN_08037cc0
     name: invalidate_data_cache_line_by_mva
