@@ -39851,6 +39851,33 @@ functions:
       tuple.
 
 
+  # --- UI object packed two-bit field setter (ui/object_packed_field) ---
+  - address: 0x08067244
+    ghidra: FUN_08067244
+    name: set_object_packed_field
+    size: 48
+    sig: "void set_object_packed_field(u32 selected, u8 *object, const u8 *selector)"
+    module: ui/object_packed_field
+    status: ported
+    renames:
+      param_1/r0: selected
+      param_2/r1: object
+      param_3/r2: selector
+      param_2_plus_0x1c: packed_fields
+      param_3_plus_0x1: packed_field_index
+      bVar1/r3: cleared_packed_fields
+    notes: >-
+      Raw ARM covers 0x08067244 through bx lr at 0x08067270; the next
+      independently linked function starts at 0x08067274, confirming the
+      48-byte extent. Decoding every ARM B/BL immediate in osos.dec finds
+      six direct callers: unconditional bl at 0x0805cdb4, 0x080df2ac,
+      0x080e2918, and 0x080e29ac; bleq at 0x080616c0; and blne at
+      0x080e2948. It clears the two-bit field selected by selector+1 in
+      object+0x1c, stores the cleared byte, then stores it ORed with
+      selected shifted by the reloaded index. The first lsl #1 makes
+      selector bit 7 irrelevant to the following register shift; only
+      indices 0..3 modify the byte. There are no null, bounds, or value
+      guards. Deliberate deviations: none.
   # --- UI resource selection-bit setter (ui/object_state) ---
   - address: 0x08067450
     ghidra: FUN_08067450
