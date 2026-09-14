@@ -58,6 +58,16 @@
 //! rotation. Its right-child promotion, middle-subtree transfer, and
 //! target-width links therefore reuse this implementation without a redundant
 //! dispatch seam. Deliberate deviations: none.
+//!
+//! `FUN_083c22b4` at load address `0x083c22b4` is another byte-identical
+//! 84-byte (21-word) ported alias, ending at `0x083c2304` before the separately
+//! linked right-rotation sibling at `0x083c2308`. Raw B/BL decoding verifies
+//! five inbound direct calls: unconditional `bl` at `0x083c25f0`,
+//! `0x083c2690`, `0x083c2784`, and `0x083c2c18`, plus predicated `bleq` at
+//! `0x083c2b80`; there are no direct tail-`B` callers. The conditional caller
+//! selects its pivot before reaching this no-guard left rotation. It shares this
+//! implementation and its host tests without a redundant dispatch seam;
+//! deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
