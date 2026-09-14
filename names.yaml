@@ -83957,3 +83957,37 @@ functions:
       callback field instead of fixed 32-bit firmware words so host fixtures
       can hold pointers above 4 GiB. Host tests cover the NULL status and
       forwarding of zero, observed codes, and u32::MAX.
+
+  # --- Forward byte-range swap ---
+  - address: 0x0809f728
+    ghidra: FUN_0809f728
+    name: swap_byte_ranges
+    size: 28
+    sig: "void swap_byte_ranges(u8 *first, u8 *second, u32 len)"
+    module: libc/swap_byte_ranges
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: len
+      uVar1/r12: second_byte
+      uVar2/r3: first_byte
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte body from ldrb r12,[r1] at
+      0x0809f728 through bx lr at 0x0809f740; the separately linked next
+      function starts at 0x0809f744. It swaps byte pairs in ascending address
+      order: reads second then first, stores the saved second byte to first,
+      stores the saved first byte to second, then advances both pointers. The
+      bottom-tested loop has NO zero-length guard: len == 0 swaps one byte,
+      wraps r2, and continues for 2^32 total iterations. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly six inbound
+      direct calls: unconditional bl at 0x080e8920, 0x080e89cc, 0x080e89d8,
+      and 0x080e8a14; blgt at 0x080e8948 and 0x080e8968. No direct tail B or
+      data-word reference targets this entry. All lie in partitioning sort
+      FUN_080e88d0; the two blgt calls are comparator-result gated, and every
+      recovered caller passes a positive element width in r2. The Rust loop
+      uses ordered volatile byte accesses and wrapping subtraction to retain
+      that zero-length behavior and prevent bulk-memory-intrinsic rewriting.
+      The dedicated text section prevents byte-identical-body folding. Host
+      tests cover all positive lengths through 64, overlapping ranges, and
+      identical ranges. Deliberate deviations: none.
