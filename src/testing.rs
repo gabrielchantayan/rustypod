@@ -800,6 +800,10 @@ pub mod hints {
     // raw-u32 tree and node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const RED_BLACK_TREE_ROTATE_LEFT_FIFTH: usize = 0x8c80_0000;
+    // 0x8ca0_0000: dedicated to cxx/red_black_tree_rotate_left_sixth's
+    // raw-u32 tree and node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RED_BLACK_TREE_ROTATE_LEFT_SIXTH: usize = 0x8ca0_0000;
     // 0x8c90_0000: dedicated to cxx/red_black_tree_rotate_right_sixth's
     // raw-u32 tree and node fixture; mappings never unmap, so no other user may
     // share this hint.
