@@ -25798,6 +25798,37 @@ functions:
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
 
+  - address: 0x0839944c
+    ghidra: FUN_0839944c
+    name: path_entry_probe_and_mark_present
+    size: 76
+    sig: "u32 path_entry_probe_and_mark_present(u8 *entry)"
+    module: app/path_entry_probe_and_mark_present
+    status: ported
+    renames:
+      param_1/r0: entry (completion byte +0x00, embedded path object +0x04,
+        signed probe hint +0x0c)
+      FUN_080f4ad8: path_probe_via_facade
+      DAT_08399490: path_present
+      DAT_08399494: path_absent
+    notes: >-
+      Raw osos.dec extent is 68 instruction bytes plus literal-pool words
+      0xffff5b80 and 0xffff5b81 at 0x08399490 and 0x08399494: 76 bytes
+      through 0x08399497; the next distinct function begins at 0x08399498.
+      Ghidra's 68-byte size omits the literal pool. Decoding every immediate
+      ARM B/BL word verifies five inbound direct calls, all unconditional BL
+      (no predicated forms): 0x08329b70, 0x0832a0e4, 0x0832a5a8, 0x0832a700,
+      and 0x0832a790. Null returns 0xffffffce; an already-complete entry
+      returns zero without probing. An incomplete entry sign-extends byte
+      +0x0c, probes the embedded path at +0x04 through the already ported
+      path_probe_via_facade, writes byte +0x00 = 1 only for a nonzero probe,
+      then returns 0xffff5b80 (present) or 0xffff5b81 (absent). No new seam:
+      direct Rust call preserves the stock direct bl. Host test proves null,
+      absent/non-mutating, signed hint 0x80 forwarding, present/marking, and
+      completed/probe-bypass paths. match.py: same null/completion guards,
+      signed byte load, direct path-probe call, conditional byte store, and
+      two literal failure returns; expected diff is Rust framing and LLVM
+      branch selection.
   - address: 0x083995d8
     ghidra: FUN_083995d8
     name: scheduler_handle_label_lookup
