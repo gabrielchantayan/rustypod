@@ -179,6 +179,7 @@ pub mod path_component_query_worker;
 pub mod path_object_construct;
 pub mod path_probe;
 pub mod path_entry_load_to_heap;
+pub mod path_entry_probe_and_mark_present;
 pub mod playlist_pointer_marker;
 pub mod pending_event_take;
 pub mod pending_event_take_due;
