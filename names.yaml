@@ -83433,3 +83433,33 @@ functions:
       the interior instruction as a shutdown callback is invalid. Fixed
       firmware storage is modeled by host statics. match.py review is
       structural, not instruction-exact.
+
+  # --- localized string-table peer map selector ---
+  - address: 0x08101bf4
+    ghidra: FUN_08101bf4
+    name: string_table_peer_map
+    size: 32
+    sig: "u8 *string_table_peer_map(u8 *table)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      "table+0x54": current_table_index
+      r1: incremented_index
+      r2: signed_remainder_rounding
+      r0: peer_map
+    notes: >-
+      Raw osos.dec establishes the 32-byte body from ldr r1,[r0,#0x54] at
+      0x08101bf4 through bx lr at 0x08101c10; the next separately linked
+      function begins push {r2,r3,r4,r5,r6,lr} at 0x08101c14. Decoding every
+      aligned immediate ARM B/BL word finds exactly six direct inbound calls,
+      all unconditional bl at 0x08101dac, 0x08101de8, 0x08101e84, 0x08101eb4,
+      0x08101ec8, and 0x0812118; there are no predicated call forms. The
+      function computes signed wrapping (current_table_index + 1) % 2 through
+      add/lsr/bic/sub, then returns table plus that signed result times 0x1c.
+      Normal selector values 0 and 1 select the opposite map; malformed
+      negative values retain ARM signed-remainder behavior rather than becoming
+      unsigned offsets. Existing string_table_copy_current_to_peer callers now
+      invoke this direct port. Host tests cover normal toggling, negative
+      selector results, and the signed-overflow edge. match.py review is
+      structural, not instruction-exact. Deliberate deviations: none.
