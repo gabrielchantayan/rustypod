@@ -82917,6 +82917,37 @@ functions:
       plus a test-only output observer, avoiding concurrent mutation of
       trace_printf's formatter slot. Tests cover linked traversal, the
       three-field match gate, a null head, and ARM sub/mul wraparound.
+  # --- SHA-1 one-shot wrapper (src/crypto/sha1_digest.rs) ---
+  - address: 0x083691a0
+    ghidra: FUN_083691a0
+    name: sha1_digest
+    size: 64
+    sig: "void sha1_digest(const u8 *input, u32 input_len, u8 *output)"
+    module: crypto/sha1_digest
+    status: ported
+    renames:
+      param_1/r0/r5: input
+      param_2/r1/r6: input_len
+      param_3/r2/r4: output
+      auStack_170/sp: sha1_context
+      FUN_080ec1bc: SHA1_Init
+      FUN_080f4fd8: SHA1_Update
+      FUN_080efbc8: SHA1_Final
+    notes: >-
+      Raw osos.dec confirms the exact 64-byte body: 16 ARM words from push
+      {r4-r6,lr} at 0x083691a0 through pop {r4-r6,pc} at 0x083691dc; the
+      next separately linked function starts at 0x083691e0. Decoding every
+      aligned ARM B/BL-immediate word finds exactly five inbound direct calls,
+      all unconditional plain bl at 0x0803c66c, 0x0803c6f8, 0x0807ea48,
+      0x080e37a4, and 0x080e37e8; there are no predicated calls or tail-B
+      callers. It allocates the 352-byte SHA-1 context, calls SHA1_Init,
+      SHA1_Update(context, input, input_len), and SHA1_Final(context, output)
+      in that order with no NULL or length guard. SHA1_Init @ 0x080ec1bc,
+      SHA1_Update @ 0x080f4fd8, and SHA1_Final @ 0x080efbc8 have no existing
+      ledger entries, so target builds retain those stock calls behind volatile
+      seams while host tests record their ABI. Deliberate deviations: the Rust
+      context is an aligned [u32; 88] rather than raw stack bytes; it has the
+      identical 352-byte extent and required word alignment.
 
   # --- SQLite expression affinity (src/sqlite/expr_affinity.rs) ---
   - address: 0x083768e0
