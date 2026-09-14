@@ -989,6 +989,114 @@ pub unsafe extern "C" fn element_array8_at(index: i32) -> *mut u8 {
     element_array_at(8, index)
 }
 
+/// Calls the retail array-7 expansion member at `0x083d4bf4`.
+///
+/// That sibling remains stock firmware: it reallocates the slot buffer to
+/// `growth * slots`, clears its new tail, records the result, and returns.
+/// The wrapper preserves its actual device entry rather than duplicating a
+/// second port.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn element_array7_expand_for_insert(this: *mut u8) {
+    let retail_expand: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(0x083d_4bf4usize);
+    retail_expand(this);
+}
+
+/// Host-side replacement for the stock array-7 expansion member.
+///
+/// Only unit tests execute this path: target builds call the fixed retailOS
+/// entry above, while non-test host builds must not pretend to implement the
+/// unported sibling.
+#[cfg(all(not(target_os = "none"), test))]
+static mut ELEMENT_ARRAY7_EXPAND_FOR_INSERT: unsafe extern "C" fn(*mut u8) =
+    missing_element_array7_expand_for_insert;
+
+#[cfg(all(not(target_os = "none"), test))]
+unsafe extern "C" fn missing_element_array7_expand_for_insert(_this: *mut u8) {
+    panic!("element_array7_insert_unique expansion seam was not installed")
+}
+
+#[cfg(all(not(target_os = "none"), test))]
+#[inline(always)]
+unsafe fn element_array7_expand_for_insert(this: *mut u8) {
+    let expand = core::ptr::read_volatile(core::ptr::addr_of!(
+        ELEMENT_ARRAY7_EXPAND_FOR_INSERT
+    ));
+    expand(this);
+}
+
+#[cfg(all(not(target_os = "none"), not(test)))]
+#[inline(always)]
+unsafe fn element_array7_expand_for_insert(_this: *mut u8) {
+    panic!("element_array7_insert_unique requires retailOS expansion member")
+}
+
+/// element_array7_insert_unique — original: `FUN_083d4b5c` @ **0x083d4b5c**
+/// (**152 bytes**; **five direct inbound `bl` call sites, all unconditional**).
+///
+/// Raw ARM establishes the exact extent `0x083d4b5c..0x083d4bf4`: the next
+/// separately linked function begins at `0x083d4bf4`. Decoding every ARM
+/// B/BL-immediate word in `osos.dec` finds the five inbound calls at
+/// `0x081893b8`, `0x082c7b7c`, `0x082c7d60`, `0x082c83bc`, and `0x082c87c4`;
+/// all are plain `bl`, with no predicated inbound calls. Its sole outgoing
+/// call is the predicated `bleq 0x083d4bf4` when `used == slots`.
+///
+/// Scans every signed-valid slot for the exact pointer first, returning `-1`
+/// without mutation for a duplicate (including a NULL argument in an empty
+/// table). If the live count equals capacity, it expands through the retail
+/// sibling. It then rescans for the first NULL slot; if one exists, it stores
+/// the pointer, increments `used` with ARM wrapping semantics, and returns
+/// that index. A full table whose `used` does not equal capacity still returns
+/// `-1`; the scan, not `used`, decides vacancy.
+///
+/// Device deviation: none. The target directly calls the unported retail
+/// expansion sibling. Host unit tests install that one call as a volatile
+/// seam; pointer slots remain pointer-width on the host while retaining the
+/// target's four-byte stride on ARM.
+///
+/// # Safety
+///
+/// `this` must be non-null and word-aligned through its six element-array
+/// words. Its `data` word must address `slots` readable/writable pointer
+/// slots whenever signed `slots` is positive. When `used == slots`, the
+/// retail expansion member must be callable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.element_array7_insert_unique")]
+pub unsafe extern "C" fn element_array7_insert_unique(this: *mut u8, element: *mut u8) -> i32 {
+    let mut index = 0i32;
+    let mut slots = array_slots(this);
+
+    while index < slots {
+        let data = (this.add(ARRAY_DATA_INDEX * WORD) as *const *mut *mut u8).read();
+        if data.add(index as usize).read() == element {
+            return -1;
+        }
+        index = index.wrapping_add(1);
+    }
+
+    let used = (this.add(ARRAY_USED_INDEX * WORD) as *const u32).read();
+    if used == slots as u32 {
+        element_array7_expand_for_insert(this);
+    }
+
+    slots = array_slots(this);
+    index = 0;
+    while index < slots {
+        let data = (this.add(ARRAY_DATA_INDEX * WORD) as *const *mut *mut u8).read();
+        if data.add(index as usize).read().is_null() {
+            let used = (this.add(ARRAY_USED_INDEX * WORD) as *const u32).read();
+            (this.add(ARRAY_USED_INDEX * WORD) as *mut u32)
+                .write(used.wrapping_add(1));
+            data.add(index as usize).write(element);
+            return index;
+        }
+        index = index.wrapping_add(1);
+    }
+
+    -1
+}
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1853,5 +1961,128 @@ mod tests {
             );
         }
         restore(guard);
+    }
+}
+
+#[cfg(test)]
+mod element_array7_insert_tests {
+    extern crate std;
+
+    use super::*;
+    use core::ptr;
+    use std::sync::Mutex;
+
+    static INSERT_LOCK: Mutex<()> = Mutex::new(());
+    static mut EXPANDED_DATA: *mut *mut u8 = ptr::null_mut();
+    static mut EXPAND_CALLS: u32 = 0;
+
+    unsafe extern "C" fn expand_to_four_slots(this: *mut u8) {
+        EXPAND_CALLS = EXPAND_CALLS.wrapping_add(1);
+        (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut *mut u8).write(EXPANDED_DATA);
+        (this.add(ARRAY_SLOTS_INDEX * WORD) as *mut i32).write(4);
+        EXPANDED_DATA.add(2).write(ptr::null_mut());
+        EXPANDED_DATA.add(3).write(ptr::null_mut());
+    }
+
+    struct ExpandSeamReset(unsafe extern "C" fn(*mut u8));
+
+    impl Drop for ExpandSeamReset {
+        fn drop(&mut self) {
+            unsafe {
+                ELEMENT_ARRAY7_EXPAND_FOR_INSERT = self.0;
+            }
+        }
+    }
+
+    unsafe fn install_expand_seam() -> ExpandSeamReset {
+        let previous = ELEMENT_ARRAY7_EXPAND_FOR_INSERT;
+        ELEMENT_ARRAY7_EXPAND_FOR_INSERT = expand_to_four_slots;
+        ExpandSeamReset(previous)
+    }
+
+    unsafe fn make_array(
+        header: &mut [usize; ELEMENT_ARRAY_WORDS],
+        data: *mut *mut u8,
+        slots: i32,
+        used: u32,
+    ) -> *mut u8 {
+        let this = header.as_mut_ptr().cast::<u8>();
+        (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut *mut u8).write(data);
+        (this.add(ARRAY_SLOTS_INDEX * WORD) as *mut i32).write(slots);
+        (this.add(ARRAY_USED_INDEX * WORD) as *mut u32).write(used);
+        (this.add(ARRAY_GROWTH_INDEX * WORD) as *mut u32).write(2);
+        this
+    }
+
+    unsafe fn used(this: *const u8) -> u32 {
+        (this.add(ARRAY_USED_INDEX * WORD) as *const u32).read()
+    }
+
+    #[test]
+    fn inserts_first_vacancy_and_rejects_duplicates_without_mutation() {
+        let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first = 0x1111usize as *mut u8;
+        let duplicate = 0x2222usize as *mut u8;
+        let inserted = 0x3333usize as *mut u8;
+        let mut entries = [first, ptr::null_mut(), duplicate, ptr::null_mut()];
+        let mut header = [0usize; ELEMENT_ARRAY_WORDS];
+        let this = unsafe { make_array(&mut header, entries.as_mut_ptr(), 4, 2) };
+
+        assert_eq!(unsafe { element_array7_insert_unique(this, inserted) }, 1);
+        assert_eq!(entries, [first, inserted, duplicate, ptr::null_mut()]);
+        assert_eq!(unsafe { used(this) }, 3);
+
+        assert_eq!(unsafe { element_array7_insert_unique(this, duplicate) }, -1);
+        assert_eq!(entries, [first, inserted, duplicate, ptr::null_mut()]);
+        assert_eq!(unsafe { used(this) }, 3);
+    }
+
+    #[test]
+    fn null_is_already_present_in_an_empty_slot() {
+        let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut entries = [ptr::null_mut(); 2];
+        let mut header = [0usize; ELEMENT_ARRAY_WORDS];
+        let this = unsafe { make_array(&mut header, entries.as_mut_ptr(), 2, 0) };
+
+        assert_eq!(unsafe { element_array7_insert_unique(this, ptr::null_mut()) }, -1);
+        assert_eq!(entries, [ptr::null_mut(); 2]);
+        assert_eq!(unsafe { used(this) }, 0);
+    }
+
+    #[test]
+    fn expands_only_when_used_equals_capacity_then_uses_new_tail_slot() {
+        let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first = 0x1111usize as *mut u8;
+        let second = 0x2222usize as *mut u8;
+        let inserted = 0x3333usize as *mut u8;
+        let mut old_entries = [first, second];
+        let mut expanded_entries = [first, second, ptr::null_mut(), ptr::null_mut()];
+        let mut header = [0usize; ELEMENT_ARRAY_WORDS];
+        let this = unsafe { make_array(&mut header, old_entries.as_mut_ptr(), 2, 2) };
+
+        unsafe {
+            EXPANDED_DATA = expanded_entries.as_mut_ptr();
+            EXPAND_CALLS = 0;
+            let _expand_reset = install_expand_seam();
+            assert_eq!(element_array7_insert_unique(this, inserted), 2);
+            assert_eq!(EXPAND_CALLS, 1);
+        }
+        assert_eq!(expanded_entries, [first, second, inserted, ptr::null_mut()]);
+        assert_eq!(unsafe { array_slots(this) }, 4);
+        assert_eq!(unsafe { used(this) }, 3);
+    }
+    #[test]
+    fn a_full_buffer_does_not_expand_when_used_disagrees_with_capacity() {
+        let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first = 0x1111usize as *mut u8;
+        let second = 0x2222usize as *mut u8;
+        let inserted = 0x3333usize as *mut u8;
+        let mut entries = [first, second];
+        let mut header = [0usize; ELEMENT_ARRAY_WORDS];
+        let this = unsafe { make_array(&mut header, entries.as_mut_ptr(), 2, 1) };
+
+        assert_eq!(unsafe { element_array7_insert_unique(this, inserted) }, -1);
+        assert_eq!(entries, [first, second]);
+        assert_eq!(unsafe { used(this) }, 1);
     }
 }

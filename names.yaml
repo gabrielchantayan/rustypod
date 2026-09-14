@@ -15123,6 +15123,31 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d4b5c
+    ghidra: FUN_083d4b5c
+    name: element_array7_insert_unique
+    size: 152
+    sig: "i32 element_array7_insert_unique(void *this, void *element)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: element, iVar1: index, iVar2: slots, iVar3: used}
+    notes: >-
+      Raw extent is exactly 0x083d4b5c..0x083d4bf4; the separately linked
+      expansion sibling begins at 0x083d4bf4. Complete ARM B/BL-immediate
+      decoding finds five inbound direct bl sites at 0x081893b8, 0x082c7b7c,
+      0x082c7d60, 0x082c83bc, and 0x082c87c4, all unconditional; no
+      predicated inbound call exists. Scans all signed-valid slots for an
+      exact pointer duplicate before mutation, so NULL is rejected in any
+      non-empty-capacity table. When used equals slots it calls the unported
+      expansion sibling through its fixed retail address, then rescans for the
+      first NULL slot. It increments used with wrapping u32 arithmetic and
+      stores element only after finding that slot; a full buffer with a stale
+      used count does not expand and returns -1. Device deviation: none. Host
+      tests supply the stock sibling through a volatile seam. match.py
+      structural review: equivalent two scans, conditional expansion, and
+      insert/update tail; LLVM uses a branch plus literal-loaded blx instead
+      of the retail predicated bleq.
+
   - address: 0x083d4a94
     ghidra: FUN_083d4a94
     name: element_array6_construct
