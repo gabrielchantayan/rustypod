@@ -1267,9 +1267,9 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf680` @ 0x083cf680, `FUN_083cf698` @ 0x083cf698,
 /// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
 /// `FUN_083cf788` @ 0x083cf788, `FUN_083cf7a0` @ 0x083cf7a0,
-/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf878` @ 0x083cf878,
-/// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8c0` @ 0x083cf8c0,
-/// `FUN_083cf890` @ 0x083cf890, `FUN_083cf8f0` @ 0x083cf8f0,
+/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf860` @ 0x083cf860,
+/// `FUN_083cf878` @ 0x083cf878, `FUN_083cf8a8` @ 0x083cf8a8,
+/// `FUN_083cf8c0` @ 0x083cf8c0, `FUN_083cf890` @ 0x083cf890,
 /// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
 /// `FUN_083cf968` @ 0x083cf968,
@@ -1347,6 +1347,18 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// no predicated call or tail branch. It has no NULL guard; routing this
 /// byte-identical copy to the established export is the deliberate deviation,
 /// avoiding a redundant dispatch seam.
+/// `FUN_083cf860` is a separately linked 24-byte copy through `bx lr` at
+/// 0x083cf874; the next equal_deref copy begins at 0x083cf878. It performs two
+/// unguarded aligned u32 loads and returns normalized 1 exactly when the values
+/// are equal. Decoding every ARM B/BL word in `osos.dec` finds exactly five
+/// direct callers, all unconditional plain `bl`: 0x083c4f1c, 0x083c4f8c,
+/// 0x083c53f8, 0x083c5414, and 0x083c5498. There are no predicated forms,
+/// direct tail branches, or aligned raw-word references. Its byte-identical body
+/// deliberately reuses this established export rather than introducing a
+/// redundant dispatch seam; hook 0x083cf860 to [`equal_deref`]. The shared host
+/// test covers equal values at distinct addresses, unequal values in both
+/// orders, zero, all-bits-set, and iterator-shaped records whose trailing word
+/// is not read. Deliberate deviations: none.
 /// `FUN_083cf878` is a separately linked 24-byte copy through `bx lr` at
 /// 0x083cf88c; the next equal_deref copy begins at 0x083cf890. It performs
 /// two unguarded aligned u32 loads and returns normalized 1 exactly when the
@@ -4638,7 +4650,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
