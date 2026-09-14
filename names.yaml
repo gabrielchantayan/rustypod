@@ -65604,6 +65604,30 @@ functions:
       cover full-width values, return identity, neighbour preservation, and
       every two-word overlap position.
 
+  - address: 0x083dc0cc
+    ghidra: FUN_083dc0cc
+    name: copy_u32_pair
+    size: 20
+    sig: "u32 *copy_u32_pair(u32 *destination, const u32 *source)"
+    module: util/u32_pair_copy
+    status: ported
+    renames:
+      param_1/r0: destination (aligned two-word output, returned unchanged)
+      param_2/r1: source (aligned two-word input)
+      r2: first_word
+    notes: >-
+      Raw ARM establishes exactly 20 code bytes, 0x083dc0cc..0x083dc0e0:
+      ldr r2,[r1]; str r2,[r0]; ldr r1,[r1,#4]; str r1,[r0,#4]; bx lr. The
+      next separately linked function begins at 0x083dc0e0. Decoding every
+      ARM B/BL word in work/firmware/osos.dec found five incoming
+      unconditional plain bl calls (0x083d7380, 0x083d9824, 0x083d983c,
+      0x083d9de0, 0x083d9df8) and no predicated forms. The target is
+      instruction-identical to the existing 0x081bb6a4 port, so it shares the
+      copy_u32_pair implementation: two aligned u32 loads/stores occur in
+      forward order, and r0 returns destination despite Ghidra declaring
+      void. Volatile accesses retain the load/store order against LLVM;
+      existing host tests cover values, return identity, neighbours, and
+      every two-word overlap position.
   # --- field-query result block initializer ---
   - address: 0x081bfb20
     ghidra: FUN_081bfb20

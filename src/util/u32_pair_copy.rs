@@ -1,10 +1,12 @@
 //! A fixed-width two-word copy helper.
 
-/// copy_u32_pair — retailOS `FUN_081bb6a4` @ 0x081bb6a4 (20 bytes exactly).
+/// copy_u32_pair — retailOS `FUN_081bb6a4` @ 0x081bb6a4 and
+/// `FUN_083dc0cc` @ 0x083dc0cc (20 bytes each).
 ///
 /// Decoding every ARM B/BL word in `osos.dec` verifies six unconditional
-/// direct `bl` call sites and two unconditional direct `b` tail branches; no
-/// predicated forms target this address. The five-instruction leaf loads word
+/// direct `bl` call sites and two unconditional direct `b` tail branches for
+/// the first address, plus five unconditional direct `bl` call sites for the
+/// second; neither has predicated forms. The five-instruction leaf loads word
 /// 0 from `source` and stores it to `destination`, then loads and stores word
 /// 1. It leaves `r0` unchanged, returning `destination`. The second source
 /// load occurs after the first destination store, so overlapping ranges have
