@@ -803,6 +803,10 @@ pub mod hints {
     // 0xe400_0000: dedicated to ui/element_change_notify's target-width
     // element fixture; mappings never unmap, so no other user may share it.
     pub const UI_ELEMENT_CHANGE_NOTIFY: usize = 0xe400_0000;
+    // 0xa1b0_0000: dedicated to app/nested_liti_class_check's raw-u32
+    // container and nested-class fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const NESTED_LITI_FIELD_CHECK: usize = 0xa1b0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

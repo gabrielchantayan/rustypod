@@ -63500,6 +63500,35 @@ functions:
       assembly, store, and 0/1 return shape. Reference C:
       decomp/c/004/080578c4_FUN_080578c4.c.
 
+  - address: 0x08057bdc
+    ghidra: FUN_08057bdc
+    name: nested_liti_class_check
+    size: 40
+    sig: "u32 nested_liti_class_check(const u8 *container)"
+    module: app/nested_liti_class_check
+    status: ported
+    renames:
+      param_1/r0: container
+      field_8/r0: target
+      FUN_08057c2c: image_library_is_liti_class
+    notes: >-
+      Raw ARM establishes the exact 40-byte extent 0x08057bdc..0x08057c04;
+      the next separately linked function begins at 0x08057c04. Decoding
+      every ARM B/BL word in osos.dec finds exactly six inbound direct calls:
+      0x080522c4, 0x08053ba8, 0x08057c14, 0x0805e0f4, 0x0806bfc8, and
+      0x0826fc1c. All six are unconditional plain BL, with zero predicated
+      forms and no plain-B tail callers. The function returns 0 for a NULL
+      container; otherwise it loads the target-width word at container+8,
+      calls image_library_is_liti_class, and canonicalizes a nonzero result to
+      1. The enclosing object and its field identity are otherwise unknown, so
+      Rust accesses the verified field as word index 2. No deliberate
+      deviations: the aligned target-width load and strict 0/1 result match
+      the original. Host tests cover a NULL container, a NULL nested pointer,
+      a nested 'liti' object, and a different nested class tag. match.py is a
+      structural review: LLVM's frame and branch choices may differ while the
+      NULL guard, word-2 load, predicate call, and strict normalization remain.
+      Reference C: decomp/c/004/08057bdc_FUN_08057bdc.c.
+
   - address: 0x08057c2c
     ghidra: FUN_08057c2c
     name: image_library_is_liti_class
@@ -65907,25 +65936,23 @@ functions:
     renames:
       param_1/r0: record
       record_payload/r0: payload
-      FUN_08057bdc: nested_liti_class_check (unported target-default seam)
+      FUN_08057bdc: nested_liti_class_check
     notes: >-
       Raw ARM establishes the exact 24-byte extent 0x0826fc14..0x0826fc2c;
       the next separately linked function, tagged_record_init, starts at
       0x0826fc2c. Decoding every ARM B/BL word in osos.dec finds exactly nine
       direct inbound calls, all unconditional plain BL, with zero predicated
       BL forms and no plain-B tail callers. The wrapper loads the target-width
-      payload word at record+4, calls the unported 0x08057bdc nested 'liti'
-      class check, then canonicalizes its result to strict 0 or 1. It has no
-      record NULL guard and deliberately still calls the nested check when the
-      payload is NULL; that callee itself guards NULL and follows its +8 field
-      to ported image_library_is_liti_class. The enclosing record and nested
-      object identities beyond these observed fields remain opaque, so the
-      port names only the verified relationship. Rust represents the
-      unported direct call with a target-default replaceable seam at
-      0x08057bdc, enabling host recording tests; target code consequently
-      makes an indirect call rather than the retail direct BL. Host tests
-      cover forwarding a nonzero target-width payload, strict normalization of
-      a nonzero callee result, and the zero-payload call-through. Reference C:
+      payload word at record+4, calls the ported nested_liti_class_check, then
+      canonicalizes its result to strict 0 or 1. It has no record NULL guard
+      and deliberately still calls the nested check when the payload is NULL;
+      that callee itself guards NULL and follows its +8 field to ported
+      image_library_is_liti_class. The enclosing record and nested object
+      identities beyond these observed fields remain opaque, so the port names
+      only the verified relationship. The target now makes a direct call to
+      the canonical port rather than the former target-default replacement
+      seam. Host tests cover a target-width payload to a real 'liti' object
+      and a zero-payload call through the ported check. Reference C:
       decomp/c/026/0826fc14_FUN_0826fc14.c.
   # --- opaque tagged record initializer ---
   - address: 0x0826fc2c
