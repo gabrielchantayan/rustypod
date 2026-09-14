@@ -74381,6 +74381,39 @@ functions:
       the level to unported 0x080cc978. Target builds retain both targets
       through literal veneers; host tests use equivalent adjustment storage and
       a dispatcher seam because neither retail address is host-mapped.
+  # --- feedback level dispatch ---
+  - address: 0x080cc978
+    ghidra: FUN_080cc978
+    name: feedback_level_dispatch
+    size: 92
+    sig: "void feedback_level_dispatch(i32 level)"
+    module: app/feedback_level_dispatch
+    status: ported
+    renames:
+      param_1/r0: level
+      DAT_080cc9d4: feedback_level_state
+      puVar2/r5: feedback_level_state
+      uVar4/r0: cached_level_is_high
+    notes: >-
+      Raw osos.dec establishes a 92-byte extent: 84 bytes of ARM code from
+      0x080cc978 through its tail branch at 0x080cc9d0, followed by the
+      PC-relative literal 0x089cab58 at 0x080cc9d4; the separately linked next
+      function starts at 0x080cc9d8. Decoding every ARM B/BL-immediate word
+      finds exactly six inbound direct call sites — 0x080609a0, 0x080609e8,
+      0x08086290, 0x081490e8, 0x081490f8, and 0x08205f94 — all unconditional
+      plain bl, with zero predicated bl forms. There are also three direct tail
+      branches: b at 0x0808c640 and 0x08293314, and beq at 0x08205fb8. It calls
+      retail helper 0x082e5aac with the signed level, stores level's low byte
+      at 0x089cab58, and calls retail helper 0x082bc9ec with level > 3. It
+      suppresses notification when the signed cached byte at 0x089cab59 has the
+      same level > 4 result, except for the -1 sentinel; otherwise it stores
+      the level's low byte there and tail-dispatches event code 4 via thunk
+      0x0809eab4. Target code retains the three unported helper targets and
+      thunk through literal veneers. Host tests use callback seams for the two
+      stateful helpers and the existing event-dispatch seam; the tiny unported
+      0x0807d548 predicate is represented directly as its verified signed
+      comparison.
+
   # --- global callback unregistration ---
   - address: 0x082928d8
     ghidra: FUN_082928d8

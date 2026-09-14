@@ -45,6 +45,11 @@ unsafe extern "C" fn missing_event_code_dispatch_worker(_event_code: u32, _flag:
 #[cfg(not(target_arch = "arm"))]
 pub static mut EVENT_CODE_DISPATCH_WORKER: EventCodeDispatchWorker = missing_event_code_dispatch_worker;
 
+/// Serializes host tests that replace [`EVENT_CODE_DISPATCH_WORKER`].
+#[cfg(test)]
+pub(crate) static EVENT_CODE_DISPATCH_WORKER_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
 /// Clears the worker flag while preserving the event-code word.
 #[cfg(not(target_arch = "arm"))]
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -79,9 +84,8 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
+    use crate::app::event_code_dispatch::EVENT_CODE_DISPATCH_WORKER_TEST_LOCK;
 
-    static WORKER_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: u32 = 0;
     static mut EVENT_CODES: [u32; 2] = [0; 2];
     static mut FLAGS: [u32; 2] = [0; 2];
@@ -108,9 +112,7 @@ mod tests {
 
     #[test]
     fn clears_worker_flag_without_filtering_event_codes() {
-        let _lock = WORKER_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = EVENT_CODE_DISPATCH_WORKER_TEST_LOCK.lock();
         let _reset = Reset;
 
         unsafe {
