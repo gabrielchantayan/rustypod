@@ -152,6 +152,7 @@ pub mod red_black_tree_rotate_left_thirteenth;
 pub mod red_black_tree_rotate_left_fourteenth;
 pub mod red_black_tree_rotate_left_fifteenth;
 pub mod red_black_tree_rotate_left_sixteenth;
+pub mod red_black_tree_rotate_left_seventeenth;
 pub mod red_black_tree_rotate_right_eighth;
 pub mod red_black_tree_rotate_right_fifth;
 pub mod red_black_tree_rotate_right_sixth;
