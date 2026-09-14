@@ -44923,6 +44923,37 @@ functions:
       indirect-jump-through-a-literal shape plus one indirection and the
       crate's fp frame, r0-r2 passed through untouched.
 
+  - address: 0x08037f70
+    ghidra: thunk_EXT_FUN_220001f4
+    name: iram_memmove_veneer
+    size: 8
+    sig: "void iram_memmove_veneer(void *dst, const void *src, size_t len)"
+    module: libc/iram_veneers
+    status: ported
+    renames:
+      thunk_EXT_FUN_220001f4: iram_memmove_veneer
+      EXT_FUN_220001f4: iram_memmove_target
+      DAT_08037f74: iram_memmove_target
+    notes: >-
+      Raw osos.dec proves this Ghidra 4-byte function is an 8-byte literal
+      veneer: e51ff004 (ldr pc,[pc,#-4]) at 0x08037f70 and target word
+      0x220001f4 at 0x08037f74; the next independent veneer begins at
+      0x08037f78. The boot relocator @ 0x080046e0 mirrors osos
+      0x08000000..0x0800aed8 into IRAM, so the target is the 136-byte
+      overlapping-copy entry @ 0x080001f4 through 0x08000278; 0x0800027c
+      starts the separate memzero routine. It forwards non-overlap to the
+      word-copy entry @ 0x08000188 and otherwise copies backward after a
+      destination-alignment byte prologue. Decoding every ARM B/BL word in
+      osos.dec found exactly six direct bl callers: five unconditional at
+      0x080b0a44, 0x08133d94, 0x08133de8, 0x0815f2c0, and 0x082da730, plus
+      one blne at 0x082434dc; no tail b reaches the veneer. Each caller's
+      following instruction overwrites r0, so its path-dependent result is
+      unobserved. The predicated caller transfers only when distinct record
+      pointers are non-NULL; the callee itself has no NULL guard. Rust makes
+      the literal-style volatile indirect call to the established memmove
+      port, preserving observed copy behavior while deliberately accepting
+      mismatched alignment that the target's word path did not promise.
+
   - address: 0x08037f08
     ghidra: thunk_EXT_FUN_22004230
     name: gateway_service19_request

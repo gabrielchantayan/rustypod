@@ -1,8 +1,8 @@
-//! IRAM veneers for the two hottest ADS block-memory routines — originals:
-//! `thunk_EXT_FUN_22000188` @ 0x08037df8 and `thunk_EXT_FUN_220002d4` @
-//! 0x08037dc8 (Ghidra reports 4 bytes each; the real stub is 8 — the
-//! `ldr pc, [pc, #-4]` word 0xe51ff004 plus the absolute target word that
-//! follows it).
+//! IRAM veneers for three hot ADS block-memory routines — originals:
+//! `thunk_EXT_FUN_22000188` @ 0x08037df8, `thunk_EXT_FUN_220002d4` @
+//! 0x08037dc8, and `thunk_EXT_FUN_220001f4` @ 0x08037f70 (Ghidra reports
+//! 4 bytes each; the real stubs are 8 — the `ldr pc, [pc, #-4]` word
+//! 0xe51ff004 plus the absolute target word that follows it).
 //!
 //! # Verified call-site counts (decoded from osos.dec, all B/BL encodings,
 //! every condition code, not a Ghidra xref count)
@@ -11,6 +11,7 @@
 //! |-------------|--------------|-----:|---------:|
 //! | 0x08037df8  | 0x22000188   |  477 |       11 |
 //! | 0x08037dc8  | 0x220002d4   |  106 |        7 |
+//! | 0x08037f70  | 0x220001f4   |    6 |        0 |
 //!
 //! Of the 477 `bl`s to 0x08037df8, 465 are unconditional and 12 predicated.
 //! 0x08037df8 is the most-called single address in the image reachable only
@@ -37,11 +38,16 @@
 //!    branches. Nothing above 0x0800aed8 ever branches directly into that
 //!    block; it reaches it only through the veneer table. That is precisely
 //!    the shape of a region whose runtime home is elsewhere.
-//! 3. **The offsets line up on real entry points.** 0x22000188 and
-//!    0x220002d4 land exactly on `memcpy_forward_words` @ 0x08000188 and
-//!    `memzero` @ 0x080002d4 — two independently identified ADS runtime
-//!    entries (see names.yaml), not arbitrary mid-function addresses.
+//! 3. **The offsets line up on real entry points.** 0x22000188,
+//!    0x220001f4, and 0x220002d4 land exactly on `memcpy_forward_words` @
+//!    0x08000188, the short overlapping-copy entry @ 0x080001f4, and
+//!    `memzero` @ 0x080002d4 — independently identified ADS runtime entries
+//!    (see names.yaml), not arbitrary mid-function addresses.
 //!
+//!
+//! The 0x220001f4 target is the short overlapping-copy routine at
+//! 0x080001f4. It branches to 0x08000188 for non-overlap, otherwise works
+//! backward. All six observed callers discard its r0 result.
 //! Bucketing the call sites confirms the split with no exceptions: all 24
 //! direct B/BL references to the in-image bodies (0x08000020, 0x080000d4,
 //! 0x08000188, 0x080002d4) originate below 0x0800aed8, and all 601
@@ -75,6 +81,7 @@
 //!   with r0-r2 passed through untouched.
 
 use crate::libc::memcpy::memcpy_forward_words;
+use crate::libc::memmove::memmove;
 use crate::libc::memzero::memzero;
 
 /// Veneer @ 0x08037df8 -> IRAM 0x22000188 = `memcpy_forward_words`
@@ -106,6 +113,30 @@ pub unsafe extern "C" fn iram_memzero_veneer(dst: *mut u8, len: usize) -> *mut u
     let body =
         core::ptr::read_volatile(&(memzero as unsafe extern "C" fn(*mut u8, usize) -> *mut u8));
     body(dst, len)
+}
+
+/// Veneer @ 0x08037f70 -> IRAM 0x220001f4 (8 bytes; 6 `bl`: five
+/// unconditional, one `blne`; no tail branches).
+/// The target @ 0x080001f4 is 136 bytes: branch to the forward word-copy
+/// entry when ranges do not overlap, otherwise copy backward after aligning
+/// `dst`. The predicated caller makes this unguarded transfer only while two
+/// record pointers differ; it does not make this veneer NULL-safe.
+///
+/// Deliberate deviation: reuse the established full `memmove` port instead
+/// of duplicating the target's word-only implementation. This preserves all
+/// observed byte effects and additionally handles mismatched alignments; the
+/// original's r0 result varies by path, but every verified caller discards it.
+///
+/// # Safety
+/// `dst` and `src` must be valid for `len` bytes; ranges may overlap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_memmove_veneer")]
+pub unsafe extern "C" fn iram_memmove_veneer(dst: *mut u8, src: *const u8, len: usize) {
+    let body = core::ptr::read_volatile(
+        &(memmove as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+    );
+    body(dst, src, len);
 }
 
 #[cfg(test)]
@@ -180,7 +211,32 @@ mod tests {
         }
     }
 
-    /// Bytes outside the requested range stay untouched through either veneer.
+    /// The 0x220001f4 transfer preserves `memmove` byte effects for forward,
+    /// backward, identical-range, and zero-length cases. The final case
+    /// exercises the unguarded predicated-call contract without dereferencing
+    /// either pointer.
+    #[test]
+    fn memmove_veneer_preserves_overlap_and_zero_length() {
+        for (dst_off, src_off, len) in [(12usize, 4usize, 32usize), (4, 12, 32), (8, 8, 32), (8, 12, 0)] {
+            let mut through_veneer = pattern(64, 29);
+            let mut expected = through_veneer.clone();
+            expected.copy_within(src_off..src_off + len, dst_off);
+            unsafe {
+                iram_memmove_veneer(
+                    through_veneer.as_mut_ptr().add(dst_off),
+                    through_veneer.as_ptr().add(src_off),
+                    len,
+                );
+            }
+            assert_eq!(through_veneer, expected, "dst_off={dst_off} src_off={src_off} len={len}");
+        }
+        unsafe {
+            iram_memmove_veneer(core::ptr::null_mut(), core::ptr::null(), 0);
+        }
+    }
+
+    /// Bytes outside the requested range stay untouched through the copy and
+    /// clear veneers.
     #[test]
     fn veneers_leave_surrounding_bytes_intact() {
         const SIZE: usize = 64;
@@ -205,20 +261,28 @@ mod tests {
     }
 
     /// The veneers must survive as distinct, callable symbols — the whole
-    /// point is that a hook can branch to them from 0x08037df8 / 0x08037dc8.
+    /// point is that a hook can branch to each veneer address.
     #[test]
     fn veneers_are_distinct_call_targets() {
-        let (copy, clear) = unsafe {
-            (
-                core::ptr::read_volatile(&(iram_memcpy_veneer
-                    as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8)),
-                core::ptr::read_volatile(
-                    &(iram_memzero_veneer as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
-                ),
+        let copy = unsafe {
+            core::ptr::read_volatile(&(iram_memcpy_veneer
+                as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8))
+        };
+        let clear = unsafe {
+            core::ptr::read_volatile(
+                &(iram_memzero_veneer as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
+            )
+        };
+        let overlap = unsafe {
+            core::ptr::read_volatile(
+                &(iram_memmove_veneer as unsafe extern "C" fn(*mut u8, *const u8, usize)),
             )
         };
         assert_ne!(copy as usize, 0);
         assert_ne!(clear as usize, 0);
+        assert_ne!(overlap as usize, 0);
         assert_ne!(copy as usize, clear as usize);
+        assert_ne!(copy as usize, overlap as usize);
+        assert_ne!(clear as usize, overlap as usize);
     }
 }
