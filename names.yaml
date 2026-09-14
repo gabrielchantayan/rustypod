@@ -85473,3 +85473,37 @@ functions:
       end-of-contents bytes for an indefinite constructed value. Signed
       comparisons and wrapping 32-bit arithmetic are preserved. Deliberate
       deviations: none.
+
+
+  # --- Global parameter-descriptor value veneer ---
+  - address: 0x0803a550
+    ghidra: FUN_0803a550
+    name: global_parameter_descriptor_value
+    size: 12
+    sig: "u32 global_parameter_descriptor_value(void) [r0 replaced; r1/r2 preserved; incoming r3 forwarded]"
+    module: runtime/global_parameter_descriptor_value
+    status: ported
+    renames:
+      r0: incoming_descriptor (replaced)
+      r1: incoming_r1
+      r2: incoming_r2
+      r3: opaque_context
+      DAT_089062ec: global_parameter_descriptor
+      FUN_0803b468: parameter_descriptor_value
+      return/r0: resolved_value
+    notes: >-
+      Raw osos.dec establishes the true 12-byte extent: `ldr r0,[pc]` at
+      0x0803a550 loads literal 0x089062ec at 0x0803a558, then `b 0x0803b468`
+      tail-enters parameter_descriptor_value. Ghidra's reported 8-byte size
+      omits that literal; the separately linked successor starts with push at
+      0x0803a55c. Decoding every ARM B/BL word in osos.dec finds exactly six
+      inbound direct calls, all unconditional plain bl at 0x0805f788,
+      0x0805f7dc, 0x0805f994, 0x08060100, 0x0806f0ec, and 0x082b4dc8; there
+      are no predicated forms or direct tail B callers. The veneer replaces r0
+      with the global descriptor address, preserves r1/r2/r3, and depends on
+      parameter_descriptor_value to forward r3 as the resolver context and
+      status-gate the result. There are no deliberate behavioral deviations:
+      LLVM lowers Rust's terminal call expression to a tail branch after its
+      frame setup/teardown. The existing host-only resolver seam proves the
+      substituted descriptor, preserved context, and zero result for zero and
+      negative statuses.
