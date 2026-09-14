@@ -34351,6 +34351,38 @@ functions:
       / element_at_alias_6908_matches_primary.
 
 
+  - address: 0x083d6b14
+    ghidra: FUN_083d6b14
+    name: container_element_at_alias_6b14
+    size: 24
+    sig: "void *container_element_at_alias_6b14(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      return/r0: element
+    notes: >-
+      ALIAS — byte-identical instantiation of container_element_at @
+      0x083d5efc. Raw osos.dec confirms the complete 24-byte body from
+      0x083d6b14 through `pop {r4,pc}` at 0x083d6b28; the next separately
+      linked sibling starts at 0x083d6b2c. It dispatches through the
+      container vtable's slot 0x40 (slot 16) with this and index, receives
+      an element-slot address, then loads the element pointer from that slot.
+      Ghidra drops r1 from its signature, but raw `blx r2` preserves the
+      index. Decoding every ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional plain bl (no predicated
+      calls or b tail-calls): 0x08235c54, 0x08235cb0, 0x08235e48,
+      0x083d1604, and 0x083d1648. Callers pass indexed container addresses,
+      use the returned element for virtual dispatch or comparison, and
+      NULL-test where needed. The implementation deliberately supplies no
+      NULL guard for the virtual result or element slot, and its distinct
+      link section preserves this independently hookable alias. Host tests
+      cover slot-16 dispatch, index forwarding, element dereference,
+      NULL-element propagation, and primary implementation equivalence.
+      Deliberate deviations: none.
+
+
   - address: 0x083d6b6c
     ghidra: FUN_083d6b6c
     name: container_element_at_alias_6b6c
