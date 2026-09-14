@@ -89199,3 +89199,29 @@ functions:
       LLVM from folding this independently hookable target into another
       byte-identical rotation. Host tests cover root replacement, the transferred
       middle subtree, and both parent-child slots.
+
+  # --- Two-word clear ---
+  - address: 0x083b45ec
+    ghidra: FUN_083b45ec
+    name: two_word_clear_alt
+    size: 16
+    sig: "void *two_word_clear_alt(void *target)"
+    module: cxx/two_word_clear_alt
+    status: ported
+    renames:
+      param_1/r0: target
+      r1: zero
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: mov r1,#0; str
+      r1,[r0]; str r1,[r0,#4]; bx lr at 0x083b45ec..0x083b45f8, with the
+      next separately linked function beginning at 0x083b45fc. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional plain bl at 0x080f9b18, 0x080fcbac,
+      0x080fcd18, 0x080fd378, and 0x081d5e34; there are no predicated calls
+      or plain-B tail sites. The function clears exactly two target-width words
+      at +0x00 and +0x04 without reading them or guarding NULL. It preserves r0;
+      caller 0x081d5e34 feeds that result to its next call, so Rust returns
+      target despite Ghidra's void prototype. This body is byte-identical to
+      two_word_clear @ 0x081598a4, but its dedicated text section preserves an
+      independently hookable target. Host tests cover exact bounds, nonzero
+      inputs, and the preserved destination result. Deliberate deviations: none.
