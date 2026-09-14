@@ -104,6 +104,17 @@
 //! This ledger alias deliberately reuses the existing dispatch seam; the
 //! shared host test covers root, both parent-child slots, and the transferred
 //! middle subtree. Deliberate deviations: none.
+//!
+//! `FUN_083c0194` at load address `0x083c0194` is also byte-identical to this
+//! 84-byte (21-word) port, ending at `0x083c01e4`; its right-rotation sibling
+//! begins at `0x083c01e8`. Complete raw ARM B/BL decoding gives five inbound
+//! direct calls: unconditional `bl` at `0x083c056c`, `0x083c060c`,
+//! `0x083c06f8`, and `0x083c0b6c`, plus predicated `bleq` at `0x083c0ad4`;
+//! there are no direct tail-`B` callers. The predicated call has selected the
+//! pivot before this intentionally unguarded routine runs. It promotes the
+//! right child, transfers that child's left subtree, and relinks the parent or
+//! header root slot. This alias intentionally shares the existing dispatch seam
+//! and host test; deliberate deviations: none.
 
 
 use super::red_black_tree_increment::RedBlackTreeNode;
