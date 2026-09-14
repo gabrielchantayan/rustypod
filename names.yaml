@@ -17,6 +17,29 @@
 base: 0x08000000
 
 functions:
+  # --- ARM ADS runtime: 64-bit byte swap ---
+  - address: 0x0805dc54
+    ghidra: FUN_0805dc54
+    name: bswap64
+    size: 84
+    sig: "u64 bswap64(u64 value)"
+    module: util/bswap
+    status: ported
+    renames:
+      param_1/r0: value_low_word
+      param_2/r1: value_high_word
+      return/r0_r1: swapped_value
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent from
+      push {r0,r1,r4,lr} at 0x0805dc54 through pop {r4,pc} at 0x0805dca4;
+      the separately linked next function begins at 0x0805dca8. The function
+      spills the ARM-EABI u64 argument, copies its eight bytes in reverse
+      order into a second stack slot, and reloads the result in r0:r1:
+      a full 64-bit byte swap. Decoding every immediate ARM B/BL word in
+      osos.dec finds exactly six inbound calls, all plain unconditional bl at
+      0x08098598, 0x080985a4, 0x080985d8, 0x080985e4, 0x080caea4, and
+      0x080cb048; there are no predicated forms or direct tail branches.
+      Deliberate deviations: none.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760

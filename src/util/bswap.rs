@@ -11,6 +11,10 @@
 //!   Spills the argument word to the stack, re-reads its 4 bytes in
 //!   reverse order into a second slot, loads that word back. Pure
 //!   byte-reverse of a 32-bit value.
+//! - `bswap64` — `FUN_0805dc54` @ 0x0805dc54 (84 bytes; 6 unconditional
+//!   `bl` call sites). Spills the two argument words to the stack, re-reads
+//!   all eight bytes in reverse order into a second slot, then reloads the
+//!   swapped `r0:r1` result.
 //! - `bswap16` — `FUN_0805dd48` @ 0x0805dd48 (32 bytes; 133 call sites).
 //!   Same stack dance over the low 2 bytes; the result is re-read with
 //!   `ldrh`, so the return value is the swapped low half zero-extended —
@@ -37,6 +41,22 @@
 /// Returns `value` with its 4 bytes reversed.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn bswap32(value: u32) -> u32 {
+    value.swap_bytes()
+}
+
+/// bswap64 — original: `FUN_0805dc54` @ 0x0805dc54 (84 bytes; 6 plain,
+/// unconditional `bl` callers).
+///
+/// Reverses all eight bytes of `value`. Raw bytes establish the exact extent
+/// from `push {r0,r1,r4,lr}` at 0x0805dc54 through `pop {r4,pc}` at
+/// 0x0805dca4; the separately linked in-place sibling starts at 0x0805dca8.
+/// The six direct callers are 0x08098598, 0x080985a4, 0x080985d8,
+/// 0x080985e4, 0x080caea4, and 0x080cb048; there are no predicated forms or
+/// direct tail branches. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.bswap64")]
+#[inline(never)]
+pub extern "C" fn bswap64(value: u64) -> u64 {
     value.swap_bytes()
 }
 
@@ -280,6 +300,21 @@ mod tests {
     fn bswap32_is_an_involution() {
         for v in [0u32, 1, 0xdead_beef, 0x8000_0000, 0x00ff_ff00] {
             assert_eq!(bswap32(bswap32(v)), v);
+        }
+    }
+
+    #[test]
+    fn bswap64_reverses_all_eight_bytes() {
+        for value in [
+            0u64,
+            u64::MAX,
+            0x0000_0000_0000_00ff,
+            0x8000_0000_0000_0001,
+            0x0123_4567_89ab_cdef,
+            0x7fff_ffff_ffff_ffff,
+        ] {
+            assert_eq!(bswap64(value), value.swap_bytes(), "value={value:#018x}");
+            assert_eq!(bswap64(bswap64(value)), value, "value={value:#018x}");
         }
     }
 
