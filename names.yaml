@@ -31285,6 +31285,35 @@ functions:
       data but releases, and an eType above 255 proves ldrb compares all 32
       input bits before strb truncates.
 
+  # ---- Auto-vacuum overflow-cell pointer-map wrapper (src/sqlite/ptrmap_put_overflow_cell.rs) ----
+  - address: 0x082e8774
+    ghidra: FUN_082e8774
+    name: ptrmap_put_overflow_cell
+    size: 28
+    sig: "u32 ptrmap_put_overflow_cell(SegmentedEntryTable *page, i32 cell_index)"
+    module: sqlite/ptrmap_put_overflow_cell
+    status: ported
+    renames:
+      param_1/r0: page
+      param_2/r1: cell_index
+      r4: page
+      iVar1/r0: cell
+    notes: >-
+      SQLite 3.5.x ptrmapPutOvfl (btree.c). Raw osos.dec establishes the
+      exact 28-byte wrapper at 0x082e8774..0x082e8790: after resolving the
+      cell with segmented_entry_lookup/FUN_082ce368, the final mov r0,r0 at
+      0x082e878c falls through into separately linked ptrmapPutOvflPtr at
+      0x082e8790. Decoding every ARM B/BL immediate finds exactly five direct
+      callers, all unconditional BL (zero predicated): 0x082b5c7c,
+      0x082b6574, 0x082b6704, 0x082b69d0, and 0x082b6bc0. The helper at
+      0x082ce368 is already ported as segmented_entry_lookup. ptrmapPutOvflPtr
+      is not yet ported, so the target seam directly calls its verified load
+      address while host tests record the resolved override and adjusted
+      fallback cells and preserve its returned status. match.py structural
+      review: the Rust body has the same saved page register, lookup call,
+      argument shuffle, and tail transfer; LLVM emits an indirect bx through
+      literal 0x082e8790 instead of retailOS fall-through.
+
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
     ghidra: FUN_0837ac30
