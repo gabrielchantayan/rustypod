@@ -27701,6 +27701,39 @@ functions:
       the load/guard/unlock behavior. Host test covers a live mutex signal and
       the NULL-mutex early-out.
 
+  - address: 0x0839e018
+    ghidra: FUN_0839e018
+    name: dma_aligned_byte_array_construct_variant
+    size: 124
+    sig: "DmaAlignedArray *dma_aligned_byte_array_construct_variant(DmaAlignedArray *array, u32 byte_count, u32 allocation_tag)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1: byte_count
+      param_3/r2: allocation_tag
+      iVar1/r0: allocation
+      uVar2/r0: aligned_data
+    notes: >-
+      Raw bytes establish the exact 124-byte extent 0x0839e018..0x0839e094:
+      the matching DMA-aligned-array destructor starts immediately at
+      0x0839e094. Decoding every ARM B/BL word in osos.dec finds exactly five
+      direct calls, all unconditional bl at 0x080f9d0c, 0x080fa8b0,
+      0x080fa9c8, 0x080fdf3c, and 0x080fe074; no predicated bl or tail b
+      reaches this entry, and no word-aligned data reference exists. This
+      separately linked byte-array constructor clears raw allocation +0x00 and
+      aligned view +0x04, stores byte_count at +0x08 and clears the
+      construction byte at +0x0c; it allocates byte_count + 0x40 through
+      already ported malloc_wrapper using the passed tag, aligns the raw block
+      to 32 bytes, and if bit 27 is set clean-invalidates the aligned byte
+      range through already ported dcache_clean_invalidate before setting bit
+      31 in the stored view. A byte_count-sized empty trivial-element loop
+      finishes before construction byte = 1. Rust uses black_box solely to
+      retain that empty loop; it has no memory effect. The function is a
+      separately linked copy of dma_aligned_byte_array_construct @ 0x0839e0e8,
+      so its target-only link section prevents LLVM from folding the hookable
+      entries. No dispatch seam was added because both callees are ported.
+
   - address: 0x0839e0e8
     ghidra: FUN_0839e0e8
     name: dma_aligned_byte_array_construct
