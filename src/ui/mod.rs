@@ -54,6 +54,7 @@ pub mod tdat_message_dispatch;
 pub mod tdat_counter_addrefs;
 pub mod tdat_counter_releases;
 pub mod tdat_flag_20_bit_2;
+pub mod element_change_notify;
 pub mod navigation_mode;
 pub mod tdat_payload;
 pub mod tdat_first_plst;

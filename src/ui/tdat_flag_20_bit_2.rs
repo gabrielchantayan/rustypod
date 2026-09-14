@@ -223,12 +223,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
 
     const TDAT_CLASS_TAG: u32 = 0x7464_6174;
     const OTHER_TAG: u32 = 0x706c_7374;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut RELEASE_CALLS: u32 = 0;
     static mut ADDREF_CALLS: u32 = 0;
     static mut NOTIFY_CALLS: u32 = 0;
@@ -316,7 +314,7 @@ mod tests {
 
     #[test]
     fn unchanged_set_bit_returns_flags_without_side_effects() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let element = element_with(TDAT_CLASS_TAG, 0xe7);
         let _ops = unsafe { install_recorders(0x1111, 0x2222) };
 
@@ -331,7 +329,7 @@ mod tests {
 
     #[test]
     fn unchanged_clear_bit_returns_flags_without_side_effects() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let element = element_with(TDAT_CLASS_TAG, 0xe3);
         let _ops = unsafe { install_recorders(0x1111, 0x2222) };
 
@@ -346,7 +344,7 @@ mod tests {
 
     #[test]
     fn clearing_set_bit_preserves_other_bits_and_releases() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let element = element_with(TDAT_CLASS_TAG, 0xe7);
         let _ops = unsafe { install_recorders(0x5151, 0x2222) };
 
@@ -362,7 +360,7 @@ mod tests {
 
     #[test]
     fn setting_clear_bit_addrefs_and_notifies_with_exact_args() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let element = element_with(TDAT_CLASS_TAG, 0xe3);
         let _ops = unsafe { install_recorders(0x1111, 0x6262) };
 
@@ -384,7 +382,7 @@ mod tests {
 
     #[test]
     fn non_tdat_element_still_stores_byte_from_zero_base() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         // A 'plst'-tagged object: the class check fails, so the old flag
         // byte is treated as 0 — 0xff becomes 0x04, not 0xff.
         let element = element_with(OTHER_TAG, 0xff);
@@ -401,7 +399,7 @@ mod tests {
 
     #[test]
     fn non_tdat_element_zero_value_clears_and_releases() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let element = element_with(OTHER_TAG, 0xff);
         let _ops = unsafe { install_recorders(0x7171, 0x2222) };
 
@@ -416,7 +414,7 @@ mod tests {
 
     #[test]
     fn value_three_never_matches_early_return_but_sets_bit_zero() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         // Bit already set, value 3: the exact `cmp r2, #bit` against 1
         // fails, so the store and the enable path still run; only bit 0
         // of value reaches the byte.
@@ -434,7 +432,7 @@ mod tests {
 
     #[test]
     fn value_two_clears_bit_but_takes_enable_path() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::testing::TDAT_FLAG_20_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         // Bit set, value 2: exact compare against 1 fails; (2 << 2) & 4
         // is 0 so the bit clears; value != 0 selects addref, not release.
         let element = element_with(TDAT_CLASS_TAG, 0xe7);

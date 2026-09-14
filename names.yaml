@@ -39892,6 +39892,44 @@ functions:
       store/notify tuple, status propagation without notification, and all
       class/NULL guard no-call paths.
 
+  # --- UI element change notification (ui/element_change_notify) ---
+  - address: 0x0805d398
+    ghidra: FUN_0805d398
+    name: notify_element_change
+    size: 92
+    sig: "void notify_element_change(u32 *owner, u32 previous_value, u32 change_data, u32 change_flags)"
+    module: ui/element_change_notify
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: previous_value
+      param_3/r2: change_data
+      param_4/r3: change_flags
+      local_18: payload_change_data
+      uStack_14: payload_change_flags
+      param_1_deref: element
+      DAT_0805d3f4: ELEMENT_CHANGE_NOTIFY_TAG
+      FUN_08067b4c: tdat_element_set_flag_20_bit_2
+      FUN_08066bb8: tagged_list_notify (seam, unported)
+    notes: >-
+      Raw ARM covers 0x0805d398 through the return at 0x0805d3f0 and its
+      referenced literal-pool word 0x6d747269 at 0x0805d3f4; the next
+      independently linked function starts at 0x0805d3f8, confirming the
+      92-byte extent Ghidra reports. Decoding every ARM B/BL word in osos.dec
+      finds six direct call sites: unconditional bl at 0x08067c64, 0x0826ff5c,
+      0x0826ffd8, and 0x0827030c; blne at 0x0806cdfc and 0x080a7ba0. The
+      predicated sites gate the notification on their own state. It removes
+      0x60020000 from change_data and 0x00c00000 from change_flags; when
+      either residual is nonzero, it calls the ported tdat flag-2 setter on
+      *owner with 1. It always then walks (*owner)+0x54 through 0x08066bb8
+      with raw key 0x6d747269, owner as context, a stack-local
+      (change_data, change_flags) payload pointer, and trailing zero. Both
+      results are discarded. The key's semantic identity is not recovered.
+      Deliberate deviation: the unported list walker dispatches through
+      ELEMENT_CHANGE_NOTIFY_OPS, whose target default calls its stock address;
+      the ported tdat setter is direct. Host tests cover ignored payloads
+      (no flag set but notification retained) and meaningful payloads (flag set
+      with the exact payload pair forwarded).
   - address: 0x08067300
     ghidra: FUN_08067300
     name: set_navigation_mode
