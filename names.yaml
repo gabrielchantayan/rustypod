@@ -7290,6 +7290,30 @@ functions:
       structural diff (indirect call through hook slot 2, `mov r0, #5`
       intact).
 
+  - address: 0x080645b0
+    ghidra: FUN_080645b0
+    name: kernel_sem1_signal
+    size: 8
+    sig: "usize kernel_sem1_signal()"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      r0: kernel semaphore id
+    notes: >-
+      Fixed-id semaphore-release shim: `mov r0, #1; b 0x08037e10`
+      (rom_sem_signal veneer -> ROM 0x220042b4), returning the r0 result
+      word from the tail branch. Raw ARM verifies the full 8-byte extent:
+      kernel_sem5_signal ends at 0x080645b0 and the next function begins
+      with `push {r4, r5, r6, lr}` at 0x080645b8. No osos data word
+      references this address, so it is never dispatched virtually.
+      Decoding every ARM B/BL word in osos.dec finds six direct callers,
+      all unconditional bl at 0x082bc738, 0x082bca2c, 0x082e56c0,
+      0x082e5b30, 0x0836a888, and 0x0836ccac; zero predicated forms or
+      tail branches means callers never flag-gate the release. Deliberate
+      deviation: calls the existing rom_sem_signal ROM_KERNEL hook instead
+      of tail-branching to the target-only ROM veneer, preserving the fixed
+      id and returned result.
+
   - address: 0x08047f40
     ghidra: FUN_08047f40
     name: gateway_request_timed

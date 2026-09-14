@@ -524,6 +524,31 @@ pub unsafe extern "C" fn kernel_sem5_signal() -> usize {
     rom_sem_signal(5)
 }
 
+/// kernel_sem1_signal — original: `FUN_080645b0` @ 0x080645b0 (8 bytes):
+/// `mov r0, #1; b 0x08037e10` — a fixed-id shim that releases kernel
+/// semaphore 1 through the rom_sem_signal veneer (ROM 0x220042b4), passing
+/// the r0 result word back through the tail branch.
+///
+/// Raw ARM establishes the full 8-byte extent: sibling
+/// kernel_sem5_signal ends at 0x080645b0, and the next function's
+/// `push {r4, r5, r6, lr}` prologue starts at 0x080645b8. No data word in
+/// osos references 0x080645b0, so this shim is never dispatched virtually.
+///
+/// Binary decoding of every ARM B/BL word in osos.dec finds exactly six
+/// direct callers, all unconditional `bl` (0x082bc738, 0x082bca2c,
+/// 0x082e56c0, 0x082e5b30, 0x0836a888, and 0x0836ccac); there are no
+/// predicated calls or tail branches, so callers never flag-gate this
+/// release.
+///
+/// Deliberate deviation: dispatches through the ported rom_sem_signal (the
+/// ROM_KERNEL hook) instead of branching to the ROM veneer; the original
+/// tail-branch becomes a call whose r0 result is returned verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem1_signal() -> usize {
+    rom_sem_signal(1)
+}
+
 /// kernel_sem17_wait — original: `FUN_0806a4b0` @ 0x0806a4b0 (8 bytes):
 /// `mov r0, #0x11; b 0x08037e08` — a fixed-id shim that acquires kernel
 /// semaphore 0x11 (17, PMU_I2C_OUTER_SEM) through the rom_sem_wait veneer
@@ -1240,6 +1265,20 @@ pub(crate) mod tests {
             check(2, ret, &[5]);
             let ret = kernel_sem5_signal();
             check(2, ret, &[5]);
+        }
+    }
+
+    /// kernel_sem1_signal (shim @ 0x080645b0): the id is forced to
+    /// semaphore 1 before the ROM signal fires, and the hook's r0 result
+    /// word comes back. No other slot may fire.
+    #[test]
+    fn kernel_sem1_signal_forces_id_1() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem1_signal();
+            check(2, ret, &[1]);
+            let ret = kernel_sem1_signal();
+            check(2, ret, &[1]);
         }
     }
 
