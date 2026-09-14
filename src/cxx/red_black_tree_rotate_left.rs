@@ -21,6 +21,13 @@
 //! ported ledger alias of this implementation; its five direct callers have
 //! the same four `bl` plus one `bleq` split.
 //!
+//! `FUN_083ba024` at load address `0x083ba024` is an 84-byte, byte-identical
+//! alias of this port. Raw branch decoding finds five direct callers: four
+//! unconditional `bl` at `0x083ba360`, `0x083ba400`, `0x083ba4f0`, and
+//! `0x083ba97c`, plus `bleq` at `0x083ba8e4`. The conditional caller selects
+//! the pivot before reaching this no-guard rotation; the shared tests cover its
+//! root and both parent-child-slot cases. Deliberate deviations: none.
+//!
 //! `FUN_083c4e14` at load address `0x083c4e14` is another byte-identical
 //! ported alias. Raw `osos.dec` gives it an 80-byte extent (through `bx lr` at
 //! `0x083c4e60`); Ghidra's 84-byte size includes the right-rotation sibling's
