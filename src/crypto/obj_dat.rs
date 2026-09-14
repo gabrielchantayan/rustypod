@@ -304,6 +304,12 @@ pub static mut LHASH_GETRN: LhashGetrn = firmware_lhash_getrn;
 #[cfg(not(target_os = "none"))]
 pub static mut LHASH_GETRN: LhashGetrn = missing_lhash_getrn;
 
+/// Serializes host tests that replace the crate-global `LHASH_GETRN` seam.
+/// Kept outside this module's tests so dependent ports cannot race its
+/// resolver replacement.
+#[cfg(test)]
+pub static LHASH_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[inline(always)]
 unsafe fn lhash_getrn() -> LhashGetrn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_GETRN)) }
@@ -648,11 +654,9 @@ mod tests {
     use crate::drivers::ata_cmd::{missing_allocator, TracedAllocHooks, TRACED_ALLOC_HOOKS};
     use crate::testing::TRACED_ALLOC_TEST_LOCK;
     use std::boxed::Box;
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::MutexGuard;
     use std::vec::Vec;
 
-    /// Serializes the tests that drive the object-database globals.
-    static OBJ_LOCK: Mutex<()> = Mutex::new(());
 
     fn object(nid: i32, encoded: &'static [u8]) -> Asn1Object {
         Asn1Object {
@@ -667,7 +671,7 @@ mod tests {
 
     /// Installs a sorted `obj_objs` and hands back the guard.
     fn with_table(slots: &mut Vec<*mut Asn1Object>) -> MutexGuard<'static, ()> {
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         unsafe {
             OBJ_OBJS.base = slots.as_ptr();
             OBJ_OBJS.len = slots.len();
@@ -692,7 +696,7 @@ mod tests {
 
     /// Installs an inline `nid_objs` fixture and hands back the guard.
     fn with_nid_objects(objects: &mut [Asn1Object]) -> MutexGuard<'static, ()> {
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         unsafe { HOST_NID_OBJS = objects.as_mut_ptr() };
         guard
     }
@@ -785,7 +789,7 @@ mod tests {
     #[test]
     fn insertion_replaces_allocates_and_records_allocation_failure() {
         let _alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let _allocator_reset = unsafe { install_insert_allocator() };
         let old = 1usize as *mut c_void;
         let replacement = 2usize as *mut c_void;
@@ -869,7 +873,7 @@ mod tests {
             core::ptr::addr_of_mut!(BUCKET)
         }
 
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let mut table = Lhash::empty();
         let data = 1usize as *mut c_void;
         unsafe {
@@ -917,7 +921,7 @@ mod tests {
     fn an_already_resolved_object_returns_its_own_nid_without_a_lookup() {
         // No table installed and no `added`: a non-zero nid still comes
         // straight back, so neither lookup ran.
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let resolved = object(42, OID_A);
         assert_eq!(unsafe { obj_obj2nid(&resolved) }, 42);
         drop(guard);
@@ -926,7 +930,7 @@ mod tests {
     #[test]
     fn a_negative_nid_is_returned_verbatim() {
         // The early-out tests `!= 0`, not `> 0`.
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let resolved = object(-7, OID_A);
         assert_eq!(unsafe { obj_obj2nid(&resolved) }, -7);
         drop(guard);
@@ -958,7 +962,7 @@ mod tests {
     #[test]
     fn an_empty_table_misses_without_touching_the_base() {
         // The host default: base NULL, len 0. The loop never runs.
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         unsafe {
             OBJ_OBJS.base = core::ptr::null();
             OBJ_OBJS.len = 0;
@@ -1207,7 +1211,7 @@ mod tests {
             core::ptr::addr_of_mut!(BUCKET)
         }
 
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let mut table = Lhash::empty();
         unsafe {
             OVERRIDE.sn = b"added\0".as_ptr();
@@ -1281,7 +1285,7 @@ mod tests {
             core::ptr::addr_of_mut!(BUCKET)
         }
 
-        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = LHASH_TEST_LOCK.lock();
         let mut table = Lhash::empty();
         unsafe {
             HOST_ADDED_SLOT = core::ptr::addr_of_mut!(table);

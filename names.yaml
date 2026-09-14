@@ -84376,3 +84376,46 @@ functions:
       sign-extension, probe/helper forwarding, allocation size, raw byte copy,
       output order, and completion marking. Deliberate deviations: the
       unresolved helper boundary only.
+
+  # --- registry lhash insert and replacement notification ---
+  - address: 0x0805e7dc
+    ghidra: FUN_0805e7dc
+    name: registry_insert_and_notify
+    size: 204
+    sig: "u32 registry_insert_and_notify(usize name, u32 namespace_index, usize value)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r0/r7: name
+      param_2/r1/r4: namespace_index
+      param_3/r2/r8: value
+      piVar1/r6: registry_singleton
+      puVar3/r0/r1: record
+      piVar4/r4: replaced_record
+      FUN_0805e93c: registry_initialize
+      FUN_08043c18: traced_alloc
+      FUN_082d7c48: lh_insert
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM establishes 200 bytes of code from 0x0805e7dc through
+      0x0805e8a3, then the singleton literal 0x08a0ea6c at 0x0805e8a4;
+      the separately linked successor starts at 0x0805e8a8, making the
+      true extent 204 bytes. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds exactly six inbound direct calls, all unconditional bl:
+      0x0804b178, 0x0804b194, 0x0804b1c4, 0x0805f524, 0x0805f534, and
+      0x0805f554. There are no predicated bl forms or direct tail branches.
+      It lazily initializes the lhash at the registry singleton's +0x00
+      word through the unported FUN_0805e93c; allocates and inserts
+      `{ namespace_index & ~0x8000, namespace_index & 0x8000, name, value }`;
+      distinguishes lh_insert's successful new-record NULL return from an
+      allocation failure through lhash +0x5c error; and, on replacement,
+      calls the selected providers-table vtable slot +0x08 with
+      `(old.name, old.namespace_index, old.value)` only when the signed
+      provider count exceeds that old index, before traced_free releases the
+      old record. Device builds call the unported initializer at its fixed
+      address; host builds inject it, defaulting to its failure result.
+      Host tests cover initialization and table reload, masking bit 15,
+      exact allocator requests, successful insert, replacement notification
+      and release, initializer failure, and lhash node-allocation failure.

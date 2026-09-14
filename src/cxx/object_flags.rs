@@ -1,6 +1,7 @@
 //! Object-header flag predicates and the singleton flag-word counter
 //! accessor ported from retailOS.
-use crate::drivers::ata_cmd::traced_realloc;
+use crate::crypto::obj_dat::{lh_insert, Lhash};
+use crate::drivers::ata_cmd::{traced_alloc, traced_free, traced_realloc};
 use crate::strto::strtod::{bsearch, BsearchCmpFn};
 
 /// object_low_flags_clear — original: `FUN_0808539c` @ `0x0808539c`
@@ -1382,6 +1383,160 @@ pub unsafe extern "C" fn registry_key_hash(key: *const usize) -> u32 {
         }
     };
     key.read_volatile() as u32 ^ name_hash
+}
+
+/// Callback at slot +0x08 of a namespace provider's dispatch table.
+pub type RegistryProviderNotification =
+    unsafe extern "C" fn(name: usize, namespace_index: usize, value: usize);
+
+/// The prefix of a namespace provider's dispatch table observed by the
+/// registry insert path.
+#[repr(C)]
+pub struct RegistryProviderVtable {
+    /// +0x00: name-hash callback used by [`registry_key_hash`].
+    pub name_hash: RegistryNameHash,
+    /// +0x04: unresolved provider callback.
+    pub unresolved_04: usize,
+    /// +0x08: notified after an existing registry entry is replaced.
+    pub notify: RegistryProviderNotification,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(RegistryProviderVtable, notify)];
+
+/// One 16-byte registry record inserted into the singleton's lhash.
+///
+/// Target words are modeled as `usize` so the host fields remain disjoint
+/// while retaining their 32-bit target offsets.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RegistryInsertRecord {
+    /// +0x00: namespace index with bit 15 removed.
+    namespace_index: usize,
+    /// +0x04: only bit 15 from the original namespace word.
+    lookup_flag: usize,
+    /// +0x08: name/key forwarded to the provider notification.
+    name: usize,
+    /// +0x0c: notification payload.
+    value: usize,
+}
+
+#[cfg(target_pointer_width = "32")]
+mod registry_insert_record_layout {
+    use super::RegistryInsertRecord;
+
+    const _: [u8; 0x10] = [0; core::mem::size_of::<RegistryInsertRecord>()];
+    const _: [u8; 0x04] = [0; core::mem::offset_of!(RegistryInsertRecord, lookup_flag)];
+    const _: [u8; 0x08] = [0; core::mem::offset_of!(RegistryInsertRecord, name)];
+    const _: [u8; 0x0c] = [0; core::mem::offset_of!(RegistryInsertRecord, value)];
+}
+
+/// ABI of the still-unported singleton initializer `FUN_0805e93c`.
+type RegistryInsertInitialize = unsafe extern "C" fn() -> u32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn registry_insert_initialize() -> u32 {
+    let initialize: RegistryInsertInitialize = core::mem::transmute(0x0805_e93cusize);
+    initialize()
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_registry_insert_initialize() -> u32 {
+    0
+}
+
+/// Host injection for the unported initializer. Its default return follows
+/// the retail initialization-failure path.
+#[cfg(not(target_os = "none"))]
+static mut REGISTRY_INSERT_INITIALIZE: RegistryInsertInitialize = missing_registry_insert_initialize;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn registry_insert_initialize() -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(REGISTRY_INSERT_INITIALIZE))()
+}
+
+/// The singleton's +0x00 lhash-pointer word.
+#[inline(always)]
+unsafe fn registry_hash_table_word() -> *mut *mut Lhash {
+    #[cfg(target_os = "none")]
+    {
+        REGISTRY_SINGLETON.cast()
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(HOST_REGISTRY_SINGLETON).cast::<*mut Lhash>()
+    }
+}
+
+/// registry_insert_and_notify — original: `FUN_0805e7dc` @ `0x0805e7dc`
+/// (200 instruction bytes, `0x0805e7dc..0x0805e8a3`, followed by its
+/// singleton literal pool word @ `0x0805e8a4`; the separately linked next
+/// function starts at `0x0805e8a8`, for a 204-byte true extent). Full-image
+/// decoding finds exactly six direct `bl` callers — `0x0804b178`,
+/// `0x0804b194`, `0x0804b1c4`, `0x0805f524`, `0x0805f534`, and
+/// `0x0805f554` — all unconditional; there are no predicated `bl` forms.
+///
+/// Ensures the lhash at singleton +0x00 exists, allocates a 16-byte record
+/// `{ namespace_index & !0x8000, namespace_index & 0x8000, name, value }`,
+/// and inserts it through [`lh_insert`]. A new record succeeds only if lhash
+/// did not set its +0x5c error word. On replacement, it conditionally invokes
+/// the namespace provider selected by the old record's index: when the
+/// singleton's +0x08 providers array has `count >s old.namespace_index`, its
+/// slot +0x08 receives `(old.name, old.namespace_index, old.value)`. It then
+/// releases the old record through [`traced_free`], regardless of notification.
+///
+/// Deliberate host deviation: the unported initializer is a volatile host
+/// injection whose default reports failure; device builds call
+/// `FUN_0805e93c` directly. Pointer-valued target words use `usize` host
+/// slots, preserving target offsets on ARM while keeping host fields disjoint.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn registry_insert_and_notify(
+    name: usize,
+    namespace_index: u32,
+    value: usize,
+) -> u32 {
+    let mut table = registry_hash_table_word().read_volatile();
+    if table.is_null() {
+        if registry_insert_initialize() == 0 {
+            return 0;
+        }
+        table = registry_hash_table_word().read_volatile();
+    }
+
+    let record = traced_alloc(16, 0, 0).cast::<RegistryInsertRecord>();
+    if record.is_null() {
+        return 0;
+    }
+    record.write_volatile(RegistryInsertRecord {
+        namespace_index: (namespace_index & !0x8000) as usize,
+        lookup_flag: (namespace_index & 0x8000) as usize,
+        name,
+        value,
+    });
+
+    let old_record = lh_insert(table, record.cast()).cast::<RegistryInsertRecord>();
+    if old_record.is_null() {
+        return u32::from((*table).error == 0);
+    }
+
+    let providers = registry_providers_word().read_volatile();
+    if !providers.is_null()
+        && namespace_provider_count(providers) > (*old_record).namespace_index as i32
+    {
+        let provider = namespace_provider_at(providers, (*old_record).namespace_index as u32)
+            .cast::<RegistryProviderVtable>();
+        let notify = core::ptr::read_volatile(core::ptr::addr_of!((*provider).notify));
+        notify(
+            (*old_record).name,
+            (*old_record).namespace_index,
+            (*old_record).value,
+        );
+    }
+    traced_free(old_record.cast());
+    1
 }
 
 /// `FT_FaceRec.family_name` (+0x14; the `str r5,[r4,#0x14]` @
@@ -3734,6 +3889,260 @@ mod tests {
             "the ldr r1,[r4,#0x0] @ 0x080855e8 reloads the index after the hash call"
         );
         uninstall_registry_context();
+    }
+
+    // --- registry_insert_and_notify ---
+
+    const EMPTY_REGISTRY_INSERT_RECORD: RegistryInsertRecord = RegistryInsertRecord {
+        namespace_index: 0,
+        lookup_flag: 0,
+        name: 0,
+        value: 0,
+    };
+    static mut REGISTRY_INSERT_ENTRIES: [RegistryInsertRecord; 2] =
+        [EMPTY_REGISTRY_INSERT_RECORD; 2];
+    static mut REGISTRY_INSERT_ENTRY_COUNT: usize = 0;
+    static mut REGISTRY_INSERT_ALLOC_SIZES: [i32; 4] = [0; 4];
+    static mut REGISTRY_INSERT_ALLOC_COUNT: usize = 0;
+    static mut REGISTRY_INSERT_FAIL_NODE: bool = false;
+    static mut REGISTRY_INSERT_NODE: crate::crypto::obj_dat::LhashNode =
+        crate::crypto::obj_dat::LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+    static mut REGISTRY_INSERT_BUCKET: *mut crate::crypto::obj_dat::LhashNode =
+        core::ptr::null_mut();
+    static mut REGISTRY_INSERT_INITIALIZE_CALLS: usize = 0;
+    static mut REGISTRY_INSERT_INITIALIZE_RESULT: u32 = 0;
+    static mut REGISTRY_INSERT_INITIALIZE_TABLE: *mut Lhash = core::ptr::null_mut();
+    static mut REGISTRY_NOTIFICATION: Option<(usize, usize, usize)> = None;
+    static mut REGISTRY_NOTIFICATION_CALLS: usize = 0;
+    static mut REGISTRY_FREED: [usize; 2] = [0; 2];
+    static mut REGISTRY_FREE_COUNT: usize = 0;
+
+    unsafe extern "C" fn recording_registry_insert_initialize() -> u32 {
+        REGISTRY_INSERT_INITIALIZE_CALLS += 1;
+        registry_hash_table_word().write_volatile(REGISTRY_INSERT_INITIALIZE_TABLE);
+        REGISTRY_INSERT_INITIALIZE_RESULT
+    }
+
+    unsafe extern "C" fn recording_registry_insert_alloc(
+        size: i32,
+        tag1: u32,
+        tag2: u32,
+    ) -> *mut u8 {
+        assert_eq!((tag1, tag2), (0, 0), "both allocator tags are zero");
+        let count = REGISTRY_INSERT_ALLOC_COUNT;
+        assert!(count < REGISTRY_INSERT_ALLOC_SIZES.len(), "too many allocator calls");
+        REGISTRY_INSERT_ALLOC_SIZES[count] = size;
+        REGISTRY_INSERT_ALLOC_COUNT = count + 1;
+        match size {
+            16 => {
+                let entry = REGISTRY_INSERT_ENTRY_COUNT;
+                assert!(entry < REGISTRY_INSERT_ENTRIES.len(), "too many registry records");
+                REGISTRY_INSERT_ENTRY_COUNT = entry + 1;
+                core::ptr::addr_of_mut!(REGISTRY_INSERT_ENTRIES[entry]).cast()
+            }
+            12 if REGISTRY_INSERT_FAIL_NODE => core::ptr::null_mut(),
+            12 => core::ptr::addr_of_mut!(REGISTRY_INSERT_NODE).cast(),
+            _ => panic!("unexpected allocation size {size}"),
+        }
+    }
+
+    unsafe extern "C" fn registry_insert_bucket(
+        _table: *mut Lhash,
+        _key: *const core::ffi::c_void,
+        _hash: *mut u32,
+    ) -> *mut *mut crate::crypto::obj_dat::LhashNode {
+        core::ptr::addr_of_mut!(REGISTRY_INSERT_BUCKET)
+    }
+
+    unsafe extern "C" fn recording_registry_notification(
+        name: usize,
+        namespace_index: usize,
+        value: usize,
+    ) {
+        REGISTRY_NOTIFICATION_CALLS += 1;
+        REGISTRY_NOTIFICATION = Some((name, namespace_index, value));
+    }
+
+    unsafe extern "C" fn recording_registry_free(block: *mut u8) {
+        let count = REGISTRY_FREE_COUNT;
+        assert!(count < REGISTRY_FREED.len(), "too many registry record frees");
+        REGISTRY_FREED[count] = block as usize;
+        REGISTRY_FREE_COUNT = count + 1;
+    }
+
+    struct RegistryInsertReset {
+        initialize: RegistryInsertInitialize,
+        alloc: crate::drivers::ata_cmd::TracedAllocHooks,
+        free: crate::drivers::ata_cmd::TracedFreeHooks,
+        getrn: crate::crypto::obj_dat::LhashGetrn,
+        hash_table: *mut Lhash,
+        providers: *const u32,
+    }
+
+    impl Drop for RegistryInsertReset {
+        fn drop(&mut self) {
+            unsafe {
+                REGISTRY_INSERT_INITIALIZE = self.initialize;
+                crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS = self.alloc;
+                crate::drivers::ata_cmd::TRACED_FREE_HOOKS = self.free;
+                crate::crypto::obj_dat::LHASH_GETRN = self.getrn;
+                registry_hash_table_word().write_volatile(self.hash_table);
+                registry_providers_word().write_volatile(self.providers);
+            }
+        }
+    }
+
+    unsafe fn install_registry_insert(
+        initialize_table: *mut Lhash,
+        providers: *const u32,
+        initialize_result: u32,
+    ) -> RegistryInsertReset {
+        let reset = RegistryInsertReset {
+            initialize: REGISTRY_INSERT_INITIALIZE,
+            alloc: crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS,
+            free: crate::drivers::ata_cmd::TRACED_FREE_HOOKS,
+            getrn: crate::crypto::obj_dat::LHASH_GETRN,
+            hash_table: registry_hash_table_word().read_volatile(),
+            providers: registry_providers_word().read_volatile(),
+        };
+        REGISTRY_INSERT_ENTRY_COUNT = 0;
+        REGISTRY_INSERT_ALLOC_SIZES = [0; 4];
+        REGISTRY_INSERT_ALLOC_COUNT = 0;
+        REGISTRY_INSERT_FAIL_NODE = false;
+        REGISTRY_INSERT_NODE = crate::crypto::obj_dat::LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+        REGISTRY_INSERT_BUCKET = core::ptr::null_mut();
+        REGISTRY_INSERT_INITIALIZE_CALLS = 0;
+        REGISTRY_INSERT_INITIALIZE_RESULT = initialize_result;
+        REGISTRY_INSERT_INITIALIZE_TABLE = initialize_table;
+        REGISTRY_NOTIFICATION = None;
+        REGISTRY_NOTIFICATION_CALLS = 0;
+        REGISTRY_FREED = [0; 2];
+        REGISTRY_FREE_COUNT = 0;
+        REGISTRY_INSERT_INITIALIZE = recording_registry_insert_initialize;
+        crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS =
+            crate::drivers::ata_cmd::TracedAllocHooks {
+                alloc: recording_registry_insert_alloc,
+                trace: None,
+            };
+        crate::drivers::ata_cmd::TRACED_FREE_HOOKS =
+            crate::drivers::ata_cmd::TracedFreeHooks {
+                free: recording_registry_free,
+                trace: None,
+            };
+        crate::crypto::obj_dat::LHASH_GETRN = registry_insert_bucket;
+        registry_hash_table_word().write_volatile(core::ptr::null_mut());
+        registry_providers_word().write_volatile(providers);
+        reset
+    }
+
+    #[test]
+    fn registry_insert_initializes_lhash_then_notifies_and_releases_replacement() {
+        let _alloc_guard = crate::testing::TRACED_ALLOC_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _free_guard = crate::drivers::ata_cmd::TRACED_FREE_TEST_LOCK.lock();
+        let _registry_guard = REGISTRY_KEY_HASH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _lhash_guard = crate::crypto::obj_dat::LHASH_TEST_LOCK.lock();
+        let provider_vtable = RegistryProviderVtable {
+            name_hash: registry_default_name_hash,
+            unresolved_04: 0,
+            notify: recording_registry_notification,
+        };
+        let provider_table = [
+            core::ptr::null(),
+            core::ptr::null(),
+            core::ptr::null(),
+            core::ptr::addr_of!(provider_vtable).cast::<u32>(),
+        ];
+        let providers = NamespaceProviders::new(4, provider_table.as_ptr().cast());
+        let mut table = Lhash::empty();
+        table.num_nodes = 1;
+        table.up_load = 257;
+        let _reset = unsafe {
+            install_registry_insert(core::ptr::addr_of_mut!(table), providers.ptr(), 1)
+        };
+
+        assert_eq!(
+            unsafe { registry_insert_and_notify(0x1111, 0x8003, 0xaaaa) },
+            1,
+            "initialization installs the table and a fresh insert succeeds"
+        );
+        assert_eq!(
+            unsafe { registry_insert_and_notify(0x2222, 0x8003, 0xbbbb) },
+            1,
+            "the matching lhash bucket replaces the first record"
+        );
+
+        unsafe {
+            assert_eq!(REGISTRY_INSERT_INITIALIZE_CALLS, 1, "only the null-table path initializes");
+            assert_eq!(&REGISTRY_INSERT_ALLOC_SIZES[..REGISTRY_INSERT_ALLOC_COUNT], &[16, 12, 16]);
+            assert_eq!(REGISTRY_INSERT_ENTRIES[0].namespace_index, 3);
+            assert_eq!(REGISTRY_INSERT_ENTRIES[0].lookup_flag, 0x8000);
+            assert_eq!(REGISTRY_INSERT_ENTRIES[0].name, 0x1111);
+            assert_eq!(REGISTRY_INSERT_ENTRIES[0].value, 0xaaaa);
+            assert_eq!(REGISTRY_NOTIFICATION_CALLS, 1);
+            assert_eq!(REGISTRY_NOTIFICATION, Some((0x1111, 3, 0xaaaa)));
+            assert_eq!(REGISTRY_FREE_COUNT, 1);
+            assert_eq!(
+                REGISTRY_FREED[0],
+                core::ptr::addr_of!(REGISTRY_INSERT_ENTRIES[0]) as usize,
+                "the replaced record is released after notification"
+            );
+        }
+    }
+
+    #[test]
+    fn registry_insert_stops_when_initialization_fails() {
+        let _alloc_guard = crate::testing::TRACED_ALLOC_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _free_guard = crate::drivers::ata_cmd::TRACED_FREE_TEST_LOCK.lock();
+        let _registry_guard = REGISTRY_KEY_HASH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _lhash_guard = crate::crypto::obj_dat::LHASH_TEST_LOCK.lock();
+        let _reset = unsafe { install_registry_insert(core::ptr::null_mut(), core::ptr::null(), 0) };
+
+        assert_eq!(unsafe { registry_insert_and_notify(0x11, 0, 0x22) }, 0);
+        assert_eq!(unsafe { REGISTRY_INSERT_INITIALIZE_CALLS }, 1);
+        assert_eq!(unsafe { REGISTRY_INSERT_ALLOC_COUNT }, 0, "no record allocation follows failure");
+    }
+
+    #[test]
+    fn registry_insert_reports_lhash_node_allocation_error() {
+        let _alloc_guard = crate::testing::TRACED_ALLOC_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _free_guard = crate::drivers::ata_cmd::TRACED_FREE_TEST_LOCK.lock();
+        let _registry_guard = REGISTRY_KEY_HASH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _lhash_guard = crate::crypto::obj_dat::LHASH_TEST_LOCK.lock();
+        let mut table = Lhash::empty();
+        table.num_nodes = 1;
+        table.up_load = 257;
+        let _reset = unsafe {
+            install_registry_insert(core::ptr::null_mut(), core::ptr::null(), 1)
+        };
+        unsafe {
+            REGISTRY_INSERT_FAIL_NODE = true;
+            registry_hash_table_word().write_volatile(core::ptr::addr_of_mut!(table));
+        }
+
+        assert_eq!(unsafe { registry_insert_and_notify(0x11, 0, 0x22) }, 0);
+        assert_eq!(unsafe { REGISTRY_INSERT_INITIALIZE_CALLS }, 0, "an existing table skips initialization");
+        assert_eq!(unsafe { &REGISTRY_INSERT_ALLOC_SIZES[..REGISTRY_INSERT_ALLOC_COUNT] }, &[16, 12]);
+        assert_eq!(table.error, 1, "outer return follows lh_insert's error word");
+        assert_eq!(unsafe { REGISTRY_NOTIFICATION_CALLS }, 0);
+        assert_eq!(unsafe { REGISTRY_FREE_COUNT }, 0);
     }
 
     // --- bitstream_stuffing_to_byte_check ---
