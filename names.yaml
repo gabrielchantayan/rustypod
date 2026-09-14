@@ -35014,6 +35014,27 @@ functions:
       current cursor is untouched outside that active, non-NULL-end path.
       No deviations.
 
+  - address: 0x083d7134
+    ghidra: FUN_083d7134
+    name: strstreambuf_active_buffer_capacity
+    size: 36
+    sig: "i32 strstreambuf_active_buffer_capacity(const u8 *this)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Raw ARM is `ldr r1,[r0,#4]; ands r1,r1,#4; ldreq r1,[r0,#0x28];
+      ldreq r0,[r0,#0x20]; ldrne r1,[r0,#0x1c]; ldrne r0,[r0,#0x14];
+      sub r0,r1,r0; bx lr`. It returns the active strstream area capacity:
+      `input_end (+0x1c) - input_begin (+0x14)` when input mode bit 0x4 is
+      set, otherwise `output_end (+0x28) - output_begin (+0x20)`. Raw
+      whole-image ARM decoding verified the 36-byte extent through the
+      `bx lr` at 0x083d7154; the next sibling starts at 0x083d7158. It also
+      finds exactly five incoming call sites, all unconditional `bl` at
+      0x083d707c, 0x083d70a4, 0x083da878, 0x083da8a8, and 0x083dabb0; no
+      predicated `bl` forms or tail `b` sites. Callers use the capacity
+      before copying or replacing the active backing area. No deviations.
+
   - address: 0x083d7044
     ghidra: FUN_083d7044
     name: strstreambuf_is_eof
