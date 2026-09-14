@@ -151,6 +151,7 @@ pub unsafe extern "C" fn gateway_wait_ready() {
 /// mode-1 mailbox-send gateway body, serialized by kernel semaphore 9. See
 /// the module header for the frame layout and deviations.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn gateway_request_blocking(payload: usize, flag: usize) {
     (ready_wait())();
     let frame: [usize; FRAME_SLOTS] = [
@@ -172,6 +173,22 @@ pub unsafe extern "C" fn gateway_request_blocking(payload: usize, flag: usize) {
         GATEWAY_SEMAPHORE,
     );
     task_lock::rom_sem_signal(REQUEST_LOCK);
+}
+
+/// gateway_request_blocking_flag_one — original: FUN_08048064 @ 0x08048064
+/// (28 bytes; 6 verified unconditional `bl` call sites in osos 2.0.4).
+/// Saves `payload` across a call to gateway_wait_ready, then sets r1 to one
+/// and branches to gateway_request_blocking. The delegated helper runs its
+/// own ready wait, so this path deliberately polls readiness twice before
+/// posting the tag-0 frame. No identity beyond its fixed flag is established;
+/// the name describes that observable behavior. Deviation: Rust represents
+/// the terminal ARM `b` as an ordinary call, preserving all effects and the
+/// return-to-caller outcome rather than the instruction form.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_request_blocking_flag_one(payload: usize) {
+    (ready_wait())();
+    gateway_request_blocking(payload, 1);
 }
 
 #[cfg(test)]
@@ -318,6 +335,23 @@ mod tests {
                     "ready", "wait", "dispatch", "signal"
                 ]
             );
+        }
+    }
+
+    /// The 28-byte fixed-flag wrapper waits once itself, then enters the
+    /// blocking helper which waits again before exactly one dispatched frame.
+    #[test]
+    fn flag_one_wrapper_rechecks_ready_before_one_blocking_request() {
+        let _installed = install();
+        unsafe {
+            gateway_request_blocking_flag_one(0x21);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["ready", "ready", "wait", "dispatch", "signal"]
+            );
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 1);
+            assert_eq!(*addr_of!(WAIT_ARG), REQUEST_LOCK);
+            assert_eq!(*addr_of!(SIGNAL_ARG), REQUEST_LOCK);
         }
     }
 
