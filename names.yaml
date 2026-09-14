@@ -87205,3 +87205,38 @@ functions:
       u32 link words preserve the target-width layout, and host tests cover
       root replacement, the transferred middle subtree, and both parent-child
       slots.
+
+
+  # --- red-black-tree node-pool acquire ---
+  - address: 0x083cc1d0
+    ghidra: FUN_083cc1d0
+    name: red_black_tree_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePooledNode *red_black_tree_node_pool_acquire(RedBlackTreeNodePool *pool)"
+    module: cxx/red_black_tree_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_1_plus_0x00/r4: chunks
+      param_1_plus_0x04/r4: free
+      param_1_plus_0x08/r4: next
+      param_1_plus_0x0c/r4: end
+      r0: node
+      r5: new_chunk
+      r6: capacity
+      r7: zero
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 ARM words from
+      push {r4-r8,lr} at 0x083cc1d0 through pop {r4-r8,pc} at 0x083cc284;
+      the next separately linked function begins at 0x083cc288. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional plain bl at 0x08101a80, 0x08177b64,
+      0x08213a64, 0x083cca58, and 0x083dc048; there are no predicated direct
+      calls or direct tail-B callers. This acquires a node from the free list
+      or current 20-byte chunk. Exhaustion allocates a 12-byte chunk header and
+      backing storage: 32 nodes initially, then max(capacity + 32, capacity +
+      capacity/2 + capacity/8). The returned node has its color byte and
+      parent/left/right words cleared while its +0x10 client payload survives.
+      No deliberate deviations: u32 pointer words preserve the target layout,
+      and host tests cover fresh allocation, free-list reuse, both growth
+      branches (32 to 64 and 64 to 104), cleared links, and preserved payload.
