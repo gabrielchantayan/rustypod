@@ -18,6 +18,8 @@
 //! an opaque 32-bit descriptor and no dispatch seam is invented. Deliberate
 //! deviations: none.
 
+use crate::app::nested_liti_class_check::nested_liti_class_check;
+
 /// Literal descriptor the ARM initializer loads from its pool word at
 /// 0x0826fc40.
 pub const TAGGED_RECORD_DESCRIPTOR: u32 = 0x089a_5b04;
@@ -61,29 +63,6 @@ pub unsafe extern "C" fn tagged_record_init(
     this
 }
 
-/// Observed ABI of the unported nested `'liti'` class check at
-/// `0x08057bdc`. It returns zero for no match and a nonzero word for a match.
-pub type NestedLitiClassCheck = unsafe extern "C" fn(*const u8) -> u32;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_nested_liti_class_check(target: *const u8) -> u32 {
-    let check: NestedLitiClassCheck = unsafe { core::mem::transmute(0x0805_7bdcusize) };
-    unsafe { check(target) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_nested_liti_class_check(_target: *const u8) -> u32 {
-    panic!("tagged_record_payload_is_liti_class requires core 0x08057bdc")
-}
-
-#[cfg(target_os = "none")]
-const DEFAULT_NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = firmware_nested_liti_class_check;
-#[cfg(not(target_os = "none"))]
-const DEFAULT_NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = missing_nested_liti_class_check;
-
-/// The unported nested `'liti'` class check. Target builds invoke its retailOS
-/// entry; host tests replace this seam to observe the exact payload forwarded.
-pub static mut NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = DEFAULT_NESTED_LITI_CLASS_CHECK;
 
 /// tagged_record_payload_is_liti_class — original: `FUN_0826fc14` @
 /// 0x0826fc14 (24 bytes).
@@ -95,17 +74,16 @@ pub static mut NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = DEFAULT_NESTED_LI
 /// callers.
 ///
 /// Algorithm: load the target-width payload word at record +0x04, call the
-/// unported nested `'liti'` class check at 0x08057bdc with that value, then
-/// return strict 0 or 1 according to whether the callee result is zero. The
-/// callee itself NULL-guards the payload and follows its +0x08 field to the
-/// ported `'liti'` tag predicate; this wrapper deliberately makes no
-/// pre-call NULL check. The record and nested-object identities beyond those
-/// observed fields are unknown, so no stronger type claim is made.
+/// ported nested `'liti'` class check with that value, then return strict 0
+/// or 1 according to whether the callee result is zero. The callee itself
+/// NULL-guards the payload and follows its +0x08 field to the ported `'liti'`
+/// tag predicate; this wrapper deliberately makes no pre-call NULL check.
+/// The record and nested-object identities beyond those observed fields are
+/// unknown, so no stronger type claim is made.
 ///
-/// Deliberate deviation: the fixed retailOS call is represented by the
-/// replaceable `NESTED_LITI_CLASS_CHECK` seam so host tests can observe its
-/// argument; target builds default that seam to 0x08057bdc. The original
-/// direct `bl` therefore becomes an indirect target-default call.
+/// Deliberate deviations: none. The retail direct `bl` is now a direct call
+/// to the canonical port rather than the former target-default replacement
+/// seam.
 ///
 /// # Safety
 ///
@@ -116,10 +94,8 @@ pub static mut NESTED_LITI_CLASS_CHECK: NestedLitiClassCheck = DEFAULT_NESTED_LI
 #[cfg_attr(target_os = "none", link_section = ".text.tagged_record_payload_is_liti_class")]
 pub unsafe extern "C" fn tagged_record_payload_is_liti_class(record: *const TaggedRecord) -> u32 {
     let payload = unsafe { core::ptr::addr_of!((*record).payload).read() };
-    let check = unsafe {
-        core::ptr::addr_of_mut!(NESTED_LITI_CLASS_CHECK).read_volatile()
-    };
-    u32::from(unsafe { check(payload as usize as *const u8) } != 0)
+    let result = unsafe { nested_liti_class_check(payload as usize as *const u8) };
+    u32::from(result != 0)
 }
 
 
@@ -139,25 +115,6 @@ mod tests {
         )
         .map(|pointer| pointer as usize)
     });
-    static mut CALLEE_RESULT: u32 = 0;
-    static mut FORWARDED_PAYLOAD: usize = 0;
-
-    unsafe extern "C" fn record_nested_liti_class_check(target: *const u8) -> u32 {
-        unsafe {
-            FORWARDED_PAYLOAD = target as usize;
-            CALLEE_RESULT
-        }
-    }
-
-    struct CheckSeamRestore(NestedLitiClassCheck);
-
-    impl Drop for CheckSeamRestore {
-        fn drop(&mut self) {
-            unsafe {
-                NESTED_LITI_CLASS_CHECK = self.0;
-            }
-        }
-    }
 
     fn mapped_record(payload: u32) -> Option<*mut TaggedRecord> {
         let base = (*PAYLOAD_CHECK_FIXTURE)? as *mut u8;
@@ -172,26 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn forwards_target_width_payload_and_normalizes_nonzero_result() {
-        let _guard = PAYLOAD_CHECK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(record) = mapped_record(0x1234_5678) else {
-            assert!(crate::testing::note_missing_u32_fixture("cxx::tagged_record"));
-            return;
-        };
-
-        unsafe {
-            let _restore = CheckSeamRestore(NESTED_LITI_CLASS_CHECK);
-            NESTED_LITI_CLASS_CHECK = record_nested_liti_class_check;
-            CALLEE_RESULT = 0xfeed_face;
-            FORWARDED_PAYLOAD = 0;
-
-            assert_eq!(tagged_record_payload_is_liti_class(record), 1);
-            assert_eq!(FORWARDED_PAYLOAD, 0x1234_5678);
-        }
-    }
-
-    #[test]
-    fn null_payload_is_still_forwarded_to_callee() {
+    fn calls_ported_check_with_target_width_payload() {
         let _guard = PAYLOAD_CHECK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(record) = mapped_record(0) else {
             assert!(crate::testing::note_missing_u32_fixture("cxx::tagged_record"));
@@ -199,14 +137,25 @@ mod tests {
         };
 
         unsafe {
-            let _restore = CheckSeamRestore(NESTED_LITI_CLASS_CHECK);
-            NESTED_LITI_CLASS_CHECK = record_nested_liti_class_check;
-            CALLEE_RESULT = 0;
-            FORWARDED_PAYLOAD = usize::MAX;
+            let container = record.cast::<u8>().add(0x100).cast::<u32>();
+            let target = record.cast::<u8>().add(0x200).cast::<u32>();
+            target.write(0x6974_696c);
+            container.add(2).write(target as usize as u32);
+            (*record).payload = container as usize as u32;
 
-            assert_eq!(tagged_record_payload_is_liti_class(record), 0);
-            assert_eq!(FORWARDED_PAYLOAD, 0);
+            assert_eq!(tagged_record_payload_is_liti_class(record), 1);
         }
+    }
+
+    #[test]
+    fn null_payload_returns_zero_through_ported_check() {
+        let _guard = PAYLOAD_CHECK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(record) = mapped_record(0) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx::tagged_record"));
+            return;
+        };
+
+        assert_eq!(unsafe { tagged_record_payload_is_liti_class(record) }, 0);
     }
 
     #[test]
