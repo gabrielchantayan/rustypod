@@ -17,6 +17,30 @@
 base: 0x08000000
 
 functions:
+  # --- u32 maximum-sentinel predicate ---
+  - address: 0x083b4788
+    ghidra: FUN_083b4788
+    name: u32_deref_is_max
+    size: 20
+    sig: "u32 u32_deref_is_max(const u32 *word)"
+    module: util/u32_deref_is_max
+    status: ported
+    renames:
+      param_1/r0: word
+      "*param_1/r0": word_value
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM words from
+      ldr r0,[r0] at 0x083b4788 through bx lr at 0x083b4798; the separately
+      linked next function begins at 0x083b479c. The function returns one only
+      when its aligned input word is 0xffffffff, otherwise zero. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional bl at 0x0824e238, 0x08256388,
+      0x083b4870, 0x083b489c, and 0x083b48c4; there are no predicated calls or
+      direct tail-B callers. The callers use the maximum word as an absent-index
+      sentinel. match.py reports the expected structural diff: LLVM uses add,
+      clz, and lsr rather than ARM ADS cmn plus predicated moves, while retaining
+      the aligned load and exact boolean result. Host tests cover zero, one,
+      maximum-minus-one, and the maximum sentinel. Deliberate deviations: none.
   # --- C++ red-black-tree left rotation ---
   - address: 0x083c0c60
     ghidra: FUN_083c0c60
