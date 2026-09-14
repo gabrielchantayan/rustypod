@@ -5,7 +5,7 @@
 //! |---|---|---:|---:|
 //! | 0x0810dddc | [`registry_observer_base_construct`] | 20 | 24 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
-//! | 0x0810e6b0 | [`registry_container_destruct`] | 4 | 10 `bl` + 1 tail `b` |
+//! | 0x08135380 | [`registry_container_destruct`] | 72 | 6 `bl` + 16 tail `b` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
@@ -393,18 +393,18 @@ unsafe extern "C" fn host_registry_container_base_destruct(registry: *mut Regist
 static mut REGISTRY_CONTAINER_BASE_DESTRUCT: unsafe extern "C" fn(*mut Registry) -> *mut Registry =
     host_registry_container_base_destruct;
 
-/// registry_container_destruct — original: `thunk_FUN_08135380` @
-/// **0x0810e6b0** (4 bytes; 10 plain `bl` and one tail `b` call sites,
+/// registry_container_destruct — original: `FUN_08135380` @ **0x08135380**
+/// (72 bytes including the trailing vtable literal; Ghidra reports 68 code
+/// bytes; 6 plain `bl`, 0 predicated `bl`, and 16 tail `b` entries, all
 /// binary-scanned by decoding every ARM B/BL word in `osos.dec`).
 ///
-/// The four-byte entry is `b 0x08135380`; its 72-byte destination
-/// (`0x08135380..0x081353c8`, including the vtable literal) implements this
-/// concrete registry-container destructor. It first installs
-/// `0x08984770`, dispatches `observer->vtable[+0x1c]` for the observer at
-/// `this+0x24`, frees the owned auxiliary allocation at `this+0x1c` only
-/// when non-NULL, then clears both words. Finally it tail-branches to the
-/// already ported [`observable_array_destruct`] (`0x08271d2c`) for the base
-/// subobject and returns its original `this`.
+/// This concrete registry-container destructor first installs `0x08984770`,
+/// dispatches `observer->vtable[+0x1c]` for the observer at `this+0x24`,
+/// frees the owned auxiliary allocation at `this+0x1c` only when non-NULL,
+/// then clears both words. Finally it tail-branches to the already ported
+/// [`observable_array_destruct`] (`0x08271d2c`) for the base subobject and
+/// returns its original `this`. The four-byte `thunk_FUN_08135380` entry at
+/// `0x0810e6b0` is a separate `b 0x08135380` tail thunk.
 ///
 /// Raw ARM has no NULL guard for `this`, its observer, or the observer's
 /// vtable; this is intentionally the same contract. The auxiliary-allocation
