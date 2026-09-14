@@ -84162,3 +84162,31 @@ functions:
       references. The six callers gate stream-handle operations before
       forwarding the second target word to their read, write, tell, or
       finalization helpers. Deliberate deviations: none.
+  # --- Bitmap bit-depth pixel-format selector ---
+  - address: 0x0808737c
+    ghidra: FUN_0808737c
+    name: pixel_format_tag_for_bit_depth_or_override
+    size: 108
+    sig: "u32 pixel_format_tag_for_bit_depth_or_override(u32 bit_depth, u32 format_tag_override)"
+    module: app/image_format
+    status: ported
+    renames:
+      param_1/r0: bit_depth
+      param_2/r1: format_tag_override
+      DAT_080873e8: argb_1888_format_tag
+      DAT_080873ec: rgb555_format_tag
+    notes: >-
+      Raw osos.dec establishes 108 bytes of instructions from mov r2,r0 at
+      0x0808737c through bx lr at 0x080873e4, followed by the two-word literal
+      pool 0x00001888 and 0x00000555 at 0x080873e8 and 0x080873ec; the next
+      separately linked function starts at 0x080873f0, making the complete
+      extent 116 bytes rather than Ghidra's 108-byte instruction body. It
+      returns a nonzero r1 unchanged; otherwise it maps bit depths 0 and 32
+      to 0x1888, 16 to 0x0555, 1/2/4/8 to themselves, and every other value
+      to zero. Decoding every immediate ARM B/BL word in osos.dec finds
+      exactly six inbound direct calls, all unconditional plain bl at
+      0x0809e2dc, 0x0809e338, 0x0810e860, 0x0829853c, 0x0829859c, and
+      0x08298608; there are no predicated forms, direct tail branches, or
+      aligned raw data-word references. Recovered callers pass zero r1 and
+      provide bitmap bit-depth fields in r0; the zero override path supplies
+      their default format tag. Deliberate deviations: none.
