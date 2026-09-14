@@ -67,6 +67,15 @@
 //! NULL guards. It shares the rotation algorithm above and deliberately adds
 //! no redundant dispatch seam; the shared host test covers its root and both
 //! parent-child-slot cases. Deliberate deviations: none.
+//!
+//! `FUN_083c2308` at load address `0x083c2308` is byte-identical to this
+//! 84-byte implementation: 21 ARM words from `ldr r2,[r1,#8]` through `bx lr`
+//! at `0x083c2358`, followed by the separately linked function at
+//! `0x083c235c`. Raw B/BL decoding finds five inbound direct calls: four
+//! unconditional `bl` at `0x083c2654`, `0x083c26cc`, `0x083c27c0`, and
+//! `0x083c2ba4`, plus predicated `bleq` at `0x083c2bf4`; no direct tail-`B`
+//! callers exist. The predicated caller selects the left child before calling,
+//! so this shared no-guard export is faithful. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
@@ -95,8 +104,9 @@ fn node_word(node: *mut RedBlackTreeNode) -> u32 {
 ///
 /// Originals: `FUN_083ced20` at load address `0x083ced20`, `FUN_083c6530` at
 /// `0x083c6530`, `FUN_083c5ab0` at `0x083c5ab0`, `FUN_083c41dc` at
-/// `0x083c41dc`, and `FUN_083baac4` at `0x083baac4` (each 84 bytes; five
-/// inbound `bl` sites: four unconditional and one `bleq`).
+/// `0x083c41dc`, `FUN_083baac4` at `0x083baac4`, and `FUN_083c2308` at
+/// `0x083c2308` (each 84 bytes; five inbound `bl` sites: four unconditional
+/// and one `bleq`).
 ///
 /// # Safety
 ///
