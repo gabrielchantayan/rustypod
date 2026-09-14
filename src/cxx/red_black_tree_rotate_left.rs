@@ -16,6 +16,10 @@
 //! becomes that child's left subtree. Deliberate deviations: none; links use
 //! target-width `u32` words so the 32-bit target layout and host fixtures are
 //! identical.
+//!
+//! The byte-identical `FUN_083c5a5c` at load address `0x083c5a5c` is a
+//! ported ledger alias of this implementation; its five direct callers have
+//! the same four `bl` plus one `bleq` split.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
