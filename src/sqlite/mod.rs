@@ -130,6 +130,7 @@ pub mod hash_init;
 pub mod hex_to_int;
 pub mod id_list_delete;
 pub mod mem;
+pub mod mprintf;
 pub mod mem_extern_release;
 pub mod mem_finalize;
 pub mod mem_release;
