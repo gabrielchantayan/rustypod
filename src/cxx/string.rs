@@ -71,6 +71,9 @@
 //! - `strstreambuf_input_available` — original: `FUN_083d7020` @
 //!   0x083d7020 (36 bytes, 1 direct `bl` call site). Returns the active
 //!   input area's end-minus-current cursor span.
+//! - `streambuf_sgetc` — original: `FUN_083da5a8` @ 0x083da5a8 (32 bytes,
+//!   5 direct unconditional `bl` call sites). Returns an unconsumed get-area
+//!   byte or calls virtual slot `+0x20` when the get area is exhausted.
 //! - `streambuf_sputc` — original: `FUN_083da5c8` @ 0x083da5c8 (76
 //!   bytes, 5 direct unconditional `bl` call sites). Stores one byte in an
 //!   active put area or calls virtual slot `+0x28` when full or inactive.
@@ -1250,27 +1253,42 @@ fn strstreambuf_input_available_honors_mode_and_cursors() {
     }
 }
 
+/// Target ABI for the stream buffer's virtual underflow callback.
+type StreambufUnderflow = unsafe extern "C" fn(*mut Streambuf) -> i32;
+
 /// Target ABI for the stream buffer's virtual overflow callback.
 type StreambufOverflow = unsafe extern "C" fn(*mut Streambuf, i32) -> i32;
 
-/// The only virtual-table slot reached by [`streambuf_sputc`].
+/// The virtual-table slots reached by [`streambuf_sgetc`] and
+/// [`streambuf_sputc`].
 #[repr(C)]
 struct StreambufVtable {
-    /// Slots `+0x00..+0x24` are not read by this helper.
-    opaque_before_overflow: [usize; 10],
+    /// Slots `+0x00..+0x1c` are not read by these helpers.
+    opaque_before_underflow: [usize; 8],
+    /// `+0x20`: virtual fallback for an exhausted get area.
+    underflow: StreambufUnderflow,
+    /// `+0x24` is not read by these helpers.
+    opaque_before_overflow: [usize; 1],
     /// `+0x28`: virtual fallback for a full or inactive put area.
     overflow: StreambufOverflow,
 }
 
-/// The stream-buffer fields reached by [`streambuf_sputc`].
+/// The stream-buffer fields reached by [`streambuf_sgetc`] and
+/// [`streambuf_sputc`].
 #[repr(C)]
 struct Streambuf {
     /// `+0x00`: virtual method table.
     vtable: *const StreambufVtable,
     /// `+0x04`: mode word; bit 0x8 enables the put area.
     mode: u32,
-    /// `+0x08..+0x20`: fields not read by this helper.
-    opaque_before_output: [u32; 7],
+    /// `+0x08..+0x14`: fields not read by these helpers.
+    opaque_before_input: [u32; 4],
+    /// `+0x18`: next byte in the get area.
+    input_current: *const u8,
+    /// `+0x1c`: exclusive get-area bound.
+    input_end: *const u8,
+    /// `+0x20`: field not read by these helpers.
+    opaque_before_output: [u32; 1],
     /// `+0x24`: next byte in the put area.
     output_current: *mut u8,
     /// `+0x28`: exclusive put-area bound.
@@ -1278,11 +1296,74 @@ struct Streambuf {
 }
 
 #[cfg(target_pointer_width = "32")]
+const _: [u8; 0x18] = [0; core::mem::offset_of!(Streambuf, input_current)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(Streambuf, input_end)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x24] = [0; core::mem::offset_of!(Streambuf, output_current)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x28] = [0; core::mem::offset_of!(Streambuf, output_end)];
 #[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(StreambufVtable, underflow)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x28] = [0; core::mem::offset_of!(StreambufVtable, overflow)];
+
+#[cfg(not(target_arch = "arm"))]
+pub(crate) type StreambufUnderflowHook = unsafe extern "C" fn(*mut u8) -> i32;
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn unavailable_streambuf_underflow(_streambuf: *mut u8) -> i32 {
+    -1
+}
+
+#[cfg(not(target_arch = "arm"))]
+pub(crate) static mut STREAMBUF_UNDERFLOW: StreambufUnderflowHook = unavailable_streambuf_underflow;
+
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+unsafe fn streambuf_underflow(streambuf: *mut Streambuf) -> i32 {
+    ((*(*streambuf).vtable).underflow)(streambuf)
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn streambuf_underflow(streambuf: *mut Streambuf) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(STREAMBUF_UNDERFLOW))(streambuf.cast())
+}
+
+/// `streambuf_sgetc` — original: `FUN_083da5a8` @ load address
+/// **0x083da5a8** (32 bytes).
+///
+/// Raw ARM fixes the exact extent at 0x083da5a8..0x083da5c4: the following
+/// `bx lr` at 0x083da5c4 terminates this helper, and the separately linked
+/// `streambuf_sputc` sibling begins at 0x083da5c8. Decoding every ARM
+/// B/BL-immediate word in `osos.dec` finds five inbound direct calls, all
+/// unconditional plain `bl` (zero predicated): 0x083d6524, 0x083d653c,
+/// 0x083d716c, 0x083d8264, and 0x083d82fc.
+///
+/// Returns the zero-extended byte at `input_current` when its unsigned address
+/// is below `input_end`; it does not advance the cursor. Otherwise it calls
+/// the stream-buffer vtable word at `+0x20` and returns that `i32` result.
+/// No ARM deviations. Non-ARM tests replace the target-width virtual callback
+/// with a hook because a 32-bit vtable word cannot hold a native host pointer.
+///
+/// # Safety
+///
+/// `streambuf` must point to a valid stream buffer. When `input_current` is
+/// below `input_end`, it must designate one readable byte. Otherwise its
+/// vtable and `+0x20` underflow slot must be valid.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn streambuf_sgetc(streambuf: *mut u8) -> i32 {
+    let streambuf = streambuf.cast::<Streambuf>();
+    let input_current = (*streambuf).input_current;
+
+    if (input_current as usize) < ((*streambuf).input_end as usize) {
+        return input_current.read() as i32;
+    }
+
+    streambuf_underflow(streambuf)
+}
 
 /// `streambuf_sputc` — original: `FUN_083da5c8` @ load address
 /// **0x083da5c8** (76 bytes).
@@ -1352,6 +1433,10 @@ mod streambuf_sputc_tests {
         }
     }
 
+    unsafe extern "C" fn unreachable_underflow(_streambuf: *mut Streambuf) -> i32 {
+        -1
+    }
+
     unsafe extern "C" fn record_overflow(streambuf: *mut Streambuf, character: i32) -> i32 {
         let mut record = OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner());
         record.calls += 1;
@@ -1364,7 +1449,10 @@ mod streambuf_sputc_tests {
         Streambuf {
             vtable,
             mode: 0,
-            opaque_before_output: [0; 7],
+            opaque_before_input: [0; 4],
+            input_current: core::ptr::null(),
+            input_end: core::ptr::null(),
+            opaque_before_output: [0; 1],
             output_current: core::ptr::null_mut(),
             output_end: core::ptr::null_mut(),
         }
@@ -1372,7 +1460,9 @@ mod streambuf_sputc_tests {
 
     fn vtable() -> StreambufVtable {
         StreambufVtable {
-            opaque_before_overflow: [0; 10],
+            opaque_before_underflow: [0; 8],
+            underflow: unreachable_underflow,
+            opaque_before_overflow: [0; 1],
             overflow: record_overflow,
         }
     }
@@ -1436,6 +1526,103 @@ mod streambuf_sputc_tests {
         assert_eq!(bytes, [0xa5, 0xa5]);
         assert_eq!(buffer.output_current, buffer.output_end);
         assert_eq!(OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()).calls, 1);
+    }
+}
+
+#[cfg(test)]
+pub(crate) static STREAMBUF_UNDERFLOW_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
+mod streambuf_sgetc_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::Mutex;
+
+    static UNDERFLOW: Mutex<UnderflowRecord> = Mutex::new(UnderflowRecord::new());
+
+    #[derive(Clone, Copy)]
+    struct UnderflowRecord {
+        calls: usize,
+        streambuf: usize,
+        result: i32,
+    }
+
+    impl UnderflowRecord {
+        const fn new() -> Self {
+            Self {
+                calls: 0,
+                streambuf: 0,
+                result: -1,
+            }
+        }
+    }
+
+    unsafe extern "C" fn record_underflow(streambuf: *mut u8) -> i32 {
+        let mut record = UNDERFLOW.lock().unwrap_or_else(|poison| poison.into_inner());
+        record.calls += 1;
+        record.streambuf = streambuf as usize;
+        record.result
+    }
+
+    struct UnderflowReset(StreambufUnderflowHook);
+
+    impl Drop for UnderflowReset {
+        fn drop(&mut self) {
+            unsafe { STREAMBUF_UNDERFLOW = self.0 };
+        }
+    }
+
+    fn install_underflow(result: i32) -> UnderflowReset {
+        *UNDERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()) = UnderflowRecord {
+            result,
+            ..UnderflowRecord::new()
+        };
+        let previous = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAMBUF_UNDERFLOW)) };
+        unsafe { STREAMBUF_UNDERFLOW = record_underflow };
+        UnderflowReset(previous)
+    }
+
+    fn streambuf(input_current: *const u8, input_end: *const u8) -> Streambuf {
+        Streambuf {
+            vtable: core::ptr::null(),
+            mode: 0,
+            opaque_before_input: [0; 4],
+            input_current,
+            input_end,
+            opaque_before_output: [0; 1],
+            output_current: core::ptr::null_mut(),
+            output_end: core::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn sgetc_returns_an_unconsumed_zero_extended_input_byte() {
+        let _guard = STREAMBUF_UNDERFLOW_TEST_LOCK.lock();
+        let _reset = install_underflow(-1);
+        let bytes = [0x4a, 0xff];
+        let mut buffer = streambuf(unsafe { bytes.as_ptr().add(1) }, unsafe { bytes.as_ptr().add(2) });
+
+        assert_eq!(unsafe { streambuf_sgetc((&mut buffer as *mut Streambuf).cast()) }, 0xff);
+        assert_eq!(buffer.input_current, unsafe { bytes.as_ptr().add(1) });
+        assert_eq!(UNDERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()).calls, 0);
+    }
+
+    #[test]
+    fn sgetc_dispatches_for_exhausted_or_inverted_get_areas() {
+        let _guard = STREAMBUF_UNDERFLOW_TEST_LOCK.lock();
+        let _reset = install_underflow(0x1234_5678);
+        let bytes = [0x4a, 0xff];
+        let mut buffer = streambuf(bytes.as_ptr(), bytes.as_ptr());
+
+        assert_eq!(unsafe { streambuf_sgetc((&mut buffer as *mut Streambuf).cast()) }, 0x1234_5678);
+        buffer.input_current = unsafe { bytes.as_ptr().add(2) };
+        buffer.input_end = unsafe { bytes.as_ptr().add(1) };
+        assert_eq!(unsafe { streambuf_sgetc((&mut buffer as *mut Streambuf).cast()) }, 0x1234_5678);
+
+        let record = *UNDERFLOW.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert_eq!(record.calls, 2);
+        assert_eq!(record.streambuf, &mut buffer as *mut Streambuf as usize);
     }
 }
 
