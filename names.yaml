@@ -48,6 +48,39 @@ functions:
       host test covers root, parent-left-slot, and parent-right-slot rotations,
       including the transferred middle subtree. Deliberate deviations: none.
   # --- C++ red-black-tree right rotation ---
+  - address: 0x083c4e68
+    ghidra: FUN_083c4e68
+    name: red_black_tree_rotate_right_nineteenth
+    size: 84
+    sig: "void red_black_tree_rotate_right_nineteenth(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_right_nineteenth
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08/r2: left_child
+      param_2_plus_0x0c: right_child
+      left_child: promoted_node
+      left_child_plus_0x0c/ip: middle_subtree
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#8] at 0x083c4e68 through bx lr at 0x083c4eb8; the separately
+      linked next function begins at 0x083c4ebc. The left child replaces the
+      pivot under its old parent (or header +0x04), its right subtree becomes the
+      pivot's left subtree, and the pivot becomes that child's right subtree.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls: unconditional bl at 0x083c5258, 0x083c52d0,
+      0x083c53c0, and 0x083c5828, plus predicated bleq at 0x083c5878; there are
+      no direct tail-B callers. The predicated caller selects the pivot's left
+      child before calling, consistent with this function's intentional lack of
+      NULL guards. A dedicated text section prevents LLVM from folding this
+      independently hookable target into another byte-identical rotation. The
+      dedicated host test covers root, parent-left, and parent-right rotations,
+      including the transferred middle subtree. Deliberate deviations: none;
+      target-width u32 link words preserve the 32-bit target layout on hosts.
+  # --- C++ red-black-tree right rotation ---
   - address: 0x083c5ab0
     ghidra: FUN_083c5ab0
     name: red_black_tree_rotate_right_c5ab0_copy
