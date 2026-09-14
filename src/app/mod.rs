@@ -112,6 +112,7 @@ pub mod input_delta_feedback_update;
 pub mod feedback_level_dispatch;
 pub mod input_action_index;
 pub mod managed_entry;
+pub mod managed_entry_selector;
 pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod opaque_record_source_get;

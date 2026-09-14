@@ -84742,3 +84742,46 @@ functions:
       repr(C) and target-only assertions preserve ARM offsets. Host tests prove
       the valid dispatch, receiver, ignored callback return, slot selection,
       NULL, and sentinel cases. Deliberate deviations: none.
+
+
+  # --- validated length-prefixed request dispatch ---
+  - address: 0x08048258
+    ghidra: FUN_08048258
+    name: validated_length_prefixed_request_dispatch
+    size: 112
+    sig: "i32 validated_length_prefixed_request_dispatch(LengthPrefixedRequestOwner **owner_slot, const u8 *input)"
+    module: app/managed_entry_selector
+    status: ported
+    renames:
+      param_1/r0: owner_slot
+      param_2/r1/r4: input
+      '*owner_slot/r5': request_owner
+      '[request_owner,#0x00]/r6': validation_context
+      '[validation_context,#0x1e]': length_limit
+      '[validation_context,#0x30]': prefix_flags
+      FUN_0804491c: length_prefix_validate
+      FUN_08042cbc: bcopy
+      FUN_08041038: unrecovered_request_dispatch
+      auStack_228: request_storage
+      return/r0: signed_status
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte body from push {r4,r5,r6,lr}
+      at 0x08048258 through pop {r4,r5,r6,pc} at 0x080482c4; the next
+      independently linked function begins at 0x080482c8. Decoding every
+      aligned immediate ARM B/BL word finds exactly six inbound direct calls,
+      all unconditional plain bl at 0x08048424, 0x08048458, 0x0805d7e0,
+      0x0805d91c, 0x0805d960, and 0x0805d974; there are no predicated BL
+      forms or direct B tail calls. Bit 1 at context +0x30 selects a byte or
+      little-endian u16 length prefix. Lengths through five are accepted;
+      larger lengths above the u16 context +0x1e limit return 0x030e without
+      copying or dispatching. Valid prefix-and-payload bytes are bcopy'd to
+      request storage +0x1c after word +0x04 is zeroed, then the unrecovered
+      0x08041038 callee receives the owner and request. Its result is
+      sign-extended from the low 16 bits. The callee identity is deliberately
+      not invented: no existing names.yaml entry owns it, so the target uses
+      its fixed-address read-volatile seam and host tests install a recorder.
+      Host coverage proves byte and wide prefix copies, initialized request
+      word, limit rejection before dispatch, and signed status propagation.
+      match.py structural review used this worktree archive; its default
+      sibling-repository archive lookup could not see this branch. Deliberate
+      deviations: host seam only.
