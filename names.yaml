@@ -31202,6 +31202,34 @@ functions:
       rowid read now writes the hi word at CellInfo+0x0c exactly like
       the original's callee.
 
+  # ---- Auto-vacuum pointer-map reader (src/sqlite/ptrmap_get.rs) ----
+  - address: 0x082e85d8
+    ghidra: FUN_082e85d8
+    name: ptrmap_get
+    size: 148
+    sig: "u32 ptrmap_get(const BtShared *bt, u32 pgno, u8 *out_type, u32 *out_parent_pgno)"
+    module: sqlite/ptrmap_get
+    status: ported
+    renames:
+      param_1: bt
+      param_2: pgno
+      param_3: out_type
+      param_4: out_parent_pgno
+    notes: >-
+      SQLite 3.5.x ptrmapGet: resolve the pointer-map page for pgno through
+      the ported leased resolver at 0x0837dc38, calculate its
+      (pgno - ptrmap_pageno(bt, pgno) - 1) * 5 entry, copy the type and
+      optional big-endian parent pgno, then release the page at 0x0837ee98.
+      Valid types 1 through 6 return 0; every other byte returns
+      SQLITE_CORRUPT (11), but only after outputs and release. Raw words
+      establish the 148-byte extent 0x082e85d8..0x082e866c: the next word
+      is the independent ptrmap_pageno prologue. Decoding every B/BL
+      immediate finds five genuine inbound calls, all plain unconditional
+      bl and no predicated forms: 0x082b33d4, 0x082bda6c, 0x082c27f8,
+      0x082d08d0, 0x082d4d30. Ghidra's reported extent is exact. Host
+      tests substitute the retailOS-owned inner resolver only; target code
+      calls the existing direct ports and preserves all ARM success,
+      resolver-failure, NULL-parent-output, and invalid-type behavior.
   # ---- Auto-vacuum pointer-map page locator (src/sqlite/ptrmap_pageno.rs) ----
   - address: 0x082e866c
     ghidra: FUN_082e866c
