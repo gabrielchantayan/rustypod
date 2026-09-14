@@ -42,6 +42,8 @@
 //! - `vdbe_resolve_label` — `FUN_0838cc04` @ 0x0838cc04 (24 bytes;
 //!   32 `bl`). `sqlite3VdbeResolveLabel`: bind a label to the current
 //!   address.
+//! - `vdbe_get_op` — `FUN_0838b064` @ 0x0838b064 (32 bytes; 5 `bl`).
+//!   `sqlite3VdbeGetOp`: return an emitted operation by address.
 //!
 //! ### Identification evidence
 //!
@@ -293,6 +295,32 @@ pub const P4_KEYINFO_HANDOFF: i32 = -9;
 /// never owned or freed (outside freeP4's -13..=0 table; upstream's
 /// P4_ADVANCE role).
 pub const P4_ADVANCE: i32 = -14;
+
+/// vdbe_get_op — original: `FUN_0838b064` @ 0x0838b064 (32 bytes; 5
+/// unconditional `bl` call sites, no predicated forms, verified by decoding
+/// every ARM B/BL word in `osos.dec`).
+///
+/// SQLite's `sqlite3VdbeGetOp`: for a non-negative address strictly below
+/// `p->nOp`, return `&p->aOp[addr]`; otherwise return NULL. The original
+/// deliberately has no `p` or `aOp` NULL guard after the range check:
+/// `p` is dereferenced when `addr >= 0`, and a NULL `aOp` is still advanced
+/// for a positive in-range address. `wrapping_add` preserves that raw ARM
+/// pointer arithmetic without dereferencing the computed pointer. No
+/// deviations.
+///
+/// # Safety
+/// For a non-negative `addr`, `p` must be readable as a [`Vdbe`]. The
+/// returned pointer may be dereferenced only when the caller has established
+/// that `p->a_op` names an allocated operation array.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_get_op(p: *mut Vdbe, addr: i32) -> *mut VdbeOp {
+    if addr < 0 || (*p).n_op <= addr {
+        core::ptr::null_mut()
+    } else {
+        (*p).a_op.wrapping_add(addr as usize)
+    }
+}
 
 /// vdbe_resize_op_array — original: `FUN_08367f88` @ 0x08367f88
 /// (48 bytes).
@@ -1315,4 +1343,38 @@ mod tests {
         assert_eq!(&arena[..10], b"collation\0");
         assert_eq!(slab[0].p4type, P4_DYNAMIC as i8);
     }
+    #[test]
+    fn get_op_returns_the_requested_emitted_record() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 3;
+
+        assert_eq!(unsafe { vdbe_get_op(stmt.ptr(), 0) }, slab.as_mut_ptr());
+        assert_eq!(
+            unsafe { vdbe_get_op(stmt.ptr(), 2) },
+            unsafe { slab.as_mut_ptr().add(2) },
+        );
+    }
+
+    #[test]
+    fn get_op_rejects_invalid_addresses_without_an_aop_guard() {
+        let _guard = quiet();
+        let mut slab = op_slab(2);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 2;
+
+        assert!(unsafe { vdbe_get_op(stmt.ptr(), -1) }.is_null());
+        assert!(unsafe { vdbe_get_op(stmt.ptr(), 2) }.is_null());
+        assert!(unsafe { vdbe_get_op(stmt.ptr(), i32::MAX) }.is_null());
+
+        stmt.vdbe.a_op = core::ptr::null_mut();
+        assert!(unsafe { vdbe_get_op(stmt.ptr(), 0) }.is_null());
+        assert_eq!(
+            unsafe { vdbe_get_op(stmt.ptr(), 1) } as usize,
+            core::mem::size_of::<VdbeOp>(),
+            "the original advances a NULL aOp for positive in-range addresses",
+        );
+    }
+
 }
