@@ -35683,6 +35683,36 @@ functions:
       controls whether it reaches this no-guard leaf; Rust preserves the
       leaf's unguarded two aligned loads.
 
+  - address: 0x083cf830
+    ghidra: FUN_083cf830
+    name: equal_deref_f830_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf830: equal_deref_f830_copy
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent from ldr r0,[r0] at
+      0x083cf830 through bx lr at 0x083cf844; the next separately linked
+      function, FUN_083cf848, begins at 0x083cf848. It aligned-loads both u32
+      operands, compares them, and returns normalized 1 only when they are
+      equal, otherwise 0, without a NULL guard. Decoding every ARM
+      B/BL-immediate word in osos.dec finds exactly five inbound direct calls,
+      all unconditional plain bl: 0x083c3794, 0x083c3c08, 0x083c3c24,
+      0x083c3ca8, and 0x083c3d6c. There are no predicated calls, direct B tail
+      branches, or aligned raw-word references. The raw body is byte-identical
+      to the established equal_deref export at 0x083cf968, so this ledger-only
+      alias deliberately adds no redundant dispatch seam; hook 0x083cf830 to
+      equal_deref. Its shared host test proves equal values at distinct
+      addresses, unequal values in both orders, zero, all-bits-set, and
+      iterator-shaped records whose trailing word is not read. Deliberate
+      deviation: none; the established export preserves the two unguarded
+      aligned loads.
+
+
   - address: 0x083cf848
     ghidra: FUN_083cf848
     name: iterator_equal

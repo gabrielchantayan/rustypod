@@ -1377,6 +1377,20 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// no predicated call or tail branch. It has no NULL guard; routing this
 /// byte-identical copy to the established export is the deliberate deviation,
 /// avoiding a redundant dispatch seam.
+/// `FUN_083cf830` @ 0x083cf830 is a separately linked 24-byte copy through
+/// `bx lr` at 0x083cf844; the next function, `FUN_083cf848`, begins
+/// immediately afterward. It performs two unguarded aligned `u32` loads and
+/// returns normalized 1 exactly when their values are equal. Decoding every
+/// ARM B/BL-immediate word in `osos.dec` finds exactly five inbound direct
+/// calls, all unconditional plain `bl`: 0x083c3794, 0x083c3c08, 0x083c3c24,
+/// 0x083c3ca8, and 0x083c3d6c. There are no predicated calls, direct tail
+/// branches, or aligned raw-word references. Its byte-identical body
+/// deliberately reuses this established export rather than introducing a
+/// redundant dispatch seam; hook 0x083cf830 to [`equal_deref`]. The shared
+/// host test covers equal values at distinct addresses, unequal values in both
+/// orders, zero, all-bits-set, and iterator-shaped records whose trailing word
+/// is not read. Deliberate deviations: none.
+///
 /// `FUN_083cf860` is a separately linked 24-byte copy through `bx lr` at
 /// 0x083cf874; the next equal_deref copy begins at 0x083cf878. It performs two
 /// unguarded aligned u32 loads and returns normalized 1 exactly when the values
@@ -4697,7 +4711,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
