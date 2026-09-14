@@ -84961,3 +84961,42 @@ functions:
       existing port or identity is established; tests cover invalid states,
       no-flush append, and three consecutive page handoffs with observed
       ordering and state.
+
+  # --- zeroing buffer logical-length update ---
+  - address: 0x08042060
+    ghidra: FUN_08042060
+    name: zeroing_buffer_set_len
+    size: 180
+    sig: "i32 zeroing_buffer_set_len(ZeroingBuffer *buffer, i32 requested)"
+    module: heap/zeroing_buffer
+    status: ported
+    renames:
+      param_1/r0/r5: buffer
+      param_2/r1/r4: requested
+      '[buffer,#0x00]/r1': current_len
+      '[buffer,#0x04]/r0': data
+      '[buffer,#0x08]/r0': capacity
+      r6: allocation_size
+      FUN_08031568: __rt_sdiv
+      FUN_08043c18: traced_alloc
+      FUN_08043f3c: traced_realloc
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+      FUN_08049a84: diag_ring_record
+      return/r0: requested_or_zero
+    notes: >-
+      Raw ARM establishes the exact 180-byte extent from push {r3,r4-r7,lr}
+      at 0x08042060 through pop {r3,r4-r7,pc} at 0x08042110; the separately
+      linked successor begins at 0x08042114. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly six inbound direct calls, all unconditional
+      plain bl at 0x0806f634, 0x0806f7ec, 0x0807be78, 0x0809d540,
+      0x0809d654, and 0x080efd30, with no predicated forms or direct tail
+      branches. The function updates logical length (+0x00). On growth it
+      expands payload capacity (+0x08) through ported traced_alloc or
+      traced_realloc, rounding with `4 * trunc((requested + 3) / 3)` under
+      signed wrapping arithmetic, then zeroes exactly data+old_len through
+      data+requested using the ported IRAM memzero veneer. A failed allocation
+      records diagnostic (7,100,0x41,0,0) and leaves every record word intact.
+      Shrinking merely stores the requested logical length and preserves bytes
+      above it. No deliberate Rust deviations; host tests cover preserving a
+      shrink, reallocation and zeroing of the growth delta, and allocation
+      failure preservation plus the diagnostic.

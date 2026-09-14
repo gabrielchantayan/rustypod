@@ -123,6 +123,63 @@ pub unsafe extern "C" fn zeroing_buffer_resize(buffer: *mut ZeroingBuffer, reque
     requested
 }
 
+/// zeroing_buffer_set_len — original: `FUN_08042060` @ `0x08042060`
+/// (180 bytes exactly, `0x08042060..0x08042114`; the independently linked
+/// successor starts with `push {r3-r9,lr}` at `0x08042114`).
+///
+/// Decoding every ARM `B`/`BL` immediate in `osos.dec` finds exactly six
+/// direct inbound calls, all unconditional plain `bl`: `0x0806f634`,
+/// `0x0806f7ec`, `0x0807be78`, `0x0809d540`, `0x0809d654`, and `0x080efd30`.
+/// There are no predicated calls or direct tail branches.
+///
+/// Sets the logical length. Growth zeroes only the newly exposed range and,
+/// when needed, grows capacity through `traced_alloc` or `traced_realloc` to
+/// `4 * trunc((requested + 3) / 3)` bytes using the retail signed wrapping
+/// arithmetic. Shrinking only changes the logical length: unlike
+/// [`zeroing_buffer_resize`], it preserves the discarded bytes. Allocation
+/// failure records `(7, 100, 0x41, 0, 0)` and leaves the record unchanged.
+///
+/// No deliberate deviations: allocation, diagnostics, and the IRAM memzero
+/// veneer are already ported direct callees.
+///
+/// # Safety
+///
+/// `buffer` must point to writable [`ZeroingBuffer`] storage. On successful
+/// growth, its payload must be valid for every newly exposed byte; the retail
+/// function performs no NULL or range checks before clearing.
+#[cfg_attr(target_os = "none", link_section = ".text.zeroing_buffer_set_len")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn zeroing_buffer_set_len(buffer: *mut ZeroingBuffer, requested: i32) -> i32 {
+    let current = core::ptr::addr_of!((*buffer).state).read_volatile() as i32;
+    if current < requested {
+        let mut data = core::ptr::addr_of!((*buffer).data).read_volatile();
+        let capacity = core::ptr::addr_of!((*buffer).byte_len).read_volatile() as i32;
+        if capacity < requested {
+            let allocation_size = __rt_sdiv(requested.wrapping_add(3), 3).wrapping_shl(2);
+            let replacement = if data.is_null() {
+                traced_alloc(allocation_size, 0, 0)
+            } else {
+                traced_realloc(data, allocation_size, 0, 0)
+            };
+            if replacement.is_null() {
+                diag_ring_record(7, 100, 0x41, 0, 0);
+                return 0;
+            }
+            core::ptr::addr_of_mut!((*buffer).data).write_volatile(replacement);
+            core::ptr::addr_of_mut!((*buffer).byte_len).write_volatile(allocation_size as u32);
+            data = replacement;
+        }
+        iram_memzero_veneer(
+            data.wrapping_offset(current as isize),
+            requested.wrapping_sub(current) as u32 as usize,
+        );
+    }
+
+    core::ptr::addr_of_mut!((*buffer).state).write_volatile(requested as u32);
+    requested
+}
+
 
 /// zeroing_buffer_destroy — original: `FUN_0804202c` @ `0x0804202c`
 /// (52 bytes exactly, `0x0804202c..0x08042060`; the independently linked
@@ -555,6 +612,55 @@ mod resize_tests {
         let mut buffer = ZeroingBuffer { state: 0, data: core::ptr::null_mut(), byte_len: 0 };
 
         assert_eq!(unsafe { zeroing_buffer_resize(&mut buffer, 1) }, 0);
+        assert_eq!(unsafe { ALLOC_REQUEST }, Some((4, 0, 0)));
+        assert!(unsafe { REALLOC_REQUEST }.is_none());
+        assert!(buffer.data.is_null());
+        assert_eq!(buffer.state, 0);
+        assert_eq!(buffer.byte_len, 0);
+        assert_eq!(fixture.ring.head, 1);
+        assert_eq!(fixture.ring.tags[1], 0x0706_4041);
+        assert_eq!(fixture.ring.data0[1], 0);
+        assert_eq!(fixture.ring.data1[1], 0);
+    }
+    #[test]
+    fn set_len_shrink_preserves_discarded_payload() {
+        let mut data = [0xa5, 0xb6, 0xc7, 0xd8, 0xe9, 0xfa];
+        let _fixture = ResizeFixture::new(core::ptr::null_mut(), core::ptr::null_mut());
+        let mut buffer = ZeroingBuffer { state: 5, data: data.as_mut_ptr(), byte_len: 6 };
+
+        assert_eq!(unsafe { zeroing_buffer_set_len(&mut buffer, 2) }, 2);
+        assert_eq!(data, [0xa5, 0xb6, 0xc7, 0xd8, 0xe9, 0xfa]);
+        assert_eq!(buffer.state, 2);
+        assert_eq!(buffer.byte_len, 6);
+        assert!(unsafe { ALLOC_REQUEST }.is_none());
+        assert!(unsafe { REALLOC_REQUEST }.is_none());
+    }
+
+    #[test]
+    fn set_len_growth_reallocates_and_clears_only_new_range() {
+        let mut old_data = [0x11; 4];
+        let mut replacement = [0x5a; 12];
+        let _fixture = ResizeFixture::new(core::ptr::null_mut(), replacement.as_mut_ptr());
+        let mut buffer = ZeroingBuffer { state: 2, data: old_data.as_mut_ptr(), byte_len: 4 };
+
+        assert_eq!(unsafe { zeroing_buffer_set_len(&mut buffer, 7) }, 7);
+        assert_eq!(
+            unsafe { REALLOC_REQUEST },
+            Some((old_data.as_mut_ptr(), 12, 0, 0)),
+        );
+        assert!(unsafe { ALLOC_REQUEST }.is_none());
+        assert_eq!(buffer.data, replacement.as_mut_ptr());
+        assert_eq!(buffer.state, 7);
+        assert_eq!(buffer.byte_len, 12);
+        assert_eq!(&replacement[..8], &[0x5a, 0x5a, 0, 0, 0, 0, 0, 0x5a]);
+    }
+
+    #[test]
+    fn set_len_failed_allocation_preserves_record_and_reports_diagnostic() {
+        let fixture = ResizeFixture::new(core::ptr::null_mut(), core::ptr::null_mut());
+        let mut buffer = ZeroingBuffer { state: 0, data: core::ptr::null_mut(), byte_len: 0 };
+
+        assert_eq!(unsafe { zeroing_buffer_set_len(&mut buffer, 1) }, 0);
         assert_eq!(unsafe { ALLOC_REQUEST }, Some((4, 0, 0)));
         assert!(unsafe { REALLOC_REQUEST }.is_none());
         assert!(buffer.data.is_null());
