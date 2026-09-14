@@ -33704,6 +33704,32 @@ functions:
       (cur/base NULL, end 0x80) with wrapping_add, and loads the existing
       deque_seg_capacity export through read_volatile so LLVM retains the
       stock capacity-call boundary rather than folding its constant result.
+  - address: 0x083da5c8
+    ghidra: FUN_083da5c8
+    name: streambuf_sputc
+    size: 76
+    sig: "i32 streambuf_sputc(Streambuf *streambuf, u32 character)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: streambuf, param_2: character, puVar1: output_current}
+    renames:
+      FUN_083da5c8: streambuf_sputc
+      param_1: streambuf
+      param_2: character
+      puVar1: output_current
+    notes: >-
+      Raw ARM establishes the exact 76-byte body 0x083da5c8..0x083da610:
+      `push {r0,r1,r4,lr}` opens at the entry, `pop {r2,r3,r4,pc}` ends at
+      0x083da610, and a separately linked sibling begins at 0x083da614.
+      Decoding every ARM B/BL-immediate word in osos.dec finds five inbound
+      calls, all plain unconditional bl (0x083d83b8, 0x083d91d4,
+      0x083d9530, 0x083da748, and 0x083dacac), with zero predicated forms.
+      If streambuf mode bit 0x8 is clear, or output_current (+0x24) equals
+      output_end (+0x28), the helper calls the vtable word at +0x28 and
+      returns that i32 result. Otherwise it increments output_current,
+      stores the low byte of character, and returns character zero-extended.
+      The virtual target identity is not assumed; only its verified receiver,
+      byte argument, and i32 result are modeled. No deviations.
   - address: 0x083d9fd4
     ghidra: FUN_083d9fd4
     name: deque_iter_assign_alias_9fd4

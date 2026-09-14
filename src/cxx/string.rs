@@ -71,6 +71,9 @@
 //! - `strstreambuf_input_available` — original: `FUN_083d7020` @
 //!   0x083d7020 (36 bytes, 1 direct `bl` call site). Returns the active
 //!   input area's end-minus-current cursor span.
+//! - `streambuf_sputc` — original: `FUN_083da5c8` @ 0x083da5c8 (76
+//!   bytes, 5 direct unconditional `bl` call sites). Stores one byte in an
+//!   active put area or calls virtual slot `+0x28` when full or inactive.
 //!
 //! `refcount == -1` carries two meanings, and both are the same
 //! `adds r, r, #1; beq` test: to the destructor it means "no owners
@@ -1244,6 +1247,195 @@ fn strstreambuf_input_available_honors_mode_and_cursors() {
             expected,
             "mode {mode:#x}, cursor {input_cursor:#x}, end {input_end:#x}"
         );
+    }
+}
+
+/// Target ABI for the stream buffer's virtual overflow callback.
+type StreambufOverflow = unsafe extern "C" fn(*mut Streambuf, i32) -> i32;
+
+/// The only virtual-table slot reached by [`streambuf_sputc`].
+#[repr(C)]
+struct StreambufVtable {
+    /// Slots `+0x00..+0x24` are not read by this helper.
+    opaque_before_overflow: [usize; 10],
+    /// `+0x28`: virtual fallback for a full or inactive put area.
+    overflow: StreambufOverflow,
+}
+
+/// The stream-buffer fields reached by [`streambuf_sputc`].
+#[repr(C)]
+struct Streambuf {
+    /// `+0x00`: virtual method table.
+    vtable: *const StreambufVtable,
+    /// `+0x04`: mode word; bit 0x8 enables the put area.
+    mode: u32,
+    /// `+0x08..+0x20`: fields not read by this helper.
+    opaque_before_output: [u32; 7],
+    /// `+0x24`: next byte in the put area.
+    output_current: *mut u8,
+    /// `+0x28`: exclusive put-area bound.
+    output_end: *mut u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x24] = [0; core::mem::offset_of!(Streambuf, output_current)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x28] = [0; core::mem::offset_of!(Streambuf, output_end)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x28] = [0; core::mem::offset_of!(StreambufVtable, overflow)];
+
+/// `streambuf_sputc` — original: `FUN_083da5c8` @ load address
+/// **0x083da5c8** (76 bytes).
+///
+/// Raw ARM establishes the exact extent 0x083da5c8..0x083da610: the `pop
+/// {r2,r3,r4,pc}` at the latter address is followed by the separately linked
+/// sibling at 0x083da614. Decoding every ARM B/BL-immediate word in
+/// `osos.dec` finds five inbound direct calls, all unconditional plain `bl`
+/// (zero predicated): 0x083d83b8, 0x083d91d4, 0x083d9530, 0x083da748, and
+/// 0x083dacac.
+///
+/// If output mode bit 0x8 is set and `output_current != output_end`, stores
+/// `character` at the current cursor, advances that cursor by one, and
+/// returns the zero-extended byte. Otherwise it dispatches through the
+/// stream-buffer vtable word at `+0x28` and returns the virtual result. No
+/// deviations.
+///
+/// # Safety
+///
+/// `streambuf` must point to a valid stream buffer. When its output mode is
+/// active and its cursors differ, `output_current` must designate one writable
+/// byte and its successor must be representable. Otherwise its vtable and
+/// `+0x28` overflow slot must be valid.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn streambuf_sputc(streambuf: *mut u8, character: u32) -> i32 {
+    const OUTPUT_ACTIVE: u32 = 0x08;
+
+    let character = (character & 0xff) as i32;
+    let streambuf = streambuf.cast::<Streambuf>();
+    if (*streambuf).mode & OUTPUT_ACTIVE != 0
+        && (*streambuf).output_current != (*streambuf).output_end
+    {
+        let output_current = (*streambuf).output_current;
+        (*streambuf).output_current = output_current.add(1);
+        output_current.write(character as u8);
+        return character;
+    }
+
+    ((*(*streambuf).vtable).overflow)(streambuf, character)
+}
+
+#[cfg(test)]
+mod streambuf_sputc_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static OVERFLOW: Mutex<OverflowRecord> = Mutex::new(OverflowRecord::new());
+
+    #[derive(Clone, Copy)]
+    struct OverflowRecord {
+        calls: usize,
+        streambuf: usize,
+        character: i32,
+    }
+
+    impl OverflowRecord {
+        const fn new() -> Self {
+            Self {
+                calls: 0,
+                streambuf: 0,
+                character: 0,
+            }
+        }
+    }
+
+    unsafe extern "C" fn record_overflow(streambuf: *mut Streambuf, character: i32) -> i32 {
+        let mut record = OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner());
+        record.calls += 1;
+        record.streambuf = streambuf as usize;
+        record.character = character;
+        -1
+    }
+
+    fn streambuf(vtable: *const StreambufVtable) -> Streambuf {
+        Streambuf {
+            vtable,
+            mode: 0,
+            opaque_before_output: [0; 7],
+            output_current: core::ptr::null_mut(),
+            output_end: core::ptr::null_mut(),
+        }
+    }
+
+    fn vtable() -> StreambufVtable {
+        StreambufVtable {
+            opaque_before_overflow: [0; 10],
+            overflow: record_overflow,
+        }
+    }
+
+    fn reset_overflow() {
+        *OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()) = OverflowRecord::new();
+    }
+
+    #[test]
+    fn sputc_writes_and_advances_an_active_put_area() {
+        let _guard = TEST_LOCK.lock();
+        reset_overflow();
+        let vtable = vtable();
+        let mut bytes = [0xa5, 0xa5, 0xa5];
+        let mut buffer = streambuf(&vtable);
+        buffer.mode = 0x08;
+        buffer.output_current = unsafe { bytes.as_mut_ptr().add(1) };
+        buffer.output_end = unsafe { bytes.as_mut_ptr().add(3) };
+
+        assert_eq!(
+            unsafe { streambuf_sputc((&mut buffer as *mut Streambuf).cast(), 0xffff_00fe) },
+            0xfe
+        );
+        assert_eq!(bytes, [0xa5, 0xfe, 0xa5]);
+        assert_eq!(buffer.output_current, unsafe { bytes.as_mut_ptr().add(2) });
+        assert_eq!(OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()).calls, 0);
+    }
+
+    #[test]
+    fn sputc_dispatches_when_the_put_area_is_inactive() {
+        let _guard = TEST_LOCK.lock();
+        reset_overflow();
+        let vtable = vtable();
+        let mut buffer = streambuf(&vtable);
+
+        assert_eq!(
+            unsafe { streambuf_sputc((&mut buffer as *mut Streambuf).cast(), 0xffff_0081) },
+            -1
+        );
+        let record = *OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert_eq!(record.calls, 1);
+        assert_eq!(record.streambuf, &mut buffer as *mut Streambuf as usize);
+        assert_eq!(record.character, 0x81);
+    }
+
+    #[test]
+    fn sputc_dispatches_without_writing_when_the_put_area_is_full() {
+        let _guard = TEST_LOCK.lock();
+        reset_overflow();
+        let vtable = vtable();
+        let mut bytes = [0xa5, 0xa5];
+        let mut buffer = streambuf(&vtable);
+        buffer.mode = 0x08;
+        buffer.output_current = unsafe { bytes.as_mut_ptr().add(2) };
+        buffer.output_end = unsafe { bytes.as_mut_ptr().add(2) };
+
+        assert_eq!(
+            unsafe { streambuf_sputc((&mut buffer as *mut Streambuf).cast(), 0xffff_007f) },
+            -1
+        );
+        assert_eq!(bytes, [0xa5, 0xa5]);
+        assert_eq!(buffer.output_current, buffer.output_end);
+        assert_eq!(OVERFLOW.lock().unwrap_or_else(|poison| poison.into_inner()).calls, 1);
     }
 }
 
