@@ -86935,6 +86935,40 @@ functions:
       u32 link words preserve the target-width layout, and host tests cover
       root replacement, the transferred middle subtree, and both parent-child
       slots.
+  # --- virtual +0x3c low-16-bit result wrapper ---
+  - address: 0x083d611c
+    ghidra: FUN_083d611c
+    name: vtable_slot_3c_result_u16
+    size: 28
+    sig: "u32 vtable_slot_3c_result_u16(void *receiver, u32 index, u32 discarded_r2, u32 initial_result)"
+    module: cxx/vtable_slot_3c_result_u16
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: index
+      param_3/r2: discarded_r2
+      param_4/r3: initial_result
+      local_8/sp: result_word
+      param_1_deref: vtable
+      vtable_plus_0x3c/r3: virtual_method
+      return/r0: result_low_u16
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: seven ARM instructions
+      from push {r3,lr} at 0x083d611c through pop {ip,pc} at 0x083d6134; the
+      independently linked next function begins at 0x083d6138. Decoding every
+      aligned immediate ARM B/BL word finds exactly five inbound direct calls,
+      all unconditional plain bl at 0x0813edac, 0x0813edd8, 0x081d16b4,
+      0x081deb08, and 0x081deb34; there are no predicated call forms or direct
+      tail branches. The wrapper saves incoming r3 in a stack result cell,
+      replaces r2 with that cell, invokes receiver vtable word 15 (+0x3c) as
+      method(receiver, index, result_word), then returns result_word's low 16
+      bits. Incoming r2 is discarded. The concrete virtual method identity is
+      unrecovered and deliberately not invented. Target vtable words are 32-bit
+      while host callback pointers are native-width, so the Rust port uses a
+      host-sized typed vtable; this is the only deliberate deviation. Host tests
+      prove receiver/index forwarding, seeded-cell visibility and mutation,
+      low-16-bit truncation, discarded r2, and exact slot selection.
+
   # --- guarded virtual +0x40 dispatch ---
   - address: 0x083d6138
     ghidra: FUN_083d6138
