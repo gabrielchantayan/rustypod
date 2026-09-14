@@ -83925,3 +83925,35 @@ functions:
       Host tests cover byte order, every valid alignment, values with high
       bits set, and surrounding-byte preservation. Deliberate deviations:
       none. match.py review is structural, not instruction-exact.
+
+  # --- Runtime-global callback dispatch ---
+  - address: 0x080b1a28
+    ghidra: FUN_080b1a28
+    name: global_slot_4_callback_dispatch
+    size: 48
+    sig: "u32 global_slot_4_callback_dispatch(u32 event_code)"
+    module: app/global_slot_4_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r2: event_code
+      DAT_080b1a58: global_slot_4_callback_target
+      global_target_plus_0x04: callback
+      callback_return/r0: discarded
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte instruction body from
+      0x080b1a28 through pop {r4,pc} at 0x080b1a54; its one-word literal pool
+      at 0x080b1a58 names the runtime global 0x089ca95c, and the separately
+      linked next function begins at 0x080b1a5c. The global is NULL-checked:
+      NULL returns 0x11 without loading a callback. A non-NULL global supplies
+      a callback word at +0x04, called with the original event code; its return
+      is discarded and this wrapper returns zero. Decoding every aligned ARM
+      B/BL immediate in osos.dec finds exactly six inbound direct calls, all
+      unconditional plain bl at 0x081f4994, 0x08369adc, 0x08369b34,
+      0x08369b3c, 0x08369b58, and 0x08369b94; there are no predicated forms,
+      direct B tail transfers, or aligned data words referring to this entry.
+      Recovered callers use event codes 1, 3, and 4, but neither the runtime
+      target nor callback identity is recoverable and neither is invented.
+      Deliberate deviation: host builds use a native-width global and typed
+      callback field instead of fixed 32-bit firmware words so host fixtures
+      can hold pointers above 4 GiB. Host tests cover the NULL status and
+      forwarding of zero, observed codes, and u32::MAX.

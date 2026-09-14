@@ -82,6 +82,7 @@ pub mod fixed_value;
 pub mod global_flag_table;
 pub mod global_identifier_slot;
 pub mod global_slot_4_get;
+pub mod global_slot_4_callback_dispatch;
 pub mod global_slot_5c_dispatch;
 pub mod global_observer_unregister;
 pub mod genius_request_wait_ready;
