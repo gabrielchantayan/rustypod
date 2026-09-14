@@ -33589,6 +33589,43 @@ functions:
       builds use a private recording seam solely to exercise that unported
       zero path. Tests cover the zero delegation, all signed/unsigned
       refcount boundaries, and activity-count wraparound.
+  - address: 0x0837ebf8
+    ghidra: FUN_0837ebf8
+    name: pager_set_page_size
+    size: 144
+    sig: "u32 pager_set_page_size(Pager *pager, u16 *page_size)"
+    module: sqlite/pager_set_page_size
+    status: ported
+    vars: {param_1/r4: pager, param_2/r7: page_size, r5: requested_page_size,
+      r6: replacement_temporary_space, r8: status}
+    renames:
+      "*(u32*)(pager+0x40)": pager->pageSize
+      "*(u8*)(pager+0x14)": pager->memDb
+      "*(u32*)(pager+0x48)": pager->dbSize
+      "*(u32*)(pager+0xe0)": pager->nRef, activity lease count
+      "*(u32*)(pager+0xe4)": pager->pTmpSpace
+      FUN_082dd3d8: context_activity_enter
+      FUN_082de404: pager_reset
+      FUN_08369040: pager_set_sector_size
+      FUN_083906f4: tracked_free
+      FUN_08390b14: sqlite3_malloc
+    notes: >-
+      SQLite 3.5.x sqlite3PagerSetPagesize. Raw ARM fixes the exact extent at
+      0x0837ebf8..0x0837ec88: 36 instructions ending in pop
+      {r4,r5,r6,r7,r8,pc}; the next separately linked function begins at
+      0x0837ec88. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      five inbound direct call sites, all unconditional plain bl
+      (0x082d8438, 0x08365b3c, 0x083725f4, 0x0837268c, 0x08372d68), with no
+      predicated or tail-b callers. A zero requested page size queries the
+      installed value. A changed nonzero value only proceeds when memDb is
+      clear and dbSize is zero: sqlite3_malloc first, SQLITE_NOMEM (7) on
+      failure, otherwise context_activity_enter, pager_reset, the pageSize
+      store, pager_set_sector_size, tracked_free(pTmpSpace), pTmpSpace
+      replacement, and an inline nRef decrement. The existing ported helpers
+      are called directly. pager_reset (0x082de404) and pager_set_sector_size
+      (0x08369040) remain retailOS-owned; target builds call their load
+      addresses and host tests use a private recording boundary only to prove
+      the old-page-size reset, new-page-size sector setup, and lease balance.
   - address: 0x0837ee98
     ghidra: FUN_0837ee98
     name: release_object
