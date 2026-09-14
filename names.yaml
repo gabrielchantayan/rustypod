@@ -30680,6 +30680,33 @@ functions:
       the flag still set (the original's assert(wantToLock>0) is
       compiled out).
 
+  - address: 0x08371dc8
+    ghidra: FUN_08371dc8
+    name: btree_leave_all
+    size: 80
+    sig: "void btree_leave_all(sqlite3 *db)"
+    module: sqlite/btree_lock
+    status: ported
+    renames:
+      param_1/r0: database
+      iVar2/r2: index
+      iVar1/r1: btree
+      uVar3/r3: record_offset_or_sharable
+      iVar4/r3: remaining
+    notes: >-
+      Extent verified from raw osos.dec: the first mov r2,#0 is at
+      0x08371dc8, bx lr is at 0x08371e14, and the next separately linked
+      function begins at 0x08371e18, so the body is 80 bytes. Decoding every
+      ARM B/BL word in osos.dec finds exactly five direct call sites, all
+      unconditional plain bl (0x082b54dc, 0x0837d34c, 0x083820f8,
+      0x0838f2d8, 0x0838f3fc); no predicated or tail branches target it.
+      This is SQLite's sqlite3BtreeLeaveAll: it walks signed sqlite3.nDb and
+      24-byte Db records, skips null or non-sharable pBt handles, and inlines
+      sqlite3BtreeLeave's wrapping decrement. It clears Btree.locked only
+      when the new wantToLock value is exactly zero. Deliberate host-only
+      adaptation: target-width aDb and pBt fields remain u32 words, with
+      tests mapping their sqlite3/Db/Btree fixture below 4 GiB.
+
   # ---- B-tree metadata reader (src/sqlite/btree_get_meta.rs) ----
   - address: 0x08371380
     ghidra: FUN_08371380
