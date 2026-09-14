@@ -58,6 +58,31 @@ pub unsafe extern "C" fn gateway_service1_request(input0: u32, input1: u32) -> u
     core::ptr::addr_of!((*frame_ptr).output).read()
 }
 
+/// gateway_service1_request_entry — original: `thunk_EXT_FUN_220043c0` @
+/// `0x08037ea0` (8-byte literal veneer; 6 unconditional `bl` call sites).
+///
+/// Raw words prove the full veneer is `ldr pc, [pc, #-4]` (`e51ff004`) at
+/// `0x08037ea0`, followed by its target literal `0x220043c0` at
+/// `0x08037ea4`; Ghidra's four-byte extent omits that literal. The boot
+/// relocator mirrors `0x080043c0` to the target address, where the 52-byte
+/// [`gateway_service1_request`] body builds the service-1 request and returns
+/// its post-dispatch status word. Decoding every aligned ARM B/BL word in
+/// `osos.dec` finds exactly six direct callers, all unconditional `bl`:
+/// `0x08056930`, `0x08056968`, `0x08086134`, `0x0836ba04`, `0x0836bc34`, and
+/// `0x08393494`; no predicated call or plain branch targets this veneer.
+///
+/// Deliberate deviation: Rust cannot express the literal load-to-pc form; the
+/// compiled entry instead tail-branches through a relocation to the existing
+/// mirror-body port after an ABI frame prologue/epilogue. Its distinct
+/// target-only section prevents identical-code folding from erasing this
+/// separately linked call target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.gateway_service1_request_entry")]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_service1_request_entry(input0: u32, input1: u32) -> u32 {
+    gateway_service1_request(input0, input1)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -117,6 +142,19 @@ mod tests {
             );
             assert_eq!(addr_of!(RECORDED_SCRATCH_OFFSET).read(), 32);
             assert_eq!(output, 0x89ab_cdef, "return reads the post-dispatch output word");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn veneer_entry_forwards_zero_and_maximum_inputs_to_service1() {
+        let guard = install_recorder();
+        unsafe {
+            let output = gateway_service1_request_entry(0, u32::MAX);
+            assert_eq!(addr_of!(CALLS).read(), 1, "veneer invokes its mirror exactly once");
+            let request = addr_of!(RECORDED_REQUEST).read();
+            assert_eq!(&request[..4], &[1, 0, 0, u32::MAX]);
+            assert_eq!(output, 0x89ab_cdef, "veneer returns the mirror status word");
         }
         restore(guard);
     }
