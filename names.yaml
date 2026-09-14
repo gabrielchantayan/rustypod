@@ -30646,6 +30646,38 @@ functions:
       match.py (--size 108, worktree archive): the same get-temp/add-op2/
       add-op3/release call sequence and schema `+1`; expected differences
       are LLVM's frame, register scheduling, and relocation placeholders.
+  # ---- B-tree cursor wrapper (src/sqlite/btree_cursor.rs) ----
+  - address: 0x08370db4
+    ghidra: FUN_08370db4
+    name: btree_cursor
+    size: 72
+    sig: "int btree_cursor(Btree *btree, i64 table, int write, KeyInfo *key_info, BtCursor *cursor)"
+    module: sqlite/btree_cursor
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1-r2: table
+      param_3/r3: write
+      param_4/stack: key_info
+      param_5/stack: cursor
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeCursor. Raw ARM establishes the exact
+      72-byte extent 0x08370db4..0x08370df8; the separately linked sibling
+      begins at 0x08370dfc. Decoding every ARM B/BL word in osos.dec finds
+      five direct call sites, all unconditional plain bl (0x08368704,
+      0x0837b6f0, 0x08388c88, 0x08388f08, and 0x08388f5c), with no
+      predicated forms. It enters the B-tree, assigns pBt->db = p->db,
+      calls static btreeCursor at the still-unported 0x082bdba0 with the
+      signed 64-bit table number and cursor arguments, then leaves on every
+      status path. Target builds call the existing btree_enter/btree_leave
+      ports directly and the unported static function at its absolute address.
+      Deliberate host-only deviation: a private dispatch table models all
+      three boundaries because widened host Btree pointers cannot compose with
+      the lock helper ports' target byte-offset layout. Tests prove argument
+      forwarding, the shared db refresh, result propagation, and leave-after-
+      error ordering. match.py reports the expected LLVM frame/register and
+      absolute-call relocation differences while retaining enter/open/leave.
+
   # ---- B-tree lock counter (src/sqlite/btree_lock.rs) ----
   - address: 0x0837118c
     ghidra: FUN_0837118c
