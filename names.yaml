@@ -34206,6 +34206,32 @@ functions:
       in a distinct link section so LLVM retains a separately hookable
       symbol despite its byte-identical body.
 
+  - address: 0x083d5f2c
+    ghidra: FUN_083d5f2c
+    name: container_element_at_alias_5f2c
+    size: 24
+    sig: "void *container_element_at_alias_5f2c(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      r2: vtable_slot_40
+      r0_after_blx: element_slot
+    notes: >-
+      Byte-identical instantiation of container_element_at @ 0x083d5efc.
+      Raw osos.dec establishes the 24-byte extent from push {r4,lr} at
+      0x083d5f2c through pop {r4,pc} at 0x083d5f40; the independently linked
+      sibling begins at 0x083d5f44. It implements T *operator[](size_t): read
+      this->vtable[16] (+0x40), call it with this and the r1 index, then load
+      the returned element slot. Ghidra drops r1, but raw blx preserves it.
+      A full ARM B/BL decode finds five direct call sites, all unconditional
+      bl at 0x082845e0, 0x082846f4, 0x08284780, 0x08284828, and 0x0839c164;
+      there are no predicated bl forms. One unconditional b tail branch at
+      0x082a6788 also enters this copy. No NULL guards exist for the virtual
+      result or element slot. The dedicated link section keeps this separately
+      hookable byte-identical body from folding; otherwise no deviations.
+
   - address: 0x083d5f44
     ghidra: FUN_083d5f44
     name: container_element_at_alias_5f44
