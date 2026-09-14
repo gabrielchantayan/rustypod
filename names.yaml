@@ -43042,6 +43042,35 @@ functions:
       returned storage, vtable replacement, cleared +0x04/+0x08, and
       preservation of every child/derived word.
 
+  # --- Silver UI framework: task current-target setter ---
+
+  - address: 0x08110ca8
+    ghidra: FUN_08110ca8
+    name: framework_base_set_current_task_target
+    size: 20
+    sig: "void framework_base_set_current_task_target(Class6800 *this)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1/r0: this
+      r4: this
+      FUN_080cb828: current_task_ctx_block
+      field_0x24: framework_base_initial_target
+    notes: >-
+      True extent is exactly 20 code bytes, 0x08110ca8..0x08110cbc; the
+      distinct next function begins at 0x08110cbc. Raw ARM is
+      `push {r4,lr}; mov r4,r0; bl 0x080cb828; str r4,[r0,#0x24];
+      pop {r4,pc}`. It fetches the current TaskCtx once and unconditionally
+      overwrites its +0x24 framework_base_initial_target word with this;
+      neither pointer has a NULL guard. Binary scanning every ARM B/BL word
+      found six call sites, all plain BL and no predicated calls:
+      0x081579dc, 0x081871fc, 0x08187248, 0x081d1db8, 0x081d23bc, and
+      0x0820e608. The Rust port calls the already-ported
+      current_task_ctx_block directly and uses the named TaskCtx field, so
+      no dispatch seam or host-layout byte offset is introduced. Focused
+      host coverage proves the getter is called once and replaces a
+      non-NULL prior +0x24 target.
+
   # --- Silver UI framework: link-owning base constructor ---
 
   - address: 0x081110d0
