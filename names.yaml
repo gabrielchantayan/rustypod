@@ -27926,6 +27926,34 @@ functions:
       stock ordering. The target section prevents linker folding with a
       byte-identical constructor sibling.
 
+  - address: 0x0839f100
+    ghidra: FUN_0839f100
+    name: refcounted_ptr_copy_construct_slot1
+    size: 24
+    sig: "RefcountedBody **refcounted_ptr_copy_construct_slot1(RefcountedBody **dst, const RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1: src
+      "*param_2/r1": source_body
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent 0x0839f100..0x0839f118:
+      six ARM words from push {r4,lr} through pop {r4,pc}; the separately linked
+      slot-1 copy-assignment function begins at 0x0839f118. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly five direct BL callers:
+      unconditional bl at 0x08162454 plus blne at 0x081622d4, 0x083e0b40,
+      0x083e0bd0, and 0x083e8a28. There is also a bne tail transfer at
+      0x081623a4. The four predicated BL callers and tail transfer gate the
+      constructor externally; its body has no slot-pointer guards. The aligned
+      image word at 0x089a4dc8 equals this address, confirming table dispatch.
+      This C++ forwarding copy constructor loads *src, calls the separately
+      entered and already ported slot-1 helper refcounted_body_attach_slot1 at
+      0x0839d198, then returns dst. The helper stores the loaded body, locks its
+      optional mutex, wrapping-increments its signed +4 refcount, reloads and
+      unlocks that optional mutex. The dedicated target section prevents linker
+      folding. Host tests cover NULL source replacement and a non-NULL
+      maximum-to-minimum refcount wrap. Deliberate deviations: none.
   - address: 0x0839f098
     ghidra: FUN_0839f098
     name: refcounted_ptr_construct_slot1
