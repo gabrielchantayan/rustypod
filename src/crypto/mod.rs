@@ -44,6 +44,7 @@ pub mod buffered_writer_write;
 pub mod base64_encode;
 pub mod bio_printf;
 pub mod bio_new;
+pub mod bio_puts;
 pub mod bio_free;
 pub mod free_ex_data;
 pub mod bio_snprintf;

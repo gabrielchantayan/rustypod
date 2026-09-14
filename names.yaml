@@ -85262,3 +85262,41 @@ functions:
       above it. No deliberate Rust deviations; host tests cover preserving a
       shrink, reallocation and zeroing of the growth delta, and allocation
       failure preservation plus the diagnostic.
+
+  # --- OpenSSL BIO string writer ---
+  - address: 0x0803d6e8
+    ghidra: FUN_0803d6e8
+    name: bio_puts
+    size: 220
+    sig: "i32 bio_puts(Bio *bio, const u8 *text)"
+    module: crypto/bio_puts
+    status: ported
+    renames:
+      param_1/r0/r4: bio
+      param_2/r1/r6: text
+      bio_plus_0x00: method
+      bio_plus_0x04/r5: callback
+      bio_plus_0x0c: initialized
+      bio_plus_0x34: num_write
+      method_plus_0x10: bputs
+      FUN_08049a84: diag_ring_record
+      return/r0: result
+    notes: >-
+      Raw ARM establishes the exact 220-byte body from push {r2,r3,r4-r6,lr}
+      at 0x0803d6e8 through pop {r2,r3,r4-r6,pc} at 0x0803d7c0; the
+      separately linked successor begins with push at 0x0803d7c4. Decoding
+      every immediate ARM B/BL word in osos.dec finds six inbound direct calls:
+      unconditional bl at 0x08078210, 0x0807d220, 0x0807d248, 0x0809c04c,
+      and 0x080aed34, plus blne at 0x0807d204. The one predicated caller
+      gates the call itself; the function still checks BIO/method/bputs. This
+      is OpenSSL BIO_puts: invalid BIO/method/bputs records (32,0x6e,0x79,0,0)
+      and returns -2; a clear initialized word records (32,0x6e,0x78,0,0).
+      Its optional callback receives (bio,4,text,0,0,1) before bputs and
+      (bio,0x84,text,0,0,result) afterward; pre-callback <=0 short-circuits,
+      while the post-callback return replaces result. Positive bputs results
+      wrap-add to bio+0x34. The bputs slot is method+0x10. Deliberate
+      deviation: 64-bit hosts use the BIO_PUTS_OPS seam for the target-width
+      callback and bputs pointer words; diagnostics directly use the ported
+      diag_ring_record. Host tests cover both diagnostics, pre-callback
+      rejection, initialization order, post-callback result replacement,
+      positive-counter wraparound, and non-positive no-count behavior.
