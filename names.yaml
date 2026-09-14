@@ -85677,3 +85677,46 @@ functions:
       host tests install a volatile callback seam and prove the unchanged
       pointer, OR accumulation, conditional bit, all-ones mask, and forwarded
       return value.
+
+
+  # --- basic_ios initializer ---
+  - address: 0x083e77dc
+    ghidra: FUN_083e77dc
+    name: basic_ios_initialize
+    size: 188
+    sig: "void basic_ios_initialize(void *stream, u32 streambuf)"
+    module: cxx/basic_ios_initialize
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: streambuf
+      param_1_plus_0x04: format_flags
+      param_1_plus_0x08: precision
+      param_1_plus_0x0c: width
+      param_1_plus_0x10: state
+      param_1_plus_0x14: exception_mask
+      param_1_plus_0x18: locale_handle
+      param_1_plus_0x34: streambuf
+      param_1_plus_0x3c: fill_character
+      DAT_083e788c: default_format_flags
+      DAT_083e7890: fallback_facet_descriptor
+      DAT_083e7894: facet_identifier
+      FUN_082a72c8: unported_slow_facet_lookup
+      FUN_082a8ba0: unported_opaque_shared_array_handle_release
+    notes: >-
+      Raw osos.dec establishes a 188-byte extent: 172 instruction bytes from
+      0x083e77dc through pop {r2,r3,r4,r5,r6,pc} at 0x083e7888, followed by
+      literal-pool words 0x00001002, 0x083ab368, and 0x08a0fb9c at
+      0x083e788c..0x083e7894; the separate next function begins at 0x083e7898.
+      Decoding every aligned ARM B/BL immediate in osos.dec finds exactly five
+      inbound direct calls, all unconditional plain bl at 0x082a7858,
+      0x082a8fb0, 0x083d80a8, 0x083d8100, and 0x083daec8, with no predicated
+      calls or tail branches. It writes default formatting state, stores the
+      streambuf target pointer, retains the locale at +0x18, obtains its
+      indexed facet directly or from unported FUN_082a72c8, invokes the facet
+      vtable +0x1c slot with 0x20, releases the locale handle through unported
+      FUN_082a8ba0, and stores the returned byte at +0x3c. Target builds use
+      those retail helpers and the 32-bit vtable slot directly; host tests use
+      volatile seams for the two unported helpers and native-width callback,
+      proving direct and fallback facet paths, exact fallback arguments,
+      reference-count wrapping, and field initialization.
