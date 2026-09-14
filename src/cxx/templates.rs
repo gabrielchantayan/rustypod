@@ -2592,6 +2592,58 @@ pub unsafe extern "C" fn vector_bool_iter_advance(iter: *mut VectorBoolIter, dis
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), new_word);
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), rem as u32);
 }
+/// vector_bool_iter_increment — original: `FUN_083e5fc0` @ 0x083e5fc0
+/// (36 bytes in raw osos.dec, despite Ghidra's 40-byte report; 5
+/// unconditional `bl` call sites at 0x0826a3d8, 0x083e5dec,
+/// 0x083e5e68, 0x083e5ef4, and 0x083e5f10; the only copy).
+///
+/// `std::vector<bool>` bit-iterator `operator++`: increments `iter.bit`
+/// with 32-bit register wrapping. When the incremented offset is exactly
+/// 32, it resets the offset to zero and advances `iter.word` by one
+/// 4-byte storage word. It reads and writes only the iterator head, never
+/// the storage word. There is deliberately no NULL guard: every decoded
+/// caller is an unconditional call and the original dereferences the head.
+///
+/// Deliberate host-only deviation: unaligned field access accepts firmware
+/// heads that are 4-byte aligned but not aligned for 64-bit host pointers;
+/// target named-field accesses remain aligned word loads and stores.
+///
+/// # Safety
+///
+/// `iter` must point at a writable [`VectorBoolIter`]. Its `word` member
+/// may be NULL because it is advanced as an address and never dereferenced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_iter_increment(iter: *mut VectorBoolIter) {
+    #[cfg(target_os = "none")]
+    let bit = (*iter).bit;
+    #[cfg(not(target_os = "none"))]
+    let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
+    let next_bit = bit.wrapping_add(1);
+    #[cfg(target_os = "none")]
+    {
+        (*iter).bit = next_bit;
+    }
+    #[cfg(not(target_os = "none"))]
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), next_bit);
+    if next_bit == 32 {
+        #[cfg(target_os = "none")]
+        {
+            (*iter).bit = 0;
+            (*iter).word = (*iter).word.wrapping_add(1);
+        }
+        #[cfg(not(target_os = "none"))]
+        {
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), 0);
+            let word = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word));
+            core::ptr::write_unaligned(
+                core::ptr::addr_of_mut!((*iter).word),
+                word.wrapping_add(1),
+            );
+        }
+    }
+}
+
 
 /// vector_bool_reference_assign — original: `FUN_083e5fe8` @ 0x083e5fe8
 /// (32 bytes; 7 unconditional `bl` call sites — 0x08269f50, 0x08269f78,
@@ -5723,6 +5775,42 @@ mod tests {
             let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
             assert_eq!(word, base.add(1));
             assert_eq!(bit, 7);
+        }
+    }
+
+    // ---- vector_bool_iter_increment -------------------------------
+
+    /// The direct increment changes only the bit offset except at the
+    /// 31-to-0 boundary, where it crosses one four-byte storage word.
+    /// It also preserves the raw ARM wrapping behavior for a noncanonical
+    /// offset and accepts a firmware-aligned head on a 64-bit host.
+    #[test]
+    fn vector_bool_iter_increment_advances_only_at_word_boundary() {
+        unsafe {
+            let storage = [0u32; 3];
+            let base = storage.as_ptr() as *mut u32;
+            let mut buf = [0u8; 24];
+            let iter = buf.as_mut_ptr().add(4) as *mut VectorBoolIter;
+
+            for (word, bit, want_word, want_bit) in [
+                (base, 30, base, 31),
+                (base, 31, base.add(1), 0),
+                (base.add(2), u32::MAX, base.add(2), 0),
+            ] {
+                core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), word);
+                core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), bit);
+                vector_bool_iter_increment(iter);
+                assert_eq!(
+                    core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word)),
+                    want_word,
+                    "word after incrementing bit {bit}"
+                );
+                assert_eq!(
+                    core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit)),
+                    want_bit,
+                    "bit after incrementing bit {bit}"
+                );
+            }
         }
     }
 
