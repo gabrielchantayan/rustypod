@@ -1536,10 +1536,17 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// stack-materialize a cursor iterator and the list/deque end iterator and
 /// compare their FIRST words (the current-node pointer) through this helper,
 /// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf788,
-/// 0x083cf7b8, 0x083cf908, 0x083cf920, 0x083cf938, 0x083cf950, 0x083cf980,
-/// 0x083cf9b0, and 0x083cf9c8 copies have the same raw body and ABI, so their
+/// 0x083cf7d0, 0x083cf7b8, 0x083cf908, 0x083cf920, 0x083cf938, 0x083cf950,
+/// 0x083cf980, 0x083cf9b0, and 0x083cf9c8 copies have the same raw body and ABI, so their
 /// ledger entries deliberately hook this established export instead of introducing redundant
 /// dispatch seams.
+///
+/// `FUN_083cf7d0` @ 0x083cf7d0 is a separately linked 24-byte copy with five
+/// direct, unconditional `bl` callers (0x083c1790, 0x083c1800, 0x083c1c6c,
+/// 0x083c1c88, and 0x083c1d0c); its two aligned loads compare the dereferenced
+/// words and return normalized equality, with no NULL guard. It deliberately
+/// reuses this byte-identical export: no behavioral deviation or duplicate
+/// dispatch seam is introduced.
 ///
 /// The body is byte-identical to `fixed16_eq_indirect` @ 0x082a1834
 /// ([`crate::fp::fp_misc`]) — a Q16.16 comparator that merely shares
