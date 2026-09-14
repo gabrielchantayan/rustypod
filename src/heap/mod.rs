@@ -12,6 +12,7 @@ pub mod client_register;
 pub mod dcache;
 pub mod endian_selector;
 pub mod gateway_service1;
+pub mod gateway_service34;
 pub mod pool_parent_reserved;
 pub mod first_event_dispatch;
 pub mod fixed_block_pool;

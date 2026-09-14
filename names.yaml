@@ -42245,6 +42245,41 @@ functions:
       void. Reference C: decomp/c/000/08004298_FUN_08004298.c; assembly
       0x08004298.
 
+  - address: 0x08037fb0
+    ghidra: thunk_EXT_FUN_2200439c
+    name: gateway_service34_request
+    size: 8
+    sig: "u32 gateway_service34_request(u32 input_r0, u32 input_r1, u32 input_r2, u32 input_r3)"
+    module: heap/gateway_service34
+    status: ported
+    renames:
+      DAT_08037fb4: iram_gateway_service34_target
+      EXT_FUN_2200439c: gateway_service34_request
+      FUN_08003660: gateway_dispatch
+      param_1/r0: input_r0
+      param_2/r1: input_r1
+      param_3/r2: input_r2
+      param_4/r3: input_r3
+      local_18[0]: gateway_service_selector
+      local_18[1]: request_word1
+      local_18[2]: result
+      local_18[3]: input_r0
+    notes: >-
+      Literal veneer at 0x08037fb0 (e51ff004) plus target literal
+      0x2200439c at 0x08037fb4, so its true extent is 8 bytes despite
+      Ghidra's 4-byte extent. The target is the IRAM mirror of the 36-byte
+      body at 0x0800439c. It saves r0-r4/lr, turns the dispatch prefix into
+      {0x22, incoming r1, incoming r2, incoming r0}, calls gateway
+      0x08003660, and returns the dispatcher-mutated third word. Every ARM
+      B/BL word in osos.dec was decoded: six direct callers, all plain
+      unconditional bl (0x080c9c80, 0x080cb788, 0x08392ea0, 0x08393030,
+      0x0839356c, 0x08393830), with zero predicated calls, plain branches,
+      or data-word references. Selector 0x22 has no recovered higher-level
+      RTXC identity, so the name records the verified gateway protocol rather
+      than inventing one. The shared volatile gateway seam represents foreign
+      ROM dispatch; host test proves frame construction, one delegation, and
+      third-word result reload.
+
   - address: 0x080043c0
     ghidra: FUN_080043c0
     name: gateway_service1_request
