@@ -240,6 +240,31 @@ pub unsafe extern "C" fn iram_pwrcon_update_masks_veneer(
     body(pwrcon0_mask, pwrcon1_mask, enable)
 }
 
+/// pwrcon_acquire_clock_2 — original: `FUN_080c996c` @ `0x080c996c`
+/// (44 bytes; next function begins at `0x080c9998`).
+///
+/// Raw ARM decoding finds **6 unconditional `bl` call sites** at
+/// `0x080af6e0`, `0x080c5df4`, `0x0836b1bc`, `0x0836b274`, `0x0836b378`,
+/// and `0x0836b51c`; no caller branches to this address with predication.
+/// It snapshots whether active-low PWRCON0 bit 1 is already clear, enables
+/// that clock through the IRAM PWRCON veneer, and returns the pre-enable
+/// Boolean. The veneer call is deliberately retained rather than calling the
+/// mirrored body directly, preserving the original call topology and its
+/// IRQ/FIQ-guarded transaction. Its ABI has no arguments: all observed
+/// caller r0-r2 values are overwritten before either call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pwrcon_acquire_clock_2() -> u32 {
+    let mut was_enabled = 0;
+    unsafe {
+        pwrcon_any_requested_clock_enabled(2, 0, &mut was_enabled);
+        iram_pwrcon_update_masks_veneer(2, 0, 1);
+    }
+    was_enabled
+}
+
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -429,6 +454,34 @@ mod tests {
             assert_eq!(iram_pwrcon_update_masks_veneer(0x000f_0c03, 0xf000_1034, 2), 0);
             assert_eq!(*addr_of!(TEST_PWRCON0), 0xf000_030c, "PWRCON0 clears its mask");
             assert_eq!(*addr_of!(TEST_PWRCON1), 0x0fff_0200, "PWRCON1 clears its mask");
+        }
+    }
+
+    #[test]
+    fn acquire_clock_2_preserves_an_already_enabled_clock() {
+        let _ops = install(0xffff_fffd, 0xfeed_beef);
+        unsafe {
+            assert_eq!(pwrcon_acquire_clock_2(), 1);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0xffff_fffd);
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0xfeed_beef);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["read0", "read1", "enter", "read0", "write0", "read1", "write1", "exit"],
+            );
+        }
+    }
+
+    #[test]
+    fn acquire_clock_2_enables_a_previously_gated_clock() {
+        let _ops = install(0xffff_ffff, 0xfeed_beef);
+        unsafe {
+            assert_eq!(pwrcon_acquire_clock_2(), 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0xffff_fffd);
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0xfeed_beef);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["read0", "read1", "enter", "read0", "write0", "read1", "write1", "exit"],
+            );
         }
     }
 
