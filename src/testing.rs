@@ -796,6 +796,10 @@ pub mod hints {
     // raw-u32 tree and node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const RED_BLACK_TREE_ROTATE_RIGHT_FIFTH: usize = 0x8c70_0000;
+    // 0x8c80_0000: dedicated to cxx/red_black_tree_rotate_left_fifth's
+    // raw-u32 tree and node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RED_BLACK_TREE_ROTATE_LEFT_FIFTH: usize = 0x8c80_0000;
     // 0x0400_0000: dedicated to sqlite/expr_worklist's target-width owner,
     // worklist, entry, and tracked-allocation fixtures; mappings never unmap.
     pub const SQLITE_EXPR_WORKLIST: usize = 0x0400_0000;
