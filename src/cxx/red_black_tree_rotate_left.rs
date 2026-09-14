@@ -20,6 +20,15 @@
 //! The byte-identical `FUN_083c5a5c` at load address `0x083c5a5c` is a
 //! ported ledger alias of this implementation; its five direct callers have
 //! the same four `bl` plus one `bleq` split.
+//!
+//! `FUN_083c4e14` at load address `0x083c4e14` is another byte-identical
+//! ported alias. Raw `osos.dec` gives it an 80-byte extent (through `bx lr` at
+//! `0x083c4e60`); Ghidra's 84-byte size includes the right-rotation sibling's
+//! first instruction at `0x083c4e64`. It has five inbound direct call sites:
+//! four `bl` (`0x083c51f4`, `0x083c5294`, `0x083c5384`, and `0x083c589c`) and
+//! one `bleq` (`0x083c5804`). Its no-guard left-rotation algorithm and
+//! target-width-link representation have no deliberate deviations from this
+//! implementation.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
