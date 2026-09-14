@@ -35421,6 +35421,36 @@ functions:
       physical copy to the established equal_deref export rather than add
       a redundant dispatch seam.
 
+
+  - address: 0x083cf998
+    ghidra: FUN_083cf998
+    name: equal_deref_f998_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf998: equal_deref_f998_copy
+      param_1: a
+      param_2: b
+    notes: >-
+      Raw osos.dec from 0x083cf998 through bx lr at 0x083cf9ac is exactly
+      `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1; bx
+      lr`; the separately linked equal_deref copy at 0x083cf9b0 follows
+      immediately, confirming the 24-byte extent. It aligned-loads both u32
+      operands, compares them, and returns normalized 1 or 0 for equality
+      without a NULL guard. Decoding every ARM B/BL word in osos.dec finds
+      exactly five inbound direct calls, all unconditional plain bl:
+      0x083ce358, 0x083ce7c4, 0x083ce7e0, 0x083ce864, and 0x083ce928. There
+      are no predicated calls, direct B tail branches, or aligned raw-word
+      references. The body is byte-identical to the established equal_deref
+      port at 0x083cf968, so this ledger-only alias deliberately adds no
+      duplicate dispatch seam; hook 0x083cf998 to equal_deref. Its shared host
+      test covers equal values at distinct addresses, unequal values in both
+      orders, zero, all-bits-set, and iterator-shaped records whose trailing
+      word is not read. Deliberate deviation: none; the established export
+      preserves the two unguarded aligned loads.
+
   - address: 0x083cf9b0
     ghidra: FUN_083cf9b0
     name: equal_deref_f9b0_copy
