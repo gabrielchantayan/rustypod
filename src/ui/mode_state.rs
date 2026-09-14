@@ -19,6 +19,9 @@ const MODE_STATE_RECORD_STRIDE: isize = 0x18c;
 
 /// Byte offset of the mode word in a selected object.
 const MODE_STATE_FLAG_OFFSET: usize = 0x860;
+/// Byte offset of the status code in a selected mode substate.
+const MODE_STATE_SUBSTATE_CODE_OFFSET: usize = 0x14;
+
 
 /// indexed_mode_flag — original: `FUN_080b649c` @ `0x080b649c` (28 bytes).
 ///
@@ -42,6 +45,47 @@ pub unsafe extern "C" fn indexed_mode_flag(index: i16) -> u32 {
     let object = (object_slot as *const *const u8).read();
     (object.add(MODE_STATE_FLAG_OFFSET) as *const u32).read() & 0x1f
 }
+
+/// indexed_mode_substate_code — original: `FUN_080dd2a0` @ `0x080dd2a0`
+/// (40 bytes: 36 bytes of code plus a 4-byte literal).
+///
+/// Verified call count: six unconditional `bl` sites
+/// (`0x080a61ac`, `0x080df660`, `0x080df688`, `0x080df69c`,
+/// `0x080df6dc`, and `0x080df6f0`); no predicated calls. Raw ARM multiplies
+/// the signed low halfword of `index` by 99, loads the object pointer from
+/// [`MODE_STATE_OBJECT_TABLE`], calls `FUN_080e1cc8` to select one of eight
+/// embedded substates, then returns the low three bits of that substate's
+/// word at `+0x14`.
+///
+/// The selector mapping from the unported `FUN_080e1cc8` is deliberately
+/// inlined: selectors 0–3 select `selector * 0x20`, while selectors 4–7
+/// select `0x100`, `0x180`, `0x200`, and `0x230`. An invalid selector makes
+/// the stock helper return null and the following load fault; it remains
+/// outside this function's safety contract.
+///
+/// # Safety
+///
+/// [`MODE_STATE_OBJECT_TABLE`] must be valid for the signed index's record,
+/// that record must hold a valid object pointer, and `selector` must be in
+/// `0..=7`. The selected substate's word at `+0x14` must be aligned and
+/// readable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_mode_substate_code(index: i16, selector: u32) -> u32 {
+    let object_slot = mode_state_object_table().offset(index as isize * MODE_STATE_RECORD_STRIDE);
+    let object = (object_slot as *const *const u8).read();
+    let substate = match selector {
+        0..=3 => object.add(selector as usize * 0x20),
+        4 => object.add(0x100),
+        5 => object.add(0x180),
+        6 => object.add(0x200),
+        7 => object.add(0x230),
+        _ => core::ptr::null(),
+    };
+
+    (substate.wrapping_add(MODE_STATE_SUBSTATE_CODE_OFFSET) as *const u32).read() & 7
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -79,6 +123,39 @@ mod tests {
 
             assert_eq!(indexed_mode_flag(0), 0x1f);
             assert_eq!(indexed_mode_flag(2), 0x15);
+
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(core::ptr::null());
+        }
+    }
+
+    #[test]
+    fn selects_each_substate_and_masks_its_status_code() {
+        let _guard = MODE_STATE_TABLE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut table = ModeStateTable([0; MODE_STATE_RECORD_STRIDE as usize * 3]);
+        let mut object = ModeStateObject([0; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]);
+        let substates = [
+            (0, 0x000, 0xffff_fff8),
+            (1, 0x020, 0x1234_5679),
+            (2, 0x040, 0xfeed_beea),
+            (3, 0x060, 0x89ab_cafb),
+            (4, 0x100, 0xabcd_ef0c),
+            (5, 0x180, 0x7654_321d),
+            (6, 0x200, 0x1357_9b1e),
+            (7, 0x230, 0x2468_acef),
+        ];
+
+        unsafe {
+            for (selector, offset, code) in substates {
+                (object.0.as_mut_ptr().add(offset + MODE_STATE_SUBSTATE_CODE_OFFSET) as *mut u32)
+                    .write(code);
+                assert_eq!(code & 7, selector);
+            }
+            install_object(&mut table, 1, object.0.as_ptr());
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(table.0.as_ptr());
+
+            for (selector, _, code) in substates {
+                assert_eq!(indexed_mode_substate_code(1, selector), code & 7);
+            }
 
             core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(core::ptr::null());
         }
