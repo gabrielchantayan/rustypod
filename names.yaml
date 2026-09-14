@@ -80104,6 +80104,34 @@ functions:
       keeping host pointer fields disjoint; the existing string assignment
       port is called directly and no dispatch seam is added.
 
+  # --- vector<T>::clear, trivially destructible 4-byte elements ---
+  - address: 0x083e6808
+    ghidra: FUN_083e6808
+    name: vector_clear_elem4
+    size: 84
+    sig: "void vector_clear_elem4(VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: vector
+      puVar3/r12: begin
+      puVar4/lr: end
+      puVar2/r2: destination_cursor
+    notes: >-
+      Raw osos.dec establishes the full 84-byte body from 0x083e6808 through
+      0x083e6858; the separately linked next function opens at 0x083e685c.
+      This is std::vector<T>::clear for a trivially destructible four-byte
+      element. Although Ghidra renders an apparent range copy, raw ARM sets
+      both sides of its first loop comparison to end, making that loop
+      unreachable. Its following walk has no memory side effects, then the
+      body writes begin to vector +4; it never reads, writes, or destroys an
+      element and preserves begin and end_of_storage. Complete aligned ARM
+      B/BL-immediate decoding finds exactly five direct plain bl callers at
+      0x0813d8e8, 0x0813e1b8, 0x0813e21c, 0x08177614, and 0x081778fc, with
+      no predicated forms. One additional direct unconditional b tail branch
+      at 0x0813d8f4 targets this body. No deliberate deviations or dispatch
+      seams are needed.
+
   # --- vector<T>::push_back, 4-byte element ---
   - address: 0x083e685c
     ghidra: FUN_083e685c
