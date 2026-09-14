@@ -562,6 +562,110 @@ ui_manager_acquire:
     .size ui_manager_acquire, . - ui_manager_acquire
 "#
 );
+/// ui_manager_begin_pending_operation — original:
+/// `thunk_EXT_FUN_22005114` @ `0x08038200` (Ghidra reports 4 bytes; raw
+/// osos.dec proves the full **8** bytes are `ldr pc,[pc,#-4]` /
+/// `0xe51ff004` and the target literal `0x22005114` at `0x08038204`; the
+/// next veneer starts at `0x08038208`).
+///
+/// The relocator at `0x080046e0` copies `0xaed8` bytes from `0x08000000` to
+/// `0x22000000`, so the literal reaches the IRAM mirror of
+/// `FUN_08005114` @ `0x08005114`, not mask ROM. That 92-byte body marks a
+/// pending manager operation when its second argument is nonzero, ensures
+/// the manager's `+0x10` subobject is initialized, and, when both
+/// `manager[0]` and its third argument are nonzero, tail-dispatches the
+/// manager's `+0x28` operation path. The veneer itself preserves every
+/// argument and LR, forwarding the target's result or tail control flow
+/// unchanged.
+///
+/// Decoding every ARM B/BL word in osos.dec found exactly six direct,
+/// unconditional `bl` callers at 0x08201c78, 0x08201fb8, 0x08202018,
+/// 0x08235da4, 0x082360b0, and 0x08237270; there are no predicated calls,
+/// direct tail branches, or aligned raw data-word references. Deviation:
+/// target builds use the exact literal tail veneer; host builds expose its
+/// otherwise foreign IRAM boundary as a replaceable callback.
+pub const UI_MANAGER_BEGIN_PENDING_OPERATION_VENEER: u32 = 0x0803_8200;
+pub const UI_MANAGER_BEGIN_PENDING_OPERATION_INSN: u32 = 0xe51f_f004;
+pub const UI_MANAGER_BEGIN_PENDING_OPERATION_TARGET: u32 = 0x2200_5114;
+
+/// ABI of the pending-operation start thunk's mirrored body.
+pub type UiManagerBeginPendingOperationFn =
+    unsafe extern "C" fn(manager: *mut u8, mark_pending: u32, dispatch_active: u32) -> u32;
+
+/// Host/target dispatch boundary for the IRAM pending-operation start body.
+#[derive(Clone, Copy)]
+pub struct UiManagerBeginPendingOperationOps {
+    pub begin: UiManagerBeginPendingOperationFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_ui_manager_begin_pending_operation(
+    _manager: *mut u8,
+    _mark_pending: u32,
+    _dispatch_active: u32,
+) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS: UiManagerBeginPendingOperationOps =
+    UiManagerBeginPendingOperationOps {
+        begin: missing_ui_manager_begin_pending_operation,
+    };
+
+/// Replaceable host boundary for the mirrored pending-operation start body.
+#[cfg(not(target_arch = "arm"))]
+pub static mut UI_MANAGER_BEGIN_PENDING_OPERATION_OPS: UiManagerBeginPendingOperationOps =
+    DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn ui_manager_begin_pending_operation_target() -> UiManagerBeginPendingOperationFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            UI_MANAGER_BEGIN_PENDING_OPERATION_OPS.begin
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn ui_manager_begin_pending_operation(
+        manager: *mut u8,
+        mark_pending: u32,
+        dispatch_active: u32,
+    ) -> u32;
+}
+
+/// Host implementation of the literal veneer. It preserves the three
+/// arguments and target result exactly.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_manager_begin_pending_operation(
+    manager: *mut u8,
+    mark_pending: u32,
+    dispatch_active: u32,
+) -> u32 {
+    unsafe { ui_manager_begin_pending_operation_target()(manager, mark_pending, dispatch_active) }
+}
+
+// `ldr pc` preserves LR and therefore forwards both ordinary returns and the
+// mirrored body's active-operation tail dispatch to the original caller.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl ui_manager_begin_pending_operation
+    .type ui_manager_begin_pending_operation, %function
+ui_manager_begin_pending_operation:
+    ldr     pc, [pc, #-4]
+    .word   0x22005114
+    .size ui_manager_begin_pending_operation, . - ui_manager_begin_pending_operation
+"#
+);
 
 /// Instruction word and literal in the lazy-singleton accessor thunk
 /// at 0x08037f58.
@@ -1133,7 +1237,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x080381e8, rom_target: 0x220054a8, name: None },
     RomThunk { thunk_addr: 0x080381f0, rom_target: 0x220050f4, name: None },
     RomThunk { thunk_addr: 0x080381f8, rom_target: 0x220056d0, name: None },
-    RomThunk { thunk_addr: 0x08038200, rom_target: 0x22005114, name: None },
+    RomThunk { thunk_addr: 0x08038200, rom_target: 0x22005114, name: Some("ui_manager_begin_pending_operation") },
     RomThunk { thunk_addr: 0x08038208, rom_target: 0x220076cc, name: None },
     RomThunk { thunk_addr: 0x08038210, rom_target: 0x22005cb0, name: None },
     RomThunk { thunk_addr: 0x08038218, rom_target: 0x22005228, name: None },
@@ -1229,7 +1333,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 23] = [
+        let expected: [(u32, &str); 24] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1250,6 +1354,7 @@ mod tests {
             (0x22004368, "wake_object"),
             (0x22005018, "ui_manager_acquire"),
             (0x2200509c, "ui_manager_finish_pending_operation"),
+            (0x22005114, "ui_manager_begin_pending_operation"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
             (0x22007470, "iram_event_handler_source_veneer"),
@@ -1329,8 +1434,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 23 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 25);
+        // 24 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 26);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -1520,6 +1625,83 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             assert!(ui_manager_acquire().is_null());
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn ui_manager_begin_pending_operation_matches_literal_veneer() {
+        assert_eq!(UI_MANAGER_BEGIN_PENDING_OPERATION_VENEER, 0x0803_8200);
+        assert_eq!(UI_MANAGER_BEGIN_PENDING_OPERATION_INSN, 0xe51f_f004);
+        assert_eq!(UI_MANAGER_BEGIN_PENDING_OPERATION_TARGET, 0x2200_5114);
+        assert_eq!(UI_MANAGER_BEGIN_PENDING_OPERATION_TARGET & 3, 0);
+    }
+
+    #[test]
+    fn ui_manager_begin_pending_operation_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(UI_MANAGER_BEGIN_PENDING_OPERATION_VENEER)
+            .expect("thunk entry for pending-operation start");
+        assert_eq!(entry.rom_target, UI_MANAGER_BEGIN_PENDING_OPERATION_TARGET);
+        assert_eq!(entry.name, Some("ui_manager_begin_pending_operation"));
+        assert_eq!(
+            lookup_by_target(UI_MANAGER_BEGIN_PENDING_OPERATION_TARGET)
+                .expect("target entry for pending-operation start")
+                .thunk_addr,
+            UI_MANAGER_BEGIN_PENDING_OPERATION_VENEER
+        );
+    }
+
+    static mut UI_MANAGER_BEGIN_PENDING_OPERATION_CALLS: u32 = 0;
+    static mut UI_MANAGER_BEGIN_PENDING_OPERATION_ARGS: (usize, u32, u32) = (0, 0, 0);
+
+    unsafe extern "C" fn record_ui_manager_begin_pending_operation(
+        manager: *mut u8,
+        mark_pending: u32,
+        dispatch_active: u32,
+    ) -> u32 {
+        UI_MANAGER_BEGIN_PENDING_OPERATION_CALLS += 1;
+        UI_MANAGER_BEGIN_PENDING_OPERATION_ARGS = (manager as usize, mark_pending, dispatch_active);
+        0x4d41_4e41
+    }
+
+    #[test]
+    fn ui_manager_begin_pending_operation_forwards_all_arguments_and_result() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut manager = 0u8;
+        unsafe {
+            core::ptr::addr_of_mut!(UI_MANAGER_BEGIN_PENDING_OPERATION_CALLS).write(0);
+            core::ptr::addr_of_mut!(UI_MANAGER_BEGIN_PENDING_OPERATION_OPS).write(
+                UiManagerBeginPendingOperationOps {
+                    begin: record_ui_manager_begin_pending_operation,
+                },
+            );
+
+            assert_eq!(
+                ui_manager_begin_pending_operation(core::ptr::null_mut(), 0, 0),
+                0x4d41_4e41
+            );
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_BEGIN_PENDING_OPERATION_ARGS).read(),
+                (0, 0, 0)
+            );
+            assert_eq!(
+                ui_manager_begin_pending_operation(
+                    core::ptr::addr_of_mut!(manager),
+                    0xffff_ffff,
+                    0x8000_0001,
+                ),
+                0x4d41_4e41
+            );
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_BEGIN_PENDING_OPERATION_CALLS).read(),
+                2
+            );
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_BEGIN_PENDING_OPERATION_ARGS).read(),
+                (core::ptr::addr_of!(manager) as usize, 0xffff_ffff, 0x8000_0001)
+            );
+            core::ptr::addr_of_mut!(UI_MANAGER_BEGIN_PENDING_OPERATION_OPS)
+                .write(DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS);
         }
         drop(guard);
     }

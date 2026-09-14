@@ -225,6 +225,35 @@ functions:
       veneer forwards to that body through a volatile function pointer,
       retaining separate hook-target identity and preventing inlining/ICF;
       it preserves the void byte-copy ABI and forward overlap behavior.
+  - address: 0x08038200
+    ghidra: thunk_EXT_FUN_22005114
+    name: ui_manager_begin_pending_operation
+    size: 8
+    sig: "u32 ui_manager_begin_pending_operation(u8 *manager, u32 mark_pending, u32 dispatch_active)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_EXT_FUN_22005114: ui_manager_begin_pending_operation
+      EXT_FUN_22005114: ui_manager_begin_pending_operation
+      param_1/r0: manager
+      param_2/r1: mark_pending
+      param_3/r2: dispatch_active
+    notes: >-
+      Ghidra's 4-byte extent omits this ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038200 and literal
+      0x22005114 at 0x08038204; the next veneer starts at 0x08038208, so the
+      true size is 8 bytes. The relocator at 0x080046e0 copies osos
+      0x08000000..0x0800aed8 into IRAM 0x22000000, making the literal target
+      the mirror of FUN_08005114 @ 0x08005114. Its 92-byte body marks a
+      pending manager operation when mark_pending is nonzero, ensures the
+      manager +0x10 subobject, and when manager[0] and dispatch_active are
+      nonzero tail-dispatches the manager +0x28 operation path. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly six inbound calls, all
+      unconditional plain bl at 0x08201c78, 0x08201fb8, 0x08202018,
+      0x08235da4, 0x082360b0, and 0x08237270; there are no predicated forms,
+      direct tail branches, or aligned raw data-word references. ARM builds
+      retain the exact literal tail veneer; host builds use a replaceable IRAM
+      boundary to prove all arguments and the result are forwarded unchanged.
   - address: 0x0833dda8
     ghidra: FUN_0833dda8
     name: xor_6b_in_place
