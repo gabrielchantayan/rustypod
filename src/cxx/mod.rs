@@ -175,6 +175,7 @@ pub mod red_black_tree_rotate_right_sixteenth;
 pub mod red_black_tree_rotate_right_seventeenth;
 pub mod red_black_tree_rotate_right_eighteenth;
 pub mod two_word_clear;
+pub mod two_word_clear_alt;
 pub mod three_word_clear;
 pub mod three_word_clear_alt;
 pub mod three_word_clear_third;
