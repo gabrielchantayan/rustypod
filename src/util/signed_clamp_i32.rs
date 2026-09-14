@@ -32,6 +32,27 @@ pub extern "C" fn signed_clamp_i32(value: i32, lower: i32, upper: i32) -> i32 {
         value
     }
 }
+/// signed_clamp_i32_q16 — original: `FUN_080f0f44` @ 0x080f0f44 (32 bytes;
+/// 6 direct `bl` call sites, all unconditional).
+///
+/// Raw ARM confirms the exact extent 0x080f0f44..0x080f0f64; the following
+/// independently linked function at 0x080f0f64 is byte-identical. This
+/// lower-then-upper signed clamp returns `lower` below the range, `upper`
+/// above it, and `value` otherwise. All six callers use the Q16 interval
+/// 0..0x10000. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+#[link_section = ".text.signed_clamp_i32_q16"]
+pub extern "C" fn signed_clamp_i32_q16(value: i32, lower: i32, upper: i32) -> i32 {
+    if value < lower {
+        lower
+    } else if value > upper {
+        upper
+    } else {
+        value
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -59,5 +80,18 @@ mod tests {
         assert_eq!(signed_clamp_i32(-5, 10, 0), 10);
         assert_eq!(signed_clamp_i32(10, 10, 0), 0);
         assert_eq!(signed_clamp_i32(20, 10, 0), 0);
+    }
+
+    #[test]
+    fn q16_clamp_covers_the_real_interval_and_inverted_bounds() {
+        assert_eq!(signed_clamp_i32_q16(i32::MIN, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16(-1, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16(0, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16(0x8000, 0, 0x10000), 0x8000);
+        assert_eq!(signed_clamp_i32_q16(0x10000, 0, 0x10000), 0x10000);
+        assert_eq!(signed_clamp_i32_q16(0x10001, 0, 0x10000), 0x10000);
+        assert_eq!(signed_clamp_i32_q16(i32::MAX, 0, 0x10000), 0x10000);
+        assert_eq!(signed_clamp_i32_q16(0, 10, -10), 10);
+        assert_eq!(signed_clamp_i32_q16(10, 10, -10), -10);
     }
 }
