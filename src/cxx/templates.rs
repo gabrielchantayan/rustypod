@@ -1448,7 +1448,8 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 
 /// equal_deref — originals: `FUN_083cf650` @ 0x083cf650,
 /// `FUN_083cf680` @ 0x083cf680, `FUN_083cf698` @ 0x083cf698,
-/// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
+/// `FUN_083cf6b0` @ 0x083cf6b0, `FUN_083cf6c8` @ 0x083cf6c8,
+/// `FUN_083cf758` @ 0x083cf758,
 /// `FUN_083cf770` @ 0x083cf770, `FUN_083cf788` @ 0x083cf788,
 /// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf7e8` @ 0x083cf7e8,
 /// `FUN_083cf860` @ 0x083cf860, `FUN_083cf878` @ 0x083cf878,
@@ -1497,6 +1498,19 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// branches. The body is byte-identical to the established equal_deref port
 /// at 0x083cf968, so this ledger-only alias deliberately adds no duplicate
 /// dispatch seam; hook 0x083cf698 to equal_deref.
+/// `FUN_083cf6b0` runs from `ldr r0,[r0]` at 0x083cf6b0 through `bx lr` at
+/// 0x083cf6c4; the next separately linked equal_deref copy begins at
+/// 0x083cf6c8, confirming the 24-byte extent. It aligned-loads both `u32`
+/// operands, compares them, and returns normalized 1 or 0 for equality.
+/// Decoding every ARM B/BL word in `osos.dec` finds exactly five direct callers,
+/// all unconditional plain `bl`: 0x083beb70, 0x083befdc, 0x083beff8,
+/// 0x083bf07c, and 0x083bf140. There are no predicated calls, direct tail
+/// branches, or aligned raw-word references. Its byte-identical body deliberately
+/// reuses the established [`equal_deref`] export rather than introducing a
+/// redundant dispatch seam; hook 0x083cf6b0 to equal_deref. The shared host test
+/// covers equal values at distinct addresses, unequal values in both orders,
+/// zero, all-bits-set, and iterator-shaped records whose trailing word is not
+/// read. Deliberate deviations: none.
 /// `FUN_083cf758` comprises the six words through `bx lr` at 0x083cf76c;
 /// the next separately linked copy begins at 0x083cf770, fixing its 24-byte
 /// extent. Decoding every ARM B/BL word in `osos.dec` finds exactly six
@@ -4984,7 +4998,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f680_f698_f6c8_f758_f770_f788_f7a0_f7b8_f7e8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f680_f698_f6b0_f6c8_f758_f770_f788_f7a0_f7b8_f7e8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
