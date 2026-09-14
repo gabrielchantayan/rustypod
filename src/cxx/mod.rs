@@ -101,6 +101,7 @@ pub mod state_object_initialize;
 pub mod string;
 pub mod string_vector_destruct;
 pub mod string_map;
+pub mod basic_ios_initialize;
 pub mod streambuf_slot_peek_equal;
 pub mod streambuf_slot_peek_byte;
 pub mod streambuf_slot_consume;
