@@ -41080,6 +41080,40 @@ functions:
       allocation fixture, covering 0, 42, -17, and i32::MIN while proving
       table/key propagation and by-value signed-decimal formatting.
 
+  - address: 0x08102130
+    ghidra: FUN_08102130
+    name: string_table_clear_or_erase
+    size: 56
+    sig: "u32 string_table_clear_or_erase(u8 *table, const char **key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_083d6f0c: cxx_string_empty
+      FUN_083c4778: string_key_map_erase
+      FUN_083db604: string_key_map_clear
+    notes: >-
+      Raw ARM proves the exact 0x38-byte extent: push {r4,r5,r6,lr} opens at
+      0x08102130, the conditional tail branches are at 0x0810215c and
+      0x08102164, and the next separately linked function begins at
+      0x08102168. Ghidra swallows later siblings into its C output. The
+      function reads the current-table index at table+0x54 and computes its
+      inline StringKeyMap at table + index * 0x1c. It calls the ported
+      basic_string::empty @ 0x083d6f0c: a nonempty key tail-calls the real
+      string-keyed tree erase-by-key entry @ 0x083c4778, while an empty key
+      tail-calls the real map clear entry @ 0x083db604. Both target entries
+      are independently verified function starts (push prologues at their
+      addresses); the erase body returns its removal count and clear returns
+      its map pointer. All six direct callers discard r0. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly six inbound plain
+      unconditional bl calls (0x0821636c, 0x08217c98, 0x08217d34,
+      0x08217dbc, 0x08229a70, 0x0823b3a0), with no predicated forms or direct
+      tail branches. Target builds call the two still-retailOS-owned operations
+      at their fixed addresses; host tests install recording callbacks,
+      proving index*0x1c selection, empty-key clear, nonempty-key erase, key
+      forwarding, return forwarding, and u32::MAX as nonempty.
+
   - address: 0x08101edc
     ghidra: FUN_08101edc
     name: string_table_has_string
