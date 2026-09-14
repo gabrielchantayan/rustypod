@@ -64,34 +64,31 @@
 //!
 //! ## Deviations
 //!
-//! The two directly queried callees are ported and called directly
-//! ([`singleton_class_6280`], [`flag_2c_is_clear`]). The class-0x6280
-//! handler and root slot-`+0x190` query veneer remain in
-//! [`UPDATE_DISPATCH_OPS`] and are read slot-by-slot through
-//! `read_volatile`; the now-ported root processor calls the latter through
-//! that existing seam. On target their defaults transmute the ROM addresses
-//! `0x0811bf0c` / `0x081115e4`; on host the documented inert defaults make
-//! the dispatcher decline with return 1. The app-root word follows the
-//! crate-static
+//! The directly queried callees are ported and called directly
+//! ([`singleton_class_6280`], [`flag_2c_is_clear`], and
+//! [`root_slot_190_query`](crate::app::root_slot_190_query::root_slot_190_query)).
+//! The class-0x6280 handler remains in [`UPDATE_DISPATCH_OPS`] and is read
+//! through `read_volatile`; on target its default transmutes ROM address
+//! `0x0811bf0c`, while its documented inert host default makes the dispatcher
+//! decline with return 1. The app-root word follows the crate-static
 //! [`APP_ROOT_OBJECT`](crate::app::context_scope::APP_ROOT_OBJECT)
 //! deviation (the `0x089cxxxx` page is runtime-initialized RW data and
 //! the image holds stale UI string bytes there).
 
 use crate::app::context_scope::app_root_object;
 use crate::app::root_pending_process::root_pending_process;
+use crate::app::root_slot_190_query::{root_slot_190_query, RootSlot190QueryRoot};
 use crate::app::singletons::singleton_class_6280;
 use crate::ui::flag_2c::flag_2c_is_clear;
 use core::ptr;
 
-/// Firmware load addresses of the two remaining unported handler callees,
-/// kept beside the transmutes below. `root_pending_process` at 0x08112bbc is
-/// ported directly in `app/root_pending_process`.
+/// Firmware load address of the remaining unported class-0x6280 handler.
+/// `root_pending_process` at 0x08112bbc and `root_slot_190_query` at
+/// 0x081115e4 are ported directly in their respective modules.
 pub const CLASS_6280_COMMIT_ADDRESS: usize = 0x0811_bf0c;
-pub const ROOT_SLOT_190_QUERY_ADDRESS: usize = 0x0811_15e4;
 
-/// The two unported handler callees, one slot each, in call order.
-/// Host tests install recording models. The root pending-work processor now
-/// calls its port directly.
+/// The remaining unported handler. Host tests install a recording model. The
+/// root query veneer and pending-work processor are called directly.
 #[derive(Clone, Copy)]
 pub struct UpdateDispatchOps {
     /// Original @ `0x0811bf0c`: the class-0x6280 object-side handler,
@@ -100,11 +97,6 @@ pub struct UpdateDispatchOps {
     /// through the vtable `+0x58` poster and stores 2 into the `+0x2c`
     /// flag byte.
     pub class_6280_commit: unsafe extern "C" fn(object: *mut u8),
-    /// Original @ `0x081115e4`: tail-call veneer into vtable slot
-    /// `+0x190` of the app root's `+0x888` sub-object. Ghidra types it
-    /// `void` and drops its argument; the original caller passes the
-    /// root and tests the returned r0 against zero.
-    pub root_slot_190_query: unsafe extern "C" fn(root: *mut u8) -> u32,
 }
 
 /// Target default: the ROM class-0x6280 handler.
@@ -118,26 +110,12 @@ unsafe extern "C" fn firmware_class_6280_commit(object: *mut u8) {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn firmware_class_6280_commit(_object: *mut u8) {}
 
-/// Target default: the ROM slot-`+0x190` query veneer.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_root_slot_190_query(root: *mut u8) -> u32 {
-    let f: unsafe extern "C" fn(*mut u8) -> u32 =
-        core::mem::transmute(ROOT_SLOT_190_QUERY_ADDRESS);
-    f(root)
-}
-
-/// Host default: reports "nothing pending", so the port declines
-/// (returns 1) without touching the root.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_root_slot_190_query(_root: *mut u8) -> u32 {
-    0
-}
 
 
-/// Wired defaults: ROM addresses on target, documented inert stubs on host.
+
+/// Wired default: ROM address on target, documented inert stub on host.
 pub const DEFAULT_UPDATE_DISPATCH_OPS: UpdateDispatchOps = UpdateDispatchOps {
     class_6280_commit: firmware_class_6280_commit,
-    root_slot_190_query: firmware_root_slot_190_query,
 };
 
 /// The active handler set. Host tests swap in recording mocks and restore.
@@ -152,13 +130,6 @@ macro_rules! seam {
     };
 }
 
-/// Calls the existing slot-`+0x190` query seam for root handler ports.
-///
-/// The four-instruction firmware veneer at 0x081115e4 remains unported; this
-/// preserves its existing target default and host-test replacement.
-pub(crate) unsafe fn root_slot_190_query(root: *mut u8) -> u32 {
-    unsafe { seam!(root_slot_190_query)(root) }
-}
 
 /// update_dispatch — original: `FUN_082199bc` @ 0x082199bc (see the
 /// module header for the full listing, extent correction and call-count
@@ -172,11 +143,12 @@ pub(crate) unsafe fn root_slot_190_query(root: *mut u8) -> u32 {
 ///
 /// # Safety
 ///
-/// The class-0x6280 singleton — allocated on first call, exactly like
-/// the original's unconditional leading `bl 0x0811b2c0` — must expose a
-/// readable byte at `+0x2c`, and [`APP_ROOT_OBJECT`] must name a live
-/// root object whenever the flag is clear; neither is NULL-checked,
-/// matching the stock code. The seam slots must be callable.
+/// The class-0x6280 singleton — allocated on first call, exactly like the
+/// original's unconditional leading `bl 0x0811b2c0` — must expose a readable
+/// byte at `+0x2c`, and [`APP_ROOT_OBJECT`] must name a live root object
+/// whenever the flag is clear; neither is NULL-checked, matching the stock
+/// code. The class-handler seam must be callable, and the root must satisfy
+/// [`root_slot_190_query`]'s safety contract.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn update_dispatch() -> u32 {
@@ -186,7 +158,7 @@ pub unsafe extern "C" fn update_dispatch() -> u32 {
         return 0;
     }
     let root = app_root_object();
-    if unsafe { root_slot_190_query(root) } == 0 {
+    if unsafe { root_slot_190_query(root.cast::<RootSlot190QueryRoot>()) } == 0 {
         return 1;
     }
     unsafe { root_pending_process(root.cast()) };
@@ -200,7 +172,10 @@ mod tests {
     use crate::app::context_scope::APP_ROOT_OBJECT;
     use crate::app::root_pending_process::{
         RootPendingProcessCallback, RootPendingProcessRoot, RootPendingProcessSubobject,
-        ROOT_PENDING_SUBOBJECT_OFFSET,
+        ROOT_PENDING_PROCESS_SLOT, ROOT_PENDING_SUBOBJECT_OFFSET,
+    };
+    use crate::app::root_slot_190_query::{
+        RootSlot190QueryCallback, RootSlot190QuerySubobject, ROOT_SLOT_190_QUERY_SLOT,
     };
     use crate::app::singletons::{CLASS_6280_INSTANCE, CLASS_8C00_INSTANCE};
     use std::sync::{Mutex, MutexGuard};
@@ -226,9 +201,9 @@ mod tests {
     /// Recorded seam invocations, in call order.
     static mut CALLS: Vec<&'static str> = Vec::new();
 
-    /// The object pointers the recording seams and vtable observed.
+    /// The object pointers the recording seam and vtables observed.
     static mut SEEN_OBJECT: *mut u8 = ptr::null_mut();
-    static mut SEEN_ROOT: *mut u8 = ptr::null_mut();
+    static mut SEEN_QUERY_SUBOBJECT: *mut RootSlot190QuerySubobject = ptr::null_mut();
     static mut SEEN_SUBOBJECT: *mut RootPendingProcessSubobject = ptr::null_mut();
 
     #[repr(align(4))]
@@ -245,8 +220,8 @@ mod tests {
     static mut FAKE_SUBOBJECT: RootPendingProcessSubobject = RootPendingProcessSubobject {
         vtable: ptr::null(),
     };
-    static mut PENDING_VTABLE: [RootPendingProcessCallback; 61] =
-        [recording_subobject_process; 61];
+    static mut ROOT_VTABLE: [usize; ROOT_SLOT_190_QUERY_SLOT + 1] =
+        [0; ROOT_SLOT_190_QUERY_SLOT + 1];
     static mut FAKE_CLASS_8C00: FakeClass8c00 = FakeClass8c00([0; CLASS_8C00_SIZE]);
 
     unsafe extern "C" fn recording_commit(object: *mut u8) {
@@ -254,15 +229,15 @@ mod tests {
         SEEN_OBJECT = object;
     }
 
-    unsafe extern "C" fn recording_query_decline(root: *mut u8) -> u32 {
+    unsafe extern "C" fn recording_query_decline(subobject: *mut RootSlot190QuerySubobject) -> u32 {
         (*ptr::addr_of_mut!(CALLS)).push("query");
-        SEEN_ROOT = root;
+        SEEN_QUERY_SUBOBJECT = subobject;
         0
     }
 
-    unsafe extern "C" fn recording_query_pending(root: *mut u8) -> u32 {
+    unsafe extern "C" fn recording_query_pending(subobject: *mut RootSlot190QuerySubobject) -> u32 {
         (*ptr::addr_of_mut!(CALLS)).push("query");
-        SEEN_ROOT = root;
+        SEEN_QUERY_SUBOBJECT = subobject;
         1
     }
 
@@ -274,16 +249,17 @@ mod tests {
     /// Installs the recording seams and points the singleton cache and
     /// the app root at the fixtures; `flag` is planted at `+0x2c` of
     /// the fake class-0x6280 object.
-    fn install(flag: u8, query: unsafe extern "C" fn(*mut u8) -> u32) -> MutexGuard<'static, ()> {
+    fn install(flag: u8, query: RootSlot190QueryCallback) -> MutexGuard<'static, ()> {
         let guard = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             UPDATE_DISPATCH_OPS = UpdateDispatchOps {
                 class_6280_commit: recording_commit,
-                root_slot_190_query: query,
             };
             FAKE_OBJECT.0 = [0; CLASS_6280_SIZE];
             FAKE_OBJECT.0[FLAG_OFFSET] = flag;
-            FAKE_SUBOBJECT.vtable = ptr::addr_of!(PENDING_VTABLE).cast();
+            ROOT_VTABLE[ROOT_PENDING_PROCESS_SLOT] = recording_subobject_process as usize;
+            ROOT_VTABLE[ROOT_SLOT_190_QUERY_SLOT] = query as usize;
+            FAKE_SUBOBJECT.vtable = ptr::addr_of!(ROOT_VTABLE).cast();
             FAKE_ROOT.pending_subobject = ptr::addr_of_mut!(FAKE_SUBOBJECT);
             FAKE_CLASS_8C00.0 = [0; CLASS_8C00_SIZE];
             FAKE_CLASS_8C00.0[CLASS_8C00_POST_SUPPRESS_OFFSET] = 1;
@@ -292,7 +268,7 @@ mod tests {
             APP_ROOT_OBJECT = ptr::addr_of_mut!(FAKE_ROOT) as *mut u8;
             (*ptr::addr_of_mut!(CALLS)).clear();
             SEEN_OBJECT = ptr::null_mut();
-            SEEN_ROOT = ptr::null_mut();
+            SEEN_QUERY_SUBOBJECT = ptr::null_mut();
             SEEN_SUBOBJECT = ptr::null_mut();
         }
         guard
@@ -305,7 +281,7 @@ mod tests {
             CLASS_8C00_INSTANCE = ptr::null_mut();
             APP_ROOT_OBJECT = ptr::null_mut();
             FAKE_ROOT.pending_subobject = ptr::null_mut();
-            FAKE_SUBOBJECT.vtable = ptr::null();
+            ROOT_VTABLE = [0; ROOT_SLOT_190_QUERY_SLOT + 1];
             (*ptr::addr_of_mut!(CALLS)).clear();
         }
         drop(guard);
@@ -342,8 +318,8 @@ mod tests {
         unsafe { root_pending_process(ptr::addr_of_mut!(FAKE_ROOT)) };
         assert_eq!(unsafe { &*ptr::addr_of!(CALLS) }, &["query", "vtable"]);
         assert_eq!(
-            unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_ROOT)) },
-            ptr::addr_of_mut!(FAKE_ROOT) as *mut u8
+            unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_QUERY_SUBOBJECT)) },
+            ptr::addr_of_mut!(FAKE_SUBOBJECT).cast()
         );
         assert_eq!(
             unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_SUBOBJECT)) },
@@ -359,9 +335,9 @@ mod tests {
         assert_eq!(result, 0);
         assert_eq!(unsafe { &*ptr::addr_of!(CALLS) }, &["query", "query", "vtable"]);
         assert_eq!(
-            unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_ROOT)) },
-            ptr::addr_of_mut!(FAKE_ROOT) as *mut u8,
-            "both the dispatcher and root processor receive the app root"
+            unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_QUERY_SUBOBJECT)) },
+            ptr::addr_of_mut!(FAKE_SUBOBJECT).cast(),
+            "both queries receive the root's pending-work sub-object"
         );
         assert_eq!(
             unsafe { ptr::read_volatile(ptr::addr_of!(SEEN_SUBOBJECT)) },
@@ -370,18 +346,4 @@ mod tests {
         restore(guard);
     }
 
-    #[test]
-    fn default_seams_are_inert_and_decline() {
-        let guard = SEAM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            UPDATE_DISPATCH_OPS = DEFAULT_UPDATE_DISPATCH_OPS;
-            FAKE_OBJECT.0 = [0; CLASS_6280_SIZE];
-            CLASS_6280_INSTANCE = ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
-            APP_ROOT_OBJECT = 0x1 as *mut u8; // would fault if dereferenced
-            (*ptr::addr_of_mut!(CALLS)).clear();
-            assert_eq!(update_dispatch(), 1);
-            assert!((*ptr::addr_of!(CALLS)).is_empty());
-        }
-        restore(guard);
-    }
 }
