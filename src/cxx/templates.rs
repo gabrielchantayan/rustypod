@@ -1090,6 +1090,56 @@ pub unsafe extern "C" fn deque_iter_advance_copy_elem4(
     dst
 }
 
+/// A pair of target words ordered by [`less_u32_pair`].
+///
+/// `first` and `second` occupy the two successive 32-bit words that the ARM
+/// comparator loads. `repr(C)` preserves that layout on the target and keeps
+/// both host fields disjoint.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct U32Pair {
+    pub first: u32,
+    pub second: u32,
+}
+
+/// less_u32_pair — original: `FUN_083d7388` @ 0x083d7388 (52 bytes; 5 direct
+/// unconditional `bl` call sites, binary-verified).
+///
+/// Orders two referenced [`U32Pair`] values lexicographically with unsigned
+/// comparisons: `first` decides unless equal, then `second` decides. The raw
+/// ARM body loads `first` from each pair, takes the `bcs` false path when the
+/// left word is greater, and compares the second words only on equality. The
+/// unused `this` argument remains in the ABI; neither pair pointer is
+/// NULL-checked.
+///
+/// Decoding every aligned ARM `B`/`BL` word in `osos.dec` finds exactly five
+/// inbound calls, all plain unconditional `bl` at 0x083b7ac8, 0x083b7b04,
+/// 0x083b7be0, 0x083b7d04, and 0x083b7dd8; there are no predicated calls or
+/// direct tail branches. The callers are red-black-tree navigation and
+/// insertion helpers, establishing this as their key-order predicate.
+///
+/// # Deliberate deviations
+///
+/// None.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to a readable, aligned [`U32Pair`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn less_u32_pair(
+    _this: *const u8,
+    left: *const U32Pair,
+    right: *const U32Pair,
+) -> u32 {
+    let left = left.read();
+    let right = right.read();
+    u32::from(
+        left.first < right.first
+            || (left.first == right.first && left.second < right.second),
+    )
+}
+
 /// less_signed — original: `FUN_083d7580` @ 0x083d7580
 /// (24 bytes, 45 `bl` call sites; the only copy of this body).
 ///
@@ -4108,6 +4158,45 @@ mod tests {
         left_guard: usize,
         vector: VectorStorage,
         right_guard: usize,
+    }
+
+    #[test]
+    fn less_u32_pair_orders_each_word_unsigned_and_ignores_this() {
+        let cases = [
+            (
+                U32Pair { first: 0, second: u32::MAX },
+                U32Pair { first: 1, second: 0 },
+                1,
+            ),
+            (
+                U32Pair { first: 7, second: 3 },
+                U32Pair { first: 7, second: 4 },
+                1,
+            ),
+            (
+                U32Pair { first: 7, second: 4 },
+                U32Pair { first: 7, second: 4 },
+                0,
+            ),
+            (
+                U32Pair { first: 7, second: 5 },
+                U32Pair { first: 7, second: 4 },
+                0,
+            ),
+            (
+                U32Pair { first: u32::MAX, second: 0 },
+                U32Pair { first: 0, second: u32::MAX },
+                0,
+            ),
+        ];
+
+        for (left, right, expected) in cases {
+            assert_eq!(
+                unsafe { less_u32_pair(core::ptr::null(), &left, &right) },
+                expected,
+                "{left:?} < {right:?}",
+            );
+        }
     }
 
     #[test]

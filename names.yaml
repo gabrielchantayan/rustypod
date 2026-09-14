@@ -86589,3 +86589,34 @@ functions:
       void and supplies a spurious second argument: callers 0x08197a88 and
       0x083db348 consume the preserved target, so the Rust port returns it.
       Deliberate deviations: none.
+
+  # --- lexicographic unsigned word-pair comparator ---
+  - address: 0x083d7388
+    ghidra: FUN_083d7388
+    name: less_u32_pair
+    size: 52
+    sig: "u32 less_u32_pair(const void *this, const U32Pair *left, const U32Pair *right)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: left
+      param_3/r2: right
+      param_2_deref: left_first
+      param_2_plus_0x04: left_second
+      param_3_deref: right_first
+      param_3_plus_0x04: right_second
+      return/r0: left_less_than_right
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: thirteen ARM words
+      from ldr r0,[r1] at 0x083d7388 through bx lr at 0x083d73b8; the next
+      separately linked function begins at 0x083d73bc. It compares the first
+      aligned u32 word of each pair unsigned, then compares the second word
+      only when the first words are equal, returning 1 only when left is
+      lexicographically less than right. The this argument is unused and
+      neither pair pointer has a NULL guard. Decoding every aligned ARM B/BL
+      immediate word in osos.dec finds exactly five inbound calls, all plain
+      unconditional bl at 0x083b7ac8, 0x083b7b04, 0x083b7be0, 0x083b7d04,
+      and 0x083b7dd8; there are no predicated forms or direct tail branches.
+      Callers are red-black-tree search and insertion helpers. Deliberate
+      deviations: none.
