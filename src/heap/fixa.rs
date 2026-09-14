@@ -33,8 +33,10 @@ const RETAIL_DESTROY_FIXL: usize = 0x080d_8750;
 pub struct FixaOwner {
     /// `0x46697841` (`FixA`) while the owner is valid; cleared before release.
     pub magic: u32,
-    _unknown_04: u32,
-    _unknown_08: u32,
+    /// Rounded byte capacity requested by `fixa_owner_create`.
+    pub allocation_size: u32,
+    /// Caller-supplied payload word initialized by `fixa_owner_create`.
+    pub payload: u32,
     /// First FixL node, or zero when no nodes remain.
     pub first_fixl: u32,
 }
