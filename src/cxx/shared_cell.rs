@@ -175,6 +175,54 @@ pub unsafe extern "C" fn shared_cell_construct_tertiary(
     slot
 }
 ///
+///
+/// `shared_cell_copy_construct_primary` — retailOS `FUN_083b50c8` @
+/// `0x083b50c8` (28 bytes; 5 incoming `bl` call sites, all unconditional;
+/// zero predicated forms, verified by decoding every ARM B/BL word in
+/// `osos.dec`). Its raw extent ends immediately before the distinct
+/// copy-assignment sibling at `0x083b50e4`. One unconditional tail `b` at
+/// `0x0822b05c` transfers to this entry.
+///
+/// ```text
+/// 083b50c8: ldr   r1, [r1]          @ cell = *src
+/// 083b50cc: cmp   r1, #0
+/// 083b50d0: str   r1, [r0]          @ *dst = cell
+/// 083b50d4: ldrne r2, [r1, #4]
+/// 083b50d8: addne r2, r2, #1
+/// 083b50dc: strne r2, [r1, #4]
+/// 083b50e0: bx    lr
+/// ```
+///
+/// Copy-constructs `dst` from `src`: copies the cell pointer, then increments
+/// the non-NULL cell's signed intrusive refcount with 32-bit wrapping
+/// arithmetic. The raw body leaves `r0` unchanged, so it returns `dst`;
+/// Ghidra's `void` prototype loses that ABI-visible result.
+///
+/// Deliberate deviation: [`SharedCell::value`] is `usize` on hosts to retain
+/// host pointers. This routine reads the target-width slot and signed 32-bit
+/// refcount. Its own text section prevents folding with byte-identical
+/// siblings and keeps the entry device-callable.
+///
+/// # Safety
+/// `dst` must be a valid, aligned writable shared-cell slot and `src` must be
+/// a valid, aligned readable slot. A non-NULL source cell must be writable
+/// through its signed refcount word; neither slot pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_copy_construct_primary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_copy_construct_primary(
+    dst: *mut *mut SharedCell,
+    src: *const *mut SharedCell,
+) -> *mut *mut SharedCell {
+    let cell = src.read();
+    dst.write(cell);
+    if !cell.is_null() {
+        let refcount = core::ptr::addr_of!((*cell).refcount).read_volatile();
+        core::ptr::addr_of_mut!((*cell).refcount).write_volatile(refcount.wrapping_add(1));
+    }
+    dst
+}
+
 /// `shared_cell_copy_construct` — retailOS `FUN_083b51f4` @ `0x083b51f4`
 /// (28 bytes; 8 incoming `bl` call sites: seven unconditional and one
 /// `blne` at `0x0818a704`, verified by decoding every ARM B/BL word in
@@ -720,6 +768,40 @@ mod tests {
         assert_eq!(cell.value, payload as usize);
         assert_eq!(cell.refcount, 1);
         assert_eq!(events(), std::vec![Event::HeapAlloc(8, 2)]);
+    }
+
+    /// The primary copy constructor overwrites a non-NULL destination with a
+    /// NULL source and returns that destination slot without a refcount read.
+    #[test]
+    fn primary_copy_construct_null_cell_replaces_destination() {
+        let source: *mut SharedCell = core::ptr::null_mut();
+        let mut destination = 0xfeed_faceusize as *mut SharedCell;
+
+        let result = unsafe { shared_cell_copy_construct_primary(&mut destination, &source) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(destination));
+        assert!(destination.is_null());
+        assert!(source.is_null());
+    }
+
+    /// The primary body preserves the source owner and performs ARM's wrapping
+    /// signed refcount increment.
+    #[test]
+    fn primary_copy_construct_retains_cell_with_wrapping_refcount() {
+        let mut cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: i32::MAX,
+        };
+        let source = core::ptr::addr_of_mut!(cell);
+        let mut destination = core::ptr::null_mut();
+
+        let result = unsafe { shared_cell_copy_construct_primary(&mut destination, &source) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(destination));
+        assert_eq!(destination, source);
+        assert_eq!(source, core::ptr::addr_of_mut!(cell));
+        assert_eq!(cell.refcount, i32::MIN);
+        assert_eq!(cell.value, 0x1234_5678);
     }
 
     /// A NULL source cell overwrites the destination with NULL and preserves
