@@ -83094,3 +83094,30 @@ functions:
       one, and 0xff at both offsets, the short-circuit true case, unaligned
       object bases, neighboring-byte guards, and absence of mutation.
       Deliberate deviations: none.
+
+
+  # --- status gate readiness ---
+  - address: 0x0810799c
+    ghidra: FUN_0810799c
+    name: status_gate_is_ready
+    size: 44
+    sig: "u32 status_gate_is_ready(void)"
+    module: drivers/status_gate_ready
+    status: ported
+    renames:
+      DAT_38400000: status_gate_register
+      FUN_0836e164: unported_status_completion_dispatch
+      r0: readiness
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte body from 0x0810799c
+      through the return at 0x081079c4; the next independently linked function
+      begins at 0x081079c8. Complete aligned ARM B/BL-immediate decoding finds
+      exactly six direct inbound calls, all unconditional bl at 0x08292f84,
+      0x0829318c, 0x082945fc, 0x08294624, 0x08294930, and 0x08294bac; no
+      predicated call forms or tail-B callers target this entry. The routine
+      reads bit 19 of 0x38400000 and returns zero without dispatch when clear.
+      When set, it calls 0x0836e164 and normalizes that target's nonzero result
+      to one. The target has no ported ledger entry, so target builds call its
+      verified address without assigning it an identity; host tests use a
+      recorder seam to prove skip-on-clear behavior and result normalization.
+      Deliberate deviations: none.
