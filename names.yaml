@@ -84050,3 +84050,37 @@ functions:
       after both multiply-accumulate operations and after the left shift;
       Rust uses wrapping arithmetic before its signed right shift. Deliberate
       deviations: none.
+  # --- ATA stop transmission ---
+  - address: 0x08098ddc
+    ghidra: FUN_08098ddc
+    name: ata_stop_transmission
+    size: 120
+    sig: "u32 ata_stop_transmission()"
+    module: drivers/ata_stop_transmission
+    status: ported
+    renames:
+      DAT_08098e54: ata_runtime_context
+      DAT_08098e58: ata_stop_transmission_command
+      DAT_089d03bc_plus_0x14: ata_timeout
+      gpio_pin_0x48: ata_reset_gpio_pin
+      FUN_08077490: ata_transaction_submit
+      FUN_080cdf5c: ata_ready_wait
+    notes: >-
+      Raw osos.dec confirms Ghidra's 120-byte instruction body from
+      0x08098ddc through pop {r4,pc} at 0x08098e50. The two-word literal pool
+      at 0x08098e54 and 0x08098e58 supplies the runtime context 0x089d03bc
+      and command 0x0009008c; the separately linked next function begins at
+      0x08098e5c. It drives GPIO pin 72 low, delays one microsecond, drives it
+      high, delays one microsecond, restores function 3, and delays one
+      microsecond before submitting the command with zero flags/result pointer
+      and context +0x14 as its timeout. A zero submission returns zero;
+      otherwise it tail-dispatches FUN_080cdf5c with zero status/error words
+      and the same timeout, preserving that result. Decoding every immediate
+      ARM B/BL word in osos.dec finds exactly six inbound calls, all plain
+      unconditional bl at 0x080dbc54, 0x080dbc8c, 0x0836a44c, 0x0836a480,
+      0x0836aadc, and 0x0836ab1c; there are no predicated forms, direct tail
+      branches, or aligned raw data words targeting the entry. FUN_08077490
+      and FUN_080cdf5c remain unported, so target builds reach them through
+      literal veneers and host tests use volatile callback seams. The GPIO
+      configurator and microsecond delay veneer were already ported and are
+      called directly. Deliberate deviations: none.
