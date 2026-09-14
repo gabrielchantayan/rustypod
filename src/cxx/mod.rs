@@ -130,6 +130,7 @@ pub mod templates;
 pub mod signed_key_tree_find;
 pub mod red_black_tree_increment;
 pub mod red_black_tree_node_pool_acquire;
+pub mod red_black_tree_payload_24_node_pool_acquire;
 pub mod red_black_tree_rotate_right;
 pub mod red_black_tree_rotate_right_second;
 pub mod red_black_tree_rotate_right_third;

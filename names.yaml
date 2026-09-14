@@ -17,6 +17,39 @@
 base: 0x08000000
 
 functions:
+  # --- C++ red-black-tree 24-byte-payload node pool ---
+  - address: 0x083c14c8
+    ghidra: FUN_083c14c8
+    name: red_black_tree_payload_24_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePayload24Node *red_black_tree_payload_24_node_pool_acquire(RedBlackTreePayload24NodePool *pool)"
+    module: cxx/red_black_tree_payload_24_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      iVar4/r0: nodes
+      uVar6/r6: capacity
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 ARM words from
+      push {r4-r8,lr} at 0x083c14c8 through pop {r4-r8,pc} at 0x083c157c;
+      the next separately linked function begins at 0x083c1580. Decoding every
+      aligned ARM B/BL-immediate word finds exactly five inbound direct calls,
+      all unconditional bl at 0x08134e48, 0x081cdb58, 0x083c1588, 0x083c1f6c,
+      and 0x083db308; no predicated direct calls or plain b tail calls. This
+      red-black-tree pool first pops free nodes threaded through node+0x0c;
+      otherwise it bumps through 0x28-byte chunks. On exhaustion it links a
+      new {previous, capacity, nodes} 12-byte header, allocates max(previous
+      capacity + 32, previous capacity + previous capacity/2 + previous
+      capacity/8) nodes (or 32 initially), and resumes at its first node. It
+      clears color and parent/left/right while preserving the client payload at
+      +0x10..+0x27. Rust maintains firmware pointers as u32 target words and,
+      as stock does, immediately dereferences failed checked allocations; no
+      deliberate deviations. Host tests cover first allocation, recycled-node
+      reset with payload preservation, linear 32-to-64 growth, and 64-to-104
+      geometric growth.
   # --- C++ red-black-tree right rotation ---
   - address: 0x083b74fc
     ghidra: FUN_083b74fc
