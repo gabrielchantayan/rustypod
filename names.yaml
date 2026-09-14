@@ -82981,3 +82981,39 @@ functions:
       than inventing a class identity. Host tests map the target-width data
       pointer, prove the exact NUL store, and preserve adjacent bytes and
       untouched words. Deliberate deviations: none.
+
+
+  # --- Bool message dispatch ---
+  - address: 0x08133ba8
+    ghidra: FUN_08133ba8
+    name: dispatch_bool_message
+    size: 84
+    sig: "u32 dispatch_bool_message(BoolMessageContext *context, RefcountedBody *const *source, u32 retain_message)"
+    module: app/bool_message_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1: source
+      param_3/r2/r5: retain_message
+      "context+0x2c": body
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent
+      0x08133ba8..0x08133bfc: 19 ARM instructions through the two tail
+      branches, followed by literal-pool words 0x00007682 and 0x426f6f6c;
+      0x08133bfc opens the separately linked next function. Complete aligned
+      ARM B/BL-immediate decoding finds six inbound direct bl calls, all
+      unconditional, at 0x08132d38, 0x08132f04, 0x0813333c, 0x081334c4,
+      0x08133520, and 0x08133594: no predicated or tail-B callers. The
+      function replaces its target +0x2c owned refcounted handle, takes a
+      16-byte block from the already ported message_0x13_arena_pool, and
+      writes the message-code-0x13 constructor's four words
+      {0x0898db3c, 0, 'Bool', 0x7682}. retain_message selects the direct
+      dispatcher call with flags {1,1,1}; zero calls the already ported
+      callback_dispatch_release, whose fixed flags are {1,0,1} and which
+      releases the message. The unported 0x0839ef54 assignment wrapper is
+      represented by its already ported exact release-owned-variant and
+      attach callees; the simple 0x081cd7b8 constructor is inlined from its
+      recovered stores, so no new target dispatch seam is introduced. Host
+      tests use a dedicated below-4-GiB message/vtable fixture to prove both
+      dispatch modes, constructor words, finalizer selection, and the
+      refcount transition.
