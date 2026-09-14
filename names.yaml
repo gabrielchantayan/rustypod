@@ -16467,6 +16467,36 @@ functions:
       the only handle the firmware gives it and the symbol says so
       rather than inventing a name.
 
+  # --- four-word big-endian serializer ---
+  - address: 0x0802a158
+    ghidra: FUN_0802a158
+    name: store_four_u32_be
+    size: 124
+    sig: "void store_four_u32_be(u32 first, u32 second, u32 third, u32 fourth, u8 *destination)"
+    module: util/store_four_u32_be
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: third
+      param_4/r3: fourth
+      param_5/stack/r12: destination
+      lr: byte
+    notes: >-
+      Raw ARM establishes the exact 124-byte extent from push {lr} at
+      0x0802a158 through pop {pc} at 0x0802a1d0; the next separately linked
+      function begins at 0x0802a1d4. Decoding every ARM B/BL word in osos.dec
+      finds exactly six direct inbound call sites, all plain unconditional bl
+      (0x0802a224, 0x0802a3d4, 0x0802a5b4, 0x0802a764, 0x0802ad84,
+      0x0802adf0); there are no predicated BL forms or direct tail branches.
+      The fifth ARM C-ABI argument is a writable byte destination. The routine
+      serializes first, second, third, and fourth in that order, storing each
+      word most-significant byte first as one contiguous 16-byte block. It has
+      no NULL, alignment, or bounds guard. Rust retains every ordered byte store
+      as volatile. Deliberate deviations: none. Host tests cover high-bit and
+      all-zero words plus every destination byte alignment, with surrounding
+      guard bytes proving the exact sixteen-byte write range.
+
   - address: 0x0802ad10
     ghidra: FUN_0802ad10
     name: operation_dispatch
