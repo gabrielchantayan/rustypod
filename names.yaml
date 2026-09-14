@@ -1739,6 +1739,25 @@ functions:
       through a literal plus the crate's fp frame, r0-r2 untouched;
       the original's literal word shows as a data-decoded andcs.
 
+  - address: 0x080c996c
+    ghidra: FUN_080c996c
+    name: pwrcon_acquire_clock_2
+    size: 44
+    sig: "u32 pwrcon_acquire_clock_2(void)"
+    module: drivers/pwrcon
+    status: ported
+    renames: {local_8: was_enabled, FUN_0836aec4: pwrcon_any_requested_clock_enabled,
+      thunk_EXT_FUN_22000318: iram_pwrcon_update_masks_veneer}
+    notes: >-
+      Raw osos.dec decoding confirms the 44-byte extent
+      0x080c996c..0x080c9998; the next function begins at 0x080c9998.
+      It asks whether active-low PWRCON0 bit 1 (mask 2) is already clear,
+      enables that mask through the 0x08037de8 IRAM veneer with r2=1, and
+      returns the pre-enable Boolean. All ARM B/BL words were decoded:
+      6 direct unconditional bl sites at 0x080af6e0, 0x080c5df4,
+      0x0836b1bc, 0x0836b274, 0x0836b378, and 0x0836b51c; no predicated
+      callers. The port retains the veneer call rather than calling the
+      mirrored body directly, preserving the original transaction topology.
   - address: 0x080003b8
     ghidra: FUN_080003b8
     name: startup_wait_status_clear
