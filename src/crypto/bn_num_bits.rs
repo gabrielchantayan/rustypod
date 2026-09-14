@@ -170,15 +170,16 @@ pub unsafe extern "C" fn bn_num_bits(a: *const BigNum) -> i32 {
 }
 
 #[cfg(test)]
+/// Serializes host tests that replace the shared [`BN_NUM_BITS_WORD`] seam.
+pub static BN_NUM_BITS_WORD_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::MutexGuard;
     use std::vec::Vec;
-
-    /// Serializes swaps of [`BN_NUM_BITS_WORD`].
-    static WORKER_LOCK: Mutex<()> = Mutex::new(());
 
     /// Limbs the recording worker saw, in order.
     static mut SEEN: Vec<u32> = Vec::new();
@@ -217,7 +218,7 @@ mod tests {
     }
 
     fn install(results: &[i32]) -> WorkerGuard {
-        let guard = WORKER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = BN_NUM_BITS_WORD_TEST_LOCK.lock();
         unsafe {
             (*core::ptr::addr_of_mut!(SEEN)).clear();
             let slot = &mut *core::ptr::addr_of_mut!(RESULTS);
@@ -229,7 +230,7 @@ mod tests {
     }
 
     fn install_openssl() -> WorkerGuard {
-        let guard = WORKER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = BN_NUM_BITS_WORD_TEST_LOCK.lock();
         unsafe {
             core::ptr::addr_of_mut!(BN_NUM_BITS_WORD).write(openssl_bits_word);
         }

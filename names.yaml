@@ -57208,6 +57208,45 @@ functions:
       NULL plus zero-size forwarding, and volatile slot reload across calls.
       #[inline(never)] retains a concrete target for all 16 BL call sites.
 
+  - address: 0x0803e3e0
+    ghidra: FUN_0803e3e0
+    name: bn_bn2bin
+    size: 88
+    sig: "int bn_bn2bin(const BigNum *a, unsigned char *to)"
+    module: crypto/bn_bn2bin
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: to
+      iVar1/r0: byte_count
+      iVar2/r1: byte_index
+      FUN_080404a8: bn_num_bits
+    notes: >-
+      OpenSSL's BN_bn2bin from crypto/bn/bn_lib.c. Raw ARM establishes
+      the 88-byte extent exactly: FUN_0803e3e0 starts with push
+      {r4,r5,lr}; the next separately linked function opens at
+      0x0803e438. It calls BN_num_bits(a), computes signed
+      (bits + 7) / 8 through add/asr correction, keeps that byte count
+      in r0 for its return (so Ghidra's void signature is wrong), and
+      counts i from byte_count - 1 to zero. Each byte is
+      a->d[i / 4] >> ((i % 4) * 8), written to successive output
+      addresses: the little-endian BIGNUM limbs therefore become a
+      big-endian magnitude. No NULL, capacity, or normalized-top check
+      exists; a nonpositive computed count returns before either source
+      limbs or destination are dereferenced. Call count
+      binary-verified by decoding every ARM B/BL word in osos.dec:
+      exactly 6 direct sites, all unconditional bl (no predicated forms
+      or tail branches), so callers neither gate this conversion nor
+      need a NULL guard that it lacks. The only inherited deviation is
+      BN_num_bits's documented volatile BN_NUM_BITS_WORD seam: target
+      invokes 0x080404dc in place until that helper is ported; host
+      tests install OpenSSL bit-length semantics. Host tests prove zero
+      returns with a NULL destination untouched, two complete
+      little-endian limbs serialize in reversed byte order, and a
+      41-bit value omits high zero bytes without writing past its
+      six-byte output. match.py structurally confirms the one worker
+      call, signed byte-count round, reverse loop, limb selection, and
+      byte stores. #[inline(never)] preserves a concrete ARM BL target.
   # --- OpenSSL bignum: the bit-length query ---
   # The bn_lib.c cluster sits in 0x0803d800..0x08041000 on the
   # { BN_ULONG *d; int top; int dmax; int neg; int flags } BIGNUM
