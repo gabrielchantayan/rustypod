@@ -7,12 +7,13 @@
 //! reverse stack buffer through the literal loaded from 0x080e95fc (whose
 //! target address is 0x083ecb4c). It caps a requested precision at 31,
 //! prepends precision zeroes and a `-`/optional `+`, records the resulting
-//! byte length, then delegates leading padding, reverse-byte emission, and
-//! trailing padding to its formatter callbacks.
+//! byte length, then invokes the direct padding helper around reverse-byte
+//! emission.
 //!
-//! Deliberate deviation: the two external retailOS helpers — unsigned
-//! divide/mod (`FUN_08036f14`) and field padding (`FUN_080ec120`) — remain
-//! callback seams. Bounded character output (`FUN_08280f7c`) is ported as
+//! Deliberate deviation: the external retailOS unsigned divide/mod helper
+//! (`FUN_08036f14`) remains a callback seam. Field padding is now handled by
+//! [`crate::printf::format_field_padding::format_field_padding`], and bounded
+//! character output (`FUN_08280f7c`) by
 //! [`crate::printf::format_bounded_byte::format_bounded_byte`].
 //! On the firmware target digit bytes are read from the original literal;
 //! host tests use an ordinary printable radix alphabet because that firmware
@@ -22,6 +23,7 @@
 
 use core::{ffi::c_void, mem::MaybeUninit};
 use crate::printf::format_bounded_byte::format_bounded_byte;
+use crate::printf::format_field_padding::format_field_padding;
 
 /// Callback seam for retailOS `FUN_08036f14`: `(quotient, remainder)` for
 /// unsigned `dividend / radix`. The original receives the quotient in r0 and
@@ -37,10 +39,6 @@ pub struct RadixDivision {
 }
 
 
-/// Callback seam for retailOS `FUN_080ec120`. `phase` is nonzero before the
-/// reverse byte stream and `left_justify` after it, exactly as the original
-/// passes `1 - left_justify` and then `left_justify`.
-pub type FormatPadFn = unsafe extern "C" fn(phase: u32, spec: *mut RadixFormatSpec);
 
 /// Format-state ABI consumed by `FUN_080e9514` and its output callbacks.
 ///
@@ -57,7 +55,7 @@ pub struct RadixFormatSpec {
     pub emitted: u32,
     /// Maximum physically written bytes (state +0x0c).
     pub limit: u32,
-    /// Padding-helper control word (state +0x10), owned by `FORMAT_PAD`.
+    /// Padding-helper control word (state +0x10).
     pub padding_enabled: u32,
     /// Nonzero selects trailing rather than leading field padding (state +0x14).
     pub left_justify: u32,
@@ -67,12 +65,11 @@ pub struct RadixFormatSpec {
     pub show_plus: u32,
     /// Length of the constructed sign-and-digit text (state +0x20).
     pub text_len: u32,
-    /// Field width consumed by `FORMAT_PAD` (state +0x24).
+    /// Minimum field width used by `format_field_padding` (state +0x24).
     pub width: i32,
     /// Minimum digit count when [`Self::precision_specified`] is nonzero
     /// (state +0x28).
     pub precision: i32,
-    /// Padding byte consumed by `FORMAT_PAD` (state +0x2c).
     pub fill: u8,
     pub reserved_2d: [u8; 3],
 }
@@ -82,14 +79,10 @@ unsafe extern "C" fn divide_not_ported(_dividend: u32, _radix: u32) -> RadixDivi
 }
 
 
-unsafe extern "C" fn padding_not_ported(_phase: u32, _spec: *mut RadixFormatSpec) {}
 
 /// Active divide helper. The eventual port of `FUN_08036f14` replaces this
 /// slot; tests install a precise host divider.
 pub static mut RADIX_DIVIDE: RadixDivideFn = divide_not_ported;
-/// Active field-padding helper. The eventual port of `FUN_080ec120` replaces
-/// this slot; tests install a deterministic padding recorder.
-pub static mut FORMAT_PAD: FormatPadFn = padding_not_ported;
 
 #[inline(always)]
 unsafe fn radix_divide() -> RadixDivideFn {
@@ -97,10 +90,6 @@ unsafe fn radix_divide() -> RadixDivideFn {
 }
 
 
-#[inline(always)]
-unsafe fn format_pad() -> FormatPadFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_PAD))
-}
 
 #[cfg(target_os = "none")]
 const FIRMWARE_RADIX_DIGITS: *const u8 = 0x083e_cb4c as *const u8;
@@ -181,12 +170,12 @@ pub unsafe extern "C" fn format_signed_radix_integer(
     } else {
         1u32.wrapping_sub(spec_ref.left_justify)
     };
-    (format_pad())(leading_phase, spec);
+    format_field_padding(leading_phase, spec);
     while end != 0 {
         end -= 1;
         format_bounded_byte(spec, reverse.add(end).read());
     }
-    (format_pad())(spec_ref.left_justify, spec);
+    format_field_padding(spec_ref.left_justify, spec);
 }
 
 #[cfg(test)]
@@ -198,7 +187,6 @@ mod tests {
     use std::vec::Vec;
 
     static CALLBACK_LOCK: Mutex<()> = Mutex::new(());
-    static mut PHASES: Vec<u32> = Vec::new();
 
     struct Sink {
         bytes: Vec<u8>,
@@ -214,33 +202,17 @@ mod tests {
     }
 
 
-    /// Deterministic stand-in for `FUN_080ec120`: a nonzero phase requests
-    /// this side's field padding. It emits through the ported bounded-byte
-    /// helper, preserving the normal output count and limit behavior.
-    unsafe extern "C" fn field_pad(phase: u32, spec: *mut RadixFormatSpec) {
-        PHASES.push(phase);
-        if phase != 0 {
-            let padding = (*spec).width.saturating_sub((*spec).text_len as i32);
-            for _ in 0..padding {
-                format_bounded_byte(spec, (*spec).fill);
-            }
-        }
-    }
 
     struct Hooks {
         divide: RadixDivideFn,
-        pad: FormatPadFn,
     }
 
     impl Hooks {
         unsafe fn install() -> Self {
             let hooks = Self {
                 divide: core::ptr::read_volatile(core::ptr::addr_of!(RADIX_DIVIDE)),
-                pad: core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_PAD)),
             };
             core::ptr::write_volatile(core::ptr::addr_of_mut!(RADIX_DIVIDE), host_divide);
-            core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_PAD), field_pad);
-            PHASES.clear();
             hooks
         }
     }
@@ -249,7 +221,6 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::write_volatile(core::ptr::addr_of_mut!(RADIX_DIVIDE), self.divide);
-                core::ptr::write_volatile(core::ptr::addr_of_mut!(FORMAT_PAD), self.pad);
             }
         }
     }
@@ -310,7 +281,6 @@ mod tests {
         let mut spec = state(&mut sink, 6, false, 0);
         unsafe { format_signed_radix_integer(-42, 10, &mut spec) };
         assert_eq!(sink.bytes, b"   -42");
-        assert_eq!(unsafe { PHASES.as_slice() }, [1, 0]);
         assert_eq!(spec.emitted, 6);
     }
 
@@ -324,7 +294,6 @@ mod tests {
         spec.show_plus = 1;
         unsafe { format_signed_radix_integer(42, 10, &mut spec) };
         assert_eq!(sink.bytes, b"+42   ");
-        assert_eq!(unsafe { PHASES.as_slice() }, [0, 1]);
         assert_eq!(spec.emitted, 6);
     }
 
