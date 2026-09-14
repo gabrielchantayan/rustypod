@@ -94,6 +94,16 @@
 //! there are no direct tail-`B` callers. The predicated caller selects the left
 //! child before calling, so the shared no-NULL-guard implementation and host
 //! tests apply without a redundant dispatch seam. Deliberate deviations: none.
+//!
+//! `FUN_083c0cb4` at load address `0x083c0cb4` is a byte-identical 84-byte
+//! copy: 21 ARM words from `ldr r2,[r1,#8]` through `bx lr` at `0x083c0d04`,
+//! followed by the separately linked function at `0x083c0d08`. A full
+//! raw-binary B/BL-immediate scan finds exactly five inbound direct calls:
+//! unconditional `bl` at `0x083c1000`, `0x083c1078`, `0x083c1164`, and
+//! `0x083c1418`, plus predicated `bleq` at `0x083c1468`; no direct tail-`B`
+//! callers exist. Its selected left-child pivot makes the shared no-NULL-guard
+//! right rotation faithful. Deliberate deviations: none; the existing host
+//! tests cover the root, middle-subtree, and both parent-child-slot cases.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
