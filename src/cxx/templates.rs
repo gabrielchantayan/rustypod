@@ -1359,7 +1359,7 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// equal_deref — originals: `FUN_083cf650` @ 0x083cf650,
 /// `FUN_083cf680` @ 0x083cf680, `FUN_083cf698` @ 0x083cf698,
 /// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
-/// `FUN_083cf788` @ 0x083cf788, `FUN_083cf7a0` @ 0x083cf7a0,
+/// `FUN_083cf770` @ 0x083cf770, `FUN_083cf788` @ 0x083cf788,
 /// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf7e8` @ 0x083cf7e8,
 /// `FUN_083cf860` @ 0x083cf860, `FUN_083cf878` @ 0x083cf878,
 /// `FUN_083cf8c0` @ 0x083cf8c0, `FUN_083cf890` @ 0x083cf890,
@@ -1368,7 +1368,7 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf968` @ 0x083cf968,
 /// `FUN_083cf980` @ 0x083cf980, `FUN_083cf998` @ 0x083cf998,
 /// `FUN_083cf9b0` @ 0x083cf9b0, and `FUN_083cf9c8` @ 0x083cf9c8
-/// (24 bytes each). Raw bytes show all twenty-two are the same six-word leaf. At
+/// (24 bytes each). Raw bytes show all twenty-three are the same six-word leaf. At
 /// 0x083cf650, the next separately linked copy begins at 0x083cf668,
 /// confirming the extent. Decoding every ARM B/BL word
 /// in `osos.dec` finds exactly 7 plain `bl` callers there: 0x08109d10,
@@ -1568,15 +1568,22 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// The 0x083cf968 callers are container-iteration loops: they
 /// stack-materialize a cursor iterator and the list/deque end iterator and
 /// compare their FIRST words (the current-node pointer) through this helper,
-/// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf788,
-/// 0x083cf7d0, 0x083cf7b8, 0x083cf908, 0x083cf920, 0x083cf938, 0x083cf950,
-/// 0x083cf980, 0x083cf9b0, and 0x083cf9c8 copies have the same raw body and ABI, so their
-/// ledger entries deliberately hook this established export instead of introducing redundant
-/// dispatch seams.
+/// i.e. the ADS checked-iterator `operator==`. The 0x083cf650, 0x083cf770,
+/// 0x083cf788, 0x083cf7d0, 0x083cf7b8, 0x083cf908, 0x083cf920, 0x083cf938,
+/// 0x083cf950, 0x083cf980, 0x083cf9b0, and 0x083cf9c8 copies have the same
+/// raw body and ABI, so their ledger entries deliberately hook this established
+/// export instead of introducing redundant dispatch seams.
 ///
 /// `FUN_083cf7d0` @ 0x083cf7d0 is a separately linked 24-byte copy with five
 /// direct, unconditional `bl` callers (0x083c1790, 0x083c1800, 0x083c1c6c,
 /// 0x083c1c88, and 0x083c1d0c); its two aligned loads compare the dereferenced
+/// words and return normalized equality, with no NULL guard. It deliberately
+/// reuses this byte-identical export: no behavioral deviation or duplicate
+/// dispatch seam is introduced.
+///
+/// `FUN_083cf770` @ 0x083cf770 is a separately linked 24-byte copy with five
+/// direct, unconditional `bl` callers (0x083b9690, 0x083b9afc, 0x083b9b18,
+/// 0x083b9b9c, and 0x083b9c60). Its two aligned loads compare dereferenced
 /// words and return normalized equality, with no NULL guard. It deliberately
 /// reuses this byte-identical export: no behavioral deviation or duplicate
 /// dispatch seam is introduced.
@@ -4829,7 +4836,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f7e8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f680_f698_f6c8_f758_f770_f788_f7a0_f7b8_f7e8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
