@@ -7456,6 +7456,24 @@ functions:
       body preserves r3 = 6 through the existing message_dispatch_veneer
       seam; pad words 6/7 zeroed rather than left uninitialized.
 
+  - address: 0x08048064
+    ghidra: FUN_08048064
+    name: gateway_request_blocking_flag_one
+    size: 28
+    sig: "void gateway_request_blocking_flag_one(void *payload)"
+    module: kernel/gateway_request_blocking
+    status: ported
+    vars: {param_1: payload}
+    notes: >-
+      Raw ARM saves payload in r4, calls gateway_wait_ready @ 0x080c8304,
+      restores payload to r0, sets r1 = 1, then tail-branches to
+      gateway_request_blocking @ 0x08048000. A whole-image ARM B/BL scan
+      verifies 6 unconditional BL call sites at 0x08068df8, 0x080fcb60,
+      0x0816c378, 0x081a20d4, 0x081b9894, and 0x081f99c0; no predicated
+      calls. This results in two readiness waits because the delegated
+      helper waits too. Deviation: Rust uses an ordinary call rather than
+      the ARM tail branch, preserving the observable result and effects.
+
   - address: 0x080c8304
     ghidra: FUN_080c8304
     name: gateway_wait_ready
