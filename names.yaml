@@ -32522,6 +32522,45 @@ functions:
       dispatches. On 64-bit host tests a typed widened Expr is copied;
       the target executes the original 0x44-byte memcpy.
 
+  - address: 0x08375328
+    ghidra: FUN_08375328
+    name: trigger_delete
+    size: 80
+    sig: "void trigger_delete(Trigger *trigger)"
+    module: sqlite/trigger_delete
+    status: ported
+    renames:
+      param_1/r0/r4: trigger
+      "trigger+0x00": z_name
+      "trigger+0x04": table
+      "trigger+0x0c": p_when
+      "trigger+0x10": p_columns
+      "trigger+0x14": name_token_z
+      "trigger+0x18": name_token_dyn
+      "trigger+0x24": step_list
+      FUN_08375378: trigger_step_delete
+      FUN_083906f4: tracked_free
+      FUN_08377e00: expr_delete
+      FUN_0837b11c: id_list_delete
+    notes: >-
+      SQLite 3.5.x sqlite3DeleteTrigger. Raw ARM spans exactly 80 bytes from
+      0x08375328 through the tail b at 0x08375374; the separately linked
+      sqlite3DeleteTriggerStep begins immediately at 0x08375378. A complete
+      osos.dec decode of every ARM B/BL word finds exactly five inbound direct
+      BL forms: unconditional bl at 0x083794f8, 0x0838284c, 0x08382cb0, and
+      0x0838a1f8, plus bleq at 0x083701ec; no direct B tail targets it. NULL
+      returns untouched. A live Trigger first releases its step_list (+0x24),
+      then zName (+0x00), table (+0x04), pWhen (+0x0c), and pColumns (+0x10).
+      It conditionally releases nameToken.z (+0x14) only when the packed
+      nameToken dyn bit at +0x18 is set, then tail-frees the Trigger itself.
+      The five ordinary outbound BLs are the step destructor, zName/table
+      frees, expression destructor, and identifier-list destructor; the
+      nameToken free is the sole predicated blne. All but trigger_step_delete
+      are already ported and called directly. trigger_step_delete @ 0x08375378
+      remains an unported volatile seam with a no-op default; host tests swap
+      it for a recorder. The typed repr(C) Trigger preserves every field's
+      target offset on ARM and keeps widened host pointer fields disjoint.
+
   - address: 0x08377e00
     ghidra: FUN_08377e00
     name: expr_delete
