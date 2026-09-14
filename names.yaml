@@ -17,6 +17,36 @@
 base: 0x08000000
 
 functions:
+  # --- conditional UTF-16 vtable dispatch ---
+  - address: 0x08135760
+    ghidra: FUN_08135760
+    name: vtable_slot_14_if_clear
+    size: 28
+    sig: "u32 vtable_slot_14_if_clear(VtableSlot14Receiver *receiver, u16 *output)"
+    module: cxx/vtable_slot_14_if_clear
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: output
+      param_1_plus_0x04: dispatch_suppressed
+      param_1_vtable_plus_0x14: vtable_slot_14
+    notes: >-
+      Raw ARM establishes the 28-byte extent from ldrb r2,[r0,#4] at
+      0x08135760 through bx lr at 0x08135778; the next separately linked
+      function begins at 0x0813577c. It returns zero for every nonzero
+      receiver byte at +0x04, without accessing the vtable or output; when
+      clear it tail-dispatches vtable slot +0x14 with receiver and output,
+      preserving the callback result. Decoding every immediate B/BL word in
+      osos.dec finds exactly six direct calls, all unconditional bl at
+      0x0810325c, 0x08147fd4, 0x08148094, 0x081a7788, 0x0820b150, and
+      0x0820b18c. A separate bne tail branch at 0x081b68f0 reaches it only
+      when that wrapper's selected receiver is non-null; there are no
+      aligned raw data-word references. Firmware callers use output as a
+      low-16-bit result cell, but the virtual method's concrete identity is
+      unrecovered and is deliberately not invented. Rust models the ARM
+      four-byte vtable word as a typed host pointer-width callback cell; its
+      final typed call represents ARM bxeq. Deliberate deviations: none.
+
   # --- ARM ADS runtime: memory block ---
   - address: 0x080000d4
     ghidra: FUN_080000d4

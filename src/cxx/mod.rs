@@ -150,6 +150,7 @@ pub mod vtable;
 pub mod vtable_predicate_state_flag;
 pub mod vtable_predicate_state_scaled_value;
 pub mod vtable_slot_12_tail_dispatch;
+pub mod vtable_slot_14_if_clear;
 pub mod vtable_slot_40_result_word;
 pub mod vtable_word_callback;
 pub mod vtable_object_base_construct;
