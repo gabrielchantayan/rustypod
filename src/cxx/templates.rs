@@ -1150,6 +1150,36 @@ pub unsafe extern "C" fn less_unsigned_alias_7404(
 ) -> u32 {
     u32::from(a.read() < b.read())
 }
+/// less_unsigned_alias_7568 — original: `FUN_083d7568` @ 0x083d7568
+/// (24 bytes; 5 `bl` call sites, all unconditional: 0x083c6b0c,
+/// 0x083c6c30, 0x083c6d08, 0x083d65b0, and 0x083d65ec; verified by
+/// decoding every ARM B/BL-immediate word in `osos.dec`).
+///
+/// Byte-identical `std::less<unsigned>::operator()(const unsigned &a,
+/// const unsigned &b)` instantiation: loads both aligned referenced words,
+/// unsigned-compares them, and returns 1 when `*a < *b`, otherwise 0. Raw
+/// ARM is `ldr r0,[r1]; ldr r1,[r2]; cmp r0,r1; movcs r0,#0; movcc r0,#1;
+/// bx lr`; it neither reads `this` nor guards either operand. The next
+/// independently linked sibling begins at 0x083d7580, confirming the
+/// 24-byte extent.
+///
+/// Deliberately exported in its own text section rather than sharing
+/// [`less_unsigned`], so the distinct retailOS branch target remains
+/// hookable and LLVM cannot fold the byte-identical bodies. No deviations.
+///
+/// # Safety
+/// `a` and `b` must be valid, aligned `u32` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.less_unsigned_alias_7568")]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_alias_7568(
+    _this: *const u8,
+    a: *const u32,
+    b: *const u32,
+) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
 
 
 /// less_unsigned_byte — original: `FUN_083d73bc` @ 0x083d73bc
@@ -4565,6 +4595,23 @@ mod tests {
                 for b in values {
                     assert_eq!(
                         less_unsigned_alias_7404(&ignored_this, &a, &b),
+                        u32::from(a < b),
+                        "{a:#010x} < {b:#010x}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn less_unsigned_alias_7568_matches_unsigned_reference_edges() {
+        unsafe {
+            let values = [0, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX];
+            let ignored_this = 0u8;
+            for a in values {
+                for b in values {
+                    assert_eq!(
+                        less_unsigned_alias_7568(&ignored_this, &a, &b),
                         u32::from(a < b),
                         "{a:#010x} < {b:#010x}"
                     );

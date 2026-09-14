@@ -33885,6 +33885,32 @@ functions:
       then 0x083d7434, 0x083d744c, 0x083d7464, 0x083d747c, 0x083d74ac,
       0x083d74c4, 0x083d74dc, 0x083d7568 at 5 each, 0x083d741c and
       0x083d7494 at 3 each.
+  - address: 0x083d7568
+    ghidra: FUN_083d7568
+    name: less_unsigned_alias_7568
+    size: 24
+    sig: "u32 less_unsigned_alias_7568(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: a
+      param_3/r2: b
+    notes: >-
+      Byte-identical `std::less<unsigned>::operator()` instantiation of
+      less_unsigned @ 0x083d7598. Raw ARM is `ldr r0,[r1]; ldr r1,[r2];
+      cmp r0,r1; movcs r0,#0; movcc r0,#1; bx lr`: it ignores this,
+      dereferences aligned u32 operands without NULL guards, and returns 1
+      only when `*a < *b`. The next independently linked sibling starts at
+      0x083d7580, confirming the 24-byte extent. Decoding every ARM
+      B/BL-immediate word in osos.dec finds exactly 5 direct call sites,
+      all plain unconditional bl (no predicated calls): 0x083c6b0c,
+      0x083c6c30, 0x083c6d08, 0x083d65b0, and 0x083d65ec. It is exported
+      in a distinct link section so LLVM cannot fold this separately
+      hookable retail branch target into another byte-identical copy. No
+      deliberate deviations; host tests cover equal, ordered, and high-bit
+      unsigned values.
+
   - address: 0x083d7404
     ghidra: FUN_083d7404
     name: less_unsigned_alias_7404
