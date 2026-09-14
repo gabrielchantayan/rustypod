@@ -43042,6 +43042,40 @@ functions:
       returned storage, vtable replacement, cleared +0x04/+0x08, and
       preservation of every child/derived word.
 
+  # --- Silver UI framework: current task target reset ---
+
+  - address: 0x08110c54
+    ghidra: FUN_08110c54
+    name: framework_base_reset_current_task_targets
+    size: 36
+    sig: "void framework_base_reset_current_task_targets(void)"
+    module: app/class_6800
+    status: ported
+    renames:
+      FUN_080cb828: current_task_ctx_block
+      field_0x24: framework_base_initial_target
+      field_0x28: framework_task_target
+      DAT_08110c78: FRAMEWORK_TASK_RESET_ENTRY_LIST_ADDRESS (0x083e2da8)
+      FUN_0812c534: unresolved_task_reset_entry_list_apply
+    notes: >-
+      Raw ARM proves 36 code bytes from 0x08110c54 through 0x08110c74,
+      followed by literal 0x083e2da8 at 0x08110c78; the distinct next
+      function begins at 0x08110c7c, so the true image extent is 40 bytes.
+      It calls current_task_ctx_block(), clears TaskCtx +0x24, calls
+      0x081110a4 with NULL (which independently calls current_task_ctx_block()
+      and clears +0x28 without dispatching its non-NULL vtable +0x44 path),
+      then tail-branches to 0x0812c534 with the literal. A whole-image A32
+      B/BL decode found exactly six direct callers, all unconditional BL:
+      0x0814b3fc, 0x081a7b40, 0x081d243c, 0x081d26f4, 0x081fb5ec, and
+      0x08209c98; there are zero predicated calls and zero direct tail
+      branches. The Rust port preserves the two independently queried
+      contexts and the opaque literal via a volatile seam. 0x0812c534 is
+      unported. Its supplied literal points at an apparent ARM branch before
+      separately decoded code rather than recognizable entry-list data, so
+      no callee or object identity is invented. Focused host coverage proves
+      a task switch between the two reads affects different contexts and that
+      the literal is forwarded exactly once.
+
   # --- Silver UI framework: task current-target setter ---
 
   - address: 0x08110ca8

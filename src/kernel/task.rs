@@ -248,8 +248,12 @@ pub struct TaskCtx {
     /// `framework_base_construct_with_task_target` (0x0811113c). Its
     /// wider task-framework role is not recovered.
     pub framework_base_initial_target: *mut u8,
-    /// +0x28..+0x34: zeroed by the allocator, untouched here.
-    pub _x28: [u32; 4],
+    /// +0x28: task framework target installed by `FUN_081110a4`; its
+    /// vtable +0x44 callback runs when it is non-NULL. The reset port at
+    /// 0x08110c54 clears it through that callee.
+    pub framework_task_target: *mut u8,
+    /// +0x2c..+0x34: zeroed by the allocator, untouched here.
+    pub _x2c: [u32; 3],
     /// +0x38: the task's own class registry, lazily constructed and
     /// installed by `task_registry_register` (app/task_registry.rs —
     /// the original's `ldr r4, [r0, #0x38]` @ 0x0826d65c and
@@ -278,7 +282,8 @@ impl TaskCtx {
         queue_pool: core::ptr::null_mut(),
         _x20: 0,
         framework_base_initial_target: core::ptr::null_mut(),
-        _x28: [0; 4],
+        framework_task_target: core::ptr::null_mut(),
+        _x2c: [0; 3],
         registry: core::ptr::null_mut(),
         _x3c: [0; 6],
     };
@@ -807,7 +812,8 @@ pub unsafe extern "C" fn name_node_alloc() -> *mut NameNode {
     (*ctx).queue_pool = core::ptr::null_mut();
     (*ctx)._x20 = 0;
     (*ctx).framework_base_initial_target = core::ptr::null_mut();
-    (*ctx)._x28 = [0; 4];
+    (*ctx).framework_task_target = core::ptr::null_mut();
+    (*ctx)._x2c = [0; 3];
     (*ctx).registry = core::ptr::null_mut();
     (*ctx)._x0c = 0;
     (*ctx)._x10 = 0;
