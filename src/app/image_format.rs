@@ -169,6 +169,57 @@ const PIXEL_FORMAT_TAG_C422: u16 = 0xc422;
 /// Tag 0xc420 (`ldr r1,[0x8105fec]`), the 480×720 12bpp format — a
 /// 4:2:0-flavored chroma tag, named on the raw value.
 const PIXEL_FORMAT_TAG_C420: u16 = 0xc420;
+
+/// Selects the pixel-format tag for a bitmap bit depth, unless the caller
+/// already supplied a nonzero tag.
+///
+/// `pixel_format_tag_for_bit_depth_or_override` — original:
+/// `FUN_0808737c` @ 0x0808737c (116 bytes through the next separately linked
+/// function: 108-byte instruction body plus the two-word literal pool at
+/// 0x080873e8 and 0x080873ec; 6 unconditional `bl` call sites,
+/// binary-scanned).
+///
+/// A nonzero `format_tag_override` is returned unchanged. Otherwise the
+/// comparison tree maps bit depths 0 and 32 to ARGB `0x1888`, 16 to RGB555
+/// `0x0555`, and 1, 2, 4, or 8 to themselves; every other depth returns zero.
+/// No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn pixel_format_tag_for_bit_depth_or_override(
+    bit_depth: u32,
+    format_tag_override: u32,
+) -> u32 {
+    if format_tag_override != 0 {
+        return format_tag_override;
+    }
+
+    if bit_depth == 4 {
+        return 4;
+    }
+    if (bit_depth as i32) > 4 {
+        if bit_depth == 8 {
+            return 8;
+        }
+        if bit_depth == 16 {
+            return 0x0555;
+        }
+        if bit_depth == 32 {
+            return PIXEL_FORMAT_TAG_1888 as u32;
+        }
+        return 0;
+    }
+    if bit_depth == 0 {
+        return PIXEL_FORMAT_TAG_1888 as u32;
+    }
+    if bit_depth == 1 {
+        return 1;
+    }
+    if bit_depth == 2 {
+        return 2;
+    }
+    0
+}
+
 /// Maps an internal image pixel-format tag to the host-facing QuickTime
 /// pixel-format OSType used in image capability records.
 ///
@@ -195,6 +246,7 @@ pub extern "C" fn pixel_format_tag_to_ostype(tag: u32) -> u32 {
         _ => 0,
     }
 }
+
 
 /// The geometry one covered format id maps to. `height_bytes` is the
 /// +0x08 field: height × bytes-per-pixel in every arm (verified
@@ -428,6 +480,48 @@ pub extern "C" fn image_pixel_buffer_size_for_kind(kind: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bit_depth_defaults_match_the_decoded_comparison_tree() {
+        // Every terminal value comes directly from an ARM mov, the two-word
+        // literal pool, or the initial `movs r0,r1` zero result.
+        for (bit_depth, expected) in [
+            (0, 0x1888),
+            (1, 1),
+            (2, 2),
+            (3, 0),
+            (4, 4),
+            (5, 0),
+            (8, 8),
+            (16, 0x0555),
+            (31, 0),
+            (32, 0x1888),
+            (33, 0),
+            (0x8000_0000, 0),
+            (u32::MAX, 0),
+        ] {
+            assert_eq!(
+                pixel_format_tag_for_bit_depth_or_override(bit_depth, 0),
+                expected,
+                "bit depth {bit_depth:#x}",
+            );
+        }
+    }
+
+    #[test]
+    fn nonzero_pixel_format_override_bypasses_bit_depth_mapping() {
+        for (bit_depth, format_tag_override) in [
+            (0, 1),
+            (16, 0x0565),
+            (32, 0xdead_beef),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert_eq!(
+                pixel_format_tag_for_bit_depth_or_override(bit_depth, format_tag_override),
+                format_tag_override,
+            );
+        }
+    }
 
     #[test]
     fn pixel_format_tags_map_to_the_decoded_ostypes() {
