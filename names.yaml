@@ -33704,6 +33704,32 @@ functions:
       (cur/base NULL, end 0x80) with wrapping_add, and loads the existing
       deque_seg_capacity export through read_volatile so LLVM retains the
       stock capacity-call boundary rather than folding its constant result.
+  - address: 0x083da5a8
+    ghidra: FUN_083da5a8
+    name: streambuf_sgetc
+    size: 32
+    sig: "i32 streambuf_sgetc(Streambuf *streambuf)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: streambuf, r1: input_current, r2: input_end}
+    renames:
+      FUN_083da5a8: streambuf_sgetc
+      param_1: streambuf
+      r1: input_current
+      r2: input_end
+    notes: >-
+      Raw ARM fixes the exact 32-byte body 0x083da5a8..0x083da5c4: the
+      following bx lr terminates it and separately linked streambuf_sputc
+      begins at 0x083da5c8. Whole-image ARM B/BL-immediate decoding finds five
+      direct inbound calls, all unconditional plain bl at 0x083d6524,
+      0x083d653c, 0x083d716c, 0x083d8264, and 0x083d82fc; zero are
+      predicated. It returns the zero-extended byte at input_current (+0x18)
+      when unsigned input_current < input_end (+0x1c), without advancing it.
+      Otherwise it tail-dispatches the streambuf vtable word at +0x20 and
+      returns that i32 result. The virtual target identity is not assumed; its
+      verified receiver and result ABI are modeled. No ARM deviations; host
+      tests inject the underflow callback because native function pointers do
+      not fit the target's 32-bit vtable word.
   - address: 0x083da5c8
     ghidra: FUN_083da5c8
     name: streambuf_sputc

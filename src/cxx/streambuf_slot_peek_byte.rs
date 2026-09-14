@@ -15,10 +15,11 @@
 //!
 //! # Deliberate deviations
 //!
-//! None on ARM. The shared bridge to 0x083da5a8 preserves the direct call;
-//! host tests replace that unavailable target helper with a recorder.
+//! None on ARM. The ported helper dispatches its real `+0x20` vtable slot;
+//! host tests install its non-ARM underflow hook because a target-width vtable
+//! callback word cannot name a native x86-64 callback.
 
-use super::streambuf_slot_peek_equal::streambuf_sgetc;
+use super::string::streambuf_sgetc;
 
 /// streambuf_slot_peek_byte — original: `FUN_083d7158` @ 0x083d7158
 /// (32 bytes; 8 unconditional plain `bl` call sites, zero predicated).
@@ -50,7 +51,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::streambuf_slot_peek_equal::{StreambufSgetc, STREAMBUF_SGETC, STREAMBUF_SGETC_TEST_LOCK};
+    use crate::cxx::string::{StreambufUnderflowHook, STREAMBUF_UNDERFLOW, STREAMBUF_UNDERFLOW_TEST_LOCK};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
     use std::sync::{LazyLock, Mutex};
@@ -87,11 +88,11 @@ mod tests {
         recorder.result
     }
 
-    struct SgetcReset(StreambufSgetc);
+    struct SgetcReset(StreambufUnderflowHook);
 
     impl Drop for SgetcReset {
         fn drop(&mut self) {
-            unsafe { STREAMBUF_SGETC = self.0 };
+            unsafe { STREAMBUF_UNDERFLOW = self.0 };
         }
     }
 
@@ -100,8 +101,8 @@ mod tests {
             result,
             ..Recorder::new()
         };
-        let previous = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAMBUF_SGETC)) };
-        unsafe { STREAMBUF_SGETC = record_sgetc };
+        let previous = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAMBUF_UNDERFLOW)) };
+        unsafe { STREAMBUF_UNDERFLOW = record_sgetc };
         SgetcReset(previous)
     }
 
@@ -119,7 +120,7 @@ mod tests {
 
     #[test]
     fn null_slot_maps_eof_to_a_byte_without_peeking() {
-        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
+        let _guard = STREAMBUF_UNDERFLOW_TEST_LOCK.lock();
         let _reset = install_sgetc(0x42);
         let Some((slot, _)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_byte"));
@@ -133,7 +134,7 @@ mod tests {
 
     #[test]
     fn helper_result_is_truncated_and_receives_slot_value() {
-        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
+        let _guard = STREAMBUF_UNDERFLOW_TEST_LOCK.lock();
         let _reset = install_sgetc(0x1234_56a5);
         let Some((slot, streambuf)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_byte"));
@@ -148,7 +149,7 @@ mod tests {
 
     #[test]
     fn helper_eof_maps_to_ff() {
-        let _guard = STREAMBUF_SGETC_TEST_LOCK.lock();
+        let _guard = STREAMBUF_UNDERFLOW_TEST_LOCK.lock();
         let _reset = install_sgetc(-1);
         let Some((slot, _)) = (unsafe { fixture() }) else {
             assert!(note_missing_u32_fixture("cxx/streambuf_slot_peek_byte"));
