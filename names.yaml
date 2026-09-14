@@ -34350,6 +34350,39 @@ functions:
       src/cxx/templates.rs::element_at_alias_6908_dispatches_through_slot_0x40_and_derefs
       / element_at_alias_6908_matches_primary.
 
+
+  - address: 0x083d6b6c
+    ghidra: FUN_083d6b6c
+    name: container_element_at_alias_6b6c
+    size: 24
+    sig: "void *container_element_at_alias_6b6c(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      return/r0: element
+    notes: >-
+      ALIAS — byte-identical instantiation of container_element_at @
+      0x083d5efc. Raw osos.dec establishes the exact 24-byte extent from
+      0x083d6b6c through `pop {r4,pc}` at 0x083d6b80; the next separately
+      linked sibling starts at 0x083d6b84. It dispatches through the
+      container vtable's slot 0x40 (slot 16) with this and index, receives
+      an element-slot address, and loads the element pointer from that slot.
+      Ghidra drops r1 from its signature, but raw `blx r2` preserves the
+      index. Decoding every ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional plain bl (no predicated
+      calls or b tail-calls): 0x0815bba0, 0x0815bbec, 0x0815bc44,
+      0x083d17b4, and 0x083d17f8. The implementation deliberately supplies
+      no NULL guard for the virtual result or element slot. It reuses the
+      existing word-indexed vtable seam, which preserves the 32-bit target
+      slot layout on a 64-bit host, and has a distinct link section to keep
+      the independently hookable alias from folding with its siblings.
+      Host tests cover vtable-slot dispatch, index propagation, element
+      dereference, NULL-element propagation, and equivalence with the
+      primary implementation. Deliberate deviations: none.
+
+
   - address: 0x083d6bc0
     ghidra: FUN_083d6bc0
     name: container_element_at_alias_6bc0
