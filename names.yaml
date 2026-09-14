@@ -6349,8 +6349,8 @@ functions:
       (0x083d5ea0, ported in place as iter_entry), reads the entry's
       +0x4 owner handle (NULL -> heap_panic, non-returning) and stamps
       the handle's +0xc back-link with the node. Returns 1.
-      0x083d5e88/0x083d5ea0 are inlined private helpers (their only
-      call sites are this body). Deviations: the original's triple
+      0x083d5e88 is now the exported list_iter_advance port; 0x083d5ea0
+      remains a private helper. Deviations: the original's triple
       entry/owner re-read per node and the dead post-panic NULL
       re-check collapse to one read (0x08030f44 is non-returning); the
       intermediate iterator spills collapse into the two locals the
@@ -6407,10 +6407,10 @@ functions:
       range_last, in the original's order) and both count fixups,
       return 1. Quirk: NO empty-range guard — first == last moves zero
       nodes but the re-link still runs, swapping the predecessor links
-      (pinned by a host test). Helpers ported in place, private:
-      iter_owner (0x083d5e5c, 20 bytes), iter_equal (0x083d5e70, 24
-      bytes), iter_advance (0x083d5e88, 24 bytes — same in-place
-      rationale as block_mgr.rs's copy). The crate adapter
+      (pinned by a host test). Helpers remain private: iter_owner
+      (0x083d5e5c, 20 bytes) and iter_equal (0x083d5e70, 24 bytes).
+      The adopt walk directly calls exported list_iter_advance
+      (0x083d5e88, 24 bytes). The crate adapter
       splice_blocks (verdict discarded, like the original's callers)
       is now the wired BLOCK_MANAGER_OPS.splice_blocks default
       (stub_splice_blocks removed — the only src/heap touch, three
@@ -6421,10 +6421,35 @@ functions:
       (full-slab snapshot unchanged), the empty-range quirk, and the
       adapter (grant + silent refusal). match.py structural: same
       ownership-check/adopt-walk/relink/count-fixup shape; the u32
-      word accesses come out as ldrb/strb chains from the
-      (read|write)_unaligned idiom, the private helper bls label as
-      list_splice+off, LLVM adds its fp frame — the accepted house
-      deviations.
+      word accesses come out as (read|write)_unaligned chains,
+      list_iter_advance remains a direct call, LLVM adds its fp frame —
+      the accepted house deviations.
+
+  - address: 0x083d5e88
+    ghidra: FUN_083d5e88
+    name: list_iter_advance
+    size: 24
+    sig: "void list_iter_advance(u8 **it)"
+    module: cxx/list_iter_advance
+    status: ported
+    renames:
+      param_1/r0: it
+      param_1_deref: node
+      node_plus_0x04: next
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM extent is exactly 24 bytes at 0x083d5e88..0x083d5e9c:
+      ldr r1,[r0]; cmp r1,#0; bleq 0x08030f44; ldr r1,[r1,#4];
+      str r1,[r0]; bx lr. The separately linked next function begins at
+      0x083d5ea0. Decoding every aligned ARM B/BL immediate in osos.dec
+      found exactly five inbound calls, all unconditional plain bl at
+      0x0818a580, 0x0818ae00, 0x0818b14c, 0x0818b1f4, and 0x083d5db8;
+      no predicated forms or tail branches. It advances the single iterator
+      target-pointer word from node to node+0x4; a NULL current node invokes
+      non-returning heap_panic, while a NULL successor is stored normally.
+      No deliberate deviations. The port replaces the prior private copies
+      used by list_splice and take_blocks_body; its host test covers both a
+      non-NULL successor and the terminal NULL successor.
 
   - address: 0x080751a0
     ghidra: FUN_080751a0

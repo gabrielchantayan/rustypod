@@ -857,6 +857,9 @@ pub mod hints {
     // handle and page-state fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const BUFFERED_WRITER_WRITE: usize = 0x2b00_0000;
+    // 0xb200_0000: dedicated to cxx/list_iter_advance's raw-u32 list-node
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const LIST_ITER_ADVANCE: usize = 0xb200_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
