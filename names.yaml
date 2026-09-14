@@ -84111,3 +84111,30 @@ functions:
       literal veneers and host tests use volatile callback seams. The GPIO
       configurator and microsecond delay veneer were already ported and are
       called directly. Deliberate deviations: none.
+
+  # --- Tagged stream-handle validation ---
+  - address: 0x08087974
+    ghidra: FUN_08087974
+    name: stream_handle_validate
+    size: 36
+    sig: "i32 stream_handle_validate(const u32 *handle)"
+    module: util/stream_handle_validate
+    status: ported
+    renames:
+      param_1/r0: handle
+      DAT_08087998: mrts_tag
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte instruction body from cmp
+      r0,#0 at 0x08087974 through bx lr at 0x08087994. The following word
+      at 0x08087998 is literal 0x7374726d (in-memory bytes "mrts"), and the
+      separately linked next function starts with push {r4,lr} at 0x0808799c.
+      A NULL handle returns -50 without a load; otherwise the body loads its
+      first aligned word and returns zero only when it equals the literal,
+      returning -50 for every other tag without mutation. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly six direct inbound
+      calls, all unconditional plain bl at 0x0805b6e0, 0x0805b720,
+      0x0805b748, 0x0805b7dc, 0x0805b814, and 0x0805b844; there are no
+      predicated forms, direct tail branches, or aligned raw data-word
+      references. The six callers gate stream-handle operations before
+      forwarding the second target word to their read, write, tell, or
+      finalization helpers. Deliberate deviations: none.
