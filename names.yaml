@@ -80518,6 +80518,31 @@ functions:
       only the MMIO word with a volatile stand-in. #[inline(never)] and a
       distinct link section preserve this direct-call hook target.
 
+  - address: 0x080ffcf0
+    ghidra: FUN_080ffcf0
+    name: indexed_record_value_lookup
+    size: 60
+    sig: "i32 indexed_record_value_lookup(u32 key)"
+    module: util/indexed_record_value_lookup
+    status: ported
+    renames:
+      param_1: key
+      DAT_080ffd2c: primary_table
+      DAT_080ffb60: secondary_table
+    notes: >-
+      Raw ARM is 60 instruction bytes at 0x080ffcf0..0x080ffd2c followed by
+      a four-byte literal holding primary-table address 0x083e9d94; the next
+      separately linked function starts at 0x080ffd30. It linearly searches
+      205 20-byte primary records by their +0x0a halfword, then tail-branches
+      into a 32-record secondary search at 0x080ffb2c keyed by primary +0x10
+      and secondary +0x02; a hit returns the secondary signed +0x00 halfword,
+      while either miss returns 0x7fffffff. Decoding every aligned ARM B/BL
+      immediate in osos.dec finds exactly six inbound calls, all unconditional
+      plain bl at 0x080ffed4, 0x080fff44, 0x080fff70, 0x0811e868, 0x08171b54,
+      and 0x0818761c; there are no predicated forms. No dispatch seam is
+      needed: both table addresses are static firmware data, not callees. Host
+      builds substitute layout-identical private tables for testability.
+
   # --- Runtime indexed-record resolver ---
   - address: 0x080ffae8
     ghidra: FUN_080ffae8

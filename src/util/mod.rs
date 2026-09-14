@@ -48,6 +48,7 @@ pub mod inner_state;
 pub mod i2s_transfer_slot;
 pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
+pub mod indexed_record_value_lookup;
 pub mod le_read;
 pub mod linked_list_count;
 pub mod list_find;
