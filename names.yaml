@@ -28546,6 +28546,35 @@ functions:
       instead of target byte offsets, preserving distinct host pointers.
 
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
+  # ---- VDBE operation lookup (src/sqlite/vdbe.rs) ----
+  - address: 0x0838b064
+    ghidra: FUN_0838b064
+    name: vdbe_get_op
+    size: 32
+    sig: "VdbeOp *vdbe_get_op(Vdbe *p, int addr)"
+    module: sqlite/vdbe
+    status: ported
+    renames:
+      param_1/r0: p
+      param_2/r1: addr
+      param_3/r2: n_op
+      iVar1/r0: op
+    notes: >-
+      SQLite's sqlite3VdbeGetOp. Raw ARM establishes the exact 32-byte extent:
+      eight words from cmp r1,#0 at 0x0838b064 through bx lr at 0x0838b080;
+      the separately linked next function begins at 0x0838b084. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional bl at 0x08376ce4, 0x0837924c,
+      0x0837bc9c, 0x0837c56c, and 0x0838edc4; there are no predicated calls or
+      direct tail-B callers. It returns NULL when addr is negative or nOp <=
+      addr; otherwise it returns aOp + addr * 20. The raw body does not guard p
+      or aOp after the addr check: NULL p faults for non-negative addr, and a
+      NULL aOp is still advanced for positive in-range addr. Rust uses named
+      repr(C) Vdbe/VdbeOp fields and wrapping_add to preserve that pointer
+      arithmetic without dereferencing the result. Host tests cover first and
+      final valid records, negative and end addresses, and the unguarded NULL
+      aOp behavior. Deliberate deviations: none.
+
   - address: 0x083867f8
     ghidra: FUN_083867f8
     name: vdbe_add_op0
