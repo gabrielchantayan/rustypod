@@ -8,6 +8,7 @@ pub mod be_read;
 pub mod beload;
 pub mod berec;
 pub mod bitfield;
+pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
 pub mod checked_byte_block;
 pub mod checked_runtime_scale;
