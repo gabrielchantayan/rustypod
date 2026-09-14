@@ -542,6 +542,14 @@ pub unsafe extern "C" fn string_key_tree_rotate_left(
 /// string-keyed map family, called by `_M_insert` @ 0x083c3408 —
 /// `bl` @ 0x083c3534, `bleq` @ 0x083c3584 — and the erase rebalance).
 ///
+/// `FUN_083c3718` @ 0x083c3718 is a separately linked, byte-identical
+/// 84-byte copy of this routine. Raw ARM decoding finds five inbound direct
+/// calls: plain `bl` at 0x083c3a64, 0x083c3adc, 0x083c3bd0, and 0x083c3fb4,
+/// plus predicated `bleq` at 0x083c4004; there are no direct tail branches.
+/// It performs the same no-NULL-guard right rotation. Deliberate deviation:
+/// this shared export is the dispatch seam for both copies, avoiding a
+/// redundant, byte-identical export.
+///
 /// Instruction-identical to the byte-keyed rotate_right @ 0x083b80e4
 /// ([`byte_key_tree_rotate_right`](crate::cxx::byte_key_map) — verified
 /// against osos.asm word for word). Right rotation around `node`:

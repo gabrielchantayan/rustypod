@@ -88599,3 +88599,37 @@ functions:
       dispatch seam; hook 0x083c4e14 to red_black_tree_rotate_left. The shared
       host test covers root, parent-left-slot, and parent-right-slot rotations,
       including the transferred middle subtree. Deliberate deviations: none.
+
+  # --- C++ red-black-tree right rotation ---
+  - address: 0x083c3718
+    ghidra: FUN_083c3718
+    name: string_key_tree_rotate_right_3718_copy
+    size: 84
+    sig: "void string_key_tree_rotate_right(StringKeyTree *tree, StringKeyTreeNode *node)"
+    module: cxx/string_map
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08/r2: left_child
+      left_child_plus_0x04/r3: parent
+      left_child_plus_0x0c/ip: middle_subtree
+      header_plus_0x04/r3: root
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#8] at 0x083c3718 through bx lr at 0x083c3768; the separately
+      linked next function begins at 0x083c376c. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly five inbound direct calls:
+      unconditional bl at 0x083c3a64, 0x083c3adc, 0x083c3bd0, and 0x083c3fb4,
+      plus predicated bleq at 0x083c4004; there are no direct tail-B callers.
+      The predicated caller selects the left child before this intentional
+      no-NULL-guard operation. This is libstdc++ _Rb_tree_rotate_right: node's
+      left child replaces node under its old parent or header root, transfers
+      its right subtree to node's left, and adopts node as its right child. The
+      body is byte-identical to string_key_tree_rotate_right @ 0x083c3228, so
+      this ledger-only alias deliberately adds no redundant dispatch seam; hook
+      0x083c3718 to string_key_tree_rotate_right. The shared host tests cover
+      root replacement, the transferred middle subtree, both parent-child slots,
+      and in-order preservation. Deliberate deviations: none.
