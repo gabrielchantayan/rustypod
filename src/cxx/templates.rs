@@ -1297,8 +1297,8 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf680` @ 0x083cf680, `FUN_083cf698` @ 0x083cf698,
 /// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
 /// `FUN_083cf788` @ 0x083cf788, `FUN_083cf7a0` @ 0x083cf7a0,
-/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf860` @ 0x083cf860,
-/// `FUN_083cf878` @ 0x083cf878, `FUN_083cf8a8` @ 0x083cf8a8,
+/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf7e8` @ 0x083cf7e8,
+/// `FUN_083cf860` @ 0x083cf860, `FUN_083cf878` @ 0x083cf878,
 /// `FUN_083cf8c0` @ 0x083cf8c0, `FUN_083cf890` @ 0x083cf890,
 /// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
@@ -1366,6 +1366,20 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// plain `bl` callers at 0x083cf7b8 (0x0809dcf4, 0x0809e074, 0x083bcb08,
 /// 0x083bcf74, 0x083bcf90, 0x083bd014, 0x083bd0d8, and 0x083db1fc), with no
 /// predicated calls, tail branches, or aligned raw-word references.
+/// `FUN_083cf7e8` spans six instructions through `bx lr` at 0x083cf7fc; the
+/// separately linked copy at 0x083cf800 fixes its 24-byte extent. It performs
+/// two unguarded aligned `u32` loads and returns normalized 1 exactly when the
+/// values are equal. Decoding every ARM B/BL-immediate word in `osos.dec`
+/// finds exactly five inbound direct calls, all unconditional plain `bl`:
+/// 0x083c2384, 0x083c27f8, 0x083c2814, 0x083c2898, and 0x083c295c. There are
+/// no predicated calls, direct tail branches, or aligned raw-word references.
+/// Its byte-identical body deliberately reuses this established export rather
+/// than introducing a redundant dispatch seam; hook 0x083cf7e8 to
+/// [`equal_deref`]. The shared host test covers equal values at distinct
+/// addresses, unequal values in both orders, zero, all-bits-set, and
+/// iterator-shaped records whose trailing word is not read. Deliberate
+/// deviations: none.
+///
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
 /// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
 /// 0x083c7480, 0x083c7504, 0x083c75c8, and 0x083db8ac), with no predicated
@@ -4711,7 +4725,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
+    fn equal_deref_f650_f680_f698_f6c8_f758_f788_f7a0_f7b8_f7e8_f830_f860_f8a8_f8c0_f890_f8f0_f908_f920_f938_f950_f968_f980_f998_f9b0_f9c8_copies_compare_words_by_value() {
         unsafe {
             let one: u32 = 1;
             let other_one: u32 = 1;
