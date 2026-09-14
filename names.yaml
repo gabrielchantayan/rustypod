@@ -4828,8 +4828,8 @@ functions:
       FUN_0811b2c0: singleton_class_6280 (already ported, called directly)
       FUN_0811c564: flag_2c_is_clear (already ported, called directly)
       FUN_0811bf0c: class_6280_commit (UPDATE_DISPATCH_OPS slot)
-      FUN_081115e4: root_slot_190_query (UPDATE_DISPATCH_OPS slot)
-      FUN_08112bbc: root_pending_process (UPDATE_DISPATCH_OPS slot)
+      FUN_081115e4: root_slot_190_query (ported direct call)
+      FUN_08112bbc: root_pending_process (ported direct call)
       DAT_08219a0c: app-root pool word (0x089ca674; the crate static
         APP_ROOT_OBJECT, the app/context_scope.rs RW-page deviation)
     notes: >-
@@ -4861,22 +4861,18 @@ functions:
       query == 0 -> return 1, else FUN_08112bbc(root) (re-queries via
       the same veneer, calls vtable slot +0xf0, then works the
       singleton_class_8c00 + 0x98 list under mutex_lock/mutex_unlock),
-      return 0. DEVIATIONS: the three handler callees are unported and
-      ride UPDATE_DISPATCH_OPS (the EVENT_HUB_OPS /
-      IAP_THREAD_SLOT_POLL_OPS pattern), read slot-by-slot through
-      read_volatile - target defaults transmute ROM addresses
-      0x0811bf0c / 0x081115e4 / 0x08112bbc (hook-faithful), host
-      defaults are documented inert stubs (commit/process no-ops, query
-      returns 0 -> decline, so the default port is a harmless no-op
-      returning 1). match.py structural review against this worktree
+      return 0. DEVIATIONS: only class_6280_commit remains
+      unported and rides UPDATE_DISPATCH_OPS, read through read_volatile; its
+      target default transmutes ROM address 0x0811bf0c and its host default is
+      an inert no-op. The query veneer and root processor are ported directly. match.py structural review against this worktree
       archive (--lib): same control flow - leading bl
       singleton_class_6280 (R_ARM_CALL verified), the +0x2c flag test
       (LLVM inlines flag_2c_is_clear to ldrb/cmp/beq; the exported
       symbol still resolves in the archive for its other callers), two
       blx seam calls with the query's zero test gating the root process,
-      and the mov r0,#1 / mov r0,#0 return pair; deltas are the crate fp
-      prologue and LLVM tail-merging the commit blx with the process
-      blx.
+      the direct query vtable call gates the root processor, and the mov
+      r0,#1 / mov r0,#0 return pair; deltas are the crate fp prologue and
+      LLVM tail-merging the commit seam call with the root processor call.
 
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
@@ -83193,7 +83189,7 @@ functions:
       "root+0x888": pending_subobject
       "pending_subobject+0x00": vtable
       "vtable+0xf0": pending_process_callback
-      FUN_081115e4: root_slot_190_query (existing UPDATE_DISPATCH_OPS seam)
+      FUN_081115e4: root_slot_190_query (ported direct call)
       FUN_081a5500: singleton_class_8c00 (ported)
       FUN_081a6368: class_8c00_rearm_timer_post_0x11 (ported)
       DAT_08112bf4: two_minute_delay_ms (0x1d4c0)
@@ -83208,15 +83204,45 @@ functions:
       it. The predicated forms show caller-side condition gating; this body
       has no NULL guards. One aligned image data word at 0x0898d9d0 contains
       its address, but its dispatch identity is unrecovered and deliberately
-      not invented. The function queries root+0x888 through the existing
-      root_slot_190_query seam, invokes that sub-object's vtable+0xf0 slot
+      not invented. The function queries root+0x888 through the ported
+      root_slot_190_query veneer, invokes that sub-object's vtable+0xf0 slot
       even when the query is zero, then returns on zero; nonzero obtains the
       already ported singleton_class_8c00 and tail-branches to the already
       ported 120000-ms class_8c00 timer-refresh/event-post method. Rust
       models the ARM four-byte vtable entries with native-width host callback
       cells (index 60), spells the tail branch as a normal direct call, and
-      reuses rather than adds the existing query seam. Host tests prove the
+      calls the ported query veneer directly. Host tests prove the
       zero-query callback ordering and the nonzero path's two queries and
       exact vtable receiver; the class fixture suppresses only its unrelated
       queue post and uses a stopped embedded timer. match.py review is
       structural, not instruction-exact.
+
+  # --- root pending-work query virtual veneer ---
+  - address: 0x081115e4
+    ghidra: FUN_081115e4
+    name: root_slot_190_query
+    size: 16
+    sig: "u32 root_slot_190_query(RootSlot190QueryRoot *root)"
+    module: app/root_slot_190_query
+    status: ported
+    renames:
+      param_1/r0: root
+      "root+0x888": query_subobject
+      "query_subobject+0x00": vtable
+      "vtable+0x190": pending_work_query_callback
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte body at 0x081115e4..0x081115f0:
+      ldr r0,[r0,#0x888]; ldr r1,[r0]; ldr r1,[r1,#0x190]; bx r1. The next
+      separately linked function begins push {r4,lr} at 0x081115f4. Decoding
+      every aligned ARM B/BL-immediate word finds exactly six inbound direct bl
+      calls, all unconditional at 0x08112bc4, 0x081147b0, 0x081161b0,
+      0x0812f34c, 0x082199ec, and 0x08289a48; no predicated bl or direct B
+      reaches it, and no aligned image data word contains its address. The
+      veneer loads root+0x888, dispatches vtable word slot 100 (+0x190) with
+      that sub-object as r0, and returns the callback's r0 result verbatim.
+      Ghidra incorrectly types the function void and drops its argument/result.
+      Rust uses a repr(C) root prefix and native-width host callback cells at
+      the same word index, and emits a normal indirect call instead of bx. Host
+      tests cover zero and u32::MAX callback results and prove slot-100 selection
+      plus the sub-object receiver. match.py review is structural, not
+      instruction-exact.

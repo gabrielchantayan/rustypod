@@ -16,7 +16,7 @@
 //!
 //! # Algorithm
 //!
-//! Query the root's `+0x888` sub-object through the existing slot-`+0x190`
+//! Query the root's `+0x888` sub-object through the ported slot-`+0x190`
 //! veneer. Independently invoke that sub-object's vtable slot `+0xf0`. A zero
 //! query result returns only after that callback. Otherwise obtain the
 //! class-0x8c00 singleton and invoke its two-minute (`0x1d4c0` ms) timer
@@ -27,15 +27,14 @@
 //! ARM vtable entries are four-byte words, while host callback pointers are
 //! native-width; the typed host vtable therefore selects word index 60. The
 //! ARM tail branch to `class_8c00_rearm_timer_post_0x11` is a normal direct
-//! call. The unported slot-`+0x190` veneer continues through the established
-//! `UPDATE_DISPATCH_OPS` seam; no new dispatch seam is introduced.
+//! call. The slot-`+0x190` veneer is now called directly, with no dispatch seam.
 
 use crate::app::class_8c00::class_8c00_rearm_timer_post_0x11;
 use crate::app::singletons::singleton_class_8c00;
-use crate::app::update_dispatch::root_slot_190_query;
+use crate::app::root_slot_190_query::root_slot_190_query;
 
 /// ARMv5TE word index for vtable offset `+0xf0`.
-const ROOT_PENDING_PROCESS_SLOT: usize = 0xf0 / 4;
+pub const ROOT_PENDING_PROCESS_SLOT: usize = 0xf0 / 4;
 
 /// ARM byte offset of the root pointer to its pending-work sub-object.
 pub const ROOT_PENDING_SUBOBJECT_OFFSET: usize = 0x888;
