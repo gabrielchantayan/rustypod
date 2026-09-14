@@ -29,6 +29,17 @@
 //! one `bleq` (`0x083c5804`). Its no-guard left-rotation algorithm and
 //! target-width-link representation have no deliberate deviations from this
 //! implementation.
+//!
+//! `FUN_083c4188` at load address `0x083c4188` is byte-identical to this
+//! implementation: 84 bytes (21 ARM words) through `bx lr` at `0x083c41d8`,
+//! followed by the separately linked right-rotation sibling at `0x083c41dc`.
+//! Its five verified direct call sites comprise unconditional `bl` at
+//! `0x083c44c4`, `0x083c4564`, `0x083c4654`, and `0x083c4c50`, plus a
+//! predicated `bleq` at `0x083c4bb8`; there are no direct tail-B callers.
+//! As with the primary body, callers have selected the pivot's right child
+//! before invoking this no-guard rotation. It deliberately reuses this
+//! dispatch seam; the shared host test exercises every parent-placement branch
+//! and the transferred middle subtree.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
