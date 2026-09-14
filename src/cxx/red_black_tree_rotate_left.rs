@@ -91,6 +91,20 @@
 //! conditional caller selects the pivot's right child before reaching this
 //! no-guard rotation. This alias reuses the established dispatch seam and
 //! shared host tests; deliberate deviations: none.
+//!
+//! `FUN_083c0c60` at load address `0x083c0c60` is another byte-identical,
+//! 84-byte (21-word) left-rotation body, ending at `0x083c0cb0`; the
+//! separately linked right-rotation sibling starts at `0x083c0cb4`. Complete
+//! aligned ARM B/BL decoding finds five inbound direct calls: unconditional
+//! `bl` at `0x083c0f9c`, `0x083c103c`, `0x083c1128`, and `0x083c148c`, plus
+//! predicated `bleq` at `0x083c13f4`; no direct tail-`B` callers exist. The
+//! predicated caller selects the pivot's right child before this intentionally
+//! unguarded routine runs. It promotes that child, transfers its left subtree
+//! to the pivot's right link, and relinks the old parent or header root slot.
+//! This ledger alias deliberately reuses the existing dispatch seam; the
+//! shared host test covers root, both parent-child slots, and the transferred
+//! middle subtree. Deliberate deviations: none.
+
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
