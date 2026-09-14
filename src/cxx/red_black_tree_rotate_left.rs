@@ -81,6 +81,16 @@
 //! shared tests cover every parent placement and the transferred middle
 //! subtree. Deliberate deviations: none; this alias intentionally reuses the
 //! established dispatch seam.
+//!
+//! `FUN_083b74a8` at load address `0x083b74a8` is a byte-identical, 84-byte
+//! (21-word) ported alias, ending at `0x083b74f8`; the separately linked
+//! right-rotation sibling begins at `0x083b74fc`. A complete aligned ARM B/BL
+//! decode verifies five direct inbound calls: unconditional `bl` at
+//! `0x083b77e4`, `0x083b7884`, `0x083b7970`, and `0x083b7f04`, plus predicated
+//! `bleq` at `0x083b7e6c`; there are no direct tail-`B` callers. The
+//! conditional caller selects the pivot's right child before reaching this
+//! no-guard rotation. This alias reuses the established dispatch seam and
+//! shared host tests; deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
