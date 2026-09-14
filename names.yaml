@@ -83827,3 +83827,34 @@ functions:
       load_be32 originals in util/beload, so the existing exported symbol and
       its host alignment and boundary tests serve this address too. Deliberate
       deviations: none. match.py review is structural, not instruction-exact.
+  # --- XTEA state big-endian writer ---
+  - address: 0x080b447c
+    ghidra: FUN_080b447c
+    name: store_u32_be
+    size: 40
+    sig: "void store_u32_be(u8 *destination, u32 value)"
+    module: util/store_u32_be
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: value
+      r2: byte
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte body from lsr r2,r1,#24 at
+      0x080b447c through bx lr at 0x080b44a0; the separately linked,
+      byte-identical sibling starts at 0x080b44a4. It stores value as four
+      big-endian bytes at destination +0..+3 via four ordered strb
+      instructions, accepting unaligned pointers and adding no NULL or bounds
+      guard. Decoding every immediate ARM B/BL word in osos.dec finds exactly
+      six inbound direct calls, all unconditional bl at 0x080e7164,
+      0x080e7170, 0x080e717c, 0x080e7188, 0x080e71b0, and 0x080e71dc; there
+      are no predicated calls, tail branches, or aligned raw data-word
+      references. All calls lie in XTEA state encryptor FUN_080e7134: four
+      serialize fixed state words and two serialize variable record lists.
+      store_u32_be uses volatile byte stores to retain that high-byte-to-low-
+      byte instruction order under LLVM optimization, rather than reusing the
+      equal-output store_be32 port whose ordinary stores compile in reverse
+      order. Its dedicated text section prevents identical-code folding.
+      Host tests cover byte order, every valid alignment, values with high
+      bits set, and surrounding-byte preservation. Deliberate deviations:
+      none. match.py review is structural, not instruction-exact.
