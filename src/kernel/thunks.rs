@@ -315,6 +315,93 @@ dispatch_no_argument_callback:
     .size dispatch_no_argument_callback, . - dispatch_no_argument_callback
 "#
 );
+/// Load address and literal contents of the retail continuation veneer at
+/// 0x080037a0.
+pub const RETAIL_CONTINUATION_DISPATCH_VENEER: u32 = 0x0800_37a0;
+pub const RETAIL_CONTINUATION_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const RETAIL_CONTINUATION_DISPATCH_TARGET: u32 = 0x080e_a68c;
+
+/// ABI of the opaque retail continuation reached by
+/// [`retail_continuation_dispatch_veneer`].
+pub type RetailContinuationDispatchFn = unsafe extern "C" fn();
+
+/// Host/target dispatch boundary for the unported retail continuation.
+#[derive(Clone, Copy)]
+pub struct RetailContinuationDispatchOps {
+    pub dispatch: RetailContinuationDispatchFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_retail_continuation_dispatch() {}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_RETAIL_CONTINUATION_DISPATCH_OPS: RetailContinuationDispatchOps =
+    RetailContinuationDispatchOps {
+        dispatch: missing_retail_continuation_dispatch,
+    };
+
+/// Host replacement for the retail continuation, which depends on its
+/// predecessor's stack frame and register state.
+#[cfg(not(target_arch = "arm"))]
+pub static mut RETAIL_CONTINUATION_DISPATCH_OPS: RetailContinuationDispatchOps =
+    DEFAULT_RETAIL_CONTINUATION_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn retail_continuation_dispatch_target() -> RetailContinuationDispatchFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            RETAIL_CONTINUATION_DISPATCH_OPS.dispatch
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// retail_continuation_dispatch_veneer — original: `FUN_080037a0` @
+    /// 0x080037a0 (8 bytes; Ghidra reports only the four-byte instruction).
+    ///
+    /// Raw ARM is `ldr pc, [pc, #-4]` followed by literal 0x080ea68c, so this
+    /// veneer tail-dispatches without changing any register or LR. Complete
+    /// ARM B/BL decoding finds six direct call sites, all unconditional `bl`
+    /// (0x080055b8, 0x08005694, 0x080056b4, 0x08005844, 0x0800584c, and
+    /// 0x08005cd8); there are no predicated calls or direct `b` tail callers.
+    ///
+    /// The literal is not a function entry: it begins at `cmp r1, #2` inside
+    /// an existing stack frame at 0x080ea68c. It has no recoverable standalone
+    /// C ABI or callee identity.
+    ///
+    /// Deliberate deviation: none on ARM. Host builds use an injected
+    /// no-argument seam because they cannot construct the retail continuation
+    /// state; it preserves the observable call-and-return edge.
+    pub fn retail_continuation_dispatch_veneer();
+}
+
+/// Host implementation of the opaque retail-continuation veneer.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retail_continuation_dispatch_veneer() {
+    retail_continuation_dispatch_target()();
+}
+
+// `ldr pc` preserves LR and every general-purpose register. The literal enters
+// the middle of a retail routine, so it must remain a literal tail transfer.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl retail_continuation_dispatch_veneer
+    .type retail_continuation_dispatch_veneer, %function
+retail_continuation_dispatch_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x080ea68c
+    .size retail_continuation_dispatch_veneer, . - retail_continuation_dispatch_veneer
+"#
+);
+
 
 /// Instruction word and literal in the shared-UI-manager accessor thunk
 /// at 0x08037f88.
@@ -1270,6 +1357,41 @@ mod tests {
         assert_eq!(NO_ARGUMENT_CALLBACK_DISPATCH_TARGET, 0x081b_0d08);
         assert_eq!(NO_ARGUMENT_CALLBACK_DISPATCH_TARGET & 3, 0);
     }
+    static mut RETAIL_CONTINUATION_DISPATCH_COUNT: u32 = 0;
+
+    unsafe extern "C" fn record_retail_continuation_dispatch() {
+        RETAIL_CONTINUATION_DISPATCH_COUNT += 1;
+    }
+
+    #[test]
+    fn retail_continuation_dispatch_calls_once_and_returns() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(RETAIL_CONTINUATION_DISPATCH_COUNT).write(0);
+            core::ptr::addr_of_mut!(RETAIL_CONTINUATION_DISPATCH_OPS).write(
+                RetailContinuationDispatchOps {
+                    dispatch: record_retail_continuation_dispatch,
+                },
+            );
+            retail_continuation_dispatch_veneer();
+            assert_eq!(
+                core::ptr::addr_of!(RETAIL_CONTINUATION_DISPATCH_COUNT).read(),
+                1
+            );
+            core::ptr::addr_of_mut!(RETAIL_CONTINUATION_DISPATCH_OPS)
+                .write(DEFAULT_RETAIL_CONTINUATION_DISPATCH_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn retail_continuation_dispatch_matches_literal_veneer() {
+        assert_eq!(RETAIL_CONTINUATION_DISPATCH_VENEER, 0x0800_37a0);
+        assert_eq!(RETAIL_CONTINUATION_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(RETAIL_CONTINUATION_DISPATCH_TARGET, 0x080e_a68c);
+        assert_eq!(RETAIL_CONTINUATION_DISPATCH_TARGET & 3, 0);
+    }
+
 
     /// The stub at 0x08037f88 is the literal veneer `ldr pc, [pc, #-4]`
     /// with target word 0x22005018 (raw osos.dec bytes 04 f0 1f e5

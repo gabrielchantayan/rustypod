@@ -639,6 +639,31 @@ functions:
       calls. The ARM port preserves the literal tail transfer exactly, while
       host tests use a replaceable no-argument seam because host callers
       cannot supply ARM r7; they verify one call and unchanged pointer result.
+
+  # --- opaque retail continuation veneer ---
+  - address: 0x080037a0
+    ghidra: FUN_080037a0
+    name: retail_continuation_dispatch_veneer
+    size: 8
+    sig: "void retail_continuation_dispatch_veneer(void)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      DAT_080037a4: retail_continuation_dispatch_target
+      FUN_080ea68c: retail_continuation_dispatch_continuation
+    notes: >-
+      Raw osos.dec establishes the true eight-byte extent: `ldr pc,[pc,#-4]`
+      (0xe51ff004) at 0x080037a0 and literal 0x080ea68c at 0x080037a4; the
+      next veneer begins at 0x080037a8. Complete ARM B/BL decoding finds six
+      direct callers, every one an unconditional `bl` at 0x080055b8,
+      0x08005694, 0x080056b4, 0x08005844, 0x0800584c, and 0x08005cd8; there
+      are no predicated forms or direct tail branches. The literal is an
+      opaque continuation, not a function entry: its first instruction is
+      `cmp r1,#2` within an existing stack frame, so no standalone callee
+      identity or ABI is claimed. ARM retains the verbatim literal tail
+      transfer; the host implementation deliberately uses an injected
+      no-argument seam to prove the observable single call-and-return edge.
+
   # --- event callback dispatch ---
   - address: 0x08005094
     ghidra: FUN_08005094
