@@ -729,6 +729,22 @@ pub unsafe extern "C" fn framework_base_construct_with_task_target(
     framework_base_initialize(this, initial_target, create_link, core::ptr::null_mut());
     this
 }
+/// framework_base_set_current_task_target — original: `FUN_08110ca8` @
+/// 0x08110ca8 (20 bytes; **6 plain `bl` call sites and 0 predicated
+/// calls**, binary-scanned from `work/firmware/osos.dec`).
+///
+/// Stores `this` in the current task context's +0x24
+/// `framework_base_initial_target` slot. It calls
+/// [`current_task_ctx_block`] exactly once, then unconditionally writes the
+/// returned context; neither pointer is NULL-checked, matching the ARM
+/// `bl 0x080cb828; str r4,[r0,#0x24]`. No deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_set_current_task_target(this: *mut Class6800) {
+    let task_context = current_task_ctx_block();
+    core::ptr::addr_of_mut!((*task_context).framework_base_initial_target).write_volatile(this.cast());
+}
+
 
 /// framework_task_target_base_construct — original: `FUN_08272474` @
 /// 0x08272474 (28 bytes of code plus the literal-pool word at 0x08272490;
@@ -1205,6 +1221,37 @@ mod tests {
             restore();
             drop(guard);
         }
+    }
+
+    #[test]
+    fn setting_task_target_overwrites_current_context_slot() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let framework_base = 0x2468usize as *mut Class6800;
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            task_context.framework_base_initial_target = 0xa5a5usize as *mut u8;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            framework_base_set_current_task_target(framework_base);
+
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "context is fetched once");
+            assert_eq!(
+                task_context.framework_base_initial_target,
+                framework_base.cast(),
+                "the existing +0x24 target is overwritten"
+            );
+
+            restore_task_hooks(saved_hooks);
+        }
+        drop(task_hooks_guard);
     }
 
     #[test]
