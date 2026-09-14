@@ -23418,6 +23418,40 @@ functions:
       returning its computed rate and a pre-captured sample preserving an
       arbitrary full-width (0xfffffffe) rate without invoking either helper.
 
+  - address: 0x080bd8bc
+    ghidra: FUN_080bd8bc
+    name: string_pool_read_counted
+    size: 52
+    sig: "void string_pool_read_counted(StringPool *pool, i32 entry_id, u16 *counted, u32 initial_byte_len)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: entry_id
+      param_3/r2: counted
+      param_4/r3: initial_byte_len
+      local_c: byte_len
+      FUN_080b4318: string_pool_read seam
+      DAT_080bd8ec: max_read_bytes (510)
+    notes: >-
+      Raw ARM establishes the 52-byte extent: the 12 instruction words run
+      from 0x080bd8bc through pop {r2,r3,r4,pc} at 0x080bd8e8, followed by
+      its 0x000001fe literal-pool word at 0x080bd8ec; the separately linked
+      wheel_sample_rate begins at 0x080bd8f0. Ghidra's reported 48 bytes
+      omits that literal. Every ARM B/BL word in osos.dec was decoded: exactly
+      six direct callers, all unconditional bl at 0x080530fc, 0x080537e0,
+      0x08095da8, 0x0809603c, 0x080dcafc, and 0x0813db6c; no predicated
+      forms, tail branches, or aligned raw data-word references occur.
+      The wrapper calls the unported string_pool_read seam with destination
+      counted+1, byte-length output local, and fixed max_len 510, then writes
+      floor(byte_len / 2) into counted[0], ignoring the status. The r3 input
+      initializes the local, but reader 0x080b4318 clears its non-NULL length
+      output before validation, so it is unobservable. No new seam: the
+      existing volatile STRING_POOL_READ boundary remains the target call
+      through retail 0x080b4318. Host tests cover odd-length flooring, exact
+      forwarded arguments, and failure after the reader's mandatory length
+      clear. match.py structural exit-1 diff is expected and reviewed.
+
   - address: 0x080bd8f0
     ghidra: FUN_080bd8f0
     name: wheel_sample_rate
