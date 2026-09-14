@@ -83588,3 +83588,35 @@ functions:
       invoke this direct port. Host tests cover normal toggling, negative
       selector results, and the signed-overflow edge. match.py review is
       structural, not instruction-exact. Deliberate deviations: none.
+
+  # --- iTunesDB field reader fixed-default wrapper ---
+  - address: 0x080d8d14
+    ghidra: FUN_080d8d14
+    name: itunesdb_read_default_field
+    size: 76
+    sig: "u32 itunesdb_read_default_field(u32 reader, u32 mode, u32 record, u32 destination, u32 field, u32 field_type, u32 enabled)"
+    module: app/itunesdb_read_default_field
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_2/r1: mode
+      param_3/r2: record
+      param_4/r3: destination
+      param_5/stack: field
+      param_6/stack: field_type
+      param_7/stack: enabled
+      FUN_080be330: itunesdb_field_read
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte instruction body
+      0x080d8d14..0x080d8d60; the separately linked next function starts at
+      0x080d8d60. The wrapper preserves its seven incoming arguments, calls
+      unported FUN_080be330 with added fourth and ninth arguments 0 and 1,
+      then returns the helper result unchanged in r0. Ghidra's void return
+      type is incorrect. Decoding every aligned ARM B/BL immediate in osos.dec
+      finds exactly six inbound direct calls, all unconditional bl at
+      0x08095c70, 0x08095ca4, 0x08095cf0, 0x08095d40, 0x08095d8c, and
+      0x08095fb8; there are no predicated direct calls or tail branches.
+      The sole direct caller parses iTunesDB mhlt/mhit records, establishing
+      the wrapper's field-read role. Target code reaches the unported helper
+      at its verified fixed address; host tests use a volatile seam proving
+      every forwarded argument, both fixed defaults, and result preservation.
