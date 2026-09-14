@@ -15148,6 +15148,31 @@ functions:
       insert/update tail; LLVM uses a branch plus literal-loaded blx instead
       of the retail predicated bleq.
 
+  - address: 0x083d48fc
+    ghidra: FUN_083d48fc
+    name: element_array6_insert_unique
+    size: 152
+    sig: "i32 element_array6_insert_unique(void *this, void *element)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: element, iVar1: index, iVar2: slots, iVar3: used}
+    renames: {FUN_083d4994: element_array6_expand_for_insert}
+    notes: >-
+      Raw ARM extent is exactly 0x083d48fc..0x083d4994; the separately linked
+      expansion sibling begins at 0x083d4994. Complete decoding of every
+      ARM B/BL-immediate word in osos.dec finds exactly five direct inbound
+      calls, all unconditional plain bl: 0x082c79ac, 0x082c7dd8, 0x082c82dc,
+      0x082c8614, and 0x082c86cc. No predicated inbound calls exist. It scans
+      every signed-valid slot for an exact pointer duplicate before mutation,
+      invokes the predicated bleq expansion sibling only when used == slots,
+      then rescans for the first NULL slot. A found slot stores the element,
+      wrapping-increments used, and returns its index; a full table whose
+      used count disagrees with capacity returns -1. Device deviation: none:
+      the Rust port preserves the fixed 0x083d4994 retail expansion edge.
+      Host tests install that unported call through a volatile seam. The
+      152-byte insertion body is instruction-identical to
+      element_array7_insert_unique at 0x083d4b5c apart from its relinked
+      predicated expansion call; each instance retains its own expansion seam.
   - address: 0x083d4a94
     ghidra: FUN_083d4a94
     name: element_array6_construct
