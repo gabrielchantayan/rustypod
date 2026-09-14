@@ -70,6 +70,7 @@ pub mod mutex_settype_init;
 pub mod recursive_mutex;
 pub mod observable_array;
 pub mod observable_array_pair;
+pub mod derived_observable_array_construct;
 pub mod pending_event;
 pub mod payload_list_owner_destroy;
 pub mod null_pointer_status;
