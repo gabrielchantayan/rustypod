@@ -84640,3 +84640,35 @@ functions:
       arithmetic. Host tests cover zero query avoidance, successful
       base-plus-daylight subtraction, signed daylight, failed-query
       preservation, and u32 underflow.
+  
+
+  # --- conditional opaque-handle release ---
+  - address: 0x0805a594
+    ghidra: FUN_0805a594
+    name: opaque_handle_release_if_valid
+    size: 32
+    sig: "u32 opaque_handle_release_if_valid(OpaqueHandle *handle)"
+    module: cxx/opaque_handle_release
+    status: ported
+    renames:
+      param_1/r0: handle
+      '[handle,#0x00]': handle_vtable
+      '[handle_vtable,#0x04]': release
+      return/r0: status_zero
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent from cmn r0,#1 at
+      0x0805a594 through pop {r4,pc} at 0x0805a5b0; the separately linked
+      next function begins at 0x0805a5b4 with push {r3,r4,r5,lr}. Decoding
+      every immediate ARM B/BL word in osos.dec finds exactly six inbound
+      calls: five unconditional plain bl at 0x08049018, 0x0805b6f0,
+      0x0806e568, 0x080a7574, and 0x080beca0, plus one predicated bleq at
+      0x080aa654. There are no direct tail branches or aligned raw data-word
+      references. NULL and the 32-bit 0xffffffff absent-handle sentinel return
+      zero without dereference; all other handles dispatch vtable slot +0x04
+      with handle retained in r0, discard that virtual result, and return zero.
+      Callers release the result acquired through FUN_0805a634, but the opaque
+      type and concrete release method remain unrecovered and are deliberately
+      not invented. Rust uses a typed native-width host callback cell while
+      repr(C) and target-only assertions preserve ARM offsets. Host tests prove
+      the valid dispatch, receiver, ignored callback return, slot selection,
+      NULL, and sentinel cases. Deliberate deviations: none.
