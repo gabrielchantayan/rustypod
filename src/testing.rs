@@ -797,6 +797,9 @@ pub mod hints {
     // varargs/output fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const RETAIL_SSCANF: usize = 0xe200_0000;
+    // 0xe400_0000: dedicated to ui/element_change_notify's target-width
+    // element fixture; mappings never unmap, so no other user may share it.
+    pub const UI_ELEMENT_CHANGE_NOTIFY: usize = 0xe400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -832,6 +835,9 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
     );
     true
 }
+/// Serializes host tests that enter `ui::tdat_flag_20_bit_2` through its
+/// shared mutable dispatch table, including callers that set its flag.
+pub static TDAT_FLAG_20_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that installs mocks into the crate-global
 /// `drivers::ata_cmd::TRACED_ALLOC_HOOKS`. That table is one shared
