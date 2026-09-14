@@ -82904,3 +82904,30 @@ functions:
       match.py structural review against the worktree archive reports the
       same NULL fast path, three lookup/free pairs, virtual release, and
       final clear; Rust keeps two additional callee-preserving registers.
+
+  # --- Input action-index advance ---
+  - address: 0x08129b6c
+    ghidra: FUN_08129b6c
+    name: input_action_index_advance
+    size: 24
+    sig: "u32 input_action_index_advance(void *input_state)"
+    module: app/input_action_index
+    status: ported
+    renames:
+      param_1/r0: input_state
+      r1: action_index
+      "input_state+0xb4": action_index
+    notes: >-
+      Raw osos.dec confirms the exact 24-byte body at 0x08129b6c..0x08129b84;
+      the independently linked sibling starts at 0x08129b84 with
+      `push {r1, r2, r3, r4, r5, r6, r7, lr}`. It loads the aligned word at input_state + 0xb4, increments and stores it only when unsigned
+      less than 31, then reloads and returns the word. The input-sequence
+      callers pass its low byte as an action index to FUN_0812881c. Complete
+      aligned ARM B/BL-immediate decoding finds exactly six inbound direct
+      calls, all unconditional plain bl at 0x08129a70, 0x08129fbc, 0x08129fc8,
+      0x08129fd4, 0x0812a200, and 0x0812ae28; no predicated forms, direct
+      tail-B entries, or aligned image words target it. It has no calls of its
+      own. No new dispatch seam is introduced. Host tests cover incrementing
+      from zero, the 31 limit, and preservation of u32::MAX. Deliberate
+      deviations: none; only the verified state prefix and action-index field
+      are modeled.
