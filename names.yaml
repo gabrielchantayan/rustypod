@@ -60058,6 +60058,43 @@ functions:
       current_utc_offset_query to exercise successful, failed, and skipped
       queries; it creates no target dispatch seam.
 
+  # --- Packed calendar record to Macintosh epoch seconds ---
+  - address: 0x080aad6c
+    ghidra: FUN_080aad6c
+    name: datetime_to_mac_epoch_seconds
+    size: 80
+    sig: "i32 datetime_to_mac_epoch_seconds(DateTime *datetime, i32 apply_utc_offset)"
+    module: time/datetime_to_mac_epoch
+    status: ported
+    renames:
+      param_1/r0: datetime
+      param_2/r1/r5: apply_utc_offset
+      r4: mac_epoch_seconds
+      local_18/sp+4: base_utc_offset_minutes
+      local_14/sp: daylight_saving_minutes
+      FUN_08093c38: datetime_to_unix_seconds
+      FUN_080ab558: current_utc_offset_query
+      DAT_080aadb8: unix_to_mac_epoch_seconds
+    notes: >-
+      Raw ARM has a 76-byte executable body at 0x080aad6c..0x080aadb8, then
+      its 0x7c25b080 Unix-to-Macintosh epoch literal at 0x080aadb8; the next
+      separately linked function begins at 0x080aadbc, so the full extent is
+      80 bytes. Decoding every ARM B/BL word in osos.dec finds exactly six
+      unconditional plain BL callers at 0x08051db8, 0x08159968, 0x081be8bc,
+      0x081be8cc, 0x0826ff24, and 0x0826ffa0; there are no predicated BL
+      callers or direct B tail callers. It converts the packed DateTime with
+      ported datetime_to_unix_seconds, adds the Unix-to-Macintosh epoch delta,
+      then, when r1 is nonzero and ported current_utc_offset_query reports
+      success, subtracts (signed i16 base UTC offset plus signed i8 daylight
+      adjustment) * 60. All arithmetic wraps as flagless ARM add/sub. Device
+      builds call both existing ports directly; private host-test seams replace
+      them only to cover successful, failed, skipped, signed-daylight, and
+      wrapping cases, creating no target dispatch seam. Safe Rust zeroes its
+      stack outputs before the query; retailOS leaves them uninitialized, but
+      current_utc_offset_query writes both before this function can read them,
+      so the observable result is unchanged.
+
+
   # --- Proleptic-Gregorian leap-year test (time/leap_year) ---
   - address: 0x080aabac
     ghidra: FUN_080aabac
