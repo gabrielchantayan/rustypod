@@ -65512,6 +65512,35 @@ functions:
       unchecked raw pointer arithmetic for bit-31-set depths. Deliberate
       deviations: none.
 
+  # --- tagged word buffer pool destructor ---
+  - address: 0x0803ddc8
+    ghidra: FUN_0803ddc8
+    name: tagged_word_buffer_pool_destroy
+    size: 68
+    sig: "void tagged_word_buffer_pool_destroy(TaggedWordBufferPool *pool)"
+    module: heap/tagged_word_buffer_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      iVar1/r4: slot_index
+      param_1_plus_0x4: slots
+      param_1_plus_0x284: flags
+      FUN_0803e5e4: tagged_word_buffer_destroy
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 0x0803ddc8..0x0803de0c (17 instructions);
+      tagged_word_buffer_pool_take begins at the next word. Decoding every ARM
+      B/BL immediate in osos.dec found exactly six direct inbound calls: five
+      unconditional BL at 0x0808e9d0, 0x080c6f90, 0x080c7264, 0x080cbac4,
+      and 0x080cbe08, plus BLNE at 0x08062360. The predicated call is gated
+      by a preceding `cmp r6,r5`; the body nevertheless has its own NULL
+      guard. A non-NULL pool destroys all 32 embedded TaggedWordBuffer slots
+      at +0x04 in ascending address order through ported
+      tagged_word_buffer_destroy, then reloads flags (+0x284) and frees the
+      pool through ported traced_free when bit 0 is set. Deliberate deviations:
+      none; release compilation retains the final conditional tail branch to
+      traced_free.
+
   # --- tagged word buffer pool nesting push ---
   - address: 0x0803dec8
     ghidra: FUN_0803dec8
