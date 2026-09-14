@@ -84674,6 +84674,33 @@ functions:
       firmware-accurate on both ARM and 64-bit host fixtures; no deliberate
       behavioral deviation.
 
+  # --- red-black tree in-order cursor advance ---
+  - address: 0x083b609c
+    ghidra: FUN_083b609c
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      r1: next_node
+      r2: current_node
+      r3: link_probe
+    notes: >-
+      Raw osos.dec is exactly 84 bytes from 0x083b609c through bx lr at
+      0x083b60ec; the separately linked sibling starts at 0x083b60f0. This
+      in-order red-black-tree cursor advance descends through the left links of
+      a right subtree, or climbs parent links while traversing right-child
+      edges, then selects the first ancestor entered from a left-child edge.
+      Its final right-link comparison preserves the header sentinel. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly five
+      direct inbound calls, all unconditional bl at 0x081f04a4, 0x081f11a4,
+      0x081f11bc, 0x083ccdd0, and 0x083cd2a4; no predicated bl forms, direct
+      b tails, or aligned data-word references target it. The raw body leaves
+      r0 unchanged, so Rust returns the cursor address. Target-width u32 links
+      retain the firmware node layout on 64-bit host fixtures. Deliberate
+      deviations: none.
   # --- child-table walker ---
   - address: 0x083925cc
     ghidra: FUN_083925cc

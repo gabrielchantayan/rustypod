@@ -88,11 +88,61 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
     original
 }
 
+/// Advances an in-order red-black-tree cursor and returns the cursor address.
+/// Original: `FUN_083b609c` @ `0x083b609c` (84 bytes; 5 direct,
+/// unconditional `bl` callers).
+///
+/// Raw `osos.dec` establishes the 84-byte extent `0x083b609c..0x083b60ec`;
+/// the separately linked sibling starts at `0x083b60f0`. Exhaustive decoding
+/// of aligned ARM B/BL-immediate words finds five inbound calls, all
+/// unconditional `bl` instructions at 0x081f04a4, 0x081f11a4, 0x081f11bc,
+/// 0x083ccdd0, and 0x083cd2a4; there are no predicated calls or direct
+/// tail branches. Deliberate deviations: none.
+///
+/// A right child selects that subtree's leftmost node. Otherwise the walk
+/// climbs parent links while leaving right-child edges, then selects the first
+/// ancestor reached from a left-child edge. The final right-link comparison
+/// retains the header sentinel.
+///
+/// # Safety
+///
+/// `cursor` must be writable and initially contain a valid non-NULL
+/// [`RedBlackTreeNode`] address. Every traversed link must designate a readable
+/// aligned node. This matches the retail function's absence of NULL checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.red_black_tree_advance_cursor")]
+#[inline(never)]
+pub unsafe extern "C" fn red_black_tree_advance_cursor(cursor: *mut u32) -> *mut u32 {
+    let mut current = node_from_word(cursor.read());
+    let mut next = (*current).right;
+
+    if next != 0 {
+        loop {
+            cursor.write(next);
+            current = node_from_word(next);
+            next = (*current).left;
+            if next == 0 {
+                return cursor;
+            }
+        }
+    }
+
+    next = (*current).parent;
+    while (*node_from_word(next)).right == cursor.read() {
+        cursor.write(next);
+        next = (*node_from_word(next)).parent;
+    }
+    if (*node_from_word(cursor.read())).right != next {
+        cursor.write(next);
+    }
+    cursor
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::{red_black_tree_increment, RedBlackTreeNode};
+    use super::{red_black_tree_advance_cursor, red_black_tree_increment, RedBlackTreeNode};
     use core::ptr;
     use std::sync::LazyLock;
 
@@ -101,8 +151,20 @@ mod tests {
             .map(|p| p as usize)
     });
 
+    static ADVANCE_CURSOR_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::RED_BLACK_TREE_ADVANCE_CURSOR,
+            0x1000,
+        )
+        .map(|p| p as usize)
+    });
+
     fn try_slab() -> Option<*mut u8> {
         (*SLAB).map(|p| p as *mut u8)
+    }
+
+    fn try_advance_cursor_slab() -> Option<*mut u8> {
+        (*ADVANCE_CURSOR_SLAB).map(|p| p as *mut u8)
     }
 
     unsafe fn node(base: *mut u8, index: usize) -> *mut RedBlackTreeNode {
@@ -182,6 +244,56 @@ mod tests {
             initialize(root, header, ptr::null_mut(), ptr::null_mut());
             cursor = root as usize as u32;
             assert_eq!(red_black_tree_increment(&mut cursor), root as usize as u32);
+            assert_eq!(cursor, header as usize as u32);
+        }
+    }
+    #[test]
+    fn advance_cursor_returns_its_address_after_all_successor_paths() {
+        let Some(base) = try_advance_cursor_slab() else {
+            crate::testing::note_missing_u32_fixture("red_black_tree_advance_cursor");
+            return;
+        };
+
+        unsafe {
+            // Right-subtree case: select the leftmost node in the right subtree.
+            reset(base);
+            let current = node(base, 0);
+            let right = node(base, 1);
+            let leftmost = node(base, 2);
+            initialize(current, ptr::null_mut(), ptr::null_mut(), right);
+            initialize(right, current, leftmost, ptr::null_mut());
+            initialize(leftmost, right, ptr::null_mut(), ptr::null_mut());
+            let mut cursor = current as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, leftmost as usize as u32);
+
+            // The first ancestor reached from a left-child edge is selected.
+            reset(base);
+            let current = node(base, 0);
+            let parent = node(base, 1);
+            let sibling = node(base, 2);
+            initialize(parent, ptr::null_mut(), current, sibling);
+            initialize(current, parent, ptr::null_mut(), ptr::null_mut());
+            initialize(sibling, parent, ptr::null_mut(), ptr::null_mut());
+            cursor = current as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, parent as usize as u32);
+
+            // Repeated right-child climbs end at the header sentinel.
+            reset(base);
+            let header = node(base, 0);
+            let root = node(base, 1);
+            let ancestor = node(base, 2);
+            let maximum = node(base, 3);
+            initialize(header, root, ptr::null_mut(), maximum);
+            initialize(root, header, ptr::null_mut(), ancestor);
+            initialize(ancestor, root, ptr::null_mut(), maximum);
+            initialize(maximum, ancestor, ptr::null_mut(), ptr::null_mut());
+            cursor = maximum as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
             assert_eq!(cursor, header as usize as u32);
         }
     }
