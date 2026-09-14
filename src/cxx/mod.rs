@@ -166,6 +166,7 @@ pub mod vtable_slot_12_tail_dispatch;
 pub mod vtable_slot_14_if_clear;
 pub mod vtable_slot_40_result_word;
 pub mod vtable_word_callback;
+pub mod guarded_vtable_slot_40_dispatch;
 pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
 pub mod vtable_two_pair_derived_construct;
