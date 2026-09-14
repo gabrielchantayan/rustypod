@@ -15040,6 +15040,28 @@ functions:
       match.py (--lib worktree build): same call/store/dispatch shape;
       deltas are the ops-table blx and frame layout, as in the sibling.
 
+  - address: 0x08135380
+    ghidra: FUN_08135380
+    name: registry_container_destruct
+    size: 72
+    sig: "Registry *registry_container_destruct(Registry *registry)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: registry, "param_1[7]": auxiliary_allocation, "param_1[9]": observer}
+    notes: >-
+      Concrete registry-container destructor. Raw ARM spans
+      0x08135380..0x081353c8: 68 code bytes plus its final vtable literal
+      0x08984770, which Ghidra excludes from its reported extent. It plants
+      the literal at +0x00, invokes observer->vtable[+0x1c] for +0x24,
+      conditionally frees +0x1c through the ported free @ 0x0802edc8, clears
+      +0x1c/+0x24, and tail-branches to observable_array_destruct
+      @ 0x08271d2c. Binary-decoding every ARM B/BL word in osos.dec found
+      6 plain bl callers, 0 predicated bl callers, and 16 tail-b entries;
+      the entry at 0x0810e6b0 is the four-byte `b 0x08135380` thunk. The
+      source deliberately substitutes only the final tail call in host tests
+      because Registry pointer fields are host-width while ObservableArray
+      preserves the target's u32 fields; the ARM build calls the port directly.
+
   - address: 0x082028a4
     ghidra: FUN_082028a4
     name: registry_observer_construct
