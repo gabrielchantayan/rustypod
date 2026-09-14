@@ -84608,3 +84608,35 @@ functions:
       target-address seam. Host tests install a source-equivalent helper to
       prove payload movement, reverse-table adjustment, and clearing of the
       reclaimed range.
+
+  # --- Nonzero timestamp UTC-offset subtraction ---
+  - address: 0x0805be78
+    ghidra: FUN_0805be78
+    name: subtract_current_utc_offset_seconds
+    size: 32
+    sig: "u32 subtract_current_utc_offset_seconds(u32 seconds)"
+    module: time/utc_adjust
+    status: ported
+    renames:
+      param_1/r0/r4: seconds
+      FUN_08054fcc: current_utc_offset_minutes_negated (unported)
+      FUN_080ab558: current_utc_offset_query (ported, time/utc_offset)
+      r0(after rsb): negated_offset_minutes_times_15
+    notes: >-
+      Raw ARM establishes the exact 32-byte extent from 0x0805be78 through
+      pop {r4,pc} at 0x0805be94; the next separately linked function begins
+      at 0x0805be98 with push {r1,r2,r3,r4,r5,r6,r7,r8,r9,lr}. Decoding every
+      aligned ARM B/BL immediate in osos.dec with load base 0x08000000 finds
+      exactly six inbound direct calls, all unconditional plain bl at
+      0x0804602c, 0x0804603c, 0x0804604c, 0x0804609c, 0x080460a8, and
+      0x080460b4; there are no predicated bl callers. Zero returns without
+      querying the calendar. Otherwise the unported 48-byte adapter
+      FUN_08054fcc returns zero for an invalid query or the negated signed
+      (i16 base plus i8 daylight) minute sum. The rsb/add arithmetic adds
+      that adapter result times 60, equivalently subtracting the live UTC
+      offset from seconds modulo 2^32. Deliberate deviation: the fully
+      decoded adapter is bypassed in favor of the existing ported
+      current_utc_offset_query, with equivalent validity gating and signed
+      arithmetic. Host tests cover zero query avoidance, successful
+      base-plus-daylight subtraction, signed daylight, failed-query
+      preservation, and u32 underflow.
