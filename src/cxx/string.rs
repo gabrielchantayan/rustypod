@@ -1253,6 +1253,85 @@ fn strstreambuf_input_available_honors_mode_and_cursors() {
     }
 }
 
+/// strstreambuf_active_buffer_capacity — original: `FUN_083d7134` @ load
+/// address **0x083d7134** (36 bytes, 0x083d7134..0x083d7154; next sibling
+/// starts at 0x083d7158). Whole-image ARM B/BL decoding finds five direct
+/// call sites, all unconditional `bl`: 0x083d707c, 0x083d70a4, 0x083da878,
+/// 0x083da8a8, and 0x083dabb0.
+///
+/// Selects a `strstreambuf` area's full capacity from its mode word. With
+/// input bit 0x4 set, it returns `input_end (+0x1c) - input_begin (+0x14)`;
+/// otherwise it returns `output_end (+0x28) - output_begin (+0x20)`. Raw
+/// ARM dereferences all selected fields without null checks and performs a
+/// wrapping 32-bit subtraction; this port preserves both behaviours. No
+/// deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.strstreambuf_active_buffer_capacity"))]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_active_buffer_capacity(this: *const u8) -> i32 {
+    const INPUT_ACTIVE: u32 = 0x04;
+    let (begin, end) = if (this.add(4) as *const u32).read() & INPUT_ACTIVE != 0 {
+        (
+            (this.add(0x14) as *const u32).read(),
+            (this.add(0x1c) as *const u32).read(),
+        )
+    } else {
+        (
+            (this.add(0x20) as *const u32).read(),
+            (this.add(0x28) as *const u32).read(),
+        )
+    };
+    (end as i32).wrapping_sub(begin as i32)
+}
+
+/// `strstreambuf_active_buffer_capacity` selects the full input area only
+/// for mode bit 0x4; output fields must not affect that selected span.
+#[cfg(test)]
+#[test]
+fn strstreambuf_active_buffer_capacity_selects_the_mode_area() {
+    #[repr(C)]
+    struct StrstreamBufferAreas {
+        vtable: u32,
+        mode: u32,
+        allocation: u32,
+        allocation_size: u32,
+        flags: u32,
+        input_begin: u32,
+        input_current: u32,
+        input_end: u32,
+        output_begin: u32,
+        output_current: u32,
+        output_end: u32,
+    }
+
+    for (mode, input_begin, input_end, output_begin, output_end, expected) in [
+        (0x00, 0x100, 0x180, 0x200, 0x260, 0x60),
+        (0x08, 0x100, 0x180, 0x280, 0x300, 0x80),
+        (0x04, 0x100, 0x180, 0x200, 0x260, 0x80),
+        (0x0c, 0x180, 0x100, 0x200, 0x260, -0x80),
+        (0x04, 4, 0, 0x200, 0x260, -4),
+    ] {
+        let object = StrstreamBufferAreas {
+            vtable: 0xfeed_face,
+            mode,
+            allocation: 0,
+            allocation_size: 0,
+            flags: 0,
+            input_begin,
+            input_current: 0xdead_beef,
+            input_end,
+            output_begin,
+            output_current: 0xcafe_babe,
+            output_end,
+        };
+        assert_eq!(
+            unsafe { strstreambuf_active_buffer_capacity((&object as *const StrstreamBufferAreas).cast()) },
+            expected,
+            "mode {mode:#x}"
+        );
+    }
+}
+
 /// `strstreambuf_set_buffer_owned` — original: `FUN_083da558` @ load address
 /// **0x083da558** (24 bytes, 0x083da558..0x083da56c; the separately linked
 /// bit-1 sibling begins at 0x083da570). Whole-image ARM B/BL decoding finds
