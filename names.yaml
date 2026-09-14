@@ -67971,6 +67971,44 @@ functions:
       seam indirection (bx r3 through RETAIL_VSPRINTF instead of a direct
       bl), the documented deviations.
 
+
+  # --- Legacy scanf sscanf veneer ---
+  - address: 0x080eb6b0
+    ghidra: FUN_080eb6b0
+    name: retail_sscanf
+    size: 24
+    sig: "i32 retail_sscanf(const u8 *input, const u8 *format, VaList args)"
+    module: printf/format_buffer
+    status: ported
+    renames:
+      param_1/r0: input
+      param_2/r1: format
+      param_3/r2: args
+      FUN_080edc48: retail_vsscanf
+    notes: >-
+      Raw ARM confirms the 24-byte extent exactly, 0x080eb6b0..0x080eb6c8:
+      push {r0,r1,r2,r3}, push {lr}, ldr r1,[sp,#8], add r2,sp,#12,
+      bl 0x080edc48, ldr pc,[sp],#20. This is an ADS variadic veneer: its
+      saved r2 word is the va_list passed with input and format to the legacy
+      scanner. Ghidra's void signature is wrong: r0 is untouched by the
+      epilogue and returns the callee's conversion count or failure value.
+      Decoding every ARM B/BL word in osos.dec finds exactly six inbound BL
+      call sites, all unconditional and no predicated forms: 0x0839d6ac,
+      0x0839d81c, 0x0839d98c, 0x0839db0c, 0x0839dc84, and 0x0839ddf4.
+      Each caller supplies format "%x" and a destination pointer. The direct
+      callee FUN_080edc48 is not separately ported; retail_sscanf dispatches
+      through RETAIL_VSSCANF, whose default uses the ported scanf format engine
+      with the exact input/format/va-list contract required by these sites.
+      Deliberate deviations: Rust takes the va_list explicitly because stable
+      Rust has no C-variadic definition, and the direct BL becomes the volatile
+      RETAIL_VSSCANF seam. Host tests prove null forwarding and failure-result
+      propagation through the seam, then exercise the wired default on the
+      observed whitespace-plus-0x hexadecimal input and a no-digit failure that
+      preserves the destination. cargo test --target x86_64-unknown-linux-gnu
+      passed 7968 tests. match.py structural review with this worktree's archive
+      reports the expected 6-to-7-instruction difference: retail ARM spills and
+      directly BLs, while Rust loads RETAIL_VSSCANF and tail-branches through it.
+
   # --- Four-word record constructor ---
   - address: 0x0803a488
     ghidra: FUN_0803a488

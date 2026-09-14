@@ -781,6 +781,10 @@ pub mod hints {
     // 0x4b00_0000: dedicated to app/output_buffer_reset's target-width data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const OUTPUT_BUFFER_RESET: usize = 0x4b00_0000;
+    // 0xe200_0000: dedicated to printf/retail_sscanf's target-width
+    // varargs/output fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RETAIL_SSCANF: usize = 0xe200_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

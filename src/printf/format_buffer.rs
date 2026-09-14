@@ -14,6 +14,10 @@
 //!   0x0806e0cc, 0x080beed8, 0x080d34d0, 0x08112234, 0x081125cc,
 //!   0x08112850, 0x08116864, 0x081168bc, 0x0812bacc, 0x081cb0ac,
 //!   0x081cb0f4, 0x081eb48c, 0x081ebb5c, 0x081ef4d0, and 0x0828b73c.
+//! - `retail_sscanf` — `FUN_080eb6b0` @ 0x080eb6b0 (24 bytes), the legacy
+//!   scanner's `sscanf` veneer. Binary decoding finds exactly six inbound
+//!   `bl` call sites, all unconditional: 0x0839d6ac, 0x0839d81c,
+//!   0x0839d98c, 0x0839db0c, 0x0839dc84, and 0x0839ddf4.
 //!
 //! The sink writes `value` at `length` when `length < capacity`, then advances
 //! the length. With an optional heap-pointer slot, it first grows exhausted
@@ -26,9 +30,12 @@
 //! result from allocation/reallocation. This port preserves the capacity and
 //! heap-slot stores but returns before that invalid access.
 
+use core::ffi::c_void;
 use crate::drivers::ata_cmd::{traced_alloc, traced_realloc};
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::printf::printf_api::{vsprintf, VaList};
+use crate::scanf::scanf_engine::scanf_engine_prologue;
+use crate::scanf::scanf_helpers::{string_getc, string_ungetc, ScanfConvState, ScanfState};
 
 
 /// `format_buffer_append_char` — original: `FUN_08077bcc` @ 0x08077bcc
@@ -162,6 +169,83 @@ pub unsafe extern "C" fn retail_sprintf(buf: *mut u8, format: *const u8, args: V
     retail_vsprintf()(buf, format, args)
 }
 
+/// The legacy scanner behind [`retail_sscanf`]. The original callee,
+/// `FUN_080edc48`, is unported; it parses the input and consumes destination
+/// words from `args`. The default maps that contract onto the ported scanf
+/// format engine, which covers this veneer’s six observed `%x` call sites.
+pub type RetailVsscanfFn =
+    unsafe extern "C" fn(input: *const u8, format: *const u8, args: VaList) -> i32;
+
+unsafe extern "C" fn retail_vsscanf_default(
+    input: *const u8,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    let mut state = ScanfState {
+        ptr: input,
+        count: -1,
+        base: input,
+        eof: 0,
+        ap: args as *mut c_void,
+        flags: 0,
+        width: 0,
+        fmt_cursor: core::ptr::null(),
+        scanset_flag: 0,
+        fmt_getc: None,
+        getc: Some(string_getc),
+        ungetc: Some(string_ungetc),
+        ctype: None,
+    };
+    let mut conv = ScanfConvState {
+        ap: args as *mut c_void,
+        flags: 0,
+        width: 0,
+        fmt_cursor: core::ptr::null(),
+        scanset_flag: 0,
+        fmt_getc: None,
+        getc: Some(string_getc),
+        ungetc: Some(string_ungetc),
+        ctype: None,
+    };
+    scanf_engine_prologue(&mut state, format, &mut conv)
+}
+
+/// Active scanner for [`retail_sscanf`]. The direct retail callee @
+/// 0x080edc48 remains unported, so this seam defaults to the ported scanf
+/// format engine. Host tests replace it to verify the veneer ABI.
+pub static mut RETAIL_VSSCANF: RetailVsscanfFn = retail_vsscanf_default;
+
+#[inline(always)]
+unsafe fn retail_vsscanf() -> RetailVsscanfFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSSCANF))
+}
+
+/// `retail_sscanf` — original: `FUN_080eb6b0` @ 0x080eb6b0 (24 bytes,
+/// 0x080eb6b0..0x080eb6c8; the distinct next function begins at
+/// 0x080eb6c8). Six direct `bl` call sites, found by decoding every ARM
+/// B/BL word in osos.dec; all are unconditional: 0x0839d6ac, 0x0839d81c,
+/// 0x0839d98c, 0x0839db0c, 0x0839dc84, and 0x0839ddf4.
+///
+/// An ADS variadic adapter: spill r0-r3, recover the saved `format` from
+/// the r1 slot, then pass the saved r2 slot as the first word of a va_list to
+/// scanner `FUN_080edc48`. It performs no validation or memory access itself;
+/// its callee's conversion count (or failure result) remains in r0.
+///
+/// Deliberate deviations: stable Rust represents `...` as explicit
+/// [`VaList`], precisely the pointer produced by the retail spill. The
+/// unported scanner is reached through [`RETAIL_VSSCANF`], whose default is
+/// the ported scanf engine. All six observed callers use `%x`; their
+/// conversion behavior is covered by that default.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn retail_sscanf(
+    input: *const u8,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    retail_vsscanf()(input, format, args)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -171,7 +255,9 @@ mod tests {
         TracedAllocHooks, TracedReallocHooks, TRACED_ALLOC_HOOKS,
         TRACED_REALLOC_HOOKS, TRACED_REALLOC_TEST_LOCK,
     };
-    use crate::testing::TRACED_ALLOC_TEST_LOCK;
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, TRACED_ALLOC_TEST_LOCK,
+    };
     use std::boxed::Box;
     use std::sync::MutexGuard;
 
@@ -403,6 +489,54 @@ mod tests {
         }
     }
 
+    /// Serializes tests that swap the RETAIL_VSSCANF seam.
+    static VSSCANF_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    static mut RECORDED_INPUT: *const u8 = core::ptr::null();
+    static mut RECORDED_SCAN_FORMAT: *const u8 = core::ptr::null();
+    static mut RECORDED_SCAN_ARGS: VaList = core::ptr::null();
+    static mut RECORDED_SCAN_CALLS: u32 = 0;
+
+    unsafe extern "C" fn recording_vsscanf(
+        input: *const u8,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        RECORDED_INPUT = input;
+        RECORDED_SCAN_FORMAT = format;
+        RECORDED_SCAN_ARGS = args;
+        RECORDED_SCAN_CALLS += 1;
+        -1
+    }
+
+    struct VsscanfSeam {
+        _guard: MutexGuard<'static, ()>,
+        old: RetailVsscanfFn,
+    }
+
+    impl VsscanfSeam {
+        fn install(stub: RetailVsscanfFn) -> Self {
+            let guard = VSSCANF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                RECORDED_INPUT = core::ptr::null();
+                RECORDED_SCAN_FORMAT = core::ptr::null();
+                RECORDED_SCAN_ARGS = core::ptr::null();
+                RECORDED_SCAN_CALLS = 0;
+                let old = core::ptr::read(core::ptr::addr_of!(RETAIL_VSSCANF));
+                *core::ptr::addr_of_mut!(RETAIL_VSSCANF) = stub;
+                Self { _guard: guard, old }
+            }
+        }
+    }
+
+    impl Drop for VsscanfSeam {
+        fn drop(&mut self) {
+            unsafe {
+                *core::ptr::addr_of_mut!(RETAIL_VSSCANF) = self.old;
+            }
+        }
+    }
+
     #[test]
     fn forwards_arguments_verbatim_and_propagates_the_count() {
         let _seam = VsprintfSeam::install(recording_vsprintf);
@@ -447,6 +581,69 @@ mod tests {
             assert_eq!(
                 core::ptr::read(core::ptr::addr_of!(RETAIL_VSPRINTF)) as usize,
                 vsprintf as usize
+            );
+        }
+    }
+
+    #[test]
+    fn retail_sscanf_forwards_nulls_and_propagates_failure() {
+        let _seam = VsscanfSeam::install(recording_vsscanf);
+
+        let result = unsafe {
+            retail_sscanf(core::ptr::null(), core::ptr::null(), core::ptr::null())
+        };
+
+        assert_eq!(result, -1);
+        unsafe {
+            assert_eq!(RECORDED_SCAN_CALLS, 1);
+            assert!(RECORDED_INPUT.is_null());
+            assert!(RECORDED_SCAN_FORMAT.is_null());
+            assert!(RECORDED_SCAN_ARGS.is_null());
+        }
+    }
+
+    #[test]
+    fn retail_sscanf_default_handles_observed_hex_and_match_failure() {
+        let _guard = VSSCANF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(slab) = try_map_u32_slab(hints::RETAIL_SSCANF, 16) else {
+            if note_missing_u32_fixture("printf/retail_sscanf") {
+                return;
+            }
+            unreachable!();
+        };
+
+        unsafe {
+            let destination = slab as *mut u32;
+            let args = slab.add(8) as *mut *mut u8;
+            destination.write(0xa5a5_a5a5);
+            args.write(destination as *mut u8);
+
+            assert_eq!(
+                retail_sscanf(
+                    b" 0x1f!\0".as_ptr(),
+                    b"%x\0".as_ptr(),
+                    args as VaList,
+                ),
+                1
+            );
+            assert_eq!(destination.read(), 0x1f);
+
+            destination.write(0xa5a5_a5a5);
+            assert_eq!(
+                retail_sscanf(b"!\0".as_ptr(), b"%x\0".as_ptr(), args as VaList),
+                0
+            );
+            assert_eq!(destination.read(), 0xa5a5_a5a5);
+        }
+    }
+
+    #[test]
+    fn retail_sscanf_default_is_ported_scanner() {
+        let _guard = VSSCANF_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            assert_eq!(
+                core::ptr::read(core::ptr::addr_of!(RETAIL_VSSCANF)) as usize,
+                retail_vsscanf_default as usize
             );
         }
     }
