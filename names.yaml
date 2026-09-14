@@ -84893,3 +84893,43 @@ functions:
       The predicated calls show their callers gate the no-NULL-guard leaf.
       Deliberate deviation: volatile byte accesses and a target-only unique
       text section retain a separate non-intrinsic, non-folded target.
+
+
+  # --- Fixed-page buffered writer append ---
+  - address: 0x080569a8
+    ghidra: FUN_080569a8
+    name: buffered_writer_write
+    size: 188
+    sig: "u32 buffered_writer_write(BufferedWriterHandle *handle, const u8 *source, u32 len)"
+    module: crypto/buffered_writer_write
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: source
+      param_3/r2: len
+      r4: state
+      r5: remaining
+      r6: source_cursor
+      r7: page_flags_reset_value
+      DAT_08056a64: BUFFERED_WRITER_INVALID_STATE
+      thunk_EXT_FUN_22000020: __rt_memcpy
+      FUN_08064fb8: buffered_writer_flush
+    notes: >-
+      Raw ARM establishes a 188-byte instruction body from 0x080569a8 through
+      pop {r4-r8,pc} at 0x08056a60; its following literal word at 0x08056a64
+      is 0xffff5bd9 and the separately linked next function starts at
+      0x08056a68. Decoding every aligned ARM B/BL immediate in osos.dec finds
+      exactly six direct BL call sites: unconditional BL at 0x080436f4,
+      0x0804370c, 0x08392e10, 0x08392e28, and 0x08396b0c, plus predicated
+      BLNE at 0x0806e3cc. The caller-side predicate gates the call itself;
+      there is also one distinct BNE tail caller at 0x083181dc. It rejects a
+      NULL handle/source, pending length >= 0x1000, or a +0x4c word other than
+      state+0x54, returning the raw literal. Otherwise it appends source to
+      state+0x6c, and each full 4096-byte page is copied through the ported
+      __rt_memcpy veneer target, handed to unported FUN_08064fb8, clears
+      state+0x50, reloads +0x68, then clears +0x68 before continuing. The
+      residual partial page stays buffered. Deliberate deviation: FUN_08064fb8
+      is a volatile host seam and direct verified device call because no
+      existing port or identity is established; tests cover invalid states,
+      no-flush append, and three consecutive page handoffs with observed
+      ordering and state.
