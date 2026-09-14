@@ -21,6 +21,15 @@
 //! copy: 21 ARM words through `bx lr` at `0x083c6580`, followed by the next
 //! function at `0x083c6584`. It has five inbound direct calls—four plain
 //! `bl` and one `bleq`—so this shared export is also its faithful port.
+//!
+//! `FUN_083c5ab0` at load address `0x083c5ab0` is also byte-identical:
+//! 21 ARM words from `ldr r2,[r1,#8]` through `bx lr` at `0x083c5b00`, then
+//! the separately linked next function at `0x083c5b04`. A full raw-binary
+//! scan finds five inbound calls: unconditional `bl` at `0x083c5dfc`,
+//! `0x083c5e74`, `0x083c5f68`, and `0x083c634c`, plus predicated `bleq` at
+//! `0x083c639c`; no direct tail-`B` callers exist. This shared export is its
+//! faithful port: the predicated caller selects the left child before calling,
+//! preserving the retail function's intentional lack of NULL guards.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
@@ -47,7 +56,8 @@ fn node_word(node: *mut RedBlackTreeNode) -> u32 {
 
 /// Rotates `node` right in `tree`.
 ///
-/// Original: `FUN_083ced20` at load address `0x083ced20` (84 bytes; five
+/// Originals: `FUN_083ced20` at load address `0x083ced20`, `FUN_083c6530` at
+/// `0x083c6530`, and `FUN_083c5ab0` at `0x083c5ab0` (each 84 bytes; five
 /// inbound `bl` sites: four unconditional and one `bleq`).
 ///
 /// # Safety
