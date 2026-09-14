@@ -47,6 +47,36 @@ functions:
       four-byte vtable word as a typed host pointer-width callback cell; its
       final typed call represents ARM bxeq. Deliberate deviations: none.
 
+  # --- component vtable tail dispatch ---
+  - address: 0x081159bc
+    ghidra: FUN_081159bc
+    name: component_vtable_slot_180_tail_dispatch
+    size: 16
+    sig: "u32 component_vtable_slot_180_tail_dispatch(ComponentVtableSlot180Owner *owner)"
+    module: cxx/component_vtable_slot_180_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0x430: component
+      component_deref: vtable
+      vtable_plus_0xb4: component_dispatch
+      method_return/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: ldr r0,[r0,#0x430],
+      ldr r1,[r0], ldr r1,[r1,#0xb4], bx r1 at 0x081159bc..0x081159c8;
+      the separately linked next function begins at 0x081159cc. It replaces
+      owner in r0 with the opaque component at +0x430 and tail-dispatches that
+      component through its vtable +0xb4 slot, returning the slot result
+      unchanged. The component and virtual method identities remain
+      unrecovered and are deliberately not invented. Decoding every immediate
+      ARM B/BL word in osos.dec finds exactly six inbound calls, all plain
+      unconditional bl at 0x0812eecc, 0x0812f174, 0x0812f4f4, 0x0819e250,
+      0x0819e2f0, and 0x08289814; there are no predicated bl forms, direct
+      tail branches, or aligned raw data-word references. Host coverage proves
+      only vtable slot +0xb4 is selected, the component replaces owner as the
+      virtual receiver, and the u32 result is preserved. Rust uses native-width
+      host vtable cells while repr(C) preserves the verified target word offsets.
+
   # --- ARM ADS runtime: memory block ---
   - address: 0x080000d4
     ghidra: FUN_080000d4

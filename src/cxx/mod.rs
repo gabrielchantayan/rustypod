@@ -15,6 +15,7 @@ pub mod clock_source_destroy;
 pub mod color_copy;
 pub mod color_pack;
 pub mod color_unpack;
+pub mod component_vtable_slot_180_tail_dispatch;
 pub mod context_activity;
 pub mod context_line_terminator;
 pub mod context_child_handle;
