@@ -12,9 +12,8 @@
 //!   rationale.
 //! - `iter_equal` — original: `FUN_083d5e70` @ 0x083d5e70 (24 bytes):
 //!   iterator pointee comparison, 1 on equal. Ported in place.
-//! - `iter_advance` — original: `FUN_083d5e88` @ 0x083d5e88 (24 bytes),
-//!   the same advance heap/block_mgr.rs ports in place for its own
-//!   walks; duplicated privately here rather than exported.
+//! - `list_iter_advance` — original: `FUN_083d5e88` @ 0x083d5e88 (24 bytes),
+//!   exported by `list_iter_advance.rs` and used directly below.
 //!
 //! The list layout recovered from this cluster (the ADS C++ library's
 //! checked `std::list`): the list object carries an identity word at
@@ -31,7 +30,7 @@
 //! the real splice with the 0/1 verdict discarded, exactly like the
 //! original body's caller (the `bl` @ 0x0818b1a0 ignores r0).
 
-use crate::heap::veneers::heap_panic;
+use crate::{cxx::list_iter_advance::list_iter_advance, heap::veneers::heap_panic};
 
 /// Byte offset of the owning-list identity word inside a node
 /// (original: the `str r0, [r1, #0x0]` re-stamp in the adopt walk).
@@ -104,20 +103,6 @@ unsafe fn iter_equal(a: *mut *mut u8, b: *mut *mut u8) -> i32 {
     }
 }
 
-/// iter_advance — original: `FUN_083d5e88` @ 0x083d5e88 (24 bytes),
-/// ported in place (same as heap/block_mgr.rs's private copy).
-///
-/// Advances a single-word list iterator to the node's +0x4 next; a
-/// NULL current node is fatal (`bleq 0x08030f44`, heap/veneers.rs's
-/// `heap_panic`, non-returning).
-#[inline(never)]
-unsafe fn iter_advance(it: *mut *mut u8) {
-    let node = *it;
-    if node.is_null() {
-        heap_panic();
-    }
-    *it = ptr_word(node, NODE_NEXT_OFFSET);
-}
 
 /// list_splice — original: `FUN_083d5d20` @ 0x083d5d20 (316 bytes; the
 /// `bl` @ 0x0818b1a0 inside heap/block_mgr.rs's `take_blocks_body` and
@@ -192,7 +177,7 @@ pub unsafe extern "C" fn list_splice(
         let owner = ptr_word(dst_list, LIST_SELF_OFFSET);
         set_word(cursor, NODE_OWNER_OFFSET, owner as u32);
         moved += 1;
-        iter_advance(&mut cursor);
+        list_iter_advance(&mut cursor);
     }
     // 4. A NULL `last` is fatal, exactly like the original's
     // `bleq 0x08030f44` (non-returning).

@@ -50,6 +50,7 @@
 //! host test) stores the object pointer.
 
 use crate::heap::veneers::heap_panic;
+use crate::cxx::list_iter_advance::list_iter_advance;
 
 /// Byte offset of the per-region block size word in the block-manager
 /// object (original: `ldrne r0, [r0, #0x30]`).
@@ -152,21 +153,6 @@ unsafe fn set_word(object: *mut u8, offset: usize, value: u32) {
     (object.add(offset) as *mut u32).write_unaligned(value);
 }
 
-/// list_iter_advance — original: `FUN_083d5e88` @ 0x083d5e88 (24
-/// bytes), the only two call sites being this module's body, so it is
-/// ported in place rather than exported.
-///
-/// Advances a single-word list iterator (`*it` = current node) to the
-/// node's +0x4 next; a NULL current node is fatal (`bleq 0x08030f44`,
-/// heap/veneers.rs's `heap_panic`, non-returning).
-#[inline(always)]
-unsafe fn iter_advance(it: &mut *mut u8) {
-    let node = *it;
-    if node.is_null() {
-        heap_panic();
-    }
-    *it = ptr_word(node, NODE_NEXT_OFFSET);
-}
 
 /// list_iter_entry — original: `FUN_083d5ea0` @ 0x083d5ea0 (20 bytes),
 /// same in-place rationale as [`iter_advance`].
@@ -284,7 +270,7 @@ pub unsafe extern "C" fn block_count_byte_size(counter: *mut LockedBlockCount) -
 ///    the whole hand-out with 0.
 /// 2. Walk a stack end-iterator `count` steps from the free-list head
 ///    (head word at list + 0x4 → absolute manager + 0x8) through the
-///    0x083d5e88 advance ([`iter_advance`]); a short list panics —
+///    0x083d5e88 advance ([`list_iter_advance`]); a short list panics —
 ///    unreachable given the gate, defensive.
     /// 3. Splice the range [head, end) out of the manager's free list
     ///    into the client state's own list (the client state IS a list
@@ -328,7 +314,7 @@ pub unsafe extern "C" fn take_blocks_body(
     let mut end: *mut u8 = ptr_word(free_list, LIST_HEAD_OFFSET);
     let mut remaining = count;
     while remaining != 0 {
-        iter_advance(&mut end);
+        list_iter_advance(&mut end);
         remaining -= 1;
     }
     // The splice (0x083d5d20, cxx/list_splice.rs's port wired as the
@@ -350,7 +336,7 @@ pub unsafe extern "C" fn take_blocks_body(
             heap_panic();
         }
         set_word(owner, OWNER_NODE_OFFSET, cursor as u32);
-        iter_advance(&mut cursor);
+        list_iter_advance(&mut cursor);
         remaining -= 1;
     }
     1
