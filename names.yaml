@@ -36037,6 +36037,30 @@ functions:
       structure; LLVM expands host-safe unaligned head accesses to byte
       operations and adds a frame.
 
+  - address: 0x083e5fc0
+    ghidra: FUN_083e5fc0
+    name: vector_bool_iter_increment
+    size: 36
+    sig: "void vector_bool_iter_increment(VectorBoolIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, iVar1: next_bit}
+    notes: >-
+      `std::vector<bool>` bit-iterator `_Vb_iterator::operator++`: reads
+      the `{word, bit}` head, increments bit with 32-bit wrapping, and
+      compares it to 32. Only that exact boundary resets bit to zero and
+      advances word by one 4-byte storage element; noncanonical offsets
+      retain the raw ARM wrapping behavior. Raw osos.dec decoding proves a
+      36-byte body from 0x083e5fc0 through 0x083e5fe4, with the next
+      sibling starting at 0x083e5fe8, correcting Ghidra's 40-byte report.
+      All 5 decoded callers are unconditional `bl` instructions at
+      0x0826a3d8, 0x083e5dec, 0x083e5e68, 0x083e5ef4, and 0x083e5f10;
+      they operate in the vector<bool> write and storage-grow paths.
+      There is no NULL guard because the original dereferences the iterator
+      head. Deliberate host-only deviation: read_unaligned/write_unaligned
+      accepts a firmware-aligned head on a 64-bit host; target code uses
+      aligned named-field accesses.
+
   - address: 0x083e5fe8
     ghidra: FUN_083e5fe8
     name: vector_bool_reference_assign
