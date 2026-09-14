@@ -1237,15 +1237,15 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf680` @ 0x083cf680, `FUN_083cf698` @ 0x083cf698,
 /// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
 /// `FUN_083cf788` @ 0x083cf788, `FUN_083cf7a0` @ 0x083cf7a0,
-/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf8a8` @ 0x083cf8a8,
-/// `FUN_083cf8c0` @ 0x083cf8c0, `FUN_083cf890` @ 0x083cf890,
-/// `FUN_083cf8f0` @ 0x083cf8f0,
+/// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf878` @ 0x083cf878,
+/// `FUN_083cf8a8` @ 0x083cf8a8, `FUN_083cf8c0` @ 0x083cf8c0,
+/// `FUN_083cf890` @ 0x083cf890, `FUN_083cf8f0` @ 0x083cf8f0,
 /// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
 /// `FUN_083cf968` @ 0x083cf968,
 /// `FUN_083cf980` @ 0x083cf980, `FUN_083cf998` @ 0x083cf998,
 /// `FUN_083cf9b0` @ 0x083cf9b0, and `FUN_083cf9c8` @ 0x083cf9c8
-/// (24 bytes each). Raw bytes show all twenty-one are the same six-word leaf. At
+/// (24 bytes each). Raw bytes show all twenty-two are the same six-word leaf. At
 /// 0x083cf650, the next separately linked copy begins at 0x083cf668,
 /// confirming the extent. Decoding every ARM B/BL word
 /// in `osos.dec` finds exactly 7 plain `bl` callers there: 0x08109d10,
@@ -1317,6 +1317,18 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// no predicated call or tail branch. It has no NULL guard; routing this
 /// byte-identical copy to the established export is the deliberate deviation,
 /// avoiding a redundant dispatch seam.
+/// `FUN_083cf878` is a separately linked 24-byte copy through `bx lr` at
+/// 0x083cf88c; the next equal_deref copy begins at 0x083cf890. It performs
+/// two unguarded aligned u32 loads and returns normalized 1 exactly when the
+/// loaded words are equal. Decoding every ARM B/BL word in `osos.dec` finds
+/// five direct callers, all unconditional plain `bl`: 0x083c5b2c, 0x083c5fa0,
+/// 0x083c5fbc, 0x083c6040, and 0x083c6104. There are no predicated forms,
+/// direct tail branches, or aligned raw-word references. Its byte-identical
+/// body deliberately reuses this established export rather than introducing a
+/// redundant dispatch seam; hook 0x083cf878 to [`equal_deref`]. The shared
+/// host test covers equal values at distinct addresses, unequal values in both
+/// orders, zero, all-bits-set, and iterator-shaped records whose trailing word
+/// is not read. Deliberate deviations: none.
 /// `FUN_083cf890` is a separately linked 24-byte copy through `bx lr` at
 /// 0x083cf8a4; the next equal_deref copy begins at 0x083cf8a8. It performs
 /// two unguarded aligned word loads and returns normalized 1 only when the
