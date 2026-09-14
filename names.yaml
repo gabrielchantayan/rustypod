@@ -85616,3 +85616,35 @@ functions:
       i32 minimum path deliberately uses wrapping negation, matching ARM rsb
       followed by arithmetic shifts. No Rust deviations: all four callees are
       already direct ports, including the IRAM memzero veneer.
+
+
+  # --- Stream state accumulator ---
+  - address: 0x083e7898
+    ghidra: FUN_083e7898
+    name: stream_state_set
+    size: 28
+    sig: "u32 stream_state_set(void *stream, u32 requested_state)"
+    module: cxx/stream_state_set
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: requested_state
+      param_1_plus_0x10/r2: accumulated_state
+      param_1_plus_0x34/r2: state_sentry
+      FUN_082a8db8: unported_stream_state_clear_helper
+      return/r0: clear_result
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte body: seven ARM instructions
+      from 0x083e7898 through the tail branch at 0x083e78b0; the following
+      ldr at 0x083e78b4 starts a separately linked constructor. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly five direct inbound
+      calls: blne at 0x083b5420, 0x083b54e0, and 0x083d81a0; plain bl at
+      0x083d8334; and bleq at 0x083d8384. There are no direct tail-B callers.
+      The function ORs requested_state into stream+0x10, sets bit 0 when word
+      stream+0x34 is zero, then tail-enters unported FUN_082a8db8 with the
+      stream, accumulated state, and mask 0xffffffff. The helper's identity
+      beyond its verified state-clear role is not established. Deliberate
+      deviation: target builds dispatch directly to the fixed retailOS helper;
+      host tests install a volatile callback seam and prove the unchanged
+      pointer, OR accumulation, conditional bit, all-ones mask, and forwarded
+      return value.
