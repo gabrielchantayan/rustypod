@@ -1248,6 +1248,127 @@ pub unsafe extern "C" fn namespace_provider_each_then_destroy(
     namespace_provider_destroy(providers);
 }
 
+/// Option word layout consumed by [`namespace_provider_release_value`].
+///
+/// The target has flags at +0x00 and the release-engine descriptor at +0x10.
+/// `repr(C)` keeps that descriptor at +0x10 on both the 32-bit target and
+/// 64-bit host; it is opaque because the unported engine owns its concrete
+/// interpretation.
+#[repr(C)]
+pub struct NamespaceProviderReleaseOptions {
+    pub flags: u32,
+    pub reserved: [u32; 3],
+    pub release_descriptor: *const u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(NamespaceProviderReleaseOptions, release_descriptor)];
+
+/// ABI of the unported type-erased release engine `FUN_080c85bc`.
+///
+/// The engine receives an address containing one target value word, its
+/// descriptor, and a mode word. Its wider identity remains unrecovered.
+pub type NamespaceProviderValueRelease =
+    unsafe extern "C" fn(value_slot: *mut usize, descriptor: *const u8, mode: u32);
+
+#[cfg(not(target_os = "none"))]
+pub(crate) static mut NAMESPACE_PROVIDER_VALUE_RELEASE: NamespaceProviderValueRelease =
+    missing_namespace_provider_value_release;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_namespace_provider_value_release(
+    _value_slot: *mut usize,
+    _descriptor: *const u8,
+    _mode: u32,
+) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Calls the unported type-erased release engine.
+#[inline(always)]
+unsafe fn namespace_provider_value_release(
+    value_slot: *mut usize,
+    descriptor: *const u8,
+    mode: u32,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let release: NamespaceProviderValueRelease = core::mem::transmute(0x080c_85bcusize);
+        release(value_slot, descriptor, mode);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(NAMESPACE_PROVIDER_VALUE_RELEASE))(
+            value_slot,
+            descriptor,
+            mode,
+        );
+    }
+}
+
+/// Reads one provider entry while retaining the target's direct accessor call
+/// and the host's disjoint pointer-sized provider words.
+#[inline(always)]
+unsafe fn namespace_provider_release_entry(providers: *mut usize, index: u32) -> usize {
+    #[cfg(target_os = "none")]
+    {
+        namespace_provider_at(providers.cast(), index) as usize
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *const usize;
+        table.add(index as usize).read_volatile()
+    }
+}
+
+
+/// namespace_provider_release_value — original: `FUN_0803b8c8` @
+/// `0x0803b8c8` (124 bytes, `0x0803b8c8..0x0803b944`; the separately linked
+/// next function begins with `push {r0-r2,r4-r11,lr}` at `0x0803b944`).
+/// Verified inbound branches: six plain, unconditional `bl` calls
+/// (0x0803af18, 0x0803afc8, 0x080b66d8, 0x080c86b8, 0x080c87a4, and
+/// 0x080cc8e8), plus one `bne` tail branch at 0x080c8634; there are no
+/// predicated `bl` forms.
+///
+/// Releases a value slot through the type-erased release engine configured at
+/// `options + 0x10`. When `options.flags & 6` is clear, it tail-dispatches
+/// once with `mode = options.flags & 0x400`, leaving the slot untouched. When
+/// either bit is set, the slot instead holds a namespace-provider table:
+/// every entry, including a null entry, is copied into a one-word stack slot
+/// and released with mode zero; the provider table is then destroyed and the
+/// original slot is cleared. The table count is reloaded on every loop gate,
+/// exactly as the `bl namespace_provider_count` / signed `bgt` pair does.
+///
+/// Deliberate deviations: the unported `FUN_080c85bc` is a fixed-address call
+/// on target and a volatile host seam; its concrete identity is not claimed.
+/// Host collection fixtures use pointer-sized provider words, so their entry
+/// load bypasses [`namespace_provider_at`]'s target-byte-offset layout.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_release_value(
+    value_slot: *mut usize,
+    options: *const NamespaceProviderReleaseOptions,
+) {
+    let flags = (*options).flags;
+    let descriptor = (*options).release_descriptor;
+    if flags & 6 == 0 {
+        namespace_provider_value_release(value_slot, descriptor, flags & 0x400);
+        return;
+    }
+
+    let providers = value_slot.read_volatile() as *mut usize;
+    let mut index = 0u32;
+    while namespace_provider_count(providers.cast()) > index as i32 {
+        let mut provider = namespace_provider_release_entry(providers, index);
+        namespace_provider_value_release(core::ptr::addr_of_mut!(provider), descriptor, 0);
+        index = index.wrapping_add(1);
+    }
+    namespace_provider_destroy(providers);
+    value_slot.write_volatile(0);
+}
+
 /// Registry fallback name hash — original: `FUN_082d7e54` @ `0x082d7e54`
 /// (88 bytes; source:
 /// `ipod-decomp/decomp/c/031/082d7e54_FUN_082d7e54.c`).
@@ -3772,6 +3893,137 @@ mod tests {
         assert_eq!(recorded_teardown_entries().0, 0, "signed count gate stays closed");
         assert_eq!(recorded_destroy_frees().0, 2, "destroy runs even for an empty drain");
         uninstall_recording_destroy(previous);
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ProviderReleaseCall {
+        value_slot: usize,
+        value: usize,
+        descriptor: usize,
+        mode: u32,
+    }
+
+    const NO_PROVIDER_RELEASE_CALL: ProviderReleaseCall =
+        ProviderReleaseCall { value_slot: 0, value: 0, descriptor: 0, mode: 0 };
+
+    /// Serializes the release-engine seam and the traced-free seam reached by
+    /// the collection branch's provider destruction.
+    static PROVIDER_RELEASE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static mut PROVIDER_RELEASE_CALLS: [ProviderReleaseCall; 4] = [NO_PROVIDER_RELEASE_CALL; 4];
+    static mut PROVIDER_RELEASE_CALL_COUNT: usize = 0;
+
+    unsafe extern "C" fn recording_provider_value_release(
+        value_slot: *mut usize,
+        descriptor: *const u8,
+        mode: u32,
+    ) {
+        let count = PROVIDER_RELEASE_CALL_COUNT;
+        assert!(count < PROVIDER_RELEASE_CALLS.len(), "release engine called too often");
+        PROVIDER_RELEASE_CALLS[count] = ProviderReleaseCall {
+            value_slot: value_slot as usize,
+            value: value_slot.read_volatile(),
+            descriptor: descriptor as usize,
+            mode,
+        };
+        PROVIDER_RELEASE_CALL_COUNT = count + 1;
+    }
+
+    struct ProviderReleaseReset {
+        _release_guard: parking_lot::MutexGuard<'static, ()>,
+        _destroy_guard: parking_lot::MutexGuard<'static, ()>,
+        old_release: NamespaceProviderValueRelease,
+        old_free: crate::drivers::ata_cmd::TracedFreeHooks,
+    }
+
+    impl Drop for ProviderReleaseReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(NAMESPACE_PROVIDER_VALUE_RELEASE),
+                    self.old_release,
+                );
+                crate::drivers::ata_cmd::TRACED_FREE_HOOKS = self.old_free;
+            }
+        }
+    }
+
+    fn install_recording_provider_release() -> ProviderReleaseReset {
+        let release_guard = PROVIDER_RELEASE_TEST_LOCK.lock();
+        let destroy_guard = crate::drivers::ata_cmd::TRACED_FREE_TEST_LOCK.lock();
+        unsafe {
+            let old_release = core::ptr::read_volatile(core::ptr::addr_of!(
+                NAMESPACE_PROVIDER_VALUE_RELEASE
+            ));
+            let old_free = core::ptr::read_volatile(core::ptr::addr_of!(
+                crate::drivers::ata_cmd::TRACED_FREE_HOOKS
+            ));
+            NAMESPACE_PROVIDER_VALUE_RELEASE = recording_provider_value_release;
+            crate::drivers::ata_cmd::TRACED_FREE_HOOKS =
+                crate::drivers::ata_cmd::TracedFreeHooks {
+                    free: recording_destroy_free,
+                    trace: None,
+                };
+            PROVIDER_RELEASE_CALLS = [NO_PROVIDER_RELEASE_CALL; 4];
+            PROVIDER_RELEASE_CALL_COUNT = 0;
+            DESTROY_FREE_CALL_COUNT = 0;
+            ProviderReleaseReset { _release_guard: release_guard, _destroy_guard: destroy_guard, old_release, old_free }
+        }
+    }
+
+    fn recorded_provider_release_calls() -> (usize, [ProviderReleaseCall; 4]) {
+        unsafe { (PROVIDER_RELEASE_CALL_COUNT, PROVIDER_RELEASE_CALLS) }
+    }
+
+    #[test]
+    fn namespace_provider_release_value_forwards_scalar_slot_and_mode() {
+        let _reset = install_recording_provider_release();
+        let mut value = 0x1111_2222usize;
+        let options = NamespaceProviderReleaseOptions {
+            flags: 0x400,
+            reserved: [0; 3],
+            release_descriptor: 0x0bad_a55usize as *const u8,
+        };
+
+        unsafe { namespace_provider_release_value(&mut value, &options) };
+
+        let (count, calls) = recorded_provider_release_calls();
+        assert_eq!(count, 1);
+        assert_eq!(
+            calls[0],
+            ProviderReleaseCall {
+                value_slot: core::ptr::addr_of_mut!(value) as usize,
+                value: 0x1111_2222,
+                descriptor: 0x0bad_a55,
+                mode: 0x400,
+            }
+        );
+        assert_eq!(value, 0x1111_2222, "the scalar tail-dispatch leaves its slot intact");
+        assert_eq!(recorded_destroy_frees().0, 0);
+    }
+
+    #[test]
+    fn namespace_provider_release_value_releases_all_entries_then_destroys_collection() {
+        let _reset = install_recording_provider_release();
+        let mut providers = ProvidersFixture::new(3, 4, std::vec![0xe1, 0, 0xe3, 0, 0, 0], 0);
+        let table = providers.words[PROVIDER_TABLE_WORD];
+        let object = providers.ptr();
+        let mut value = object as usize;
+        let options = NamespaceProviderReleaseOptions {
+            flags: 0x406,
+            reserved: [0; 3],
+            release_descriptor: 0x0bad_a56usize as *const u8,
+        };
+
+        unsafe { namespace_provider_release_value(&mut value, &options) };
+
+        let (count, calls) = recorded_provider_release_calls();
+        assert_eq!(count, 3, "the collection path releases every table entry, including null");
+        assert_eq!([calls[0].value, calls[1].value, calls[2].value], [0xe1, 0, 0xe3]);
+        assert!(calls[..3].iter().all(|call| call.descriptor == 0x0bad_a56 && call.mode == 0));
+        assert_eq!(value, 0, "provider collection destruction clears the original slot");
+        let (free_count, freed) = recorded_destroy_frees();
+        assert_eq!(free_count, 2);
+        assert_eq!(freed[..2], [table, object as usize], "table then providers object");
     }
 
     #[test]

@@ -32485,6 +32485,40 @@ functions:
       in retail. match.py (--size 8): same `ldr r2,[r0]` + tail-branch
       shape; the LLVM frame prologue is the only addition.
 
+  - address: 0x0803b8c8
+    ghidra: FUN_0803b8c8
+    name: namespace_provider_release_value
+    size: 124
+    sig: "void namespace_provider_release_value(usize *value_slot, const NamespaceProviderReleaseOptions *options)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r0: value_slot
+      param_2/r1: options
+      param_2_plus_0x00: flags
+      param_2_plus_0x10: release_descriptor
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+      FUN_08369618: namespace_provider_destroy
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent from push
+      {r3,r4,r5,r6,r7,lr} at 0x0803b8c8 through pop
+      {r3,r4,r5,r6,r7,pc} at 0x0803b940; the separately linked sibling begins
+      at 0x0803b944. Decoding every immediate ARM B/BL word finds exactly six
+      inbound bl calls, all unconditional, at 0x0803af18, 0x0803afc8,
+      0x080b66d8, 0x080c86b8, 0x080c87a4, and 0x080cc8e8; there are no
+      predicated bl forms. One bne tail branch at 0x080c8634 also reaches this
+      entry. When flags & 6 is clear, the function tail-dispatches the
+      unported release engine at 0x080c85bc with mode flags & 0x400 and leaves
+      the value slot unchanged. Otherwise it reloads the namespace-provider
+      count before every signed index gate, releases every table entry
+      (including null) through a stack-local word with mode zero, destroys the
+      provider array, and clears the original slot. The release engine's
+      concrete identity is unrecovered and deliberately not invented.
+      Deliberate deviations: target code calls the engine at its verified fixed
+      address; host tests use a volatile seam and pointer-sized provider slots
+      to preserve disjoint target words.
   - address: 0x083697ac
     ghidra: FUN_083697ac
     name: namespace_provider_each_then_destroy
