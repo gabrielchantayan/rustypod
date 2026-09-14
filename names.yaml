@@ -33704,6 +33704,32 @@ functions:
       (cur/base NULL, end 0x80) with wrapping_add, and loads the existing
       deque_seg_capacity export through read_volatile so LLVM retains the
       stock capacity-call boundary rather than folding its constant result.
+  - address: 0x083da558
+    ghidra: FUN_083da558
+    name: strstreambuf_set_buffer_owned
+    size: 24
+    sig: "void strstreambuf_set_buffer_owned(u8 *this, u32 owned)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: owned, uVar1/r1: ownership_flags}
+    renames:
+      FUN_083da558: strstreambuf_set_buffer_owned
+      param_1/r0: this
+      param_2/r1: owned
+      uVar1/r1: ownership_flags
+    notes: >-
+      Raw ARM fixes the exact 24-byte extent from 0x083da558 through `bx lr`
+      at 0x083da56c; the separately linked bit-1 sibling begins at 0x083da570.
+      It loads the ownership word at this + 0x10 and clears bit 0 only when
+      r1 is zero, otherwise setting bit 0 while preserving every other flag.
+      The initial `movs r2,r1` proves a zero/nonzero condition, so the Rust
+      ABI deliberately receives u32 rather than bool. Decoding every ARM B/BL
+      immediate word in osos.dec finds exactly five inbound calls, all plain
+      unconditional bl at 0x083d910c, 0x083da8d0, 0x083dac48, 0x083dad38, and
+      0x083daf34; there are no predicated bl forms or tail b sites. Callers
+      set this ownership bit after allocating a backing buffer and consult it
+      before releasing a replaced allocation. No deviations.
+
   - address: 0x083da5a8
     ghidra: FUN_083da5a8
     name: streambuf_sgetc

@@ -1253,6 +1253,70 @@ fn strstreambuf_input_available_honors_mode_and_cursors() {
     }
 }
 
+/// `strstreambuf_set_buffer_owned` — original: `FUN_083da558` @ load address
+/// **0x083da558** (24 bytes, 0x083da558..0x083da56c; the separately linked
+/// bit-1 sibling begins at 0x083da570). Whole-image ARM B/BL decoding finds
+/// five direct inbound calls, all unconditional plain `bl` forms at
+/// 0x083d910c, 0x083da8d0, 0x083dac48, 0x083dad38, and 0x083daf34; there
+/// are no predicated or tail-`b` calls.
+///
+/// Sets bit 0 of the strstream buffer's ownership word (word index 4) when
+/// `owned` is nonzero and clears it when `owned` is zero, preserving every
+/// other flag bit. The callers use this bit to decide whether replacing the
+/// backing buffer releases the previous allocation. The raw `movs r2, r1`
+/// makes this a zero/nonzero test, rather than a Rust `bool` ABI; no
+/// deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.strstreambuf_set_buffer_owned"))]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_set_buffer_owned(this: *mut u8, owned: u32) {
+    let ownership = this.cast::<u32>().add(4);
+    let flags = ownership.read();
+    ownership.write(if owned == 0 { flags & !1 } else { flags | 1 });
+}
+
+/// The ownership helper must leave adjacent target words and every non-owner
+/// flag untouched, while treating every nonzero input as true.
+#[cfg(test)]
+#[test]
+fn strstreambuf_set_buffer_owned_preserves_adjacent_words_and_flag_bits() {
+    #[repr(C)]
+    struct StrstreamBufferOwnership {
+        vtable: u32,
+        mode: u32,
+        buffer: u32,
+        buffer_length: u32,
+        ownership_flags: u32,
+        trailing: [u32; 2],
+    }
+
+    for (initial_flags, owned, expected_flags) in [
+        (0xffff_fffe, 0, 0xffff_fffe),
+        (0xffff_ffff, 0, 0xffff_fffe),
+        (0xffff_fffe, 1, 0xffff_ffff),
+        (0x1234_5678, 2, 0x1234_5679),
+        (0x8000_0000, u32::MAX, 0x8000_0001),
+    ] {
+        let mut buffer = StrstreamBufferOwnership {
+            vtable: 0xfeed_face,
+            mode: 0xa5a5_a5a5,
+            buffer: 0x1020_3040,
+            buffer_length: 0x5060_7080,
+            ownership_flags: initial_flags,
+            trailing: [0x1122_3344, 0x5566_7788],
+        };
+
+        unsafe { strstreambuf_set_buffer_owned((&mut buffer as *mut StrstreamBufferOwnership).cast(), owned) };
+
+        assert_eq!(buffer.ownership_flags, expected_flags, "owned {owned:#x}");
+        assert_eq!(buffer.vtable, 0xfeed_face);
+        assert_eq!(buffer.mode, 0xa5a5_a5a5);
+        assert_eq!(buffer.buffer, 0x1020_3040);
+        assert_eq!(buffer.buffer_length, 0x5060_7080);
+        assert_eq!(buffer.trailing, [0x1122_3344, 0x5566_7788]);
+    }
+}
+
 /// Target ABI for the stream buffer's virtual underflow callback.
 type StreambufUnderflow = unsafe extern "C" fn(*mut Streambuf) -> i32;
 
