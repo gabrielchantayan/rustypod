@@ -108,6 +108,7 @@ pub mod stream_read;
 pub mod stream_read_cxx_string;
 pub mod stream_write;
 pub mod stream_write_exact;
+pub mod stream_state_set;
 pub mod stream_write_cstr;
 pub mod ostream_insert_cstr;
 pub mod ostream_insert_string;
