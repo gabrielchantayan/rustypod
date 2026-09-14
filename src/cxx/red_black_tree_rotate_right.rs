@@ -76,6 +76,15 @@
 //! `0x083c2ba4`, plus predicated `bleq` at `0x083c2bf4`; no direct tail-`B`
 //! callers exist. The predicated caller selects the left child before calling,
 //! so this shared no-guard export is faithful. Deliberate deviations: none.
+//!
+//! `FUN_083b8bd0` at load address `0x083b8bd0` is a byte-identical 84-byte
+//! copy: 21 ARM words from `ldr r2,[r1,#8]` through `bx lr` at `0x083b8c20`;
+//! the next separately linked function begins at `0x083b8c24`. A complete raw
+//! B/BL-immediate scan finds exactly five inbound direct calls: unconditional
+//! `bl` at `0x083b8f1c`, `0x083b8f94`, `0x083b9080`, and `0x083b9458`, plus
+//! predicated `bleq` at `0x083b94a8`; no direct tail-`B` callers exist. The
+//! predicated caller selects the left child before calling, so reusing this
+//! no-guard right rotation is faithful. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
