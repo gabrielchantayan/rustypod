@@ -68,6 +68,19 @@
 //! selects its pivot before reaching this no-guard left rotation. It shares this
 //! implementation and its host tests without a redundant dispatch seam;
 //! deliberate deviations: none.
+//!
+//! `FUN_083c1688` at load address `0x083c1688` is a byte-identical, 84-byte
+//! (21-word) ported alias. Raw `osos.dec` runs through `bx lr` at
+//! `0x083c16d8`; the separately linked right-rotation sibling starts at
+//! `0x083c16dc`. A complete aligned ARM B/BL decode verifies five direct
+//! inbound calls: unconditional `bl` at `0x083c1a68`, `0x083c1b08`,
+//! `0x083c1bf8`, and `0x083c20f4`, plus predicated `bleq` at `0x083c205c`;
+//! there are no direct tail branches or aligned raw-word references. It
+//! promotes the non-null right child, transfers that child's left subtree to
+//! the pivot's right link, and relinks the old parent or header root slot. The
+//! shared tests cover every parent placement and the transferred middle
+//! subtree. Deliberate deviations: none; this alias intentionally reuses the
+//! established dispatch seam.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 use super::red_black_tree_rotate_right::RedBlackTree;
