@@ -89817,3 +89817,35 @@ functions:
       documented variadic trampoline. Host tests prove format/argument
       forwarding, the stock configuration, heap result pass-through, and the
       empty-format allocation-failure NULL path.
+
+  # --- UART recovery control ---
+  - address: 0x0836e0a8
+    ghidra: FUN_0836e0a8
+    name: uart_set_recovery_control_if_clear
+    size: 104
+    sig: "void uart_set_recovery_control_if_clear(u32 port)"
+    module: drivers/uart
+    status: ported
+    renames:
+      param_1/r0: port
+      puVar1/r1: uart_control_register
+      DAT_0836e110/r2: uart_port_1_base
+      DAT_0836e114/r0: recovery_control_word
+    notes: >-
+      Raw osos.dec establishes the 104-byte code extent: 26 ARM words from
+      ldr r2,[pc,#96] at 0x0836e0a8 through bx lr at 0x0836e10c; the two
+      literal words at 0x0836e110/0x0836e114 are 0x3cc04000 and 0x00035c85,
+      and the separately linked next function begins at 0x0836e118. The port
+      selects UARTC blocks 0..2 for inputs 0..2 and block 3 for every other
+      input, reads control +4, and writes 0x00035c85 only when bit 17 is
+      clear. Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly five direct calls: unconditional bl at 0x080c9ca0, 0x080c9cd4,
+      0x080cb6a0, and 0x0836dfd4, plus predicated blne at 0x0836debc; there
+      are no direct tail-B callers or aligned raw-word references. The
+      predicated call is gated by UART status and error bits in its caller.
+      match.py reports the expected structural diff: LLVM compiles the selector
+      to a bounds-checked base-plus-stride calculation rather than retailOS's
+      repeated compares. Host tests cover a clear word, a bit-17-set preserved
+      word, all explicit ports, and the default-to-port-three path. Deliberate
+      deviations: hardware names for the control word and bit 17 remain
+      unverified, so the source uses behavior-oriented recovery names.
