@@ -105,6 +105,35 @@ const NODE_VALUE_OFFSET: usize = 0x14;
 unsafe fn word(base: *const u8, index: usize) -> u32 {
     (base as *const u32).add(index).read()
 }
+/// string_table_peer_map — original: `FUN_08101bf4` @ **0x08101bf4**
+/// (32 bytes, 0x08101bf4..0x08101c10; the next separately linked function
+/// starts with `push {r2,r3,r4,r5,r6,lr}` at 0x08101c14). Decoding every
+/// aligned ARM B/BL word in `osos.dec` finds **six direct `bl` call sites**,
+/// all unconditional, at 0x08101dac, 0x08101de8, 0x08101e84, 0x08101eb4,
+/// 0x08101ec8, and 0x0812118; there are no predicated call forms.
+///
+/// Returns the other selectable 0x1c-byte map for the table's current
+/// selector: `table + ((selector + 1) % 2) * 0x1c`. The ARM sequence
+/// implements signed remainder using wrapping 32-bit arithmetic, so malformed
+/// negative selectors preserve their raw `-1`, `0`, or `1` map stride rather
+/// than being cast to an unsigned index. There is no NULL guard.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+/// `table` must point into a live string-table object with an aligned selector
+/// word at `+0x54`; the returned map pointer has the original's derived-pointer
+/// validity requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_peer_map(table: *mut u8) -> *mut u8 {
+    let selector = unsafe { word(table, CURRENT_TABLE_INDEX_WORD) };
+    let incremented = selector.wrapping_add(1);
+    let rounded = incremented.wrapping_add(incremented >> 31) & !1;
+    let map_index = incremented.wrapping_sub(rounded) as i32;
+    unsafe { table.offset(map_index as isize * TABLE_STRIDE as isize) }
+}
+
 
 /// The retailOS dependencies of [`string_table_has_string`]. Every
 /// pointee behind a `*const u32` is a 32-bit firmware word.
@@ -1041,16 +1070,13 @@ pub unsafe extern "C" fn string_table_copy_current_to_peer(
             let current_map =
                 table.add(word(table, CURRENT_TABLE_INDEX_WORD) as usize * TABLE_STRIDE);
             let source = string_table_fallback_value_slot(current_map, key);
-            let peer_map = table.add(
-                ((word(table, CURRENT_TABLE_INDEX_WORD) + 1) % 2) as usize * TABLE_STRIDE,
-            );
+            let peer_map = string_table_peer_map(table);
             let destination = string_table_fallback_value_slot(peer_map, key);
             crate::cxx::string::cxx_string_assign(destination, source);
             return;
         }
 
-        let peer_map =
-            table.add(((word(table, CURRENT_TABLE_INDEX_WORD) + 1) % 2) as usize * TABLE_STRIDE);
+        let peer_map = string_table_peer_map(table);
         let current_map =
             table.add(word(table, CURRENT_TABLE_INDEX_WORD) as usize * TABLE_STRIDE);
         let header = word(current_map, MAP_HEADER_WORD) as usize as *mut u8;
@@ -2519,6 +2545,57 @@ mod clear_or_erase_tests {
             assert_eq!(CLEAR_ENTRY.load(Ordering::SeqCst), 0);
             assert_eq!(ERASE_ENTRY.load(Ordering::SeqCst), expected_map);
             assert_eq!(ERASE_KEY.load(Ordering::SeqCst), &key as *const *mut u8 as usize);
+        }
+    }
+}
+
+#[cfg(test)]
+mod peer_map_tests {
+    use super::*;
+
+    #[repr(C, align(4))]
+    struct Fixture {
+        bytes: [u8; 0x90],
+    }
+
+    #[test]
+    fn selects_the_other_normal_map() {
+        let mut fixture = Fixture { bytes: [0; 0x90] };
+        let table = unsafe { fixture.bytes.as_mut_ptr().add(TABLE_STRIDE) };
+        let selector = unsafe { table.add(CURRENT_TABLE_INDEX_WORD * 4).cast::<u32>() };
+
+        for (value, expected_delta) in [(0u32, 1isize), (1, 0), (2, 1)] {
+            unsafe {
+                selector.write(value);
+                assert_eq!(
+                    string_table_peer_map(table) as usize,
+                    table.offset(expected_delta * TABLE_STRIDE as isize) as usize,
+                    "selector {value:#010x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_signed_remainder_for_malformed_selectors() {
+        let mut fixture = Fixture { bytes: [0; 0x90] };
+        let table = unsafe { fixture.bytes.as_mut_ptr().add(TABLE_STRIDE) };
+        let selector = unsafe { table.add(CURRENT_TABLE_INDEX_WORD * 4).cast::<u32>() };
+
+        for (value, expected_delta) in [
+            (u32::MAX, 0isize),
+            (u32::MAX - 1, -1),
+            (0x8000_0000, -1),
+            (0x7fff_ffff, 0),
+        ] {
+            unsafe {
+                selector.write(value);
+                assert_eq!(
+                    string_table_peer_map(table) as usize,
+                    table.offset(expected_delta * TABLE_STRIDE as isize) as usize,
+                    "selector {value:#010x}"
+                );
+            }
         }
     }
 }
