@@ -134,6 +134,7 @@ pub mod name_from_token;
 pub mod nested_parse;
 pub mod parse;
 pub mod pager_lookup;
+pub mod pager_set_page_size;
 pub mod pcache_remove_from_lru_list;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
