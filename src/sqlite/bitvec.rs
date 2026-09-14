@@ -5,6 +5,7 @@
 //! bitmap. A nonzero `iDivisor` instead selects the 125-slot child-pointer
 //! representation. This is SQLite 3.5.9's `bitvec.c` layout.
 
+use crate::sqlite::mem::sqlite3_malloc_zero;
 use crate::heap::tracked::tracked_free;
 
 /// Number of words/pointers in a target `Bitvec` union.
@@ -42,6 +43,32 @@ pub struct Bitvec {
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(Bitvec, storage)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x200] = [0; core::mem::size_of::<Bitvec>()];
+
+/// sqlite3_bitvec_create — original `FUN_0837056c` @ `0x0837056c`
+/// (28 bytes, `0x0837056c..0x08370588`; **5 direct `bl` call sites**, all
+/// unconditional, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Allocates SQLite's fixed 512-byte zeroed Bitvec node, then records its bit
+/// capacity in the first word when allocation succeeds. A failed allocation
+/// returns NULL without a store. Deliberate deviation: the target's literal
+/// 512-byte request remains `0x200` instead of using `size_of::<Bitvec>()`,
+/// because host child pointers widen that representation beyond the target
+/// object size.
+///
+/// # Safety
+///
+/// The returned pointer is either NULL or a tracked 512-byte allocation. It
+/// must be released through [`sqlite3_bitvec_destroy`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.sqlite3_bitvec_create")]
+pub unsafe extern "C" fn sqlite3_bitvec_create(size: u32) -> *mut Bitvec {
+    let bitvec = sqlite3_malloc_zero(0x200).cast::<Bitvec>();
+    if !bitvec.is_null() {
+        (*bitvec).size = size;
+    }
+    bitvec
+}
 
 /// sqlite3_bitvec_destroy — original `FUN_08370588` @ `0x08370588`
 /// (64 bytes, `0x08370588..0x083705c8`; **9 direct `bl` call sites**, all
@@ -150,9 +177,10 @@ pub unsafe extern "C" fn sqlite3_bitvec_test(mut bitvec: *const Bitvec, mut bit:
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::{sqlite3_bitvec_destroy, sqlite3_bitvec_test, Bitvec, BitvecStorage, BITVEC_NPTR};
+    use super::{sqlite3_bitvec_create, sqlite3_bitvec_destroy, sqlite3_bitvec_test, Bitvec, BitvecStorage, BITVEC_NPTR};
     use crate::heap::types::HeapDescriptorDescriptor;
     use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+    use crate::sqlite::mem::tests::{install_recorder, realloc_log};
     use parking_lot::Mutex;
     use std::boxed::Box;
     use std::vec;
@@ -216,6 +244,35 @@ mod tests {
 
             Self { storage, node, raw }
         }
+    }
+
+    #[test]
+    fn create_allocates_a_zeroed_target_node_and_records_each_capacity() {
+        let mut arena = [0xa5u8; 0x200];
+        let _allocator_guard = install_recorder(arena.as_mut_ptr());
+
+        for size in [0, 1, u32::MAX] {
+            arena.fill(0xa5);
+            let bitvec = unsafe { sqlite3_bitvec_create(size) };
+
+            assert_eq!(bitvec.cast::<u8>(), arena.as_mut_ptr());
+            unsafe {
+                assert_eq!((*bitvec).size, size);
+                assert_eq!((*bitvec).n_set, 0);
+                assert_eq!((*bitvec).i_divisor, 0);
+            }
+            assert!(arena[4..].iter().all(|byte| *byte == 0));
+        }
+
+        assert_eq!(realloc_log(), std::vec![(0, 0x200), (0, 0x200), (0, 0x200)]);
+    }
+
+    #[test]
+    fn create_returns_null_without_a_store_when_allocation_fails() {
+        let _allocator_guard = install_recorder(core::ptr::null_mut());
+
+        assert!(unsafe { sqlite3_bitvec_create(u32::MAX) }.is_null());
+        assert_eq!(realloc_log(), std::vec![(0, 0x200)]);
     }
 
     #[test]
