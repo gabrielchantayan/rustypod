@@ -27,9 +27,9 @@
 //! size word at data - 4). Callers build a key with
 //! `cxx_string_from_cstr` @ 0x083d8b5c (e.g. `"AlarmToneAt"`,
 //! `"RefreshingGenius"`, `"CreatingGeniusMix"`), run this predicate, and
-//! only then fetch the value through the getter family @ 0x08102168 /
-//! the veneer @ 0x08101ed4 (`this + 0x38; b 0x083c4778` — the
-//! fallback-table `operator[]`).
+//! only then fetch the value through the getter family @ 0x08102168.
+//! `FUN_08101ed4` is instead a distinct fallback-table erase veneer:
+//! `this + 0x38; b 0x083c4778`.
 //!
 //! # Algorithm (from the raw bytes)
 //!
@@ -2341,6 +2341,34 @@ pub unsafe extern "C" fn string_table_clear_or_erase(
     }
 }
 
+/// string_table_erase_fallback_key — retailOS `FUN_08101ed4` @ 0x08101ed4
+/// (8 bytes; 6 unconditional plain `bl` call sites, no predicated forms).
+///
+/// Forms the fallback `StringKeyMap` at `table + 0x38` and tail-dispatches
+/// its COW-string key erase operation at 0x083c4778. The target's removal
+/// count is returned unchanged. Raw ARM is exactly `add r0,r0,#0x38; b
+/// 0x083c4778`; the separately linked next function begins with `push` at
+/// 0x08101edc.
+///
+/// Deliberate deviation: the target erase operation remains retailOS-owned.
+/// Target builds branch through its fixed address; host builds use the
+/// existing recording callback seam. No null, alignment, or bounds check is
+/// added.
+///
+/// # Safety
+///
+/// `table + 0x38` must be a live `StringKeyMapSlot`; `key` must meet the
+/// still-retailOS-owned erase operation's COW-string contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.string_table_erase_fallback_key")]
+#[inline(never)]
+pub unsafe extern "C" fn string_table_erase_fallback_key(
+    table: *mut u8,
+    key: *const *mut u8,
+) -> u32 {
+    string_key_map_erase(table.add(FALLBACK_TABLE_OFFSET).cast(), key)
+}
+
 #[cfg(test)]
 mod clear_or_erase_tests {
     use super::*;
@@ -2462,6 +2490,32 @@ mod clear_or_erase_tests {
                 ),
                 3,
             );
+            assert_eq!(CLEAR_ENTRY.load(Ordering::SeqCst), 0);
+            assert_eq!(ERASE_ENTRY.load(Ordering::SeqCst), expected_map);
+            assert_eq!(ERASE_KEY.load(Ordering::SeqCst), &key as *const *mut u8 as usize);
+        }
+    }
+
+    #[test]
+    fn fallback_erase_uses_fixed_third_map_and_forwards_result() {
+        let _lock = OPS_LOCK.lock();
+        unsafe {
+            let _restore = install_recording_ops();
+            CLEAR_ENTRY.store(0, Ordering::SeqCst);
+            ERASE_ENTRY.store(0, Ordering::SeqCst);
+            ERASE_KEY.store(0, Ordering::SeqCst);
+            let mut table = fixture(u32::MAX);
+            let mut key_storage = StringFixture {
+                _refcount: -1,
+                _capacity: 1,
+                length: 1,
+                data: [0],
+            };
+            let key = key_storage.data.as_mut_ptr();
+            let base = core::ptr::addr_of_mut!(table.table).cast::<u8>();
+            let expected_map = base.add(FALLBACK_TABLE_OFFSET) as usize;
+
+            assert_eq!(string_table_erase_fallback_key(base, &key), 3);
             assert_eq!(CLEAR_ENTRY.load(Ordering::SeqCst), 0);
             assert_eq!(ERASE_ENTRY.load(Ordering::SeqCst), expected_map);
             assert_eq!(ERASE_KEY.load(Ordering::SeqCst), &key as *const *mut u8 as usize);

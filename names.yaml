@@ -41114,6 +41114,31 @@ functions:
       proving index*0x1c selection, empty-key clear, nonempty-key erase, key
       forwarding, return forwarding, and u32::MAX as nonempty.
 
+  - address: 0x08101ed4
+    ghidra: FUN_08101ed4
+    name: string_table_erase_fallback_key
+    size: 8
+    sig: "u32 string_table_erase_fallback_key(u8 *table, const char **key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_083c4778: string_key_map_erase
+    notes: >-
+      Raw ARM confirms the 8-byte extent: add r0,r0,#0x38 at 0x08101ed4
+      then b 0x083c4778 at 0x08101ed8; the next independently linked function
+      starts with push at 0x08101edc. It selects the fixed fallback StringKeyMap
+      at table+0x38 and tail-dispatches the COW-string key erase entry, returning
+      its removal count unchanged. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds six inbound unconditional plain bl calls (0x081de484,
+      0x081de4e0, 0x0822530c, 0x08225390, 0x08228f78, 0x082326f0), with zero
+      predicated forms or direct tail branches; no aligned data word equals this
+      address. The erase target is still retailOS-owned: device builds call
+      0x083c4778 and host tests use the existing recording callback seam. The
+      test proves the fixed third-map address, key-address forwarding, return
+      forwarding, and that the current-table selector is not read.
+
   - address: 0x08101edc
     ghidra: FUN_08101edc
     name: string_table_has_string
