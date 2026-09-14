@@ -84308,3 +84308,47 @@ functions:
       a unique target-width fixture to prove the zero, one-byte, and maximum
       255-byte cases, including both reads, the completed count, COW length,
       payload, and terminator. Deliberate deviations: none.
+
+
+  # --- path-entry buffered load to heap ---
+  - address: 0x08072af8
+    ghidra: FUN_08072af8
+    name: path_entry_load_to_heap
+    size: 188
+    sig: "u32 path_entry_load_to_heap(u8 *entry, u8 **out_allocation, u32 *out_len)"
+    module: app/path_entry_load_to_heap
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: out_allocation
+      param_3/r2: out_len
+      entry+0x00: completion_marker
+      entry+0x04: path_object
+      entry+0x0c: path_hint_signed
+      auStack_68: buffered_load_state
+      FUN_080f4ad8: path_probe_via_facade
+      FUN_081e1ea0: PATH_BUFFER_LOAD boundary
+      FUN_0802edac: malloc
+      thunk_EXT_FUN_22000020: __rt_memcpy
+      FUN_081a8204: aligned_buffer_reset
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte extent from push
+      {r4,r5,r6,r7,r8,lr} at 0x08072af8 through the final branch at
+      0x08072bb0; the next separately linked function starts at 0x08072bb4
+      with push {lr}. Decoding every aligned immediate ARM B/BL word in
+      osos.dec finds exactly six inbound direct calls, all unconditional bl:
+      0x082db884, 0x0832152c, 0x08329bb4, 0x08329e4c, 0x0832a05c, and
+      0x0832a7c4. No predicated call forms or direct tail branches target it.
+      After null validation it signs extends entry+0x0c, probes the embedded
+      path at +0x04, drives the 100-byte buffered-load helper, mallocs its
+      completed length at +0x5c, marks entry+0x00, copies the aligned buffer
+      at +0x54 through __rt_memcpy, stores length then allocation to outputs,
+      and resets the staging buffer. Errors are 0xffffffce (invalid input),
+      0xffffffd5 (probe absent), and 0xffffff94 (malloc failure); errors
+      leave outputs and completion marker untouched. The unported 0x081e1ea0
+      helper remains a read-volatile PATH_BUFFER_LOAD boundary: the target
+      default reaches its verified firmware address and host tests install a
+      layout-valid recorder. Host coverage proves every error path,
+      sign-extension, probe/helper forwarding, allocation size, raw byte copy,
+      output order, and completion marking. Deliberate deviations: the
+      unresolved helper boundary only.

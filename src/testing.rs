@@ -39,6 +39,10 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0xde00_0000: dedicated to app/path_entry_load_to_heap's raw-u32
+    // buffered-loader source fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const PATH_ENTRY_LOAD_TO_HEAP: usize = 0xde00_0000;
     // 0x0100_0000: dedicated to cxx/stream_read's target-width descriptor,
     // complete-owner state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ: usize = 0x0100_0000;
