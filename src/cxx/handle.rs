@@ -577,6 +577,43 @@ pub unsafe extern "C" fn refcounted_ptr_construct_slot1(
     }
     slot
 }
+///
+/// refcounted_ptr_copy_construct_slot1 — original: `FUN_0839f100` @ load
+/// address `0x0839f100` (24 bytes; 5 direct `bl` call sites: unconditional
+/// `bl` at `0x08162454` and `blne` at `0x081622d4`, `0x083e0b40`,
+/// `0x083e0bd0`, and `0x083e8a28`). Raw decoding establishes the six-word
+/// body from `push {r4,lr}` through `pop {r4,pc}`; the separately linked
+/// copy-assignment function begins at `0x0839f118`. It also finds a `bne` tail
+/// transfer at `0x081623a4` and an aligned image word at `0x089a4dc8` equal to
+/// this address, so this constructor is table-dispatched as well as directly
+/// called. The four predicated direct callers supply their own gate; this body
+/// itself does not guard either slot pointer.
+///
+/// C++ copy-constructor for the slot-1 refcounted-handle family. It loads
+/// `*src`, passes it to [`refcounted_body_attach_slot1`] to store it in `dst`
+/// and wrapping-increment its signed refcount under its optional mutex, then
+/// returns `dst`.
+///
+/// Deliberate deviations: none. The dedicated target section preserves this
+/// separately hookable entry instead of folding it into an equivalent
+/// constructor.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. When `*src` is
+/// non-NULL, it must point at a writable [`RefcountedBody`] whose optional
+/// mutex satisfies [`refcounted_body_attach_slot1`]'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_construct_slot1")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_construct_slot1(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    refcounted_body_attach_slot1(dst, src.read());
+    dst
+}
+
 
 /// refcounted_ptr_construct_variant — original: `FUN_0839f148` @
 /// 0x0839f148 (104 bytes; 29 `bl` call sites, all unconditional —
@@ -2801,6 +2838,45 @@ mod tests {
             assert_eq!(destination, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, i32::MIN);
             assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// The slot-1 forwarding constructor preserves the unconditional source
+    /// load and attach: NULL replaces the destination and still returns it.
+    #[test]
+    fn copy_construct_slot1_null_source_stores_null_and_returns_destination() {
+        unsafe {
+            let source: *mut RefcountedBody = core::ptr::null_mut();
+            let mut destination = 0xdead_beefusize as *mut RefcountedBody;
+
+            let result =
+                refcounted_ptr_copy_construct_slot1(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert!(destination.is_null());
+        }
+    }
+
+    /// Slot-1 uses its separately entered attach helper, preserving the raw
+    /// wrapping increment while leaving unrelated body fields intact.
+    #[test]
+    fn copy_construct_slot1_copies_body_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let source: *mut RefcountedBody = &mut body;
+            let mut destination: *mut RefcountedBody = core::ptr::null_mut();
+
+            let result =
+                refcounted_ptr_copy_construct_slot1(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x3333_4444);
         }
     }
 
