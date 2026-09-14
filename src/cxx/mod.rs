@@ -95,6 +95,7 @@ pub mod shared_handle_initialize;
 pub mod shared_reference_owner_destroy;
 pub mod slot_reset;
 pub mod state_object_destroy;
+pub mod state_object_initialize;
 pub mod string;
 pub mod string_vector_destruct;
 pub mod string_map;

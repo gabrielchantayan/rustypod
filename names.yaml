@@ -66783,6 +66783,32 @@ functions:
       try_map_u32_slab fixture needed - the test model is a
       static-array find-or-insert map under a parking_lot lock.
 
+  - address: 0x08076924
+    ghidra: FUN_08076924
+    name: state_object_initialize
+    size: 48
+    sig: "void state_object_initialize(u32 *this, u32 class_descriptor, u32 init_argument, u32 initial_auxiliary)"
+    module: cxx/state_object_initialize
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: class_descriptor
+      param_3/r2: init_argument
+      param_4/r3: initial_auxiliary
+    notes: >-
+      True extent is 48 bytes: 44 bytes of instructions
+      (0x08076924..0x08076950) plus its literal-pool word
+      0x73746f70, ending immediately before the next separately linked
+      function at 0x08076954. It initializes the 0x20-byte
+      state-machine base subobject: writes r1/r2/r3 to +0x0c/+0x10/+0x14,
+      clears +0x00/+0x04/+0x08/+0x1c, and writes the 'stop' FourCC
+      (0x73746f70) at +0x18. A complete ARM B/BL decode finds exactly
+      six call sites, all unconditional bl
+      (0x0811f6b4, 0x0812c680, 0x0819c6c4, 0x0819c710, 0x082282b4,
+      0x082969ac); there are 0 predicated calls and 0 plain-b tail calls.
+      No NULL or alignment guard is present in the ARM str sequence.
+      initial_auxiliary denotes only the r3 data flow: stock stores it
+      unchanged at +0x14, and its higher-level semantics are not identified.
   - address: 0x08076920
     ghidra: FUN_08076920
     name: state_object_destroy
