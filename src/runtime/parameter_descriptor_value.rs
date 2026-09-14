@@ -43,6 +43,13 @@ pub static mut PARAMETER_DESCRIPTOR_VALUE_OPS: ParameterDescriptorValueOps =
     };
 
 #[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub(crate) static PARAMETER_DESCRIPTOR_VALUE_OPS_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
+#[cfg(test)]
 #[inline(always)]
 unsafe fn parameter_descriptor_value_ops() -> ParameterDescriptorValueOps {
     core::ptr::read_volatile(core::ptr::addr_of!(PARAMETER_DESCRIPTOR_VALUE_OPS))
@@ -101,9 +108,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut STATUS: i32 = 0;
     static mut RESOLVED_VALUE: u32 = 0;
     static mut CALLS: usize = 0;
@@ -123,7 +128,7 @@ mod tests {
     }
 
     fn install_recording_resolver() -> TestOps {
-        let lock = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = PARAMETER_DESCRIPTOR_VALUE_OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             let saved = core::ptr::read_volatile(core::ptr::addr_of!(PARAMETER_DESCRIPTOR_VALUE_OPS));
             PARAMETER_DESCRIPTOR_VALUE_OPS = ParameterDescriptorValueOps {
