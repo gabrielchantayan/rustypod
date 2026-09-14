@@ -45237,6 +45237,33 @@ functions:
       0x8062 mask, same 0/1 result; the diff is the crate fp frame and
       the three deviations above.
 
+  - address: 0x08113438
+    ghidra: FUN_08113438
+    name: scoped_context_member_owner_byte_8f_bit_0
+    size: 8
+    sig: "u32 scoped_context_member_owner_byte_8f_bit_0(const ScopedContextMemberOwner *receiver)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_1_plus_0x38: scoped_context
+      FUN_082a4574: scoped_context_owner_byte_8f_bit_0
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent: add r0, r0,
+      immediate 0x38 at 0x08113438, then unconditional tail b 0x082a4574 at
+      0x0811343c; the next separately linked function begins at 0x08113440.
+      Decoding every ARM B/BL word in the image finds exactly six direct
+      callers, all plain unconditional bl at 0x081f40c0, 0x081f4204,
+      0x081f4278, 0x081f4438, 0x081f4488, and 0x081f44d4, with zero
+      predicated forms and no aligned raw data-word references. It advances
+      receiver to the ScopedContext member at target offset +0x38 and
+      tail-dispatches the already ported scoped_context_owner_byte_8f_bit_0,
+      preserving its validity gate and 0-or-1 result. The enclosing receiver
+      type has no recovered semantic identity. Deliberate deviations: none.
+      Although expressed as a Rust call, the release ARM build lowers it to
+      the original tail branch. Host tests prove the
+      +0x38 member selection, forwarded vtable receiver, low-bit result, and
+      validity short-circuit.
   - address: 0x082a4574
     ghidra: FUN_082a4574
     name: scoped_context_owner_byte_8f_bit_0
