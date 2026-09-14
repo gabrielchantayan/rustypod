@@ -85544,3 +85544,40 @@ functions:
       function's observed equality result without claiming a broader callee
       identity. Host tests cover equal positions, unequal interior positions,
       both directions of adjacent-boundary aliasing, and nonadjacent segments.
+
+
+  # --- ASN.1 INTEGER scalar setter ---
+  - address: 0x08039ff0
+    ghidra: FUN_08039ff0
+    name: asn1_integer_set
+    size: 224
+    sig: "i32 asn1_integer_set(Asn1Integer *integer, i32 value)"
+    module: crypto/asn1_integer_set
+    status: ported
+    renames:
+      param_1/r0: integer
+      param_2/r1: value
+      param_1_plus_0x00: length
+      param_1_plus_0x04: kind
+      param_1_plus_0x08: data
+      FUN_08043994: traced_free
+      FUN_08043c18: traced_alloc
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw osos.dec establishes a 224-byte extent from 0x08039ff0 through its
+      0x0803a0cc literal-pool word 0x00000102; the separately linked successor
+      begins at 0x0803a0d0. Ghidra's 220 bytes exclude that trailing literal.
+      Decoding every immediate ARM B/BL word in osos.dec finds exactly six
+      inbound direct calls, all unconditional plain bl at 0x0805f70c,
+      0x0806056c, 0x080605ac, 0x080605e0, 0x0806061c, and 0x08065a70; there
+      are no predicated forms or direct tail branches. The setter stores
+      ASN1_INTEGER (2), and when the unsigned length is below five, releases
+      the old non-NULL payload, allocates and zeroes five bytes, and records
+      diagnostic (13, 0x76, 0x41, 0, 0) on allocation failure. It sets the
+      negative kind 0x102 for negative inputs, then emits up to four
+      little-endian-extracted bytes in reverse order, producing a minimal
+      big-endian magnitude; zero is the unusual zero-length payload. The
+      i32 minimum path deliberately uses wrapping negation, matching ARM rsb
+      followed by arithmetic shifts. No Rust deviations: all four callees are
+      already direct ports, including the IRAM memzero veneer.
