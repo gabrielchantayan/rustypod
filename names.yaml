@@ -40,6 +40,33 @@ functions:
       0x08098598, 0x080985a4, 0x080985d8, 0x080985e4, 0x080caea4, and
       0x080cb048; there are no predicated forms or direct tail branches.
       Deliberate deviations: none.
+  # --- HFS B-tree key-length decoder ---
+  - address: 0x080537f8
+    ghidra: FUN_080537f8
+    name: hfs_btree_key_length
+    size: 36
+    sig: "u16 hfs_btree_key_length(const BTreeControlBlock *btree, const u8 *key, u32 is_index)"
+    module: fs/hfs_btree_key_length
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: key
+      param_3/r2: is_index
+      btree_plus_0x1e: max_key_length
+      btree_plus_0x30: attributes
+      return/r0: key_length
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      movs r3,r2 at 0x080537f8 through bx lr at 0x08053818. The separately
+      linked next function is the four-byte tail veneer at 0x0805381c
+      (b 0x08086e4c). With is_index zero and attributes bit 0x4 clear, this
+      returns the fixed u16 max_key_length at btree+0x1e without reading key.
+      Otherwise attributes bit 0x2 selects the aligned little-endian u16 key
+      prefix; a clear bit selects the zero-extended first key byte. Decoding
+      every immediate ARM B/BL word in osos.dec finds exactly six inbound
+      calls, all unconditional plain bl at 0x0803bd0c, 0x0803bd4c,
+      0x08058ffc, 0x08059060, 0x08059600, and 0x08064cf8; there are no
+      predicated forms or direct tail branches. Deliberate deviations: none.
   # --- intrusive linked-list lookup and promotion ---
   - address: 0x08053850
     ghidra: FUN_08053850
