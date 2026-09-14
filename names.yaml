@@ -87979,3 +87979,36 @@ functions:
       layout, a dedicated text section keeps this independently hookable target
       distinct from byte-identical rotations, and host tests cover root replacement,
       the transferred middle subtree, and both parent-child slots.
+
+  # --- C++ red-black-tree right rotation ---
+  - address: 0x083bc048
+    ghidra: FUN_083bc048
+    name: red_black_tree_rotate_right_fifteenth
+    size: 84
+    sig: "void red_black_tree_rotate_right_fifteenth(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_right_fifteenth
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10: header
+      node_plus_0x04: parent
+      node_plus_0x08: left_child
+      node_plus_0x0c: right_child
+      left_child: promoted_node
+      left_child_plus_0x0c: middle_subtree
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#8] at 0x083bc048 through bx lr at 0x083bc098; the separately
+      linked next function begins at 0x083bc09c. The left child replaces the
+      pivot under its old parent (or header +0x04), its right subtree becomes
+      the pivot's left subtree, and the pivot becomes that child's right
+      subtree. Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly five inbound direct calls: unconditional bl at 0x083bc394,
+      0x083bc40c, 0x083bc4f8, and 0x083bc8d0, plus predicated bleq at
+      0x083bc920; there are no direct tail-B callers. The predicated caller
+      reaches this no-NULL-guard rotation only after it selects the left child
+      as the pivot. A dedicated text section prevents LLVM from folding this
+      independently hookable target into another byte-identical rotation.
+      Deliberate deviations: none; target-width u32 link words preserve the
+      32-bit target layout on hosts.
