@@ -249,6 +249,7 @@ pub mod token_parser;
 pub mod template_binding;
 pub mod tree_flag_propagation;
 pub mod tracker_record;
+pub mod root_pending_process;
 pub mod update_dispatch;
 pub mod trace_buffer;
 pub mod track_extras_cache;
