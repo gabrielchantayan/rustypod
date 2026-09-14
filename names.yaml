@@ -72808,6 +72808,32 @@ functions:
       remain volatile; host tests use atomic controller words. Focused tests
       cover modes 0..3, unsupported modes, preservation of the exact saved
       value, and blocking until command-ready.
+  # --- LCD status busy-bit readiness wait ---
+  - address: 0x080ce0c8
+    ghidra: FUN_080ce0c8
+    name: lcd_wait_ready
+    size: 20
+    sig: "void lcd_wait_ready(void)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      DAT_080ce0dc: LCD_CONTROLLER_BASE
+      r1: lcd_controller
+      r0: status
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte instruction extent:
+      0x080ce0c8..0x080ce0d8 loads LCD controller 0x38300000 from the literal
+      pool at 0x080ce0dc, then repeatedly reads status +0x1c until busy bit 4
+      is clear and returns. The separately linked next function begins at
+      0x080ce0e0. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      six inbound direct BL calls, all unconditional (zero predicated):
+      0x080bb5fc, 0x080c4ae0, 0x080c9a08, 0x080c9a24, 0x080d7b68, and
+      0x080da1b0. There are no direct B tail calls or outbound calls. The ARM
+      body has no arguments, stores, or timeout. Deliberate deviation: target
+      reads are volatile MMIO loads; host tests use an atomic status word while
+      preserving the exact bit-4 polling condition, including immediate return
+      when every other status bit is set.
+
   # --- LCD controller data-port write ---
   - address: 0x080bb5f4
     ghidra: FUN_080bb5f4
@@ -72831,9 +72857,9 @@ functions:
       0x080dbef8, 0x080dbf00, 0x080dbf08, 0x0836b3f8, 0x0836b404,
       0x0836b41c, and 0x0836b428. The sole direct B is the tail call from
       lcd_write_register at 0x080d4b28; no data word equals the entry address.
-      Deliberate deviation: the local lcd_wait_ready implementation reproduces
-      the unported 0x080ce0c8 status-bit-4 poll; device accesses are volatile,
-      while host tests use atomic MMIO registers. Reference C:
+      The readiness call now resolves to the ported lcd_wait_ready entry at
+      0x080ce0c8; device accesses remain volatile while host tests use atomic
+      MMIO registers. Reference C:
       decomp/c/007/080bb5f4_FUN_080bb5f4.c.
 
   # --- Scoped path-component query wrapper ---

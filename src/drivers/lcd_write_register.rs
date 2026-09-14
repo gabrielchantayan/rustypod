@@ -102,8 +102,17 @@ unsafe fn lcd_write_control(value: u32) {
     unsafe { lcd_write_word(LCD_CONTROL_OFFSET, value) };
 }
 
-#[inline(always)]
-unsafe fn lcd_wait_ready() {
+/// lcd_wait_ready — original: `FUN_080ce0c8` @ `0x080ce0c8` (20 bytes;
+/// **6 verified direct `bl` call sites, all unconditional; zero predicated
+/// forms**).
+///
+/// Repeatedly performs a volatile load of LCD status (+0x1c) until busy bit 4
+/// clears. The ARM body has no arguments, stores, calls, or timeout. Host
+/// builds deliberately substitute an atomic status word for the device MMIO
+/// register, preserving the polling condition.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lcd_wait_ready() {
     while unsafe { lcd_status() } & LCD_BUSY != 0 {}
 }
 
@@ -203,10 +212,10 @@ pub unsafe extern "C" fn lcd_begin_command_transaction() -> u32 {
 mod tests {
     extern crate std;
 
-    use super::{lcd_begin_command_transaction, lcd_write_register, lcd_write_value,
-        LcdCommandModeFn, HOST_LCD_CONTROL, HOST_LCD_REGISTER_INDEX,
-        HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS,
-        LCD_BUSY, LCD_COMMAND_MODE, LCD_COMMAND_READY};
+    use super::{lcd_begin_command_transaction, lcd_wait_ready, lcd_write_register,
+        lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL, HOST_LCD_REGISTER_INDEX,
+        HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS, LCD_BUSY,
+        LCD_COMMAND_MODE, LCD_COMMAND_READY};
     use core::sync::atomic::{AtomicU32, Ordering};
     use parking_lot::Mutex;
     use std::sync::mpsc;
@@ -247,6 +256,16 @@ mod tests {
         HOST_LCD_REGISTER_VALUE.store(u32::MAX, Ordering::SeqCst);
         HOST_LCD_STATUS_READS.store(0, Ordering::SeqCst);
         HOST_LCD_CONTROL.store(u32::MAX, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn ready_wait_ignores_every_status_bit_except_busy() {
+        let _guard = TEST_LOCK.lock();
+        reset_host_controller(u32::MAX & !LCD_BUSY);
+
+        unsafe { lcd_wait_ready() };
+
+        assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
