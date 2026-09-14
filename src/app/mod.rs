@@ -143,6 +143,7 @@ pub mod child_table_reconcile;
 pub mod notes_dispatcher_status;
 pub mod no_content_layout_default;
 pub mod object_byte_at_5;
+pub mod object_bytes_64_or_6c_nonzero;
 pub mod object_offset_48;
 pub mod object_flag_nibble;
 pub mod object_dispatch_entry;

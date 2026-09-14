@@ -83035,3 +83035,32 @@ functions:
       tests use a dedicated below-4-GiB message/vtable fixture to prove both
       dispatch modes, constructor words, finalizer selection, and the
       refcount transition.
+
+  # --- opaque object bytes +0x64 or +0x6c nonzero predicate ---
+  - address: 0x08131854
+    ghidra: FUN_08131854
+    name: object_bytes_64_or_6c_nonzero
+    size: 28
+    sig: "u32 object_bytes_64_or_6c_nonzero(const u8 *object)"
+    module: app/object_bytes_64_or_6c_nonzero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x64": byte_at_0x64
+      "object+0x6c": byte_at_0x6c
+      r0: either_byte_nonzero
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: seven ARM
+      instructions from ldrb r1,[r0,#0x6c] at 0x08131854 through bx lr at
+      0x0813186c; the separately linked next function opens at 0x08131870.
+      Complete aligned ARM B/BL-immediate decoding finds six direct inbound bl
+      calls, all unconditional, at 0x08130a80, 0x081314b8, 0x08131f2c,
+      0x08132d14, 0x08132d50, and 0x08132e40; there are no predicated calls,
+      tail-B callers, or image data-word references. It reads byte +0x6c and
+      returns 1 without reading +0x64 when that byte is nonzero; otherwise it
+      returns whether byte +0x64 is nonzero. The callers establish waiting and
+      follow-up gating but no concrete object type or field meaning, so the
+      port deliberately retains an offset-based name. Host tests cover zero,
+      one, and 0xff at both offsets, the short-circuit true case, unaligned
+      object bases, neighboring-byte guards, and absence of mutation.
+      Deliberate deviations: none.
