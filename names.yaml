@@ -50420,6 +50420,34 @@ functions:
       src/cxx/templates.rs::less_unsigned_byte_alias_73d4_truth_table /
       less_unsigned_byte_alias_73d4_matches_primary_exhaustively.
 
+  - address: 0x083d73ec
+    ghidra: FUN_083d73ec
+    name: less_unsigned_byte_alias_73ec
+    size: 24
+    sig: "u32 less_unsigned_byte_alias_73ec(void *this, const u8 *a, const u8 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1: this
+      param_2: a
+      param_3: b
+    notes: >-
+      ALIAS — third byte-identical `std::less<unsigned
+      char>::operator()(const u8 &, const u8 &)` instantiation. The verified
+      24-byte body is `ldrb r0,[r1]; ldrb r1,[r2]; cmp r0,r1; movcs r0,#0;
+      movcc r0,#1; bx lr`: unsigned byte less-than with no NULL guard and
+      ignored `this`. The next independently linked sibling starts at
+      0x083d7404. Decoding every ARM B/BL-immediate word in osos.dec found
+      exactly five unconditional BL sites — 0x083ba654, 0x083ba778,
+      0x083ba850, 0x083d727c, and 0x083d72cc — and no predicated BL or direct
+      branch/data-word references. The first three calls are byte-key
+      red-black-tree search/insert paths (FUN_083ba614 and FUN_083ba7e0);
+      the last two are lookup directions in FUN_083d7248. Exported under a
+      unique link_section to prevent LLVM identical-code folding from
+      erasing this hookable symbol. Deviations: none. Host test exhaustively
+      checks all 65,536 byte pairs against less_unsigned_byte:
+      src/cxx/templates.rs::less_unsigned_byte_alias_73ec_matches_primary_exhaustively.
+
   - address: 0x0811d68c
     ghidra: FUN_0811d68c
     name: vtable_set_50_kind4

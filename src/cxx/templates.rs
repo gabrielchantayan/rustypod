@@ -1449,6 +1449,40 @@ pub unsafe extern "C" fn less_unsigned_byte_alias_73d4(
 ) -> u32 {
     u32::from(a.read() < b.read())
 }
+/// less_unsigned_byte_alias_73ec — original: `FUN_083d73ec` @ 0x083d73ec
+/// (24 bytes; 5 unconditional `bl` call sites: 0x083ba654, 0x083ba778,
+/// 0x083ba850, 0x083d727c, and 0x083d72cc; verified by decoding every ARM
+/// B/BL-immediate word in `osos.dec`).
+///
+/// A third, byte-identical `std::less<unsigned char>::operator()(const u8
+/// &, const u8 &)` instantiation. It loads the two referenced bytes, compares
+/// them unsigned, and returns 1 precisely when `*a < *b`; `this` is ignored
+/// and neither operand is NULL-guarded. The raw sequence is `ldrb r0,[r1];
+/// ldrb r1,[r2]; cmp r0,r1; movcs r0,#0; movcc r0,#1; bx lr`. The next
+/// independently linked sibling begins at 0x083d7404, confirming the
+/// 24-byte extent.
+///
+/// The five calls occur in byte-key red-black-tree search/insert helpers:
+/// `FUN_083ba614` uses two search directions, `FUN_083ba7e0` selects an
+/// insert child, and `FUN_083d7248` performs two lookup directions.
+///
+/// Exported in a distinct text section so LLVM cannot fold this independently
+/// hookable retail branch target with either byte-identical predecessor. No
+/// deliberate deviations.
+///
+/// # Safety
+/// `a` and `b` must be valid readable `u8` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.less_unsigned_byte_alias_73ec")]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_byte_alias_73ec(
+    _this: *const u8,
+    a: *const u8,
+    b: *const u8,
+) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
 
 /// not_equal_deref — original: `FUN_083d6f78` @ 0x083d6f78
 /// (28 bytes; 14 `bl` call sites there, 35 across all 5 byte-identical
@@ -4860,6 +4894,21 @@ mod tests {
                 for b in 0..=u8::MAX {
                     assert_eq!(
                         less_unsigned_byte_alias_73d4(core::ptr::null(), &a, &b),
+                        less_unsigned_byte(core::ptr::null(), &a, &b),
+                        "{a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn less_unsigned_byte_alias_73ec_matches_primary_exhaustively() {
+        unsafe {
+            for a in 0..=u8::MAX {
+                for b in 0..=u8::MAX {
+                    assert_eq!(
+                        less_unsigned_byte_alias_73ec(core::ptr::null(), &a, &b),
                         less_unsigned_byte(core::ptr::null(), &a, &b),
                         "{a} vs {b}"
                     );
