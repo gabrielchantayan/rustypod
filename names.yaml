@@ -35291,6 +35291,32 @@ functions:
       host test covers equal values at distinct addresses, unequal values in
       both orders, zero, all-bits-set, and iterator-shaped records whose
       trailing word is not read.
+  - address: 0x083cf770
+    ghidra: FUN_083cf770
+    name: equal_deref_f770_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf770: equal_deref_f770_copy
+      param_1: a
+      param_2: b
+    notes: >-
+      Raw osos.dec from 0x083cf770 through bx lr at 0x083cf784 is exactly
+      `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1; bx
+      lr`; the next separately linked equal_deref copy begins at 0x083cf788,
+      confirming the 24-byte extent. It aligned-loads both u32 operands,
+      compares them, and returns normalized 1 or 0 for equality, with no NULL
+      guard. Decoding every ARM B/BL word in osos.dec finds exactly five direct
+      callers, all unconditional bl: 0x083b9690, 0x083b9afc, 0x083b9b18,
+      0x083b9b9c, and 0x083b9c60; there are no predicated calls or tail
+      branches. The body is byte-identical to the established equal_deref port
+      at 0x083cf968, so this ledger-only alias deliberately adds no duplicate
+      dispatch seam; hook 0x083cf770 to equal_deref. Its shared host test
+      covers equal values at distinct addresses, unequal values in both orders,
+      zero, all-bits-set, and iterator-shaped records whose trailing word is
+      not read.
   - address: 0x083cf788
     ghidra: FUN_083cf788
     name: equal_deref_f788_copy
