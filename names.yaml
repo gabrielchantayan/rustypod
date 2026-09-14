@@ -8864,6 +8864,26 @@ functions:
       port clears five aligned words and returns dst + 20; it deliberately
       does not inherit the public memzero_aligned port's dst-return
       compatibility deviation.
+  - address: 0x0803f358
+    ghidra: FUN_0803f358
+    name: bounded_word_bit_set_contains
+    size: 72
+    sig: "u32 bounded_word_bit_set_contains(const BoundedWordBitSet *set, i32 bit_index)"
+    module: util/bounded_word_bit_set_contains
+    status: ported
+    renames:
+      r0: set
+      r1: bit_index
+      r2: word_index
+      r3: word_count
+    notes: >-
+      Raw extent is exactly 0x0803f358..0x0803f3a0: signed-negative indexes
+      return 0 before dereferencing set; otherwise it tests bit (index & 31)
+      in words[index >> 5] only when the signed word count exceeds index >> 5,
+      returning normalized 0 or 1. Full osos.dec ARM B/BL decode finds exactly
+      six direct unconditional BL callers (0x0803f7fc, 0x0803f85c,
+      0x0803fb28, 0x0803fbb0, 0x080823e0, 0x080823f4), with no predicated BL
+      or direct B callers. No deliberate deviations.
 
   - address: 0x080304a0
     ghidra: FUN_080304a0
