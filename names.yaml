@@ -34351,6 +34351,38 @@ functions:
       / element_at_alias_6908_matches_primary.
 
 
+  - address: 0x083d6a68
+    ghidra: FUN_083d6a68
+    name: container_element_at_alias_6a68
+    size: 24
+    sig: "void *container_element_at_alias_6a68(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      return/r0: element
+    notes: >-
+      ALIAS — byte-identical instantiation of container_element_at @
+      0x083d5efc. Raw osos.dec confirms the complete 24-byte body from
+      0x083d6a68 through pop {r4,pc} at 0x083d6a7c; the next separately
+      linked sibling starts at 0x083d6a80. It dispatches through the
+      container vtable's slot 0x40 (slot 16) with this and index, receives
+      an element-slot address, then loads the element pointer from that slot.
+      Ghidra drops r1 from its signature, but raw blx r2 preserves the
+      index. Decoding every ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional plain bl (no predicated
+      calls or b tail-calls): 0x0812f63c, 0x0812fc00, 0x0812fdc0,
+      0x083d10e0, and 0x083d1124. The callers pass indexed container
+      addresses, use the returned element for virtual dispatch or comparison,
+      and NULL-test where needed. Ported as its own exported symbol with an
+      identical body under a distinct link_section so LLVM's
+      identical-function folding keeps the independently hookable label.
+      Deliberate deviations: none. match.py confirms the ldr/ldr/blx/ldr
+      dispatch-and-deref shape; LLVM adds an fp frame (push {fp,lr};
+      mov fp,sp) where retailOS uses push {r4,lr}. Host tests:
+      src/cxx/templates.rs::element_at_alias_6a68_dispatches_through_slot_0x40_and_derefs
+      / element_at_alias_6a68_matches_primary.
   - address: 0x083d6b14
     ghidra: FUN_083d6b14
     name: container_element_at_alias_6b14
