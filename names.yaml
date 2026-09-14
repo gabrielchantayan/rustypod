@@ -83148,3 +83148,45 @@ functions:
       verified address without assigning it an identity; host tests use a
       recorder seam to prove skip-on-clear behavior and result normalization.
       Deliberate deviations: none.
+
+
+  # --- root pending-work processor ---
+  - address: 0x08112bbc
+    ghidra: FUN_08112bbc
+    name: root_pending_process
+    size: 60
+    sig: "void root_pending_process(RootPendingProcessRoot *root)"
+    module: app/root_pending_process
+    status: ported
+    renames:
+      param_1/r0/r4: root
+      "root+0x888": pending_subobject
+      "pending_subobject+0x00": vtable
+      "vtable+0xf0": pending_process_callback
+      FUN_081115e4: root_slot_190_query (existing UPDATE_DISPATCH_OPS seam)
+      FUN_081a5500: singleton_class_8c00 (ported)
+      FUN_081a6368: class_8c00_rearm_timer_post_0x11 (ported)
+      DAT_08112bf4: two_minute_delay_ms (0x1d4c0)
+    notes: >-
+      Raw ARM establishes 56 code bytes at 0x08112bbc..0x08112bf0 plus
+      the required literal-pool word 0x0001d4c0 at 0x08112bf4, for a true
+      60-byte extent ending before the separately linked sibling at
+      0x08112bf8. Decoding every aligned immediate ARM B/BL word in
+      osos.dec finds exactly six direct inbound bl sites: four unconditional
+      bl at 0x081147cc, 0x0812f390, 0x0813139c, and 0x08219a00, plus two
+      predicated blne at 0x081161bc and 0x08232bfc; no direct B site targets
+      it. The predicated forms show caller-side condition gating; this body
+      has no NULL guards. One aligned image data word at 0x0898d9d0 contains
+      its address, but its dispatch identity is unrecovered and deliberately
+      not invented. The function queries root+0x888 through the existing
+      root_slot_190_query seam, invokes that sub-object's vtable+0xf0 slot
+      even when the query is zero, then returns on zero; nonzero obtains the
+      already ported singleton_class_8c00 and tail-branches to the already
+      ported 120000-ms class_8c00 timer-refresh/event-post method. Rust
+      models the ARM four-byte vtable entries with native-width host callback
+      cells (index 60), spells the tail branch as a normal direct call, and
+      reuses rather than adds the existing query seam. Host tests prove the
+      zero-query callback ordering and the nonzero path's two queries and
+      exact vtable receiver; the class fixture suppresses only its unrelated
+      queue post and uses a stopped embedded timer. match.py review is
+      structural, not instruction-exact.
