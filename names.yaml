@@ -64939,6 +64939,42 @@ functions:
       focused host tests cover every flag byte, a zero payload, and payload
       suppression when bit 0 is set.
 
+  # --- 'plst' element counted-string reader ---
+  - address: 0x080544dc
+    ghidra: FUN_080544dc
+    name: plst_element_read_counted_string
+    size: 56
+    sig: "void plst_element_read_counted_string(u8 *element, u16 *counted)"
+    module: ui/plst_counted_string
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: counted
+      "element+0x4": plst_class_tag
+      "element+0xcc": inline_string_pool
+      "element+0x124": string_pool_entry_id
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw ARM establishes the 56-byte extent exactly: movs r2,r1 begins at
+      0x080544dc, pop {r4,pc} returns at 0x08054510, and the separately
+      linked next function begins at 0x08054514. It returns immediately for
+      NULL counted; otherwise clears counted[0], validates the element's
+      'plst' tag through ui_element_is_plst_class (0x080613e0), then tail
+      branches to the already ported string_pool_read_counted (0x080bd8bc)
+      with the inline pool, entry id, and counted output. The tail wrapper
+      reads up to 510 bytes at counted+1 and writes floor(copied_bytes / 2)
+      to counted[0]. Ghidra incorrectly treats the tail branch as a call to
+      string_pool_read (0x080b4318) and absorbs the separate tail wrapper's
+      count write. Decoding every ARM B/BL word in osos.dec finds six direct
+      callers, all plain bl: 0x08052f68, 0x08094cf0, 0x080aae20,
+      0x080aae30, 0x0813c340, and 0x082a65a0; no predicated forms or raw
+      data-word references occur. The r3 element value initializes a
+      byte-length local that the pool reader clears before validation, so
+      Rust's direct tail-target call retains it as an unobservable u32.
+      Host tests cover NULL output, invalid class, and a valid odd-byte
+      payload whose copied count floors in u16 units.
+
   # --- adaptive tick accumulator scale-factor limit setter ---
   - address: 0x081bb28c
     ghidra: FUN_081bb28c
