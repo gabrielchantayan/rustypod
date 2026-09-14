@@ -12384,6 +12384,24 @@ functions:
       Not ported only because it is one instruction and its family is
       already represented; trivial to add.
 
+  - address: 0x081212ac
+    ghidra: FUN_081212ac
+    name: ata_cmd_set_opaque_48_49
+    size: 12
+    sig: "void ata_cmd_set_opaque_48_49(u8 *cmd, u8 value_48, u8 value_49)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: value_48, param_3: value_49}
+    notes: >-
+      Raw osos.dec establishes the complete 12-byte extent: `strb r1,
+      [r0, #0x48]; strb r2, [r0, #0x49]; bx lr`, with the next separately
+      linked setter at 0x081212b8. Decoding every ARM B/BL word finds six
+      direct calls, all unconditional bl: 0x082832b0, 0x08283758,
+      0x08283858, 0x0828386c, 0x08283924, and 0x08283938. Callers supply
+      (0x50, 0), (0x51, 0x40), or two request-derived bytes; that establishes
+      only the paired command-block byte storage, not a stronger semantic
+      identity. No NULL guard or deliberate deviations. #[inline(never)].
+
   - address: 0x08121204
     ghidra: FUN_08121204
     name: ata_cmd_set_buffer_offset
