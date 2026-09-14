@@ -35650,6 +35650,33 @@ functions:
       byte-identical to equal_deref @ 0x083cf968 but exported separately
       in `.text.iterator_equal` to retain the independently hookable label.
 
+  - address: 0x083cf860
+    ghidra: FUN_083cf860
+    name: equal_deref_f860_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf860: equal_deref_f860_copy
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent from ldr r0,[r0] at
+      0x083cf860 through bx lr at 0x083cf874; the next separately linked
+      equal_deref copy begins at 0x083cf878. It loads the two aligned u32
+      operands and returns normalized 1 only when they are equal, otherwise 0.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly five
+      inbound direct calls, all unconditional plain bl at 0x083c4f1c,
+      0x083c4f8c, 0x083c53f8, 0x083c5414, and 0x083c5498; there are no
+      predicated forms, direct tail branches, or aligned raw-word references.
+      The raw body is byte-identical to the established equal_deref export at
+      0x083cf968, so this ledger-only alias deliberately adds no redundant
+      dispatch seam; hook 0x083cf860 to equal_deref. The shared host test
+      proves equal values at distinct addresses, unequal values in both orders,
+      zero, all-bits-set, and iterator-shaped records whose trailing word is
+      not read. Deliberate deviations: none.
+
   - address: 0x083d76f8
     ghidra: FUN_083d76f8
     name: vector_size_elem12
