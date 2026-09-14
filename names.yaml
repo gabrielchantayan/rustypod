@@ -113,6 +113,40 @@ functions:
       0x083c4188 to red_black_tree_rotate_left. The shared host test covers
       root, parent-left-slot, and parent-right-slot rotations, including the
       transferred middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree left rotation ---
+  - address: 0x083c36c4
+    ghidra: FUN_083c36c4
+    name: red_black_tree_rotate_left_083c36c4_copy
+    size: 84
+    sig: "void red_black_tree_rotate_left(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_left
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08: left_child
+      param_2_plus_0x0c/r2: right_child
+      right_child: promoted_node
+      right_child_plus_0x08/r12: middle_subtree
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#0xc] at 0x083c36c4 through bx lr at 0x083c3714; the separately
+      linked right-rotation sibling begins at 0x083c3718. The right child
+      replaces the pivot under its old parent (or header +0x04), its left subtree
+      becomes the pivot's right subtree, and the pivot becomes that child's left
+      subtree. Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly five inbound direct calls: unconditional bl at 0x083c3a00,
+      0x083c3aa0, 0x083c3b94, and 0x083c4028, plus predicated bleq at
+      0x083c3f90; there are no direct tail-B callers. The predicated call is
+      gated by the caller's preceding equality comparison, consistent with this
+      function's intentional lack of NULL guards. This body is byte-identical to
+      the established red_black_tree_rotate_left port at 0x083ceccc, so this
+      ledger-only alias deliberately adds no redundant dispatch seam; hook
+      0x083c36c4 to red_black_tree_rotate_left. The shared host test covers root,
+      parent-left-slot, and parent-right-slot rotations, including the transferred
+      middle subtree. Deliberate deviations: none.
   # --- C++ red-black-tree right rotation ---
   - address: 0x083ba078
     ghidra: FUN_083ba078
