@@ -85,11 +85,11 @@ fn node_word(node: *mut RedBlackTreeNode) -> u32 {
 /// Rotates `node` left in `tree`.
 ///
 /// Original: `FUN_083ceccc` at load address `0x083ceccc` (84 bytes; five
-/// inbound `bl` sites: four unconditional and one `bleq`). `FUN_083c36c4`
-/// at load address `0x083c36c4` is byte-identical (84 bytes; five direct
-/// inbound calls: `bl` at 0x083c3a00, 0x083c3aa0, 0x083c3b94, and
-/// 0x083c4028, plus `bleq` at 0x083c3f90). It uses this same port without a
-/// redundant dispatch seam; no deliberate deviations.
+/// inbound `bl` sites: four unconditional and one `bleq`). `FUN_083b8b7c` at
+/// load address `0x083b8b7c` is byte-identical (84 bytes; five direct inbound
+/// calls: `bl` at 0x083b8eb8, 0x083b8f58, 0x083b9044, and 0x083b94cc, plus
+/// `bleq` at 0x083b9434). It uses this same port without a redundant dispatch
+/// seam; no deliberate deviations.
 ///
 /// # Safety
 ///
