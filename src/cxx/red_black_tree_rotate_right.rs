@@ -31,6 +31,15 @@
 //! faithful port: the predicated caller selects the left child before calling,
 //! preserving the retail function's intentional lack of NULL guards.
 //!
+//! `FUN_083c41dc` at load address `0x083c41dc` is another byte-identical
+//! 84-byte copy: 21 ARM words through `bx lr` at `0x083c422c`, followed by
+//! the next function at `0x083c4230`. A complete raw-binary scan finds five
+//! inbound direct calls: unconditional `bl` at `0x083c4528`, `0x083c45a0`,
+//! `0x083c4690`, and `0x083c4bdc`, plus predicated `bleq` at `0x083c4c2c`;
+//! no direct tail-`B` callers exist. This shared export is its faithful port:
+//! the predicated caller selects the pivot's left child before calling,
+//! preserving the retail function's intentional lack of NULL guards.
+//!
 //! `FUN_083baac4` at load address `0x083baac4` is another byte-identical
 //! 84-byte copy: 21 ARM words through `bx lr` at `0x083bab14`, followed by
 //! the next function at `0x083bab18`. A full raw-binary B/BL scan finds five
@@ -65,9 +74,9 @@ fn node_word(node: *mut RedBlackTreeNode) -> u32 {
 /// Rotates `node` right in `tree`.
 ///
 /// Originals: `FUN_083ced20` at load address `0x083ced20`, `FUN_083c6530` at
-/// `0x083c6530`, `FUN_083c5ab0` at `0x083c5ab0`, and `FUN_083baac4` at
-/// `0x083baac4` (each 84 bytes; five inbound `bl` sites: four unconditional
-/// and one `bleq`).
+/// `0x083c6530`, `FUN_083c5ab0` at `0x083c5ab0`, `FUN_083c41dc` at
+/// `0x083c41dc`, and `FUN_083baac4` at `0x083baac4` (each 84 bytes; five
+/// inbound `bl` sites: four unconditional and one `bleq`).
 ///
 /// # Safety
 ///
