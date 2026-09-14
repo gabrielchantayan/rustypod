@@ -12,12 +12,18 @@
 
 use crate::heap::tagged_word_buffer::TaggedWordBuffer;
 use crate::kernel::diag_ring_record::diag_ring_record;
+use crate::drivers::ata_cmd::traced_alloc;
+use crate::libc::memzero::memzero_aligned;
+
+static MEMZERO_ALIGNED_CALL: unsafe extern "C" fn(*mut u8, usize) -> *mut u8 = memzero_aligned;
 
 /// Embedded slot count in the 0x2c0-byte pool object.
 pub const TAGGED_WORD_BUFFER_POOL_CAPACITY: usize = 32;
 /// Depth threshold at which the current nesting depth becomes the selected
 /// slot index instead of the mutable slot cursor.
 pub const TAGGED_WORD_BUFFER_POOL_DEPTH_LIMIT: u32 = 13;
+
+const TAGGED_WORD_BUFFER_POOL_SIZE: usize = 0x2c0;
 
 /// Target-layout pool object that owns 32 embedded tagged word buffers.
 #[repr(C)]
@@ -130,12 +136,105 @@ pub unsafe extern "C" fn tagged_word_buffer_pool_take(
     }
 }
 
+/// tagged_word_buffer_pool_create — original: `FUN_0803de70` @
+/// 0x0803de70 (88 bytes; **6 direct `bl` call sites**, binary-verified:
+/// 0x08062230, 0x0808e620, 0x080c6dc8, 0x080c701c, 0x080cb870, and
+/// 0x080cbb94 — all unconditional).
+///
+/// Allocates a 0x2c0-byte [`TaggedWordBufferPool`] through
+/// [`traced_alloc`], records diagnostic `(3, 0x6a, 0x41, 0, 0)` and returns
+/// NULL when that allocation fails, otherwise clears the complete object and
+/// marks `flags` (+0x284) as one. The embedded slots, nesting cursor, saved
+/// cursors, and overflow latch therefore start at zero.
+///
+/// Deliberate deviation: the stock body reaches the IRAM
+/// `memzero_aligned` mirror through veneer 0x08037db8. The port invokes the
+/// already-ported `memzero_aligned` through a volatile function-pointer load,
+/// preserving a real call without allowing LLVM to substitute a builtin.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tagged_word_buffer_pool_create() -> *mut TaggedWordBufferPool {
+    let pool = traced_alloc(TAGGED_WORD_BUFFER_POOL_SIZE as i32, 0, 0).cast::<TaggedWordBufferPool>();
+    if pool.is_null() {
+        diag_ring_record(3, 0x6a, 0x41, 0, 0);
+        return core::ptr::null_mut();
+    }
+
+    let zero = core::ptr::read_volatile(core::ptr::addr_of!(MEMZERO_ALIGNED_CALL));
+    zero(pool.cast(), TAGGED_WORD_BUFFER_POOL_SIZE);
+    (*pool).flags = 1;
+    pool
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use std::mem::{size_of, zeroed};
+    use crate::drivers::ata_cmd::{TracedAllocHooks, TRACED_ALLOC_HOOKS};
+    use crate::kernel::diag_ring_record::{
+        BlockGetter, DiagEventRing, DIAG_RING_BLOCK_GETTER,
+    };
+    use crate::testing::{DIAG_RING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
+    use core::mem::MaybeUninit;
+    use std::slice;
+
+    #[repr(align(4))]
+    struct FactoryStorage([u8; TAGGED_WORD_BUFFER_POOL_SIZE]);
+
+    static mut FACTORY_STORAGE: FactoryStorage =
+        FactoryStorage([0; TAGGED_WORD_BUFFER_POOL_SIZE]);
+    static mut FACTORY_RING: MaybeUninit<DiagEventRing> = MaybeUninit::uninit();
+
+    unsafe extern "C" fn factory_alloc(
+        _size: i32,
+        _tag1: u32,
+        _tag2: u32,
+    ) -> *mut u8 {
+        core::ptr::addr_of_mut!(FACTORY_STORAGE).cast()
+    }
+
+    unsafe extern "C" fn factory_alloc_fail(
+        _size: i32,
+        _tag1: u32,
+        _tag2: u32,
+    ) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn factory_ring_getter() -> *mut DiagEventRing {
+        core::ptr::addr_of_mut!(FACTORY_RING).cast()
+    }
+
+    struct FactoryHookReset {
+        allocator: TracedAllocHooks,
+        ring_getter: Option<BlockGetter>,
+    }
+
+    impl FactoryHookReset {
+        unsafe fn save() -> Self {
+            Self {
+                allocator: core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS)),
+                ring_getter: core::ptr::read_volatile(core::ptr::addr_of!(DIAG_RING_BLOCK_GETTER)),
+            }
+        }
+    }
+
+    impl Drop for FactoryHookReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                    self.allocator,
+                );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER),
+                    self.ring_getter,
+                );
+            }
+        }
+    }
 
     #[test]
     fn pool_layout_matches_the_recovered_extent() {
@@ -252,5 +351,62 @@ mod tests {
         let second = unsafe { tagged_word_buffer_pool_take(&mut pool) };
         assert!(second.is_null());
         assert_eq!(pool.overflow_reported, 1);
+    }
+    #[test]
+    fn create_clears_every_field_then_marks_pool_owned() {
+        let _ring_guard = DIAG_RING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _reset = unsafe { FactoryHookReset::save() };
+        unsafe {
+            core::ptr::addr_of_mut!(FACTORY_STORAGE)
+                .cast::<u8>()
+                .write_bytes(0xa5, TAGGED_WORD_BUFFER_POOL_SIZE);
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                TracedAllocHooks {
+                    alloc: factory_alloc,
+                    trace: None,
+                },
+            );
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER), None);
+        }
+
+        let pool = unsafe { tagged_word_buffer_pool_create() };
+
+        assert_eq!(pool.cast::<u8>(), core::ptr::addr_of_mut!(FACTORY_STORAGE).cast());
+        let bytes = unsafe { slice::from_raw_parts(pool.cast::<u8>(), TAGGED_WORD_BUFFER_POOL_SIZE) };
+        assert!(bytes[..0x284].iter().all(|&byte| byte == 0));
+        assert_eq!(unsafe { (*pool).flags }, 1);
+        assert!(bytes[0x288..].iter().all(|&byte| byte == 0));
+    }
+
+    #[test]
+    fn create_reports_the_retail_allocation_failure_triple() {
+        let _ring_guard = DIAG_RING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _alloc_guard = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _reset = unsafe { FactoryHookReset::save() };
+        unsafe {
+            core::ptr::addr_of_mut!(FACTORY_RING)
+                .cast::<DiagEventRing>()
+                .write_bytes(0, 1);
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS),
+                TracedAllocHooks {
+                    alloc: factory_alloc_fail,
+                    trace: None,
+                },
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER),
+                Some(factory_ring_getter),
+            );
+        }
+
+        assert!(unsafe { tagged_word_buffer_pool_create() }.is_null());
+        let ring = unsafe { core::ptr::addr_of!(FACTORY_RING).cast::<DiagEventRing>().read() };
+        assert_eq!(ring.head, 1);
+        assert_eq!(ring.tags[1], 0x0306_a041);
+        assert_eq!(ring.data0[1], 0);
+        assert_eq!(ring.data1[1], 0);
     }
 }

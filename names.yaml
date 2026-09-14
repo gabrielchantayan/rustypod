@@ -65548,6 +65548,35 @@ functions:
       saved_slot_counts on the same object; this port keeps the same unchecked
       raw pointer arithmetic and a direct call to the already-ported diagnostic
       logger.
+
+  # --- tagged word buffer pool factory ---
+  - address: 0x0803de70
+    ghidra: FUN_0803de70
+    name: tagged_word_buffer_pool_create
+    size: 88
+    sig: "TaggedWordBufferPool *tagged_word_buffer_pool_create(void)"
+    module: heap/tagged_word_buffer_pool
+    status: ported
+    renames:
+      r4/r0: pool
+      FUN_08043c18: traced_alloc
+      thunk_EXT_FUN_2200027c: memzero_aligned via IRAM veneer
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw ARM establishes the supplied 88-byte extent exactly:
+      0x0803de70..0x0803dec8, with the separately linked
+      tagged_word_buffer_pool_push beginning at 0x0803dec8. Decoding every
+      ARM B/BL immediate in osos.dec finds six direct inbound call sites,
+      all unconditional BL: 0x08062230, 0x0808e620, 0x080c6dc8,
+      0x080c701c, 0x080cb870, and 0x080cbb94. It requests 0x2c0 bytes from
+      traced_alloc(0x2c0, 0, 0); NULL records diag_ring_record(3, 0x6a,
+      0x41, 0, 0) and returns NULL. A successful allocation is zero-filled
+      through the 0x08037db8 IRAM veneer to memzero_aligned @ 0x2200027c,
+      then receives flags = 1 at +0x284 before returning. Deliberate
+      deviation: the port reaches the already-ported aligned zero routine
+      through a volatile function-pointer load instead of reproducing the
+      retail veneer, preserving the call without LLVM replacing it with an
+      AEABI builtin; memory effects are identical.
   # --- three-buffer owner destructor ---
   - address: 0x0803deec
     ghidra: FUN_0803deec
