@@ -85418,3 +85418,33 @@ functions:
       this is not virtual dispatch. Deliberate deviation: none on ARM; the
       host model takes the implicit r4/r5 operands explicitly and returns
       normally to verify the sole store without simulating an ARM frame pop.
+
+
+  # --- BER tag-length-value encoded-size calculator ---
+  - address: 0x0803b5a8
+    ghidra: FUN_0803b5a8
+    name: ber_tlv_encoded_size
+    size: 72
+    sig: "i32 ber_tlv_encoded_size(i32 container_kind, i32 content_length, i32 tag_number)"
+    module: util/ber_tlv_encoded_size
+    status: ported
+    renames:
+      param_1/r0: container_kind
+      param_2/r1: content_length
+      param_3/r2: tag_number
+      r3: encoded_size
+      return/r0: encoded_size
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent from cmp r2,#31 at
+      0x0803b5a8 through bx lr at 0x0803b5ec; the separately linked successor
+      begins with push at 0x0803b5f0. Decoding every immediate ARM B/BL word
+      in osos.dec finds exactly six inbound direct calls, all unconditional
+      plain bl at 0x0803b2f0, 0x0803ba0c, 0x0803ba2c, 0x0803bae4,
+      0x0805f3b4, and 0x080bfb84; there are no predicated forms or direct
+      tail branches. Computes the total BER TLV size emitted by
+      FUN_0803b788: content length, tag byte, high-tag-number base-128 bytes
+      when tag_number is at least 31, and either short or long-form length.
+      The container_kind 2 with zero content length reserves the two
+      end-of-contents bytes for an indefinite constructed value. Signed
+      comparisons and wrapping 32-bit arithmetic are preserved. Deliberate
+      deviations: none.
