@@ -144,6 +144,17 @@ const SELECTION_CACHE_MARKER: usize = 0xe78;
 const SELECTION_CACHE_INDEX: usize = 0x14;
 const SELECTION_CACHE_CURSOR: usize = 0x42c;
 
+/// Byte offsets of the independently released record-cache allocations.
+const RECORD_CACHE_PRIMARY: usize = 0xe40;
+const RECORD_CACHE_SECONDARY: usize = 0xe44;
+/// Byte offsets delimiting the logical 12-byte-record vector.
+const RECORD_CACHE_BEGIN: usize = 0xe58;
+const RECORD_CACHE_END: usize = 0xe5c;
+/// Fields reset when the record cache is cleared.
+const RECORD_CACHE_INDEX: usize = 0x0c;
+const RECORD_CACHE_SELECTION: usize = 0x2c;
+
+
 
 /// query_object_create — original: `FUN_082597a0` @ 0x082597a0 (32 bytes;
 /// 25 verified `bl` call sites, all unconditional).
@@ -426,6 +437,62 @@ pub unsafe extern "C" fn inner_clear_selection_cache(inner: *mut u8) {
     (inner.add(SELECTION_CACHE_MARKER) as *mut u32).write(0);
     (inner.add(SELECTION_CACHE_CURSOR) as *mut u16).write(0);
 }
+
+/// inner_clear_record_cache — original: `FUN_08059870` @ `0x08059870`
+/// (172 bytes; the next independent function starts at `0x0805991c`).
+///
+/// Raw decoding of every ARM immediate B/BL word in `osos.dec` finds six
+/// direct callers, all plain unconditional `bl`: `0x08066790`, `0x080668bc`,
+/// `0x08066a28`, `0x08066b58`, `0x08068ea8`, and `0x0813d008`. There are no
+/// predicated calls.
+///
+/// Releases and clears each nonzero tag-4 record-cache allocation at
+/// `inner + 0xe40` and `+0xe44` independently. It then erases the logical
+/// contents of the 12-byte-record vector at `+0xe58/+0xe5c`, retaining a
+/// partial trailing span exactly as the signed ADS division does. Finally it
+/// stores -1 at `+0x0c` and clears the u16 selection at `+0x2c`.
+///
+/// Deliberate deviation: the raw empty-source copy and no-op iterator walks
+/// are expressed as their resulting end-pointer arithmetic rather than
+/// inventing a seam for either. Existing direct calls to `free_tag4` preserve
+/// both independent release calls.
+///
+/// # Safety
+///
+/// `inner` must address writable, suitably aligned storage through `+0xe5f`
+/// and a writable u16 at `+0x2c`. Its nonzero record-cache words must be
+/// valid tag-4 allocations. The vector bounds must be target 32-bit
+/// addresses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_clear_record_cache(inner: *mut u8) {
+    let primary = (inner.add(RECORD_CACHE_PRIMARY) as *const u32).read();
+    if primary != 0 {
+        crate::heap::veneers::free_tag4(primary as usize as *mut u8);
+        (inner.add(RECORD_CACHE_PRIMARY) as *mut u32).write(0);
+    }
+
+    let secondary = (inner.add(RECORD_CACHE_SECONDARY) as *const u32).read();
+    if secondary != 0 {
+        crate::heap::veneers::free_tag4(secondary as usize as *mut u8);
+        (inner.add(RECORD_CACHE_SECONDARY) as *mut u32).write(0);
+    }
+
+    let begin = (inner.add(RECORD_CACHE_BEGIN) as *const u32).read();
+    let end = (inner.add(RECORD_CACHE_END) as *const u32).read();
+    if begin != end {
+        let element_count = crate::runtime::rt_div::__rt_sdiv(
+            end.wrapping_sub(begin) as i32,
+            12,
+        ) as u32;
+        (inner.add(RECORD_CACHE_END) as *mut u32)
+            .write(end.wrapping_sub(element_count.wrapping_mul(12)));
+    }
+
+    (inner.add(RECORD_CACHE_INDEX) as *mut u32).write(u32::MAX);
+    (inner.add(RECORD_CACHE_SELECTION) as *mut u16).write(0);
+}
+
 /// Object word holding the selected resource pointer.
 const SELECTED_RESOURCE: usize = 4;
 /// Object word holding the selected resource's table index.
@@ -444,7 +511,6 @@ type ObjectCleanup = unsafe extern "C" fn(object: *mut u8);
 struct ObjectSelectionOps {
     activate_resource: ActivateResource,
     call_080be1c8: ObjectCleanup,
-    call_08059870: ObjectCleanup,
     call_08059700: ObjectCleanup,
     call_08059a04: ObjectCleanup,
     call_0805997c: ObjectCleanup,
@@ -460,12 +526,6 @@ unsafe extern "C" fn firmware_activate_resource(resource: *mut u8, mode: u32) {
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_call_080be1c8(object: *mut u8) {
     let call: ObjectCleanup = core::mem::transmute(0x080b_e1c8usize);
-    call(object);
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_call_08059870(object: *mut u8) {
-    let call: ObjectCleanup = core::mem::transmute(0x0805_9870usize);
     call(object);
 }
 
@@ -502,7 +562,6 @@ unsafe extern "C" fn missing_object_cleanup(_object: *mut u8) {
 const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
     activate_resource: firmware_activate_resource,
     call_080be1c8: firmware_call_080be1c8,
-    call_08059870: firmware_call_08059870,
     call_08059700: firmware_call_08059700,
     call_08059a04: firmware_call_08059a04,
     call_0805997c: firmware_call_0805997c,
@@ -512,7 +571,6 @@ const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
 const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
     activate_resource: missing_activate_resource,
     call_080be1c8: missing_object_cleanup,
-    call_08059870: missing_object_cleanup,
     call_08059700: missing_object_cleanup,
     call_08059a04: missing_object_cleanup,
     call_0805997c: missing_object_cleanup,
@@ -539,9 +597,9 @@ static mut OBJECT_SELECTION_OPS: ObjectSelectionOps = DEFAULT_OBJECT_SELECTION_O
 /// selection-dependent object state in the stock call order, returning zero
 /// even when the final callback-dispatch reset reports a status.
 ///
-/// Deliberate deviation: six unported callees remain volatile operation slots
+/// Deliberate deviation: five unported callees remain volatile operation slots
 /// on host and direct firmware calls on target. Their identities are not
-/// inferred from their addresses; the five already-ported cleanup calls remain
+/// inferred from their addresses; the six already-ported cleanup calls remain
 /// direct Rust calls. This preserves the ARM call boundaries and lets host
 /// tests observe the full sequence.
 ///
@@ -568,7 +626,7 @@ pub unsafe extern "C" fn object_select_resource_index(object: *mut u8, index: i3
     (ops.activate_resource)(resource as usize as *mut u8, 0);
     inner_release_buffer_and_reset_cursor(object);
     (ops.call_080be1c8)(object);
-    (ops.call_08059870)(object);
+    inner_clear_record_cache(object);
     (ops.call_08059700)(object);
     inner_clear_selection_cache(object);
     inner_reset_transient_state(object);
@@ -1322,6 +1380,91 @@ mod tests {
         assert_eq!(fixture.word(TRANSIENT_RECORD_END), 0x1001);
     }
 
+    // ---- inner_clear_record_cache ---------------------------------------
+
+    const RECORD_CACHE_LEN: usize = RECORD_CACHE_END + 4;
+
+    #[repr(align(4))]
+    struct RecordCacheFixture {
+        bytes: [u8; RECORD_CACHE_LEN],
+    }
+
+    impl RecordCacheFixture {
+        fn new() -> Self {
+            RecordCacheFixture { bytes: [SENTINEL; RECORD_CACHE_LEN] }
+        }
+
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
+        }
+
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn halfword(&self, offset: usize) -> u16 {
+            u16::from_le_bytes(self.bytes[offset..offset + 2].try_into().unwrap())
+        }
+
+        fn set_halfword(&mut self, offset: usize, value: u16) {
+            self.bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn clear(&mut self) {
+            unsafe { inner_clear_record_cache(self.bytes.as_mut_ptr()) };
+        }
+    }
+
+    #[test]
+    fn record_cache_clear_releases_both_allocations_and_only_resets_its_fields() {
+        let _heap_guard = mock_heap();
+        let mut fixture = RecordCacheFixture::new();
+        fixture.set_word(RECORD_CACHE_PRIMARY, 0x1111_2222);
+        fixture.set_word(RECORD_CACHE_SECONDARY, 0x3333_4444);
+        fixture.set_word(RECORD_CACHE_BEGIN, 0x1000);
+        fixture.set_word(RECORD_CACHE_END, 0x1025);
+        fixture.set_word(RECORD_CACHE_INDEX, 7);
+        fixture.set_halfword(RECORD_CACHE_SELECTION, u16::MAX);
+        let mut expected = fixture.bytes;
+        for offset in [RECORD_CACHE_PRIMARY, RECORD_CACHE_SECONDARY] {
+            expected[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes());
+        }
+        expected[RECORD_CACHE_END..RECORD_CACHE_END + 4]
+            .copy_from_slice(&0x1001u32.to_le_bytes());
+        expected[RECORD_CACHE_INDEX..RECORD_CACHE_INDEX + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[RECORD_CACHE_SELECTION..RECORD_CACHE_SELECTION + 2]
+            .copy_from_slice(&0u16.to_le_bytes());
+
+        fixture.clear();
+
+        assert_eq!(free_log(), (2, 0x3333_4444usize as *mut u8, 4));
+        assert_eq!(fixture.word(RECORD_CACHE_BEGIN), 0x1000);
+        assert_eq!(fixture.bytes, expected);
+    }
+
+    #[test]
+    fn record_cache_clear_releases_secondary_when_primary_is_null() {
+        let _heap_guard = mock_heap();
+        let mut fixture = RecordCacheFixture::new();
+        fixture.set_word(RECORD_CACHE_PRIMARY, 0);
+        fixture.set_word(RECORD_CACHE_SECONDARY, 0x5555_6666);
+        fixture.set_word(RECORD_CACHE_BEGIN, 0x2000);
+        fixture.set_word(RECORD_CACHE_END, 0x2000);
+        fixture.set_word(RECORD_CACHE_INDEX, 7);
+        fixture.set_halfword(RECORD_CACHE_SELECTION, u16::MAX);
+
+        fixture.clear();
+
+        assert_eq!(free_log(), (1, 0x5555_6666usize as *mut u8, 4));
+        assert_eq!(fixture.word(RECORD_CACHE_PRIMARY), 0);
+        assert_eq!(fixture.word(RECORD_CACHE_SECONDARY), 0);
+        assert_eq!(fixture.word(RECORD_CACHE_END), 0x2000);
+        assert_eq!(fixture.word(RECORD_CACHE_INDEX), u32::MAX);
+        assert_eq!(fixture.halfword(RECORD_CACHE_SELECTION), 0);
+    }
+
+
     // ---- inner_dispatch_selected_resource -----------------------------
 
     static SELECTED_RESOURCE_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -1585,8 +1728,8 @@ mod tests {
 
     static OBJECT_SELECTION_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut OBJECT_SELECTION_CALL_COUNT: usize = 0;
-    static mut OBJECT_SELECTION_STAGES: [u8; 6] = [0; 6];
-    static mut OBJECT_SELECTION_OBJECTS: [usize; 6] = [0; 6];
+    static mut OBJECT_SELECTION_STAGES: [u8; 5] = [0; 5];
+    static mut OBJECT_SELECTION_OBJECTS: [usize; 5] = [0; 5];
     static mut OBJECT_SELECTION_RESOURCE: *mut u8 = core::ptr::null_mut();
     static mut OBJECT_SELECTION_MODE: u32 = u32::MAX;
 
@@ -1606,21 +1749,18 @@ mod tests {
         record_object_selection_call(2, object);
     }
 
-    unsafe extern "C" fn mock_call_08059870(object: *mut u8) {
-        record_object_selection_call(3, object);
-    }
 
     unsafe extern "C" fn mock_call_08059700(object: *mut u8) {
-        record_object_selection_call(4, object);
+        record_object_selection_call(3, object);
     }
 
 
     unsafe extern "C" fn mock_call_08059a04(object: *mut u8) {
-        record_object_selection_call(5, object);
+        record_object_selection_call(4, object);
     }
 
     unsafe extern "C" fn mock_call_0805997c(object: *mut u8) {
-        record_object_selection_call(6, object);
+        record_object_selection_call(5, object);
     }
 
     struct ObjectSelectionOpsRestore;
@@ -1637,15 +1777,14 @@ mod tests {
     fn install_object_selection_mocks() -> ObjectSelectionOpsRestore {
         unsafe {
             OBJECT_SELECTION_CALL_COUNT = 0;
-            OBJECT_SELECTION_STAGES = [0; 6];
-            OBJECT_SELECTION_OBJECTS = [0; 6];
+            OBJECT_SELECTION_STAGES = [0; 5];
+            OBJECT_SELECTION_OBJECTS = [0; 5];
             OBJECT_SELECTION_RESOURCE = core::ptr::null_mut();
             OBJECT_SELECTION_MODE = u32::MAX;
             core::ptr::addr_of_mut!(OBJECT_SELECTION_OPS).write_volatile(
                 ObjectSelectionOps {
                     activate_resource: mock_activate_selected_resource,
                     call_080be1c8: mock_call_080be1c8,
-                    call_08059870: mock_call_08059870,
                     call_08059700: mock_call_08059700,
                     call_08059a04: mock_call_08059a04,
                     call_0805997c: mock_call_0805997c,
@@ -1712,9 +1851,9 @@ mod tests {
             assert_eq!(object.add(SELECTED_RESOURCE_INDEX).cast::<u32>().read(), 2);
             assert_eq!(OBJECT_SELECTION_RESOURCE, 0x89ab_cdefusize as *mut u8);
             assert_eq!(OBJECT_SELECTION_MODE, 0);
-            assert_eq!(OBJECT_SELECTION_CALL_COUNT, 6);
-            assert_eq!(OBJECT_SELECTION_STAGES, [1, 2, 3, 4, 5, 6]);
-            assert_eq!(OBJECT_SELECTION_OBJECTS[1..], [object as usize; 5]);
+            assert_eq!(OBJECT_SELECTION_CALL_COUNT, 5);
+            assert_eq!(OBJECT_SELECTION_STAGES, [1, 2, 3, 4, 5]);
+            assert_eq!(OBJECT_SELECTION_OBJECTS[1..], [object as usize; 4]);
             assert_eq!(object.add(BUFFER_CURSOR_END).cast::<u32>().read(), 0x1000);
             assert_eq!(object.add(BUFFER_INDEX).cast::<u32>().read(), u32::MAX);
             assert_eq!(object.add(BUFFER_SELECTION).cast::<u16>().read(), 0);

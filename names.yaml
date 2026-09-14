@@ -40213,6 +40213,37 @@ functions:
       direct Rust call. Deliberate deviation: none. Host tests prove full
       release and exact writes, plus the NULL-primary case preserving a
       nonzero secondary allocation.
+
+  - address: 0x08059870
+    ghidra: FUN_08059870
+    name: inner_clear_record_cache
+    size: 172
+    sig: "void inner_clear_record_cache(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec decoding confirms 43 instructions from 0x08059870 through
+      the pop at 0x08059918; the next independent function starts at
+      0x0805991c, so the true extent is 172 bytes. Decoding every immediate
+      ARM B/BL word finds exactly six direct call sites, all unconditional bl
+      (0x08066790, 0x080668bc, 0x08066a28, 0x08066b58, 0x08068ea8,
+      0x0813d008); no predicated call enters. The function independently
+      frees and clears nonzero tag-4 words at inner+0xe40 and +0xe44 (the
+      Ghidra C incorrectly nests the second release under the first). The
+      apparent 12-byte-record copy and iterator walks start with end == end,
+      so are side-effect-free. The resulting update is end -
+      ((end - begin) / 12) * 12 using __rt_sdiv, retaining a partial trailing
+      span. It then stores -1 at +0x0c and clears the u16 at +0x2c. The
+      existing object_select_resource_index seam for this address was removed
+      for a direct call. Host tests cover both releases, the independent
+      secondary-only release, exact owned-field writes, the empty vector, and
+      a partial span. match.py structural review retains two independent
+      free_tag4 calls, signed divide by 12, vector-end rewind, and final
+      halfword/sentinel stores; LLVM omits the provably empty raw walks.
   - address: 0x08059a98
     ghidra: FUN_08059a98
     name: inner_clear_cached_results
