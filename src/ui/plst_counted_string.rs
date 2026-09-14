@@ -1,12 +1,14 @@
-//! 'plst' UI-element counted-string store and notification.
+//! 'plst' UI-element counted-string load/store helpers.
 //!
 //! - `plst_element_store_counted_string` — original: `FUN_08067274` @
 //!   `0x08067274` (88 bytes including the literal event key at `0x080672cc`;
 //!   10 direct `bl` call sites, all unconditional).
+//! - `plst_element_read_counted_string` — original: `FUN_080544dc` @
+//!   `0x080544dc` (56 bytes; 6 direct `bl` call sites, all unconditional).
 
 use core::ptr;
 
-use crate::util::string_pool::{string_pool_store_counted, StringPool, PARAM_ERR};
+use crate::util::string_pool::{string_pool_read_counted, string_pool_store_counted, StringPool, PARAM_ERR};
 
 use super::plst_class_check::ui_element_is_plst_class;
 
@@ -148,13 +150,69 @@ pub unsafe extern "C" fn plst_element_store_counted_string(
     status
 }
 
+/// plst_element_read_counted_string — original: `FUN_080544dc` @
+/// `0x080544dc` (56 bytes; **6 direct `bl` call sites, all
+/// unconditional** — binary-scanned).
+///
+/// The raw body runs from `movs r2,r1` at 0x080544dc through
+/// `pop {r4,pc}` at 0x08054510; the separately linked next function starts
+/// with `push {r1,r2,r3,r4,r5,lr}` at 0x08054514. It first guards the
+/// counted output pointer and clears its leading count. A non-NULL `'plst'`
+/// element then passes its inline `"crts"` pool at +0xcc, its entry id at
+/// +0x124, and the counted output to
+/// [`string_pool_read_counted`]. The reader writes at `counted + 1` and
+/// replaces `*counted` with the copied byte count divided by two.
+///
+/// Raw bytes prove that the last instruction is a tail `bne 0x080bd8bc`,
+/// not a call to `0x080b4318`: Ghidra incorrectly absorbs that separate
+/// counted wrapper and claims the current function writes the count itself.
+/// Its r3 input to the tail wrapper is the element pointer; that value only
+/// initializes the wrapper's byte-length local, which the reader clears
+/// before validation, so it is unobservable.
+///
+/// All six inbound calls are plain `bl` at 0x08052f68, 0x08094cf0,
+/// 0x080aae20, 0x080aae30, 0x0813c340, and 0x082a65a0. No call is
+/// predicated; this function owns both its output and class guards. No data
+/// word references its address.
+///
+/// Deliberate deviation: Rust calls the already ported tail target directly;
+/// the otherwise unobservable fourth argument retains the target-width
+/// element value. The `'plst'` predicate is likewise called directly.
+///
+/// # Safety
+///
+/// `counted` may be NULL. A non-NULL `element` must carry its target-layout
+/// class tag at word 1. A qualifying element must provide its inline pool
+/// beginning at word 51 and an aligned entry id at word 73. `counted` must
+/// have writable storage for one count plus up to 255 UTF-16 units.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.plst_element_read_counted_string")]
+pub unsafe extern "C" fn plst_element_read_counted_string(
+    element: *mut u8,
+    counted: *mut u16,
+) {
+    if counted.is_null() {
+        return;
+    }
+    counted.write(0);
+    if ui_element_is_plst_class(element) == 0 {
+        return;
+    }
+
+    let words = element.cast::<u32>();
+    let pool = words.add(STRING_POOL_WORD_INDEX).cast::<StringPool>();
+    let entry_id = words.add(STRING_ID_WORD_INDEX).cast::<i32>().read();
+    string_pool_read_counted(pool, entry_id, counted, element as usize as u32);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use core::mem::size_of;
     use super::*;
-    use crate::util::string_pool::{StringPoolStore, STRING_POOL_STORE};
+    use crate::util::string_pool::{PoolEntry, StringPoolStore, STRING_POOL_STORE};
     use std::sync::Mutex;
 
     const PLST_CLASS_TAG: u32 = 0x706c_7374;
@@ -244,6 +302,70 @@ mod tests {
         let mut element = [0u32; 74];
         element[1] = tag;
         element
+    }
+
+    /// The element begins four bytes into an eight-byte-aligned allocation:
+    /// its +0xcc inline pool is consequently aligned for the host's native
+    /// pointer fields while retaining retailOS's 4-byte word positions.
+    #[repr(C, align(8))]
+    struct ReadElementStorage {
+        leading_word: u32,
+        words: [u32; 74],
+    }
+
+    #[test]
+    fn valid_plst_element_reads_odd_length_payload_and_floors_count() {
+        let mut storage = ReadElementStorage {
+            leading_word: 0,
+            words: element_with_tag(PLST_CLASS_TAG),
+        };
+        let mut entries = [PoolEntry {
+            blob_offset: 0,
+            length: 5,
+        }];
+        let mut entry_handle = entries.as_mut_ptr();
+        let mut payload = [0x41, 0x00, 0xa9, 0x03, 0xfe];
+        let mut payload_handle = payload.as_mut_ptr();
+        let words = storage.words.as_mut_ptr();
+        let pool = unsafe { words.add(STRING_POOL_WORD_INDEX).cast::<StringPool>() };
+
+        unsafe {
+            pool.write(core::mem::zeroed());
+            (*pool).tag = crate::util::crts_tag::CRTS_TAG;
+            (*pool).entries = &mut entry_handle;
+            (*pool).payload = &mut payload_handle;
+            (*pool).entry_count = 1;
+            words.add(STRING_ID_WORD_INDEX).cast::<i32>().write(1);
+        }
+
+        let mut counted = [u16::MAX; 256];
+        unsafe {
+            plst_element_read_counted_string(words.cast(), counted.as_mut_ptr());
+        }
+
+        assert_eq!(counted[0], 2);
+        assert_eq!(counted[1], 0x0041);
+        assert_eq!(counted[2], 0x03a9);
+        assert_eq!(counted[3], 0xfffe);
+    }
+
+    #[test]
+    fn null_counted_output_does_not_inspect_null_element() {
+        unsafe {
+            plst_element_read_counted_string(core::ptr::null_mut(), core::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn foreign_element_clears_count_without_requiring_a_pool() {
+        let mut element = element_with_tag(0x7464_6174);
+        let mut counted = [0xffffu16; 1];
+
+        unsafe {
+            plst_element_read_counted_string(element.as_mut_ptr().cast(), counted.as_mut_ptr());
+        }
+
+        assert_eq!(counted[0], 0);
     }
 
     #[test]
