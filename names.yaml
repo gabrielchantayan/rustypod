@@ -35429,6 +35429,32 @@ functions:
       the usual push {fp,lr}/pop {fp,pc} frame - the same accepted
       deviation as fixed16_eq_indirect.
 
+  - address: 0x083cf890
+    ghidra: FUN_083cf890
+    name: equal_deref_f890_copy
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      FUN_083cf890: equal_deref_f890_copy
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent from ldr r0,[r0] at
+      0x083cf890 through bx lr at 0x083cf8a4; the next separately linked
+      equal_deref copy begins at 0x083cf8a8. It loads the two aligned u32
+      operands and returns normalized 1 only when they are equal, otherwise 0.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly five
+      inbound direct calls, all unconditional plain bl at 0x083c65ac,
+      0x083c6a1c, 0x083c6a38, 0x083c6abc, and 0x083c6b80; there are no
+      predicated forms, direct tail branches, or aligned raw-word references.
+      The raw body is byte-identical to the established equal_deref export at
+      0x083cf968, so this ledger-only alias deliberately adds no redundant
+      dispatch seam; hook 0x083cf890 to equal_deref. The shared host test
+      proves equal distinct words, unequal operands in both orders, zero,
+      all-bits-set, and iterator-shaped records whose trailing words are not
+      read. Deliberate deviations: none.
   - address: 0x083cf980
     ghidra: FUN_083cf980
     name: equal_deref_f980_copy
