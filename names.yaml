@@ -89505,3 +89505,29 @@ functions:
       for zero and u32::MAX lengths. Deliberate deviation: the stock direct
       bl is an indirect seam for host modeling; target builds invoke its
       verified retailOS address.
+  # --- SQLite expression conjunction builder ---
+  - address: 0x08376958
+    ghidra: FUN_08376958
+    name: expr_and
+    size: 60
+    sig: "Expr *expr_and(sqlite3 *db, Expr *left, Expr *right)"
+    module: sqlite/expr_and
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: left
+      param_3/r2: right
+      FUN_08376808: expr_new
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: 15 ARM words from
+      mov ip,r0 at 0x08376958 through ldmia sp!,{ip,pc} at 0x08376990; the
+      separately linked next function begins at 0x08376994. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional bl at 0x082b2e88, 0x082ce9a0, 0x082ce9dc,
+      0x0836e4b0, and 0x08391b38; there are no predicated calls or direct
+      tail-B callers. This is SQLite 3.5's sqlite3ExprAnd: return the present
+      child when either operand is NULL, otherwise call the already ported
+      sqlite3Expr @ 0x08376808 with TK_AND (0x3d) and a NULL token. Host tests
+      cover all NULL combinations without dereferencing the surviving operand
+      and construction of a token-less conjunction node with both operands.
+      Deliberate deviations: none.
