@@ -86902,3 +86902,33 @@ functions:
       u32 link words preserve the target-width layout, and host tests cover
       root replacement, the transferred middle subtree, and both parent-child
       slots.
+  # --- guarded virtual +0x40 dispatch ---
+  - address: 0x083d6138
+    ghidra: FUN_083d6138
+    name: guarded_vtable_slot_40_dispatch
+    size: 32
+    sig: "u8 *guarded_vtable_slot_40_dispatch(GuardedVtableReceiver *receiver)"
+    module: cxx/guarded_vtable_slot_40_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_1_plus_0x00/r1: vtable
+      param_1_plus_0x04/r1: guard_word
+      vtable_plus_0x40/r2: virtual_method
+      DAT_083d6158/r0: fallback_pointer
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: seven ARM
+      instructions from ldr r1,[r0,#4] at 0x083d6138 through bx lr at
+      0x083d6154, followed by the fallback-pointer literal at 0x083d6158;
+      the next separately linked function begins at 0x083d615c. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly five
+      inbound direct calls, all unconditional plain bl at 0x080f03e0,
+      0x08147fec, 0x08148000, 0x08148354, and 0x08148364; there are no
+      predicated calls, direct tail-B callers, or aligned image words equal
+      to this entry. A zero receiver+4 guard returns the literal
+      0x08a0fc64; otherwise the function dispatches vtable word 16 (+0x40)
+      as method(receiver, 0). The guarded word and concrete virtual method
+      identity remain unrecovered and deliberately unnamed. Host builds
+      return a stable private fallback pointer instead of the firmware
+      absolute address; tests prove the guard avoids an invalid vtable and
+      that a nonzero guard dispatches only slot +0x40 with zero as argument.
