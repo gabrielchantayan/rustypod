@@ -358,6 +358,15 @@ pub struct Class6800Ops {
     pub parent_construct: FrameworkBaseParentConstruct,
 }
 
+/// Remaining unported tail call of
+/// [`framework_base_reset_current_task_targets`].
+#[derive(Clone, Copy)]
+pub struct FrameworkTaskResetOps {
+    /// `FUN_0812c534` consumes the literal pointer passed in r0. Its
+    /// identity and the pointed-to object are not established.
+    pub apply_entry_list: unsafe extern "C" fn(entries: *const u32),
+}
+
 /// The vtable literal `FUN_08125234` plants after it chains the shared
 /// framework root constructor (pool word @ 0x08125254). The outer
 /// `framework_base_construct` overwrites this immediately, so only
@@ -463,6 +472,24 @@ pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
 /// parent to prove return forwarding.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
+/// The literal loaded from 0x08110c78 before the tail branch to
+/// `FUN_0812c534`. It lands on an apparent ARM branch immediately before a
+/// separately decoded function, not on recognizable table data.
+pub const FRAMEWORK_TASK_RESET_ENTRY_LIST_ADDRESS: u32 = 0x083e_2da8;
+
+unsafe extern "C" fn unported_apply_framework_task_reset_entries(_entries: *const u32) {}
+
+/// Wired default for the unresolved `FUN_0812c534` tail call.
+pub const DEFAULT_FRAMEWORK_TASK_RESET_OPS: FrameworkTaskResetOps =
+    FrameworkTaskResetOps {
+        apply_entry_list: unported_apply_framework_task_reset_entries,
+    };
+
+/// Active seam for the unresolved tail call in
+/// [`framework_base_reset_current_task_targets`].
+pub static mut FRAMEWORK_TASK_RESET_OPS: FrameworkTaskResetOps =
+    DEFAULT_FRAMEWORK_TASK_RESET_OPS;
+
 /// Wired default for [`CLASS_6800_VTABLE`]'s +0x2c operation. The real
 /// virtual body is not ported, so this no-op makes that seam explicit
 /// without inventing class behavior.
@@ -528,6 +555,11 @@ pub static mut FRAMEWORK_BASE_VTABLE: Class6800Vtable = Class6800Vtable {
 #[inline(always)]
 unsafe fn class_6800_ops() -> Class6800Ops {
     core::ptr::read_volatile(core::ptr::addr_of!(CLASS_6800_OPS))
+}
+
+#[inline(always)]
+unsafe fn framework_task_reset_ops() -> FrameworkTaskResetOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(FRAMEWORK_TASK_RESET_OPS))
 }
 
 #[inline(always)]
@@ -745,6 +777,42 @@ pub unsafe extern "C" fn framework_base_set_current_task_target(this: *mut Class
     core::ptr::addr_of_mut!((*task_context).framework_base_initial_target).write_volatile(this.cast());
 }
 
+/// framework_base_reset_current_task_targets — original: `FUN_08110c54` @
+/// 0x08110c54 (36 bytes of code plus the literal-pool word @ 0x08110c78;
+/// **6 plain `bl` call sites, 0 predicated calls, and 0 direct `b` call
+/// sites**, binary-scanned from `work/firmware/osos.dec`).
+///
+/// Clears the current task framework's initial target (+0x24), then clears
+/// its framework target (+0x28) through the known NULL path of
+/// `FUN_081110a4`, and tail-calls `FUN_0812c534` with literal
+/// 0x083e2da8. The two clears deliberately fetch the task context
+/// independently, matching the two raw `bl 0x080cb828` calls; a task switch
+/// between them therefore writes different contexts.
+///
+/// The direct target 0x0812c534 and its pointed-to object are not ported.
+/// The literal points at an apparent ARM branch followed by independently
+/// decoded code, not recognizable entry-list data, so the port preserves it
+/// as an opaque pointer through [`FRAMEWORK_TASK_RESET_OPS`] rather than
+/// inventing a callee or layout. No NULL guards are added. The true extent is
+/// 40 bytes through the literal; the next separately linked function starts
+/// at 0x08110c7c.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_reset_current_task_targets() {
+    let initial_target_context = current_task_ctx_block();
+    core::ptr::addr_of_mut!((*initial_target_context).framework_base_initial_target)
+        .write_volatile(core::ptr::null_mut());
+
+    let framework_target_context = current_task_ctx_block();
+    core::ptr::addr_of_mut!((*framework_target_context).framework_task_target)
+        .write_volatile(core::ptr::null_mut());
+
+    (framework_task_reset_ops().apply_entry_list)(
+        FRAMEWORK_TASK_RESET_ENTRY_LIST_ADDRESS as usize as *const u32,
+    );
+}
+
+
 
 /// framework_task_target_base_construct — original: `FUN_08272474` @
 /// 0x08272474 (28 bytes of code plus the literal-pool word at 0x08272490;
@@ -941,6 +1009,11 @@ mod tests {
     static mut APPLY_COUNT: usize = 0;
     static mut RUNNING_TASK_NODE: *mut NameNode = ptr::null_mut();
     static mut RUNNING_TASK_NODE_CALLS: usize = 0;
+    static mut RUNNING_TASK_NODE_SEQUENCE: [*mut NameNode; 2] =
+        [ptr::null_mut(); 2];
+    static mut RUNNING_TASK_NODE_SEQUENCE_INDEX: usize = 0;
+    static mut RESET_ENTRY_LIST_CALLS: usize = 0;
+    static mut RESET_ENTRY_LIST: *const u32 = ptr::null();
 
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
@@ -970,6 +1043,18 @@ mod tests {
     unsafe extern "C" fn record_running_task_node() -> *mut NameNode {
         RUNNING_TASK_NODE_CALLS += 1;
         RUNNING_TASK_NODE
+    }
+
+    unsafe extern "C" fn record_running_task_node_sequence() -> *mut NameNode {
+        RUNNING_TASK_NODE_CALLS += 1;
+        let node = RUNNING_TASK_NODE_SEQUENCE[RUNNING_TASK_NODE_SEQUENCE_INDEX];
+        RUNNING_TASK_NODE_SEQUENCE_INDEX += 1;
+        node
+    }
+
+    unsafe extern "C" fn record_reset_entry_list(entries: *const u32) {
+        RESET_ENTRY_LIST_CALLS += 1;
+        RESET_ENTRY_LIST = entries;
     }
 
     unsafe extern "C" fn record_alloc(
@@ -1089,7 +1174,14 @@ mod tests {
         ITERATOR_ENTRIES = [ptr::null_mut(); 2];
         APPLY_ARGS = [(ptr::null_mut(), ptr::null_mut()); 2];
         APPLY_COUNT = 0;
+        RUNNING_TASK_NODE_SEQUENCE = [ptr::null_mut(); 2];
+        RUNNING_TASK_NODE_SEQUENCE_INDEX = 0;
+        RESET_ENTRY_LIST_CALLS = 0;
+        RESET_ENTRY_LIST = ptr::null();
         CLASS_6800_OPS = Class6800Ops { parent_construct: record_parent_construct };
+        FRAMEWORK_TASK_RESET_OPS = FrameworkTaskResetOps {
+            apply_entry_list: record_reset_entry_list,
+        };
         FRAMEWORK_BASE_INITIALIZE_OPS = FrameworkBaseInitializeOps {
             report_allocation_failure: unported_report_allocation_failure,
             implicit_link_context: record_implicit_context,
@@ -1118,6 +1210,7 @@ mod tests {
 
     unsafe fn restore() {
         CLASS_6800_OPS = DEFAULT_CLASS_6800_OPS;
+        FRAMEWORK_TASK_RESET_OPS = DEFAULT_FRAMEWORK_TASK_RESET_OPS;
         FRAMEWORK_BASE_INITIALIZE_OPS = DEFAULT_FRAMEWORK_BASE_INITIALIZE_OPS;
         crate::heap::veneers::HEAP_OPS = crate::heap::veneers::DEFAULT_HEAP_OPS;
         crate::heap::types::DEFAULT_HEAP = ptr::null_mut();
@@ -1250,6 +1343,61 @@ mod tests {
             );
 
             restore_task_hooks(saved_hooks);
+        }
+        drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn resetting_task_targets_uses_two_context_reads_and_forwards_literal() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut initial_context = TaskCtx::ZERO;
+        let mut framework_context = TaskCtx::ZERO;
+        let mut initial_node = NameNode::ZERO;
+        let mut framework_node = NameNode::ZERO;
+
+        unsafe {
+            let guard = install_mocks();
+            initial_context.framework_base_initial_target = 0x1111usize as *mut u8;
+            initial_context.framework_task_target = 0x2222usize as *mut u8;
+            framework_context.framework_base_initial_target = 0x3333usize as *mut u8;
+            framework_context.framework_task_target = 0x4444usize as *mut u8;
+            initial_node.ctx = ptr::addr_of_mut!(initial_context);
+            framework_node.ctx = ptr::addr_of_mut!(framework_context);
+            RUNNING_TASK_NODE_SEQUENCE = [
+                ptr::addr_of_mut!(initial_node),
+                ptr::addr_of_mut!(framework_node),
+            ];
+            RUNNING_TASK_NODE_SEQUENCE_INDEX = 0;
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node_sequence;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            framework_base_reset_current_task_targets();
+
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 2, "each raw context query runs");
+            assert!(initial_context.framework_base_initial_target.is_null());
+            assert_eq!(
+                initial_context.framework_task_target,
+                0x2222usize as *mut u8,
+                "the second clear must not reuse the first context"
+            );
+            assert_eq!(
+                framework_context.framework_base_initial_target,
+                0x3333usize as *mut u8,
+                "the first clear must not use the later context"
+            );
+            assert!(framework_context.framework_task_target.is_null());
+            assert_eq!(RESET_ENTRY_LIST_CALLS, 1);
+            assert_eq!(
+                RESET_ENTRY_LIST,
+                FRAMEWORK_TASK_RESET_ENTRY_LIST_ADDRESS as usize as *const u32
+            );
+
+            restore_task_hooks(saved_hooks);
+            restore();
+            drop(guard);
         }
         drop(task_hooks_guard);
     }
