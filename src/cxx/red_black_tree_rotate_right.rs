@@ -56,6 +56,17 @@
 //! predicated `bleq` at `0x083ba958`; no direct tail-`B` callers exist. This
 //! shared export faithfully preserves its no-guard right rotation because the
 //! predicated caller selects the left child before calling.
+//!
+//! `FUN_083b9614` at load address `0x083b9614` is a byte-identical 84-byte
+//! copy: 21 ARM words through `bx lr` at `0x083b9664`, followed by the next
+//! separately linked function at `0x083b9668`. A full raw-binary B/BL scan
+//! finds five inbound direct calls: unconditional `bl` at `0x083b9960`,
+//! `0x083b99d8`, `0x083b9ac4`, and `0x083b9e9c`, plus predicated `bleq` at
+//! `0x083b9eec`; there are no direct tail-`B` callers. The predicated caller
+//! selects the left child before calling, preserving the intentional lack of
+//! NULL guards. It shares the rotation algorithm above and deliberately adds
+//! no redundant dispatch seam; the shared host test covers its root and both
+//! parent-child-slot cases. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
