@@ -1069,6 +1069,27 @@ functions:
       Ghidra's C agrees exactly. The concrete layouts and ownership are not
       recovered, so the port deliberately retains the raw dereferences with
       no NULL or bounds checks.
+  # --- opaque FreeType service metadata status-flag accessor ---
+  - address: 0x08051b44
+    ghidra: FUN_08051b44
+    name: ft_service_metadata_flags_at_b20
+    size: 12
+    sig: "u32 ft_service_metadata_flags_at_b20(const void *object)"
+    module: ft/service_metadata
+    status: ported
+    vars:
+      param_1: object
+      r0_after_first_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb20]; bx lr`: return
+      the aligned u32 at metadata+0xb20 through the aligned object+0xf00
+      metadata pointer. Decoding every ARM B/BL word in osos.dec found six
+      direct BL call sites (0x08170b08, 0x08171080, 0x08173120, 0x08173138,
+      0x08173184, and 0x0817319c); all are unconditional. The callers inspect
+      bits 0 and 1 while caching UI state, but the flags' concrete meanings are
+      unrecovered. No NULL or bounds guard is added: direct dereferences match
+      retailOS exactly.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
