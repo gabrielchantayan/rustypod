@@ -31739,6 +31739,39 @@ functions:
       deliberate deviations: count zero and integer overflow preserve
       the original wrapped endpoint semantics.
 
+  - address: 0x08376c94
+    ghidra: FUN_08376c94
+    name: expr_code_expr_list
+    size: 156
+    sig: "int expr_code_expr_list(Parse *parse, ExprList *list, int target, int do_hard_copy)"
+    module: sqlite/expr_code_expr_list
+    status: ported
+    renames:
+      param_1: parse
+      param_2: list
+      param_3: target
+      param_4: do_hard_copy
+      iVar2: index
+      iVar4: count
+      puVar3: item
+    notes: >-
+      SQLite 3.5.9's sqlite3ExprCodeExprList (expr.c). Raw osos.dec words
+      from 0x08376c94 through pop {r4-r10,pc} at 0x08376d2c establish the
+      156-byte extent; the independent next function begins at 0x08376d30.
+      Binary-scanning every ARM B/BL-immediate word finds five direct inbound
+      calls, all unconditional bl: 0x082e885c, 0x08368908, 0x083771c0,
+      0x083836dc, and 0x083961a0; no predicated calls. Algorithm: NULL list
+      returns 0; otherwise walk nExpr 12-byte ExprList_item records from a at
+      +0x0c, code each pExpr into target+i via expr_code, and return nExpr.
+      When doHardCopy is nonzero, fetch Vdbe.aOp[nOp-1] through vdbe_get_op;
+      change opcode 8 to opcode 19 only if its signed p1 lies in the
+      half-open target range [target, target+nExpr). The upstream assertions
+      are compiled out in retailOS, including the pVdbe validity assertion;
+      no deliberate deviations. match.py (exit 1, diff expected): Rust has
+      the same NULL early return, signed index/count loop, expr_code call,
+      doHardCopy gate, nOp-1 Vdbe lookup, opcode/range checks, and count
+      return; LLVM uses explicit branches instead of ADS predication.
+
   - address: 0x08376bf4
     ghidra: FUN_08376bf4
     name: expr_code
