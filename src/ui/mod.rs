@@ -83,6 +83,7 @@ pub mod passkey_mask_indicators;
 pub mod mode_state;
 pub mod view_base;
 pub mod view_transition_mode;
+pub mod view_interaction_mode;
 pub mod range_view;
 pub mod container_view;
 pub mod set_geometry;
