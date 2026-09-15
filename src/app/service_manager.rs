@@ -11,6 +11,7 @@
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
+//! | 0x08194110 | [`service_handler_set`] | 16 | 5 direct |
 //! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
@@ -455,6 +456,41 @@ pub unsafe extern "C" fn service_handler_at(slot_table: *const u32, selector: i3
     core::ptr::read(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize))
 }
 
+/// service_handler_set — original: `FUN_08194110` @ 0x08194110 (16 bytes;
+/// 5 direct, unconditional `bl` call sites).
+///
+/// Replaces word zero of the selected primary handler record. The verified
+/// four-instruction ARM body is `cmp r1,#3; blge 0x08030f44; str
+/// r2,[r0,r1,lsl #5]; bx lr`: records are eight words apart, the comparison
+/// is signed, and the supplied handler word is stored without inspecting its
+/// old value. Selectors greater than or equal to three terminate through
+/// [`heap_panic`].
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly five direct
+/// callers — 0x081648a4, 0x0818f3e8, 0x0818fcf4, 0x08191108, and 0x08192b5c
+/// — all unconditional plain `BL`; no predicated direct calls or tail
+/// branches target this address. The next distinct function begins at
+/// 0x08194120 (`push {r4,lr}`), confirming Ghidra's four-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point at the first word of at least three aligned,
+/// writable eight-word records. Negative selectors intentionally retain
+/// retailOS's unchecked before-table addressing behavior and are not valid
+/// Rust memory accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_handler_set")]
+pub unsafe extern "C" fn service_handler_set(slot_table: *mut u32, selector: i32, handler: u32) {
+    if selector >= 3 {
+        heap_panic();
+    }
+    core::ptr::write(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize), handler);
+}
+
+
 /// service_manager_handler_group_for_slot — original: `FUN_081941b8` @
 /// 0x081941b8 (64 bytes; 5 direct `bl` call sites).
 ///
@@ -615,6 +651,47 @@ mod handler_at_tests {
                 "the ARM ldr reads the record word on every call"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod handler_set_tests {
+    use super::*;
+
+    #[test]
+    fn replaces_each_primary_handler_word_without_touching_neighbors() {
+        let mut table = [0xdead_beefu32; 24];
+
+        unsafe {
+            let base = table.as_mut_ptr();
+            service_handler_set(base, 0, 0x1111_0000);
+            service_handler_set(base, 1, 0x2222_0000);
+            service_handler_set(base, 2, 0x3333_0000);
+            service_handler_set(base, 1, 0x4444_0000);
+        }
+
+        assert_eq!(table[0], 0x1111_0000);
+        assert_eq!(table[8], 0x4444_0000, "the ARM str replaces, not ORs");
+        assert_eq!(table[16], 0x3333_0000);
+        assert!(
+            table.iter().enumerate().all(|(i, &word)| {
+                matches!(i, 0 | 8 | 16) || word == 0xdead_beef
+            }),
+            "only word zero of each eight-word record is written"
+        );
+    }
+
+    #[test]
+    fn signed_negative_selector_remains_unchecked() {
+        // `blge` is a signed comparison: -1 reaches the preceding record.
+        let mut table = [0u32; 32];
+
+        unsafe {
+            let base = table.as_mut_ptr().add(8);
+            service_handler_set(base, -1, 0xface_cafe);
+        }
+
+        assert_eq!(table[0], 0xface_cafe);
     }
 }
 

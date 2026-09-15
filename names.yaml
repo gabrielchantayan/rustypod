@@ -69902,6 +69902,34 @@ functions:
       with no predicated forms or tail branches. Deliberate deviations: none.
 
 
+  - address: 0x08194110
+    ghidra: FUN_08194110
+    name: service_handler_set
+    size: 16
+    sig: "void service_handler_set(u32 *slot_table, i32 selector, u32 handler)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: selector
+      param_3/r2: handler
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x08194110..0x08194120: `cmp r1,#3; blge
+      0x08030f44; str r2,[r0,r1,lsl #5]; bx lr`; the following
+      `push {r4,lr}` at 0x08194120 begins a separately linked function.
+      It replaces word zero in one of three 8-word primary handler records.
+      The signed `blge` admits negative selectors, which address unchecked
+      before the table exactly as retailOS does; selectors >=3 terminate
+      through ported non-returning heap_panic. Decoding every ARM B/BL word
+      in osos.dec found exactly five inbound direct call sites — 0x081648a4,
+      0x0818f3e8, 0x0818fcf4, 0x08191108, and 0x08192b5c — all
+      unconditional plain BL, with no predicated forms or tail branches.
+      The handler's concrete type is not established; its role and storage
+      behavior are verified. Deliberate deviations: none. Host coverage
+      proves all valid record offsets, replacement rather than accumulation,
+      neighbor preservation, and the signed negative-selector path.
+
   - address: 0x081941b8
     ghidra: FUN_081941b8
     name: service_manager_handler_group_for_slot
