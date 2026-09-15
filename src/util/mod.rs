@@ -14,6 +14,7 @@ pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
 pub mod checked_byte_block;
 pub mod checked_runtime_scale;
+pub mod collection_item_at;
 pub mod clear_optional_byte;
 pub mod clear_u16_three_word_record;
 pub mod bswap;
