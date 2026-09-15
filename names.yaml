@@ -51257,6 +51257,34 @@ functions:
       original is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
 
+  - address: 0x082620f0
+    ghidra: FUN_082620f0
+    name: resource_handle_execute
+    size: 32
+    sig: "ResourceHandle *resource_handle_execute(ResourceHandle *result, u32 operation, u32 subject, u32 context)"
+    module: cxx/resource_handle_execute
+    status: ported
+    renames:
+      param_1: result
+      param_2: operation
+      param_3: subject
+      param_4: context
+      FUN_08262070: unported resource-handle execution worker
+    notes: >-
+      Raw extent is exactly 32 bytes (0x082620f0..0x08262110): push
+      {r4,lr}; preserve result; clear its u32 operation-status word at +4;
+      call 0x08262070 with all four incoming ARM argument registers unchanged;
+      restore result to r0; pop. The next distinct function starts at
+      0x08262110 with push {r4,lr}; no literal pool follows the body.
+      Decoding every ARM B/BL word in osos.dec finds five direct call sites,
+      all unconditional plain bl at 0x081e6ba0, 0x082628a8, 0x0839e918,
+      0x0839ea84, and 0x0839f460; no predicated BL callers. Ghidra's
+      0x08262070 prototype confirms that the worker may replace the cleared
+      status. It is absent from names.yaml, so target builds call that fixed
+      retailOS address while host tests use a volatile recording seam to prove
+      status clearing precedes the call, four-register forwarding, worker
+      status replacement, and result-pointer identity.
+
   - address: 0x08262110
     ghidra: FUN_08262110
     name: resource_handle_initialize_for_current_thread
