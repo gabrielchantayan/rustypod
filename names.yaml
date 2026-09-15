@@ -14879,6 +14879,42 @@ functions:
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
 
+  - address: 0x08177d2c
+    ghidra: FUN_08177d2c
+    name: scoped_string_id_record_set_dispatch
+    size: 220
+    sig: "u32 scoped_string_id_record_set_dispatch(const void *callback_handle)"
+    module: app/scoped_string_id_record_set_dispatch
+    status: ported
+    renames:
+      param_1/r0: callback_handle
+      r4: callback_target
+      r5: snapshot
+      r6: source
+      FUN_0817ceb4: media_player_get
+      FUN_081979dc: scoped_string_id_record_set_construct
+      FUN_08197a30: scoped_string_id_record_set_destroy
+      FUN_08258c9c: string_id_record_assign
+      FUN_083d6190: handle_deref_or_null_alias_6190
+      "callback_target->vtable+0x1f8": populate_snapshot
+      "callback_object->vtable+0x00": snapshot_callback
+    notes: >-
+      Raw osos.dec establishes the 220-byte extent from 0x08177d2c through
+      the pop-and-return at 0x08177e04; 0x08177e08 begins the next separately
+      linked function. Decoding every word in the extent finds twelve plain,
+      unconditional direct bl instructions and zero predicated bl forms; its
+      two indirect calls are blx r2 (the callback target's vtable +0x1f8) and
+      blx r3 (the returned object's slot zero). Ghidra's five direct callers
+      construct or forward a callback handle. The function constructs source
+      and snapshot ScopedStringIdRecordSets, copies the media player's
+      +0x9e8..+0x9f4 scalar scope and five StringIdRecords from +0x9f8 through
+      +0xa38 plus the trailing +0xa48 word into source, asks the handle-owned
+      object to populate snapshot, and calls the returned callback with
+      (source, snapshot, 1). Both temporaries are destroyed in reverse order.
+      The virtual identities are unestablished, so the Rust port names only
+      their proven slots; host dispatch is deliberately replaceable because
+      host pointers cannot inhabit retailOS's 32-bit vtable words.
+
   - address: 0x0817cab0
     ghidra: FUN_0817cab0
     name: media_player_post_kind
