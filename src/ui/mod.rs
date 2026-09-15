@@ -3,6 +3,7 @@
 pub mod block_map;
 pub mod byte_store;
 pub mod checked_byte_block_forwarder;
+pub mod clone_slot_source;
 pub mod coordinate_origin;
 pub mod display_pending_nibbles;
 pub mod color;
