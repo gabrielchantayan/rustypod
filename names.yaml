@@ -95138,3 +95138,35 @@ functions:
       and calls the literal +0x58 slot. match.py confirms the two
       construct/copy/release groups followed by two vtable calls; LLVM
       may retain a different frame and call layout.
+
+  - address: 0x0810025c
+    ghidra: FUN_0810025c
+    name: object_state_initialize
+    size: 108
+    sig: "u32 object_state_initialize(void *object)"
+    module: app/object_state_initialize
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x28": state
+      "object+0x2c": result
+      "object+0x90": initialized
+      DAT_081002c8: STATE_INIT_TABLE
+      FUN_08048000: gateway_request_blocking
+      FUN_08100968: retained retailOS state dispatcher
+      FUN_08047f40: gateway_request_timed
+    notes: >-
+      Raw ARM establishes the true 108-byte extent: 104 bytes of code from
+      0x0810025c through 0x081002c4 and the literal-pool word 0x089ca69c at
+      0x081002c8; `push {r4,lr}` at 0x081002cc starts the next separately
+      linked function. Whole-image raw-B/BL decoding finds five direct inbound
+      calls, all unconditional BL at 0x081004f4, 0x0810052c, 0x081011b0,
+      0x08101894, and 0x0811239c; no predicated BL forms enter it. If byte
+      object+0x90 is zero, it calls gateway_request_blocking(0x26, 1), calls
+      unported FUN_08100968 with (object, object+0x28, selector 4,
+      *(u32 *)0x089ca6a4) then selector 0 and *(u32 *)0x089ca6a0, stores one
+      at +0x90, and calls gateway_request_timed(0x26, 1000). It always
+      returns object+0x2c. Deliberate deviations: the unported callee has no
+      established identity, so the device seam retains its verified address
+      rather than assigning one; host gateway and dispatcher seams record
+      observable ordering without attempting to execute retailOS.
