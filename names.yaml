@@ -95517,3 +95517,35 @@ functions:
       rather than being checked. Rust calls the existing operator_new seam
       instead of encoding the retailOS direct branch; host tests cover values
       0x00, 0x01, and 0xff, allocation size/tag, and returned storage.
+
+  # --- CFF SID string resolution ---
+  - address: 0x080d3f74
+    ghidra: FUN_080d3f74
+    name: cff_sid_to_string
+    size: 172
+    sig: "u8 *cff_sid_to_string(void *source, u32 sid, const void *ps_names, void *custom_arg3)"
+    module: ft/cff_sid
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: sid
+      param_3/r2: ps_names
+      param_4/r3: custom_arg3
+      FUN_080a8294: custom_sid_to_string
+      FUN_082cfaa4: ft_mem_alloc
+      FUN_08392478: strlen
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec establishes the exact 172-byte extent
+      0x080d3f74..0x080d4020; 0x080d4020 begins the next function. Full
+      osos.asm branch decoding finds five inbound plain unconditional bl
+      calls (0x08082868, 0x08082890, 0x08082a38, 0x08082a90, 0x080a80e4)
+      and zero predicated inbound bl calls. The body has three unconditional
+      direct bl calls (strlen, ft_mem_alloc, __rt_memcpy), no predicated bl,
+      one virtual blx through ps_names+0x14, and a conditional tail b to
+      unported 0x080a8294. SID 0xffff returns NULL; SID >= 391 tail-calls
+      that helper with sid-391, preserving r2 and the unrecovered r3 ABI
+      argument. Standard SIDs call the PSNames service, then allocate and
+      copy an owned NUL-terminated result using source->library->memory
+      (+0x1c). Target builds retain the exact unported fixed-address call;
+      host tests use a replaceable seam solely to prove the forwarding.
