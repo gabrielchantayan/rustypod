@@ -17,6 +17,34 @@
 base: 0x08000000
 
 functions:
+  # --- RGBA8 cursor to RGB555A1 packer ---
+  - address: 0x0825eca8
+    ghidra: FUN_0825eca8
+    name: rgba8_cursor_write_rgb555a1
+    size: 28
+    sig: "void rgba8_cursor_write_rgb555a1(u32 unused, u16 **destination_cursor, const u8 *components)"
+    module: cxx/rgba8_cursor_write_rgb555a1
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: destination_cursor
+      param_3/r2: components
+      r4: destination
+      r3: next_destination
+      r0: packed_rgb555a1
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: seven ARM words from
+      push {r4,lr} at 0x0825eca8 through pop {r4,pc} at 0x0825ecc4; the
+      separate packed-pixel reader begins at 0x0825ecc8, with no literal pool.
+      The function advances destination_cursor by one aligned halfword before
+      calling the separately ported rgba8_to_rgb555a1 at 0x082a00cc, then
+      stores that result's low halfword at the original cursor location.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional bl at 0x0825e958,
+      0x0825f278, 0x0825fc38, 0x082601a4, and 0x083b4ec0; there are no
+      predicated bl forms or direct tail-B callers. Host tests cover cursor
+      advancement, adjacent-halfword preservation, component-bit truncation,
+      and an offset RGBA record. match.py structural review was completed.
   # --- big-endian word bit-index conversion ---
   - address: 0x0836b698
     ghidra: FUN_0836b698
