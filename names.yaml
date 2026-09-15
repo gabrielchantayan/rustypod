@@ -91717,3 +91717,32 @@ functions:
       injectable dispatch seam provides host ABI tests; firmware performs the
       verified dereferences, slot load, and indirect call. match.py reports the
       expected seam/frame structural diff (exit 1).
+  # --- MMIO single-bit update ---
+  - address: 0x0827281c
+    ghidra: FUN_0827281c
+    name: mmio_bit_write
+    size: 36
+    sig: "void mmio_bit_write(u32 **register, u32 bit, u32 value)"
+    module: drivers/mmio_bit_write
+    status: ported
+    renames:
+      param_1/r0: register
+      param_2/r1: bit
+      param_3/r2: value
+      r0_deref: target_register
+      r3: one
+      r1: bit_mask_then_updated_bits
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      ldr r0,[r0] at 0x0827281c through bx lr at 0x0827283c; the separately
+      linked next function begins with ldr r3,[r0] at 0x08272840. Decoding
+      every aligned ARM B/BL-immediate word finds exactly five inbound direct
+      calls: unconditional bl at 0x08092414, 0x08092458, 0x080924a0,
+      0x080924b4, and 0x080924e4; there are no predicated bl or tail-b callers.
+      The body loads the target register address through the r0 pointer, then
+      clears its selected bit when r2 is zero and sets it for every nonzero r2.
+      ARM uses the low byte of r1 as its shift count and yields a zero mask for
+      32..255; only bits congruent to 0 modulo 256 can select bit zero.
+      Volatile reads and writes deliberately preserve the target's MMIO access
+      semantics even though the retail instructions are ordinary ldr/str. Host
+      tests cover clear, nonzero set, and low-byte shift behavior.
