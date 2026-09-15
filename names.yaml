@@ -91610,3 +91610,21 @@ functions:
       builds retain the getter's verified raw address and vtable dispatch;
       host tests use a typed seam because the getter has no verified semantic
       identity. Tests cover empty and three-listener order/output cases.
+
+  # --- Escaped path-string record assignment ---
+  - address: 0x0826bc30
+    ghidra: FUN_0826bc30
+    name: path_escape_record_assign
+    size: 192
+    sig: "void path_escape_record_assign(EscapedPathStringRecord *record, const StringObject *source)"
+    module: cxx/path_escape_record
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      param_2/r1/r5: source
+      "record+0x04": normalized
+      "record+0x0c": source_copy
+      FUN_0826bd10: path_escape_remove_markers
+      FUN_08276db4: string_object_text_normalize
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent, from stmdb sp!,{r4,r5,lr} at 0x0826bc30 through ldmia sp!,{r4,r5,pc} at 0x0826bcec; the separately linked next function starts at 0x0826bcf0. Decoding every aligned ARM B/BL-immediate word finds five inbound calls, all unconditional plain bl at 0x08178ab0, 0x08178bb4, 0x08178d30, 0x08178df8, and 0x0828bcf4; no predicated BL reaches it. The record retains source's NULL-safe C string at +0x0c, then constructs a temporary with 0x0826bd10 removing # only before #, slash, or backslash, and conditionally normalizes it through 0x08276db4. It assigns +0x04 only when the resulting UTF-8 comparison differs from the original C string, then destroys both temporaries. The two unported callees are explicit injectable boundaries: device builds must wire their retail addresses; host tests use the boundary contract. The repr(C) record uses typed fields rather than host byte offsets so target StringObject word positions remain correct.
