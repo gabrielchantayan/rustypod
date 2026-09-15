@@ -235,6 +235,7 @@ pub mod refcounted_value;
 pub mod refcounted_owner_callback_dispatch;
 pub mod resource;
 pub mod resource_provider_contains_view;
+pub mod resource_handle_pair_reset_notify;
 pub mod root_context_f9c_bound;
 pub mod resource_chain;
 pub mod resource_reference_value;
