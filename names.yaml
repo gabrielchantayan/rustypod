@@ -63074,6 +63074,33 @@ functions:
       non-NULL context, ignored nonzero status, absence of local
       stores, and NULL forwarding without a wrapper guard.
 
+  - address: 0x08262a84
+    ghidra: FUN_08262a84
+    name: destroy_opaque_context_and_mutex
+    size: 24
+    sig: "void *destroy_opaque_context_and_mutex(void *this)"
+    module: cxx/opaque_context_mutex_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_08262944: destroy_opaque_context
+      FUN_08261e54: cxx_mutex_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte instruction extent
+      0x08262a84..0x08262a9b: push {r4,lr}; add r0,r0,#0x1c; bl
+      0x08262944; pop {r4,lr}; sub r0,r0,#0x1c; b 0x08261e54. The
+      separately linked prologue at 0x08262a9c pins the end and proves
+      there is no literal pool. Whole-image decoding finds five direct
+      unconditional bl callers at 0x081533b4, 0x081d6a8c, 0x081d7e30,
+      0x081d81e0, and 0x081e6c1c; no predicated calls or direct tail
+      branches target it. It destroys the opaque context at this+0x1c,
+      restores this by subtracting 0x1c from the callee result, and
+      tail-calls cxx_mutex_destroy. The mutex wrapper discards native
+      pthread status and returns this. Host tests cover pointer adjustment,
+      order, unchanged storage, and NULL arithmetic. The Rust port reuses
+      the existing callee ports and seams while their ultimate retail
+      targets remain unhooked.
+
 
 
   - address: 0x08262958
