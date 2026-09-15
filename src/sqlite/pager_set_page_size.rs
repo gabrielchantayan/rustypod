@@ -12,15 +12,15 @@
 //! old temporary space, then releases the lease. Allocation failure returns
 //! `SQLITE_NOMEM` (7), while all other paths return `SQLITE_OK` (0).
 //!
-//! Deliberate deviations: `pager_reset` @ `0x082de404` and
-//! `pager_set_sector_size` @ `0x08369040` remain retailOS-owned. Target builds
-//! call those exact load addresses; host builds use a private ops table solely
-//! to observe their ordering. The already ported activity and tracked-heap
-//! helpers are called directly.
+//! Deliberate deviation: `pager_set_sector_size` @ `0x08369040` remains
+//! retailOS-owned. Target builds call that exact load address; host builds use
+//! a private ops table solely to observe its ordering. The already ported
+//! activity, pager-reset, and tracked-heap helpers are called directly.
 
 use crate::cxx::context_activity::context_activity_enter;
 use crate::heap::tracked::tracked_free;
 use super::mem::sqlite3_malloc;
+use super::pager_reset::pager_reset;
 
 /// Target-layout byte offset of `Pager.pageSize`.
 const PAGE_SIZE: usize = 0x40;
@@ -40,13 +40,6 @@ type PagerHelper = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn pager_reset(pager: *mut u8) {
-    let reset: PagerHelper = core::mem::transmute(0x082d_e404usize);
-    reset(pager);
-}
-
-#[cfg(target_os = "none")]
-#[inline(always)]
 unsafe fn pager_set_sector_size(pager: *mut u8) {
     let set_sector_size: PagerHelper = core::mem::transmute(0x0836_9040usize);
     set_sector_size(pager);
@@ -55,7 +48,6 @@ unsafe fn pager_set_sector_size(pager: *mut u8) {
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 struct PagerSetPageSizeHostOps {
-    reset: PagerHelper,
     set_sector_size: PagerHelper,
 }
 
@@ -64,20 +56,12 @@ unsafe extern "C" fn unavailable_pager_helper(_pager: *mut u8) {}
 
 #[cfg(not(target_os = "none"))]
 const DEFAULT_PAGER_SET_PAGE_SIZE_HOST_OPS: PagerSetPageSizeHostOps = PagerSetPageSizeHostOps {
-    reset: unavailable_pager_helper,
     set_sector_size: unavailable_pager_helper,
 };
 
 #[cfg(not(target_os = "none"))]
 static mut PAGER_SET_PAGE_SIZE_HOST_OPS: PagerSetPageSizeHostOps =
     DEFAULT_PAGER_SET_PAGE_SIZE_HOST_OPS;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn pager_reset(pager: *mut u8) {
-    let ops = core::ptr::read_volatile(core::ptr::addr_of!(PAGER_SET_PAGE_SIZE_HOST_OPS));
-    (ops.reset)(pager);
-}
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
@@ -98,8 +82,8 @@ unsafe fn pager_set_sector_size(pager: *mut u8) {
 /// # Safety
 /// `pager` must name a writable target-layout Pager through `+0xe4`, and
 /// `page_size` must be a writable aligned u16. If replacement is permitted,
-/// both retail helper functions must accept `pager`, and the old `pTmpSpace`
-/// word must be NULL or a tracked allocation payload.
+/// pager reset and the retail sector-size helper must accept `pager`, and the
+/// old `pTmpSpace` word must be NULL or a tracked allocation payload.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.pager_set_page_size")]
 #[inline(never)]
@@ -144,15 +128,9 @@ mod tests {
     use crate::sqlite::mem;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
 
-    static mut RESET_PAGE_SIZE: u32 = 0;
-    static mut SECTOR_PAGE_SIZE: u32 = 0;
-    static mut RESET_COUNT: u32 = 0;
-    static mut SECTOR_COUNT: u32 = 0;
 
-    unsafe extern "C" fn recording_reset(pager: *mut u8) {
-        RESET_COUNT = RESET_COUNT.wrapping_add(1);
-        RESET_PAGE_SIZE = pager.add(PAGE_SIZE).cast::<u32>().read();
-    }
+    static mut SECTOR_PAGE_SIZE: u32 = 0;
+    static mut SECTOR_COUNT: u32 = 0;
 
     unsafe extern "C" fn recording_set_sector_size(pager: *mut u8) {
         SECTOR_COUNT = SECTOR_COUNT.wrapping_add(1);
@@ -179,14 +157,9 @@ mod tests {
             set_alloc_ret(core::ptr::null_mut());
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(PAGER_SET_PAGE_SIZE_HOST_OPS),
-                PagerSetPageSizeHostOps {
-                    reset: recording_reset,
-                    set_sector_size: recording_set_sector_size,
-                },
+                PagerSetPageSizeHostOps { set_sector_size: recording_set_sector_size },
             );
-            RESET_PAGE_SIZE = 0;
             SECTOR_PAGE_SIZE = 0;
-            RESET_COUNT = 0;
             SECTOR_COUNT = 0;
 
             let pager = base.cast::<u8>();
@@ -214,7 +187,6 @@ mod tests {
             assert_eq!(pager_set_page_size(pager, &mut requested), SQLITE_NOMEM);
             assert_eq!(requested, 512, "OOM reports the previous page size");
             assert_eq!(alloc_log().0, 2, "sqlite3_malloc retries once after raw OOM");
-            assert_eq!(RESET_COUNT, 0, "OOM occurs before the reset");
             assert_eq!(SECTOR_COUNT, 0, "OOM does not update sector geometry");
             requested = 1024;
 
@@ -222,8 +194,6 @@ mod tests {
             assert_eq!(pager_set_page_size(pager, &mut requested), SQLITE_OK);
             assert_eq!(requested, 1024);
             assert_eq!(alloc_log(), (3, 1024 + 44, 57));
-            assert_eq!(RESET_COUNT, 1);
-            assert_eq!(RESET_PAGE_SIZE, 512, "reset sees the old page size");
             assert_eq!(SECTOR_COUNT, 1);
             assert_eq!(SECTOR_PAGE_SIZE, 1024, "sector setup sees the new page size");
             assert_eq!(pager.add(PAGE_SIZE).cast::<u32>().read(), 1024);
@@ -235,7 +205,6 @@ mod tests {
 
             requested = 1024;
             assert_eq!(pager_set_page_size(pager, &mut requested), SQLITE_OK);
-            assert_eq!(RESET_COUNT, 1, "an unchanged size does not reset");
             assert_eq!(SECTOR_COUNT, 1);
 
             core::ptr::write_volatile(
