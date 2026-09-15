@@ -94918,3 +94918,26 @@ functions:
       forwarding, and the constant third argument. Deliberate deviation: host
       tests use a dispatch seam because host function pointers exceed a target
       vtable slot's four-byte width.
+  # --- comma-delimited parser-input guard ---
+  - address: 0x08116d8c
+    ghidra: FUN_08116d8c
+    name: comma_input_guard
+    size: 32
+    sig: "u32 comma_input_guard(const u8 *input)"
+    module: ui/comma_input_guard
+    status: ported
+    renames:
+      param_1/r0: input
+      "*input+0x8c9": delimiter_byte
+      FUN_081b9134: unrecovered_comma_signal
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: eight ARM words from
+      push {lr} at 0x08116d8c through pop {pc} at 0x08116da8; the separately
+      linked next function begins with push {r4,lr} at 0x08116dac. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly five
+      inbound direct calls, all unconditional bl at 0x0807fcb8, 0x080946f4,
+      0x08094da8, 0x0809542c, and 0x0811524c; there are no predicated bl
+      calls or direct tail-B callers. It reads input+0x8c9, returns zero unless
+      that byte is ',', and otherwise calls unrecovered FUN_081b9134 at
+      0x081b9134 before returning one. The target call is retained as a raw
+      verified address; host tests substitute a callback only to observe it.

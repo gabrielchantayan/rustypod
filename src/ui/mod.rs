@@ -99,4 +99,5 @@ pub mod texture_upload;
 pub mod texture_activate;
 pub mod element_slot_reset;
 pub mod clear_pending_notify;
+pub mod comma_input_guard;
 pub mod element_refresh;
