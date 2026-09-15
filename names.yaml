@@ -65365,6 +65365,33 @@ functions:
       seam checks, an fp prologue, an equivalent alternate mod-16 sequence
       for the tail, and the store reorder above.
 
+  - address: 0x0825b650
+    ghidra: FUN_0825b650
+    name: time_source_get
+    size: 48
+    sig: "void *time_source_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0825b67c: TIME_SOURCE_CACHE_POOL (trailing pool word holding
+        0x08a09f5c; the cache word is TIME_SOURCE_INSTANCE in host builds)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0825b7b4: time_source_ctor (unported SINGLETON_CTORS.time_source seam)
+    notes: >-
+      Lazy getter over cache word 0x08a09f5c: on NULL, allocate 0x40 bytes
+      with operator_new, construct with FUN_0825b7b4, store the constructor
+      return, reload, and return the cache. Raw osos.dec establishes 44 code
+      bytes at 0x0825b650..0x0825b67b plus the trailing pool word
+      0x08a09f5c at 0x0825b67c: true extent 48 bytes through 0x0825b67f;
+      0x0825b680 is the next real function. Decoding every aligned ARM B/BL
+      immediate finds five unconditional plain BL callers (0x08196a70,
+      0x081fe7f0, 0x081fe8a4, 0x081fec08, 0x081fed18) and no predicated BL
+      forms. Callers retrieve time fields through virtual slots +0x24, +0x2c,
+      and +0x34; no class name survives, so time_source is deliberately
+      role-only. The unported constructor uses the zeroing dispatch default
+      and the host cache replaces the firmware word, so this getter is not
+      hook-ready until FUN_0825b7b4 is ported.
+
   - address: 0x0825b680
     ghidra: FUN_0825b680
     name: lazy_singleton_0x40
