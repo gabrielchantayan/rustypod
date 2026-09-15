@@ -46,6 +46,7 @@ pub mod four_word_clear;
 pub mod tagged_value;
 pub mod tagged_pointer_init;
 pub mod tagged_record;
+pub mod tagged_record_from_context_key;
 pub mod draw_state;
 pub mod draw_state_font;
 pub mod draw_state_text_width;
