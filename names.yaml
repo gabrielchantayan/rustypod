@@ -90318,3 +90318,35 @@ functions:
       match.py structural review confirmed the expected LLVM stack/seam
       differences. Deliberate deviations: unported calls are volatile host
       seams while firmware builds dispatch to their retailOS addresses.
+
+  # --- SQLite single SQL statement executor ---
+  - address: 0x082ccf38
+    ghidra: FUN_082ccf38
+    name: sqlite3_execute_sql
+    size: 92
+    sig: "i32 sqlite3_execute_sql(sqlite3 *db, const char *query)"
+    module: sqlite/execute_sql
+    status: ported
+    renames:
+      param_1/r0/r4: db
+      param_2/r1: query
+      local_c/sp_plus_4: statement
+      FUN_08390dcc: sqlite3_prepare_v2
+      FUN_08391470: sqlite3_step
+      FUN_083906d4: sqlite3_finalize
+      FUN_0839020c: sqlite3_errcode
+    notes: >-
+      Raw osos.dec verifies the 92-byte extent 0x082ccf38..0x082ccf94:
+      push {r2,r3,r4,lr}; prepare query with nByte=-1, a stack statement
+      output, and NULL tail; on preparation failure return sqlite3_errcode(db);
+      otherwise repeatedly sqlite3_step(statement) while it returns SQLITE_ROW
+      (100), then finalize the statement and return that result. The next real
+      function begins with push {r0-r2,r4-r11,lr} at 0x082ccf94. Decoding the
+      target and all callers establishes exactly five inbound direct BL calls,
+      all unconditional at 0x082ccf00, 0x083828f4, 0x08382988, 0x083829b8,
+      and 0x08382a44; there are no predicated BL callers. sqlite3_prepare_v2
+      and sqlite3_errcode remain volatile seams; sqlite3_step and
+      sqlite3_finalize call their existing Rust ports directly. Host tests
+      cover preparation-error substitution and the NULL prepared-statement
+      terminal/finalization path. Deliberate deviations: those two unported
+      callees use seams on host and retailOS addresses on firmware.

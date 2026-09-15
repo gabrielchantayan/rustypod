@@ -10,9 +10,9 @@
 //! finalizer's result, while an inner-execution failure is preserved across
 //! finalization. A prepare failure returns immediately without finalizing.
 //!
-//! Deliberate deviation: the three still-unported direct callees are exposed
-//! as volatile seams. `sqlite3_step` and `sqlite3_finalize` are existing Rust
-//! ports and are called directly.
+//! Deliberate deviation: the two still-unported direct callees are exposed
+//! as volatile seams. `sqlite3_step`, `sqlite3_finalize`, and the nested SQL
+//! executor are existing Rust ports and are called directly.
 
 use core::ptr::null_mut;
 
@@ -51,8 +51,7 @@ unsafe extern "C" fn retail_column_text(statement: *mut u8, column: i32) -> *con
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_execute_sql(db: *mut u8, query: *const u8) -> i32 {
-    let execute: ExecuteSqlFn = core::mem::transmute(0x082c_cf38usize);
-    execute(db, query)
+    crate::sqlite::execute_sql::sqlite3_execute_sql(db, query)
 }
 
 #[cfg(not(target_os = "none"))]
