@@ -19106,6 +19106,32 @@ functions:
       the same value into the caller's word at +0x0c. Host builds model the
       firmware word with OBJECT_SEQUENCE_ID.
 
+  - address: 0x0828a978
+    ghidra: FUN_0828a978
+    name: notes_dispatcher_status_strings
+    size: 72
+    sig: "void notes_dispatcher_status_strings(NotesDispatcher *dispatcher)"
+    module: app/notes_dispatcher_status_strings
+    status: ported
+    renames:
+      param_1/r0: dispatcher
+      DAT_0828a9c0: status_string_id
+      DAT_0828a9c4: nonzero_mode_argument
+      DAT_0828a9c8: zero_mode_argument
+      DAT_0828a9cc: secondary_argument
+      DAT_0828a9d0: secondary_string_id
+    notes: >-
+      Raw osos.dec establishes 72 code bytes from 0x0828a978 through
+      0x0828a9bc, followed by five literal words through 0x0828a9d0; the next
+      real function begins at 0x0828a9d4. The body reads dispatcher word
+      +0x4e8, selects 0x4190 when zero and 0x4195 otherwise, calls vtable
+      slot +0x58 with the `StSt` resource ID, then tail-dispatches that slot
+      with `Str ` and 0x41a1. It has no plain direct bl or predicated bl
+      instructions: one unconditional indirect blx and one bx tail dispatch.
+      Ghidra's five bl references are inbound call sites. The resource text
+      and virtual-slot identity remain unestablished, so the port preserves
+      their verified IDs and models only the virtual status-string dispatch.
+
   - address: 0x0828ae68
     ghidra: FUN_0828ae68
     name: instance_of_class_4180
