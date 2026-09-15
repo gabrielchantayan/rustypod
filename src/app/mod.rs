@@ -122,6 +122,7 @@ pub mod managed_entry_selector;
 pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod opaque_record_source_get;
+pub mod opaque_record_source_entry_count;
 pub mod lazy_handle_manager;
 pub mod lazy_static_object;
 pub mod matched_entry;
