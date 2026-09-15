@@ -91803,3 +91803,35 @@ functions:
       Four other embedded StringObjects are deliberately untouched because the
       verified ARM body never addresses them. Target vector pointers remain u32;
       host tests use the repr(C) fields rather than target byte offsets.
+
+  - address: 0x0826756c
+    ghidra: FUN_0826756c
+    name: temporary_buffer_replace
+    size: 156
+    sig: "void temporary_buffer_replace(u32 out[2], void *old_buffer, u32 requested_size)"
+    module: runtime/temporary_buffer
+    vars:
+      param_1: out
+      param_2: old_buffer
+      param_3: requested_size
+      DAT_08267610: temporary_buffer_depth
+      DAT_08267614: temporary_buffer
+      DAT_08267618: temporary_buffer_guard
+      DAT_0826761c: fixed_temporary_buffer
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 156-byte instruction extent
+      0x0826756c..0x08267607; the four following literals are data and
+      0x08267618 begins the successor. Five inbound BL-form call sites
+      were checked as four plain BL and one predicated BL. The body makes
+      four direct calls: cxa_guard_acquire @ 0x082ab31c, predicated
+      cxa_guard_release @ 0x082ab338, operator_delete @ 0x082aad24, and
+      operator_new @ 0x082aadd4. It initializes the fixed 4 KiB buffer
+      0x08b31950 behind the three globals at 0x08a0fc34..0x08a0fc3c,
+      releases a non-fixed prior buffer, then returns either {fixed, 0}
+      for an outer <= 0x1000 request or {operator_new(size), size};
+      allocation deliberately performs the second depth decrement found
+      in ARM. Host builds model the fixed globals. match.py reports the
+      same guard, delete, threshold, allocation, counter, and pair-store
+      structure; the volatile release seam necessarily emits BLX rather
+      than the stock predicated direct BL.
