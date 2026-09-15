@@ -901,6 +901,55 @@ const CONTEXT_MODE_FLAG_OFFSET: usize = 0x94;
 pub unsafe extern "C" fn context_mode_flag() -> u32 {
     (shared_context().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
 }
+ 
+/// The lazily initialized record-layout size at retailOS global
+/// `0x089c_a7f4` (`ldr r0,[r4,#4]` after loading literal `0x089ca7f0`).
+#[cfg(target_os = "none")]
+const RECORD_LAYOUT_SIZE_SLOT: *mut u32 = 0x089c_a7f4usize as *mut u32;
+
+/// Host model of the record-layout size slot.
+#[cfg(not(target_os = "none"))]
+static mut RECORD_LAYOUT_SIZE: u32 = 0;
+
+#[inline(always)]
+unsafe fn record_layout_size_slot() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        RECORD_LAYOUT_SIZE_SLOT
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(RECORD_LAYOUT_SIZE)
+    }
+}
+
+/// record_layout_size — original: `FUN_0816029c` @ `0x0816029c` (48 bytes).
+///
+/// Raw ARM spans `0x0816029c..0x081602c8`; the following literal word is
+/// `0x089ca7f0`, and the next real function starts at `0x081602d0`. Raw
+/// decoding verifies five direct inbound `bl` calls, all unconditional:
+/// `0x080bdfe8`, `0x080be0ec`, `0x08116530`, `0x08117258`, and `0x081d0960`;
+/// there are no predicated `bl` calls.
+///
+/// Lazily caches a record-layout size in the global slot at `0x089ca7f4`.
+/// A zero slot calls [`context_mode_flag`] and stores `0x100` for a clear
+/// flag or `0xd8` for a set flag; a nonzero slot is returned unchanged. The
+/// callers use the value both directly and halved for record allocation, but
+/// the layout's concrete identity is not recovered.
+///
+/// Deliberate deviation: host builds model the fixed firmware slot with
+/// [`RECORD_LAYOUT_SIZE`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn record_layout_size() -> u32 {
+    let slot = record_layout_size_slot();
+    if slot.read_volatile() == 0 {
+        let size = if context_mode_flag() == 0 { 0x100 } else { 0xd8 };
+        slot.write_volatile(size);
+    }
+    slot.read_volatile()
+}
+
 
 /// Byte offset of the companion word inside the nested object
 /// (`ldr r0, [r0, #0xb54]`).
@@ -2671,6 +2720,40 @@ mod tests {
             0,
             "a set word with bit 0 clear yields 0 (`and r0,r0,#0x1`)"
         );
+    }
+
+    static RECORD_LAYOUT_SIZE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    #[test]
+    fn initializes_record_layout_size_from_the_clear_mode_flag() {
+        let _record_layout_lock = RECORD_LAYOUT_SIZE_LOCK.lock();
+        let mut context = [0u8; 0x98];
+        let _context_lock = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        unsafe { record_layout_size_slot().write(0) };
+        assert_eq!(unsafe { record_layout_size() }, 0x100);
+
+        context[0x94..0x98].copy_from_slice(&1u32.to_le_bytes());
+        assert_eq!(
+            unsafe { record_layout_size() },
+            0x100,
+            "a nonzero slot bypasses the mode-flag call and remains cached"
+        );
+        unsafe { record_layout_size_slot().write(0) };
+    }
+
+    #[test]
+    fn initializes_record_layout_size_from_the_set_mode_flag() {
+        let _record_layout_lock = RECORD_LAYOUT_SIZE_LOCK.lock();
+        let mut context = [0u8; 0x98];
+        context[0x94..0x98].copy_from_slice(&0xffff_ff01u32.to_le_bytes());
+        let _context_lock = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        unsafe { record_layout_size_slot().write(0) };
+        assert_eq!(unsafe { record_layout_size() }, 0xd8);
+        unsafe { record_layout_size_slot().write(0) };
     }
 
     static KIND_TABLE_LOCK: Mutex<()> = Mutex::new(());

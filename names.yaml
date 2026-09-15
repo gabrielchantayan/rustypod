@@ -93976,3 +93976,31 @@ functions:
       match.py reports the expected structural frame-prologue difference from
       LLVM while retaining the literal load and return. Host test verifies the
       exact returned target word. Deliberate deviations: none.
+
+  # --- lazy record-layout size cache ---
+  - address: 0x0816029c
+    ghidra: FUN_0816029c
+    name: record_layout_size
+    size: 48
+    sig: "u32 record_layout_size(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      DAT_081602cc: record_layout_size_base
+      "*(DAT_081602cc + 4)": record_layout_size
+      FUN_08056028: context_mode_flag
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte body at
+      0x0816029c..0x081602c8: it loads 0x089ca7f0 from the following literal,
+      reads the +0x04 slot, and returns it unchanged when nonzero. A zero slot
+      calls context_mode_flag, stores 0x100 for a clear result or 0xd8 for a
+      set result, then reloads and returns the slot. The next real function
+      begins at 0x081602d0. Decoding every aligned ARM B/BL-immediate finds
+      five inbound direct callers, all unconditional plain bl at 0x080bdfe8,
+      0x080be0ec, 0x08116530, 0x08117258, and 0x081d0960; no predicated bl
+      calls (and one tail B at 0x08160248). The slot therefore caches a
+      mode-selected record-layout size; callers use it directly and halved,
+      but the concrete layout remains unidentified. Host builds model fixed
+      target slot 0x089ca7f4 with static storage. match.py retains the
+      load/test/lazy-call/select/store/reload structure; LLVM differs only in
+      frame shape, branch direction, and early-return placement.
