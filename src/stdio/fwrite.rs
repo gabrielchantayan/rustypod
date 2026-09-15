@@ -54,6 +54,7 @@ unsafe fn hook<T: Copy>(slot: *const T) -> T {
 /// mod-2^32 value and the loop bound compares SIGNED (`blt`), so a
 /// nonpositive total writes nothing and still returns `nitems`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn stream_write_block(
     mut buf: *const u8,
     size: i32,
@@ -75,6 +76,26 @@ pub unsafe extern "C" fn stream_write_block(
     }
     nitems
 }
+/// `stream_write_all` — original: `FUN_08266be8` @ 0x08266be8
+/// (48 bytes; one plain `bl`, no predicated `bl`).
+///
+/// Loads the putc context from the first word of `stream`, calls
+/// [`stream_write_block`] for `size * nitems` bytes, and reports whether
+/// the writer returned exactly `nitems`. This is the small C++ formatter
+/// bridge used by the text-output paths. Deliberate deviations: none;
+/// `stream` is represented as a word pointer so the target's +0 field
+/// remains four bytes wide on host builds.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_write_all(
+    stream: *const u32,
+    buf: *const u8,
+    size: i32,
+    nitems: i32,
+) -> i32 {
+    (stream_write_block(buf, size, nitems, *stream as i32) == nitems) as i32
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -218,4 +239,21 @@ mod tests {
         }
         reset_hook();
     }
+    #[test]
+    fn stream_write_all_compares_the_complete_item_count() {
+        let _guard = hook_lock();
+        unsafe {
+            let stream = [42_u32];
+            let buf = *b"abc";
+
+            install_scripted_putc(i32::MAX);
+            assert_eq!(stream_write_all(stream.as_ptr(), buf.as_ptr(), 1, 3), 1);
+            assert_eq!(PUTC_CTXS, std::vec![42; 3], "uses stream word zero as context");
+
+            install_scripted_putc(2);
+            assert_eq!(stream_write_all(stream.as_ptr(), buf.as_ptr(), 1, 3), 0);
+        }
+        reset_hook();
+    }
+
 }

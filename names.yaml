@@ -91869,3 +91869,29 @@ functions:
       identity. match.py confirms the saved-name branch and the two locale
       calls; LLVM expands the already ported strcpy into its own copy loop,
       so its 71 instructions do not exactly match the stock 23.
+
+  # --- RetailOS stream write completion check ---
+  - address: 0x08266be8
+    ghidra: FUN_08266be8
+    name: stream_write_all
+    size: 48
+    sig: "i32 stream_write_all(const u32 *stream, const u8 *buf, i32 size, i32 nitems)"
+    module: stdio/fwrite
+    status: ported
+    vars:
+      param_1/r0: stream (+0x00 is putc context)
+      param_2/r1: buf
+      param_3/r2: size
+      param_4/r3: nitems
+      FUN_0802ffa8: stream_write_block
+    notes: >-
+      Raw osos.dec words decode to the 48-byte extent
+      0x08266be8..0x08266c18; the next separately linked function starts
+      at 0x08266c18. The complete image disassembly finds five inbound
+      BL-form call sites, all plain unconditional BL (zero predicated
+      forms): 0x083d8e68, 0x083d9440, 0x083d9494, 0x083d9c4c, and
+      0x083d9ca0. The function loads stream+0x00 as the line-buffer putc
+      context, calls stream_write_block(buf, size, nitems, context), and
+      returns 1 exactly when its result equals nitems, otherwise 0.
+      Deliberate host-only representation: stream is a u32 word pointer,
+      preserving the target's four-byte field layout on 64-bit hosts.
