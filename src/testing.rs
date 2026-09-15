@@ -312,6 +312,10 @@ pub mod hints {
     // sqlite3/default-collation fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const SQLITE_FIND_COLLATION_ENCODING: usize = 0x7700_0000;
+    // 0x7f30_0000: dedicated to app/character_class_scan's target-width
+    // parser and character-class-table fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const PARSER_SCAN_TO_CLASS_BOUNDARY: usize = 0x7f30_0000;
     // 0x8300_0000: dedicated to sqlite/index_key_info's raw-u32 Index,
     // KeyInfo, collation-array, and tracked-allocation fixtures; mappings
     // never unmap, so no other user may share this hint.
