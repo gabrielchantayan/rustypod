@@ -72,40 +72,17 @@ extern crate std;
 use crate::libc::iram_veneers::iram_memcpy_veneer;
 use crate::ui::view_base::ViewBase;
 
-/// The unported redraw helper's retail address — original:
-/// `FUN_0826db38` @ 0x0826db38. Reached by the seam default on the
-/// firmware target only.
-#[cfg(target_os = "none")]
-const GEOMETRY_CHANGED_ADDRESS: usize = 0x0826_db38;
-
-/// ABI of the redraw helper `FUN_0826db38`: `(view)`. Its exit r0 is
-/// scratch no caller consumes (see the module header), so the seam is
-/// void.
+/// The ported redraw helper — original `FUN_0826db38` @ 0x0826db38.
+///
+/// The dispatch point lets existing geometry-setter host tests replace the
+/// helper; both target and host defaults invoke the Rust port.
 pub type ViewBaseGeometryChanged = unsafe extern "C" fn(view: *mut ViewBase);
 
-/// Target default: the retail `FUN_0826db38` body at 0x0826db38.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_geometry_changed(view: *mut ViewBase) {
-    let changed: unsafe extern "C" fn(*mut ViewBase) =
-        unsafe { core::mem::transmute(GEOMETRY_CHANGED_ADDRESS) };
-    unsafe { changed(view) };
-}
-
-/// Host default: inert. Faithful in that the helper's effects are
-/// all side effects on objects host fixtures do not model; the
-/// geometry copy below runs regardless.
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_geometry_changed(_view: *mut ViewBase) {}
 
-/// The active redraw helper — the dispatch seam for `FUN_0826db38` @
-/// 0x0826db38. Host tests install a recording model; the real port
-/// replaces the default when it lands.
-#[cfg(target_os = "none")]
-pub static mut VIEW_BASE_GEOMETRY_CHANGED: ViewBaseGeometryChanged = firmware_geometry_changed;
-
-/// The active redraw helper — inert host default (see above).
-#[cfg(not(target_os = "none"))]
-pub static mut VIEW_BASE_GEOMETRY_CHANGED: ViewBaseGeometryChanged = missing_geometry_changed;
+pub static mut VIEW_BASE_GEOMETRY_CHANGED: ViewBaseGeometryChanged =
+    crate::ui::geometry_changed::view_base_geometry_changed;
 
 /// view_base_set_geometry — original: `FUN_0826d850` @ 0x0826d850
 /// (44 bytes).

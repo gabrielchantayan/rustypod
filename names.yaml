@@ -46321,7 +46321,7 @@ functions:
       param_2/r1: geometry
       param_3/r2/r5: redraw
       thunk_EXT_FUN_22000188: iram_memcpy_veneer (direct, already ported)
-      FUN_0826db38: VIEW_BASE_GEOMETRY_CHANGED seam (unported redraw helper)
+      FUN_0826db38: view_base_geometry_changed (direct, ported)
     notes: >-
       The geometry setter of the grand-base view (the class
       ui/view_base.rs constructs; +0x50..+0x80 is its 0x30-byte
@@ -46338,25 +46338,23 @@ functions:
       (view+0x50, geometry, 0x30) - the bl 0x08037df8 ROM veneer,
       already ported and called directly per the view_base_construct
       precedent - then, when redraw != 0, a tail call (movne r0,r4;
-      popne {r4,r5,r6,lr}; bne 0x0826db38) into the unported redraw
-      helper FUN_0826db38, which (raw-byte verified) sets flags+0x48 |=
-      0x20, invalidates the view's own bounds (+0x80) through the
-      unported region form @ 0x0826ec14, runs the parent's vtable
-      +0x128 notification when parent +0x34 exists and its byte +0xa0
-      is clear, and marks the vtable +0x5c owner's +0x48 word with
-      0x40. Deviations: the tail branch becomes a call through the new
-      VIEW_BASE_GEOMETRY_CHANGED seam (target builds transmute the
-      retail address 0x0826db38, hook-ready on device; host default
-      inert; tests install a recording model - the ui/invalidate.rs
-      precedent), and the port returns void - the original's exit r0
-      (memcpy's return on the redraw==0 path, the helper's leftover on
-      the other) is dead everywhere: all 9 sampled call sites
+      popne {r4,r5,r6,lr}; bne 0x0826db38) into the ported
+      view_base_geometry_changed helper, which sets flags+0x48 |= 0x20,
+      invalidates the view's own bounds (+0x80) through
+      ui_element_invalidate_region, runs the parent's vtable +0x128
+      notification when parent +0x34 exists and its byte +0xa0 is clear,
+      and marks the vtable +0x5c owner's +0x48 word with 0x40. The tail
+      branch becomes a call through the existing VIEW_BASE_GEOMETRY_CHANGED
+      test-dispatch point; both target and host defaults invoke the Rust
+      port, and host tests may still install a recording model. The port
+      returns void; the original's exit r0 is dead everywhere: all 9 sampled
+      call sites
       (0x080966e8/0x0809ef60/0x080a7708/0x080ac0f8/0x081165dc/
       0x081802fc/0x08182888/0x08288218/0x0828865c) overwrite r0 with
       the very next instruction. Host tests cover the verbatim 0x30-byte
       copy with +0x4c/+0x80 canaries, redraw==0 non-dispatch, dispatch
-      for redraw 1/2/0x80000000 with the view pointer, full-overwrite
-      (not merge) semantics, and the inert host default. match.py
+      for redraw 1/2/0x80000000 with the view pointer, and full-overwrite
+      (not merge) semantics. match.py
       structural: the add r0,r0,#0x50 / mov r2,#0x30 / bl memcpy /
       cmp-redraw core survives verbatim; the diff is the crate's
       frame-pointer prologue and the seam's ldr/bx tail in place of the
@@ -46398,6 +46396,35 @@ functions:
       bit-0x20-masked modes, all three rule families, modular overflow,
       generic no-redraw, and equal-extent no-dispatch paths. match.py
       structural review is recorded with the port.
+  - address: 0x0826db38
+    ghidra: FUN_0826db38
+    name: view_base_geometry_changed
+    size: 96
+    sig: "void view_base_geometry_changed(ViewBase *view)"
+    module: ui/geometry_changed
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      "view+0x48": flags
+      "view+0x80": bounds
+      "view+0x34": parent
+      "parent vtable+0x128": parent geometry-change notification (identity unresolved)
+      "view vtable+0x5c": geometry-change owner accessor (identity unresolved)
+    notes: >-
+      Raw bytes establish a 96-byte extent: push {r4,lr} opens at
+      0x0826db38, pop {r4,pc} ends at 0x0826db94, and the next independent
+      function opens with push {r4-r9,sl,lr} at 0x0826db98. Whole-image ARM
+      B/BL decoding finds five direct callers: unconditional bl at
+      0x082882f8 and 0x08288330, and predicated bl forms at 0x08157c2c,
+      0x0826d784, and 0x0826d918; no callee identity is invented for either
+      virtual slot. The body sets view flags bit 0x20, calls the ported
+      ui_element_invalidate_region(view, view+0x80), calls parent slot +0x128
+      only when parent is non-NULL and view byte +0xa0 is clear, then calls
+      view slot +0x5c and sets bit 0x40 in its returned owner's flags word.
+      Target builds dispatch the exact target-word vtables; host builds use
+      replaceable virtual-call operations because firmware code pointers are
+      32-bit. Host tests cover both flag writes and the parent NULL/suppressed
+      gates. match.py structural review is recorded with the port.
   - address: 0x0826dde8
     ghidra: FUN_0826dde8
     name: view_base_release_render_state
