@@ -30,6 +30,7 @@
 //! the name is structural (see the names.yaml notes).
 
 use core::ffi::c_void;
+use crate::heap::types::HeapDescriptor;
 
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::{cxa_atexit, ShutdownHandlerFn};
@@ -204,6 +205,78 @@ pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 
     core::ptr::write_bytes(grand_base.cast::<u8>(), 0, 0x94);
     object
 }
+///
+/// PairHeaderBase's owned payload release — original: `FUN_0810e908` @
+/// **0x0810e908** (52 bytes; the preceding `pop {...,pc}` at 0x0810e904
+/// closes the prior function and 0x0810e93c starts the next).
+///
+/// Raw ARM has no `bl` call sites, plain or predicated, despite Ghidra's
+/// five-call reconstruction. It tests ownership at +0xb4 and the payload
+/// pointer at +0x04; either clear returns. A non-NULL pool at +0xb0
+/// tail-branches to `heap_free(pool, payload, 28)`, otherwise it
+/// tail-branches to `free_wrapper(payload, 28)`.
+///
+/// Deliberate deviation: Rust dispatches through this operation table rather
+/// than tail-branching, so host tests can observe both deallocation routes.
+#[derive(Clone, Copy)]
+pub struct PairHeaderBaseReleaseOps {
+    pub free_global: unsafe extern "C" fn(*mut u8, usize),
+    pub free_pool: unsafe extern "C" fn(*mut HeapDescriptor, *mut u8, usize),
+}
+
+unsafe extern "C" fn release_free_global(payload: *mut u8, tag: usize) {
+    unsafe { crate::heap::veneers::free_wrapper(payload, tag) }
+}
+
+unsafe extern "C" fn release_free_pool(pool: *mut HeapDescriptor, payload: *mut u8, tag: usize) {
+    unsafe { crate::heap::free_path::heap_free(pool, payload, tag) }
+}
+
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_RELEASE_OPS: PairHeaderBaseReleaseOps = PairHeaderBaseReleaseOps {
+    free_global: release_free_global,
+    free_pool: release_free_pool,
+};
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_release_free_global(_payload: *mut u8, _tag: usize) {
+    panic!("pair_header_base_release_owned_payload requires global free")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_release_free_pool(
+    _pool: *mut HeapDescriptor,
+    _payload: *mut u8,
+    _tag: usize,
+) {
+    panic!("pair_header_base_release_owned_payload requires pool free")
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_RELEASE_OPS: PairHeaderBaseReleaseOps = PairHeaderBaseReleaseOps {
+    free_global: missing_release_free_global,
+    free_pool: missing_release_free_pool,
+};
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_release_owned_payload(base: *mut u32) {
+    if base.cast::<u8>().add(0xb4).read() == 0 {
+        return;
+    }
+    let payload = base.add(1).read() as usize as *mut u8;
+    if payload.is_null() {
+        return;
+    }
+    let pool = base.add(0xb0 / 4).read() as usize as *mut HeapDescriptor;
+    let ops = core::ptr::addr_of!(PAIR_HEADER_BASE_RELEASE_OPS).read_volatile();
+    if pool.is_null() {
+        (ops.free_global)(payload, 28);
+    } else {
+        (ops.free_pool)(pool, payload, 28);
+    }
+}
+
 /// Host/test and target dispatch for the still-unported `FUN_0810e824`
 /// owned-payload initializer.
 ///
@@ -420,8 +493,7 @@ pub struct PairHeaderBasePayloadInitializeOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_initialize_release_owned_payload(base: *mut u32) {
-    let release: unsafe extern "C" fn(*mut u32) = core::mem::transmute(0x0810_e908usize);
-    release(base);
+    unsafe { pair_header_base_release_owned_payload(base) }
 }
 
 #[cfg(target_os = "none")]
@@ -624,9 +696,7 @@ pub struct PairHeaderBaseDestructOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_release_owned_payload(base: *mut u32) {
-    let release: unsafe extern "C" fn(*mut u32) =
-        unsafe { core::mem::transmute(0x0810_e908usize) };
-    unsafe { release(base) }
+    unsafe { pair_header_base_release_owned_payload(base) }
 }
 
 #[cfg(target_os = "none")]
@@ -1759,6 +1829,83 @@ mod tests {
             assert_eq!(object[(12 + 0xb0) / 4], 0);
             assert_eq!(object[(12 + 0xb4) / 4], 0xaaaa_5500);
             assert_eq!(object[0xc4 / 4], 0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod release_owned_payload_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::MutexGuard;
+    use std::vec;
+
+    static mut EVENTS: [usize; 2] = [0; 2];
+    static mut EVENT_COUNT: usize = 0;
+
+    fn lock_ops() -> MutexGuard<'static, ()> {
+        crate::testing::CPP_ARRAY_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    unsafe extern "C" fn record_global(payload: *mut u8, tag: usize) {
+        let index = core::ptr::addr_of!(EVENT_COUNT).read_volatile();
+        core::ptr::addr_of_mut!(EVENTS)
+            .cast::<usize>()
+            .add(index)
+            .write_volatile((payload as usize) ^ tag);
+        core::ptr::addr_of_mut!(EVENT_COUNT).write_volatile(index + 1);
+    }
+
+    unsafe extern "C" fn record_pool(pool: *mut HeapDescriptor, payload: *mut u8, tag: usize) {
+        let index = core::ptr::addr_of!(EVENT_COUNT).read_volatile();
+        core::ptr::addr_of_mut!(EVENTS)
+            .cast::<usize>()
+            .add(index)
+            .write_volatile((pool as usize) ^ (payload as usize) ^ tag);
+        core::ptr::addr_of_mut!(EVENT_COUNT).write_volatile(index + 1);
+    }
+
+    #[test]
+    fn release_owned_payload_guards_then_selects_heap() {
+        let _lock = lock_ops();
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_RELEASE_OPS).write_volatile(
+                PairHeaderBaseReleaseOps {
+                    free_global: record_global,
+                    free_pool: record_pool,
+                },
+            );
+            core::ptr::addr_of_mut!(EVENT_COUNT).write_volatile(0);
+            let mut base = vec![0u32; 0xb8 / 4];
+            let payload = 0x1234_5000usize as *mut u8;
+
+            base[1] = payload as usize as u32;
+            pair_header_base_release_owned_payload(base.as_mut_ptr());
+            base.as_mut_ptr().cast::<u8>().add(0xb4).write(1);
+            base[1] = 0;
+            pair_header_base_release_owned_payload(base.as_mut_ptr());
+            assert_eq!(EVENT_COUNT, 0, "unowned and NULL payloads are no-ops");
+
+            base[1] = payload as usize as u32;
+            pair_header_base_release_owned_payload(base.as_mut_ptr());
+            assert_eq!(EVENT_COUNT, 1);
+            assert_eq!(EVENTS[0], (payload as usize) ^ 28);
+
+            let pool = 0x5678_9000usize as *mut HeapDescriptor;
+            base[0xb0 / 4] = pool as usize as u32;
+            pair_header_base_release_owned_payload(base.as_mut_ptr());
+            assert_eq!(EVENT_COUNT, 2);
+            assert_eq!(EVENTS[1], (pool as usize) ^ (payload as usize) ^ 28);
+
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_RELEASE_OPS).write_volatile(
+                PairHeaderBaseReleaseOps {
+                    free_global: missing_release_free_global,
+                    free_pool: missing_release_free_pool,
+                },
+            );
         }
     }
 }

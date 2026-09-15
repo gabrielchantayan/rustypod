@@ -39950,6 +39950,28 @@ functions:
       bl, the crate's fp frame, and LLVM folding the vtable store and the
       +0x30 pointer bump into one "str r1,[r4],#48".
 
+  - address: 0x0810e908
+    ghidra: FUN_0810e908
+    name: pair_header_base_release_owned_payload
+    size: 52
+    sig: "void pair_header_base_release_owned_payload(u32 *base)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r0: base, r1: payload_or_tag, r3: payload, pool: payload_pool}
+    notes: >-
+      Raw osos.dec establishes the whole 52-byte extent: the prior function
+      ends `pop {...,pc}` at 0x0810e904 and 0x0810e93c starts with
+      `push {r4,lr}`. Ghidra's alleged five-call body crosses this boundary;
+      the true body has zero plain BL and zero predicated BL instructions.
+      It reads the ownership byte at base+0xb4; a clear byte returns. It then
+      reads payload at +0x04; NULL returns. For a non-NULL payload it loads
+      the pool at +0xb0 and tail-branches to free_wrapper(payload, 28) when
+      the pool is NULL, otherwise to heap_free(pool, payload, 28). The Rust
+      port preserves both guards, payload tag 28, and route selection, with
+      PAIR_HEADER_BASE_RELEASE_OPS providing an intentional testable dispatch
+      seam rather than the original tail branches. All target callers in
+      cxx/pair_header now reach this port rather than transmuting 0x0810e908.
+
   - address: 0x0810e6b4
     ghidra: FUN_0810e6b4
     name: pair_header_base_bind_payload
