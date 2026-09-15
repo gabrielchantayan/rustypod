@@ -75266,6 +75266,32 @@ functions:
       deviations: the port keeps the exact element store order with volatile
       aligned accesses and leaves the three trailing ABI-padding bytes alone.
 
+  - address: 0x082572c0
+    ghidra: FUN_082572c0
+    name: fixed_matrix_copy
+    size: 36
+    sig: "void fixed_matrix_copy(FixedMatrix4x4 *dst, const FixedMatrix4x4 *src)"
+    module: util/fixed_matrix_copy
+    status: ported
+    renames:
+      param_1/r0: dst (aligned writable 0x44-byte Q16.16 4x4 matrix)
+      param_2/r1: src (aligned readable 0x44-byte Q16.16 4x4 matrix)
+      r2: word_index (0 through 15)
+      r3: matrix_word (loaded then stored at word_index)
+    notes: >-
+      Raw ARM extent is exactly 36 bytes, 0x082572c0..0x082572e4: mov r2,#0
+      opens the function and the next independently linked function begins at
+      0x082572e4. The five direct inbound calls are all plain unconditional bl
+      (0x08242e98, 0x08252160, 0x08252180, 0x082521c0, and 0x08253854);
+      decoding every ARM B/BL immediate in osos.dec found zero predicated
+      forms. The unguarded leaf iterates word indices 0 through 15, copying
+      each Q16.16 matrix element from src to dst, then copies the identity
+      marker byte at +0x40. Callers use the same 0x44-byte matrix format
+      established by fixed_matrix_identity_init @ 0x082570ec. Target builds
+      retain the recovered ARM instruction sequence exactly; host builds use
+      equivalent volatile accesses because ARM inline assembly cannot execute
+      there.
+
   - address: 0x081d6380
     ghidra: FUN_081d6380
     name: vtable_object_base_construct
