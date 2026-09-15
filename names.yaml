@@ -92339,3 +92339,29 @@ functions:
       table at 0x08a79af8, shifts the result right eight bits, and negates
       the second half-turn. Target Rust reads that exact table address;
       host tests install a table pointer because the table is runtime data.
+  - address: 0x0825679c
+    ghidra: FUN_0825679c
+    name: object_owner_set
+    size: 44
+    sig: "void object_owner_set(OwnedObject *object, void *owner)"
+    module: app/object_owner_set
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: owner
+      FUN_08256b50: object_resources_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw ARM is exactly eleven words at 0x0825679c..0x082567c7: it stores
+      owner at object+0x9c, returns when owner is non-NULL or byte object+0xa0
+      is zero, otherwise calls object_resources_destroy @ 0x08256b50 and
+      tail-branches to the ported tag-2 operator_delete @ 0x082aad24. The
+      next real function begins with push {r4,r5,r6,lr} at 0x082567c8;
+      Ghidra's C therefore wrongly absorbs operator_delete's body and reports
+      five callee BLs. Full-image ARM B/BL decoding finds five inbound direct
+      BL calls: one plain (0x08251df8) and four predicated
+      (0x08251e8c, 0x08251ec8, 0x08256440, 0x08256458). The body itself has
+      one plain BL and zero predicated BLs. Target Rust calls the verified
+      unported resource destructor address directly; host tests use recording
+      seams for that boundary and the final delete. The tail branch is an
+      ordinary Rust call, the only behavioral-neutral structural deviation.

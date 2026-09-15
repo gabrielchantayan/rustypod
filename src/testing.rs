@@ -1003,6 +1003,9 @@ pub mod hints {
     // 0x2300_0000: dedicated to util/nested_container_item_count's raw-u32
     // owner and nested-container fixture; mappings never unmap.
     pub const NESTED_CONTAINER_ITEM_COUNT: usize = 0x2300_0000;
+    // 0x2e00_0000: dedicated to app/object_owner_set's raw-u32 object
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const OBJECT_OWNER_SET: usize = 0x2e00_0000;
     // 0xda00_0000: dedicated to drivers/surface_plane_owner's raw-u32
     // surface-plane fixture; mappings never unmap, so no other user may
     // share this hint.
