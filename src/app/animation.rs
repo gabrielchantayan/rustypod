@@ -184,21 +184,75 @@ pub unsafe extern "C" fn timing_wheel_insert(table: *mut u32, node: *mut u32) {
     }
 }
 
+/// Returns the timing-wheel singleton, allocating its 12 bucket heads and
+/// trailing guard word on first use. On target the cache is the live global
+/// word at [`SCHEDULER_SINGLETON_GLOBAL`].
+///
+/// `scheduler_table_get_or_create` — original: `FUN_082739a0` @
+/// 0x082739a0 (60 bytes: fourteen instruction words plus the literal-pool
+/// word at 0x082739dc). The next real function begins at 0x082739e0.
+/// Raw ARM decoding verifies five inbound plain `bl` call sites and no
+/// predicated forms. The body calls `operator_new(0x34)` @ 0x082aadd4,
+/// zeroes its first 0x30 bytes through the IRAM memzero-aligned veneer, then
+/// explicitly clears the trailing guard word before publishing and returning
+/// the cached pointer. A populated cache returns unchanged without allocation
+/// or writes. The port loads the existing `memzero_aligned` export through a
+/// volatile function pointer so LLVM preserves that required call instead of
+/// lowering it to `__aeabi_memclr4`.
+///
+/// Deliberate deviation: host builds use permanent static storage rather than
+/// the target heap/global-address pair, preserving the lazy cache and exact
+/// 13-word initialization observable to callers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scheduler_table_get_or_create() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        let cached = core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *const u32) as *mut u32;
+        if !cached.is_null() {
+            return cached;
+        }
+
+        let table = crate::heap::veneers::operator_new(0x34).cast::<u32>();
+        let zero = core::ptr::read_volatile(
+            &(crate::libc::memzero::memzero_aligned as unsafe extern "C" fn(*mut u8, usize) -> *mut u8)
+        );
+        zero(table.cast(), 0x30);
+        table.add(TIMING_WHEEL_BUCKETS).write(0);
+        core::ptr::write_volatile(SCHEDULER_SINGLETON_GLOBAL as *mut u32, table as u32);
+        table
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        if HOST_SCHEDULER_SINGLETON.is_null() {
+            let table = core::ptr::addr_of_mut!(HOST_SCHEDULER_STORAGE).cast::<u32>();
+            crate::libc::memzero::memzero_aligned(table.cast(), 0x30);
+            table.add(TIMING_WHEEL_BUCKETS).write(0);
+            HOST_SCHEDULER_SINGLETON = table;
+        }
+        HOST_SCHEDULER_SINGLETON
+    }
+}
+
 /// The first argument both wheel callees receive: the word stored at
 /// [`SCHEDULER_SINGLETON_GLOBAL`]. On target that is the live singleton
-/// pointer (created lazily @ 0x082739a0); host builds model the created
-/// state with a house-static bucket array.
+/// pointer (created lazily by [`scheduler_table_get_or_create`]); host builds
+/// model the created state with permanent static storage.
 #[cfg(target_os = "none")]
 pub(crate) fn scheduler_table() -> *mut u32 {
     unsafe { core::ptr::read_volatile(SCHEDULER_SINGLETON_GLOBAL as *mut u32) as *mut u32 }
 }
 
 #[cfg(not(target_os = "none"))]
-static mut HOST_SCHEDULER_BUCKETS: [u32; TIMING_WHEEL_BUCKETS] = [0; TIMING_WHEEL_BUCKETS];
+static mut HOST_SCHEDULER_STORAGE: [u32; TIMING_WHEEL_BUCKETS + 1] = [0; TIMING_WHEEL_BUCKETS + 1];
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_SCHEDULER_SINGLETON: *mut u32 = core::ptr::null_mut();
 
 #[cfg(not(target_os = "none"))]
 pub(crate) fn scheduler_table() -> *mut u32 {
-    core::ptr::addr_of_mut!(HOST_SCHEDULER_BUCKETS).cast::<u32>()
+    unsafe { scheduler_table_get_or_create() }
 }
 /// timing_wheel_remove — original: `FUN_082738e0` @ 0x082738e0 (96 bytes).
 ///
@@ -1417,6 +1471,7 @@ mod tests {
             (*f.animation).from_value = 0; // the blne guard skips the call
             (*f.animation).to_value = f.to as usize as u32;
 
+
             let returned = animation_destroy(f.animation);
 
             assert_eq!(returned, f.animation);
@@ -1463,6 +1518,26 @@ mod tests {
                 (*f.animation).vtable,
                 crate::app::fixed_value::REFCOUNTED_BASE_VTABLE
             );
+        }
+    }
+    #[test]
+    fn scheduler_table_get_or_create_initializes_once() {
+        let _lock = take_lock();
+        unsafe {
+            HOST_SCHEDULER_SINGLETON = core::ptr::null_mut();
+            for word in HOST_SCHEDULER_STORAGE.iter_mut() {
+                *word = u32::MAX;
+            }
+
+            let first = scheduler_table_get_or_create();
+            assert_eq!(first, core::ptr::addr_of_mut!(HOST_SCHEDULER_STORAGE).cast::<u32>());
+            for index in 0..=TIMING_WHEEL_BUCKETS {
+                assert_eq!(*first.add(index), 0, "word {index} must be initialized");
+            }
+
+            *first.add(3) = 0x1234_5678;
+            assert_eq!(scheduler_table_get_or_create(), first);
+            assert_eq!(*first.add(3), 0x1234_5678, "cached table must not be rewritten");
         }
     }
 
