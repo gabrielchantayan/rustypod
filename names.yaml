@@ -94888,3 +94888,33 @@ functions:
       retain that register-preserving return; the host equivalent is an empty
       function. Host tests invoke the no-op path; match.py is an exact
       single-instruction match. Deliberate deviations: none.
+  # --- UI notification virtual-dispatch thunk ---
+  - address: 0x0811707c
+    ghidra: FUN_0811707c
+    name: ui_dispatch_notification
+    size: 20
+    sig: "void ui_dispatch_notification(void *owner, u32 event)"
+    module: ui/notification_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner_then_notification_target
+      param_2/r1: event
+      "*owner+0x88c": notification_target
+      "*notification_target": notification_vtable
+      "notification_vtable+0x54": notification_method
+      r2: constant_one
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM words from
+      ldr r0,[r0,#0x88c] at 0x0811707c through bx r3 at 0x0811708c; the
+      separately linked next function begins at 0x08117090. Decoding every
+      aligned ARM B/BL-immediate word finds exactly five inbound direct calls:
+      unconditional bl at 0x08112fa4, 0x081135b4, 0x081169d4, and 0x08116c88,
+      plus predicated blne at 0x08116c34; there are no direct tail-B callers.
+      It loads owner+0x88c, its vtable, and slot +0x54, then tail-dispatches
+      the method with event and constant one. The vtable method's semantic
+      identity is unrecovered. match.py reports the expected prologue/epilogue
+      around the same three loads, constant, and indirect tail branch. Host
+      tests cover the ARM-width owner and vtable pointer layout, event
+      forwarding, and the constant third argument. Deliberate deviation: host
+      tests use a dispatch seam because host function pointers exceed a target
+      vtable slot's four-byte width.

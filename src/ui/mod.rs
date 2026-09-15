@@ -80,6 +80,7 @@ pub mod current_window;
 pub mod scheduler_lock;
 pub mod selection_index;
 pub mod window_list_find_by_key;
+pub mod notification_dispatch;
 
 pub mod passkey_mask_indicators;
 pub mod mode_state;
