@@ -94821,3 +94821,21 @@ functions:
       registration versus fixed-object return. match.py reports the same
       guard gate and constructor/registration/release phases; LLVM inlines
       cxa_atexit and uses indirect calls through the constructor seam.
+  - address: 0x0811f594
+    ghidra: FUN_0811f594
+    name: no_op_destructor
+    size: 4
+    sig: "void no_op_destructor(void)"
+    module: util/no_op_destructor
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 4-byte extent: `bx lr` at
+      0x0811f594..0x0811f598; the distinct virtual dispatch thunk begins at
+      0x0811f598. Decoding every ARM B/BL word finds exactly five inbound
+      direct calls (0x081959e8, 0x08195c10, 0x08195e1c, 0x08195f2c, and
+      0x08195fa8), all plain unconditional BL, with no predicated BL forms.
+      It does not read arguments or modify memory, and preserves r0 by
+      returning directly. The target implementation uses naked assembly to
+      retain that register-preserving return; the host equivalent is an empty
+      function. Host tests invoke the no-op path; match.py is an exact
+      single-instruction match. Deliberate deviations: none.
