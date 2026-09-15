@@ -66306,6 +66306,34 @@ functions:
       and is NULL-safe, cache independence from the neighbouring
       singletons.
 
+  # --- big-endian u16 virtual byte dispatcher ---
+  - address: 0x081667d8
+    ghidra: FUN_081667d8
+    name: u16_be_vtable_dispatch
+    size: 68
+    sig: "void u16_be_vtable_dispatch(U16BeDispatchTarget *this, void *context, u32 message)"
+    module: app/u16_be_vtable_dispatch
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: context
+      param_3/r2: message
+      "[this+0x00]": vtable
+      "[vtable+0xa4]": dispatch_byte (identity unresolved)
+    notes: >-
+      Raw osos.dec words establish the exact 17-instruction, 68-byte extent
+      0x081667d8..0x0816681b; the next real function begins at 0x0816681c
+      with ldrh/strh/mov/bx. The wrapper invokes vtable slot +0xa4 with the
+      high byte of message, then tail-dispatches the same slot with its low
+      byte; context is preserved across the first call. Decoding every ARM
+      B/BL word finds five direct callers at 0x081662c8, 0x08166360,
+      0x081663f8, 0x08166490, and 0x08166528: all plain unconditional bl,
+      zero predicated forms. No identity for the virtual target is recorded
+      in names.yaml, so the slot remains deliberately semantic-only rather
+      than inventing a callee. Host uses widened function-pointer fields;
+      target global_asm preserves the retail sequence and match.py reports
+      an instruction-for-instruction exact match.
+
   # --- UI animation three-value rebinder ---
   - address: 0x08166a40
     ghidra: FUN_08166a40
