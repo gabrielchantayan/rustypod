@@ -91081,3 +91081,26 @@ functions:
       no object writes. Deliberate deviation: LLVM emits a frame
       prologue/epilogue instead of the stock bx lr, preserving the same r0
       result and observable behavior.
+
+  - address: 0x08294a94
+    ghidra: FUN_08294a94
+    name: app_state_cleanup
+    size: 148
+    module: app/app_state_cleanup
+    status: ported
+    renames:
+      param_1/r0: controller
+      DAT_08294b28: registration_table
+      DAT_08294b2c: sequence_table
+      iVar2/r4: entry_or_sequence_position
+      iVar3/r6: selected_sequence
+    notes: >-
+      Raw osos.dec establishes the 148-byte code extent from 0x08294a94 through
+      the pop {r4-r8,pc} at 0x08294b24; the two literal-pool words follow and
+      the next separately linked function starts at 0x08294b30. Decoding every
+      ARM B/BL-immediate word finds five inbound unconditional bl calls and
+      zero predicated forms. The body conditionally cancels active entries in
+      the four 0x18-byte records at 0x089d04c4, clears their shared slots, then
+      walks the selected byte sequence from 0x089d04bc to sentinel 4 and
+      invokes each object's vtable slot +0x1c. Direct callees remain verified
+      address seams because their semantic identities are unrecovered.
