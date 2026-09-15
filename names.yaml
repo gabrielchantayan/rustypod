@@ -90631,3 +90631,30 @@ functions:
       ASN1_INTEGER_get at 0x08039f74 is a volatile host seam/direct target
       call; OBJ_obj2nid and diag_ring_record use their existing ports. Raw
       u32 target-pointer words retain the ARM layout on 64-bit hosts.
+
+  # --- opaque header-payload record constructor ---
+  - address: 0x082a89b4
+    ghidra: FUN_082a89b4
+    name: opaque_header_payload_construct
+    size: 32
+    sig: "u32 *opaque_header_payload_construct(u32 *this, u32 second_word, u32 third_word)"
+    module: cxx/opaque_header_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: second_word
+      param_3/r2: third_word
+      DAT_082a89d0: opaque_header_payload_literal
+    notes: >-
+      Raw osos.dec establishes the true 32-byte extent at 0x082a89b4..
+      0x082a89d3: seven ARM instruction words through bx lr at 0x082a89cc,
+      followed by literal 0x089a8518 at 0x082a89d0; the next separately linked
+      function begins at 0x082a89d4. Ghidra's 28-byte size excludes that
+      literal. The ARM body stores third_word at +0x04, second_word at +0x0c,
+      the literal at +0x00, and zero at +0x08, retaining r0 as its return
+      value. Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly five inbound direct calls, all plain bl at 0x082a898c,
+      0x082a8c6c, 0x082a8c94, 0x083e71c4, and 0x083e7740; zero predicated bl
+      calls. The literal's data identity is unrecovered, and callers overwrite
+      word zero with their own literals, so no class or vtable identity is
+      inferred. Deliberate deviations: none.
