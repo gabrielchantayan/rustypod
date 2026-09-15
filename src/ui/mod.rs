@@ -7,6 +7,7 @@ pub mod coordinate_origin;
 pub mod display_pending_nibbles;
 pub mod color;
 pub mod rgb565_pack;
+pub mod hash_glyph_cells_to_rgb565;
 pub mod rgba4444_pack;
 pub mod rgb555a1_pack;
 pub mod content_bounds;

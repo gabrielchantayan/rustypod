@@ -91185,3 +91185,35 @@ functions:
       walks the selected byte sequence from 0x089d04bc to sentinel 4 and
       invokes each object's vtable slot +0x1c. Direct callees remain verified
       address seams because their semantic identities are unrecovered.
+  - address: 0x082924d4
+    ghidra: FUN_082924d4
+    name: hash_glyph_cells_to_rgb565
+    size: 116
+    sig: "void hash_glyph_cells_to_rgb565(u16 *destination, const u8 *source, u32 glyph_count, u32 destination_stride_pixels)"
+    module: ui/hash_glyph_cells_to_rgb565
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: glyph_count
+      param_4/r3: destination_stride_pixels
+      iVar6/r14: source_row_offset
+      iVar4/r4: glyph_row_countdown
+      iVar5/r5: source_cell_and_rgb565_color
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent: the push
+      {r4-r7,lr} at 0x082924d4 runs through pop {r4-r7,pc} at 0x08292544;
+      the next separately linked function begins at 0x08292548. Decoding
+      every aligned ARM branch-immediate word finds exactly five inbound
+      unconditional plain bl calls at 0x082923a4, 0x082923cc, 0x082923e0,
+      0x08292408, and 0x0829248c; there are no predicated calls or direct
+      tail-B callers. For each 3-by-5 glyph cell, read from a four-byte-wide
+      source row, it maps '#' to RGB565 0x0821 and any other byte to 0xffff.
+      It processes glyphs right-to-left, writing rows at destination stride and
+      leaving a one-pixel gap between glyphs. Host tests cover three glyphs,
+      non-hash cells, and ignored source padding, plus the zero-count no-write
+      case. match.py reports the expected structural diff: LLVM fully unrolls
+      the fixed three-column and five-row loops, retaining the reverse glyph
+      loop and character-to-color comparisons. Deliberate deviation: the
+      unused final destination-register decrement is omitted to avoid forming
+      an out-of-bounds Rust pointer.
