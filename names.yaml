@@ -95915,3 +95915,26 @@ functions:
       both outcomes. Deliberate deviation: Rust models the tail transfer
       as a normal call and uses a native-pointer host seam; LLVM selects target
       tail-call codegen.
+  - address: 0x080903ec
+    ghidra: FUN_080903ec
+    name: cff_parse_fixed
+    size: 48
+    sig: "u32 cff_parse_fixed(const u32 *cursor_record)"
+    module: ft/cff_parse_fixed
+    status: ported
+    renames:
+      param_1/r0: cursor_record
+      r0: cursor
+      r1: limit
+      r2: real_exponent
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      mov r1,r0 at 0x080903ec through pop {r4,pc} at 0x08090418; push
+      {r4-r6,lr} at 0x0809041c begins the next function. Whole-image ARM
+      branch decoding finds five inbound direct calls, all plain BL
+      (0x08087ecc, 0x080ae464, 0x080ae474, 0x080ae484, 0x080ae494), with zero
+      predicated BL forms. Byte 30 tail-branches to the separately linked CFF
+      real parser at 0x08087bf8 with r2=0; other CFF DICT operands call the
+      integer parser at 0x080a1b68 and shift its result into 16.16 form.
+      Rust uses typed host/target seams for those verified unported callees and
+      models the real-parser tail transfer as a normal call.

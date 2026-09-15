@@ -9,6 +9,7 @@ pub mod calc;
 pub mod charmap;
 pub mod cff_builder;
 pub mod cff_index;
+pub mod cff_parse_fixed;
 pub mod cff_sid;
 pub mod t1_builder;
 pub mod conditional_offset;

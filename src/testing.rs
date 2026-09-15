@@ -1129,6 +1129,10 @@ pub mod hints {
     // 0x4200_0000: dedicated to ui/text_line_offset_read_be's target-width
     // layout record fixture; mappings never unmap, so no other user may share it.
     pub const UI_TEXT_LINE_OFFSET_READ_BE: usize = 0x4200_0000;
+    // 0x4300_0000: dedicated to ft/cff_parse_fixed's target-width cursor
+    // record and operand fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const CFF_PARSE_FIXED: usize = 0x4300_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
