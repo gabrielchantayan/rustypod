@@ -1116,6 +1116,9 @@ pub mod hints {
     // Dedicated raw-u32 input-sequence state fixtures; mappings never unmap.
     pub const INPUT_SEQUENCE_ITEM_FOUND: usize = 0x3d00_0000;
     pub const INPUT_SEQUENCE_ITEM_BUILD: usize = 0x3f00_0000;
+    // 0x4000_0000: dedicated to ui/notification_dispatch's owner, target,
+    // and vtable raw-u32 fixture; mappings never unmap.
+    pub const UI_NOTIFICATION_DISPATCH: usize = 0x4000_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
