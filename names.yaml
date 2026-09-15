@@ -76243,6 +76243,27 @@ functions:
       no plain-b tails, and no aligned whole-image word equal to the entry
       address, so this accessor is not data-dispatched.
 
+  - address: 0x0813eabc
+    ghidra: thunk_FUN_0825a028
+    name: root_context_f9c_bound_destruct_first_veneer
+    size: 4
+    sig: "RootContextF9cBound *root_context_f9c_bound_destruct_first_veneer(RootContextF9cBound *this)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r0: this (root-context +0xf9c bound object; forwarded without a NULL guard)
+      FUN_0825a028: root_context_f9c_bound_destruct_target (unported)
+    notes: >-
+      Raw ARM establishes Ghidra's four-byte extent exactly: 0xea046d59 at
+      0x0813eabc is `b 0x0825a028`, and the separately linked next function
+      begins with `push {r4, r5, r6, lr}` at 0x0813eac0. The branch forwards
+      this and the final target return unchanged. Full-image ARM B/BL decode
+      finds exactly five inbound direct calls, all unconditional bl:
+      0x0812fa24, 0x081425f8, 0x08142614, 0x081b58b4, and 0x081b5d8c.
+      There are no predicated bl forms targeting this veneer. Device builds
+      retain the unported target as a fixed-address volatile seam; host tests
+      replace it with a recorder and prove NULL forwarding plus return
+      propagation.
   - address: 0x08168ae4
     ghidra: thunk_FUN_0825a028
     name: root_context_f9c_bound_destruct
