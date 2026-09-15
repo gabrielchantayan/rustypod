@@ -66,6 +66,9 @@ pub const EVENT_SOURCE_DECLARATION_OFFSET: usize = 0x04;
 
 /// Byte offset of the kind byte returned by [`event_source_kind`].
 pub const EVENT_SOURCE_KIND_OFFSET: usize = 0x0c;
+/// Byte offset of the owning source registry returned by [`event_source_registry`].
+pub const EVENT_SOURCE_REGISTRY_OFFSET: usize = 0x58;
+
 
 /// Byte offset of the 28-byte child collection constructed at +0x1c.
 pub const EVENT_SOURCE_CHILDREN_OFFSET: usize = 0x1c;
@@ -200,6 +203,28 @@ unsafe fn construct_ops() -> EventSourceConstructOps {
 #[inline(never)]
 pub unsafe extern "C" fn event_source_kind(source: *const u8) -> u8 {
     unsafe { source.add(EVENT_SOURCE_KIND_OFFSET).read() }
+}
+
+/// event_source_registry — original: `FUN_081e04dc` @ **0x081e04dc**
+/// (**8 bytes**; the next separately linked function starts at 0x081e04e4;
+/// **5 direct `bl` call sites, all unconditional — 0 predicated**,
+/// binary-verified from `osos.dec`).
+///
+/// `ldr r0, [r0, #0x58]; bx lr` returns the event source's owning registry
+/// pointer. The factory @ 0x081472b0 installs this field after construction;
+/// callers use the returned registry to inspect source-specific declarations.
+///
+/// Deliberate deviations: none. The object stores target-width pointers as
+/// four-byte words, so host fixtures use a below-4-GiB mapping.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_source_registry(source: *const u8) -> *mut u8 {
+    unsafe {
+        source
+            .add(EVENT_SOURCE_REGISTRY_OFFSET)
+            .cast::<u32>()
+            .read() as usize as *mut u8
+    }
 }
 
 /// event_source_construct — original: `FUN_081e0bac` @ 0x081e0bac
@@ -518,7 +543,8 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
+    use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex};
     use std::vec::Vec;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
@@ -603,6 +629,15 @@ mod tests {
         u32::from_ne_bytes(source.0[offset..offset + 4].try_into().unwrap())
     }
 
+    const REGISTRY_SLAB_LEN: usize = 0x1000;
+    static REGISTRY_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(
+            crate::testing::hints::EVENT_SOURCE_REGISTRY,
+            REGISTRY_SLAB_LEN,
+        )
+        .map(|pointer| pointer as usize)
+    });
+
     #[test]
     fn kind_reads_only_the_byte_at_0x0c() {
         for kind in [0u8, 1, 5, 6, 9, 10, 0xff] {
@@ -610,6 +645,25 @@ mod tests {
             source[EVENT_SOURCE_KIND_OFFSET] = kind;
             source[EVENT_SOURCE_KIND_OFFSET + 1] = !kind;
             assert_eq!(unsafe { event_source_kind(source.as_ptr()) }, kind);
+        }
+    }
+
+    #[test]
+    fn registry_returns_the_target_width_owning_registry_word() {
+        let Some(slab) = *REGISTRY_SLAB else {
+            assert!(note_missing_u32_fixture("app::event_source::registry"));
+            return;
+        };
+        let source = slab as *mut u8;
+        let registry = unsafe { source.add(0x180) };
+        for stored in [0u32, registry as usize as u32, u32::MAX] {
+            unsafe {
+                source
+                    .add(EVENT_SOURCE_REGISTRY_OFFSET)
+                    .cast::<u32>()
+                    .write(stored);
+                assert_eq!(event_source_registry(source), stored as usize as *mut u8);
+            }
         }
     }
 
