@@ -95275,3 +95275,36 @@ functions:
       LLVM adds a frame, changes independent load order, and uses a distinct
       shift/mask sequence for the first byte, all equivalent deliberate codegen
       differences.
+  # --- UI mode dimension applier ---
+  - address: 0x080f8040
+    ghidra: FUN_080f8040
+    name: ui_apply_mode_dimensions
+    size: 104
+    sig: "u32 ui_apply_mode_dimensions(void *state)"
+    module: ui/apply_mode_dimensions
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x1d": mode
+      "state+0x1e": variant
+      "state+0x1c": dimension
+      "state+0x0": width
+      "state+0x4": height
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte extent
+      0x080f8040..0x080f80a4: the tail `b 0x080f7d44` at 0x080f80a4 is
+      the final word, while 0x080f80a8 begins a separately linked setter
+      veneer. The body has three internal unconditional plain bl instructions
+      (0x080f8050, 0x080f8064, 0x080f8070) and no predicated bl. Whole-image
+      decoding finds five inbound plain bl call sites and no predicated
+      inbound bl. It calls IRAM-mirror targets 0x2200881c, 0x22008744, and
+      0x220087bc with the exact observed byte-field ABI, writes the lookup
+      result at +0x1c, maps variant 0 to (28,result) and variant 1 to
+      (result,28), then tail-dispatches to 0x080f7d44; other variants return
+      the lookup result after the first three calls. The three mirror targets
+      and tail target have no recovered names, so the Rust port deliberately
+      uses volatile seams with fixed firmware addresses rather than inventing
+      identities. Host tests cover both accepted variants, field argument
+      ordering, word writes, tail result propagation, and the unsupported
+      variant's no-tail early return. match.py is reviewed against the
+      register/branch structure.
