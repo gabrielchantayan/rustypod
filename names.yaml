@@ -3514,6 +3514,27 @@ functions:
     status: ported
     notes: bit 0x08 = lowercase (subtracts 0x20); 0xdf guard (dead under C locale).
 
+  - address: 0x082d72a0
+    ghidra: FUN_082d72a0
+    name: word_list_is_zero
+    size: 68
+    sig: "i32 word_list_is_zero(const WordList *list)"
+    module: util/word_list_is_zero
+    status: ported
+    renames:
+      param_1: list
+      iVar1: index
+      piVar2: entries
+    notes: >-
+      Raw extent is exactly 68 bytes at 0x082d72a0..0x082d72e0; the next
+      separately entered function starts at 0x082d72e4 with mov r2,r0 followed
+      by push {lr}. Decoding every ARM B/BL word in osos.dec found five plain
+      unconditional bl callers (0x080ec18c, 0x082b7974, 0x082ceb1c,
+      0x082d3e70, 0x0836940c), zero predicated bl callers, and no calls in this
+      leaf. It returns 1 when every word in the WordList's leading count slots
+      is zero (including count zero), otherwise 0 at the first nonzero word.
+      The entries pointer is loaded only after the count-zero test, so empty
+      lists do not dereference it. No deliberate deviations.
   - address: 0x082d731c
     ghidra: FUN_082d731c
     name: isdigit
