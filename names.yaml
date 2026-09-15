@@ -92560,3 +92560,41 @@ functions:
       0x08211ed4; none are predicated. Host tests cover first-match ordering
       and independent rejection of either mismatched word. No deliberate
       deviations.
+
+  # --- registration-handle current-record status wrapper ---
+  - address: 0x0820d598
+    ghidra: FUN_0820d598
+    name: registration_handle_current_status_is_nonzero
+    size: 84
+    sig: "i32 registration_handle_current_status_is_nonzero(void *const *context_source, u32 selector_first, u32 selector_second)"
+    module: app/registration_handle_current_status
+    status: ported
+    renames:
+      param_1/r0: context_source
+      param_1_deref: context
+      param_2/r1/r2: selector_first
+      param_3/r2/r3: selector_second
+      local_sp: registration_handle_wrapper
+      FUN_081c877c: registration_handle_wrapper_init
+      FUN_0829dd28: current_record_handle_from_owner
+      FUN_081c87c4: registration_handle_wrapper_destroy
+      "vtable_plus_0x28": current_record_status
+    notes: >-
+      Raw osos.dec confirms exactly 84 code bytes from the push at 0x0820d598
+      through the pop at 0x0820d5e8; the separately linked next function
+      begins at 0x0820d5ec. The body loads context from context_source+0,
+      initializes a stack wrapper with that context and both selector words,
+      obtains its current record target, and returns
+      zero only when that target is non-NULL and its vtable+0x28 method returns
+      zero. It always destroys the wrapper before returning. The vtable method
+      has no recovered identity beyond this status result. Whole-image ARM
+      B/BL-immediate decoding finds five inbound plain unconditional bl calls
+      at 0x0820cfd0, 0x0820d17c, 0x0820d470, 0x0820d558, and 0x0820d658; there
+      are zero predicated direct bl forms. The function body has three direct
+      unconditional bl instructions and one dynamic blx through vtable+0x28.
+      Deliberate host deviation: widened host owner pointers prevent the
+      target-width current-record cursor accessor from addressing the wrapper,
+      so host code calculates the identical owner + slot*0x14 + 4 target word
+      through named fields. Firmware builds use the existing raw-layout
+      accessor. Host tests cover absent records, selector preservation on the
+      absent path, and zero versus nonzero virtual status results.
