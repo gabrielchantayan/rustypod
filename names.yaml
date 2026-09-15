@@ -69901,6 +69901,38 @@ functions:
       0x081d760c, 0x081f2e90, and 0x081f2f54 — all unconditional plain BL,
       with no predicated forms or tail branches. Deliberate deviations: none.
 
+
+  - address: 0x081941b8
+    ghidra: FUN_081941b8
+    name: service_manager_handler_group_for_slot
+    size: 64
+    sig: "u32 service_manager_handler_group_for_slot(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      iVar2/r3: handler_group
+      iVar1/r2: candidate_group
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x081941b8..0x081941f8: `cmp r1,#13; blge
+      0x08030f44; mov ip,#1; mov r1,ip,lsl r1; mov r3,#0; mov r2,#0; ldr
+      ip,[r0,r2,lsl #5]; tst ip,r1; movne r3,r2; add r2,r2,#1; cmp r2,#3;
+      bge 0x081941ec; cmp r3,#0; beq 0x081941d0; mov r0,r3; bx lr`.
+      0x081941f8 begins the next separately linked function (`cmp r1,#13`).
+      It scans the flags word of three eight-word primary handler records
+      and returns the first matching nonzero group; group zero is the default
+      and fallback, so its match does not stop the scan. The signed guard
+      permits negative slots. The ARM register shift uses the low byte and
+      yields zero for shift counts >=32, retained by the Rust port rather
+      than using Rust's modulo-32 wrapping behavior. Decoding every ARM B/BL
+      word in osos.dec found exactly five inbound direct call sites:
+      0x0818fa68, 0x081910e4, 0x081aa180, 0x08200efc, and 0x082090f4; all
+      are unconditional plain BL, with no predicated BL forms or tail
+      branches. Deliberate deviations: none. Host coverage proves the
+      group-zero fallback, group-one priority, group-two fallback, no-match,
+      and negative-slot register-shift cases.
   - address: 0x0819420c
     ghidra: FUN_0819420c
     name: service_manager_slot_flags_or
