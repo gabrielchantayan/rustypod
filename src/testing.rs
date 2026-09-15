@@ -480,6 +480,10 @@ pub mod hints {
     // expression-node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CG_EXPRESSION_DEPENDENCY_MASK: usize = 0xd400_0000;
+    // 0xd500_0000: dedicated to codegen/expression_collection_dependency_mask's
+    // raw-u32 collection, entry, expression-node, and context fixture;
+    // mappings never unmap, so no other user may share this hint.
+    pub const CG_EXPRESSION_COLLECTION_DEPENDENCY_MASK: usize = 0xd500_0000;
     // 0x8400_0000: dedicated to util/fixed_matrix_cursor's raw-u32 base
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const FIXED_MATRIX_CURSOR: usize = 0x8400_0000;

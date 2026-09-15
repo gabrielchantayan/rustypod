@@ -76884,6 +76884,33 @@ functions:
       data-cluster mapping, strict limit rejection, addition wraparound, and
       the >=32 shift rule.
 
+  - address: 0x082cd8c4
+    ghidra: FUN_082cd8c4
+    name: cg_expression_collection_dependency_mask
+    size: 88
+    sig: "u64 cg_expression_collection_dependency_mask(const u32 *context, const u8 *collection)"
+    module: codegen/expression_collection_dependency_mask
+    status: ported
+    renames:
+      param_1/r8: context
+      param_2/r5: collection
+      "collection+0x00": entry_count
+      "collection+0x0c": entries
+      "entry+0x00": expression_node
+      r6:r7: accumulated_mask
+    notes: >-
+      Raw osos.dec extent is exactly 88 code bytes from 0x082cd8c4 through
+      pop {r4-r8,pc} at 0x082cd918; the next separately linked function
+      starts at 0x082cd91c. Decoding the body finds one plain unconditional bl
+      at 0x082cd8f4 to FUN_082cda48. Decoding all ARM B/BL immediates finds
+      five direct callers, all plain unconditional bl forms, with zero
+      predicated bl forms. NULL returns zero. Otherwise it reads a signed
+      count at collection+0x00 and, while index < count, follows
+      collection+0x0c to a 12-byte-stride entry array, resolves each entry's
+      first word through FUN_082cda48(context, expression_node), and ORs both
+      mask halves. Non-positive counts do not dereference the entry array. No
+      deliberate deviations; target pointer fields are read as u32 words.
+
   - address: 0x082cda48
     ghidra: FUN_082cda48
     name: cg_expression_dependency_mask

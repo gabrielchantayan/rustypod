@@ -22,6 +22,9 @@ pub mod arm_immediate_rotation;
 /// address block (0x082c5dxx), one function away from `se(v)` @
 /// 0x082c5dcc, and is ported under the same `cg_*` roof.
 pub mod exp_golomb;
+/// `cg_expression_collection_dependency_mask` @ 0x082cd8c4 — ORs the
+/// dependency masks of a counted collection's 12-byte expression entries.
+pub mod expression_collection_dependency_mask;
 /// `cg_expression_dependency_mask` @ 0x082cda48 — recursively combines
 /// an opaque expression node's two child and two collection dependency masks.
 pub mod expression_dependency_mask;
