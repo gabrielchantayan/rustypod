@@ -95170,3 +95170,34 @@ functions:
       established identity, so the device seam retains its verified address
       rather than assigning one; host gateway and dispatcher seams record
       observable ordering without attempting to execute retailOS.
+  - address: 0x080f9de0
+    ghidra: FUN_080f9de0
+    name: resource_range_validate_position
+    size: 104
+    sig: "void resource_range_validate_position(u8 *out, ResourceRangeCursor *cursor, u32 start, u32 count)"
+    module: app/resource_range_validate_position
+    status: ported
+    renames:
+      param_1: out
+      param_2: cursor
+      param_3: start
+      param_4: count
+      "cursor->vtable+0x28": position
+    notes: >-
+      Raw ARM establishes the exact 104-byte extent 0x080f9de0..0x080f9e48:
+      26 instruction words and no literal pool; the push at 0x080f9e48
+      starts the next real function. Whole-image raw-B/BL decoding finds five
+      inbound plain unconditional bl sites at 0x080f8dc4, 0x080f94f0,
+      0x080f9c6c, 0x080fa5b0, and 0x080fc274; no predicated inbound bl forms.
+      The body clears the four-byte parser result through parse_result_init
+      (0x08283168), invokes cursor vtable slot +0x28 with cursor in r0, adds
+      one to the returned u32, and accepts exactly start < position+1 <=
+      start+count without unsigned overflow. It writes parser error {2, 5,
+      0x2100} through the byte-identical initializer at 0x08283134 for an
+      outside position or wrapped end. The slot target's concrete identity is
+      not established: it stays an inline vtable dispatch, not an invented
+      seam. Internal call decode: one plain unconditional bl, zero predicated
+      bl, one blx virtual call, and one tail b. Rust deliberately calls the
+      canonical parse_result_init for both record writes because 0x08283134
+      has the same verified strb/strb/strh body. Host tests cover interior,
+      both boundaries, empty, and wrapping ranges.
