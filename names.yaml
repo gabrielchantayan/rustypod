@@ -94322,3 +94322,33 @@ functions:
       ported. Host test covers fifth-argument forwarding, use of the base
       return rather than entry storage, literal placement, and the +0x30
       target-width addon-pointer store.
+
+  # --- UI collection first-item field ---
+  - address: 0x081476dc
+    ghidra: FUN_081476dc
+    name: ui_collection_first_item_word_at_1c
+    size: 40
+    sig: "u32 ui_collection_first_item_word_at_1c(void *owner)"
+    module: ui/collection_first_item_word_at_1c
+    status: ported
+    renames:
+      param_1/r0: owner
+      r0_after_ldr_owner_plus_0xa4: collection
+      r1: collection_count
+      FUN_083d5f5c: collection_item_at (unported; identity unresolved)
+      r0_after_call: first_item
+    notes: >-
+      Raw words establish exactly ten instructions from 0x081476dc through
+      0x08147700: push {r4,lr}; load owner+0xa4; test collection+0x04; return
+      -1 through mvneq/popeq when empty; otherwise call 0x083d5f5c with index
+      zero and return item+0x1c. The next separately entered function begins
+      at 0x08147704, so the true extent is 40 bytes. Whole-image decoding of
+      every ARM B/BL immediate finds five inbound calls at 0x081a1bb0,
+      0x081a1c54, 0x081a1dbc, 0x081a1e20, and 0x081a1e88; all are plain
+      unconditional BL, with zero predicated BL forms. 0x083d5f5c has no
+      names.yaml identity; its raw body invokes vtable slot +0x40 and
+      dereferences the result. The port keeps that exact ABI as a volatile
+      dispatch seam, calling its retail address on target and replacing it in
+      host tests. match.py confirms the collection load, count gate, index-0
+      dispatch, and item +0x1c load; the deliberate codegen deviation is the
+      seam load and blx versus the retail direct BL.
