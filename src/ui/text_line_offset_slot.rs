@@ -24,7 +24,7 @@
 #[repr(C)]
 pub struct TextLineOffsetLayout {
     pub line_base: u32,
-    _word_at_4: u32,
+    pub _word_at_4: u32,
     pub offset_record: u32,
 }
 
