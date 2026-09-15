@@ -188,6 +188,34 @@ pub unsafe extern "C" fn heap_string_format(
     length
 }
 
+/// heap_string_construct_from_cstr — original: `FUN_0810b634` @ 0x0810b634
+/// (32 bytes, words `e92d4010 e1a04000 e3a00000 e5840000 e1a00004 ebffffb1
+/// e1a00004 e8bd8010`). The next real function starts at 0x0810b654 with
+/// `stmdb sp!,{r4,lr}`, confirming the extent. **5 plain `bl` call sites and
+/// zero predicated `bl` forms**, independently verified by decoding every ARM
+/// branch word in `osos.dec`; all five target this entry directly.
+///
+/// Initializes the one-word holder to NULL, then delegates the supplied C
+/// string to stock `HeapString::assign_from_cstr` @ 0x0810b514. It returns
+/// `this` after the assignment, even if the stock allocator leaves it empty.
+/// There is no NULL guard: the initial store faults exactly as retailOS does.
+///
+/// Deviation: the stock assignment method remains the established device
+/// absolute-entry seam; host tests install its recorder rather than executing
+/// the iPod load address.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_construct_from_cstr(
+    this: *mut HeapString,
+    source: *const u8,
+) -> *mut HeapString {
+    (*this).data = core::ptr::null_mut();
+    heap_string_assign_from_cstr(this, source);
+    this
+}
+
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -207,6 +235,7 @@ mod tests {
     static mut FORMAT_ENGINE_CALL: Option<(usize, usize, usize, usize, usize)> = None;
     static mut ASSIGN_THIS: *mut HeapString = core::ptr::null_mut();
     static mut ASSIGNED_BYTES: Vec<u8> = Vec::new();
+    static mut ASSIGN_DATA_AT_CALL: *mut u8 = core::ptr::null_mut();
 
     unsafe extern "C" fn recording_format_engine(
         sink: usize,
@@ -240,6 +269,7 @@ mod tests {
             len += 1;
         }
         core::ptr::addr_of_mut!(ASSIGN_THIS).write(this);
+        core::ptr::addr_of_mut!(ASSIGN_DATA_AT_CALL).write((*this).data);
         core::ptr::addr_of_mut!(ASSIGNED_BYTES)
             .write(core::slice::from_raw_parts(source, len + 1).to_vec());
     }
@@ -277,6 +307,8 @@ mod tests {
             core::ptr::addr_of_mut!(FORMAT_ENGINE_CALL).write(None);
             core::ptr::addr_of_mut!(ASSIGN_THIS).write(core::ptr::null_mut());
             core::ptr::addr_of_mut!(ASSIGNED_BYTES).write(Vec::new());
+            core::ptr::addr_of_mut!(ASSIGN_DATA_AT_CALL).write(core::ptr::null_mut());
+
             core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE).write_volatile(recording_format_engine);
             core::ptr::addr_of_mut!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST)
                 .write_volatile(recording_assign_from_cstr);
@@ -321,6 +353,25 @@ mod tests {
             0
         );
         assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() }, [0]);
+    }
+
+    /// Construction clears the holder before forwarding the unchanged source
+    /// to the stock assignment method, then returns the original holder.
+    #[test]
+    fn construct_from_cstr_clears_before_assigning_and_returns_holder() {
+        let mut holder = HeapString { data: 0xdead_beefusize as *mut u8 };
+        let source = b"OTGPlaylistInfo\0";
+        let _bench = format_bench(0, 0, 0);
+
+        let result = unsafe { heap_string_construct_from_cstr(&mut holder, source.as_ptr()) };
+
+        assert_eq!(result, &mut holder as *mut HeapString);
+        assert_eq!(unsafe { *core::ptr::addr_of!(ASSIGN_THIS) }, &mut holder as *mut HeapString);
+        assert_eq!(unsafe { *core::ptr::addr_of!(ASSIGN_DATA_AT_CALL) }, core::ptr::null_mut());
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() },
+            source
+        );
     }
 
     /// A live holder releases exactly its payload with tag 0x14, then clears
