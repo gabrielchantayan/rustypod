@@ -57,6 +57,8 @@ pub mod error_status;
 pub mod block_window;
 /// Block-size alignment check and opaque storage-backend transfer @ 0x08077444.
 pub mod storage_transfer;
+/// Opaque storage-backend dispatch through vtable slot three @ 0x08149e10.
+pub mod storage_backend_transfer;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
 /// Mounted-volume descriptor cursor seek wrapper @ 0x082e628c.
