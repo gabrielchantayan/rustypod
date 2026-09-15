@@ -1088,6 +1088,10 @@ pub mod hints {
     // 0x5f00_0000: dedicated to app/pending_object_release's raw-u32 pending-
     // object fixture; mappings never unmap, so no other user may share it.
     pub const PENDING_OBJECT_RELEASE: usize = 0x5f00_0000;
+    // 0xdf00_0000: dedicated to app/controller_candidate_notify's raw-u32
+    // controller, candidate, and notification-target fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const CONTROLLER_CANDIDATE_NOTIFY: usize = 0xdf00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

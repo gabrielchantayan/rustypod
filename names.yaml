@@ -93660,3 +93660,37 @@ functions:
       above-range, and u32::MAX rejection. match.py reports LLVM's compact
       subtract/range-check sequence rather than retail's four compare/early
       return chains. Deliberate deviations: none.
+
+  # --- controller candidate notification policy ---
+  - address: 0x0817ef14
+    ghidra: FUN_0817ef14
+    name: controller_candidate_notify
+    size: 212
+    sig: "u32 controller_candidate_notify(void *controller, void *input, u32 mode)"
+    module: app/controller_candidate_notify
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: input
+      param_3/r2: mode
+      FUN_08275b9c: object_cast_to_class
+    notes: >-
+      Raw osos.dec establishes the exact 212-byte extent
+      0x0817ef14..0x0817efe8; the next separately linked function begins
+      with push {r4-r8,lr} at 0x0817efe8. The body contains five
+      unconditional calls (three BL and two BLX) plus one predicated BLXEQ:
+      input vtable +0xe8 starts the candidate chain; each candidate that
+      object_cast_to_class accepts as 0x1100 advances through its +0x120
+      virtual parent accessor. The terminal candidate is cast as 0x3b80;
+      a NULL cast or nonzero +0x160 predicate permits the final comparison
+      of candidate +0x34 against controller +0x38. A mismatch returns one
+      and, only when mode is zero, calls the controller +0x34 object's
+      +0x1e8 notification slot; every other path returns zero. Host tests
+      use a low 32-bit fixture and dispatch seams to prove parent traversal,
+      mode-zero notification, and the missing-initial-candidate rejection.
+      match.py structural review completed: LLVM uses a different register
+      allocation and loop layout, while preserving the virtual-call order,
+      class ids, offsets, and predicated notification condition. Deliberate
+      deviation: host builds replace target-width vtable and cast dispatch
+      with test seams; device builds use volatile 32-bit fields and direct
+      object_cast_to_class.
