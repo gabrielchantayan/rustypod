@@ -1104,6 +1104,9 @@ pub mod hints {
     // controller, candidate, and notification-target fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const CONTROLLER_CANDIDATE_NOTIFY: usize = 0xdf00_0000;
+    // 0x3c00_0000: dedicated to util/growable_buffer_append's target-width
+    // buffer and data fixture; mappings never unmap, so no other user may share it.
+    pub const GROWABLE_BUFFER_APPEND: usize = 0x3c00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
