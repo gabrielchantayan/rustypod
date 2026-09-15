@@ -11,7 +11,7 @@
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
-//! | 0x0819420c | [`service_manager_slot_flags_or`] | 28 | 16 direct |
+//! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
 //! `work/firmware/osos.dec` by decoding every ARM `B`/`BL` word in the image
@@ -453,6 +453,90 @@ pub unsafe extern "C" fn service_handler_at(slot_table: *const u32, selector: i3
         heap_panic();
     }
     core::ptr::read(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize))
+}
+
+/// service_manager_handler_group_for_slot — original: `FUN_081941b8` @
+/// 0x081941b8 (64 bytes; 5 direct `bl` call sites).
+///
+/// Selects the first nonzero primary-handler group whose flags word contains
+/// `slot`'s bit. The three primary records are eight words apart; group zero
+/// is also the default, so a matching group-zero record continues scanning
+/// and can be superseded by group one or two. Raw ARM: `cmp r1,#13; blge
+/// 0x08030f44; mov ip,#1; mov r1,ip,lsl r1; mov r3,#0; mov r2,#0; ldr
+/// ip,[r0,r2,lsl #5]; tst ip,r1; movne r3,r2; add r2,r2,#1; cmp r2,#3;
+/// bge ...; cmp r3,#0; beq ...; mov r0,r3; bx lr`. The next function
+/// begins at 0x081941f8 (`cmp r1,#13`), confirming the 64-byte extent.
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly five inbound
+/// direct calls — 0x0818fa68, 0x081910e4, 0x081aa180, 0x08200efc, and
+/// 0x082090f4 — all unconditional plain `BL`; no predicated `BL` forms
+/// target it. The signed bounds check admits negative slots. ARM register
+/// shifts use the low byte and yield zero for counts at least 32; this port
+/// preserves that behavior rather than Rust's modulo-32 wrapping shift.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point at the first word of three aligned, eight-word
+/// primary handler records.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_manager_handler_group_for_slot")]
+pub unsafe extern "C" fn service_manager_handler_group_for_slot(
+    slot_table: *const u32,
+    slot: i32,
+) -> u32 {
+    if slot >= 13 {
+        heap_panic();
+    }
+
+    let shift = (slot as u32 & 0xff) as u32;
+    let slot_mask = if shift < 32 { 1u32 << shift } else { 0 };
+    let mut group = 0u32;
+    for candidate in 0..3usize {
+        if core::ptr::read_volatile(slot_table.add(candidate * 8)) & slot_mask != 0 {
+            group = candidate as u32;
+        }
+        if group != 0 {
+            break;
+        }
+    }
+    group
+}
+
+#[cfg(test)]
+mod handler_group_for_slot_tests {
+    extern crate std;
+    use super::*;
+
+    #[test]
+    fn selects_the_first_nonzero_matching_group_with_group_zero_as_fallback() {
+        let mut table = [0u32; 24];
+        table[0] = 1 << 6;
+        table[8] = 1 << 4;
+        table[16] = 1 << 4;
+
+        unsafe {
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), 6), 0);
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), 4), 1);
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), 5), 0);
+
+            table[8] = 0;
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), 4), 2);
+        }
+    }
+
+    #[test]
+    fn preserves_arm_register_shift_behavior_for_negative_slots() {
+        let mut table = [0u32; 24];
+        table[8] = 1;
+
+        unsafe {
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), -256), 1);
+            assert_eq!(service_manager_handler_group_for_slot(table.as_ptr(), -1), 0);
+        }
+    }
 }
 
 /// service_manager_slot_flags_or — original: `FUN_0819420c` @ 0x0819420c
