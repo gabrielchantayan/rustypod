@@ -78006,6 +78006,42 @@ functions:
       guard and no callee. No deliberate deviations. Host tests cover the
       first entry, a later entry, and 32-bit address wraparound.
 
+  # --- Queue completion ---
+  - address: 0x0822b5e0
+    ghidra: FUN_0822b5e0
+    name: queue_complete
+    size: 140
+    sig: "u32 queue_complete(void *state)"
+    module: app/queue_complete
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x14": request_interface
+      "state+0x24": request_flags
+      FUN_0822ab50: completion_gate (unported fixed-address seam)
+      FUN_0822aecc: mode_selected_position
+      FUN_0822ba50: mode_selected_position_set
+      FUN_0822b020: queue_operation (unported fixed-address seam)
+      FUN_082143e8: release_check (unported fixed-address seam)
+      FUN_081f0530: list_cursor_release
+    notes: >-
+      Raw osos.dec confirms the exact 140-byte extent from 0x0822b5e0 through
+      0x0822b668; the next separately linked function begins at 0x0822b66c.
+      Its five inbound direct bl calls are all predicated blne at 0x081b6fd8,
+      0x081cc958, 0x081cca8c, 0x081cce88, and 0x081cd000; there are zero
+      unconditional inbound bl calls. The body contains five unconditional bl
+      instructions and one predicated bleq. A NULL request_interface or clear
+      request_flags bit 0 returns zero. Otherwise a zero completion-gate result
+      returns one. A passed gate obtains the selected position; u32::MAX is
+      replaced with zero, otherwise it is read a second time, then passed as
+      (state, 1, position) to the selected-position setter. A nonzero queue
+      operation result and zero release check release request_interface.
+      Unported fixed-address callees use replaceable host seams; target builds
+      preserve their addresses. The position getter, setter, and cursor release
+      call their existing ports. Host tests cover blocked requests, the unique
+      nonzero result, selected position forwarding, release suppression, and
+      the u32::MAX sentinel.
+
   # --- Mode-selected state byte ---
   - address: 0x0822b684
     ghidra: FUN_0822b684
