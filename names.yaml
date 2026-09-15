@@ -92671,3 +92671,27 @@ functions:
       through named fields. Firmware builds use the existing raw-layout
       accessor. Host tests cover absent records, selector preservation on the
       absent path, and zero versus nonzero virtual status results.
+
+  # --- pool deque begin cursor setter ---
+  - address: 0x081fbf78
+    ghidra: FUN_081fbf78
+    name: pool_deque_begin_cursor_set
+    size: 8
+    sig: "void pool_deque_begin_cursor_set(PoolBase *this, u32 cursor)"
+    module: heap/pool_deque_begin_cursor
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: cursor
+      "this_plus_0x4c": deque.begin.cur
+    notes: >-
+      Raw osos.dec words at 0x081fbf78 are e580104c and e12fff1e:
+      `str r1,[r0,#0x4c]` followed by `bx lr`. The next independent body
+      begins at 0x081fbf80, so the true extent is eight bytes. Five inbound
+      direct BL call sites are reported; the recovered callers use this word
+      as a u32 cursor. The port writes PoolBase.deque.begin.cur through its
+      named target-layout field, casting the target word to the recovered
+      pointer representation. There is no NULL check, matching firmware.
+      match.py confirms the target store; LLVM adds its standard fp/lr
+      prologue and epilogue. Host tests cover zero, one, high-bit, and all-one
+      cursor values while proving adjacent iterator words are unchanged.
