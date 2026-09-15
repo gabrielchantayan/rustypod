@@ -73,6 +73,7 @@ pub mod object_candidate_payload_resolve;
 pub mod nested_container_item_count;
 pub mod resource_list;
 pub mod pascal_string;
+pub mod paletted_image_copy;
 pub mod parse_ascii_decimal_cursor;
 pub mod plane_cursor;
 pub mod q15_mul;

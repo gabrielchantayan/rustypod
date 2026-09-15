@@ -94352,3 +94352,35 @@ functions:
       host tests. match.py confirms the collection load, count gate, index-0
       dispatch, and item +0x1c load; the deliberate codegen deviation is the
       seam load and blx versus the retail direct BL.
+  # --- 0x1888 paletted image copier ---
+  - address: 0x08144730
+    ghidra: FUN_08144730
+    name: paletted_image_copy
+    size: 220
+    sig: "void paletted_image_copy(u32 unused, u32 mode, const u32 *source, u32 *destination, u32 first_row, u32 end_row)"
+    module: util/paletted_image_copy
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: mode
+      param_3/r2: source
+      param_4/r3: destination
+      param_5/stack: first_row
+      param_6/stack: end_row
+      r7: row
+      r0: column
+      r12: pixel
+    notes: >-
+      Raw osos.dec establishes the 220-byte body at 0x08144730..0x0814480b:
+      55 ARM words through the final bx lr, followed by the 0x00000708
+      literal-pool word; the next function begins at 0x08144810. The two
+      loops copy source columns 6..153 from 160-word rows and OR each word
+      with 0xff000000. Modes 2 and 3 use the rotated 180-word destination
+      layout; all other modes use the linear layout based at word 450. An
+      aligned B/BL-immediate decode finds five direct inbound calls, all plain
+      unconditional bl and no predicated bl. Host tests cover both layouts,
+      alpha forcing, interior-column bounds, and signed empty ranges. match.py
+      structural review was completed; its nonzero result is a printed
+      structural diff, as expected for modern LLVM versus ARM ADS. Deliberate
+      deviation: volatile word accesses preserve the original per-pixel memory
+      order and prevent bulk-copy substitution.
