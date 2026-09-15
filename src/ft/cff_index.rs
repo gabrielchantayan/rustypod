@@ -5,7 +5,7 @@
 //! loader constructs five of these records and calls [`cff_index_done`] while
 //! unwinding a face.
 
-use crate::ft::stream::{ft_stream_release_frame, FtStream};
+use crate::ft::stream::{ft_stream_extract_frame, ft_stream_release_frame, ft_stream_seek, FtStream};
 use crate::ft::memory::ft_mem_free;
 use crate::libc::memzero::memzero_aligned;
 
@@ -121,6 +121,84 @@ pub unsafe extern "C" fn cff_index_forget_element(
     );
     release((*index).stream, pbytes);
 }
+/// cff_index_access_element (FreeType `cff_index_access_element`) — original:
+/// `FUN_080d3e9c` @ 0x080d3e9c (196 bytes,
+/// `0x080d3e9c..0x080d3f60`; `ldr r2,[r0,#0x14]` at 0x080d3f60 begins the
+/// next separately linked function). Two outbound plain BL calls (to
+/// `FT_Stream_Seek` and `FT_Stream_ExtractFrame`) and no predicated BL calls
+/// are verified by decoding every ARM branch word in `osos.dec`; the three
+/// `bls` encodings branch locally and do not write LR.
+///
+/// Locates an INDEX element's first following nonzero offset, skipping empty
+/// elements. A pre-extracted index returns its byte address directly; otherwise
+/// it seeks to the element and extracts a stream frame. A null index or an
+/// out-of-range element returns `FT_Err_Invalid_Argument` (6) without writing
+/// either output; an absent or malformed successor clears both outputs.
+///
+/// Deliberate deviation: retail uses direct BL instructions. Volatile loads
+/// retain the existing Rust stream seams and prevent LLVM from folding either
+/// callee into this required callable target.
+///
+/// # Safety
+/// `index`, `pbytes`, and `pbyte_len` must be valid where the corresponding
+/// ARM path dereferences them. `offsets` has at least `count + 1` words, and
+/// the stream must satisfy the existing seek/extract contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_index_access_element(
+    index: *mut CffIndex,
+    element: u32,
+    pbytes: *mut *mut u8,
+    pbyte_len: *mut u32,
+) -> i32 {
+    if index.is_null() || (*index).count <= element {
+        return 6;
+    }
+
+    let first_offset = (*index).offsets.add(element as usize).read();
+    if first_offset != 0 {
+        let mut next_element = element;
+        loop {
+            next_element = next_element.wrapping_add(1);
+            let next_offset = (*index).offsets.add(next_element as usize).read();
+            if next_offset != 0 {
+                if first_offset < next_offset {
+                    let byte_len = next_offset.wrapping_sub(first_offset);
+                    pbyte_len.write(byte_len);
+                    if !(*index).bytes.is_null() {
+                        pbytes.write((*index).bytes.add(first_offset as usize - 1));
+                        return 0;
+                    }
+
+                    let seek = core::ptr::read_volatile(
+                        &(ft_stream_seek as unsafe extern "C" fn(*mut FtStream, u32) -> i32),
+                    );
+                    let error = seek(
+                        (*index).stream,
+                        (*index).data_offset.wrapping_add(first_offset).wrapping_sub(1),
+                    );
+                    if error != 0 {
+                        return error;
+                    }
+                    let extract = core::ptr::read_volatile(
+                        &(ft_stream_extract_frame
+                            as unsafe extern "C" fn(*mut FtStream, u32, *mut *mut u8) -> i32),
+                    );
+                    return extract((*index).stream, byte_len, pbytes);
+                }
+                break;
+            }
+            if (*index).count <= next_element {
+                break;
+            }
+        }
+    }
+
+    pbytes.write(core::ptr::null_mut());
+    pbyte_len.write(0);
+    0
+}
+
 
 
 #[cfg(test)]
@@ -327,5 +405,73 @@ mod tests {
         assert_eq!(index.data_offset, 0x4455_6677);
         assert_eq!(index.offsets, offsets);
         assert_eq!(index.bytes, bytes);
+    }
+    #[test]
+    fn index_access_skips_empty_elements_and_preserves_invalid_outputs() {
+        let _guard = TEST_LOCK.lock();
+        let mut data = [0xa0u8, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7];
+        let mut offsets = [1u32, 0, 5, 9];
+        let mut memory = test_memory();
+        let mut stream = test_stream(&mut memory, None);
+        let mut index = CffIndex {
+            stream: &mut stream,
+            count: 3,
+            off_size: 1,
+            _padding: [0; 3],
+            data_offset: 0,
+            offsets: offsets.as_mut_ptr(),
+            bytes: data.as_mut_ptr(),
+        };
+        let mut bytes = 0x1234usize as *mut u8;
+        let mut byte_len = 0x5678_9abc;
+
+        unsafe {
+            assert_eq!(cff_index_access_element(ptr::null_mut(), 0, &mut bytes, &mut byte_len), 6);
+            assert_eq!(cff_index_access_element(&mut index, 3, &mut bytes, &mut byte_len), 6);
+        }
+        assert_eq!(bytes as usize, 0x1234);
+        assert_eq!(byte_len, 0x5678_9abc);
+
+        assert_eq!(unsafe { cff_index_access_element(&mut index, 0, &mut bytes, &mut byte_len) }, 0);
+        assert_eq!(bytes, unsafe { data.as_mut_ptr().add(0) });
+        assert_eq!(byte_len, 4);
+
+        offsets[0] = 0;
+        assert_eq!(unsafe { cff_index_access_element(&mut index, 0, &mut bytes, &mut byte_len) }, 0);
+        assert!(bytes.is_null());
+        assert_eq!(byte_len, 0);
+    }
+
+    #[test]
+    fn index_access_extracts_memory_frames_and_retains_length_on_seek_failure() {
+        let _guard = TEST_LOCK.lock();
+        let mut data = [0xa0u8, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5];
+        let mut offsets = [1u32, 3];
+        let mut memory = test_memory();
+        let mut stream = test_stream(&mut memory, None);
+        stream.base = data.as_mut_ptr();
+        stream.size = data.len() as u32;
+        let mut index = CffIndex {
+            stream: &mut stream,
+            count: 1,
+            off_size: 1,
+            _padding: [0; 3],
+            data_offset: 2,
+            offsets: offsets.as_mut_ptr(),
+            bytes: ptr::null_mut(),
+        };
+        let mut bytes = ptr::null_mut();
+        let mut byte_len = 0;
+
+        assert_eq!(unsafe { cff_index_access_element(&mut index, 0, &mut bytes, &mut byte_len) }, 0);
+        assert_eq!(bytes, unsafe { data.as_mut_ptr().add(2) });
+        assert_eq!(byte_len, 2);
+        assert_eq!(stream.pos, 4);
+
+        index.data_offset = 6;
+        bytes = 0x9876usize as *mut u8;
+        assert_eq!(unsafe { cff_index_access_element(&mut index, 0, &mut bytes, &mut byte_len) }, 0x55);
+        assert_eq!(byte_len, 2);
+        assert_eq!(bytes as usize, 0x9876);
     }
 }
