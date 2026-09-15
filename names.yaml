@@ -39827,6 +39827,37 @@ functions:
       ABI forwarding, return pointer, pool and clear ordering, and absent
       +4 zero-fill. match.py structural review is expected to differ at the
       operations seam's indirect call.
+  - address: 0x0810b29c
+    ghidra: FUN_0810b29c
+    name: view_pair_header_construct
+    size: 60
+    sig: "ViewPairHeader *view_pair_header_construct(ViewPairHeader *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/view_base
+    status: ported
+    renames:
+      param_1/r4: view
+      param_2/r1: resources
+      param_3/r2: controller
+      param_4/r3: parent
+      param_5/stack: spec
+      iVar1/r0: pair_header
+    notes: >-
+      Structural name: this 0x164-byte intermediate class is the common base
+      between ViewBase and the styled-text and alternate derived views. Raw
+      ARM is 14 instructions at 0x0810b29c..0x0810b2d0 plus the vtable
+      literal 0x08980c98 at 0x0810b2d4; 0x0810b2d8 begins the next distinct
+      function, making the true extent 60 bytes rather than Ghidra's
+      code-only 56. Decoding every B/BL word in osos.dec finds five direct
+      unconditional bl callers and no predicated bl callers. It forwards all
+      five ABI arguments to ported view_base_construct, stores its own vtable
+      at +0xa4, invokes ported pair_header_base_construct there, clears
+      ViewBase byte +0xa1 and trailing word +0x15c, then returns view. The
+      Rust port retains the original view pointer rather than subtracting
+      +0xa4 from the returned subobject pointer, avoiding target-offset
+      arithmetic on 64-bit host pointers while preserving the verified
+      return contract. Host coverage proves both constructor calls, vtables,
+      local clears, padding preservation, and return identity.
+
   - address: 0x0810ea18
     ghidra: FUN_0810ea18
     name: pair_header_base_construct_with_payload

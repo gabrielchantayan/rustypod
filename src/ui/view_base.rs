@@ -662,6 +662,64 @@ pub unsafe extern "C" fn view_base_construct(
     view
 }
 
+/// The 0x15c-byte intermediate view class built between [`ViewBase`] and
+/// concrete widgets such as [`crate::ui::styled_text_view::StyledTextView`].
+#[repr(C)]
+pub struct ViewPairHeader {
+    pub view: ViewBase,
+    pair_header: [u32; 0xb8 / 4],
+    trailing_word: u32,
+    padding: [u8; 4],
+}
+
+const _: [u8; 0x164] = [0; core::mem::size_of::<ViewPairHeader>()];
+
+
+/// view_pair_header_construct — original: `FUN_0810b29c` @ 0x0810b29c
+/// (60 bytes: 56 code through `ldmia sp!, {r3, pc}` @ 0x0810b2d0 plus its
+/// vtable literal 0x08980c98 @ 0x0810b2d4; the next distinct function begins
+/// at 0x0810b2d8). A full-image ARM B/BL-word decode finds 5 direct call
+/// sites: 5 unconditional `bl` and no predicated `bl`.
+///
+/// Constructs the 0xa4-byte [`ViewBase`], plants this intermediate class's
+/// vtable at +0xa4, constructs its 0xb8-byte PairHeaderBase subobject, then
+/// clears the inherited byte at +0xa1 and its trailing word at +0x15c.
+/// Returns `view`.
+///
+/// Deliberate deviation: the ARM code recovers `view` by subtracting 0xa4
+/// from PairHeaderBase's returned subobject pointer. Both ported constructors
+/// return their input, so this port retains `view`; that preserves the target
+/// dataflow without applying target byte offsets to wider host pointers.
+///
+/// # Safety
+///
+/// `view` must point to writable, 4-byte-aligned [`ViewPairHeader`] storage,
+/// `spec` to a readable [`ViewSpec`], and the installed [`VIEW_BASE_OPS`] must
+/// accept its arguments.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn view_pair_header_construct(
+    view: *mut ViewPairHeader,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ViewPairHeader {
+    crate::ui::view_base::view_base_construct(
+        core::ptr::addr_of_mut!((*view).view),
+        resources,
+        controller,
+        parent,
+        spec,
+    );
+    let pair_header = core::ptr::addr_of_mut!((*view).pair_header);
+    pair_header.cast::<u32>().write(0x0898_0c98);
+    crate::cxx::pair_header::pair_header_base_construct(pair_header.cast());
+    core::ptr::addr_of_mut!((*view).trailing_word).write(0);
+    core::ptr::addr_of_mut!((*view).view.padding_after_byte_a0[0]).write(0);
+    view
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -865,6 +923,34 @@ mod tests {
         assert_eq!(core::mem::size_of::<ViewSpec>(), 0x5c);
         assert_eq!(core::mem::align_of::<ViewBase>(), 4);
         assert_eq!(core::mem::align_of::<ViewSpec>(), 4);
+    }
+
+    #[test]
+    fn pair_header_constructs_bases_vtable_and_local_clears() {
+        let Some(fixture) = Fixture::map(recording_ops()) else {
+            assert!(unavailable());
+            return;
+        };
+        unsafe {
+            (*(&raw mut CALL_LOG)).clear();
+            fill_spec(fixture.spec(), 1, 0x5858_5858);
+            let pair = fixture.slab.cast::<ViewPairHeader>();
+            let result = view_pair_header_construct(
+                pair,
+                fixture.resources(),
+                fixture.controller(),
+                fixture.parent(),
+                fixture.spec(),
+            );
+
+            assert_eq!(result, pair);
+            assert_eq!((*pair).view.padding_after_byte_a0[0], 0);
+            assert_eq!((*pair).pair_header[0], 0x0898_1630);
+            assert_eq!((*pair).view.byte_a0, 0);
+            assert_eq!((*pair).trailing_word, 0);
+            assert_eq!((*pair).padding, [0xa5; 4], "the final padding is untouched");
+            assert_eq!(*(&raw const CALL_LOG), ["linkage", "initialize"]);
+        }
     }
 
     #[test]
