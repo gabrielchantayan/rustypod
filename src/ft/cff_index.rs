@@ -5,8 +5,8 @@
 //! loader constructs five of these records and calls [`cff_index_done`] while
 //! unwinding a face.
 
-use crate::ft::memory::ft_mem_free;
 use crate::ft::stream::{ft_stream_release_frame, FtStream};
+use crate::ft::memory::ft_mem_free;
 use crate::libc::memzero::memzero_aligned;
 
 /// `CFF_IndexRec` as used by this retailOS build.  The index reader at
@@ -85,6 +85,43 @@ pub unsafe extern "C" fn cff_index_done(index: *mut CffIndex) {
     );
     zero(index.cast(), core::mem::size_of::<CffIndex>());
 }
+/// cff_index_forget_element (FreeType `cff_index_forget_element`, cffload.c)
+/// — original: `FUN_080d3f60` @ 0x080d3f60 (20 bytes,
+/// `0x080d3f60..0x080d3f74`; `push {r4-r7,lr}` at 0x080d3f74 begins the
+/// next separately linked function). Five inbound direct `bl` calls are
+/// verified from the raw ARM image; all are unconditional and none predicated.
+///
+/// An index backed by an extracted frame (`index->bytes != NULL`) retains the
+/// supplied element pointer. Otherwise this tail-calls
+/// [`ft_stream_release_frame`] with the index stream and pointer slot, which
+/// returns a disk-stream allocation or simply forgets a memory-stream frame.
+/// The release routine clears the slot in either case.
+///
+/// Deliberate deviation: the retail body tail-branches directly to
+/// `ft_stream_release_frame` @ 0x0804fcb8. The volatile function-pointer load
+/// retains the existing Rust seam instead of allowing LLVM to inline its
+/// release logic.
+///
+/// # Safety
+/// `index` and `pbytes` must be valid. When `index->bytes` is null,
+/// `index->stream` and the pointer slot must satisfy
+/// [`ft_stream_release_frame`]'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_index_forget_element(
+    index: *mut CffIndex,
+    pbytes: *mut *mut u8,
+) {
+    if !(*index).bytes.is_null() {
+        return;
+    }
+
+    let release = core::ptr::read_volatile(
+        &(ft_stream_release_frame as unsafe extern "C" fn(*mut FtStream, *mut *mut u8)),
+    );
+    release((*index).stream, pbytes);
+}
+
 
 #[cfg(test)]
 extern crate std;
@@ -147,6 +184,48 @@ mod tests {
             cursor: ptr::null_mut(),
             limit: ptr::null_mut(),
         }
+    }
+
+    #[test]
+    fn index_forget_element_releases_only_unextracted_frames() {
+        let _guard = TEST_LOCK.lock();
+        FREE_COUNT.store(0, Ordering::SeqCst);
+        FIRST_FREE.store(0, Ordering::SeqCst);
+
+        unsafe extern "C" fn read_stub(
+            _stream: *mut FtStream,
+            _offset: u32,
+            _buffer: *mut u8,
+            _count: u32,
+        ) -> u32 {
+            0
+        }
+
+        let mut memory = test_memory();
+        let mut stream = test_stream(&mut memory, Some(read_stub));
+        let mut index = CffIndex {
+            stream: &mut stream,
+            count: 0,
+            off_size: 0,
+            _padding: [0; 3],
+            data_offset: 0,
+            offsets: ptr::null_mut(),
+            bytes: ptr::null_mut(),
+        };
+        let mut released = 0x1234usize as *mut u8;
+
+        unsafe { cff_index_forget_element(&mut index, &mut released) };
+
+        assert_eq!(FREE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(FIRST_FREE.load(Ordering::SeqCst), 0x1234);
+        assert!(released.is_null());
+
+        let mut retained = 0x5678usize as *mut u8;
+        index.bytes = 0x9abcusize as *mut u8;
+        unsafe { cff_index_forget_element(&mut index, &mut retained) };
+
+        assert_eq!(FREE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(retained as usize, 0x5678);
     }
 
     #[test]

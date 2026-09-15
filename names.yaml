@@ -95549,3 +95549,30 @@ functions:
       copy an owned NUL-terminated result using source->library->memory
       (+0x1c). Target builds retain the exact unported fixed-address call;
       host tests use a replaceable seam solely to prove the forwarding.
+
+  # --- CFF index element frame release ---
+  - address: 0x080d3f60
+    ghidra: FUN_080d3f60
+    name: cff_index_forget_element
+    size: 20
+    sig: "void cff_index_forget_element(CffIndex *index, u8 **pbytes)"
+    module: ft/cff_index
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: pbytes
+      r2: index_bytes
+    notes: >-
+      Raw osos.dec establishes the five-instruction, 20-byte extent
+      0x080d3f60..0x080d3f74: ldr r2,[r0,#20]; cmp r2,#0; ldreq r0,[r0];
+      beq 0x0804fcb8; bx lr. The immediate next function starts at
+      0x080d3f74 with push {r4-r7,lr}. Thus CFF_IndexRec::bytes at +20
+      retains pbytes unchanged when non-NULL; otherwise this tail-calls
+      ft_stream_release_frame(index->stream, pbytes), which releases a
+      disk-stream allocation or merely clears a memory-stream pointer.
+      Full-image ARM B/BL decoding finds five inbound calls, all plain
+      unconditional bl and no predicated bl. Ghidra's recovered
+      ft_mem_free call is incorrect: the raw conditional branch targets
+      ft_stream_release_frame @ 0x0804fcb8. The Rust port preserves the
+      existing release seam with a volatile function-pointer load, so LLVM
+      emits an indirect tail dispatch rather than the retail direct branch.
