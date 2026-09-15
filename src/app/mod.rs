@@ -247,6 +247,7 @@ pub mod registered_listener_notify;
 pub mod slot_signal_reset;
 pub mod slot_value_process;
 pub mod four_slot_key_index;
+pub mod collection_item_find_by_pair;
 pub mod four_slot_buffer_pool;
 pub mod string_owner;
 pub mod string_resolve;
