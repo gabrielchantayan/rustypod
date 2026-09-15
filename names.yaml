@@ -23387,6 +23387,29 @@ functions:
       util/xml_decode_codepoint_and_reset.rs. The remaining direct callee
       uses a volatile seam: its fixed raw address on target and a
       test-installed host callback.
+  - address: 0x0825d5ac
+    ghidra: FUN_0825d5ac
+    name: xml_input_is_exhausted
+    size: 48
+    sig: "unsigned int xml_input_is_exhausted(struct XmlInput *input)"
+    module: util/xml_input_is_exhausted
+    status: ported
+    renames:
+      param_1/r0/r4: input
+      param_1+0: input.vtable
+      param_1+4: input.status
+      "*(input.vtable+8)": input.is_exhausted
+    notes: >-
+      Raw ARM is exactly 0x0825d5ac..0x0825d5db: it tests input.status (+4)
+      and returns one immediately when nonzero; otherwise it loads the vtable
+      +8 entry and invokes it with input still in r0, normalizing a nonzero
+      result to one. The next real function starts at 0x0825d5dc. Decoding
+      every B/BL word in osos.dec finds five static bl call sites, all
+      unconditional: 0x0825ca4c, 0x0825ca84, 0x0825d1f4, 0x0825d244, and
+      0x0825d4b4; there are no predicated direct calls. The in-body blx r1 is
+      a vtable dispatch, not a statically identifiable callee. Target builds
+      invoke that verified vtable entry; host tests use a volatile callback
+      seam because the entry's identity is not independently verified.
   - address: 0x0825d7c4
     ghidra: FUN_0825d7c4
     name: xml_decode_codepoint_and_reset
