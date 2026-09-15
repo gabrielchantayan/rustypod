@@ -228,6 +228,7 @@ pub mod record_manager;
 pub mod recording_buffer;
 pub mod recording_controller;
 pub mod refcounted_value;
+pub mod refcounted_owner_callback_dispatch;
 pub mod resource;
 pub mod resource_provider_contains_view;
 pub mod root_context_f9c_bound;
