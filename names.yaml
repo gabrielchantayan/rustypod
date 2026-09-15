@@ -52421,6 +52421,36 @@ functions:
       selector) and a fake-vtable end-to-end through the default
       dispatcher body.
 
+  - address: 0x082bcd2c
+    ghidra: FUN_082bcd2c
+    name: cg_wait_and_dispatch
+    size: 196
+    sig: "u32 cg_wait_and_dispatch(u32 dispatch_arg)"
+    module: codegen/availability_dispatch
+    status: ported
+    renames:
+      param_1: dispatch_arg
+      DAT_082bcdf0: dispatch_state
+      DAT_082bcdf4: dispatch_mailbox_slot
+      FUN_082bcf38: cg_first_availability
+      FUN_082bc4b8: cg_second_availability
+      FUN_080e4b6c: cg_dispatch_setup
+      FUN_0808e2a8: mailbox_slot_post
+      thunk_FUN_080568e8: task_sleep
+    notes: >-
+      Raw osos.dec confirms the 196-byte body 0x082bcd2c..0x082bcdf0,
+      followed by literals 0x089caae4 and 0x089ca964; the next separately
+      linked function begins at 0x082bcdf8. Complete aligned ARM B/BL decode
+      finds five inbound direct calls: four unconditional bl at 0x080ac134,
+      0x08283974, 0x08283a18, and 0x0836c39c, plus blmi at 0x08283a9c.
+      The body first tests the two availability predicates; if both are zero,
+      it sets dispatch_state[0], posts the optional mailbox, and sleeps 100
+      ticks until either changes. Otherwise it clears that word, returns the
+      setup gate's nonzero status, requires dispatch_state[1], calls its
+      optional +0x08 callback with dispatch_state[2], then returns its
+      optional +0x24 callback's result for dispatch_arg. The three unported
+      callees are ARM literal veneers and host callback seams; the already
+      ported mailbox post and task sleep are wired directly on target.
   - address: 0x082bc4fc
     ghidra: FUN_082bc4fc
     name: cg_timer_wait

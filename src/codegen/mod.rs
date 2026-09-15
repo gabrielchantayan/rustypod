@@ -17,6 +17,9 @@ pub mod block_ref;
 /// `cg_arm_immediate_rotation` @ 0x082be96c — recognizes literals the
 /// Vincent ARM code generator can encode as an immediate or its complement.
 pub mod arm_immediate_rotation;
+/// `cg_wait_and_dispatch` @ 0x082bcd2c — waits for either availability
+/// predicate, then performs the target callback dispatch.
+pub mod availability_dispatch;
 /// `cg_exp_golomb_ue_read` @ 0x082c5df0 — the H.264 decoder's `ue(v)`
 /// Exp-Golomb reader. Not IR either, but it sits inside the JIT's
 /// address block (0x082c5dxx), one function away from `se(v)` @
