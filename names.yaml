@@ -95343,3 +95343,27 @@ functions:
       propagation. match.py is reviewed for the three-call scoped-guard
       structure; Rust frame layout and indirect boundary dispatch differ
       deliberately.
+  # --- WordList value matcher ---
+  - address: 0x080ec178
+    ghidra: FUN_080ec178
+    name: word_list_matches_value
+    size: 68
+    sig: "i32 word_list_matches_value(u32 value, const WordList *list)"
+    module: util/word_list_matches_value
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: list
+      FUN_082d72a0: word_list_is_zero
+    notes: >-
+      Raw osos.dec establishes the true 68-byte extent: seventeen ARM words
+      from push {r4,r5,r6,lr} at 0x080ec178 through pop {r4,r5,r6,pc} at
+      0x080ec1b8; the next separately entered function begins at 0x080ec1bc.
+      The body has one unconditional bl to word_list_is_zero @ 0x082d72a0,
+      reached only when value is zero. Complete-image decoding finds five
+      plain unconditional inbound bl calls (0x082cb1b8, 0x082cb1d8,
+      0x082cb1ec, 0x082cb200, 0x082cb214), zero predicated inbound bl calls,
+      and no direct tail branches. A zero value accepts an all-zero active
+      WordList; otherwise only a one-element list whose sole word equals value
+      matches. The existing word_list_is_zero seam has the verified identity
+      and exact ABI used by the original. No deliberate deviations.
