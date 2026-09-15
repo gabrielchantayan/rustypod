@@ -91,6 +91,46 @@ unsafe fn ops() -> StageProgressOps {
     STAGE_PROGRESS_OPS
 }
 
+/// stage_progress_set — original: `FUN_081fa378` @ **0x081fa378**
+/// (**56 bytes**; **5 `bl` call sites, all unconditional — 0 predicated** —
+/// verified by decoding every ARM B/BL word in `osos.dec`; the next real entry
+/// is `FUN_081fa3b0`).
+///
+/// Sets `tracker.progress` to `progress` only for the active stage, provided
+/// that `progress` is within the stage's inclusive budget and does not move
+/// backwards. A successful update publishes `tracker.completed_base + progress`
+/// through the running-deadline setter.
+///
+/// Like the ARM entry, this has no NULL or stage-range guard: callers must pass
+/// a valid tracker whose active stage is 0..=6. The deadline addition wraps as
+/// the ARM `addle`; the unported setter is reached through its retail veneer on
+/// device and through the deterministic operation-table seam on the host.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stage_progress_set(
+    tracker: *mut StageProgressTracker,
+    stage: u32,
+    progress: u32,
+) {
+    if (*tracker).current_stage as u32 != stage {
+        return;
+    }
+
+    // The retail code indexes `tracker + 0x10 + stage * 4` after comparing
+    // stage against current_stage; valid trackers keep that byte in 0..=6.
+    let budget = core::ptr::addr_of!((*tracker).stage_budgets)
+        .cast::<u32>()
+        .add(stage as usize)
+        .read();
+    if budget < progress || (*tracker).progress > progress {
+        return;
+    }
+
+    (*tracker).progress = progress;
+    let operations = ops();
+    (operations.set_running_deadline)((*tracker).completed_base.wrapping_add(progress));
+}
+
 /// stage_progress_increment — original: `FUN_081fa36c` @ **0x081fa36c**
 /// (**12 bytes**; **11 `bl` call sites, all unconditional — 0 predicated and
 /// 0 plain `b`** — verified by decoding every ARM B/BL word in `osos.dec`).
@@ -117,29 +157,7 @@ pub unsafe extern "C" fn stage_progress_increment(
     tracker: *mut StageProgressTracker,
     stage: u32,
 ) {
-    let next_progress = (*tracker).progress.wrapping_add(1);
-
-    if (*tracker).current_stage as u32 != stage {
-        return;
-    }
-
-    // The retail code indexes `tracker + 0x10 + stage * 4` after comparing
-    // stage against current_stage; valid trackers keep that byte in 0..=6.
-    let budget = core::ptr::addr_of!((*tracker).stage_budgets)
-        .cast::<u32>()
-        .add(stage as usize)
-        .read();
-    if budget < next_progress {
-        return;
-    }
-
-    if (*tracker).progress > next_progress {
-        return;
-    }
-
-    (*tracker).progress = next_progress;
-    let operations = ops();
-    (operations.set_running_deadline)((*tracker).completed_base.wrapping_add(next_progress));
+    stage_progress_set(tracker, stage, (*tracker).progress.wrapping_add(1));
 }
 /// stage_progress_advance — original: `FUN_081fa2e8` @ **0x081fa2e8**
 /// (**84 bytes**; **7 `bl` call sites, all unconditional — 0 predicated and
@@ -189,7 +207,7 @@ pub unsafe extern "C" fn stage_progress_advance(
     if (budgets.wrapping_add(stage as usize).read() as i32) < 0 {
         return;
     }
-    (operations.set_running_deadline)((*tracker).completed_base);
+    stage_progress_set(tracker, stage, 0);
 }
 
 #[cfg(test)]
@@ -300,6 +318,24 @@ mod tests {
 
             assert_eq!(value.progress, u32::MAX);
             assert_eq!(DEADLINE_CALLS, 0);
+            STAGE_PROGRESS_OPS = saved;
+        }
+    }
+
+    #[test]
+    fn set_updates_only_forward_progress_within_the_active_budget() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            let saved = install_recording_ops();
+            let mut value = tracker(2, 4, 0xffff_ffff, [0, 0, 9, 0, 0, 0, 0]);
+
+            stage_progress_set(&mut value, 2, 9);
+            assert_eq!((value.progress, DEADLINE_CALLS, DEADLINE), (9, 1, 8));
+
+            stage_progress_set(&mut value, 2, 8);
+            stage_progress_set(&mut value, 1, 9);
+            stage_progress_set(&mut value, 2, 10);
+            assert_eq!((value.progress, DEADLINE_CALLS), (9, 1));
             STAGE_PROGRESS_OPS = saved;
         }
     }

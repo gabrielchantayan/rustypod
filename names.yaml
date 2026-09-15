@@ -65831,6 +65831,33 @@ functions:
       no NULL guard for tracker. Deviation: the unported setter is called at
       its retail veneer on target; host tests use the StageProgressOps seam.
 
+  # --- Stage progress set ---
+  - address: 0x081fa378
+    ghidra: FUN_081fa378
+    name: stage_progress_set
+    size: 56
+    sig: "void stage_progress_set(StageProgressTracker *tracker, uint stage, uint progress)"
+    module: app/stage_progress
+    status: ported
+    renames:
+      param_1: tracker
+      param_2: stage
+      param_3: progress
+      thunk_FUN_0815940c: set_running_deadline
+    notes: >-
+      EXTENT: raw ARM establishes the exact 56-byte code extent
+      0x081fa378..0x081fa3b0; the next real function begins with `push
+      {r4,r5,r6,lr}` at 0x081fa3b0. CALL COUNT: 5 plain unconditional `bl`
+      call sites and 0 predicated BL forms, independently counted from
+      osos.dec; Ghidra reports the same five callers. ALGORITHM: return unless
+      tracker.current_stage equals stage, the unsigned stage budget at
+      tracker+0x10+stage*4 is at least progress, and progress is no less than
+      the existing tracker progress. Store progress, then tail-call veneer
+      0x081b9154 with tracker.completed_base + progress. The veneer targets
+      unported FUN_0815940c, which conditionally writes the deadline keeper.
+      Deviation: the target calls the retail veneer; host tests install the
+      existing StageProgressOps deterministic seam.
+
   # --- Stage progress advance ---
   - address: 0x081fa2e8
     ghidra: FUN_081fa2e8
