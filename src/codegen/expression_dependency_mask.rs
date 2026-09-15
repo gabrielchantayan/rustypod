@@ -18,33 +18,21 @@
 //!
 //! ## Deviations
 //!
-//! The two collection callees are not yet ported. Target builds retain their
-//! fixed retailOS entries (`0x082cd8c4` and `0x082cd9b4`); host builds expose
-//! them through [`CG_EXPRESSION_DEPENDENCY_MASK_OPS`]. Node links are raw
-//! 32-bit target words, so accesses use word indices rather than host-width
-//! pointer fields.
+//! The `+0x10` collection helper is ported in this module; the `+0x38`
+//! collection helper remains a retailOS entry on target builds and a host ops
+//! seam. Node links are raw 32-bit target words, so accesses use word indices
+//! rather than host-width pointer fields.
 
-/// The unported calls made by [`cg_expression_dependency_mask`].
+/// The unported `+0x38` collection call made by
+/// [`cg_expression_dependency_mask`].
 #[derive(Clone, Copy)]
 pub struct CgExpressionDependencyMaskOps {
-    /// `FUN_082cd8c4` @ `0x082cd8c4`, called with the target word at +0x10.
-    pub collect_field_10: unsafe extern "C" fn(context: *const u32, node: *const u8) -> u64,
     /// `FUN_082cd9b4` @ `0x082cd9b4`, called with the target word at +0x38.
     pub collect_field_38: unsafe extern "C" fn(context: *const u32, node: *const u8) -> u64,
 }
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_collect_field_10(context: *const u32, node: *const u8) -> u64 {
-    let collect: unsafe extern "C" fn(*const u32, *const u8) -> u64 =
-        core::mem::transmute(0x082c_d8c4usize);
-    collect(context, node)
-}
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_collect_field_10(_context: *const u32, _node: *const u8) -> u64 {
-    panic!("cg_expression_dependency_mask requires FUN_082cd8c4")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_collect_field_38(context: *const u32, node: *const u8) -> u64 {
@@ -62,7 +50,6 @@ unsafe extern "C" fn missing_collect_field_38(_context: *const u32, _node: *cons
 #[cfg(target_os = "none")]
 pub const DEFAULT_CG_EXPRESSION_DEPENDENCY_MASK_OPS: CgExpressionDependencyMaskOps =
     CgExpressionDependencyMaskOps {
-        collect_field_10: retail_collect_field_10,
         collect_field_38: retail_collect_field_38,
     };
 
@@ -70,11 +57,10 @@ pub const DEFAULT_CG_EXPRESSION_DEPENDENCY_MASK_OPS: CgExpressionDependencyMaskO
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_CG_EXPRESSION_DEPENDENCY_MASK_OPS: CgExpressionDependencyMaskOps =
     CgExpressionDependencyMaskOps {
-        collect_field_10: missing_collect_field_10,
         collect_field_38: missing_collect_field_38,
     };
 
-/// Active bindings for the unported retailOS dependencies.
+/// Active binding for the unported retailOS dependency.
 pub static mut CG_EXPRESSION_DEPENDENCY_MASK_OPS: CgExpressionDependencyMaskOps =
     DEFAULT_CG_EXPRESSION_DEPENDENCY_MASK_OPS;
 
@@ -109,7 +95,7 @@ pub unsafe extern "C" fn cg_expression_dependency_mask(
 
     let mut mask = cg_expression_dependency_mask(context, node_word(node, 3) as usize as *const u8);
     mask |= cg_expression_dependency_mask(context, node_word(node, 2) as usize as *const u8);
-    mask |= (dependency_mask_ops().collect_field_10)(
+    mask |= super::expression_collection_dependency_mask::cg_expression_collection_dependency_mask(
         context,
         node_word(node, 4) as usize as *const u8,
     );
@@ -138,16 +124,7 @@ mod tests {
 
     #[derive(Debug, Eq, PartialEq)]
     enum Call {
-        Collect10 { context: usize, node: usize },
         Collect38 { context: usize, node: usize },
-    }
-
-    unsafe extern "C" fn record_collect_10(context: *const u32, node: *const u8) -> u64 {
-        CALLS.lock().unwrap_or_else(|e| e.into_inner()).push(Call::Collect10 {
-            context: context as usize,
-            node: node as usize,
-        });
-        0x0001_0000_0000_0000
     }
 
     unsafe extern "C" fn record_collect_38(context: *const u32, node: *const u8) -> u64 {
@@ -159,7 +136,6 @@ mod tests {
     }
 
     const RECORDING_OPS: CgExpressionDependencyMaskOps = CgExpressionDependencyMaskOps {
-        collect_field_10: record_collect_10,
         collect_field_38: record_collect_38,
     };
 
@@ -258,20 +234,14 @@ mod tests {
             context.add(2).write(0x3333_4444);
             assert_eq!(
                 cg_expression_dependency_mask(context, root),
-                0x0011_0000_0000_0003
+                0x0010_0000_0000_0003
             );
             assert_eq!(
                 *CALLS.lock().unwrap_or_else(|e| e.into_inner()),
-                [
-                    Call::Collect10 {
-                        context: context as usize,
-                        node: field_10 as usize,
-                    },
-                    Call::Collect38 {
-                        context: context as usize,
-                        node: field_38 as usize,
-                    },
-                ]
+                [Call::Collect38 {
+                    context: context as usize,
+                    node: field_38 as usize,
+                }]
             );
         }
         teardown();
