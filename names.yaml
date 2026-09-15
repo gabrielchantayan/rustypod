@@ -70556,6 +70556,38 @@ functions:
       deviations. Host tests cover descriptor/payload stores, flag truncation,
       preserved trailing bytes, zero inputs, and pointer return.
 
+  # --- tagged record built from opaque context lookup ---
+  - address: 0x0813e6b0
+    ghidra: FUN_0813e6b0
+    name: tagged_record_from_context_key
+    size: 76
+    sig: "void tagged_record_from_context_key(TaggedRecord *out, void *context, u32 key)"
+    module: cxx/tagged_record_from_context_key
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: context
+      param_3/r2: key
+      FUN_0826fc2c: tagged_record_init
+      FUN_08050418: retail_lookup
+    notes: >-
+      Raw ARM establishes the exact 76-byte extent 0x0813e6b0..0x0813e6fc:
+      the next separately linked function starts at 0x0813e700 and 0x0813e6fc
+      is a NOP alignment word. Decoding every ARM B/BL word in osos.dec finds
+      five direct inbound calls, all unconditional plain BL
+      (0x08142584, 0x081f8a0c, 0x081f8af4, 0x081f8e70, 0x082c8694), with zero
+      predicated BL forms. Internally, the body makes three unconditional
+      plain BL calls and no predicated BL calls: it initializes out with zero
+      payload/flag, calls the still-unported FUN_08050418 at context+0x40 with
+      key, then initializes out with its result and the byte at context+0x44.
+      FUN_08050418 has no names.yaml entry, so its semantics remain deliberately
+      unnamed; only its static address and observed two-word ABI are used. The
+      port directly calls tagged_record_init for both initializer calls and
+      invokes the unported lookup at its retail load address on target builds;
+      host tests replace only that boundary with a recording seam. Tests cover
+      a nonzero result, flag-byte propagation, a zero result, and preservation
+      of context storage. Reference C: decomp/c/012/0813e6b0_FUN_0813e6b0.c.
+
   # --- statically bound empty C++ destructor ---
   - address: 0x0826fc64
     ghidra: FUN_0826fc64
