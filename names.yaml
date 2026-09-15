@@ -90922,3 +90922,33 @@ functions:
       its proven render-configuration role. Host tests cover zero, both
       observed caller values (0x80 and 0x65), u32::MAX, and untouched
       neighboring bytes. match.py structural review completed.
+
+  # --- optional vtable slot-18 result dispatch ---
+  - address: 0x0828ae4c
+    ghidra: FUN_0828ae4c
+    name: optional_vtable_slot_18_result
+    size: 28
+    sig: "u32 optional_vtable_slot_18_result(OptionalVtableSlot18Owner *owner)"
+    module: cxx/optional_vtable_slot_18_result
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0xdc: target
+      target_deref: vtable
+      vtable_plus_0x18: optional_target_result
+      method_return/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent from ldr
+      r0,[r0,#0xdc] at 0x0828ae4c through bx lr at 0x0828ae64; the separately
+      linked next function begins at 0x0828ae68. A null target at owner +0xdc
+      returns 1. Otherwise the target replaces owner in r0 and tail-dispatches
+      its vtable +0x18 slot, preserving the callback result. The target and
+      virtual method identities remain unrecovered and are deliberately not
+      invented. Decoding every immediate ARM B/BL word in osos.dec finds
+      exactly five inbound calls, all plain unconditional bl at 0x0828a4f8,
+      0x0828a50c, 0x0828ac04, 0x0828ae04, and 0x0828aec4; there are no
+      predicated bl forms, direct tail branches, or aligned raw data-word
+      references. Host coverage proves the null return, target replacement,
+      selection of only vtable slot +0x18, and preservation of its result.
+      Rust uses native-width host vtable cells while repr(C) preserves the
+      verified ARM owner field offset. Deliberate deviations: none.
