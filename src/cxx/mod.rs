@@ -21,6 +21,7 @@ pub mod rgba8_cursor_write_rgba4444;
 pub mod rgb8_cursor_write;
 pub mod rgb8_cursor_write_rgb565;
 pub mod component_vtable_slot_180_tail_dispatch;
+pub mod component_vtable_slot_208_tail_dispatch;
 pub mod context_activity;
 pub mod context_line_terminator;
 pub mod context_child_handle;

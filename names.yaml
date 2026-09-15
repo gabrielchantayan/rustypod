@@ -1400,6 +1400,37 @@ functions:
       virtual receiver, and the u32 result is preserved. Rust uses native-width
       host vtable cells while repr(C) preserves the verified target word offsets.
 
+  # --- component vtable tail dispatch ---
+  - address: 0x081119c4
+    ghidra: FUN_081119c4
+    name: component_vtable_slot_208_tail_dispatch
+    size: 16
+    sig: "u32 component_vtable_slot_208_tail_dispatch(ComponentVtableSlot208Owner *owner, u32 selector)"
+    module: cxx/component_vtable_slot_208_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0x430: component
+      component_deref: vtable
+      vtable_plus_0xd0: component_dispatch
+      param_2/r1: selector
+      method_return/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: ldr r0,[r0,#0x430],
+      ldr r2,[r0], ldr r2,[r2,#0xd0], bx r2 at 0x081119c4..0x081119d0;
+      the separately linked next function begins at 0x081119d4. It replaces
+      owner in r0 with the opaque component at +0x430 and tail-dispatches that
+      component through its vtable +0xd0 slot, forwarding the caller-provided
+      r1 selector and returning the slot result unchanged. The component and
+      virtual method identities remain unrecovered and are deliberately not
+      invented. Disassembly references identify four inbound plain unconditional
+      bl calls at 0x08112860, 0x0819e2c0, 0x0819e31c, and 0x08289b40; no
+      predicated bl form or direct tail branch targets the wrapper. Host coverage
+      proves only vtable slot +0xd0 is selected, the component replaces owner as
+      the virtual receiver, r1 is forwarded, and the u32 result is preserved.
+      Rust uses native-width host vtable cells while repr(C) preserves the
+      verified target word offsets.
+
   # --- ARM ADS runtime: memory block ---
   - address: 0x080000d4
     ghidra: FUN_080000d4
