@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a83c0
+    ghidra: FUN_080a83c0
+    name: configured_path_prefix_matches
+    size: 48
+    sig: "int configured_path_prefix_matches(const char *path)"
+    module: app/configured_path_prefix_matches
+    status: ported
+    renames:
+      param_1/r0: path
+      r0: configured_prefix_record
+      r1: path_without_leading_slash
+      r2: configured_prefix_length
+    notes: >-
+      Raw osos.dec establishes the true 48-byte extent
+      0x080a83c0..0x080a83f0; 0x080a83f0 is the literal-pool word and
+      0x080a83f4 is the next distinct push prologue. There are five incoming
+      plain BL calls at 0x0805ad04, 0x080ccb1c, 0x08189578, 0x081f5180,
+      and 0x081f521c, with no incoming predicated BL calls. The sole outgoing
+      call is strncmp (0x0803105c): skip exactly one leading slash and compare
+      the supplied path to the live record's +4 prefix pointer for its +0x10
+      byte length, returning one only for equality. Target reads 32-bit record
+      fields at 0x089ca3a4; host tests use a native-pointer seam.
   - address: 0x080a8e10
     ghidra: FUN_080a8e10
     name: input_state_transition

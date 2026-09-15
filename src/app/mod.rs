@@ -74,6 +74,7 @@ pub mod current_record_handle;
 pub mod object_state_initialize;
 pub mod indexed_item_value;
 pub mod registration_handle_current_status;
+pub mod configured_path_prefix_matches;
 pub mod firmware_query_low_byte;
 pub mod dual_pool_screen;
 pub mod double_buffer;
