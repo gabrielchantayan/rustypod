@@ -5,6 +5,8 @@ pub mod fat_dirent;
 /// FAT data-cluster to cache-block-index conversion @ 0x082e01cc.
 pub mod fat_cluster_to_block;
 pub mod path_limits;
+/// Finder `.DS_Store` metadata-path substring predicate @ 0x0809e718.
+pub mod ds_store_path;
 /// Splits a path at its final configured delimiter @ 0x082e37d4.
 pub mod path_component_split;
 /// Optional `X:` drive-prefix parser @ 0x082e377c.
