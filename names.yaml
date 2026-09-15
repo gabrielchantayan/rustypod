@@ -56795,6 +56795,34 @@ functions:
       / file_record_lookup_routes_registry_and_key_verbatim_to_the_search.
 
 
+  - address: 0x0812d20c
+    ghidra: FUN_0812d20c
+    name: app_string_provider_lookup
+    size: 40
+    sig: "i32 app_string_provider_lookup(source: u32, context: *mut u8, value: *mut u8, record_slot: *mut *mut AppStringResolveRecord)"
+    module: app/string_resolve
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: context
+      param_3/r2: value
+      param_4/r3: record_slot
+      FUN_0812d160: vtable_file_record_lookup
+      FUN_0810e4c8: registry_lookup
+    notes: >-
+      Raw firmware establishes a 40-byte body ending at 0x0812d234:
+      push {r4-r6,lr}; preserve value and record_slot; plain bl
+      vtable_file_record_lookup(source, context); on non-NULL, restore
+      value and record_slot then conditionally tail-branch to
+      registry_lookup(provider_registry, value, record_slot). The five
+      inbound calls are all plain bl instructions at 0x0811ca98,
+      0x0811cab8, 0x0811cb38, 0x0811ccb4, and 0x0811cf8c; there are no
+      predicated bl callers. The Rust port calls registry_lookup normally
+      after the same NULL test, rather than emitting the ARM conditional
+      tail branch; this does not alter ABI-visible arguments, status, or
+      output-slot effects. Host coverage:
+      src/app/string_resolve.rs::provider_lookup_chains_context_and_value_registries_and_preserves_a_miss_slot.
+
   - address: 0x0812d160
     ghidra: FUN_0812d160
     name: vtable_file_record_lookup

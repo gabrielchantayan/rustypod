@@ -43,6 +43,9 @@ pub mod hints {
     // buffered-loader source fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const PATH_ENTRY_LOAD_TO_HEAP: usize = 0xde00_0000;
+    // 0x3e00_0000: dedicated to app/string_resolve's raw-u32 provider
+    // registry fixture; mappings never unmap, so no other user may share it.
+    pub const APP_STRING_PROVIDER_LOOKUP: usize = 0x3e00_0000;
     // 0x1234_0000: dedicated to cxx/basic_ios_initialize's raw-u32 stream,
     // locale, and facet-table fixture; mappings never unmap, so no other user
     // may share this hint.
