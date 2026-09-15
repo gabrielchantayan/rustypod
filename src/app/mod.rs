@@ -62,6 +62,7 @@ pub mod context_scope;
 pub mod directory_iterator;
 pub mod context_scope_selector;
 pub mod current_record_handle;
+pub mod indexed_item_value;
 pub mod registration_handle_current_status;
 pub mod firmware_query_low_byte;
 pub mod dual_pool_screen;

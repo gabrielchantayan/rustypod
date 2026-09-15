@@ -93194,3 +93194,31 @@ functions:
       are preserved. match.py structural diff reviewed after the ARM build:
       LLVM preserves reverse teardown order but uses a frame and derives the
       second call from saved this rather than the first callee's return.
+  # --- indexed source value accessor ---
+  - address: 0x081d11b8
+    ghidra: FUN_081d11b8
+    name: indexed_item_value
+    size: 52
+    sig: "u32 indexed_item_value(IndexedItemSource *object, i32 index)"
+    module: app/indexed_item_value
+    status: ported
+    renames:
+      param_1/r0: object_then_source_slot
+      param_2/r1: index
+      r2: item_count_then_source_vtable_then_item_at
+      r0: value_slot_then_value_pointer_then_value
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: 13 ARM words from
+      push {r4,lr} at 0x081d11b8 through pop {r4,pc} at 0x081d11e8; the
+      separately linked next function begins at 0x081d11ec. The function
+      signed-compares index with object+0x34, then on index < count adjusts r0
+      to object+0x30 and invokes the source vtable's +0x40 slot by blx. It
+      dereferences the returned value slot, returning zero for a null contained
+      pointer and otherwise its pointed-to word. The body has zero plain direct
+      bl, zero predicated direct bl, and one indirect blx. Decoding aligned ARM
+      B/BL-immediate words in osos.dec finds five inbound direct calls, all
+      unconditional bl; there are no predicated inbound bl calls. Host tests
+      cover a successful dispatch, equal and greater count boundaries, the
+      observable negative-index dispatch, and a null contained value pointer.
+      match.py structural review was completed. Deliberate deviation: the
+      unported vtable method has a typed host seam rather than an invented name.
