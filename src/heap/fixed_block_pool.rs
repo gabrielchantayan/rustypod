@@ -105,7 +105,8 @@
 //!   and `operator_new` (heap/veneers.rs) — so with no mocks installed
 //!   the original call graph runs end to end.
 
-use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
+use crate::heap::veneers::operator_new;
+use crate::kernel::sync_mutex::{mutex_create, mutex_lock, mutex_unlock, Mutex};
 
 /// A free block, seen through its list link. The original stores the
 /// link at offset 0 of the block itself (`ldr r0, [r5]` in the
@@ -198,6 +199,57 @@ pub unsafe extern "C" fn fixed_block_pool_alloc(
     (*pool).free_head = (*block).next;
     (ops.unlock)(mutex);
     block as *mut u8
+}
+
+/// fixed_block_pool_init — original: `FUN_0826c134` @ 0x0826c134 (116
+/// bytes, 0x0826c134..0x0826c1a8; **5 plain `bl` call sites, 0 predicated**,
+/// binary-scanned).
+///
+/// Initializes the fixed-block pool's mutex, records its block geometry,
+/// allocates one `block_size * block_count` byte slab through tag-2
+/// [`operator_new`], and links its blocks into the initial free list. The
+/// final block's link is NULL; `free_head` is the first block. Neither input
+/// pointer nor allocation result is checked, matching the ARM code.
+///
+/// Deliberate deviations: the ARM's target-width fields become the existing
+/// `repr(C)` host-width [`FixedBlockPool`] fields, and its raw `str` links
+/// become typed [`FreeBlock`] stores. The multiplication remains wrapping,
+/// matching ARM's low-32-bit `mul` on the target.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed_block_pool_init(
+    pool: *mut FixedBlockPool,
+    block_size: usize,
+    block_count: usize,
+) -> *mut FixedBlockPool {
+    (*pool).block_size = block_size;
+    (*pool).block_count = block_count;
+    (*pool).total_bytes = 0;
+    (*pool).storage = core::ptr::null_mut();
+    (*pool).free_head = core::ptr::null_mut();
+
+    mutex_create(core::ptr::addr_of_mut!((*pool).lock));
+
+    let total_bytes = block_size.wrapping_mul(block_count);
+    (*pool).total_bytes = total_bytes;
+    let storage = operator_new(total_bytes);
+    (*pool).storage = storage;
+    fixed_block_pool_link_storage(pool);
+    pool
+}
+
+/// Links the just-allocated slab exactly as the constructor's unsigned
+/// `i < block_count - 1` loop does. Its caller supplies a nonzero count:
+/// zero would underflow the original loop bound and walk arbitrary memory.
+unsafe fn fixed_block_pool_link_storage(pool: *mut FixedBlockPool) {
+    let mut block = (*pool).storage as *mut FreeBlock;
+    for _ in 0..(*pool).block_count.wrapping_sub(1) {
+        let next = (block as *mut u8).add((*pool).block_size) as *mut FreeBlock;
+        (*block).next = next;
+        block = next;
+    }
+    (*block).next = core::ptr::null_mut();
+    (*pool).free_head = (*pool).storage as *mut FreeBlock;
 }
 
 #[cfg(test)]
@@ -430,6 +482,38 @@ mod tests {
         assert!(unsafe { fixed_block_pool_alloc(pool_ptr, BLOCK + 8) }.is_null());
     }
 
+
+    #[test]
+    fn constructor_linker_terminates_single_block_and_chains_multiple_blocks() {
+        let block_size = core::mem::size_of::<FreeBlock>();
+        let mut slab = [0usize; 3];
+        let base = slab.as_mut_ptr().cast::<u8>();
+        let mut pool = FixedBlockPool {
+            lock: Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            },
+            block_size,
+            block_count: 1,
+            total_bytes: block_size,
+            storage: base,
+            free_head: core::ptr::null_mut(),
+        };
+
+        unsafe { fixed_block_pool_link_storage(&mut pool) };
+        assert_eq!(pool.free_head as *mut u8, base);
+        assert!(unsafe { (*pool.free_head).next }.is_null());
+
+        pool.block_count = 3;
+        pool.total_bytes = block_size * 3;
+        unsafe { fixed_block_pool_link_storage(&mut pool) };
+        let first = pool.free_head;
+        let second = unsafe { (*first).next };
+        let third = unsafe { (*second).next };
+        assert_eq!(second as *mut u8, unsafe { base.add(block_size) });
+        assert_eq!(third as *mut u8, unsafe { base.add(block_size * 2) });
+        assert!(unsafe { (*third).next }.is_null());
+    }
     #[test]
     fn the_wired_defaults_run_the_pool_path_with_no_mocks() {
         // No bench: the real mutex_lock/mutex_unlock ports bracket the

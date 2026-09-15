@@ -59494,6 +59494,37 @@ functions:
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
 
+  - address: 0x0826c134
+    ghidra: FUN_0826c134
+    name: fixed_block_pool_init
+    size: 116
+    sig: "FixedBlockPool *fixed_block_pool_init(FixedBlockPool *pool, size_t block_size, size_t block_count)"
+    module: heap/fixed_block_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: block_size
+      param_3/r2: block_count
+      r4: pool (saved)
+      r5: zero
+      FUN_080744a4: mutex_create
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw extent is exactly 116 bytes from 0x0826c134 through 0x0826c1a7;
+      the next real function begins at 0x0826c1a8 with push {r4,lr}.
+      The ARM body stores block_size/count and three zero fields, creates
+      the mutex at pool+0, computes the wrapping block_size*block_count
+      slab size, allocates it through tag-2 operator_new, then links each
+      block's word-0 next pointer at block_size strides and terminates the
+      final link with NULL before setting free_head. Binary decoding finds
+      five direct plain BL call sites (0x08103430, 0x081cd784, 0x08266a14,
+      0x08292008, 0x08292b20), no predicated BLs, and no tail branches.
+      Rust uses the existing repr(C) FixedBlockPool host-width fields and
+      typed FreeBlock links; target offsets remain +0/+8/+c/+10/+14/+18.
+      block_count zero is intentionally not sanitized: ARM underflows its
+      unsigned loop bound and walks arbitrary memory too. Host linker tests
+      cover one-block termination and a three-block chain.
+
   # --- RGBA component to packed pixel conversion ---
   - address: 0x08272018
     ghidra: FUN_08272018
