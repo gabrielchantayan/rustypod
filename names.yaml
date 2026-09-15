@@ -72405,6 +72405,36 @@ functions:
       and the Rust port preserves that by initializing only the fields the
       callees write and read.
 
+
+  # --- Normalize a Rata Die day-and-seconds pair ---
+  - address: 0x081b4d60
+    ghidra: FUN_081b4d60
+    name: normalize_day_and_seconds
+    size: 96
+    sig: "void normalize_day_and_seconds(DayAndSeconds *pair, i32 day_delta, i32 seconds_delta)"
+    module: time/normalize_day_and_seconds
+    status: ported
+    renames:
+      param_1/r4: pair
+      param_2/r6: day_delta
+      param_3/r2: seconds_delta
+      DAT_081b4dc0: negative_seconds_per_day_divisor
+      DAT_081b4dc4: seconds_per_day
+      DAT_081b4dc8: negative_divisor_over_128
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw ARM extent is exactly 96 instruction bytes at
+      0x081b4d60..0x081b4dbc, followed by its three-word literal pool at
+      0x081b4dc0..0x081b4dc8; the next separately linked function begins at
+      0x081b4dcc. Decoding every ARM B/BL word in osos.dec finds exactly 5
+      direct BL call sites, all unconditional, with no predicated BL forms
+      and no plain-B tail callers. The function adds seconds_delta to pair+4,
+      divides that signed wrapped total by +86400 or -86400 through
+      __rt_sdiv, adjusts truncating negative division to a floor quotient,
+      then adds quotient + day_delta to pair+0 and subtracts quotient*86400
+      from pair+4. ARM word arithmetic wraps, so an overflowed signed total
+      need not retain the ordinary [0,86400) range. The Rust port reuses the
+      existing repr(C) DayAndSeconds record and ported signed divider.
   # --- Two-word record initialization helper ---
   - address: 0x081b4e24
     ghidra: FUN_081b4e24

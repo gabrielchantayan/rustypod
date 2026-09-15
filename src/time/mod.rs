@@ -3,6 +3,7 @@ pub mod civil;
 pub mod current_day_and_seconds;
 pub mod current_mac_epoch_seconds;
 pub mod current_datetime;
+pub mod normalize_day_and_seconds;
 pub mod datetime;
 pub mod datetime_to_mac_epoch;
 pub mod day_number;
