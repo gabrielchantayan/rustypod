@@ -14657,6 +14657,34 @@ functions:
       @ 0x081c38e0..0x081c8a38 (owns the moov/trak/mdhd atom literals),
       which looks up track nodes by id.
 
+  - address: 0x0810b514
+    ghidra: FUN_0810b514
+    name: heap_string_assign_from_cstr
+    size: 84
+    sig: "void heap_string_assign_from_cstr(HeapString *this, const u8 *source)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this, param_2: source}
+    renames:
+      FUN_0810b3e4: heap_string_destroy
+      FUN_0810b4c4: heap_string_reallocate (inlined through realloc_wrapper)
+      FUN_0810b610: strlen_safe
+      FUN_080edbf0: realloc_wrapper
+      DAT_08037db4: memcpy entry (0x08037db0)
+    notes: >-
+      Raw osos.dec words from 0x0810b514 through 0x0810b564 are 21 ARM
+      instructions (84 bytes); 0x0810b568 begins the distinct
+      assign-from-buffer function. The entry tests source and source[0];
+      NULL or empty sources tail-branch to heap_string_destroy. Otherwise it
+      calls strlen_safe, adds one for the NUL, reallocates this->data through
+      the 0x0810b4c4 helper with tag 0x14 and zero fourth argument, then copies
+      exactly len+1 bytes when allocation succeeded. Whole-image ARM branch
+      decoding finds five direct inbound calls (0x0809e724, 0x081132c4,
+      0x081132d0, 0x08113874, 0x081a3634): five unconditional bl and zero
+      predicated bl forms. The Rust port uses the existing realloc_wrapper
+      directly instead of reproducing the tiny helper, whose fully decoded
+      behavior is that wrapper plus initial-allocation NUL initialization;
+      this function's non-empty source overwrites that NUL immediately.
   - address: 0x0810b610
     ghidra: FUN_0810b610
     name: strlen_safe

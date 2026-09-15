@@ -33,8 +33,8 @@
 use core::mem::MaybeUninit;
 
 use crate::cxx::string_object::retail_vsnprintf;
-use crate::heap::veneers::free_wrapper;
-
+use crate::heap::veneers::{free_wrapper, realloc_wrapper};
+use crate::libc::strlen_safe::strlen_safe;
 use crate::printf::printf_api::VaList;
 
 /// The one-word holder object: `data` is the heap `char` buffer (allocated
@@ -109,50 +109,37 @@ pub unsafe extern "C" fn heap_string_data(this: *const HeapString) -> *mut u8 {
 /// The raw `mov r1,#512` bound in `heap_string_format`.
 const HEAP_STRING_FORMAT_BUFFER_LEN: usize = 512;
 
-/// Stock `HeapString::assign_from_cstr` entry point. It remains stock code:
-/// this port is solely the caller at 0x0810b5cc.
-#[cfg(target_os = "none")]
-const HEAP_STRING_ASSIGN_FROM_CSTR_ADDRESS: usize = 0x0810b514;
-
-type HeapStringAssignFromCstrFn = unsafe extern "C" fn(*mut HeapString, *const u8);
-
-/// Enters the unported assignment method on the device.
+/// heap_string_assign_from_cstr — original: `FUN_0810b514` @ 0x0810b514
+/// (84 bytes; **5 plain `bl` call sites, zero predicated forms**, binary-
+/// scanned: 0x0809e724, 0x081132c4, 0x081132d0, 0x08113874, 0x081a3634).
+/// The next real function begins with `push {r4-r6,lr}` at 0x0810b568,
+/// confirming the complete extent.
 ///
-/// The retail image remains mapped at its load address after the Rust payload
-/// is linked, so device code loads this absolute entry and reaches it by `blx`.
-#[cfg(target_os = "none")]
-unsafe fn heap_string_assign_from_cstr(this: *mut HeapString, source: *const u8) {
-    let assign: HeapStringAssignFromCstrFn =
-        core::mem::transmute(HEAP_STRING_ASSIGN_FROM_CSTR_ADDRESS);
-    assign(this, source);
-}
-
-/// Host unit tests replace the still-stock callee with a recorder. A host
-/// binary cannot safely execute a load address in the iPod image.
-#[cfg(not(target_os = "none"))]
-unsafe fn heap_string_assign_from_cstr(this: *mut HeapString, source: *const u8) {
-    #[cfg(test)]
-    {
-        core::ptr::read_volatile(core::ptr::addr_of!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST))(this, source);
+/// Replaces the holder's payload from a C string. A NULL source or an empty
+/// source tail-calls [`heap_string_destroy`]. Otherwise it obtains
+/// `strlen_safe(source) + 1`, reallocates the current payload through the
+/// known `realloc_wrapper` @ 0x080edbf0 with `(tag = 0x14, a4 = 0)`, then
+/// copies exactly that many bytes, including the NUL, when allocation succeeds.
+/// `this` is never NULL-guarded.
+///
+/// Deliberate deviations: the tail call becomes a normal Rust call, and
+/// `realloc_wrapper` dispatches through `HEAP_OPS` so host tests can observe
+/// the otherwise direct retail heap path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_assign_from_cstr(this: *mut HeapString, source: *const u8) {
+    if source.is_null() || source.read() == 0 {
+        heap_string_destroy(this);
+        return;
     }
-    #[cfg(not(test))]
-    {
-        let _ = (this, source);
-        panic!("heap_string_assign_from_cstr is available only in retailOS");
+
+    let len = strlen_safe(source) + 1;
+    let data = realloc_wrapper((*this).data, len, HEAP_STRING_PAYLOAD_FREE_TAG, 0);
+    (*this).data = data;
+    if !data.is_null() {
+        core::ptr::copy_nonoverlapping(source, data, len);
     }
 }
-
-#[cfg(test)]
-unsafe extern "C" fn heap_string_assign_from_cstr_test_unavailable(
-    _this: *mut HeapString,
-    _source: *const u8,
-) {
-    panic!("heap_string_format test recorder was not installed");
-}
-
-#[cfg(test)]
-static mut HEAP_STRING_ASSIGN_FROM_CSTR_TEST: HeapStringAssignFromCstrFn =
-    heap_string_assign_from_cstr_test_unavailable;
 
 /// heap_string_format — original: `FUN_0810b5cc` @ 0x0810b5cc (68 bytes,
 /// all code; **20 plain `bl` call sites, zero predicated forms, zero plain
@@ -171,9 +158,8 @@ static mut HEAP_STRING_ASSIGN_FROM_CSTR_TEST: HeapStringAssignFromCstrFn =
 /// is consistent with live stack holders and supplied format strings.
 ///
 /// Deviation: stable Rust receives the variadic spill as explicit [`VaList`],
-/// the crate convention for printf-style retail methods. The assign-from-cstr
-/// sibling @ 0x0810b514 is intentionally not re-stubbed: device builds call
-/// that verified stock entry directly; host tests install a test-only recorder.
+/// the crate convention for printf-style retail methods. The assignment is the
+/// ported [`heap_string_assign_from_cstr`] method.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn heap_string_format(
@@ -200,9 +186,8 @@ pub unsafe extern "C" fn heap_string_format(
 /// `this` after the assignment, even if the stock allocator leaves it empty.
 /// There is no NULL guard: the initial store faults exactly as retailOS does.
 ///
-/// Deviation: the stock assignment method remains the established device
-/// absolute-entry seam; host tests install its recorder rather than executing
-/// the iPod load address.
+/// Deviation: delegates to the ported assignment method rather than the
+/// original direct branch.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn heap_string_construct_from_cstr(
@@ -219,159 +204,68 @@ pub unsafe extern "C" fn heap_string_construct_from_cstr(
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use std::vec::Vec;
     use super::*;
-    use crate::cxx::string_object::{
-        RetailVsnprintfEngineFn, RETAIL_VSNPRINTF_ENGINE, RETAIL_VSNPRINTF_SINK_ADDRESS,
-    };
-    use crate::heap::veneers::tests::{free_log, mock_heap};
+    use crate::heap::veneers::tests::{free_log, mock_heap, realloc_log, set_alloc_ret};
 
-    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
-    use std::sync::MutexGuard;
-
-    static mut FORMAT_ENGINE_BYTE: u8 = 0;
-    static mut FORMAT_ENGINE_LEN: usize = 0;
-    static mut FORMAT_ENGINE_RESULT: i32 = 0;
-    static mut FORMAT_ENGINE_CALL: Option<(usize, usize, usize, usize, usize)> = None;
-    static mut ASSIGN_THIS: *mut HeapString = core::ptr::null_mut();
-    static mut ASSIGNED_BYTES: Vec<u8> = Vec::new();
-    static mut ASSIGN_DATA_AT_CALL: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn recording_format_engine(
-        sink: usize,
-        cursor: *mut *mut u8,
-        maximum: usize,
-        format: *const u8,
-        args: VaList,
-    ) -> i32 {
-        let scratch = *cursor;
-        let output_len = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_LEN));
-        let written = core::cmp::min(output_len, maximum);
-        core::ptr::write_bytes(
-            scratch,
-            core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_BYTE)),
-            written,
-        );
-        *cursor = scratch.add(written);
-        core::ptr::addr_of_mut!(FORMAT_ENGINE_CALL).write(Some((
-            sink,
-            scratch as usize,
-            maximum,
-            format as usize,
-            args as usize,
-        )));
-        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_RESULT))
-    }
-
-    unsafe extern "C" fn recording_assign_from_cstr(this: *mut HeapString, source: *const u8) {
-        let mut len = 0;
-        while source.add(len).read() != 0 {
-            len += 1;
-        }
-        core::ptr::addr_of_mut!(ASSIGN_THIS).write(this);
-        core::ptr::addr_of_mut!(ASSIGN_DATA_AT_CALL).write((*this).data);
-        core::ptr::addr_of_mut!(ASSIGNED_BYTES)
-            .write(core::slice::from_raw_parts(source, len + 1).to_vec());
-    }
-
-    /// Restores both process-wide seams even when a test assertion panics.
-    struct FormatBench {
-        _lock: MutexGuard<'static, ()>,
-        previous_engine: RetailVsnprintfEngineFn,
-        previous_assign: HeapStringAssignFromCstrFn,
-    }
-
-    impl Drop for FormatBench {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
-                    .write_volatile(self.previous_engine);
-                core::ptr::addr_of_mut!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST)
-                    .write_volatile(self.previous_assign);
-            }
-        }
-    }
-
-    fn format_bench(byte: u8, len: usize, result: i32) -> FormatBench {
-        let lock = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        unsafe {
-            let previous_engine =
-                core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSNPRINTF_ENGINE));
-            let previous_assign =
-                core::ptr::read_volatile(core::ptr::addr_of!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST));
-            core::ptr::addr_of_mut!(FORMAT_ENGINE_BYTE).write(byte);
-            core::ptr::addr_of_mut!(FORMAT_ENGINE_LEN).write(len);
-            core::ptr::addr_of_mut!(FORMAT_ENGINE_RESULT).write(result);
-            core::ptr::addr_of_mut!(FORMAT_ENGINE_CALL).write(None);
-            core::ptr::addr_of_mut!(ASSIGN_THIS).write(core::ptr::null_mut());
-            core::ptr::addr_of_mut!(ASSIGNED_BYTES).write(Vec::new());
-            core::ptr::addr_of_mut!(ASSIGN_DATA_AT_CALL).write(core::ptr::null_mut());
-
-            core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE).write_volatile(recording_format_engine);
-            core::ptr::addr_of_mut!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST)
-                .write_volatile(recording_assign_from_cstr);
-            FormatBench { _lock: lock, previous_engine, previous_assign }
-        }
-    }
-
+    /// A non-empty source reallocates the existing payload with the raw
+    /// `(tag = 0x14, a4 = 0)` arguments and copies its trailing NUL.
     #[test]
-    fn format_bounds_the_512_byte_scratch_assigns_it_and_returns_count() {
-        let mut holder = HeapString { data: 0xdead_beefusize as *mut u8 };
-        let format = b"%s\0";
-        let args = 0x5555_5555usize as VaList;
-        let _bench = format_bench(b'X', 600, -31);
+    fn assign_from_cstr_reallocates_and_copies_nul() {
+        let _heap = mock_heap();
+        let previous = 0xdead_beefusize as *mut u8;
+        let source = b"GeniusPlaylist\0";
+        let mut output = [0u8; 16];
+        set_alloc_ret(output.as_mut_ptr());
+        let mut holder = HeapString { data: previous };
 
-        let result = unsafe { heap_string_format(&mut holder, format.as_ptr(), args) };
+        unsafe { heap_string_assign_from_cstr(&mut holder, source.as_ptr()) };
 
-        assert_eq!(result, -31, "the conversion result survives assignment");
-        let (sink, scratch, maximum, seen_format, seen_args) =
-            unsafe { (*core::ptr::addr_of!(FORMAT_ENGINE_CALL)).unwrap() };
-        assert_eq!(sink, RETAIL_VSNPRINTF_SINK_ADDRESS);
-        assert_eq!(maximum, HEAP_STRING_FORMAT_BUFFER_LEN - 1);
-        assert_eq!(seen_format, format.as_ptr() as usize);
-        assert_eq!(seen_args, args as usize);
-        assert_ne!(scratch, &mut holder as *mut HeapString as usize, "scratch is not the holder");
-        assert_eq!(
-            unsafe { *core::ptr::addr_of!(ASSIGN_THIS) },
-            &mut holder as *mut HeapString
-        );
-        let assigned = unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() };
-        assert_eq!(assigned.len(), HEAP_STRING_FORMAT_BUFFER_LEN);
-        assert!(assigned[..HEAP_STRING_FORMAT_BUFFER_LEN - 1].iter().all(|&byte| byte == b'X'));
-        assert_eq!(assigned[HEAP_STRING_FORMAT_BUFFER_LEN - 1], 0);
+        assert_eq!(holder.data, output.as_mut_ptr());
+        assert_eq!(&output[..source.len()], source);
+        let (calls, old_data, size, tag, a4) = realloc_log();
+        assert_eq!((calls, old_data, size, tag, a4),
+            (1, previous, source.len(), HEAP_STRING_PAYLOAD_FREE_TAG, 0));
     }
 
+    /// Both source representations of an empty replacement use the destroy
+    /// path instead of asking realloc for a one-byte buffer.
     #[test]
-    fn format_assigns_the_empty_string_and_returns_zero() {
-        let mut holder = HeapString { data: core::ptr::null_mut() };
-        let _bench = format_bench(b'X', 0, 0);
+    fn assign_from_null_or_empty_source_destroys_payload() {
+        let _heap = mock_heap();
+        let first = 0xdead_beefusize as *mut u8;
+        let mut holder = HeapString { data: first };
 
-        assert_eq!(
-            unsafe { heap_string_format(&mut holder, b"\0".as_ptr(), core::ptr::null()) },
-            0
-        );
-        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() }, [0]);
+        unsafe { heap_string_assign_from_cstr(&mut holder, b"\0".as_ptr()) };
+        assert!(holder.data.is_null());
+        assert_eq!(free_log(), (1, first, HEAP_STRING_PAYLOAD_FREE_TAG));
+        assert_eq!(realloc_log().0, 0);
+
+        let second = 0xdead_beecusize as *mut u8;
+        holder.data = second;
+        unsafe { heap_string_assign_from_cstr(&mut holder, core::ptr::null()) };
+        assert!(holder.data.is_null());
+        assert_eq!(free_log(), (2, second, HEAP_STRING_PAYLOAD_FREE_TAG));
+        assert_eq!(realloc_log().0, 0);
     }
 
-    /// Construction clears the holder before forwarding the unchanged source
-    /// to the stock assignment method, then returns the original holder.
+    /// Construction clears its old word before delegating, so assignment
+    /// reaches realloc with NULL rather than the stale payload.
     #[test]
     fn construct_from_cstr_clears_before_assigning_and_returns_holder() {
-        let mut holder = HeapString { data: 0xdead_beefusize as *mut u8 };
+        let _heap = mock_heap();
         let source = b"OTGPlaylistInfo\0";
-        let _bench = format_bench(0, 0, 0);
+        let mut output = [0u8; 16];
+        set_alloc_ret(output.as_mut_ptr());
+        let mut holder = HeapString { data: 0xdead_beefusize as *mut u8 };
 
         let result = unsafe { heap_string_construct_from_cstr(&mut holder, source.as_ptr()) };
 
         assert_eq!(result, &mut holder as *mut HeapString);
-        assert_eq!(unsafe { *core::ptr::addr_of!(ASSIGN_THIS) }, &mut holder as *mut HeapString);
-        assert_eq!(unsafe { *core::ptr::addr_of!(ASSIGN_DATA_AT_CALL) }, core::ptr::null_mut());
-        assert_eq!(
-            unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() },
-            source
-        );
+        assert_eq!(holder.data, output.as_mut_ptr());
+        assert_eq!(&output[..source.len()], source);
+        let (calls, old_data, size, tag, a4) = realloc_log();
+        assert_eq!((calls, old_data, size, tag, a4),
+            (1, core::ptr::null_mut(), source.len(), HEAP_STRING_PAYLOAD_FREE_TAG, 0));
     }
 
     /// A live holder releases exactly its payload with tag 0x14, then clears
