@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f867c
+    ghidra: FUN_080f867c
+    name: text_line_offset_read_be
+    size: 20
+    sig: "u32 text_line_offset_read_be(const TextLineOffsetLayout *layout, u32 line_index)"
+    module: ui/text_line_offset_read_be
+    status: ported
+    renames:
+      param_1/r0: layout
+      param_2/r1: line_index
+      r0: line_offset_slot
+      "*(u16 *)line_offset_slot": big_endian_line_offset
+    notes: >-
+      Raw osos.dec establishes the true 20-byte extent
+      0x080f867c..0x080f8690: push {r4,lr}; bl text_line_offset_slot; ldrh
+      r0,[r0]; pop {r4,lr}; then a tail b to bswap16. The body has one plain
+      outbound BL and no predicated BLs. It reads the target-width indexed slot
+      returned by text_line_offset_slot, byte-swaps the loaded halfword, and
+      returns it zero-extended. Host tests cover all record-offset and value
+      extremes through a below-4GiB target-width fixture. match.py finds the
+      slot-helper BL and ldrh; LLVM inlines bswap16 rather than preserving the
+      original tail branch, an intentional equivalent codegen deviation.
   - address: 0x080f8690
     ghidra: FUN_080f8690
     name: text_line_offset_slot
