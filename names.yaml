@@ -90041,3 +90041,46 @@ functions:
       propagation. match.py against this worktree archive exits 1 with the
       expected structural diff: LLVM adds the crate frame, synthesizes 0xffff
       with mov/orr, and loads the unported tail target before bx.
+
+
+  # --- Optional drive-prefix parser ---
+  - address: 0x082e377c
+    ghidra: FUN_082e377c
+    name: parse_drive_prefix
+    size: 88
+    sig: "const u8 *parse_drive_prefix(u32 *drive_out, const u8 *path)"
+    module: fs/drive_prefix_parse
+    status: ported
+    renames:
+      param_1/r0: drive_out
+      param_2/r1: path
+      r4: remainder
+      r5: drive_index
+      r6: drive_out
+      FUN_082e0180: ascii_to_uppercase
+      FUN_082e2254: current_drive_index (unported resident dependency)
+      FUN_082e4b3c: drive_slot_index_is_valid
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from
+      push {r4, r5, r6, lr} at 0x082e377c through pop {r4, r5, r6, pc} at
+      0x082e37d0; the separately linked next function starts at 0x082e37d4.
+      The parser reads the first two path bytes without NULL guards. Only a
+      nonempty X: prefix is ASCII-folded, converted from A to a zero-based
+      index, and skipped; every other path selects the current resident drive
+      index and remains unadvanced. The index is valid exactly when unsigned
+      index < 4, then is stored and the selected path is returned; invalid
+      indices return NULL without storing. Decoding every ARM B/BL immediate
+      word in osos.dec finds exactly five inbound direct calls, all
+      unconditional bl at 0x082c3018, 0x082e0618, 0x082e15e8, 0x082e3488,
+      and 0x082e349c; there are no predicated forms or direct B entries. No
+      aligned raw image word references this address. The port calls the
+      already ported ascii_to_uppercase directly and reduces the already
+      ported validator to its exact index < 4 expression. FUN_082e2254 has no
+      ported ledger entry, so target builds call that verified resident address
+      directly. Host builds substitute current drive 0 only for prefix-less
+      paths; host tests cover uppercase and lowercase accepted prefixes,
+      prefix skipping, empty and relative paths, and invalid prefixes that
+      preserve the output word. match.py against this worktree archive exits 1
+      with the expected structural diff: LLVM uses cmp #3 rather than a call to
+      the inlined validator and materializes the resident current-drive target
+      in a literal before blx.

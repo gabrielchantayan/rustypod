@@ -7,6 +7,8 @@ pub mod fat_cluster_to_block;
 pub mod path_limits;
 /// Splits a path at its final configured delimiter @ 0x082e37d4.
 pub mod path_component_split;
+/// Optional `X:` drive-prefix parser @ 0x082e377c.
+pub mod drive_prefix_parse;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
 /// Shared path-data reference release @ 0x082e1960.
