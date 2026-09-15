@@ -81703,6 +81703,38 @@ functions:
       validity compare, gated owner +0x10/source byte/source +0x14 chain, and
       tail transfer. The 22-versus-19 instruction diff is the crate frame,
       branch layout in place of ADS predicates, and literal-loaded bx target.
+  - address: 0x082a2c80
+    ghidra: FUN_082a2c80
+    name: scoped_context_owner_word_5c_or_zero
+    size: 44
+    sig: "u32 scoped_context_owner_word_5c_or_zero(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: this
+      r1@0x082a2c8c: scoped_context_vtable
+      r1@0x082a2c90: validity
+      r0@0x082a2ca0: owner
+      r0@0x082a2ca4: owner_word_5c
+    notes: >-
+      Raw osos.dec establishes the true 44-byte extent: eleven ARM
+      instructions run from the push {r4,lr} at 0x082a2c80 through pop
+      {r4,pc} at 0x082a2ca8, and the separately linked next function begins
+      at 0x082a2cac. The function dispatches this->vtable slot +0x08, returns
+      zero without reading the owner when that call returns zero, and otherwise
+      returns the aligned owner word at +0x5c. The assignment's five inbound
+      direct BL sites are plain and unconditional; the function has no
+      predicated BL forms. Recovered callers at 0x0817c50c and 0x082a9a70
+      compare the value as an unsigned bound, but do not establish a concrete
+      field identity, so the offset-based name is deliberate. No new callee
+      seam is introduced: the verified existing ScopedContext vtable +0x08
+      dispatch is retained. The Rust repr(C) fragment replaces literal offsets
+      while preserving the 32-bit target layout and a host-consistent fixture.
+      Host tests prove invalid-token short-circuiting with a NULL owner and
+      exact +0x5c word selection for a nonzero validity result. match.py shows
+      the same vtable load, slot +0x08 blx, zero gate, owner +0x08 and +0x5c
+      loads; its 12-versus-11 instruction diff is the crate frame plus an
+      explicit moveq before the predicated ARM loads.
   - address: 0x08276fbc
     ghidra: FUN_08276fbc
     name: unicode_casefold_byte
