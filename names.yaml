@@ -76212,6 +76212,32 @@ functions:
       frame-pointer prologue/epilogue, allocates r2 for the zero literal, and
       otherwise preserves the retail store order and receiver return.
 
+  # --- Two-word receiver clear ---
+  - address: 0x08280174
+    ghidra: FUN_08280174
+    name: two_word_clear_third
+    size: 16
+    sig: "u32 *two_word_clear_third(u32 *target)"
+    module: cxx/two_word_clear_third
+    status: ported
+    renames:
+      param_1/r0: target
+      "target+0x0": first
+      "target+0x4": second
+    notes: >-
+      Raw ARM confirms the exact 16-byte extent 0x08280174..0x08280184:
+      `mov r1,#0; str r1,[r0]; str r1,[r0,#4]; bx lr`; the next separately
+      linked function starts at 0x08280184. The body writes zero to two
+      consecutive aligned words, reads neither word, has no NULL guard, and
+      preserves r0 as the C++ receiver return despite Ghidra's void signature.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly five direct
+      call sites, all plain unconditional bl: 0x0814d3e4, 0x081c1ad4,
+      0x081c1f24, 0x081c8000, and 0x081c8db0; there are no predicated calls,
+      tail branches, or aligned data-word references. No deliberate deviations;
+      the unique target-only text section keeps this hookable helper distinct
+      from byte-identical ports. Host tests cover receiver return, both stores,
+      and untouched neighboring words.
+
   # --- Q16.16 point-coordinate store ---
   - address: 0x08280184
     ghidra: FUN_08280184
