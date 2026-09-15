@@ -24,6 +24,32 @@ pub struct FixedPoint {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 8] = [0; core::mem::size_of::<FixedPoint>()];
 
+/// `fixed_point3_set` — original: `FUN_0828018c` @ **0x0828018c** (8 bytes,
+/// 0x0828018c..0x08280194; **5 direct `bl` call sites**, all unconditional,
+/// zero predicated forms, and no tail `b` calls), verified by decoding every
+/// ARM B/BL word in `osos.dec`.
+///
+/// Raw ARM is `stm r0, {r1, r2, r3}; bx lr`: stores three Q16.16 coordinate
+/// words in ascending order through an unguarded point pointer. The next real
+/// function begins at 0x08280194 (`bx lr`). The five callers assemble and add
+/// or subtract three-coordinate vectors for the application layout code.
+///
+/// Deliberate deviations: none.
+///
+/// Three signed Q16.16 coordinates, stored as consecutive target words.
+#[repr(C)]
+pub struct FixedPoint3 {
+    /// +0x00
+    pub x: i32,
+    /// +0x04
+    pub y: i32,
+    /// +0x08
+    pub z: i32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 12] = [0; core::mem::size_of::<FixedPoint3>()];
+
 /// fixed_point_set — original: `FUN_08280184` @ 0x08280184 (8 bytes; 12
 /// unconditional `bl` call sites, binary-scanned).
 ///
@@ -40,6 +66,26 @@ pub unsafe extern "C" fn fixed_point_set(point: *mut FixedPoint, x: i32, y: i32)
     unsafe {
         (*point).x = x;
         (*point).y = y;
+    }
+}
+
+/// fixed_point3_set — original: `FUN_0828018c` @ 0x0828018c (8 bytes; 5
+/// unconditional `bl` call sites, binary-scanned).
+///
+/// Stores Q16.16 `x`, `y`, and `z` at the three consecutive words of `point`.
+/// There is no NULL or alignment guard, matching the original `stm`.
+///
+/// # Safety
+///
+/// `point` must be writable and word-aligned for one [`FixedPoint3`].
+#[cfg_attr(target_os = "none", link_section = ".text.fixed_point3_set")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed_point3_set(point: *mut FixedPoint3, x: i32, y: i32, z: i32) {
+    unsafe {
+        (*point).x = x;
+        (*point).y = y;
+        (*point).z = z;
     }
 }
 
@@ -74,7 +120,7 @@ pub extern "C" fn q15_weighted_blend(
 
 #[cfg(test)]
 mod tests {
-    use super::{fixed_point_set, q15_weighted_blend, FixedPoint};
+    use super::{fixed_point3_set, fixed_point_set, q15_weighted_blend, FixedPoint, FixedPoint3};
 
     #[test]
     fn stores_signed_fixed_coordinates_without_touching_neighbors() {
@@ -84,6 +130,33 @@ mod tests {
         unsafe { fixed_point_set(point, -0x0001_8000, 0x7fff_ffff) };
 
         assert_eq!(words, [0xdead_beef, 0xfffe_8000, 0x7fff_ffff, 0xc001_d00d]);
+    }
+
+    #[test]
+    fn stores_three_signed_coordinates_without_touching_neighbors() {
+        let mut words = [
+            0xdead_beefu32,
+            0xa5a5_a5a5,
+            0x5a5a_5a5a,
+            0xc001_d00d,
+            0xfeed_face,
+        ];
+        let point = unsafe { words.as_mut_ptr().add(1).cast::<FixedPoint3>() };
+
+        unsafe { fixed_point3_set(point, -0x0001_8000, 0x7fff_ffff, i32::MIN) };
+
+        assert_eq!(
+            words,
+            [0xdead_beef, 0xfffe_8000, 0x7fff_ffff, 0x8000_0000, 0xfeed_face]
+        );
+    }
+
+    #[test]
+    fn overwrites_all_three_coordinate_words_on_each_call() {
+        let mut point = FixedPoint3 { x: 1, y: 2, z: 3 };
+
+        unsafe { fixed_point3_set(&mut point, 0, -1, 0x0001_0000) };
+        assert_eq!((point.x, point.y, point.z), (0, -1, 0x0001_0000));
     }
 
     #[test]

@@ -76241,6 +76241,35 @@ functions:
       boundary distinct. Host tests cover signed/high-bit coordinate words,
       overwrite behavior, and untouched neighboring words.
 
+
+  # --- Q16.16 three-coordinate store ---
+  - address: 0x0828018c
+    ghidra: FUN_0828018c
+    name: fixed_point3_set
+    size: 8
+    sig: "void fixed_point3_set(FixedPoint3 *point, i32 x, i32 y, i32 z)"
+    module: app/fixed_point
+    status: ported
+    renames:
+      param_1/r0: point
+      param_2/r1: x
+      param_3/r2: y
+      param_4/r3: z
+    notes: >-
+      Raw ARM confirms the exact extent 0x0828018c..0x08280194: `stm
+      r0,{r1,r2,r3}; bx lr`; the next separately linked function starts at
+      0x08280194 with `bx lr`. It writes three Q16.16 coordinate words in
+      ascending x, y, z order with no reads, NULL check, or alignment guard.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly 5 direct
+      calls, all plain unconditional bl: 0x0827b688, 0x0827b6b0, 0x0827b7a0,
+      0x082a5d98, and 0x082a5df4; none are predicated and there are no direct
+      tail branches. The first three construct layout vectors and the final
+      two form three-word vector sums or differences. No aligned image word
+      contains 0x0828018c, so it is statically called, not vtable-dispatched.
+      No deliberate behavioral deviations: the port uses the same three
+      ordered field stores and its target-only text section keeps this tiny
+      hook boundary distinct. Host tests cover signed/high-bit coordinate
+      words, overwrite behavior, and untouched neighboring words.
   # --- 0xa0 lazy singleton getter (app/singletons) ---
   - address: 0x08259740
     ghidra: FUN_08259740
