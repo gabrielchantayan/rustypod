@@ -66306,6 +66306,40 @@ functions:
       and is NULL-safe, cache independence from the neighbouring
       singletons.
 
+  # --- little-endian u16 virtual byte reader with temporary mode ---
+  - address: 0x081666fc
+    ghidra: FUN_081666fc
+    name: u16_le_vtable_read_mode
+    size: 124
+    sig: "u16 u16_le_vtable_read_mode(U16LeReadModeTarget *this, void *context, u32 first_seed, u32 second_seed)"
+    module: app/u16_le_vtable_read_mode
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: context
+      param_3/r2: first_seed
+      param_4/r3: second_seed
+      "[this+0x00]": vtable
+      "[this+0x50]": mode_context
+      "[vtable+0x9c]": read_byte (identity unresolved)
+      "[vtable+0xa4]": set_mode (identity unresolved)
+    notes: >-
+      Raw osos.dec words establish the exact 31-instruction, 124-byte extent
+      0x081666fc..0x08166777; the next real function begins at 0x08166778
+      with ldrb/strb/mov/bx. The wrapper initializes two stack words from the
+      third and fourth arguments, invokes slot +0x9c to replace the low byte
+      of the first, invokes slot +0xa4 with this+0x50 and mode 0x80, invokes
+      slot +0x9c to replace the low byte of the second, then invokes +0xa4
+      with mode zero. It returns first low byte | (second low byte << 8).
+      Decoding every ARM B/BL word finds five direct callers at 0x08166300,
+      0x08166398, 0x08166430, 0x081664c8, and 0x08166560: all plain
+      unconditional bl, zero predicated forms. The function itself has four
+      unconditional indirect blx dispatches. Neither virtual target has a
+      recovered identity in names.yaml, so both remain semantic-only slots.
+      Deliberate host deviation: widened native function-pointer vtable
+      fields replace target u32 words; target global_asm preserves the retail
+      sequence. match.py reports an instruction-for-instruction exact match.
+
   # --- big-endian u16 virtual byte dispatcher ---
   - address: 0x081667d8
     ghidra: FUN_081667d8
