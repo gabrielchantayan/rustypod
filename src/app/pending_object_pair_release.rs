@@ -24,6 +24,9 @@
 
 use core::ptr::addr_of_mut;
 
+#[cfg(test)]
+extern crate std;
+
 pub const PENDING_STATE: usize = 0x198;
 pub const FIRST_PENDING_OBJECT: usize = 0x1a0;
 pub const SECOND_PENDING_OBJECT: usize = 0x1a4;
@@ -36,7 +39,7 @@ unsafe extern "C" fn firmware_destruct_0828e5b0(object: *mut u8) {
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_destruct_0828e5b0(_object: *mut u8) {
+pub(crate) unsafe extern "C" fn missing_destruct_0828e5b0(_object: *mut u8) {
     panic!("pending_object_pair_release requires destructor 0x0828e5b0")
 }
 
@@ -48,6 +51,9 @@ unsafe extern "C" fn missing_destruct_0828e5b0(_object: *mut u8) {
 pub static mut PENDING_OBJECT_DESTRUCT: unsafe extern "C" fn(*mut u8) = firmware_destruct_0828e5b0;
 #[cfg(not(target_os = "none"))]
 pub static mut PENDING_OBJECT_DESTRUCT: unsafe extern "C" fn(*mut u8) = missing_destruct_0828e5b0;
+
+#[cfg(test)]
+pub(crate) static PENDING_OBJECT_DESTRUCT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Releases both pending objects and clears their four-word owner state.
 ///
@@ -87,12 +93,11 @@ mod tests {
     use super::*;
     use crate::heap::veneers::tests::{free_log, mock_heap};
     use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
-    static RELEASE_LOCK: Mutex<()> = Mutex::new(());
-    static mut DESTRUCTED: Vec<*mut u8> = Vec::new();
 
+    static mut DESTRUCTED: Vec<*mut u8> = Vec::new();
     const OBJECT_SLAB_LEN: usize = 0x100;
     const SECOND_OBJECT_OFFSET: usize = 0x80;
 
@@ -101,7 +106,7 @@ mod tests {
     }
 
     fn mock() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
-        let release_guard = RELEASE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let release_guard = PENDING_OBJECT_DESTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let heap_guard = mock_heap();
         unsafe {
             addr_of_mut!(PENDING_OBJECT_DESTRUCT).write_volatile(recording_destruct);
