@@ -94515,3 +94515,29 @@ functions:
       decomp/c/013/08142910_FUN_08142910.c; assembly: osos.asm 0x08142910.
       Host tests distinguish the adjacent word and preserve high-bit values.
       match.py structural review is expected to show a modern LLVM diff.
+
+  # --- Object +0x20 flag containment ---
+  - address: 0x08137ea4
+    ghidra: FUN_08137ea4
+    name: object_flags_contain
+    size: 20
+    sig: "u32 object_flags_contain(const u8 *object, u32 mask)"
+    module: util/object_flags_contain
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: mask
+      param_1_plus_0x20: flags
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte body: ldr r0,[r0,#0x20],
+      tst r1,r0, movne r0,#0, moveq r0,#1, bx lr at 0x08137ea4..0x08137eb4;
+      the next real function begins with push {r4-r8,lr} at 0x08137eb8.
+      Decoding every aligned ARM B/BL-immediate word independently finds five
+      direct inbound calls, all plain unconditional bl at 0x08208d68,
+      0x0820bf40, 0x08215448, 0x0821a630, and 0x0822c390; no predicated bl
+      forms occur. It returns one precisely when the aligned object+0x20 flag
+      word contains every requested mask bit, including the vacuously true
+      zero mask. Host tests cover zero, fully-present multi-bit, and partially
+      present masks. match.py structural review completed (exit 1 printed the
+      expected LLVM-versus-ADS diff: LLVM emits bic/clz/lsr rather than the
+      original conditional moves). Deliberate deviations: none.
