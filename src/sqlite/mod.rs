@@ -90,6 +90,7 @@ pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;
 pub mod exec_first_column_sql;
+pub mod execute_sql;
 pub mod error_msg;
 pub mod expire_prepared_statements;
 pub mod expr_affinity;
