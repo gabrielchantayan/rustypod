@@ -46500,6 +46500,37 @@ functions:
       and 0/1 exits; the diff is the crate frame, LLVM register
       allocation, and the restructured loop-condition branch.
 
+  # --- OpenSSL registration initialization gate ---
+  - address: 0x080ebcb4
+    ghidra: FUN_080ebcb4
+    name: crypto_ensure_initialized
+    size: 44
+    sig: "void crypto_ensure_initialized(void)"
+    module: crypto/ensure_initialized
+    status: ported
+    renames:
+      DAT_080ebcdc: crypto_initialization_object
+      FUN_0805f430: openssl_register_algorithms
+      FUN_08049a10: set_secondary_initialization_flag
+    notes: >-
+      Raw firmware decoding establishes a 44-byte extent, not Ghidra's
+      reported 64: nine code words at 0x080ebcb4..0x080ebcd8, followed by
+      the 0x080a96bc literal-pool word at 0x080ebcdc; the next real function
+      begins with `stmdb sp!,{r4,lr}` at 0x080ebce0. There are exactly five
+      callers, all unconditional `bl` (0x080aeecc, 0x082d3f2c,
+      0x082d42a8, 0x082d44f8, and 0x082d4934), with no predicated call
+      form. This body itself has one plain `bl`, to 0x0805f430, and no
+      predicated `bl`; it otherwise tail-branches to the six-instruction
+      0x08049a10 helper. The literal points at 0x080a96bc and the body tests
+      and sets its +4 word (0x080a96c0) before the OpenSSL registration
+      initializer. The tail helper independently changes the zero word at
+      0x08049a28 to one. The Rust port preserves cold-before-call flag
+      ordering, warm-path no-op behavior, and the conditional secondary
+      store. The unported 0x0805f430 registration initializer is a fixed
+      target-address call and an explicit host test seam. `match.py` reports
+      the expected structural difference: Rust uses a literal-call `blx`
+      and normal return rather than the retail direct `bl` and tail branch.
+
   # --- MPEG video header parser: bitstream read-and-advance ---
   - address: 0x080ebbe0
     ghidra: FUN_080ebbe0
