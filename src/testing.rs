@@ -1133,6 +1133,9 @@ pub mod hints {
     // record and operand fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CFF_PARSE_FIXED: usize = 0x4300_0000;
+    // 0x4400_0000: dedicated to ui/pool_entry_create's owner fixture; mappings
+    // never unmap, so no other user may share this hint.
+    pub const UI_POOL_ENTRY_CREATE: usize = 0x4400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -1341,3 +1344,8 @@ pub static POSIX_MUTEX_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::n
 /// Serializes host tests that replace the input-sequence item lookup/build
 /// seam. Both operations share one dispatch pair and must restore together.
 pub static INPUT_SEQUENCE_ITEM_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes tests that mutate the shared UI sequence identifier at
+/// `0x089c_fcc4`, including callers that consume an identifier.
+pub static SEQUENCE_ID_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes host tests that replace `ui::pool_entry_create::FIXED_POOL_OPS`.
+pub static UI_POOL_ENTRY_CREATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
