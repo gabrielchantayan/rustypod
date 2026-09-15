@@ -74558,6 +74558,40 @@ functions:
       the diff is LLVM rotating the NULL path into a mvneq/bxeq early-out
       plus the crate fp frame — the accepted ADS-vs-LLVM noise. The symbol
       resolves standalone in librustypod.a (no LLVM body fold observed).
+
+  # --- Block-backed list cursor item-count reader ---
+  - address: 0x081f0a84
+    ghidra: FUN_081f0a84
+    name: list_cursor_count
+    size: 24
+    sig: "u32 list_cursor_count(const void *list)"
+    module: cxx/list_cursor_count
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x30": cursor (u32 target pointer)
+      "cursor+0x2b8": item_count (unsigned)
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent
+      0x081f0a84..0x081f0a9c: `mov r1,r0; ldr r1,[r1,#0x30]; mov r0,#0; cmp
+      r1,#0; ldrne r0,[r1,#0x2b8]; bx lr`; 0x081f0a9c begins the next
+      separately linked function with `push {r4,r5,r6,r7,r8,r9,sl,lr}`.
+      Decoding every ARM B/BL word in osos.dec finds five direct inbound calls
+      at 0x082087cc, 0x0821ab04, 0x0821b2e0, 0x0821b380, and 0x0821b75c:
+      all are plain unconditional BL, with no predicated BL or direct
+      tail-branch transfer. Algorithm: load the cursor target word at
+      list+0x30; NULL returns zero without accessing the cursor record;
+      otherwise return cursor+0x2b8 verbatim. The adjacent
+      list_cursor_index getter and cursor setter 0x081fcc64 establish this
+      field as the unsigned count constraining the signed +0x2b4 index. No
+      callee seam: this is a leaf. Deliberate deviation: the pointer is kept
+      as a u32 target word on every architecture so host pointer width cannot
+      alter the firmware layout; u32 preserves r0 bit-for-bit. Host tests
+      cover the NULL short-circuit, zero/ordinary/maximum count words, and
+      detach/reattach reloads. match.py reports the same loads and NULL guard;
+      LLVM emits an early bxeq return and frame around the present-cursor
+      load, accepted ADS-versus-LLVM structural noise. The symbol resolves
+      standalone in librustypod.a.
   # --- Block-backed list cursor base-index reader ---
   - address: 0x081f0e78
     ghidra: FUN_081f0e78
