@@ -31,6 +31,7 @@ pub mod buffer_transition_controller;
 pub mod tracked_operation_dispatch;
 pub mod byte_flag_at_d_is_one;
 pub mod category_is_below_three;
+pub mod flagged_base_construct;
 pub mod callback_target_dispatch;
 pub mod callback_queue;
 pub mod callback_target_slot_14_dispatch;
