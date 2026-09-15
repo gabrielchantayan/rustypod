@@ -237,6 +237,7 @@ pub mod screen_base;
 pub mod screen_layout;
 pub mod singleton_state;
 pub mod slot_table;
+pub mod registered_listener_notify;
 pub mod slot_signal_reset;
 pub mod slot_value_process;
 pub mod four_slot_key_index;

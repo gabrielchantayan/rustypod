@@ -91551,3 +91551,31 @@ functions:
       while retaining the target slot role. match.py structural review and
       host tests cover clean and dirty states. Deliberate deviations: the
       unported helper remains a target-address seam.
+
+  # --- process-wide registered-listener notification ---
+  - address: 0x082753bc
+    ghidra: FUN_082753bc
+    name: registered_listener_notify
+    size: 120
+    sig: "u32 registered_listener_notify(u32 event)"
+    module: app/registered_listener_notify
+    status: ported
+    renames:
+      param_1/r0: event
+      piVar1/r0: listener_collection
+      piVar3/r4: listener
+      local_20/sp: output
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent from 0x082753bc
+      through 0x08275430; 0x08275434 is the next independently linked
+      function. Decoding every aligned ARM B/BL-immediate word finds five
+      direct inbound calls, all unconditional bl: 0x0812d6a8, 0x0816c418,
+      0x081a2114, 0x081b985c, and 0x081f9a0c. The body has one plain direct
+      bl to the unported collection getter at 0x08275434, no predicated
+      direct bl, and three unconditional indirect blx calls through vtable
+      slots. It walks the collection's initial count, prepares each listener
+      through slot +0x2c, then notifies it through slot +0x1c with event and
+      a zero-initialized output word, returning the final output. Target
+      builds retain the getter's verified raw address and vtable dispatch;
+      host tests use a typed seam because the getter has no verified semantic
+      identity. Tests cover empty and three-listener order/output cases.
