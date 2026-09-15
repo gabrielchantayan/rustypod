@@ -71625,6 +71625,30 @@ functions:
       (5 module tests, 2 new) verify the 511-byte payload bound plus NUL in
       the 512-byte scratch, verbatim negative result propagation, argument
       forwarding, one assignment call, and empty output.
+  - address: 0x0810b634
+    ghidra: FUN_0810b634
+    name: heap_string_construct_from_cstr
+    size: 32
+    sig: "HeapString *heap_string_construct_from_cstr(HeapString *this, const u8 *source)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this, param_2: source}
+    renames:
+      FUN_0810b514: heap_string_assign_from_cstr (stock absolute-entry seam)
+    notes: >-
+      Raw osos.dec at 0x0810b634..0x0810b650 is exactly 32 bytes
+      (e92d4010 e1a04000 e3a00000 e5840000 e1a00004 ebffffb1 e1a00004
+      e8bd8010); the next sibling begins at 0x0810b654 with
+      stmdb sp!,{r4,lr}. It preserves this in r4, writes NULL to its sole
+      data word, calls the known stock HeapString::assign_from_cstr entry
+      at 0x0810b514 with the unchanged source in r1, returns this in r0.
+      Ghidra's one-argument signature is wrong: raw code never assigns r1
+      before the call. Whole-image ARM branch decoding finds exactly five
+      direct call sites (0x0809e724, 0x081132c4, 0x081132d0, 0x08113874,
+      0x081a3610), all unconditional bl and zero predicated bl forms.
+      The port retains the original fault-on-NULL store and uses the existing
+      stock absolute-entry seam; host test recorder verifies pre-call clearing,
+      exact source forwarding, and returned holder identity.
   # --- track-metadata fetch framework: serialized-record scalar reader ---
   - address: 0x0826863c
     ghidra: FUN_0826863c
