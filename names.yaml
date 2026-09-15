@@ -90868,3 +90868,24 @@ functions:
       operation slots and ARM frame differences; its state reads, low-byte
       mask, callback ordering, clears, and two final sentinel writes match the
       retail control flow. Deliberate deviations: none.
+
+  - address: 0x0828c804
+    ghidra: FUN_0828c804
+    name: coordinate_owner_set_render_parameter
+    size: 8
+    sig: "void coordinate_owner_set_render_parameter(void *owner, u32 parameter)"
+    module: ui/coordinate_origin
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: parameter
+      "*(u32 *)(owner + 0x38)": render_parameter
+    notes: >-
+      Raw words e5801038/e12fff1e prove the true 8-byte extent: str
+      r1,[r0,#0x38] then bx lr; the next distinct function begins at
+      0x0828c80c. Decoding every aligned ARM B/BL-immediate word in osos.dec
+      finds five unconditional inbound bl calls and no predicated calls. The
+      word's downstream interpretation is unresolved, so the port names only
+      its proven render-configuration role. Host tests cover zero, both
+      observed caller values (0x80 and 0x65), u32::MAX, and untouched
+      neighboring bytes. match.py structural review completed.

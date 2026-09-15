@@ -271,6 +271,37 @@ pub unsafe extern "C" fn coordinate_owner_set_opacity(owner: *mut u8, opacity: u
     }
 }
 
+/// coordinate_owner_set_render_parameter — original: `FUN_0828c804` @
+/// **0x0828c804** (**8 bytes**; `str r1,[r0,#0x38]; bx lr`, immediately
+/// followed by the distinct function at 0x0828c80c). Decoding every aligned
+/// ARM `B`/`BL` immediate in `osos.dec` finds **5 unconditional `bl`** call
+/// sites and no predicated calls.
+///
+/// # Algorithm
+///
+/// Stores the supplied 32-bit render parameter at owner +0x38. The word's
+/// further interpretation is not established by this leaf setter; callers
+/// supply 0x80 and 0x65 while configuring drawable owners.
+///
+/// # Deliberate deviations
+///
+/// None. The target uses a volatile aligned word store to retain the single
+/// observable retail write; host fixtures use an unaligned store because
+/// native-width fields may change their layout.
+#[cfg(target_os = "none")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn coordinate_owner_set_render_parameter(owner: *mut u8, parameter: u32) {
+    (owner.add(0x38) as *mut u32).write_volatile(parameter);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(never)]
+pub unsafe extern "C" fn coordinate_owner_set_render_parameter(owner: *mut u8, parameter: u32) {
+    (owner.add(0x38) as *mut u32).write_unaligned(parameter);
+}
+
+
 
 /// ARM form of [`coordinate_owner_set_origin`].
 #[cfg(target_os = "none")]
@@ -536,6 +567,21 @@ mod tests {
             assert_eq!(ptr::addr_of!((*owner).origin_changed).read_unaligned(), 1);
             assert_eq!(REFRESH_CALLS, 1);
             assert_eq!(REFRESHED_OWNER, owner.cast());
+        }
+    }
+
+    #[test]
+    fn render_parameter_overwrites_only_its_full_word() {
+        for parameter in [0, 0x65, 0x80, u32::MAX] {
+            let mut storage = [0xa5u8; 0x100];
+
+            unsafe {
+                coordinate_owner_set_render_parameter(storage.as_mut_ptr(), parameter);
+
+                assert_eq!((storage.as_ptr().add(0x38) as *const u32).read_unaligned(), parameter);
+            }
+            assert!(storage[..0x38].iter().all(|&byte| byte == 0xa5));
+            assert!(storage[0x3c..].iter().all(|&byte| byte == 0xa5));
         }
     }
 
