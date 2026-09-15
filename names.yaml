@@ -18022,6 +18022,31 @@ functions:
       LLVM adds the frame-pointer push/pop every tiny port in this crate
       shows (observable_set_changed precedent).
 
+  - address: 0x08171a80
+    ghidra: FUN_08171a80
+    name: class6000_property_6045_i8
+    size: 40
+    sig: "i32 class6000_property_6045_i8(Class6000 *store)"
+    module: app/class_6000_property_6045_i8
+    status: ported
+    renames:
+      param_1: store
+      DAT_08171aa8: RESOURCE_KIND_23IU
+      cVar1: property_value
+    notes: >-
+      Raw extent is 40 bytes: ten ARM instructions through 0x08171aa4,
+      followed by the literal-pool word at 0x08171aa8 (0x55693332,
+      "23iU"); the next real function begins at 0x08171aac. Decoding all
+      branch-with-link encodings in osos.dec finds exactly 5 direct call
+      sites, all unconditional bl instructions; no predicated bl,
+      tail-branch, or aligned data-word reference targets this entry. The
+      function loads vtable slot +0xe0 and calls it as
+      `(store, 0x6045, 0x6000, "23iU")`, then sign-extends the low byte of
+      r0. The resource kind's semantic identity is not established, so its
+      name retains the verified literal. Rust models the shared slot result
+      as a pointer but deliberately uses only its raw low byte here, without
+      dereferencing it, matching stock.
+
   - address: 0x08171ba0
     ghidra: FUN_08171ba0
     name: class6000_dirp_property_6066_or_default
