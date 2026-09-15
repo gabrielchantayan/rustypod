@@ -97,6 +97,7 @@
 use core::mem::{offset_of, MaybeUninit};
 use core::ptr;
 use crate::util::crts_tag::crts_has_tag;
+use crate::util::pool_entry_is_live::pool_entry_is_live;
 #[cfg(target_pointer_width = "32")]
 use crate::util::tagged_counter::{tagged_counter_try_decrement, tagged_counter_try_increment};
 
@@ -280,11 +281,11 @@ pub const QUERY_MAX_LEN: u32 = 0x7fff_ffff;
 /// copies `min(entry.length, max_len as i32)` bytes only for non-NULL `dst`,
 /// writes that length, and decrements the counter on both entry outcomes.
 ///
-/// The separately linked 0x080ac160 acceptance predicate is unported. Its
-/// verified two-word condition is inlined; no semantic identity is assigned
-/// to that callee. Existing 0x080a7714 / 0x0808e16c / 0x0809f744 ports are
-/// called directly. The bcopy function pointer is read volatile to prevent
-/// LLVM replacing its memmove tail with an AEABI builtin; there is no seam.
+/// The separately linked 0x080ac160 entry-live predicate is ported as
+/// [`crate::util::pool_entry_is_live::pool_entry_is_live`] and called
+/// directly. Existing 0x080a7714 / 0x0808e16c / 0x0809f744 ports are called
+/// directly. The bcopy function pointer is read volatile to prevent LLVM
+/// replacing its memmove tail with an AEABI builtin; there is no seam.
 ///
 /// On 64-bit hosts, `StringPool` uses native handle pointers, so its
 /// `lock_depth` is not at the target's +0x30. The host build updates that
@@ -324,7 +325,7 @@ pub unsafe extern "C" fn string_pool_read(
         (*pool).lock_depth = (*pool).lock_depth.wrapping_add(1);
     }
     let entry = (*(*pool).entries).add((id - 1) as usize);
-    let status = if ((*entry).blob_offset as i32) < 0 || (*entry).length <= 0 {
+    let status = if pool_entry_is_live(entry.cast()) == 0 {
         PARAM_ERR
     } else {
         let copied_len = (*entry).length.min(max_len as i32);

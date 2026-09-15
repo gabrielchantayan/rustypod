@@ -25828,6 +25828,30 @@ functions:
       returning its computed rate and a pre-captured sample preserving an
       arbitrary full-width (0xfffffffe) rate without invoking either helper.
 
+  - address: 0x080ac160
+    ghidra: FUN_080ac160
+    name: pool_entry_is_live
+    size: 28
+    sig: "u32 pool_entry_is_live(PoolEntry *entry)"
+    module: util/pool_entry_is_live
+    status: ported
+    renames:
+      param_1/r0: entry
+      "[entry+0x00]/r1": blob_offset
+      "[entry+0x04]/r0": length
+    notes: >-
+      Raw osos.dec words at 0x080ac160 decode as ldr r1,[r0]; cmp r1,#0;
+      ldrge r0,[r0,#4]; cmpge r0,#0; movle r0,#0; movgt r0,#1; bx lr.
+      The bx lr at 0x080ac178 makes the true extent 28 bytes; the next
+      separately linked function begins at 0x080ac17c. A raw ARM branch-word
+      scan finds five direct callers (0x080760f0, 0x080a653c, 0x080b438c,
+      0x080c5b64, and 0x080d6e14), all plain bl, and no predicated bl calls.
+      The predicate returns normalized one only when blob_offset, interpreted
+      signed, is non-negative and length is positive. It is used
+      for live pool entries; all recovered callers operate on the same
+      two-word entry layout. Deliberate deviations: none. Host tests cover
+      the zero offset and maximum positive values plus high-bit offsets,
+      reclaimed offsets, and zero/negative lengths.
   - address: 0x080b4318
     ghidra: FUN_080b4318
     name: string_pool_read

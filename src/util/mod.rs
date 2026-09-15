@@ -78,6 +78,7 @@ pub mod nested_container_item_count;
 pub mod no_op_destructor;
 pub mod resource_list;
 pub mod pascal_string;
+pub mod pool_entry_is_live;
 pub mod paletted_image_copy;
 pub mod parse_ascii_decimal_cursor;
 pub mod plane_cursor;
