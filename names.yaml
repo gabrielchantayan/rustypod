@@ -95576,3 +95576,34 @@ functions:
       ft_stream_release_frame @ 0x0804fcb8. The Rust port preserves the
       existing release seam with a volatile function-pointer load, so LLVM
       emits an indirect tail dispatch rather than the retail direct branch.
+  # --- CFF INDEX element access ---
+  - address: 0x080d3e9c
+    ghidra: FUN_080d3e9c
+    name: cff_index_access_element
+    size: 196
+    sig: "FT_Error cff_index_access_element(CffIndex *index, u32 element, u8 **pbytes, u32 *pbyte_len)"
+    module: ft/cff_index
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: element
+      param_3/r2: pbytes
+      param_4/r3: pbyte_len
+      r5: index_count
+      r6: byte_len
+      "index+0x10": offsets
+      "index+0x14": bytes
+    notes: >-
+      Raw osos.dec establishes the true 196-byte extent
+      0x080d3e9c..0x080d3f60: push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the distinct CFF index release helper starts at 0x080d3f60. The body
+      has two plain outbound BL calls, FT_Stream_Seek (0x0804fce8) and
+      FT_Stream_ExtractFrame (0x0804effc), and no predicated BL calls. Three
+      bls words are local conditional branches, not link calls. It finds the
+      next nonzero CFF INDEX offset, reports the span, and either returns a
+      pre-extracted byte pointer or seeks and extracts a frame. Null/out of
+      range returns 6 without output writes; missing successor clears both.
+      Host tests cover skipped empty entries, invalid-output preservation,
+      memory-frame extraction, and seek failure. match.py reviewed the
+      structural diff: LLVM adds a frame and uses indirect seam calls, an
+      intentional equivalent deviation.
