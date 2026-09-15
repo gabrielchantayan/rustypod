@@ -8,6 +8,7 @@ pub mod byte_block_checksum_veneer;
 pub mod buffer_state;
 pub mod chval;
 pub mod cpp_array_construct;
+pub mod cpp_array_allocate;
 pub mod ctype;
 pub mod cxa_guard;
 pub mod errno;

@@ -39443,6 +39443,34 @@ functions:
       dataflow. match.py structural: literal load and fixed-argument
       tail-call shape are retained.
 
+  - address: 0x082ab264
+    ghidra: FUN_082ab264
+    name: cpp_array_allocate
+    size: 36
+    sig: "u32 *cpp_array_allocate(u32 element_size, u32 element_count, u32 element_initializer, u32 initializer_context)"
+    module: runtime/cpp_array_allocate
+    status: ported
+    renames:
+      param_1: element_size
+      param_2: element_count
+      param_3: element_initializer
+      param_4: initializer_context
+      FUN_082ab400: cpp_array_allocate_helper_adapter
+      FUN_082b498c: unported_array_helper (existing PairHeaderElementArrayOps seam)
+    notes: >-
+      Raw ARM establishes the exact 36-byte extent 0x082ab264..0x082ab288;
+      the next separately linked adapter starts at 0x082ab288. Decoding every
+      aligned B/BL word in osos.dec finds exactly five direct callers, all
+      unconditional bl and none predicated. The body rotates the ADS
+      (element_size, element_count, element_initializer, initializer_context)
+      convention through 0x082ab400 into the unported 0x082b498c helper ABI:
+      (0, element_count, element_size, 8, 0, element_initializer,
+      initializer_context, 0, 0, 0, 0). The helper's pointer result survives
+      pop {ip,pc}, so Ghidra's void return is incorrect. The port uses the
+      existing exact-ABI PairHeaderElementArrayOps seam without inventing the
+      helper's identity; host tests verify literal slots, opaque extreme words,
+      one call, and r0-result forwarding.
+
   - address: 0x082ab398
     ghidra: FUN_082ab398
     name: pair_header_grand_base_reset
