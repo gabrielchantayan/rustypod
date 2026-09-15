@@ -52,6 +52,7 @@ pub mod plst_element_teardown;
 pub mod plst_task_complete;
 pub mod plst_next;
 pub mod plst_slot_item;
+pub mod plst_selector_normalize;
 pub mod plst_slot_materialize;
 pub mod plst_linked_item_count;
 pub mod plst_slot_position;

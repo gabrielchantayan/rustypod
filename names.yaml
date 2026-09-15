@@ -7155,6 +7155,30 @@ functions:
       global load, and tail-calls the registration slot (bx ip)
       since the verdict needs no further work.
 
+  - address: 0x080b48dc
+    ghidra: FUN_080b48dc
+    name: normalize_plst_selector
+    size: 200
+    sig: "void normalize_plst_selector(u8 *element, u32 *selector, u8 *reverse_flag)"
+    module: ui/plst_selector_normalize
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: selector
+      param_3/r2: reverse_flag
+      element+0xc8: selector_state
+      element+0x18c: selector_flags
+      element+0x18d: reverse_flags
+    notes: >-
+      Raw decoding establishes the exact 200-byte extent
+      0x080b48dc..0x080b49a4: the following cmp r0,#0 begins the next
+      function. The leaf has no outgoing calls. Decoding all BL words in
+      osos.dec finds ten incoming plain bl calls and zero predicated bl
+      calls; Ghidra's five-call reference count is incomplete. Selectors
+      0x34/0x37 become 4; selectors 0x33/0x35/0x36 derive their result
+      from element flags and selector_state, with 0x33/0x36 optionally
+      rewriting the byte reverse_flag. Rust retains the exact byte and
+      aligned word access widths and replaces both existing UI stock seams.
   - address: 0x080b4adc
     ghidra: FUN_080b4adc
     name: queue_wait
@@ -77947,7 +77971,7 @@ functions:
       param_1/r0: handle
       param_2/r1: selector
       param_3/r2: reverse_flag
-      FUN_080b48dc: normalize_selector_unported
+      FUN_080b48dc: normalize_plst_selector (ported, ui/plst_selector_normalize)
       FUN_080df1b8: materialize_plst_slot (ported, ui/plst_slot_materialize)
       FUN_080ca00c: build_position_map_unported
       FUN_080daad4: slot_index_of_unported
