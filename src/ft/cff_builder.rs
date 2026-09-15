@@ -45,6 +45,12 @@
 use crate::ft::types::{FtOutline, FtVector};
 use core::ffi::c_void;
 
+/// Serializes host tests that replace the shared glyph-loader growth seam.
+#[cfg(test)]
+pub(crate) static GLYPH_LOADER_CHECK_POINTS_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+
 /// `FT_CURVE_TAG_ON` (ftimage.h) — the point lies on the curve.
 pub const FT_CURVE_TAG_ON: u8 = 1;
 
@@ -528,9 +534,6 @@ mod tests {
 
     use parking_lot::Mutex;
 
-    /// Serializes the tests that override [`GLYPH_LOADER_CHECK_POINTS`].
-    static CHECK_LOCK: Mutex<()> = Mutex::new(());
-
     /// Recorded arguments of the most recent seam call.
     static SEAM_CALLS: Mutex<std::vec::Vec<(usize, i32, i32)>> =
         Mutex::new(std::vec::Vec::new());
@@ -603,7 +606,7 @@ mod tests {
 
     /// Installs the recording seam for the duration of `body`.
     fn with_seam(body: impl FnOnce()) {
-        let _lock = CHECK_LOCK.lock();
+        let _lock = GLYPH_LOADER_CHECK_POINTS_TEST_LOCK.lock();
         SEAM_CALLS.lock().clear();
         let saved = unsafe { core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile() };
         unsafe {
