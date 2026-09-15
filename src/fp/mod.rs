@@ -11,6 +11,7 @@ pub mod fp_fadd;
 pub mod fp_fconv;
 pub mod fp_fixed16;
 pub mod fp_interpolate;
+pub mod fixed16_vec3;
 pub mod fp_fmuldiv;
 pub mod fp_misc;
 pub mod fp_scalb;

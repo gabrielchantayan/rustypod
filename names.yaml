@@ -92386,3 +92386,25 @@ functions:
       unported resource destructor address directly; host tests use recording
       seams for that boundary and the final delete. The tail branch is an
       ordinary Rust call, the only behavioral-neutral structural deviation.
+
+  - address: 0x0824c6d8
+    ghidra: FUN_0824c6d8
+    name: copy_fixed16_vec3
+    size: 28
+    sig: "void copy_fixed16_vec3(i32 *dst, const i32 *src)"
+    module: fp/fixed16_vec3
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_1[0..2]: dst_components
+      param_2[0..2]: src_components
+    notes: >-
+      Raw ARM is seven instructions at 0x0824c6d8..0x0824c6f3; the next
+      function starts at 0x0824c6f4. The function copies three Q16.16 vector
+      component words forward, loading then storing each component before the
+      next. Raw caller disassembly finds four direct plain BL sites
+      (0x0824bfe0, 0x0824bfec, 0x08255238, 0x0825525c) and zero predicated
+      BL sites; Ghidra's fifth reference from 0x082d1c70 is a false function
+      boundary. Rust uses volatile reads and writes to preserve this observable
+      order for partially overlapping pointers; no other deviations.
