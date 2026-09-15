@@ -91379,3 +91379,33 @@ functions:
       than creating an identity-bearing seam for the still-unnamed helper;
       host tests use a below-4GiB target-layout fixture. match.py reports the
       expected structural diff: Rust lowers the tail transfer as direct reads.
+
+  # --- PathObject path join ---
+  - address: 0x08279374
+    ghidra: FUN_08279374
+    name: path_object_join
+    size: 180
+    sig: "StringObject *path_object_join(StringObject *this, const StringObject *source)"
+    module: app/path_object_join
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      FUN_082a52e8: string_object_suffix
+      FUN_082a52c8: string_object_codepoint_at
+      FUN_082771e0: string_object_remove_trailing_codepoint
+      FUN_08276b64: string_object_insert_utf16
+      FUN_08276a18: string_object_insert_cstr
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent
+      0x08279374..0x08279427: `pop {r2,r3,r4,r5,r6,pc}` at 0x08279424 is
+      followed by a new `push` at 0x08279428. Full-image ARM B/BL-immediate
+      decoding finds five inbound calls, all plain unconditional bl
+      (0x08149e90, 0x081bd52c, 0x081bde9c, 0x08279358, 0x082a5630), and
+      zero predicated calls. It samples the destination's one-codepoint
+      suffix, removes trailing colon/slash/backslash runs, prefixes a slash
+      only when joining nonempty source to an empty destination, then appends
+      source's NULL-safe C string and returns this. All named string helpers
+      are ported and direct except string_object_remove_trailing_codepoint
+      (0x082771e0), whose raw target call remains a documented target seam
+      because its virtual truncation protocol is not yet ported.

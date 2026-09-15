@@ -141,6 +141,7 @@ pub mod media_player_interface_status;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
 pub mod indexed_slot_pending_reset;
+pub mod path_object_join;
 pub mod indexed_timestamp_bounds;
 pub mod indexed_timestamp_window_bounds;
 pub mod indexed_payload_lookup;
