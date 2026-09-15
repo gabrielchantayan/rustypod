@@ -100,6 +100,7 @@ pub mod resource_handle_release;
 pub mod opaque_handle_release;
 pub mod resource_handle_initialize;
 pub mod resource_handle_execute;
+pub mod zero_selector_timeout_dispatch;
 pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;

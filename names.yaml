@@ -51257,6 +51257,29 @@ functions:
       original is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
 
+  - address: 0x082620cc
+    ghidra: FUN_082620cc
+    name: zero_selector_timeout_dispatch
+    size: 12
+    sig: "u32 zero_selector_timeout_dispatch(void *handle, void *timeout)"
+    module: cxx/zero_selector_timeout_dispatch
+    status: ported
+    renames:
+      param_1: handle (discarded)
+      param_2: timeout
+      FUN_082dadb8: unported zero-selector request relay
+    notes: >-
+      Raw extent is exactly 12 bytes (0x082620cc..0x082620d8): mov r0,r1;
+      mov r1,#0; b 0x082dadb8. The next distinct function opens at
+      0x082620d8; there is no literal pool. The body contains no bl
+      instruction; whole-image ARM decoding finds five plain incoming bl
+      call sites (0x08165328, 0x081654b8, 0x081d7780, 0x081d77f0, and
+      0x08201198) and zero predicated forms. Ghidra's reported 188-byte body
+      and five call sites otherwise include adjacent functions. The tail relay
+      copies timeout to r2, zeroes r0/r1/r3, then tail-dispatches to
+      0x082c378c. The relay is unported: device builds call its fixed address;
+      volatile seam to prove the transformed argument tuple and status.
+
   - address: 0x082620f0
     ghidra: FUN_082620f0
     name: resource_handle_execute
