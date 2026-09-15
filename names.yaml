@@ -93169,3 +93169,28 @@ functions:
       identical-code folding with other empty destructor exports; host tests
       cover pointer preservation and no object writes. match.py structural
       diff reviewed after the ARM release build.
+  - address: 0x081d5f38
+    ghidra: FUN_081d5f38
+    name: observable_array_pair_destruct
+    size: 28
+    sig: "ObservableArrayPair *observable_array_pair_destruct(ObservableArrayPair *this)"
+    module: cxx/observable_array_pair
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent, seven A32 words from
+      0x081d5f38 through `pop {r4,pc}` at 0x081d5f50; the next real function
+      begins at 0x081d5f54 with `mov r1,r0`. It adds 0x18 to this, calls
+      observable_array_destruct @ 0x08271d2c, subtracts 0x10, calls that same
+      destructor again, then subtracts 0x08 and returns the original pair
+      base. Thus it destroys the second embedded ObservableArray before the
+      first and leaves the leading words untouched. Decoding every A32 B/BL
+      immediate in osos.dec finds five direct plain unconditional BL callers
+      and no predicated BL callers. No deliberate deviations. Host coverage
+      proves both arrays are destructed and the pair base and leading words
+      are preserved. match.py structural diff reviewed after the ARM build:
+      LLVM preserves reverse teardown order but uses a frame and derives the
+      second call from saved this rather than the first callee's return.
