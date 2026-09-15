@@ -15,6 +15,7 @@ pub mod errno;
 pub mod exit;
 pub mod i2c0_idle;
 pub mod global_state;
+pub mod global_object_address;
 pub mod i2c0_transfer;
 pub mod lib_init;
 pub mod ll_udiv10;

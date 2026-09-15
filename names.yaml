@@ -93955,3 +93955,24 @@ functions:
       predicated bl calls and no direct tail-B callers. The prior
       mov_checked_flagged_width port now calls this faithful seam rather than
       preserving the behavior inline. Deliberate deviations: none.
+  # --- Global object address getter ---
+  - address: 0x081621e4
+    ghidra: FUN_081621e4
+    name: global_object_address
+    size: 8
+    sig: "u32 global_object_address(void)"
+    module: runtime/global_object_address
+    status: ported
+    renames:
+      r0: global_object_address
+      DAT_081621ec: global_object_address_literal
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent: ldr r0,[pc] at
+      0x081621e4 loads the in-function literal 0x08ad1778 at 0x081621ec, then
+      bx lr returns it; the next separately linked function begins at
+      0x081621f0. Decoding inbound direct ARM calls finds exactly five plain,
+      unconditional bl calls and no predicated bl calls. The literal is an
+      address returned directly, not a pointer dereferenced by this getter.
+      match.py reports the expected structural frame-prologue difference from
+      LLVM while retaining the literal load and return. Host test verifies the
+      exact returned target word. Deliberate deviations: none.
