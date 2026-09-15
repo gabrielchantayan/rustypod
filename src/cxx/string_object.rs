@@ -418,6 +418,17 @@ pub struct StringObject {
     pub payload: *mut u8,
 }
 
+/// Two opaque leading words followed by the six StringObject members
+/// destroyed by [`string_object_array6_destroy`]. On ARM the members occupy
+/// +0x08 through +0x30; the leading words at +0x00 and +0x04 are not touched
+/// by that destructor.
+#[repr(C)]
+pub struct StringObjectArray6 {
+    pub header: [usize; 2],
+    pub strings: [StringObject; 6],
+}
+
+
 /// The decoded prefix of an otherwise unidentified record whose word-one
 /// member is a [`StringObject`]. On ARM this places `primary` at +0x04; the
 /// wider host pointer fields are intentionally represented by named fields,
@@ -1649,6 +1660,33 @@ pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut 
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
     this
+}
+
+/// string_object_array6_destroy — original: `FUN_0827dea4` @ 0x0827dea4
+/// (64 bytes; **6 direct `bl` call sites** — all unconditional, zero
+/// predicated — verified by decoding the raw ARM words in `osos.dec`).
+///
+/// Destroys six consecutive [`StringObject`] members in reverse address
+/// order: offsets +0x30, +0x28, +0x20, +0x18, +0x10 and +0x08 from `this`.
+/// Each call reaches [`string_object_destroy`] @ 0x08277484. The final
+/// `sub r0, r0, #8` derives and returns the original base from the final
+/// callee return. The word at +0x00 is untouched. No NULL guard exists.
+///
+/// Deliberate deviation: target offsets are represented as elements of a
+/// `StringObject` array, so native-widened host pointers retain their
+/// meaningful member spacing; on ARM this is the identical 8-byte stride.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_array6_destroy(
+    this: *mut StringObjectArray6,
+) -> *mut StringObjectArray6 {
+    let current = string_object_destroy(core::ptr::addr_of_mut!((*this).strings[5]));
+    let current = string_object_destroy(current.sub(1));
+    let current = string_object_destroy(current.sub(1));
+    let current = string_object_destroy(current.sub(1));
+    let current = string_object_destroy(current.sub(1));
+    let current = string_object_destroy(current.sub(1));
+    current.sub(1).cast()
 }
 
 /// string_object_destroy_veneer — original: `thunk_FUN_082792fc` @
@@ -5506,6 +5544,34 @@ pub(crate) mod tests {
             &STRING_OBJECT_VTABLE as *const _ as usize,
             "the vtable store precedes the release call (str before bl)"
         );
+    }
+
+    #[test]
+    fn array6_destroy_releases_all_members_in_descending_address_order() {
+        let _bench = bench();
+        let mut array = StringObjectArray6 {
+            header: [0xfeed_face, 0xdead_c0de],
+            strings: core::array::from_fn(|index| StringObject {
+                vtable: (0xdead_beefusize + index) as *const StringObjectVtable,
+                payload: (0xcafe_f000usize + index) as *mut u8,
+            }),
+        };
+        let this = &mut array as *mut StringObjectArray6;
+        unsafe {
+            assert_eq!(string_object_array6_destroy(this), this);
+        }
+        assert_eq!(
+            array.header,
+            [0xfeed_face, 0xdead_c0de],
+            "the leading words are untouched"
+        );
+        let calls = release_calls();
+        assert_eq!(calls.len(), 6, "one release for every embedded string");
+        for (call_index, (object, vtable)) in calls.iter().enumerate() {
+            let member_index = 5 - call_index;
+            assert_eq!(*object, core::ptr::addr_of!(array.strings[member_index]) as usize);
+            assert_eq!(*vtable, &STRING_OBJECT_VTABLE as *const _ as usize);
+        }
     }
 
     #[test]

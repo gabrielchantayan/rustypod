@@ -23865,6 +23865,26 @@ functions:
        STRING_OBJECT_VTABLE_ADDRESS) per the heap/pool_client.rs
        pattern. Original never writes r0, so the port returns `this`.
 
+  - address: 0x0827dea4
+    ghidra: FUN_0827dea4
+    name: string_object_array6_destroy
+    size: 64
+    sig: "StringObjectArray6 *string_object_array6_destroy(StringObjectArray6 *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Raw `osos.dec` confirms the 64-byte extent: `push {r4,lr}` at
+      0x0827dea4 through `b 0x08275d74` at 0x0827dee0, with the next
+      function's `push {r4,r5,r6,r7,lr}` at 0x0827dee4. Decoding those
+      sixteen words finds six direct, unconditional BL calls (not Ghidra's
+      reported five): each targets the ported string_object_destroy @
+      0x08277484, for embedded StringObject members at offsets +0x30 down
+      to +0x08. The returned this pointer is derived from the final member
+      destructor result by `sub r0,r0,#8`; the leading word at +0 is
+      untouched. The port represents the target's 4-byte header and six
+      8-byte members as a repr(C) StringObjectArray6, preserving member
+      identity on pointer-widened hosts.
   - address: 0x08277484
     ghidra: FUN_08277484
     name: string_object_destroy
