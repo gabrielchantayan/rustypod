@@ -53,6 +53,7 @@ pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
 pub mod controller_history_select;
+pub mod controller_history_select_core;
 pub mod context_scope;
 pub mod directory_iterator;
 pub mod context_scope_selector;

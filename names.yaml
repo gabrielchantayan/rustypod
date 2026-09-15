@@ -25310,6 +25310,32 @@ functions:
       volatile callback seam. Host tests prove the exact resource id and
       complementary (1,0) policy flags. match.py structural review is
       recorded after the release ARM build.
+  - address: 0x08292d1c
+    ghidra: FUN_08292d1c
+    name: controller_history_select
+    size: 60
+    sig: "void controller_history_select(u32 resource_id, u32 history_flag, u32 skip_callback)"
+    module: app/controller_history_select_core
+    status: ported
+    renames:
+      DAT_08292d58: controller_history_resource_id
+      FUN_0817ee04: app_controller_get
+      FUN_08292bd4: controller_history_select_core
+    notes: >-
+      Raw ARM establishes the true 60-byte extent: fourteen instruction
+      words at 0x08292d1c..0x08292d54 followed by resource-id literal
+      0x0dad073a at 0x08292d58; the next function begins at 0x08292d5c.
+      Ghidra incorrectly combines this wrapper with the adjacent
+      0x08292bd4 selection body. A complete B/BL scan finds five direct
+      BL callers: four unconditional at 0x0813456c, 0x0813f4bc,
+      0x081a3fe4, and 0x081b4be8, plus BLNE at 0x0815cb50; the sibling
+      wrappers at 0x08292d14 and 0x08292e64 tail-branch here. If resource_id
+      is the controller-history id, app_controller_get() is called and
+      halfword 6 is stored at controller+0x80, then all arguments forward to
+      the adjacent unported core. Deliberate deviation: Rust makes an
+      ordinary call through a literal veneer rather than the retail tail
+      branch; host tests replace both callees and prove the private and
+      non-private paths.
   - address: 0x08292e58
     ghidra: FUN_08292e58
     name: controller_history_select_without_callback
