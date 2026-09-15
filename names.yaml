@@ -95607,3 +95607,31 @@ functions:
       memory-frame extraction, and seek failure. match.py reviewed the
       structural diff: LLVM adds a frame and uses indirect seam calls, an
       intentional equivalent deviation.
+  # --- Type 1 builder point-capacity gate ---
+  - address: 0x080ce174
+    ghidra: FUN_080ce174
+    name: t1_builder_check_points
+    size: 52
+    sig: "FT_Error t1_builder_check_points(T1Builder *builder, i32 count)"
+    module: ft/t1_builder
+    status: ported
+    renames:
+      param_1/r0: builder
+      param_2/r1: count
+      r0: loader
+      r2: required_points
+    notes: >-
+      Raw osos.dec establishes the 52-byte extent
+      0x080ce174..0x080ce1a8: cmp r1,#0 through bx lr; the distinct next
+      function starts with mov r3,r0 / push {r4,lr}. Ghidra incorrectly
+      merges the 0x0804c638 growth body into this function. Five inbound
+      direct calls are plain unconditional bl; no predicated bl was found.
+      A zero count returns before dereferencing builder. Otherwise it
+      sign-extends base/current n_points, sums them with count using wrapping
+      32-bit arithmetic, and tail-branches to FT_GlyphLoader_CheckPoints
+      (0x0804c638) only when the signed total exceeds max_points. Rust uses
+      the existing volatile seam for that tail target; host tests cover the
+      NULL zero-count fast path, exact capacity, signed counts, and overflow.
+      LLVM folds this identical body into cff_check_points despite
+      inline(never), leaving t1_builder_check_points as an archive-symbol
+      alias; match.py therefore cannot isolate a separate disassembly label.

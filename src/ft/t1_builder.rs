@@ -4,6 +4,8 @@
 //! values or 16.16 fixed-point values, selected by [`T1Builder::shift`].
 
 use core::ffi::c_void;
+use crate::ft::cff_builder::{FtGlyphLoader, GLYPH_LOADER_CHECK_POINTS};
+
 
 use crate::ft::types::{FtBBox, FtOutline, FtVector};
 
@@ -205,6 +207,50 @@ pub unsafe extern "C" fn t1_builder_start_point(
         core::ptr::addr_of!(T1_BUILDER_CHECK_AND_ADD_ON_CURVE_POINT).read_volatile();
     add_point(builder, x, y)
 }
+/// Type 1 `t1_builder_check_points` (psaux.c) — original:
+/// `FUN_080ce174` @ `0x080ce174` (52 bytes,
+/// `0x080ce174..0x080ce1a8`; the following `mov r3,r0 / push {r4,lr}`
+/// starts the distinct function at `0x080ce1a8`). Five direct call sites
+/// verified by decoding every B/BL word in `osos.dec`: five unconditional
+/// `bl` and no predicated `bl`; the overflow path is a `bgt` tail branch to
+/// `FT_GlyphLoader_CheckPoints` @ `0x0804c638`.
+///
+/// Computes whether `count` more Type 1 outline points fit in the builder's
+/// glyph loader. A zero count succeeds before dereferencing `builder`.
+/// Otherwise the signed base and current point counts and `count` are added
+/// with 32-bit wrapping; only a signed result strictly greater than
+/// `max_points` invokes the loader growth path with zero new contours.
+/// Equal capacity succeeds.
+///
+/// Deliberate deviations: the ARM `bgt` tail branch becomes a regular return
+/// of the existing volatile `FT_GlyphLoader_CheckPoints` seam, preserving its
+/// observable arguments and result. Despite `#[inline(never)]`, LLVM folds
+/// this identical body into `cff_check_points`; the `t1_builder_check_points`
+/// archive symbol aliases `.text.cff_check_points`, so `match.py` cannot
+/// isolate a separate label.
+///
+/// # Safety
+///
+/// When `count != 0`, `builder` must point to a valid [`T1Builder`] whose
+/// `loader` points to a valid [`FtGlyphLoader`]. The original has no NULL
+/// guards beyond the zero-count fast path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn t1_builder_check_points(builder: *mut T1Builder, count: i32) -> i32 {
+    if count == 0 {
+        return 0;
+    }
+    let loader = (*builder).loader.cast::<FtGlyphLoader>();
+    let need = ((*loader).base.outline.n_points as i32)
+        .wrapping_add((*loader).current.outline.n_points as i32)
+        .wrapping_add(count);
+    if need > (*loader).max_points as i32 {
+        let check = core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile();
+        return check(loader, count, 0);
+    }
+    0
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -216,6 +262,28 @@ mod tests {
     static ADD_CONTOUR_CALLS: Mutex<std::vec::Vec<usize>> = Mutex::new(std::vec::Vec::new());
     static ADD_POINT_CALLS: Mutex<std::vec::Vec<(usize, i32, i32)>> =
         Mutex::new(std::vec::Vec::new());
+    static CHECK_POINTS_CALLS: Mutex<std::vec::Vec<(usize, i32, i32)>> =
+        Mutex::new(std::vec::Vec::new());
+
+    unsafe extern "C" fn record_check_points(
+        loader: *mut FtGlyphLoader,
+        count: i32,
+        new_contours: i32,
+    ) -> i32 {
+        CHECK_POINTS_CALLS.lock().push((loader as usize, count, new_contours));
+        0x2a
+    }
+
+    fn with_check_points_seam(body: impl FnOnce()) {
+        let _lock = crate::ft::cff_builder::GLYPH_LOADER_CHECK_POINTS_TEST_LOCK.lock();
+        CHECK_POINTS_CALLS.lock().clear();
+        let saved = unsafe { core::ptr::addr_of!(GLYPH_LOADER_CHECK_POINTS).read_volatile() };
+        unsafe {
+            core::ptr::addr_of_mut!(GLYPH_LOADER_CHECK_POINTS).write_volatile(record_check_points)
+        };
+        body();
+        unsafe { core::ptr::addr_of_mut!(GLYPH_LOADER_CHECK_POINTS).write_volatile(saved) };
+    }
 
     unsafe extern "C" fn record_add_contour(builder: *mut T1Builder) -> i32 {
         ADD_CONTOUR_CALLS.lock().push(builder as usize);
@@ -416,5 +484,51 @@ mod tests {
             );
         });
         assert_eq!(fixture.builder.parse_state, 3);
+    }
+    #[test]
+    fn zero_count_accepts_null_builder() {
+        let rc = unsafe { t1_builder_check_points(core::ptr::null_mut(), 0) };
+        assert_eq!(rc, 0);
+    }
+
+    #[test]
+    fn fitting_and_equal_capacity_counts_skip_the_growth_seam() {
+        let mut fixture = Fixture::new(0, 0, 0);
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.outline.n_points = 7;
+        loader.current.outline.n_points = 5;
+        loader.max_points = 20;
+        fixture.builder.loader = (&mut loader as *mut FtGlyphLoader).cast();
+
+        assert_eq!(unsafe { t1_builder_check_points(&mut fixture.builder, 7) }, 0);
+        assert_eq!(unsafe { t1_builder_check_points(&mut fixture.builder, 8) }, 0);
+    }
+
+    #[test]
+    fn signed_outline_counts_contribute_to_capacity() {
+        let mut fixture = Fixture::new(0, 0, 0);
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.outline.n_points = -4;
+        loader.current.outline.n_points = 6;
+        loader.max_points = 3;
+        fixture.builder.loader = (&mut loader as *mut FtGlyphLoader).cast();
+
+        assert_eq!(unsafe { t1_builder_check_points(&mut fixture.builder, 1) }, 0);
+    }
+
+    #[test]
+    fn over_capacity_calls_growth_seam_with_zero_contours() {
+        let mut fixture = Fixture::new(0, 0, 0);
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.outline.n_points = 7;
+        loader.current.outline.n_points = 5;
+        loader.max_points = 19;
+        fixture.builder.loader = (&mut loader as *mut FtGlyphLoader).cast();
+        let loader_address = &mut loader as *mut FtGlyphLoader as usize;
+
+        with_check_points_seam(|| {
+            assert_eq!(unsafe { t1_builder_check_points(&mut fixture.builder, 8) }, 0x2a);
+            assert_eq!(CHECK_POINTS_CALLS.lock().as_slice(), [(loader_address, 8, 0)]);
+        });
     }
 }
