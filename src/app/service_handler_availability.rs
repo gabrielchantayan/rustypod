@@ -169,6 +169,30 @@ pub unsafe extern "C" fn service_handler_lifecycle_state(_manager: *mut u8, sele
     let record = service_handler_lifecycle_records().wrapping_offset(selector as isize);
     ptr::read_volatile(ptr::addr_of!((*record).state)) as i32
 }
+/// service_handler_lifecycle_word_8 — original: `FUN_08138ba8` @
+/// **0x08138ba8** (40 raw bytes: nine ARM instructions plus the trailing table
+/// literal @ 0x08138bcc; 0x08138bd0 begins the distinct next function).
+/// Ghidra reports only the 36 instruction bytes. A complete decode of every
+/// ARM `B`/`BL` word in `osos.dec` finds **five direct, unconditional `bl` call
+/// sites**, with no predicated `bl` or tail-branch callers.
+///
+/// Algorithm: ignore `manager`; selectors one and two return their
+/// 0x114-byte lifecycle record's 32-bit otherwise-unidentified word at offset
+/// `+8`. Every other selector, including negative values, returns zero.
+///
+/// Deliberate deviation: host builds share the adjacent lifecycle-table
+/// fixture; firmware reads the table at 0x08ad0f34 directly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_lifecycle_word_8(_manager: *mut u8, selector: i32) -> u32 {
+    if (selector as u32).wrapping_sub(1) >= 2 {
+        return 0;
+    }
+
+    let record = service_handler_lifecycle_records().add(selector as usize);
+    ptr::read_volatile(ptr::addr_of!((*record).word_8))
+}
+
 
 /// service_handler_lifecycle_select_default_descriptor — original:
 /// `FUN_08138c30` @ **0x08138c30** (80 raw bytes: 19 ARM instructions plus
@@ -485,6 +509,39 @@ mod tests {
             unsafe {
                 replace_service_handler_lifecycle_state(selector, previous);
             }
+        }
+    }
+
+    #[test]
+    fn lifecycle_word_8_accepts_only_selectors_one_and_two() {
+        let _guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            let first = lifecycle_record(1);
+            let second = lifecycle_record(2);
+            let first_before = ptr::read_volatile(first);
+            let second_before = ptr::read_volatile(second);
+            set_lifecycle_record(first, 0, 0, 0x1234_5678, 0);
+            set_lifecycle_record(second, 0, 0, 0x9abc_def0, 0);
+
+            for (selector, expected) in [
+                (i32::MIN, 0),
+                (-1, 0),
+                (0, 0),
+                (1, 0x1234_5678),
+                (2, 0x9abc_def0),
+                (3, 0),
+                (i32::MAX, 0),
+            ] {
+                assert_eq!(
+                    service_handler_lifecycle_word_8(ptr::null_mut(), selector),
+                    expected,
+                    "selector {selector}",
+                );
+            }
+
+            ptr::write_volatile(first, first_before);
+            ptr::write_volatile(second, second_before);
         }
     }
 
