@@ -92408,3 +92408,32 @@ functions:
       BL sites; Ghidra's fifth reference from 0x082d1c70 is a false function
       boundary. Rust uses volatile reads and writes to preserve this observable
       order for partially overlapping pointers; no other deviations.
+
+  # --- Tracked operation dispatch ---
+  - address: 0x08242694
+    ghidra: FUN_08242694
+    name: tracked_operation_dispatch
+    size: 76
+    sig: "void tracked_operation_dispatch(void *state)"
+    module: app/tracked_operation_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "[state+0x40]": configuration
+      "[state+0x44]": operation_list
+      "state+0x6c": payload
+      r1: operation_type
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 19 ARM words from
+      0x08242694 through the tail branch at 0x082426dc; the next separately
+      linked function starts at 0x082426e0. Decoding every aligned ARM B/BL
+      immediate in osos.dec finds exactly five inbound direct calls, all
+      unconditional bl at 0x08253bb8, 0x08253bcc, 0x08253c20, 0x08253c34,
+      and 0x08253c48; there are zero predicated bl forms. The body calls
+      FUN_082419b0(state), then FUN_08243778(state->operation_list, 3,
+      state->configuration, state+0x6c) and the corresponding type-4 call,
+      before tail-branching to the type-5 dispatch. The two unported callees
+      retain literal device-address veneers on ARM and host callback seams.
+      No deliberate behavioral deviations; the Rust type-5 call replaces the
+      stock tail branch because the function returns void. Host tests prove
+      synchronization ordering and all three argument-identical dispatches.

@@ -26,6 +26,7 @@ pub mod settings_value_scale;
 pub mod buffer_refill_request;
 pub mod byte_source;
 pub mod buffer_transition_controller;
+pub mod tracked_operation_dispatch;
 pub mod byte_flag_at_d_is_one;
 pub mod category_is_below_three;
 pub mod callback_target_dispatch;
