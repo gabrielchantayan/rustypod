@@ -23,6 +23,7 @@ pub mod service;
 pub mod size;
 pub mod service_metadata;
 pub mod stream;
+pub mod resource_fork;
 pub mod stream_read_bounded;
 pub mod stream_read_capped;
 pub mod stream_skip;
