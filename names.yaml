@@ -93091,3 +93091,33 @@ functions:
       clears all four words at +0x198..+0x1a4. The opaque destructor's class
       identity is not inferred; target code calls its verified raw address
       through PENDING_OBJECT_DESTRUCT, while host tests replace that seam.
+
+  # --- Pending opaque-object release (src/app/pending_object_release.rs) ---
+  - address: 0x081db860
+    ghidra: FUN_081db860
+    name: pending_object_release
+    size: 60
+    sig: "void pending_object_release(void *owner)"
+    module: app/pending_object_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x1b4": pending_state
+      "owner+0x1b8": pending_object
+      "pending_object+0x60": release_flag
+      FUN_0828e5b0: opaque_destructor
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw words e92d4010 e1a04000 e59001b8 e3500000 13a01001 15c01060
+      1594101b 13500000 0a000001 eb02cb49 eb033d25 e3a00000 e58401b4
+      e58401b8 e8bd8010 establish the exact 60-byte extent 0x081db860..0x081db89b;
+      the next real function begins at 0x081db89c with push {r4,lr}. A full
+      raw ARM B/BL-immediate scan finds four plain inbound bl calls at
+      0x081daf04, 0x081dbc28, 0x081dbfcc, and 0x081dc1ec, plus one predicated
+      bleq at 0x081dbc48. The body has two plain bl calls and no predicated
+      calls: after marking the first loaded non-NULL object byte +0x60, it
+      reloads owner+0x1b8, destructs the reloaded object through 0x0828e5b0,
+      calls tag-2 operator_delete @ 0x082aad24, then clears owner+0x1b4 and
+      +0x1b8 on every path. The opaque class identity remains unrecovered.
+      Deliberate deviation: target builds call the unported destructor through
+      the verified shared PENDING_OBJECT_DESTRUCT seam; host tests replace it.

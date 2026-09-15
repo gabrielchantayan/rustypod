@@ -1085,6 +1085,9 @@ pub mod hints {
     // 0x5e00_0000: dedicated to app/pending_object_pair_release's raw-u32
     // pending-object fixture; mappings never unmap, so no other user may share it.
     pub const PENDING_OBJECT_PAIR_RELEASE: usize = 0x5e00_0000;
+    // 0x5f00_0000: dedicated to app/pending_object_release's raw-u32 pending-
+    // object fixture; mappings never unmap, so no other user may share it.
+    pub const PENDING_OBJECT_RELEASE: usize = 0x5f00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
