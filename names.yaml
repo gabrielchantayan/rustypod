@@ -95248,3 +95248,30 @@ functions:
       canonical parse_result_init for both record writes because 0x08283134
       has the same verified strb/strb/strh body. Host tests cover interior,
       both boundaries, empty, and wrapping ranges.
+  # --- ID3 synchsafe 28-bit length decoder ---
+  - address: 0x080f81bc
+    ghidra: FUN_080f81bc
+    name: id3_synchsafe_u28_decode
+    size: 52
+    sig: "u32 id3_synchsafe_u28_decode(const u8 *bytes)"
+    module: util/id3_synchsafe_u28_decode
+    status: ported
+    renames:
+      param_1/r0: bytes
+      r1: high_14_bits
+      r2: byte_value
+      r0: decoded_length
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: thirteen ARM words
+      from ldrb r1,[r0] at 0x080f81bc through bx lr at 0x080f81ec; the next
+      separately linked function starts with push {r4,lr} at 0x080f81f0.
+      Decoding every aligned ARM B/BL-immediate word in the complete image
+      finds exactly five inbound direct calls, all unconditional bl at
+      0x08120c70, 0x08120d88, 0x08121084, 0x08167428, and 0x08282784; there
+      are no predicated BL callers. The function masks each of four bytes to
+      seven bits and combines them as a big-endian u28. Host tests cover zero,
+      a representative ID3 length, the maximum u28, and high-bit masking.
+      match.py finds the same four byte loads, masks, shifts, and OR reduction;
+      LLVM adds a frame, changes independent load order, and uses a distinct
+      shift/mask sequence for the first byte, all equivalent deliberate codegen
+      differences.
