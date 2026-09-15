@@ -18,7 +18,7 @@
 //! has no NULL, alignment, or pre-existing-state checks. No deliberate
 //! deviations.
 
-use super::observable_array::{observable_array_construct, ObservableArray, OBSERVABLE_ARRAY_SIZE};
+use super::observable_array::{observable_array_construct, observable_array_destruct, ObservableArray, OBSERVABLE_ARRAY_SIZE};
 
 /// A 40-byte base subobject with two leading state words and two observable
 /// arrays. The leading words have no recovered identity beyond this
@@ -67,6 +67,35 @@ pub unsafe extern "C" fn observable_array_pair_construct(
     pair
 }
 
+/// Destructs both embedded observable arrays in descending address order.
+///
+/// Original: `FUN_081d5f38` @ `0x081d5f38` (28 bytes;
+/// 0x081d5f38..0x081d5f54; 5 unconditional `bl` call sites, no predicated
+/// `bl` call sites; binary-scanned). The next real function begins at
+/// `0x081d5f54` with `mov r1, r0`.
+///
+/// # Algorithm
+///
+/// Call `observable_array_destruct` on the second array, then on the first.
+/// Each callee returns its input, so subtracting `0x10` between calls and
+/// `0x08` afterward returns the pair base. The leading words are untouched.
+/// No deliberate deviations.
+///
+/// # Safety
+///
+/// `this` must point to a live [`ObservableArrayPair`]. Both embedded arrays
+/// must satisfy [`observable_array_destruct`]'s safety contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.observable_array_pair_destruct")]
+pub unsafe extern "C" fn observable_array_pair_destruct(
+    this: *mut ObservableArrayPair,
+) -> *mut ObservableArrayPair {
+    let second = observable_array_destruct(core::ptr::addr_of_mut!((*this).second));
+    let first = observable_array_destruct(second.sub(1));
+    first.cast::<u8>().sub(0x08).cast::<ObservableArrayPair>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +122,26 @@ mod tests {
 
         assert!(core::ptr::eq(returned, &mut pair));
         assert_eq!(pair.leading_words, [0, 0]);
+        for array in [&pair.first, &pair.second] {
+            assert_eq!(array.base.vtable, OBSERVABLE_ARRAY_VTABLE);
+            assert_eq!(array.len, 0);
+            assert_eq!(array.storage, 0);
+            assert_eq!(array.observers, 0);
+        }
+    }
+
+    #[test]
+    fn destructs_arrays_in_reverse_order_and_preserves_leading_words() {
+        let mut pair = ObservableArrayPair {
+            leading_words: [0x1111_1111, 0x2222_2222],
+            first: ObservableArray { observers: 0, ..sentinel_array() },
+            second: ObservableArray { observers: 0, ..sentinel_array() },
+        };
+
+        let returned = unsafe { observable_array_pair_destruct(&mut pair) };
+
+        assert!(core::ptr::eq(returned, &mut pair));
+        assert_eq!(pair.leading_words, [0x1111_1111, 0x2222_2222]);
         for array in [&pair.first, &pair.second] {
             assert_eq!(array.base.vtable, OBSERVABLE_ARRAY_VTABLE);
             assert_eq!(array.len, 0);
