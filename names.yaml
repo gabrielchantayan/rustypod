@@ -90833,3 +90833,38 @@ functions:
       retention, argument forwarding, and return rebasing. match.py reports
       the expected structural diff: LLVM uses host seam BLX calls and a larger
       frame while retaining the observed stores and call order.
+
+  # --- Display-layer state reset ---
+  - address: 0x0828d504
+    ghidra: FUN_0828d504
+    name: display_layer_state_reset
+    size: 120
+    sig: "void display_layer_state_reset(u8 *state)"
+    module: drivers/display_layer_state_reset
+    status: ported
+    renames:
+      param_1/r4: state
+      "state+0xf4": display
+      "state+0xfc": layer_index_and_absent_sentinel
+      "state+0x100": mode
+      "state+0x104": first_callback
+      "state+0x108": second_callback
+      "state+0x10c": third_callback
+      FUN_0811ff8c: layer_configuration_pop
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent: thirty words from
+      push {r4,r5,r6,lr} at 0x0828d504 through pop {r4,r5,r6,pc} at
+      0x0828d578; the separately linked next function begins at 0x0828d57c.
+      The five direct inbound BL call sites reported by Ghidra are all plain
+      unconditional bl; no predicated BL or direct tail B targets this entry.
+      It obtains display_get_layer(display, state+0xfc & 0xff), passes that
+      layer to the unported configuration-pop helper 0x0811ff8c, and enables
+      it. For mode four it unregisters each nonzero callback word in ascending
+      offset order, clearing all three words; every mode then becomes -1 and
+      the layer-index word becomes -1. Target code reaches the verified but
+      unnamed 0x0811ff8c address through a volatile operation slot; host tests
+      record all calls and cover mode-four callback filtering/order and the
+      non-four preservation path. match.py reports the expected indirect-call
+      operation slots and ARM frame differences; its state reads, low-byte
+      mask, callback ordering, clears, and two final sentinel writes match the
+      retail control flow. Deliberate deviations: none.

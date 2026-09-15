@@ -20,6 +20,7 @@ pub mod display;
 pub mod internal_display_layers;
 pub mod secondary_display_layers;
 pub mod display_layer;
+pub mod display_layer_state_reset;
 pub mod display_index_flags;
 pub mod eight_slot_identity_init;
 pub mod eight_slot_identity_init_alias;
