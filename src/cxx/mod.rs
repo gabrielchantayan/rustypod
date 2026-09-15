@@ -134,6 +134,7 @@ pub mod text_buffer;
 pub mod string_from_range_provider;
 pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
+pub mod path_escape_record;
 pub mod string_encoding;
 pub mod templates;
 pub mod signed_key_tree_find;
