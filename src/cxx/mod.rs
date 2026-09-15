@@ -40,6 +40,7 @@ pub mod empty_destructor_1070b4;
 pub mod empty_destructor_083d8008;
 pub mod empty_destructor_2a1ebc;
 pub mod flagged_pair_copy;
+pub mod flagged_pair_payload;
 pub mod four_word_clear;
 pub mod tagged_value;
 pub mod tagged_pointer_init;
