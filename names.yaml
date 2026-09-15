@@ -94941,3 +94941,40 @@ functions:
       that byte is ',', and otherwise calls unrecovered FUN_081b9134 at
       0x081b9134 before returning one. The target call is retained as a raw
       verified address; host tests substitute a callback only to observe it.
+
+  # --- Resource handle pair reset and notification ---
+  - address: 0x08113ea4
+    ghidra: FUN_08113ea4
+    name: resource_handle_pair_reset_notify
+    size: 152
+    sig: "void resource_handle_pair_reset_notify(void *receiver)"
+    module: app/resource_handle_pair_reset_notify
+    status: ported
+    renames:
+      param_1/r0/r4: receiver
+      param_1_plus_0x540: first_handle
+      param_1_plus_0x544: second_handle
+      DAT_08113f30: first_resource_id
+      DAT_08113f34: message_category
+      DAT_08113f38: second_resource_id
+    notes: >-
+      Raw ARM establishes the true 152-byte extent
+      0x08113ea4..0x08113f3c: 140 bytes of instructions, ending in
+      `pop {r3,r4,r5,pc}` at 0x08113f2c, followed by the three-word
+      literal pool at 0x08113f30..0x08113f3c; a separately linked
+      function begins at 0x08113f3c. Full-image ARM branch decoding finds
+      five inbound direct call sites: unconditional bl at 0x08068f70,
+      0x08113bc4, 0x08114364, and 0x08211fdc, plus conditional bleq at
+      0x08212138. The body has six unconditional direct bl instructions
+      (construct at 0x08113eb8/0x08113edc,
+      copy-assign at 0x08113ec4/0x08113eec, release at
+      0x08113ecc/0x08113ef4), zero predicated bl instructions, and two
+      indirect blx r3 calls through receiver-vtable slot +0x58. It
+      constructs empty refcounted handles, assigns them to receiver
+      slots +0x540 and +0x544 to release old retain-count bodies, then
+      dispatches category 0x44726177 with resource ids 0x63c8 and
+      0x63c9. Host dispatch uses a replaceable seam because target
+      vtable words are 32-bit while host pointers are wider; ARM reads
+      and calls the literal +0x58 slot. match.py confirms the two
+      construct/copy/release groups followed by two vtable calls; LLVM
+      may retain a different frame and call layout.
