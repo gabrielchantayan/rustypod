@@ -218,6 +218,7 @@ pub mod vtable_slot_12_tail_dispatch;
 pub mod vtable_slot_14_if_clear;
 pub mod optional_vtable_slot_18_result;
 pub mod vtable_slot_3c_result_u16;
+pub mod vtable_slot_2c_read_i16;
 pub mod vtable_slot_40_result_word;
 pub mod vtable_word_callback;
 pub mod guarded_vtable_slot_40_dispatch;
