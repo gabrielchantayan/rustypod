@@ -92871,3 +92871,33 @@ functions:
       attached-cursor transition. match.py shows the same guard, cleanup call,
       sentinel stores, and range clears; LLVM differs in frame, seam BLX, and
       store order.
+  # --- Block-backed list cursor indexed-item accessor ---
+  - address: 0x081f0700
+    ghidra: FUN_081f0700
+    name: list_cursor_item_at
+    size: 36
+    sig: "u32 list_cursor_item_at(const void *list, u32 index)"
+    module: cxx/list_cursor_item_at
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: index
+      "list+0x30": cursor (u32 target pointer)
+      FUN_081fcab0: cursor_indexed_lookup
+    notes: >-
+      Raw ARM establishes the exact 36-byte extent
+      0x081f0700..0x081f0724: push {r4,lr}; ldr r0,[r0,#0x30]; mov r2,#0;
+      cmp r0,#0; beq 0x081f071c; bl 0x081fcab0; mov r2,r0; mov r0,r2; pop
+      {r4,pc}. The next separately linked function opens at 0x081f0724 with
+      push {r3,r4,r5,r6,r7,lr}. Decoding direct branch words finds five inbound
+      plain unconditional BL calls at 0x08208848, 0x0821b0a4, 0x0821b5a8,
+      0x0821b7c4, and 0x0821b7f8; no predicated BL or direct tail-branch
+      transfer. Algorithm: load the cursor target word from list+0x30; NULL
+      returns zero without touching the cursor; otherwise forward cursor and
+      index unchanged to 0x081fcab0 and return its word. The direct callee is
+      unnamed in names.yaml and its Ghidra signature omits r1 despite all five
+      callers setting it immediately before this wrapper; raw register flow
+      verifies the (cursor,index) ABI. Deliberate deviation: host tests inject
+      that unrecovered callee through a dispatch seam, while target builds call
+      its verified retailOS address directly. Tests cover NULL short-circuit,
+      forwarded high-bit index/result words, and detach/reattach reloads.

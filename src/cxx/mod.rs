@@ -65,6 +65,7 @@ pub mod list_item_count;
 pub mod identified_vtable_object_construct;
 pub mod identified_vtable_flagged_pair_construct;
 pub mod list_cursor_index;
+pub mod list_cursor_item_at;
 pub mod list_cursor_base_index;
 pub mod list_cursor_count;
 pub mod list_cursor_clear;
