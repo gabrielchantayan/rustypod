@@ -73266,6 +73266,33 @@ functions:
       decomp/c/021/081fa044_FUN_081fa044.c; raw assembly:
       osos.dec 0x081fa044.
 
+  # --- media-player slot +0xb8 then volume-controller update ---
+  - address: 0x081fa04c
+    ghidra: FUN_081fa04c
+    name: media_player_slot_b8_then_volume_controller_update
+    size: 36
+    module: app/media_player_slot_b8_then_volume_controller_update
+    status: ported
+    renames:
+      param_1/r0: volume_controller
+      FUN_08259594: media_player_interface_get
+      "vtable+0xb8": media_player_slot_b8_unidentified
+      FUN_081f9020: volume_controller_update_unidentified
+      r4: volume_controller
+    notes: >-
+      Raw ARM establishes the true 36-byte extent 0x081fa04c..0x081fa070:
+      BLX its vtable+0xb8 entry; restore r0; then tail-B to FUN_081f9020.
+      The next separately linked function begins with push {r4,r5,r6,lr} at
+      0x081fa070. Decoding every ARM B/BL-immediate word in osos.dec finds
+      exactly five direct inbound calls: unconditional BL at 0x08217670,
+      0x08217704, and 0x082177ec, plus predicated BLNE at 0x0821d53c and
+      0x0821fccc; there are no direct B tail callers. Ghidra wrongly merges
+      this wrapper with FUN_081f9020 and reports a 36-byte extent. Neither
+      dynamic callee has a recoverable semantic identity, so their names remain
+      structural. Host tests cover one getter and slot dispatch, unchanged
+      volume-controller forwarding, and tail-result forwarding. match.py
+      structural review was completed. Deliberate deviations: host seams replace
+      the firmware-owned getter and FUN_081f9020; ARM uses the retail calls.
   # --- volume controller opaque byte +0x90 setter ---
   - address: 0x081f9d90
     ghidra: FUN_081f9d90
