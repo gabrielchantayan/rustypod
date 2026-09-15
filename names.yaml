@@ -30909,6 +30909,36 @@ functions:
       successful key clearing, and failure retention.
 
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
+  - address: 0x082d05d0
+    ghidra: FUN_082d05d0
+    name: get_and_init_page
+    size: 96
+    sig: "u32 get_and_init_page(BtShared *shared, u32 page_number, u32 *out_page, u32 flags)"
+    module: sqlite/get_and_init_page
+    status: ported
+    renames:
+      param_1/r0: shared
+      param_2/r1: page_number
+      param_3/r2: out_page
+      param_4/r3: flags
+      FUN_08371418: context_child_handle_acquire
+      FUN_08371478: initialize_btree_page
+      FUN_0836761c: release_via_field_0x48
+    notes: >-
+      Raw osos.dec words establish the exact 96-byte extent
+      0x082d05d0..0x082d0630: the next separately linked prologue begins at
+      0x082d0630. Five inbound direct calls are unconditional plain bl
+      (0x082b5eb0, 0x082bdc4c, 0x082c3588, 0x082d99e4, 0x082d9b68);
+      none are predicated. Zero page_number returns SQLITE_CORRUPT (11)
+      without writing out_page. Otherwise it acquires the page, initializes
+      only a handle whose byte +0 is clear, and on initialization failure
+      releases the handle and clears out_page. The initializer at 0x08371478
+      remains retailOS-owned: target builds call it directly and host tests
+      inject that external boundary with the acquire and release operations
+      to preserve target-width pointer semantics. match.py reports the same
+      zero-page, acquire, conditional-initialize, release-and-clear shape;
+      expected differences are LLVM's frame and literal-pool blx.
+
   - address: 0x082d99d0
     ghidra: FUN_082d99d0
     name: btree_move_to_child

@@ -78,6 +78,7 @@ pub mod btree_get_meta;
 pub mod btree_drop_cell;
 pub mod btree_balance;
 pub mod move_to_child;
+pub mod get_and_init_page;
 pub mod move_to_root;
 pub mod cell_size;
 pub mod change_cookie;
