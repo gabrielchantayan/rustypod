@@ -39498,6 +39498,34 @@ functions:
       volatile host seam and a direct call to its retailOS address on target;
       equal_deref is inlined as the equivalent candidate != header test.
 
+  # --- Task-message pool release ---
+  - address: 0x0812c1b4
+    ghidra: FUN_0812c1b4
+    name: task_message_pool_release
+    size: 48
+    sig: "void task_message_pool_release(ListNode *cell)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1: cell
+      DAT_0812c1dc: task_message_pool_mutex
+      DAT_0812c1e0: task_message_free_list
+      FUN_0807f5c4: mutex_lock
+      FUN_080f1158: list_push_back
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes a 48-byte true extent:
+      0x0812c1b4..0x0812c1dc is 40 bytes of instructions and
+      0x0812c1dc..0x0812c1e4 is the two-word literal pool
+      (0x089cb284 mutex, 0x089cb28c free-list anchor); the next real
+      function begins at 0x0812c1e4. It locks the pool mutex, appends cell
+      to the intrusive free list, then tail-branches to mutex_unlock.
+      Decoding every ARM B/BL word finds exactly five direct caller bl
+      sites (0x08110e38, 0x0812c114, 0x0812c28c, 0x0812c5c0,
+      0x0812c600), all unconditional; no predicated bl sites. The body
+      has two unconditional bl instructions and one tail b. The port
+      expresses the tail branch as a return after unlock and volatile-loads
+      the mutex to retain the lock pair despite its null initializer.
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
   - address: 0x0812c6b0

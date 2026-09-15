@@ -51,6 +51,44 @@
 //!   four arguments returning `u32` — the helper's 1-on-success /
 //!   0-on-failure result.
 
+use crate::kernel::condvar::{list_push_back, ListHead, ListNode};
+use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
+
+/// Original: task-message pool mutex @ 0x089cb284. It brackets every
+/// append to [`TASK_MESSAGE_FREE_LIST`].
+pub static mut TASK_MESSAGE_POOL_MUTEX: Mutex = Mutex {
+    sem_cell: core::ptr::null_mut(),
+    unused: 0,
+};
+
+/// Original: task-message pool free-list anchor @ 0x089cb28c.
+pub static mut TASK_MESSAGE_FREE_LIST: ListHead = ListHead {
+    head: core::ptr::null_mut(),
+    tail: core::ptr::null_mut(),
+};
+
+/// task_message_pool_release — original: `FUN_0812c1b4` @ 0x0812c1b4
+/// (**48 bytes** true extent: 40 bytes of code plus the 8-byte literal pool
+/// at 0x0812c1dc..0x0812c1e4; the next function begins at 0x0812c1e4).
+///
+/// **5 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`
+/// (0x08110e38, 0x0812c114, 0x0812c28c, 0x0812c5c0, 0x0812c600).
+/// The body locks the task-message pool mutex @ 0x089cb284, appends `cell`
+/// to its free list @ 0x089cb28c through `list_push_back` @ 0x080f1158,
+/// then tail-branches to `mutex_unlock` @ 0x0807f6a0. Deliberate deviation:
+/// the stock tail branch is expressed as a normal Rust return after unlock;
+/// the mutex is copied through a volatile load so LLVM cannot fold its
+/// null-initialized static and remove the lock pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_message_pool_release(cell: *mut ListNode) {
+    let mut mutex = core::ptr::addr_of_mut!(TASK_MESSAGE_POOL_MUTEX).read_volatile();
+    mutex_lock(&mut mutex);
+    list_push_back(core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST), cell);
+    mutex_unlock(&mut mutex);
+}
+
 /// Indirect dispatch table for the not-yet-ported message-post helper
 /// (see the module header for the design and the default-stub
 /// behavior).
@@ -239,5 +277,38 @@ pub(crate) mod tests {
         let message: [u32; 3] = [1, 2, 3];
         let ret = unsafe { task_message_post_sync(10, 20, message.as_ptr(), 30) };
         assert_eq!(ret, 0);
+    }
+
+    #[test]
+    fn pool_release_appends_cells_and_clears_each_link() {
+        let _guard = OPS_LOCK.lock().unwrap();
+        let mut first = ListNode {
+            next: core::ptr::null_mut(),
+        };
+        let mut second = ListNode {
+            next: &mut first,
+        };
+
+        unsafe {
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POOL_MUTEX).write_volatile(Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            });
+            core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST).write_volatile(ListHead {
+                head: core::ptr::null_mut(),
+                tail: core::ptr::null_mut(),
+            });
+
+            task_message_pool_release(&mut first);
+            assert!(core::ptr::eq(TASK_MESSAGE_FREE_LIST.head, &mut first));
+            assert!(core::ptr::eq(TASK_MESSAGE_FREE_LIST.tail, &mut first));
+            assert!(first.next.is_null());
+
+            task_message_pool_release(&mut second);
+            assert!(core::ptr::eq(TASK_MESSAGE_FREE_LIST.head, &mut first));
+            assert!(core::ptr::eq(TASK_MESSAGE_FREE_LIST.tail, &mut second));
+            assert!(core::ptr::eq(first.next, &mut second));
+            assert!(second.next.is_null());
+        }
     }
 }
