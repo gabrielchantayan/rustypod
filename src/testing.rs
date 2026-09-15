@@ -107,6 +107,9 @@ pub mod hints {
     // cxx/opaque_vtable_record_copy_construct's target-width source fixtures.
     pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT: usize = 0xc000_0000;
     pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT_DEFAULT: usize = 0xc100_0000;
+    // 0xc200_0000: dedicated to cxx/opaque_shared_record_construct's
+    // target-width source, vtable, shared-object, and destination fixture.
+    pub const OPAQUE_SHARED_RECORD_CONSTRUCT: usize = 0xc200_0000;
     // 0x6700_0000: dedicated to app/registry's raw-u32 owner field
     // fixture for field_dc_as_class_4a80; mappings never unmap, so no other
     // user may share this hint.

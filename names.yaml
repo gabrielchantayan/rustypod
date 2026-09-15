@@ -90689,3 +90689,36 @@ functions:
       match.py printed a structural diff (exit 1): LLVM uses indirect BLX
       seams and a different prologue, while preserving the source selection,
       stores, calls, and conditional cleanup structure.
+
+  - address: 0x082a7dac
+    ghidra: FUN_082a7dac
+    name: opaque_shared_record_construct
+    size: 96
+    sig: "void *opaque_shared_record_construct(void *storage, u32 value, u32 flags)"
+    module: cxx/opaque_shared_record_construct
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1/r5: value
+      param_3/r2/r6: flags
+      DAT_082a7e0c: fixed_source_record
+      FUN_083e78b4: vtable_shared_handle_construct
+      FUN_083d801c: opaque_shared_record_base_construct
+      FUN_083dace0: opaque_shared_record_member_construct
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent from the prologue at
+      0x082a7dac through pop {r4,r5,r6,pc} at 0x082a7e08; 0x082a7e0c is the
+      literal fixed-source pointer and the next separately entered function
+      begins at 0x082a7e10. Decoding every aligned ARM B/BL-immediate word
+      finds five direct inbound calls, all plain unconditional bl at
+      0x081cdbf8, 0x081cdc60, 0x081e0328, 0x081e03c4, and 0x081e0460, with
+      zero predicated bl calls. It writes the fixed source vtable, constructs
+      the +0x3c shared-handle subobject, invokes the base constructor with
+      source+4 and storage+12, copies the source's vtable-indexed +0x20 word
+      and +0x24 word, then constructs the +0x0c member and returns its result
+      minus 12. FUN_083d801c and FUN_083dace0 have no verified semantic
+      identity, so target builds call their exact addresses and host builds use
+      ABI seams. Host tests cover indexed payload copying, shared-handle
+      retention, argument forwarding, and return rebasing. match.py reports
+      the expected structural diff: LLVM uses host seam BLX calls and a larger
+      frame while retaining the observed stores and call order.
