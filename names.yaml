@@ -75850,6 +75850,30 @@ functions:
       CURRENT_WINDOW hint (0x43000000); the +0x1c field is read as a u32
       target word and widened.
 
+  - address: 0x08148cc8
+    ghidra: FUN_08148cc8
+    name: scheduler_lock
+    size: 28
+    sig: "void scheduler_lock(void)"
+    module: ui/scheduler_lock
+    status: ported
+    renames:
+      iVar2/r0: kernel_running_result
+      DAT_08148ce4: scheduler_mutex_08a77d00
+      FUN_0809444c: kernel_running
+      FUN_08094404: mutex_lock_counted
+    notes: >-
+      Raw ARM establishes the 28-byte extent 0x08148cc8..0x08148ce4:
+      push {r4,lr}; bl kernel_running; cmp r0,#0; ldrne r0,[pc,#8];
+      popne {r4,lr}; bne mutex_lock_counted; pop {r4,pc}; then the
+      0x08a77d00 literal pool word. Thus kernel-not-started returns without
+      accessing the mutex; otherwise it tail-calls mutex_lock_counted, which
+      waits then increments the CountedMutex +8 hold count. Inbound evidence:
+      five direct bl call sites, all plain, zero predicated bl. The target
+      port calls the already-ported kernel_running and mutex_lock_counted
+      directly; host-only callback seams plus a local mutex replace the
+      unmapped firmware global for tests.
+
   - address: 0x082ab3ec
     ghidra: FUN_082ab3ec
     name: cpp_finalise_dtor_guard
