@@ -94266,3 +94266,35 @@ functions:
       exactly as the stock void wrapper does. Host tests cover this argument
       swap, fixed post arguments, high-bit flags, and the NULL-allocation
       path that skips construction and posting. Deliberate deviations: none.
+
+  # --- Transition-container constructor ---
+  - address: 0x08149cec
+    ghidra: FUN_08149cec
+    name: transition_container_construct
+    size: 88
+    sig: "void *transition_container_construct(void *this, const void *source, u32 flag, u32 base_hint, u32 kind)"
+    module: app/transition_container_construct
+    status: ported
+    renames:
+      DAT_08149d44: transition_container_literal
+      FUN_0816bfe4: transition_container_base_construct (unported; identity unresolved)
+      FUN_082aadd4: operator_new
+      FUN_08278e8c: silver_controller_transition_addon_construct
+    notes: >-
+      Raw osos.dec establishes a 92-byte true extent: 22 ARM instruction
+      words at 0x08149cec..0x08149d40 followed by literal 0x0898665c at
+      0x08149d44; the next separately linked function begins at 0x08149d48.
+      The body calls the unported base constructor with (this, kind), stores
+      the literal at its return, allocates 0x54 bytes through ported
+      operator_new, constructs the ported Silver-controller transition addon
+      with (allocation, source, flag, base_hint, 0x400, 1, 0), stores its
+      target-width pointer at returned_base+0x30, and returns returned_base.
+      Decoding every ARM B/BL-immediate word in osos.dec finds five inbound
+      direct call sites, all unconditional bl (0x081030a4, 0x0811d768,
+      0x0818bd40, 0x081d6458, 0x0825c9b4), with zero predicated bl forms and
+      no direct tail-B callers. The base constructor's identity is not
+      inferred: it remains an explicit seam whose default preserves only its
+      verified return path, so the port is not hook-ready until 0x0816bfe4 is
+      ported. Host test covers fifth-argument forwarding, use of the base
+      return rather than entry storage, literal placement, and the +0x30
+      target-width addon-pointer store.
