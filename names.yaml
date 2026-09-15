@@ -74494,6 +74494,31 @@ functions:
       resolve, both timers, empty-string clear, derived array ABI, returned
       this, copied words, the underflow clamp, and untouched padding.
 
+  - address: 0x0814d1ac
+    ghidra: FUN_0814d1ac
+    name: mov_atom_node_get_size
+    size: 16
+    sig: "u64 mov_atom_node_get_size(const MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_1_plus_0x18: size_lo
+      param_1_plus_0x1c: size_hi
+    notes: >-
+      Raw ARM establishes the exact 16-byte extent
+      0x0814d1ac..0x0814d1bc: mov r1,r0; ldr r1,[r1,#28];
+      ldr r0,[r0,#24]; bx lr. The separately linked next function begins
+      at 0x0814d1bc. Decoding every ARM B/BL word in osos.dec finds exactly
+      five direct call sites, all unconditional plain bl: 0x08121180,
+      0x081c21b8, 0x081c7e44, 0x081c8088, 0x081e6060; zero predicated BL
+      forms and no aligned DATA word reference this address. Returns the
+      MOV atom node's total size as the low word at +0x18 and high word at
+      +0x1c, loaded high then low and returned in AAPCS r0:r1. No NULL
+      guard: stock faults on the first load. No deliberate deviations:
+      Rust performs the two volatile target-width word reads in the same
+      order. Host tests cover zero, all-ones, and distinct high/low halves
+      while proving every node field is preserved.
   - address: 0x0814d230
     ghidra: FUN_0814d230
     name: mov_atom_node_get_offset
