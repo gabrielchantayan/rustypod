@@ -16,6 +16,7 @@ pub mod endian_selector;
 pub mod gateway_service1;
 pub mod gateway_service34;
 pub mod pool_parent_reserved;
+pub mod pool_deque_begin_cursor;
 pub mod first_event_dispatch;
 pub mod fixed_block_pool;
 pub mod free_path;
