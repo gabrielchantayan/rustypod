@@ -92802,3 +92802,38 @@ functions:
       those operations only because their target-width object layouts cannot
       compose with native vtable pointers. `match.py` reports the expected
       structural difference from LLVM's larger prologue and inlining choices.
+
+  # --- Active list cursor clear ---
+  - address: 0x081f10a0
+    ghidra: FUN_081f10a0
+    name: list_cursor_clear
+    size: 60
+    sig: "void list_cursor_clear(ListCursorState *state)"
+    module: cxx/list_cursor_clear
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x30": active_cursor (u32 target pointer)
+      "state+0x38": range_start
+      "state+0x3c": range_end
+      "state+0x40": cursor_position (-1 sentinel)
+      "state+0x44": cursor_limit (-1 sentinel)
+      "state+0x59": cursor_active
+      FUN_081fcea0: unported cursor cleanup (fixed-address seam)
+      FUN_081f036c: cached-range update (inlined zero-cursor path)
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte extent
+      0x081f10a0..0x081f10dc: the next independent function begins at
+      0x081f10dc with `push {r4,lr}`. Raw ARM branch decoding finds five
+      inbound BL sites: four plain and one predicated. The body contains one
+      plain BL (0x081f10b4 -> 0x081fcea0) and no predicated BL. With a null
+      active cursor at +0x30 it returns immediately. Otherwise it invokes the
+      unported cleanup, stores -1 at +0x40/+0x44, clears +0x30 and +0x59, then
+      tail-branches to FUN_081f036c with mode zero. Because +0x30 was just
+      cleared, that tail path only zeros +0x38/+0x3c, which the port inlines.
+      Deliberate deviation: FUN_081fcea0 has no recovered semantic identity,
+      so target builds dispatch to its fixed retailOS address and host tests
+      install a volatile seam. Host tests cover the null early-out and complete
+      attached-cursor transition. match.py shows the same guard, cleanup call,
+      sentinel stores, and range clears; LLVM differs in frame, seam BLX, and
+      store order.
