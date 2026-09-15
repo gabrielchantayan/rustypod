@@ -90350,3 +90350,35 @@ functions:
       cover preparation-error substitution and the NULL prepared-statement
       terminal/finalization path. Deliberate deviations: those two unported
       callees use seams on host and retailOS addresses on firmware.
+
+  # --- SQLite comparison opcode emitter ---
+  - address: 0x082c3bf0
+    ghidra: FUN_082c3bf0
+    name: expr_code_compare
+    size: 168
+    sig: "int expr_code_compare(Parse *parse, Expr *left, Expr *right, int opcode, int left_reg, int right_reg, int destination, u8 jump_if_null)"
+    module: sqlite/expr_code_compare
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: left
+      param_3/r2: right
+      param_4/r3: opcode
+      param_5: left_reg
+      param_6: right_reg
+      param_7: destination
+      param_8: jump_if_null
+    notes: >-
+      Raw osos.dec words establish the exact 168-byte extent from push
+      {r1-r3,r4-r11,lr} at 0x082c3bf0 through pop {r1-r3,r4-r11,pc}
+      at 0x082c3c94; the next independent function begins at 0x082c3c98.
+      The body has six unconditional outbound bl calls and no predicated bl;
+      decoding inbound ARM branches finds five direct callers, all plain bl.
+      SQLite 3.5.9 sqlite3ExprCodeCompare resolves the pair collation,
+      combines affinity, emits the comparison with P4_COLLSEQ, combines P5
+      with jump_if_null, then invalidates both one-register affinity caches
+      when flags & 0x67 is nonzero. expr_coll_seq @ 0x08370298 and
+      expr_compare_affinity @ 0x083735b8 remain volatile seams; target builds
+      call their retail addresses while host tests install recorders. match.py
+      exit 1 printed the expected structural LLVM differences: seam blx calls,
+      a smaller preserved-register set, and frame layout.

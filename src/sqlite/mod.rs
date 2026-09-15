@@ -97,6 +97,7 @@ pub mod expr_affinity;
 pub mod expr_and;
 pub mod expr_coll_seq;
 pub mod expr_code;
+pub mod expr_code_compare;
 pub mod expr_code_expr_list;
 pub mod expr_cache_affinity_change;
 pub mod expr_worklist;
