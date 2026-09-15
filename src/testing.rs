@@ -1119,6 +1119,9 @@ pub mod hints {
     // 0x4000_0000: dedicated to ui/notification_dispatch's owner, target,
     // and vtable raw-u32 fixture; mappings never unmap.
     pub const UI_NOTIFICATION_DISPATCH: usize = 0x4000_0000;
+    // 0x4100_0000: dedicated to ui/text_line_offset_slot's target-width
+    // layout record fixture; mappings never unmap, so no other user may share it.
+    pub const UI_TEXT_LINE_OFFSET_SLOT: usize = 0x4100_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
