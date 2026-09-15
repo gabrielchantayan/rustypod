@@ -60,6 +60,7 @@ pub mod draw_state_get_style;
 pub mod draw_state_surface;
 pub mod handler_list_construct;
 pub mod handle;
+pub mod handle_callback_dispatch;
 pub mod heap_string;
 pub mod list_splice;
 pub mod list_iter_advance;
