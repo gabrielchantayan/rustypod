@@ -123,6 +123,7 @@ pub mod slot_reset;
 pub mod state_object_destroy;
 pub mod state_object_initialize;
 pub mod string;
+pub mod named_object_cache;
 pub mod string_vector_destruct;
 pub mod string_map;
 pub mod basic_ios_initialize;
