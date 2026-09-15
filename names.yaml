@@ -71781,6 +71781,37 @@ functions:
       returns 0; absent handles skip destroy but teardown still runs;
       teardown status is discarded.
 
+  # --- collection item lookup by key ---
+  - address: 0x0809e1bc
+    ghidra: FUN_0809e1bc
+    name: collection_item_find_by_key
+    size: 104
+    sig: "void *collection_item_find_by_key(Collection *collection, u32 key)"
+    module: app/collection_item_find_by_key
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: key
+      local_18: item
+      uStack_14: cursor
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+    notes: >-
+      Raw words at 0x0809e1bc..0x0809e224 establish the exact 104-byte
+      extent: the next separately entered function starts at 0x0809e224.
+      The body initializes the shared 8-byte collection cursor, walks until
+      its vtable accessor refuses, and compares each yielded item's aligned
+      word at +0x20 to key; it invalidates the cursor before both the match
+      and NULL returns. Its four internal calls are unconditional bl
+      instructions (cursor_init once, cursor_advance once in the loop, and
+      cursor_invalidate on each exit); no predicated bl occurs. Ghidra's
+      recovered C agrees after correcting its misleading longlong return
+      type to the raw r0 item pointer. Deliberate deviation: a volatile read
+      of the local cursor index after invalidation retains its state change
+      in optimized code without observing firmware state; LLVM folds the two
+      equivalent retail exit paths into one cursor_invalidate call.
+
   - address: 0x082f0a1c
     ghidra: FUN_082f0a1c
     name: digest_init
