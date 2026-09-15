@@ -93905,3 +93905,28 @@ functions:
       tail-B callers. Host tests cover all 256 header-byte values. match.py
       structural review is recorded with this port. Deliberate deviations: the
       provably unreachable compare and heap_panic call are omitted.
+
+  - address: 0x08164de8
+    ghidra: FUN_08164de8
+    name: mov_checked_flagged_width
+    size: 24
+    sig: "u8 mov_checked_flagged_width(const u8 *flagged_field)"
+    module: mov/checked_flagged_width
+    status: ported
+    renames:
+      param_1/r0: flagged_field
+      FUN_08164c80: optional_flagged_byte
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body from
+      0x08164de8 through 0x08164dfc: push {r4,lr}; bl 0x08164c80; and
+      r0,r0,#3; cmp r0,#3; popls {r4,pc}; bl 0x08030f44. The separately
+      linked next function starts at 0x08164e00. FUN_08164c80 is not
+      independently identified, so this port preserves its verified behavior
+      inline: it returns byte 1 only when byte 0 has bit 7 set, otherwise
+      zero. Thus this function returns the low two bits of that optional byte
+      unless they equal 3, when it invokes the non-returning heap_panic.
+      Decoding every aligned ARM B/BL-immediate in osos.dec found exactly five
+      inbound direct calls, all unconditional plain bl at 0x08163f0c,
+      0x08164a40, 0x08164ad4, 0x08164e48, and 0x08164efc; zero predicated
+      calls. No deliberate deviations.
