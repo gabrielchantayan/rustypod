@@ -48,6 +48,32 @@
 
 use crate::ft::types::{FtInt64, FtMatrix};
 
+/// `ft_atan_table` — 256-byte legacy FreeType raster arctangent lookup.
+///
+/// The retail pointer at 0x0890bba4 refers to the relocated RW image; its
+/// ROM copy is at raw `osos.dec` offset 0x00916a7c (runtime + 0x0aeed8).
+/// Entries approximate `atan(i / 256)` in 1/512-turn units.
+static FT_ATAN_TABLE: [u8; 256] = [
+    0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5,
+    5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+    10, 11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 14, 14, 14,
+    15, 15, 15, 16, 16, 16, 17, 17, 17, 18, 18, 18, 18, 19,
+    19, 19, 20, 20, 20, 21, 21, 21, 21, 22, 22, 22, 23, 23,
+    23, 24, 24, 24, 24, 25, 25, 25, 26, 26, 26, 26, 27, 27,
+    27, 28, 28, 28, 28, 29, 29, 29, 30, 30, 30, 30, 31, 31,
+    31, 31, 32, 32, 32, 33, 33, 33, 33, 34, 34, 34, 34, 35,
+    35, 35, 35, 36, 36, 36, 36, 37, 37, 37, 38, 38, 38, 38,
+    39, 39, 39, 39, 40, 40, 40, 40, 41, 41, 41, 41, 42, 42,
+    42, 42, 42, 43, 43, 43, 43, 44, 44, 44, 44, 45, 45, 45,
+    45, 46, 46, 46, 46, 46, 47, 47, 47, 47, 48, 48, 48, 48,
+    48, 49, 49, 49, 49, 50, 50, 50, 50, 50, 51, 51, 51, 51,
+    51, 52, 52, 52, 52, 52, 53, 53, 53, 53, 53, 54, 54, 54,
+    54, 54, 55, 55, 55, 55, 55, 56, 56, 56, 56, 56, 57, 57,
+    57, 57, 57, 58, 58, 58, 58, 58, 59, 59, 59, 59, 59, 59,
+    60, 60, 60, 61, 61, 61, 61, 61, 61, 62, 62, 62, 62, 62,
+    62, 63, 63, 63, 63, 63, 64, 64, 64, 64, 64, 64, 64, 64,
+];
+
 /// ft_add64 (FreeType `FT_Add64`) — original: `FUN_080ed3b4`
 /// @ 0x080ed3b4 (68 bytes; 2 call sites, both inside this module's
 /// `ft_divfix`/`ft_muldiv` where the port inlines it).
@@ -153,6 +179,7 @@ pub extern "C" fn ft_div64by32(hi: u32, lo: u32, divisor: u32) -> u32 {
 /// division by zero or overflow. See the module header for the exact
 /// paths, the arithmetic-shift quirks, and the inlined helpers.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub extern "C" fn ft_divfix(a: i32, b: i32) -> i32 {
     let sign = a ^ b;
     let ua = a.wrapping_abs() as u32;
@@ -176,6 +203,56 @@ pub extern "C" fn ft_divfix(a: i32, b: i32) -> i32 {
     }
 }
 
+
+/// ft_raster_atan2 (legacy FreeType raster `FT_Atan2`) — original:
+/// `FUN_08081b5c` @ 0x08081b5c (172-byte body plus a 4-byte literal pool;
+/// Ghidra's 176-byte extent includes that pool; 5 direct `bl` callers, all
+/// unconditional).
+///
+/// Returns the angle of `(x, y)` in 1/512-turn units, normalized to
+/// `[-256, 256]`: zero is positive x, +128 is positive y, and +256 is
+/// negative x. It folds the vector into the first octant, divides the
+/// smaller magnitude by the larger with [`ft_divfix`], and looks up the
+/// 8-bit ratio. The original calls `ft_divfix` twice; this port calls the
+/// existing direct Rust port. The relocated `ft_atan_table` is embedded
+/// above from its verified ROM copy. No other deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn ft_raster_atan2(x: i32, y: i32) -> i32 {
+    if y == 0 {
+        return if x < 0 { 0x100 } else { 0 };
+    }
+    if x == 0 {
+        return if y < 0 { -0x80 } else { 0x80 };
+    }
+
+    let mut angle = if x < 0 { 0x100 } else { 0 };
+    let mut x = x;
+    let mut y = y;
+    if x < 0 {
+        x = x.wrapping_neg();
+        y = y.wrapping_neg();
+    }
+    if y < 0 {
+        angle -= 0x80;
+        let old_x = x;
+        x = y.wrapping_neg();
+        y = old_x;
+    }
+
+    if x == y {
+        angle += 0x40;
+    } else if x > y {
+        angle += unsafe { *FT_ATAN_TABLE.get_unchecked((ft_divfix(y, x) >> 8) as usize) } as i32;
+    } else {
+        angle += 0x80
+            - unsafe { *FT_ATAN_TABLE.get_unchecked((ft_divfix(x, y) >> 8) as usize) } as i32;
+    }
+    if angle > 0x100 {
+        angle -= 0x200;
+    }
+    angle
+}
 /// ft_muldiv (FreeType `FT_MulDiv`) — original: `FUN_0804d1a8`
 /// @ 0x0804d1a8 (288 bytes; 33 call sites).
 ///
@@ -862,6 +939,27 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn raster_atan2_axes_octants_and_lookup_edges() {
+        // Exact raw-table and fold-path results, including each zero axis.
+        for (x, y, want) in [
+            (1, 0, 0),
+            (-1, 0, 0x100),
+            (0, 1, 0x80),
+            (0, -1, -0x80),
+            (1, 1, 0x40),
+            (-1, 1, 0xc0),
+            (-1, -1, -0xc0),
+            (1, -1, -0x40),
+            (256, 1, 1),
+            (1, 256, 0x7f),
+            (-256, 1, 0xff),
+            (1, -256, -0x7f),
+        ] {
+            assert_eq!(ft_raster_atan2(x, y), want, "({x}, {y})");
         }
     }
 }
