@@ -55,6 +55,10 @@ use crate::cxx::list_iter_advance::list_iter_advance;
 /// Byte offset of the per-region block size word in the block-manager
 /// object (original: `ldrne r0, [r0, #0x30]`).
 pub const BLOCK_SIZE_OFFSET: usize = 0x30;
+/// Byte offset of the per-region block count word in the block-manager
+/// object (original: `ldrne r0, [r0, #0x34]`).
+pub const BLOCK_COUNT_OFFSET: usize = 0x34;
+
 
 /// Byte offset of the manager's own mutex object inside the
 /// block-manager object (original: `add r0, r0, #0x148` ahead of both
@@ -128,6 +132,25 @@ pub unsafe extern "C" fn region_block_size() -> u32 {
     }
     (mgr.add(BLOCK_SIZE_OFFSET) as *const u32).read()
 }
+/// region_block_count — original: `FUN_0818ac40` @ 0x0818ac40 (24 bytes;
+/// 5 direct, plain `bl` call sites; no calls in its own body).
+///
+/// Per-region block count: the word at manager + 0x34, or 0 when no block
+/// manager exists.
+///
+/// Deviation: the original global word at 0x089cb1b4 is represented by
+/// [`BLOCK_MANAGER`], as documented in this module's header.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_block_count() -> u32 {
+    let mgr = block_manager();
+    if mgr.is_null() {
+        return 0;
+    }
+    (mgr.add(BLOCK_COUNT_OFFSET) as *const u32).read()
+}
+
+
 
 
 /// Reads one u32 word of the opaque manager/list/node layout (the
@@ -432,6 +455,27 @@ pub(crate) mod tests {
             assert!(!block_manager_get().is_null());
         }
         clear_manager();
+    }
+
+    #[test]
+    fn count_comes_from_manager_plus_0x34() {
+        let _guard = MGR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let mgr = core::ptr::addr_of_mut!(FAKE_MGR) as *mut u8;
+            (mgr.add(BLOCK_COUNT_OFFSET) as *mut u32).write(0x1234_5678);
+            BLOCK_MANAGER = mgr;
+            assert_eq!(region_block_count(), 0x1234_5678);
+        }
+        clear_manager();
+    }
+
+    #[test]
+    fn no_manager_returns_zero_count() {
+        let _guard = MGR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_manager();
+        unsafe {
+            assert_eq!(region_block_count(), 0);
+        }
     }
 
     /// One ordered event log across the mocked mutex boundary and the

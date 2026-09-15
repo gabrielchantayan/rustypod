@@ -7481,6 +7481,21 @@ functions:
       the POOL_OPS.region_block_size default (pool_seed_regions /
       block_deque_fill sizing).
 
+  - address: 0x0818ac40
+    ghidra: FUN_0818ac40
+    name: region_block_count
+    size: 24
+    sig: "u32 region_block_count(void)"
+    module: heap/block_mgr
+    status: ported
+    notes: >-
+      [[0x089cb1b4] + 0x34] — the block manager's per-region block count;
+      0 when the manager pointer is NULL. 5 direct, plain bl call sites,
+      binary-verified. Raw words establish the true 24-byte extent
+      (0x0818ac40..0x0818ac57) and a leaf body: 0 plain/predicated bl
+      instructions. Port uses BLOCK_MANAGER instead of the runtime global
+      word, matching block_manager_get and region_block_size.
+
   - address: 0x081a7a9c
     ghidra: thunk_FUN_0818a364
     name: region_block_size_thunk
