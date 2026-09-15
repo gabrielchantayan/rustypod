@@ -88,6 +88,29 @@ pub unsafe extern "C" fn ui_element_bounds(element: *const u8, out: *mut Rect) {
     ptr::write(out, ptr::addr_of!((*element).bounds).read());
     rect_move_to_origin(out);
 }
+/// ui_offset_bounds — original: `FUN_08129308` @ 0x08129308 (40 bytes;
+/// `0x08129308..0x08129330`; the next function starts at 0x08129330).
+///
+/// Copies the source record's local rectangle at +0x14 to `out`, then offsets
+/// it by the horizontal and vertical words at +0x24 and +0x28 respectively.
+/// Raw decoding finds exactly five direct, unconditional `bl` call sites and
+/// no predicated `bl`; its final `b 0x0826c574` tail-dispatches to
+/// [`rect_offset`]. The stores deliberately precede the offset reads, so an
+/// overlapping output has the same observable result as the ARM `ldm`/`stm`.
+///
+/// # Deliberate deviations
+///
+/// Rust represents the tail dispatch as an ordinary call; its observable
+/// rectangle result is identical.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_offset_bounds(source: *const u8, out: *mut Rect) {
+    ptr::write(out, source.add(0x14).cast::<Rect>().read());
+    let dx = source.add(0x24).cast::<i32>().read();
+    let dy = source.add(0x28).cast::<i32>().read();
+    crate::ui::rect::rect_offset(out, dx, dy);
+}
+
 
 /// ui_element_render_bounds — original: `FUN_082a25d8` @ 0x082a25d8
 /// (36 bytes; `0x082a25d8..0x082a25fc`; the next function starts at
@@ -425,5 +448,43 @@ mod tests {
 
         let cleared = run_case(0x0020_0000, rect(0, 0, 1, 1), Rect::default());
         assert_eq!(cleared, Rect::default());
+    }
+
+    #[test]
+    fn offset_bounds_copies_then_translates_with_wrapping_coordinates() {
+        #[repr(C)]
+        struct OffsetBounds {
+            _before_bounds: [u8; 0x14],
+            bounds: Rect,
+            dx: i32,
+            dy: i32,
+        }
+
+        let source = OffsetBounds {
+            _before_bounds: [0; 0x14],
+            bounds: rect(i32::MAX, i32::MIN, -3, 7),
+            dx: 2,
+            dy: -4,
+        };
+        let mut out = Rect::default();
+
+        unsafe { ui_offset_bounds((&source as *const OffsetBounds).cast(), &mut out) };
+
+        assert_eq!(out, rect(i32::MAX.wrapping_sub(4), i32::MIN.wrapping_add(2), -7, 9));
+    }
+
+    #[test]
+    fn offset_bounds_reads_offsets_after_writing_an_overlapping_output() {
+        let mut words = [0_i32; 13];
+        words[5..9].copy_from_slice(&[10, 20, 30, 40]);
+        words[9] = 100;
+        words[10] = 200;
+        let out = unsafe { words.as_mut_ptr().add(9).cast::<Rect>() };
+
+        unsafe { ui_offset_bounds(words.as_ptr().cast(), out) };
+
+        // The output overwrites source +0x24/+0x28 before they are read:
+        // dx becomes copied top (10) and dy becomes copied left (20).
+        assert_eq!(unsafe { out.read() }, rect(30, 30, 50, 50));
     }
 }

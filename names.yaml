@@ -94737,3 +94737,29 @@ functions:
       of that slot. Both callees remain unported; target builds retain their
       explicit linker seams and host tests replace those seams to prove
       lookup, fallback, argument forwarding, and final-slot reload behavior.
+
+  # --- Offset bounds materialization ---
+  - address: 0x08129308
+    ghidra: FUN_08129308
+    name: ui_offset_bounds
+    size: 40
+    sig: "void ui_offset_bounds(const u8 *source, Rect *out)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: out
+      "source+0x14": local_bounds
+      "source+0x24": horizontal_offset
+      "source+0x28": vertical_offset
+      FUN_0826c574: rect_offset
+    notes: >-
+      Raw osos.dec establishes the true 40-byte extent 0x08129308..0x08129330:
+      ldm/stm copies source+0x14..+0x20 before loads of source+0x24/+0x28,
+      then the final b tail-dispatches to ported rect_offset at 0x0826c574.
+      Whole-image ARM branch decoding finds five inbound plain unconditional bl
+      instructions and zero inbound predicated bl instructions. Host tests cover
+      signed wrapping offsets and an overlapping output, which proves the
+      source-order dependency. match.py reports the same copy/load/tail-call
+      structure; LLVM chooses fp/lr/r3 instead of ADS r4/lr and emits an
+      ordinary frame, so no instruction prefix is shared.
