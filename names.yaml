@@ -94384,3 +94384,32 @@ functions:
       structural diff, as expected for modern LLVM versus ARM ADS. Deliberate
       deviation: volatile word accesses preserve the original per-pixel memory
       order and prevent bulk-copy substitution.
+
+  # --- Growable byte-buffer append ---
+  - address: 0x08143f38
+    ghidra: FUN_08143f38
+    name: growable_buffer_append
+    size: 52
+    sig: "void growable_buffer_append(u32 *buffer, const u8 *source, u32 len)"
+    module: util/growable_buffer_append
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: source
+      param_3/r2: len
+      param_1_plus_0x00: data
+      param_1_plus_0x04: length
+      param_1_plus_0x08: capacity
+      iVar1/r4: old_length
+      FUN_08143f6c: growable_buffer_ensure_capacity
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: 13 ARM words from
+      push {r4-r8,lr} at 0x08143f38 through b 0x08037db0 at 0x08143f68; the
+      next real function starts with push {r4-r8,lr} at 0x08143f6c. Decoding
+      aligned ARM B/BL-immediate words finds five inbound direct bl calls:
+      four unconditional and one predicated. The function saves the old
+      length, calls the unported 0x08143f6c capacity helper with length+len,
+      then appends through the post-growth data pointer at data+old_length.
+      Its terminal branch is the 0x08037db0 ADS __rt_memcpy veneer. Rust uses
+      a normal __rt_memcpy call and an address seam for the unported helper;
+      target-width u32 buffer words preserve the ARM field layout on hosts.
