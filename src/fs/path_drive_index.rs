@@ -7,23 +7,14 @@
 
 use crate::drivers::{ata_cmd, ata_semaphore};
 use crate::fs::drive_slot;
+use crate::fs::drive_prefix_parse;
 
-/// Resident retailOS drive-prefix parser at `0x082e377c`.
-pub const DRIVE_PREFIX_PARSE_ADDRESS: usize = 0x082e_377c;
 /// Resident retailOS drive-ready wrapper at `0x082c3168`.
 pub const DRIVE_READY_CHECK_ADDRESS: usize = 0x082c_3168;
 
-/// ABI of the unrecovered resident drive-prefix parser.
-pub type DrivePrefixParse = unsafe extern "C" fn(*mut u32, *const u8) -> *const u8;
 /// ABI of the unrecovered resident drive-ready wrapper.
 pub type DriveReadyCheck = unsafe extern "C" fn(u32) -> u32;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn retail_drive_prefix_parse(index_out: *mut u32, path: *const u8) -> *const u8 {
-    let parse: DrivePrefixParse = core::mem::transmute(DRIVE_PREFIX_PARSE_ADDRESS);
-    parse(index_out, path)
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -37,10 +28,6 @@ unsafe extern "C" fn missing_error_report(_error: u32) -> u32 {
     u32::MAX
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_prefix_parse(_index_out: *mut u32, _path: *const u8) -> *const u8 {
-    core::ptr::null()
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_ready_check(_index: u32) -> u32 {
@@ -57,14 +44,13 @@ unsafe extern "C" fn missing_slot_lookup(_index: u32) -> *mut u8 {
     core::ptr::null_mut()
 }
 
-/// Host-test boundaries for each externally observable call in the wrapper.
-/// Device builds call the retail parser/checker and the already ported ATA and
-/// drive-slot entry points directly.
+/// Host-test boundaries for the wrapper's non-ported dependencies.
+/// Device builds call the ported parser and ATA/drive-slot entries directly,
+/// while retaining the resident drive-ready checker.
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 struct PathDriveIndexHostOps {
     error_report: unsafe extern "C" fn(u32) -> u32,
-    prefix_parse: DrivePrefixParse,
     ready_check: DriveReadyCheck,
     semaphore_wait: unsafe extern "C" fn(usize) -> usize,
     semaphore_signal: unsafe extern "C" fn(usize) -> usize,
@@ -74,7 +60,6 @@ struct PathDriveIndexHostOps {
 #[cfg(not(target_os = "none"))]
 const DEFAULT_HOST_OPS: PathDriveIndexHostOps = PathDriveIndexHostOps {
     error_report: missing_error_report,
-    prefix_parse: missing_prefix_parse,
     ready_check: missing_ready_check,
     semaphore_wait: missing_semaphore,
     semaphore_signal: missing_semaphore,
@@ -102,17 +87,6 @@ unsafe fn report_ata_error(error: u32) {
     }
 }
 
-#[inline(always)]
-unsafe fn parse_drive_prefix(index_out: *mut u32, path: *const u8) -> *const u8 {
-    #[cfg(target_os = "none")]
-    {
-        retail_drive_prefix_parse(index_out, path)
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        (host_ops().prefix_parse)(index_out, path)
-    }
-}
 
 #[inline(always)]
 unsafe fn drive_ready_check(index: u32) -> u32 {
@@ -185,10 +159,11 @@ unsafe fn live_drive_slot(index: u32) -> *mut u8 {
 /// The 12 decoded callers are `bl` at 0x082e0600, 0x082e173c, 0x082e1d40,
 /// 0x082e22a4, 0x082e30f8, 0x082e3458, 0x082e4094, 0x082e458c, 0x082e462c,
 /// 0x082e46d4, 0x082e47b4, and 0x082e6338; there are zero predicated calls or
-/// tail branches. No data word dispatch was introduced: `ata_report_error`,
-/// both ATA semaphore thunks, and `drive_slot_lookup` are already ported;
-/// target builds call the two unrecovered resident entries at their verified
-/// addresses. Host builds use volatile test boundaries for those calls.
+/// tail branches. No data-word dispatch was introduced: `ata_report_error`,
+/// both ATA semaphore thunks, `drive_slot_lookup`, and `parse_drive_prefix`
+/// are already ported; target builds call only the unrecovered ready-check
+/// entry at its verified address. Host builds use volatile test boundaries for
+/// that checker and the other wrapper dependencies.
 ///
 /// # Safety
 ///
@@ -200,7 +175,7 @@ pub unsafe extern "C" fn resolve_path_drive_index(path: *const u8) -> i32 {
     let mut index = 0u32;
     report_ata_error(0);
 
-    if parse_drive_prefix(&mut index, path).is_null() {
+    if drive_prefix_parse::parse_drive_prefix(&mut index, path).is_null() {
         report_ata_error(31);
         return -1;
     }
@@ -228,8 +203,6 @@ mod tests {
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static EVENTS: Mutex<std::vec::Vec<Event>> = Mutex::new(std::vec::Vec::new());
     static RESULTS: Mutex<Results> = Mutex::new(Results {
-        parsed_index: 0,
-        parse_result: 0,
         ready_result: 0,
         slot_result: 0,
     });
@@ -237,7 +210,6 @@ mod tests {
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Event {
         Error(u32),
-        Parse(usize),
         Wait(u32),
         Ready(u32),
         Lookup(u32),
@@ -246,8 +218,6 @@ mod tests {
 
     #[derive(Clone, Copy)]
     struct Results {
-        parsed_index: u32,
-        parse_result: usize,
         ready_result: u32,
         slot_result: usize,
     }
@@ -265,12 +235,6 @@ mod tests {
         u32::MAX
     }
 
-    unsafe extern "C" fn record_parse(index_out: *mut u32, path: *const u8) -> *const u8 {
-        let result = *results();
-        index_out.write(result.parsed_index);
-        events().push(Event::Parse(path as usize));
-        result.parse_result as *const u8
-    }
 
     unsafe extern "C" fn record_ready(index: u32) -> u32 {
         events().push(Event::Ready(index));
@@ -298,7 +262,6 @@ mod tests {
             let saved = addr_of!(HOST_OPS).read_volatile();
             addr_of_mut!(HOST_OPS).write_volatile(PathDriveIndexHostOps {
                 error_report: record_error,
-                prefix_parse: record_parse,
                 ready_check: record_ready,
                 semaphore_wait: record_wait,
                 semaphore_signal: record_signal,
@@ -315,10 +278,8 @@ mod tests {
         drop(state);
     }
 
-    fn configure(parsed_index: u32, parse_result: usize, ready_result: u32, slot_result: usize) {
+    fn configure(ready_result: u32, slot_result: usize) {
         *results() = Results {
-            parsed_index,
-            parse_result,
             ready_result,
             slot_result,
         };
@@ -332,7 +293,7 @@ mod tests {
     #[test]
     fn returns_parsed_index_after_ready_live_slot() {
         let state = install();
-        configure(2, 1, 1, 0x1000);
+        configure(1, 0x1000);
         let path = b"C:\\music\0";
 
         assert_eq!(unsafe { resolve_path_drive_index(path.as_ptr()) }, 2);
@@ -340,7 +301,6 @@ mod tests {
             observed_events(),
             [
                 Event::Error(0),
-                Event::Parse(path.as_ptr() as usize),
                 Event::Wait(2),
                 Event::Ready(2),
                 Event::Lookup(2),
@@ -353,28 +313,24 @@ mod tests {
     #[test]
     fn parser_failure_skips_lock_and_reports_error_31() {
         let state = install();
-        configure(3, 0, 1, 0x1000);
+        configure(1, 0x1000);
         let path = b"Z:\\missing\0";
 
         assert_eq!(unsafe { resolve_path_drive_index(path.as_ptr()) }, -1);
-        assert_eq!(
-            observed_events(),
-            [Event::Error(0), Event::Parse(path.as_ptr() as usize), Event::Error(31)]
-        );
+        assert_eq!(observed_events(), [Event::Error(0), Event::Error(31)]);
         restore(state);
     }
 
     #[test]
     fn failed_ready_check_releases_lock_before_error() {
         let state = install();
-        configure(1, 1, 0, 0x1000);
+        configure(0, 0x1000);
 
-        assert_eq!(unsafe { resolve_path_drive_index(core::ptr::null()) }, -1);
+        assert_eq!(unsafe { resolve_path_drive_index(b"B:\0".as_ptr()) }, -1);
         assert_eq!(
             observed_events(),
             [
                 Event::Error(0),
-                Event::Parse(0),
                 Event::Wait(1),
                 Event::Ready(1),
                 Event::Signal(1),
@@ -387,7 +343,7 @@ mod tests {
     #[test]
     fn missing_slot_releases_lock_before_error() {
         let state = install();
-        configure(0, 1, 1, 0);
+        configure(1, 0);
         let path = b"A:\\empty\0";
 
         assert_eq!(unsafe { resolve_path_drive_index(path.as_ptr()) }, -1);
@@ -395,7 +351,6 @@ mod tests {
             observed_events(),
             [
                 Event::Error(0),
-                Event::Parse(path.as_ptr() as usize),
                 Event::Wait(0),
                 Event::Ready(0),
                 Event::Lookup(0),
