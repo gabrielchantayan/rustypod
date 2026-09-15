@@ -95490,3 +95490,30 @@ functions:
       inbound bl calls, and no outbound bl calls. The parser type remains raw
       storage because only its table field is independently established; host
       tests cover scan, delimiter precedence, and the 0xff table index.
+
+  # --- single-byte allocation and initialization ---
+  - address: 0x080d6930
+    ghidra: FUN_080d6930
+    name: allocate_byte_with_value
+    size: 24
+    sig: "u8 *allocate_byte_with_value(u8 value)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: value
+      r4: saved_value
+      FUN_082aadd4: operator_new
+      puVar1/r0: allocation
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent
+      0x080d6930..0x080d6944: push {r4,lr}; mov r4,r0; mov r0,#1; bl
+      0x082aadd4; strb r4,[r0]; pop {r4,pc}. The following cmp r0,#0x25
+      at 0x080d6948 begins a separately entered jump-table dispatch function.
+      Complete-image ARM branch decoding finds five inbound plain
+      unconditional bl calls (0x081c22f4, 0x081c2b14, 0x081c3224,
+      0x081c4024, 0x081c7e00), zero predicated bl calls, and one outbound
+      bl to operator_new @ 0x082aadd4. It allocates one tag-2 heap byte then
+      unconditionally stores the input's low byte; a NULL allocation faults
+      rather than being checked. Rust calls the existing operator_new seam
+      instead of encoding the retailOS direct branch; host tests cover values
+      0x00, 0x01, and 0xff, allocation size/tag, and returned storage.
