@@ -46748,6 +46748,40 @@ functions:
       LLVM's branch+mov selection for the streq/beq pair, and the
       crate's frame-pointer prologue.
 
+  - address: 0x0815880c
+    ghidra: FUN_0815880c
+    name: container_view_destruct
+    size: 44
+    sig: "ContainerView *container_view_destruct(ContainerView *view)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1: view
+      FUN_08157b18: detach_children (CONTAINER_VIEW_OPS seam, unported)
+      FUN_08135380: registry_container_destruct (direct, already ported)
+      FUN_0826f340: view_base_destruct (CONTAINER_VIEW_OPS seam, unported)
+      DAT_08158838: CONTAINER_VIEW_VTABLE_ADDRESS
+    notes: >-
+      Raw ARM is exactly 44 bytes at 0x0815880c..0x08158838: 40 bytes
+      of code followed by the 0x08986f38 vtable literal at 0x08158838.
+      The next real function starts at 0x0815883c with push {r4,lr}.
+      Decoding its words finds two plain bl calls (0x08157b18 and
+      0x08135380), zero predicated bl calls, and a final tail b to
+      0x0826f340; Ghidra's claimed five call sites are incorrect. The
+      body saves view, restores the container vtable, detaches the child
+      registry, directly destructs the 0x28-byte registry at view+0xa8,
+      then recovers view with sub r0,r0,#0xa8 and tail-branches to the
+      grand-base destructor. Deviations: the two unported direct edges
+      are semantic CONTAINER_VIEW_OPS seams (firmware calls on target,
+      recorders on host); the direct registry destructor remains direct.
+      The port preserves view rather than recovering it from the
+      registry result, because target-byte arithmetic would be wrong for
+      host-width Registry fields. Host coverage verifies vtable restore,
+      child-detach/registry/base order, observer virtual detach, registry
+      vtable restore, and returned pointer identity. match.py reports
+      the expected ops-table dispatches and larger LLVM frame rather than
+      an exact instruction match.
+
   - address: 0x081586e0
     ghidra: FUN_081586e0
     name: container_view_children

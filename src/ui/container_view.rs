@@ -132,7 +132,9 @@
 //! - The original's `str r4, [sp]` re-stores the stacked spec into its
 //!   own outgoing argument slot; the port simply forwards `spec`.
 
-use crate::app::class_registry::registry_container_construct_default;
+use crate::app::class_registry::{
+    registry_container_construct_default, registry_container_destruct,
+};
 use crate::app::registry::Registry;
 use crate::app::resource_chain::ResourceProvider;
 use crate::ui::view_base::{view_base_construct, ViewBase, ViewSpec};
@@ -224,6 +226,12 @@ pub struct ContainerViewOps {
     /// discards it (`mov r0, r4` follows the `bl` immediately), so the
     /// slot returns nothing. Not yet ported.
     pub refresh_clip_rect: unsafe extern "C" fn(view: *mut ContainerView),
+    /// Detaches every registered child through its virtual destructor:
+    /// `0x08157b18(view)`. Not yet ported.
+    pub detach_children: unsafe extern "C" fn(view: *mut ContainerView),
+    /// Grand-base destructor `0x0826f340(view)`, reached through the
+    /// container destructor's final tail branch. Not yet ported.
+    pub destruct_base: unsafe extern "C" fn(view: *mut ViewBase) -> *mut ViewBase,
 }
 
 #[cfg(target_os = "none")]
@@ -238,22 +246,48 @@ unsafe extern "C" fn missing_refresh_clip_rect(_view: *mut ContainerView) {
     panic!("container_view_construct requires clip-rect refresh 0x08157f18")
 }
 
-/// Wired defaults (the `event_list.rs` split: firmware addresses on
-/// target, panics on host).
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_detach_children(view: *mut ContainerView) {
+    let detach: unsafe extern "C" fn(*mut ContainerView) =
+        unsafe { core::mem::transmute(0x0815_7b18usize) };
+    unsafe { detach(view) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_detach_children(_view: *mut ContainerView) {
+    panic!("container_view_destruct requires child-detach helper 0x08157b18")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_destruct_base(view: *mut ViewBase) -> *mut ViewBase {
+    let destruct: unsafe extern "C" fn(*mut ViewBase) -> *mut ViewBase =
+        unsafe { core::mem::transmute(0x0826_f340usize) };
+    unsafe { destruct(view) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_destruct_base(_view: *mut ViewBase) -> *mut ViewBase {
+    panic!("container_view_destruct requires grand-base destructor 0x0826f340")
+}
+
 pub const DEFAULT_CONTAINER_VIEW_OPS: ContainerViewOps = ContainerViewOps {
     #[cfg(target_os = "none")]
     refresh_clip_rect: firmware_refresh_clip_rect,
     #[cfg(not(target_os = "none"))]
     refresh_clip_rect: missing_refresh_clip_rect,
+    #[cfg(target_os = "none")]
+    detach_children: firmware_detach_children,
+    #[cfg(not(target_os = "none"))]
+    detach_children: missing_detach_children,
+    #[cfg(target_os = "none")]
+    destruct_base: firmware_destruct_base,
+    #[cfg(not(target_os = "none"))]
+    destruct_base: missing_destruct_base,
 };
 
 /// The active dispatch table. Written once at init on target; host
 /// tests swap in recorders and restore the defaults.
 pub static mut CONTAINER_VIEW_OPS: ContainerViewOps = DEFAULT_CONTAINER_VIEW_OPS;
-
-/// container_view_construct — original: `FUN_08158778` @ 0x08158778
-/// (124 bytes: 120 code ending in `ldmia sp!, {r3, r4, r5, pc}` @
-/// 0x081587ec, plus the 4-byte vtable literal @ 0x081587f0; 22 `bl`
 /// call sites, all unconditional, binary-scanned by decoding every
 /// B/BL word in osos.dec — every one a derived-class constructor or
 /// `new` wrapper chaining into this one, e.g. the `operator_new(0xe8)`
@@ -328,6 +362,41 @@ pub unsafe extern "C" fn container_view_construct(
 /// and **0 occurrences of 0x081586e0 as a data word**, so the
 /// accessor is never dispatched virtually).
 ///
+
+/// container_view_destruct — original: `FUN_0815880c` @ 0x0815880c
+/// (44 bytes: 40 code ending in the tail `b 0x0826f340` @ 0x08158834,
+/// plus the vtable literal @ 0x08158838). Raw ARM has **2 plain `bl`,
+/// 0 predicated `bl`**, and one tail branch; Ghidra's reported 5 call
+/// sites are a boundary/call-analysis error.
+///
+/// Replants the container vtable, detaches registered children through
+/// `0x08157b18`, destructs the 0x28-byte registry at +0xa8 through the
+/// already ported [`registry_container_destruct`], then tail-calls the
+/// grand-base destructor at `0x0826f340`. Its result is the destructor
+/// result, cast back to the derived pointer type.
+///
+/// Deliberate deviations: unported child detachment and grand-base
+/// destruction use [`CONTAINER_VIEW_OPS`] seams (firmware direct calls
+/// on target; replaceable host recorders). The original obtains `view`
+/// from the registry destructor result with `sub r0, r0, #0xa8`; the
+/// port retains the input pointer, avoiding host-width pointer arithmetic.
+///
+/// # Safety
+/// `view` must identify a writable [`ContainerView`] whose children
+/// registry is valid for both destructor calls.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_destruct(view: *mut ContainerView) -> *mut ContainerView {
+    let detach_children = core::ptr::addr_of!(CONTAINER_VIEW_OPS.detach_children).read_volatile();
+    let destruct_base = core::ptr::addr_of!(CONTAINER_VIEW_OPS.destruct_base).read_volatile();
+
+    core::ptr::addr_of_mut!((*view).vtable).write_volatile(CONTAINER_VIEW_VTABLE_ADDRESS);
+    detach_children(view);
+    registry_container_destruct(
+        core::ptr::addr_of_mut!((*view).children).cast::<Registry>(),
+    );
+    destruct_base(view.cast::<ViewBase>()).cast::<ContainerView>()
+}
 /// The class's registry accessor: returns a pointer to the 0x28-byte
 /// child-view registry subobject at view+0xa8 — pure pointer
 /// arithmetic, nothing read or written. Every recovered caller feeds
@@ -358,7 +427,8 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::app::class_registry::{
-        ClassRegistryOps, CLASS_REGISTRY_OPS, DEFAULT_CLASS_REGISTRY_OPS,
+        ClassRegistryOps, RegistryObserver, RegistryObserverVtable,
+        CLASS_REGISTRY_OPS, DEFAULT_CLASS_REGISTRY_OPS,
         REGISTRY_CONTAINER_VTABLE_ADDRESS,
     };
     use crate::ui::view_base::{ViewBaseOps, VIEW_BASE_OPS, DEFAULT_VIEW_BASE_OPS};
@@ -467,6 +537,28 @@ mod tests {
         unsafe { REFRESH_VIEW = view as usize };
     }
 
+    unsafe extern "C" fn stub_detach_children(view: *mut ContainerView) {
+        trace().push("detach_children");
+        unsafe { REFRESH_VIEW = view as usize };
+    }
+
+    unsafe extern "C" fn stub_destruct_base(view: *mut ViewBase) -> *mut ViewBase {
+        trace().push("destruct_base");
+        view
+    }
+
+    unsafe extern "C" fn stub_registry_observer_attach(
+        _observer: *mut RegistryObserver,
+    ) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn stub_registry_observer_detach(
+        _observer: *mut RegistryObserver,
+    ) -> *mut u8 {
+        trace().push("registry_observer_detach");
+        core::ptr::null_mut()
+    }
     static mut REFRESH_VIEW: usize = 0;
 
     fn install_stubs() -> OpsGuard {
@@ -481,6 +573,8 @@ mod tests {
             },
             ContainerViewOps {
                 refresh_clip_rect: stub_refresh_clip_rect,
+                detach_children: stub_detach_children,
+                destruct_base: stub_destruct_base,
             },
         )
     }
@@ -672,6 +766,53 @@ mod tests {
         };
         assert_eq!(view.config, 0);
         assert_eq!(view.content_provider, this as usize as u32);
+    }
+
+    /// The destructor must restore its own vtable before detaching
+    /// children, then tear down the +0xa8 registry before tail-calling
+    /// the grand-base. The recorder seams make the two unported edges
+    /// observable while the real registry destructor is exercised.
+    #[test]
+    fn destructor_orders_child_registry_and_base_teardown() {
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        let mut storage = Box::new([0xcdu8; 0x140]);
+        let this = storage.as_mut_ptr().cast::<ContainerView>();
+        let observer_vtable = RegistryObserverVtable {
+            unresolved_00: [0; 6],
+            attach: stub_registry_observer_attach,
+            detach: stub_registry_observer_detach,
+        };
+        let mut observer = RegistryObserver {
+            vtable: &observer_vtable,
+            state: 0,
+        };
+        let registry = unsafe { this.cast::<u8>().add(0xa8).cast::<Registry>() };
+        unsafe {
+            registry.write(Registry {
+                vtable: core::ptr::null(),
+                container: [0; 7],
+                changed: 0,
+                notify_enabled: 0,
+                reserved: [0; 2],
+                observer: core::ptr::addr_of_mut!(observer).cast(),
+            });
+        }
+
+        let returned = unsafe { container_view_destruct(this) };
+
+        assert_eq!(returned, this);
+        assert_eq!(unsafe { (*this).vtable }, CONTAINER_VIEW_VTABLE_ADDRESS);
+        assert_eq!(
+            *trace(),
+            std::vec!["detach_children", "registry_observer_detach", "destruct_base"]
+        );
+        assert_eq!(unsafe { REFRESH_VIEW }, this as usize);
+        assert_eq!(
+            unsafe { (*registry).vtable as usize },
+            REGISTRY_CONTAINER_VTABLE_ADDRESS,
+            "the concrete registry destructor replants its own vtable"
+        );
     }
 
     /// The accessor lands exactly on the +0xa8 registry subobject:
