@@ -91243,3 +91243,31 @@ functions:
       loop and character-to-color comparisons. Deliberate deviation: the
       unused final destination-register decrement is omitted to avoid forming
       an out-of-bounds Rust pointer.
+
+  # --- parser diagnostic plain destructor ---
+  - address: 0x0826fd10
+    ghidra: FUN_0826fd10
+    name: parse_diagnostic_destroy
+    size: 20
+    sig: "ParseDiagnostic *parse_diagnostic_destroy(ParseDiagnostic *out)"
+    module: app/parse_diagnostic
+    status: ported
+    renames:
+      param_1/r0: out
+      param_1_plus_0x0c: message
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: push {r4,lr} at
+      0x0826fd10, add r0,r0,#12, bl 0x08277484, sub r0,r0,#12, and pop
+      {r4,pc} at 0x0826fd20. The raw next word at 0x0826fd24 begins the
+      separately linked scoped_context_adopt_source_owner. Decoding every
+      aligned ARM B/BL-immediate word finds five inbound direct calls, all
+      unconditional plain bl, with zero predicated bl forms. It destroys the
+      embedded StringObject at out+0x0c and rebases the helper's returned
+      pointer to out; it does not access the diagnostic kind or source span.
+      The helper is the established direct port string_object_destroy. Host
+      tests cover the return rebase, message destruction, and preservation of
+      the surrounding diagnostic fields. Deliberate deviation: LLVM recognizes
+      string_object_destroy's verified return-this contract and emits the saved
+      out argument instead of the stock helper-result subtraction; the results
+      are identical for that direct callee.
