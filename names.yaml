@@ -94198,3 +94198,38 @@ functions:
       plus zero and maximum return values. match.py structural review was
       completed. Deliberate deviations: none; the unchecked dereference
       intentionally preserves the firmware's invalid-pointer fault behavior.
+
+  # --- Queued-message create and post wrapper ---
+  - address: 0x0814b038
+    ghidra: FUN_0814b038
+    name: queued_message_create_and_post
+    size: 80
+    sig: "void queued_message_create_and_post(MessageTarget *target, u32 message_code, u32 byte_count, const u8 *bytes, u32 flags)"
+    module: app/queued_message_create_and_post
+    status: ported
+    renames:
+      param_1/r6: target
+      param_2/r5: message_code
+      param_3/r7: byte_count
+      param_4/r4: bytes
+      param_5/r8: flags
+      FUN_08103400: message_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08103464: queued_message_construct
+      FUN_08110fdc: queued_message_post
+    notes: >-
+      Raw osos.dec is exactly twenty ARM instructions at
+      0x0814b038..0x0814b084; the next separately linked function begins
+      with push {r3,r4,r5,lr} at 0x0814b088, confirming the 80-byte extent.
+      Its five direct inbound bl call sites are supplied by the raw call-site
+      scan. The body contains three unconditional bl calls and one blne:
+      it obtains message_arena_pool(), allocates exactly 12 bytes through
+      fixed_block_pool_alloc, and only for a non-NULL result constructs a
+      queued message then posts it with no_wait=1, reply_queue=0, and the
+      incoming stack flags word. Ghidra reverses the third and fourth
+      arguments: raw register moves prove byte_count arrives in r2 and bytes
+      in r3, then are swapped to queued_message_construct's
+      (bytes, byte_count) ABI. The post result is deliberately discarded,
+      exactly as the stock void wrapper does. Host tests cover this argument
+      swap, fixed post arguments, high-bit flags, and the NULL-allocation
+      path that skips construction and posting. Deliberate deviations: none.
