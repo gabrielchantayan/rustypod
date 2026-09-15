@@ -65213,6 +65213,34 @@ functions:
       deviations. Host tests cover arbitrary words, zero/all-ones boundaries,
       pointer aliasing, and the absence of mutation.
 
+  # --- event subscription constructor ---
+  - address: 0x0811e978
+    ghidra: FUN_0811e978
+    name: event_subscription_init
+    size: 44
+    sig: "EventSubscription *event_subscription_init(EventSubscription *subscription, u32 event_code)"
+    module: app/event_subscription_init
+    status: ported
+    renames:
+      param_1/r0: subscription
+      param_2/r1: event_code
+      param_1_plus_0x00: event_code
+      param_1_plus_0x04: active
+      param_1_plus_0x08: event_rank
+      param_1_plus_0x0c: event_descriptor
+    notes: >-
+      Raw ARM spans 0x0811e978..0x0811e9a4; the independent next function
+      begins at 0x0811e9a4. It clears words +0x00, +0x08, and +0x0c plus byte
+      +0x04, then forwards the preserved r1 event code to FUN_0811e84c and
+      returns the original subscription pointer. Every ARM B/BL word confirms
+      five direct, unconditional BL callers (0x08173790, 0x08284af4,
+      0x08284e90, 0x082858f0, and 0x082859d0), no predicated callers, and one
+      outbound BL to 0x0811e84c. The callee has no names.yaml entry; its
+      recovered body updates the event code and derives the +0x08/+0x0c words
+      from the firmware event tables. Target builds call that verified address;
+      host tests use a volatile seam. Reference C:
+      decomp/c/011/0811e978_FUN_0811e978.c; assembly: osos.asm 0x0811e978.
+
   # --- opaque object +0x0d equality-to-one predicate ---
   - address: 0x0813af44
     ghidra: FUN_0813af44
