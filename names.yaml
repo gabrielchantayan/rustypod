@@ -11119,6 +11119,32 @@ functions:
       invented identity. The clone uses a volatile byte copy rather than the
       stock generic-copy dispatch to prevent LLVM from substituting libc memcpy.
 
+  - address: 0x080da6a0
+    ghidra: FUN_080da6a0
+    name: clone_slot_source
+    size: 60
+    sig: "u8 *clone_slot_source(u8 *source)"
+    module: ui/clone_slot_source
+    status: ported
+    renames:
+      param_1/r0/r4: source
+      iVar1/r5: clone
+      "*(u32 *)(source + 8)": byte_len
+      FUN_0805d1d4: malloc_tag4
+      FUN_0805d0f4: bcopy_guarded
+    notes: >-
+      Raw osos.dec words at 0x080da6a0 decode to a 60-byte function:
+      push {r4-r6,lr}; NULL source returns 0; otherwise load source+8,
+      call malloc_tag4, return 0 on allocation failure, then call
+      bcopy_guarded(source, clone, source+8) and return the clone. The next
+      word at 0x080da6dc is cmp r0,#0x28, so Ghidra's 60-byte extent is
+      exact. Decoding all ARM B/BL instructions finds five inbound plain bl
+      calls (0x0804783c, 0x08047880, 0x080478e0, 0x080dc560, 0x080df264)
+      and zero predicated forms; the body has two plain bl callees.
+      Deliberate deviation: Rust represents the register save/restore via its
+      ABI and calls the already ported named callee symbols instead of stock
+      addresses. Host tests cover NULL input, allocation failure, and the
+      source+8 byte-length copy.
   - address: 0x08052728
     ghidra: FUN_08052728
     name: ui_plst_slot_item_at
