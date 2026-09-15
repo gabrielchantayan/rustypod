@@ -96000,3 +96000,32 @@ functions:
       restores the signed 1/512-turn angle. The runtime table pointer
       0x0890bba4 is relocated; its ROM copy is raw offset 0x00916a7c
       (runtime + 0x0aeed8), byte-verified. No deliberate deviations.
+
+  - address: 0x0807fe3c
+    ghidra: FUN_0807fe3c
+    name: rgb565_palette_blend
+    size: 192
+    sig: "void rgb565_palette_blend(const u8 *palette_index, const u16 *opacity_table, const u16 *target, u16 (*transform)(u16), u16 *destination)"
+    module: ui/rgb565_palette_blend
+    status: ported
+    renames:
+      param_1/r0: palette_index
+      param_2/r1: opacity_table
+      param_3/r2: target
+      param_4/r3: transform
+      param_5/[sp]: destination
+      uVar6/r4: weight
+      uVar2/r0: transformed_destination
+      uVar5/r3: target_color
+    notes: >-
+      Raw osos.dec establishes the true 192-byte extent
+      0x0807fe3c..0x0807fefc; 0x0807fefc begins the next independent
+      byte-swap function. Decoding every ARM B/BL word finds five plain,
+      unconditional incoming BL calls (0x080d5a68, 0x080d6160, 0x080d61b4,
+      0x080d61ec, and 0x080d624c) and zero predicated BL calls. Select the
+      Q0.8 weight by palette index; zero preserves destination, 0x100
+      transforms and stores target, and other weights transform destination,
+      interpolate each RGB565 component with signed divide-by-256 rounded
+      toward zero, then transform and store the result. The callback is an
+      indirect caller-supplied transform, so no callee identity or seam was
+      invented. No deliberate deviations.
