@@ -41,6 +41,9 @@ unsafe extern "C" fn missing_position_changed(_state: *mut u8) {}
 #[cfg(not(target_arch = "arm"))]
 pub static mut MODE_POSITION_CHANGED: PositionChanged = missing_position_changed;
 
+#[cfg(test)]
+pub(crate) static MODE_POSITION_CHANGED_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 #[inline(always)]
 unsafe fn set_backend_position(state: *mut u8, position: u32) {
@@ -145,6 +148,7 @@ mod tests {
     #[test]
     fn clamps_signed_bounds_and_updates_both_observable_paths() {
         let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
+        let _notification_guard = MODE_POSITION_CHANGED_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
@@ -170,6 +174,7 @@ mod tests {
     #[test]
     fn skips_backend_setter_when_active_position_already_matches() {
         let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
+        let _notification_guard = MODE_POSITION_CHANGED_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
@@ -190,6 +195,7 @@ mod tests {
     #[test]
     fn backend_update_does_not_notify_when_cached_position_is_unchanged() {
         let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
+        let _notification_guard = MODE_POSITION_CHANGED_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         unsafe {
             reset_seams();
