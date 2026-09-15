@@ -46035,6 +46035,32 @@ functions:
       0x224, 0x225, 0x228, 0x22c from spec 0x5c/0x5d/0x60/0x64), same
       vtable literal; the diff is ops-table blx for bl, the folded
       colour word, and the crate's frame-pointer prologue.
+  # --- Silver UI framework: view transition-mode setter ---
+  - address: 0x0826ddd4
+    ghidra: FUN_0826ddd4
+    name: view_set_transition_mode
+    size: 20
+    sig: "void view_set_transition_mode(ViewBase *view, u32 mode)"
+    module: ui/view_transition_mode
+    vars:
+      param_1: view
+      param_2: mode
+    status: ported
+    notes: >-
+      True extent is 20 bytes, from 0x0826ddd4 through `bx lr` at
+      0x0826dde4; the next real function begins at 0x0826dde8. Raw
+      osos.dec words decode to ldr view+0x48, bic #0x1800, orr mode,
+      str view+0x48, bx lr: clear the transition-mode field bits 11-12,
+      then OR the unmasked caller mode word. Five unconditional bl
+      callers and zero predicated bl callers, independently counted by
+      decoding every ARM B/BL word in osos.dec; 0x0826eb0c is a tail b
+      call and is excluded. Callers use modes 0x800, 0x1000, and 0x1800
+      while synchronizing view state and then dispatching vtable +0xa8.
+      No deliberate deviations. Host tests cover replacement, clearing,
+      preservation of surrounding flags, and caller bits outside the
+      field. match.py structural: identical load/bic/orr/store sequence;
+      LLVM adds only its frame-pointer push/pop.
+
   # --- Silver UI framework: the grand-base view constructor ---
 
   - address: 0x0826f26c
