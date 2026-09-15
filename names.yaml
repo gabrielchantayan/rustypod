@@ -91746,3 +91746,32 @@ functions:
       Volatile reads and writes deliberately preserve the target's MMIO access
       semantics even though the retail instructions are ordinary ldr/str. Host
       tests cover clear, nonzero set, and low-byte shift behavior.
+
+  - address: 0x082679f8
+    ghidra: FUN_082679f8
+    name: opaque_result_destroy
+    size: 164
+    sig: "OpaqueResult *opaque_result_destroy(OpaqueResult *this)"
+    module: cxx/opaque_result_destroy
+    vars:
+      param_1/r0: this
+      r4: vector_header
+      r5: this
+      r6: vector_begin
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 164-byte extent: push {r4,r5,r6,lr} at
+      0x082679f8 through the tail b 0x08277484 at 0x08267a98; the separately
+      linked next function begins push {r4,r5,lr} at 0x08267a9c. Ghidra's
+      212-byte extent incorrectly follows that tail branch into the StringObject
+      destructor. Decoding raw words verifies seven direct BL calls, all
+      unconditional and none predicated: vector range destroy 0x083e3c50,
+      unsigned divide 0x08031568, cxx_array_dealloc 0x08266f2c, vector range
+      destroy 0x083e38a0, cxx_array_dealloc, vector range destroy 0x083e3ea8,
+      and cxx_array_dealloc. The object owns three vectors at +0x44 (28-byte
+      elements), +0x38 (16-byte elements), and +0x2c (32-byte elements);
+      their element ranges are destroyed and allocations released in that
+      order, then the function tail-destroys the primary StringObject at +0.
+      Four other embedded StringObjects are deliberately untouched because the
+      verified ARM body never addresses them. Target vector pointers remain u32;
+      host tests use the repr(C) fields rather than target byte offsets.
