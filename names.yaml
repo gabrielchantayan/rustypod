@@ -94413,3 +94413,26 @@ functions:
       Its terminal branch is the 0x08037db0 ADS __rt_memcpy veneer. Rust uses
       a normal __rt_memcpy call and an address seam for the unported helper;
       target-width u32 buffer words preserve the ARM field layout on hosts.
+
+  # --- Object word at +0xc0 ---
+  - address: 0x08142910
+    ghidra: FUN_08142910
+    name: object_word_0xc0
+    size: 8
+    sig: "u32 object_word_0xc0(const u32 *object)"
+    module: util/object_word_0xc0
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0xc0: word
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte body: ldr r0,[r0,#0xc0]
+      at 0x08142910 followed by bx lr at 0x08142914; the next real function
+      begins with push {r4,lr} at 0x08142918. Decoding aligned ARM
+      B/BL-immediate words finds five direct inbound calls, all plain
+      unconditional bl and no predicated bl. The load returns the untyped
+      32-bit word from object+0xc0; callers compare it as a signed value, but
+      no signed behavior belongs to this accessor. Reference C:
+      decomp/c/013/08142910_FUN_08142910.c; assembly: osos.asm 0x08142910.
+      Host tests distinguish the adjacent word and preserve high-bit values.
+      match.py structural review is expected to show a modern LLVM diff.
