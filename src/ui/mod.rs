@@ -97,4 +97,5 @@ pub mod view_scroll_position;
 pub mod texture_upload;
 pub mod texture_activate;
 pub mod element_slot_reset;
+pub mod clear_pending_notify;
 pub mod element_refresh;
