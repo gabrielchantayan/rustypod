@@ -87,6 +87,7 @@ mod object_state;
 pub mod opaque_result_destroy;
 pub mod opaque_context_initialize;
 pub mod opaque_header_literal_construct;
+pub mod opaque_layout_construct;
 pub mod opaque_pair_copy_from_word8;
 pub mod opaque_header_payload_construct;
 pub mod opaque_context_destroy;
