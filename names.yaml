@@ -78233,6 +78233,31 @@ functions:
       consulted nor written. match.py structural review is expected to differ:
       Rust loads the seam through a static rather than issuing the retail bl.
 
+  - address: 0x0829b3d0
+    ghidra: FUN_0829b3d0
+    name: object_candidate_payload_resolve
+    size: 140
+    sig: "u32 object_candidate_payload_resolve(u32 *object, u32 *input, u32 *output)"
+    module: util/object_candidate_payload_resolve
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_2/r1/r6: input
+      param_3/r2/r5: output
+      local_20: candidate
+    notes: >-
+      Raw osos.dec has 35 ARM words from 0x0829b3d0 through 0x0829b458; the
+      next independently linked function starts at 0x0829b45c. It has six
+      outbound unconditional bl instructions: four_word_clear (0x08158cf0),
+      candidate transform (0x0829b7a8), constraint check (0x0829b224),
+      candidate finder (0x0829b548), candidate validity check (0x0829bda8),
+      and object payload processor (0x0829b804). There are five direct inbound
+      plain bl call sites and zero predicated forms. The function transforms a
+      cleared temporary candidate, returns immediately if the unconstrained
+      finder succeeds, otherwise validates it and copies object words +0x1c
+      through +0x28 to output before invoking the processor. The four unported
+      callees remain target-address host-test seams; the existing 0x0829b804
+      processor seam is reused.
   - address: 0x0829b490
     ghidra: FUN_0829b490
     name: object_word_payload_resolve
