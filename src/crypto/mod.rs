@@ -41,6 +41,7 @@
 //! file.
 pub mod add_lock;
 pub mod asn1_integer_set;
+pub mod asn1_adb;
 pub mod buffered_writer_write;
 pub mod base64_encode;
 pub mod bio_printf;

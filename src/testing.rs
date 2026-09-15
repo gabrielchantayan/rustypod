@@ -1042,6 +1042,10 @@ pub mod hints {
     // BtShared, cursor, and sqlite3 fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const BTREE_CHECK_READ_LOCKS: usize = 0xf100_0000;
+    // 0x5550_0000: dedicated to crypto/asn1_adb's raw-u32 ADB, template,
+    // table, and containing-value fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const ASN1_DO_ADB: usize = 0x5550_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
