@@ -91003,3 +91003,26 @@ functions:
       selection of only vtable slot +0x18, and preservation of its result.
       Rust uses native-width host vtable cells while repr(C) preserves the
       verified ARM owner field offset. Deliberate deviations: none.
+
+  # --- empty destructor ---
+  - address: 0x08297568
+    ghidra: FUN_08297568
+    name: empty_destructor_08297568
+    size: 4
+    sig: "void *empty_destructor_08297568(void *this)"
+    module: cxx/empty_destructor_08297568
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      Raw osos.dec establishes the exact 4-byte extent: bx lr at 0x08297568,
+      after the preceding function's return at 0x08297560 and literal-pool
+      word at 0x08297564; the next separately linked function begins at
+      0x0829756c. Decoding aligned ARM branch-immediate words finds five
+      inbound unconditional plain bl calls and no predicated bl calls. The
+      body performs no data access or virtual dispatch and preserves r0, so it
+      is an empty destructor; no stronger object type is invented. Host tests
+      prove preservation of NULL, unaligned, and maximal pointer values and
+      no object writes. Deliberate deviation: LLVM emits a frame
+      prologue/epilogue instead of the stock bx lr, preserving the same r0
+      result and observable behavior.
