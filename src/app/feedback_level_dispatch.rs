@@ -35,13 +35,9 @@ pub struct FeedbackLevelState {
 
 /// ABI of retail helper `0x082e5aac`, which receives the requested level.
 pub type FeedbackLevelPrepare = unsafe extern "C" fn(level: i32);
-/// ABI of retail helper `0x082bc9ec`, which receives `level > 3` as zero/one.
-pub type FeedbackLevelModeSet = unsafe extern "C" fn(is_above_three: u32);
-
 #[cfg(not(target_arch = "arm"))]
 unsafe extern "C" fn missing_feedback_level_prepare(_level: i32) {}
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_feedback_level_mode_set(_is_above_three: u32) {}
+
 
 /// Host replacement for the two runtime bytes at `0x089cab58`.
 #[cfg(not(target_os = "none"))]
@@ -53,9 +49,6 @@ pub static mut FEEDBACK_LEVEL_STATE: FeedbackLevelState = FeedbackLevelState {
 /// Host replacement for retail helper `0x082e5aac`.
 #[cfg(not(target_arch = "arm"))]
 pub static mut FEEDBACK_LEVEL_PREPARE: FeedbackLevelPrepare = missing_feedback_level_prepare;
-/// Host replacement for retail helper `0x082bc9ec`.
-#[cfg(not(target_arch = "arm"))]
-pub static mut FEEDBACK_LEVEL_MODE_SET: FeedbackLevelModeSet = missing_feedback_level_mode_set;
 
 #[cfg(target_os = "none")]
 const FEEDBACK_LEVEL_STATE: *mut FeedbackLevelState = 0x089c_ab58 as *mut FeedbackLevelState;
@@ -76,7 +69,7 @@ pub unsafe extern "C" fn feedback_level_dispatch(level: i32) {
 
     let state = feedback_level_state_ptr();
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*state).current_level), level as i8);
-    core::ptr::read_volatile(core::ptr::addr_of!(FEEDBACK_LEVEL_MODE_SET))((level > 3) as u32);
+    crate::app::feedback_level_mode_set::feedback_level_mode_set((level > 3) as u32);
 
     let notified_level = core::ptr::read_volatile(core::ptr::addr_of!((*state).notified_level));
     if (notified_level > 4) == (level > 4) && notified_level != -1 {
@@ -88,8 +81,8 @@ pub unsafe extern "C" fn feedback_level_dispatch(level: i32) {
 }
 
 // The original contains 84 bytes of code followed by the state-address
-// literal. The retail helpers and thunk remain literal veneers because payload
-// placement cannot change their fixed retailOS destinations.
+// literal. The prepare helper, predicate, and event thunk remain literal
+// veneers because payload placement cannot change their fixed retailOS destinations.
 #[cfg(target_arch = "arm")]
 core::arch::global_asm!(
     r#"
@@ -107,7 +100,7 @@ feedback_level_dispatch:
     movgt   r0, #1
     movle   r0, #0
     strb    r4, [r5]
-    bl      retail_feedback_level_mode_set
+    bl      feedback_level_mode_set
     ldrsb   r0, [r5, #1]
     bl      retail_feedback_level_is_high
     cmp     r4, #4
@@ -131,10 +124,6 @@ retail_feedback_level_prepare:
     .word   0x082e5aac
     .size retail_feedback_level_prepare, . - retail_feedback_level_prepare
 
-retail_feedback_level_mode_set:
-    ldr     pc, [pc, #-4]
-    .word   0x082bc9ec
-    .size retail_feedback_level_mode_set, . - retail_feedback_level_mode_set
 
 retail_feedback_level_is_high:
     ldr     pc, [pc, #-4]
@@ -156,6 +145,10 @@ mod tests {
     use crate::app::event_code_dispatch::{
         EVENT_CODE_DISPATCH_WORKER, EVENT_CODE_DISPATCH_WORKER_TEST_LOCK,
     };
+    use crate::app::feedback_level_mode_set::{
+        missing_feedback_mode_apply, missing_feedback_mode_profile, FEEDBACK_MODE_APPLY,
+        FEEDBACK_MODE_PROFILE,
+    };
 
     static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static mut PREPARE_CALLS: u32 = 0;
@@ -171,9 +164,14 @@ mod tests {
         PREPARED_LEVEL = level;
     }
 
-    unsafe extern "C" fn record_mode(is_above_three: u32) {
+    unsafe extern "C" fn record_mode(is_above_three: u32) -> u32 {
         MODE_CALLS += 1;
         MODE_VALUE = is_above_three;
+        0
+    }
+
+    unsafe extern "C" fn profile_is_one() -> u32 {
+        1
     }
 
     unsafe extern "C" fn record_event(event_code: u32, flag: u32) {
@@ -190,7 +188,8 @@ mod tests {
             notified_level: initial_notified_level,
         };
         FEEDBACK_LEVEL_PREPARE = record_prepare;
-        FEEDBACK_LEVEL_MODE_SET = record_mode;
+        FEEDBACK_MODE_PROFILE = profile_is_one;
+        FEEDBACK_MODE_APPLY = record_mode;
         EVENT_CODE_DISPATCH_WORKER = record_event;
         PREPARE_CALLS = 0;
         PREPARED_LEVEL = 0;
@@ -207,7 +206,8 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 FEEDBACK_LEVEL_PREPARE = missing_feedback_level_prepare;
-                FEEDBACK_LEVEL_MODE_SET = missing_feedback_level_mode_set;
+                FEEDBACK_MODE_PROFILE = missing_feedback_mode_profile;
+                FEEDBACK_MODE_APPLY = missing_feedback_mode_apply;
                 EVENT_CODE_DISPATCH_WORKER = missing_event;
             }
         }
@@ -221,7 +221,6 @@ mod tests {
         unsafe {
             install(-1);
             feedback_level_dispatch(4);
-
             assert_eq!(PREPARE_CALLS, 1);
             assert_eq!(PREPARED_LEVEL, 4);
             assert_eq!(MODE_CALLS, 1);

@@ -90515,3 +90515,36 @@ functions:
       call their retail addresses while host tests install recorders. match.py
       exit 1 printed the expected structural LLVM differences: seam blx calls,
       a smaller preserved-register set, and frame layout.
+
+  # --- Feedback level mode selection ---
+  - address: 0x082bc9ec
+    ghidra: FUN_082bc9ec
+    name: feedback_level_mode_set
+    size: 76
+    sig: "u32 feedback_level_mode_set(u32 mode)"
+    module: app/feedback_level_mode_set
+    status: ported
+    renames:
+      param_1/r0: mode
+      FUN_082bc614: feedback_mode_profile
+      FUN_082e5a20: feedback_mode_apply
+      FUN_0806a4a8: kernel_sem1_wait
+      FUN_0836b744: gpio_pin_write
+      FUN_080645b0: kernel_sem1_signal
+    notes: >-
+      Raw osos.dec establishes the 76-byte body at 0x082bc9ec..0x082bca34:
+      19 ARM words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc}; the
+      next independent function begins at 0x082bca38. The body contains five
+      unconditional outbound bl calls and no predicated bl. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds five inbound direct calls:
+      plain bl at 0x0809e51c, 0x080cc998, and 0x0818e4c0, plus blne at
+      0x0805886c and 0x0818f3a0. If feedback_mode_profile returns one it
+      delegates mode to feedback_mode_apply. Otherwise it holds semaphore one,
+      writes GPIO pin 0x61 high exactly when mode is zero (the rsbs/movcc
+      sequence gives zero for every other u32), releases the semaphore, and
+      returns gpio_pin_write's result. The unported profile/apply helpers are
+      target literal veneers and host callback seams; semaphore and GPIO calls
+      use their existing ports in the same order. Host tests cover zero, one,
+      another nonzero value, and u32::MAX; feedback dispatch tests cover the
+      delegating seam. match.py exit 1 prints expected LLVM frame, tail-call,
+      and direct-port call differences.
