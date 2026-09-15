@@ -95308,3 +95308,38 @@ functions:
       ordering, word writes, tail result propagation, and the unsupported
       variant's no-tail early return. match.py is reviewed against the
       register/branch structure.
+  # --- base interface-guard scoped dispatch ---
+  - address: 0x080ef4b4
+    ghidra: FUN_080ef4b4
+    name: interface_guard_base_dispatch
+    size: 52
+    sig: "u32 interface_guard_base_dispatch(u32 base_hint)"
+    module: app/interface_guard_base_dispatch
+    status: ported
+    renames:
+      param_1/r0/r1: base_hint
+      uStack_18/sp: guard_storage
+      "guard_storage+0x4": resolved_interface
+      uVar1/r4: operation_status
+      FUN_0818a0c4: interface_guard_base_construct
+      FUN_082971bc: "unidentified interface-guard operation boundary"
+      FUN_0818a0fc: interface_guard_base_destroy
+    notes: >-
+      Raw osos.dec establishes the true 52-byte extent: thirteen ARM words
+      from stmdb sp!,{r1,r2,r3,r4,r5,lr} at 0x080ef4b4 through ldmia
+      sp!,{r1,r2,r3,r4,r5,pc} at 0x080ef4e4; the next separately linked
+      function begins at 0x080ef4e8. The body has three unconditional bl
+      instructions, to 0x0818a0c4, 0x082971bc, and 0x0818a0fc. Complete-image
+      decoding finds exactly five inbound direct BL calls: four plain
+      (0x080588d4, 0x08063464, 0x0813a358, 0x0813aa80) and one predicated
+      bleq (0x080c6900); no direct tail branches target it. It constructs the
+      common base interface guard at sp with base_hint and zero flag, loads its
+      resolved interface word at +0x04, calls the unresolved 0x082971bc
+      operation with (interface, guard), tears down the guard, and returns the
+      operation status saved in r4. FUN_082971bc has no evidence-supported
+      semantic identity, so the port uses a fixed-address volatile boundary:
+      the target default calls it and the host default returns zero. Host test
+      proves construction fields, operation argument order, and status
+      propagation. match.py is reviewed for the three-call scoped-guard
+      structure; Rust frame layout and indirect boundary dispatch differ
+      deliberately.
