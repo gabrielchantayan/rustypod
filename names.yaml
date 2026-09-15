@@ -47723,6 +47723,24 @@ functions:
       return; the diff is LLVM inverting the branch into an early-return
       block and the crate's fp frame.
 
+  - address: 0x081e04dc
+    ghidra: FUN_081e04dc
+    name: event_source_registry
+    size: 8
+    sig: "void *event_source_registry(void *source)"
+    module: app/event_source
+    status: ported
+    vars: {param_1: source}
+    notes: >-
+      Raw words e5900058 e12fff1e decode as `ldr r0,[r0,#0x58]; bx lr`;
+      the next real function begins at 0x081e04e4, establishing the
+      eight-byte extent. Five inbound calls are all unconditional `bl` at
+      0x0817ebac, 0x0817fd70, 0x0817fd88, 0x0817fdcc, and 0x0817fde4;
+      none is predicated. The accessor returns the event source's owning
+      registry pointer, installed by the factory after 0x081e0bac
+      construction. The port reads the target-width four-byte field directly;
+      match.py confirms that load, with only LLVM's fp frame differing.
+
   - address: 0x081e054c
     ghidra: FUN_081e054c
     name: event_list_release
