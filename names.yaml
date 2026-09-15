@@ -17,6 +17,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f8690
+    ghidra: FUN_080f8690
+    name: text_line_offset_slot
+    size: 28
+    sig: "u16 *text_line_offset_slot(const TextLineOffsetLayout *layout, u32 line_index)"
+    module: ui/text_line_offset_slot
+    status: ported
+    renames:
+      param_1/r0: layout
+      param_2/r1: line_index
+      r2: line_base
+      "layout+0x08": offset_record
+      "offset_record+0x1c": offset
+    notes: >-
+      Raw osos.dec establishes the true 28-byte extent
+      0x080f8690..0x080f86ac: seven ARM words through bx lr; the separately
+      linked next function begins with push {r4,lr} at 0x080f86ac. Decoding
+      every aligned ARM B/BL immediate finds five direct inbound BL calls, all
+      unconditional at 0x080f827c, 0x080f82e4, 0x080f8614, 0x080f862c, and
+      0x080f8680; no predicated BLs or direct tail-B callers. This leaf
+      returns line_base + unsigned offset_record[0x1c] - 2*line_index - 2 as
+      a u16 slot pointer. Host tests exercise u16 extremes and wrapping
+      arithmetic through a below-4GiB target-width fixture. match.py review
+      found the same three loads, scaled subtraction, add, and final subtract;
+      LLVM adds a frame and reorders the independent subtraction before ldrh.
   - address: 0x0811e1c4
     ghidra: FUN_0811e1c4
     name: ui_clear_pending_notify
