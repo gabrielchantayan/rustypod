@@ -66,8 +66,9 @@ unsafe extern "C" fn retail_clear_cursor(cursor: *mut u8) {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_get_and_init_page(shared: u32, page_number: u32, page_out: *mut u32, flags: u32) -> i32 {
-    let get_and_init_page: GetAndInitPageFn = core::mem::transmute(0x082d_05d0usize);
-    get_and_init_page(shared, page_number, page_out, flags)
+    crate::sqlite::get_and_init_page::get_and_init_page(
+        shared as usize as *mut u8, page_number, page_out, flags,
+    ) as i32
 }
 
 
@@ -106,8 +107,8 @@ unsafe fn move_to_root_ops() -> BtreeMoveToRootOps {
 pub(crate) unsafe fn get_and_init_page(shared: u32, page_number: u32, page_out: *mut u32, flags: u32) -> i32 {
     (move_to_root_ops().get_and_init_page)(shared, page_number, page_out, flags)
 }
-
 #[inline(always)]
+
 unsafe fn read_u16(base: *const u8, offset: usize) -> u16 {
     u16::from_le(base.add(offset).cast::<u16>().read())
 }
