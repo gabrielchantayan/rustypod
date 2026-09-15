@@ -127,6 +127,7 @@ pub static mut SEQUENCE_ID: u32 = 0;
 /// literal, stores that word plus one with wrapping 32-bit arithmetic, and
 /// returns the pre-increment value. The runtime global is modeled by
 /// [`SEQUENCE_ID`] rather than its fixed device address.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sequence_id_next() -> u32 {
     let state = core::ptr::addr_of_mut!(SEQUENCE_ID);
@@ -1441,7 +1442,6 @@ mod tests {
 
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
-    static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
     static OBJECT_SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
 
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
@@ -1781,7 +1781,8 @@ mod tests {
 
     #[test]
     fn returns_then_advances_the_sequence_state() {
-        let _guard = SEQUENCE_ID_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = crate::testing::SEQUENCE_ID_TEST_LOCK
+            .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         for initial in [0, 1, 0x2468_ace0, 0xffff_fffe] {
             seed_sequence_id(initial);
@@ -1792,7 +1793,8 @@ mod tests {
 
     #[test]
     fn wraps_after_returning_the_maximum_sequence_id() {
-        let _guard = SEQUENCE_ID_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = crate::testing::SEQUENCE_ID_TEST_LOCK
+            .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         seed_sequence_id(u32::MAX);
         assert_eq!(unsafe { sequence_id_next() }, u32::MAX);

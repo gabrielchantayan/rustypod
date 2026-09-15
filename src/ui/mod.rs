@@ -64,6 +64,7 @@ pub mod tdat_flag_20_bit_2;
 pub mod element_change_notify;
 pub mod navigation_mode;
 pub mod tdat_payload;
+pub mod pool_entry_create;
 pub mod tdat_first_plst;
 pub mod element_reference;
 pub mod operation_destroy;

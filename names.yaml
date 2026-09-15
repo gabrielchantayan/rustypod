@@ -10735,6 +10735,25 @@ functions:
       rand seeding in rt_lib_init_for_abort (its sole caller,
       binary-verified). Twin of the exit-path no-op @ 0x0802ecc0.
 
+  # --- Fixed-pool UI entry construction ---
+  - address: 0x0808e228
+    ghidra: FUN_0808e228
+    name: ui_pool_entry_create
+    size: 52
+    sig: "void *ui_pool_entry_create(void *owner)"
+    module: ui/pool_entry_create
+    status: ported
+    notes: >-
+      Raw ARM establishes 0x0808e228..0x0808e25c as the function extent; the
+      next push at 0x0808e25c begins another function. Acquires an entry from
+      the fixed-pool descriptor at owner +0x3c. On success, stores owner at
+      entry +0x00, the pre-increment sequence ID at +0x10, and zero at byte
+      +0x1c; on allocation failure returns NULL without advancing the ID.
+      Five direct call sites, verified by decoding every ARM B/BL word in
+      osos.dec: five unconditional bl, zero predicated forms. Calls unported
+      fixed-pool allocator FUN_0805de1c through FIXED_POOL_OPS; target builds
+      dispatch to its stock address. Calls ported sequence_id_next directly.
+
   # --- Batch: RTXC kernel-object layer (opcode-2 objects, task objects,
   # --- message-queue nodes) ---
   - address: 0x0805675c
