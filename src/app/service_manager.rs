@@ -10,6 +10,7 @@
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
+//! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
 //! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
 //! | 0x08194110 | [`service_handler_set`] | 16 | 5 direct |
 //! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
@@ -422,6 +423,88 @@ pub unsafe extern "C" fn service_manager_secondary_handler_kind_get(
         heap_panic();
     }
     core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(5))
+}
+
+/// service_manager_secondary_handler_has_events_get — original:
+/// `FUN_08193f38` @ 0x08193f38 (24 bytes; 5 direct `bl` call sites).
+///
+/// The raw six-word body is `cmp r1,#3; blge 0x08030f44; add r0,r0,r1,lsl
+/// #5; ldr r0,[r0,#12]; and r0,r0,#1; bx lr`. It reads bit zero of the
+/// `+0x0c` status word in one of the service manager's three secondary
+/// 0x20-byte handler records. The paired event-mask setter @ 0x08193f50
+/// clears this bit before updating `+0x18`, then sets it exactly when that
+/// mask is nonzero, so the bit denotes whether the handler has pending event
+/// bits. Slots greater than or equal to three terminate through
+/// [`heap_panic`].
+///
+/// The next real function begins at 0x08193f50 (`push {r4,lr}`), confirming
+/// the 24-byte extent. Decoding every aligned ARM B/BL-immediate word in
+/// `osos.dec` finds five inbound direct calls, all unconditional plain `BL`;
+/// no predicated `BL` or direct tail `B` targets this address.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_has_events_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> u32 {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(3)) & 1
+}
+
+#[cfg(test)]
+mod secondary_handler_has_events_get_tests {
+    use super::*;
+
+    #[test]
+    fn reads_only_status_bit_zero_for_each_slot_and_reloads() {
+        let mut table = [0u32; 24];
+        table[3] = 0xfeed_beef;
+        table[11] = 0x0000_0000;
+        table[19] = 0xffff_fffe;
+        table[2] = 0xaaaa_aaaa;
+        table[4] = 0x5555_5555;
+
+        unsafe {
+            assert_eq!(service_manager_secondary_handler_has_events_get(table.as_ptr(), 0), 1);
+            assert_eq!(service_manager_secondary_handler_has_events_get(table.as_ptr(), 1), 0);
+            assert_eq!(service_manager_secondary_handler_has_events_get(table.as_ptr(), 2), 0);
+
+            table[11] = 1;
+            assert_eq!(
+                service_manager_secondary_handler_has_events_get(table.as_ptr(), 1),
+                1,
+                "the ARM ldr reloads the status word on every call"
+            );
+        }
+
+        assert_eq!(table[2], 0xaaaa_aaaa, "the preceding word is not read");
+        assert_eq!(table[4], 0x5555_5555, "the following word is not read");
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[3] = 1;
+
+        unsafe {
+            assert_eq!(
+                service_manager_secondary_handler_has_events_get(table.as_ptr().add(8), -1),
+                1,
+            );
+        }
+    }
 }
 
 /// service_handler_at — original: `FUN_08194080` @ 0x08194080 (16 bytes;

@@ -93587,3 +93587,32 @@ functions:
       and callback-target getter seams to verify source acquisition and exact
       word forwarding. match.py reports LLVM's frame and direct source call
       around the same preserved-word/tail-dispatch structure.
+
+  # --- secondary service-handler event predicate ---
+  - address: 0x08193f38
+    ghidra: FUN_08193f38
+    name: service_manager_secondary_handler_has_events_get
+    size: 24
+    sig: "u32 service_manager_secondary_handler_has_events_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; ldr r0,[r0,#12]; and r0,r0,#1; bx
+      lr` at 0x08193f38..0x08193f4c. The separately linked next function
+      begins at 0x08193f50 with `push {r4,lr}`. Decoding every aligned ARM
+      B/BL-immediate word finds five inbound direct calls, all plain
+      unconditional BL; there are no predicated BL forms or direct tail-B
+      callers. The routine returns bit zero of the selected secondary
+      0x20-byte handler record's +0x0c status word. The paired event-mask
+      setter at 0x08193f50 sets that bit exactly when its +0x18 event mask
+      is nonzero, establishing it as the has-events predicate. The signed
+      `blge` bound check intentionally admits negative slots. Rust preserves
+      that unchecked address calculation and calls the existing heap_panic
+      port for slots greater than or equal to three. Host tests cover all
+      three records, masking, reload behavior, neighboring words, and
+      negative-slot addressing.
+      match.py structural review completed. Deliberate deviations: none.
