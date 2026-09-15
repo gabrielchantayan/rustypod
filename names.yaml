@@ -94123,3 +94123,29 @@ functions:
       occupy the retail four-byte global and vtable words. Tests cover first
       slot precedence, second-slot fallback, both message words, and the
       all-null return.
+
+  # --- locked callback predicate ---
+  - address: 0x0814decc
+    ghidra: FUN_0814decc
+    name: locked_callback_predicate
+    size: 60
+    sig: "bool locked_callback_predicate(u32 *object)"
+    module: app/locked_callback_predicate
+    status: ported
+    renames:
+      param_1/r0/r5: object (word 1 callback target; word 4 CountedMutex)
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      "target-vtable+0x18": callback returning i32
+    notes: >-
+      Raw osos.dec establishes exactly fifteen instruction words from
+      0x0814decc through 0x0814df04; the next real function begins at
+      0x0814df08. Decoding every ARM B/BL immediate finds five inbound plain
+      unconditional bl sites (0x08076414, 0x080c6888, 0x082bcaac,
+      0x0839304c, and 0x0839309c), zero predicated forms. It locks the
+      CountedMutex at object+0x10, invokes the callback target at object+0x04
+      through vtable slot +0x18, unlocks, then normalizes the i32 result to
+      bool. The callback identity is not established, so the host port uses
+      an ordering-preserving operation seam; target builds dispatch its
+      target-width vtable directly. Host tests cover callback order and zero
+      versus negative nonzero results.
