@@ -79903,6 +79903,32 @@ functions:
       RAM addresses and direct initializer call; host builds model those
       runtime objects and inject the unported initializer through a seam.
 
+  - address: 0x082bd218
+    ghidra: FUN_082bd218
+    name: storage_buffer_extent
+    size: 192
+    sig: "u32 storage_buffer_extent(u32 buffer, u32 *start_out, u32 *length_out)"
+    module: drivers/storage_buffer_extent
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: start_out
+      param_3/r2: length_out
+      DAT_082bd2d4: storage_scan_context_slot
+      FUN_082bcb40: storage_device_operations_get
+      FUN_082bd164: scan_storage_records
+    notes: >-
+      Raw osos.dec fixes the true 192-byte extent at 0x082bd218..0x082bd2d7:
+      47 instruction words through pop {r4-r9,pc} at 0x082bd2d0 and the
+      literal-pool word at 0x082bd2d4; 0x082bd2d8 is separately entered.
+      Exactly five inbound direct BL instructions are unconditional bl at
+      0x080fcc4c, 0x0814fc10, 0x08279670, 0x082796b0, and 0x082bd36c; there
+      are no predicated calls. It invokes the storage operation at table +8,
+      scans records with the context word at 0x089caaec, chooses the first
+      status 1 or 2 record, and writes its two following words or -1 sentinels.
+      Firmware calls the unported scanner and target-width callback directly;
+      host builds expose seams for both.
+
   # --- tagged payload address helper ---
   - address: 0x082b513c
     ghidra: FUN_082b513c
