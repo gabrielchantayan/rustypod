@@ -53886,6 +53886,30 @@ functions:
       bytes; the tail is allocator padding). Deviation: the per-cell
       init routes through the CG_CELL_TABLE_CELL_INIT seam (the
       CG_PROC_EMIT precedent), whose default is the ported
+  - address: 0x08256b9c
+    ghidra: FUN_08256b9c
+    name: cg_cell_configure_buffer
+    size: 112
+    sig: "bool cg_cell_configure_buffer(u8 *cell, u32 width, u32 height, u32 format, usize allocator)"
+    module: codegen/ir
+    status: identified
+    renames:
+      param_1/r4: cell
+      param_2/r5: width
+      param_3/r7: height
+      param_4: format
+      param_5: allocator
+    notes: >-
+      BLOCKED: raw ARM is exactly 112 bytes at 0x08256b9c-0x08256c0b; it has
+      three plain BL instructions (two to FUN_0823664c and one to FUN_0808dafc)
+      and one predicated BLNE to FUN_0807f234, not the five reported by
+      Ghidra. It reads the bytes-per-pixel multiplier from address 0x083f10a9
+      indexed by format, then requests width*height*multiplier bytes. That
+      address lies in the undecrypted 0x083ee1c1-0x083f25ec range: osos.dec
+      contains only zero bytes at 0x083f10a0-0x083f10cf, so no format table
+      values are available. Implementing any table or fallback would invent
+      observable allocation sizes; this function cannot be faithfully ported
+      until that region is decrypted.
       cg_cell_table_cell_init; the two cell words are genuine 32-bit
       stores at fixed byte offsets (record ABI pinned by the unported
       caller/destructor), not the module's word-index convention. Host
