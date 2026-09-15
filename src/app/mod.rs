@@ -133,6 +133,7 @@ pub mod layout_recompute_notify;
 pub mod opaque_record_source_get;
 pub mod opaque_record_source_entry_count;
 pub mod lazy_handle_manager;
+pub mod lazy_handle_manager_acquire;
 pub mod lazy_static_object;
 pub mod matched_entry;
 pub mod media_command_facade;
