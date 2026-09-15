@@ -134,6 +134,7 @@ pub mod media_ext;
 pub mod mode_selected_byte;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
+pub mod mode_selected_extent;
 pub mod mode_selected_position_set;
 pub mod media_player;
 pub mod class_9400_current_item_matches_media_player;
