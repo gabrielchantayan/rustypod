@@ -29047,6 +29047,35 @@ functions:
       displacements, so the port calls the canonical helper rather than adding
       a redundant dispatch seam. Host tests cover self-assignment and the
       distinct-slot non-final release/attach transition.
+  - address: 0x0816c960
+    ghidra: FUN_0816c960
+    name: named_object_cache_ensure
+    size: 104
+    sig: "void named_object_cache_ensure(NamedObjectCacheOwner *owner)"
+    module: cxx/named_object_cache
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "owner+0x70": container
+      "owner+0x74": cached_object
+      "owner+0x7c": key
+      FUN_082a50b0: string_object_c_str
+      FUN_08299d20: named_object_lookup
+      FUN_082aadd4: operator_new
+      FUN_0828494c: named_object_construct
+      FUN_08128468: named_object_register
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte extent
+      0x0816c960..0x0816c9c8; 0x0816c9c8 begins the next function with
+      `push {r4,r5,lr}`. Decoding the body finds six unconditional BL
+      instructions to five distinct addresses (string_object_c_str is
+      reached twice) and no predicated BL instructions. If cached_object is
+      non-NULL it returns immediately. Otherwise it resolves key in
+      container; on a miss it allocates 0x90 bytes, constructs an object,
+      registers it, then stores the result in cached_object. The three
+      unported boundaries dispatch to their fixed retailOS addresses on
+      ARM and injectable seams on host; Rust cannot preserve their tail-call
+      layout but preserves call order and unguarded accesses.
   - address: 0x0816ccb0
     ghidra: FUN_0816ccb0
     name: refcounted_ptr_release_dtor_copy
