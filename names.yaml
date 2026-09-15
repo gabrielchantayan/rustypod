@@ -68090,6 +68090,32 @@ functions:
       a head with successor, a terminal head that must clear its bucket word,
       and an interior splice. There are no deliberate deviations.
 
+  - address: 0x082739a0
+    ghidra: FUN_082739a0
+    name: scheduler_table_get_or_create
+    size: 60
+    sig: "u32 *scheduler_table_get_or_create(void)"
+    module: app/animation
+    status: ported
+    renames:
+      DAT_082739dc: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_082aadd4: operator_new
+      thunk_EXT_FUN_2200027c: iram_memzero_aligned_veneer
+    notes: >-
+      Raw ARM is fourteen instruction words at 0x082739a0..0x082739d8 plus
+      its literal-pool word 0x089cc7e0 at 0x082739dc, for the true 60-byte
+      extent; retain/release begins separately at 0x082739e0. Decoding every
+      ARM B/BL word in osos.dec finds five direct inbound call sites, all
+      plain unconditional bl and no predicated forms. It returns the cached
+      scheduler-table pointer when nonzero; otherwise it calls
+      operator_new(0x34), zero-fills the first 0x30 bytes through the
+      0x08037db8 IRAM veneer, explicitly clears the trailing guard word,
+      publishes the pointer to 0x089cc7e0, and returns it. The port directly
+      calls operator_new and reaches memzero_aligned through a volatile
+      function-pointer load to prevent LLVM lowering that call to memclr.
+      Host builds use permanent 13-word static storage instead of the target
+      address pair, preserving lazy initialization and the observable cache.
+
   - address: 0x0827398c
     ghidra: FUN_0827398c
     name: timing_wheel_insert_global
