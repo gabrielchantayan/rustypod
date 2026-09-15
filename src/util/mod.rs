@@ -151,6 +151,7 @@ pub mod zero_four_words;
 pub mod zero_three_words;
 pub mod u32_word_swap;
 pub mod u8_pair_copy;
+pub mod utf16_nul_terminator_consume;
 pub mod utf8_next_codepoint_permissive;
 pub mod utf8_codepoint_count_permissive;
 pub mod utoa;
