@@ -91271,3 +91271,36 @@ functions:
       string_object_destroy's verified return-this contract and emits the saved
       out argument instead of the stock helper-result subtraction; the results
       are identical for that direct callee.
+
+  - address: 0x0826f014
+    ghidra: FUN_0826f014
+    name: ui_element_refresh
+    size: 140
+    sig: "UiElement *ui_element_refresh(UiElement *element, u32 reason)"
+    module: ui/element_refresh
+    status: ported
+    renames:
+      param_1/r0/r4: element
+      param_2/r1/r6: reason
+      FUN_08298064: ui_element_virtual_predicate
+      FUN_081106a0: NAVIGATION_MANAGER_FOCUS seam
+      FUN_0828dda0: render_context_set_suspended
+      FUN_0826db38: VIEW_BASE_GEOMETRY_CHANGED seam
+    notes: >-
+      Raw ARM verifies the exact 140-byte extent: push {r4,r5,r6,lr} starts
+      at 0x0826f014, the tail b 0x0826db38 is at 0x0826f09c, and the
+      distinct next function starts at 0x0826f0a0. Decoding direct branches
+      finds five BL/BLX call sites: four unconditional and one predicated
+      BLX (the virtual +0x1c call); no predicated BL forms. On reason zero,
+      the body evaluates the virtual +0x18 predicate and byte +0x0c == 2,
+      then calls virtual +0x1c and the unported navigation-manager routine
+      at 0x081106a0. When context +0x3c owns element at +0x78 it calls the
+      ported render_context_set_suspended(context, reason == 0). Either the
+      element or parent +0x48 must contain 0x10 before tail-calling the
+      existing geometry-changed helper. Deliberate deviations: the unknown
+      navigation manager remains an address-named seam with an inert host
+      default, and the tail branch becomes a call to the existing helper
+      seam. Host tests cover both redraw gate outcomes with a below-4GiB
+      target-layout fixture. match.py reports a structural diff (74 Rust
+      instructions versus 35 retail): target-width field reads lower as byte
+      assemblies and the seam calls replace direct retail BL instructions.
