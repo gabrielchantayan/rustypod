@@ -409,6 +409,31 @@ pub unsafe extern "C" fn realloc_wrapper(
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
+/// allocate_byte_with_value — original: `FUN_080d6930` @ 0x080d6930
+/// (24 bytes; five unconditional `bl` call sites, none predicated).
+///
+/// Allocates exactly one byte through [`operator_new`] @ 0x082aadd4 and
+/// stores `value` at that byte. The raw body preserves the input in r4 across
+/// the allocation, then performs an unconditional `strb`; a NULL allocation
+/// therefore faults exactly as the retailOS code does.
+///
+/// Raw extent is 0x080d6930..0x080d6944: `push {r4,lr}; mov r4,r0; mov
+/// r0,#1; bl 0x082aadd4; strb r4,[r0]; pop {r4,pc}`. The next word
+/// (`cmp r0,#0x25`) begins a distinct jump-table dispatch function at
+/// 0x080d6948. Complete-image decoding finds inbound plain `bl` at
+/// 0x081c22f4, 0x081c2b14, 0x081c3224, 0x081c4024, and 0x081c7e00; no
+/// predicated `bl` forms.
+///
+/// Deliberate deviation: the direct call to the retailOS allocator becomes
+/// the existing Rust [`operator_new`] seam, retaining its tag-2 heap dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_byte_with_value(value: u8) -> *mut u8 {
+    let allocation = operator_new(1);
+    allocation.write(value);
+    allocation
+}
+
 
 /// placement_new — original: `FUN_082aaddc` @ 0x082aaddc (8 bytes; 18
 /// unconditional `bl` call sites, binary-verified by decoding every ARM
@@ -1270,6 +1295,24 @@ pub(crate) mod tests {
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
+    #[test]
+    fn allocate_byte_with_value_allocates_one_tag2_byte_and_stores_all_values() {
+        let _lock = mock_heap();
+        let mut storage = [0u8; 1];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            for (calls, value) in [0u8, 1, 0xff].into_iter().enumerate() {
+                storage[0] = !value;
+                let allocation = allocate_byte_with_value(value);
+                assert_eq!(allocation, storage.as_mut_ptr());
+                assert_eq!(storage[0], value);
+                assert_eq!(ALLOC_CALLS, calls + 1);
+                assert_eq!(LAST_ALLOC_SIZE, 1);
+                assert_eq!(LAST_ALLOC_TAG, 2);
+            }
+        }
+    }
+
 
     #[test]
     fn placement_new_ignores_size_and_returns_location_unchanged() {
