@@ -1069,6 +1069,9 @@ pub mod hints {
     // 0x5d00_0000: dedicated to ui/element_refresh's raw-u32 element fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const UI_ELEMENT_REFRESH: usize = 0x5d00_0000;
+    // 0xfe00_0000: dedicated to cxx/parse_i32_list's UTF-16 raw-u32 range
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const PARSE_I32_LIST: usize = 0xfe00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

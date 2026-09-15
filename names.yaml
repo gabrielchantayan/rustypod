@@ -92718,3 +92718,33 @@ functions:
       match.py confirms the target store; LLVM adds its standard fp/lr
       prologue and epilogue. Host tests cover zero, one, high-bit, and all-one
       cursor values while proving adjacent iterator words are unchanged.
+
+  # --- comma-separated UTF-16 integer list parser ---
+  - address: 0x081fa86c
+    ghidra: FUN_081fa86c
+    name: parse_i32_list
+    size: 136
+    sig: "void parse_i32_list(ObservableArray *out, void *context, const VectorBounds *range)"
+    module: cxx/parse_i32_list
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: context
+      param_3/r2: range
+      local_38: delimiter
+      auStack_24: tokenizer
+      local_2c: token
+    notes: >-
+      Raw osos.dec words verify 0x081fa86c..0x081fa8ef is the 136-byte
+      extent: `e8bd8030` (`pop {r4,r5,pc}`) ends the body and the independent
+      next body begins at 0x081fa8f0 with `e92d41fc`. Decoding the body finds
+      seven plain BL instructions and no predicated BL instructions: construct
+      observable array; initialize tokenizer; tokenizer-next twice; parse one
+      UTF-16 i32 token; append it; and compute vector size. These are seven
+      instructions across six distinct callee addresses.
+      The function constructs `out`, ignores r1, tokenizes r2's UTF-16 range on
+      comma with quote support, parses each nonempty token, and appends its
+      word to out. Target code calls existing direct ports; host tests inject
+      those operations only because their target-width object layouts cannot
+      compose with native vtable pointers. `match.py` reports the expected
+      structural difference from LLVM's larger prologue and inlining choices.
