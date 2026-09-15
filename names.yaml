@@ -92081,3 +92081,30 @@ functions:
       to prove exactly one verbatim forwarding call and return identity for
       live and NULL pointers. Deliberate codegen deviation: that seam lowers
       to indirect BLX rather than stock's direct BL.
+
+  # --- OpenGL ES pixel-format to retail layout-kind mapper ---
+  - address: 0x08260468
+    ghidra: FUN_08260468
+    name: gl_pixel_format_to_layout_kind
+    size: 144
+    sig: "i32 gl_pixel_format_to_layout_kind(u32 pixel_format)"
+    module: app/gl_pixel_format_to_layout_kind
+    vars:
+      param_1/r0: pixel_format
+      r0: layout_kind
+      DAT_082604f8: GL_ALPHA
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 144-byte instruction body
+      0x08260468..0x082604f4; the following word at 0x082604f8 is the
+      GL_ALPHA literal 0x1906 and the distinct successor starts at
+      0x082604fc. Decoding every aligned ARM B/BL-immediate word finds five
+      inbound direct plain BL calls, at 0x0824d660, 0x0824de88, 0x0824de94,
+      0x0825066c, and 0x08251680; there are zero predicated BL calls. The
+      comparison tree maps GL_ALPHA/GL_RGB/GL_RGBA/GL_LUMINANCE/
+      GL_LUMINANCE_ALPHA (0x1906..0x190a) to retail layout kinds
+      0/5/4/1/2 respectively, accepts existing kinds 1..4 (with kind 3
+      normalized to 5), and returns -1 for every other value. Rust uses an
+      exact-value match instead of the signed ARM comparison tree; this is a
+      deliberate structural deviation with identical results for every u32
+      input. The function is leaf code and creates no callee seam.
