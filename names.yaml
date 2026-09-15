@@ -7493,6 +7493,22 @@ functions:
       region_block_size (verified against osos.asm); 1 bl caller. No
       separate port; hook this address to the region_block_size symbol.
 
+  - address: 0x081a81bc
+    ghidra: FUN_081a81bc
+    name: aligned_buffer_alignment
+    size: 8
+    sig: "u32 aligned_buffer_alignment(void)"
+    module: heap/aligned_buffer
+    status: ported
+    notes: >-
+      `mov r0, #0x20; bx lr`: returns the 32-byte cache-line alignment
+      used by the adjacent aligned-buffer owner. The true extent is
+      0x081a81bc..0x081a81c4; the aligned_buffer_init constructor starts
+      immediately afterward. Raw `osos.dec` B/BL decoding found five
+      direct callers, all plain unconditional bl (0x080b54a0,
+      0x080f0750, 0x082676e0, 0x08278e5c, 0x08278f1c), and no predicated
+      bl forms. No arguments or memory access. Deliberate deviations:
+      none. Host test verifies the fixed result on repeated calls.
   - address: 0x081a8204
     ghidra: FUN_081a8204
     name: aligned_buffer_reset

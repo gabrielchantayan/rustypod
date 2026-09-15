@@ -65,6 +65,23 @@ pub const ALIGNED_BUFFER_ALLOCATION: usize = 0x04;
 /// (`mov r0, #0x20`) and the align-up mask arithmetic @ 0x081a8198.
 pub const ALIGNED_BUFFER_ALIGNMENT: usize = 0x20;
 
+/// aligned_buffer_alignment — original: `FUN_081a81bc` @ `0x081a81bc`
+/// (8 bytes; true extent `0x081a81bc..0x081a81c4`, immediately followed
+/// by `aligned_buffer_init`).
+///
+/// Raw ARM is `mov r0, #0x20; bx lr`. Decoding every ARM B/BL word in
+/// `work/firmware/osos.dec` finds five direct call sites, all plain,
+/// unconditional `bl` (`0x080b54a0`, `0x080f0750`, `0x082676e0`,
+/// `0x08278e5c`, and `0x08278f1c`); there are no predicated `bl` forms.
+/// Returns the aligned-buffer cache-line alignment constant, 32, without
+/// reading arguments or memory. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn aligned_buffer_alignment() -> u32 {
+    ALIGNED_BUFFER_ALIGNMENT as u32
+}
+
+
 /// aligned_buffer_reset — original: `FUN_081a8204` @ 0x081a8204
 /// (40 bytes; 53 `bl` call sites).
 ///
@@ -183,6 +200,12 @@ mod tests {
         let data = u32::from_le_bytes(buffer.0[0..4].try_into().unwrap());
         let allocation = u32::from_le_bytes(buffer.0[4..8].try_into().unwrap());
         (data, allocation)
+    }
+
+    #[test]
+    fn alignment_query_returns_the_cache_line_size_on_every_call() {
+        assert_eq!(aligned_buffer_alignment(), 0x20);
+        assert_eq!(aligned_buffer_alignment(), ALIGNED_BUFFER_ALIGNMENT as u32);
     }
 
     #[test]
