@@ -47275,6 +47275,30 @@ functions:
       returned storage, vtable replacement, cleared +0x04/+0x08, and
       preservation of every child/derived word.
 
+  # --- Silver UI framework: task initial-target getter ---
+
+  - address: 0x08110c44
+    ghidra: FUN_08110c44
+    name: framework_base_current_task_initial_target
+    size: 16
+    sig: "void *framework_base_current_task_initial_target(void)"
+    module: app/class_6800
+    status: ported
+    renames:
+      FUN_080cb828: current_task_ctx_block
+      field_0x24: framework_base_initial_target
+    notes: >-
+      Raw ARM proves the 16-byte extent: `push {r4,lr}; bl 0x080cb828;
+      ldr r0,[r0,#0x24]; pop {r4,pc}` at 0x08110c44..0x08110c50, followed
+      by the next independent function at 0x08110c54. Whole-image A32
+      B/BL decoding finds exactly five direct callers, all unconditional BL
+      (0x081579b8, 0x081871f0, 0x081e9b50, 0x0820e5ec, 0x0826e530), and
+      zero predicated BL calls. It returns the current task context's
+      framework_base_initial_target word at +0x24 without a NULL guard.
+      Rust calls the already ported current_task_ctx_block directly and uses
+      a volatile field read; this preserves the observable one query and
+      unchecked dereference with no deliberate semantic deviation.
+
   # --- Silver UI framework: current task target reset ---
 
   - address: 0x08110c54

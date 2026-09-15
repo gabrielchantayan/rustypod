@@ -761,6 +761,21 @@ pub unsafe extern "C" fn framework_base_construct_with_task_target(
     framework_base_initialize(this, initial_target, create_link, core::ptr::null_mut());
     this
 }
+/// framework_base_current_task_initial_target — original: `FUN_08110c44` @
+/// 0x08110c44 (16 bytes; **5 plain `bl` call sites and 0 predicated
+/// calls**, binary-scanned from `work/firmware/osos.dec`).
+///
+/// Fetches the current task context through [`current_task_ctx_block`] and
+/// returns its +0x24 `framework_base_initial_target` word. The raw
+/// `ldr r0,[r0,#0x24]` has no NULL guard, so this port likewise faults when
+/// no current task exists. No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_current_task_initial_target() -> *mut u8 {
+    let task_context = current_task_ctx_block();
+    core::ptr::read_volatile(core::ptr::addr_of!((*task_context).framework_base_initial_target))
+}
+
 /// framework_base_set_current_task_target — original: `FUN_08110ca8` @
 /// 0x08110ca8 (20 bytes; **6 plain `bl` call sites and 0 predicated
 /// calls**, binary-scanned from `work/firmware/osos.dec`).
@@ -1341,6 +1356,31 @@ mod tests {
                 framework_base.cast(),
                 "the existing +0x24 target is overwritten"
             );
+
+            restore_task_hooks(saved_hooks);
+        }
+        drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn current_task_initial_target_returns_current_context_slot() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let expected = 0x2468usize as *mut u8;
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            task_context.framework_base_initial_target = expected;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            assert_eq!(framework_base_current_task_initial_target(), expected);
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "context is fetched once");
 
             restore_task_hooks(saved_hooks);
         }
