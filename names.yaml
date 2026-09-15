@@ -91518,3 +91518,36 @@ functions:
       native callbacks fit; target entries remain four-byte words. Host tests
       cover signed results, both byte orders, exact-length dispatch, and short
       reads. Deliberate deviations: none.
+  # --- dirty layout recomputation and notification ---
+  - address: 0x0826d60c
+    ghidra: FUN_0826d60c
+    name: layout_recompute_notify
+    size: 64
+    sig: "LayoutState *layout_recompute_notify(LayoutState *state, u32 first, u32 second, u32 third)"
+    module: app/layout_recompute_notify
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: first
+      param_3/r2: second
+      param_4/r3: third
+      piStack_18/sp: layout_result
+      "*(state + 0x48)": dirty_flags
+      "(*state->vtable + 0x68)": notify_layout
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen ARM words
+      from push {r0,r1,r2,r3,r4,lr} at 0x0826d60c through
+      pop {r0,r1,r2,r3,r4,pc} at 0x0826d648; the next separately linked
+      function begins at 0x0826d64c. Decoding every aligned ARM
+      B/BL-immediate word finds five inbound direct calls: unconditional bl at
+      0x0818124c, 0x08181c60, 0x08182890, and 0x081dd44c, plus predicated
+      blne at 0x081809b4. The body has one unconditional direct bl to
+      FUN_0826e610, no predicated direct bl, and an unconditional indirect blx
+      through vtable slot +0x68. When dirty_flags has bit 0x20, it recomputes
+      the saved four register words then notifies the vtable slot with zero as
+      its third argument; otherwise it returns state unchanged. Target builds
+      retain the unported helper's verified retailOS address 0x0826e610; host
+      tests provide a volatile seam. The host vtable is pointer-width widened
+      while retaining the target slot role. match.py structural review and
+      host tests cover clean and dirty states. Deliberate deviations: the
+      unported helper remains a target-address seam.
