@@ -5246,6 +5246,26 @@ functions:
     status: ported
     notes: 32KB heap @ 0x08a12710, desc @ 0x08a1a710, global @ 0x089ca638.
 
+  - address: 0x082a94d0
+    ghidra: FUN_082a94d0
+    name: shared_handle_owner_destroy
+    size: 72
+    sig: "void *shared_handle_owner_destroy(void *this)"
+    module: cxx/shared_handle_owner_destroy
+    status: ported
+    vars: {param_1/r0: this, r4: this_saved, DAT_082a9518: owner_vtable, FUN_082a8cc0: callback_dispatch, FUN_082aad14: operator_delete_tag3, FUN_082a8ba0: shared_handle_release}
+    notes: >-
+      Raw osos.dec proves the 18-word extent at 0x082a94d0..0x082a9514:
+      the vtable literal is 0x089a8aac at 0x082a9518, followed by the
+      separately linked next destructor at 0x082a951c. The body installs
+      that vtable, calls callback dispatch @ 0x082a8cc0 with (this, 0, 0),
+      passes the target-width pointer words +0x1c, +0x20, and +0x2c to the
+      ported tag-3 operator delete, then releases its embedded shared handle
+      at +0x18 via 0x082a8ba0 and returns this. Whole-image ARM branch-word
+      decoding finds five incoming plain bl calls and zero predicated bl
+      calls. Callback dispatch and shared-handle release are unported, so
+      target builds call their resident addresses and host tests use exact
+      ABI seams; the existing heap port replaces the three direct deletes.
   - address: 0x082aadd4
     name: operator_new
     size: 20

@@ -53,6 +53,9 @@ pub mod hints {
     // 0x0800_0000: dedicated to util/predicate_list_find's raw-u32 list and
     // node fixture; mappings never unmap, so no other user may share it.
     pub const PREDICATE_LIST_FIND: usize = 0x0800_0000;
+    // 0x0400_0000: dedicated to cxx/shared_handle_owner_destroy's raw-u32
+    // owner fixture; mappings never unmap, so no other user may share it.
+    pub const SHARED_HANDLE_OWNER_DESTROY: usize = 0x0400_0000;
     pub const HEAP_INTEGRATION: usize = 0x0900_0000;
     // 0x5500_0000: dedicated to ft/sfnt's raw-u32 TT_Face table-directory
     // fixture; mappings never unmap, so no other user may share this hint.

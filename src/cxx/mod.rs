@@ -114,6 +114,7 @@ pub mod stream_write;
 pub mod stream_write_exact;
 pub mod stream_state_set;
 pub mod stream_write_cstr;
+pub mod shared_handle_owner_destroy;
 pub mod ostream_insert_cstr;
 pub mod ostream_insert_string;
 pub mod stream_write_owner_construct;
