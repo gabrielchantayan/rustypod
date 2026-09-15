@@ -45,6 +45,34 @@ functions:
       predicated bl forms or direct tail-B callers. Host tests cover cursor
       advancement, adjacent-halfword preservation, component-bit truncation,
       and an offset RGBA record. match.py structural review was completed.
+  # --- RGBA8 cursor to RGBA4444 packer ---
+  - address: 0x0825ec88
+    ghidra: FUN_0825ec88
+    name: rgba8_cursor_write_rgba4444
+    size: 32
+    sig: "void rgba8_cursor_write_rgba4444(u32 unused, u16 **destination_cursor, const u8 *components)"
+    module: cxx/rgba8_cursor_write_rgba4444
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: destination_cursor
+      param_3/r2: components
+      r4: destination
+      r3: next_destination
+      r0: packed_rgba4444
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: eight ARM words from
+      push {r4,lr} at 0x0825ec88 through pop {r4,pc} at 0x0825eca4; the
+      separate RGB555A1 cursor writer starts at 0x0825eca8, with no literal
+      pool. The function advances destination_cursor by one aligned halfword
+      before calling the separately ported rgba8_to_rgba4444 at 0x082a009c,
+      then stores that result's low halfword at the original cursor location.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds exactly
+      five inbound direct calls, all unconditional bl at 0x0825e9e8,
+      0x0825f1c4, 0x0825f6e0, 0x082600f4, and 0x083b505c; there are no
+      predicated bl forms or direct tail-B callers. Host tests cover cursor
+      advancement, adjacent-halfword preservation, component-bit truncation,
+      and an offset RGBA record. match.py structural review was completed.
   # --- RGB8 cursor writer ---
   - address: 0x0826056c
     ghidra: FUN_0826056c
