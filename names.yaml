@@ -93930,3 +93930,28 @@ functions:
       inbound direct calls, all unconditional plain bl at 0x08163f0c,
       0x08164a40, 0x08164ad4, 0x08164e48, and 0x08164efc; zero predicated
       calls. No deliberate deviations.
+
+  - address: 0x08164c80
+    ghidra: FUN_08164c80
+    name: optional_flagged_byte
+    size: 24
+    sig: "u8 optional_flagged_byte(const u8 *flagged_field)"
+    module: mov/optional_flagged_byte
+    status: ported
+    renames:
+      param_1/r0: flagged_field
+      "*param_1/r0": field_flag
+      "param_1[1]/r1": optional_byte
+      r0: optional_byte
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body: mov r1,r0; ldrb
+      r2,[r1]; mov r0,#0; tst r2,#0x80; ldrbne r0,[r1,#1]; bx lr at
+      0x08164c80..0x08164c94. The next separately linked function begins at
+      0x08164c98. The function returns byte one only when byte zero has its
+      high bit set; otherwise it returns zero without reading byte one.
+      Decoding every aligned ARM B/BL-immediate in osos.dec finds exactly five
+      inbound direct calls, all unconditional plain bl at 0x08163f00,
+      0x08164a50, 0x08164dbc, 0x08164dec, and 0x08164e68; there are zero
+      predicated bl calls and no direct tail-B callers. The prior
+      mov_checked_flagged_width port now calls this faithful seam rather than
+      preserving the behavior inline. Deliberate deviations: none.

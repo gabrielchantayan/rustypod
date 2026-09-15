@@ -13,6 +13,8 @@
 //! byte. No deliberate deviations.
 
 use crate::heap::veneers::heap_panic;
+use super::optional_flagged_byte::optional_flagged_byte;
+
 
 /// Returns the checked low-two-bit width encoded after a high-bit field flag.
 ///
@@ -24,11 +26,7 @@ use crate::heap::veneers::heap_panic;
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mov_checked_flagged_width(flagged_field: *const u8) -> u8 {
-    let optional_width = if *flagged_field & 0x80 != 0 {
-        *flagged_field.add(1)
-    } else {
-        0
-    };
+    let optional_width = optional_flagged_byte(flagged_field);
     let width = optional_width & 3;
     if width == 3 {
         heap_panic();
