@@ -93144,3 +93144,28 @@ functions:
       +0x1b8 on every path. The opaque class identity remains unrecovered.
       Deliberate deviation: target builds call the unported destructor through
       the verified shared PENDING_OBJECT_DESTRUCT seam; host tests replace it.
+
+  # --- statically bound empty C++ destructor ---
+  - address: 0x081d85d4
+    ghidra: FUN_081d85d4
+    name: empty_destructor_1d85d4
+    size: 4
+    sig: "void *empty_destructor_1d85d4(void *this)"
+    module: cxx/empty_destructor_1d85d4
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      Raw extent is exactly 0x081d85d4..0x081d85d8. The sole instruction is
+      `bx lr` (0xe12fff1e); the separately linked next function begins at
+      0x081d85d8 with `ldr r0,[r0,#0xc]`, so this is neither a veneer nor a
+      branch. Decoding every A32 B/BL word in osos.dec finds exactly five
+      direct call sites, all unconditional plain BL forms, with no predicated
+      BL forms: 0x081c2344, 0x081c2b64, 0x081c3274, 0x081c4074, and
+      0x081c7e58. The port returns this, reads and writes nothing, and permits
+      NULL, unaligned, or dangling input exactly as the raw body does. No
+      deliberate behavioral deviations. Its own text section prevents LLVM
+      identical-code folding with other empty destructor exports; host tests
+      cover pointer preservation and no object writes. match.py structural
+      diff reviewed after the ARM release build.
