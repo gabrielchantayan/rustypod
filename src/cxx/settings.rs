@@ -58,6 +58,9 @@ use core::ptr;
 /// Allocation size of the settings object (`mov r0, #0x84`).
 pub const SETTINGS_SIZE: usize = 0x84;
 
+/// Allocation size of the settings-notification hub (`mov r0, #0x44`).
+pub const SETTINGS_NOTIFICATION_HUB_SIZE: usize = 0x44;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
@@ -87,6 +90,26 @@ pub static mut SETTINGS_CTOR: Constructor = zeroing_settings_ctor;
 /// deviation).
 pub static mut SETTINGS_INSTANCE: *mut u8 = ptr::null_mut();
 
+/// The active constructor for the settings-notification hub (original:
+/// direct `bl 0x08259450`). It remains a seam until that constructor lands.
+pub static mut SETTINGS_NOTIFICATION_HUB_CTOR: Constructor = zeroing_settings_notification_hub_ctor;
+
+/// The settings-notification hub singleton (original cache word @
+/// 0x089d03a8, addressed by the pool literal @ 0x08259924).
+pub static mut SETTINGS_NOTIFICATION_HUB_INSTANCE: *mut u8 = ptr::null_mut();
+
+/// The hub constructor's default: zeroes its 0x44-byte allocation and returns
+/// it. The original installs a vtable and list state, so this is not hook-ready.
+unsafe extern "C" fn zeroing_settings_notification_hub_ctor(this: *mut u8) -> *mut u8 {
+    let mut cursor = this;
+    let end = unsafe { this.add(SETTINGS_NOTIFICATION_HUB_SIZE) };
+    while cursor < end {
+        unsafe { ptr::write_volatile(cursor, 0) };
+        cursor = unsafe { cursor.add(1) };
+    }
+    this
+}
+
 /// settings_get — original: `FUN_08259928` @ 0x08259928 (44 bytes;
 /// 61 `bl` call sites).
 ///
@@ -107,6 +130,39 @@ pub unsafe extern "C" fn settings_get() -> *mut u8 {
         // original's `bl` is — passing the pointer itself would let
         // LLVM hoist the load above the cache test.
         let ctor = unsafe { ptr::read_volatile(ptr::addr_of!(SETTINGS_CTOR)) };
+        let constructed = unsafe { ctor(block) };
+        unsafe { cache.write(constructed) };
+    }
+    unsafe { cache.read() }
+}
+
+/// settings_notification_hub_get — original: `FUN_082598f8` @
+/// **0x082598f8** (**48-byte true extent**: 44 instruction bytes,
+/// `0x082598f8..0x08259924`, plus its pool word; the next real function
+/// begins at `0x08259928`; **5 plain `bl` call sites, 0 predicated `bl`
+/// forms**, verified by decoding raw ARM B/BL words in `osos.dec`).
+///
+/// Lazy-creates the 0x44-byte hub: load cache word @ 0x089d03a8, and when
+/// NULL, call `operator_new(0x44)`, construct through `FUN_08259450`, cache
+/// its result, then reload and return the cache. Callers use vtable slot +0
+/// to attach a listener and slot +0x10 to dispatch a settings-related event,
+/// establishing this as the settings-notification hub without claiming an
+/// unrecovered C++ class name.
+///
+/// Deliberate deviations: the runtime RW cache is modeled by
+/// [`SETTINGS_NOTIFICATION_HUB_INSTANCE`], and the unported constructor uses
+/// [`SETTINGS_NOTIFICATION_HUB_CTOR`]'s zeroing default. That default lacks
+/// the real vtable/list state, so this is not hook-ready until `FUN_08259450`
+/// is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn settings_notification_hub_get() -> *mut u8 {
+    let cache = ptr::addr_of_mut!(SETTINGS_NOTIFICATION_HUB_INSTANCE);
+    if unsafe { cache.read() }.is_null() {
+        let block = unsafe { operator_new(SETTINGS_NOTIFICATION_HUB_SIZE) };
+        let ctor = unsafe {
+            ptr::read_volatile(ptr::addr_of!(SETTINGS_NOTIFICATION_HUB_CTOR))
+        };
         let constructed = unsafe { ctor(block) };
         unsafe { cache.write(constructed) };
     }
@@ -188,6 +244,8 @@ mod tests {
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
             (*ptr::addr_of_mut!(CTOR_BLOCKS)).clear();
             SETTINGS_INSTANCE = ptr::null_mut();
+            SETTINGS_NOTIFICATION_HUB_CTOR = recording_ctor;
+            SETTINGS_NOTIFICATION_HUB_INSTANCE = ptr::null_mut();
         }
         guard
     }
@@ -200,6 +258,8 @@ mod tests {
             DEFAULT_HEAP = ptr::null_mut();
             SETTINGS_CTOR = zeroing_settings_ctor;
             SETTINGS_INSTANCE = ptr::null_mut();
+            SETTINGS_NOTIFICATION_HUB_CTOR = zeroing_settings_notification_hub_ctor;
+            SETTINGS_NOTIFICATION_HUB_INSTANCE = ptr::null_mut();
         }
         drop(guard);
     }
@@ -249,6 +309,34 @@ mod tests {
         unsafe {
             assert!(settings_get().is_null());
             assert!(settings_get().is_null());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn notification_hub_allocates_0x44_constructs_and_caches() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(settings_notification_hub_get(), constructed());
+            assert_eq!(settings_notification_hub_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![SETTINGS_NOTIFICATION_HUB_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SETTINGS_NOTIFICATION_HUB_INSTANCE)),
+                constructed()
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn notification_hub_retries_after_a_null_ctor_result() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(settings_notification_hub_get().is_null());
+            assert!(settings_notification_hub_get().is_null());
             assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
             assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
         }
