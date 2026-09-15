@@ -76238,6 +76238,32 @@ functions:
       frame-pointer prologue/epilogue, allocates r2 for the zero literal, and
       otherwise preserves the retail store order and receiver return.
 
+  - address: 0x0828011c
+    ghidra: FUN_0828011c
+    name: mov_atom_table_clear
+    size: 32
+    sig: "void mov_atom_table_clear(u32 *table)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: table
+      "table+0x0": root
+      "table+0x4": node_count
+    notes: >-
+      Raw ARM confirms the exact 32-byte extent 0x0828011c..0x0828013c:
+      `push {r4,lr}; mov r4,r0; ldr r0,[r0]; bl 0x080c6080; mov r0,#0;
+      str r0,[r4]; str r0,[r4,#4]; pop {r4,pc}`. The next separately linked
+      function begins at 0x0828013c. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly five direct calls, all plain unconditional bl:
+      0x0814d3d4, 0x081c1ac4, 0x081c1f14, 0x081c7ff0, and 0x081c8da0; there
+      are no predicated calls, tail branches, or aligned data-word references.
+      This clears a MOV atom table after the unported 0x080c6080 recursively
+      visits child-B, child-A, and duplicate-fourcc links and releases each
+      node. No table NULL guard: stock faults on its first load. Deliberate
+      deviation: host tests use an inert helper stand-in; target builds call
+      0x080c6080 directly. Host tests prove the helper receives zero, ordinary,
+      and all-ones roots, then both target-width table words are cleared.
+
   # --- Two-word receiver clear ---
   - address: 0x08280174
     ghidra: FUN_08280174

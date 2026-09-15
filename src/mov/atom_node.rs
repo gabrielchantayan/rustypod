@@ -337,6 +337,61 @@ pub unsafe extern "C" fn mov_atom_node_set_child_a_if_present(
 }
 
 
+/// MOV atom table clear — original: `FUN_0828011c` @ **0x0828011c** (32
+/// bytes, 0x0828011c..0x0828013c, 8 instructions, no literal pool). The
+/// next separately linked function begins at 0x0828013c. Raw ARM decoding
+/// finds **5 direct `bl` call sites**, all unconditional plain `bl` (zero
+/// predicated `bl` forms).
+///
+/// Loads the table root at `+0x00`, recursively destroys and frees its MOV
+/// atom nodes through the retail allocator helper @ 0x080c6080, then clears
+/// the root and node-count words at `+0x00` and `+0x04`. The helper visits
+/// child-B, child-A, then duplicate-fourcc links before clearing each node's
+/// links and returning it to the heap. No NULL guard is added for `table`;
+/// stock faults on the initial root load.
+///
+/// # Deliberate deviations
+///
+/// The unported allocator helper remains a direct target call on firmware.
+/// Host builds use an inert stand-in so the target-width table teardown can
+/// be tested without invoking firmware code.
+///
+/// # Safety
+///
+/// `table` must point to two writable target-width words: root and node
+/// count.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_table_clear")]
+pub unsafe extern "C" fn mov_atom_table_clear(table: *mut u32) {
+    let root = unsafe { core::ptr::read_volatile(table) };
+    unsafe { mov_atom_node_destroy(root as usize as *mut MovAtomNode) };
+    unsafe { core::ptr::write_volatile(table, 0) };
+    unsafe { core::ptr::write_volatile(table.add(1), 0) };
+}
+
+/// Calls the retail MOV-node post-order destructor and allocator release
+/// helper at 0x080c6080.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn mov_atom_node_destroy(node: *mut MovAtomNode) {
+    let destroy: unsafe extern "C" fn(*mut MovAtomNode) =
+        unsafe { core::mem::transmute(0x080c_6080usize) };
+    unsafe { destroy(node) };
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn mov_atom_node_destroy(node: *mut MovAtomNode) {
+    #[cfg(test)]
+    LAST_DESTROYED_NODE.store(node as usize as u32, core::sync::atomic::Ordering::Relaxed);
+    let _ = node;
+}
+
+#[cfg(test)]
+static LAST_DESTROYED_NODE: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(0);
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -621,6 +676,23 @@ mod tests {
             assert_eq!((node.offset_lo, node.offset_hi), (offset_lo, offset_hi));
             assert_eq!((node.size_lo, node.size_hi), (0x8888_8888, 0x9999_9999));
             assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0xaa, 0xbb, [0xcc, 0xdd], 0xeeee_eeee));
+        }
+    }
+
+    #[test]
+    fn clears_root_and_count_after_destroying_every_root_value() {
+        for root in [0, 0x1020_3040, u32::MAX] {
+            let mut table = [root, 0xa5a5_a5a5];
+            LAST_DESTROYED_NODE.store(0xdead_beef, core::sync::atomic::Ordering::Relaxed);
+
+            unsafe { mov_atom_table_clear(table.as_mut_ptr()) };
+
+            assert_eq!(
+                LAST_DESTROYED_NODE.load(core::sync::atomic::Ordering::Relaxed),
+                root,
+                "the helper receives the original root, including NULL",
+            );
+            assert_eq!(table, [0, 0], "both target-width table words clear");
         }
     }
 }
