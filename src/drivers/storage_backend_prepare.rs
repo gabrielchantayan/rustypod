@@ -109,6 +109,62 @@ unsafe fn storage_backend_status() -> u32 {
     ptr::read_volatile(ptr::addr_of!(STORAGE_BACKEND_STATUS))()
 }
 
+/// Callback ABI for the active backend's target-width vtable slot at +0x28.
+#[cfg(not(target_os = "none"))]
+pub type StorageBackendSlot28 = unsafe extern "C" fn(*mut u32);
+
+/// Host replacement for the active backend's unported +0x28 callback.
+#[cfg(not(target_os = "none"))]
+pub static mut STORAGE_BACKEND_SLOT_28: Option<StorageBackendSlot28> = None;
+
+/// Invokes active storage backend vtable slot +0x28 — retailOS `FUN_082bcc08`
+/// at `0x082bcc08` (64 bytes including its literal-pool word; five direct,
+/// unconditional inbound `bl` call sites and no predicated inbound calls).
+///
+/// The raw body runs through `pop {r4,pc}` at `0x082bcc44`; its literal at
+/// `0x082bcc48` is the shared storage-backend state object, and `0x082bcc4c`
+/// is the next separately entered function. It first prepares the active
+/// backend, propagating a nonzero error. With no backend it returns 0x11;
+/// otherwise it invokes the optional target-width callback at backend +0x28
+/// with `output`, then returns zero.
+///
+/// # Deliberate deviation
+///
+/// Firmware builds load and call the literal target pointer at +0x28.
+/// Host builds cannot dereference its narrowed 32-bit address, so they use
+/// `STORAGE_BACKEND_SLOT_28` as a faithful optional-callback seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.storage_backend_slot_28_invoke")]
+pub unsafe extern "C" fn storage_backend_slot_28_invoke(output: *mut u32) -> u32 {
+    let status = storage_backend_prepare();
+    if status != 0 {
+        return status;
+    }
+
+    let backend = ptr::addr_of!((*storage_backend_state()).active_backend).read_volatile();
+    if backend == 0 {
+        return 0x11;
+    }
+
+    #[cfg(target_os = "none")]
+    {
+        let callback_address = ((backend as *const u32).add(10)).read_volatile();
+        if callback_address != 0 {
+            let callback: unsafe extern "C" fn(*mut u32) = core::mem::transmute(callback_address as usize);
+            callback(output);
+        }
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        if let Some(callback) = ptr::read_volatile(ptr::addr_of!(STORAGE_BACKEND_SLOT_28)) {
+            callback(output);
+        }
+    }
+
+    0
+}
+
 /// Selects and caches the active storage backend — retailOS `FUN_080e4b6c` @
 /// `0x080e4b6c` (76 bytes; seven direct unconditional `bl` call sites).
 ///
@@ -233,6 +289,97 @@ mod tests {
                 assert_eq!(CALLS, 1);
                 restore(saved);
             }
+        }
+    }
+
+    static mut SLOT_28_CALLS: u32 = 0;
+
+    unsafe extern "C" fn record_slot_28(output: *mut u32) {
+        SLOT_28_CALLS += 1;
+        output.write_volatile(0xfeed_beef);
+    }
+
+    #[test]
+    fn slot_28_invocation_prepares_and_forwards_output() {
+        let _lock = TEST_LOCK.lock();
+        unsafe {
+            let saved_status = reset();
+            let saved_slot = STORAGE_BACKEND_SLOT_28;
+            STATUS = 2;
+            SLOT_28_CALLS = 0;
+            STORAGE_BACKEND_SLOT_28 = Some(record_slot_28);
+            let mut output = 0;
+
+            assert_eq!(storage_backend_slot_28_invoke(&mut output), 0);
+            assert_eq!(CALLS, 1);
+            assert_eq!(SLOT_28_CALLS, 1);
+            assert_eq!(output, 0xfeed_beef);
+
+            STORAGE_BACKEND_SLOT_28 = saved_slot;
+            restore(saved_status);
+        }
+    }
+
+    #[test]
+    fn slot_28_invocation_returns_prepare_errors_without_dispatching() {
+        let _lock = TEST_LOCK.lock();
+        unsafe {
+            let saved_status = reset();
+            let saved_slot = STORAGE_BACKEND_SLOT_28;
+            STATUS = u32::MAX;
+            SLOT_28_CALLS = 0;
+            STORAGE_BACKEND_SLOT_28 = Some(record_slot_28);
+            let mut output = 0x1234_5678;
+
+            assert_eq!(storage_backend_slot_28_invoke(&mut output), 0x13);
+            assert_eq!(CALLS, 1);
+            assert_eq!(SLOT_28_CALLS, 0);
+            assert_eq!(output, 0x1234_5678);
+
+            STORAGE_BACKEND_SLOT_28 = saved_slot;
+            restore(saved_status);
+        }
+    }
+
+    #[test]
+    fn slot_28_invocation_succeeds_when_callback_is_absent() {
+        let _lock = TEST_LOCK.lock();
+        unsafe {
+            let saved_status = reset();
+            let saved_slot = STORAGE_BACKEND_SLOT_28;
+            STATUS = 2;
+            SLOT_28_CALLS = 0;
+            STORAGE_BACKEND_SLOT_28 = None;
+            let mut output = 0x1234_5678;
+
+            assert_eq!(storage_backend_slot_28_invoke(&mut output), 0);
+            assert_eq!(CALLS, 1);
+            assert_eq!(SLOT_28_CALLS, 0);
+            assert_eq!(output, 0x1234_5678);
+
+            STORAGE_BACKEND_SLOT_28 = saved_slot;
+            restore(saved_status);
+        }
+    }
+
+    #[test]
+    fn slot_28_invocation_reports_missing_backend() {
+        let _lock = TEST_LOCK.lock();
+        unsafe {
+            let saved_status = reset();
+            let saved_slot = STORAGE_BACKEND_SLOT_28;
+            STATUS = 4;
+            SLOT_28_CALLS = 0;
+            STORAGE_BACKEND_SLOT_28 = Some(record_slot_28);
+            let mut output = 0x1234_5678;
+
+            assert_eq!(storage_backend_slot_28_invoke(&mut output), 0x11);
+            assert_eq!(CALLS, 1);
+            assert_eq!(SLOT_28_CALLS, 0);
+            assert_eq!(output, 0x1234_5678);
+
+            STORAGE_BACKEND_SLOT_28 = saved_slot;
+            restore(saved_status);
         }
     }
 }
