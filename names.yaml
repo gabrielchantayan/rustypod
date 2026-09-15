@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a8e10
+    ghidra: FUN_080a8e10
+    name: input_state_transition
+    size: 72
+    sig: "void input_state_transition(u32 slot, u32 previous_state, u32 next_state)"
+    module: ui/input_state_transition
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: previous_state
+      param_3/r2: next_state
+      r4: slot
+    notes: >-
+      Raw osos.dec establishes the true 72-byte extent
+      0x080a8e10..0x080a8e54; 0x080a8e58 is the next distinct push
+      prologue. Five incoming plain BLs at 0x08084bc4, 0x08084cac,
+      0x08084ccc, 0x08084cec, and 0x08084d0c; no incoming predicated BLs.
+      The body has one predicated BLNE and a final tail B, both to unresolved
+      FUN_080921dc. State 3 emits command 0 except when next_state is 1,
+      then emits command 1; unequal odd states emit 0 then 1, unequal even
+      states emit 1, and other equal states return. Target retains the
+      unresolved callee address; host uses a deterministic command seam.
   - address: 0x080f867c
     ghidra: FUN_080f867c
     name: text_line_offset_read_be
