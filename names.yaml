@@ -90155,3 +90155,28 @@ functions:
       tracked-free target. match.py against this worktree archive prints the
       expected structural diff: LLVM inlines tracked_free and uses an indirect
       host-modelable unlink call rather than the original direct bl.
+
+  - address: 0x082d9634
+    ghidra: FUN_082d9634
+    name: global_timer_cleanup
+    size: 72
+    sig: "u32 global_timer_cleanup(u32 request_shutdown)"
+    module: app/global_timer_cleanup
+    status: ported
+    renames:
+      DAT_082d9678: global_timer_state
+      "global_timer_state+0x10": pending_timer
+      "global_timer_state+0x14": shutdown_requested
+    notes: >-
+      Raw osos.dec establishes the true 72-byte extent: instructions run from
+      0x082d9634 through pop {r4,pc} at 0x082d9674, then the literal
+      0x089d05c4 occupies 0x082d9678; the next real function opens at
+      0x082d967c. Decoding every ARM B/BL immediate finds five inbound direct
+      calls: four unconditional bl and one predicated blne; no direct tail
+      branch or aligned image data word targets this function. The state block
+      at 0x089d05c4 holds pending_timer at +0x10 and shutdown_requested at
+      +0x14. A nonzero argument sets the latter, every invocation signals
+      kernel object 0x40 through rom_svc_220041cc, and a nonzero pending timer
+      is passed to gateway_service19_request then iram_timer_free_veneer before
+      being cleared. The Rust port uses existing ROM/gateway seams and private
+      host backing storage for the fixed retailOS state address.

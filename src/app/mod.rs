@@ -87,6 +87,7 @@ pub mod global_slot_5c_dispatch;
 pub mod global_observer_unregister;
 pub mod genius_request_wait_ready;
 pub mod global_callback_unregister;
+pub mod global_timer_cleanup;
 pub mod global_callback_register;
 pub mod handler_list_activate;
 pub mod handler_context;
