@@ -23158,6 +23158,33 @@ functions:
       deviation), and LLVM forming the id equality as sub/clz/lsr
       instead of cmpeq/moveq/movne (same 0/1 result).
 
+  - address: 0x082598f8
+    ghidra: FUN_082598f8
+    name: settings_notification_hub_get
+    size: 44
+    sig: "void *settings_notification_hub_get(void)"
+    module: cxx/settings
+    status: ported
+    renames:
+      piVar1: cache (pointer to cache word @ 0x089d03a8)
+      iVar2: constructed (the constructor's return)
+      FUN_082aadd4: operator_new
+      FUN_08259450: settings_notification_hub_ctor
+    vars: {DAT_08259924: SETTINGS_NOTIFICATION_HUB_INSTANCE_PTR (pool literal holding &cache)}
+    notes: >-
+      Raw ARM has eleven instruction words (44 code bytes) from 0x082598f8
+      through 0x08259920, plus pool word 0x089d03a8 at 0x08259924; the next
+      real function starts at 0x08259928. Decoding every ARM B/BL word in
+      osos.dec finds 5 plain BL call sites and 0 predicated forms. The
+      getter reloads its cache, allocates 0x44 through ported operator_new,
+      invokes the unported 0x08259450 constructor, caches its return, then
+      reloads the cache. Callers use vtable slot +0 to attach a listener and
+      +0x10 to dispatch a settings-related event, identifying a
+      settings-notification hub but not a recoverable C++ class name.
+      Deviations: Rust uses a crate static for the runtime RW cache and
+      a constructor seam with a zeroing default; absent the original
+      vtable/list constructor this port is not hook-ready.
+
   - address: 0x08259928
     ghidra: FUN_08259928
     name: settings_get
