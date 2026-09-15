@@ -31,6 +31,8 @@
 //!   +0x110/+0x114.
 //! - [`scoped_context_chapter_count_or_zero`] — `FUN_082a2c34` @ 0x082a2c34,
 //!   a validity-gated owner chapter-count lookup.
+//! - [`scoped_context_owner_word_5c_or_zero`] — `FUN_082a2c80` @ 0x082a2c80,
+//!   a validity-gated opaque owner-word getter.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -729,6 +731,51 @@ const OWNER_FLAGS_MASK_8062: u32 = 0x8062;
 
 /// ABI of the token vtable's slot-+0x08 validity method.
 type ScopedContextValidity = unsafe extern "C" fn(*const ScopedContext) -> u32;
+
+/// Opaque owner fragment whose word at +0x5c is returned by
+/// [`scoped_context_owner_word_5c_or_zero`].
+///
+/// The preceding target-width words preserve the ARM field address on both
+/// target and host.
+#[repr(C)]
+struct OwnerWord5c {
+    _words_before_value: [u32; 0x5c / 4],
+    value: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x60] = [0; core::mem::size_of::<OwnerWord5c>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x5c] = [0; core::mem::offset_of!(OwnerWord5c, value)];
+
+/// scoped_context_owner_word_5c_or_zero — original: `FUN_082a2c80` @
+/// 0x082a2c80 (**44 bytes**, exact: eleven ARM instructions through `pop
+/// {r4, pc}`; the next separately linked function begins at 0x082a2cac;
+/// **5 direct `bl` call sites**, all plain and unconditional, with no
+/// predicated `bl` forms).
+///
+/// Dispatches the scoped-context vtable's +0x08 validity slot. A zero result
+/// returns zero without reading the owner; any nonzero result returns the
+/// owner's aligned word at +0x5c. The callers use that word as an unsigned
+/// bound, but its concrete field identity is not recovered, so the name
+/// deliberately preserves its verified offset.
+///
+/// Deliberate deviations: [`ScopedContext`] and [`OwnerWord5c`] are
+/// `#[repr(C)]` models, replacing literal ARM offsets with typed accesses that
+/// retain the target layout and host consistency. Rust branches where ADS uses
+/// predicated loads and move.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_word_5c_or_zero(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (*(*this).owner.cast::<OwnerWord5c>()).value
+}
 
 /// Opaque owner fragment whose +0x10 word names a conditionally present
 /// `name`-value source.
@@ -2201,6 +2248,57 @@ mod tests {
         unsafe {
             assert_eq!(VALIDITY_CALLS, 1);
             assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn owner_word_5c_short_circuits_before_a_null_owner() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        assert_eq!(unsafe { scoped_context_owner_word_5c_or_zero(&token) }, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &token as *const ScopedContext as usize);
+        }
+    }
+
+    #[test]
+    fn owner_word_5c_returns_its_exact_aligned_word() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0x8000_0000);
+        let mut owner_words = [0u32; 0x60 / 4];
+        owner_words[0x5c / 4] = 0xcafe_babe;
+        owner_words[0x58 / 4] = 0x1122_3344;
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: owner_words.as_mut_ptr().cast(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        assert_eq!(
+            unsafe { scoped_context_owner_word_5c_or_zero(&token) },
+            0xcafe_babe
+        );
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
         }
     }
 
