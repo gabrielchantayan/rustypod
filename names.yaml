@@ -17169,6 +17169,26 @@ functions:
       `255 - r5` on the fading-out layer; other callers pass 0 or 0xff.
       Leaf, no lock (four instructions, no call).
 
+  - address: 0x08120094
+    ghidra: FUN_08120094
+    name: layer_reset
+    size: 160
+    sig: "i32 layer_reset(u32 *layer)"
+    module: drivers/display_layer_reset
+    status: ported
+    vars:
+      param_1: layer
+    notes: >-
+      Raw osos.dec establishes the 160-byte extent
+      0x08120094..0x08120134; 0x08120134 begins layer_reconfigure_thunk.
+      It locks the layer mutex at +0x78, calls unported 0x0812084c, releases
+      non-null target-width object words at +0x4c through +0x5c through vtable
+      slot +0x04, clears only +0x4c/+0x50/+0x54 and active byte +0x40, then
+      unlocks. Raw A32 decoding finds five plain BL callers at 0x081205fc,
+      0x08142848, 0x0816e4d4, 0x08292294, and 0x082962bc; the body has three
+      plain BL and five predicated BLX calls. The unported embedded reset is an
+      address seam; host virtual dispatch is a seam because target pointer
+      fields are four bytes and host pointers are wider.
   - address: 0x08120880
     ghidra: FUN_08120880
     name: layer_set_global_alpha_blend
