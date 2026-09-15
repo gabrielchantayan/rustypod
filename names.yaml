@@ -91350,3 +91350,32 @@ functions:
       target-layout fixture. match.py reports a structural diff (74 Rust
       instructions versus 35 retail): target-width field reads lower as byte
       assemblies and the seam calls replace direct retail BL instructions.
+
+
+  # --- Opaque record-source entry-count wrapper ---
+  - address: 0x0827b308
+    ghidra: FUN_0827b308
+    name: opaque_record_source_entry_count
+    size: 20
+    sig: "i32 opaque_record_source_entry_count(const u8 *source)"
+    module: app/opaque_record_source_entry_count
+    status: ported
+    renames:
+      param_1/r0: source
+      "source+0x04": provider
+      "provider+0x1c": count_state
+      "count_state+0x04": entry_count
+      FUN_081c1cdc: provider_entry_count
+    notes: >-
+      Raw osos.dec establishes the true 20-byte extent from 0x0827b308 through
+      0x0827b31c: ldr r0,[r0,#4]; cmp r0,#0; moveq r0,#0; bne 0x081c1cdc;
+      bx lr, with the next separately linked function beginning at 0x0827b31c.
+      Whole-image ARM B/BL-immediate decoding finds exactly five direct inbound
+      BL calls, all plain unconditional at 0x081a1948, 0x081a19c0, 0x081a1a64,
+      0x081a1a78, and 0x0827b4d4; there are no predicated BL calls. A null
+      provider returns -1. Otherwise the function tail-transfers to unported
+      FUN_081c1cdc, whose verified body returns the signed word at
+      [provider+0x1c]+4. The Rust port inlines that verified accessor rather
+      than creating an identity-bearing seam for the still-unnamed helper;
+      host tests use a below-4GiB target-layout fixture. match.py reports the
+      expected structural diff: Rust lowers the tail transfer as direct reads.

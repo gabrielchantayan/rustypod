@@ -747,6 +747,10 @@ pub mod hints {
     // 0x5600_0000: dedicated to app/opaque_record_source_item_count's raw-u32
     // provider fixture; mappings never unmap, so no other user may share it.
     pub const OPAQUE_RECORD_SOURCE_ITEM_COUNT: usize = 0x5600_0000;
+    // 0x5900_0000: dedicated to app/opaque_record_source_entry_count's raw-u32
+    // source, provider, and state fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const OPAQUE_RECORD_SOURCE_ENTRY_COUNT: usize = 0x5900_0000;
     // 0xe100_0000: dedicated to app/opaque_record_source_copy_item's raw-u32
     // record-table fixture; mappings never unmap, so no other user may share it.
     pub const OPAQUE_RECORD_SOURCE_COPY_ITEM: usize = 0xe100_0000;
