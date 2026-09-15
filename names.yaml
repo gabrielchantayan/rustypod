@@ -92962,3 +92962,27 @@ functions:
       that unrecovered callee through a dispatch seam, while target builds call
       its verified retailOS address directly. Tests cover NULL short-circuit,
       forwarded high-bit index/result words, and detach/reattach reloads.
+
+  # --- UI element selection-index getter (src/ui/selection_index.rs) ---
+  - address: 0x081ea750
+    ghidra: FUN_081ea750
+    name: ui_element_selection_index
+    size: 8
+    sig: "u32 ui_element_selection_index(const UiElement *element)"
+    module: ui/selection_index
+    status: ported
+    renames:
+      param_1/r0: element
+      param_1_plus_0x124: selection_index
+    notes: >-
+      Raw words e5900124 and e12fff1e establish the exact 8-byte extent:
+      `ldr r0,[r0,#0x124]; bx lr`; the paired setter
+      FUN_081ea758 begins immediately at 0x081ea758. A complete ARM B/BL
+      immediate scan of osos.dec finds five direct inbound calls, all plain
+      unconditional bl, and no predicated bl forms. The callers retrieve this
+      word from a UI element returned by a keyed lookup: one selects behavior
+      for values zero and one, another compares it with controller state, and
+      the paired setter writes the same field then marks +0x120 dirty. The
+      enclosing derived element type remains unrecovered, so the name records
+      only the verified selection-index field access. Rust preserves the
+      no-NULL-guard volatile word load and has no deliberate deviations.
