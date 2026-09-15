@@ -78071,6 +78071,34 @@ functions:
       both bytes, every meaningful flag-bit state, byte extremes, and
       read-only behavior.
 
+  # --- Mode-selected stream extent ---
+  - address: 0x0822ad9c
+    ghidra: FUN_0822ad9c
+    name: mode_selected_extent
+    size: 20
+    sig: "u32 mode_selected_extent(const void *state)"
+    module: app/mode_selected_extent
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x2f0": mode_extent
+      "state+0x5e8": default_extent
+      "state+0x5f8": mode_flags
+    notes: >-
+      Raw osos.dec confirms the exact five-instruction, 20-byte extent:
+      ldrb r1,[r0,#0x5f8]; tst r1,#1; ldreq r0,[r0,#0x5e8]; ldrne
+      r0,[r0,#0x2f0]; bx lr from 0x0822ad9c through 0x0822adac. The next
+      separately linked function opens at 0x0822adb0. It returns the
+      +0x5e8 extent for flags with bit 0 clear and the +0x2f0 extent when
+      bit 0 is set; no NULL, bounds, or alignment guard exists. The state
+      class, extent unit, and other flag bits remain unidentified. Decoding
+      every ARM B/BL immediate finds exactly five direct bl callers: four
+      unconditional calls at 0x081cbc18, 0x081cc278, 0x0822b26c, and
+      0x0822b464, plus one predicated bleq at 0x0822b09c. No direct tail
+      branch reaches this entry. No deliberate deviations. Host tests cover
+      both selected words, every meaningful flag-bit state, full-width values,
+      and read-only behavior.
+
   # --- Stream-window request dispatch ---
   - address: 0x0822adb0
     ghidra: FUN_0822adb0

@@ -4,8 +4,8 @@
 //!
 //! Raw ARM saves the requested position at `state+0x34`. A request of `-1`
 //! returns immediately, leaving the previous window length at `+0x30`. Any
-//! other request calls the unported mode-selected extent helper at
-//! `0x0822ad9c`, subtracts the request with 32-bit wrapping arithmetic, and
+//! other request calls `mode_selected_extent` at `0x0822ad9c`, subtracts the
+//! request with 32-bit wrapping arithmetic, and
 //! treats a negative signed result as invalid: it replaces the saved position
 //! with `-1` and again preserves `+0x30`. A nonnegative remainder becomes the
 //! new window length, capped by the configured maximum at `+0x2c`.
@@ -13,8 +13,7 @@
 //! The helper selects its extent word from `state+0x5e8` (mode flag bit 0
 //! clear) or `state+0x2f0` (set). Its owning class and the semantic unit of
 //! the extent are not identified; `StreamWindowState` names only the verified
-//! local window fields. On target the helper is reached through an absolute
-//! veneer so this payload function retains the retail call.
+//! local window fields.
 //!
 //! Decoding every ARM `B`/`BL` immediate in `osos.dec` finds eight direct
 //! inbound `bl` calls: one predicated `bleq` at `0x081cc658`, plus
@@ -38,21 +37,8 @@ pub struct StreamWindowState {
     pub requested_position: i32,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" {
-    fn retail_mode_selected_extent(state: *const u8) -> u32;
-}
 
-// The host seam models only the stock callee needed to exercise this function;
-// target builds use the absolute retail veneer below.
-#[cfg(not(target_os = "none"))]
-unsafe fn retail_mode_selected_extent(state: *const u8) -> u32 {
-    if state.add(0x5f8).read() & 1 == 0 {
-        state.add(0x5e8).cast::<u32>().read()
-    } else {
-        state.add(0x2f0).cast::<u32>().read()
-    }
-}
+use super::mode_selected_extent::mode_selected_extent;
 
 /// Saves a requested position and derives the remaining, capped window length.
 ///
@@ -60,8 +46,8 @@ unsafe fn retail_mode_selected_extent(state: *const u8) -> u32 {
 ///
 /// `state` must be non-NULL, four-byte aligned, and writable through `+0x34`.
 /// Except for `position == -1`, it must additionally address the full wider
-/// state object required by `retail_mode_selected_extent`: readable words at
-/// `+0x2f0` and `+0x5e8`, and a readable byte at `+0x5f8`. There is no NULL,
+/// state object required by `mode_selected_extent`: readable words at `+0x2f0`
+/// and `+0x5e8`, and a readable byte at `+0x5f8`. There is no NULL,
 /// bounds, or alignment guard in the retail ARM implementation.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -71,7 +57,7 @@ pub unsafe extern "C" fn stream_window_set_position(state: *mut StreamWindowStat
         return;
     }
 
-    let remaining = retail_mode_selected_extent(state.cast()).wrapping_sub(position as u32) as i32;
+    let remaining = mode_selected_extent(state.cast()).wrapping_sub(position as u32) as i32;
     if remaining < 0 {
         (*state).requested_position = -1;
         return;
@@ -80,20 +66,6 @@ pub unsafe extern "C" fn stream_window_set_position(state: *mut StreamWindowStat
     (*state).window_length = core::cmp::min(remaining, (*state).maximum_window_length);
 }
 
-#[cfg(target_os = "none")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .text
-    .p2align 2
-    .globl retail_mode_selected_extent
-    .type retail_mode_selected_extent, %function
-retail_mode_selected_extent:
-    ldr     pc, [pc, #-4]
-    .word   0x0822ad9c
-    .size retail_mode_selected_extent, . - retail_mode_selected_extent
-"#
-);
 
 #[cfg(test)]
 mod tests {
