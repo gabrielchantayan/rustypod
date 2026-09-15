@@ -46,6 +46,7 @@ pub mod three_buffer_owner;
 pub mod pool_client;
 pub mod registration_node_construct;
 pub mod queue_wait;
+pub mod queue_wait_status;
 pub mod stats;
 pub mod state;
 pub mod tracked;

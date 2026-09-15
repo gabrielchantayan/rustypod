@@ -64,6 +64,7 @@ fn sem_wait() -> unsafe extern "C" fn(csem: *mut CountingSem, timeout: u32) -> u
 /// Returns 0 when the wait acquired (and for any non-timeout verdict,
 /// faithfully) or [`QUEUE_WAIT_TIMEOUT`] when it expired.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn queue_wait(slot: *mut *mut Mailbox, timeout: u32) -> u32 {
     let mailbox = slot.read();
     let rc = (sem_wait())(mailbox as *mut CountingSem, timeout);
