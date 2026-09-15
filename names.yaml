@@ -94574,3 +94574,29 @@ functions:
       recovered dispatch roles. Rust uses an ordinary final call where retailOS
       tail-dispatches slot +0x44; host fixtures use native-width vtable
       pointers while target offset assertions retain four-byte slot offsets.
+  - address: 0x08133bfc
+    ghidra: FUN_08133bfc
+    name: reset_callback_target
+    size: 124
+    sig: "void reset_callback_target(CallbackTargetOwner *owner)"
+    module: app/callback_target_reset
+    status: ported
+    renames:
+      param_1/r0: owner
+      "[owner,#0x28]": callback_handle
+      "callback_target->vtable+0x38": prepare
+      "callback_target->vtable+0xf0": reset
+      "callback_target->vtable+0x108": value
+      "callback_target->vtable+0x10c": state
+      "callback_target->vtable+0x110": complete
+    notes: >-
+      Raw osos.dec decoding establishes the 124-byte extent
+      0x08133bfc..0x08133c78; the next separately linked function begins
+      at 0x08133c78. The body has six unconditional direct bl instructions
+      and five unconditional indirect blx calls, with the final +0x110
+      dispatch tail-called after restoring callee-saved registers. It
+      re-dereferences the owner handle before every virtual dispatch, invokes
+      slots +0x38, +0xf0, +0x108, +0x10c, and +0x110 in order, and calls the
+      recovered but unported mode-5 setter at 0x081324f8 between the first two.
+      Rust retains that setter as a target fixed-address call; host-only
+      substitution exists solely to prove order.
