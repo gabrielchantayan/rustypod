@@ -161,4 +161,5 @@ pub mod xor_8d_in_place;
 pub mod xml_decode_codepoint_and_reset;
 pub mod xml_decode_skip_whitespace;
 pub mod xml_peek_skip_whitespace;
+pub mod xml_input_is_exhausted;
 pub mod xml_skip_whitespace;
