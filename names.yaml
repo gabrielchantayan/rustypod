@@ -95957,3 +95957,27 @@ functions:
       integer parser at 0x080a1b68 and shift its result into 16.16 form.
       Rust uses typed host/target seams for those verified unported callees and
       models the real-parser tail transfer as a normal call.
+  # --- UTF-16 NUL terminator consumer ---
+  - address: 0x08087b7c
+    ghidra: FUN_08087b7c
+    name: utf16_nul_terminator_consume
+    size: 48
+    sig: "u32 utf16_nul_terminator_consume(const u8 **cursor, i32 remaining_bytes)"
+    module: util/utf16_nul_terminator_consume
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: remaining_bytes
+      param_2/r1_after_load: input
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      cmp r1,#2 at 0x08087b7c through bx lr at 0x08087ba8; the separately
+      linked next function begins with push {r4,r5,r6,lr} at 0x08087bac.
+      Decoding every direct caller finds five unconditional bl instructions at
+      0x0803ae70, 0x0803af44, 0x0807b4a0, 0x080b6694, and 0x080cc7fc, with no
+      predicated BL calls. Given at least two remaining bytes, the function
+      recognizes two zero bytes at *cursor, advances it by two, and returns one;
+      otherwise it returns zero without advancing. The stock less-than-two-byte
+      path uses an incoming scratch register and may dereference an address
+      derived from the length, so the Rust port deliberately returns zero for
+      that malformed incomplete-code-unit input.
