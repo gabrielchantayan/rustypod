@@ -795,6 +795,9 @@ pub mod hints {
     // transient-object fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const UI_ELEMENT_SLOT_RESET: usize = 0x4e00_0000;
+    // 0x4d00_0000: dedicated to ui/clear_pending_notify's target-width
+    // object fixture; mappings never unmap, so no other user may share it.
+    pub const UI_CLEAR_PENDING_NOTIFY: usize = 0x4d00_0000;
     // 0x5100_0000: dedicated to ui/layout_apply_pending_offsets' raw-u32
     // entry-offset fixture; mappings never unmap, so no other user may
     // share this hint.

@@ -17,6 +17,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811e1c4
+    ghidra: FUN_0811e1c4
+    name: ui_clear_pending_notify
+    size: 84
+    sig: "void ui_clear_pending_notify(void *object)"
+    module: ui/clear_pending_notify
+    status: ported
+    renames:
+      param_1/r0: object
+      r4: object
+      "*object+0x48": pending_flags
+      "vtable+0x88": pending_notify
+      "vtable+0x8c": final_notify
+    notes: >-
+      Raw osos.dec gives the true 84-byte extent 0x0811e1c4..0x0811e218:
+      `str r1,[r0,#0xfc]` at 0x0811e218 begins the next function. Five
+      direct callers are all unconditional BLs; this body has one direct BL
+      (FUN_08110fb4(5, NULL)) and two indirect BLX calls. While object+0x48
+      bit 0x40 is set, clear it, invoke vtable+0x88, then dispatch code 5;
+      always tail-dispatch vtable+0x8c. FUN_08110fb4's concrete identity is
+      unrecovered, so no semantic callee name is asserted.
   # --- RGBA8 cursor writer ---
   - address: 0x0825e394
     ghidra: FUN_0825e394
