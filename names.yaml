@@ -90548,3 +90548,38 @@ functions:
       another nonzero value, and u32::MAX; feedback dispatch tests cover the
       delegating seam. match.py exit 1 prints expected LLVM frame, tail-call,
       and direct-port call differences.
+  # --- OpenSSL ASN.1 ADB template selector ---
+  - address: 0x082b4b14
+    ghidra: FUN_082b4b14
+    name: asn1_do_adb
+    size: 176
+    sig: "const ASN1_TEMPLATE *asn1_do_adb(ASN1_VALUE **value_slot, const ASN1_TEMPLATE *template, int null_error)"
+    module: crypto/asn1_adb
+    status: ported
+    renames:
+      param_1/r0: value_slot
+      param_2/r1: template
+      param_3/r2: null_error
+      uVar6/r2: selector
+      puVar1/r0: containing_value
+      piVar4/r1: adb_entry
+      iVar5/r2: entry_index
+    calls:
+      FUN_08039f74: asn1_integer_get
+      FUN_0805f074: obj_obj2nid
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent
+      0x082b4b14..0x082b4bc4: 44 ARM words from push {r3,r4,r5,lr} through
+      pop {r3,r4,r5,pc}, followed by the separately linked function at
+      0x082b4bc4. The body has three plain outbound bl instructions
+      (0x082b4b50, 0x082b4b58, 0x082b4bb8) and no predicated bl. Decoding
+      aligned ARM B/BL immediate words across osos.dec finds exactly five
+      inbound plain bl calls and zero predicated forms. This is OpenSSL
+      asn1_do_adb: non-ADB templates pass through; ADB templates select
+      null_tt for a NULL containing field, otherwise derive a selector from
+      OBJ_obj2nid or ASN1_INTEGER_get, scan 24-byte ADB entries, and use
+      default_tt before optionally recording (13,110,164,0,0). The unported
+      ASN1_INTEGER_get at 0x08039f74 is a volatile host seam/direct target
+      call; OBJ_obj2nid and diag_ring_record use their existing ports. Raw
+      u32 target-pointer words retain the ARM layout on 64-bit hosts.
