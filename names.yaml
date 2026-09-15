@@ -35497,6 +35497,27 @@ functions:
       it. The routine has no NULL or overlap guard: it performs its four
       reads and writes in increasing word order and leaves dst in r0.
 
+
+  - address: 0x0824c774
+    ghidra: FUN_0824c774
+    name: deque_iter_assign_alias_c774
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_c774(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw ARM establishes the 36-byte extent from 0x0824c774 through bx lr at
+      0x0824c794; the next separately linked function begins with push
+      {r4,lr} at 0x0824c798. It copies the four aligned 32-bit deque iterator
+      fields (cur, seg_base, seg_end, seg_slot) in increasing address order
+      from src to dst, retaining dst in r0 as the return value. This is a
+      byte-identical non-C++-block copy of deque_iter_assign @ 0x083da458.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly five
+      unconditional plain bl callers (0x0824ccd8, 0x0824cce4, 0x0824d04c,
+      0x082520b8, 0x082a1538), zero predicated bl callers, and zero direct
+      tail branches. The dedicated Rust text section preserves this separately
+      hookable target against identical-code folding.
   - address: 0x083d9ff8
     ghidra: FUN_083d9ff8
     name: deque_iter_init_elem4_alias_9ff8

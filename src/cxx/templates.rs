@@ -1002,6 +1002,40 @@ pub unsafe extern "C" fn deque_iter_assign_alias_a34c(
     dst
 }
 
+/// deque_iter_assign_alias_c774 — original: `FUN_0824c774` @ `0x0824c774`
+/// (36 bytes; five unconditional plain-`bl` call sites, zero predicated
+/// `bl` call sites, binary-verified).
+///
+/// Raw ARM fixes the true extent as `0x0824c774..0x0824c798`: four
+/// `ldr`/`str` pairs copy the aligned 16-byte deque iterator (`cur`,
+/// `seg_base`, `seg_end`, `seg_slot`) forward from `src` to `dst`, and
+/// `bx lr` returns the untouched `dst` in r0. The next independently linked
+/// function begins with `push {r4,lr}` at `0x0824c798`. Decoding every ARM
+/// B/BL-immediate word in `osos.dec` finds the five plain calls at
+/// 0x0824ccd8, 0x0824cce4, 0x0824d04c, 0x082520b8, and 0x082a1538.
+///
+/// Deliberate deviations: none. A distinct text section keeps this
+/// independently hookable non-C++-block instance from being folded into the
+/// byte-identical [`deque_iter_assign`] family.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; retailOS
+/// performs this as a forward word copy without NULL or overlap handling.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_c774")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_c774(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
+
 
 /// Firmware load address of the unported 4-byte deque iterator advance
 /// member `FUN_083da088`, called by [`deque_iter_advance_copy_elem4`].
@@ -4753,6 +4787,17 @@ mod tests {
             assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
         }
     }
+    #[test]
+    fn iter_assign_alias_c774_is_a_forward_word_copy() {
+        unsafe {
+            let mut words = [0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444, 0x5555_5555];
+            let dst = words.as_mut_ptr().add(1);
+            let ret = deque_iter_assign_alias_c774(dst, words.as_ptr());
+            assert_eq!(ret, dst);
+            assert_eq!(words, [0x1111_1111; 5]);
+        }
+    }
+
 
 
     #[test]
