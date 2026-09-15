@@ -94600,3 +94600,32 @@ functions:
       recovered but unported mode-5 setter at 0x081324f8 between the first two.
       Rust retains that setter as a target fixed-address call; host-only
       substitution exists solely to prove order.
+
+  # --- Refcounted-handle callback dispatch ---
+  - address: 0x08131e00
+    ghidra: FUN_08131e00
+    name: handle_callback_dispatch
+    size: 132
+    sig: "void handle_callback_dispatch(void *owner, const HandleCallbackRequest *request, void *context)"
+    module: cxx/handle_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: request
+      param_3/r2: context
+      "owner+0x28": refcounted-handle slot
+      "implementation->vtable+0x164/+0x168/+0x16c": callback by request.mode
+      FUN_083d6190: handle_deref_or_null_alias_6190
+    notes: >-
+      Raw osos.dec confirms the 132-byte extent at 0x08131e00..0x08131e84:
+      bx r3 at 0x08131e80 is followed by a literal word, and the next
+      separately linked function starts at 0x08131e88. Body decoding finds
+      three plain unconditional direct bl instructions, all to the ported
+      handle_deref_or_null alias at 0x083d6190, and zero predicated bl forms.
+      Whole-image branch decoding finds five inbound direct bl call sites.
+      Modes 0, 1, and 2 select unrecovered vtable callbacks at +0x164, +0x168,
+      and +0x16c respectively, called with implementation, request.value, and
+      context. Other modes tail-branch to the still-unidentified 0x0814459c
+      failure path; target Rust branches there directly and host builds panic
+      rather than inventing that callee identity. Host vtable cells are
+      pointer-width rather than target four-byte words.
