@@ -94149,3 +94149,27 @@ functions:
       an ordering-preserving operation seam; target builds dispatch its
       target-width vtable directly. Host tests cover callback order and zero
       versus negative nonzero results.
+  # --- Object byte field accessor ---
+  - address: 0x0814d1bc
+    ghidra: FUN_0814d1bc
+    name: object_byte_0x21
+    size: 8
+    sig: "u8 object_byte_0x21(const u8 *object)"
+    module: util/object_byte_0x21
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: field_byte
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent: ldrb r0,[r0,#0x21]
+      at 0x0814d1bc followed by bx lr at 0x0814d1c0; the next separately
+      linked function begins at 0x0814d1c4. It returns the unsigned byte at
+      offset 0x21 of an unchecked object pointer; the concrete object type is
+      not recovered, so the field-offset name records the verified behavior.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds five
+      inbound direct calls, all unconditional bl at 0x081c2134, 0x081c226c,
+      0x081c22c0, 0x081c2aa4, and 0x081c2aec; there are no predicated bl
+      forms or direct tail-B callers. Host tests cover adjacent-byte selection
+      plus zero and maximum return values. match.py structural review was
+      completed. Deliberate deviations: none; the unchecked dereference
+      intentionally preserves the firmware's invalid-pointer fault behavior.
