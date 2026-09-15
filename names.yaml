@@ -95981,3 +95981,22 @@ functions:
       path uses an incoming scratch register and may dereference an address
       derived from the length, so the Rust port deliberately returns zero for
       that malformed incomplete-code-unit input.
+  - address: 0x08081b5c
+    ghidra: FUN_08081b5c
+    name: ft_raster_atan2
+    size: 172
+    sig: "i32 ft_raster_atan2(i32 x, i32 y)"
+    module: ft/calc
+    status: ported
+    notes: >-
+      Raw ARM has a 172-byte instruction body (0x08081b5c..0x08081c08)
+      followed by its separate 4-byte literal pool at 0x08081c0c; the next
+      real function begins at 0x08081c10. A whole-image ARM instruction
+      scan finds 5 direct bl callers, all unconditional (zero predicated).
+      Its own two plain bl instructions both call the ported FreeType
+      ft_divfix @ 0x0804c2d4.
+      Legacy raster atan2 folds (x,y) to the first octant, indexes the
+      verified 256-byte atan lookup table using Q16.16 ratio >> 8, and
+      restores the signed 1/512-turn angle. The runtime table pointer
+      0x0890bba4 is relocated; its ROM copy is raw offset 0x00916a7c
+      (runtime + 0x0aeed8), byte-verified. No deliberate deviations.
