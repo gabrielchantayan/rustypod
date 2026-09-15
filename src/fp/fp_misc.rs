@@ -2672,8 +2672,64 @@ pub unsafe extern "C" fn timespec_is_nonzero(ts: *const i32) -> bool {
     core::ptr::read_unaligned(ts.add(1)) != 0
 }
 
+/// fixed16_cos — original: `FUN_082572e4` @ 0x082572e4 (192 bytes of
+/// code plus the two literal-pool words at 0x082573a4/0x082573a8; true
+/// extent 200 bytes through 0x082573ab, where FUN_082573ac begins).
+///
+/// Raw ARM B/BL decoding finds five direct incoming calls, all plain `bl`
+/// (0x0827b680, 0x0827cf3c, 0x0827d024, 0x0827d130, and 0x0827d23c);
+/// there are no predicated `bl` calls. It folds a Q16.16 degree angle into
+/// the cosine quadrant, chooses an 8-byte `{ slope, intercept }` entry from
+/// the live cosine table at 0x08a79af8, evaluates `slope * distance +
+/// intercept`, and shifts the Q16.16 interpolation result right eight bits.
+/// The 180-degree half is negated. The caller supplies an angle in the
+/// table's 0..360-degree domain; the original deliberately does not wrap
+/// other inputs.
+///
+/// Deliberate deviation: target builds use the literal table address exactly;
+/// host builds load a replaceable table pointer so tests can provide the
+/// otherwise runtime-resident table.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_COS_TABLE: *const i32 = core::ptr::null();
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn fixed16_cos_table() -> *const i32 {
+    0x08a7_9af8 as *const i32
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn fixed16_cos_table() -> *const i32 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FIXED16_COS_TABLE)) }
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed16_cos(mut angle: i32) -> i32 {
+    const HALF_TURN: i32 = 0x00b4_0000;
+    const QUARTER_TURN: i32 = 0x005a_0000;
+
+    if angle > HALF_TURN {
+        angle = HALF_TURN.wrapping_mul(2).wrapping_sub(angle);
+    }
+    let negate = angle > QUARTER_TURN;
+    if negate {
+        angle = HALF_TURN.wrapping_sub(angle);
+    }
+    let distance = QUARTER_TURN.wrapping_sub(angle);
+    let index = (fixed16_mul_indirect(&distance, QUARTER_TURN) >> 16) as usize;
+    let entry = unsafe { fixed16_cos_table().add(index * 2) };
+    let result = fixed16_mul_indirect(entry, distance)
+        .wrapping_add(unsafe { *entry.add(1) })
+        >> 8;
+    if negate { result.wrapping_neg() } else { result }
+}
+
 #[cfg(test)]
 mod tests {
+    static FIXED16_COS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
     extern crate std;
     use super::*;
     use std::vec::Vec;
@@ -6376,5 +6432,27 @@ mod tests {
         }
         assert_eq!(first_storage.rep.refcount, 0, "temporary reference is released after growth");
         assert_eq!(second_storage.rep.refcount, 0, "temporary reference is released after growth");
+    }
+
+    #[test]
+    fn fixed16_cos_folds_quadrants_and_truncates_table_selection() {
+        let _lock = FIXED16_COS_TEST_LOCK.lock();
+        let mut table = [0_i32; 16_202];
+        for index in 0..=8_100 {
+            table[index * 2 + 1] = (index as i32) << 8;
+        }
+        let old_table = unsafe { FIXED16_COS_TABLE };
+        unsafe { FIXED16_COS_TABLE = table.as_ptr() };
+
+        let degree = |degrees: i32| degrees << 16;
+        assert_eq!(unsafe { fixed16_cos(degree(0)) }, 8_100);
+        assert_eq!(unsafe { fixed16_cos(degree(90)) }, 0);
+        assert_eq!(unsafe { fixed16_cos(degree(135)) }, -4_050);
+        assert_eq!(unsafe { fixed16_cos(degree(180)) }, -8_100);
+        assert_eq!(unsafe { fixed16_cos(degree(270)) }, 0);
+        assert_eq!(unsafe { fixed16_cos(degree(360)) }, 8_100);
+        assert_eq!(unsafe { fixed16_cos(degree(44) + 0x8000) }, 4_095);
+
+        unsafe { FIXED16_COS_TABLE = old_table };
     }
 }

@@ -92270,3 +92270,22 @@ functions:
       exact-value match instead of the signed ARM comparison tree; this is a
       deliberate structural deviation with identical results for every u32
       input. The function is leaf code and creates no callee seam.
+  - address: 0x082572e4
+    ghidra: FUN_082572e4
+    name: fixed16_cos
+    size: 200
+    sig: "i32 fixed16_cos(i32 angle)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1/r0: angle}
+    notes: >-
+      Raw ARM has 192 bytes of code plus the two literal words at
+      0x082573a4/0x082573a8, so its true extent is 200 bytes through
+      0x082573ab and the next real function starts at 0x082573ac.
+      Full-image B/BL decoding finds five direct incoming plain bl calls
+      (0x0827b680, 0x0827cf3c, 0x0827d024, 0x0827d130, 0x0827d23c) and
+      zero predicated bl forms. It folds a Q16.16 degree angle into the
+      cosine quadrant, interpolates the live 8-byte {slope, intercept}
+      table at 0x08a79af8, shifts the result right eight bits, and negates
+      the second half-turn. Target Rust reads that exact table address;
+      host tests install a table pointer because the table is runtime data.
