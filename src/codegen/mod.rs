@@ -38,6 +38,9 @@ pub mod file_directory_entry;
 /// accessor in the codegen address block.
 pub mod field_10_low_u16;
 pub mod heap;
+/// `cg_register_bitset_create` @ 0x082c0c54 — allocates the code generator's
+/// register-count header and its zeroed 32-bit bitset words.
+pub mod register_bitset;
 pub mod module_owner;
 pub mod ir;
 /// `cg_emit_load_word_at_offset` @ 0x082605f0 — emission sugar the
