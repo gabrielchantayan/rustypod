@@ -94541,3 +94541,36 @@ functions:
       present masks. match.py structural review completed (exit 1 printed the
       expected LLVM-versus-ADS diff: LLVM emits bic/clz/lsr rather than the
       original conditional moves). Deliberate deviations: none.
+
+  - address: 0x08133cc0
+    ghidra: FUN_08133cc0
+    name: refcounted_owner_callback_dispatch
+    size: 96
+    sig: "void refcounted_owner_callback_dispatch(void *output, RefcountedBodyOwner *owner, u32 selector)"
+    module: app/refcounted_owner_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: owner
+      param_3/r2: selector
+      r4: owner
+      r5: selector
+      r6: output
+      FUN_083d6190: handle_deref_or_null_alias_6190
+      "callback->vtable+0x44": finalize
+      "callback->vtable+0xdc": initialize
+      "callback->vtable+0x13c": construct
+    notes: >-
+      Raw osos.dec decoding establishes the 96-byte extent from 0x08133cc0
+      through the tail bx r2 at 0x08133d1c; 0x08133d20 begins the next
+      separately linked function. It finds five inbound direct bl sites, all
+      plain and unconditional (0x081310e0, 0x081311b8, 0x08131354,
+      0x08131458, and 0x08131498), and zero predicated direct bl forms. The
+      handle at owner+0x28 is dereferenced three times through
+      handle_deref_or_null_alias_6190; the resulting callback object's vtable
+      slots +0xdc, +0x13c, and +0x44 are dynamically dispatched with
+      (callback), (output, callback, selector), and (callback, output).
+      Virtual identities remain unestablished, so names state only the
+      recovered dispatch roles. Rust uses an ordinary final call where retailOS
+      tail-dispatches slot +0x44; host fixtures use native-width vtable
+      pointers while target offset assertions retain four-byte slot offsets.
