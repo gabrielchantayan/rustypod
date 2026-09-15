@@ -46297,6 +46297,22 @@ functions:
       partial-tail exits, while preserving the arithmetic-shift byte
       address, signed fast/loop tests, byte append, and partial-MSB tail.
 
+  - address: 0x0819b5fc
+    ghidra: FUN_0819b5fc
+    name: unidentified_string_pair_destroy
+    size: 24
+    sig: "void unidentified_string_pair_destroy(void *this)"
+    status: identified
+    notes: >-
+      Raw osos.dec words establish six instructions from 0x0819b5fc through
+      0x0819b610: push {r4,lr}; add r0,r0,#8; bl 0x08277484; pop {r4,lr};
+      sub r0,r0,#8; b 0x08277480. Binary-wide decoding finds five plain BL
+      callers and zero predicated BL callers. The apparent tail target is the
+      word 0x089a6044 at 0x08277480, immediately before the documented
+      string_object_destroy entry at 0x08277484; it is not a verified callee.
+      Ghidra's claimed tail call to 0x08275d74 is therefore false. Porting
+      would require inventing semantics for executable data, so this remains
+      identified rather than a guessed Rust seam.
   # --- retailOS UI: the styled-text view widget ---
   - address: 0x0819b9e0
     ghidra: FUN_0819b9e0
