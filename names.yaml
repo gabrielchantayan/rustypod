@@ -93439,3 +93439,33 @@ functions:
       plain unconditional BL; there are no predicated BL forms. It neither
       reads arguments nor modifies memory, and always returns one. No
       deliberate deviations.
+
+  # --- event handler callback dispatch ---
+  - address: 0x081b0cd4
+    ghidra: FUN_081b0cd4
+    name: event_handler_callback_dispatch
+    size: 36
+    sig: "void event_handler_callback_dispatch(u32 value, u32 kind)"
+    module: app/event_handler_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r5: value
+      param_2/r1/r4: kind
+      thunk_EXT_FUN_22007470: iram event-handler source veneer
+      thunk_FUN_080077a8: callback target slot-14 dispatch veneer
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,r5,r6,lr} at 0x081b0cd4 through b 0x08038158 at 0x081b0cf0;
+      the separately linked next function begins at 0x081b0cf4. The body has
+      one plain unconditional BL (0x08038060), zero predicated BL forms, and
+      one unconditional tail B (0x08038158 -> ROM mirror 0x220077a8).
+      Decoding every aligned ARM B/BL-immediate word finds five inbound direct
+      BL callers, all plain unconditional, with no predicated BL forms. It
+      obtains the IRAM event-handler source, preserves both incoming words,
+      then tail-dispatches the callback target's +0x14 virtual slot; that
+      wrapper deliberately ignores the source pointer and forwards the two
+      words. Rust composes the existing source and slot-14 ports. Target code
+      retains the latter's assembly tail dispatch; host tests install source
+      and callback-target getter seams to verify source acquisition and exact
+      word forwarding. match.py reports LLVM's frame and direct source call
+      around the same preserved-word/tail-dispatch structure.
