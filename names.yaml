@@ -11135,6 +11135,26 @@ functions:
       re-read-after-materialize, and the +0x3ac/+0x10 addressing all
       match.
 
+  - address: 0x080e430c
+    ghidra: FUN_080e430c
+    name: queue_wait_status
+    size: 20
+    sig: "i32 queue_wait_status(Mailbox **slot, u32 timeout)"
+    module: heap/queue_wait_status
+    status: ported
+    vars: {param_1: slot, param_2: timeout}
+    notes: >-
+      Raw words e92d4010 ebff41f1 e1b00000 13e00000 e8bd8010 prove
+      the 0x080e430c..0x080e4320 extent: queue_wait(slot, timeout)
+      @ 0x080b4adc returns unchanged in r0, then movs/mvnne maps any
+      nonzero verdict to -1 and keeps zero. Binary scan finds 5 direct
+      incoming bl sites (0x080af6a0, 0x081b08c4, 0x081bbc4c,
+      0x081bbc68, 0x081c0df4): all unconditional, none predicated.
+      The body has one unconditional bl and no predicated calls. Direct
+      Rust call is preserved; queue_wait is inline(never) so LLVM retains
+      the call boundary. match.py structural: LLVM emits an fp prologue
+      and cmp instead of the retail movs, but retains the bl, nonzero
+      test, mvnne, and return structure.
   - address: 0x080e4348
     ghidra: FUN_080e4348
     name: task_priority_map
