@@ -120,6 +120,7 @@ pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod table_transform_fixed_selector;
 pub mod tagged_counter;
+pub mod tagged_header_low_bits;
 pub mod tagged_resource_payload;
 pub mod positive_counter_decrement;
 pub mod tagged_payload_address;
