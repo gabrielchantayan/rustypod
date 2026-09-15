@@ -71,9 +71,18 @@ mod tests {
         let member = member.cast::<ListCursorReleaseState>();
         unsafe {
             write(member, ListCursorReleaseState {
-                unresolved_00: [0; 20],
+                unresolved_00: [0; 12],
+                active_cursor: 0,
+                range_scale: 0,
+                range_start: 0,
+                range_end: 0,
+                cursor_position: 0,
+                cursor_limit: 0,
+                unresolved_48: [0; 2],
                 mutex_words: [0; 2],
-                unresolved_58: [0; 6],
+                range_valid: 0,
+                cursor_active: 0,
+                unresolved_5a: [0; 22],
                 cursor_clear_suppressed: 1,
                 unresolved_71: [0; 3],
             });
