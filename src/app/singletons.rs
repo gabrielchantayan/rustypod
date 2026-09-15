@@ -24,6 +24,7 @@
 //! | 0x081f77a4 | [`volume_controller_get`] | 0x3bc | 0x089cc288 | 0x081fa070 | 52 |
 //! | 0x0812c72c | [`lazy_singleton_0x58`] | 0x58 | 0x089cc16c | 0x0812ce88 | 46 |
 //! | 0x0825b680 | [`lazy_singleton_0x40`] | 0x40 | 0x089cc94c | 0x0825bd20 | 43 |
+//! | 0x0825b650 | [`time_source_get`] | 0x40 | 0x08a09f5c | 0x0825b7b4 | 5 |
 //! | 0x08259564 | [`lazy_singleton_0x4c`] | 0x4c | 0x089cc950 | 0x08258eb0 | 7 |
 //! | 0x08257f04 | [`lazy_singleton_0xd0`] | 0xd0 | 0x089d03ac | 0x0825af98 | 7 |
 //! | 0x08258ba0 | [`lazy_singleton_0x80`] | 0x80 | 0x089d00b8 | 0x082590e0 | 7 |
@@ -402,7 +403,9 @@ pub struct SingletonCtors {
     /// GeniusMixesTask ctor @ 0x0819c1d4.
     pub genius_mixes_task: Constructor,
 
-    /// The 0x40 object's ctor @ 0x0825bd20.
+    /// The fixed 0x40 time-source object's ctor @ 0x0825b7b4.
+    pub time_source: Constructor,
+    /// The other 0x40 object's ctor @ 0x0825bd20.
     pub singleton_0x40: Constructor,
     /// The 0x44 object's ctor @ 0x0825aa58.
     pub singleton_0x44: Constructor,
@@ -458,6 +461,7 @@ zeroing_ctor!(zeroing_volume_controller_ctor, VOLUME_CONTROLLER_SIZE);
 zeroing_ctor!(zeroing_singleton_0x58_ctor, SINGLETON_0X58_SIZE);
 zeroing_ctor!(zeroing_genius_mixes_task_ctor, GENIUS_MIXES_TASK_SIZE);
 zeroing_ctor!(zeroing_singleton_0x40_ctor, SINGLETON_0X40_SIZE);
+zeroing_ctor!(zeroing_time_source_ctor, SINGLETON_0X40_SIZE);
 zeroing_ctor!(zeroing_singleton_0x44_ctor, SINGLETON_0X44_SIZE);
 zeroing_ctor!(zeroing_class_6280_ctor, CLASS_6280_SIZE);
 zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
@@ -507,6 +511,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0x58: zeroing_singleton_0x58_ctor,
     genius_mixes_task: zeroing_genius_mixes_task_ctor,
     singleton_0x40: zeroing_singleton_0x40_ctor,
+    time_source: zeroing_time_source_ctor,
     singleton_0x44: zeroing_singleton_0x44_ctor,
     class_6280: zeroing_class_6280_ctor,
     stage_progress_tracker: zeroing_stage_progress_tracker_ctor,
@@ -652,6 +657,10 @@ unsafe fn genius_mixes_task_after_construct(this: *mut u8) {
 }
 
 
+
+/// The 0x40 time-source singleton (original cache word @ 0x08a09f5c, pool
+/// literal @ 0x0825b67c).
+pub static mut TIME_SOURCE_INSTANCE: *mut u8 = core::ptr::null_mut();
 
 /// The unidentified 0x40 singleton (original: the word @ 0x089cc94c,
 /// the pool literal @ 0x0825b6ac — the next word after the settings
@@ -1160,6 +1169,32 @@ pub unsafe extern "C" fn volume_controller_get() -> *mut u8 {
     lazy_singleton(cache, VOLUME_CONTROLLER_SIZE, || unsafe {
         ctor!(volume_controller)
     })
+}
+
+/// time_source_get — original: `FUN_0825b650` @ **0x0825b650**.
+/// The true extent is **48 bytes**: 44 instruction bytes through `pop
+/// {r4, pc}` at 0x0825b678 plus the cache-word literal 0x08a09f5c at
+/// 0x0825b67c; the next real function starts at 0x0825b680. Decoding every
+/// aligned ARM branch-immediate word in `osos.dec` finds **5** direct plain
+/// `bl` callers (0x08196a70, 0x081fe7f0, 0x081fe8a4, 0x081fec08, and
+/// 0x081fed18), and **0** predicated `bl` forms.
+///
+/// Algorithm: return the cached time-source object. When its cache is NULL,
+/// allocate 0x40 bytes through `operator_new`, construct it with
+/// `FUN_0825b7b4`, cache the constructor's result, reload the cache, and
+/// return it. The callers obtain time fields through virtual slots +0x24,
+/// +0x2c, and +0x34; no recovered class name exists, so `time source` states
+/// only that verified role.
+///
+/// Deliberate deviations: the unported constructor is the `time_source`
+/// [`SINGLETON_CTORS`] seam with the family zeroing default, and the cache is
+/// [`TIME_SOURCE_INSTANCE`] instead of firmware word 0x08a09f5c. This is not
+/// hook-ready until `FUN_0825b7b4` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn time_source_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(TIME_SOURCE_INSTANCE);
+    lazy_singleton(cache, SINGLETON_0X40_SIZE, || unsafe { ctor!(time_source) })
 }
 
 /// lazy_singleton_0x40 — original: `FUN_0825b680` @ **0x0825b680**
@@ -1960,6 +1995,7 @@ mod tests {
                 volume_controller: recording_ctor,
                 singleton_0x58: recording_ctor,
                 genius_mixes_task: recording_ctor,
+                time_source: recording_ctor,
                 singleton_0x40: recording_ctor,
                 singleton_0x44: recording_ctor,
                 class_6280: recording_ctor,
@@ -2015,6 +2051,7 @@ mod tests {
         SINGLETON_0X58 = ptr::null_mut();
         GENIUS_MIXES_TASK_INSTANCE = ptr::null_mut();
         SINGLETON_0X40 = ptr::null_mut();
+        TIME_SOURCE_INSTANCE = ptr::null_mut();
         SINGLETON_0X44 = ptr::null_mut();
         CLASS_6280_INSTANCE = ptr::null_mut();
         STAGE_PROGRESS_TRACKER = ptr::null_mut();
@@ -2077,6 +2114,34 @@ mod tests {
                 2,
                 "a NULL cache remains a miss, so every call retries allocation and construction"
             );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn time_source_allocates_constructs_and_caches_its_constructor_result() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(time_source_get(), constructed());
+            assert_eq!(time_source_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![SINGLETON_0X40_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(TIME_SOURCE_INSTANCE)),
+                constructed(),
+                "the constructor return is the cached pointer"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn null_time_source_constructor_retries_allocation() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(time_source_get().is_null());
+            assert!(time_source_get().is_null());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
         }
         restore(guard);
     }
