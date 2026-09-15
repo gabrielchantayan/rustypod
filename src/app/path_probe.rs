@@ -398,7 +398,7 @@ unsafe fn guard_dtor_fn() -> GuardDestroy {
 /// destructor's final tail branch. Host builds have no retailOS object
 /// graph, so retaining `this` is the deliberate boundary no-op.
 #[inline(always)]
-unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
+pub(crate) unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
     #[cfg(target_os = "none")]
     {
         let destroy: GuardDestroy = core::mem::transmute(GUARD_BASE_DESTROY_ADDRESS);

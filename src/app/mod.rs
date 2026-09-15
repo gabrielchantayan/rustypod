@@ -130,6 +130,7 @@ pub mod kinded_controller;
 pub mod image_format_descriptor_slot;
 pub mod image_format_descriptor_slots_initialize;
 pub mod lock_service;
+pub mod interface_guard_base_dispatch;
 pub mod input_capabilities;
 pub mod input_delta_feedback_update;
 pub mod feedback_level_dispatch;
