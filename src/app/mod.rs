@@ -285,6 +285,7 @@ pub mod track_extras_cache;
 pub mod ui_flag_update_forwarder;
 pub mod tbm_app_client_cache;
 pub mod volume_controller_byte_at_90;
+pub mod media_player_slot_b8_then_volume_controller_update;
 pub mod volume_controller_set_byte_at_90;
 pub mod vtable_set;
 pub mod view_event;
