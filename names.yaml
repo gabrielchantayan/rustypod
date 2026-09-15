@@ -91835,3 +91835,37 @@ functions:
       same guard, delete, threshold, allocation, counter, and pair-store
       structure; the volatile release seam necessarily emits BLX rather
       than the stock predicated direct BL.
+
+  # --- C++ temporary-locale guard constructor ---
+  - address: 0x082670e0
+    ghidra: FUN_082670e0
+    name: locale_guard_init
+    size: 92
+    sig: "LocaleGuard *locale_guard_init(LocaleGuard *guard, const char *name, u32 mask)"
+    module: runtime/locale_guard
+    vars:
+      param_1/r0: guard
+      param_2/r1: name
+      param_3/r2: mask
+      "guard+0x00": mask
+      "guard+0x04": saved_name
+      FUN_080307bc: setlocale_core
+      FUN_08392478: strlen
+      FUN_082aad74: operator_new_tag3
+      FUN_08030ff4: strcpy
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x082670e0..0x08267138;
+      the next separately linked function starts at 0x0826713c. Decoding
+      every ARM B/BL word independently finds five inbound BL-form call
+      sites, all plain unconditional BL (zero predicated BL): 0x082673f8,
+      0x082a7068, 0x082a78f4, 0x082a85b0, and 0x083b62b8. It stores mask,
+      queries the current locale through setlocale_core(mask, NULL), saves
+      that pointer, duplicates a non-NULL name as strlen+1 through the
+      ported tag-3 allocator and strcpy, then installs name with the same
+      mask. Allocation failure still reaches strcpy, as in ARM. Host tests
+      substitute the four existing seams to verify call ordering, allocation
+      size, copied NUL-terminated bytes, NULL prior-name behavior, and return
+      identity. match.py confirms the saved-name branch and the two locale
+      calls; LLVM expands the already ported strcpy into its own copy loop,
+      so its 71 instructions do not exactly match the stock 23.
