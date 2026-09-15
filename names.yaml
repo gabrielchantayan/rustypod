@@ -94004,3 +94004,31 @@ functions:
       target slot 0x089ca7f4 with static storage. match.py retains the
       load/test/lazy-call/select/store/reload structure; LLVM differs only in
       frame shape, branch direction, and early-return placement.
+
+  # --- Zero-extend two words into a two-u64 key ---
+  - address: 0x08158cb0
+    ghidra: FUN_08158cb0
+    name: expand_u32_pair_to_u64_pair
+    size: 64
+    sig: "u32 *expand_u32_pair_to_u64_pair(u32 *output, const u32 *first, const u32 *second)"
+    module: util/expand_u32_pair_to_u64_pair
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: first
+      param_3/r2: second
+      FUN_081b4e10: unported two-word copy helper
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte executable extent
+      0x08158cb0..0x08158cf0; the next separately linked function begins at
+      0x08158cf0. The body has two outbound unconditional plain bl calls to
+      0x081b4e10 and no predicated bl form. Its five inbound direct call sites
+      are all unconditional plain bl, with no predicated bl forms. Each helper
+      invocation copies a local two-word pair: first (*first, 0), then
+      (*second, 0), yielding two little-endian zero-extended u64 values at
+      output. The second input word is loaded only after the first output pair
+      is stored, so overlapping pointers observe that order. Rust directly
+      emits the ordered volatile word accesses instead of adding a seam for
+      unported FUN_081b4e10; this deliberately removes the helper call shape
+      while preserving memory behavior and the output return pointer. Host
+      tests cover full-width values and second-input/output aliasing.

@@ -133,6 +133,7 @@ pub mod u16_le_store_last_byte;
 pub mod u16_pair_copy;
 pub mod u32_pair_store;
 pub mod u32_pair_copy;
+pub mod expand_u32_pair_to_u64_pair;
 pub mod u32_indirect_equal;
 pub mod u32_deref_equal;
 pub mod u32_deref_is_max;
