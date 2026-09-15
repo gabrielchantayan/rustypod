@@ -57,6 +57,7 @@ pub mod bn_add;
 pub mod bn_mod_mul_montgomery;
 pub mod bn_ucmp;
 pub mod cipher_name;
+pub mod i2a_asn1_object;
 pub mod digest_init;
 pub mod digest_update_u32;
 pub mod evp_digest_init_ex;

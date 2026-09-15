@@ -90201,3 +90201,37 @@ functions:
       is passed to gateway_service19_request then iram_timer_free_veneer before
       being cleared. The Rust port uses existing ROM/gateway seams and private
       host backing storage for the fixed retailOS state address.
+
+  # --- OpenSSL ASN.1 object BIO printer ---
+  - address: 0x082d3528
+    ghidra: FUN_082d3528
+    name: i2a_asn1_object
+    size: 108
+    sig: "int i2a_ASN1_OBJECT(BIO *bio, const ASN1_OBJECT *object)"
+    module: crypto/i2a_asn1_object
+    status: ported
+    renames:
+      param_1/r0: bio
+      param_2/r1: object
+      auStack_5c/sp_plus_4: oid_text
+      iVar1/r0: object_data
+      uVar2/r4: rendered_length
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte code extent: 27 ARM words
+      from push {r4,r5,lr} at 0x082d3528 through b 0x082d3554 at 0x082d3590;
+      the adjacent "NULL\0" literal occupies 0x082d3594..0x082d3598 and the
+      next separately linked function begins at 0x082d359c. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly five inbound
+      direct calls, all unconditional bl at 0x080511a4, 0x080758c0,
+      0x08078204, 0x0809c040, and 0x080aed20; there are no predicated bl,
+      blx, or direct tail-B callers. This is OpenSSL i2a_ASN1_OBJECT: NULL
+      writes "NULL" through BIO_write; otherwise OBJ_obj2txt renders the
+      numeric OID to its 80-byte stack buffer, lengths above 80 are capped,
+      BIO_write receives that length, and the rendered length is returned.
+      The caller and the ASN1_OBJECT +0x0c/+0x10 layout corroborate the
+      identification; OBJ_obj2txt at 0x0805f110 and BIO_write at 0x0803da74
+      are verified, still-unported seams. Host tests cover NULL, oversized
+      output, ignored BIO_write result, and negative renderer propagation.
+      match.py structural review confirmed the expected LLVM stack/seam
+      differences. Deliberate deviations: unported calls are volatile host
+      seams while firmware builds dispatch to their retailOS addresses.
