@@ -238,6 +238,7 @@ pub unsafe extern "C" fn rect_clear(rect: *mut Rect) {
 ///
 /// Translates the rectangle in place: `dx` moves the horizontal pair,
 /// `dy` the vertical pair. QuickDraw's `OffsetRect`.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rect_offset(rect: *mut Rect, dx: i32, dy: i32) {
     let r = &mut *rect;
