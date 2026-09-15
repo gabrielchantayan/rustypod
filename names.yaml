@@ -13842,6 +13842,37 @@ functions:
       early return, same ldr of node +4, same call order, same
       pass-through return of the pool result.
 
+  # --- Path-resolution node factory ---
+  - address: 0x082e0100
+    ghidra: FUN_082e0100
+    name: path_node_create
+    size: 56
+    sig: "u8 *path_node_create(void)"
+    module: fs/path_node
+    status: ported
+    renames:
+      r0: node/data/return
+      r4: node
+      FUN_082e2f04: path_node_pool_pop_or_recycle
+      FUN_082e00f8: shared_data_allocate
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent
+      0x082e0100..0x082e0137: the next separately linked function begins
+      with b 0x082e014c at 0x082e0138. Decoding every ARM B/BL word in
+      osos.dec finds exactly five direct callers, all plain unconditional
+      bl at 0x082e1fb8, 0x082e2104, 0x082e21e4, 0x082e3094, and
+      0x082e3280; no predicated forms or tail branches target it. It calls
+      path-node pool recycle-or-pop @ 0x082e2f04 with NULL, returns NULL
+      without a data allocation if the pool is empty, otherwise calls the
+      shared-data allocator veneer @ 0x082e00f8, stores its result at node
+      +0x04, and recycles the node through 0x082e2f04 on allocation failure
+      before returning NULL. Raw 0x082e00f8 is mov r0,#0; b 0x082e2f74;
+      Ghidra's 0x082e00f8 C body is not trustworthy. Deliberate deviation:
+      neither allocation helper is ported, so target builds invoke their
+      retailOS load addresses through transmuted function pointers and host
+      tests use recording seams to prove the pool-empty, allocation-failure,
+      and success paths.
+
   - address: 0x082e2004
     ghidra: FUN_082e2004
     name: path_node_lookup_component
