@@ -32431,6 +32431,36 @@ functions:
       diagnostic capture while target builds call the ported
       integrity_check_append_msg directly.
 
+  - address: 0x082c28a0
+    ghidra: FUN_082c28a0
+    name: check_read_locks
+    size: 152
+    sig: "i32 check_read_locks(Btree *btree, u32 root_page, BtCursor *exclude)"
+    module: sqlite/check_read_locks
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r6: root_page
+      param_3/r7: exclude
+      iVar4/r5: btree->db
+      puVar3/r4: btree->pBt->pCursor
+      "puVar3+0x40": cursor->wrFlag
+      "puVar3+0x43": cursor->eState
+      FUN_082d9b00: sqlite3BtreeMoveToRoot (btree_move_to_root)
+    notes: >-
+      SQLite 3.5.x checkReadLocks. Raw ARM confirms the 152-byte extent
+      0x082c28a0..0x082c2934, ending at pop {r4-r8,pc}; the next independent
+      function begins at 0x082c2938. Decoding every ARM B/BL-immediate word
+      in osos.dec finds five inbound direct calls, all unconditional bl:
+      0x082bdbd8, 0x083709d4, 0x08370f50, 0x08371654, and 0x08372a90; no
+      predicated inbound calls. The only outbound call is a caller-gated
+      blne to sqlite3BtreeMoveToRoot @ 0x082d9b00 when a write cursor has
+      moved away from root_page. Valid non-excluded cursors on root_page
+      conflict when read-only and either share btree->db or their db lacks
+      SQLITE_ReadUncommitted; displaced write cursors reset to root. Deliberate
+      deviation: pointers remain target-width u32 fields rather than host
+      pointers, preserving ARM offsets on 64-bit host tests.
+
 
   # ---- SQLite OS close wrapper, sqlite3OsClose (src/sqlite/os_close.rs) ----
   - address: 0x0837dae8
