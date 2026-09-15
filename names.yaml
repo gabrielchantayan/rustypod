@@ -94092,3 +94092,34 @@ functions:
       unported FUN_081b4e10; this deliberately removes the helper call shape
       while preserving memory behavior and the output return pointer. Host
       tests cover full-width values and second-input/output aliasing.
+
+  - address: 0x0814e470
+    ghidra: FUN_0814e470
+    name: service_handler_global_dispatch
+    size: 64
+    sig: "void service_handler_global_dispatch(u32 selector, u32 value)"
+    module: app/service_handler_global_dispatch
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: value
+      DAT_0814e4b0: service_handler_global_slots (two pointers at 0x089ccc28)
+      FUN_0814e3ac: service_handler_selector_dispatch
+    notes: >-
+      Raw ARM is exactly fifteen instruction words at 0x0814e470..0x0814e4ac
+      followed by its literal-pool word 0x089ccc28 at 0x0814e4b0, for the
+      true 64-byte extent. The next real function begins at 0x0814e4b4;
+      Ghidra instead consumed that function and reported a fabricated large
+      body. Decoding every ARM B/BL immediate in osos.dec finds exactly five
+      inbound direct call sites (0x080c9b74, 0x080cb634, 0x080e43c0,
+      0x081b0be8, and 0x0827dbb4), all plain unconditional bl; there are no
+      predicated BL forms or inbound tail branches. It loads the two live
+      pointers at 0x089ccc28 in order, returns when both are zero, and
+      tail-dispatches the first nonzero handler to 0x0814e3ac with selector
+      and value unchanged. Raw code proves that continuation reads the
+      handler vtable's +0x14 slot; it remains unported, so target builds call
+      its fixed address. Host builds deliberately substitute two pointer-sized
+      slots and a volatile function-pointer seam because host pointers cannot
+      occupy the retail four-byte global and vtable words. Tests cover first
+      slot precedence, second-slot fallback, both message words, and the
+      all-null return.
