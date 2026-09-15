@@ -94783,3 +94783,41 @@ functions:
       source-order dependency. match.py reports the same copy/load/tail-call
       structure; LLVM chooses fp/lr/r3 instead of ADS r4/lr and emits an
       ordinary frame, so no instruction prefix is shared.
+
+  # --- ATA work-loop fixed singleton accessor ---
+  - address: 0x0811f634
+    ghidra: FUN_0811f634
+    name: ata_work_loop_get
+    size: 72
+    sig: "void *ata_work_loop_get(void)"
+    module: drivers/ata_work_loop
+    status: ported
+    renames:
+      DAT_0811f67c: ATA_WORK_LOOP_GUARD (0x08a0edf0)
+      DAT_0811f680: ATA_WORK_LOOP (0x08b2f7f8)
+      DAT_0811f684: __dso_handle (0x089ca09c)
+      DAT_0811f688: ATA work-loop destructor (FUN_081147e8)
+      FUN_0811f68c: ATA work-loop constructor (unported seam)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes the true 72-byte extent: 14 instruction words
+      at 0x0811f634..0x0811f67c followed by the four literal-pool words at
+      0x0811f67c..0x0811f68c; 0x0811f68c starts the separately linked
+      constructor. Decoding every ARM B/BL word in osos.dec finds exactly five
+      direct inbound calls, all unconditional plain BL, with no predicated BL.
+      Algorithm: test bit 0 of the guard word; if clear and
+      cxa_guard_acquire succeeds, construct the fixed ATA work-loop object,
+      register the constructor return with cxa_atexit using __dso_handle, then
+      release the guard; always return the fixed object literal. Constructor
+      0x0811f68c initializes a one-time base then a 0x20-byte state object at
+      +0x08, proving the modeled 0x28-byte storage extent. Deliberate
+      deviations: fixed addresses are crate statics, the unported constructor
+      is a volatile seam, and unported three-argument destructor FUN_081147e8
+      is a shutdown-safe no-op because cxa_atexit invokes one-argument
+      handlers. Host tests cover first initialization, bit-0 fast path,
+      acquire refusal for a nonzero bit-0-clear guard, and constructor-return
+      registration versus fixed-object return. match.py reports the same
+      guard gate and constructor/registration/release phases; LLVM inlines
+      cxa_atexit and uses indirect calls through the constructor seam.

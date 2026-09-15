@@ -3,6 +3,7 @@ pub mod ata_cmd;
 pub mod ata_command_execute;
 pub mod ata_command_submit_wait;
 pub mod ata_semaphore;
+pub mod ata_work_loop;
 pub mod ata_taskfile_register_read;
 pub mod ata_stop_transmission;
 pub mod ata_pio_read_halfword;
