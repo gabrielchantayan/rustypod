@@ -93730,3 +93730,37 @@ functions:
       deviation: host builds replace target-width vtable and cast dispatch
       with test seams; device builds use volatile 32-bit fields and direct
       object_cast_to_class.
+
+  # --- controller event mask enablement ---
+  - address: 0x08172550
+    ghidra: FUN_08172550
+    name: controller_event_is_enabled
+    size: 88
+    sig: "u32 controller_event_is_enabled(const void *controller, u32 event)"
+    module: app/controller_event_is_enabled
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: event
+      param_1_plus_0xa8: input_state
+      FUN_080d21f8: event_mask
+      FUN_080e2054: event_class
+      FUN_080538a4: class_zero_mask
+      FUN_080538b0: class_one_mask
+      return/r0: enabled
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x08172550..0x081725a8: push {r4-r8,lr} begins the function and the
+      next separately linked function begins with push {r4-r6,lr} at
+      0x081725a8. The body contains exactly four direct BL instructions, all
+      unconditional and plain: event_mask at 0x08172564, event_class at
+      0x08172570, class_one_mask at 0x08172588, and class_zero_mask at
+      0x081725a0; there are no predicated BL forms. It first maps event to a
+      mask, then classifies it. Class zero reads the controller +0xa8 input
+      state through FUN_080538a4, class one through FUN_080538b0, and every
+      other class leaves the selected mask zero. It returns whether the
+      selected mask shares any bit with the event mask. The four callees have
+      no names.yaml entries, so device builds retain their verified addresses
+      through a volatile operation seam; host tests install recorders to prove
+      call order, input forwarding, both mask branches, rejection, and the
+      unsupported-class path. Deliberate deviations: none.

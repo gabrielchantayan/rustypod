@@ -60,6 +60,7 @@ pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
 pub mod controller_event_category_index;
+pub mod controller_event_is_enabled;
 pub mod controller_history_select;
 pub mod controller_history_select_core;
 pub mod context_scope;
