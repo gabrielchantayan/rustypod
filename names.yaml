@@ -76880,11 +76880,37 @@ functions:
       NULL returns zero. Tag 0x95 tail-calls FUN_082d07f8(context,
       node+0x24); every other tag recursively combines node+0x0c then
       node+0x08, then ORs FUN_082cd8c4(context,node+0x10) and
-      FUN_082cd9b4(context,node+0x38). The three unported callees retain
-      their literal device addresses on ARM and use the documented host ops
-      seam; their identities are intentionally not invented. Tests prove the
-      NULL path, leaf short-circuit, 32-bit node links, recursive call order,
-      and low/high-half mask OR.
+      FUN_082cd9b4(context,node+0x38). The two unported collection callees
+      retain their literal device addresses on ARM and use the documented host
+      ops seam; the leaf lookup is the direct Rust port. Tests prove the NULL
+      path, leaf short-circuit, 32-bit node links, recursive call order, and
+      low/high-half mask OR.
+
+  # --- JIT expression dependency-table identifier mask ---
+  - address: 0x082d07f8
+    ghidra: FUN_082d07f8
+    name: cg_dependency_mask_lookup
+    size: 64
+    sig: "u64 cg_dependency_mask_lookup(const u32 *context, u32 identifier)"
+    module: codegen/dependency_mask_lookup
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: identifier
+      "[context+0x00]": entry_count
+      "context[index+1]": entry_identifier
+      r2: entry_index
+      r0:r1: dependency_mask
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte all-code extent from
+      0x082d07f8 through bx lr at 0x082d0834; the next separately entered
+      function begins at 0x082d0838. The function scans an aligned u32 table
+      whose signed word-zero count bounds identifier words beginning at word
+      one. On a match it tail-branches to the ARM ADS 64-bit shift helper
+      with value one and the matching index; no match returns zero. Decoding
+      inbound ARM branch-with-link instructions finds five direct callers,
+      all unconditional bl, with zero predicated bl forms. The port preserves
+      the helper's >=64 shift result of zero and adds no NULL or bounds guard.
 
   - address: 0x08242ec4
     ghidra: FUN_08242ec4

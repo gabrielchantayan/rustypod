@@ -25,6 +25,9 @@ pub mod exp_golomb;
 /// `cg_expression_dependency_mask` @ 0x082cda48 — recursively combines
 /// an opaque expression node's two child and two collection dependency masks.
 pub mod expression_dependency_mask;
+/// `cg_dependency_mask_lookup` @ `0x082d07f8` — maps a dependency-table
+/// identifier to its 64-bit position mask.
+pub mod dependency_mask_lookup;
 /// `file_has_directory_entry` @ 0x082a548c — platform-file directory-entry
 /// sentinel predicate in the JIT address block.
 pub mod file_directory_entry;
