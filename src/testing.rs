@@ -1110,6 +1110,9 @@ pub mod hints {
     // 0x3c00_0000: dedicated to util/growable_buffer_append's target-width
     // buffer and data fixture; mappings never unmap, so no other user may share it.
     pub const GROWABLE_BUFFER_APPEND: usize = 0x3c00_0000;
+    // Dedicated raw-u32 input-sequence state fixtures; mappings never unmap.
+    pub const INPUT_SEQUENCE_ITEM_FOUND: usize = 0x3d00_0000;
+    pub const INPUT_SEQUENCE_ITEM_BUILD: usize = 0x3f00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -1314,3 +1317,7 @@ pub static OPAQUE_KEYED_COLLECTION_VECTOR_TEST_LOCK: parking_lot::Mutex<()> =
 /// `kernel::posix_mutex::POSIX_MUTEX_OPS`. The mutex port and callers that
 /// query the mask-ROM running-thread entry share this one dispatch table.
 pub static POSIX_MUTEX_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes host tests that replace the input-sequence item lookup/build
+/// seam. Both operations share one dispatch pair and must restore together.
+pub static INPUT_SEQUENCE_ITEM_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

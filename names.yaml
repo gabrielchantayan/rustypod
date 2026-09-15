@@ -94710,3 +94710,30 @@ functions:
       failure path; target Rust branches there directly and host builds panic
       rather than inventing that callee identity. Host vtable cells are
       pointer-width rather than target four-byte words.
+
+  # --- Input-sequence selected item acquisition ---
+  - address: 0x08129a78
+    ghidra: FUN_08129a78
+    name: input_sequence_item_acquire
+    size: 60
+    sig: "void *input_sequence_item_acquire(void *state, u32 action_index, u32 mode)"
+    module: app/input_sequence_item_acquire
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: action_index
+      param_3/r2: mode
+      "state+0xb0": selected_item
+      FUN_0812b018: input_sequence_find_item
+      FUN_081294c4: input_sequence_build_item
+    notes: >-
+      Raw osos.dec confirms the 60-byte extent
+      0x08129a78..0x08129ab4; FUN_08129ab4 begins at the next word. The
+      body has two plain unconditional bl instructions and no predicated
+      calls. Five inbound plain bl calls are at 0x081299c0, 0x08129b30,
+      0x08129c80, 0x08129f04, and 0x08129f48; no inbound predicated bl was
+      observed. It stores the selected collection item's lookup result at
+      +0xb0, calling the builder only for NULL and then returning a reload
+      of that slot. Both callees remain unported; target builds retain their
+      explicit linker seams and host tests replace those seams to prove
+      lookup, fallback, argument forwarding, and final-slot reload behavior.
