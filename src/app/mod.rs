@@ -133,6 +133,7 @@ pub mod input_delta_feedback_update;
 pub mod feedback_level_dispatch;
 pub mod feedback_level_mode_set;
 pub mod input_action_index;
+pub mod input_sequence_item_acquire;
 pub mod managed_entry;
 pub mod managed_entry_selector;
 pub mod class_6600_byte_at_100;
