@@ -95665,3 +95665,30 @@ functions:
       LLVM folds this identical body into cff_check_points despite
       inline(never), leaving t1_builder_check_points as an archive-symbol
       alias; match.py therefore cannot isolate a separate disassembly label.
+
+  - address: 0x080c9604
+    ghidra: FUN_080c9604
+    name: ft_resource_fork_path
+    size: 172
+    sig: "u8 *ft_resource_fork_path(FtMemory *memory, const u8 *path, const u8 *resource_name)"
+    module: ft/resource_fork
+    status: ported
+    renames:
+      param_1/r0: memory
+      param_2/r1: path
+      param_3/r2: resource_name
+      puVar3/r5: output
+      local_20: error
+    notes: >-
+      Raw ARM is 43 instructions from 0x080c9604 through 0x080c96ac (172
+      bytes); 0x080c96b0 is the distinct next function. Five direct BL calls,
+      all unconditional: strlen @ 0x08392478 twice, ft_mem_alloc @
+      0x082cfaa4, strrchr @ 0x08031240, strncpy @ 0x080310d4, and strcat @
+      0x080311b4 twice. It allocates strlen(path)+strlen(resource_name)+1,
+      then inserts resource_name immediately before path's last slash-delimited
+      component; without a slash it prepends the resource name. The u32
+      wrapping size arithmetic, unguarded inputs, and redundant directory
+      prefix NUL are faithful. Host tests cover a nested path, no slash, and
+      allocation failure. match.py reports the expected structural diff: LLVM
+      inlines ft_mem_alloc/memzero and the string helpers rather than retaining
+      the stock BL boundaries.
