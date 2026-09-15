@@ -102,6 +102,7 @@ pub mod stream_read_be16;
 pub mod stream_read_be32;
 pub mod stream_read_core;
 pub mod stream_read_be32_or_zero;
+pub mod stream_read_u32;
 pub mod store_static_descriptor;
 pub mod store_four_u32s;
 pub mod store_four_u32_be;

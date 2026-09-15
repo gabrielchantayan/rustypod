@@ -91436,3 +91436,30 @@ functions:
       are ported and direct except string_object_remove_trailing_codepoint
       (0x082771e0), whose raw target call remains a documented target seam
       because its virtual truncation protocol is not yet ported.
+
+  # --- native-endian stream word read ---
+  - address: 0x08275c88
+    ghidra: FUN_08275c88
+    name: stream_read_u32
+    size: 76
+    sig: "u32 stream_read_u32(EndianWordReader *reader)"
+    module: util/stream_read_u32
+    status: ported
+    renames:
+      param_1/r0: reader
+      local_10: value
+      FUN_080f1588: byteswap_u32
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x08275c88..0x08275cd3: `pop {r3,r4,r5,pc}` at 0x08275cd0 is
+      followed by a new `push {r4,lr}` at 0x08275cd4. The body has one plain
+      direct bl (the byte-swap helper at 0x080f1588), zero predicated direct
+      bl, and one indirect blx through vtable slot +0x2c. Whole-image ARM
+      B/BL-immediate decoding finds five inbound direct calls, all plain
+      unconditional bl; the virtual call is modeled directly, not as an
+      invented named callee. It reads exactly four bytes into a local word,
+      returns -1 on any other count, and byte-swaps successful reads when
+      reader+0x08 is nonzero. Rust inlines the otherwise unported byte-swap
+      helper. Host tests cover exact, short, overlong, and byte-swapped reads;
+      match.py reports the expected structural diff from initialized local
+      storage and inlined byte swapping.
