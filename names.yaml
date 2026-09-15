@@ -48699,6 +48699,32 @@ functions:
       heap_panic path, equivalent to the retail `cmp r1,#3; blge heap_panic`
       path.
 
+  - address: 0x08138ba8
+    ghidra: FUN_08138ba8
+    name: service_handler_lifecycle_word_8
+    size: 40
+    sig: "u32 service_handler_lifecycle_word_8(void *manager, i32 selector)"
+    module: app/service_handler_availability
+    renames:
+      param_1/r0: manager (ignored)
+      param_2/r1: selector
+      DAT_08138bcc: service_handler_lifecycle_records (0x08ad0f34; 0x114-byte records)
+      "lifecycle+0x8": otherwise-unidentified word_8
+    status: ported
+    notes: >-
+      Raw ARM establishes the 40-byte extent 0x08138ba8..0x08138bd0:
+      nine instructions followed by literal 0x08ad0f34 at 0x08138bcc.
+      Ghidra's 36-byte extent omits that literal; 0x08138bd0 starts the
+      distinct next function. The unsigned `selector - 1 < 2` guard admits
+      only selectors one and two; every other 32-bit selector returns zero.
+      The valid path ignores r0 and returns the u32 otherwise-unidentified word
+      at lifecycle table + selector*0x114 + 8. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly five direct inbound bl sites (0x0818e6f0,
+      0x0818e9a0, 0x08190e7c, 0x081924b8, 0x08192750), all unconditional;
+      no predicated direct callers and no plain-B tail sites. The port shares
+      the existing lifecycle-table host fixture; firmware reads 0x08ad0f34
+      directly.
+
   - address: 0x08138c30
     ghidra: FUN_08138c30
     name: service_handler_lifecycle_select_default_descriptor
