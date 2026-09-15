@@ -35,25 +35,51 @@ pub type AppStringResolveFallback = unsafe extern "C" fn(
     output_slot: *mut *mut u8,
 ) -> *mut u8;
 
-/// Unported provider-table operations used by [`app_string_resolver_resolve`].
+/// Provider-table operations used by [`app_string_resolver_resolve`].
 ///
-/// The tagged resolver itself is ported here; its provider lookup and range
-/// table formats remain opaque and are delegated at their original call
-/// boundaries.
+/// The provider lookup is ported as [`app_string_provider_lookup`]. The tagged
+/// resolver's range-table fallback format remains opaque and is delegated at
+/// its original call boundary.
 #[derive(Clone, Copy)]
 pub struct AppStringResolveOps {
     pub lookup: AppStringResolveLookup,
     pub fallback: AppStringResolveFallback,
 }
 
-unsafe extern "C" fn missing_app_string_resolve_lookup(
-    _source: u32,
-    _context: *mut u8,
-    _value: *mut u8,
-    _record_slot: *mut *mut AppStringResolveRecord,
+/// app_string_provider_lookup — original: `FUN_0812d20c` @ 0x0812d20c
+/// (40 bytes; **5 plain `bl` call sites**, 0 predicated `bl` call sites).
+///
+/// Resolves `context` in the provider registry named by `source`, then looks
+/// `value` up in that returned registry. The first lookup returns NULL on a
+/// miss; only a non-NULL provider registry reaches the second lookup, which
+/// preserves its success status and output-slot behavior.
+///
+/// Raw ARM: `bl vtable_file_record_lookup; cmp r0,#0; movne r2,r5; movne
+/// r1,r4; popne; bne registry_lookup; pop {..,pc}`. The five inbound calls
+/// are 0x0811ca98, 0x0811cab8, 0x0811cb38, 0x0811ccb4, and 0x0811cf8c.
+/// Deliberate deviation: Rust performs an ordinary call rather than the
+/// original's conditional tail branch; ABI-visible arguments, status, and
+/// output-slot effects are retained.
+///
+/// # Safety
+/// `source` must be a 32-bit firmware address of a live provider registry;
+/// `record_slot` must be writable. Both registry lookups retain their own
+/// vtable and output-pointer requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn app_string_provider_lookup(
+    source: u32,
+    context: *mut u8,
+    value: *mut u8,
+    record_slot: *mut *mut AppStringResolveRecord,
 ) -> i32 {
-    panic!("app_string_resolver_resolve requires provider lookup 0x0812d20c")
+    let registry = crate::app::vtable_set::vtable_file_record_lookup(source as usize as *mut u8, context as usize as u32);
+    if registry.is_null() {
+        return 0;
+    }
+    crate::app::registry::registry_lookup(registry.cast(), value as usize as u32, record_slot.cast()) as i32
 }
+
 
 unsafe extern "C" fn missing_app_string_resolve_fallback(
     _source: u32,
@@ -67,7 +93,7 @@ unsafe extern "C" fn missing_app_string_resolve_fallback(
 /// Active provider-table operations. Target integration replaces these before
 /// routing retailOS through this resolver.
 pub static mut APP_STRING_RESOLVE_OPS: AppStringResolveOps = AppStringResolveOps {
-    lookup: missing_app_string_resolve_lookup,
+    lookup: app_string_provider_lookup,
     fallback: missing_app_string_resolve_fallback,
 };
 
@@ -183,6 +209,28 @@ mod tests {
 
     use super::*;
     use std::sync::{Mutex, MutexGuard};
+    use crate::app::registry::{Registry, RegistryEntry, RegistryVtable};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+    unsafe extern "C" fn provider_insert(_this: *mut Registry, _entry: *const RegistryEntry) -> usize { 0 }
+    unsafe extern "C" fn provider_assign(_this: *mut Registry, _index: i32, _entry: *const RegistryEntry) -> usize { 0 }
+    unsafe extern "C" fn provider_entry_at(this: *mut Registry, _index: i32, out: *mut RegistryEntry) -> *mut RegistryEntry {
+        out.write(RegistryEntry { class_id: (*this).container[0] as u32, instance: (*this).container[1] as *mut u8 });
+        out
+    }
+    unsafe extern "C" fn provider_index_of(this: *mut Registry, key: *const u32) -> i32 {
+        ((*this).container[0] as u32 == key.read()) as i32 - 1
+    }
+    unsafe extern "C" fn provider_null(_this: *mut Registry) -> *mut u8 { core::ptr::null_mut() }
+
+    fn provider_vtable() -> RegistryVtable {
+        RegistryVtable {
+            unresolved_00: [0; 7], insert: provider_insert, unresolved_20: 0,
+            assign_at: provider_assign, unresolved_28: [0; 5], entry_at: provider_entry_at,
+            unresolved_40: [0; 3], index_of: provider_index_of, unresolved_50: [0; 4],
+            has_pending_changes: provider_null, notify_deferred: provider_null, notify_changed: provider_null,
+        }
+    }
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut LOOKUP_CALLS: u32 = 0;
@@ -233,7 +281,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 APP_STRING_RESOLVE_OPS = AppStringResolveOps {
-                    lookup: missing_app_string_resolve_lookup,
+                    lookup: app_string_provider_lookup,
                     fallback: missing_app_string_resolve_fallback,
                 };
             }
@@ -417,4 +465,38 @@ mod tests {
             assert_eq!(FALLBACK_CALLS, 0);
         }
     }
+    #[test]
+    fn provider_lookup_chains_context_and_value_registries_and_preserves_a_miss_slot() {
+        let _lock = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = try_map_u32_slab(hints::APP_STRING_PROVIDER_LOOKUP, 0x1000) else {
+            assert!(note_missing_u32_fixture("app/string_resolve provider lookup"));
+            return;
+        };
+        let outer = base.cast::<Registry>();
+        let inner = unsafe { base.add(0x200).cast::<Registry>() };
+        let mut outer_vtable = provider_vtable();
+        let mut inner_vtable = provider_vtable();
+        let mut record = AppStringResolveRecord { output: 0x1122_3344, value: 0x5566_7788 };
+
+        unsafe {
+            outer.write(Registry {
+                vtable: &mut outer_vtable, container: [0x11, inner as usize, 0, 0, 0, 0, 0],
+                changed: 0, notify_enabled: 0, reserved: [0; 2], observer: core::ptr::null_mut(),
+            });
+            inner.write(Registry {
+                vtable: &mut inner_vtable, container: [0x22, (&mut record as *mut AppStringResolveRecord) as usize, 0, 0, 0, 0, 0],
+                changed: 0, notify_enabled: 0, reserved: [0; 2], observer: core::ptr::null_mut(),
+            });
+
+            let mut output = core::ptr::null_mut();
+            assert_eq!(app_string_provider_lookup(base as usize as u32, 0x11usize as *mut u8, 0x22usize as *mut u8, &mut output), 1);
+            assert_eq!(output as usize, (&mut record as *mut AppStringResolveRecord) as usize);
+
+            let sentinel = 0xaaaa_bbbbusize as *mut AppStringResolveRecord;
+            output = sentinel;
+            assert_eq!(app_string_provider_lookup(base as usize as u32, 0x11usize as *mut u8, 0x23usize as *mut u8, &mut output), 0);
+            assert_eq!(output, sentinel);
+        }
+    }
+
 }
