@@ -91687,3 +91687,33 @@ functions:
       FUN_08276db4: string_object_text_normalize
     notes: >-
       Raw osos.dec establishes the exact 192-byte extent, from stmdb sp!,{r4,r5,lr} at 0x0826bc30 through ldmia sp!,{r4,r5,pc} at 0x0826bcec; the separately linked next function starts at 0x0826bcf0. Decoding every aligned ARM B/BL-immediate word finds five inbound calls, all unconditional plain bl at 0x08178ab0, 0x08178bb4, 0x08178d30, 0x08178df8, and 0x0828bcf4; no predicated BL reaches it. The record retains source's NULL-safe C string at +0x0c, then constructs a temporary with 0x0826bd10 removing # only before #, slash, or backslash, and conditionally normalizes it through 0x08276db4. It assigns +0x04 only when the resulting UTF-8 comparison differs from the original C string, then destroys both temporaries. The two unported callees are explicit injectable boundaries: device builds must wire their retail addresses; host tests use the boundary contract. The repr(C) record uses typed fields rather than host byte offsets so target StringObject word positions remain correct.
+
+  # --- collection virtual indexed-item wrapper ---
+  - address: 0x0826ba9c
+    ghidra: FUN_0826ba9c
+    name: collection_item_at
+    size: 40
+    sig: "u32 collection_item_at(CollectionOwner *collection, u32 index)"
+    module: util/collection_item_at
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: index
+      "collection+0x04": object
+      "object.vtable+0x3c": indexed_item_method
+      local_8/r0: item
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent, 0x0826ba9c..0x0826bac4:
+      mov r2,#0; push {r3,lr}; str r2,[sp]; ldr r0,[r0,#4]; ldr r2,[r0];
+      ldr r3,[r2,#0x3c]; mov r2,sp; blx r3; ldr r0,[sp]; pop {r12,pc}.
+      The next separately linked function starts at 0x0826bac4. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly five
+      inbound unconditional plain bl calls at 0x0812d390, 0x0812d4bc,
+      0x081880f8, 0x08188128, and 0x082894d4; there are no predicated forms.
+      The owner stores a collection object at +0x04. Its vtable +0x3c method
+      receives (object, index, &zeroed_item); the method return in r0 is
+      discarded and the output word is returned. The virtual target is runtime
+      data, so no callee identity is invented. Deliberate deviation: an
+      injectable dispatch seam provides host ABI tests; firmware performs the
+      verified dereferences, slot load, and indirect call. match.py reports the
+      expected seam/frame structural diff (exit 1).
