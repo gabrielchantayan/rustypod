@@ -91489,3 +91489,32 @@ functions:
       helper. Host tests cover exact, short, overlong, and byte-swapped reads;
       match.py reports the expected structural diff from initialized local
       storage and inlined byte swapping.
+  # --- C++ vtable signed-16-bit reader ---
+  - address: 0x08275c38
+    ghidra: FUN_08275c38
+    name: vtable_slot_2c_read_i16
+    size: 80
+    sig: "i32 vtable_slot_2c_read_i16(void *receiver, u32 unused_r1, u32 unused_r2, u32 initial_value)"
+    module: cxx/vtable_slot_2c_read_i16
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_4/r3: initial_value
+      local_10/sp: value
+      param_1_plus_8: byte_order
+      vtable_plus_0x2c: read_i16
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent: 20 ARM words from
+      push {r3,r4,r5,lr} at 0x08275c38 through pop {r3,r4,r5,pc} at
+      0x08275c84; the next separately linked function begins at 0x08275c88.
+      Decoding every aligned ARM B/BL-immediate word finds exactly five inbound
+      direct calls, all unconditional plain bl at 0x0815fab0, 0x081a378c,
+      0x081a3798, 0x081a37bc, and 0x081a37c8; there are no predicated direct
+      calls or direct tail-B callers. The wrapper seeds a two-byte stack cell,
+      invokes receiver->vtable[11](receiver, &cell, 2), returns -1 unless that
+      call returns 2, then conditionally reverses the cell when receiver+8 is
+      nonzero and returns it sign-extended. The virtual target is unrecovered
+      and deliberately not named. Host vtables use pointer-width entries so
+      native callbacks fit; target entries remain four-byte words. Host tests
+      cover signed results, both byte orders, exact-length dispatch, and short
+      reads. Deliberate deviations: none.
