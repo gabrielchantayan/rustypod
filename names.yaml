@@ -93421,3 +93421,21 @@ functions:
       0x081b53a0, 0x08086e68, and 0x081b53c0; host operations expose their
       ordering and the fixed offset. Deliberate host deviation: the test
       unwind seam returns for inspection, while retail longjmp never returns.
+
+  # --- unconditional successful predicate ---
+  - address: 0x081b11f8
+    ghidra: FUN_081b11f8
+    name: always_succeeds
+    size: 8
+    sig: "u32 always_succeeds(void)"
+    module: util/always_succeeds
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent:
+      `mov r0,#1; bx lr` at 0x081b11f8..0x081b1200. The separately linked
+      next predicate begins at 0x081b1200 with `cmp r1,#18`. Decoding every
+      ARM B/BL word finds exactly five inbound direct call sites
+      (0x080db820, 0x08167288, 0x081af580, 0x081c86a8, 0x08201a3c), all
+      plain unconditional BL; there are no predicated BL forms. It neither
+      reads arguments nor modifies memory, and always returns one. No
+      deliberate deviations.
