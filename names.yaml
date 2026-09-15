@@ -52681,6 +52681,27 @@ functions:
       exactly, with poisoned neighbours proving no adjacent word is
       read.
 
+  - address: 0x082c0c54
+    ghidra: FUN_082c0c54
+    name: cg_register_bitset_create
+    size: 36
+    sig: "uint32_t *cg_register_bitset_create(cg_heap_t *heap, uint32_t register_count)"
+    module: codegen/register_bitset
+    status: ported
+    vars:
+      param_1: heap
+      param_2: register_count
+      piVar1: bitset
+    notes: >-
+      Raw words `e92d4010 e1a04001 e281101f e1a012a1 e3a02008 e0821101
+      eb000365 e5804000 e8bd8010` establish the complete 36-byte body:
+      allocate `((register_count + 31) >> 5) * 4 + 8` bytes through
+      cg_heap_alloc, then store register_count at word zero and return the
+      allocation unchanged. A full raw-binary ARM disassembly finds 5 plain
+      `bl` call sites (0x082b7a9c, 0x082b7ab4, 0x082b7acc, 0x082b7ae4,
+      0x082b7be4) and no predicated calls. The zero-filled allocation leaves
+      word one and all following bit words clear; callers use word zero as
+      the count and word one onward as register masks.
   - address: 0x082c0d2c
     ghidra: FUN_082c0d2c
     name: cg_block_create
