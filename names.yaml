@@ -95398,3 +95398,26 @@ functions:
       WordList; otherwise only a one-element list whose sole word equals value
       matches. The existing word_list_is_zero seam has the verified identity
       and exact ABI used by the original. No deliberate deviations.
+  # --- Parser character-class boundary scan ---
+  - address: 0x080e8eb0
+    ghidra: FUN_080e8eb0
+    name: parser_scan_to_class_boundary
+    size: 52
+    sig: "const u8 *parser_scan_to_class_boundary(const Parser *parser, const u8 *characters)"
+    module: app/character_class_scan
+    status: ported
+    renames:
+      param_1/r0: parser
+      param_2/r1: characters
+      r3: character_class_table
+      r1: character_class
+    notes: >-
+      Raw osos.dec establishes the true 52-byte extent
+      0x080e8eb0..0x080e8ee4: it loads the target-width u32 character-class
+      table pointer from parser+4, advances while class bit 0x10 is set, and
+      returns before a class without bit 0x10 or with bit 0x08. Complete-image
+      decoding finds five plain unconditional inbound bl calls (0x0807bf8c,
+      0x0807bfb8, 0x0807bfd8, 0x0807c0b0, 0x0807c0dc), zero predicated
+      inbound bl calls, and no outbound bl calls. The parser type remains raw
+      storage because only its table field is independently established; host
+      tests cover scan, delimiter precedence, and the 0xff table index.
