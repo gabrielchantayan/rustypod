@@ -1082,6 +1082,9 @@ pub mod hints {
     // 0xfe00_0000: dedicated to cxx/parse_i32_list's UTF-16 raw-u32 range
     // fixture; mappings never unmap, so no other user may share it.
     pub const PARSE_I32_LIST: usize = 0xfe00_0000;
+    // 0x5e00_0000: dedicated to app/pending_object_pair_release's raw-u32
+    // pending-object fixture; mappings never unmap, so no other user may share it.
+    pub const PENDING_OBJECT_PAIR_RELEASE: usize = 0x5e00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

@@ -202,6 +202,7 @@ pub mod pending_event_take;
 pub mod pending_event_take_due;
 pub mod pending_event_insert;
 pub mod request_callback_state_reset;
+pub mod pending_object_pair_release;
 pub mod queue_complete;
 pub mod completion_gate;
 pub mod queued_message;

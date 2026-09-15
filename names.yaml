@@ -93060,3 +93060,34 @@ functions:
       literal veneer to the unported base constructor; host tests inject that
       constructor through a seam and verify argument forwarding, store order,
       return identity, and both derived writes.
+
+  # --- Pending opaque-object pair release (src/app/pending_object_pair_release.rs) ---
+  - address: 0x081db89c
+    ghidra: FUN_081db89c
+    name: pending_object_pair_release
+    size: 100
+    sig: "void pending_object_pair_release(void *owner)"
+    module: app/pending_object_pair_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x198": pending_state_0
+      "owner+0x19c": pending_state_1
+      "owner+0x1a0": first_pending_object
+      "owner+0x1a4": second_pending_object
+      "pending_object+0x60": release_flag
+      FUN_0828e5b0: opaque_destructor
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec words establish the exact 100-byte extent
+      0x081db89c..0x081db8ff; the next real function is the two-word helper
+      at 0x081db900 (`strb r1,[r0,#0x168]; bx lr`). A complete ARM B/BL
+      immediate scan finds five inbound direct calls at 0x081daeec, 0x081db910,
+      0x081dbc20, 0x081dbfc4, and 0x081dc1e4: all plain unconditional bl and
+      no predicated bl forms. The body has four plain bl instructions and no
+      predicated calls: for each non-NULL object at +0x1a0 then +0x1a4, it
+      first sets byte +0x60, calls the opaque destructor @ 0x0828e5b0, then
+      calls the already ported tag-2 operator_delete @ 0x082aad24. Finally it
+      clears all four words at +0x198..+0x1a4. The opaque destructor's class
+      identity is not inferred; target code calls its verified raw address
+      through PENDING_OBJECT_DESTRUCT, while host tests replace that seam.
