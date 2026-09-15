@@ -17,6 +17,35 @@
 base: 0x08000000
 
 functions:
+  # --- RGBA8 cursor writer ---
+  - address: 0x0825e394
+    ghidra: FUN_0825e394
+    name: rgba8_cursor_write
+    size: 84
+    sig: "void rgba8_cursor_write(u32 unused, u8 **destination_cursor, const u8 *components)"
+    module: cxx/rgba8_cursor_write
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: destination_cursor
+      param_3/r2: components
+      r0: destination
+      r3: component
+      r12: next_destination
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r0,[r1] at 0x0825e394 through bx lr at 0x0825e3e4; the separately
+      linked next function begins at 0x0825e3e8, with no literal pool. The
+      body repeats four ordered byte loads and stores: it reads components[0..4),
+      advances destination_cursor after each read, then emits each byte at the
+      original cursor. This order makes overlapping component and destination
+      regions observable. Decoding every aligned ARM B/BL-immediate word in
+      osos.dec finds exactly five inbound direct calls, all unconditional bl at
+      0x0825e908, 0x0826026c, 0x083b4d24, 0x083b4df0, and 0x083b4f8c; there
+      are no predicated bl forms or direct tail-B callers. Host tests cover
+      cursor advancement and every relative quadruplet overlap. match.py
+      structural review was completed. Deliberate deviation: volatile Rust
+      accesses preserve the ARM load/store ordering against LLVM optimization.
   # --- RGBA8 cursor to RGB555A1 packer ---
   - address: 0x0825eca8
     ghidra: FUN_0825eca8
