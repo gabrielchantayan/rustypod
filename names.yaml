@@ -95891,3 +95891,27 @@ functions:
       strlen/strncmp substring algorithm locally; the construct and destroy
       calls use their existing ports. Host tests cover embedded matches,
       incomplete and case-variant nonmatches, empty input, and NULL input.
+  - address: 0x0809ca70
+    ghidra: FUN_0809ca70
+    name: global_event_dispatch
+    size: 36
+    sig: "u32 global_event_dispatch(u32 event_code)"
+    module: app/global_event_dispatch
+    status: ported
+    renames:
+      param_1/r0: event_code
+      DAT_0809ca94: global_event_dispatch_object
+      r1: dispatch_object_then_entry
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      ldr r1,[0x0809ca94] at 0x0809ca70 through bx lr at 0x0809ca90; the
+      literal global-object-pointer address 0x089ca95c is at 0x0809ca94 and
+      the next separately linked function starts at 0x0809ca98. Decoding every
+      aligned ARM B/BL-immediate word finds five inbound direct calls: plain bl
+      at 0x081f48dc, 0x081f4910, 0x081f49d4, and 0x081f49f4, plus predicated
+      blhi at 0x08a0e99c. No direct BL occurs within the body; when the global
+      object is non-NULL, bxne tail-dispatches its +0x0c entry with the event
+      word and returns that result, otherwise it returns 0x11. Host tests cover
+      both outcomes. Deliberate deviation: Rust models the tail transfer
+      as a normal call and uses a native-pointer host seam; LLVM selects target
+      tail-call codegen.
