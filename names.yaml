@@ -93359,3 +93359,35 @@ functions:
       cover adjacent-field preservation, full-width overwrites, and return
       identity. match.py reports only LLVM's frame prologue/epilogue around the
       same three ordered stores. Deliberate deviations: none.
+
+  # --- runtime error report and non-local unwind ---
+  - address: 0x081b53e4
+    ghidra: FUN_081b53e4
+    name: report_runtime_error
+    size: 48
+    sig: "void report_runtime_error(u32 code, const u8 *descriptor)"
+    module: heap/report_runtime_error
+    status: ported
+    renames:
+      param_1/r0/r5: error code
+      FUN_081b53a0: active runtime-error context getter
+      FUN_08086e68: missing runtime-error context handler
+      FUN_081b53c0: runtime-error descriptor setter
+      FUN_08031748: longjmp
+      "context+0x180": error code
+      "context+0x184": JmpBuf
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent from push
+      {r4,r5,r6,lr} at 0x081b53e4 through bl longjmp at 0x081b5410. The
+      following ldr r1,[r0,#4] at 0x081b5414 is the separately linked next
+      leaf function, despite Ghidra's continuation into it. Decoding the body
+      finds three unconditional plain BL and one predicated BLEQ, with no
+      other call form; the firmware has five inbound direct BL callers, all
+      plain unconditional. It fetches the active runtime-error context; when
+      NULL it calls the missing-context handler with -1, then (as stock does)
+      continues. It writes code at +0x180, publishes the opaque descriptor,
+      and longjmps to the context with value 1. The three context helpers
+      remain unported, so target defaults call their verified stock addresses
+      0x081b53a0, 0x08086e68, and 0x081b53c0; host operations expose their
+      ordering and the fixed offset. Deliberate host deviation: the test
+      unwind seam returns for inspection, while retail longjmp never returns.

@@ -37,6 +37,7 @@ pub mod task_unblock_range_gateway;
 pub mod task_yield_gateway;
 pub mod timer_free_gateway;
 pub mod new_handler;
+pub mod report_runtime_error;
 pub mod pool;
 pub mod releasable_buffer;
 pub mod owned_buffer;
