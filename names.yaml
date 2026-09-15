@@ -67329,6 +67329,39 @@ functions:
       renders the >=32 clamps as cmp/bhi and bicls, exactly as it does
       for the already-ported berec_extract_bits.
 
+  - address: 0x082728cc
+    ghidra: FUN_082728cc
+    name: base64_decode
+    size: 216
+    sig: "int base64_decode(u32 unused, const u8 *encoded, int encoded_len, u8 *output, u32 *output_capacity)"
+    module: crypto/base64_decode
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1/r9: encoded
+      param_3/r2/r10: encoded_len
+      param_4/r3/r5: output
+      param_5/[sp,#0x28]/r7: output_capacity
+      r6: filter_bio
+      r4: memory_bio
+    notes: >-
+      OpenSSL BIO-chain base64 decoder. Raw ARM confirms the exact
+      216-byte extent 0x082728cc..0x082729a4: push {r3-r9,sl,fp,lr} at
+      the start and pop at +0xd4, followed by the next separately linked
+      function's push. Decoding the full raw body finds eight internal
+      unconditional BL instructions and no predicated BL. Independently,
+      raw ARM branch-target scanning finds five inbound plain BL call sites
+      and zero predicated BL call sites, matching the five callers. It
+      creates the filter and memory BIOs via the verified method factories
+      at 0x0803d358 and 0x0803d8a8, pushes the latter behind the former,
+      writes encoded input, enables control 11, then retrieves the memory
+      BIO bytes with BIO_ctrl(..., 3, 0, &bytes). If capacity >= bytes + 1,
+      it copies bytes and zeroes bytes[bytes] and bytes[bytes-1]. Regardless
+      of capacity it stores bytes - 1, including the original's u32
+      underflow when bytes is zero. The unported factories, BIO_push,
+      BIO_write, and BIO_free_all retain verified target-address seams;
+      host tests model their ABI boundaries. Deliberate deviations: none.
+
   - address: 0x0819c9d0
     ghidra: FUN_0819c9d0
     name: set_global_flag_byte
