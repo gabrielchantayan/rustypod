@@ -29,6 +29,7 @@ pub mod empty_destructor_1e741c;
 pub mod empty_destructor_1d6030;
 pub mod empty_destructor_1f3ff0;
 pub mod empty_destructor_08267b90;
+pub mod empty_destructor_08297568;
 pub mod empty_destructor_166a3c;
 pub mod empty_destructor_1070b4;
 pub mod empty_destructor_083d8008;
