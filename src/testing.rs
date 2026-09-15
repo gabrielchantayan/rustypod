@@ -95,6 +95,11 @@ pub mod hints {
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
+    // Dedicated raw-u32 owner fixtures for iterator seek tests; mappings
+    // never unmap, so each target layout has its own hint.
+    pub const ITERATOR_STATE_SEEK: usize = 0x1c10_0000;
+    pub const ITERATOR_STATE_SEEK_CONSTRUCT: usize = 0x1c20_0000;
+    pub const ITERATOR_STATE_SEEK_BEGIN: usize = 0x1c30_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
     // session and pending-event fixture; mappings never unmap, so no other
     // user may share this hint.
