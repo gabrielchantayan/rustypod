@@ -116,6 +116,39 @@ pub unsafe extern "C" fn lcd_wait_ready() {
     while unsafe { lcd_status() } & LCD_BUSY != 0 {}
 }
 
+/// lcd_write_command — original: `FUN_080c99fc` @ `0x080c99fc` (76 bytes,
+/// `0x080c99fc..0x080c9a48`, including its literal pool; **5 verified direct
+/// `bl` call sites, all unconditional; zero predicated forms**).
+///
+/// Waits for the LCD, writes `command` to controller +0x04, then writes the
+/// low byte of each of zero through four ABI argument words to data +0x40,
+/// waiting before every data write. The retail body accepts a count in `r1`;
+/// four explicit trailing words preserve its maximum observed ARM call ABI.
+/// It neither validates the count nor times out.
+///
+/// Deliberate deviation: target MMIO accesses remain volatile; host builds
+/// use atomic controller words. Counts above four have no known call sites and
+/// cannot be represented by Rust's stable non-variadic C ABI.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lcd_write_command(
+    command: u32,
+    parameter_count: u8,
+    parameter_0: u32,
+    parameter_1: u32,
+    parameter_2: u32,
+    parameter_3: u32,
+) {
+    unsafe { lcd_wait_ready() };
+    unsafe { lcd_write_word(LCD_REGISTER_INDEX_OFFSET, command) };
+
+    let parameters = [parameter_0, parameter_1, parameter_2, parameter_3];
+    for parameter in parameters.iter().take(parameter_count as usize) {
+        unsafe { lcd_wait_ready() };
+        unsafe { lcd_write_word(LCD_REGISTER_VALUE_OFFSET, *parameter & 0xff) };
+    }
+}
+
 #[inline(always)]
 unsafe fn lcd_wait_command_ready() {
     while unsafe { lcd_status() } & LCD_COMMAND_READY == 0 {}
@@ -212,10 +245,10 @@ pub unsafe extern "C" fn lcd_begin_command_transaction() -> u32 {
 mod tests {
     extern crate std;
 
-    use super::{lcd_begin_command_transaction, lcd_wait_ready, lcd_write_register,
-        lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL, HOST_LCD_REGISTER_INDEX,
-        HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS, LCD_BUSY,
-        LCD_COMMAND_MODE, LCD_COMMAND_READY};
+    use super::{lcd_begin_command_transaction, lcd_wait_ready, lcd_write_command,
+        lcd_write_register, lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL,
+        HOST_LCD_REGISTER_INDEX, HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS,
+        LCD_BUSY, LCD_COMMAND_MODE, LCD_COMMAND_READY};
     use core::sync::atomic::{AtomicU32, Ordering};
     use parking_lot::Mutex;
     use std::sync::mpsc;
@@ -278,6 +311,40 @@ mod tests {
             assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), u32::MAX);
             assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), value);
             assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn command_writes_index_without_data_when_count_is_zero() {
+        let _guard = TEST_LOCK.lock();
+        reset_host_controller(0);
+
+        unsafe { lcd_write_command(0x2c, 0, u32::MAX, u32::MAX, u32::MAX, u32::MAX) };
+
+        assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), 0x2c);
+        assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), u32::MAX);
+        assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn command_writes_low_bytes_for_all_four_observed_parameters() {
+        let _guard = TEST_LOCK.lock();
+
+        for (count, expected_value) in [(1, 0x44), (2, 0x33), (3, 0x22), (4, 0x11)] {
+            reset_host_controller(0);
+            unsafe {
+                lcd_write_command(
+                    0x2a,
+                    count,
+                    0xffff_ff44,
+                    0xaaaa_aa33,
+                    0x5555_5522,
+                    0x1234_5611,
+                )
+            };
+            assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), 0x2a);
+            assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), expected_value);
+            assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), count as u32 + 1);
         }
     }
     #[test]
