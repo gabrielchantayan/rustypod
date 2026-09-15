@@ -28,12 +28,6 @@ const POSITION_MAP_TABLE_OFFSET: usize = 0x470;
 /// Number of per-selector slots (`cmpne r5, #0x31; bcs` skips >= 49).
 const SLOT_COUNT: u32 = 49;
 
-/// Stock selector normalizer @ 0x080b48dc (unported, shared with
-/// `ui/plst_slot_item`). Rewrites `*selector` for the special selectors
-/// 0x33..0x37 and may force `*reverse_flag` to 0. Identity for selectors
-/// below 0x33.
-#[cfg(target_os = "none")]
-static NORMALIZE_SELECTOR_ADDRESS: usize = 0x080b_48dc;
 
 
 /// Stock sorted-map builder @ 0x080ca00c (unported). Reads the u32 count
@@ -63,15 +57,6 @@ pub type PlstBuildPositionMap = unsafe extern "C" fn(slot: *mut u8) -> *mut u8;
 pub type PlstSlotIndexOf =
     unsafe extern "C" fn(key: *mut u8, map: *mut u8, reverse_flag: u32) -> u32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_normalize_selector(
-    element: *mut u8,
-    selector: *mut u32,
-    reverse_flag: *mut u8,
-) {
-    let normalize: PlstNormalizeSelector = core::mem::transmute(NORMALIZE_SELECTOR_ADDRESS);
-    normalize(element, selector, reverse_flag)
-}
 
 unsafe extern "C" fn ported_materialize_slot(element: *mut u8, selector: u32) -> u32 {
     crate::ui::plst_slot_materialize::materialize_plst_slot(element, selector)
@@ -93,15 +78,6 @@ unsafe extern "C" fn firmware_slot_index_of(
     index_of(key, map, reverse_flag)
 }
 
-/// Host default: the stock normalizer is the identity for every selector
-/// below 0x33, which is all a fixture needs unless it installs a mock.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_normalize_selector(
-    _element: *mut u8,
-    _selector: *mut u32,
-    _reverse_flag: *mut u8,
-) {
-}
 
 
 /// Host default: unreachable because target-width host materialization fails
@@ -121,10 +97,9 @@ unsafe extern "C" fn host_slot_index_of(_key: *mut u8, _map: *mut u8, _reverse_f
 
 /// Calls outside this one-function port.
 ///
-/// `normalize_selector`, `build_position_map`, and `slot_index_of` preserve
-/// their stock boundaries. The materializer is now the Rust port at
-/// [`crate::ui::plst_slot_materialize`]; host tests may still replace all
-/// calls with mocks.
+/// `normalize_selector` and `materialize_slot` reach Rust ports. The map
+/// builder and index helper preserve their stock boundaries; host tests may
+/// still replace all calls with mocks.
 #[derive(Clone, Copy)]
 pub struct PlstSlotPositionOps {
     pub normalize_selector: PlstNormalizeSelector,
@@ -135,10 +110,7 @@ pub struct PlstSlotPositionOps {
 
 /// Default target/host call boundary.
 pub const DEFAULT_PLST_SLOT_POSITION_OPS: PlstSlotPositionOps = PlstSlotPositionOps {
-    #[cfg(target_os = "none")]
-    normalize_selector: firmware_normalize_selector,
-    #[cfg(not(target_os = "none"))]
-    normalize_selector: host_normalize_selector,
+    normalize_selector: crate::ui::plst_selector_normalize::normalize_plst_selector,
     materialize_slot: ported_materialize_slot,
     #[cfg(target_os = "none")]
     build_position_map: firmware_build_position_map,
