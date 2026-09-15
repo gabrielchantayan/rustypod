@@ -23,6 +23,7 @@ pub mod prid_checked_word_c0;
 pub mod class_8900_work_queue;
 pub mod class_8900_queued_work_construct;
 pub mod clamped_mode_position;
+pub mod clamped_mode_position_adjust;
 pub mod class_8c00;
 pub mod settings_value_scale;
 pub mod buffer_refill_request;
