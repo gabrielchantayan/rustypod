@@ -34010,11 +34010,11 @@ functions:
       clear and dbSize is zero: sqlite3_malloc first, SQLITE_NOMEM (7) on
       failure, otherwise context_activity_enter, pager_reset, the pageSize
       store, pager_set_sector_size, tracked_free(pTmpSpace), pTmpSpace
-      replacement, and an inline nRef decrement. The existing ported helpers
-      are called directly. pager_reset (0x082de404) and pager_set_sector_size
-      (0x08369040) remain retailOS-owned; target builds call their load
-      addresses and host tests use a private recording boundary only to prove
-      the old-page-size reset, new-page-size sector setup, and lease balance.
+      replacement, and an inline nRef decrement. The existing ported helpers,
+      including pager_reset (0x082de404), are called directly.
+      pager_set_sector_size (0x08369040) remains retailOS-owned; target builds
+      call its load address and host tests use a private recording boundary to
+      prove the new-page-size sector setup and lease balance.
   - address: 0x0837ee98
     ghidra: FUN_0837ee98
     name: release_object
@@ -90115,3 +90115,43 @@ functions:
       with the expected structural diff: LLVM uses cmp #3 rather than a call to
       the inlined validator and materializes the resident current-drive target
       in a literal before blx.
+
+
+  # --- SQLite pager cache reset ---
+  - address: 0x082de404
+    ghidra: FUN_082de404
+    name: pager_reset
+    size: 112
+    sig: "void pager_reset(Pager *pager)"
+    module: sqlite/pager_reset
+    status: ported
+    renames:
+      param_1/r5: pager
+      iVar1/r4: page
+      iVar2/r6: next_page
+      "pager+0x20": reset_guard
+      "pager+0x88": page_list
+      "page+0x18": next_page
+      "page+0x34": tracked_payload
+      FUN_082d8e30: page_cache_unlink (unported)
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte extent: 28 ARM words from
+      push {r4,r5,r6,lr} at 0x082de404 through pop {r4,r5,r6,pc} at
+      0x082de470; the separately linked next function begins at 0x082de474.
+      Decoding every ARM B/BL immediate finds exactly five inbound direct
+      calls: four unconditional plain bl at 0x082dd458, 0x082de890,
+      0x0837ddf4, and 0x0837ec50, plus one blne at 0x082dd6e8; there are no
+      direct-B tail callers. No aligned image data word equals this address.
+      A nonzero pager+0x20 returns without touching state. Otherwise the page
+      list rooted at pager+0x88 is walked in order: save page+0x18, unlink the
+      page through the unported 0x082d8e30, free its page+0x34 tracked payload,
+      then free the page. It clears +0x8c, +0x88, +0x90, and +0xcc, frees
+      +0xd0, then clears +0x44, +0xd0, and +0x48. Target builds call the
+      unported unlinker at its verified load address; host tests use a private
+      recording slot only for that unported dependency. Target-width pointers
+      are loaded and stored as u32 words. Host tests cover the guard no-op,
+      two-page unlink order, NULL page payload, all state clears, and final
+      tracked-free target. match.py against this worktree archive prints the
+      expected structural diff: LLVM inlines tracked_free and uses an indirect
+      host-modelable unlink call rather than the original direct bl.
