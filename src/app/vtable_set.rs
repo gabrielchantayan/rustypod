@@ -3458,10 +3458,10 @@ const FILE_RECORD_NODE_FREE_TAG: usize = 0x19;
 /// pointer, the state object at iter+4).
 const ITERATOR_WORDS: usize = 6;
 
-/// The outer-iterator begin behind the `bl 0x08212a5c` at 0x0811d01c
-/// inside [`vtable_file_record_teardown`]. 0x08212a5c is a 4-byte
-/// thunk (`b 0x081dde18`) into `FUN_081dde18` @ 0x081dde18 (28 bytes;
-/// **5 `bl` call sites**, grep on `decomp/osos.asm`; **unported**):
+/// file_record_iterator_begin — original: `FUN_081dde18` @ 0x081dde18
+/// (24 bytes exactly, 0x081dde18..0x081dde30; six instructions, no
+/// literal pool; **5 plain `bl` call sites, 0 predicated `bl` call
+/// sites**, binary-scanned).
 ///
 /// ```text
 /// 081dde18  stmdb sp!, {r4, lr}
@@ -3472,22 +3472,42 @@ const ITERATOR_WORDS: usize = 6;
 /// 081dde2c  ldmia sp!, {r4, pc}
 /// ```
 ///
-/// Stores the registry pointer in the iterator's first word and
-/// initializes the state object at iter+4 through the unported
-/// 0x08155e80; the returned iter pointer is discarded at this call
-/// site. The wired default is a no-op: the state-machine init is an
-/// unported registry-iterator subsystem, and paired with the
-/// 0-returning [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`] default it
-/// yields an empty traversal (the `store_remove_unported` no-op
-/// precedent). Host tests install a recording mock via
-/// `core::ptr::addr_of_mut!`.
+/// Stores the registry or bucket in iterator word zero, then constructs
+/// its five-word iterator state at word one with the before-first
+/// position (`-2`). The constructor's returned state pointer is
+/// deliberately discarded; this function returns the original iterator.
+/// Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `iter` must address six writable target-width words. `registry`
+/// reaches [`iterator_state_construct`] unchecked, matching ARM.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn file_record_iterator_begin(
+    iter: *mut u32,
+    registry: *mut u8,
+) -> *mut u32 {
+    iter.write(registry as u32);
+    iterator_state_construct(iter.add(1), registry, -2);
+    iter
+}
+
+/// The outer-iterator begin behind the `bl 0x08212a5c` at 0x0811d01c
+/// inside [`vtable_file_record_teardown`]. 0x08212a5c is a 4-byte
+/// thunk (`b 0x081dde18`) into [`file_record_iterator_begin`].
+///
+/// This seam keeps the unported thunk interceptable for teardown host
+/// tests; its default calls the ported shared iterator begin.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN: unsafe extern "C" fn(
     iter: *mut u32,
     registry: *mut u8,
-) = teardown_outer_begin_unported;
+) = teardown_outer_begin_ported;
 
-/// Default outer-iterator begin: a no-op (see the seam's doc).
-unsafe extern "C" fn teardown_outer_begin_unported(_iter: *mut u32, _registry: *mut u8) {}
+/// Default outer-iterator thunk: discards the target's returned iterator.
+unsafe extern "C" fn teardown_outer_begin_ported(iter: *mut u32, registry: *mut u8) {
+    file_record_iterator_begin(iter, registry);
+}
 
 /// The outer-iterator step behind the `bl 0x08212a4c` at 0x0811d07c
 /// inside [`vtable_file_record_teardown`]. `FUN_08212a4c` @ 0x08212a4c
@@ -3537,10 +3557,8 @@ unsafe extern "C" fn teardown_outer_next_unported(_iter: *mut u32, _key_out: *mu
 ///
 /// Looks the outer key up in the registry through the ported
 /// [`vtable_file_record_lookup`] (0x0812d160) and tail-branches into
-/// the shared iterator begin
-/// `FUN_081dde18` (see [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`])
-/// over the resulting bucket. The wired default is a no-op (the
-/// [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`] rationale). Host tests
+/// the ported shared [`file_record_iterator_begin`] over the resulting
+/// bucket. The unported wrapper remains a no-op by default; host tests
 /// install a recording mock via `core::ptr::addr_of_mut!`.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN: unsafe extern "C" fn(
     iter: *mut u32,
@@ -4028,18 +4046,18 @@ unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
 ///
 /// # Deviations
 ///
-/// - **Four unported callees sit behind seams** — the outer begin
-///   0x08212a5c behind [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`],
-///   the outer step 0x08212a4c behind
-///   [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`], the inner begin
-///   0x0821c4c8 behind [`VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN`],
-///   and the registry dispose 0x0812d300 behind
+/// - **Three unported callees sit behind seams** — the outer step
+///   0x08212a4c behind [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`], the
+///   inner begin 0x0821c4c8 behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN`], and the registry
+///   dispose 0x0812d300 behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. The ported
-///   [`iterator_state_cleanup`] remains behind
+///   [`file_record_iterator_begin`] is the default behind the outer
+///   thunk's test seam, while [`iterator_state_cleanup`] remains behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`] for host-test
 ///   interception, wired directly as its default. The unported defaults
-///   yield an EMPTY traversal (no-op begins/dispose and 0-returning
-///   steps), so an unswapped table runs through cleanup then straight to
+///   yield an EMPTY traversal (no-op inner begin/dispose and 0-returning
+///   step), so an unswapped table runs through cleanup then straight to
 ///   the guard/delete/zero tail (the `store_remove_unported` /
 ///   `construct_guard_unported` no-op precedent). Host tests install
 ///   scripted recording mocks.
@@ -4687,7 +4705,7 @@ pub(crate) mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_GUARD)
                     .write_volatile(construct_guard_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN)
-                    .write_volatile(teardown_outer_begin_unported);
+                    .write_volatile(teardown_outer_begin_ported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT)
                     .write_volatile(teardown_outer_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
@@ -5231,6 +5249,27 @@ pub(crate) mod tests {
             .write_volatile(recording_iterator_state_link);
         core::ptr::addr_of_mut!(ITERATOR_STATE_SEEK)
             .write_volatile(recording_iterator_state_seek);
+    }
+
+    #[test]
+    fn file_record_iterator_begin_stores_registry_constructs_state_and_returns_iterator() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        let mut iter = [0xa5a5_a5a5u32; ITERATOR_WORDS];
+        let registry = 0x0855_0000usize as *mut u8;
+        unsafe {
+            install_recording_iterator_state_ops();
+            let iter_ptr = iter.as_mut_ptr();
+            let returned = file_record_iterator_begin(iter_ptr, registry);
+
+            assert_eq!(returned, iter_ptr, "sub r0, r0, #4 returns the original iterator");
+            assert_eq!(iter[0], registry as u32, "str r1, [r0], #4 stores the registry");
+            assert_eq!(ITERATOR_LINK_CALLS, 1, "the state constructor links once");
+            assert_eq!(ITERATOR_LINK_STATE, iter_ptr.add(1), "state begins at iterator + 4");
+            assert_eq!(ITERATOR_SEEK_CALLS, 1, "the state constructor seeks once");
+            assert_eq!(ITERATOR_SEEK_STATE, iter_ptr.add(1), "seek receives iterator + 4");
+            assert_eq!(ITERATOR_SEEK_POSITION, -2, "mvn r2, #1 supplies before-first");
+        }
     }
 
     #[test]
