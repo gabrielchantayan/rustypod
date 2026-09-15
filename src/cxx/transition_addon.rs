@@ -239,13 +239,14 @@ pub unsafe extern "C" fn silver_controller_transition_addon_destroy(
     this
 }
 
-/// Dispatch boundaries for the six unresolved calls in
-/// [`silver_controller_transition_addon_construct`]. Two more callees are
-/// already ported and called directly: the common interface-guard base
-/// constructor 0x0818a0c4 ([`interface_guard_base_construct`]), the facade
-/// accessor 0x0818a0bc ([`facade_for_selector`]), and the alignment query
-/// 0x081a81bc (a byte-identical copy of [`deque_seg_capacity`], which the
-/// 0x083d9fc0 ledger entry sanctions hooking any copy to).
+/// Dispatch boundaries for five unresolved helpers in
+/// [`silver_controller_transition_addon_construct`]. The owner-capacity
+/// query @ 0x08296efc is ported and wired directly; the other ported callees
+/// are the common interface-guard base constructor 0x0818a0c4
+/// ([`interface_guard_base_construct`]), the facade accessor 0x0818a0bc
+/// ([`facade_for_selector`]), and the alignment query 0x081a81bc (a
+/// byte-identical copy of [`deque_seg_capacity`], which the 0x083d9fc0
+/// ledger entry sanctions hooking any copy to).
 #[derive(Clone, Copy)]
 pub struct TransitionAddonConstructOps {
     /// `FUN_082792b4`: the embedded string member's construction veneer —
@@ -256,10 +257,6 @@ pub struct TransitionAddonConstructOps {
         member: *mut u8,
         source: *const u8,
     ) -> *mut u8,
-    /// `FUN_08296efc`: reads the owner's +0x04 interface word; NULL yields
-    /// 0x200, otherwise the interface vtable slot +0x2c is called. The
-    /// caller-visible boundary takes the owner word stored at this+0x04.
-    pub owner_capacity_query: unsafe extern "C" fn(owner: *mut u8) -> u32,
     /// `FUN_08277b64`: the transfer-quantum helper. Reads the context word
     /// at this+0x28 (already stored) and the capacity word at this+0x24,
     /// optionally re-queries the context through 0x081a8198, clamps against
@@ -299,14 +296,38 @@ unsafe extern "C" fn string_member_construct_unported(
     member
 }
 
-/// Default for the unresolved owner capacity query @ 0x08296efc: the
-/// decoded body's own `moveq r0, #0x200` fallback for a NULL interface
-/// word, reproduced without dereferencing the owner (the common base
-/// constructor's host resolver boundary supplies that NULL word by default,
-/// so there is nothing valid to dispatch on). The live-interface vtable
-/// slot +0x2c call is not reproduced.
-unsafe extern "C" fn owner_capacity_query_unported(_owner: *mut u8) -> u32 {
-    0x200
+/// owner_capacity_query — original: `FUN_08296efc` @ 0x08296efc (28 bytes;
+/// five plain `bl` call sites, zero predicated calls).
+///
+/// Loads the object's 32-bit interface word at +0x04. A NULL interface returns
+/// 0x200; otherwise it loads the interface vtable word, invokes its +0x2c
+/// slot with the interface still in r0, and returns that result. The next
+/// function starts at 0x08296f18, confirming Ghidra's 28-byte extent.
+/// On non-firmware host
+/// targets the live 32-bit code pointer cannot be invoked as a native
+/// function pointer; that branch returns 0x200 solely to keep the existing
+/// host-only constructor fixtures executable. The NULL-interface path is
+/// exact on every target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn owner_capacity_query(this: *mut u8) -> u32 {
+    let interface = (this.add(4) as *const u32).read();
+    if interface == 0 {
+        return 0x200;
+    }
+
+    #[cfg(target_os = "none")]
+    {
+        let vtable = (interface as *const u32).read();
+        let query: unsafe extern "C" fn(*mut u8) -> u32 =
+            core::mem::transmute((vtable as *const u32).add(11).read());
+        query(interface as *mut u8)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        0x200
+    }
 }
 
 /// Default for the unresolved transfer-quantum helper @ 0x08277b64: inert
@@ -359,7 +380,6 @@ unsafe extern "C" fn register_with_owner_unported(_this: *mut u8) {}
 pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
     TransitionAddonConstructOps {
         string_member_construct: string_member_construct_unported,
-        owner_capacity_query: owner_capacity_query_unported,
         transfer_quantum: transfer_quantum_unported,
         scale_class: scale_class_body,
         vector_member_construct: vector_member_construct_unported,
@@ -380,12 +400,6 @@ unsafe fn string_member_construct_op() -> unsafe extern "C" fn(*mut u8, *const u
     ))
 }
 
-#[inline(always)]
-unsafe fn owner_capacity_query_op() -> unsafe extern "C" fn(*mut u8) -> u32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(
-        TRANSITION_ADDON_CONSTRUCT_OPS.owner_capacity_query
-    ))
-}
 
 #[inline(always)]
 unsafe fn transfer_quantum_op() -> unsafe extern "C" fn(*mut u8, u32) -> u32 {
@@ -464,12 +478,12 @@ unsafe fn register_with_owner_op() -> unsafe extern "C" fn(*mut u8) {
 /// the interface resolver 0x0814a130 through the base constructor's guard
 /// accessor 0x0818a06c (r1 is live there); its semantics are unresolved.
 ///
-/// Deviations: six remaining helper calls cross
+/// Deviations: five remaining helper calls cross
 /// [`TRANSITION_ADDON_CONSTRUCT_OPS`] dispatch slots — see each default's
-/// documentation; the scale-class default is the faithful decoded body, the
-/// string/vector defaults reproduce their decoded stores, the capacity
-/// default reproduces the NULL-interface 0x200 fallback, and the
-/// quantum/registration defaults are inert. Three already-ported callees
+/// documentation; the scale-class default is the faithful decoded body and
+/// the string/vector defaults reproduce their decoded stores, while the
+/// quantum/registration defaults are inert. The ported owner-capacity query
+/// is wired directly. Three already-ported callees
 /// are called directly: [`interface_guard_base_construct`],
 /// [`facade_for_selector`] (its `ldr r0,[r0,#4]` reads the owner/interface
 /// word this constructor just stored), and [`deque_seg_capacity`], the
@@ -503,8 +517,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
     write_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET), 0xffff_ffff);
     write_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET), 0);
 
-    let owner = read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)) as *mut u8;
-    let capacity = owner_capacity_query_op()(owner);
+    let capacity = owner_capacity_query(this);
     write_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET), capacity);
 
     write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), context);
@@ -630,8 +643,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
     write_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET), 0xffff_ffff);
     write_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET), 0);
 
-    let owner = read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)) as *mut u8;
-    let capacity = owner_capacity_query_op()(owner);
+    let capacity = owner_capacity_query(this);
     write_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET), capacity);
 
     write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), context);
@@ -732,15 +744,30 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(CALLS)).clone() }
     }
 
+    #[test]
+    fn owner_capacity_query_returns_0x200_only_from_the_interface_word() {
+        let mut first_object = [0xa5a5_a5a5u32; 3];
+        let mut second_object = [0x5a5a_5a5au32; 3];
+
+        unsafe {
+            let first = first_object.as_mut_ptr().cast::<u8>();
+            let second = second_object.as_mut_ptr().cast::<u8>();
+            write_u32_unaligned(first, 0xffff_ffff);
+            write_u32_unaligned(first.add(4), 0);
+            write_u32_unaligned(second, 0x0123_4567);
+            write_u32_unaligned(second.add(4), 0);
+            assert_eq!(owner_capacity_query(first), 0x200);
+            assert_eq!(owner_capacity_query(second), 0x200);
+        }
+    }
+
     #[repr(align(8))]
     struct Object([u8; 0x100]);
 
     #[test]
-    fn destroy_routes_all_offsets_and_vtable_transitions_through_callee_returns() {
-        let mut object = Object([0; 0x100]);
+    fn destroy_threads_returned_member_addresses() {
+        let mut object = Object([0xa5; 0x100]);
         let this = object.0.as_mut_ptr();
-
-        // The vector mock returns a deliberately shifted member pointer. The
         // final result therefore proves both original container-of steps:
         // vector result - 0x34 -> StringObject, then string result - 0x0c
         // -> outer object. Keeping that StringObject 8-aligned also gives the
@@ -751,6 +778,7 @@ mod tests {
         let owner = 0x1234_5000usize as *mut u8;
         unsafe {
             write_word_unaligned(expected_this.add(TRANSITION_ADDON_OWNER_OFFSET), owner as usize);
+            write_word_unaligned(expected_string.add(8), 0);
         }
         let _guard = install_recorders(vector_return);
 
@@ -824,7 +852,6 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum ConstructCall {
         StringMember { member: usize, source: usize },
-        Capacity { owner: u32 },
         Quantum { this: usize, arg: u32, context_at_call: u32 },
         Scale { this: usize, arg: u32 },
         Walk { selector: u32 },
@@ -848,12 +875,6 @@ mod tests {
         member.add(core::ptr::read_volatile(core::ptr::addr_of!(STRING_RETURN_SHIFT)))
     }
 
-    unsafe extern "C" fn recording_owner_capacity_query(owner: *mut u8) -> u32 {
-        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::Capacity {
-            owner: owner as usize as u32,
-        });
-        0x1111
-    }
 
     unsafe extern "C" fn recording_transfer_quantum(this: *mut u8, arg: u32) -> u32 {
         (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::Quantum {
@@ -946,7 +967,6 @@ mod tests {
         }
         construct_guard(TransitionAddonConstructOps {
             string_member_construct: recording_string_member_construct,
-            owner_capacity_query: recording_owner_capacity_query,
             transfer_quantum: recording_transfer_quantum,
             scale_class: recording_scale_class,
             vector_member_construct: recording_vector_member_construct,
@@ -998,7 +1018,6 @@ mod tests {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
                 },
-                ConstructCall::Capacity { owner: 0xa5a5_a5a5 },
                 ConstructCall::Quantum {
                     this: derived as usize,
                     arg: 0xaaaa,
@@ -1025,7 +1044,7 @@ mod tests {
             assert_eq!(*this.add(0x2c + 8), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x1111);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 0x3333);
@@ -1232,7 +1251,6 @@ mod tests {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
                 },
-                ConstructCall::Capacity { owner: 0xa5a5_a5a5 },
                 ConstructCall::Quantum {
                     this: derived as usize,
                     arg: 0xaaaa,
@@ -1267,7 +1285,7 @@ mod tests {
             assert_eq!(*string_return.add(8), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x1111);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 0x3333);

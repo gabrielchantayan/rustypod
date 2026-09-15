@@ -24185,6 +24185,32 @@ functions:
       the unaligned u32 stores/loads to strb/ldrb quads on ARMv5TE (the
       sibling's accepted widening).
 
+  - address: 0x08296efc
+    ghidra: FUN_08296efc
+    name: owner_capacity_query
+    size: 28
+    sig: "u32 owner_capacity_query(u8 *this)"
+    module: cxx/transition_addon
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+0x04: interface
+      interface[0]: vtable
+      vtable+0x2c: capacity_query
+    notes: >-
+      Raw osos.dec decodes exactly seven ARM words at 0x08296efc..0x08296f14;
+      0x08296f18 is the next real function's `push {r4,lr}`, confirming
+      Ghidra's 28-byte extent. The object's +0x04 word is loaded into r0 and
+      NULL-tested: NULL returns 0x200; otherwise
+      its vtable's +0x2c function word is loaded and reached through `bxne`,
+      retaining the interface as the callee's r0 argument. A raw scan of
+      every ARM B/BL word finds five direct plain BL callers
+      (0x08086990, 0x08278e18, 0x08278ed8, 0x08296f30, 0x08297320), zero
+      predicated calls. Rust preserves the ARM virtual dispatch on the
+      firmware target and wires both transition-addon constructors directly
+      to it. Host builds exactly test the NULL-interface result; their
+      non-NULL branch returns 0x200 because firmware u32 code pointers are
+      not host-callable native pointers.
   - address: 0x0829b180
     ghidra: FUN_0829b180
     name: primary_string_record_c_str
