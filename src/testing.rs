@@ -1038,6 +1038,10 @@ pub mod hints {
     // 0x2d00_0000: dedicated to sqlite/get_and_init_page's raw-u32 page
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BTREE_GET_AND_INIT_PAGE: usize = 0x2d00_0000;
+    // 0xf100_0000: dedicated to sqlite/check_read_locks's raw-u32 Btree,
+    // BtShared, cursor, and sqlite3 fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const BTREE_CHECK_READ_LOCKS: usize = 0xf100_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
