@@ -359,6 +359,42 @@ pub unsafe extern "C" fn root_context_f9c_bound_destruct(
     root_context_f9c_bound_destruct_target()(this)
 }
 
+/// root_context_f9c_bound_destruct_first_veneer — original:
+/// `thunk_FUN_0825a028` @ `0x0813eabc` (4 bytes; **5** verified direct
+/// `bl` callers).
+///
+/// Raw ARM is the single `b 0x0825a028` word `0xea046d59`; the separately
+/// linked next function begins with `push {r4, r5, r6, lr}` at `0x0813eac0`,
+/// establishing the true four-byte extent. The algorithm tail-forwards
+/// `this` to the unported destructor body and propagates its return unchanged.
+/// The five inbound calls at `0x0812fa24`, `0x081425f8`, `0x08142614`,
+/// `0x081b58b4`, and `0x081b5d8c` are all unconditional `bl`; no predicated
+/// `bl` forms target this veneer.
+///
+/// # Deliberate deviation
+///
+/// The ARM tail branch becomes the same volatile injectable boundary used by
+/// [`root_context_f9c_bound_destruct`]. Device builds call the verified fixed
+/// retailOS target; host tests install a recorder. This wrapper deliberately
+/// has no NULL guard, matching the branch-only original.
+///
+/// # Safety
+///
+/// `this` must satisfy the unported destructor body's requirements. It is
+/// forwarded even when NULL.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.root_context_f9c_bound_destruct_first_veneer"
+)]
+pub unsafe extern "C" fn root_context_f9c_bound_destruct_first_veneer(
+    this: *mut RootContextF9cBound,
+) -> *mut RootContextF9cBound {
+    root_context_f9c_bound_destruct_target()(this)
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -621,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn destruct_forwards_null_and_non_null_without_rewriting_the_target_result() {
+    fn destruct_veneers_forward_null_and_non_null_without_rewriting_the_target_result() {
         let _guard = DESTRUCT_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let mut input = object(0x2222_2222, 0x33, [0x44; 3]);
         let mut returned = object(0x6666_6666, 0x77, [0x88; 3]);
@@ -636,7 +672,7 @@ mod tests {
 
         unsafe {
             assert_eq!(
-                root_context_f9c_bound_destruct(ptr::null_mut()),
+                root_context_f9c_bound_destruct_first_veneer(ptr::null_mut()),
                 ptr::addr_of_mut!(returned)
             );
             assert_eq!(DESTRUCT_CALLS, 1);
