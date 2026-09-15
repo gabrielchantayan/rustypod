@@ -61642,6 +61642,39 @@ functions:
       input, time boundary values including u32::MAX, call count, date-field
       preservation, and that the caller overwrites the callee's time fields.
 
+  # --- time: Rata Die day-and-seconds pair -> packed calendar record ---
+  - address: 0x0829d874
+    ghidra: FUN_0829d874
+    name: day_seconds_to_datetime
+    size: 108
+    sig: "void day_seconds_to_datetime(DateTime *out, const DayAndSeconds *input)"
+    module: time/day_seconds_to_datetime
+    status: ported
+    renames:
+      param_1/r0/r5: out
+      param_2/r1/r4: input
+      local_18/sp: datetime
+      iVar3/r4: seconds
+      bVar1/r0: hour
+      cVar2/r0: minute
+      FUN_0807eafc: day_number_to_datetime
+      FUN_08036f14: __rt_udiv
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw ARM establishes the exact 108-byte extent: push at 0x0829d874
+      through pop at 0x0829d8dc, with the next separately linked ldr r2,[r0]
+      at 0x0829d8e0. It calls the unported day-number-to-record converter
+      0x0807eafc with input.day_number, divides input.seconds_since_midnight
+      unsigned by 3600 and then the residual by 60, writes low-byte hour,
+      minute, and second into the ten-byte record, then invokes the
+      0x08037db0 veneer for ROM __rt_memcpy at 0x22000020. Raw word decoding
+      finds four unconditional BL instructions in the body (one calendar
+      conversion, two __rt_udiv, one memcpy) and no predicated BL; the
+      reported five call sites is not present in this body. The port uses the
+      existing volatile calendar seam and ported memcpy, with host tests
+      proving all split boundaries and u32::MAX while retaining calendar
+      fields.
+
   # --- Vincent JIT: pipeline emission sugar ---
   - address: 0x082605f0
     ghidra: FUN_082605f0
