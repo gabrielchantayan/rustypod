@@ -59752,6 +59752,34 @@ functions:
       all-one, mixed-byte, and high-bit words, destination bounds, and
       successive cursor advancement.
 
+  # --- RGB8 cursor-to-RGB565 writer ---
+  - address: 0x0825ec54
+    ghidra: FUN_0825ec54
+    name: rgb8_cursor_write_rgb565
+    size: 32
+    sig: "void rgb8_cursor_write_rgb565(u32 unused, u16 **destination_cursor, const u8 *components)"
+    module: cxx/rgb8_cursor_write_rgb565
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: destination_cursor
+      param_3/r2: components
+      puVar2/r4: destination
+      uVar1/r0: packed_rgb565
+    notes: >-
+      Raw ARM words establish the exact eight-instruction body from
+      0x0825ec54 through the pop {r4,pc} at 0x0825ec70, bounded by the prior
+      sibling's pop at 0x0825ec50 and the distinct RGB565 cursor reader at
+      0x0825ec74; there is no literal pool. The function reads the u16
+      destination cursor, advances and stores it before calling the verified
+      rgb8_to_rgb565 callee at 0x082a0074 with the RGB8 record, then writes
+      the returned low halfword to the old cursor. Decoding all aligned ARM
+      B/BL words in osos.dec finds exactly five direct unconditional BL
+      callers and no predicated BL or direct tail B callers. The incoming r0
+      is ignored. The Rust port calls the existing packer seam and retains the
+      cursor-before-component-read order and absence of guards. Host tests
+      cover primary and mixed colors, bounds, and cursor advancement.
+
   # --- packed RGB565 expansion ---
   - address: 0x0824be9c
     ghidra: FUN_0824be9c
