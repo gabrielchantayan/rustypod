@@ -63213,6 +63213,32 @@ functions:
       a negative successful activation, and a failed activation restoring the
       original count and returning the error status.
 
+  - address: 0x08262a3c
+    ghidra: FUN_08262a3c
+    name: cxx_mutex_opaque_context_release_default
+    size: 8
+    sig: "u32 cxx_mutex_opaque_context_release_default(void *this)"
+    module: cxx/mutex_opaque_context_release_default
+    status: ported
+    renames:
+      param_1/r0: this
+      r1: selector
+      FUN_082629c4: shared opaque-context release implementation
+    notes: >-
+      Raw osos.dec words e3a01000 and eaffffdf decode to "mov r1,#0" and
+      "b 0x082629c4". The push {r4,r5,r6,lr} at 0x082629c4 begins a
+      separately linked shared release implementation, proving the exact
+      eight-byte extent without a literal pool. Whole-image ARM B/BL-immediate
+      decoding finds five unconditional direct bl callers at 0x080869dc,
+      0x0818a2fc, 0x081d69ec, 0x081d7d90, and 0x081e6c00; there are zero
+      predicated bl callers. Algorithm: clear the optional selector argument,
+      then tail-branch to the shared release implementation, returning its
+      status unchanged. Deliberate deviation: because the separately linked
+      0x082629c4 body remains unported, the Rust port calls its verified fixed
+      retail address on target and an injectable host seam otherwise. This
+      changes the tail b to an indirect call while preserving both arguments
+      and the result.
+
   - address: 0x08262a64
     ghidra: FUN_08262a64
     name: cxx_mutex_opaque_context_construct
