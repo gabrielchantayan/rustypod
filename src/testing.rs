@@ -340,6 +340,10 @@ pub mod hints {
     // list/cursor fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LIST_CURSOR_INDEX: usize = 0x8200_0000;
+    // 0x8300_0000: dedicated to cxx/list_cursor_item_at's raw-u32
+    // list/cursor fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LIST_CURSOR_ITEM_AT: usize = 0x8300_0000;
     // 0x81f0_0000: dedicated to cxx/list_cursor_base_index's raw-u32
     // list/cursor fixture; mappings never unmap, so no other user may
     // share this hint.
