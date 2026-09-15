@@ -51873,6 +51873,26 @@ functions:
   # Status codes: 0x1a invalid object, 0x0f would-deadlock, 0x27 recursion
   # overflow, 0x05 not owner.
 
+  - address: 0x080a3c7c
+    ghidra: FUN_080a3c7c
+    name: semaphore_cell_acquire
+    size: 40
+    sig: "u32 semaphore_cell_acquire(u32 *cell)"
+    module: kernel/posix_mutex
+    status: ported
+    vars: {param_1: cell, iVar1: rom_status}
+    notes: >-
+      Raw osos.dec words establish the 40-byte extent
+      0x080a3c7c..0x080a3ca4: push {r4,lr}; load the unchecked handle
+      from cell; a zero handle returns 0x1a; otherwise bl 0x08037e08
+      (rom_sem_wait, veneer to ROM 0x22003fd0). ROM status 10 maps to
+      0x0f and every other status maps to zero. The body contains one
+      unconditional bl and no predicated bl; binary scanning finds five
+      unconditional bl callers and no predicated callers. The port calls
+      the existing rom_sem_wait dispatch seam rather than jumping through
+      the mask-ROM veneer. cell remains intentionally unchecked and must
+      be aligned, matching the ldr instruction.
+
   - address: 0x082e8390
     ghidra: FUN_082e8390
     name: posix_mutex_lock

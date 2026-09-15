@@ -113,7 +113,7 @@
 //!   `wrapping_*` forms so a debug host build cannot panic where the
 //!   ARM code silently wraps.
 
-use crate::kernel::task_lock::rom_sem_signal;
+use crate::kernel::task_lock::{rom_sem_signal, rom_sem_wait};
 
 /// Width of the mutex's recursion counter, and the value at which one
 /// more acquire is refused (original: the `subs r12, r0, #0xff00` /
@@ -308,6 +308,39 @@ pub const DEFAULT_POSIX_MUTEX_OPS: PosixMutexOps = PosixMutexOps {
 /// kernel layer installs the real ROM helpers.
 pub static mut POSIX_MUTEX_OPS: PosixMutexOps = DEFAULT_POSIX_MUTEX_OPS;
 
+
+/// semaphore_cell_acquire — original: `FUN_080a3c7c` @ **0x080a3c7c** (40
+/// bytes; **5 unconditional `bl` call sites**, no predicated calls).
+///
+/// Loads the unchecked ROM semaphore handle from `cell`. A zero handle maps
+/// to 0x1a. Otherwise it waits on that handle through the `rom_sem_wait`
+/// veneer; ROM status 10 maps to 0x0f and every other status maps to success.
+/// The ARM body is exactly ten instructions (`push; ldr; cmp; moveq; popeq;
+/// bl; cmp; movne; moveq; pop`). Deliberate deviation: the mask-ROM veneer
+/// dispatches indirectly through [`crate::kernel::task_lock::ROM_KERNEL`]
+/// rather than tail-jumping to 0x22003fd0. As in the original, `cell` is
+/// neither NULL-checked nor alignment-checked and must designate an aligned
+/// `u32`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn semaphore_cell_acquire(cell: *mut u32) -> u32 {
+    semaphore_cell_acquire_via(cell, rom_sem_wait)
+}
+
+#[inline(always)]
+unsafe fn semaphore_cell_acquire_via(
+    cell: *mut u32,
+    wait: unsafe extern "C" fn(usize) -> usize,
+) -> u32 {
+    let handle = cell.read();
+    if handle == 0 {
+        ERR_INVALID_OBJECT
+    } else if wait(handle as usize) == 10 {
+        ERR_WOULD_DEADLOCK
+    } else {
+        0
+    }
+}
 /// semaphore_cell_signal — original: `FUN_080a3d30` @ **0x080a3d30** (36
 /// bytes; **7 unconditional `bl` call sites** at 0x080cdedc, 0x080cdef8,
 /// 0x081e21a8, 0x081e2200, 0x082e81f0, 0x082e8204, and 0x082e8460; no
@@ -500,6 +533,24 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
+    static mut SEM_ACQUIRE_STATUS: usize = 0;
+    static mut SEM_ACQUIRE_ARG: usize = usize::MAX;
+    static mut SEM_ACQUIRE_CALLS: usize = 0;
+
+    unsafe extern "C" fn mock_sem_acquire(handle: usize) -> usize {
+        SEM_ACQUIRE_ARG = handle;
+        SEM_ACQUIRE_CALLS += 1;
+        SEM_ACQUIRE_STATUS
+    }
+
+    fn reset_sem_acquire(status: usize) {
+        unsafe {
+            SEM_ACQUIRE_STATUS = status;
+            SEM_ACQUIRE_ARG = usize::MAX;
+            SEM_ACQUIRE_CALLS = 0;
+        }
+    }
+
 
     /// Serializes tests that mutate the semaphore-signal recorder state.
     static SEM_SIGNAL_LOCK: Mutex<()> = Mutex::new(());
@@ -979,6 +1030,39 @@ mod tests {
             assert_eq!(m.owner, 0, "a timeout claims nothing");
         }
         restore();
+    }
+
+    /// A null handle is rejected before dispatch; ROM status 10 is the only
+    /// failure mapping, and every other ROM status is success.
+    #[test]
+    fn semaphore_cell_acquire_maps_handle_and_rom_status() {
+        let _guard = SEM_SIGNAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let mut cell = 0;
+            reset_sem_acquire(10);
+            assert_eq!(
+                semaphore_cell_acquire_via(&mut cell, mock_sem_acquire),
+                ERR_INVALID_OBJECT
+            );
+            assert_eq!(SEM_ACQUIRE_CALLS, 0, "zero handle must not dispatch");
+
+            cell = 0x12;
+            reset_sem_acquire(0);
+            assert_eq!(semaphore_cell_acquire_via(&mut cell, mock_sem_acquire), 0);
+            assert_eq!(SEM_ACQUIRE_CALLS, 1);
+            assert_eq!(SEM_ACQUIRE_ARG, 0x12, "handle is passed unchanged");
+
+            reset_sem_acquire(10);
+            assert_eq!(
+                semaphore_cell_acquire_via(&mut cell, mock_sem_acquire),
+                ERR_WOULD_DEADLOCK
+            );
+            assert_eq!(SEM_ACQUIRE_CALLS, 1);
+
+            reset_sem_acquire(9);
+            assert_eq!(semaphore_cell_acquire_via(&mut cell, mock_sem_acquire), 0);
+            assert_eq!(SEM_ACQUIRE_CALLS, 1, "only status 10 is an error");
+        }
     }
 
     /// A null handle is rejected before dispatch; a live handle forwards as
