@@ -269,6 +269,49 @@ pub unsafe extern "C" fn draw_state_line(this: *mut u8, x1: i32, y1: i32, x2: i3
     state.current_y = y2;
 }
 
+/// draw_state_line_to — original: `FUN_082640a0` @ 0x082640a0 (140 bytes;
+/// 5 unconditional `bl` call sites, zero predicated `bl`, binary-scanned).
+///
+/// The complete extent is 0x082640a0..0x0826412c: raw ARM starts with
+/// `push {r4,r5,lr}` and the next real function starts at 0x0826412c.
+/// It loads the record's current point as the first local endpoint, adds
+/// both endpoints to the +0x2c/+0x30 origin with wrapping ARM `add`, calls
+/// the same unported line engine as [`draw_state_line`], then writes the
+/// supplied endpoint to current-point words +0/+4 after that call.
+///
+/// Deliberate deviations: `FUN_080e7870` remains the existing
+/// [`DRAW_STATE_LINE_OPS`] seam. Target builds call its verified retail
+/// address; host tests install its recorder.
+///
+/// # Safety
+///
+/// `draw_state` must point to a writable, word-aligned complete
+/// [`DrawStateRecord`] whose engine-facing fields are valid.
+#[cfg_attr(target_os = "none", link_section = ".text.draw_state_line_to")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn draw_state_line_to(draw_state: *mut u8, x: i32, y: i32) {
+    let engine = draw_state_line_ops().line_engine;
+    let state = unsafe { &mut *(draw_state as *mut DrawStateRecord) };
+    unsafe {
+        engine(
+            state.surface as usize + 4,
+            state.origin_x.wrapping_add(state.current_x),
+            state.origin_y.wrapping_add(state.current_y),
+            state.origin_x.wrapping_add(x),
+            state.origin_y.wrapping_add(y),
+            1,
+            state.foreground.as_ptr(),
+            state.style,
+            state.clip_rect.as_ptr(),
+            0,
+        );
+    }
+    state.current_x = x;
+    state.current_y = y;
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -460,6 +503,41 @@ mod tests {
             assert_eq!((seen.x1, seen.y1), (105, -35));
             assert_eq!((seen.x2, seen.y2), (105, -35));
             assert_eq!((record.state.current_x, record.state.current_y), (5, 5));
+        });
+    }
+
+    #[test]
+    fn line_to_uses_current_point_then_updates_it_after_the_engine() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            let base = record.base();
+            unsafe { draw_state_line_to(base, 42, 900) };
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!((seen.x1, seen.y1), (-677, 515));
+            assert_eq!((seen.x2, seen.y2), (142, 860));
+            assert_eq!(seen.point_during_call, (-777, 555));
+            assert_eq!((record.state.current_x, record.state.current_y), (42, 900));
+        });
+    }
+
+    #[test]
+    fn line_to_wraps_endpoint_translation_and_preserves_record_tail() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            record.state.current_x = 1;
+            record.state.current_y = -1;
+            record.state.origin_x = i32::MAX;
+            record.state.origin_y = i32::MIN;
+            let before = record.state_bytes().to_vec();
+
+            unsafe { draw_state_line_to(record.base(), i32::MAX, 0) };
+
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!((seen.x1, seen.y1), (i32::MIN, i32::MAX));
+            assert_eq!((seen.x2, seen.y2), (-2, i32::MIN));
+            assert_eq!((record.state.current_x, record.state.current_y), (i32::MAX, 0));
+            assert_eq!(&record.state_bytes()[8..], &before[8..]);
+            assert!(record.guards_intact());
         });
     }
 
