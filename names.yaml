@@ -78006,6 +78006,33 @@ functions:
       guard and no callee. No deliberate deviations. Host tests cover the
       first entry, a later entry, and 32-bit address wraparound.
 
+  - address: 0x0822ab50
+    ghidra: FUN_0822ab50
+    name: completion_gate
+    size: 52
+    sig: "u32 completion_gate(const void *state)"
+    module: app/completion_gate
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x14": request_interface
+      "state+0x24": request_flags
+      "state+0x2f4": mode_source
+      "state+0x5ec": default_source
+      "state+0x5f8": mode_flags
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte all-code extent from
+      0x0822ab50 through bx lr at 0x0822ab80; the next separately linked
+      function begins at 0x0822ab84. Decoding every ARM branch-with-link
+      immediate finds five direct inbound callers, all unconditional bl and
+      none predicated: 0x081cc94c, 0x081cca80, 0x081cce7c, 0x081ccff4, and
+      0x0822b604. The body itself contains zero plain and zero predicated bl
+      instructions. A zero request_interface or clear request_flags bit zero
+      returns one. Otherwise it selects default_source when mode_flags bit
+      zero is clear, or mode_source when set, and returns that byte XOR one.
+      No callee, NULL, bounds, or alignment guard exists. No deliberate
+      deviations. Host tests cover absent and inactive requests, both default
+      source low-bit outcomes, and mode-source selection.
   # --- Queue completion ---
   - address: 0x0822b5e0
     ghidra: FUN_0822b5e0
