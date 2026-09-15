@@ -79933,6 +79933,32 @@ functions:
       RAM addresses and direct initializer call; host builds model those
       runtime objects and inject the unported initializer through a seam.
 
+  - address: 0x082bcc08
+    ghidra: FUN_082bcc08
+    name: storage_backend_slot_28_invoke
+    size: 64
+    sig: "u32 storage_backend_slot_28_invoke(u32 *output)"
+    module: drivers/storage_backend_prepare
+    status: ported
+    renames:
+      param_1/r0: output
+      DAT_082bcc48: storage_backend_state
+      FUN_080e4b6c: storage_backend_prepare
+      pcVar2: slot_28_callback
+    notes: >-
+      Raw osos.dec fixes the true 64-byte extent at 0x082bcc08..0x082bcc47:
+      sixteen ARM instruction words through pop {r4,pc} at 0x082bcc44,
+      followed by the literal-pool word 0x089caae4 at 0x082bcc48. The next
+      separately entered function starts at 0x082bcc4c. Complete aligned ARM
+      B/BL decode finds five inbound direct calls, all unconditional bl:
+      0x08283a8c, 0x0836a284, 0x0836be2c, 0x0836cdd8, and 0x0839317c; no
+      predicated BL form targets this entry. It calls storage_backend_prepare,
+      propagates its nonzero status, returns 0x11 with no active backend, and
+      otherwise invokes the optional active-backend target-width callback at
+      +0x28 with output before returning zero. Firmware builds load that slot
+      directly; host builds use the optional STORAGE_BACKEND_SLOT_28 seam
+      because the modeled target pointer is narrowed to 32 bits.
+
   - address: 0x082bd218
     ghidra: FUN_082bd218
     name: storage_buffer_extent
