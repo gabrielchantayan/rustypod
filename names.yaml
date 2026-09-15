@@ -56509,6 +56509,32 @@ functions:
       volatile accesses and the crate frame account for instruction
       differences.
 
+  # --- Opaque pair copy from word eight ---
+  - address: 0x082a1dd4
+    ghidra: FUN_082a1dd4
+    name: opaque_pair_copy_from_word8
+    size: 16
+    sig: "void opaque_pair_copy_from_word8(u32 *out, const u32 *source)"
+    module: cxx/opaque_pair_copy_from_word8
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      uVar1/r2: second
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, from 0x082a1dd4 through bx lr at
+      0x082a1de0; the distinct next function begins at 0x082a1de4. A binary
+      scan of every ARM B/BL-immediate word in osos.dec found five direct
+      inbound call sites, all unconditional plain bl (zero predicated forms):
+      0x0812851c, 0x08128544, 0x0816c34c, 0x081b2c54, and 0x081f9998.
+      There are no direct tail branches. The function has no NULL, alignment,
+      or bounds guards: it loads source words at +0x20 and +0x24 before the
+      stmia stores them to out+0x00 and out+0x04. The concrete record type is
+      unrecovered, so the name records only this observed opaque pair copy.
+      No deliberate behavioral deviations: volatile reads and writes preserve
+      the stock all-loads-before-stores ordering for overlapping buffers and
+      prevent LLVM from substituting a copy intrinsic.
+
   - address: 0x0818a0bc
     ghidra: FUN_0818a0bc
     name: facade_for_selector
