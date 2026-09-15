@@ -90658,3 +90658,34 @@ functions:
       calls. The literal's data identity is unrecovered, and callers overwrite
       word zero with their own literals, so no class or vtable identity is
       inferred. Deliberate deviations: none.
+
+  - address: 0x082a7e10
+    ghidra: FUN_082a7e10
+    name: opaque_vtable_record_copy_construct
+    size: 92
+    sig: "void *opaque_vtable_record_copy_construct(void *storage, u32 use_default_source, const void *source)"
+    module: cxx/opaque_vtable_record_copy_construct
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1: use_default_source
+      param_3/r2: source
+      DAT_082a7e6c: default_source
+      FUN_083dadd4: opaque_base_construct
+      FUN_082a77b0: opaque_member_copy_construct
+      FUN_082a94d0: shared_handle_owner_destroy
+    notes: >-
+      Raw osos.dec establishes 23 instruction words, 92 bytes from
+      0x082a7e10 through 0x082a7e68; 0x082a7e6c is its default-source
+      literal and 0x082a7e70 begins the independently linked next function.
+      The body has three direct plain BL calls and zero predicated BL calls:
+      0x083dadd4, 0x082a77b0, and (only when r1 is nonzero) 0x082a94d0.
+      It copies the source vtable, its vtable-indexed word and +0x24 word,
+      invokes the two unresolved construction helpers, then conditionally
+      destroys the returned +0x3c member. The unresolved helper names are
+      deliberately descriptive seams, not inferred identities; target builds
+      call their verified resident addresses and host tests provide ABI seams.
+      The final destroy uses the existing Rust port. Host suite: 8318 passed.
+      match.py printed a structural diff (exit 1): LLVM uses indirect BLX
+      seams and a different prologue, while preserving the source selection,
+      stores, calls, and conditional cleanup structure.

@@ -103,6 +103,10 @@ pub mod hints {
     pub const STRING_RECORD: usize = 0x1d00_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
+    // 0xc000_0000 and 0xc100_0000: dedicated to
+    // cxx/opaque_vtable_record_copy_construct's target-width source fixtures.
+    pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT: usize = 0xc000_0000;
+    pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT_DEFAULT: usize = 0xc100_0000;
     // 0x6700_0000: dedicated to app/registry's raw-u32 owner field
     // fixture for field_dc_as_class_4a80; mappings never unmap, so no other
     // user may share this hint.
