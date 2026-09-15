@@ -43,9 +43,6 @@ pub struct Texture {
     pub reserved_a: [u8; 2],
 }
 
-/// `FUN_08281140` @ 0x08281140: enables/binds `texture`'s GL name.
-pub type TextureActivate = unsafe extern "C" fn(texture: *mut Texture);
-
 /// `FUN_08281208` @ 0x08281208: define a complete texture image.
 ///
 /// `requested_width` and `requested_height` are stack arguments in the
@@ -69,14 +66,7 @@ pub type TextureUpdateSubimage = unsafe extern "C" fn(
     pixels: *const u8,
 );
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_texture_activate(texture: *mut Texture) {
-    let activate: TextureActivate = unsafe { core::mem::transmute(0x0828_1140usize) };
-    unsafe { activate(texture) };
-}
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_texture_activate(_texture: *mut Texture) {}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_texture_define_image(
@@ -135,13 +125,6 @@ unsafe extern "C" fn missing_texture_update_subimage(
 ) {
 }
 
-/// Active `FUN_08281140` dispatch seam. The port of that helper replaces this
-/// with a direct call; tests replace it with a recorder.
-#[cfg(target_os = "none")]
-pub static mut TEXTURE_ACTIVATE: TextureActivate = firmware_texture_activate;
-/// Host's inert `FUN_08281140` seam default.
-#[cfg(not(target_os = "none"))]
-pub static mut TEXTURE_ACTIVATE: TextureActivate = missing_texture_activate;
 
 /// Active `FUN_08281208` dispatch seam for full image definitions.
 #[cfg(target_os = "none")]
@@ -175,8 +158,7 @@ pub unsafe extern "C" fn texture_upload_pixels(
     width: u32,
     height: u32,
 ) {
-    let activate = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TEXTURE_ACTIVATE)) };
-    unsafe { activate(texture) };
+    unsafe { crate::ui::texture_activate::texture_activate(texture) };
 
     let stored_width = unsafe { (*texture).width };
     let stored_height = unsafe { (*texture).height };
@@ -227,7 +209,7 @@ mod tests {
     use core::mem::{offset_of, size_of};
     use core::ptr;
 
-    static mut ACTIVATED_TEXTURE: *mut Texture = ptr::null_mut();
+    static mut ACTIVATION_CALLS: u32 = 0;
     static mut DEFINE_CALLS: u32 = 0;
     static mut UPDATE_CALLS: u32 = 0;
     static mut DEFINITION: (u16, u16, u8, *const u8, u32, u32) = (0, 0, 0, ptr::null(), 0, 0);
@@ -235,9 +217,9 @@ mod tests {
     static mut ORDER: [u8; 4] = [0; 4];
     static mut ORDER_LEN: usize = 0;
 
-    unsafe extern "C" fn record_activate(texture: *mut Texture) {
+    unsafe extern "C" fn record_activate(_flag: u32) {
         unsafe {
-            ACTIVATED_TEXTURE = texture;
+            ACTIVATION_CALLS += 1;
             ORDER[ORDER_LEN] = 1;
             ORDER_LEN += 1;
         }
@@ -282,7 +264,7 @@ mod tests {
     impl Drop for SeamGuard {
         fn drop(&mut self) {
             unsafe {
-                TEXTURE_ACTIVATE = missing_texture_activate;
+                crate::ui::texture_activate::reset_mock_texture_binding_cache();
                 TEXTURE_DEFINE_IMAGE = missing_texture_define_image;
                 TEXTURE_UPDATE_SUBIMAGE = missing_texture_update_subimage;
             }
@@ -292,14 +274,15 @@ mod tests {
     fn install_recorders() -> SeamGuard {
         let lock = TEXTURE_UPLOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            ACTIVATED_TEXTURE = ptr::null_mut();
+            ACTIVATION_CALLS = 0;
             DEFINE_CALLS = 0;
             UPDATE_CALLS = 0;
             DEFINITION = (0, 0, 0, ptr::null(), 0, 0);
             UPDATE = (0, 0, 0, 0, 0, ptr::null());
             ORDER = [0; 4];
             ORDER_LEN = 0;
-            TEXTURE_ACTIVATE = record_activate;
+            crate::ui::texture_activate::reset_mock_texture_binding_cache();
+            crate::ui::texture_activate::set_mock_texture_binding_refresh(record_activate);
             TEXTURE_DEFINE_IMAGE = record_definition;
             TEXTURE_UPDATE_SUBIMAGE = record_update;
         }
@@ -337,7 +320,7 @@ mod tests {
         assert_eq!(texture.width, 640);
         assert_eq!(texture.height, 480);
         unsafe {
-            assert_eq!(ACTIVATED_TEXTURE, &mut texture as *mut Texture);
+            assert_eq!(ACTIVATION_CALLS, 1);
             assert_eq!(DEFINE_CALLS, 1);
             assert_eq!(UPDATE_CALLS, 0);
             assert_eq!(DEFINITION, (640, 480, 4, pixels.as_ptr(), 640, 480));
@@ -357,7 +340,7 @@ mod tests {
             assert_eq!(DEFINE_CALLS, 0);
             assert_eq!(UPDATE_CALLS, 1);
             assert_eq!(UPDATE, (0, 0, 320, 240, 4, pixels.as_ptr()));
-            assert_eq!(ACTIVATED_TEXTURE, &mut texture as *mut Texture);
+            assert_eq!(ACTIVATION_CALLS, 1);
             assert_eq!(&ORDER[..ORDER_LEN], &[1, 3]);
         }
     }
@@ -374,7 +357,7 @@ mod tests {
             assert_eq!(DEFINE_CALLS, 2);
             assert_eq!(UPDATE_CALLS, 0);
             assert_eq!(DEFINITION, (1, 2, 4, pixels.as_ptr(), 0x1_0001, 0x2_0002));
-            assert_eq!(&ORDER[..ORDER_LEN], &[1, 2, 1, 2]);
+            assert_eq!(&ORDER[..ORDER_LEN], &[1, 2, 2]);
         }
         assert_eq!(texture.width, 1);
         assert_eq!(texture.height, 2);

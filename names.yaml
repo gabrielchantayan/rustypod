@@ -86563,6 +86563,35 @@ functions:
       guard. Rust preserves the target-width words and signed count layout
       with a repr(C) structure, including the negative-count store behavior.
 
+  # --- Texture activation (ui/texture_activate) ---
+  - address: 0x08281140
+    ghidra: FUN_08281140
+    name: texture_activate
+    size: 84
+    sig: "void texture_activate(Texture *texture)"
+    module: ui/texture_activate
+    status: ported
+    renames:
+      param_1/r0/r5: texture
+      "texture+0x00": gl_name
+      "0x089d00c8+0x00": initialized
+      "0x089d00c8+0x04": cached_gl_name
+      FUN_082d1290: video_engine_enable_flag
+      FUN_082d0ce0: unported_texture_binding_refresh
+    notes: >-
+      Raw osos.dec establishes the 84-byte body at 0x08281140..0x08281190:
+      push {r4-r6,lr} through pop {r4-r6,pc}; 0x08281194 begins the next
+      independently linked function, so Ghidra's 152-byte extent includes its
+      first 68 bytes. Complete aligned ARM B/BL-immediate decoding finds five
+      inbound plain bl calls at 0x08281048, 0x08281098, 0x082810e4,
+      0x0828111c, and 0x082811a8, with no predicated inbound bl. On its first
+      call it writes one to 0x089d00c8 and conditionally calls
+      video_engine_enable_flag(0x0de1). It compares texture->gl_name with
+      0x089d00cc, returns when equal, otherwise updates that cache then
+      tail-branches to FUN_082d0ce0 with 0x0de1. The tail target is unported
+      and lacks a verified semantic identity; target builds call it by address,
+      while host tests use cache and target seams.
+
   # --- Texture image upload (ui/texture_upload) ---
   - address: 0x08281194
     ghidra: FUN_08281194
