@@ -95784,3 +95784,29 @@ functions:
       allocation failure. match.py reports the expected structural diff: LLVM
       inlines ft_mem_alloc/memzero and the string helpers rather than retaining
       the stock BL boundaries.
+
+  - address: 0x080a3e68
+    ghidra: FUN_080a3e68
+    name: task_local_for_current_task
+    size: 48
+    sig: "u32 task_local_for_current_task(void)"
+    module: kernel/task_local
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003eb0: current_task_id
+      FUN_080b4c20: task_local_lookup
+      FUN_080ccbd0: task_local_construct
+      FUN_080b4bfc: task_local_store
+    notes: >-
+      Raw osos.dec fixes the extent at 48 bytes
+      (0x080a3e68..0x080a3ea0): four unconditional BL instructions
+      (0x08037e60 current_task_id, 0x080b4c20 lookup, 0x080ccbd0
+      construct, and 0x080b4bfc store), zero predicated BLs; the distinct
+      next function opens with push {r4,r5,r6,lr} at 0x080a3ea0. Ghidra's
+      56-byte/five-call report is therefore incorrect. It returns the
+      nonzero per-task slot, or constructs, stores, and returns a new slot
+      value. Deliberate deviation: host tests use a volatile-free operation
+      table for the three unported retailOS helpers; target builds directly
+      call all four verified fixed addresses. match.py is structural:
+      LLVM emits literal-loaded BLX calls and a larger frame rather than
+      direct BL instructions.
