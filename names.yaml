@@ -92028,3 +92028,28 @@ functions:
       returns 1 exactly when its result equals nitems, otherwise 0.
       Deliberate host-only representation: stream is a u32 word pointer,
       preserving the target's four-byte field layout on 64-bit hosts.
+
+  # --- Opaque layout-record constructor ---
+  - address: 0x08261da8
+    ghidra: FUN_08261da8
+    name: opaque_layout_construct
+    size: 20
+    sig: "u8 *opaque_layout_construct(u8 *layout)"
+    module: cxx/opaque_layout_construct
+    status: ported
+    vars:
+      param_1/r0: layout
+      FUN_082e7bf0: opaque_layout_initialize
+    notes: >-
+      Raw words `e92d4010 e1a04000 eb02178e e1a00004 e8bd8010` establish
+      the 20-byte body 0x08261da8..0x08261dbc; the next `push {r4,lr}` at
+      0x08261dbc is a distinct function. The wrapper preserves layout in r4,
+      calls opaque_layout_initialize at 0x082e7bf0, discards its status, and
+      returns layout unchanged, including NULL. Raw decoding of the five
+      inbound branch words finds plain unconditional BL at 0x081e6b70,
+      0x0826287c, 0x0839e898, 0x0839ea04, and 0x0839f3e0; no predicated BL
+      reaches this address. The initializer is unported: target builds call
+      its verified fixed address, while host tests use a volatile callback seam
+      to prove exactly one verbatim forwarding call and return identity for
+      live and NULL pointers. Deliberate codegen deviation: that seam lowers
+      to indirect BLX rather than stock's direct BL.
