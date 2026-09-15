@@ -93880,3 +93880,28 @@ functions:
       through a volatile operation seam; host tests install recorders to prove
       call order, input forwarding, both mask branches, rejection, and the
       unsupported-class path. Deliberate deviations: none.
+  # --- tagged header low-bit accessor ---
+  - address: 0x08164ec4
+    ghidra: FUN_08164ec4
+    name: tagged_header_low_bits
+    size: 20
+    sig: "u32 tagged_header_low_bits(const u8 *header)"
+    module: util/tagged_header_low_bits
+    status: ported
+    renames:
+      param_1/r0: header
+      "*param_1/r0": header_byte
+      r0: low_two_bits
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM words from
+      ldrb r0,[r0] at 0x08164ec4 through the unreachable bl 0x08030f44 at
+      0x08164ed4; the separately linked next function begins at 0x08164ed8.
+      The ldrb and and r0,r0,#3 produce a value in 0..=3, so cmp r0,#3 and
+      bxls lr always return and the fatal call cannot execute. The function
+      returns bits [1:0] of the tagged header byte. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly five inbound direct calls,
+      all unconditional plain bl at 0x08163ec4, 0x08164a5c, 0x08164ae4,
+      0x08164e2c, and 0x08164ee0; there are no predicated calls or direct
+      tail-B callers. Host tests cover all 256 header-byte values. match.py
+      structural review is recorded with this port. Deliberate deviations: the
+      provably unreachable compare and heap_panic call are omitted.
