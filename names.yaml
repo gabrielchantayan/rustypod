@@ -73560,6 +73560,29 @@ functions:
       tests prove the -1 sentinel path restores both vtables without needing
       a host slot-release seam and returns the outer wrapper.
 
+  # --- selector-pair initializer ---
+  - address: 0x081d9698
+    ghidra: FUN_081d9698
+    name: selector_pair_init
+    size: 8
+    sig: "unsigned int *selector_pair_init(unsigned int *selector, unsigned int first, unsigned int second)"
+    module: app/selector_pair_init
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: first
+      param_3/r2: second
+      r0: selector
+    notes: >-
+      Raw ARM confirms the 8-byte code extent 0x081d9698..0x081d96a0:
+      `stm r0, {r1, r2}; bx lr`. It stores first and second at consecutive
+      aligned selector words, retains r0 unchanged, and has no NULL guard.
+      Although Ghidra declares void, the preserved r0 is exposed as the
+      destination pointer. The next real function starts at 0x081d96a0.
+      Decoding every ARM B/BL word in osos.dec finds five direct inbound BL
+      callers, all unconditional: 0x081c84d4, 0x081c855c, 0x081c85dc,
+      0x081c8798, and 0x081c8800. There are no predicated BL forms.
+
   # --- manager-table registration handle initializer ---
   - address: 0x081d96a0
     ghidra: FUN_081d96a0
