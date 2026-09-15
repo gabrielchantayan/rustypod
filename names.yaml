@@ -48671,6 +48671,35 @@ functions:
       token succeeds, and absent or mismatched registry tokens fail when
       owner_valid is zero.
 
+  - address: 0x082a3e14
+    ghidra: FUN_082a3e14
+    name: scoped_context_assign_string
+    size: 92
+    sig: "void scoped_context_assign_string(ScopedContext *source, StringObject *destination)"
+    module: app/scoped_context
+    status: identified
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      FUN_0827639c: string_object_assign_cstr
+      FUN_082765a8: string_object_assign_utf16
+    notes: >-
+      BLOCKED: raw ARM is exactly 0x082a3e14..0x082a3e6f: 88 bytes of
+      code ending in a branch to its common epilogue, followed by the
+      separately addressed four-byte zero literal at 0x082a3e70. The next
+      function begins with push {r4,lr} at 0x082a3e74. Its initial BLX
+      dispatches source's vtable +0x08 and, on a zero result, assigns the
+      literal empty C string through ported string_object_assign_cstr. On a
+      nonzero result it calls unported, unnamed 0x08055718 with source +0x08
+      and a 512-byte stack buffer; that callee forwards undocumented state
+      through 0x080b4318, returns a u16 count, and the target assigns the
+      buffer through ported string_object_assign_utf16. The raw target has
+      three plain unconditional BL instructions, zero predicated BL
+      instructions, and one indirect BLX; its five direct plain-BL callers
+      require a complete raw image scan before this status can be promoted.
+      No Rust seam is created: 0x08055718's required inputs and its buffer
+      contents are not established by the available decompilation, so a
+      host callback would invent a callee contract.
   - address: 0x082a3e74
     ghidra: FUN_082a3e74
     name: string_construct_from_vtable_slot_58
