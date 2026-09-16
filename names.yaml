@@ -73441,6 +73441,53 @@ functions:
       memory effects. Both callees are already ported and are called
       directly.
 
+  # --- vendored OpenSSL: EVP_MD_CTX copy ---
+  - address: 0x0804acb4
+    ghidra: FUN_0804acb4
+    name: evp_md_ctx_copy_ex
+    size: 204
+    sig: "int evp_md_ctx_copy_ex(EvpMdCtx *ctx, const EvpMdCtx *src)"
+    module: crypto/evp_md_ctx_copy_ex
+    status: ported
+    renames:
+      param_1/r0/r4: ctx
+      param_2/r1/r5: src
+      r6: saved_md_data
+      FUN_08049a84: diag_ring_record (ported)
+      FUN_0804ac2c: evp_md_ctx_cleanup (ported)
+      FUN_08043c18: traced_alloc (ported)
+      0x08037db0: __rt_memcpy (IRAM veneer, ported as libc/rt_memcpy)
+    notes: >-
+      Raw ARM extent is exactly 0x0804acb4..0x0804ad80 (204 bytes,
+      matching Ghidra): the next independently linked function starts at
+      0x0804ad80 with `push {r4,lr}`. Inbound call sites from
+      decomp/osos.asm: exactly 5, ALL unconditional `bl` (0x0804afb0,
+      0x0804b0ec, 0x0805fcc8, 0x08060748, 0x080ebf2c) - no predicated
+      calls and no direct tail `b`. This is OpenSSL's
+      EVP_MD_CTX_copy_ex from the vendored copy: a NULL `src` or NULL
+      `src->digest` logs diag_ring_record(ERR_LIB_EVP=6,
+      EVP_F_EVP_MD_CTX_COPY_EX=110, EVP_R_INPUT_NOT_INITIALIZED=111, 0,
+      0) (5th arg on the stack) and returns 0 without touching `ctx`.
+      When ctx->digest == src->digest the old md_data is saved and flags
+      gains bit 2 (OpenSSL REUSE) BEFORE evp_md_ctx_cleanup runs, so
+      cleanup keeps the state buffer; otherwise the saved pointer is 0
+      and cleanup releases old state. Four context words are then copied
+      from src (ldmia/stmia). When the freshly copied descriptor's
+      ctx_size (+0x44) is nonzero, the saved buffer is restored or
+      traced_alloc(ctx_size, 0, 0) supplies a new one - the alloc result
+      is NOT NULL-checked - and ctx_size bytes move src->md_data ->
+      ctx->md_data through the 0x08037db0 veneer, with digest, ctx_size,
+      src->md_data, and ctx->md_data all re-loaded after the allocator
+      call. Finally the descriptor's +0x1c slot, when non-NULL, is
+      TAIL-called as copy(ctx, src) and its value returned; otherwise
+      the function returns 1. This is the first ported consumer of the
+      EvpMd +0x1c slot (still an untyped word, transmuted after the
+      non-NULL test). Deliberate host/codegen deviation: the four-word
+      copy is four volatile field copies over #[repr(C)] fields because
+      host pointers are 8 bytes. match.py confirms identical control
+      flow; residual diffs are LLVM register allocation and branches in
+      place of ADS predication.
+
   # --- vendored OpenSSL: EVP_MD_CTX initialization ---
   - address: 0x0804adc4
     ghidra: FUN_0804adc4

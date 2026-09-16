@@ -67,6 +67,7 @@ pub mod evp_digest_init_ex;
 pub mod evp_digest_final_ex;
 pub mod evp_digest_update;
 pub mod evp_md_ctx_cleanup;
+pub mod evp_md_ctx_copy_ex;
 pub mod evp_md_ctx_init;
 pub mod evp_sha1;
 pub mod evp_pkey;
