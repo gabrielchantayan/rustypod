@@ -85714,6 +85714,48 @@ functions:
       source. match.py confirms the cursor loop, conditional stores, and
       eight-byte stride; Rust field stores replace the raw ldrb/ldrh sequence.
 
+  - address: 0x083e8a44
+    ghidra: FUN_083e8a44
+    name: vector_copy_construct_range_attach
+    size: 56
+    sig: "RefcountedBody **vector_copy_construct_range_attach(RefcountedBody *const *first, RefcountedBody *const *last, RefcountedBody **output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      return/r0: output_cursor
+    notes: >-
+      Raw osos.dec extent is exactly 0x083e8a44..0x083e8a7c; the next
+      leaf function begins at 0x083e8a7c with its own `b test` loop entry,
+      so Ghidra's 56-byte size is exact. std::vector<RefcountedBody*>
+      uninitialized-copy over [first, last): each iteration NULL-checks
+      the CURRENT output cursor (movs r0, r5), and when nonzero loads the
+      body from the source slot (ldrne r1, [r4]) and calls the ported
+      refcounted_body_attach @ 0x0839d370 (blne), which stores the body
+      and bumps its refcount; both cursors then advance by 4 and the
+      advanced output cursor is returned. An initially NULL output
+      therefore skips only the first attach before the cursor becomes
+      0x4; no caller passes NULL. Call count, verified by decoding every
+      ARM B/BL immediate in osos.dec: exactly four inbound direct bl
+      sites (0x083e0ce0, 0x083e0d4c, 0x083e0dd8, 0x083e0e18), all
+      unconditional; the body contains exactly ONE bl (the blne to
+      0x0839d370), so Ghidra's "4 bl" figure counts inbound callers, not
+      internal calls. No data-word references: never virtually
+      dispatched. The Rust port calls the already-ported
+      refcounted_body_attach directly (no ops seam) and advances cursors
+      with wrapping_add so a NULL initial output is not UB on host.
+      Host tests cover a three-body range with refcount bumps, an empty
+      range, a NULL body slot (unconditional store, no bump), a single
+      element, and the one-record NULL-output guard path. match.py
+      structural review finds the same cursor loop, predicated body load
+      and blne attach, equality termination, and advanced-output return;
+      differences are LLVM register allocation and frame setup.
+
   - address: 0x083e8ba0
     ghidra: FUN_083e8ba0
     name: vector_copy_range_elem24
