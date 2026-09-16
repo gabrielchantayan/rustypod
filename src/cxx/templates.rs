@@ -1010,6 +1010,34 @@ pub unsafe extern "C" fn deque_back_elem4(deque: *const BlockDeque) -> *mut u8 {
 
 
 
+/// deque_iter_assign_alias_9f64 — original: `FUN_083d9f64` @ 0x083d9f64
+/// (36 bytes, `0x083d9f64..0x083d9f88`; the next separately linked function
+/// starts at 0x083d9f88).
+///
+/// Raw `osos.dec` is eight forward `ldr`/`str` word pairs followed by `bx lr`.
+/// Decoding the incoming branch words finds four unconditional plain `bl`
+/// calls (0x083ddf2c, 0x083ddf38, 0x083ddfec, and 0x083de050), with no
+/// predicated `bl` calls. The callers use the four words as a deque iterator
+/// (`cur`, `seg_base`, `seg_end`, `seg_slot`); r0 remains the destination,
+/// despite Ghidra's `void` signature. No deliberate deviations.
+///
+/// # Safety
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; the
+/// original is a plain forward word copy and does not handle overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_9f64")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_9f64(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
+
 /// deque_iter_assign_alias_9fd4 — original: `FUN_083d9fd4` @ 0x083d9fd4
 /// (36 bytes; 22 `bl` call sites, all plain, none predicated — verified
 /// by decoding every BL word in osos.dec).
@@ -5835,6 +5863,24 @@ mod tests {
             assert_eq!(ret, dst.as_mut_ptr());
             assert_eq!(&dst[..4], &src, "including zero and all-ones words");
             assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
+        }
+    }
+
+    #[test]
+    fn iter_assign_alias_9f64_preserves_destination_and_forward_overlap() {
+        unsafe {
+            let src = [0xdead_beefu32, 0, 0xffff_ffff, 0x1234_5678];
+            let mut dst = [0xaaaa_aaaa; 5];
+            assert_eq!(
+                deque_iter_assign_alias_9f64(dst.as_mut_ptr(), src.as_ptr()),
+                dst.as_mut_ptr(),
+            );
+            assert_eq!(&dst[..4], &src);
+            assert_eq!(dst[4], 0xaaaa_aaaa, "does not write past 16 bytes");
+
+            let mut overlapping = [1u32, 2, 3, 4, 5];
+            deque_iter_assign_alias_9f64(overlapping.as_mut_ptr().add(1), overlapping.as_ptr());
+            assert_eq!(overlapping, [1, 1, 1, 1, 1]);
         }
     }
 

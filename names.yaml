@@ -37226,6 +37226,27 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083d9f64
+    ghidra: FUN_083d9f64
+    name: deque_iter_assign_alias_9f64
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_9f64(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec establishes a 36-byte body: four forward aligned u32
+      loads from src and stores to dst, then bx lr. The next separately
+      linked function begins at 0x083d9f88. Four incoming unconditional
+      plain bl instructions are at 0x083ddf2c, 0x083ddf38, 0x083ddfec,
+      and 0x083de050; no predicated bl calls target it. The predecessor
+      deque_seg_capacity at 0x083d9f5c and callers that copy iterator
+      temporaries identify this as the 16-byte deque iterator assignment
+      (cur, seg_base, seg_end, seg_slot). r0 passes through as dst despite
+      Ghidra declaring void. Kept as a separate exported, link-sectioned
+      alias so this independently hookable byte-identical instantiation
+      cannot be folded into the canonical deque_iter_assign; no other
+      deliberate deviations.
   - address: 0x083da34c
     ghidra: FUN_083da34c
     name: deque_iter_assign_alias_a34c
