@@ -2226,53 +2226,36 @@ fn plist_node_ctor_empty_tag_preserves_empty_rep_and_clears_poisoned_state() {
 }
 
 
-/// The unported recursive child-range destructor `FUN_083e3284`.
-pub type PlistNodeChildRangeDestroyFn =
-    unsafe extern "C" fn(*mut u8, *mut PlistNode, *mut PlistNode);
-
-/// Device entry for the child-range destructor. Raw ARM confirms it walks
-/// 40-byte child nodes and invokes `FUN_0825c790` on every element.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_plist_node_child_range_destroy(
-    vector: *mut u8,
-    first: *mut PlistNode,
+/// plist_node_child_range_destroy — original: `FUN_083e3284` @ 0x083e3284
+/// (40 bytes; 4 direct `bl` callers, all unconditional).
+///
+/// Raw-byte extent: ten instructions from 0x083e3284 through the
+/// `ldmia sp!,{r4,r5,r6,pc}` at 0x083e32a8, immediately before the distinct
+/// sibling `FUN_083e32ac`; no literal pool. A full osos.dec ARM B/BL decode
+/// finds four incoming `bl` sites and no predicated call forms.
+///
+/// Destroys the half-open `[first, last)` range of 0x28-byte [`PlistNode`]
+/// children. The first ABI argument in r0 is unused (the owning vector head
+/// passed by the convention of these range-destroy templates); r1 and r2
+/// are the current and end iterators. The raw loop compares the iterators
+/// first, calls the ported [`plist_node_destroy`] @ 0x0825c790 on the
+/// current node, advances r4 by 0x28 only after the call, and terminates
+/// solely on iterator equality.
+///
+/// # Safety
+/// `first` and `last` must delimit a valid contiguous range of
+/// [`PlistNode`]s; every element must be valid for [`plist_node_destroy`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_child_range_destroy(
+    _vector: *mut u8,
+    mut first: *mut PlistNode,
     last: *mut PlistNode,
 ) {
-    let destroy: PlistNodeChildRangeDestroyFn = unsafe { core::mem::transmute(0x083e_3284usize) };
-    unsafe { destroy(vector, first, last) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_plist_node_child_range_destroy(
-    _vector: *mut u8,
-    _first: *mut PlistNode,
-    _last: *mut PlistNode,
-) {
-    panic!("plist_node_destroy requires child-range destructor 0x083e3284")
-}
-
-/// Host-replaceable body of the sole unported direct callee.
-#[cfg(target_os = "none")]
-pub static mut PLIST_NODE_DESTROY_OPS: PlistNodeDestroyOps = PlistNodeDestroyOps {
-    destroy_child_range: firmware_plist_node_child_range_destroy,
-};
-
-/// Host-replaceable body of the sole unported direct callee.
-#[cfg(not(target_os = "none"))]
-pub static mut PLIST_NODE_DESTROY_OPS: PlistNodeDestroyOps = PlistNodeDestroyOps {
-    destroy_child_range: missing_plist_node_child_range_destroy,
-};
-
-/// Operations supplied by the only unported direct callee of
-/// [`plist_node_destroy`].
-#[derive(Clone, Copy)]
-pub struct PlistNodeDestroyOps {
-    pub destroy_child_range: PlistNodeChildRangeDestroyFn,
-}
-
-#[inline(always)]
-unsafe fn plist_node_destroy_ops() -> PlistNodeDestroyOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PLIST_NODE_DESTROY_OPS)) }
+    while first != last {
+        unsafe { plist_node_destroy(first) };
+        first = unsafe { first.add(1) };
+    }
 }
 
 /// plist_node_destroy — original: `FUN_0825c790` @ 0x0825c790 (144 bytes).
@@ -2290,10 +2273,8 @@ unsafe fn plist_node_destroy_ops() -> PlistNodeDestroyOps {
 /// tears down and frees the 8-byte attribute-pair vector; then releases the
 /// tag string. It returns `this`, preserving the ARM destructor convention.
 ///
-/// Deliberate deviation: child-range destruction remains the unported
-/// `FUN_083e3284`; target builds call that exact address through
-/// [`PLIST_NODE_DESTROY_OPS`], while host tests install a recorder. All other
-/// direct callees are established ports.
+/// All direct callees are established ports; the child range is walked by
+/// the ported [`plist_node_child_range_destroy`] @ 0x083e3284.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistNode {
@@ -2305,7 +2286,7 @@ pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistN
 
     let children = unsafe { &mut (*node).children };
     unsafe {
-        (plist_node_destroy_ops().destroy_child_range)(
+        plist_node_child_range_destroy(
             children as *mut PlistNodeChildVector as *mut u8,
             children.begin,
             children.end,
@@ -5641,54 +5622,11 @@ mod tests {
         );
     }
 
-    // ---- plist_node_destroy ----
+    // ---- plist_node_child_range_destroy / plist_node_destroy ----
 
-    static PLIST_NODE_DESTROY_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut PLIST_NODE_CHILD_RANGES: Vec<(*mut u8, *mut PlistNode, *mut PlistNode)> = Vec::new();
-
-    unsafe extern "C" fn record_plist_node_child_range(
-        vector: *mut u8,
-        first: *mut PlistNode,
-        last: *mut PlistNode,
-    ) {
-        (*core::ptr::addr_of_mut!(PLIST_NODE_CHILD_RANGES)).push((vector, first, last));
-    }
-
-    struct PlistNodeDestroyMock {
-        previous: PlistNodeDestroyOps,
-        _seam_lock: MutexGuard<'static, ()>,
-        _heap_lock: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for PlistNodeDestroyMock {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(PLIST_NODE_DESTROY_OPS).write_volatile(self.previous);
-            }
-        }
-    }
-
-    fn install_plist_node_destroy_mock() -> PlistNodeDestroyMock {
-        let seam_lock = PLIST_NODE_DESTROY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let heap_lock = crate::heap::veneers::tests::mock_heap();
-        unsafe {
-            (*core::ptr::addr_of_mut!(PLIST_NODE_CHILD_RANGES)).clear();
-            let previous = core::ptr::addr_of!(PLIST_NODE_DESTROY_OPS).read_volatile();
-            core::ptr::addr_of_mut!(PLIST_NODE_DESTROY_OPS)
-                .write_volatile(PlistNodeDestroyOps {
-                    destroy_child_range: record_plist_node_child_range,
-                });
-            PlistNodeDestroyMock { previous, _seam_lock: seam_lock, _heap_lock: heap_lock }
-        }
-    }
-
-    #[test]
-    fn plist_node_destroy_recurses_before_freeing_owned_vectors() {
-        let _mocks = install_plist_node_destroy_mock();
+    fn empty_plist_node() -> PlistNode {
         let empty = crate::cxx::string::empty_rep_data();
-        let mut attributes = [CxxStringPair { first: empty, second: empty }];
-        let attribute_begin = attributes.as_mut_ptr();
-        let mut companion = PlistNode {
+        PlistNode {
             tag: empty,
             attributes: PlistNodeAttributeVector {
                 begin: core::ptr::null_mut(),
@@ -5703,7 +5641,65 @@ mod tests {
             },
             companion: core::ptr::null_mut(),
             kind: 0,
-        };
+        }
+    }
+
+    #[test]
+    fn plist_node_child_range_destroy_leaves_an_empty_range_untouched() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let mut node = empty_plist_node();
+
+        unsafe {
+            plist_node_child_range_destroy(
+                core::ptr::null_mut(),
+                &mut node,
+                &mut node,
+            );
+        }
+
+        assert_eq!(
+            crate::heap::veneers::tests::free_log().0,
+            0,
+            "an empty range performs no destruction"
+        );
+    }
+
+    #[test]
+    fn plist_node_child_range_destroy_destroys_every_node_forward() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let empty = crate::cxx::string::empty_rep_data();
+        let mut first_attributes = [CxxStringPair { first: empty, second: empty }];
+        let mut last_attributes = [CxxStringPair { first: empty, second: empty }];
+        let mut children = [empty_plist_node(), empty_plist_node()];
+        for (child, attributes) in children
+            .iter_mut()
+            .zip([&mut first_attributes, &mut last_attributes])
+        {
+            child.attributes.begin = attributes.as_mut_ptr();
+            child.attributes.end = unsafe { attributes.as_mut_ptr().add(1) };
+            child.attributes.capacity = child.attributes.end;
+        }
+
+        let begin = children.as_mut_ptr();
+        unsafe {
+            plist_node_child_range_destroy(core::ptr::null_mut(), begin, begin.add(2));
+        }
+
+        let (frees, last_ptr, _) = crate::heap::veneers::tests::free_log();
+        assert_eq!(frees, 2, "both children's attribute vectors are freed");
+        assert!(
+            core::ptr::eq(last_ptr, last_attributes.as_mut_ptr().cast()),
+            "the final child's teardown comes last"
+        );
+    }
+
+    #[test]
+    fn plist_node_destroy_recurses_before_freeing_owned_vectors() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let empty = crate::cxx::string::empty_rep_data();
+        let mut attributes = [CxxStringPair { first: empty, second: empty }];
+        let attribute_begin = attributes.as_mut_ptr();
+        let mut companion = empty_plist_node();
         let mut node = PlistNode {
             tag: empty,
             attributes: PlistNodeAttributeVector {
@@ -5722,24 +5718,6 @@ mod tests {
         };
 
         assert!(core::ptr::eq(unsafe { plist_node_destroy(&mut node) }, &mut node));
-        unsafe {
-            assert_eq!(
-                (*core::ptr::addr_of!(PLIST_NODE_CHILD_RANGES)).as_slice(),
-                [
-                    (
-                        core::ptr::addr_of_mut!(companion.children).cast(),
-                        core::ptr::null_mut(),
-                        core::ptr::null_mut(),
-                    ),
-                    (
-                        core::ptr::addr_of_mut!(node.children).cast(),
-                        core::ptr::null_mut(),
-                        core::ptr::null_mut(),
-                    ),
-                ],
-                "recursive companion range precedes the owner's range"
-            );
-        }
         assert_eq!(
             crate::heap::veneers::tests::free_log(),
             (2, attribute_begin.cast(), 2),
