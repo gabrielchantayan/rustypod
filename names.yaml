@@ -85652,6 +85652,47 @@ functions:
       its extra setup and indirect call are the deliberate veneer deviation.
 
   # --- vector<u32> range-copy template ---
+  - address: 0x083e8f5c
+    ghidra: thunk_FUN_083e8f74
+    name: vector_copy_range_u32_alias_8f5c
+    size: 40
+    sig: "u32 *vector_copy_range_u32_alias_8f5c(const u32 *first, const u32 *last, u32 *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: unused_vector
+      r12: word
+      return/r0: output_cursor
+    notes: >-
+      Byte-identical twin of vector_copy_range_u32 at 0x083e9418 (all ten
+      instruction words match). Although Ghidra reports a 4-byte thunk at
+      0x083e8f5c, raw osos.dec shows the entry's b 0x083e8f74 enters its
+      own scheduled compare/loop header; the backward bne reaches the loop
+      body at 0x083e8f60, and the function returns at 0x083e8f80. Its
+      complete extent is therefore 0x083e8f5c..0x083e8f84, bounded by the
+      separately linked `push {r4,r5,r6,lr}` at 0x083e8f84. It
+      forward-copies aligned u32 words from [first, last) while the current
+      output cursor is nonzero, advances both cursors by four bytes, and
+      returns output; an initially NULL output skips only the first source
+      read and advances to address 4. Complete ARM B/BL immediate decoding
+      of osos.dec finds exactly four inbound direct calls, all
+      unconditional plain bl at 0x083e2aa8, 0x083e2afc, 0x083e2b7c, and
+      0x083e2bbc (the 0x083e2a1c vector insert split), with no predicated
+      calls and no direct tail branches. r3 (the vector argument every
+      caller passes) is never read and is omitted from the Rust ABI.
+      Exported as a distinct symbol in its own link section so LLVM's
+      identical-function folding cannot merge it with
+      vector_copy_range_u32 (the deque_iter_assign_alias_9fd4 precedent).
+      Host tests cover copying and the exclusive range end, the empty
+      range, and the NULL output one-word path. match.py (--size 40,
+      Ghidra's 4-byte record would clip the body) reports the expected
+      structural diff: LLVM opens with cmp/beq instead of the
+      branch-into-header scheduling, adds the crate fp/lr frame, and uses
+      r3 instead of ip; the loop body and return sequence are identical.
+
   - address: 0x083e9418
     ghidra: thunk_FUN_083e9430
     name: vector_copy_range_u32
