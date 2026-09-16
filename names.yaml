@@ -80831,6 +80831,45 @@ functions:
       loads and blx seam calls plus LLVM's larger frame and split cleanup.
 
 
+  # --- SQLite expression-list walker ---
+  - address: 0x08398614
+    ghidra: FUN_08398614
+    name: sqlite_expr_list_walk
+    size: 88
+    sig: "i32 sqlite_expr_list_walk(ExprList *list, ExprVisit visit, void *context)"
+    module: sqlite/expr_list_walk
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: visit
+      param_3/r2: context
+      FUN_0839866c: sqlite_expr_walk
+    notes: >-
+      Raw ARM confirms the Ghidra 88-byte extent from 0x08398614 through
+      0x08398668; the next real function is the ported sqlite_expr_walk at
+      0x0839866c. The 22-word body contains exactly one bl, the
+      unconditional call to sqlite_expr_walk at 0x08398640, and no
+      predicated calls; exactly four unconditional bl call sites target
+      this entry (0x083986d0 inside sqlite_expr_walk itself, plus
+      0x0839870c, 0x0839872c and 0x0839874c in the sibling walker at
+      0x083986f8). This is SQLite expr.c's walkExprList: NULL-guard the
+      list, snapshot the signed n_expr count (+0x00) and the item-array
+      pointer (+0x0c) once, then loop while the count is greater than
+      zero (bgt); each iteration walks the current item's p_expr and,
+      only on success, decrements the count and advances one 12-byte
+      ExprList_item. Any item walk abort (nonzero) returns one
+      immediately; a full sweep or a NULL list returns zero. The per-item
+      recursion calls the ported sqlite_expr_walk directly, mirroring the
+      original bl, and this port is now the shipped default of
+      walk_expr's SQLITE_EXPR_LIST_WALK slot, replacing its former
+      stock-address transmute. Host tests serialize against walk_expr's
+      recording-model tests through the shared
+      testing::SQLITE_EXPR_WALK_TEST_LOCK. match.py --lib <worktree
+      archive>: 27 vs 22 instructions; same NULL guard, signed count
+      guard, item p_expr load, single bl to sqlite_expr_walk and
+      stride-12 advance — LLVM counts an incremented down-counter with a
+      frame pointer instead of ADS's predicated subeq/addeq pair.
+
   # --- SQLite expression visitor ---
   - address: 0x0839866c
     ghidra: FUN_0839866c
@@ -80855,9 +80894,10 @@ functions:
       one. A NULL expr returns zero without calling visit. Exactly 13 direct
       B/BL words target this entry: 12 unconditional bl and one blne at
       0x08383394, whose call is gated by the caller's condition. The
-      distinct list helper FUN_08398614 is unported, so the target default
-      calls its verified stock address while host tests install a recording
-      volatile seam; names.yaml contains no ported entry for that helper.
+      distinct list helper FUN_08398614 is now ported as
+      sqlite_expr_list_walk (see its own entry); it is the shipped
+      default of this walker's SQLITE_EXPR_LIST_WALK slot, while host
+      tests still install recording models through that slot.
       The raw body does not inspect Expr::p_select. match.py is structural:
       LLVM's recursive call and list-helper slot call need not reproduce ADS
       instruction selection exactly.

@@ -1276,6 +1276,11 @@ pub static TDAT_FLAG_20_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// installation and restoration cannot race.
 pub static CTYPE_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes every host test that installs a recording model into
+/// `sqlite::walk_expr::SQLITE_EXPR_LIST_WALK` against the `expr_list_walk`
+/// port's own tests, which rely on that slot's real-port default.
+pub static SQLITE_EXPR_WALK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Serializes every host test that installs mocks into the crate-global
 /// `drivers::ata_cmd::TRACED_ALLOC_HOOKS`. That table is one shared
 /// mutable global, and `cargo test` runs test functions on parallel
