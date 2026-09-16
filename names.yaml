@@ -88325,6 +88325,48 @@ functions:
       0x081e0c4c notes). Deliberate deviation: the veneer dispatch to
       operator_delete is routed through the ported free seam in
       runtime/malloc_rt, matching the 0x083e68a0 instance.
+  - address: 0x083dbdfc
+    ghidra: FUN_083dbdfc
+    name: equal_key_tree_clear
+    size: 56
+    sig: "void equal_key_tree_clear(EqualKeyTree *tree)"
+    module: cxx/equal_key_tree_clear
+    status: ported
+    renames:
+      FUN_083dbdfc: equal_key_tree_clear
+      param_1/r0: tree
+      local_10: guard
+      local_c: key
+      local_8: out
+    notes: >-
+      Raw osos.dec fixes the body at 56 bytes, `0x083dbdfc..0x083dbe34`;
+      the separately linked next function opens with `push {r1-r5,lr}` at
+      0x083dbe34. The body is `push {r1,r2,r3,lr}`; load header from
+      tree+0x10; load header's +0x8 word (its left link, the leftmost
+      node); materialize three stack slots out=header, key=header->left,
+      guard=header; `bl 0x083befac(&out, tree, &key, &guard)`; pop
+      {r2,r3,ip,pc}. Exactly one bl inside the body, no predicated calls.
+      Decoding every aligned ARM B/BL word in osos.dec finds exactly four
+      direct inbound calls, all unconditional bl: 0x080ca5bc, 0x080ca5c4,
+      0x080ca654, 0x080ca65c (this is the "4 bl call sites" Ghidra
+      reports); no predicated forms, tail branches, or aligned raw-word
+      references. The callee 0x083befac belongs to the _Rb_tree
+      instantiation whose comparator is the ported equal_deref copy
+      (0x083cf6b0): it re-derives header->left and header, equality
+      compares them against the passed key/guard slots, and when both
+      match and the node count at tree+0x14 is nonzero destroys the
+      subtree through 0x083bf218 and rewires the header circular with a
+      zeroed count — this wrapper is the family's clear-the-tree entry.
+      Deliberate deviations: 0x083befac is not ported, so target builds
+      call its retailOS load address through a volatile dispatch seam
+      (host tests replace only that boundary), which is why match.py
+      shows a frame-pointer prologue and an indirect blx instead of the
+      original push/bl shape; the original's redundant double load of
+      tree+0x10 and temporary slot shuffles are each represented once,
+      with bit-identical slot values at the call. Host tests map a
+      sub-4GiB slab (hints::EQUAL_KEY_TREE_CLEAR) and verify the
+      out/key/guard slot values, fresh per-call reads of the left link,
+      and a zero left link.
   - address: 0x083dbedc
     ghidra: FUN_083dbedc
     name: container_end_cursor
