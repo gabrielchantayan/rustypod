@@ -99708,3 +99708,24 @@ functions:
       byte tolerance, map pass-through, and node+0x14 return. Deliberate
       deviations: the three original stack-padding bytes are zeroed and
       its dead dying-frame node store is omitted.
+
+  - address: 0x083da42c
+    ghidra: FUN_083da42c
+    name: copy_four_words_forward
+    size: 36
+    sig: "u32 *copy_four_words_forward(u32 *destination, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r2: copied_word
+    notes: >-
+      Raw osos.dec words establish the exact nine-instruction,
+      36-byte body at 0x083da42c..0x083da44f; 0x083da450 begins the
+      next distinct function (`mov r0,#0; bx lr`). It loads and stores
+      aligned words at offsets +0, +4, +8, and +12 in that order,
+      leaving r0/destination intact as its return value. Decoding ARM
+      branch-immediate words finds exactly four inbound direct calls, all
+      unconditional plain bl, with no predicated bl forms. The body has
+      no callee or dispatch seam. No deliberate deviations.
