@@ -161,6 +161,7 @@ pub mod video_engine;
 pub mod validator;
 pub mod vtable_query;
 pub mod wang_hash;
+pub mod hash_word;
 pub mod word_list;
 pub mod word_list_modular_add;
 pub mod word_list_modular_multiply;
