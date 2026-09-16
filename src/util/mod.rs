@@ -155,6 +155,7 @@ pub mod zero_u32_pair;
 pub mod zero_four_words;
 pub mod zero_three_words;
 pub mod u32_word_swap;
+pub mod u32_word_exchange;
 pub mod u8_pair_copy;
 pub mod utf16_nul_terminator_consume;
 pub mod utf8_next_codepoint_permissive;
