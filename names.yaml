@@ -49958,6 +49958,43 @@ functions:
       typed pointer-to-pointer rather than a literal offset, preserving
       target layout and host pointer width. scoped_context_is_valid now
       directly calls this port, removing its former ROM dispatch seam.
+  - address: 0x0806b4a0
+    ghidra: FUN_0806b4a0
+    name: music_path_resolve
+    size: 144
+    sig: "i32 music_path_resolve(const char *path, u16 *dst, u32 reserved, u32 seed)"
+    module: fs/music_path_resolve
+    status: ported
+    renames:
+      param_1/r0: path
+      param_2/r1: dst
+      param_3/r2: reserved
+      param_4/r3: seed
+      local_10: digit
+      FUN_08030ff4: strcpy
+      FUN_0809a7e4: music_dir_volume_digit
+      FUN_080ccb44: volume_path_translate
+      s_iPod_Control_Music__0806b530: MUSIC_DIR_PREFIX
+    notes: >-
+      Raw ARM extent is exactly 0x0806b4a0..0x0806b530 (144 instruction
+      bytes, matching Ghidra's size), followed by the 20-byte literal
+      "iPod_Control\Music\" at 0x0806b530..0x0806b544; the next function
+      starts at 0x0806b544 with push {r4,r5,r6,r7,r8,lr}. Decoding the
+      disassembly finds exactly five direct bl call sites (0x08053160,
+      0x080d7214, 0x080e2e78, 0x080e2eb4, 0x080e5054), all unconditional;
+      zero predicated forms and no tail-B sites. Builds a caller buffer as
+      [u16 volume header][NUL-terminated path]: returns -50 on NULL path or
+      dst; zeroes the header; when path byte +0x24 is set, copies the fixed
+      prefix at dst+2 and appends path at byte offset 21 (overwriting the
+      prefix NUL); otherwise calls the unported volume-digit matcher
+      0x0809a7e4 (path, &digit-seeded-from-arg4) and, on a nonzero result,
+      rewrites the path through the unported translator 0x080ccb44 at dst+2
+      with max 0x100 and stores the digit word's sign-extended low byte into
+      the header, else copies the path verbatim at dst+2. Both unported
+      callees run through volatile host-test seams; the ported strcpy is
+      called directly. LLVM inlines the strcpy bodies and lowers the
+      constant 20-byte prefix copy to __aeabi_memcpy (weak, from
+      compiler_builtins) — semantics identical to the original BLs.
   - address: 0x082a3dcc
     ghidra: FUN_082a3dcc
     name: scoped_context_is_valid
