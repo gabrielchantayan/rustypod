@@ -76616,6 +76616,25 @@ functions:
       return the original slot. Host tests cover the NULL guard and verify slot
       +0x1c, object forwarding, unchanged slot contents, and returned address.
 
+  # --- deferred branch veneer into unavailable code ---
+  - address: 0x083eaa8c
+    ghidra: FUN_083eaa8c
+    name: unresolved_branch_veneer
+    size: 4
+    status: identified
+    notes: >-
+      Deferred: raw osos.dec establishes that the only instruction at
+      0x083eaa8c is `b 0x083f3350`; the next seven words at
+      0x083eaa90..0x083eaaa8 are separate adjacent B-table entries, and
+      0x083eaaac begins the next real function (`cmp r2,#3`). Ghidra's
+      36-byte extent therefore crosses eight branch entries and into that
+      next function. A full raw ARM B/BL scan finds exactly four inbound
+      calls, all unconditional plain BL (0x083e8610, 0x083e8650,
+      0x083e9878, 0x083e98b4), with zero predicated BL calls and zero
+      direct B tails. The target's raw bytes at 0x083f3350 are zero, so
+      its identity and ABI cannot be established from the available image.
+      Porting a Rust seam would invent both; retain this identified entry
+      until the target code is available.
   - address: 0x083863d4
     ghidra: FUN_083863d4
     name: sqlite_utf8_read
