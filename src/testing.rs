@@ -1305,6 +1305,11 @@ pub static SCREEN_LAYOUT_ASSIGN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mut
 pub static STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
+/// Serializes tests that swap the `cxx::string_export_counted_utf16`
+/// worker seam.
+pub static STRING_EXPORT_COUNTED_UTF16_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 
 /// Serializes every host test that swaps
 /// `util::context_field::CURRENT_TASK_CTX_BLOCK`. That slot is one shared

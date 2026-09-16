@@ -3042,6 +3042,52 @@ functions:
       the existing usec_timer_read port rather than duplicate its one MMIO
       load, with a dedicated section to preserve this hookable thunk symbol.
 
+
+  # --- counted byte string -> length-prefixed UTF-16 export wrapper ---
+  - address: 0x0805a8b4
+    ghidra: FUN_0805a8b4
+    name: string_export_counted_utf16
+    size: 48
+    sig: "i32 string_export_counted_utf16(const void *src, u32 dead, u16 *dst)"
+    module: cxx/string_export_counted_utf16
+    status: ported
+    vars:
+      param_1/r0: src (counted byte string {u16 length @ +0, NUL-terminated
+        bytes @ +2}; passed through to the worker verbatim)
+      param_2/r1: dead (forwarded into the worker's r2, which the worker
+        never reads; every observed caller passes 0)
+      param_3/r2: dst (u16 length prefix at [dst], code units at dst+2)
+      FUN_0805ab44: "STRING_EXPORT_COUNTED_UTF16_IMPL seam (unported
+        344-byte worker: rebuilds src+2 as a COW string via
+        string_object_assign_cstr @ 0x0827639c, optional '\\' escape pass
+        when its r1 selector is nonzero - the wrapper pins it to 0 -,
+        utf8_to_utf16_bounded @ 0x082767fc into dst+2 with the 0xff
+        capacity, utf16_code_unit_count_safe @ 0x08277164 into the result
+        slot; returns 0 or -0x32 via mvn r0,#0x31)"
+    notes: >-
+      Ghidra's 48-byte extent is correct: the body is 12 words ending in
+      `ldmia sp!,{r1,r2,r3,r4,r5,pc}` and the next distinct function
+      begins at 0x0805a8e4 (`stmdb sp!,{r4-r7,lr}`); whole body verified
+      against osos.dec. Ghidra's "5 bl" report counts the CALLERS - five
+      unconditional plain `bl` sites (0x080514a8, 0x080fe220, 0x08106f00,
+      0x0813e8cc, 0x082a3830) - while the body itself issues exactly 1
+      plain BL (the worker @ 0x0805ab44) and 0 predicated BLs. Algorithm:
+      push {r1-r5,lr}; plant the worker's stack args via
+      `strd {0xff, &slot}, [sp]` (the result slot aliases the pushed-r3
+      spill word); call worker(src, 0, r1, dst+2, 0xff, &slot); then
+      `strh slot, [dst]` publishes the low halfword of the exported
+      code-unit count as the u16 length prefix and r0 returns the worker's
+      status verbatim. The worker is unported, so ARM builds dispatch to
+      its retailOS entry 0x0805ab44 and the host default fails closed
+      with -0x32, mirroring the worker's own NULL-argument early return
+      (which likewise never touches the slot). Deliberate deviation: the
+      port zero-initializes the result slot, so on the error path dst[0]
+      becomes 0 where stock stores the caller's leftover r3 - no observed
+      caller reads dst[0] after a nonzero status. match.py confirms the
+      frame/capacity/dead-forward/dst+2/call/reload/strh sequence; the
+      worker call goes through a literal-loaded BLX seam and LLVM picks
+      its own frame layout, matching the deviation already accepted for
+      the other unported-callee seams.
   - address: 0x08086e24
     ghidra: FUN_08086e24
     name: read_usec_timer_into
