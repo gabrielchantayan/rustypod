@@ -935,6 +935,53 @@ functions:
       red_black_tree_rotate_right. Its shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the
       transferred middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree 16-byte-payload node pool ---
+  - address: 0x083c4d30
+    ghidra: FUN_083c4d30
+    name: red_black_tree_payload_16_node_pool_acquire
+    size: 176
+    sig: "RedBlackTreePayload16Node *red_black_tree_payload_16_node_pool_acquire(RedBlackTreePayload16NodePool *pool)"
+    module: cxx/red_black_tree_payload_16_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      iVar4/r0: nodes
+      uVar6/r6: capacity
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent: 44 ARM words from
+      push {r4-r8,lr} at 0x083c4d30 through pop {r4-r8,pc} at 0x083c4ddc;
+      the next separately linked function (cxx_string_vector_record_link)
+      begins at 0x083c4de0. The body holds exactly two bl instructions, both
+      unconditional calls to operator_new_checked @ 0x08266c70 (sizes 0xc
+      and capacity<<5); there are no predicated calls and no tail branches.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly four inbound direct calls, all unconditional bl at 0x08134dfc,
+      0x081cdb0c, 0x083c5648, and 0x083c5714, matching Ghidra's four call
+      sites; there are no predicated direct calls or plain b tail calls.
+      Ghidra's void return is wrong: r0 carries the acquired node out and
+      every caller consumes it (e.g. the 0x081342ec/0x081cdab4 constructors
+      close the returned header node into an empty circle). The pool first
+      pops free nodes threaded through node+0x0c; otherwise it bumps through
+      0x20-byte chunks. On exhaustion it links a new {previous, capacity,
+      nodes} 12-byte header, allocates max(previous capacity + 32, previous
+      capacity + previous capacity/2 + previous capacity/8) nodes (or 32
+      initially), and resumes at its first node. It clears color and
+      parent/left/right while preserving the client payload at +0x10..+0x1f.
+      This is the 0x20-stride twin of red_black_tree_payload_24_node_pool_acquire
+      @ 0x083c14c8 (same algorithm, 0x28 stride); both keep separate hooks,
+      so the bodies are not merged. Rust maintains firmware pointers as u32
+      target words and, as stock does, immediately dereferences failed
+      checked allocations; no deliberate deviations. Host tests cover first
+      allocation, recycled-node reset with payload preservation, linear
+      32-to-64 growth, and 64-to-104 geometric growth. match.py structural:
+      same skeleton throughout (free-list pop, chunk growth via lsr #1/lsr #3
+      and max, two operator_new_checked calls, stm {previous, capacity}, end
+      = nodes + capacity<<5, four-word node clear); the diff is ADS-vs-LLVM
+      register allocation, the crate's fp frame, and intra-archive bl
+      relocations.
   # --- C++ string/vector record slot link ---
   - address: 0x083c4de0
     ghidra: FUN_083c4de0
