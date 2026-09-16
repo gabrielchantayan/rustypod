@@ -239,6 +239,48 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock_owned(body: *mut Refcounte
     }
 }
 
+/// refcounted_body_mutex_unlock_owned_variant — original: `FUN_0839cfec` @
+/// load address 0x0839cfec (16 bytes; 4 direct `bl` call sites, all
+/// unconditional: 0x0815f4d4, 0x0815f50c, 0x0839cf98, and 0x0839cfd0).
+/// Decoding every ARM `B`/`BL` word in `osos.dec` finds no predicated calls
+/// or direct tail `b` sites; no word-aligned image word equals this address,
+/// so it is not virtually dispatched. Raw instructions:
+///
+/// ```text
+/// 0839cfec:  ldr r0,[r0,#0x8]
+/// 0839cff0:  cmp r0,#0x0
+/// 0839cff4:  bne 0x0807f6a0
+/// 0839cff8:  bx lr
+/// ```
+///
+/// ending with `bx lr` at 0x0839cff8; the next separately linked function
+/// begins at 0x0839cffc. This is the mutex-unlock half of the helper pair
+/// (lock @ 0x0839cfdc, unlock @ 0x0839cfec) linked immediately after
+/// [`refcounted_body_release_owned_variant`] @ 0x0839cf4c, which calls it
+/// twice; the remaining two sites come from the 0x0815f4xx family.
+///
+/// Loads the optional mutex from `body` at target +8 and, when non-NULL,
+/// tail-branches to [`mutex_unlock`] @ 0x0807f6a0. It has no NULL guard for
+/// `body`; callers must supply a readable [`RefcountedBody`].
+///
+/// No deliberate behavioral deviations. A distinct target-only section keeps
+/// this separately linked retail helper from folding into its byte-identical
+/// siblings at 0x0839d44c and 0x0839d360.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_unlock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_unlock_owned_variant")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_unlock_owned_variant(body: *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 /// refcounted_body_mutex_unlock_slot1 — original: `FUN_0839d274` @ load
 /// address 0x0839d274 (16 bytes; 4 direct `bl` call sites, all
 /// unconditional: 0x0816cedc, 0x0816cf14, 0x0839d220, and 0x0839d258).
@@ -3728,6 +3770,28 @@ mod tests {
             body.mutex = core::ptr::null_mut();
             unsafe { refcounted_body_mutex_unlock(&mut body) };
             assert_eq!(events(), std::vec![Event::Signal(0x39)]);
+        }
+
+        #[test]
+        fn owned_variant_body_mutex_unlock_signals_only_a_present_mutex() {
+            let _bench = bench();
+            let mut semaphore = 0x3b;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+
+            unsafe { refcounted_body_mutex_unlock_owned_variant(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x3b)]);
+
+            body.mutex = core::ptr::null_mut();
+            unsafe { refcounted_body_mutex_unlock_owned_variant(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x3b)]);
         }
 
         #[test]
