@@ -84,6 +84,7 @@ pub mod move_to_root;
 pub mod check_read_locks;
 pub mod cell_size;
 pub mod change_cookie;
+pub mod column_default;
 pub mod column_mem;
 pub mod context_malloc;
 pub mod data_size;

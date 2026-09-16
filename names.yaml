@@ -33474,6 +33474,47 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- Column default-value attachment (src/sqlite/column_default.rs) ----
+  - address: 0x0837354c
+    ghidra: FUN_0837354c
+    name: column_default
+    size: 108
+    sig: "void column_default(Vdbe *v, Table *tab, int i_col)"
+    module: sqlite/column_default
+    status: ported
+    renames:
+      param_1: v
+      param_2: tab
+      param_3: i_col
+      FUN_08386524: value_from_expr
+      FUN_08386aa4: vdbe_change_p4
+    notes: >-
+      SQLite 3.5.9 sqlite3ColumnDefault. Raw ARM verifies exactly 108
+      bytes (0x0837354c..0x083735b7): the independently linked sibling
+      expr_compare_affinity starts at 0x083735b8, and Ghidra's own
+      108-byte size agrees. Four direct inbound bl call sites, all
+      unconditional (0x08376e24, 0x08379fd8, 0x08385d20, 0x08385eec),
+      binary-verified; no predicated bl forms and no tail branches
+      reach it. When the table is real (Table.pSelect at +0x18 is
+      NULL), the body evaluates Column[i_col].pDflt (the 0x14-byte
+      Column at Table.aCol + i_col*0x14, pDflt at +0x04, affinity byte
+      at +0x12) through valueFromExpr @ 0x08386524 (static in
+      SQLite's insert.c; UNPORTED, no ledger entry) with the schema
+      encoding ([[db+0x08]+0x14]+0x59, the same aDb[0].pSchema->enc
+      chain locate_coll_seq decodes) and attaches a non-NULL result
+      as P4_MEM (-8, mvnne r3,#0x7) of the newest op via the ported
+      vdbe_change_p4 @ 0x08386aa4. valueFromExpr remains a volatile
+      dispatch seam in the expr_code_compare style: target builds call
+      the retail address 0x08386524, host tests install a recorder,
+      and the shipped host default panics. The port pre-initializes
+      the out-slot to NULL where the original leaves sp+4 untouched
+      (the callee writes *out on every path, verified in its
+      decompile, so the states are equivalent). match.py (exit 1,
+      diff expected): same NULL-tab/pSelect guards -> enc chain ->
+      seam blx in place of the direct bl 0x08386524 -> NULL check ->
+      change_p4(-1, value, -8); the diff is the crate fp frame, the
+      out-slot pre-initialization, and the blx seam dispatch.
+
   # ---- Schema-cookie verification marker (deferred) ----
   - address: 0x083734bc
     ghidra: FUN_083734bc
