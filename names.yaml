@@ -74367,8 +74367,10 @@ functions:
       param_1/r0: tag
       param_2/r1: handler
       DAT_081e11dc: TAG_HANDLER_MAP_ADDRESS (BSS map global 0x08ad7d74)
-      FUN_083dbd9c: TAG_MAP_VALUE_SLOT (unported; dispatch slot, ROM
-        transmute on target, inert shared-word stub on host)
+      FUN_083dbd9c: TAG_MAP_VALUE_SLOT (ported as
+        cxx/u32_map_value_slot::u32_map_value_slot; dispatch slot now
+        delegates to the port, whose own tree-walk seam transmutes ROM
+        0x083ce874 on target)
     notes: >-
       True extent 56 bytes (Ghidra's 52 drops the trailing literal-pool
       word @ 0x081e11dc = 0x08ad7d74, past the image end 0x08a1b5e8, so
@@ -74391,8 +74393,9 @@ functions:
       getter FUN_081e13b4 @ 0x081e13b4 (same map, same callee, one bl
       site @ 0x081e9b5c) reads the slot and blx's the handler with the
       tag owner object in r3, so the stored word is a raw entry-point
-      address. Not hooked anywhere yet; on target the seam default
-      transmutes 0x083dbd9c so a hooked build is faithful. match.py
+      address. Not hooked anywhere yet; the seam default delegates to
+      the ported u32_map_value_slot (itself faithful on target via its
+      own ROM transmute of the tree walk 0x083ce874). match.py
       structural diff vs worktree --lib archive: same shape - key
       spilled to a stack slot, two calls with (map, &key), the
       conditional store; differences are the dispatch-slot blx
@@ -88325,6 +88328,58 @@ functions:
       0x081e0c4c notes). Deliberate deviation: the veneer dispatch to
       operator_delete is routed through the ported free seam in
       runtime/malloc_rt, matching the 0x083e68a0 instance.
+  - address: 0x083dbd9c
+    ghidra: FUN_083dbd9c
+    name: u32_map_value_slot
+    size: 56
+    sig: "u32 *u32_map_value_slot(void *map, const u32 *key)"
+    module: cxx/u32_map_value_slot
+    status: ported
+    renames:
+      FUN_083dbd9c: u32_map_value_slot
+      param_1/r0: map
+      param_2/r1: key
+      uStack_14: pair[0] (key word)
+      uStack_10: pair[1] (zero value)
+      local_c: out (node pointer + inserted-flag byte)
+      FUN_083ce874: U32_MAP_TREE_WALK (unported; ADS find-or-insert tree
+        walk, dispatch slot, ROM transmute on target, panic stub on host)
+    notes: >-
+      Raw osos.dec fixes the body at 56 bytes, 0x083dbd9c..0x083dbdd4
+      (Ghidra's 56 is correct); the next separately linked function
+      opens stmdb sp!, {r3, lr} (e92d4008) @ 0x083dbdd4. Decoding every
+      aligned ARM B/BL word in osos.dec finds exactly four direct
+      inbound calls, all unconditional bl: 0x081e11b8 and 0x081e11d0
+      inside tag_handler_register_default @ 0x081e11a8, 0x081e13c0 and
+      0x081e13d8 inside the sibling getter FUN_081e13b4 @ 0x081e13b4; no
+      predicated forms, tail branches, or aligned raw-word references.
+      The body contains exactly one bl (to 0x083ce874) and no predicated
+      calls. Algorithm: the ADS std::map<u32, u32> operator[] fast path
+      - load the key word, materialize a {key, 0} pair on the stack,
+      bl the find-or-insert tree walk @ 0x083ce874 (u32 less-than
+      comparator @ 0x083d7598 on both dereferenced key words, left link
+      +8, right link +0xc, key @ node +0x10; it writes the
+      found-or-freshly-inserted node pointer plus an inserted-flag byte
+      at out + 4) with (&out, map, &pair), and return node + 0x14, the
+      mapped-value slot. Absent keys therefore read back the zero the
+      pair was built with. Never returns NULL. Deliberate deviations:
+      0x083ce874 (and the insert/rebalance machinery @ 0x083cea3c /
+      0x083cf998 beneath it) is not ported, so target builds invoke its
+      retailOS load address through a volatile dispatch seam and host
+      tests replace only that boundary (the equal_key_tree_clear house
+      pattern); the original's str r0, [sp] is a dead store into bytes
+      released by the very next add sp and is omitted; LLVM zero-inits
+      the out frame, extra stores the original does not need. The
+      registrar app/tag_handler_registry's TAG_MAP_VALUE_SLOT dispatch
+      slot now delegates to this port as its default. match.py
+      structural diff vs worktree --lib archive: same shape - {key, 0}
+      pair construction, out slot, the call, node + 0x14 return;
+      differences are the crate fp frame, the dispatch-slot load and
+      blx (vs direct bl 0x083ce874), and the out zero-init stores.
+      Host tests (2): the walk observes exactly {*key, 0} and the
+      untouched map pointer, and node + 0x14 is returned even when the
+      walk scribbles its inserted-flag byte at out + 4; the key word is
+      read fresh per call (two distinct keys each observed).
   - address: 0x083dbdfc
     ghidra: FUN_083dbdfc
     name: equal_key_tree_clear
