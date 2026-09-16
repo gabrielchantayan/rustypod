@@ -92070,9 +92070,50 @@ functions:
       LLVM inlines the ported __rt_uread4 byte-wise instead of bl. Host
       tests cover status pass-through, both tag layouts, unknown tags, and
       zero payloads.
-  
 
-  # --- conditional opaque-handle release ---
+  # --- record descriptor pack (query engine) ---
+  - address: 0x080433b0
+    ghidra: FUN_080433b0
+    name: record_descriptor_pack
+    size: 148
+    sig: "void record_descriptor_pack(u32 id, const void *name, i32 wide, u8 *dst)"
+    module: ui/record_descriptor_pack
+    status: ported
+    renames:
+      param_1/r0: id
+      param_2/r1/r5: name
+      param_3/r2/r7: wide (byte mode when 0; callers pass tag == 0x482b)
+      param_4/r3/r4: dst
+      FUN_08031160: __rt_uwrite4 (ported, libc/rt_unaligned)
+      FUN_08045fb0: counted_wide_copy (unported, seam)
+      FUN_0806c520: counted_byte_copy (unported, seam)
+    notes: >-
+      Raw ARM extent is exactly 0x080433b0..0x08043444, 148 bytes; the next
+      function begins at 0x08043444 with push {r4-r8,lr}. The body issues
+      four plain bl instructions and no predicated bl: __rt_uwrite4 plus
+      one counted-string copier per path. Decoding every inbound ARM branch
+      word in osos.dec finds exactly five plain unconditional bl callers
+      (0x080472d4, 0x0804844c, 0x08051784, 0x0805c104, 0x0805c178) and no
+      predicated forms. Writes a query-engine descriptor record at dst: a
+      two-byte total-length field (u16 in wide mode, a u8 6 plus u8 0 in
+      byte mode), the unaligned LE u32 id at +2 via ported __rt_uwrite4, a
+      zeroed counted-string slot at +6, then for a non-NULL name the
+      counted payload copy into +6 and a fold of the payload length into
+      the total (wide: 6 + 2 * u16 count; byte: 6 + the clamped count the
+      copier stored at +6). Wide mode is selected by callers when the
+      object tag at +2 is 0x482b. The counted copiers stay in retailOS:
+      0x08045fb0 copies (count + 1) * 2 bytes for a u16-counted UTF-16
+      string; 0x0806c520 stores a u8 count clamped to 31 then copies that
+      many payload bytes. Deviations: both copiers are volatile host seams
+      and fixed-address blx calls on target (the original's bl), and LLVM
+      inlines the ported __rt_uwrite4 byte-wise instead of bl 0x08031160.
+      match.py structural (exit 1, diff expected): same wide/byte split,
+      header stores, NULL-name early return, and fold arithmetic; deltas
+      are the blx seam pointers, the inlined uwrite4, and LLVM register
+      allocation. Host tests (6) cover both modes, NULL names, seam
+      argument forwarding, the 31-clamp via a faithful copier model, and
+      u16 total wraparound.
+
   - address: 0x0805a594
     ghidra: FUN_0805a594
     name: opaque_handle_release_if_valid
