@@ -33747,6 +33747,51 @@ functions:
       failure, output preservation, release/lock suppression on failure,
       and the enter/leave pairing.
 
+  # ---- B-tree metadata writer (src/sqlite/btree_update_meta.rs) ----
+  - address: 0x08372dd4
+    ghidra: FUN_08372dd4
+    name: btree_update_meta
+    size: 128
+    sig: "u32 btree_update_meta(Btree *btree, u32 index, u32 value)"
+    module: sqlite/btree_update_meta
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: index
+      param_3/r2: value
+      iVar1/r4: shared
+      iVar3/r8: page_one_data
+      iVar2/r6: status
+    notes: >-
+      Extent verified from raw osos.dec: push {r4-r10,lr} starts at
+      0x08372dd4, its pop {r4-r10,pc} ends at 0x08372e50, and the next
+      separately linked function starts at 0x08372e54 - exactly 128 bytes,
+      matching Ghidra. Every ARM B/BL word in the decrypted image was
+      decoded: exactly 4 plain-bl callers of this entry (0x082bdb38,
+      0x082bde68, 0x08382a88, 0x08388ad0) and 4 bl instructions inside the
+      body, all unconditional plain bl (btree_enter @ 0x0837118c,
+      sqlite3PagerWrite @ 0x0837ef64, store_be32 @ 0x083816cc, btree_leave
+      @ 0x08371da4) with no predicated form. This is SQLite's sqlite3BtreeUpdateMeta: enter the B-tree,
+      refresh pBt->db from p->db, then if p->inTrans != TRANS_WRITE return
+      SQLITE_ERROR (1) when BtShared+0x11 (readOnly) is clear else
+      SQLITE_READONLY (8); otherwise pager-write root page one's DbPage
+      (MemPage+0x48; aData at +0x44), store the value big-endian at page
+      +0x24 + index*4, and for index 7 latch the value's low byte into
+      BtShared+0x17 (incrVacuum). The B-tree leave runs on every path. The
+      target calls the existing btree_enter/btree_leave/store_be32 ports
+      directly; sqlite3PagerWrite remains an absolute target call at
+      0x0837ef64. Deliberate host-only deviation: a private dispatch table
+      models the enter/pager_write/leave boundaries because widened host
+      Btree pointers cannot compose directly with the older
+      target-byte-offset lock-counter port. Tests cover the big-endian
+      store, the index-7 low-byte latch, pager-failure pass-through without
+      store or latch, SQLITE_ERROR on a writable cache outside a
+      transaction, SQLITE_READONLY on a read-only cache, and the
+      enter/leave pairing. match.py shows the expected LLVM block
+      reordering (write path inlined, error path out-of-line) and blx via
+      the 0x0837ef64 literal while retaining enter, pager write, be store,
+      the strbeq latch, and leave.
+
   # ---- Deferred VDBE cursor movement (src/sqlite/cursor_moveto.rs) ----
   - address: 0x08386c90
     ghidra: FUN_08386c90
