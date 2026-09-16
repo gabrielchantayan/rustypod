@@ -36021,7 +36021,7 @@ functions:
     notes: >-
       SQLite 3.5.x's sqlite3IdListDelete. Raw ARM confirms the exact
       68-byte extent 0x0837b11c..0x0837b15f; the separately linked
-      identifier-list constructor opens at 0x0837b160. A whole-image ARM
+      identifier-list duplicator (id_list_dup) opens at 0x0837b160. A whole-image ARM
       B/BL decode finds exactly nine direct BL callers, all unconditional:
       0x083701d4, 0x08375358, 0x083753b8, 0x0837b0f4, 0x0837ca68,
       0x08384330, 0x08384434, 0x08385204, and 0x08391a14. No predicated
@@ -36040,6 +36040,57 @@ functions:
       release. match.py should retain the NULL early return, signed loop,
       three tracked frees, and final-header teardown; LLVM need not preserve
       the original tail branch.
+
+  - address: 0x0837b160
+    ghidra: FUN_0837b160
+    name: id_list_dup
+    size: 164
+    sig: "IdList *id_list_dup(sqlite3 *db, const IdList *src)"
+    module: sqlite/id_list_dup
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: src
+      r4: index
+      r5: new
+      r6: src
+      r9: db
+      "src+0x00": items
+      "src+0x04": n_id
+      "new+0x08": n_alloc
+      "item+0x00": z_name
+      "item+0x04": index
+    notes: >-
+      SQLite 3.5.x's sqlite3IdListDup. Raw ARM confirms the exact 164-byte
+      extent 0x0837b160..0x0837b203; the next function's stmdb opens at
+      0x0837b204. A whole-image ARM B/BL decode finds exactly four direct
+      BL callers, all unconditional: 0x082c42ac, 0x083701a4, 0x08384548,
+      and 0x08391a08; no predicated BL reaches it. The body itself issues
+      four unconditional BLs: db_malloc_raw @ 0x08374960 twice (12-byte
+      header, then n_id << 3 item array), db_str_dup @ 0x08374a14 per item
+      name, and tracked_free @ 0x083906f4 on the array-failure path. NULL
+      src or a failed header allocation returns NULL without more work.
+      The source n_id seeds both n_alloc (+0x08, stored first) and n_id
+      (+0x04). If the item array fails, the header goes straight to
+      tracked_free and NULL is returned. Otherwise a signed, pre-tested
+      bgt loop re-reads src->n_id each pass: every 8-byte item's z_name
+      is deep-copied through db_str_dup (a NULL name passes through as
+      NULL without allocating) and the trailing index word is copied
+      verbatim; a failed name duplication stores NULL and keeps walking.
+      This corrects id_list_delete's notes, which guessed 0x0837b160 was
+      the identifier-list constructor - the raw code is unambiguously the
+      deep-copying duplicator. The IdList/IdListItem repr(C) views are
+      shared with id_list_delete, keeping pointer fields disjoint in host
+      tests. Host tests cover NULL src, header-allocation failure,
+      array-allocation failure (header freed, NULL out), zero count (the
+      0-byte array is still requested), name deep-copy with verbatim
+      indices and exact malloc size sequence, NULL names, and a failed
+      name dup that neither aborts nor aliases. match.py: same structure
+      - both guards, the paired n_id stores, the lsl #3 array request,
+      the signed loop re-reading n_id with the 8-byte stride, db_str_dup
+      plus the verbatim index word; the diff is LLVM's fp frame, register
+      allocation, and tracked_free's stats update inlined at the single
+      failure-path free site (the accepted tracked_free deviation).
 
   - address: 0x0837894c
     ghidra: FUN_0837894c

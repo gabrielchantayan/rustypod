@@ -4,7 +4,7 @@
 //!   9 direct `bl` call sites, binary-scanned).
 //!
 //! Raw ARM spans 0x0837b11c..0x0837b15f; the separately linked identifier
-//! list constructor begins at 0x0837b160. A whole-image ARM B/BL decode found
+//! list duplicator (id_list_dup) begins at 0x0837b160. A whole-image ARM B/BL decode found
 //! nine unconditional direct `bl` callers (0x083701d4, 0x08375358,
 //! 0x083753b8, 0x0837b0f4, 0x0837ca68, 0x08384330, 0x08384434,
 //! 0x08385204, and 0x08391a14), no predicated `bl`, and one unconditional
