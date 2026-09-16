@@ -91952,6 +91952,41 @@ functions:
       negative product bit pattern, and the exhausted-table sentinel.
 
   # --- Observable-array pair constructor ---
+  - address: 0x083e749c
+    ghidra: FUN_083e749c
+    name: observable_array_owned_destroy
+    size: 36
+    sig: "ObservableArray **observable_array_owned_destroy(ObservableArray **slot)"
+    module: cxx/observable_array_owned_destroy
+    status: ported
+    renames:
+      param_1/r0: slot
+      "*slot": array
+      FUN_08271d2c: observable_array_destruct
+      FUN_082aad24: operator_delete
+      "r0 return": slot
+    notes: >-
+      Raw osos.dec (words e92d4010 e1a04000 e5900000 e3500000 0a000001
+      ebfa2a1d ebfb0e1a e1a00004 e8bd8010) confirms the 36-byte extent
+      0x083e749c..0x083e74c0: the next real function begins at 0x083e74c0
+      with push {r4,r5,r6,lr}. Binary-scanning every ARM B/BL immediate in
+      the image finds 4 plain unconditional bl callers and 0 predicated bl
+      callers — the "4 bl call sites" Ghidra reports are the callers; the
+      body itself holds exactly 2 bls, to the already-ported
+      observable_array_destruct @ 0x08271d2c and operator_delete @
+      0x082aad24. Teardown helper for an owning ObservableArray* member:
+      load the pointer from the caller's slot, and when non-NULL destruct
+      the array and feed the destructor's return (which is the same
+      pointer) to the tag-2 delete; the slot word is NOT cleared, unlike
+      the sibling helper ending at 0x083e7498, and the slot address is
+      returned (caller 0x081d2914 anchors sibling access at return-4).
+      Deviations from Ghidra's decompile: the "Subroutine does not return"
+      warning on the delete is spurious — the mov r0,r4; pop {r4,pc}
+      epilogue is reachable — and the declared int* return is the
+      ObservableArray** slot. match.py structural: identical shape
+      (slot load, NULL guard, destruct bl, delete bl, slot returned in r0);
+      the diff is LLVM's frame-pointer prologue and register shuffling
+      versus ADS's push {r4,lr}, the accepted modern-toolchain deviation.
   - address: 0x081d5f14
     ghidra: FUN_081d5f14
     name: observable_array_pair_construct
