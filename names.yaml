@@ -46569,6 +46569,54 @@ functions:
       port reaches that remaining retailOS helper directly on target and
       models it with a host-swappable seam only for tests; no already ported
       callee was restubbed.
+  - address: 0x08046c74
+    ghidra: FUN_08046c74
+    name: utf8_span_to_utf16_counted
+    size: 116
+    sig: "i32 utf8_span_to_utf16_counted(const u8 *source, u32 source_len, u16 *destination, u32 max_codepoints, u32 *out_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1: source
+      param_2: source_len
+      param_3: destination
+      param_4: max_codepoints
+      param_5: out_count
+      local_20: temporary_vtable
+      local_1c: temporary_payload
+      DAT_08046ce8: STRING_OBJECT_VTABLE_ADDRESS
+    notes: >-
+      Five direct unconditional bl call sites, binary-verified from
+      osos.asm: 0x08046b58, 0x08046c64 (inside utf8_to_utf16_counted_buffer
+      @ 0x08046c24 and its sibling), 0x080be510, 0x080be678 and
+      0x0816ee28; no predicated bl or B entries target it. Ghidra's
+      116-byte extent is correct: the body is 29 words ending in `ldmia
+      sp!, {r2-r8, pc}` at 0x08046ce4, followed by the vtable literal
+      0x089a6044 @ 0x08046ce8; the next function starts at 0x08046cec.
+      The body stack-constructs a temporary two-word StringObject (vtable
+      literal, NULL payload), fills it from the byte span through the
+      unported span-assignment helper @ 0x08277188 (raw-decoded: empty
+      spans tail-dispatch vtable slot +0xc, otherwise slot +0x8 allocates
+      len + 1, memcpy @ 0x08037db0 copies len + 1 bytes and an explicit
+      trailing NUL is stored; return value ignored), counts the payload's
+      codepoints with the ported utf8_codepoint_count_safe @ 0x082770e0,
+      resolves the C string with string_object_c_str @ 0x082a50b0, then
+      converts through utf8_to_utf16_bounded @ 0x082767fc bounded by the
+      UNSIGNED minimum of max_codepoints and the decoded count (`cmp r4,
+      r5; movcs r4, r5`). A non-NULL out_count receives the converter's
+      decoded-count return word; the temporary is destroyed by
+      string_object_destroy @ 0x08277484 and the function always returns
+      zero. All five bl callees verified by decoding the raw BL words in
+      osos.dec. Deviation: 0x08277188 remains retailOS code, reached by
+      fixed-address call on target and by a host-swappable seam for
+      tests, matching the module's existing helper boundary; the callers
+      at 0x08046c24 / 0x08045f54 keep their own seams unchanged. Codegen
+      review: 29 original versus 36 Rust instructions; identical call
+      sequence and literals (0x089a6044, 0x08277188), unsigned min kept
+      (`cmp`/`movcc` versus the original's operand-swapped `movcs`),
+      `strne` out-count store kept; LLVM uses a frame pointer and an
+      indirect blx for the fixed-address helper instead of the original's
+      direct bl.
   - address: 0x082774a8
     ghidra: FUN_082774a8
     name: string_object_assign

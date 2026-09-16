@@ -4,7 +4,10 @@
 //! the readable source and sufficient writable output storage; positive
 //! bounds do not imply that the input or output is NUL-terminated.
 
-use super::string_object::utf8_next_codepoint;
+use super::string_object::{
+    string_object_c_str, string_object_destroy, utf8_codepoint_count_safe,
+    utf8_next_codepoint, StringObject, StringObjectVtable, STRING_OBJECT_VTABLE_ADDRESS,
+};
 
 #[inline(always)]
 unsafe fn write_cursor_byte(cursor: *mut *mut u8, byte: u8) {
@@ -163,6 +166,103 @@ pub unsafe extern "C" fn utf8_copy_codepoints(
         count += 1;
     }
     count
+}
+
+/// utf8_span_to_utf16_counted — original: FUN_08046c74 @ 0x08046c74
+/// (116 bytes of code plus the 4-byte vtable literal @ 0x08046ce8;
+/// five `bl` call sites, all unconditional, verified by decoding the raw
+/// words in osos.dec: the unported span-assignment helper @ 0x08277188,
+/// utf8_codepoint_count_safe @ 0x082770e0, string_object_c_str @
+/// 0x082a50b0, utf8_to_utf16_bounded @ 0x082767fc and
+/// string_object_destroy @ 0x08277484). Ghidra's 116-byte body extent is
+/// correct: the separately linked next function begins at 0x08046cec.
+///
+/// Stack-construct a temporary two-word StringObject (vtable literal
+/// 0x089a6044, NULL payload), fill it from the byte span through the
+/// span-assignment helper @ 0x08277188, count the payload's codepoints
+/// with utf8_codepoint_count_safe, then convert the object's C string
+/// into `destination` with utf8_to_utf16_bounded, bounding by the
+/// UNSIGNED minimum of `max_codepoints` and that count (`cmp` / `movcs`).
+/// When `out_count` is non-NULL it receives the converter's decoded-count
+/// return word; the temporary is destroyed and the function always
+/// returns zero.
+///
+/// Deliberate deviations: 0x08277188 is unported retailOS code
+/// (raw-decoded: for an empty span it tail-dispatches vtable slot 3,
+/// otherwise vtable slot 2 allocates `len + 1`, memcpy @ 0x08037db0
+/// copies `len + 1` bytes and an explicit trailing NUL is stored); it is
+/// reached by fixed-address call on target and by a swappable seam on
+/// host, matching this module's existing helper boundary. The stack
+/// temporary plants the original image vtable address as a value, exactly
+/// as the original's literal load does; host code never dereferences it
+/// because the seam performs the assignment.
+type StringObjectAssignSpanHelper =
+    unsafe extern "C" fn(*mut StringObject, *const u8, u32);
+
+#[cfg(target_os = "none")]
+const STRING_OBJECT_ASSIGN_SPAN_ADDRESS: usize = 0x0827_7188;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn string_object_assign_span_helper(
+    this: *mut StringObject,
+    source: *const u8,
+    source_len: u32,
+) {
+    let helper: StringObjectAssignSpanHelper =
+        core::mem::transmute(STRING_OBJECT_ASSIGN_SPAN_ADDRESS);
+    helper(this, source, source_len);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_string_object_assign_span_helper(
+    _this: *mut StringObject,
+    _source: *const u8,
+    _source_len: u32,
+) {
+}
+
+#[cfg(not(target_os = "none"))]
+static mut STRING_OBJECT_ASSIGN_SPAN_HELPER: StringObjectAssignSpanHelper =
+    unavailable_string_object_assign_span_helper;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn string_object_assign_span_helper(
+    this: *mut StringObject,
+    source: *const u8,
+    source_len: u32,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_SPAN_HELPER))(
+        this,
+        source,
+        source_len,
+    )
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_span_to_utf16_counted(
+    source: *const u8,
+    source_len: u32,
+    destination: *mut u16,
+    max_codepoints: u32,
+    out_count: *mut u32,
+) -> i32 {
+    let mut temporary = StringObject {
+        vtable: STRING_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable,
+        payload: core::ptr::null_mut(),
+    };
+    string_object_assign_span_helper(&mut temporary, source, source_len);
+    let decoded = utf8_codepoint_count_safe(temporary.payload) as u32;
+    let text = string_object_c_str(&temporary);
+    let bound = core::cmp::min(decoded, max_codepoints);
+    let written = utf8_to_utf16_bounded(destination, text, bound as i32);
+    if !out_count.is_null() {
+        out_count.write(written as u32);
+    }
+    string_object_destroy(&mut temporary);
+    0
 }
 
 /// utf8_to_utf16_counted_buffer — original: FUN_08046c24 @ 0x08046c24
@@ -618,6 +718,157 @@ mod tests {
             unsafe { utf8_to_utf16(unbounded.as_mut_ptr(), source.as_ptr()) };
             assert_eq!(out, unbounded);
         }
+    }
+
+    static SPAN_HELPER_LOCK: Mutex<()> = Mutex::new(());
+    static mut SPAN_PAYLOAD: [u8; 64] = [0; 64];
+    static mut SPAN_CALLS: u32 = 0;
+    static mut SPAN_ARGS: (usize, usize, u32) = (0, 0, 0);
+
+    unsafe extern "C" fn stub_string_object_assign_span(
+        this: *mut StringObject,
+        source: *const u8,
+        source_len: u32,
+    ) {
+        SPAN_CALLS += 1;
+        SPAN_ARGS = (this as usize, source as usize, source_len);
+        let payload = core::ptr::addr_of_mut!(SPAN_PAYLOAD).cast::<u8>();
+        let len = source_len as usize;
+        if len > 0 {
+            core::ptr::copy_nonoverlapping(source, payload, len);
+        }
+        payload.add(len).write(0);
+        (*this).payload = payload;
+    }
+
+    struct SpanHelperGuard(StringObjectAssignSpanHelper);
+
+    impl SpanHelperGuard {
+        unsafe fn install() -> Self {
+            let previous =
+                core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_SPAN_HELPER));
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_SPAN_HELPER)
+                .write_volatile(stub_string_object_assign_span);
+            SPAN_CALLS = 0;
+            SPAN_ARGS = (0, 0, 0);
+            Self(previous)
+        }
+    }
+
+    impl Drop for SpanHelperGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_SPAN_HELPER).write_volatile(self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn span_to_utf16_converts_reports_count_and_destroys_the_temporary() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = SPAN_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe { SpanHelperGuard::install() };
+        let source = b"ab\xc3\xa9rest";
+        let mut destination = [0xa5a5_u16; 6];
+        let mut count = 0xdead_u32;
+
+        assert_eq!(
+            unsafe {
+                utf8_span_to_utf16_counted(
+                    source.as_ptr(),
+                    4,
+                    destination.as_mut_ptr(),
+                    0xff,
+                    &mut count,
+                )
+            },
+            0
+        );
+        assert_eq!(&destination[..4], &[0x61, 0x62, 0xe9, 0xa5a5]);
+        assert_eq!(count, 3, "three codepoints in four bytes");
+        assert_eq!(unsafe { SPAN_CALLS }, 1);
+        let (_, seen_source, seen_len) = unsafe { SPAN_ARGS };
+        assert_eq!(seen_source, source.as_ptr() as usize);
+        assert_eq!(seen_len, 4);
+        let (frees, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(frees, 1, "the temporary's payload is released exactly once");
+        assert_eq!(freed, unsafe { core::ptr::addr_of_mut!(SPAN_PAYLOAD).cast::<u8>() });
+        assert_eq!(tag, 0x34, "string_object_destroy's free tag");
+    }
+
+    #[test]
+    fn span_to_utf16_takes_the_unsigned_minimum_of_bound_and_decoded_count() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = SPAN_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe { SpanHelperGuard::install() };
+        let source = b"abcdef";
+        let mut destination = [0xa5a5_u16; 6];
+        let mut count = 0xdead_u32;
+
+        assert_eq!(
+            unsafe {
+                utf8_span_to_utf16_counted(
+                    source.as_ptr(),
+                    4,
+                    destination.as_mut_ptr(),
+                    2,
+                    &mut count,
+                )
+            },
+            0
+        );
+        assert_eq!(&destination[..4], &[0x61, 0x62, 0xa5a5, 0xa5a5]);
+        assert_eq!(count, 2, "the 255-style bound clamps the decoded four");
+    }
+
+    #[test]
+    fn span_to_utf16_tolerates_a_null_count_out_pointer() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = SPAN_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe { SpanHelperGuard::install() };
+        let source = b"xy";
+        let mut destination = [0xa5a5_u16; 4];
+
+        assert_eq!(
+            unsafe {
+                utf8_span_to_utf16_counted(
+                    source.as_ptr(),
+                    2,
+                    destination.as_mut_ptr(),
+                    0xff,
+                    core::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        assert_eq!(&destination[..4], &[0x78, 0x79, 0xa5a5, 0xa5a5]);
+    }
+
+    #[test]
+    fn span_to_utf16_with_an_empty_span_writes_nothing_and_reports_zero() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = SPAN_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe { SpanHelperGuard::install() };
+        let mut destination = [0xa5a5_u16; 2];
+        let mut count = 0xdead_u32;
+
+        assert_eq!(
+            unsafe {
+                utf8_span_to_utf16_counted(
+                    core::ptr::null(),
+                    0,
+                    destination.as_mut_ptr(),
+                    0xff,
+                    &mut count,
+                )
+            },
+            0
+        );
+        assert_eq!(count, 0);
+        assert_eq!(
+            destination, [0xa5a5; 2],
+            "a zero decoded count leaves the bound at zero, which touches no pointer"
+        );
     }
 
     #[test]
