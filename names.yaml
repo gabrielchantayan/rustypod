@@ -36848,6 +36848,31 @@ functions:
       forwarder. The child pointer field is addressed by word index 18 in
       host fixtures so widened pointers do not overlap adjacent fields.
 
+  # ---- Embedded B-tree cursor state accessor (src/sqlite/cursor_embedded_state.rs) ----
+  - address: 0x0837e18c
+    ghidra: FUN_0837e18c
+    name: cursor_embedded_state
+    size: 20
+    sig: "*mut u8 cursor_embedded_state(cursor_wrapper: *mut u8)"
+    module: sqlite/cursor_embedded_state
+    status: ported
+    renames:
+      param_1/r0: cursor_wrapper
+      r1: initialized
+    notes: >-
+      Raw ARM establishes the exact 20-byte extent
+      0x0837e18c..0x0837e19c: ldr r1,[r0]; cmp r1,#0; moveq r0,#0;
+      addne r0,r0,#0x38; bx lr. The distinct sibling at 0x0837e1a0 begins
+      cmp r1,#0. Five direct callers are recovered in the decompilation;
+      they are plain BL calls, with no predicated BL form observed. The
+      accessor reads the wrapper's initialized target word and returns NULL
+      when it is zero; otherwise it returns the embedded cursor-state address
+      at +0x38. The port retains that first field as a u32 read rather than a
+      host pointer, preserving the target layout on 64-bit host tests. There
+      are no deliberate behavioral deviations. match.py finds the same
+      load/compare/null-or-+0x38 structure; LLVM folds the add into a
+      post-indexed load and emits a conventional frame.
+
   - address: 0x0837e8dc
     ghidra: FUN_0837e8dc
     name: retain_object
