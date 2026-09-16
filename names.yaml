@@ -71677,6 +71677,51 @@ functions:
       prove blob/no-z no-coercion, MEM_Zero signed-add wrapping and the
       non-blob NULL-text zero result. No implementation deviation.
 
+  - address: 0x08391714
+    ghidra: FUN_08391714
+    name: sqlite3_value_blob
+    size: 60
+    sig: "const void *sqlite3_value_blob(sqlite3_value *value)"
+    module: sqlite/value_blob
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: flags
+      FUN_0838bbb4: sqlite3VdbeMemExpandBlob
+      FUN_08386718: sqlite3ValueText
+    notes: >-
+      SQLite 3.5.9's public API sqlite3_value_blob (vdbemem.c),
+      verified line-for-line against the public 3.5.9 source. Raw
+      extent 0x08391714..0x08391750 is confirmed by the closing
+      ldmia sp!,{r4,pc} at 0x0839174c and the distinct entry of
+      sqlite3_value_bytes @ 0x08391750 (ported, sqlite/value_bytes);
+      no literal pool. A MEM_Str|MEM_Blob (0x12) value is blob-ified in
+      place: sqlite3VdbeMemExpandBlob @ 0x0838bbb4 (ported,
+      sqlite/vdbe_mem_expand_blob) materializes any MEM_Zero tail
+      (return code discarded, as upstream), the flags are RE-READ from
+      +0x1c after the call (the original's second ldrh at 0x08391738),
+      MEM_Str clears and MEM_Blob sets (bic r0,r0,#2; orr r0,r0,#16),
+      and z (+0x14) is returned. Any other type tail-branches to
+      sqlite3ValueText @ 0x08386718 (ported, sqlite/value_text) with
+      r1 = SQLITE_UTF8; the wrapper has no NULL guard of its own (its
+      opening ldrh already dereferences the value) - the extractor's
+      NULL/MEM_Null check is the only guard. Decoding every ARM B/BL
+      word in osos.dec finds exactly 4 call sites, all plain
+      unconditional bl, zero predicated forms: 0x082d2b0c, 0x082e8af4,
+      0x0838f9bc, 0x083926d4. Deliberate deviations: the expand-blob
+      call dispatches through the value_text.rs SQLITE_VDBE_MEM_
+      EXPAND_BLOB slot (shipped default IS the port) so host tests can
+      record it, lowering to blx instead of the direct bl; on target z
+      is one aligned word read at +0x14 (full-width unaligned pointer
+      read on 64-bit hosts); the crate frame-pointer prologue and the
+      commutative orr/bic order are the remaining match.py deltas -
+      branch structure, flag reload, strh, single ldr of z, and the
+      mov r1,#1 + b sqlite_value_text tail all match. Host tests
+      (src/sqlite/value_blob.rs) cover pure-blob passthrough, string
+      demotion, the MEM_Zero flag reload after expand, integer
+      fall-through to UTF-8 text, MEM_Null to NULL, and the
+      missing-stringify OOM shape.
+
   - address: 0x08391750
     ghidra: FUN_08391750
     name: sqlite3_value_bytes

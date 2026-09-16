@@ -191,6 +191,7 @@ pub mod table_affinity;
 pub mod table_lock;
 pub mod used_as_column_cache;
 pub mod utf8_read;
+pub mod value_blob;
 pub mod value_bytes;
 pub mod value_free;
 pub mod value_new;
