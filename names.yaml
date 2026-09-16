@@ -5157,6 +5157,54 @@ functions:
       crate fp frame and the blx-through-volatile-slot dispatch standing in
       for the direct bl 0x083d7df4 (the documented deviation).
 
+  - address: 0x083e8afc
+    ghidra: FUN_083e8afc
+    name: vector_copy_construct_range_elem20
+    size: 64
+    sig: "u8 *vector_copy_construct_range_elem20(const u8 *first, const u8 *last, u8 *output, VectorStorage *vector)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: vector
+      r4: source_cursor
+      r5: output_cursor
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      64 bytes exactly (extent 0x083e8afc..0x083e8b3c, bounded by the push
+      {r4,r5,r6,lr} of the next function at 0x083e8b3c). Ghidra's reported
+      size and C are both correct. std::vector uninitialized-copy over
+      0x14-byte elements (the element type is not recovered; the
+      per-element helper 0x083d7d20 skips construction on NULL output via
+      movs r0,r1; beq, stores output at a pooled base, copies the source
+      word at +0x04, and zeroes the two words at +0x08/+0x0c).
+      Word-for-word twin of vector_copy_construct_range_elem28 with 0x14
+      strides: push {r4-r8,lr}; for each element call the helper (vector,
+      output, source) with both cursors striding +0x14; loop test is
+      cursor EQUALITY (cmp r4,r6; bne), the helper's return is discarded,
+      and the advanced output cursor is returned. The NULL-output guard
+      lives inside the helper, not in this loop. Call counts, verified by
+      decoding every B/BL word in osos.dec: exactly four inbound direct bl
+      sites (0x083e168c, 0x083e16f4, 0x083e1778, 0x083e17cc - the vector
+      reallocation/insert paths of FUN_083e1614), all unconditional, no
+      predicated inbound calls; the body itself holds one plain bl (to
+      0x083d7d20, binary-verified: eb ff bc 7e at 0x083e8b20 resolves to
+      0x083e8b20+8+sext(0xffbc7e)<<2) and no predicated calls. Deviations:
+      helper 0x083d7d20 is unported, so the call goes through the new
+      VECTOR_COPY_CONSTRUCT_ELEM20_OPS dispatch slot (the
+      VECTOR_COPY_CONSTRUCT_ELEM28_OPS pattern) whose target default
+      transmutes VECTOR_COPY_CONSTRUCT_ELEM20_ADDRESS and whose host
+      default is inert; the vector argument is forwarded verbatim. Host
+      tests: one helper call per element with the cursors striding
+      together and the vector pointer forwarded, the exclusive range end
+      (destination untouched by the loop itself), the empty range, and the
+      NULL-output dispatch-and-advance path. match.py structural: same
+      push/mov/loop/call/add-0x14/cmp/bne/return-output shape; the diff is
+      the crate fp frame and the blx-through-volatile-slot dispatch
+      standing in for the direct bl 0x083d7d20 (the documented deviation).
+
   - address: 0x083e90b8
     ghidra: FUN_083e90b8
     name: vector_copy_construct_range_elem28
