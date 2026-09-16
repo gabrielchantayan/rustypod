@@ -8996,6 +8996,45 @@ functions:
       prove dispatch clobbers cannot change the restored task return word, and
       prove exactly one dispatch per invocation.
 
+  - address: 0x08037ec8
+    ghidra: thunk_EXT_FUN_22003e44
+    name: task_priority_get
+    size: 8
+    sig: "u32 task_priority_get(u32 task)"
+    module: kernel/task_priority
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003e44: task_priority_get
+      EXT_FUN_22003e44: task_priority_get
+      DAT_08037ecc: task_priority_get_rom_target
+      DAT_08a24570: task_record_table
+      DAT_2200acf4: current_task_record_slot
+      param_1: task
+    notes: >-
+      Raw words establish the complete literal veneer: e51ff004 (ldr
+      pc,[pc,#-4]) at 0x08037ec8 plus target word 0x22003e44 at 0x08037ecc;
+      Ghidra's 4-byte extent omits the literal, and the sibling
+      task_priority_set veneer begins at 0x08037ed0. The relocator at
+      0x080046e0 mirrors the target to the 36-byte osos body
+      0x08003e44..0x08003e67 (the next stub body starts at 0x08003e70): cmp
+      r0,#0; if nonzero, index the 52-byte-per-record task table at
+      0x08a24570 (movne r1,#13; mulne; addne r0,r1,r0,lsl#2); if zero, load
+      the current-task record through the IRAM global 0x2200acf4; return the
+      aligned u32 at record +0x24. That field is the task priority: every
+      observed caller passes r0=0, saves the result, brackets work in
+      task_priority_set(0,{2,3}) (0x08067fa8, 0x081e1d1c) and later restores
+      the saved word (0x0806802c, 0x081e1d5c), and the sibling getter
+      current_task_id returns the adjacent +0x20 id word. Decoding every ARM
+      B/BL word in osos.dec finds exactly 5 call sites, all unconditional bl
+      (0x08067f98, 0x080a3dd4, 0x080ccc14, 0x08104fdc, 0x081e1d0c) — Ghidra's
+      asm listing shows only 4 because it mislabels the 0x08104fdc site; zero
+      predicated calls, zero tail branches, and no data word holds the veneer
+      address. The stub has no NULL guard. Deviation: the port performs the
+      pointer chase directly (device loads 0x2200acf4 and walks 0x08a24570)
+      instead of the ldr pc veneer transfer; host tests substitute same-width
+      u32 slot/table words over a sub-4 GiB slab and prove the id==0 current
+      path, the 52-byte stride for ids {1,2,0x3f}, and that a nonzero id
+      never touches the current-task record.
   - address: 0x08037e10
     ghidra: thunk_EXT_FUN_220042b4
     name: rom_sem_signal
