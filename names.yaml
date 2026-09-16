@@ -97810,3 +97810,47 @@ functions:
       through five as accepted, but raw bytes, objdump, and its Ghidra C
       all establish this callee rejects them; that caller is intentionally
       outside this single-function port.
+
+  - address: 0x0803c12c
+    ghidra: FUN_0803c12c
+    name: object_stack_push
+    size: 140
+    sig: "u32 object_stack_push(u8 *owner, u32 entry)"
+    module: ui/object_stack_push
+    vars: {param_1/r0/r4: owner, param_2/r1/r5: entry, r6: old_items,
+      +0xf40: current, +0xf64: items, +0xf68: count}
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 140-byte extent
+      0x0803c12c..0x0803c1b8: the final `pop {r4,r5,r6,pc}` sits at
+      0x0803c1b4 and 0x0803c1b8 begins a distinct thunk
+      (`mov r1,r0; ldr r0,[pc,#4]; ldr r0,[r0]; b 0x08058c3c` with its
+      0x08a0aa78 literal), matching Ghidra's 140-byte size. Decoding every
+      ARM B/BL word in the image finds exactly five inbound calls, all
+      plain bl (0x08061748, 0x0806359c, 0x0806368c, 0x08065cd4,
+      0x0812cc20) and none predicated — matching Ghidra's call-site count;
+      the body makes three plain bl calls (malloc_tag4, free_tag4,
+      FUN_0813e194). The owner keeps a current entry at +0xf40, a tag-4
+      word array at +0xf64, and its element count at +0xf68. The body
+      allocates (count+1)*4 bytes with malloc_tag4 and returns 0 on
+      failure. When entry == current it copies all count words and appends
+      entry; otherwise it copies count-1 words, stores entry at index
+      count-1, and re-appends the displaced current at index count. It
+      then installs the new array, increments the count, frees the old
+      array with free_tag4, posts the change notification FUN_0813e194,
+      and returns 1. The copy loop's signed blt means a count of 0 on the
+      mismatched path copies nothing and stores entry at index -1 exactly
+      like the original (unreachable in practice: a live owner has
+      count >= 1). Deliberate deviations: the still-unported notification
+      poster FUN_0813e194 (prologue decoded: allocates a 0x48-byte object,
+      initializes it via FUN_0813e474, then dispatches through a global
+      listener) is called at its fixed load address on target via
+      transmute and replaced by a test hook on host; the original calls it
+      with free_tag4's dead return value in r0, which its first
+      instruction overwrites, so the port passes no argument. The +0xf64
+      items field is accessed as a target-width u32 word so host fixtures
+      stay 32-bit. The copy uses volatile word accesses so LLVM cannot
+      fold it into memcpy. match.py structural diff (38 vs 35
+      instructions): LLVM emits a post-increment copy loop, a literal-pool
+      blx for the fixed-address notification call, and a shared epilogue —
+      same structure as the original.
