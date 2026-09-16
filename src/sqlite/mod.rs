@@ -143,6 +143,7 @@ pub mod mem_release;
 pub mod name_from_token;
 pub mod nested_parse;
 pub mod parse;
+pub mod prepare;
 pub mod pager_lookup;
 pub mod pager_reset;
 pub mod pager_set_page_size;
