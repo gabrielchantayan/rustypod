@@ -9,6 +9,7 @@ pub mod array_element_at;
 pub mod array_index_stride20;
 pub mod array_index_stride24;
 pub mod byte_key_map;
+pub mod byte_key_word_map;
 pub mod character_class;
 pub mod clock_source_construct;
 pub mod clock_source_destroy;

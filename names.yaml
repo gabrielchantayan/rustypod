@@ -99677,3 +99677,34 @@ functions:
       node+0x14 return. Deliberate deviations: the dead `str r0,[sp]`
       before frame release is omitted, while the 12-byte result frame is
       retained so the callee's inserted-flag write at out+4 is valid.
+
+  - address: 0x083db0d0
+    ghidra: FUN_083db0d0
+    name: byte_key_word_map_lookup_or_insert
+    size: 60
+    sig: "u32 *byte_key_word_map_lookup_or_insert(u8 *map, const u8 *key)"
+    module: cxx/byte_key_word_map
+    status: ported
+    renames:
+      param_1/r0: map
+      param_2/r1: key
+      FUN_083b9bac: byte_key_word_tree_insert_unique
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte body
+      0x083db0d0..0x083db10b: it reads one key byte, materializes
+      the target-width pair `{key, 0}` at sp+4, calls 0x083b9bac with
+      `(&out, map, &pair)`, then returns out.node+0x14. 0x083db10c
+      begins the next distinct function (`push {r4-r6,lr}`). Immediate
+      ARM B/BL decoding finds exactly four inbound direct calls, all
+      unconditional plain bl, and no predicated forms; the body itself
+      has one plain bl to the still-retail byte-key tree insert-unique
+      operation 0x083b9bac. The map and node offsets observed in that
+      operation (+0x10 header, node key +0x10, mapped word +0x14) and
+      the callers' returned-slot writes identify the ADS
+      `std::map<u8,u32>::operator[]` shape. The port calls that verified
+      ABI at its fixed load address on device and routes host tests
+      through BYTE_KEY_WORD_TREE_INSERT_UNIQUE, proving fresh 0x00 and
+      0xff key reads, zero mapped-word initialization, inserted-flag
+      byte tolerance, map pass-through, and node+0x14 return. Deliberate
+      deviations: the three original stack-padding bytes are zeroed and
+      its dead dying-frame node store is omitted.

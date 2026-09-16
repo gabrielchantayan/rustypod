@@ -730,6 +730,9 @@ pub mod hints {
     // node, and tree fixture for FUN_083dbf00; mappings never unmap, so no
     // other user may share this hint.
     pub const SIGNED_KEY_TREE_FIND_NODE: usize = 0x8200_0000;
+    // 0x9d40_0000: dedicated to cxx/byte_key_word_map's raw-u32 node
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const BYTE_KEY_WORD_MAP_LOOKUP_OR_INSERT: usize = 0x9d40_0000;
     // Dedicated to sqlite/parse_release_deferred_vdbe's target-width
     // Parse/db/Vdbe fixture; mappings never unmap, so each test has a
     // distinct hint.
