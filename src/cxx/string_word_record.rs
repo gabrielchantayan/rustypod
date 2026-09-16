@@ -6,7 +6,9 @@
 //! the `0x083eXXXX` callers copy them while growing and rearranging vectors.
 //! No concrete class identity is established, so its name describes its layout.
 
-use crate::cxx::string_object::{string_object_copy_construct, StringObject};
+use crate::cxx::string_object::{
+    string_object_assign, string_object_copy_construct, StringObject,
+};
 
 /// A StringObject followed by the opaque word its copy constructor preserves.
 ///
@@ -48,6 +50,102 @@ pub unsafe extern "C" fn string_word_record_copy_construct(
     );
     (*this).value = (*source).value;
     this
+}
+
+/// string_word_record_copy_assign — original: `FUN_081f5014` @
+/// `0x081f5014` (24 bytes, six ARM words; the next separately linked
+/// function starts with `push {r4,lr}` at `0x081f5034`). Binary-verified
+/// against osos.dec:
+///
+/// ```text
+/// push {r4, r5, r6, lr}
+/// mov  r5, r1          ; save source
+/// mov  r4, r0          ; save this
+/// bl   0x082774a8      ; string_object_assign(this, source)
+/// ldr  r0, [r5, #8]    ; source->value
+/// str  r0, [r4, #8]    ; this->value
+/// mov  r0, r4          ; return this
+/// pop  {r4, r5, r6, pc}
+/// ```
+///
+/// The record class's copy-ASSIGNMENT operator (the sibling of the copy
+/// constructor above): the embedded [`StringObject`] is reassigned through
+/// the ported [`string_object_assign`] @ `0x082774a8` — which carries the
+/// address-based self-assignment guard — and the opaque word at +8 is
+/// copied outright. `this` is returned unconditionally.
+///
+/// Kept private: `FUN_081f5014` is not separately ported (its only caller
+/// is the loop below), so its verified body is modeled here one call deep,
+/// preserving the original's nested-call structure.
+#[inline(never)]
+unsafe fn string_word_record_copy_assign(
+    this: *mut StringWordRecord,
+    source: *const StringWordRecord,
+) -> *mut StringWordRecord {
+    string_object_assign(
+        core::ptr::addr_of_mut!((*this).string),
+        core::ptr::addr_of!((*source).string),
+    );
+    (*this).value = (*source).value;
+    this
+}
+
+/// string_word_record_copy_backward — original: `FUN_083e811c` @
+/// `0x083e811c` (56 bytes; the next separately linked function starts with
+/// `push {r4, r5, r6, lr}` at `0x083e8154`, binary-verified). **4 direct
+/// `bl` call sites** (`0x083e1880`, `0x083e82cc`, `0x083e869c`,
+/// `0x083e86e8`), verified by decoding every ARM `B`/`BL` word in
+/// osos.dec; no predicated calls. Ghidra's "4 bl" report is these inbound
+/// sites — the body itself contains exactly one `bl`, to `FUN_081f5014`.
+///
+/// Decoded from the raw ARM:
+///
+/// ```text
+/// push {r4, r5, r6, lr}
+/// mov  r6, r0          ; first
+/// mov  r5, r2          ; dest cursor
+/// mov  r4, r1          ; source cursor
+/// b    test
+/// loop:
+/// sub  r1, r4, #0xc
+/// sub  r0, r5, #0xc
+/// mov  r5, r0
+/// mov  r4, r1
+/// bl   0x081f5014      ; record copy-assign(dest, source)
+/// test:
+/// cmp  r6, r4
+/// bne  loop
+/// mov  r0, r5
+/// pop  {r4, r5, r6, pc}
+/// ```
+///
+/// `std::copy_backward` over the record range `[first, last)`: records are
+/// assigned highest-address-first into the destination range ending at
+/// `result_end`, which is what makes an in-place shift to a higher address
+/// (the vector gap-opening move) safe. Returns the new destination start,
+/// `result_end - (last - first)`; for an empty range nothing is touched
+/// and `result_end` is returned.
+///
+/// Deliberate deviations: the loop steps whole [`StringWordRecord`]
+/// strides instead of the literal `0xc` so widened host pointers keep the
+/// 12-byte ARM layout semantics, and the per-record `bl 0x081f5014` goes
+/// to the private [`string_word_record_copy_assign`] model above (the
+/// helper itself is not separately ported). No behavioral difference.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_word_record_copy_backward(
+    first: *const StringWordRecord,
+    last: *const StringWordRecord,
+    result_end: *mut StringWordRecord,
+) -> *mut StringWordRecord {
+    let mut source = last;
+    let mut dest = result_end;
+    while first != source {
+        source = source.sub(1);
+        dest = dest.sub(1);
+        string_word_record_copy_assign(dest, source);
+    }
+    dest
 }
 
 #[cfg(test)]
@@ -168,6 +266,164 @@ mod tests {
             assert_eq!(record.string.payload, source_text.as_mut_ptr());
             assert_eq!(record.value, 0x89ab_cdef);
             assert_eq!(COPY_ALLOCATION, None);
+        }
+    }
+
+    /// Per-assignment destination buffers handed out by the recording
+    /// allocate op, so each copied record owns observable payload storage.
+    static mut BACKWARD_POOL: [[u8; 16]; 8] = [[0; 16]; 8];
+    static mut BACKWARD_CURSOR: usize = 0;
+    /// `(this, requested_size, pool_slot)` per allocation, in call order.
+    static mut BACKWARD_ALLOCATIONS: std::vec::Vec<(usize, usize, usize)> = std::vec::Vec::new();
+
+    unsafe extern "C" fn backward_copy_allocation(
+        this: *mut StringObject,
+        requested_size: usize,
+        _flags: u32,
+    ) -> *mut u8 {
+        let cursor = core::ptr::addr_of_mut!(BACKWARD_CURSOR).read();
+        core::ptr::addr_of_mut!(BACKWARD_CURSOR).write(cursor + 1);
+        let storage = core::ptr::addr_of_mut!(BACKWARD_POOL[cursor]).cast::<u8>();
+        (*this).payload = storage;
+        core::ptr::addr_of_mut!(BACKWARD_ALLOCATIONS)
+            .as_mut()
+            .unwrap()
+            .push((this as usize, requested_size, cursor));
+        storage
+    }
+
+    unsafe extern "C" fn backward_copy_clear(_this: *mut StringObject) {}
+
+    /// Installs the recording ops over the shared seam and resets the pool.
+    fn backward_bench() -> CopyAssignOpsGuard {
+        let bench = copy_assign_bench();
+        unsafe {
+            core::ptr::addr_of_mut!(BACKWARD_CURSOR).write(0);
+            core::ptr::addr_of_mut!(BACKWARD_ALLOCATIONS)
+                .as_mut()
+                .unwrap()
+                .clear();
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
+                StringObjectAssignCstrOps {
+                    allocate_payload: backward_copy_allocation,
+                    clear_payload: backward_copy_clear,
+                },
+            );
+        }
+        bench
+    }
+
+    fn record(text: &mut [u8], value: u32) -> StringWordRecord {
+        StringWordRecord {
+            string: StringObject {
+                vtable: 0xdead_beefusize as *const StringObjectVtable,
+                payload: text.as_mut_ptr(),
+            },
+            value,
+        }
+    }
+
+    /// Three 16-byte text buffers, `b"a\0"`, `b"bb\0"`, `b"ccc\0"`,
+    /// returned with their lengths.
+    fn backward_texts() -> ([[u8; 16]; 3], [usize; 3]) {
+        let mut texts = [[0u8; 16]; 3];
+        texts[0][..2].copy_from_slice(b"a\0");
+        texts[1][..3].copy_from_slice(b"bb\0");
+        texts[2][..4].copy_from_slice(b"ccc\0");
+        (texts, [2, 3, 4])
+    }
+
+    #[test]
+    fn copy_backward_assigns_highest_first_and_returns_the_new_start() {
+        let _bench = backward_bench();
+        let (mut texts, lens) = backward_texts();
+        let mut sources = [
+            record(&mut texts[0], 0x1111_1111),
+            record(&mut texts[1], 0x2222_2222),
+            record(&mut texts[2], u32::MAX),
+        ];
+        let mut destinations = [
+            record(&mut [], 0),
+            record(&mut [], 0),
+            record(&mut [], 0),
+        ];
+
+        unsafe {
+            let first = sources.as_ptr();
+            let last = sources.as_ptr().add(3);
+            let result_end = destinations.as_mut_ptr().add(3);
+            let returned = string_word_record_copy_backward(first, last, result_end);
+
+            assert_eq!(returned, destinations.as_mut_ptr());
+            let allocations = (*core::ptr::addr_of!(BACKWARD_ALLOCATIONS)).clone();
+            assert_eq!(allocations.len(), 3);
+            assert_eq!(
+                allocations.iter().map(|&(this, ..)| this).collect::<std::vec::Vec<_>>(),
+                std::vec![
+                    core::ptr::addr_of_mut!((*destinations.as_mut_ptr().add(2)).string) as usize,
+                    core::ptr::addr_of_mut!((*destinations.as_mut_ptr().add(1)).string) as usize,
+                    core::ptr::addr_of_mut!((*destinations.as_mut_ptr().add(0)).string) as usize,
+                ],
+                "assignments run highest-address-first"
+            );
+            assert_eq!(
+                allocations.iter().map(|&(_, size, _)| size).collect::<std::vec::Vec<_>>(),
+                std::vec![4, 3, 2],
+                "strlen + 1 of \"ccc\", \"bb\", \"a\""
+            );
+            for index in 0..3 {
+                let slot = allocations[2 - index].2;
+                assert_eq!(
+                    &BACKWARD_POOL[slot][..lens[index]],
+                    &texts[index][..lens[index]],
+                    "record {index} payload text copied through the assignment"
+                );
+                assert_eq!(destinations[index].value, sources[index].value);
+            }
+        }
+    }
+
+    #[test]
+    fn copy_backward_empty_range_touches_nothing_and_returns_result_end() {
+        let _bench = backward_bench();
+        let mut text = *b"edge\0";
+        let mut records = [record(&mut text, 7)];
+
+        unsafe {
+            let boundary = records.as_mut_ptr().add(1);
+            let returned =
+                string_word_record_copy_backward(boundary, boundary, records.as_mut_ptr());
+            assert_eq!(returned, records.as_mut_ptr());
+            assert!((*core::ptr::addr_of!(BACKWARD_ALLOCATIONS)).is_empty());
+            assert_eq!(records[0].value, 7, "no record is written for an empty range");
+        }
+    }
+
+    #[test]
+    fn copy_backward_shifts_an_overlapping_range_up_in_place() {
+        let _bench = backward_bench();
+        let (mut texts, _) = backward_texts();
+        let mut records = [
+            record(&mut texts[0], 0xaaaa),
+            record(&mut texts[1], 0xbbbb),
+            record(&mut texts[2], 0xcccc),
+            record(&mut [], 0xdddd),
+        ];
+
+        unsafe {
+            let base = records.as_mut_ptr();
+            let returned = string_word_record_copy_backward(base, base.add(3), base.add(4));
+            assert_eq!(returned, base.add(1));
+            assert_eq!(records[1].value, 0xaaaa);
+            assert_eq!(records[2].value, 0xbbbb);
+            assert_eq!(records[3].value, 0xcccc);
+            let allocations = (*core::ptr::addr_of!(BACKWARD_ALLOCATIONS)).clone();
+            assert_eq!(allocations.len(), 3);
+            assert_eq!(
+                allocations.iter().map(|&(_, size, _)| size).collect::<std::vec::Vec<_>>(),
+                std::vec![4, 3, 2],
+                "highest record is moved before the lower ones it would overlap"
+            );
         }
     }
 }

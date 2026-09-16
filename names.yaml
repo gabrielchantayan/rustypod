@@ -85207,6 +85207,53 @@ functions:
       payload copying and self-construction, including the embedded
       constructor's address-based no-allocation path.
 
+  # --- copy_backward over StringObject+word records ---
+  - address: 0x083e811c
+    ghidra: FUN_083e811c
+    name: string_word_record_copy_backward
+    size: 56
+    sig: "StringWordRecord *string_word_record_copy_backward(const StringWordRecord *first, const StringWordRecord *last, StringWordRecord *result_end)"
+    module: cxx/string_word_record
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: result_end
+      FUN_081f5014: string_word_record_copy_assign
+      FUN_082774a8: string_object_assign
+    notes: >-
+      std::copy_backward over the 12-byte StringWordRecord range [first,
+      last): records are copy-ASSIGNED highest-address-first into the
+      destination range ending at result_end (the vector gap-opening move
+      among the 0x083eXXXX helpers), returning result_end - (last-first);
+      an empty range touches nothing and returns result_end. Raw osos.dec
+      confirms 56 bytes exactly (extent 0x083e811c..0x083e8154, bounded by
+      the push {r4-r6,lr} of the next function at 0x083e8154): push
+      {r4-r6,lr}; r6/r4/r5 hold first and the two descending cursors; the
+      loop body decrements both cursors by 0xc and bl 0x081f5014; the test
+      cmp r6,r4 / bne sits after an initial b. Exactly one bl in the body
+      (to 0x081f5014) and no predicated calls; Ghidra's "4 bl" report is
+      the inbound call-site count - binary-scanned bl sites: 0x083e1880,
+      0x083e82cc, 0x083e869c, 0x083e86e8. The per-record callee
+      0x081f5014 (the record class's copy-assignment operator, 24 bytes
+      ending at the push {r4,lr} of 0x081f5034) is NOT separately ported;
+      its binary-verified body - bl 0x082774a8 (ported
+      string_object_assign) on the embedded StringObjects, then copying
+      the +8 word, returning this - is modeled one call deep by the
+      private inline(never) string_word_record_copy_assign so the
+      original's nested-call structure survives. Deliberate deviations:
+      the loop steps whole StringWordRecord strides instead of the literal
+      0xc (host pointers widen past the 12-byte ARM layout), and the
+      private assign helper stands in for unported 0x081f5014. Host tests:
+      highest-first assignment order with per-record allocation order and
+      sizes, payload text and value words landing in the right
+      destinations, the empty range writing nothing and returning
+      result_end, and an in-place overlapping shift up by one record.
+      match.py structural: same push/three-cursor/dual-sub-0xc/call/cmp/bne
+      loop and return-last-dest shape; the diff is the crate fp frame,
+      LLVM rotating the loop test to the top, and the local bl standing
+      in for bl 0x081f5014 (the documented deviation).
+
   # --- paired four-word copy helper ---
   - address: 0x08158c94
     ghidra: FUN_08158c94
