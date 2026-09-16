@@ -35325,6 +35325,45 @@ functions:
       pMethods still set during the call and NULLed after (original
       ordering), and a second close on the same file is a no-op.
 
+  # ---- SQLite OS device-characteristics forwarding wrapper, sqlite3OsDeviceCharacteristics (src/sqlite/os_device_characteristics.rs) ----
+  - address: 0x0837db4c
+    ghidra: FUN_0837db4c
+    name: sqlite_os_device_characteristics
+    size: 12
+    sig: "i32 sqlite_os_device_characteristics(sqlite3_file *file)"
+    module: sqlite/os_device_characteristics
+    status: ported
+    renames:
+      param_1/r0: file
+      r1: "file->pMethods, then xDeviceCharacteristics"
+      "*(code**)(*param_1 + 0x30)": sqlite3_io_methods::xDeviceCharacteristics
+    notes: >-
+      SQLite's sqlite3OsDeviceCharacteristics from os.c. Raw bytes are
+      exactly three instructions at 0x0837db4c..0x0837db54; the next
+      separately linked thunk begins at 0x0837db58 and has its own bl
+      caller at 0x0838f904, so Ghidra's 12-byte extent is exact with no
+      literal pool. It loads file->pMethods, loads its
+      xDeviceCharacteristics slot at +0x30 into r1 (clobbering AAPCS
+      argument register 1, safe because the slot is unary), then
+      tail-dispatches xDeviceCharacteristics(file), returning its i32
+      flags word unchanged. The adjacent 0x0837db44..0x0837dc18
+      forwarding family matches SQLite's sqlite3_io_methods,
+      establishing this identity. Decoding every ARM B/BL word in
+      osos.dec finds exactly 4 inbound calls, all unconditional plain bl
+      (0x082de36c, 0x08392a48, 0x083973ac, 0x08398a94); no predicated BL
+      forms, direct tail branches, or aligned raw data words target this
+      wrapper. The concrete xDeviceCharacteristics implementation is
+      runtime method-table data, so the port dispatches the supplied
+      table rather than inventing a callee; the shared SqliteIoMethods
+      struct models only the verified prefix through +0x18, so the port
+      reads the +0x30 slot by word index (12 pointer-sized slots on both
+      target and host). match.py: structural parity - same load chain
+      (file -> pMethods -> +0x30 into r1), same bx r1 tail dispatch;
+      LLVM adds a dead push/pop {fp, lr} frame around the call. Host
+      tests verify the slot index constant, exact file forwarding with
+      unchanged status propagation, and that only the +0x30 slot is read
+      (garbage in all other post-prefix slots).
+
   # ---- SQLite OS file-size forwarding wrapper, sqlite3OsFileSize (src/sqlite/os_file_size.rs) ----
   - address: 0x0837db60
     ghidra: FUN_0837db60

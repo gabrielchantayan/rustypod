@@ -155,6 +155,7 @@ pub mod pcache_remove_from_lru_list;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod os_close;
+pub mod os_device_characteristics;
 pub mod os_file_size;
 pub mod os_open;
 pub mod os_read;
