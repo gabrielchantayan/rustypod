@@ -717,6 +717,10 @@ pub mod hints {
     // node fixture for FUN_0839bbd0; mappings never unmap, so no other user
     // may share this hint.
     pub const SIGNED_KEY_TREE_FIND_VALUE_COPY: usize = 0x0200_0000;
+    // 0x8200_0000: dedicated to cxx/signed_key_tree_find's raw-u32 header,
+    // node, and tree fixture for FUN_083dbf00; mappings never unmap, so no
+    // other user may share this hint.
+    pub const SIGNED_KEY_TREE_FIND_NODE: usize = 0x8200_0000;
     // Dedicated to sqlite/parse_release_deferred_vdbe's target-width
     // Parse/db/Vdbe fixture; mappings never unmap, so each test has a
     // distinct hint.

@@ -88349,6 +88349,46 @@ functions:
       0x083dbedc, so it is not used as a data-dispatched target. The Rust
       port returns u32 rather than inventing a pointer type, preserving the
       target-word ABI and the opaque cursor representation on host tests.
+  - address: 0x083dbf00
+    ghidra: FUN_083dbf00
+    name: signed_key_tree_find_node
+    size: 180
+    sig: "u32 signed_key_tree_find_node(const SignedKeyTree *tree, const i32 *key)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      iVar5: candidate
+      iVar2: node
+      local_2c: candidate_slot
+      local_24: header_slot
+    notes: >-
+      Raw osos.dec from 0x083dbf00 through `pop {r4-r9,pc}` at 0x083dbfb0
+      is 180 bytes; the separately linked next function opens with
+      `push {r1,r2,r3,lr}` at 0x083dbfb4, confirming the extent.
+      `std::_Rb_tree<int, ...>::find(const int &)`: it descends from the
+      header's root word (+0x4), calling less_signed @ 0x083d7580 on each
+      node key at node+0x10 against the key pointer, remembering the last
+      not-less node; a less node walks to its right child (+0xc), otherwise
+      to its left child (+0x8). The candidate is compared with the header
+      word at tree+0x10 through the ported equal_deref copy @ 0x083cf9b0
+      (equal means empty or past-maximum), then a second less_signed(key,
+      node_key) call rejects a strictly-less key by returning the header;
+      anything else returns the found node word. The node key address comes
+      from the 8-byte helper FUN_083b6b4c (`add r0, r0, #0x10; bx lr`),
+      which the port inlines as candidate + 0x10. Decoding every ARM B/BL
+      word in osos.dec finds exactly 4 inbound direct, unconditional bl
+      call sites (0x08101388, 0x081016dc, 0x08175210, 0x081775a8), no
+      predicated calls, and no direct b transfers; the 4 bl callees inside
+      the body are less_signed (twice), the equal_deref copy @ 0x083cf9b0,
+      and FUN_083b6b4c. Deliberate deviations: FUN_083b6b4c is inlined as
+      the +0x10 key address (its exact body), and the original's two slack
+      argument registers plus stacked zero on the first less_signed call
+      are not reproduced (less_signed ignores them). Host tests build a
+      three-node signed tree in a u32 slab and cover root/leaf hits,
+      between-keys and past-maximum misses, signed extremes, and the empty
+      tree.
   - address: 0x083dbeec
     ghidra: FUN_083dbeec
     name: container_begin_cursor
