@@ -33579,6 +33579,44 @@ functions:
       match.py (--size 108, worktree archive): the same get-temp/add-op2/
       add-op3/release call sequence and schema `+1`; expected differences
       are LLVM's frame, register scheduling, and relocation placeholders.
+  - address: 0x08372ec0
+    ghidra: FUN_08372ec0
+    name: sqlite_check_object_name
+    size: 100
+    sig: "int sqlite_check_object_name(Parse *parse, const char *name)"
+    module: sqlite/check_object_name
+    status: ported
+    renames:
+      param_1: parse
+      param_2: name
+    notes: >-
+      SQLite 3.5.9 sqlite3CheckObjectName (src/build.c): reject user
+      object names beginning with the internal `sqlite_` prefix, unless
+      the connection is initialising its schema (db->init.busy, byte at
+      db+0x80), the parse is nested (Parse.nested, byte at +0x13), or
+      the write-schema flag is set (bit 0x800 of db->flags, word at
+      db+0x0c). On a hit, sqlite3ErrorMsg reports "object name reserved
+      for internal use: %s" with the name and the function returns 1;
+      otherwise 0. True extent 0x08372ec0..0x08372f24 (100 bytes) read
+      from the raw words: the twin pop {r4,r5,r6,pc} exits are followed
+      by the two inline literal strings, and the next function starts
+      with push {r0-r11,lr} at 0x08372f58. Binary decoding every ARM
+      B/BL word in osos.dec finds 4 direct callers, all unconditional
+      bl (0x0836ef98, 0x0836fe98, 0x08373edc, 0x08384688); the function
+      itself issues 2 unconditional bl calls. Both callees are ported
+      and called directly: str_nicmp @ 0x08384fa0 (7-byte
+      case-insensitive prefix compare) and sqlite_error_msg @
+      0x083767a0. Deliberate deviations: C varargs become the explicit
+      VaList convention with a fixed local word array as the original's
+      r2/r3 varargs home (same pattern as sqlite/locate_table.rs), and
+      Parse/Connection are typed repr(C) views with the target offsets
+      asserted on 32-bit. Host tests cover the reserved hit (incl.
+      case-insensitivity and n_err increment), the three exception
+      guards, the 6-byte prefix stem miss, and non-0x800 flags.
+      match.py: same short-circuit guard chain, same two BL calls, same
+      0/1 returns; expected differences are LLVM's frame, the explicit
+      stack home for the vararg word, and a byte-narrowed flags test
+      (ldrb db+13; tsteq #8 == ldreq word db+12; tsteq #0x800).
   # ---- B-tree cursor wrapper (src/sqlite/btree_cursor.rs) ----
   - address: 0x08370db4
     ghidra: FUN_08370db4
