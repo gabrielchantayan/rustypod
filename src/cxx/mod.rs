@@ -140,6 +140,7 @@ pub mod string;
 pub mod named_object_cache;
 pub mod string_range_destroy;
 pub mod string_vector_destruct;
+pub mod string_vector_record_link;
 pub mod string_vector_record_range_destroy;
 pub mod string_map;
 pub mod basic_ios_initialize;

@@ -935,6 +935,44 @@ functions:
       red_black_tree_rotate_right. Its shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the
       transferred middle subtree. Deliberate deviations: none.
+  # --- C++ string/vector record slot link ---
+  - address: 0x083c4de0
+    ghidra: FUN_083c4de0
+    name: cxx_string_vector_record_link
+    size: 52
+    sig: "void cxx_string_vector_record_link(u8 *owner, u8 *record, i32 teardown)"
+    module: cxx/string_vector_record_link
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: record
+      param_3/r2: teardown
+      FUN_083e5b88: cxx_string_vector_destruct
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: 13 ARM words from
+      stmdb sp!, {r4,r5,r6,lr} at 0x083c4de0 through ldmia sp!, {r4,r5,r6,pc}
+      at 0x083c4e10; the separately linked next function begins at 0x083c4e14.
+      The body loads the owner's slot word at +4, chains it into the record's
+      link word at +0xc via the UNCONDITIONAL str (raw word 0xe581000c —
+      Ghidra's C also shows the store unconditional), and when the flag is
+      nonzero destructs the record's embedded CxxStringVector at +0x14 through
+      cxx_string_vector_destruct @ 0x083e5b88 and releases its COW string slot
+      at +0x10 through cxx_string_release @ 0x083d8b04, recovering the slot as
+      the returned vector pointer minus four; the record is stored into the
+      owner slot last either way. Exactly two unconditional bl instructions
+      inside, no predicated calls. Decoding every ARM B/BL word in osos.dec
+      verifies four direct, unconditional bl callers: 0x08134f64 and
+      0x081cdcf8 (flag 0), 0x083c5340 and 0x083c56e4 (flag 1); no tail
+      branches. Deliberate deviations: none in behavior; because
+      cxx_string_vector_destruct is visible within the crate, LLVM proves it
+      returns its argument and materializes the release address as add r0, r4,
+      #0x10 instead of the original sub r0, r0, #4, and pushes a frame pointer
+      the ADS original did not need. Host tests prove the unconditional chain
+      store, flag-zero no-teardown, nonzero-flag teardown order (vector
+      destruct before string release), the return-minus-four release
+      argument, and the final slot store. Raw disassembly: osos.dec
+      0x083c4de0; match.py structural review recorded.
   # --- C++ red-black-tree right rotation ---
   - address: 0x083c4e68
     ghidra: FUN_083c4e68
