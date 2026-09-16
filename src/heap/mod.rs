@@ -44,6 +44,7 @@ pub mod releasable_buffer;
 pub mod owned_buffer;
 pub mod zeroing_buffer;
 pub mod three_buffer_owner;
+pub mod three_buffer_owner_create;
 pub mod pool_client;
 pub mod registration_node_construct;
 pub mod queue_wait;

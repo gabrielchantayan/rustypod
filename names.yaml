@@ -71405,6 +71405,40 @@ functions:
       set. Deliberate deviation: the retail final tail branch to traced_free
       is an ordinary returning Rust call; traced_free returns, so behavior is
       unchanged.
+  # --- three-buffer owner factory ---
+  - address: 0x0803df54
+    ghidra: FUN_0803df54
+    name: three_buffer_owner_create
+    size: 52
+    sig: "ThreeBufferOwner *three_buffer_owner_create(void)"
+    module: heap/three_buffer_owner_create
+    status: ported
+    renames:
+      iVar1/r4: this
+      FUN_08043c18: traced_alloc
+      FUN_0803df28: three_buffer_owner_initialize (unported; seam default)
+    notes: >-
+      Raw extent is exactly 0x0803df54..0x0803df88 (13 ARM instructions);
+      the independently linked FUN_0803df88 begins at the next word with no
+      trailing literal pool. Decoding every ARM B/BL immediate in osos.dec
+      finds 3 direct inbound call sites, all unconditional bl (0x0803f648,
+      0x080c6e84, 0x080c715c); no predicated forms. The body issues exactly
+      two bl calls: traced_alloc(0x48, 0, 0) @ 0x08043c18 (ported, called
+      directly) and the sibling initializer FUN_0803df28. Algorithm: return
+      NULL when the allocation fails (movs/ldmiaeq); else run the
+      initializer, store 1 (FLAG_DELETE_THIS) to the +0x44 flags word, and
+      return the block. The sibling initializer (unported) clears +0x00,
+      memzeroes the three embedded 0x14-byte ReleasableBuffers at +0x04,
+      +0x18, and +0x2c through the IRAM veneer 0x08037db8 (memzero_aligned
+      @ 0x2200027c), and clears +0x44, deliberately leaving +0x40 untouched.
+      Deliberate deviation: the initializer is reached through the
+      replaceable THREE_BUFFER_OWNER_OPS boundary whose binary-verified
+      default reproduces its exact stores as volatile word writes (the
+      registration_node_construct precedent), avoiding a libc memset
+      builtin. The 1 stored to +0x44 is the flag
+      three_buffer_owner_release tests to free the owner itself. Rust
+      implementation and host tests:
+      `src/heap/three_buffer_owner_create.rs::three_buffer_owner_create`.
   # --- heap debug-fill helper ---
   - address: 0x0805f440
     ghidra: FUN_0805f440
