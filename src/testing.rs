@@ -1225,6 +1225,10 @@ pub mod hints {
     // 'tdat' element and linked 'plst' chain fixture; mappings never
     // unmap, so no other test may reuse this hint.
     pub const UI_PLST_FIND_BY_PERSISTENT_ID: usize = 0xc400_0000;
+    // 0x0101_0000: dedicated to cxx/strstreambuf_copy_active_buffer's
+    // target-width stream-buffer and source fixture; mappings never unmap,
+    // so no other user may share this hint.
+    pub const STRSTREAMBUF_COPY_ACTIVE_BUFFER: usize = 0x0101_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
