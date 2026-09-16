@@ -30210,6 +30210,36 @@ functions:
       the load/guard/unlock behavior. Host test covers a live mutex signal and
       the NULL-mutex early-out.
 
+  - address: 0x0839cfec
+    ghidra: FUN_0839cfec
+    name: refcounted_body_mutex_unlock_owned_variant
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_owned_variant(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839cfec..0x0839cffc: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_unlock @ 0x0807f6a0; bx lr. The next
+      separately linked function starts at 0x0839cffc. Decoding every ARM
+      B/BL word in osos.dec finds four direct bl callers, all unconditional
+      at 0x0815f4d4, 0x0815f50c, 0x0839cf98, and 0x0839cfd0; no predicated
+      calls or direct tail b sites. No word-aligned image word equals this
+      address, so it is not virtually dispatched. This is the mutex-unlock
+      half of the helper pair (lock @ 0x0839cfdc, unlock @ 0x0839cfec)
+      linked immediately after refcounted_body_release_owned_variant @
+      0x0839cf4c, its two in-family callers. It loads the RefcountedBody's
+      optional mutex at target +8 and tail-branches to the already ported
+      mutex_unlock only when non-NULL; byte-identical sibling of
+      refcounted_body_mutex_unlock @ 0x0839d44c and
+      refcounted_body_mutex_unlock_owned @ 0x0839d360, kept distinct by a
+      target-only link section. No deliberate behavioral deviations:
+      match.py shows LLVM frame setup plus popeq early-out and a tail b to
+      mutex_unlock, preserving the load/guard/unlock behavior. Host test
+      covers a live mutex signal and the NULL-mutex early-out.
+
   - address: 0x0839e018
     ghidra: FUN_0839e018
     name: dma_aligned_byte_array_construct_variant
