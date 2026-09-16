@@ -44375,6 +44375,38 @@ functions:
       a partial span. match.py structural review retains two independent
       free_tag4 calls, signed divide by 12, vector-end rewind, and final
       halfword/sentinel stores; LLVM omits the provably empty raw walks.
+  - address: 0x0805997c
+    ghidra: FUN_0805997c
+    name: inner_clear_index_cache
+    size: 136
+    sig: "void inner_clear_index_cache(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw osos.dec decoding confirms 34 instructions from 0x0805997c through
+      the pop at 0x08059a00; the next independent function starts at
+      0x08059a04, so the true extent is 136 bytes, matching Ghidra. Decoding
+      every immediate ARM B/BL word finds exactly five direct call sites, all
+      unconditional bl (0x080667b8, 0x080669b8, 0x08066a50, 0x08068ed8,
+      0x0813d030); no predicated call enters. The body's single bl targets
+      the ported free_tag4 @ 0x0805d070. The function frees and clears a
+      nonzero tag-4 word at inner+0xea8, then rewinds the 8-byte-element
+      vector at +0xee0/+0xee4: the apparent element copy starts with
+      source == end (never executes) and the destroy walk is a no-op for the
+      trivially destructible element, so the only effect is end -
+      ((end - begin) & ~7), retaining an unaligned tail exactly as the mask
+      does. It then stores -1 at +0x28 and +0xe2c. The existing
+      object_select_resource_index seam for this address was removed for a
+      direct call (four unported slots remain). Host tests cover the release
+      and owned-field writes, the unaligned-tail retention, the empty
+      vector, and the null-allocation skip. match.py structural review
+      retains the free guard, free_tag4 call, mask rewind, and both sentinel
+      stores; LLVM folds the provably empty raw loops into the equivalent
+      predicated mask arithmetic, reorders the two -1 stores, and adds its
+      ABI frame.
   - address: 0x08059a98
     ghidra: FUN_08059a98
     name: inner_clear_cached_results
@@ -85947,11 +85979,12 @@ functions:
       kind-2 backend, returns -50 for a negative or out-of-range index,
       stores the chosen table word and index at object +0x04/+0x08, invokes
       resource activation 0x0806cf80 with mode zero, then executes the
-      eleven cleanup/dispatch calls in order and returns zero. Four callees
-      were already ported and remain direct Rust calls. The seven unported
-      callees remain direct firmware calls on target through volatile
-      operation slots, while host tests install recording operations; their
-      identities are deliberately not inferred from raw addresses.
+      eleven cleanup/dispatch calls in order and returns zero.
+      inner_clear_index_cache @ 0x0805997c has since been ported, so its
+      slot was removed: four callees remain direct firmware calls on target
+      through volatile operation slots, while host tests install recording
+      operations; their identities are deliberately not inferred from raw
+      addresses.
 
   # --- OpenSSL RAND_bytes dispatch ---
   - address: 0x080620f8
