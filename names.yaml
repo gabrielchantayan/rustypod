@@ -96029,3 +96029,34 @@ functions:
       toward zero, then transform and store the result. The callback is an
       indirect caller-supplied transform, so no callee identity or seam was
       invented. No deliberate deviations.
+
+  - address: 0x0807f1b0
+    ghidra: FUN_0807f1b0
+    name: register_string_id_record
+    size: 52
+    sig: "int register_string_id_record(const StringIdRecord *record)"
+    module: cxx/string_object
+    status: identified
+    renames:
+      param_1/r0: record
+      uVar1/r4: record_id
+      uStack_10/[sp]: temporary_name
+    notes: >-
+      BLOCKER: raw osos.dec establishes a 52-byte body, not Ghidra's
+      reported 56: the 13 ARM words from 0x0807f1b0 through
+      0x0807f1e0 end in `pop {r2,r3,r4,pc}`, and the next independent
+      function starts with `push {r4,r5,lr}` at 0x0807f1e4. A whole-image
+      ARM scan finds five direct incoming BL callers, all plain and
+      unconditional (0x082c78d0, 0x082c7920, 0x082c79e8, 0x082c7a38, and
+      0x082c7ae8), and zero predicated callers. Its body has three plain
+      BL instructions: string_object_copy_construct @ 0x082773e0 copies
+      record->string (+4) into a stack StringObject; the unported,
+      unnamed FUN_0807f160 consumes that temporary and record->id (+0xc)
+      and supplies the eventual result; string_object_destroy @
+      0x08277484 destroys the temporary before returning that result.
+      names.yaml has no entry for 0x0807f160, and its 132-byte body
+      allocates a 0x10-byte object, copies the temporary, and mutates the
+      manager returned by 0x08105ffc through further unported callees.
+      No faithful direct Rust call or existing semantic dispatch seam
+      exists. Porting this wrapper alone would require an invented callee
+      identity or a fallback/stub result, so it remains identified.
