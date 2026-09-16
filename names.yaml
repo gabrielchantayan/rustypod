@@ -36279,6 +36279,53 @@ functions:
       forwarding and the post-initializer vtable reload. The target tail bx
       is an ordinary returning Rust call.
 
+  # --- OpenSSL CRYPTO_new_ex_data dispatch shim ---
+  - address: 0x08043e04
+    ghidra: FUN_08043e04
+    name: crypto_new_ex_data
+    size: 60
+    sig: "i32 crypto_new_ex_data(i32 class_index, void *object, void *ex_data)"
+    module: crypto/new_ex_data
+    status: ported
+    renames:
+      r0/r5: class_index
+      r1/r6: object
+      r2/r7: ex_data
+      r3: ex_data_new_slot
+      r4: ex_data_singleton
+      FUN_08075914: initialize_crypto_ex_data
+    notes: >-
+      OpenSSL CRYPTO_new_ex_data dispatch shim. Raw ARM confirms the
+      60-byte extent: 56 bytes of instructions at 0x08043e04..0x08043e3f
+      and the singleton-object literal 0x08a0e9e0 at 0x08043e40; the next
+      distinct function begins at 0x08043e44. Decoding every ARM B/BL
+      word in osos.dec finds exactly 5 direct inbound calls, all
+      unconditional bl (0x0803d914, 0x0806251c, 0x080701a8, 0x08070694,
+      0x080ec29c), with zero predicated direct calls; the single
+      predicated call inside the body is the lazy-initializer bleq
+      0x08075914 @ 0x08043e20. It reads the singleton vtable word, calls
+      the unported lazy initializer FUN_08075914 only when that word is
+      zero, reloads it, then tail-dispatches (class_index, object,
+      ex_data) through vtable slot +0x0c and returns the slot's int.
+      Identity evidence: FUN_0803d8c0 zero-fills a fresh object, calls
+      FUN_08043e04(0, object, &object->ex_data), runs the object's
+      constructor callback, and unwinds on failure with FUN_080439e0
+      (crypto_free_ex_data, the +0x14 sibling) — the exact OpenSSL
+      per-class object setup pattern; FUN_08070030 tests the returned
+      int for zero. The slot target does not decode as a statically
+      named function at this wrapper, so the port preserves it as an
+      indirect call. Target builds call the verified initializer
+      address; host tests model the singleton with CRYPTO_EX_DATA_OPS
+      and prove unchanged argument forwarding, result pass-through, and
+      the post-initializer vtable reload. match.py confirms the
+      structural shape: singleton literal, null check, initializer call,
+      vtable reload, +0x0c slot load, and tail bx r3 all correspond; the
+      diff is LLVM's push {r4-r7,fp,lr} frame, the blx through a
+      transmuted initializer address versus the ADS direct bleq, and
+      register scheduling. The target tail bx is an ordinary returning
+      Rust call. Rust implementation and focused host tests:
+      `src/crypto/new_ex_data.rs::crypto_new_ex_data`.
+
   - address: 0x08043c18
     ghidra: FUN_08043c18
     name: traced_alloc

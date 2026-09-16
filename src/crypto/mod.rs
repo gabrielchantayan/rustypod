@@ -51,6 +51,7 @@ pub mod bio_new;
 pub mod bio_puts;
 pub mod bio_free;
 pub mod free_ex_data;
+pub mod new_ex_data;
 pub mod bio_snprintf;
 pub mod bio_ctrl;
 pub mod bio_copy_next_retry;
