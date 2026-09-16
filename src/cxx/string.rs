@@ -3036,3 +3036,175 @@ mod tests {
         assert_eq!(zero_capacity, 0, "the accessor's empty fallback has strlen zero");
     }
 }
+
+/// cxx_string_vector_entry_copy_ctor — original: `FUN_083d7df4` @
+/// 0x083d7df4.
+///
+/// **40 bytes**, 0x083d7df4..0x083d7e1c, bounded by the next `movs r0, r1`
+/// constructor at 0x083d7e1c. There are **four direct, unconditional `bl`**
+/// callers (0x08197bf8, 0x083c1610, 0x083e2634, and 0x083e2714) and no
+/// predicated `bl` callers, verified from `osos.dec`. The owner is ignored;
+/// a NULL destination returns immediately. Otherwise this copy-constructs
+/// the COW string at +0x00, then tail-calls the vector copy constructor at
+/// 0x083e5b00 for the three-word vector head at +0x04. The tail constructor's
+/// return, destination + 4, is this function's result.
+///
+/// Deliberate deviation: both direct calls use volatile dispatch slots. This
+/// preserves the target calls without requiring the unported vector copy
+/// constructor to be linked into the payload and permits target-layout
+/// (four-byte pointer) host fixtures.
+pub const CXX_STRING_VECTOR_ENTRY_COPY_CTOR_ADDRESS: usize = 0x083d_7df4;
+const CXX_STRING_VECTOR_ENTRY_VECTOR_COPY_CTOR_ADDRESS: usize = 0x083e_5b00;
+
+pub type CxxStringCopyConstruct =
+    unsafe extern "C" fn(*mut *mut u8, *const *mut u8) -> *mut *mut u8;
+pub type VectorCopyConstruct = unsafe extern "C" fn(*mut u8, *const u8) -> *mut u8;
+
+#[derive(Clone, Copy)]
+pub struct CxxStringVectorEntryCopyCtorOps {
+    pub copy_string: CxxStringCopyConstruct,
+    pub copy_vector: VectorCopyConstruct,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_vector_copy_construct(
+    destination: *mut u8,
+    source: *const u8,
+) -> *mut u8 {
+    let function: VectorCopyConstruct =
+        core::mem::transmute(CXX_STRING_VECTOR_ENTRY_VECTOR_COPY_CTOR_ADDRESS);
+    function(destination, source)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn host_vector_copy_construct(
+    destination: *mut u8,
+    _source: *const u8,
+) -> *mut u8 {
+    destination
+}
+
+pub const DEFAULT_CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS: CxxStringVectorEntryCopyCtorOps =
+    CxxStringVectorEntryCopyCtorOps {
+        copy_string: cxx_string_copy_ctor,
+        copy_vector: {
+            #[cfg(target_os = "none")]
+            {
+                firmware_vector_copy_construct
+            }
+            #[cfg(not(target_os = "none"))]
+            {
+                host_vector_copy_construct
+            }
+        },
+    };
+
+pub static mut CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS: CxxStringVectorEntryCopyCtorOps =
+    DEFAULT_CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS;
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.cxx_string_vector_entry_copy_ctor"
+)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_vector_entry_copy_ctor(
+    _owner: *mut u8,
+    destination: *mut u8,
+    source: *const u8,
+) -> *mut u8 {
+    if destination.is_null() {
+        return destination;
+    }
+
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(
+        CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS
+    ));
+    (ops.copy_string)(destination.cast(), source.cast());
+    (ops.copy_vector)(destination.add(4), source.add(4))
+}
+
+#[cfg(test)]
+mod cxx_string_vector_entry_copy_ctor_tests {
+    use super::*;
+    use parking_lot::Mutex;
+
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut STRING_CALL: (*mut u8, *const u8) = (core::ptr::null_mut(), core::ptr::null());
+    static mut VECTOR_CALL: (*mut u8, *const u8) = (core::ptr::null_mut(), core::ptr::null());
+
+    unsafe extern "C" fn record_string(destination: *mut *mut u8, source: *const *mut u8) -> *mut *mut u8 {
+        STRING_CALL = (destination.cast(), source.cast());
+        destination
+    }
+
+    unsafe extern "C" fn record_vector(destination: *mut u8, source: *const u8) -> *mut u8 {
+        VECTOR_CALL = (destination, source);
+        destination
+    }
+
+    struct OpsReset;
+
+    impl Drop for OpsReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS)
+                    .write_volatile(DEFAULT_CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS);
+            }
+        }
+    }
+
+    #[test]
+    fn null_destination_returns_without_reading_source_or_dispatching() {
+        let _lock = OPS_LOCK.lock();
+        let _reset = OpsReset;
+        unsafe {
+            STRING_CALL = (core::ptr::null_mut(), core::ptr::null());
+            VECTOR_CALL = (core::ptr::null_mut(), core::ptr::null());
+            core::ptr::addr_of_mut!(CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS).write_volatile(
+                CxxStringVectorEntryCopyCtorOps {
+                    copy_string: record_string,
+                    copy_vector: record_vector,
+                },
+            );
+
+            assert!(cxx_string_vector_entry_copy_ctor(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+            )
+            .is_null());
+            assert!(STRING_CALL.0.is_null());
+            assert!(VECTOR_CALL.0.is_null());
+        }
+    }
+
+    #[test]
+    fn copies_string_then_vector_at_target_word_offsets() {
+        let _lock = OPS_LOCK.lock();
+        let _reset = OpsReset;
+        let mut destination = [0u8; 16];
+        let source = [0u8; 16];
+        unsafe {
+            core::ptr::addr_of_mut!(CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS).write_volatile(
+                CxxStringVectorEntryCopyCtorOps {
+                    copy_string: record_string,
+                    copy_vector: record_vector,
+                },
+            );
+
+            let returned = cxx_string_vector_entry_copy_ctor(
+                0xfeed_faceusize as *mut u8,
+                destination.as_mut_ptr(),
+                source.as_ptr(),
+            );
+
+            assert_eq!(STRING_CALL, (destination.as_mut_ptr(), source.as_ptr()));
+            assert_eq!(
+                VECTOR_CALL,
+                (destination.as_mut_ptr().add(4), source.as_ptr().add(4))
+            );
+            assert_eq!(returned, destination.as_mut_ptr().add(4));
+        }
+    }
+}
