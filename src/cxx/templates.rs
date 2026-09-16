@@ -4438,6 +4438,56 @@ pub unsafe extern "C" fn vector_copy_range_u32(
     output
 }
 
+/// vector_copy_range_u32_alias_8f5c — original: `thunk_FUN_083e8f74`
+/// @ 0x083e8f5c (40 bytes; raw extent 0x083e8f5c..0x083e8f84, bounded by
+/// the separately linked `push {r4,r5,r6,lr}` at 0x083e8f84). Exactly four
+/// direct `bl` call sites, all unconditional — 0x083e2aa8, 0x083e2afc,
+/// 0x083e2b7c, and 0x083e2bbc — verified by decoding every ARM B/BL word
+/// in `osos.dec`; no predicated calls and no direct tail branches target
+/// this entry.
+///
+/// A byte-identical `vector_copy_range_u32` instantiation (the 40 bytes
+/// match 0x083e9418 word for word): forward-copies the half-open
+/// `[first, last)` range of aligned 4-byte vector elements into `output`
+/// while the current output cursor is nonzero, advances both cursors by
+/// one word per element, and returns the advanced output cursor. An
+/// initially NULL output skips only the first source word, then advances
+/// to address 4. Ghidra again splits the scheduled loop header at
+/// 0x083e8f74 and labels the four-byte entry a thunk; the raw entry
+/// branches into its own compare/loop header, so the 40-byte extent is
+/// one function. r3 (the vector argument passed by all four callers) is
+/// never read and is omitted from the Rust ABI.
+///
+/// Deliberate deviation: none beyond the alias itself. This distinct
+/// export and text section keep the independently hookable retailOS
+/// address from being folded into the byte-identical
+/// [`vector_copy_range_u32`] body (the [`deque_iter_assign_alias_9fd4`]
+/// precedent).
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous, aligned readable `u32`
+/// words. When `output` is non-NULL, it must be writable for the same
+/// number of words. The original has no overlap guard and therefore
+/// copies forward.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_range_u32_alias_8f5c")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_u32_alias_8f5c(
+    mut first: *const u32,
+    last: *const u32,
+    mut output: *mut u32,
+) -> *mut u32 {
+    while first != last {
+        if !output.is_null() {
+            output.write(first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
 /// Firmware load address of `FUN_083d7f2c`, the 0x20-byte element
 /// copy-construct helper [`vector_copy_construct_range_elem32`] calls once
 /// per element. Unported (its own StringObject copy-constructor chain
@@ -8640,6 +8690,48 @@ mod tests {
     fn vector_copy_range_u32_null_output_skips_one_word_without_reading_source() {
         let returned = unsafe {
             vector_copy_range_u32(core::ptr::null(), 4usize as *const u32, core::ptr::null_mut())
+        };
+
+        assert_eq!(returned, 4usize as *mut u32, "skipped word still advances output");
+    }
+
+    #[test]
+    fn vector_copy_range_u32_alias_8f5c_copies_words_and_returns_advanced_output() {
+        let source = [0x0f1e_2d3cu32, 0x4b5a_6978, 0x8796_a5b4];
+        let mut destination = [0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe {
+            vector_copy_range_u32_alias_8f5c(source.as_ptr(), source.as_ptr().add(3), output)
+        };
+
+        assert_eq!(&destination[..3], &source);
+        assert_eq!(destination[3], 0xdddd_dddd, "range end is exclusive");
+        assert_eq!(returned, unsafe { output.add(3) });
+    }
+
+    #[test]
+    fn vector_copy_range_u32_alias_8f5c_empty_range_leaves_output_unchanged() {
+        let source = [0x0f1e_2d3cu32];
+        let mut destination = [0xaaaa_aaaa];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe {
+            vector_copy_range_u32_alias_8f5c(source.as_ptr(), source.as_ptr(), output)
+        };
+
+        assert_eq!(returned, output);
+        assert_eq!(destination, [0xaaaa_aaaa]);
+    }
+
+    #[test]
+    fn vector_copy_range_u32_alias_8f5c_null_output_skips_one_word_without_reading_source() {
+        let returned = unsafe {
+            vector_copy_range_u32_alias_8f5c(
+                core::ptr::null(),
+                4usize as *const u32,
+                core::ptr::null_mut(),
+            )
         };
 
         assert_eq!(returned, 4usize as *mut u32, "skipped word still advances output");
