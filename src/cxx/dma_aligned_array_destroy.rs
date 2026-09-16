@@ -223,6 +223,43 @@ pub unsafe extern "C" fn dma_aligned_array_destroy(
     unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
 }
 
+/// dma_aligned_byte_array_destroy_variant — original: `FUN_0839e094` @
+/// 0x0839e094 (72 bytes exactly, 0x0839e094..0x0839e0dc; the next separately
+/// linked function opens with `ldmib r1,{r1,r2}` immediately after).
+/// Decoding every ARM B/BL word in `osos.dec` finds exactly four direct `bl`
+/// call sites, all unconditional: 0x080fa798, 0x080faa64, 0x080faa78, and
+/// 0x080fdfe0. The body itself contains a single predicated `blne` to
+/// `free_wrapper` @ 0x080e7970 with tag 3 and no other call.
+///
+/// Separately linked destructor instance paired with
+/// [`dma_aligned_byte_array_construct_variant`] @ 0x0839e018. Its algorithm
+/// matches [`dma_aligned_array_destroy`] exactly: when `constructed` is
+/// nonzero it performs the element-count-sized empty trivial-element walk,
+/// unconditionally clears `constructed`, releases a non-NULL raw allocation
+/// through `free_wrapper(ptr, 3)`, and returns `array`. `aligned_data` and
+/// `element_count` are untouched.
+///
+/// Deliberate deviations: [`core::hint::black_box`] preserves the original's
+/// count-dependent empty loop (no memory effect), and the target-only link
+/// section keeps LLVM from folding this body into the identical primary
+/// destructor so both hookable entries survive. The already ported
+/// `free_wrapper` is reached through the same release helper as the primary
+/// destructor, matching the original `blne` behavior.
+///
+/// # Safety
+///
+/// `array` must be non-NULL, word-aligned, and point to a writable target-size
+/// [`DmaAlignedArray`]. A nonzero `allocation` must be owned by this object
+/// and valid for the retailOS tag-3 heap free path.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.dma_aligned_byte_array_destroy_variant")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dma_aligned_byte_array_destroy_variant(
+    array: *mut DmaAlignedArray,
+) -> *mut DmaAlignedArray {
+    unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
+}
+
 unsafe extern "C" fn release_tag3_allocation(allocation: *mut u8) {
     unsafe { free_wrapper(allocation, DMA_ALIGNED_ARRAY_FREE_TAG) };
 }
@@ -355,6 +392,47 @@ mod tests {
         assert_eq!(array.aligned_data, before.aligned_data, "aligned view is untouched");
         assert_eq!(array.element_count, before.element_count, "element count is untouched");
         assert_eq!(array.constructed, 0, "construction state is always cleared");
+        assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(RELEASED_ALLOCATION.load(Ordering::SeqCst), before.allocation as usize);
+    }
+
+    #[test]
+    fn variant_destructor_walks_then_releases_tag3_allocation() {
+        let mut array = DmaAlignedArray {
+            allocation: 0x0821_0100,
+            aligned_data: 0x8821_0120,
+            element_count: 2,
+            constructed: 1,
+        };
+        let before = array;
+        RELEASE_CALLS.store(0, Ordering::SeqCst);
+        RELEASED_ALLOCATION.store(0, Ordering::SeqCst);
+
+        let result = unsafe { dma_aligned_byte_array_destroy_variant(&mut array) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array));
+        assert_eq!(array.allocation, before.allocation);
+        assert_eq!(array.aligned_data, before.aligned_data);
+        assert_eq!(array.element_count, before.element_count);
+        assert_eq!(array.constructed, 0);
+    }
+
+    #[test]
+    fn variant_destructor_with_release_walks_then_releases() {
+        let mut array = DmaAlignedArray {
+            allocation: 0x0821_0080,
+            aligned_data: 0x8821_00a0,
+            element_count: 5,
+            constructed: 0xff,
+        };
+        let before = array;
+        RELEASE_CALLS.store(0, Ordering::SeqCst);
+        RELEASED_ALLOCATION.store(0, Ordering::SeqCst);
+
+        let result = unsafe { dma_aligned_array_destroy_with_release(&mut array, record_release) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array));
+        assert_eq!(array.constructed, 0);
         assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(RELEASED_ALLOCATION.load(Ordering::SeqCst), before.allocation as usize);
     }

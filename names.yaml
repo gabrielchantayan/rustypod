@@ -30127,6 +30127,34 @@ functions:
       so its target-only link section prevents LLVM from folding the hookable
       entries. No dispatch seam was added because both callees are ported.
 
+  - address: 0x0839e094
+    ghidra: FUN_0839e094
+    name: dma_aligned_byte_array_destroy_variant
+    size: 72
+    sig: "DmaAlignedArray *dma_aligned_byte_array_destroy_variant(DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      iVar1/r0: allocation
+    notes: >-
+      Raw bytes establish the exact 72-byte extent 0x0839e094..0x0839e0dc;
+      the next separately linked function opens with `ldmib r1,{r1,r2}` at
+      0x0839e0dc. Decoding every ARM B/BL word in osos.dec finds exactly four
+      direct bl call sites, all unconditional at 0x080fa798, 0x080faa64,
+      0x080faa78, and 0x080fdfe0; the body itself holds a single predicated
+      blne to free_wrapper @ 0x080e7970 with tag 3 and no other call.
+      Separately linked destructor instance paired with
+      dma_aligned_byte_array_construct_variant @ 0x0839e018, algorithmically
+      identical to dma_aligned_array_destroy @ 0x0839e164: when constructed
+      byte +0x0c is nonzero it performs the element-count (+0x08) sized empty
+      trivial-element walk, unconditionally clears the constructed byte, frees
+      a non-NULL raw allocation (+0x00) via free_wrapper(ptr, 3), and returns
+      array. aligned_data +0x04 and element_count are untouched. Rust uses
+      black_box to retain the empty loop (no memory effect) and a target-only
+      link section so LLVM cannot fold the body into the identical primary
+      destructor; match.py confirms the same guard/walk/clear/free structure.
+
   - address: 0x0839e0e8
     ghidra: FUN_0839e0e8
     name: dma_aligned_byte_array_construct
