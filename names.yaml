@@ -101531,3 +101531,32 @@ functions:
       so their semantic role is limited to observed recognition. Host tests
       cover NULL, every accepted tag, and an unrecognized tag. Deliberate
       deviations: none.
+  # --- opaque type-tag predicate ---
+  - address: 0x08382be4
+    ghidra: FUN_08382be4
+    name: opaque_type_tag_is_allowed
+    size: 44
+    sig: "u32 opaque_type_tag_is_allowed(const OpaqueTypeTaggedObject *object)"
+    module: cxx/opaque_type_tag_is_allowed
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x40": type_tag
+      DAT_08382c10: opaque_type_tag_a
+      DAT_08382c14: opaque_type_tag_b
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent: eleven ARM words from
+      cmp r0,#0 at 0x08382be4 through bx lr at 0x08382c0c; two literal tag
+      words follow at 0x08382c10 and 0x08382c14, and the separately linked next
+      function begins at 0x08382c18. Decoding every aligned ARM BL-immediate in
+      osos.dec finds exactly four inbound direct calls, all unconditional bl at
+      0x0837d314, 0x08381638, 0x08390ad8, and 0x08390e84; there are no
+      predicated bl calls or outbound calls. A null object returns zero without
+      reading memory; otherwise its aligned +0x40 word returns one only when it
+      equals opaque tag 0xa029a697 or 0xf03b7906. The class identity is
+      unrecovered, so no callee seam is introduced. match.py reports the
+      expected structural difference: LLVM uses subtraction, clz, shifts, and
+      or for the two equality tests instead of ADS comparisons and predicated
+      returns, while retaining the null guard, aligned +0x40 load, and exact
+      boolean result. Host tests cover null, both tags, and adjacent nonmatching
+      values. Deliberate deviations: volatile access preserves the target load.
