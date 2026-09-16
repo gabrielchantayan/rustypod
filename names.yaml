@@ -96955,3 +96955,34 @@ functions:
       cancels LLVM intentionally folds the device body to a tail call
       (bx) to 0x08343050 — the fold is semantically exact and match.py's
       structural diff against the obfuscated original is expected.
+  - address: 0x08054a90
+    ghidra: FUN_08054a90
+    name: offset_table_entry_span
+    size: 40
+    sig: "u16 offset_table_entry_span(const u8 *header, const u8 *base, u32 index)"
+    module: util/offset_table_entry_span
+    status: ported
+    renames:
+      param_1/r0: header
+      param_2/r1: base
+      param_3/r2: index
+    notes: >-
+      Raw osos.dec confirms the exact 40-byte extent 0x08054a90..0x08054ab8;
+      0x08054ab8 is the next function's stmdb prologue. Leaf function: zero
+      outgoing BLs. Five incoming plain BL call sites verified in osos.asm
+      (0x0804b748, 0x080539b4, 0x08064d88, 0x08064e68, 0x0806b7b8); no
+      predicated BLs. Algorithm: the record header carries a u16 at +0x1c
+      giving the offset from base to the END of a downward-growing u16
+      offset table (entry i lives at end - 2*(i+1)). The body computes
+      addr = base + off - 2*index - 2 and returns
+      ldrh(addr - 2) - ldrh(addr), zero-extended to 16 bits via the
+      lsl #16/lsr #16 pair — i.e. entry[index] - entry[index+1], the byte
+      span of record index. Callers agree: 0x080539b4 stores it as a u16
+      alongside a record pointer computed from the same table; 0x0804b748
+      shifts it left 3 for a bit count. Ghidra's decompile
+      (*(short*)(iVar1-4) - *(short*)(iVar1-2) with
+      iVar1 = off + param_2 - 2*param_3) matches the raw code exactly.
+      Deliberate deviations: none semantic. LLVM emits the sub in swapped
+      operand order with the -2 folded into the load offsets and masks with
+      0xffff instead of the lsl/lsr pair (equivalent), plus an fp/lr frame;
+      match.py structural diff reviewed and expected.
