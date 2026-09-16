@@ -88116,6 +88116,43 @@ functions:
       seam in runtime/malloc_rt, matching trivial_vector8_destruct; the
       dead capacity auxiliary is retained behind black_box so the walk and
       descriptor reads survive codegen.
+  - address: 0x083e4b2c
+    ghidra: FUN_083e4b2c
+    name: trivial_vector4_destruct
+    size: 64
+    sig: "VectorStorage *trivial_vector4_destruct(VectorStorage *vector)"
+    module: cxx/trivial_vector4_destruct
+    status: ported
+    renames:
+      param_1/r0: vector
+      iVar1/r0: begin
+      param_1[1]/r1: end
+      param_1[2]/r1: end_of_storage
+      FUN_08266f2c: operator_delete_veneer
+    notes: >-
+      Second identical instantiation of trivial_vector4_destruct (first is
+      0x083e68a0); one Rust symbol covers both and the fold is intentional,
+      matching the trivial_vector8_destruct precedent. Raw osos.dec fixes
+      the complete 64-byte extent 0x083e4b2c..0x083e4b6c; the next
+      separately linked function FUN_083e4b6c begins push {r4-r8,lr} at
+      0x083e4b6c. The body is word-for-word identical to 0x083e68a0 except
+      the bl immediate: loads begin (+0) and end (+4), keeps begin in r2,
+      walks r0 from begin to end in four-byte increments with an empty body
+      (trivial element destructor optimized away, walk retained), computes
+      (end_of_storage (+8) - begin) asr 2 as a dead capacity-in-elements
+      auxiliary, clears r2, and calls the 0x08266f2c veneer, an
+      unconditional branch to the ported operator_delete @ 0x082aad24 (tag
+      2, NULL-guarded); Ghidra's recovered C loop and its iVar1 first
+      argument are wrong - the raw code passes begin. The single bl is the
+      body's only call. Complete aligned ARM B/BL-immediate decoding finds
+      exactly four direct inbound calls: unconditional bl at 0x081e0640,
+      0x081e0648, and 0x081e0cdc, plus one predicated blne at 0x083ba018;
+      no tail branches. The 0x081exxxx callers sit in the EventSource
+      object family whose big destructor 0x081e0c4c tears down "the
+      declaration vector at +0x10" through this function (see the
+      0x081e0c4c notes). Deliberate deviation: the veneer dispatch to
+      operator_delete is routed through the ported free seam in
+      runtime/malloc_rt, matching the 0x083e68a0 instance.
   - address: 0x083dbedc
     ghidra: FUN_083dbedc
     name: container_end_cursor

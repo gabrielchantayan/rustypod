@@ -1,9 +1,12 @@
-//! `trivial_vector4_destruct` — original: `FUN_083e68a0` @ `0x083e68a0`
-//! (64 bytes, `0x083e68a0..0x083e68e0`; the next separately linked function
-//! starts `push {r4,r5,r6,r7,r8,lr}` at `0x083e68e0`).
+//! `trivial_vector4_destruct` — originals: `FUN_083e68a0` @ `0x083e68a0`
+//! and `FUN_083e4b2c` @ `0x083e4b2c` (64 bytes each; `0x083e68a0..0x083e68e0`
+//! ends where the next separately linked function starts `push
+//! {r4,r5,r6,r7,r8,lr}` at `0x083e68e0`, and `0x083e4b2c..0x083e4b6c` ends
+//! where `FUN_083e4b6c` starts `push {r4,r5,r6,r7,r8,lr}` at `0x083e4b6c`).
 //!
-//! Source: `ipod-decomp/decomp/c/038/083e68a0_FUN_083e68a0.c` (Ghidra's
-//! recovered loop is wrong; raw ARM below is ground truth).
+//! Source: `ipod-decomp/decomp/c/038/083e68a0_FUN_083e68a0.c` and
+//! `ipod-decomp/decomp/c/038/083e4b2c_FUN_083e4b2c.c` (Ghidra's recovered
+//! loops are wrong; raw ARM below is ground truth).
 //!
 //! The four-byte-element sibling of [`super::trivial_vector8_destruct`].
 //! Destroys a `std::vector<T>` whose four-byte elements have trivial
@@ -12,7 +15,36 @@
 //! away but the walk is retained), then releases the backing allocation
 //! and returns the vector descriptor.
 //!
-//! Raw ARM (`osos.dec`):
+//! Raw osos.dec confirms both 64-byte bodies are word-for-word identical
+//! except for the `bl` immediate (each reaches the `0x08266f2c` veneer from
+//! its own address), so a single Rust symbol covers both and the fold is
+//! intentional. The `0x083e4b2c` body:
+//!
+//! ```text
+//! 083e4b2c:  push {r4,lr}
+//! 083e4b30:  mov r4,r0
+//! 083e4b34:  ldr r0,[r0,#0x0]      ; begin
+//! 083e4b38:  ldr r1,[r4,#0x4]      ; end
+//! 083e4b3c:  mov r2,r0             ; r2 = begin
+//! 083e4b40:  cmp r0,r1
+//! 083e4b44:  addne r0,r0,#0x4      ; walk begin -> end by 4
+//! 083e4b48:  bne 0x083e4b40
+//! 083e4b4c:  ldr r1,[r4,#0x8]      ; end_of_storage
+//! 083e4b50:  mov r0,r2             ; arg0 = begin
+//! 083e4b54:  sub r1,r1,r2
+//! 083e4b58:  mov r1,r1, asr #0x2   ; arg1 = capacity in elements
+//! 083e4b5c:  mov r2,#0x0           ; arg2 = 0
+//! 083e4b60:  bl 0x08266f2c         ; veneer: b 0x082aad24 (operator_delete)
+//! 083e4b64:  mov r0,r4
+//! 083e4b68:  pop {r4,pc}
+//! ```
+//!
+//! **Call count (0x083e4b2c):** complete aligned ARM B/BL-immediate
+//! decoding of `osos.dec` finds exactly four direct inbound calls:
+//! unconditional `bl` at `0x081e0640`, `0x081e0648`, and `0x081e0cdc`,
+//! plus one predicated `blne` at `0x083ba018`; there are no tail branches.
+//!
+//! Raw ARM of the `0x083e68a0` instance:
 //!
 //! ```text
 //! 083e68a0:  push {r4,lr}
@@ -41,10 +73,10 @@
 //! while reaching the existing allocator `free` seam with the sole live
 //! cleanup argument. The vector descriptor is never written.
 //!
-//! **Call count:** complete aligned ARM B/BL-immediate decoding of
-//! `osos.dec` finds exactly four direct inbound calls, all unconditional
-//! `bl`, at `0x08177890`, `0x08177898`, `0x081778a0`, and `0x08177be4`;
-//! there are no predicated forms and no tail branches.
+//! **Call count (0x083e68a0):** complete aligned ARM B/BL-immediate
+//! decoding of `osos.dec` finds exactly four direct inbound calls, all
+//! unconditional `bl`, at `0x08177890`, `0x08177898`, `0x081778a0`, and
+//! `0x08177be4`; there are no predicated forms and no tail branches.
 //!
 //! # Deliberate deviations
 //!
