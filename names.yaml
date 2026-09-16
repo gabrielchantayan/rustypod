@@ -9318,6 +9318,46 @@ functions:
       already-ported predicate and counter decrement rather than branching into
       stock code; otherwise no deliberate deviations.
 
+  - address: 0x080522bc
+    ghidra: FUN_080522bc
+    name: entry_match_first
+    size: 24
+    sig: "u32 entry_match_first(const u8 *container)"
+    module: app/entry_match_first
+    status: ported
+    renames:
+      param_1/r0: container
+      param_1_plus_0x24: first_entry
+      FUN_08057bdc: nested_liti_class_check
+    notes: >-
+      Raw ARM is mov r2, r0; push {lr}; bl 0x08057bdc; movs r0, r0;
+      ldrne r0, [r2, #0x24]; pop {pc}. The 24-byte Ghidra extent is exact:
+      the next separately linked function ui_tdat_first_plst begins with
+      mov r2, r0 at 0x080522d4. Returns the word at container+0x24 only when
+      the already-ported nested_liti_class_check succeeds (non-NULL container
+      whose +0x08 word points at a 'liti'-tagged ImageLibrary database
+      object); otherwise returns zero. The stored word is the first entry of
+      the container's matchable entry list: entry_match_next @ 0x08053b14
+      starts its iteration from this value and steps with the successor
+      selector @ 0x08053bb8, matching each entry's word at +0x8; caller
+      0x08050708 walks the same list for an exact or sentinel-marked entry.
+      The container type beyond these two verified fields remains opaque.
+      Call count verified by decoding every B/BL word in osos.dec: 5
+      unconditional bl (0x08046ff8, 0x08050724, 0x08053b2c, 0x0806bff4,
+      0x081a8d8c), zero predicated bl, plus one predicated beq tail dispatch
+      from 0x08053b10. The Rust port directly calls the ported
+      nested_liti_class_check rather than branching to stock 0x08057bdc;
+      aligned word load and zero-on-rejected-class behavior are unchanged.
+      Host tests use a raw-u32 slab fixture (hints::ENTRY_MATCH_FIRST)
+      because the container holds a real 32-bit pointer to the nested
+      object; they cover a NULL container, a NULL nested object, a 'liti'
+      nested object with edge first-entry words, a wrong nested class tag,
+      and that only the +0x24 word is returned. match.py is a structural
+      review: LLVM forms a crate fp frame and cmp/ldrne/moveq where ADS
+      used movs/ldrne, while the predicate call, +0x24 conditional load,
+      and zero-on-reject shape match. Reference C:
+      decomp/c/003/080522bc_FUN_080522bc.c.
+
   - address: 0x080522d4
     ghidra: FUN_080522d4
     name: ui_tdat_first_plst
