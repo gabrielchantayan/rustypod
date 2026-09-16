@@ -51,16 +51,14 @@
 //!
 //! ## Deviations
 //!
-//! The map find-or-insert @ `0x083dbd9c` is unported (the ADS tree
-//! insert/rebalance machinery @ `0x083cea3c`/`0x083cf998` underneath is
-//! not yet characterized), so it rides the [`TAG_MAP_VALUE_SLOT`]
-//! dispatch slot, read through `read_volatile` (the
-//! `UPDATE_DISPATCH_OPS` house pattern): on target the default
-//! transmutes the ROM address `0x083dbd9c`, so a hooked build is
-//! faithful; on host the default is a documented inert stub returning
-//! one shared zero word (every key aliases it), and the tests install a
-//! real find-or-insert model. The map global address `0x08ad7d74` is
-//! passed through as an opaque pointer exactly like the original's
+//! The map find-or-insert @ `0x083dbd9c` is now ported as
+//! [`crate::cxx::u32_map_value_slot::u32_map_value_slot`] (with the ADS
+//! tree walk @ `0x083ce874` beneath it still retail behind that port's
+//! own seam), and the [`TAG_MAP_VALUE_SLOT`] dispatch slot's default
+//! delegates to it. The slot remains, read through `read_volatile` (the
+//! `UPDATE_DISPATCH_OPS` house pattern), so host tests can install a
+//! recording find-or-insert model. The map global address `0x08ad7d74`
+//! is passed through as an opaque pointer exactly like the original's
 //! literal-pool load; on host it is never dereferenced.
 
 use core::ptr;
@@ -69,40 +67,21 @@ use core::ptr;
 /// `0x081e11dc`; past the image end, runtime-zeroed).
 pub const TAG_HANDLER_MAP_ADDRESS: usize = 0x08ad_7d74;
 
-/// Firmware load address of the unported map find-or-insert callee,
-/// kept beside the transmute below.
-pub const TAG_MAP_VALUE_SLOT_ADDRESS: usize = 0x083d_bd9c;
-
 /// The map find-or-insert (original @ `0x083dbd9c`): given the map
 /// object and a pointer to the key word, returns the address of the
 /// mapped-value slot (`node + 0x14`), inserting a zero-valued node when
 /// the key is absent. Never returns NULL.
 pub type TagMapValueSlot = unsafe extern "C" fn(map: *mut u8, key: *const u32) -> *mut u32;
 
-/// Target default: the ROM map find-or-insert.
-#[cfg(target_os = "none")]
+/// Default: the ported map find-or-insert (`cxx/u32_map_value_slot`),
+/// faithful on target because its own tree-walk seam defaults to the
+/// ROM address `0x083ce874`.
 unsafe extern "C" fn firmware_tag_map_value_slot(map: *mut u8, key: *const u32) -> *mut u32 {
-    let f: TagMapValueSlot = core::mem::transmute(TAG_MAP_VALUE_SLOT_ADDRESS);
-    f(map, key)
-}
-
-/// One shared word behind the host default stub.
-#[cfg(not(target_os = "none"))]
-static mut STUB_SLOT: u32 = 0;
-
-/// Host default: inert — every key aliases the same zero word, so the
-/// default port stores into scratch space only. The tests install a
-/// real find-or-insert model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_tag_map_value_slot(
-    _map: *mut u8,
-    _key: *const u32,
-) -> *mut u32 {
-    ptr::addr_of_mut!(STUB_SLOT) as *mut u32
+    crate::cxx::u32_map_value_slot::u32_map_value_slot(map, key)
 }
 
 /// The active map find-or-insert. Host tests swap in a recording model
-/// and restore; the real port replaces the default when it lands.
+/// and restore; the default is the real port.
 pub static mut TAG_MAP_VALUE_SLOT: TagMapValueSlot = firmware_tag_map_value_slot;
 
 /// tag_handler_register_default — original: `FUN_081e11a8` @
