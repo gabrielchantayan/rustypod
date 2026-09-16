@@ -1823,6 +1823,42 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  - address: 0x08003848
+    ghidra: thunk_FUN_08201460
+    name: stream_buffer_flush_enter
+    size: 8
+    sig: "u32 stream_buffer_flush_enter(void *stream_buffer, u32 (*flush_callback)(void *stream_buffer))"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_FUN_08201460: stream_buffer_flush_enter
+      DAT_0800384c: stream_buffer_flush_enter_target
+      FUN_08201460: stream_buffer_flush_continuation (Ghidra 312-byte split)
+      param_1/r0: stream_buffer (caller copies to r4 before the bl)
+      param_2/r1: flush_callback
+    notes: >-
+      Ghidra's 4-byte extent omits the ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08003848 and literal
+      0x08201460 at 0x0800384c; the next veneer starts at 0x08003850, so
+      the true size is 8 bytes. Decoding every ARM B/BL word in osos.dec
+      finds exactly five direct callers, all unconditional bl (0x0800603c,
+      0x08006094, 0x080064cc, 0x08006534, 0x080073c0), zero predicated
+      forms, no tail branches, and no aligned data-word references. The
+      literal target is DRAM code, not an IRAM mirror: a mid-function
+      continuation entry of the stream-buffer flush routine (Ghidra's
+      312-byte FUN_08201460 split) opening with mov r0,r4; blx r1; b
+      0x082014cc — it reads the object from callee-saved r4 (callers copy
+      their r0 object into r4 first, e.g. FUN_0800602c), calls the flush
+      callback in r1 with the object, then runs the flush tail over the
+      [r4,#...] buffer fields and the [r4,#0x18]/[r4,#0x1c] vtables,
+      forwarding the callback's r0 result. ARM builds retain the exact
+      literal tail veneer in global assembly; host builds model the
+      continuation as a replaceable boundary taking the object and
+      callback the caller placed in r0/r1, since r4 is not expressible in
+      the Rust ABI. match.py confirms the single ldr pc instruction is
+      identical; the original's Ghidra extent stops before the literal
+      word the port retains.
+
   - address: 0x080038e8
     ghidra: FUN_080038e8
     name: record_fields_compare_tail_veneer

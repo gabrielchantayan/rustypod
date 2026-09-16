@@ -872,6 +872,115 @@ ui_manager_begin_pending_operation:
 "#
 );
 
+/// stream_buffer_flush_enter — original:
+/// `thunk_FUN_08201460` @ `0x08003848` (Ghidra reports 4 bytes; raw
+/// osos.dec proves the full **8** bytes are `ldr pc,[pc,#-4]` /
+/// `0xe51ff004` and the target literal `0x08201460` at `0x0800384c`; the
+/// next veneer starts at `0x08003850`, so the true extent is 8 bytes).
+///
+/// The literal target `0x08201460` is DRAM code (not an IRAM mirror): a
+/// mid-function continuation entry of the stream-buffer flush routine
+/// Ghidra splits as `FUN_08201460` (312 bytes). Its first three words are
+/// `mov r0,r4; blx r1; b 0x082014cc` — it reads the stream-buffer object
+/// from **callee-saved r4**, calls the flush callback held in r1 with the
+/// object as its only argument, then runs the flush tail (reloading
+/// buffer fields from `[r4,#...]` and driving the vtables at `[r4,#0x18]`
+/// / `[r4,#0x1c]`). Callers copy their r0 object into r4 before the `bl`
+/// (e.g. `FUN_0800602c`: `mov r6,r1; mov r4,r0; bl 0x08003848`), so the
+/// veneer behaves as `flush_callback(stream_buffer)` plus the flush tail,
+/// forwarding the callback's r0 result and every register unchanged.
+///
+/// Decoding every ARM B/BL word in osos.dec found exactly five direct,
+/// unconditional `bl` callers at 0x0800603c, 0x08006094, 0x080064cc,
+/// 0x08006534, and 0x080073c0; there are no predicated calls, direct tail
+/// branches, or aligned raw data-word references. Deviation: target
+/// builds use the exact literal tail veneer; host builds expose the
+/// otherwise foreign DRAM boundary as a replaceable callback taking the
+/// object and callback the caller placed in r0/r1 (r4 is not expressible
+/// in the Rust ABI).
+pub const STREAM_BUFFER_FLUSH_ENTER_VENEER: u32 = 0x0800_3848;
+pub const STREAM_BUFFER_FLUSH_ENTER_INSN: u32 = 0xe51f_f004;
+pub const STREAM_BUFFER_FLUSH_ENTER_TARGET: u32 = 0x0820_1460;
+
+/// Flush callback the continuation invokes as `callback(stream_buffer)`.
+pub type StreamBufferFlushCallbackFn = unsafe extern "C" fn(stream_buffer: *mut u8) -> u32;
+
+/// ABI of the flush-enter continuation as seen by its callers: the
+/// stream-buffer object and the flush callback to invoke on it.
+pub type StreamBufferFlushEnterFn = unsafe extern "C" fn(
+    stream_buffer: *mut u8,
+    flush_callback: StreamBufferFlushCallbackFn,
+) -> u32;
+
+/// Host/target dispatch boundary for the flush-enter continuation body.
+#[derive(Clone, Copy)]
+pub struct StreamBufferFlushEnterOps {
+    pub enter: StreamBufferFlushEnterFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_stream_buffer_flush_enter(
+    _stream_buffer: *mut u8,
+    _flush_callback: StreamBufferFlushCallbackFn,
+) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_STREAM_BUFFER_FLUSH_ENTER_OPS: StreamBufferFlushEnterOps =
+    StreamBufferFlushEnterOps {
+        enter: missing_stream_buffer_flush_enter,
+    };
+
+/// Replaceable host boundary for the flush-enter continuation body.
+#[cfg(not(target_arch = "arm"))]
+pub static mut STREAM_BUFFER_FLUSH_ENTER_OPS: StreamBufferFlushEnterOps =
+    DEFAULT_STREAM_BUFFER_FLUSH_ENTER_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn stream_buffer_flush_enter_target() -> StreamBufferFlushEnterFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAM_BUFFER_FLUSH_ENTER_OPS.enter)) }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn stream_buffer_flush_enter(
+        stream_buffer: *mut u8,
+        flush_callback: StreamBufferFlushCallbackFn,
+    ) -> u32;
+}
+
+/// Host implementation of the literal veneer. It preserves both arguments
+/// and the target result exactly.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_buffer_flush_enter(
+    stream_buffer: *mut u8,
+    flush_callback: StreamBufferFlushCallbackFn,
+) -> u32 {
+    unsafe { stream_buffer_flush_enter_target()(stream_buffer, flush_callback) }
+}
+
+// `ldr pc` preserves LR and every argument register; the continuation's
+// `mov r0,r4` relies on the caller having copied r0 into r4, which the
+// verbatim veneer forwards untouched.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl stream_buffer_flush_enter
+    .type stream_buffer_flush_enter, %function
+stream_buffer_flush_enter:
+    ldr     pc, [pc, #-4]
+    .word   0x08201460
+    .size stream_buffer_flush_enter, . - stream_buffer_flush_enter
+"#
+);
+
 /// iram_stream_buffer_reinitialize_veneer — original:
 /// `thunk_EXT_FUN_220073b0` @ `0x08038190` (Ghidra reports 4 bytes; raw
 /// osos.dec proves the full **8** bytes are `ldr pc,[pc,#-4]` /
@@ -2587,6 +2696,75 @@ mod tests {
                 .write(DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS);
         }
         drop(guard);
+    }
+
+    static mut STREAM_BUFFER_FLUSH_ENTER_CALLS: u32 = 0;
+    static mut STREAM_BUFFER_FLUSH_ENTER_ARGS: (usize, usize) = (0, 0);
+
+    unsafe extern "C" fn recording_flush_callback(_stream_buffer: *mut u8) -> u32 {
+        0x5eed_0001
+    }
+
+    unsafe extern "C" fn record_stream_buffer_flush_enter(
+        stream_buffer: *mut u8,
+        flush_callback: StreamBufferFlushCallbackFn,
+    ) -> u32 {
+        STREAM_BUFFER_FLUSH_ENTER_CALLS += 1;
+        STREAM_BUFFER_FLUSH_ENTER_ARGS =
+            (stream_buffer as usize, flush_callback as usize);
+        // The real continuation invokes the callback with the object.
+        flush_callback(stream_buffer)
+    }
+
+    #[test]
+    fn stream_buffer_flush_enter_forwards_object_callback_and_result() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut stream_buffer = 0u8;
+        unsafe {
+            core::ptr::addr_of_mut!(STREAM_BUFFER_FLUSH_ENTER_CALLS).write(0);
+            core::ptr::addr_of_mut!(STREAM_BUFFER_FLUSH_ENTER_OPS).write(
+                StreamBufferFlushEnterOps {
+                    enter: record_stream_buffer_flush_enter,
+                },
+            );
+
+            assert_eq!(
+                stream_buffer_flush_enter(core::ptr::null_mut(), recording_flush_callback),
+                0x5eed_0001
+            );
+            assert_eq!(
+                core::ptr::addr_of!(STREAM_BUFFER_FLUSH_ENTER_ARGS).read(),
+                (0, recording_flush_callback as usize)
+            );
+            assert_eq!(
+                stream_buffer_flush_enter(
+                    core::ptr::addr_of_mut!(stream_buffer),
+                    recording_flush_callback,
+                ),
+                0x5eed_0001
+            );
+            assert_eq!(
+                core::ptr::addr_of!(STREAM_BUFFER_FLUSH_ENTER_CALLS).read(),
+                2
+            );
+            assert_eq!(
+                core::ptr::addr_of!(STREAM_BUFFER_FLUSH_ENTER_ARGS).read(),
+                (
+                    core::ptr::addr_of!(stream_buffer) as usize,
+                    recording_flush_callback as usize
+                )
+            );
+            core::ptr::addr_of_mut!(STREAM_BUFFER_FLUSH_ENTER_OPS)
+                .write(DEFAULT_STREAM_BUFFER_FLUSH_ENTER_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn stream_buffer_flush_enter_constants_match_raw_bytes() {
+        assert_eq!(STREAM_BUFFER_FLUSH_ENTER_VENEER, 0x0800_3848);
+        assert_eq!(STREAM_BUFFER_FLUSH_ENTER_INSN, 0xe51f_f004);
+        assert_eq!(STREAM_BUFFER_FLUSH_ENTER_TARGET, 0x0820_1460);
     }
 
     /// The stub at 0x08038190 is the literal veneer `ldr pc, [pc, #-4]`
