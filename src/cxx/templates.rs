@@ -1117,6 +1117,38 @@ pub unsafe extern "C" fn deque_iter_assign_alias_c774(
     dst
 }
 
+/// deque_iter_assign_alias_a1b0 — original: `FUN_083da1b0` @ 0x083da1b0
+/// (36 bytes; four unconditional plain-`bl` call sites, zero predicated
+/// forms, verified by decoding every ARM B/BL-immediate word in `osos.dec`).
+///
+/// Raw ARM establishes the true extent as `0x083da1b0..0x083da1d4`: four
+/// forward aligned word copies transfer the 16-byte deque iterator (`cur`,
+/// `seg_base`, `seg_end`, `seg_slot`) from `src` to `dst`; `bx lr` returns
+/// the untouched destination. The next separately linked function begins
+/// with `push {r4,r5,lr}` at 0x083da1d4. Its callers are 0x083deb1c,
+/// 0x083e005c, 0x083e0068, and 0x083e0110.
+///
+/// Deliberate deviations: none. This dedicated export and text section keep
+/// this independently hookable copy from being folded into the byte-identical
+/// [`deque_iter_assign`] family.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; retailOS
+/// performs a forward word copy with no NULL or overlap handling.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_a1b0")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_a1b0(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
 
 
 /// Firmware load address of the unported 4-byte deque iterator advance
@@ -10722,6 +10754,22 @@ mod tests {
             // The attach's store is unconditional: the NULL body lands
             // in the destination slot and no refcount is touched.
             assert!(out.is_null());
+        }
+    }
+    #[test]
+    fn deque_iter_assign_alias_a1b0_copies_words_forward_and_returns_destination() {
+        unsafe {
+            let src = [0x0102_0304u32, 0x1112_1314, 0x2122_2324, 0x3132_3334];
+            let mut dst = [0xdead_beefu32; 4];
+            assert_eq!(
+                deque_iter_assign_alias_a1b0(dst.as_mut_ptr(), src.as_ptr()),
+                dst.as_mut_ptr(),
+            );
+            assert_eq!(dst, src);
+
+            let mut overlapping = [1u32, 2, 3, 4, 5];
+            deque_iter_assign_alias_a1b0(overlapping.as_mut_ptr().add(1), overlapping.as_ptr());
+            assert_eq!(overlapping, [1, 1, 1, 1, 1]);
         }
     }
 }
