@@ -81,6 +81,7 @@ pub mod object_release_slot1;
 pub mod object_word_payload_resolve;
 pub mod object_candidate_payload_resolve;
 pub mod object_validation_status;
+pub mod object_type_tag_is_recognized;
 pub mod nested_container_item_count;
 pub mod no_op_destructor;
 pub mod resource_list;
