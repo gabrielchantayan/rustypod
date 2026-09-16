@@ -98477,3 +98477,34 @@ functions:
       negative cross-segment distances. match.py reports the same slot
       comparison, capacity call, multiply, and three distance terms; LLVM
       adds a function-pointer blx and frame setup.
+
+  - address: 0x083eab58
+    ghidra: FUN_083eab58
+    name: deque_iter_equal_elem4_alias_ab58
+    size: 68
+    sig: "u32 deque_iter_equal_elem4_alias_ab58(const DequeIter *left, const DequeIter *right)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      FUN_083ead78: deque_iter_distance_elem4 (byte-identical algorithm to 0x083eade0)
+      "left+0x00": cur
+      "left+0x04": seg_base
+      "right+0x00": cur
+      "right+0x04": seg_base
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte body from 0x083eab58 through
+      `pop {r4,pc}` at 0x083eab98; 0x083eab9c begins the next separately
+      linked function with `push {r4-r8,lr}`. A full immediate ARM B/BL decode
+      finds exactly four inbound direct calls, all unconditional plain bl at
+      0x083de56c, 0x083de5ac, 0x083de6b8, and 0x083de77c; there are no
+      predicated forms or direct tail branches. Equal cur pointers return one.
+      Otherwise, two non-base cursors return zero without a call; an endpoint
+      cursor calls the adjacent deque iterator distance member at 0x083ead78
+      and returns one exactly when its signed distance is zero. The raw
+      0x083ead78 body is the 4-byte deque-distance algorithm already ported at
+      0x083eade0, so the alias directly calls deque_iter_distance_elem4 rather
+      than adding a redundant retail-address seam. Host tests cover equal and
+      unequal interior cursors plus both directions of the adjacent-segment
+      boundary alias, rejecting an interior and a non-adjacent segment.
