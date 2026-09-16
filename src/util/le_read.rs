@@ -22,12 +22,19 @@
 //! read_u32_le` finds no separate body — review it as
 //! `match.py 0x080ed748 __rt_uread4` instead.
 //!
+//! A *third* copy of the 32-bit reader lives at 0x0839e7e8 with a
+//! base-plus-offset signature — the caller keeps the record base in r0 and
+//! passes the field offset in r1. The body is the same four-byte assembly,
+//! so LLVM folds it onto `__rt_uread4` too; review it as
+//! `match.py 0x0839e7e8 __rt_uread4`.
+//!
 //! Sizes from decomp/functions.csv; call-site counts from decoding every
 //! `b`/`bl` word in osos.dec (osos.asm drops lines and undercounts):
 //!
 //! - `read_u16_le` — `FUN_080ed738` @ 0x080ed738 (16 bytes; 34 call sites).
 //! - `read_u32_le` — `FUN_080ed748` @ 0x080ed748 (32 bytes; 66 call sites).
 //! - `read_u64_le` — `FUN_080ed768` @ 0x080ed768 (88 bytes; 2 call sites).
+//! - `read_u32_le_at` — `FUN_0839e7e8` @ 0x0839e7e8 (36 bytes; 4 call sites).
 //!
 //! All three are leaves and touch no hardware, so host tests prove complete
 //! behavior against a `from_le_bytes` reference.
@@ -57,6 +64,26 @@ pub unsafe extern "C" fn read_u16_le(p: *const u8) -> u32 {
 /// shifts 0/8/16/24.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn read_u32_le(p: *const u8) -> u32 {
+    (*p as u32)
+        | ((*p.add(1) as u32) << 8)
+        | ((*p.add(2) as u32) << 16)
+        | ((*p.add(3) as u32) << 24)
+}
+
+/// read_u32_le_at — original: `FUN_0839e7e8` @ 0x0839e7e8 (36 bytes).
+///
+/// Unaligned little-endian u32 load at a caller-supplied offset:
+/// `*(u32 *)(base + offset)` assembled byte-wise, identical in behavior to
+/// `read_u32_le(base.add(offset))`. The original loads byte 0 with
+/// `ldrb r2, [r0, r1]`, advances `r0` by `offset`, then gathers bytes 1..3
+/// at fixed offsets and ORs everything into the return register; 36 bytes,
+/// 9 instructions, ends in `bx lr` with the next function's
+/// `push {r4,r5,r6,lr}` at 0x0839e80c. 4 plain `bl` call sites
+/// (0x081608a0/0x081608ec/0x08160958/0x081609d0), 0 predicated, 0 plain
+/// `b` — binary-scanned.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn read_u32_le_at(base: *const u8, offset: u32) -> u32 {
+    let p = base.add(offset as usize);
     (*p as u32)
         | ((*p.add(1) as u32) << 8)
         | ((*p.add(2) as u32) << 16)
@@ -159,6 +186,42 @@ mod tests {
         unsafe {
             assert_eq!(read_u16_le(p), 0x2211);
             assert_eq!(read_u32_le(p), 0x4433_2211);
+        }
+    }
+
+    /// The offset form must agree with `read_u32_le(base.add(offset))`
+    /// over offsets 0 and every alignment, including straddling the end of
+    /// the buffer's patterned region.
+    #[test]
+    fn read_u32_le_at_matches_pointer_form() {
+        let buf = pattern(64, 73);
+        for off in 0..=buf.len() - 4 {
+            let want = u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
+            assert_eq!(
+                unsafe { read_u32_le_at(buf.as_ptr(), off as u32) },
+                want,
+                "off={off}"
+            );
+            assert_eq!(
+                unsafe { read_u32_le_at(buf.as_ptr(), off as u32) },
+                unsafe { read_u32_le(buf.as_ptr().add(off)) },
+                "pointer-form off={off}"
+            );
+        }
+    }
+
+    /// Offset zero reads from the base itself; a nonzero offset must not
+    /// leak base bytes into the result.
+    #[test]
+    fn read_u32_le_at_zero_and_extremes() {
+        let buf = [0x78, 0x56, 0x34, 0x12, 0xde, 0xad, 0xbe, 0xef];
+        unsafe {
+            assert_eq!(read_u32_le_at(buf.as_ptr(), 0), 0x1234_5678);
+            assert_eq!(read_u32_le_at(buf.as_ptr(), 4), 0xefbe_adde);
+        }
+        for value in [0u32, u32::MAX, 1, 0x8000_0000, 0x0102_0304] {
+            let bytes = value.to_le_bytes();
+            assert_eq!(unsafe { read_u32_le_at(bytes.as_ptr(), 0) }, value);
         }
     }
 

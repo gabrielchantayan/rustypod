@@ -30183,6 +30183,32 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e7e8
+    ghidra: FUN_0839e7e8
+    name: read_u32_le_at
+    size: 36
+    sig: "u32 read_u32_le_at(const u8 *base, u32 offset)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: base, param_2: offset}
+    notes: >-
+      Unaligned little-endian u32 load at a caller-supplied offset:
+      *(u32 *)(base + offset) assembled byte-wise, behaviorally identical to
+      read_u32_le(base + offset). Ghidra's 36-byte extent is right: 9 words,
+      ldrb r2,[r0,r1] / add r0,r0,r1 / ldrb r1,[r0,#1] / orr r1,r2,r1,lsl#8
+      / ldrb r2,[r0,#2] / ldrb r0,[r0,#3] / orr r1,r1,r2,lsl#16 / orr
+      r0,r1,r0,lsl#24 / bx lr, with the next function's push {r4,r5,r6,lr}
+      at 0x0839e80c. Decoding every ARM B/BL word in osos.dec finds exactly
+      4 direct bl callers (0x081608a0, 0x081608ec, 0x08160958, 0x081609d0,
+      all in the plst record checker FUN_08160888), all unconditional - no
+      predicated forms, no tail b sites. This is a third copy of the ADS
+      __packed-dereference idiom beside 0x08031140 (__rt_uread4) and the
+      0x080ed738/748/768 family, kept as its own symbol with a base+offset
+      signature; the sibling byte-wise le32 store 0x0839e7c4 is its write
+      counterpart. LLVM emits the same load/orr structure as the original
+      (register-indexed first load, fixed offsets 1..3, shifts 8/16/24);
+      the crate-wide frame-pointer push/pop is the only diff.
+
   - address: 0x0839eb54
     ghidra: FUN_0839eb54
     name: vtable_word_callback_repeat
