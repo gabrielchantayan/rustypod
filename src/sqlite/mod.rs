@@ -74,6 +74,7 @@ pub mod blob_to_hex;
 pub mod bitvec;
 pub mod btree_lock;
 pub mod btree_cursor;
+pub mod cursor_embedded_state;
 pub mod btree_get_meta;
 pub mod btree_drop_cell;
 pub mod btree_balance;
