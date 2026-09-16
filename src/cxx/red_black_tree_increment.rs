@@ -16,6 +16,17 @@
 //! Deliberate deviations: none. Links remain target-width `u32` words, rather
 //! than host pointers, so their 32-bit `repr(C)` layout and host fixtures match
 //! the firmware exactly.
+//!
+//! `FUN_083b5ea4` at load address `0x083b5ea4` is a byte-identical, 84-byte
+//! (21-word) copy of the `red_black_tree_advance_cursor` body ported below,
+//! ending with `bx lr` at `0x083b5ef4`; the separately linked sibling begins
+//! at `0x083b5ef8`. A complete aligned ARM B/BL decode verifies exactly four
+//! direct inbound calls, all unconditional `bl` at `0x08147398`,
+//! `0x08147514`, `0x083c85a0`, and `0x083c8a70`; there are no predicated
+//! calls, direct tail-`B` transfers, or aligned data-word references. Like
+//! the primary copy, it leaves r0 unchanged, so the cursor address is
+//! returned. This alias reuses the established dispatch seam and shared host
+//! tests; deliberate deviations: none.
 
 /// Base node layout used by the C++ red-black tree implementation.
 ///
