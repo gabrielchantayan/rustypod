@@ -88054,6 +88054,40 @@ functions:
       The Rust port writes the named repr(C) fields, preserving the target's
       three 32-bit words without overlapping widened host pointers; there
       are no deliberate deviations or dispatch seams.
+  # --- std::vector<T> trivial 4-byte-element destructor ---
+  - address: 0x083e68a0
+    ghidra: FUN_083e68a0
+    name: trivial_vector4_destruct
+    size: 64
+    sig: "VectorStorage *trivial_vector4_destruct(VectorStorage *vector)"
+    module: cxx/trivial_vector4_destruct
+    status: ported
+    renames:
+      param_1/r0: vector
+      iVar1/r0: begin
+      param_1[1]/r1: end
+      param_1[2]/r1: end_of_storage
+      FUN_08266f2c: operator_delete_veneer
+    notes: >-
+      Raw osos.dec fixes the complete 64-byte extent 0x083e68a0..0x083e68e0;
+      the next separately linked function begins push {r4-r8,lr} at
+      0x083e68e0. The body loads begin (+0) and end (+4), keeps begin in r2,
+      walks r0 from begin to end in four-byte increments with an empty body
+      (the trivial element destructor was optimized away but the walk is
+      retained), then computes (end_of_storage (+8) - begin) asr 2 as a dead
+      capacity-in-elements auxiliary, clears r2, and calls the 0x08266f2c
+      veneer, an unconditional branch to the ported operator_delete @
+      0x082aad24 (tag 2, NULL-guarded). Ghidra's recovered C loop is wrong;
+      the raw walk discards its result. The single bl is the body's only
+      call. Complete aligned ARM B/BL-immediate decoding finds exactly four
+      direct inbound calls, all unconditional bl, at 0x08177890, 0x08177898,
+      0x081778a0, and 0x08177be4; no predicated forms or tail branches.
+      This is the four-byte-element sibling of the ported
+      trivial_vector8_destruct @ 0x083e1ae4. Deliberate deviation: the
+      veneer dispatch to operator_delete is routed through the ported free
+      seam in runtime/malloc_rt, matching trivial_vector8_destruct; the
+      dead capacity auxiliary is retained behind black_box so the walk and
+      descriptor reads survive codegen.
   - address: 0x083dbedc
     ghidra: FUN_083dbedc
     name: container_end_cursor
