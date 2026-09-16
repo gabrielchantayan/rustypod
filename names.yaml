@@ -46485,6 +46485,39 @@ functions:
       compare, +32 commit, 24-bit loop check, and +8 non-prefix step; LLVM
       frame/register allocation differs.
 
+  - address: 0x0807d814
+    ghidra: FUN_0807d814
+    name: trim_ctype_whitespace
+    size: 136
+    sig: "char *trim_ctype_whitespace(char *text)"
+    module: runtime/trim_ctype_whitespace
+    status: ported
+    renames:
+      param_1: text
+      piVar3: ctype_table_slot
+      pbVar5: string_end
+      pbVar6: trailing_cursor
+    notes: >-
+      Trims the mutable C string against bit 0 of the active LC_CTYPE table:
+      skip leading flagged bytes; NULL if that reaches the terminator; otherwise
+      strlen the remainder, scan back across trailing flagged bytes, and NUL
+      terminate them. Raw osos.dec decoding fixes the true extent at
+      0x0807d814..0x0807d89c (136 bytes); the next function starts at
+      0x0807d89c. A complete raw ARM scan finds 5 plain unconditional bl
+      callers (0x0806ef50, 0x0806ef80, 0x0806efd8, 0x0806f01c,
+      0x0806f050), no predicated BL callers. The body calls
+      __rt_ctype_table_addr @ 0x0802eca0 while leading bytes are examined,
+      then strlen @ 0x08392478 and reuses the final table pointer for the
+      trailing scan. No NULL, bounds, or encoding guards; Rust preserves that
+      contract with volatile table/string accesses. Codegen deviation: LLVM
+      folds the leading loop's repeated ctype accessor calls into one
+      libspace+0x24 load; that slot is process-global in retailOS, so behavior
+      is unchanged. Host tests install a
+      target-width ctype fixture and cover empty, all-whitespace, mixed
+      leading/trailing, interior, and custom-class bytes. match.py structural
+      output is reviewed for the expected leading scan, strlen call, backward
+      scan, and terminator store.
+
   # --- H.264 / MPEG-4 AVC video decoder: RBSP bitstream ---
   - address: 0x082b3258
     ghidra: FUN_082b3258

@@ -39,6 +39,10 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x7f40_0000: dedicated to runtime/trim_ctype_whitespace's raw-u32
+    // LC_CTYPE table fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const STRING_TRIM_CTYPE: usize = 0x7f40_0000;
     // 0xde00_0000: dedicated to app/path_entry_load_to_heap's raw-u32
     // buffered-loader source fixture; mappings never unmap, so no other user
     // may share this hint.
@@ -1174,6 +1178,10 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
 /// Serializes host tests that enter `ui::tdat_flag_20_bit_2` through its
 /// shared mutable dispatch table, including callers that set its flag.
 pub static TDAT_FLAG_20_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that replaces libspace's LC_CTYPE table slot.
+/// Ctype readers and ctype-string ports must share this lock so their fixture
+/// installation and restoration cannot race.
+pub static CTYPE_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that installs mocks into the crate-global
 /// `drivers::ata_cmd::TRACED_ALLOC_HOOKS`. That table is one shared

@@ -167,6 +167,7 @@ pub unsafe extern "C" fn errno_set(value: i32) {
 /// Returns libspace+0x24: the address of the ctype-table pointer slot
 /// (setlocale stores through it; ctype readers load the pointer from it).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __rt_ctype_table_addr() -> *mut u32 {
     &mut (*__rt_libspace()).ctype_table
 }

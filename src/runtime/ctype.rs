@@ -140,12 +140,11 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::runtime::errno::__rt_ctype_table_addr;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, CTYPE_TABLE_TEST_LOCK};
     use core::ptr;
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::LazyLock;
 
     const CTYPE_FIXTURE_LEN: usize = 0x1000;
-    static CTYPE_TABLE_TEST_LOCK: Mutex<()> = Mutex::new(());
     static ISDIGIT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::CTYPE_ISDIGIT, CTYPE_FIXTURE_LEN)
             .map(|pointer| pointer as usize)
