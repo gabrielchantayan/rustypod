@@ -2496,6 +2496,43 @@ functions:
       indexed_object_offset at 0x08055ed0.
 
 
+  # --- matchable entry index word getter ---
+  - address: 0x08051400
+    ghidra: FUN_08051400
+    name: entry_match_index
+    size: 32
+    sig: "u32 entry_match_index(const u8 *entry, u32 *out_index)"
+    module: app/entry_match_index
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: out_index
+      param_1_plus_0xc: index
+    notes: >-
+      Raw ARM is cmp r0,#0; mvneq r0,#0xbf; bxeq lr; cmp r1,#0;
+      ldrne r0,[r0,#0xc]; strne r0,[r1]; mov r0,#0; bx lr, decoded from
+      osos.dec @ 0x08051400..0x08051420; the next function opens with the
+      same cmp/mvneq prologue at 0x08051420, confirming Ghidra's 32-byte
+      extent. NULL entry returns 0xbf and leaves out_index untouched;
+      otherwise a non-NULL out_index receives the entry's word at +0xc and
+      zero is returned either way. The +0xc word is the entry's
+      matchable-list index: caller 0x0826f8f0 iterates while the fetched
+      word is at most a caller bound, 0x0826f998 selects the first entry
+      whose word exceeds a bound, 0x0826fa6c collects the words into a
+      vector, and 0x081a8cf4 walks on while the container's +0x18 word
+      equals the fetched word plus one (consecutive indices). Ghidra's
+      reference C shows the NULL-entry return as 0xffffff40, but the raw
+      word 0x03e000bf is a plain MOV of 0xbf, so the port returns 191.
+      Decoding every ARM B/BL word in osos.dec finds exactly 5
+      unconditional bl call sites (0x081a8d2c, 0x081a8e80, 0x0826f938,
+      0x0826f9e4, 0x0826faf8), zero predicated bl, and no tail b callers.
+      Deliberate deviations: none; the aligned word load matches the
+      original ldr. match.py is a structural review: LLVM forms a crate fp
+      frame and schedules the load through r2 where ADS predicated on r0,
+      while the NULL-entry 0xbf return, conditional +0xc load/store
+      through the out pointer, and zero-on-success shape match. Reference
+      C: decomp/c/003/08051400_FUN_08051400.c.
+
   # --- opaque FreeType service metadata flag-word accessor ---
   - address: 0x080514e0
     ghidra: FUN_080514e0
