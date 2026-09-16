@@ -122,9 +122,14 @@ unsafe extern "C" fn firmware_construct_event_list(
     comparator: *mut u8,
     allocator: *mut u8,
 ) -> *mut u8 {
-    let construct: unsafe extern "C" fn(*mut u8, *mut u8, *mut u8) -> *mut u8 =
-        unsafe { core::mem::transmute(0x083d_b2d4usize) };
-    unsafe { construct(tree, comparator, allocator) }
+    unsafe {
+        crate::cxx::red_black_tree_payload_24_construct::red_black_tree_payload_24_construct(
+            tree.cast(),
+            comparator,
+            allocator,
+        )
+        .cast()
+    }
 }
 
 #[cfg(target_os = "none")]

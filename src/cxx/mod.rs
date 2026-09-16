@@ -176,6 +176,7 @@ pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;
 pub mod red_black_tree_node_pool_acquire;
 pub mod red_black_tree_payload_24_node_pool_acquire;
+pub mod red_black_tree_payload_24_construct;
 pub mod red_black_tree_rotate_right;
 pub mod red_black_tree_rotate_right_second;
 pub mod red_black_tree_rotate_right_third;

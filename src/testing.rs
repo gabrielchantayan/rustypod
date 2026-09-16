@@ -1147,6 +1147,10 @@ pub mod hints {
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const RED_BLACK_TREE_PAYLOAD_24_NODE_POOL_ACQUIRE: usize = 0x3200_0000;
+    // 0x3300_0000: dedicated to cxx/red_black_tree_payload_24_construct's
+    // recycled sentinel-node fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const RED_BLACK_TREE_PAYLOAD_24_CONSTRUCT: usize = 0x3300_0000;
     // 0x4242_0000: dedicated to sqlite/btree_lock's raw-u32 sqlite3, Db,
     // and Btree fixture for sqlite3BtreeLeaveAll; mappings never unmap, so
     // no other user may share this hint.

@@ -156,8 +156,6 @@ unsafe extern "C" fn firmware_append_event_descriptor(
     #[repr(C, align(4))]
     struct EventDescriptorTree([u8; 0x1c]);
 
-    let construct_tree: unsafe extern "C" fn(*mut u8, *mut u8) =
-        unsafe { core::mem::transmute(0x083d_b2d4usize) };
     let construct_descriptor: unsafe extern "C" fn(*mut u8, *mut u8, u32) -> *mut u8 =
         unsafe { core::mem::transmute(0x082a_7dacusize) };
     let store_descriptor: unsafe extern "C" fn(*mut u8, *mut u8) =
@@ -175,7 +173,11 @@ unsafe extern "C" fn firmware_append_event_descriptor(
     let mut string = core::ptr::null_mut();
 
     unsafe {
-        construct_tree(temporary_tree.0.as_mut_ptr(), &mut comparator);
+        crate::cxx::red_black_tree_payload_24_construct::red_black_tree_payload_24_construct(
+            temporary_tree.0.as_mut_ptr().cast(),
+            &mut comparator,
+            core::ptr::null_mut(),
+        );
         crate::cxx::string::cxx_string_from_buffer(&mut string, bytes, length);
         let stored = construct_descriptor(descriptor.0.as_mut_ptr(), string, 12);
         crate::cxx::string::cxx_string_release(&mut string);
