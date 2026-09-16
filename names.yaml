@@ -97449,6 +97449,34 @@ functions:
       terminal/finalization path. Deliberate deviations: those two unported
       callees use seams on host and retailOS addresses on firmware.
 
+  # --- SQLite legacy prepare wrapper ---
+  - address: 0x08390dcc
+    ghidra: FUN_08390dcc
+    name: sqlite3_prepare
+    size: 36
+    sig: "i32 sqlite3_prepare(sqlite3 *db, const char *sql, i32 n_byte, sqlite3_stmt **statement_out, const char **tail_out)"
+    module: sqlite/prepare
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: sql
+      param_3/r2/r12: n_byte
+      param_4/r3: statement_out
+      param_5/stack: tail_out
+      FUN_0837d2fc: sqlite3_lock_and_prepare
+    notes: >-
+      Raw osos.dec establishes the true 36-byte extent
+      0x08390dcc..0x08390df0: ten ARM words from stmdb sp!,{r2,r3,r4,lr}
+      through ldmia sp!,{r2,r3,r4,pc}; 0x08390df0 starts the next separate
+      wrapper. Independent decoding of every ARM B/BL-immediate in osos.dec
+      finds exactly four direct inbound calls, all unconditional plain bl at
+      0x082159fc, 0x082ccedc, 0x082ccf60, and 0x08390394; no predicated bl
+      targets this entry. The wrapper forwards db, sql, n_byte, statement_out,
+      and tail_out to 0x0837d2fc, inserting zero as its fourth argument.
+      Ghidra confirms the six-argument forwarding shape. The unported callee
+      is a volatile host seam and a retailOS address on firmware. Deliberate
+      deviations: none beyond that seam.
+
   # --- SQLite comparison opcode emitter ---
   - address: 0x082c3bf0
     ghidra: FUN_082c3bf0
