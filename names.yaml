@@ -31923,6 +31923,39 @@ functions:
       to vdbe_int_value (shown as `b 0` from the unresolved .a
       relocation).
 
+  - address: 0x0838bad0
+    ghidra: FUN_0838bad0
+    name: vdbe_mem_copy
+    size: 96
+    sig: "i32 vdbe_mem_copy(Mem *p_to, const Mem *p_from)"
+    module: sqlite/vdbe_mem_copy
+    status: ported
+    renames:
+      param_1/r0: p_to
+      param_2/r1: p_from
+      uVar1/r0: flags
+      uVar2/r1: source_flags
+      uVar3/r5: result
+      FUN_0838c074: mem_extern_release
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_0838bb30: vdbe_mem_make_writeable
+    notes: >-
+      SQLite 3.5.x's sqlite3VdbeMemCopy (vdbemem.c). Raw extent is
+      exactly 0x0838bad0..0x0838bb30: the closing pop {r4,r5,r6,pc} is
+      at 0x0838bb2c and the next word is the distinct stmdb entry of
+      sqlite3VdbeMemMakeWriteable; there is no literal pool. Decoding
+      every aligned ARM B/BL word in osos.dec found four direct callers:
+      unconditional bl at 0x082e8aec and 0x08388484, plus predicated
+      blne at 0x082d971c and bleq at 0x0838f10c. The destination's
+      external resources are released, 0x24 bytes are copied from the
+      source (all of Mem except destination zMalloc), and MEM_Dyn (0x40)
+      is cleared. For MEM_Str|MEM_Blob (0x12), a source without
+      MEM_Static (0x80) makes the destination MEM_Ephem (0x100) and
+      calls sqlite3VdbeMemMakeWriteable; its result is returned.
+      Deliberate deviation: typed repr(C) Mem fields model the target
+      copy without tearing widened host pointers; a direct-callee slot
+      permits host tests to record the raw-offset extern release and
+      materialization call.
   - address: 0x0838bb30
     ghidra: FUN_0838bb30
     name: vdbe_mem_make_writeable
