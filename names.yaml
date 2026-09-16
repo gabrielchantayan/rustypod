@@ -96150,3 +96150,33 @@ functions:
       No faithful direct Rust call or existing semantic dispatch seam
       exists. Porting this wrapper alone would require an invented callee
       identity or a fallback/stub result, so it remains identified.
+
+  - address: 0x080758e0
+    ghidra: FUN_080758e0
+    name: interface_guard_query
+    size: 52
+    sig: "u32 interface_guard_query(u32 selector)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: selector (live base-constructor hint)
+      uStack_18/sp: guard (16-byte InterfaceGuard spill frame)
+      uVar1/r0: status
+      FUN_0818a0c4: interface_guard_base_construct (ported)
+      FUN_08297224: unresolved interface query operation (retailOS boundary)
+      FUN_0818a0fc: interface_guard_base_destroy (retailOS boundary)
+    notes: >-
+      Raw ARM proves the exact 52-byte extent 0x080758e0..0x08075914: the
+      next distinct function starts at 0x08075914. It spills r1-r5/lr,
+      constructs a common InterfaceGuard at sp with selector still live in r1
+      and zero flag r2, loads the resolved interface word from sp+4, invokes
+      0x08297224(interface, guard), preserves that status in r4 across the
+      base teardown, and returns it verbatim. Decoding inbound ARM B/BL words
+      finds five unconditional plain BL calls at 0x080644fc, 0x080d3558,
+      0x0813aabc, 0x0813ab34, and 0x081e62c4; no predicated BL forms. One
+      additional wrapper tail-branches here at 0x08064518. Deliberate
+      deviation: 0x08297224 has no established identity, so the port uses a
+      typed volatile dispatch seam; the device default calls that fixed
+      retailOS address and the host default returns zero. Host coverage proves
+      selector values 0, 5, and 6, interface propagation, guard layout, and
+      statuses 0, 0x12, and 0xdeadbeef.

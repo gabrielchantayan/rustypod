@@ -148,6 +148,12 @@ pub const INTERFACE_GUARD_VTABLE_ADDRESS: u32 = 0x0899_1978;
 /// Firmware load address of the base guard teardown reached by the
 /// destructor's tail branch.
 pub const GUARD_BASE_DESTROY_ADDRESS: usize = 0x0818_a0fc;
+/// Firmware load address of the interface-scoped virtual query.
+pub const INTERFACE_GUARD_QUERY_ADDRESS: usize = 0x0807_58e0;
+/// Firmware load address of the unported interface query invoked while the
+/// temporary guard is live.
+pub const INTERFACE_GUARD_QUERY_OPERATION_ADDRESS: usize = 0x0829_7224;
+
 
 /// The selector immediate the original hands the facade accessor
 /// (`mov r1, #0x1` @ 0x080f4ae8).
@@ -222,6 +228,11 @@ pub type GuardConstruct =
 /// constructor stores at +0x04.
 pub type GuardInterfaceResolve =
     unsafe extern "C" fn(this: *mut InterfaceGuard, base_hint: u32) -> u32;
+/// The still-unidentified query operation at `0x08297224`. It receives the
+/// resolved interface word in r0 and the live guard frame in r1.
+pub type InterfaceGuardQueryOperation =
+    unsafe extern "C" fn(interface: u32, guard: *mut InterfaceGuard) -> u32;
+
 
 /// Boundary default for the separately linked interface resolver @
 /// 0x0818a06c. Device builds preserve the exact retailOS call; host tests
@@ -352,6 +363,28 @@ unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) -> *mut I
         this
     }
 }
+/// Boundary default for the query operation at `0x08297224`. The target
+/// build preserves its exact firmware call; host tests install a recorder
+/// because the operation's interface graph remains unported.
+unsafe extern "C" fn firmware_interface_guard_query_operation(
+    interface: u32,
+    guard: *mut InterfaceGuard,
+) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let operation: InterfaceGuardQueryOperation =
+            core::mem::transmute(INTERFACE_GUARD_QUERY_OPERATION_ADDRESS);
+        operation(interface, guard)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = interface;
+        let _ = guard;
+        0
+    }
+}
+
 
 /// The active separately linked interface resolver. Device builds call the
 /// fixed retailOS function; host tests install a recorder.
@@ -371,6 +404,11 @@ pub static mut PATH_PROBE_FACADE_FETCH: FacadeFetch = firmware_facade_fetch;
 /// 0x08206e6c (`bl` @ 0x080f4b0c). Host tests install a recording
 /// mock; the wired default is the retailOS boundary.
 pub static mut PATH_PROBE_GUARD_DTOR: GuardDestroy = firmware_guard_destroy;
+/// The active unported query operation. Device builds retain the raw
+/// firmware target; host tests replace it with a recording mock.
+pub static mut INTERFACE_GUARD_QUERY_OPERATION: InterfaceGuardQueryOperation =
+    firmware_interface_guard_query_operation;
+
 
 #[inline(always)]
 unsafe fn interface_resolve_fn() -> GuardInterfaceResolve {
@@ -391,6 +429,11 @@ unsafe fn facade_fetch_fn() -> FacadeFetch {
 unsafe fn guard_dtor_fn() -> GuardDestroy {
     core::ptr::read_volatile(core::ptr::addr_of!(PATH_PROBE_GUARD_DTOR))
 }
+#[inline(always)]
+unsafe fn interface_guard_query_operation_fn() -> InterfaceGuardQueryOperation {
+    core::ptr::read_volatile(core::ptr::addr_of!(INTERFACE_GUARD_QUERY_OPERATION))
+}
+
 
 /// Calls the still-retail base guard teardown @ 0x0818a0fc. It installs
 /// the base vtable, deregisters the guard from its interface, and returns
@@ -441,6 +484,32 @@ pub unsafe extern "C" fn interface_guard_base_construct(
     this.cast::<u8>().add(9).write_volatile(base_flag as u8);
     this
 }
+/// interface_guard_query — original: `FUN_080758e0` @ **0x080758e0**
+/// (52 instruction bytes; **5 plain `bl` call sites and 0 predicated
+/// forms**, verified by decoding every ARM B/BL word in `osos.dec`:
+/// 0x080644fc, 0x080d3558, 0x0813aabc, 0x0813ab34, and 0x081e62c4).
+/// One further caller tail-branches here at 0x08064518.
+///
+/// Constructs a 16-byte common interface guard over the r1-r3 spill frame
+/// with `selector` as its live base hint, invokes the unresolved
+/// `0x08297224` interface operation with the resolved guard word and guard
+/// address, tears the guard down, and returns that operation's status
+/// verbatim.
+///
+/// Deliberate deviation: the operation's concrete identity is not established,
+/// so it remains a typed dispatch boundary. Device builds call its verified
+/// fixed address; host builds return zero unless a test supplies a recorder.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn interface_guard_query(selector: u32) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    interface_guard_base_construct(guard, selector, 0);
+    let status = interface_guard_query_operation_fn()((*guard).words[1], guard);
+    interface_guard_base_destroy(guard);
+    status
+}
+
 /// path_probe_guard_construct — original: `FUN_08206e40` @ 0x08206e40
 /// (40 instruction bytes plus its 4-byte literal pool; **14 direct `bl`
 /// call sites**, all unconditional; no predicated `bl` forms).
@@ -683,6 +752,9 @@ pub(crate) mod tests {
             .write_volatile(firmware_facade_fetch);
         core::ptr::addr_of_mut!(PATH_PROBE_GUARD_DTOR)
             .write_volatile(firmware_guard_destroy);
+        core::ptr::addr_of_mut!(INTERFACE_GUARD_QUERY_OPERATION)
+            .write_volatile(firmware_interface_guard_query_operation);
+
     }
 
     impl Drop for SeamGuard {
@@ -741,6 +813,10 @@ pub(crate) mod tests {
     static mut QUERY_PATH: *const u8 = core::ptr::null();
     static mut QUERY_PATH_VTABLE: usize = 0;
     static mut RELEASED_STORAGE: *mut StringObject = core::ptr::null_mut();
+    static mut INTERFACE_QUERY_GUARD: *mut InterfaceGuard = core::ptr::null_mut();
+    static mut INTERFACE_QUERY_WORD: u32 = 0;
+    static mut INTERFACE_QUERY_RESULT: u32 = 0;
+
     static mut RELEASED_VTABLE: usize = 0;
 
     /// The mock facade and its vtable; every slot begins as the wrong-slot
@@ -777,6 +853,15 @@ pub(crate) mod tests {
         RESOLVE_HINT = base_hint;
         RESOLVED_INTERFACE
     }
+    unsafe extern "C" fn recording_interface_guard_query_operation(
+        interface: u32,
+        guard: *mut InterfaceGuard,
+    ) -> u32 {
+        INTERFACE_QUERY_GUARD = guard;
+        INTERFACE_QUERY_WORD = interface;
+        INTERFACE_QUERY_RESULT
+    }
+
 
     unsafe extern "C" fn recording_fetch(
         guard: *mut InterfaceGuard,
@@ -862,6 +947,10 @@ pub(crate) mod tests {
         RELEASED_STORAGE = core::ptr::null_mut();
         RELEASED_VTABLE = 0;
         QUERY_RESULT = 0;
+        INTERFACE_QUERY_GUARD = core::ptr::null_mut();
+        INTERFACE_QUERY_WORD = 0;
+        INTERFACE_QUERY_RESULT = 0;
+
         let vtable = core::ptr::addr_of_mut!(MOCK_VTABLE);
         for slot in 0..FACADE_VTABLE_SLOTS {
             (*vtable).slots[slot] = recording_wrong_slot as usize;
@@ -998,6 +1087,37 @@ pub(crate) mod tests {
             assert_eq!(EVENT_COUNT, 0, "no recording mock is installed");
         }
     }
+    #[test]
+    fn interface_guard_query_resolves_selector_and_returns_operation_status() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            for (selector, interface, status) in [
+                (0u32, 0x1000_0000, 0u32),
+                (5, 0x2000_0004, 0x12),
+                (6, 0xffff_fffc, 0xdead_beef),
+            ] {
+                RESOLVED_INTERFACE = interface;
+                INTERFACE_QUERY_GUARD = core::ptr::null_mut();
+                INTERFACE_QUERY_WORD = 0;
+                INTERFACE_QUERY_RESULT = status;
+                core::ptr::addr_of_mut!(INTERFACE_GUARD_INTERFACE_RESOLVE)
+                    .write_volatile(recording_interface_resolve);
+                core::ptr::addr_of_mut!(INTERFACE_GUARD_QUERY_OPERATION)
+                    .write_volatile(recording_interface_guard_query_operation);
+
+                assert_eq!(interface_guard_query(selector), status);
+                assert!(!INTERFACE_QUERY_GUARD.is_null(), "the stack guard reaches the operation");
+                assert_eq!(RESOLVE_THIS, INTERFACE_QUERY_GUARD);
+                assert_eq!(RESOLVE_HINT, selector, "r1 remains live into the base constructor");
+                assert_eq!(INTERFACE_QUERY_WORD, interface, "ldr r0, [sp, #4]");
+                assert_eq!((*INTERFACE_QUERY_GUARD).words[0], INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
+                assert_eq!((*INTERFACE_QUERY_GUARD).words[1], interface);
+                assert_eq!((*INTERFACE_QUERY_GUARD).words[2] & 0xffff, 0);
+            }
+        }
+    }
+
 
     #[test]
     fn slot_5c_keeps_the_guarded_path_operation_contract() {
