@@ -13272,6 +13272,33 @@ functions:
       callers. Host coverage proves zeroing both signed counts and the
       subglyph count, copying every outline and tail field, and preserving
       the loader header.
+  - address: 0x0804cb24
+    ghidra: FUN_0804cb24
+    name: ft_list_find
+    size: 40
+    sig: "FtListNode *ft_list_find(const FtList *list, void *data)"
+    module: ft/list
+    status: ported
+    vars: {param_1: list, param_2: data}
+    notes: >-
+      FreeType FT_List_Find (src/base/ftlist.c). Raw osos.dec confirms
+      the complete 40-byte body at 0x0804cb24..0x0804cb4c; the distinct
+      next function (FT_List_Remove) starts at 0x0804cb4c, so Ghidra's
+      extent is exact. Node layout falls out of the code: FT_ListNodeRec
+      prev @ +0 (untouched here), next @ +4 (ldr [r0,#4]), data @ +8
+      (ldr [r2-node,#8], cmp against r1, bxeq lr). Loads list->head from
+      [list], walks next, returns the first node with data == key, else
+      NULL; no NULL guard on list itself. Decoding every ARM BL word in
+      osos.dec finds exactly 5 inbound call sites, all unconditional
+      plain bl (cond 0xe): 0x0804c384, 0x0804c46c, 0x0804ecf0,
+      0x08080ec8, 0x080868cc; no predicated BL, no inbound tail b. The
+      0x0804c360/0x0804c42c callers are the FT_Module/FT_Service lookup
+      paths (key is the module/service pointer, list heads at +0x18 and
+      +0x6c of the registry object). LLVM codegen adds a frame
+      push/pop and reorders the NULL return; the loop structure matches
+      instruction-for-instruction. Host tests cover head/mid/tail hits,
+      miss, empty list, first-match-wins on duplicate data, and NULL
+      data matching a node with NULL data.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
