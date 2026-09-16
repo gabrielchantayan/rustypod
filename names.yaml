@@ -68056,6 +68056,40 @@ functions:
       an unchanged descriptor/guard footprint. Raw disassembly:
       osos.dec 0x083e5b88; match.py structural review recorded.
 
+  # --- COW-string/vector record range destroyer ---
+  - address: 0x083e2230
+    ghidra: FUN_083e2230
+    name: cxx_string_vector_record_range_destroy
+    size: 48
+    sig: "void cxx_string_vector_record_range_destroy(void *ignored, u8 *begin, u8 *end)"
+    module: cxx/string_vector_record_range_destroy
+    status: ported
+    renames:
+      param_1/r0: ignored
+      param_2/r1/r4: begin
+      param_3/r2/r5: end
+      FUN_083e5b88: cxx_string_vector_destruct
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw ARM extent is exactly 0x083e2230..0x083e2260: 12 instruction words,
+      with the next independently linked function (pushing r4..r8) starting at
+      0x083e2260. r0 is never used; r1 (begin) and r2 (end) are saved into
+      r4/r5 and the loop walks sixteen-byte records {COW string slot @ +0,
+      CxxStringVector @ +4}: it passes record+4 to cxx_string_vector_destruct
+      @ 0x083e5b88, subtracts four from the returned vector pointer to recover
+      the record base, passes that to cxx_string_release @ 0x083d8b04,
+      advances r4 by 0x10, and repeats until r4 == r5. Decoding every ARM B/BL
+      word in osos.dec verifies exactly two unconditional bl calls inside, no
+      predicated calls, and four direct, unconditional bl callers at
+      0x08197c3c, 0x083e237c, 0x083e2640, and 0x083e26b4; there are no tail
+      branches. Host tests prove the ordered record walk, the +4 vector
+      argument, the return-minus-four release argument, and empty-range
+      behavior. LLVM keeps the same loop and adds an equivalent empty-range
+      early-out; because cxx_string_vector_destruct is visible within the
+      crate, LLVM proves it returns its argument and loads the record base
+      directly instead of subtracting four from the call result. Raw
+      disassembly: osos.dec 0x083e2230; match.py structural review recorded.
+
   # --- pending-event queue take ---
   - address: 0x08138f14
     ghidra: FUN_08138f14
