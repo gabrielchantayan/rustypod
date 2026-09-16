@@ -2366,6 +2366,48 @@ functions:
       replaceable deterministic CP15 seam.
 
   # --- opaque FreeType-adjacent metadata halfword accessor ---
+
+  - address: 0x08050d10
+    ghidra: FUN_08050d10
+    name: ui_tdat_find_node_by_id
+    size: 116
+    sig: "u32 ui_tdat_find_node_by_id(const u8 *element, u32 id_lo, u32 id_hi)"
+    module: ui/tdat_node_find
+    status: ported
+    renames:
+      param_1/r0: element
+      param_3/r2: id_lo
+      param_4/r3: id_hi
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_080522fc: tdat_node_list_head (seam, unported)
+      FUN_08053d54: tdat_node_next (seam, unported)
+    notes: >-
+      Raw ARM extent is exactly 0x08050d10..0x08050d84; the next function's
+      push {r4,r5,r6,lr} prologue at 0x08050d84 confirms Ghidra's 116-byte
+      size. The function validates element with the ported
+      ui_element_is_tdat_class at 0x0806aa3c, rejects the all-zero 64-bit
+      identifier (cmp r6,#0; cmpeq r0,r2 with r2 zeroed), then walks the
+      node list whose head is the word at element+0x28 via the unported
+      tdat-class-gated getter 0x080522fc and whose successor step is the
+      scoped_context_owner_validity-gated word at node+0x4 via the
+      unported selector 0x08053d54, returning the first node whose word
+      pair at node+0x110/+0x114 equals (id_lo, id_hi) with the high word
+      compared first. Returns zero on class rejection, zero identifier, or
+      list exhaustion. Callers pass split 64-bit identifiers: 0x080ab120
+      passes (int)id and (int)(id >> 32) of a local u64; 0x0816ec28 and
+      0x082a5f7c pass *p, p[1] word pairs. Call count verified by decoding
+      every B/BL word in osos.dec: 5 unconditional bl sites (0x08051344,
+      0x08094c9c, 0x080ab39c, 0x0813e44c, 0x082a5fd4), zero predicated
+      forms; the function itself contains 3 unconditional bl instructions
+      and zero predicated ones, not Ghidra's reported 5 call sites (that
+      count is its caller count). The port keeps the two unported callees
+      behind the explicit TDAT_NODE_FIND_OPS dispatch seam (target builds
+      transmute the retail addresses; host tests install fixture
+      accessors) and calls the ported class predicate directly. match.py:
+      crate fp frame and blx seam dispatch vs ADS bl, LLVM orr zero-id
+      test, and an ldreq low-word load replacing the unconditional
+      ldr/cmpeq pair; the guard order, hi-then-lo compare loop, and
+      return-node-or-zero structure are identical.
   - address: 0x0805128c
     ghidra: FUN_0805128c
     name: ft_metadata_u16_at_b26

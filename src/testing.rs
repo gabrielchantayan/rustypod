@@ -181,6 +181,10 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const SET_STRING: usize = 0x3900_0000;
+    // 0x4c00_0000, skipping 0x3a00_0000..0x4b00_0000: sibling ports in
+    // flight take the sequential slots, and a collision skips tests
+    // silently on every host.
+    pub const TDAT_NODE_FIND: usize = 0x4c00_0000;
     // 0x5000_0000: dedicated to app/typed_handler_registry_lookup's raw-u32
     // registry and table fixture; mappings never unmap, so no other test may
     // reuse this hint.
