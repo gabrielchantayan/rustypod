@@ -44,6 +44,9 @@
 //!   osos.dec), so every target below 0x2200aed8 has a byte-identical
 //!   osos body that CAN be disassembled: 0x22005018 == FUN_08005018,
 //!   which identifies thunk 0x08037f88 as ui_manager_acquire, and
+//!   0x2200427c == FUN_0800427c, which identifies thunk 0x08037f80 as
+//!   task_delete_gateway_veneer (RTXC gateway service 0x18, task delete;
+//!   the 28-byte mirror body is ported in heap/task_delete_gateway.rs).
 //!   0x220060e0 == FUN_080060e0, which identifies thunk 0x08037f58 as
 //!   lazy_singleton_106dc_acquire. 0x220041cc == osos 0x080041cc names
 //!   thunk 0x08037e78 signal_object: the mirror posts the gateway
@@ -461,6 +464,129 @@ retail_continuation_dispatch_veneer:
 "#
 );
 
+
+/// Instruction word and literal in the task-delete gateway thunk at
+/// 0x08037f80.
+///
+/// Identified through the relocator mirror: the boot relocator at
+/// 0x080046e0 copies 0xaed8 bytes from 0x08000000 to 0x22000000 (both
+/// literals verified in osos.dec), so IRAM 0x2200427c is byte-identical
+/// to osos `FUN_0800427c` — the RTXC task-delete gateway wrapper, already
+/// ported as [`crate::heap::task_delete_gateway::task_delete_gateway`].
+pub const TASK_DELETE_GATEWAY_VENEER: u32 = 0x0803_7f80;
+pub const TASK_DELETE_GATEWAY_VENEER_INSN: u32 = 0xe51f_f004;
+pub const TASK_DELETE_GATEWAY_VENEER_TARGET: u32 = 0x2200_427c;
+
+/// ABI of the mirrored task-delete gateway body reached by
+/// [`task_delete_gateway_veneer`]: task id in r0, raw r1/r3 inputs, and the
+/// dispatcher's two-word result returned as an ARM EABI u64 (r0 low, r1
+/// high). r2 is preserved by the target but is not a service input.
+pub type TaskDeleteGatewayFn =
+    unsafe extern "C" fn(task_id: u32, input_r1: u32, input_r2: u32, input_r3: u32) -> u64;
+
+/// Host/target dispatch boundary for the IRAM task-delete gateway body.
+#[derive(Clone, Copy)]
+pub struct TaskDeleteGatewayVeneerOps {
+    pub delete: TaskDeleteGatewayFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_task_delete_gateway(
+    _task_id: u32,
+    _input_r1: u32,
+    _input_r2: u32,
+    _input_r3: u32,
+) -> u64 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_TASK_DELETE_GATEWAY_VENEER_OPS: TaskDeleteGatewayVeneerOps =
+    TaskDeleteGatewayVeneerOps {
+        delete: missing_task_delete_gateway,
+    };
+
+/// Replaceable host boundary for the mirrored task-delete gateway body.
+#[cfg(not(target_arch = "arm"))]
+pub static mut TASK_DELETE_GATEWAY_VENEER_OPS: TaskDeleteGatewayVeneerOps =
+    DEFAULT_TASK_DELETE_GATEWAY_VENEER_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn task_delete_gateway_veneer_target() -> TaskDeleteGatewayFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(TASK_DELETE_GATEWAY_VENEER_OPS.delete))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// task_delete_gateway_veneer — original: `thunk_EXT_FUN_2200427c` @
+    /// 0x08037f80 (8 bytes; Ghidra's 4-byte extent drops the trailing
+    /// literal word, the next thunk stub starts at 0x08037f88).
+    ///
+    /// One stub of the osos -> IRAM thunk table (see [`ROM_THUNKS`]):
+    /// `ldr pc, [pc, #-4]` loading the literal 0x2200427c. `ldr pc` is a
+    /// tail dispatch preserving every register including LR, so the target
+    /// returns directly to this stub's caller. Decoding every ARM B/BL
+    /// word in osos.dec finds exactly five calls — unconditional `bl` at
+    /// 0x080b4c5c (`task_destroy`), 0x080cdf10, and 0x08393504, plus
+    /// predicated `bleq` @ 0x08392fdc and `blne` @ 0x08393eb0 — and two
+    /// unconditional `b` tail branches at 0x08392fcc and 0x08393aa8; no
+    /// aligned raw data-word references exist. `task_destroy` supplies the
+    /// kernel task id in r0; the predicated sites sit in the RTXC
+    /// semihosting debug cluster around `swi 0x123456`.
+    ///
+    /// Target behaviour (IRAM mirror of `FUN_0800427c` @ 0x0800427c,
+    /// 28 bytes, ported as
+    /// [`crate::heap::task_delete_gateway::task_delete_gateway`]): builds
+    /// the four-word gateway request `{0x18, input_r1, task_id, input_r3}`
+    /// (selector 0x18 = task delete; input_r2 is saved/restored but not
+    /// submitted), delegates it to the foreign ROM dispatcher 0x08003660,
+    /// and returns the first two post-dispatch words as an ARM EABI u64.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and
+    /// literal. Host builds expose the foreign IRAM boundary as a
+    /// replaceable callback.
+    pub fn task_delete_gateway_veneer(
+        task_id: u32,
+        input_r1: u32,
+        input_r2: u32,
+        input_r3: u32,
+    ) -> u64;
+}
+
+/// Host implementation of the literal veneer. It preserves all four
+/// argument registers and the mirrored body's two-word result exactly.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_delete_gateway_veneer(
+    task_id: u32,
+    input_r1: u32,
+    input_r2: u32,
+    input_r3: u32,
+) -> u64 {
+    unsafe { task_delete_gateway_veneer_target()(task_id, input_r1, input_r2, input_r3) }
+}
+
+// `ldr pc` preserves LR, so the IRAM target returns directly to this
+// stub's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl task_delete_gateway_veneer
+    .type task_delete_gateway_veneer, %function
+task_delete_gateway_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x2200427c
+    .size task_delete_gateway_veneer, . - task_delete_gateway_veneer
+"#
+);
 
 /// Instruction word and literal in the shared-UI-manager accessor thunk
 /// at 0x08037f88.
@@ -1272,7 +1398,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f68, rom_target: 0x2200053c, name: None },
     RomThunk { thunk_addr: 0x08037f70, rom_target: 0x220001f4, name: Some("memmove_backward") },
     RomThunk { thunk_addr: 0x08037f78, rom_target: 0x22003e00, name: None },
-    RomThunk { thunk_addr: 0x08037f80, rom_target: 0x2200427c, name: None },
+    RomThunk { thunk_addr: 0x08037f80, rom_target: 0x2200427c, name: Some("task_delete_gateway_veneer") },
     RomThunk { thunk_addr: 0x08037f88, rom_target: 0x22005018, name: Some("ui_manager_acquire") },
     RomThunk { thunk_addr: 0x08037f90, rom_target: 0x22004eec, name: None },
     RomThunk { thunk_addr: 0x08037f98, rom_target: 0x22005234, name: None },
@@ -1448,7 +1574,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 25] = [
+        let expected: [(u32, &str); 26] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1467,6 +1593,7 @@ mod tests {
             (0x22004230, "gateway_service19_request"),
             (0x22003e1c, "timer_free_gateway"),
             (0x22004368, "wake_object"),
+            (0x2200427c, "task_delete_gateway_veneer"),
             (0x22005018, "ui_manager_acquire"),
             (0x2200509c, "ui_manager_finish_pending_operation"),
             (0x22005114, "ui_manager_begin_pending_operation"),
@@ -1550,8 +1677,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 25 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 27);
+        // 26 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 28);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -1682,6 +1809,94 @@ mod tests {
         assert_eq!(RETAIL_CONTINUATION_DISPATCH_TARGET & 3, 0);
     }
 
+
+    /// The stub at 0x08037f80 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x2200427c (raw osos.dec bytes 04 f0 1f e5
+    /// 7c 42 00 22); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn task_delete_gateway_veneer_matches_literal_veneer() {
+        assert_eq!(TASK_DELETE_GATEWAY_VENEER, 0x0803_7f80);
+        assert_eq!(TASK_DELETE_GATEWAY_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(TASK_DELETE_GATEWAY_VENEER_TARGET, 0x2200_427c);
+        assert_eq!(TASK_DELETE_GATEWAY_VENEER_TARGET & 3, 0);
+        // The relocator mirror covers the target (below 0x2200aed8).
+        assert!(TASK_DELETE_GATEWAY_VENEER_TARGET < ROM_BASE + 0xaed8);
+    }
+
+    /// The thunk table resolves 0x08037f80 to the identified IRAM target.
+    #[test]
+    fn task_delete_gateway_veneer_thunk_table_entry_resolves() {
+        let entry =
+            lookup_by_thunk(TASK_DELETE_GATEWAY_VENEER).expect("thunk entry for 0x08037f80");
+        assert_eq!(entry.rom_target, TASK_DELETE_GATEWAY_VENEER_TARGET);
+        assert_eq!(entry.name, Some("task_delete_gateway_veneer"));
+        // The target is unique in the table: exactly one stub reaches it.
+        assert_eq!(
+            lookup_by_target(TASK_DELETE_GATEWAY_VENEER_TARGET)
+                .expect("target entry for task delete")
+                .thunk_addr,
+            TASK_DELETE_GATEWAY_VENEER
+        );
+    }
+
+    /// With no target installed the default seam returns 0 without
+    /// panicking; on device the stub always reaches the IRAM body instead.
+    #[test]
+    fn task_delete_gateway_veneer_default_seam_returns_zero() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert_eq!(task_delete_gateway_veneer(0, 0, 0, 0), 0);
+        }
+        drop(guard);
+    }
+
+    static mut TASK_DELETE_GATEWAY_VENEER_CALLS: u32 = 0;
+    static mut TASK_DELETE_GATEWAY_VENEER_ARGS: (u32, u32, u32, u32) = (0, 0, 0, 0);
+
+    unsafe extern "C" fn record_task_delete_gateway(
+        task_id: u32,
+        input_r1: u32,
+        input_r2: u32,
+        input_r3: u32,
+    ) -> u64 {
+        TASK_DELETE_GATEWAY_VENEER_CALLS += 1;
+        TASK_DELETE_GATEWAY_VENEER_ARGS = (task_id, input_r1, input_r2, input_r3);
+        0xfeed_cafe_1234_5678
+    }
+
+    /// The host port forwards all four argument registers unchanged and
+    /// passes the mirrored body's two-word result through — the veneer's
+    /// only observable contract.
+    #[test]
+    fn task_delete_gateway_veneer_forwards_all_arguments_and_result() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(TASK_DELETE_GATEWAY_VENEER_CALLS).write(0);
+            core::ptr::addr_of_mut!(TASK_DELETE_GATEWAY_VENEER_OPS).write(
+                TaskDeleteGatewayVeneerOps {
+                    delete: record_task_delete_gateway,
+                },
+            );
+
+            assert_eq!(task_delete_gateway_veneer(0, 0, 0, 0), 0xfeed_cafe_1234_5678);
+            assert_eq!(
+                core::ptr::addr_of!(TASK_DELETE_GATEWAY_VENEER_ARGS).read(),
+                (0, 0, 0, 0)
+            );
+            assert_eq!(
+                task_delete_gateway_veneer(0xdead_beef, 0xffff_ffff, 0x8000_0001, 7),
+                0xfeed_cafe_1234_5678
+            );
+            assert_eq!(core::ptr::addr_of!(TASK_DELETE_GATEWAY_VENEER_CALLS).read(), 2);
+            assert_eq!(
+                core::ptr::addr_of!(TASK_DELETE_GATEWAY_VENEER_ARGS).read(),
+                (0xdead_beef, 0xffff_ffff, 0x8000_0001, 7)
+            );
+            core::ptr::addr_of_mut!(TASK_DELETE_GATEWAY_VENEER_OPS)
+                .write(DEFAULT_TASK_DELETE_GATEWAY_VENEER_OPS);
+        }
+        drop(guard);
+    }
 
     /// The stub at 0x08037f88 is the literal veneer `ldr pc, [pc, #-4]`
     /// with target word 0x22005018 (raw osos.dec bytes 04 f0 1f e5

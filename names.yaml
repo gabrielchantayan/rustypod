@@ -49600,6 +49600,41 @@ functions:
       proves the cold veneer call performs both construction and independent
       page initialization through the existing port. match.py structural
       review is expected to differ by the Rust indirect-call frame.
+  - address: 0x08037f80
+    ghidra: thunk_EXT_FUN_2200427c
+    name: task_delete_gateway_veneer
+    size: 8
+    sig: "u64 task_delete_gateway_veneer(u32 task_id, u32 input_r1, u32 input_r2, u32 input_r3)"
+    module: kernel/thunks
+    status: ported
+    renames: {thunk_EXT_FUN_2200427c: task_delete_gateway_veneer,
+      EXT_FUN_2200427c: task_delete_gateway}
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs): ldr pc,[pc,#-4] + literal word 0x2200427c.
+      Ghidra reports 4 bytes; the stub is 8 (next stub starts at
+      0x08037f88). Call count binary-verified by decoding every B/BL word
+      in osos.dec: exactly five bl — unconditional at 0x080b4c5c
+      (task_destroy), 0x080cdf10, 0x08393504, plus predicated bleq @
+      0x08392fdc and blne @ 0x08393eb0 (both in the RTXC semihosting
+      debug cluster around swi 0x123456) — and two unconditional tail b
+      at 0x08392fcc and 0x08393aa8; no aligned raw data-word references
+      exist, so it is not a virtual dispatch target. Target identified
+      via the relocator mirror (0x080046e0 copies 0xaed8 bytes from
+      0x08000000 to 0x22000000, literals verified), so IRAM 0x2200427c is
+      byte-identical to FUN_0800427c @ 0x0800427c (28 bytes), already
+      ported as task_delete_gateway in heap/task_delete_gateway.rs: it
+      builds the four-word gateway request {0x18, input_r1, task_id,
+      input_r3} (selector 0x18 = RTXC task delete; input_r2 is
+      saved/restored but not submitted), delegates to the foreign ROM
+      dispatcher 0x08003660, and returns the first two post-dispatch
+      words as an ARM EABI u64. task_destroy supplies the task id in r0.
+      Port keeps the verbatim veneer on ARM via global_asm (ldr pc
+      preserves LR, target returns straight to the caller); host builds
+      dispatch through the volatile TASK_DELETE_GATEWAY_VENEER_OPS seam,
+      default 0. match.py structural: instruction stream identical (ldr
+      pc,[pc,#-4]); only diff line is the literal word shown as .word vs
+      data-decoded-andcs, plus Ghidra's 4-byte extent truncation.
   - address: 0x08037f88
     ghidra: thunk_EXT_FUN_22005018
     name: ui_manager_acquire
