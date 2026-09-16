@@ -466,7 +466,6 @@ functions:
       linked next function begins at 0x083c023c. Decoding every aligned ARM
       B/BL-immediate word in osos.dec finds exactly five inbound direct calls:
       unconditional bl at 0x083c05d0, 0x083c0648, 0x083c0734, and 0x083c0af8,
-      plus predicated bleq at 0x083c0b48; there are no direct tail-B callers. The
       predicated caller selects the left child before calling, consistent with the
       function's intentional lack of NULL guards. This body is byte-identical to
       the established red_black_tree_rotate_right port at 0x083ced20, so this
@@ -474,7 +473,6 @@ functions:
       0x083c01e8 to red_black_tree_rotate_right. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the transferred
       middle subtree. Deliberate deviations: none.
-  # --- C++ red-black-tree left rotation ---
   - address: 0x083b74a8
     ghidra: FUN_083b74a8
     name: red_black_tree_rotate_left_b74a8_copy
@@ -101446,3 +101444,33 @@ functions:
       a popne replacing bxne. Deliberate host deviation: native-width vtable
       function pointers replace target u32 slot words; target code retains the
       physical ARM layout.
+
+  - address: 0x08386bf4
+    ghidra: FUN_08386bf4
+    name: vdbe_free_ops
+    size: 80
+    sig: "void vdbe_free_ops(Vdbe *p, u32 start, u32 count)"
+    module: sqlite/vdbe_free_ops
+    status: ported
+    renames:
+      param_1/r0: vdbe
+      param_2/r1: start
+      param_3/r2: count
+      "vdbe+0x14": operations
+      "operation+0x00": opcode
+      "operation+0x01": p4type
+      "operation+0x10": p4
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x08386bf4..0x08386c43: the next real function begins at 0x08386c44
+      with push {r4,lr}. Decoding every aligned ARM B/BL-immediate word finds
+      exactly four incoming direct calls, all unconditional plain bl
+      (0x08373404, 0x083832b0, 0x083839d0, and 0x0838f390); there are no
+      predicated BL call sites. The body guards NULL vdbe and NULL aOp, then
+      for count records at aOp + start*20 calls vdbe_free_p4 with the signed
+      p4type byte and p4 word, clears the record through the 0x2200027c IRAM
+      memzero veneer, and writes opcode 0x17 (OP_Noop). The counter uses
+      subs/bcs, so zero performs no access. Deliberate deviation: the Rust
+      port directly calls the verified vdbe_free_p4 and reaches memzero_aligned
+      through a volatile function pointer instead of the retailOS addresses
+      and IRAM veneer, preserving the call without a builtin clear.
