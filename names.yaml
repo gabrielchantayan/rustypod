@@ -30253,6 +30253,34 @@ functions:
       deletes (ROM_KERNEL dispatch included), so match.py shows a larger
       body with the same guard/destruct/unlock/teardown structure.
 
+  - address: 0x0839cc60
+    ghidra: FUN_0839cc60
+    name: refcounted_body_mutex_unlock_copy
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_copy(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839cc60..0x0839cc70: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_unlock @ 0x0807f6a0 (branch word
+      0x1af38a8c, bit24 clear so a tail bne, not blne); bx lr. The next
+      separately linked function starts at 0x0839cc70. Decoding every ARM
+      B/BL word in osos.dec finds four direct bl callers, all unconditional
+      at 0x0816ccfc, 0x0816cd34, 0x0839cc0c, and 0x0839cc44; no predicated
+      calls or direct tail b sites. No word-aligned image word equals this
+      address, so it is not virtually dispatched. It loads the
+      RefcountedBody's optional mutex at target +8 and tail-branches to the
+      already ported mutex_unlock only when non-NULL. This is a separately
+      linked copy of refcounted_body_mutex_unlock @ 0x0839d44c, reached from
+      the third template instantiation of refcounted_body_release @
+      0x0839cbb0 (its sibling refcounted_body_mutex_lock_copy @ 0x0839cc50
+      targets mutex_lock @ 0x0807f5c4). No deliberate behavioral deviations:
+      structural review (match.py) shows LLVM retains the tail branch after
+      harmless frame setup, identical to the accepted sibling port. Host test
+      covers a live mutex signal and the NULL-mutex early-out.
   - address: 0x0839d44c
     ghidra: FUN_0839d44c
     name: refcounted_body_mutex_unlock
