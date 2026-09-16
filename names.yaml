@@ -2258,6 +2258,46 @@ functions:
       wrappers 0x08007788, 0x080077a8 and 0x08007bd4 keep their own inline
       copies of this veneer; they are unchanged by this entry.
 
+  # --- event-handler source child-enabled veneer ---
+  - address: 0x08003950
+    ghidra: FUN_08003950
+    name: event_handler_source_child_enabled
+    size: 8
+    sig: "u32 event_handler_source_child_enabled(const void *child)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      FUN_08003950: event_handler_source_child_enabled
+      param_1/r0: child
+    notes: >-
+      Raw bytes are 04 f0 1f e5 1c 85 11 08, i.e. the literal veneer
+      `ldr pc, [pc, #-4]` plus target word 0x0811851c; Ghidra's 4-byte
+      extent drops the literal, and the next veneer starts at 0x08003958,
+      so the true size is 8 bytes. Decoding every ARM B/BL word in osos.dec
+      finds exactly five inbound calls, all plain unconditional bl at
+      0x080078d0, 0x08007930, 0x080079cc, 0x08007a10 and 0x08007e08 - no
+      predicated forms, no tail b, and no aligned data word in osos.dec
+      holds 0x08003950 or 0x22003950, so there is no vtable dispatch. The
+      veneer sits inside the 0xaed8-byte block the relocator at 0x080046e0
+      mirrors to IRAM, so on device it is equally entered as 0x22003950.
+      The literal is a post-relocation retailOS address: retailOS runtime
+      address A lives at osos.dec file address A - 0x08000000 + 0xaed8, so
+      the target's bytes are at file address 0x081233f4. Read at face value
+      the literal lands on a strb mid FUN_081184d0; at file address
+      0x081233f4 it is a clean 16-byte leaf (ldrh r0,[r0,#0x68]; cmp r0,#0;
+      movne r0,#1; bx lr), bounded by the next function prologue at file
+      address 0x08123404. The leaf reads the child object's enabled
+      halfword at +0x68 and normalizes it to 0/1, ignoring r1. Recovered
+      callers are the event-handler source message/teardown paths
+      (FUN_0800796c, FUN_08007c98 and neighbors): a nonzero result gates
+      child teardown via the 0x080039c8 veneer and decrements the source's
+      active-child halfword count at +0x50. ARM builds retain the exact
+      literal tail veneer (match.py confirms byte parity with the original
+      instruction plus literal); the host build implements the fully
+      decoded 16-byte leaf directly, with host tests proving 0/1
+      normalization over edge halfwords (0, 1, 0x7fff, 0x8000, 0xff00,
+      0xffff), neighbor-halfword isolation, and read-only behavior.
+
   # --- callback-target virtual dispatch ---
   - address: 0x08007788
     ghidra: FUN_08007788

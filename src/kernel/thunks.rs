@@ -1553,6 +1553,91 @@ context_value_commit_veneer:
 "#
 );
 
+/// Osos load address of the event-handler source child-enabled veneer.
+pub const EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER: u32 = 0x0800_3950;
+
+/// Instruction word and literal in the child-enabled veneer.
+pub const EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_INSN: u32 = 0xe51f_f004;
+pub const EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_TARGET: u32 = 0x0811_851c;
+
+/// Byte offset of the enabled flag halfword inside a source child object.
+pub const EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET: usize = 0x68;
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// event_handler_source_child_enabled — original: `FUN_08003950` @
+    /// `0x08003950` (8 bytes: `ldr pc,[pc,#-4]` and its target literal
+    /// 0x0811851c; Ghidra's reported 4-byte extent excludes the literal word,
+    /// and the next veneer starts at 0x08003958).
+    ///
+    /// The literal is a post-relocation retailOS address: the relocator at
+    /// 0x080046e0 copies the 0xaed8-byte IRAM block (this veneer included, so
+    /// on device it is equally entered as 0x22003950) to 0x22000000 and only
+    /// then moves the retailOS image down to 0x08000000, so the target's
+    /// bytes live at osos.dec file address 0x081233f4 (= target - 0x08000000
+    /// + 0xaed8). Read at face value the literal lands on a `strb` mid
+    /// `FUN_081184d0`; at file address 0x081233f4 it is a clean 16-byte leaf:
+    ///
+    /// ```text
+    /// ldrh r0, [r0, #0x68]
+    /// cmp  r0, #0
+    /// movne r0, #1
+    /// bx   lr
+    /// ```
+    ///
+    /// i.e. it reads the child object's enabled halfword at +0x68 and
+    /// normalizes it to 0/1; r1 is ignored. The next function prologue at
+    /// file address 0x08123404 confirms the 16-byte extent. Recovered callers
+    /// are the event-handler source message/teardown paths: they use the
+    /// result as a predicate, tearing the child down (`FUN_080039c8`) and
+    /// decrementing the source's active-child halfword count at +0x50 when it
+    /// is nonzero.
+    ///
+    /// A complete ARM B/BL decode of osos.dec finds exactly five inbound
+    /// calls, all plain unconditional `bl` at 0x080078d0, 0x08007930,
+    /// 0x080079cc, 0x08007a10, and 0x08007e08; there are no predicated forms
+    /// and no tail `b`. No aligned data word in osos.dec holds 0x08003950 or
+    /// 0x22003950, so there is no vtable dispatch.
+    ///
+    /// Deliberate deviation: none on ARM; the port is the verbatim
+    /// instruction and literal. The host build implements the fully decoded
+    /// 16-byte target leaf directly instead of crossing a replaceable seam.
+    pub fn event_handler_source_child_enabled(child: *const u8) -> u32;
+}
+
+/// Host port of the child-enabled leaf the veneer tail-dispatches to.
+///
+/// The ARM target has no NULL guard and ignores r1; callers must provide a
+/// valid child object at least 0x6a bytes long. The halfword read is
+/// volatile so host tests observe exactly one load per call.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source_child_enabled(child: *const u8) -> u32 {
+    let flag = core::ptr::read_volatile(
+        child.add(EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET) as *const u16
+    );
+    u32::from(flag != 0)
+}
+
+// `ldr pc` preserves LR, so the retailOS leaf returns directly to this
+// veneer's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl event_handler_source_child_enabled
+    .type event_handler_source_child_enabled, %function
+event_handler_source_child_enabled:
+    ldr     pc, [pc, #-4]
+    .word   0x0811851c
+    .size event_handler_source_child_enabled, . - event_handler_source_child_enabled
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -2741,6 +2826,86 @@ mod tests {
                 .write(DEFAULT_R7_CONTEXT_TABLE_DISPATCH_OPS);
         }
         drop(guard);
+    }
+
+    /// The veneer at 0x08003950 is `ldr pc, [pc, #-4]` with target word
+    /// 0x0811851c (raw osos.dec bytes 04 f0 1f e5 1c 85 11 08); Ghidra's
+    /// 4-byte extent drops the literal, and the next veneer begins at
+    /// 0x08003958. The literal is a post-relocation retailOS address whose
+    /// bytes live at osos.dec file address 0x081233f4.
+    #[test]
+    fn child_enabled_veneer_matches_the_literal_veneer() {
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER, 0x0800_3950);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_TARGET, 0x0811_851c);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_TARGET & 3, 0);
+        // Post-relocation retailOS address A lives at osos.dec file offset
+        // A - 0x08000000 + 0xaed8; the target leaf's bytes sit at 0x081233f4.
+        assert_eq!(
+            EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER_TARGET - 0x0800_0000 + 0xaed8,
+            0x0012_33f4
+        );
+        // The veneer lives inside the 0xaed8-byte block the relocator mirrors
+        // to IRAM, so it is equally reachable as 0x22003950.
+        assert!(EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER - 0x0800_0000 < 0xaed8);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET, 0x68);
+    }
+
+    /// The decoded target leaf returns `u16(child + 0x68) != 0` as 0/1 and
+    /// reads nothing else: neighbors may be arbitrary without changing the
+    /// result.
+    #[test]
+    fn child_enabled_reads_only_the_flag_halfword() {
+        let mut child = [0xffff_u16; 0x40];
+        child[EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET / 2] = 0;
+        unsafe {
+            assert_eq!(event_handler_source_child_enabled(child.as_ptr() as *const u8), 0);
+        }
+
+        let mut child = [0x0000_u16; 0x40];
+        child[EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET / 2] = 1;
+        unsafe {
+            assert_eq!(event_handler_source_child_enabled(child.as_ptr() as *const u8), 1);
+        }
+    }
+
+    /// Every nonzero halfword normalizes to exactly 1, including high-byte-
+    /// only and sign-bit values; zero alone yields 0.
+    #[test]
+    fn child_enabled_normalizes_any_nonzero_halfword_to_one() {
+        let mut child = [0u16; 0x40];
+        for (flag, expected) in [
+            (0x0000_u16, 0u32),
+            (0x0001, 1),
+            (0x7fff, 1),
+            (0x8000, 1),
+            (0xff00, 1),
+            (0xffff, 1),
+        ] {
+            child[EVENT_HANDLER_SOURCE_CHILD_FLAG_OFFSET / 2] = flag;
+            unsafe {
+                assert_eq!(
+                    event_handler_source_child_enabled(child.as_ptr() as *const u8),
+                    expected,
+                    "flag {flag:#06x}"
+                );
+            }
+        }
+    }
+
+    /// The leaf is read-only: the child object is byte-identical after the
+    /// call.
+    #[test]
+    fn child_enabled_leaves_the_child_untouched() {
+        let mut child = [0u16; 0x40];
+        for (index, word) in child.iter_mut().enumerate() {
+            *word = (index as u16) * 0x0101 | 0x5a;
+        }
+        let before = child;
+        unsafe {
+            let _ = event_handler_source_child_enabled(child.as_ptr() as *const u8);
+        }
+        assert_eq!(child, before);
     }
 
     #[test]
