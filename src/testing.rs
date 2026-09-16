@@ -1310,6 +1310,11 @@ pub static STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK: std::sync::Mutex<()> =
 pub static STRING_EXPORT_COUNTED_UTF16_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
+/// Serializes tests that swap the
+/// `app::path_facade_probe_dispatch_counted` probe and slot +0x60 seams.
+pub static PATH_FACADE_PROBE_DISPATCH_COUNTED_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 
 /// Serializes every host test that swaps
 /// `util::context_field::CURRENT_TASK_CTX_BLOCK`. That slot is one shared

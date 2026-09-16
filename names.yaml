@@ -3043,6 +3043,49 @@ functions:
       load, with a dedicated section to preserve this hookable thunk symbol.
 
 
+  # --- counted byte string -> facade probe + conditional slot dispatch ---
+  - address: 0x0805a84c
+    ghidra: FUN_0805a84c
+    name: path_facade_probe_dispatch_counted
+    size: 104
+    sig: "i32 path_facade_probe_dispatch_counted(const u8 *counted_path)"
+    module: app/path_facade_probe_dispatch_counted
+    status: ported
+    renames:
+      param_1/r0/r4: counted_path (counted byte string {u16 length @ +0,
+        NUL-terminated cstr @ +2}; NULL returns -0x32)
+      local_10/sp[0]: flag_slot (probe out word; low byte selects the op)
+      FUN_080891dc: path_facade_slot_54_from_cstr (unported seam)
+      FUN_080a8eb0: path_facade_slot_60_from_cstr (unported seam)
+      FUN_08084d28: path_facade_slot_5c_from_cstr (ported, called direct)
+      FUN_0809da3c: map_status_code (ported, called direct)
+    notes: >-
+      Raw osos.dec decoding confirms the exact 104-byte extent
+      0x0805a84c..0x0805a8b4: 26 ARM words ending in
+      `ldmia sp!,{r3,r4,r5,pc}`, and the next distinct function begins at
+      0x0805a8b4 (ported string_export_counted_utf16). Decoding every ARM
+      B/BL immediate finds exactly five direct call sites: four
+      unconditional plain bl at 0x080aa620, 0x080bec64, 0x081a31d8 and
+      0x081a4cbc, plus one predicated bleq at 0x081a30dc; the body itself
+      issues five bl instructions (two to map_status_code, one each to
+      the slot +0x54 probe, slot +0x60 wrapper, and slot +0x5c wrapper),
+      none predicated - Ghidra's "5 bl" report matches the body's own
+      instruction count. Algorithm: NULL counted_path returns -0x32
+      (`mvneq r0,#0x31`); otherwise the cstr at +2 is probed through
+      facade vtable slot +0x54 (via the 0x080891dc construct/dispatch/
+      destroy wrapper) with base_hint = (i8)(u16_prefix & 0xff), the
+      probe status is mapped and returned on failure, then the probe's
+      out-flag low byte selects the facade slot +0x60 wrapper (nonzero)
+      or the ported slot +0x5c wrapper (zero), whose status is mapped on
+      return. The concrete semantic identity of facade slots +0x54/+0x5c/
+      +0x60 remains unresolved, so structural names are kept. Deliberate
+      deviation: the port zero-initializes the flag slot that stock
+      leaves as the caller's leftover r3 spill when the probe does not
+      write it. match.py confirms the NULL/mvn/ldrsb-hint/seam-call/map/
+      flag-select/map structure; LLVM uses ldrsb for the (i8)low-byte
+      sign extension and literal-loaded BLX for both retailOS seams,
+      matching the accepted unported-callee seam deviation.
+
   # --- counted byte string -> length-prefixed UTF-16 export wrapper ---
   - address: 0x0805a8b4
     ghidra: FUN_0805a8b4
