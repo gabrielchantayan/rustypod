@@ -91484,6 +91484,65 @@ functions:
       NULL, and sentinel cases. Deliberate deviations: none.
 
 
+  # --- validated opaque-handle acquisition ---
+  - address: 0x0805a634
+    ghidra: FUN_0805a634
+    name: opaque_handle_acquire
+    size: 180
+    sig: "i32 opaque_handle_acquire(const u8 *request, u32 reserved, u32 mode, OpaqueHandle **out_handle)"
+    module: cxx/opaque_handle_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: request (leading u16 hint, then a NUL-terminated path at +0x02)
+      param_2/r1: reserved (spilled by the prologue, never read)
+      param_3/r2: mode (1 -> flag 1/status 0; 2 or 3 -> flag 0/status 0 or 7)
+      param_4/r3/r6: out_handle
+      r5: flag (mode-derived constructor flag)
+      '[request,#0x00]': hint (u16; only its sign-extended low byte is used)
+      '[request,#0x02]': path
+      '[object,#0x1c]/r4 (late)': status
+      FUN_082aadd4: operator_new (ported, called direct)
+      FUN_08278dc4: silver_controller_transition_addon_construct_from_cstr
+        (ported; called through the OPAQUE_HANDLE_CONSTRUCT dispatch slot whose
+        wired default is the port)
+      FUN_0809da3c: map_status_code (ported, called direct)
+      return/r0: status (0 on success, -50 on argument rejection, else
+        map_status_code(status))
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent 0x0805a634..0x0805a6e8:
+      45 ARM words from `stmdb sp!,{r1-r7,lr}` through `ldmia sp!,{r1-r7,pc}`,
+      and the next independently linked function begins at 0x0805a6e8 (`mov
+      r12,r1; cmn r0,#1`). Decoding every immediate ARM B/BL word finds exactly
+      five inbound calls, all unconditional plain bl at 0x0805b798, 0x0806e538,
+      0x080a7504, 0x080aa648, and 0x080bec90; no predicated BL forms, no tail
+      branches, and no aligned raw data-word references. The body contains
+      three plain bl (operator_new 0x082aadd4, the 0x08278dc4 constructor,
+      map_status_code 0x0809da3c) plus one predicated blxne through vtable slot
+      +0x04 on the failure path. Algorithm: reject NULL request/out and modes
+      other than 1/2/3 with `mvn r0,#0x31` (-50); allocate 0x54 bytes with
+      tag-2 operator new; construct in place from the path at request+0x02, the
+      mode-derived flag, the sign-extended low byte of the leading u16
+      (lsl #24/asr #24) as base_hint, and the fixed triple (0x400, 1, 0)
+      stacked by `stmia sp,{r1,r2,r3}`; read the status word at object+0x1c
+      unconditionally (a NULL allocation faults exactly as retailOS does).
+      Mode 1 accepts only status 0; modes 2 and 3 accept 0 or 7. On acceptance
+      the object is stored through out_handle and zero returned; otherwise the
+      object is released through vtable slot +0x04 (NULL-gated, same protocol
+      as the ported sibling opaque_handle_release_if_valid @ 0x0805a594, whose
+      six callers release this function's result) and the raw status returns
+      through map_status_code. The request's u16 hint semantics remain
+      unrecovered and are deliberately not invented. Host tests cover success
+      for all three modes and both accepted statuses, mode-1 rejection of
+      status 7 (mapped to -42) with release through slot +0x04, passthrough of
+      an unmapped status, sign-extension of the hint low byte, and the -50
+      rejection paths with no allocation. Deliberate deviations: the ported
+      constructor rides the OPAQUE_HANDLE_CONSTRUCT dispatch slot (wired
+      default is the port; the transition_addon construct-ops precedent)
+      because the port's own host fixture alignment constraints keep it from
+      running inside this wrapper on 64-bit hosts, and host fixtures use the
+      sibling module's typed native-width vtable slots.
+
+
   # --- validated length-prefixed request dispatch ---
   - address: 0x08048258
     ghidra: FUN_08048258
