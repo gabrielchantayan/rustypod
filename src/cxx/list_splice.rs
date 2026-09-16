@@ -11,7 +11,7 @@
 //!   Ported in place (private), the block_mgr.rs `iter_advance`
 //!   rationale.
 //! - `iter_equal` — original: `FUN_083d5e70` @ 0x083d5e70 (24 bytes):
-//!   iterator pointee comparison, 1 on equal. Ported in place.
+//!   iterator pointee comparison, 1 on equal. Exported below.
 //! - `list_iter_advance` — original: `FUN_083d5e88` @ 0x083d5e88 (24 bytes),
 //!   exported by `list_iter_advance.rs` and used directly below.
 //!
@@ -90,12 +90,28 @@ unsafe fn iter_owner(it: *mut *mut u8) -> *mut u8 {
     }
 }
 
-/// iter_equal — original: `FUN_083d5e70` @ 0x083d5e70 (24 bytes),
-/// ported in place.
+/// iter_equal — original: `FUN_083d5e70` @ 0x083d5e70 (24 bytes,
+/// raw-verified: `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0;
+/// moveq r0,#1; bx lr` — the next function starts immediately at
+/// 0x083d5e88). 4 `bl` call sites, binary-verified: 3 unconditional
+/// @ 0x0818a5f0, 0x0818a604 and 0x083d5dc4 (list_splice's adopt walk),
+/// plus one predicated `blne` @ 0x083d5d90 (list_splice's dead
+/// validation). Ghidra's "4 bl call sites" are these inbound calls;
+/// the body itself makes none.
 ///
-/// 1 when both iterators point at the same node, 0 otherwise.
+/// 1 when both iterators point at the same node, 0 otherwise — the
+/// `*a == *b` word comparator over the iterators' current-node
+/// pointers, one of the 41 byte-identical equal_deref copies
+/// (cxx/templates.rs). Kept as a distinct export because 0x083d5e70
+/// is independently hookable; its dedicated section prevents LLVM
+/// from folding the identical bodies together. Deliberate deviation:
+/// like equal_deref, LLVM selects the equality branchlessly
+/// (sub/clz/lsr) instead of the movne/moveq pair and adds its fp
+/// frame — identical semantics; match.py structural only.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iter_equal")]
 #[inline(never)]
-unsafe fn iter_equal(a: *mut *mut u8, b: *mut *mut u8) -> i32 {
+pub unsafe extern "C" fn iter_equal(a: *mut *mut u8, b: *mut *mut u8) -> i32 {
     if *a == *b {
         1
     } else {
@@ -236,6 +252,24 @@ mod tests {
 
     fn lock() -> MutexGuard<'static, ()> {
         LIST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn iter_equal_compares_only_the_pointee_words() {
+        // No fixture slab: iter_equal dereferences the two iterator
+        // pointers and compares the node-pointer words stored there;
+        // the pointees are never touched, so fabricated addresses do.
+        let mut same_a = 0x08004000 as *mut u8;
+        let mut same_b = 0x08004000 as *mut u8;
+        let mut other = 0x08004004 as *mut u8;
+        let mut null_a = core::ptr::null_mut::<u8>();
+        let mut null_b = core::ptr::null_mut::<u8>();
+        unsafe {
+            assert_eq!(iter_equal(&mut same_a, &mut same_b), 1, "same node");
+            assert_eq!(iter_equal(&mut same_a, &mut other), 0, "different nodes");
+            assert_eq!(iter_equal(&mut null_a, &mut null_b), 1, "NULL == NULL");
+            assert_eq!(iter_equal(&mut same_a, &mut null_a), 0, "node != NULL");
+        }
     }
 
     /// The list/node words are u32 target pointers and `ptr_word` casts
