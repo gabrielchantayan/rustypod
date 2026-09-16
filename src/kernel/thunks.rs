@@ -48,7 +48,13 @@
 //!   task_delete_gateway_veneer (RTXC gateway service 0x18, task delete;
 //!   the 28-byte mirror body is ported in heap/task_delete_gateway.rs).
 //!   0x220060e0 == FUN_080060e0, which identifies thunk 0x08037f58 as
-//!   lazy_singleton_106dc_acquire. 0x220041cc == osos 0x080041cc names
+//!   lazy_singleton_106dc_acquire. 0x2200200c == FUN_0800200c, which
+//!   identifies thunk 0x08037f60 as clock_config_dispatch_veneer: the
+//!   988-byte mirror body is a 17-way selector switch (0x00-0x10) that
+//!   read-modify-writes clock-bit fields of six registers in the
+//!   0x3C500000 MMIO block (mode 1..3 field encodings, (divisor>>1)-1
+//!   divisor nibbles), records per-selector mode/value bytes at
+//!   0x089CA524, and returns 0. 0x220041cc == osos 0x080041cc names
 //!   thunk 0x08037e78 signal_object: the mirror posts the gateway
 //!   request {2, status, object} and returns the status word (ported in
 //!   kernel/gateway_signal.rs). Selector 2 and the record shape are
@@ -1020,6 +1026,117 @@ lazy_singleton_106dc_acquire:
 "#
 );
 
+/// Instruction word and literal in the clock-config-dispatch thunk at
+/// 0x08037f60.
+///
+/// The boot relocator at 0x080046e0 copies 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (literals verified in osos.dec), so IRAM
+/// target 0x2200200c is the byte-identical mirror of osos
+/// `FUN_0800200c`.
+pub const CLOCK_CONFIG_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const CLOCK_CONFIG_DISPATCH_TARGET: u32 = 0x2200_200c;
+
+/// ABI of the selector-dispatched clock-register writer reached by
+/// [`clock_config_dispatch_veneer`]: selector in r0, mode in r1,
+/// divisor/value in r2, always returns 0.
+pub type ClockConfigDispatchFn = unsafe extern "C" fn(selector: u32, mode: u32, value: u32) -> u32;
+
+/// Host/target dispatch boundary for the unported IRAM target.
+#[derive(Clone, Copy)]
+pub struct ClockConfigDispatchOps {
+    pub dispatch: ClockConfigDispatchFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_clock_config_dispatch(_selector: u32, _mode: u32, _value: u32) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_CLOCK_CONFIG_DISPATCH_OPS: ClockConfigDispatchOps = ClockConfigDispatchOps {
+    dispatch: missing_clock_config_dispatch,
+};
+
+/// The host dispatch boundary for the unported IRAM target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut CLOCK_CONFIG_DISPATCH_OPS: ClockConfigDispatchOps =
+    DEFAULT_CLOCK_CONFIG_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn clock_config_dispatch_target() -> ClockConfigDispatchFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CLOCK_CONFIG_DISPATCH_OPS.dispatch)) }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// clock_config_dispatch_veneer — original: `thunk_EXT_FUN_2200200c`
+    /// @ 0x08037f60 (8 bytes; Ghidra's 4-byte extent drops the trailing
+    /// literal word, the next thunk stub starts at 0x08037f68).
+    ///
+    /// One stub of the osos -> IRAM thunk table (see [`ROM_THUNKS`]):
+    /// `ldr pc, [pc, #-4]` loading the literal 0x2200200c. `ldr pc` is a
+    /// tail dispatch preserving every register including LR, so the
+    /// target returns directly to this stub's caller. Decoding every ARM
+    /// B/BL word in osos.dec finds exactly five calls, all plain
+    /// unconditional `bl` at 0x080a7cd0, 0x080aa138, 0x080ad428,
+    /// 0x080b2808, and 0x08169d18 — no predicated forms, no tail `b`,
+    /// and no aligned data-word references (no virtual dispatch).
+    /// Observed arguments are selector/mode/value triples like
+    /// (6, 0, 1) and (0xe, 3, 4), always paired with a companion
+    /// `FUN_0836ada8(selector, 1)` call.
+    ///
+    /// Target behaviour (IRAM mirror of `FUN_0800200c` @ 0x0800200c,
+    /// 972 bytes of code + 16-byte literal pool; the next function opens
+    /// at 0x080023e8): a 17-way selector switch (0x00-0x10) that
+    /// read-modify-writes bit fields of six 32-bit registers in the MMIO
+    /// block at 0x3C500000 (the S5L8702 clock-controller block; register
+    /// index = selector group, mode 1..3 plants 0x1000/0x2000/0x3000
+    /// field encodings, divisor values > 1 are encoded as
+    /// `(divisor >> 1) - 1` nibbles, with direct encodings via helper
+    /// 0x0802c03c for odd divisors >= 0x12). Selectors 0 and 4
+    /// busy-wait on register write-back; selector 8 writes value - 1 to
+    /// 0x38501000; several selectors run the delay helper
+    /// 0x08001f78(100) after the write. On exit it records the mode and
+    /// value bytes per selector in the state array at 0x089CA524
+    /// (+0x00 mode, +0x11 value) and returns 0. Direct predicated calls
+    /// to the body exist at 0x0800289c/0x080028c4/0x08002904/0x08002924
+    /// (blhi/blcc) and a plain bl at 0x08002aac — those bypass this
+    /// thunk.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and
+    /// literal. Host builds expose the foreign IRAM boundary as a
+    /// replaceable callback.
+    pub fn clock_config_dispatch_veneer(selector: u32, mode: u32, value: u32) -> u32;
+}
+
+/// Host implementation of the literal veneer, with the unported IRAM
+/// target supplied by [`CLOCK_CONFIG_DISPATCH_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn clock_config_dispatch_veneer(selector: u32, mode: u32, value: u32) -> u32 {
+    unsafe { clock_config_dispatch_target()(selector, mode, value) }
+}
+
+// `ldr pc` preserves LR, so the IRAM target returns directly to this
+// stub's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl clock_config_dispatch_veneer
+    .type clock_config_dispatch_veneer, %function
+clock_config_dispatch_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x2200200c
+    .size clock_config_dispatch_veneer, . - clock_config_dispatch_veneer
+"#
+);
+
 /// Instruction word and literal in the event-handler-source thunk at
 /// 0x08038060.
 ///
@@ -1394,7 +1511,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f48, rom_target: 0x22003f08, name: None },
     RomThunk { thunk_addr: 0x08037f50, rom_target: 0x22003e70, name: None },
     RomThunk { thunk_addr: 0x08037f58, rom_target: 0x220060e0, name: Some("lazy_singleton_106dc_acquire") },
-    RomThunk { thunk_addr: 0x08037f60, rom_target: 0x2200200c, name: None },
+    RomThunk { thunk_addr: 0x08037f60, rom_target: 0x2200200c, name: Some("clock_config_dispatch_veneer") },
     RomThunk { thunk_addr: 0x08037f68, rom_target: 0x2200053c, name: None },
     RomThunk { thunk_addr: 0x08037f70, rom_target: 0x220001f4, name: Some("memmove_backward") },
     RomThunk { thunk_addr: 0x08037f78, rom_target: 0x22003e00, name: None },
@@ -1574,7 +1691,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 26] = [
+        let expected: [(u32, &str); 27] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1597,6 +1714,7 @@ mod tests {
             (0x22005018, "ui_manager_acquire"),
             (0x2200509c, "ui_manager_finish_pending_operation"),
             (0x22005114, "ui_manager_begin_pending_operation"),
+            (0x2200200c, "clock_config_dispatch_veneer"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
             (0x22007470, "iram_event_handler_source_veneer"),
@@ -1677,8 +1795,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 26 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 28);
+        // 27 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 29);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -1956,6 +2074,81 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             assert!(ui_manager_acquire().is_null());
+        }
+        drop(guard);
+    }
+
+    /// The stub at 0x08037f60 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x2200200c (raw osos.dec words e51ff004 /
+    /// 2200200c); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn clock_config_dispatch_veneer_matches_the_literal_veneer() {
+        assert_eq!(CLOCK_CONFIG_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(CLOCK_CONFIG_DISPATCH_TARGET, 0x2200_200c);
+        assert_eq!(CLOCK_CONFIG_DISPATCH_TARGET & 3, 0);
+    }
+
+    /// The thunk table resolves 0x08037f60 to the identified IRAM target.
+    #[test]
+    fn clock_config_dispatch_veneer_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(0x08037f60).expect("thunk entry for 0x08037f60");
+        assert_eq!(entry.rom_target, CLOCK_CONFIG_DISPATCH_TARGET);
+        assert_eq!(entry.name, Some("clock_config_dispatch_veneer"));
+        // The target is unique in the table: exactly one stub reaches it.
+        assert_eq!(
+            lookup_by_target(CLOCK_CONFIG_DISPATCH_TARGET).unwrap().thunk_addr,
+            0x08037f60
+        );
+    }
+
+    static mut CLOCK_CONFIG_DISPATCH_CALLS: u32 = 0;
+    static mut CLOCK_CONFIG_DISPATCH_ARGS: (u32, u32, u32) = (0, 0, 0);
+
+    unsafe extern "C" fn record_clock_config_dispatch(selector: u32, mode: u32, value: u32) -> u32 {
+        CLOCK_CONFIG_DISPATCH_CALLS += 1;
+        CLOCK_CONFIG_DISPATCH_ARGS = (selector, mode, value);
+        0
+    }
+
+    /// The host port forwards the full selector/mode/value triple to the
+    /// injected IRAM target exactly once — the veneer's only observable
+    /// contract (argument registers preserved, status word returned).
+    #[test]
+    fn clock_config_dispatch_veneer_forwards_arguments_unchanged() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(CLOCK_CONFIG_DISPATCH_CALLS).write(0);
+            core::ptr::addr_of_mut!(CLOCK_CONFIG_DISPATCH_OPS).write(ClockConfigDispatchOps {
+                dispatch: record_clock_config_dispatch,
+            });
+            // Both observed stock call shapes.
+            assert_eq!(clock_config_dispatch_veneer(6, 0, 1), 0);
+            assert_eq!(clock_config_dispatch_veneer(0xe, 3, 4), 0);
+            assert_eq!(core::ptr::addr_of!(CLOCK_CONFIG_DISPATCH_CALLS).read(), 2);
+            assert_eq!(
+                core::ptr::addr_of!(CLOCK_CONFIG_DISPATCH_ARGS).read(),
+                (0xe, 3, 4)
+            );
+            // Widest selector: boundary value passes through untouched.
+            assert_eq!(clock_config_dispatch_veneer(0x10, 3, 0xffff_ffff), 0);
+            assert_eq!(
+                core::ptr::addr_of!(CLOCK_CONFIG_DISPATCH_ARGS).read(),
+                (0x10, 3, 0xffff_ffff)
+            );
+            core::ptr::addr_of_mut!(CLOCK_CONFIG_DISPATCH_OPS)
+                .write(DEFAULT_CLOCK_CONFIG_DISPATCH_OPS);
+        }
+        drop(guard);
+    }
+
+    /// With no target installed the default seam returns the target's
+    /// status 0 without panicking; on device the stub always reaches the
+    /// IRAM body instead.
+    #[test]
+    fn clock_config_dispatch_veneer_default_seam_returns_zero() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert_eq!(clock_config_dispatch_veneer(0, 1, 1), 0);
         }
         drop(guard);
     }

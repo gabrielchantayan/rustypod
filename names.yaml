@@ -49574,6 +49574,47 @@ functions:
       (ldr pc,[pc,#-4]); only diff line is the literal word shown as
       .word vs data-decoded-andcs.
 
+  - address: 0x08037f60
+    ghidra: thunk_EXT_FUN_2200200c
+    name: clock_config_dispatch_veneer
+    size: 8
+    sig: "uint32_t clock_config_dispatch_veneer(uint32_t selector, uint32_t mode, uint32_t value)"
+    module: kernel/thunks
+    status: ported
+    renames: {thunk_EXT_FUN_2200200c: clock_config_dispatch_veneer}
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs): `ldr pc,[pc,#-4]` + literal word 0x2200200c.
+      Ghidra reports 4 bytes; the stub is 8 (next stub starts at
+      0x08037f68). Call count binary-verified by decoding every ARM
+      B/BL word in osos.dec: exactly five calls, all plain unconditional
+      bl at 0x080a7cd0, 0x080aa138, 0x080ad428, 0x080b2808, and
+      0x08169d18; zero predicated forms, zero tail b, and no aligned
+      data word holds the thunk address, so it has no observed virtual
+      dispatch. Observed argument triples are selector/mode/value like
+      (6,0,1) and (0xe,3,4), each paired with a companion
+      FUN_0836ada8(selector,1) call. The relocator at 0x080046e0 copies
+      0xaed8 bytes from 0x08000000 to 0x22000000, so the target is the
+      IRAM mirror of FUN_0800200c @ 0x0800200c (972 bytes of code +
+      16-byte literal pool; next function opens at 0x080023e8): a
+      17-way selector switch (0x00-0x10) that read-modify-writes bit
+      fields of six 32-bit registers in the MMIO block at 0x3C500000
+      (S5L8702 clock-controller block), encoding mode 1..3 as
+      0x1000/0x2000/0x3000 fields and divisors > 1 as
+      ((divisor>>1)-1) nibbles, with helper 0x0802c03c for odd divisors
+      >= 0x12; selectors 0 and 4 busy-wait on write-back, selector 8
+      writes value-1 to 0x38501000, several selectors delay via
+      0x08001f78(100), and on exit it records mode/value bytes per
+      selector in the state array at 0x089CA524 and returns 0. Direct
+      predicated calls to the body at 0x0800289c/0x080028c4/0x08002904/
+      0x08002924 (blhi/blcc) and a plain bl at 0x08002aac bypass this
+      thunk. Port keeps the verbatim veneer on ARM via global_asm (ldr
+      pc preserves LR, target returns straight to the caller); host
+      builds dispatch through the volatile CLOCK_CONFIG_DISPATCH_OPS
+      seam, default returning the target's status 0. match.py
+      structural: instruction stream identical (ldr pc,[pc,#-4]); the
+      only diff line is the literal word shown as .word vs the
+      Ghidra-side 4-byte truncation.
   - address: 0x08037fd8
     ghidra: thunk_EXT_FUN_22006e88
     name: iram_stream_buffer_initializer_veneer
