@@ -128,6 +128,7 @@ pub mod scaled_cursor;
 pub mod selector_item_base;
 pub mod shared_cell;
 pub mod shared_handle_initialize;
+pub mod shared_record_construct;
 pub mod shared_reference_owner_destroy;
 pub mod slot_reset;
 pub mod state_object_destroy;

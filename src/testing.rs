@@ -138,6 +138,9 @@ pub mod hints {
     // 0xc200_0000: dedicated to cxx/opaque_shared_record_construct's
     // target-width source, vtable, shared-object, and destination fixture.
     pub const OPAQUE_SHARED_RECORD_CONSTRUCT: usize = 0xc200_0000;
+    // 0xc300_0000: dedicated to cxx/shared_record_construct's target-width
+    // storage and shared-handle fixture; mappings never unmap.
+    pub const SHARED_RECORD_CONSTRUCT: usize = 0xc300_0000;
     // 0x6700_0000: dedicated to app/registry's raw-u32 owner field
     // fixture for field_dc_as_class_4a80; mappings never unmap, so no other
     // user may share this hint.
