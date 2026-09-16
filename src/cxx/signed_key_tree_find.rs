@@ -188,6 +188,76 @@ pub unsafe extern "C" fn signed_key_tree_find_value_copy(
 }
 
 
+/// signed_key_tree_find_node — original: `FUN_083dbf00` @ `0x083dbf00`
+/// (180 bytes, `0x083dbf00..0x083dbfb4`; the separately linked next function
+/// opens with `push {r1,r2,r3,lr}` at `0x083dbfb4`; exactly 4 direct,
+/// unconditional `bl` call sites — 0x08101388, 0x081016dc, 0x08175210,
+/// 0x081775a8 — and no predicated calls).
+///
+/// `std::_Rb_tree<int, ...>::find(const int &key)`: descends from the
+/// header's root word (+0x4) comparing node keys at node+0x10 through
+/// `less_signed` @ 0x083d7580, remembering the last not-less node; a less
+/// node walks to its right child (+0xc), otherwise to its left child (+0x8).
+/// The candidate is compared against the header word through the
+/// `equal_deref` copy @ 0x083cf9b0; equal means empty/exhausted and the
+/// header is returned. Otherwise the node's key address (retail helper
+/// `FUN_083b6b4c`, `add r0, r0, #0x10; bx lr`) is fed to a second
+/// `less_signed(key, node_key)`: a strictly-less key is a miss returning the
+/// header, and anything else returns the found node.
+///
+/// Deliberate deviations: the 8-byte node-key accessor `FUN_083b6b4c` is
+/// inlined as `candidate + 0x10` (its exact body), and the original's two
+/// slack argument registers plus stacked zero on the first `less_signed`
+/// call are not reproduced (the callee ignores them).
+///
+/// # Safety
+///
+/// `tree` must designate a readable [`SignedKeyTree`], `key` a readable
+/// aligned `i32`, and every reachable tree node must expose readable aligned
+/// words at +0x4 (root, header only), +0x8 (left), +0xc (right), and +0x10
+/// (key). As in the original, no pointer is NULL-checked and a malformed
+/// tree loops forever or faults.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_find_node(
+    tree: *const SignedKeyTree,
+    key: *const i32,
+) -> u32 {
+    let header = addr_of!((*tree).header).read();
+    let mut node = (header as usize as *const u32).add(1).read();
+    let mut candidate = header;
+    let comparator = tree.cast::<u8>().add(0x19);
+    while node != 0 {
+        let node_words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(
+            comparator,
+            node_words.add(4).cast::<i32>(),
+            key,
+        ) != 0
+        {
+            node = node_words.add(3).read();
+        } else {
+            candidate = node;
+            node = node_words.add(2).read();
+        }
+    }
+    if crate::cxx::templates::equal_deref(addr_of!(candidate), addr_of!((*tree).header))
+        != 0
+    {
+        return candidate;
+    }
+    if crate::cxx::templates::less_signed(
+        comparator,
+        key,
+        (candidate as usize as *const i32).add(4),
+    ) != 0
+    {
+        addr_of!((*tree).header).read()
+    } else {
+        candidate
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +417,47 @@ mod tests {
         assert_eq!(found, 1);
         assert_eq!(output, 0x5eed_c0de);
         assert_eq!(copy_calls(), vec![(ptr::addr_of!(tree) as usize, i32::MIN)]);
+    }
+
+    #[test]
+    fn find_node_walks_signed_tree_and_reports_misses() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SIGNED_KEY_TREE_FIND_NODE,
+            0x1000,
+        ) else {
+            return;
+        };
+        let base = slab as usize;
+        let word = |off: usize| (base + off) as u32;
+        // Node layout: +0x8 left, +0xc right, +0x10 key; header root at +0x4.
+        let (header, root, left, right) = (word(0x00), word(0x40), word(0x60), word(0x80));
+        let w = |off: usize, v: u32| unsafe { ((base + off) as *mut u32).write(v) };
+        w(0x04, root); // header->root
+        // root: key 10, children left/right
+        w(0x48, left);
+        w(0x4c, right);
+        w(0x50, 10);
+        // left: key 5, no children
+        w(0x68, 0);
+        w(0x6c, 0);
+        w(0x70, 5);
+        // right: key 20, no children
+        w(0x88, 0);
+        w(0x8c, 0);
+        w(0x90, 20);
+        let tree = SignedKeyTree { opaque_prefix: [0; 4], header };
+        let find = |key: i32| unsafe { signed_key_tree_find_node(&tree, &key) };
+
+        assert_eq!(find(10), root, "root hit");
+        assert_eq!(find(5), left, "left-leaf hit");
+        assert_eq!(find(20), right, "right-leaf hit");
+        assert_eq!(find(7), header, "between keys: lower_bound key 10 is strictly greater");
+        assert_eq!(find(25), header, "past maximum: candidate stays the header");
+        assert_eq!(find(i32::MIN), header, "signed: MIN is less than every node key");
+        assert_eq!(find(i32::MAX), header, "past maximum from the right spine");
+
+        // Empty tree: the header has no root, so the candidate is the header.
+        w(0x04, 0);
+        assert_eq!(find(10), header, "empty tree returns the header");
     }
 }
