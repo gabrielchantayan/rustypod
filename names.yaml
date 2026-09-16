@@ -31858,6 +31858,38 @@ functions:
       volatile slot loads plus blx calls, while the flag-priority and
       short-circuit skeleton is preserved.
 
+  - address: 0x08391774
+    ghidra: thunk_FUN_0838c7ec
+    name: vdbe_real_value_thunk
+    size: 4
+    sig: "double vdbe_real_value_thunk(Mem *p_mem)"
+    module: sqlite/vdbe_real_value
+    status: ported
+    renames:
+      param_1/r0: p_mem
+      thunk_FUN_0838c7ec: vdbe_real_value_thunk
+      FUN_0838c7ec: vdbe_real_value (ported)
+    notes: >-
+      Binary extent is exactly 0x08391774..0x08391778: the sole word
+      `b 0x0838c7ec` (0xeaffec1c); the adjacent words @ 0x08391778 and
+      0x0839177c are separately assigned thunks to vdbe_int_value @
+      0x0838b5c4, and the next separately linked function begins its
+      `push {r4,lr}` prologue at 0x08391780. The branch leaves lr, the
+      p_mem argument in r0, and the stack untouched, so this is a tail
+      transfer into the already ported vdbe_real_value @ 0x0838c7ec.
+      Full aligned ARM B/BL decode of osos.dec finds exactly 4 direct
+      bl call sites, all unconditional: 0x082b28e0, 0x083682ac,
+      0x0838fa54, and 0x08392a04; there are no predicated forms and no
+      tail b sites. The Rust port forwards to vdbe_real_value directly
+      with a dedicated link section to keep the independently hookable
+      symbol; host tests cover the forwarded REAL arm (no helper calls)
+      and the full text recode/terminate/parse path through the
+      recording ops seam. match.py structural: as with the established
+      vdbe_int_value_thunk precedent, the crate-wide frame-pointer
+      prologue (push {fp,lr}/mov/pop) precedes the single tail branch
+      to vdbe_real_value (shown as `b 0` from the unresolved .a
+      relocation).
+
   - address: 0x0839177c
     ghidra: thunk_FUN_0838b5c4
     name: vdbe_int_value_thunk
