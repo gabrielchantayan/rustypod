@@ -87,6 +87,7 @@ pub mod column_mem;
 pub mod context_malloc;
 pub mod data_size;
 pub mod restore_cursor_position;
+pub mod cursor_moveto;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;

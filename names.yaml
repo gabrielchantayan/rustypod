@@ -33670,6 +33670,35 @@ functions:
       failure, output preservation, release/lock suppression on failure,
       and the enter/leave pairing.
 
+  # ---- Deferred VDBE cursor movement (src/sqlite/cursor_moveto.rs) ----
+  - address: 0x08386c90
+    ghidra: FUN_08386c90
+    name: vdbe_cursor_moveto
+    size: 148
+    sig: "i32 sqlite3VdbeCursorMoveto(VdbeCursor *cursor)"
+    module: sqlite/cursor_moveto
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      FUN_08371e54: sqlite3BtreeMoveto (unported direct target call)
+      FUN_08372288: sqlite3BtreeNext (unported direct target call)
+      local_10: comparison_result
+    notes: >-
+      Raw osos.dec words establish the exact 148-byte extent
+      0x08386c90..0x08386d24: push {r4,r5,lr} starts the function, pop
+      {r4,r5,pc} ends it, and the next separately linked prologue starts at
+      0x08386d24. Decoding every ARM B/BL word finds exactly four inbound
+      direct callers, all unconditional plain bl at 0x0838816c, 0x08389918,
+      0x083899d0, and 0x08389aa0; none are predicated. This is SQLite's
+      sqlite3VdbeCursorMoveto: a deferred rowid seek calls
+      sqlite3BtreeMoveto(cursor +0, NULL, 0, &res, movetoTarget +0x28, 0,
+      &res), invalidates the byte named by cursor's +0x48 pointer, copies the
+      target to lastRowid +0x08, and advances once through sqlite3BtreeNext
+      when res is negative. Only full success clears deferredMoveto +0x20 and
+      cacheStatus +0x68. The two unported b-tree callees are direct absolute
+      target calls; host tests deliberately replace them with a volatile
+      dispatch table while preserving the target's u32 pointer-field layout.
+
   # ---- B-tree cursor position restoration (src/sqlite/restore_cursor_position.rs) ----
   - address: 0x08372ae0
     ghidra: FUN_08372ae0

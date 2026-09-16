@@ -96,6 +96,9 @@ pub mod hints {
     // 0x7000_0000: dedicated to sqlite/restore_cursor_position's raw-u32
     // BtCursor fixture; mappings never unmap, so no other user may share it.
     pub const BTREE_RESTORE_CURSOR: usize = 0x7000_0000;
+    // 0x7100_0000: dedicated to sqlite/cursor_moveto's raw-u32 VdbeCursor
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const VDBE_CURSOR_MOVETO: usize = 0x7100_0000;
     pub const ELEMENT_REFERENCE: usize = 0x1200_0000;
     pub const VTABLE_SET_ITERATOR: usize = 0x1300_0000;
     pub const OBSERVABLE_ARRAY: usize = 0x1400_0000;
