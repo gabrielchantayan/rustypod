@@ -24,6 +24,7 @@ pub mod init;
 pub mod heap_poison;
 pub mod managed_handle;
 pub mod memh_handle;
+pub mod memh_set_len;
 pub mod object_destroy_dispatch;
 pub mod fixa;
 pub mod fixa_owner_create;

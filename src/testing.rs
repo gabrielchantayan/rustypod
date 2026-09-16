@@ -801,6 +801,10 @@ pub mod hints {
     // 0x5800_0000: dedicated to heap/memh_handle's target-width handle
     // fixture; mappings never unmap, so no other user may share it.
     pub const MEMH_HANDLE_DESTROY: usize = 0x5800_0000;
+    // 0x3400_0000: dedicated to heap/memh_set_len's target-width header,
+    // payload, and mock-allocation fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const MEMH_SET_LEN: usize = 0x3400_0000;
     // 0x5700_0000: dedicated to util/mapped_subobject_for_slot's raw-u32
     // context and selected-subobject fixture; mappings never unmap.
     pub const MAPPED_SUBOBJECT_FOR_SLOT: usize = 0x5700_0000;
