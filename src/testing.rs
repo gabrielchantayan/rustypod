@@ -853,6 +853,10 @@ pub mod hints {
     // 0x5200_0000: dedicated to kernel/task_lock's raw-u32 current-task
     // record fixture; mappings never unmap, so no other user may share it.
     pub const CURRENT_TASK_ID: usize = 0x5200_0000;
+    // 0xdc00_0000: dedicated to kernel/task_priority's raw-u32 task-record
+    // table and current-task record fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const TASK_PRIORITY_GET: usize = 0xdc00_0000;
     // 0x8000_0000: dedicated to cxx/red_black_tree_increment's raw-u32
     // red-black-tree node fixture; mappings never unmap, so no other user may
     // share this hint.
