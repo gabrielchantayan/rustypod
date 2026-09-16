@@ -65475,6 +65475,36 @@ functions:
       fixed nonzero offset flag and preserve negative and i32::MIN timestamps.
 
 
+  # --- opaque FreeType service-context metadata word accessor ---
+  - address: 0x08054ffc
+    ghidra: FUN_08054ffc
+    name: ft_service_metadata_word_at_b74
+    size: 12
+    sig: "u32 ft_service_metadata_word_at_b74(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb74]; bx lr`, hence an
+      aligned metadata pointer word at service_context+0xf00 and an aligned,
+      unextended u32 at metadata+0xb74. Ghidra's C agrees exactly and its
+      12-byte extent is correct: the next separately linked function begins
+      at 0x08055008 with `mov r2,r0; push {lr}`. Decoding every B/BL word in
+      osos.dec finds exactly five callers, all unconditional plain bl at
+      0x08112f24, 0x08171b4c, 0x08172314, 0x081875a4, and 0x0819b094; there
+      are no predicated bl or b tail callers (the osos.asm text grep misses
+      0x08172314, which is why Ghidra's count of five beats the visible
+      four). Recovered callers read the service context from +0x30 or +0xa8
+      owner fields and pass this word onward (e.g. into FUN_080ffb64 /
+      FUN_080ffea0 alongside the byte getter at 0x08054fb0). The concrete
+      layouts and ownership are not recovered, so the port deliberately
+      retains raw dereferences with no NULL or bounds checks. match.py
+      differs only by the crate-wide LLVM frame-pointer prologue/epilogue
+      (push {fp,lr} / pop {fp,pc} vs bx lr), identical to the accepted
+      sibling metadata accessors at 0x0805129c/0x080512ac/0x080512c4.
+
   # --- Macintosh epoch timestamp to local packed calendar record ---
   - address: 0x080aa95c
     ghidra: FUN_080aa95c

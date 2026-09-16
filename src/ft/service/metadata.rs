@@ -12,6 +12,8 @@ pub const METADATA_U16_B1C_OFFSET: usize = 0xb1c;
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B89_OFFSET: usize = 0xb89;
+/// Byte offset of this unsigned word in the metadata block.
+pub const METADATA_WORD_B74_OFFSET: usize = 0xb74;
 
 
 
@@ -88,6 +90,28 @@ pub unsafe extern "C" fn ft_service_metadata_pointer(service_context: *const u8)
     (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read()
 }
 
+/// ft_service_metadata_word_at_b74 — original: `FUN_08054ffc` @ `0x08054ffc`
+/// (12 bytes).
+///
+/// Loads the metadata pointer word at `service_context + 0xf00`, then returns
+/// the little-endian unsigned word at `metadata + 0xb74`. The entire ARM body
+/// is `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb74]; bx lr`, so this is a pure
+/// aligned word load with no zero-extension and no NULL or bounds checks.
+/// Decoding every B/BL word in osos.dec finds exactly five callers, all
+/// unconditional plain `bl` at 0x08112f24, 0x08171b4c, 0x08172314,
+/// 0x081875a4, and 0x0819b094. The concrete layouts and ownership are not
+/// recovered, so this deliberately retains raw dereferences.
+///
+/// Register usage: `r0 = service_context`; `r0 = metadata word`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_word_at_b74(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(METADATA_WORD_B74_OFFSET) as *const u32).read()
+}
+
 
 
 
@@ -101,7 +125,8 @@ mod tests {
         SERVICE_CONTEXT_METADATA_OFFSET,
         ft_service_metadata_byte_at_b89,
         METADATA_BYTE_B89_OFFSET,
-
+        ft_service_metadata_word_at_b74,
+        METADATA_WORD_B74_OFFSET,
     };
 
     #[repr(C)]
@@ -119,6 +144,9 @@ mod tests {
 
     #[repr(align(4))]
     struct MetadataByteB89Fixture([u8; METADATA_BYTE_B89_OFFSET + 1]);
+
+    #[repr(align(4))]
+    struct MetadataWordB74Fixture([u8; METADATA_WORD_B74_OFFSET + 4]);
 
 
     #[test]
@@ -263,6 +291,61 @@ mod tests {
         };
         assert_eq!(result, metadata.as_ptr(), "ldr returns the pointer word, not its contents");
         assert_eq!(core::mem::offset_of!(ServiceContextFixture, metadata), SERVICE_CONTEXT_METADATA_OFFSET);
+    }
+
+    #[test]
+    fn reads_the_unsigned_word_at_b74_without_extension() {
+        let mut metadata = MetadataWordB74Fixture([0; METADATA_WORD_B74_OFFSET + 4]);
+        metadata.0[METADATA_WORD_B74_OFFSET..].copy_from_slice(&0xdec0_addeu32.to_le_bytes());
+        let service_context = ServiceContextFixture {
+            before_metadata: [0x5a; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.0.as_ptr(),
+        };
+
+        let result = unsafe {
+            ft_service_metadata_word_at_b74((&service_context as *const ServiceContextFixture).cast())
+        };
+        assert_eq!(result, 0xdec0_adde, "ldr preserves all 32 bits, including the high byte");
+    }
+
+    #[test]
+    fn reads_the_final_word_of_the_minimal_b74_metadata_prefix() {
+        let mut metadata = MetadataWordB74Fixture([0; METADATA_WORD_B74_OFFSET + 4]);
+        metadata.0[METADATA_WORD_B74_OFFSET..].copy_from_slice(&0x7856_3412u32.to_le_bytes());
+        let service_context = ServiceContextFixture {
+            before_metadata: [0; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.0.as_ptr(),
+        };
+
+        assert_eq!(
+            unsafe {
+                ft_service_metadata_word_at_b74(
+                    (&service_context as *const ServiceContextFixture).cast(),
+                )
+            },
+            0x7856_3412,
+            "the raw load needs exactly the recovered four aligned bytes",
+        );
+    }
+
+    #[test]
+    fn all_word_bit_patterns_survive_the_b74_load() {
+        for value in [0x0000_0000u32, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff] {
+            let mut metadata = MetadataWordB74Fixture([0; METADATA_WORD_B74_OFFSET + 4]);
+            metadata.0[METADATA_WORD_B74_OFFSET..].copy_from_slice(&value.to_le_bytes());
+            let service_context = ServiceContextFixture {
+                before_metadata: [0; SERVICE_CONTEXT_METADATA_OFFSET],
+                metadata: metadata.0.as_ptr(),
+            };
+            assert_eq!(
+                unsafe {
+                    ft_service_metadata_word_at_b74(
+                        (&service_context as *const ServiceContextFixture).cast(),
+                    )
+                },
+                value,
+            );
+        }
     }
 }
 
