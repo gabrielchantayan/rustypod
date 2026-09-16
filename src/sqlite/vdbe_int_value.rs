@@ -163,6 +163,34 @@ pub unsafe extern "C" fn vdbe_int_value(p_mem: *mut Mem) -> i64 {
     0
 }
 
+/// vdbe_int_value_thunk — original: `thunk_FUN_0838b5c4` @ 0x0839177c
+/// (**4 bytes**, 0x0839177c..0x08391780; the next separately linked
+/// function starts with `push {r4,lr}` at 0x08391780, binary-decoded).
+///
+/// **4 direct `bl` call sites, all unconditional** (0x082b2914, 0x0838faa4,
+/// 0x08392994, and 0x0839b90c); **0 predicated `bl` call sites and 0 tail
+/// `b` call sites**, verified by decoding every ARM `B`/`BL` word in
+/// `work/firmware/osos.dec`.
+///
+/// The sole word `b 0x0838b5c4` transfers without changing `lr`, the
+/// `p_mem` argument, or the stack: a plain tail transfer into
+/// [`vdbe_int_value`]. The adjacent word @ 0x08391778 is a second,
+/// separately assigned thunk to the same target; the neighbor @ 0x08391774
+/// tail-branches to `vdbe_real_value` @ 0x0838c7ec instead.
+///
+/// No deliberate deviation: the forwarded call inherits the stock
+/// tail-transfer ABI (`p_mem` in r0 untouched, `lr` preserved, and the
+/// target's i64 result pair returned to the original caller). The
+/// dedicated section prevents LLVM from folding this independently
+/// hookable 0x0839177c seam into [`vdbe_int_value`] or the byte-identical
+/// twin thunk.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vdbe_int_value_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_int_value_thunk(p_mem: *mut Mem) -> i64 {
+    unsafe { vdbe_int_value(p_mem) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -298,6 +326,37 @@ mod tests {
                 (&mut value as *mut Mem) as usize,
                 SQLITE_UTF8,
             )],
+        );
+    }
+
+    #[test]
+    fn thunk_forwards_the_integer_arm_unchanged() {
+        let _guard = bench();
+        for integer in [i64::MIN, -1, 0, 1, i64::MAX] {
+            let mut value = mem(MEM_INT | MEM_STR);
+            value.u = integer as u64;
+
+            assert_eq!(unsafe { vdbe_int_value_thunk(&mut value) }, integer);
+            assert_eq!(value.flags, MEM_INT | MEM_STR);
+        }
+        assert!(events().is_empty());
+    }
+
+    #[test]
+    fn thunk_forwards_text_through_the_full_recode_path() {
+        let _guard = bench();
+        let mut text = *b"9223372036854775807\0\0";
+        let mut value = mem(MEM_STR | MEM_TERM);
+        value.z = text.as_mut_ptr();
+        unsafe { *core::ptr::addr_of_mut!(ATOI64_RESULT) = i64::MAX; }
+
+        assert_eq!(unsafe { vdbe_int_value_thunk(&mut value) }, i64::MAX);
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
+                Event::Atoi64(text.as_ptr() as usize),
+            ],
         );
     }
 
