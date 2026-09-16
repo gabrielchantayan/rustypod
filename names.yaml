@@ -61192,6 +61192,33 @@ functions:
       u32 argument/result ABI uses r0, matching the C `uint` input and its
       0-or-1 int result. No deviations; focused host tests cover 0, 1, 2,
       and both high unsigned boundaries.
+  # --- handle/length span validator ---
+  - address: 0x08027b08
+    ghidra: FUN_08027b08
+    name: validate_span
+    size: 52
+    sig: "u32 validate_span(u32 handle, i32 length, u32 pending_error)"
+    module: util/span_validation
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: length
+      param_3/r2: pending_error
+    notes: >-
+      52-byte pure leaf with zero outgoing `bl` sites; the five call sites
+      reported by Ghidra are the incoming callers
+      (0x082fa9c8, 0x08312fc0, 0x08343bc0, 0x083482a8, 0x0834ddb4), four of
+      which pass `is_zero(flag)` as pending_error. Return codes: nonzero
+      pending_error passes through verbatim (code 1 from is_zero means a
+      required input was zero); 2 for a null handle; 0 when length is
+      signed-positive and 16-byte aligned; 3 for any other length (the `ble`
+      is signed, so negative lengths including i32::MIN fail). Raw words
+      confirm Ghidra's 52-byte extent; the following push at 0x08027b3c is
+      the next function. No deliberate deviations. match.py shows the
+      expected ADS-vs-LLVM diff (LLVM frame + select-based branches instead
+      of predicated returns) with the identical three-way decision structure
+      and constants. Host tests sweep handles, lengths across alignment and
+      sign boundaries, and error codes against a listing-derived reference.
   # --- zero-inclusive single-bit predicate ---
   - address: 0x0825ebb4
     ghidra: FUN_0825ebb4

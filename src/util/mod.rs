@@ -142,6 +142,7 @@ pub mod tagged_payload_signed_field_sum;
 pub mod three_pointer_select;
 pub mod u16_le_store_last_byte;
 pub mod offset_table_entry_span;
+pub mod span_validation;
 pub mod u16_pair_copy;
 pub mod u32_pair_store;
 pub mod u32_pair_copy;
