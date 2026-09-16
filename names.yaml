@@ -80234,6 +80234,34 @@ functions:
       dispatch, zero and multi-block dispatch, wrapping base addition,
       return-status forwarding, and the ignored high word.
 
+  # --- Nested object +0x04 value accessor ---
+  - address: 0x08070d5c
+    ghidra: FUN_08070d5c
+    name: nested_object_value_at_4
+    size: 12
+    sig: "u32 nested_object_value_at_4(const NestedObjectOwner *owner)"
+    module: cxx/nested_object_value_at_4
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x0": nested (u32 target pointer)
+      "nested+0x4": value
+      r0_after_first_ldr: nested
+      r0_after_second_ldr: value
+    notes: >-
+      True raw extent is exactly 12 bytes, 0x08070d5c..0x08070d68: `ldr
+      r0,[r0]; ldr r0,[r0,#4]; bx lr`. The separately linked next function
+      begins with `ldr r0,[r0]` at 0x08070d68. Decoding every ARM
+      B/BL-immediate word in osos.dec finds exactly 5 direct inbound calls,
+      all unconditional plain BL at 0x0805f734, 0x080707cc, 0x080b24d4,
+      0x080eebe0, and 0x082d4a50; there are no predicated direct BL forms and
+      no direct tail B callers. It follows owner+0x00 as a 32-bit target
+      pointer, then returns that nested object's word at +0x04. Neither load
+      checks for NULL. The concrete class and field identities remain
+      unrecovered, so the name describes the observed nested value access
+      rather than inventing an object identity. Host tests use a dedicated
+      below-4-GiB fixture and prove +0x04 word selection and following a
+      changed owner pointer.
   # --- Nested object +0x0c value accessor ---
   - address: 0x08070c40
     ghidra: FUN_08070c40
