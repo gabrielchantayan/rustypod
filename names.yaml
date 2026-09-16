@@ -71671,6 +71671,45 @@ functions:
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
 
+  - address: 0x083917d8
+    ghidra: FUN_083917d8
+    name: sqlite_vfs_find
+    size: 100
+    sig: "sqlite3_vfs *sqlite_vfs_find(const char *name)"
+    module: sqlite/vfs_find
+    status: ported
+    renames:
+      param_1/r0/r5: name
+      DAT_08391838: "registry base 0x08a09918 (SQLite global)"
+      "[reg+0x00]": head
+      "[reg+0x14]": initialized
+    notes: >-
+      SQLite's sqlite3_vfs_find: lazily seeds the registered-VFS list
+      (head at 0x08a09918+0x00, init flag at +0x14) with the built-in
+      default VFS on first use, then walks the sqlite3_vfs chain (pNext
+      at +0x0c, zName at +0x10). A NULL name returns the head; otherwise
+      the first node whose zName strcmp-equals name wins, NULL on no
+      match. TRUE extent is 100 bytes: Ghidra's 96 covers only the body
+      0x083917d8..0x08391838; the ldr r4,[pc,#0x54] literal pool word
+      0x08a09918 sits at 0x08391838 and sqlite3_vfs_register opens at
+      0x0839183c. Binary scan of osos.dec confirms exactly 4 bl call
+      sites, all plain unconditional (0x082dbe6c, 0x08365468,
+      0x08391398, 0x0839184c) - the "4 bl call sites" Ghidra reports
+      are its callers, not callees; the function itself makes 2 bl's:
+      0x0837db38 (a 2-instruction getter returning the default-VFS
+      global DAT_0837db40, still stock, dispatched through the
+      VFS_FIND_OPS.os_init slot) and 0x08391e38 (the strcmp veneer,
+      ported as libc::strcmp and called directly - LLVM inlines its
+      byte loop into the walk). Identity corroborated by sibling
+      0x0839183c = sqlite3_vfs_register (makeDflt insert-after-head vs
+      push-front) and by callers: 0x08365444 calls the +0x3c method,
+      0x0839138c feeds the node to a 64-bit scaling helper. Host tests
+      pin the one-shot lazy seed, NULL-name head return, second-node
+      match, case-sensitive miss, and the already-initialized empty
+      list. match.py: same init-guard/seed/walk/return structure; the
+      diff is LLVM's fp frame, the blx-through-ops-slot, and the
+      inlined strcmp (the documented deviations).
+
   - address: 0x08272840
     ghidra: FUN_08272840
     name: bitfield_replace
