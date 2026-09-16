@@ -30183,6 +30183,43 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839eb54
+    ghidra: FUN_0839eb54
+    name: vtable_word_callback_repeat
+    size: 56
+    sig: "usize vtable_word_callback_repeat(void *receiver, i32 count, u32 spilled_seed_r2, usize forwarded_r3)"
+    module: cxx/vtable_word_callback_repeat
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: count
+      param_3/r2: spilled_seed_r2
+      param_4/r3: forwarded_r3
+      piVar1: vtable
+      uVar2: callback
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x0839eb54..0x0839eb8c:
+      fourteen instruction words from push {r0,r1,r2,r4,r5,r6,r7,lr} through
+      pop {r1,r2,r3,r4,r5,r6,r7,pc}; the separately linked sibling
+      vtable_word_callback @ 0x0839eb8c begins immediately after, matching
+      Ghidra's 56-byte report. The body contains no direct BL; its single
+      dispatch is a register-indirect blx r2 through vtable word 7 (+0x1c),
+      the same slot the sibling invokes once. Decoding every immediate ARM
+      B/BL word in osos.dec finds exactly four direct inbound calls, all
+      unconditional plain bl (0x080f0358, 0x080f036c, 0x080f0384,
+      0x080f03a0), all inside the escape-sequence parser near 0x080f0300; no
+      predicated calls, tail b sites, or aligned image data-word references
+      exist. Incoming r2 is spilled once before the loop and seeds the private
+      word cell; each iteration reloads receiver->vtable and calls
+      method(receiver, &cell, method, forwarded_r3), so callback mutations of
+      the cell persist across iterations. The loop counter compares with a
+      signed blt, so count <= 0 performs no dispatch and returns the receiver
+      residue left in r0; otherwise the last callback return survives the pop.
+      The concrete virtual method identity is unrecovered and deliberately not
+      invented. Deliberate deviations: Rust models the ARM stack spill with a
+      local u32 and LLVM counts the loop down rather than up; both are
+      ABI-observable equivalent.
+
   - address: 0x0839eba4
     ghidra: FUN_0839eba4
     name: derived_observable_array_construct
