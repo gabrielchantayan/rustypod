@@ -161,6 +161,7 @@ pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
 pub mod path_escape_record;
 pub mod string_encoding;
+pub mod string_export_counted_utf16;
 pub mod templates;
 pub mod signed_key_tree_find;
 pub mod red_black_tree_increment;
