@@ -53275,6 +53275,38 @@ functions:
       0x089ca5e0 literal at offset 0x20. Rust implementation and focused
       host tests: `src/ui/object_state.rs::timestamp_baseline`.
 
+  # --- shared-context kind halfword accessor ---
+  - address: 0x08054ab8
+    ghidra: FUN_08054ab8
+    name: context_kind
+    size: 20
+    sig: "u32 context_kind(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw ARM is `push {r4,lr}; bl 0x08369bec; ldrh r0,[r0,#0x92];
+      bic r0,r0,#0xc0; pop {r4,pc}`; the next real function starts at
+      0x08054acc. Raw decoding verifies four direct inbound `bl` calls,
+      all unconditional — 0x08051e3c, 0x08051f24, 0x0807a514, 0x080ffbcc
+      (grep -c on decomp/osos.asm) — and no predicated `bl` calls;
+      Ghidra's count of five call sites includes a phantom. Fetches the
+      process-wide shared context through the retailOS lazy getter
+      0x08369bec (the same SHARED_CONTEXT boundary context_mode_flag @
+      0x08056028 uses), loads the halfword at context+0x92, and returns
+      it with bits 6-7 cleared (`bic #0xc0`); the halfword's high byte
+      passes through unchanged. Two callers (0x08051e38, 0x080ffbc0)
+      dispatch the result through identical 0..0x26 jump tables mapping
+      the kind to a mode value; the third (0x0807a514) branches on
+      kind == 1. The concrete kind identity is not recovered. The
+      original's saved r4 is never used — an ADS frame artifact not
+      reproduced. match.py: 5 original versus 6 LLVM instructions; the
+      diff is only LLVM's push {fp,lr}/mov fp,sp frame versus the ADS
+      push {r4,lr}; the getter call is a direct R_ARM_CALL relocation
+      to the ported `shared_context` symbol. Rust implementation and
+      focused host tests: `src/ui/object_state.rs::context_kind`.
+
   # --- shared-context mode-flag low-bit accessor ---
   - address: 0x08056028
     ghidra: FUN_08056028

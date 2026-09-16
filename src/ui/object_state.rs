@@ -903,6 +903,38 @@ pub unsafe extern "C" fn context_mode_flag() -> u32 {
     (shared_context().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
 }
  
+/// Byte offset of the halfword kind field inside the shared context.
+const CONTEXT_KIND_FIELD_OFFSET: usize = 0x92;
+
+/// context_kind — original: `FUN_08054ab8` @ `0x08054ab8` (20 bytes).
+///
+/// Raw ARM is `push {r4,lr}; bl 0x08369bec; ldrh r0,[r0,#0x92];
+/// bic r0,r0,#0xc0; pop {r4,pc}`; the next real function starts at
+/// `0x08054acc`. Raw decoding verifies four direct inbound `bl` calls, all
+/// unconditional (`0x08051e3c`, `0x08051f24`, `0x0807a514`, `0x080ffbcc`);
+/// there are no predicated `bl` calls (Ghidra's count of five includes a
+/// phantom).
+///
+/// Fetches the process-wide context through [`shared_context`] @ 0x08369bec
+/// (the same getter [`context_mode_flag`] uses), loads the halfword at
+/// `context + 0x92`, and returns it with bits 6-7 cleared (`bic #0xc0`);
+/// the halfword's high byte passes through unchanged. Two recovered callers (`0x08051e38`, `0x080ffbc0`)
+/// dispatch the result through identical 0..0x26 jump tables that map the
+/// kind to a mode value; a third (`0x0807a514`) branches on kind == 1.
+/// The concrete kind identity is not recovered. The original's saved `r4`
+/// is never used — an ADS frame artifact not reproduced here.
+///
+/// # Safety
+///
+/// Like the original, there is no null guard: the context getter must
+/// return a pointer readable at `+0x92`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn context_kind() -> u32 {
+    let kind = (shared_context().add(CONTEXT_KIND_FIELD_OFFSET) as *const u16).read();
+    u32::from(kind) & !0xc0
+}
+
 /// The lazily initialized record-layout size at retailOS global
 /// `0x089c_a7f4` (`ldr r0,[r4,#4]` after loading literal `0x089ca7f0`).
 #[cfg(target_os = "none")]
@@ -2721,6 +2753,59 @@ mod tests {
             unsafe { context_mode_flag() },
             0,
             "a set word with bit 0 clear yields 0 (`and r0,r0,#0x1`)"
+        );
+    }
+
+    static CONTEXT_KIND_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    #[test]
+    fn context_kind_returns_the_low_six_bits_of_the_halfword_at_0x92() {
+        let _kind_lock = CONTEXT_KIND_LOCK.lock();
+        let mut context = [0xffu8; 0x98];
+        context[0x92..0x94].copy_from_slice(&0x25u16.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { context_kind() },
+            0x25,
+            "the halfword's low six bits pass through unchanged"
+        );
+    }
+
+    #[test]
+    fn context_kind_masks_bits_6_and_7_and_ignores_the_high_byte() {
+        let _kind_lock = CONTEXT_KIND_LOCK.lock();
+        let mut context = [0u8; 0x98];
+        // 0xffc1: bits 6-7 set (masked by `bic #0xc0`); the high byte
+        // and low six bits pass through.
+        context[0x92..0x94].copy_from_slice(&0xffc1u16.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { context_kind() },
+            0xff01,
+            "only bits 6-7 are cleared; the rest of the halfword survives"
+        );
+
+        context[0x92..0x94].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(unsafe { context_kind() }, 0, "a zero field yields kind 0");
+    }
+
+    #[test]
+    fn context_kind_reads_only_the_halfword_at_0x92() {
+        let _kind_lock = CONTEXT_KIND_LOCK.lock();
+        // All-ones neighbors make a wrong offset or width read nonzero here.
+        let mut context = [0xffu8; 0x98];
+        context[0x92..0x94].copy_from_slice(&0u16.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { context_kind() },
+            0,
+            "surrounding bytes must not leak into the kind"
         );
     }
 
