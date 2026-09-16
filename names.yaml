@@ -83763,12 +83763,53 @@ functions:
       0x082ccf8c, 0x08381544, 0x0838f170, 0x0838f440, 0x083901d8, and
       0x083904e0; two BLNE at 0x0838f648 and 0x08390558. The predicated sites
       prove non-NULL before the call; the remaining eight depend on this
-      function's own guard. Neither callee is ported, so target builds retain
-      exact typed retail-address calls through volatile seams and host tests
-      install recorders to prove NULL suppression plus non-NULL
+      function's own guard. stmtLruRemove is now ported (sqlite/
+      stmt_lru_remove) and target builds call it directly; only
+      sqlite3VdbeFinalize remains a volatile typed retail-address seam, and
+      host tests install recorders to prove NULL suppression plus non-NULL
       unlink-then-finalize ordering and status forwarding. No mutex operation
       exists in the verified retail body and none is added. Host verification:
       cargo test --target x86_64-unknown-linux-gnu (6435 passed).
+
+  - address: 0x08391d64
+    ghidra: FUN_08391d64
+    name: stmt_lru_remove
+    size: 104
+    sig: "void stmt_lru_remove(Vdbe *statement)"
+    module: sqlite/stmt_lru_remove
+    status: ported
+    vars: {param_1: statement}
+    renames:
+      param_1/r0: statement
+      "*(Vdbe**)(statement+0x150)": statement->pLruPrev
+      "*(Vdbe**)(statement+0x154)": statement->pLruNext
+      "*(Vdbe**)0x08a09944": pLruHead
+      "*(Vdbe**)0x08a09948": pLruTail
+    notes: >-
+      Raw osos.dec confirms the exact 104-byte body 0x08391d64..0x08391dc8
+      (26 words); the word at 0x08391dcc is this function's own literal pool
+      holding the anchor address 0x08a09944, and the next separately linked
+      function (a statement-name hasher) begins at 0x08391dec. Decoding every
+      aligned ARM BL-immediate word in osos.dec finds exactly 4 inbound
+      calls, all plain unconditional bl at 0x08384b94, 0x083906e4,
+      0x0839107c, and 0x083974d4; there are no predicated call sites and no
+      direct B tail transfers. This is SQLite vdbeapi.c's stmtLruRemove: it
+      splices a Vdbe out of the global statement-memory LRU whose head/tail
+      anchor lives at 0x08a09944/0x08a09948. The anchor literal appears in
+      exactly three pools (also 0x083910a0 in the reclaim walk and
+      0x08391120 in the unported stmt_lru_add at 0x083910a4), so the port
+      reaches the anchor through the fixed runtime address on target and a
+      crate-owned word pair on host. Both links null with anchor head !=
+      statement returns without touching anything (orphan); otherwise
+      next->pLruPrev = prev or tail = prev, then from a reloaded prev
+      (0x08391da4) head = next or prev->pLruNext = next, and the statement's
+      two link words are cleared. Host tests cover middle, head, tail,
+      only-node, and orphan cases against a dedicated target-width fixture.
+      match.py confirms the same block structure and the 0x08a09944 anchor
+      literal; remaining diffs are LLVM frame setup and scheduling.
+      Deliberate deviations: the anchor accessor is cfg-split
+      (fixed runtime address on target, host stand-in otherwise); links are
+      raw target-layout words, not Vdbe struct fields.
 
   # --- application byte source priority accessor ---
   - address: 0x082725c0
