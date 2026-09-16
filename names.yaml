@@ -99906,6 +99906,29 @@ functions:
       addresses and host builds use ABI seams. Deliberate deviation: the known
       leaf pair copies are direct word stores.
 
+  - address: 0x083d7b88
+    ghidra: FUN_083d7b88
+    name: opaque_pair_equal
+    size: 36
+    sig: "bool opaque_pair_equal(const void *context, const OpaquePair *left, const OpaquePair *right)"
+    module: cxx/opaque_pair_equal
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: left
+      param_3/r2: right
+      return/r0: equal
+    notes: >-
+      Raw osos.dec words e1a00001, e1c220d0, e5911004, e5900000, e1510003,
+      01500002, 03a00001, 13a00000, e12fff1e establish the complete 36-byte
+      body: r0 takes left, ldrd loads both right words, ldr loads left second
+      then first, and the two comparisons return an exact 0/1 equality
+      predicate. The next real function begins at 0x083d7bac with push
+      {r1,r2,r3,r4,r5,r6,r7,lr}, confirming Ghidra's extent. There are four
+      inbound direct plain bl calls and no predicated bl calls; this leaf
+      contains no outbound bl instructions. The callback context is ignored.
+      The Rust port uses volatile aligned reads to retain both pair loads under
+      LLVM; it deliberately assigns no identity to the opaque key pair.
   - address: 0x083d7dd0
     ghidra: FUN_083d7dd0
     name: copy_u32_pair_if_destination
