@@ -9154,6 +9154,48 @@ functions:
       the hook slot, not the 8-byte ldr pc veneer - same family pattern as
       the other 31 wrappers.
 
+  - address: 0x08037e70
+    ghidra: thunk_EXT_FUN_22003d70
+    name: kernel_create_dispatch
+    size: 8
+    sig: "usize kernel_create_dispatch(usize op, usize slot)"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Already ported as kernel_create_dispatch in kernel/task_lock.rs
+      under the rom_gateway_wrappers span entry (slot 14 of 32); this
+      entry records the per-function verification. ldr pc,[pc,#-4]
+      (0xe51ff004) at 0x08037e70 + target word 0x22003d70 at 0x08037e74:
+      Ghidra reports 4 bytes, the stub is 8 - the sibling veneer to ROM
+      0x220041cc opens immediately after at 0x08037e78 (thunk-table
+      stride 8). A real ADS literal veneer, not an empty bx lr
+      destructor. The RTXC kernel lives in mask ROM, but the boot
+      relocator @ 0x080046e0 mirrors 0xaed8 bytes (0x2200XXXX == osos
+      0x0800XXXX), so the target body IS recoverable: mirror @
+      0x08003d70, 56 bytes, the object-create gateway stub - builds the
+      five-word request {0xd, 0x7, op, slot, 0} (service 13, selector
+      7), posts it through the 0x08003660 dispatcher, and returns the
+      post-dispatch status word. Call sites binary-verified by decoding
+      every ARM B/BL word in osos.dec for every condition code: exactly
+      5 bl, all unconditional - 0x0805674c (sem_create, op 1),
+      0x0805677c (mailbox block create, op 2), 0x0805679c (mailbox slot
+      create, op 2), 0x08086040, and 0x0808b1dc; no predicated calls
+      and no tail branches. No data word in osos holds 0x08037e70 -
+      never dispatched virtually; the only 0x22003d70 word in the image
+      is the veneer's own literal at 0x08037e74. r0 = object-class
+      opcode (1 = semaphore, 2 = mailbox), r1 = caller-owned handle
+      slot; the veneer has no NULL or opcode guard. Deviation (module
+      design): dispatches through the ROM_KERNEL.kernel_create_dispatch
+      hook (volatile slot read) instead of jumping into IRAM; match.py
+      structural - an indirect call through the hook slot, not the
+      8-byte ldr pc veneer - same family pattern as the other 31
+      wrappers. Port hardening in this pass: doc header brought to the
+      per-function standard, link_section .text.kernel_create_dispatch
+      plus inline(never) added so the wrapper stays a real BL target,
+      and a dedicated host test proves verbatim forwarding of the
+      observed opcodes (1, 2), a NULL slot, and all-ones op/slot words
+      with the status word returned unchanged.
+
   - address: 0x08037ea8
     ghidra: thunk_EXT_FUN_22004368
     name: gateway_wake_object

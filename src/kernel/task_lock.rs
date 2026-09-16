@@ -756,9 +756,29 @@ pub unsafe extern "C" fn rom_svc_22003be8(
     (hook!(rom_svc_22003be8))(a0, a1, a2, a3)
 }
 
-/// kernel_create_dispatch — original: thunk @ 0x08037e70 -> ROM 0x22003d70,
-/// the object-create dispatcher (mirror frame {13, 7, op, slot, 0}): r0 =
-/// object-class opcode, r1 = handle slot (sync_sem's op_create).
+/// kernel_create_dispatch — original: `thunk_EXT_FUN_22003d70` @
+/// `0x08037e70`. Ghidra reports 4 bytes; raw words establish its full
+/// **8-byte** extent: `e51ff004` (`ldr pc, [pc, #-4]`) plus target literal
+/// `0x22003d70`, with the next veneer (`0x08037e78` -> `0x220041cc`)
+/// beginning immediately after.
+///
+/// Binary decoding of every ARM B/BL word in osos.dec finds **5
+/// unconditional `bl` call sites**, at 0x0805674c (sem_create),
+/// 0x0805677c and 0x0805679c (mailbox create paths), 0x08086040, and
+/// 0x0808b1dc; no predicated calls or tail branches. The thunk has no
+/// guard: it tail-dispatches `op` (r0, the object-class opcode — 1 =
+/// semaphore, 2 = mailbox) and `slot` (r1, the caller-owned handle
+/// slot) unchanged to IRAM `0x22003d70`, whose 56-byte osos mirror
+/// `0x08003d70` builds a service-{13, 7} gateway frame
+/// ({0xd, 0x7, op, slot, 0}), calls the `0x08003660` dispatcher, and
+/// returns the post-dispatch status word.
+///
+/// Deliberate deviation: the target is mask-ROM code, so this Rust seam
+/// calls the volatile `ROM_KERNEL.kernel_create_dispatch` hook rather
+/// than loading PC from the ROM literal. It preserves the documented two
+/// input words and r0 status result; no Rust code dereferences `slot`.
+#[cfg_attr(target_os = "none", link_section = ".text.kernel_create_dispatch")]
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_create_dispatch(op: usize, slot: usize) -> usize {
     (hook!(kernel_create_dispatch))(op, slot)
@@ -1349,6 +1369,20 @@ pub(crate) mod tests {
         unsafe {
             check(17, rom_task_delay(0, 1), &[0, 1]);
             check(17, rom_task_delay(usize::MAX, usize::MAX), &[usize::MAX, usize::MAX]);
+        }
+    }
+
+    /// The literal veneer has no NULL or opcode guard: the observed
+    /// object classes (1 = semaphore, 2 = mailbox), a NULL slot, and
+    /// all-ones words pass verbatim to the dispatcher hook and its
+    /// status word returns unchanged.
+    #[test]
+    fn kernel_create_dispatch_forwards_observed_opcodes_and_edge_slots() {
+        let _lock = mock_kernel();
+        unsafe {
+            check(14, kernel_create_dispatch(1, 0x6000), &[1, 0x6000]);
+            check(14, kernel_create_dispatch(2, 0), &[2, 0]);
+            check(14, kernel_create_dispatch(usize::MAX, usize::MAX), &[usize::MAX, usize::MAX]);
         }
     }
 
