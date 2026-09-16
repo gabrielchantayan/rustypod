@@ -1589,6 +1589,43 @@ functions:
       veneer forwards to that body through a volatile function pointer,
       retaining separate hook-target identity and preventing inlining/ICF;
       it preserves the void byte-copy ABI and forward overlap behavior.
+  - address: 0x08038190
+    ghidra: thunk_EXT_FUN_220073b0
+    name: iram_stream_buffer_reinitialize_veneer
+    size: 8
+    sig: "u32 iram_stream_buffer_reinitialize_veneer(u8 *stream_buffer, u32 zero_page_context, u32 page_context)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_EXT_FUN_220073b0: iram_stream_buffer_reinitialize_veneer
+      EXT_FUN_220073b0: stream_buffer_reinitialize
+      param_1/r0: stream_buffer
+      param_2/r1: zero_page_context
+      param_3/r2: page_context
+    notes: >-
+      Ghidra's 4-byte extent omits this ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038190 and literal
+      0x220073b0 at 0x08038194; the next veneer starts at 0x08038198, so the
+      true size is 8 bytes. Decoding every ARM B/BL word in osos.dec finds
+      exactly five direct calls, all unconditional bl (0x081b0eb8,
+      0x08201c90, 0x08202070, 0x082360c8, 0x08237288); no predicated call,
+      tail branch, or aligned raw word references this thunk. All five sites
+      obtain the buffer from the 0x08037fd8 accessor and pass (buffer, 1, 0).
+      The relocator at 0x080046e0 copies osos 0x08000000..0x0800aed8 into
+      IRAM 0x22000000, making target 0x220073b0 the byte-identical mirror of
+      the unported FUN_080073b0 @ 0x080073b0. That 60-byte body saves all
+      three arguments, invokes the two stream flush continuations through
+      literal veneers 0x08003848 (-> 0x08201460) and 0x080038f8 (->
+      0x082014c8, second argument 0), clears the stream-buffer
+      page-initialization flag byte 0x2200aed5, then tail-calls page
+      initializer FUN_080072cc with the original arguments restored.
+      Clearing 0x2200aed5 re-arms FUN_080072cc's guard, so the tail call
+      re-runs page setup (zeroing the existing 0x20000-byte allocation and
+      rebuilding page pointers) and stores page_context via
+      stream_buffer_set_page_contexts when zero_page_context is 0, else 0;
+      the initializer's r0 result (0) is forwarded. ARM builds retain the
+      exact literal tail veneer; host builds use a replaceable IRAM boundary
+      to prove all arguments and the result are forwarded unchanged.
   - address: 0x08038200
     ghidra: thunk_EXT_FUN_22005114
     name: ui_manager_begin_pending_operation
