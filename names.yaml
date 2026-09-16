@@ -94293,6 +94293,40 @@ functions:
       absolute address; tests prove the guard avoids an invalid vtable and
       that a nonzero guard dispatches only slot +0x40 with zero as argument.
 
+  # --- guarded virtual +0x1c dispatch through an object handle ---
+  - address: 0x083e72d4
+    ghidra: FUN_083e72d4
+    name: guarded_vtable_slot_1c_dispatch
+    size: 36
+    sig: "GuardedSlot1cHandle *guarded_vtable_slot_1c_dispatch(GuardedSlot1cHandle *handle)"
+    module: cxx/guarded_vtable_slot_1c_dispatch
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_1_deref/r0: object
+      object_deref/r1: vtable
+      vtable_plus_0x1c/r1: virtual_method
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM
+      instructions from push {r4,lr} at 0x083e72d4 through pop {r4,pc} at
+      0x083e72f4; the next function's push {r4-r6,lr} begins at 0x083e72f8.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly four inbound direct calls, all unconditional plain bl at
+      0x082267f0, 0x082268ec, 0x08226aec, and 0x08232bdc; there are no
+      predicated call forms, direct tail-B callers, or aligned image words
+      equal to this entry. The argument is a handle (pointer to object
+      pointer): a NULL object word returns the handle unchanged; otherwise
+      the object's vtable word 7 (+0x1c) is dispatched as method(object)
+      via predicated blxne, its result discarded, and the original handle
+      returned in r0. Ghidra loses the forwarded r0 argument; raw code
+      shows the dispatch receives the inner object, not the handle. The
+      guarded object pointer and concrete virtual method identity remain
+      unrecovered and deliberately unnamed. Target vtable words are 32-bit
+      while host callback pointers are native-width, so the Rust port uses
+      a host-sized typed vtable; this is the only deliberate deviation.
+      Host tests prove the NULL guard avoids the vtable, exact slot +0x1c
+      selection, object (not handle) forwarding, and handle passthrough.
+
   # --- generic C++ red-black-tree left rotation, fifth copy ---
   - address: 0x083cccec
     ghidra: FUN_083cccec
