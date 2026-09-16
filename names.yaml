@@ -96331,3 +96331,42 @@ functions:
       retailOS address and the host default returns zero. Host coverage proves
       selector values 0, 5, and 6, interface propagation, guard layout, and
       statuses 0, 0x12, and 0xdeadbeef.
+
+  - address: 0x080648e0
+    ghidra: FUN_080648e0
+    name: slot_request_submit_and_release
+    size: 36
+    sig: "void slot_request_submit_and_release(void *ctx, u32 arg1, u32 arg2, u32 arg3)"
+    module: app/slot_request_release
+    vars:
+      param_1: ctx
+      FUN_0806ab00: slot_request_submit (unported retailOS seam)
+      FUN_080dc754: slot_resources_release (unported retailOS seam)
+    status: ported
+    notes: >-
+      Ghidra's 28-byte extent is wrong: the mid-function `b 0x08064908`
+      skips over a separate 12-byte helper at 0x080648fc..0x08064907
+      (`mov r1,#0; strb r1,[r0,#0xb91]; bx lr`), and the true body resumes
+      at 0x08064908 (`cmp r1,#0; bne 0x080dc754; bx lr`), ending before the
+      next function at 0x08064914 — 36 bytes of code in two disjoint chunks.
+      Whole body verified against osos.dec. Five direct callers, all
+      unconditional plain `bl`: 0x08067e30, 0x0806d2a0, 0x0806d2b0,
+      0x0806d2c0, 0x0806d2d0. The body issues one plain BL (the submit @
+      0x0806ab00) and zero predicated BLs; the release is reached via the
+      predicated tail branch `bne 0x080dc754`. Algorithm: forward all four
+      argument words unchanged to the submit (r1 is a dead word the callee
+      never reads; forwarded only to keep the register stream identical),
+      and when it returns a nonzero slot/result word, tail-branch to the
+      per-slot resource release with (ctx, result). The release treats the
+      word as a slot index in 1..=0x30, freeing five pointer fields
+      (+0x224..+0x544, stride 4) plus special slots 6, 7, 9, 0x18
+      (+0x534..+0x540). Both callees are unported, so ARM builds dispatch
+      to their retailOS entries and host tests use replaceable recording
+      ops. Deliberate deviations: the predicated tail branch becomes an
+      ordinary conditional Rust call, and the seam targets go through
+      literal-loaded BLX/BX instead of direct BL/B, matching the deviation
+      already accepted for the other unported-callee seams. match.py
+      confirms the call → test → conditional-tail-call structure; arg
+      names stay arg1..arg3 because their semantics belong to the unported
+      submit (caller-supplied words include 0x1000, 0x20000000,
+      0x40000000, 0x400000, 0x800000).
