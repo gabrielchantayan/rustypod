@@ -35459,6 +35459,38 @@ functions:
       file and mutable buffer pointers, zero amount, i64::MIN offset, and
       method status unchanged.
 
+  # ---- SQLite OS truncate forwarding wrapper, sqlite3OsTruncate (src/sqlite/os_truncate.rs) ----
+  - address: 0x0837dbec
+    ghidra: FUN_0837dbec
+    name: sqlite_os_truncate
+    size: 12
+    sig: "i32 sqlite_os_truncate(sqlite3_file *file, i64 size)"
+    module: sqlite/os_truncate
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r2: size low word
+      param_3/r3: size high word
+      "file->pMethods": sqlite3_io_methods
+      "pMethods+0x10": xTruncate
+    notes: >-
+      SQLite's sqlite3OsTruncate from os.c. Raw words at 0x0837dbec,
+      0x0837dbf0, and 0x0837dbf4 decode as ldr r1,[r0], ldr r1,[r1,#0x10],
+      and bx r1. The separately linked xWrite wrapper begins at 0x0837dbf8,
+      proving Ghidra's 12-byte extent exact with no literal pool. The wrapper
+      loads file->pMethods, loads xTruncate at +0x10, and tail-dispatches it
+      as xTruncate(file, size), returning its i32 status unchanged. The
+      adjacent 0x0837db44..0x0837dc18 forwarding family matches SQLite's
+      sqlite3_io_methods (xClose/xRead/xWrite/xTruncate/xSync), establishing
+      this identity. Decoding every ARM B/BL word in osos.dec finds exactly
+      four inbound calls, all unconditional plain bl (0x082bd820, 0x082ddb20,
+      0x082de740, 0x08398cc8); there are no predicated BL forms, direct tail
+      branches, or aligned raw data words targeting the wrapper. The concrete
+      xTruncate implementation is runtime method-table data, so the port
+      dispatches the supplied table rather than inventing a callee. Host tests
+      cover zero, -1, i64::MIN, and i64::MAX sizes, exact file-pointer
+      forwarding, and unchanged negative status propagation.
+
   # ---- SQLite OS write forwarding wrapper (src/sqlite/os_write.rs) ----
   - address: 0x0837dbf8
     ghidra: FUN_0837dbf8
