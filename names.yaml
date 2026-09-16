@@ -8169,6 +8169,33 @@ functions:
       injectable RETAIL_VSNPRINTF_ENGINE seam; tests cover forwarding,
       bounded truncation/NUL, count propagation, and the zero-size path.
 
+  # --- UTC timestamp converted through current calendar offset ---
+  - address: 0x08074be0
+    ghidra: FUN_08074be0
+    name: utc_seconds_to_local_seconds
+    size: 56
+    sig: "u32 utc_seconds_to_local_seconds(u32 seconds)"
+    module: time/local_timestamp
+    status: ported
+    renames:
+      param_1/r0/r4: seconds
+      local_10/sp+4: base_utc_offset_minutes
+      local_c/sp+0: daylight_saving_minutes
+      FUN_080ab558: current_utc_offset_query
+    notes: >-
+      Raw ARM extent is exactly 56 bytes, 0x08074be0..0x08074c18; the next
+      separately linked function begins at 0x08074c18 with cmp r0,#0.
+      Decoding every A32 B/BL word in osos.dec finds exactly five direct
+      unconditional plain BL callers (0x0826fec4, 0x082a31f0, 0x082a325c,
+      0x082a3404, and 0x082a3470) and no predicated BL callers. The zero
+      input branch returns unchanged without querying the calendar. Otherwise
+      it calls ported current_utc_offset_query, ignores that provider's
+      validity result, and adds the signed i16 base offset plus signed i8
+      daylight-saving offset, each scaled by 60 seconds, modulo 2^32.
+      Deliberate deviation: typed Rust locals replace the retail 8-byte stack
+      spill; observable signed loads, unconditional query, ignored validity,
+      and wrapping arithmetic remain identical.
+
   - address: 0x0807a228
     ghidra: FUN_0807a228
     name: timer_arm
