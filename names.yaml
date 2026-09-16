@@ -62547,8 +62547,11 @@ functions:
       exactly 6 direct sites, all unconditional bl (no predicated forms
       or tail branches), so callers neither gate this conversion nor
       need a NULL guard that it lacks. The only inherited deviation is
-      BN_num_bits's documented volatile BN_NUM_BITS_WORD seam: target
-      invokes 0x080404dc in place until that helper is ported; host
+      BN_num_bits's documented volatile BN_NUM_BITS_WORD seam: with
+      0x080404dc ported (crypto/bn_num_bits_word.rs) the slot's
+      target default is the Rust bn_num_bits_word, compiled from the
+      same branch tree and the upstream bits[] table the loader
+      installs at 0x08906520; host
       tests install OpenSSL bit-length semantics. Host tests prove zero
       returns with a NULL destination untouched, two complete
       little-endian limbs serialize in reversed byte order, and a
@@ -62603,8 +62606,10 @@ functions:
       anywhere in osos.dec, so the runtime content must be installed
       by a loader pass this port does not model. The port therefore
       reaches the helper through the BN_NUM_BITS_WORD slot whose
-      target default calls the stock 0x080404dc in place - device
-      behavior is bit-exact whatever lives at 0x08906520. Upstream
+      target default is the ported Rust bn_num_bits_word
+      (crypto/bn_num_bits_word.rs, compiled from the same branch tree
+      and the upstream bits[] table the loader pass must install), so
+      device behavior is identical once that pass has run. Upstream
       bits[b] = floor(log2(b)) + 1 with bits[0] = 0, so a zero top
       limb contributes nothing and a 32-limb value with bit 1023 set
       measures 31*32 + 32 = 0x400, matching the caller. Deviations:
@@ -62622,6 +62627,67 @@ functions:
       limb select, and i*32 add correspond one-to-one; the diff is
       the seam's indirect call and LLVM's shrink-wrapped frame.
       #[inline(never)] for the 22 `bl` targets.
+  - address: 0x080404dc
+    ghidra: FUN_080404dc
+    name: bn_num_bits_word
+    size: 56
+    sig: "int bn_num_bits_word(u32 limb)"
+    module: crypto/bn_num_bits_word
+    status: ported
+    renames:
+      param_1/r0: limb
+      DAT_08906520: bits (the 256-byte bit-length table base literal @ 0x08040514)
+    notes: >-
+      OpenSSL's `BN_num_bits_word` from crypto/bn/bn_lib.c, verbatim:
+      the limb bit-length helper of the BIGNUM cluster
+      0x0803d800..0x08041000 (identity evidence in bn_num_bits's
+      entry @ 0x080404a8, its principal caller). Body decoded from
+      the raw image: 14 words + one literal-pool word @ 0x08040514,
+      and the next entry @ 0x08040518 is a separately linked function
+      with its own callers, so Ghidra's 56-byte extent is exactly
+      right. Algorithm: select the most significant nonzero byte of
+      the limb via a predicated branch tree (high half? then byte 3
+      else byte 2; low half? then byte 1 else byte 0), return
+      bits[byte] + 8*k (k = byte index 0..3); a zero limb returns
+      bits[0]. Upstream bits[b] = floor(log2(b)) + 1 with
+      bits[0] = 0, so the result is the limb's bit length 1..=32
+      (0 for 0) - consistent with the RSA-1024 `== 0x400` caller
+      chain through BN_num_bits (top limb bit length 32 over 32
+      limbs gives 31*32 + 32 = 1024). Call count binary-verified by
+      decoding every ARM B/BL word in osos.dec: exactly 5 sites
+      (0x08040204, 0x080404d0 inside bn_num_bits, 0x08040954,
+      0x080ef5f4, 0x082b80ac), ALL unconditional `bl` - no
+      predicated forms, no tail branches, so no caller gates the
+      call and no NULL/zero guard exists or is needed. ANOMALY,
+      documented not explained: the table-base literal is 0x08906520,
+      which at rest lands mid-string in the Italian UI heap ("tata."
+      inside "...non e' piu' supportata."); no instruction writes a
+      table there and no canonical {0,1,2,2,3,3,3,3,...} byte run
+      exists anywhere in osos.dec, so the runtime content must be
+      installed by a loader pass this port does not model. Whatever
+      installs it must install the canonical upstream table (the
+      RSA-1024 modulus check fails otherwise), so the port bakes
+      upstream's `static const unsigned char bits[256]` in as a
+      const [u8; 256] instead of dereferencing 0x08906520 -
+      identical behavior once the loader pass has run. Deviations:
+      the compiled-in const table in place of the runtime pointer,
+      and read_volatile on the table load so LLVM cannot prove it
+      constant and collapse the byte-select tree into a `clz` (the
+      original has no CLZ-class instruction). Host tests: zero limb
+      returns 0, the same 0x80 byte in each lane returns 8/16/24/32
+      (the +8*k term tracks the byte index), lower bytes below the
+      most significant one are ignored, and an exhaustive sweep
+      (every byte value in every lane with 0x00/0xff lower-lane
+      noise, plus every power-of-two boundary) matches the
+      bit-length reference. match.py structural - the branch tree,
+      per-lane table ldrb, and +8/+16/+24 adds correspond
+      one-to-one; the diff is LLVM's branch-based tests instead of
+      predicated tst/ldrbeq, its shrink-wrapped frame (the ADS
+      original is a leaf bx lr), and per-block literal loads of the
+      .rodata table base. #[inline(never)] preserves a concrete ARM
+      BL target. The bn_num_bits BN_NUM_BITS_WORD seam's target
+      default now points at this port (was the stock 0x080404dc
+      called in place).
   - address: 0x08040ddc
     ghidra: FUN_08040ddc
     name: bn_ucmp

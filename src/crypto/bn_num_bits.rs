@@ -64,10 +64,14 @@
 //! pass this port does not model — or every `BN_num_bits` call would
 //! return string bytes. Documented, not explained: the port reaches
 //! the helper through the [`BN_NUM_BITS_WORD`] slot, whose target
-//! default calls the stock 0x080404dc in place, so device behavior is
-//! bit-exact whatever lives at 0x08906520.
+//! default is the ported `bn_num_bits_word` in
+//! crypto/bn_num_bits_word.rs — compiled from the same branch tree
+//! and the upstream `bits[]` table the loader pass must install at
+//! 0x08906520 (the RSA-1024 check fails otherwise), so device
+//! behavior is identical once that pass has run.
 //!
-//! Helper semantics, for whoever ports 0x080404dc: select the most
+//! Helper semantics, now ported in crypto/bn_num_bits_word.rs:
+//! select the most
 //! significant nonzero byte of the limb, return `bits[byte] + 8*k`
 //! (k = byte index 0..3); for limb == 0 it returns `bits[0]`.
 //! Upstream `bits[b] = floor(log2(b)) + 1` (bit length of the byte,
@@ -79,12 +83,12 @@
 //!
 //! # Deviations
 //!
-//! - `BN_num_bits_word` @ 0x080404dc is not ported yet, so it rides
-//!   the [`BN_NUM_BITS_WORD`] slot: on target the default calls
-//!   0x080404dc in place (the original `bl` becomes a volatile slot
-//!   load plus `blx`, the same documented seam shape as
-//!   crypto/bio_printf.rs); on host it panics until a test installs
-//!   one.
+//! - `BN_num_bits_word` @ 0x080404dc is now ported
+//!   (crypto/bn_num_bits_word.rs), so the [`BN_NUM_BITS_WORD`]
+//!   slot's target default is the Rust `bn_num_bits_word` (the
+//!   original `bl` becomes a volatile slot load plus `blx`, the
+//!   documented seam shape, same as crypto/bio_printf.rs); on host
+//!   it panics until a test installs one.
 //! - The top-limb index arithmetic is `wrapping_*` so a bogus
 //!   `top < 0` cannot trip host overflow checks; on target the
 //!   wrapping ops are the same single `sub`/`lsl` the original emits.
@@ -110,13 +114,11 @@ pub struct BigNum {
 /// length (1..=32, or `bits[0]` for 0) out.
 pub type BnNumBitsWordFn = unsafe extern "C" fn(limb: u32) -> i32;
 
-/// Target default: the stock `BN_num_bits_word` @ 0x080404dc, called
-/// in place until it is ported.
+/// Target default: the ported `BN_num_bits_word`
+/// (crypto/bn_num_bits_word.rs), compiled from the same branch tree
+/// and the upstream bits[] table the loader installs at 0x08906520.
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_bn_num_bits_word(limb: u32) -> i32 {
-    let worker: BnNumBitsWordFn = unsafe { core::mem::transmute(0x0804_04dcusize) };
-    unsafe { worker(limb) }
-}
+use super::bn_num_bits_word::bn_num_bits_word as firmware_bn_num_bits_word;
 
 /// Host default: nothing to forward to, and silently returning 0
 /// would make a missing install look like a zero-length limb.
