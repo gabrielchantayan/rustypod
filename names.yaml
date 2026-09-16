@@ -96955,6 +96955,56 @@ functions:
       cancels LLVM intentionally folds the device body to a tail call
       (bx) to 0x08343050 — the fold is semantically exact and match.py's
       structural diff against the obfuscated original is expected.
+  - address: 0x08054a04
+    ghidra: FUN_08054a04
+    name: hfs_btree_get_record
+    size: 140
+    sig: "i32 hfs_btree_get_record(const BTreeControlBlock *btree, const u8 *node, u32 index, u32 *key_ptr, u32 *data_ptr, u16 *data_size)"
+    module: fs/hfs_btree_get_record
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: node
+      param_3/r2: index
+      param_4/r3: key_ptr
+      param_5/stack0: data_ptr
+      param_6/stack1: data_size
+      field 0x1c: node_size
+      field 0x30: attributes
+    notes: >-
+      Apple's GetRecord from the classic hfs BTreeNodeOps.c: locate record
+      index of a B-tree node and publish its key pointer, data pointer,
+      and data length. Shares BTreeControlBlock with hfs_btree_get_node
+      (node_size at +0x1c, attributes at +0x30); attributes bit 1 is
+      Apple's kBTBigKeysMask (HFS+ two-byte key length vs HFS one-byte).
+      Raw osos.dec confirms the exact 140-byte extent
+      0x08054a04..0x08054a90, matching Ghidra; the next function is the
+      separately entered leaf offset_table_entry_span @ 0x08054a90
+      (already ported). Leaf: zero outgoing BLs. Exactly 5 incoming plain
+      unconditional bl call sites verified in osos.asm (0x080416f8,
+      0x08041f04, 0x08048d80, 0x08058fc8, 0x080662ec); no predicated BLs.
+      Algorithm: numRecords is the u16 at node+0x0a; index >= numRecords
+      (unsigned cmp/bls) returns 0x20, the firmware's stand-in for
+      fsBTInvalidNodeErr (distinct from CheckNode's 36). Otherwise
+      record_offset = ldrh(node + node_size - 2*(index+1)) from the
+      downward-growing offset table at the end of the node, *key_ptr =
+      node + record_offset, and the data offset is record_offset plus the
+      key length field plus its own prefix size (1 or 2), padded up to an
+      even offset; *data_ptr = node + data_offset and *data_size =
+      ldrh(node + node_size - 2*(index+2)) - data_offset truncated to u16
+      by the original's strh. The original's bic r3,r3,#0x10000 after
+      each addition (clearing bit 16 of the 32-bit accumulator, an
+      artifact of 16-bit arithmetic carried in a 32-bit register) is
+      preserved literally; given u16 inputs it is exactly 16-bit
+      truncation, which is how LLVM renders it (and with 0xffff masks
+      instead of the bic). Deliberate deviations: none semantic. Six host
+      tests cover small-key and big-key layouts against an independent
+      reference, the index==numRecords and unsigned 0xffffffff rejections,
+      odd-offset even padding, and the trailing-table-entry data size.
+      match.py (diff reviewed, expected) shows identical control flow and
+      field offsets; LLVM differs only in predicate form (bcs vs popls),
+      a byte load for the attributes bit test, and the mask strength
+      reduction above.
   - address: 0x08054a90
     ghidra: FUN_08054a90
     name: offset_table_entry_span
