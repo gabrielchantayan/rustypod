@@ -274,6 +274,41 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock_slot1(body: *mut Refcounte
     }
 }
 
+/// refcounted_body_mutex_unlock_dtor_copy — original: `FUN_0839d188` @
+/// load address 0x0839d188 (16 bytes; 4 direct `bl` call sites, all
+/// unconditional: 0x0816ce40, 0x0816ce78, 0x0839d134, and 0x0839d16c).
+/// Decoding every ARM `B`/`BL` word in `osos.dec` finds no predicated
+/// calls or direct tail `b` sites; no word-aligned image word equals this
+/// address, so it is not virtually dispatched. Raw instructions end with
+/// `bx lr` at 0x0839d194; the next separately linked function
+/// ([`refcounted_body_attach_slot1`]) begins at 0x0839d198.
+///
+/// Loads the optional mutex from `body` at target +8 and, when non-NULL,
+/// tail-branches to [`mutex_unlock`] @ 0x0807f6a0. It has no NULL guard for
+/// `body`; callers must supply a readable [`RefcountedBody`]. It is the
+/// separately linked unlock half paired with the lock helper @ 0x0839d178
+/// inside the slot-1-virtual-destructor release template @ 0x0839d0e8 (the
+/// two call sites at 0x0839d134/0x0839d16c) and its 0x0816cdec sibling
+/// release (0x0816ce40/0x0816ce78).
+///
+/// No deliberate behavioral deviations. A distinct target-only section keeps
+/// this separately linked retail helper from folding into its byte-identical
+/// siblings at 0x0839d360, 0x0839d44c, and 0x0839d274.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_unlock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_unlock_dtor_copy")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_unlock_dtor_copy(body: *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 
 /// Opaque owner record whose refcounted-body handle is the eleventh word.
 ///
@@ -3701,6 +3736,28 @@ mod tests {
             body.mutex = core::ptr::null_mut();
             unsafe { refcounted_body_mutex_unlock_slot1(&mut body) };
             assert_eq!(events(), std::vec![Event::Signal(0x3b)]);
+        }
+
+        #[test]
+        fn dtor_copy_body_mutex_unlock_signals_only_a_present_mutex() {
+            let _bench = bench();
+            let mut semaphore = 0x3c;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+
+            unsafe { refcounted_body_mutex_unlock_dtor_copy(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x3c)]);
+
+            body.mutex = core::ptr::null_mut();
+            unsafe { refcounted_body_mutex_unlock_dtor_copy(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x3c)]);
         }
 
         /// A non-final reference is decremented and unlocked; neither the
