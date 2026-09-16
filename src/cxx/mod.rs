@@ -73,6 +73,7 @@ pub mod list_cursor_item_at;
 pub mod list_cursor_base_index;
 pub mod list_cursor_count;
 pub mod magic_tagged_object_release;
+pub mod magic_tagged_object_retain;
 pub mod list_cursor_clear;
 pub mod list_cursor_release;
 pub mod locked_vtable_slot_16_dispatch;
