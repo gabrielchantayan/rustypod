@@ -79,6 +79,10 @@ pub mod hints {
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;
     pub const ATA_COMMAND_SUBMIT_WAIT: usize = 0x6500_0000;
+    // 0x6600_0000: dedicated to ui/object_stack_push's raw-u32 owner items
+    // array and growth-allocation slab; mappings never unmap, so no other
+    // user may share this hint.
+    pub const OBJECT_STACK_PUSH: usize = 0x6600_0000;
     pub const CLIENT_POPULATE: usize = 0x0b00_0000;
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;
