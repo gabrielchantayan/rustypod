@@ -31,6 +31,12 @@
 //!   (68 bytes; 9 plain `bl` call sites, no predicated forms, binary-
 //!   verified). Builds the same four-word iterator for this 12-byte
 //!   element template: `seg_end = *slot + 0x20 * 0xc`.
+//! - `deque_construct` — original: `FUN_083dfdac` @ 0x083dfdac
+//!   (64 bytes; 4 plain `bl` call sites @ 0x081de2c0, 0x081de2cc,
+//!   0x082e7ecc, 0x082e7ed8, binary-verified). Default-constructs a
+//!   0x28-byte deque head: both iterators all-NULL, element count and
+//!   segment-map pointer zeroed (the trailing `map_cap` word of a full
+//!   `BlockDeque` is left untouched, exactly like the original).
 //! - `deque_pop_front` — original: `FUN_083ddbdc` @ 0x083ddbdc
 //!   (204 bytes; 4 bl call sites @ 0x0814c724, 0x081fc0c8, 0x08214250,
 //!   0x083ddcbc, binary-verified). Pops the front element: advances
@@ -216,6 +222,21 @@ pub struct BlockDeque {
     /// Map capacity handed to the deallocator when the deque empties
     /// (+0x28).
     pub map_cap: u32,
+}
+
+/// Plain 0x28-byte deque head built by `deque_construct` — the
+/// `BlockDeque` prefix without the trailing `map_cap` word (the
+/// original ctor at 0x083dfdac zeroes only through +0x24).
+#[repr(C)]
+pub struct DequeHead {
+    /// Begin iterator (+0x00).
+    pub begin: DequeIter,
+    /// End iterator (+0x10).
+    pub end: DequeIter,
+    /// Element count (+0x20).
+    pub count: u32,
+    /// Segment-pointer map (+0x24).
+    pub map: *mut *mut u8,
 }
 
 /// The class vtable, modeled down to the one slot the ported cluster
@@ -519,6 +540,30 @@ pub unsafe extern "C" fn deque_iter_init_elem12(
     }
     (*iter).seg_slot = slot;
     iter
+}
+
+/// deque_construct — original: `FUN_083dfdac` @ 0x083dfdac (64 bytes;
+/// 4 plain `bl` call sites @ 0x081de2c0, 0x081de2cc, 0x082e7ecc,
+/// 0x082e7ed8; no predicated forms and no tail branches, binary-verified).
+///
+/// Default-constructs a 0x28-byte deque head: the original pushes a
+/// 4-word stack frame, builds the empty iterator there through a real
+/// `deque_iter_init(_, 0, 0)` call (the local 4-byte-element copy @
+/// 0x083da47c, not separately ported), stores it at +0x10 (`end`),
+/// reloads those four words and stores them at +0x00 (`begin`), then
+/// zeroes +0x20 (`count`) and +0x24 (`map`). With `cur = NULL` and
+/// `slot = NULL` that call unconditionally yields the all-NULL iterator,
+/// so the port inlines `DequeIter::NULL` and drops the call (deliberate
+/// deviation). The original returns r0 = 0 (a zeroed stack slot, not
+/// `dq`); every caller ignores it, and so does the port's NULL return.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_construct(dq: *mut DequeHead) -> *mut DequeHead {
+    (*dq).end = DequeIter::NULL;
+    (*dq).begin = (*dq).end;
+    (*dq).count = 0;
+    (*dq).map = core::ptr::null_mut();
+    core::ptr::null_mut()
 }
 
 /// The base object's client handle (`handle_deref_or_null(this + 0x4)`,
@@ -973,6 +1018,58 @@ mod tests {
             assert!(it.seg_base.is_null());
             assert!(it.seg_end.is_null());
             assert!(it.seg_slot.is_null());
+        }
+    }
+
+    #[test]
+    fn construct_zeroes_both_iterators_count_and_map() {
+        let garbage = DequeIter {
+            cur: 0x11 as *mut u8,
+            seg_base: 0x22 as *mut u8,
+            seg_end: 0x33 as *mut u8,
+            seg_slot: 0x44 as *mut *mut u8,
+        };
+        let mut dq = DequeHead {
+            begin: garbage,
+            end: garbage,
+            count: 0xdead_beef,
+            map: 0x55 as *mut *mut u8,
+        };
+        unsafe {
+            let ret = deque_construct(&mut dq);
+            // The original returns a zeroed stack slot, not `dq`.
+            assert!(ret.is_null());
+            for it in [&dq.begin, &dq.end] {
+                assert!(it.cur.is_null());
+                assert!(it.seg_base.is_null());
+                assert!(it.seg_end.is_null());
+                assert!(it.seg_slot.is_null());
+            }
+            assert_eq!(dq.count, 0);
+            assert!(dq.map.is_null());
+        }
+    }
+
+    #[test]
+    fn construct_leaves_the_trailing_word_untouched() {
+        /// Head plus the `map_cap` word the original never writes.
+        #[repr(C)]
+        struct HeadWithTail {
+            head: DequeHead,
+            tail: u32,
+        }
+        let mut obj = HeadWithTail {
+            head: DequeHead {
+                begin: DequeIter::NULL,
+                end: DequeIter::NULL,
+                count: 7,
+                map: 0x99 as *mut *mut u8,
+            },
+            tail: 0xcafe_babe,
+        };
+        unsafe {
+            deque_construct(&mut obj.head);
+            assert_eq!(obj.tail, 0xcafe_babe);
         }
     }
 
