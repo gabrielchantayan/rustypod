@@ -77,6 +77,7 @@ pub mod btree_cursor;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
 pub mod btree_update_meta;
+pub mod btree_set_page_size;
 pub mod btree_drop_cell;
 pub mod btree_balance;
 pub mod move_to_child;

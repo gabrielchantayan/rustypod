@@ -33792,6 +33792,60 @@ functions:
       the 0x0837ef64 literal while retaining enter, pager write, be store,
       the strbeq latch, and leave.
 
+  # ---- B-tree page size control (src/sqlite/btree_set_page_size.rs) ----
+  - address: 0x08372cf0
+    ghidra: FUN_08372cf0
+    name: btree_set_page_size
+    size: 156
+    sig: "u32 btree_set_page_size(Btree *btree, i32 page_size, i32 n_reserve)"
+    module: sqlite/btree_set_page_size
+    status: ported
+    renames:
+      param_1/r0/r7: btree
+      param_2/r1/r5: page_size
+      param_3/r2/r6: n_reserve
+      puVar1/r4: shared (BtShared)
+      uVar2/r8: status
+      bVar3: page_size window and power-of-two test
+      FUN_0837118c: btree_enter
+      FUN_08371da4: btree_leave
+      FUN_083906f4: tracked_free
+      FUN_0837ebf8: pager_set_page_size
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeSetPageSize (three-argument form, before
+      iFix). Extent verified from raw osos.dec: push {r4,r5,r6,r7,r8,lr}
+      starts at 0x08372cf0, its pop {r4,r5,r6,r7,r8,pc} ends at
+      0x08372d8c, and the next separately linked function starts at
+      0x08372d8c - exactly 156 bytes, matching Ghidra. Decoding every ARM
+      B/BL word in the image finds exactly 4 plain-bl callers
+      (0x0837f4f8, 0x0838294c, 0x08382964, 0x08382b08), all
+      unconditional. The body holds 5 bl instructions to 4 unique
+      callees, all unconditional plain bl (btree_enter @ 0x0837118c,
+      btree_leave @ 0x08371da4 twice, tracked_free @ 0x083906f4,
+      pager_set_page_size @ 0x0837ebf8); no predicated calls. BtShared
+      layout: pPager +0x00, readOnly +0x15, pageSize +0x1c, usableSize
+      +0x1e, pTmpSpace +0x60. Enters the B-tree, returns SQLITE_READONLY
+      (8) immediately when readOnly is set. A negative n_reserve defaults
+      to pageSize - usableSize (predicated ldrhlt/sublt). A page_size
+      that is a power of two in 512..=0x8000 (unsigned sub/cmp window
+      plus predicated subls/tstls) is latched into pageSize, pTmpSpace is
+      freed and cleared, and pager_set_page_size runs on pPager with a
+      pointer to the pageSize halfword, writing the installed size back.
+      usableSize is recomputed on every non-readonly path as the low 16
+      bits of pageSize - nReserve (32-bit sub truncated by strh). The
+      target calls all four existing ports directly. Deliberate
+      host-only deviation: a private dispatch table models the
+      enter/leave/free/pager boundaries because widened host Btree
+      pointers cannot compose with the target-byte-offset lock port and
+      tests must observe the free/pager calls. Tests cover the readonly
+      early return, the reserve default, the power-of-two window edges
+      (256, 0, 0x8400, 1000), pager status pass-through with the
+      installed-size write-back, the tmp-space free ordering, and the
+      truncating usableSize store. match.py shows the expected LLVM
+      frame/register differences plus same-crate inlining of the
+      tracked_free body; enter, leave, the pager call, both strh stores,
+      and the window test are retained.
+
   # ---- Deferred VDBE cursor movement (src/sqlite/cursor_moveto.rs) ----
   - address: 0x08386c90
     ghidra: FUN_08386c90
