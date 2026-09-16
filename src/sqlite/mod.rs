@@ -110,6 +110,7 @@ pub mod expr_height_of;
 pub mod expr_list_delete;
 pub mod expr_list_append;
 pub mod expr_list_height;
+pub mod expr_list_walk;
 pub mod expr_new;
 pub mod expr_span;
 pub mod fix_expr;

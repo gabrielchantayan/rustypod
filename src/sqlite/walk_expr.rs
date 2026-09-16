@@ -14,11 +14,13 @@
 //! greater than one aborts, as does an abort reported by a descendant. A NULL
 //! expression succeeds without calling `visit`.
 //!
-//! Deliberate deviation: the final list traversal is the distinct unported
-//! `FUN_08398614` @ `0x08398614`. Target builds call its verified firmware
-//! entry; host builds expose a volatile replacement slot. `names.yaml` has no
-//! ported entry for that address, so no existing port is re-stubbed. The raw
-//! function touches `p_list` only; it deliberately does not inspect the
+//! Deliberate deviation: the final list traversal is the distinct
+//! `FUN_08398614` @ `0x08398614`, now ported as
+//! [`super::expr_list_walk::sqlite_expr_list_walk`]. That port is the shipped
+//! default of the [`SQLITE_EXPR_LIST_WALK`] dispatch slot (replacing the
+//! former stock-address transmute), so target walks descend through Rust end
+//! to end; host tests still install recording models through the slot. The
+//! raw function touches `p_list` only; it deliberately does not inspect the
 //! separate `p_select` field.
 
 use core::ptr;
@@ -31,44 +33,20 @@ use super::expr_height::Expr;
 /// value greater than one aborts the whole traversal.
 pub type ExprVisit = unsafe extern "C" fn(context: *mut u8, expr: *mut Expr) -> i32;
 
-/// ABI of `FUN_08398614`, the still-unported expression-list walker.
+/// ABI of `FUN_08398614`, the expression-list walker (now ported, see
+/// [`super::expr_list_walk`]).
 pub type ExprListWalk = unsafe extern "C" fn(
     list: *mut u8,
     visit: ExprVisit,
     context: *mut u8,
 ) -> i32;
 
-/// Firmware load address of the expression-list walker.
-pub const EXPR_LIST_WALK_ADDRESS: usize = 0x0839_8614;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_expr_list_walk(
-    list: *mut u8,
-    visit: ExprVisit,
-    context: *mut u8,
-) -> i32 {
-    let walk: ExprListWalk = core::mem::transmute(EXPR_LIST_WALK_ADDRESS);
-    walk(list, visit, context)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_expr_list_walk(
-    _list: *mut u8,
-    _visit: ExprVisit,
-    _context: *mut u8,
-) -> i32 {
-    panic!("sqlite_expr_walk requires the expression-list walker 0x08398614")
-}
-
-/// Dispatch slot for the unported `FUN_08398614` expression-list walker.
-/// Target builds retain the stock entry; host tests install a recording model.
-#[cfg(target_os = "none")]
-pub static mut SQLITE_EXPR_LIST_WALK: ExprListWalk = firmware_expr_list_walk;
-
-/// Host default for [`SQLITE_EXPR_LIST_WALK`]; tests must explicitly provide
-/// the list walk whenever a successful visitor reaches `Expr::p_list`.
-#[cfg(not(target_os = "none"))]
-pub static mut SQLITE_EXPR_LIST_WALK: ExprListWalk = missing_expr_list_walk;
+/// Dispatch slot for the expression-list walker. The default is the real
+/// port, [`super::expr_list_walk::sqlite_expr_list_walk`]; host tests install
+/// recording models through the slot (serialized by
+/// [`crate::testing::SQLITE_EXPR_WALK_TEST_LOCK`]).
+pub static mut SQLITE_EXPR_LIST_WALK: ExprListWalk =
+    super::expr_list_walk::sqlite_expr_list_walk;
 
 /// `sqlite_expr_walk` — original: `FUN_0839866c` @ `0x0839866c` (140 bytes;
 /// 13 direct `bl` callers, 12 unconditional and one predicated). See the
@@ -80,9 +58,9 @@ pub static mut SQLITE_EXPR_LIST_WALK: ExprListWalk = missing_expr_list_walk;
 /// # Safety
 ///
 /// `visit` must be callable. Every non-NULL expression reached must be a
-/// readable [`Expr`]; the unported list walker defines the additional validity
-/// requirements of `p_list` when and only when the visitor accepts the node
-/// and both operand walks complete.
+/// readable [`Expr`]; the list walker (see [`SQLITE_EXPR_LIST_WALK`]) defines
+/// the additional validity requirements of `p_list` when and only when the
+/// visitor accepts the node and both operand walks complete.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn sqlite_expr_walk(
@@ -123,9 +101,12 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
+    use crate::testing::SQLITE_EXPR_WALK_TEST_LOCK;
+    use std::sync::MutexGuard;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    fn lock() -> MutexGuard<'static, ()> {
+        SQLITE_EXPR_WALK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
     static mut VISITS: [u8; 8] = [0; 8];
     static mut VISIT_COUNT: usize = 0;
     static mut LIST_POINTER: *mut u8 = ptr::null_mut();
@@ -144,7 +125,7 @@ mod tests {
                 LIST_VISIT = None;
                 LIST_CONTEXT = ptr::null_mut();
                 LIST_RESULT = 0;
-                SQLITE_EXPR_LIST_WALK = missing_expr_list_walk;
+                SQLITE_EXPR_LIST_WALK = crate::sqlite::expr_list_walk::sqlite_expr_list_walk;
             }
         }
     }
@@ -191,7 +172,7 @@ mod tests {
 
     #[test]
     fn null_root_never_calls_visitor_or_list_walker() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = lock();
         let _reset = Reset;
         install_list_walk(1);
 
@@ -206,7 +187,7 @@ mod tests {
 
     #[test]
     fn nonzero_status_prunes_and_only_greater_than_one_aborts() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = lock();
         let _reset = Reset;
         install_list_walk(0);
         let mut child = expr(2, 0, ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
@@ -232,7 +213,7 @@ mod tests {
 
     #[test]
     fn descendant_abort_short_circuits_right_operand_and_list() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = lock();
         let _reset = Reset;
         install_list_walk(0);
         let mut left = expr(2, 2, ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
@@ -248,7 +229,7 @@ mod tests {
 
     #[test]
     fn accepted_node_visits_operands_then_forwards_list_callback_and_context() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = lock();
         let _reset = Reset;
         install_list_walk(1);
         let context = 0x5a as *mut u8;
