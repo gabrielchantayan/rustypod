@@ -1228,6 +1228,41 @@ pub static mut DEQUE_ITER_ADVANCE_ELEM4_OPS: DequeIterAdvanceElem4Ops =
 fn deque_iter_advance_elem4_ops() -> DequeIterAdvanceElem4Ops {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_OPS)) }
 }
+/// deque_iter_retreat_copy_elem4 — original: `FUN_083d6fb0` @ 0x083d6fb0
+/// (44 bytes; 4 plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// The 4-byte-element deque iterator's non-mutating retreat: copy `source`
+/// into a stack iterator, call its signed `operator+=` with the wrapping
+/// negation of `distance`, then copy the returned iterator into `dst` and
+/// return `dst`. Raw ARM spans the push at 0x083d6fb0 through the
+/// `pop {r0,r1,r2,r3,r4,r5,r6,pc}` at 0x083d6fd8; the next sibling begins
+/// at 0x083d6fdc. It calls 0x083d9fd4 before and after 0x083da088.
+///
+/// Deliberate deviation: 0x083da088 is unported, so its call crosses
+/// [`DEQUE_ITER_ADVANCE_ELEM4_OPS`]. The target default invokes that
+/// firmware address; host tests replace it with a behavioral model. Typed
+/// [`DequeIter`] copies retain four disjoint pointer fields on 64-bit hosts
+/// while preserving the target's four-word copy.
+///
+/// # Safety
+///
+/// `dst` must be writable and `source` readable as complete [`DequeIter`]
+/// values. The configured advance member must accept a writable iterator copy.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_retreat_copy_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_retreat_copy_elem4(
+    dst: *mut DequeIter,
+    source: *const DequeIter,
+    distance: i32,
+) -> *mut DequeIter {
+    let mut copy = source.read();
+    let retreated = (deque_iter_advance_elem4_ops().advance)(&mut copy, distance.wrapping_neg());
+    dst.write(retreated.read());
+    dst
+}
+
 
 /// deque_iter_advance_copy_elem4 — original: `FUN_083d6fdc` @ 0x083d6fdc
 /// (44 bytes; 9 plain `bl` call sites, no predicated forms, verified by
@@ -8764,6 +8799,72 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_ne!(calls[0].iter, &source as *const DequeIter as usize);
         assert_ne!(calls[0].iter, &dst as *const DequeIter as usize);
+        assert_eq!(calls[0].distance, i32::MIN);
+        assert_eq!(calls[0].source, [0xa0, 0xb0, 0xc0, 0xd0]);
+        assert_eq!(dst.cur as usize, 0xaaaa);
+        assert_eq!(dst.seg_base as usize, 0xbbbb);
+        assert_eq!(dst.seg_end as usize, 0xcccc);
+        assert_eq!(dst.seg_slot as usize, 0xdddd);
+    }
+
+    #[test]
+    fn deque_iter_retreat_copy_elem4_retreats_a_private_copy() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let source = DequeIter {
+            cur: 0x10usize as *mut u8,
+            seg_base: 0x20usize as *mut u8,
+            seg_end: 0x30usize as *mut u8,
+            seg_slot: 0x40usize as *mut *mut u8,
+        };
+        let mut dst = DequeIter::NULL;
+
+        let returned = unsafe { deque_iter_retreat_copy_elem4(&mut dst, &source, 7) };
+
+        assert_eq!(returned, &mut dst as *mut DequeIter);
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert_eq!(calls.len(), 1);
+        assert_ne!(calls[0].iter, &source as *const DequeIter as usize);
+        assert_ne!(calls[0].iter, &dst as *const DequeIter as usize);
+        assert_eq!(calls[0].distance, -7);
+        assert_eq!(calls[0].source, [0x10, 0x20, 0x30, 0x40]);
+        assert_eq!(source.cur as usize, 0x10);
+        assert_eq!(source.seg_base as usize, 0x20);
+        assert_eq!(source.seg_end as usize, 0x30);
+        assert_eq!(source.seg_slot as usize, 0x40);
+        assert_eq!(dst.cur as usize, 0x1111);
+        assert_eq!(dst.seg_base as usize, 0x2222);
+        assert_eq!(dst.seg_end as usize, 0x3333);
+        assert_eq!(dst.seg_slot as usize, 0x4444);
+    }
+
+    #[test]
+    fn deque_iter_retreat_copy_elem4_wraps_minimum_distance_and_copies_return() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let source = DequeIter {
+            cur: 0xa0usize as *mut u8,
+            seg_base: 0xb0usize as *mut u8,
+            seg_end: 0xc0usize as *mut u8,
+            seg_slot: 0xd0usize as *mut *mut u8,
+        };
+        let mut helper_result = DequeIter {
+            cur: 0xaaaausize as *mut u8,
+            seg_base: 0xbbbbusize as *mut u8,
+            seg_end: 0xccccusize as *mut u8,
+            seg_slot: 0xddddusize as *mut *mut u8,
+        };
+        let mut dst = DequeIter::NULL;
+        unsafe {
+            core::ptr::addr_of_mut!(DEQUE_ITER_ADVANCE_ELEM4_RETURN)
+                .write_volatile(&mut helper_result);
+        }
+
+        let returned = unsafe { deque_iter_retreat_copy_elem4(&mut dst, &source, i32::MIN) };
+
+        assert_eq!(returned, &mut dst as *mut DequeIter);
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].distance, i32::MIN);
         assert_eq!(calls[0].source, [0xa0, 0xb0, 0xc0, 0xd0]);
         assert_eq!(dst.cur as usize, 0xaaaa);
