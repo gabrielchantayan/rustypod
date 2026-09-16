@@ -101500,3 +101500,34 @@ functions:
       port directly calls the verified vdbe_free_p4 and reaches memzero_aligned
       through a volatile function pointer instead of the retailOS addresses
       and IRAM veneer, preserving the call without a builtin clear.
+
+  # --- object type tag recognition ---
+  - address: 0x08382c18
+    ghidra: FUN_08382c18
+    name: object_type_tag_is_recognized
+    size: 64
+    sig: "u32 object_type_tag_is_recognized(const u8 *object)"
+    module: util/object_type_tag_is_recognized
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x40/r0": type_tag
+      DAT_08382c4c: recognized_type_tag_0 (0x4b771290)
+      DAT_08382c50: recognized_type_tag_1 (0xa029a697)
+      DAT_08382c54: recognized_type_tag_2 (0xf03b7906)
+      r0_return: type_tag_is_recognized
+    notes: >-
+      Raw osos.dec establishes the true 64-byte extent:
+      13 ARM instructions at 0x08382c18..0x08382c4c ending in bx lr,
+      followed by the three literal-pool words at 0x08382c4c..0x08382c54;
+      the next distinct function begins at 0x08382c58. Ghidra's 52-byte
+      size describes only the instruction body. Full-image raw ARM
+      B/BL-immediate decoding finds exactly four incoming direct calls, all
+      unconditional plain bl at 0x0838f77c, 0x0839021c, 0x08390260, and
+      0x083902c8; there are no predicated bl callers. The body itself contains
+      no bl instruction. It returns zero for NULL; otherwise it loads the
+      aligned object word at +0x40 and returns one exactly when it equals one
+      of its three literal tags. The meanings of those tags are unrecovered,
+      so their semantic role is limited to observed recognition. Host tests
+      cover NULL, every accepted tag, and an unrecognized tag. Deliberate
+      deviations: none.

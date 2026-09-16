@@ -4,50 +4,24 @@
 //! the next distinct function starts with `push {r4,lr}` at `0x0839024c`.
 //! Raw `osos.dec` decoding finds four incoming plain `bl` calls
 //! (`0x082ccf70`, `0x082dc060`, `0x082dc07c`, and `0x08390580`) and no incoming
-//! predicated `bl` calls. Its one outgoing plain `bl` calls the unported
+//! predicated `bl` calls. Its one outgoing plain `bl` calls the ported type-tag
 //! validator at `0x08382c18`.
 //!
 //! A null object, an object rejected by that validator, or an object whose
 //! byte at `+0x1e` is nonzero returns the status value 7. A rejected non-null
 //! object instead returns 21. For an accepted object with a zero `+0x1e` byte,
 //! the result is the bitwise AND of its aligned words at `+0x14` and `+0x18`.
-//! Deliberate deviations: the validator remains a target-address seam; host
-//! tests replace it because retailOS code is not host-mapped.
+//! Deliberate deviations: none.
 
-const VALIDATOR_ADDRESS: usize = 0x0838_2c18;
 const STATUS_DEFAULT: u32 = 7;
 const STATUS_VALIDATION_FAILED: u32 = 21;
 const STATUS_MASK_A_OFFSET: usize = 0x14;
 const STATUS_MASK_B_OFFSET: usize = 0x18;
 const STATUS_BYTE_OFFSET: usize = 0x1e;
 
-type ObjectValidator = unsafe extern "C" fn(*const u8) -> u32;
-
-#[cfg(target_arch = "arm")]
-#[inline(always)]
-unsafe fn retail_object_validator(object: *const u8) -> u32 {
-    let validator: ObjectValidator = core::mem::transmute(VALIDATOR_ADDRESS);
-    validator(object)
-}
-
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn unavailable_object_validator(_object: *const u8) -> u32 {
-    0
-}
-
-#[cfg(not(target_arch = "arm"))]
-static mut OBJECT_VALIDATOR: ObjectValidator = unavailable_object_validator;
-
 #[inline(always)]
 unsafe fn object_validator(object: *const u8) -> u32 {
-    #[cfg(target_arch = "arm")]
-    {
-        retail_object_validator(object)
-    }
-    #[cfg(not(target_arch = "arm"))]
-    {
-        OBJECT_VALIDATOR(object)
-    }
+    crate::util::object_type_tag_is_recognized::object_type_tag_is_recognized(object)
 }
 
 /// Returns the object's validation status using its retailOS field layout.
@@ -75,65 +49,42 @@ pub unsafe extern "C" fn object_validation_status(object: *const u8) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
-    static VALIDATOR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    static mut VALIDATOR_RESULT: u32 = 0;
-
-    unsafe extern "C" fn test_validator(_object: *const u8) -> u32 {
-        VALIDATOR_RESULT
-    }
-
-    unsafe fn with_validator_result(result: u32, test: impl FnOnce()) {
-        let _lock = VALIDATOR_TEST_LOCK.lock();
-        let previous_validator = OBJECT_VALIDATOR;
-        let previous_result = VALIDATOR_RESULT;
-        OBJECT_VALIDATOR = test_validator;
-        VALIDATOR_RESULT = result;
-        test();
-        OBJECT_VALIDATOR = previous_validator;
-        VALIDATOR_RESULT = previous_result;
-    }
+    const RECOGNIZED_TYPE_TAG: u32 = 0x4b77_1290;
 
     #[test]
-    fn null_object_returns_default_without_validation() {
+    fn null_object_returns_default() {
         unsafe {
-            with_validator_result(1, || {
-                assert_eq!(object_validation_status(core::ptr::null()), STATUS_DEFAULT);
-            });
+            assert_eq!(object_validation_status(core::ptr::null()), STATUS_DEFAULT);
         }
     }
 
     #[test]
     fn rejected_object_returns_validation_failure() {
-        let object = [0u32; 8];
+        let object = [0u32; 17];
         unsafe {
-            with_validator_result(0, || {
-                assert_eq!(object_validation_status(object.as_ptr().cast()), STATUS_VALIDATION_FAILED);
-            });
+            assert_eq!(object_validation_status(object.as_ptr().cast()), STATUS_VALIDATION_FAILED);
         }
     }
 
     #[test]
     fn accepted_active_object_returns_default() {
-        let mut object = [0u32; 8];
+        let mut object = [0u32; 17];
+        object[0x40 / 4] = RECOGNIZED_TYPE_TAG;
         unsafe {
             (object.as_mut_ptr().cast::<u8>().add(STATUS_BYTE_OFFSET)).write(1);
-            with_validator_result(1, || {
-                assert_eq!(object_validation_status(object.as_ptr().cast()), STATUS_DEFAULT);
-            });
+            assert_eq!(object_validation_status(object.as_ptr().cast()), STATUS_DEFAULT);
         }
     }
 
     #[test]
     fn accepted_inactive_object_ands_status_masks() {
-        let mut object = [0u32; 8];
+        let mut object = [0u32; 17];
+        object[0x40 / 4] = RECOGNIZED_TYPE_TAG;
         object[STATUS_MASK_A_OFFSET / 4] = 0xa5a5_0f0f;
         object[STATUS_MASK_B_OFFSET / 4] = 0x3c3c_f0f0;
         unsafe {
-            with_validator_result(1, || {
-                assert_eq!(object_validation_status(object.as_ptr().cast()), 0x2424_0000);
-            });
+            assert_eq!(object_validation_status(object.as_ptr().cast()), 0x2424_0000);
         }
     }
 }
