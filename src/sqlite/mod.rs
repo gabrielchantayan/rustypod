@@ -125,6 +125,7 @@ pub mod index_key_info;
 pub mod find_table;
 pub mod find_index;
 pub mod locate_table;
+pub mod lock_and_prepare;
 pub mod free_p4;
 pub mod vdbe_free_ops;
 pub mod get_varint;

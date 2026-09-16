@@ -7,8 +7,10 @@
 //! It forwards its five arguments to `0x0837d2fc`, inserting a zero fourth
 //! argument and moving the final two arguments to the callee stack.
 //!
-//! Deliberate deviation: `0x0837d2fc` is not ported, so it is a volatile seam
-//! on host builds and a retailOS call on firmware builds.
+//! Deliberate deviation: `0x0837d2fc` (now ported as
+//! `sqlite::lock_and_prepare::sqlite3_lock_and_prepare`) remains a volatile
+//! seam on host builds and a retailOS call on firmware builds, so host tests
+//! can substitute the whole preparation operation.
 
 /// Internal six-argument SQLite preparation operation at `0x0837d2fc`.
 pub type LockAndPrepareFn = unsafe extern "C" fn(

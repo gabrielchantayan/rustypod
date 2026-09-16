@@ -1248,6 +1248,10 @@ pub mod hints {
     // target-width stream-buffer and source fixture; mappings never unmap,
     // so no other user may share this hint.
     pub const STRSTREAMBUF_COPY_ACTIVE_BUFFER: usize = 0x0101_0000;
+    // 0x6100_0000: dedicated to sqlite/lock_and_prepare's raw-u32 connection
+    // and Db-record fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SQLITE_LOCK_AND_PREPARE: usize = 0x6100_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
