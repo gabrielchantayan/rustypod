@@ -1172,6 +1172,10 @@ pub mod hints {
     // 0x4400_0000: dedicated to ui/pool_entry_create's owner fixture; mappings
     // never unmap, so no other user may share this hint.
     pub const UI_POOL_ENTRY_CREATE: usize = 0x4400_0000;
+    // 0xc400_0000: dedicated to ui/plst_find_by_persistent_id's raw-u32
+    // 'tdat' element and linked 'plst' chain fixture; mappings never
+    // unmap, so no other test may reuse this hint.
+    pub const UI_PLST_FIND_BY_PERSISTENT_ID: usize = 0xc400_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
