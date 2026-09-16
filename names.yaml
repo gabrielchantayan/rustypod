@@ -13213,6 +13213,35 @@ functions:
       empty/negative counts, and first-match installation. LLVM codegen
       counts down with `subs` instead of the original's pointer-limit loop
       and sinks the returns behind a shared pop — same structure.
+  - address: 0x0804eafc
+    ghidra: FUN_0804eafc
+    name: ft_select_metrics
+    size: 176
+    sig: "void ft_select_metrics(FtFace *face, u32 strike_index)"
+    module: ft/select_metrics
+    status: ported
+    vars:
+      param_1/r0: face
+      param_2/r1: strike_index
+      r4: metrics
+      r5: bitmap_size
+    notes: >-
+      FreeType 2.3 FT_Select_Metrics (src/base/ftobjs.c). Raw osos.dec
+      confirms the true 176-byte body is 0x0804eafc..0x0804ebac; the next
+      distinct function starts with cmp r0,#0 at 0x0804ebac. The body has
+      two plain BL instructions, both to ft_divfix (0x0804c2d4), no
+      predicated BL, and one tail B to the verified but unported shared
+      scalable-metrics finalize helper at 0x080db840. Exactly five direct
+      incoming plain BL calls occur at 0x0803d178, 0x0804ebf4, 0x0808cb94,
+      0x0808da88, and 0x08090454; there are no predicated inbound calls.
+      It indexes face->available_sizes (+0x20) by r1 lsl #4, rounds the
+      selected 26.6 x/y ppem through the raw wrapping lsl #10; lsr #16
+      pair into size->metrics (+0x0c), and either divfixes scales before
+      tail-calling the helper for scalable faces or writes the fixed bitmap
+      metrics. Host tests cover the bitmap writes, scalable divfix/seam
+      arguments, and shift-pair overflow behavior. The deliberate
+      host/target seam for 0x080db840 preserves the unported shared tail
+      helper rather than inventing its identity or duplicating it.
   # --- FreeType glyph loader ---
   - address: 0x0804c9f4
     ghidra: FUN_0804c9f4
