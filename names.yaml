@@ -91281,6 +91281,47 @@ functions:
       arithmetic. Host tests cover zero query avoidance, successful
       base-plus-daylight subtraction, signed daylight, failed-query
       preservation, and u32 underflow.
+
+  # --- sub-record reference chase ---
+  - address: 0x0805be98
+    ghidra: FUN_0805be98
+    name: sub_record_lookup
+    size: 136
+    sig: "i32 sub_record_lookup(void *object, u32 kind, const void *word2, u32 word3, const void *key, const void *descriptor, u32 detail)"
+    module: ui/sub_record_lookup
+    status: ported
+    renames:
+      param_1/r0/r6: object
+      r1: kind (payload on the chase call)
+      r2/r12: word2 (continuation pointer on the chase call)
+      r3: word3 (zeroed on the chase call)
+      '[sp,#0x28]/r7': key
+      '[sp,#0x2c]/r4': descriptor
+      '[sp,#0x30]/r8': detail
+      FUN_0805c0c8: query_dispatch (unported, seam)
+      FUN_08031140: __rt_uread4 (ported, libc/rt_unaligned)
+      'ldrsh r0,[r4,#0x0]': tag (signed i16 at descriptor +0)
+    notes: >-
+      Raw ARM establishes the exact 136-byte extent from 0x0805be98 through
+      pop {r1-r9,pc} at 0x0805bf1c; the next function begins at 0x0805bf20
+      with push {r0-r8,lr}. The disassembly shows exactly five inbound
+      calls, all plain unconditional bl (0x08051838, 0x0805c024,
+      0x0805d58c, 0x0805d660, 0x0806ca90); no predicated callers. The body
+      issues three bls: two to the query-dispatch helper 0x0805c0c8 and one
+      to __rt_uread4. Forwards all seven arguments to the dispatch helper
+      and returns its status when nonzero; on zero it reads the signed i16
+      tag at descriptor +0, resolves an inline u32 at +4 (tags 3/4,
+      continuation at +8) or an unaligned u32 at +0xa via __rt_uread4 (tags
+      0x300/0x400, continuation at +0xe), and chases a nonzero payload with
+      a second dispatch of (object, payload, continuation, 0, key,
+      descriptor, detail). Any other tag or a zero payload returns zero.
+      Callers (e.g. FUN_0805bfd0) treat 0x37 as keep-searching, so this is
+      the query engine's sub-record reference chase. Deviations: the
+      dispatch helper stays in retailOS behind a volatile seam pointer
+      (blx instead of direct bl; LLVM tail-calls the second dispatch), and
+      LLVM inlines the ported __rt_uread4 byte-wise instead of bl. Host
+      tests cover status pass-through, both tag layouts, unknown tags, and
+      zero payloads.
   
 
   # --- conditional opaque-handle release ---
