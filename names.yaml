@@ -96842,3 +96842,54 @@ functions:
       structure; the digit test lowers to cmp #10/bcs (equivalent to the
       original cmp #9/bhi) and the init dispatch goes through BLX as with
       the other unported-callee seams.
+  - address: 0x08056a68
+    ghidra: FUN_08056a68
+    name: hash_word
+    size: 168
+    sig: "u32 hash_word(u32 word)"
+    module: util/hash_word
+    status: ported
+    renames:
+      param_1/r0: word
+      r4: result
+      r5: saved_input
+      r6: input
+      r8: first_multiplier (0x8e92610f)
+      r11: second_multiplier (0x05bc6def)
+      r0_state: jump_table_state (walks literals 0xc80f077e..0xc80f0782)
+      DAT_08056afc: state_base (0xc80f0781)
+      DAT_08056b00: FIRST_MULTIPLIER (0x8e92610f)
+      DAT_08056b04: SECOND_MULTIPLIER (0x05bc6def)
+      DAT_08056b08: state_key (0x37f0f882; state + key mod 2^32 = case index)
+      DAT_08056b0c: state_low (0xc80f077e)
+      FUN_08343050: hash_word_base (unported retailOS seam)
+    notes: >-
+      Raw osos.dec establishes a 148-byte instruction body
+      (0x08056a68..0x08056af8, 37 words, pop-free: it returns via
+      ldmia sp!,{r3-r11,pc} at 0x08056ac0) followed by its own 20-byte
+      five-word literal pool at 0x08056afc..0x08056b10; the separately
+      linked successor FUN_08056b10 begins at 0x08056b10, so the full
+      extent is 168 bytes (Ghidra's 148 covers instructions only).
+      Decoding every ARM B/BL word in the image finds exactly 5 direct bl
+      call sites: four unconditional (0x081c1a0c, 0x081c390c, 0x081e5ef4,
+      0x08206d98) plus one predicated blne (0x081048f0), matching
+      Ghidra's count. The body issues exactly one bl, to FUN_08343050.
+      Algorithm: the body is a compiler-obfuscated state machine (addls
+      pc,pc,r0,lsl #2 jump table keyed on a state word walking the
+      literals 0xc80f077e..0xc80f0782); tracing states 3,0,1,2,4 in
+      order shows the straight-line computation mixed =
+      FUN_08343050(word); mixed = 0x8e92610f * mixed; mixed =
+      0x05bc6def * mixed; return mixed, all 32-bit wrapping muls. The
+      two multipliers are exact modular inverses (0x8e92610f *
+      0x05bc6def == 1 mod 2^32), so the multiplies cancel and the
+      function is a bit-exact alias of FUN_08343050 — the pair is pure
+      obfuscation. Callers feed pointer/handle words (FUN_081c19d4
+      passes the object field at +0x24, then zeroes the field and its
+      +0x20 type byte), so the callee is a handle/cookie mixer.
+      Deliberate deviations: FUN_08343050 is a volatile host seam and a
+      direct verified device call (it is itself an unported obfuscated
+      state machine calling FUN_0835450c), the state-machine dance
+      collapses to straight-line code, and because the multiplier pair
+      cancels LLVM intentionally folds the device body to a tail call
+      (bx) to 0x08343050 — the fold is semantically exact and match.py's
+      structural diff against the obfuscated original is expected.
