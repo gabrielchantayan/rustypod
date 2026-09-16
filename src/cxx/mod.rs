@@ -168,6 +168,7 @@ pub mod string_encoding;
 pub mod string_export_counted_utf16;
 pub mod templates;
 pub mod signed_key_tree_find;
+pub mod equal_key_tree_clear;
 pub mod red_black_tree_increment;
 pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;

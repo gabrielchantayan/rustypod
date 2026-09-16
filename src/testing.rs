@@ -120,6 +120,9 @@ pub mod hints {
     // 0x1d10_0000: dedicated to cxx/named_object_cache's target-width owner,
     // container, key, and allocated-object fixture; mappings never unmap.
     pub const NAMED_OBJECT_CACHE: usize = 0x1d10_0000;
+    // 0x1d20_0000: dedicated to cxx/equal_key_tree_clear's raw-u32 header
+    // node and tree record fixture; mappings never unmap.
+    pub const EQUAL_KEY_TREE_CLEAR: usize = 0x1d20_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0xc000_0000 and 0xc100_0000: dedicated to
