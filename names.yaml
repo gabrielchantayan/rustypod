@@ -73347,6 +73347,49 @@ functions:
       literal; the only difference is the source-relative b replaced by
       the seam's volatile pointer load plus bx, as designed.
   # ---- HFS B-tree node fetch (src/fs/hfs_btree_get_node.rs) ----
+  - address: 0x08053e14
+    ghidra: FUN_08053e14
+    name: hfs_btree_free_space
+    size: 44
+    sig: "u16 hfs_btree_free_space(const BTreeControlBlock *btree, const u8 *node)"
+    module: fs/hfs_btree_free_space
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: node
+      field 0x1c: node_size
+      node field 0x0a: num_records
+    notes: >-
+      Apple's FreeSpace from the classic hfs BTreeIO.c - the number of bytes
+      free in a B-tree node, already net of the offset-table entry a new
+      record would consume. Algorithm - node_size is the u16 at btree+0x1c
+      (the same control-block field GetNode publishes into each block
+      descriptor), numRecords is the u16 at node+0x0a, and the descending
+      offset table at the tail makes *(u16*)(node + nodeSize - 2*numRecords
+      - 2) the one-past-the-end offset of record data; the result is
+      nodeSize - thatOffset - 2*numRecords - 2, truncated to a u16 by the
+      original's closing lsl #16 / lsr #16 pair. All five callers
+      (0x08058d88, 0x080594c8, 0x08064d3c, 0x08064d50, 0x0806b808) sit in
+      record insert/split paths - 0x0806b808 compares the result plus the
+      space reclaimed by a record move against a new record's length to
+      decide whether the node must split - exactly how the classic code uses
+      FreeSpace. Extent and call census from raw bytes: 0x08053e14..0x08053e40
+      is 44 bytes ending in bx lr with the next function at 0x08053e40, and
+      decoding every ARM B/BL word in osos.dec finds exactly 5 direct
+      callers, all unconditional plain bl - no predicated forms and no
+      tail-call entries - and zero BLs inside the body (a pure leaf). The
+      port reads the same three u16s natively (little-endian, as the
+      original's ldrh does) and repeats the same wrapping u32 subtraction
+      chain and 16-bit truncation; no deviations in behavior. match.py (exit
+      1, diff expected) shows the identical three ldrh loads, the identical
+      table-entry address arithmetic (add, sub-shifted, ldrh #-2) and the
+      same subtraction chain; the only differences are LLVM's frame
+      (push {fp,lr} / pop {fp,pc}) and the uxth materialised as an and with
+      0xffff instead of the shift pair. Five host tests cover an empty
+      header-style node, a partially filled node, a packed node reporting
+      zero free, the u16 truncation/wrap on an underflowing layout, and a
+      sweep of record counts and data-end offsets against a native-u16
+      reference.
   - address: 0x08053d6c
     ghidra: FUN_08053d6c
     name: hfs_btree_get_node
