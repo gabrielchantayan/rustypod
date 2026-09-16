@@ -43875,14 +43875,48 @@ functions:
       unconditional tail b at 0x081c8334 and no predicated calls. The
       non-deleting plist/XML-node destructor first recursively destroys and
       operator_delete's the owned +0x20 processing-instruction companion,
-      tears down the +0x14 child vector as 40-byte nodes through unported
-      FUN_083e3284 then cxx_array_dealloc's its storage, releases the +0x10
-      COW value string, tears down/frees the +0x04 8-byte attribute-pair
-      vector, releases the +0x00 tag string, and returns node. The sole
-      unported direct callee is explicit PLIST_NODE_DESTROY_OPS: target calls
-      the verified address 0x083e3284; host tests replace it with a recorder.
+      tears down the +0x14 child vector as 40-byte nodes through the ported
+      plist_node_child_range_destroy @ 0x083e3284 then cxx_array_dealloc's
+      its storage, releases the +0x10 COW value string, tears down/frees
+      the +0x04 8-byte attribute-pair vector, releases the +0x00 tag
+      string, and returns node. All direct callees are ported and called
+      directly; the former PLIST_NODE_DESTROY_OPS seam was removed when
+      0x083e3284 was ported.
       The cxx_array_dealloc count arguments are faithfully computed from the
       capacity-minus-begin spans but dead at its already-ported tail veneer.
+
+  - address: 0x083e3284
+    ghidra: FUN_083e3284
+    name: plist_node_child_range_destroy
+    size: 40
+    sig: "void plist_node_child_range_destroy(void *vector, PlistNode *first, PlistNode *last)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: vector (unused; owning vector head by range-destroy
+        template convention)
+      param_2: first
+      param_3: last
+    renames:
+      FUN_0825c790: plist_node_destroy
+    notes: >-
+      Raw ARM extent is exactly 40 bytes: ten instructions at
+      0x083e3284..0x083e32a8 ending in ldmia sp!,{r4,r5,r6,pc},
+      immediately before the distinct sibling FUN_083e32ac; no literal
+      pool, matching Ghidra's 40-byte size. A full osos.dec ARM B/BL-word
+      decode finds 4 incoming bl sites, all unconditional, matching
+      Ghidra's call-site count; no predicated call forms. Destroys the
+      half-open [first, last) range of 0x28-byte PlistNode children: the
+      loop compares the iterators first, calls the ported
+      plist_node_destroy @ 0x0825c790 on the current node, advances by
+      0x28 only after the call, and terminates solely on iterator
+      equality; r0 (the vector head) is unused. The sole callee was
+      already ported, so the port calls it directly and the
+      PLIST_NODE_DESTROY_OPS seam in plist_node_destroy was removed in a
+      clean cutover. match.py shows the identical loop shape (cmp, bl,
+      add #0x28, cmp, bne); the diff is prologue/register allocation
+      plus an LLVM early-exit on empty ranges, matching the original's
+      compare-first branch.
 
   - address: 0x082a0074
     ghidra: FUN_082a0074
