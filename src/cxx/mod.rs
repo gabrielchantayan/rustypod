@@ -265,6 +265,7 @@ pub mod optional_vtable_slot_18_result;
 pub mod vtable_slot_3c_result_u16;
 pub mod vtable_slot_2c_read_i16;
 pub mod vtable_slot_40_result_word;
+pub mod vtable_slot_40_result_word_at;
 pub mod vtable_word_callback;
 pub mod guarded_vtable_slot_04_dispatch;
 pub mod guarded_vtable_slot_1c_dispatch;
