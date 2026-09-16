@@ -96770,3 +96770,42 @@ functions:
       names stay arg1..arg3 because their semantics belong to the unported
       submit (caller-supplied words include 0x1000, 0x20000000,
       0x40000000, 0x400000, 0x800000).
+  - address: 0x08059c68
+    ghidra: FUN_08059c68
+    name: counted_wstr_validate
+    size: 148
+    sig: "u32 counted_wstr_validate(const u16 *chars, i32 len, u32 flags)"
+    module: util/counted_wstr_validate
+    status: ported
+    renames:
+      param_1/r0: chars
+      param_2/r1: len
+      param_3/r2: flags
+      FUN_080d5090: charset_table_init (unported retailOS seam)
+      DAT_08059cfc: validate_flag_byte (0x089cb1a8, initialized byte)
+      DAT_08059d00: validate_table (0x08a777a8, 0x80-byte allowed-character table)
+    notes: >-
+      Raw osos.dec establishes a 148-byte instruction body
+      (0x08059c68..0x08059cfc) followed by its own 8-byte literal pool at
+      0x08059cfc..0x08059d04 (the two data addresses above); the next real
+      function begins at 0x08059d04. Decoding every ARM B/BL word in the
+      image finds exactly 5 direct bl call sites, all plain and
+      unconditional (0x08044394, 0x080443e8, 0x08044460, 0x080444b4,
+      0x08044508), zero predicated callers — matching Ghidra's count. The
+      body itself issues one predicated bleq (the lazy init) and no plain
+      bl. All five callers fetch a database string field via the
+      0x080d6e50 wrapper, halve the byte count, pass flags=0x1d, and
+      store the boolean into an object flag bit. Algorithm: flags&4
+      rejects unconditionally; len==0 accepts; flags&2 rejects a first
+      element <= 0x20; if the initialized flag byte is zero the unported
+      table builder 0x080d5090 runs; each element must be <= 0x7a with a
+      nonzero table entry, and flags&0x10 additionally rejects ASCII
+      digits. Deliberate deviations: the bleq becomes an ordinary
+      conditional call through the COUNTED_WSTR_VALIDATE_INIT seam
+      (target transmutes 0x080d5090; host substitutes a recorder), the
+      two fixed data addresses are host-replaceable seams, and element/
+      byte reads are volatile because the builder mutates the table
+      behind the compiler's back. match.py confirms the same block
+      structure; the digit test lowers to cmp #10/bcs (equivalent to the
+      original cmp #9/bhi) and the init dispatch goes through BLX as with
+      the other unported-callee seams.
