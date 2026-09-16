@@ -556,6 +556,10 @@ pub mod hints {
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
     pub const NESTED_OBJECT_VALUE: usize = 0xb300_0000;
+    // 0xb320_0000: dedicated to cxx/nested_object_value_at_4's raw-u32
+    // owner/nested-object fixtures; mappings never unmap, so no other user
+    // may share this hint.
+    pub const NESTED_OBJECT_VALUE_AT_4: usize = 0xb320_0000;
     // 0xb310_0000: dedicated to cxx/nested_object_value_at_14's raw-u32
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
