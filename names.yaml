@@ -29674,6 +29674,40 @@ functions:
       opflags +2 (NEVER written), p5 +3 (u8), p1 +4, p2 +8, p3 +12
       (`stmib`), p4 +16 (zeroed). Also clears p->expired at +0xff.
 
+  - address: 0x0839cf00
+    ghidra: FUN_0839cf00
+    name: refcounted_body_mutex_unlock_array_variant
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_array_variant(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839cf00..0x0839cf10: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_unlock @ 0x0807f6a0; bx lr. The
+      next separately linked function (attach helper 0x0839cf10) starts
+      at 0x0839cf10. Decoding every ARM B/BL word in osos.dec finds four
+      direct bl callers, all unconditional at 0x08096264, 0x080962d8,
+      0x0839cea8, and 0x0839cee0; no predicated calls or direct tail b
+      sites. No word-aligned image word equals this address, so it is
+      not virtually dispatched. This is the mutex-unlock half of the
+      helper pair (lock @ 0x0839cef0, unlock @ 0x0839cf00) linked
+      immediately after the release function @ 0x0839ce48, its two
+      in-family callers; that release disposes the implementation via
+      cpp_finalise_dtor_guard @ 0x082ab3ec as a 4-element array of
+      12-byte elements before tag-2 operator delete. It loads the
+      RefcountedBody's optional mutex at target +8 and tail-branches to
+      the already ported mutex_unlock only when non-NULL; byte-identical
+      sibling of refcounted_body_mutex_unlock @ 0x0839d44c,
+      refcounted_body_mutex_unlock_owned @ 0x0839d360, and
+      refcounted_body_mutex_unlock_owned_variant @ 0x0839cfec, kept
+      distinct by a target-only link section. No deliberate behavioral
+      deviations: match.py shows LLVM frame setup plus popeq early-out
+      and a tail b to mutex_unlock, preserving the load/guard/unlock
+      behavior. Host test covers a live mutex signal and the NULL-mutex
+      early-out.
+
   - address: 0x0839cf4c
     ghidra: FUN_0839cf4c
     name: refcounted_body_release_owned_variant
