@@ -23,6 +23,14 @@ pub const FT_ERR_ARRAY_TOO_LARGE: i32 = 0x0a;
 /// `FT_Err_Invalid_Library_Handle` — `moveq r0, #33` @ 0x0804f258.
 pub const FT_ERR_INVALID_LIBRARY_HANDLE: i32 = 0x21;
 
+/// `FT_Err_Invalid_Face_Handle` — `moveq r0, #35` @ 0x0804ec68
+/// (`ft_set_charmap`'s null-face gate).
+pub const FT_ERR_INVALID_FACE_HANDLE: i32 = 0x23;
+
+/// `FT_Err_Invalid_CharMap_Handle` — `moveq r0, #38` @ 0x0804ec78
+/// (`ft_set_charmap`'s null-charmaps gate).
+pub const FT_ERR_INVALID_CHARMAP_HANDLE: i32 = 0x26;
+
 /// `FT_Err_Out_Of_Memory` — `moveq r4, #64` in `ft_mem_qalloc`
 /// @ 0x082cfb1c.
 pub const FT_ERR_OUT_OF_MEMORY: i32 = 0x40;
