@@ -56,6 +56,7 @@ pub mod bio_snprintf;
 pub mod bio_ctrl;
 pub mod bio_copy_next_retry;
 pub mod bn_num_bits;
+pub mod bn_num_bits_word;
 pub mod bn_bn2bin;
 pub mod bn_add;
 pub mod bn_mod_mul_montgomery;
