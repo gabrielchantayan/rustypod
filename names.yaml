@@ -28650,6 +28650,27 @@ functions:
       as "destroy me"; the two readings never collide because a leaked
       rep is the sole owner by definition. Returns `dst`.
 
+  - address: 0x083d7e58
+    ghidra: FUN_083d7e58
+    name: cxx_string_pair_entry_copy_ctor
+    size: 48
+    sig: "char **cxx_string_pair_entry_copy_ctor(void *owner, CxxStringPairRangeEntry *destination, const CxxStringPairRangeEntry *source)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: destination
+      param_3/r2: source
+    notes: >-
+      Raw ARM is exactly 12 instructions at 0x083d7e58..0x083d7e84; the
+      independent sibling at 0x083d7e88 fixes the 48-byte extent. r0 is
+      discarded, a NULL destination returns NULL before source is read,
+      then it COW-copies the first and second string words through
+      cxx_string_copy_ctor @ 0x083d8c30 and copies the trailing +0x08 word.
+      Returns destination+4. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds four direct unconditional bl callers (0x081df428,
+      0x083e2fb8, 0x083e3058, 0x083e8fe4), zero predicated BL callers,
+      and no direct tail branches. No deliberate deviations.
   - address: 0x083d7e98
     ghidra: FUN_083d7e98
     name: cxx_string_pair_copy_ctor

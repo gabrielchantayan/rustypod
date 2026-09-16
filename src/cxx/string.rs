@@ -384,6 +384,71 @@ pub unsafe extern "C" fn cxx_string_pair_copy_ctor(
     cxx_string_copy_ctor(destination.add(1), source.add(1))
 }
 
+
+#[cfg(target_arch = "arm")]
+unsafe extern "C" {
+    #[link_name = "cxx_string_copy_ctor"]
+    fn cxx_string_copy_ctor_opaque(
+        destination: *mut *mut u8,
+        source: *const *mut u8,
+    ) -> *mut *mut u8;
+}
+
+/// cxx_string_pair_entry_copy_ctor — retailOS `FUN_083d7e58` @ `0x083d7e58`
+/// (48 bytes; four direct, unconditional `bl` call sites at 0x081df428,
+/// 0x083e2fb8, 0x083e3058, and 0x083e8fe4).
+///
+/// Raw ARM spans 0x083d7e58..0x083d7e84; the independent null-checking
+/// sibling begins at 0x083d7e88. It discards the r0 owner, returns a null
+/// destination without reading the source, COW-copies the two string words in
+/// order, then copies the trailing word at +0x08. The return is the address
+/// of the destination's second string word. Binary-wide ARM B/BL decoding
+/// found four plain `bl` callers and no predicated, tail-branch, or data-word
+/// references. No deliberate deviations.
+///
+/// # Safety
+///
+/// A non-null `destination` and `source` must designate valid 12-byte
+/// target-layout entries.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_entry_copy_ctor(
+    _owner: *mut u8,
+    destination: *mut CxxStringPairRangeEntry,
+    source: *const CxxStringPairRangeEntry,
+) -> *mut *mut u8 {
+    if destination.is_null() {
+        return destination.cast();
+    }
+
+    #[cfg(target_arch = "arm")]
+    {
+        cxx_string_copy_ctor_opaque(
+            core::ptr::addr_of_mut!((*destination).first),
+            core::ptr::addr_of!((*source).first),
+        );
+        let second = cxx_string_copy_ctor_opaque(
+            core::ptr::addr_of_mut!((*destination).second),
+            core::ptr::addr_of!((*source).second),
+        );
+        (second as *mut u8).add(4).cast::<u32>().write((*source).trailing);
+        second
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        cxx_string_copy_ctor(
+            core::ptr::addr_of_mut!((*destination).first),
+            core::ptr::addr_of!((*source).first),
+        );
+        let second = cxx_string_copy_ctor(
+            core::ptr::addr_of_mut!((*destination).second),
+            core::ptr::addr_of!((*source).second),
+        );
+        (*destination).trailing = (*source).trailing;
+        second
+    }
+}
+
 /// cxx_string_pair_destroy — original @ 0x0825c8fc (32 bytes).
 ///
 /// Source: `ipod-decomp/decomp/c/025/0825c8fc_FUN_0825c8fc.c`. The raw ARM
@@ -1976,6 +2041,57 @@ mod tests {
             );
             assert_eq!((*data_rep(source.second)).refcount, -1);
             assert_eq!((*data_rep(destination.second)).refcount, 0);
+        }
+    }
+
+    #[test]
+    fn pair_entry_copy_ctor_copies_trailer_and_preserves_cow_semantics() {
+        let _guard = arena();
+        unsafe {
+            let mut source_first: *mut u8 = core::ptr::null_mut();
+            let mut source_second: *mut u8 = core::ptr::null_mut();
+            build(&mut source_first, b"shared");
+            build(&mut source_second, b"leaked");
+            (*data_rep(source_second)).refcount = -1;
+            let source = CxxStringPairRangeEntry {
+                first: source_first,
+                second: source_second,
+                trailing: 0xa5a5_5a5a,
+            };
+            let mut destination = CxxStringPairRangeEntry {
+                first: core::ptr::null_mut(),
+                second: core::ptr::null_mut(),
+                trailing: 0,
+            };
+
+            assert_eq!(
+                cxx_string_pair_entry_copy_ctor(
+                    core::ptr::null_mut(),
+                    core::ptr::addr_of_mut!(destination),
+                    core::ptr::addr_of!(source),
+                ),
+                core::ptr::addr_of_mut!(destination.second),
+            );
+            assert_eq!(destination.first, source.first);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_ne!(destination.second, source.second);
+            assert_eq!(
+                core::slice::from_raw_parts(destination.second, 7),
+                b"leaked\0",
+            );
+            assert_eq!(destination.trailing, source.trailing);
+        }
+    }
+
+    #[test]
+    fn pair_entry_copy_ctor_null_destination_does_not_read_source() {
+        unsafe {
+            assert!(cxx_string_pair_entry_copy_ctor(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+            )
+            .is_null());
         }
     }
 
