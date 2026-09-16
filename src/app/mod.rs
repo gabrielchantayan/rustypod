@@ -246,6 +246,7 @@ pub mod resource_handle_pair_reset_notify;
 pub mod root_context_f9c_bound;
 pub mod resource_range_validate_position;
 pub mod resource_chain;
+pub mod resource_index_lookup;
 pub mod resource_reference_value;
 pub mod scoped_context;
 pub mod search_query_token_score;

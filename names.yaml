@@ -84943,6 +84943,50 @@ functions:
       verified retailOS addresses; host tests inject their ABI through a
       private seam. The vtable target has no recovered concrete identity, so
       only its binary-verified ABI and slot are represented.
+  # --- resource-index record lookup dispatcher ---
+  - address: 0x080506bc
+    ghidra: FUN_080506bc
+    name: resource_index_lookup
+    size: 76
+    sig: "ResourceIndexRecord *resource_index_lookup(ResourceIndex *index, ResourceIndexEntry *entry)"
+    module: app/resource_index_lookup
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: entry
+      "entry+0x00": owner_element
+      "entry+0xf0": direct_key
+      "entry+0x110": indirect_key_lo
+      "entry+0x114": indirect_key_hi
+      FUN_0806b410: scoped_context_owner_validity
+      FUN_08050418: resource_index_direct_key_search (unported, fixed-address seam)
+      FUN_0805054c: resource_index_indirect_key_search (unported, fixed-address seam)
+    notes: >-
+      Raw osos.dec gives the exact 76-byte extent 0x080506bc..0x08050708;
+      the next separately linked function starts at 0x08050708 and there is
+      no literal pool. Decoding every ARM B/BL immediate word finds exactly
+      four inbound unconditional plain bl calls (0x080513a4, 0x0809dd18,
+      0x0809e098, 0x082a4500), zero predicated bl forms, and two inbound
+      direct tail branches (unconditional b at 0x08051354, predicated bne
+      at 0x08051388). The body holds two bl calls plus one predicated bne
+      tail branch. It validates entry's first word through the ported
+      scoped_context_owner_validity and returns NULL on rejection; a
+      nonzero direct key at entry+0xf0 tail-branches to the unported
+      32-bit-key record search at 0x08050418, otherwise the unported
+      64-bit-key search at 0x0805054c is called as (index, 0,
+      *(entry+0x110), *(entry+0x114)) with an explicit zero fifth stack
+      argument that the callee reads at [sp,#0x30]. Ghidra's decompile
+      mistargets the bne as 0x08050518 (the preceding function's epilogue,
+      folding that foreign body into its C output) and reports the key
+      loads one word late; the raw words 0x1affff4a and 0xe5942110 /
+      0xe5943114 fix the true target 0x08050418 and the plain [r4,#0x110]
+      / [r4,#0x114] addressing. Target builds call both record searches at
+      their verified fixed addresses; host tests inject their ABI through a
+      private ops table. LLVM keeps the direct-key path a true tail call
+      via a literal-pool bx and reaches the indirect search through blx on
+      a computed address instead of the original direct bl, and builds a
+      frame pointer the original lacks — behaviorally identical.
+
   - address: 0x0829cf40
     ghidra: FUN_0829cf40
     name: byte_is_three_or_four
