@@ -8,8 +8,7 @@
 //!   function's doc header for the algorithm.
 //! - `iter_owner` — original: `FUN_083d5e5c` @ 0x083d5e5c (20 bytes):
 //!   iterator's node's owning-list identity word, NULL in -> 0 out.
-//!   Ported in place (private), the block_mgr.rs `iter_advance`
-//!   rationale.
+//!   Exported below.
 //! - `iter_equal` — original: `FUN_083d5e70` @ 0x083d5e70 (24 bytes):
 //!   iterator pointee comparison, 1 on equal. Exported below.
 //! - `list_iter_advance` — original: `FUN_083d5e88` @ 0x083d5e88 (24 bytes),
@@ -75,18 +74,32 @@ unsafe fn set_word(object: *mut u8, offset: usize, value: u32) {
     (object.add(offset) as *mut u32).write_unaligned(value);
 }
 
-/// iter_owner — original: `FUN_083d5e5c` @ 0x083d5e5c (20 bytes),
-/// ported in place.
+/// iter_owner — original: `FUN_083d5e5c` @ 0x083d5e5c (20 bytes,
+/// raw-verified: `ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0];
+/// moveq r0,#0; bx lr` — the next function (iter_equal) starts
+/// immediately at 0x083d5e70). 4 `bl` call sites, binary-verified,
+/// all unconditional: 0x083d5cac, 0x083d5d40, 0x083d5d54 and
+/// 0x083d5d68, all inside list_splice's ownership checks; the body
+/// itself makes no calls.
 ///
-/// The owning-list identity word of the node iterator `it` points at:
-/// `**it`, NULL node in -> 0 out (`moveq r0, #0`).
+/// The owning-list identity word of the node iterator `it` points
+/// at: `**it`, NULL node in -> 0 out (`moveq r0, #0`) — the ADS
+/// checked-iterator "is this mine?" probe. Kept as a distinct
+/// export because 0x083d5e5c is independently hookable; its
+/// dedicated section prevents LLVM from folding it. Deliberate
+/// deviation: LLVM adds its fp frame — match.py structural only.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iter_owner")]
 #[inline(never)]
-unsafe fn iter_owner(it: *mut *mut u8) -> *mut u8 {
+pub unsafe extern "C" fn iter_owner(it: *mut *mut u8) -> *mut u8 {
     let node = *it;
     if node.is_null() {
         core::ptr::null_mut()
     } else {
-        ptr_word(node, NODE_OWNER_OFFSET)
+        // Aligned word read like the original `ldrne r0, [r0]` — not
+        // ptr_word's read_unaligned byte chain. Target pointers
+        // truncate to u32; host fixtures live below 4 GiB.
+        (node as *mut u32).read() as *mut u8
     }
 }
 
@@ -252,6 +265,28 @@ mod tests {
 
     fn lock() -> MutexGuard<'static, ()> {
         LIST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn iter_owner_reads_owner_word_and_maps_null_to_zero() {
+        // iter_owner dereferences the iterator once (the node pointer)
+        // and, when non-NULL, reads the node's owner word at +0x0; a
+        // stack node suffices — the owner word itself is an opaque
+        // identity, never dereferenced.
+        let owner = 0x0800d00d as u32;
+        let mut node = [owner, 0xdeadbeef, 0, 0];
+        let mut it = node.as_mut_ptr() as *mut u8;
+        let mut null_it = core::ptr::null_mut::<u8>();
+        unsafe {
+            assert_eq!(iter_owner(&mut it), owner as *mut u8, "node owner");
+            assert_eq!(
+                iter_owner(&mut null_it),
+                core::ptr::null_mut(),
+                "NULL node -> 0 (moveq r0, #0)",
+            );
+            // The iterator word must be untouched by the probe.
+            assert_eq!(it, node.as_mut_ptr() as *mut u8);
+        }
     }
 
     #[test]

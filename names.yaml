@@ -8756,10 +8756,10 @@ functions:
       range_last, in the original's order) and both count fixups,
       return 1. Quirk: NO empty-range guard — first == last moves zero
       nodes but the re-link still runs, swapping the predecessor links
-      (pinned by a host test). Helpers remain private: iter_owner
-      (0x083d5e5c, 20 bytes) and iter_equal (0x083d5e70, 24 bytes).
-      The adopt walk directly calls exported list_iter_advance
-      (0x083d5e88, 24 bytes). The crate adapter
+      (pinned by a host test). iter_owner (0x083d5e5c, 20 bytes) and
+      iter_equal (0x083d5e70, 24 bytes) are distinct exports with
+      dedicated sections; the adopt walk directly calls exported
+      list_iter_advance (0x083d5e88, 24 bytes). The crate adapter
       splice_blocks (verdict discarded, like the original's callers)
       is now the wired BLOCK_MANAGER_OPS.splice_blocks default
       (stub_splice_blocks removed — the only src/heap touch, three
@@ -8773,6 +8773,38 @@ functions:
       word accesses come out as (read|write)_unaligned chains,
       list_iter_advance remains a direct call, LLVM adds its fp frame —
       the accepted house deviations.
+
+  - address: 0x083d5e5c
+    ghidra: FUN_083d5e5c
+    name: iter_owner
+    size: 20
+    sig: "u8 *iter_owner(u8 **it)"
+    module: cxx/list_splice
+    status: ported
+    renames:
+      param_1/r0: it
+      it_deref: node
+      return/r0: owner
+    notes: >-
+      Raw ARM extent is exactly 20 bytes at 0x083d5e5c..0x083d5e70:
+      ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; moveq r0,#0; bx lr;
+      iter_equal begins immediately at 0x083d5e70. Ghidra's "4 bl
+      call sites" are the inbound callers, verified against the raw
+      binary: 4 unconditional bl at 0x083d5cac, 0x083d5d40,
+      0x083d5d54 and 0x083d5d68, all inside list_splice's ownership
+      checks; the body itself contains no calls. It is the ADS
+      checked-iterator ownership probe: the owning-list identity
+      word (**it) of the node iterator `it` points at, NULL node in
+      -> 0 out. Previously a private helper inside cxx/list_splice;
+      now a distinct export with link_section .text.iter_owner so
+      LLVM cannot fold it, keeping it independently hookable. The
+      owner-word read is an aligned ldr (node as *mut u32), not
+      ptr_word's read_unaligned byte chain. Host test pins the
+      owner-word read, NULL -> 0 and that the iterator word is left
+      untouched. match.py structural: same load/cmp/null-select
+      shape; LLVM splits the predicated ldrne/moveq into a
+      moveq/bxeq early return plus an unpredicated tail ldr and
+      adds its fp frame — the accepted house deviations.
 
   - address: 0x083d5e70
     ghidra: FUN_083d5e70
