@@ -99729,3 +99729,26 @@ functions:
       branch-immediate words finds exactly four inbound direct calls, all
       unconditional plain bl, with no predicated bl forms. The body has
       no callee or dispatch seam. No deliberate deviations.
+
+  - address: 0x083da248
+    ghidra: FUN_083da248
+    name: copy_four_words_forward_alt
+    size: 36
+    sig: "u32 *copy_four_words_forward_alt(u32 *destination, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r2: copied_word
+    notes: >-
+      Raw osos.dec establishes the exact nine-instruction, 36-byte body at
+      0x083da248..0x083da26c: four aligned load/store pairs followed by bx lr;
+      the separately linked next function starts with push {r4,r5,lr} at
+      0x083da26c. Decoding every aligned ARM B/BL-immediate word finds exactly
+      four inbound direct calls, all unconditional plain bl at 0x081da6d8,
+      0x081da6e4, 0x081da78c, and 0x083deee4, with no predicated bl forms.
+      The body has no callee or dispatch seam and is byte-identical to the
+      established copy_four_words_forward at 0x083da42c. This separately linked
+      entry retains its own exported symbol and text section for hooking. No
+      deliberate deviations.

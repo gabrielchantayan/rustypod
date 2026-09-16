@@ -55,6 +55,36 @@ pub unsafe extern "C" fn copy_four_words_forward(
     destination.add(3).write(source.add(3).read());
     destination
 }
+/// copy_four_words_forward_alt — retailOS `FUN_083da248` at `0x083da248`
+/// (36 bytes; four unconditional plain-`bl` call sites, binary-verified).
+///
+/// Raw ARM establishes the true extent as `0x083da248..0x083da26c`: four
+/// aligned load/store pairs followed by `bx lr`; the next independent function
+/// begins with `push {r4,r5,lr}` at `0x083da26c`. The body is byte-identical
+/// to [`copy_four_words_forward`] at 0x083da42c, but needs its own symbol for
+/// a hook at this separately linked entry. It copies four words from `source`
+/// to `destination` in ascending offset order and returns `destination`.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `source` must be valid for four aligned `u32` reads and `destination` for
+/// four aligned `u32` writes. The ranges may overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.copy_four_words_forward_alt")]
+#[inline(never)]
+pub unsafe extern "C" fn copy_four_words_forward_alt(
+    destination: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    destination.write(source.read());
+    destination.add(1).write(source.add(1).read());
+    destination.add(2).write(source.add(2).read());
+    destination.add(3).write(source.add(3).read());
+    destination
+}
+
 
 /// copy_four_words_staggered — original: `FUN_08248704` @ **0x08248704**
 /// (**36 bytes exactly**, `0x08248704..0x08248728`; `0x08248728` opens the
@@ -127,7 +157,8 @@ mod tests {
     extern crate std;
 
     use super::{
-        copy_four_words, copy_four_words_forward, copy_four_words_paired, copy_four_words_staggered,
+        copy_four_words, copy_four_words_forward, copy_four_words_forward_alt, copy_four_words_paired,
+        copy_four_words_staggered,
     };
 
     /// Independent model of the four ordered `ldr`/`str` pairs. The returned
@@ -204,6 +235,36 @@ mod tests {
 
             assert_eq!(actual, expected, "destination={destination}");
             assert_eq!(actual_return, expected_return, "destination={destination}");
+        }
+    }
+
+    #[test]
+    fn forward_alt_matches_ordered_instruction_model_for_all_four_word_overlaps() {
+        for destination in 0..=6 {
+            let source = 3;
+            let initial = [
+                0x0000_0000,
+                0x1111_1111,
+                0x2222_2222,
+                0x3333_3333,
+                0x4444_4444,
+                0x5555_5555,
+                0x6666_6666,
+                0x7777_7777,
+                0x8888_8888,
+                0x9999_9999,
+            ];
+            let mut expected = initial;
+            let mut actual = initial;
+
+            reference_four_word_copy(&mut expected, source, destination);
+            let expected_return = unsafe { actual.as_mut_ptr().add(destination) };
+            let actual_return = unsafe {
+                copy_four_words_forward_alt(expected_return, actual.as_ptr().add(source))
+            };
+
+            assert_eq!(actual, expected, "destination={destination}");
+            assert_eq!(actual_return, expected_return);
         }
     }
 
