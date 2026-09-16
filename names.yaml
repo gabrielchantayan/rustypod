@@ -99905,3 +99905,29 @@ functions:
       ported directly; target builds call the other three verified retail
       addresses and host builds use ABI seams. Deliberate deviation: the known
       leaf pair copies are direct word stores.
+
+  - address: 0x083d7dd0
+    ghidra: FUN_083d7dd0
+    name: copy_u32_pair_if_destination
+    size: 16
+    sig: "u32 *copy_u32_pair_if_destination(void *owner, u32 *destination, const u32 *source)"
+    module: util/copy_u32_pair_if_destination
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: destination
+      param_3/r2: source
+      return/r0: destination
+    notes: >-
+      Raw osos.dec words e1b00001, 18920006, 18800006, e12fff1e establish
+      the full 16-byte body: movs r0,r1; ldmne r2,{r1,r2};
+      stmne r0,{r1,r2}; bx lr. The next separately linked function begins
+      at 0x083d7de0, so Ghidra's extent is exact. It ignores owner, returns
+      destination, and when destination is non-NULL loads both aligned source
+      words before either destination store; NULL destination neither reads
+      source nor stores. Decoding all ARM B/BL-immediate words in osos.dec
+      finds four inbound plain direct bl calls and no predicated direct bl
+      calls. The Rust port uses volatile aligned reads and writes to preserve
+      that grouped load-before-store behavior under LLVM; match.py reports
+      the same null guard, two source loads, and two destination stores, with
+      the compiler-added frame and scalar instructions replacing ldm/stm.
