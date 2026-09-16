@@ -46,6 +46,37 @@ pub unsafe extern "C" fn ks_alloc_timer() -> u32 {
     request_words.add(TIMER_ALLOC_RESULT_WORD).read()
 }
 
+/// iram_ks_alloc_timer_veneer — original: `thunk_EXT_FUN_22003b8c` @
+/// `0x08037f18` (8 bytes: `ldr pc,[pc,#-4]` / `0xe51ff004`, followed by the
+/// `0x22003b8c` target literal at `0x08037f1c`; Ghidra's 4-byte extent
+/// excludes that word).
+///
+/// Raw `osos.dec` decoding proves the following veneer begins at `0x08037f20`.
+/// The relocator at `0x080046e0` copies `0xaed8` bytes from `0x08000000` to
+/// `0x22000000`, so the target is the IRAM mirror of [`ks_alloc_timer`] @
+/// `0x08003b8c`. Decoding every ARM B/BL word finds exactly five direct
+/// calls, all unconditional `bl` at `0x08084bf8`, `0x080c9b8c`, `0x08393640`,
+/// `0x08393670`, and `0x08393810` (matching Ghidra's call-site count); there
+/// are no predicated calls or tail branches. No raw aligned word holds the
+/// thunk address, and the only `0x22003b8c` word is the target literal at
+/// `0x08037f1c`, so the veneer has no observed indirect dispatch.
+///
+/// The original tail-loads PC, passing the returned timer handle through
+/// unchanged. This port volatile-loads the already ported body and calls it
+/// instead; that extra call/return is the deliberate code-generation
+/// deviation needed to keep this exported veneer as a distinct target.
+///
+/// # Safety
+/// Same as [`ks_alloc_timer`]: allocates an RTXC timer through the ROM
+/// dispatcher and returns the handle/result word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_ks_alloc_timer_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_ks_alloc_timer_veneer() -> u32 {
+    let body = core::ptr::read_volatile(&(ks_alloc_timer as unsafe extern "C" fn() -> u32));
+    body()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -112,6 +143,25 @@ mod tests {
         assert_eq!(
             returned, 0xa5a5_5a5a,
             "returns the callback-populated final record word"
+        );
+    }
+
+    #[test]
+    fn veneer_delegates_to_alloc_body_once_and_passes_result_through() {
+        let _ops = install_recording_dispatcher();
+
+        let returned = unsafe { iram_ks_alloc_timer_veneer() };
+
+        unsafe {
+            assert_eq!(CALL_COUNT, 1, "the veneer dispatches exactly once");
+            assert_eq!(
+                OBSERVED_SELECTOR, TIMER_ALLOC_SERVICE,
+                "the veneer reaches the same selector-0x10 request"
+            );
+        }
+        assert_eq!(
+            returned, 0xa5a5_5a5a,
+            "the veneer returns the body's result word unchanged"
         );
     }
 }

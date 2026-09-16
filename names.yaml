@@ -49529,6 +49529,35 @@ functions:
       distinct exported call target; host tests prove the null no-dispatch and
       non-null selector-0x11 delegation cases. match.py structural difference
       is expected for the Rust indirect call frame.
+  - address: 0x08037f18
+    ghidra: thunk_EXT_FUN_22003b8c
+    name: iram_ks_alloc_timer_veneer
+    size: 8
+    sig: "u32 iram_ks_alloc_timer_veneer(void)"
+    module: runtime/message_0x10
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003b8c: iram_ks_alloc_timer_veneer
+      EXT_FUN_22003b8c: ks_alloc_timer
+      DAT_08037f1c: iram_ks_alloc_timer_target
+    notes: >-
+      Raw osos.dec proves this Ghidra 4-byte function is an 8-byte ADS literal
+      veneer: e51ff004 (ldr pc,[pc,#-4]) at 0x08037f18, followed by target
+      word 0x22003b8c at 0x08037f1c; the next veneer begins at 0x08037f20.
+      The relocator at 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+      0x22000000, so the target is the IRAM mirror of the already ported
+      ks_alloc_timer at 0x08003b8c. Decoding every ARM B/BL word finds
+      exactly five direct calls, all unconditional bl at 0x08084bf8,
+      0x080c9b8c, 0x08393640, 0x08393670, and 0x08393810, matching Ghidra's
+      call-site count; no predicated call or tail branch reaches it. No raw
+      aligned word holds the thunk address, and the only 0x22003b8c word is
+      the target literal itself, so there is no observed indirect dispatch.
+      The retail veneer tail-loads PC with the returned timer handle passed
+      through unchanged. The port volatile-loads the existing body and calls
+      it, preserving behavior while keeping this distinct exported call
+      target; the host test proves single delegation with selector 0x10 and
+      pass-through of the body result. match.py structural difference is
+      expected for the Rust indirect call frame.
   - address: 0x08037f20
     ghidra: thunk_EXT_FUN_220041fc
     name: gateway_service18_request
