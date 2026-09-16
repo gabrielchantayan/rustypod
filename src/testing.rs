@@ -366,6 +366,10 @@ pub mod hints {
     // sqlite3/aDb/Schema and CollSeq fixtures; mappings never unmap, so no
     // other user may share this hint.
     pub const SQLITE_LOCATE_COLL_SEQ: usize = 0x7f50_0000;
+    // 0x7f60_0000: dedicated to sqlite/column_default's raw-u32
+    // sqlite3/aDb/Schema and Column-array fixtures; mappings never
+    // unmap, so no other user may share this hint.
+    pub const SQLITE_COLUMN_DEFAULT: usize = 0x7f60_0000;
     // 0x7f30_0000: dedicated to app/character_class_scan's target-width
     // parser and character-class-table fixture; mappings never unmap, so no
     // other user may share this hint.
