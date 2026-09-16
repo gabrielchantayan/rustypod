@@ -124,6 +124,7 @@ pub mod find_collation_encoding;
 pub mod index_key_info;
 pub mod find_table;
 pub mod find_index;
+pub mod locate_coll_seq;
 pub mod locate_table;
 pub mod lock_and_prepare;
 pub mod free_p4;

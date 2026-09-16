@@ -36247,6 +36247,48 @@ functions:
       named forwarding and third-record selection, lookup failure, and all
       three record positions.
 
+  - address: 0x0837d18c
+    ghidra: FUN_0837d18c
+    name: locate_coll_seq
+    size: 160
+    sig: "CollSeq *sqlite3LocateCollSeq(Parse *parse, const char *name, int name_len)"
+    module: sqlite/locate_coll_seq
+    status: ported
+    vars: {param_1: parse, param_2: name, param_3: name_len,
+      DAT_0837d22c: NO_SUCH_COLLATION_SEQUENCE}
+    notes: >-
+      SQLite 3.5.9's sqlite3LocateCollSeq. Exact raw extent
+      0x0837d18c..0x0837d22c: the return is pop {r3-r9,pc} at 0x0837d228,
+      immediately followed by the "no such collation sequence: %.*s"
+      format string. 4 bl call sites, binary-scanned over every ARM B/BL
+      word in osos.dec, all unconditional: 0x0837434c, 0x083788d4,
+      0x0837b348 (index_key_info), 0x0839a1e4. Algorithm: db = parse->db
+      (+0x00); encoding = ldrb [[db+0x08]+0x14]+0x59 (ENC(db), the
+      aDb[0].pSchema->enc chain); init_busy = ldrb [db+0x80]
+      (sqlite3.init.busy). Calls the ported find_collation_encoding @
+      0x08378ad0 with create = init_busy regardless of branch. A busy
+      handle returns the raw lookup result immediately, even NULL, with
+      no error. Otherwise a NULL result or one whose comparator word at
+      +0x0c (CollSeq->xCmp) is NULL goes through the collation factory
+      0x0837a17c (sqlite3GetCollSeq) with (db, coll, name, name_len); a
+      final NULL reports the format through the ported sqlite_error_msg
+      with (name_len, name) as varargs, falling back to the ported
+      unguarded strlen @ 0x08392478 when name_len < 0, and returns NULL.
+      Deviations: the 0x0837a17c helper is not ported (same boundary as
+      sqlite/expr_coll_seq.rs), so its observed ABI is a volatile
+      LOCATE_COLL_SEQ_HOOKS seam - target builds call the exact retail
+      address (transmuted via the shared GET_COLL_SEQ_ADDRESS constant),
+      host tests install a recorder; the db aDb/pSchema chain and the
+      CollSeq name/comparator words are target-width u32 reads so host
+      pointer width cannot shift fields. match.py structural: same
+      5-argument find (str init_busy,[sp]), busy early return, +0x0c
+      comparator gate, cmn #1/bgt negative-length guard; the diff is
+      LLVM's fp frame, register shuffling, and the seam's ldr/blx.
+      Host tests cover busy-handle passthrough (no factory, no error),
+      found-with-comparator bypass, missing-comparator factory
+      forwarding and upgrade, factory failure reporting with an explicit
+      non-NUL-terminated length, and the negative-length strlen path.
+
   - address: 0x0837b2f4
     ghidra: FUN_0837b2f4
     name: index_key_info
