@@ -6020,6 +6020,54 @@ functions:
       shape already accepted for calloc_tag4 @ 0x0805d1dc and
       free_tag4 @ 0x0805d070.
 
+  - address: 0x0805d270
+    ghidra: FUN_0805d270
+    name: memh_set_len
+    size: 168
+    sig: "i32 memh_set_len(MemhBufferHeader *header, u32 new_len)"
+    module: heap/memh_set_len
+    vars: {param_1: header, param_2: new_len}
+    status: ported
+    notes: >-
+      Sets the used length of a 16-byte MemH managed-buffer header
+      `{payload, "MemH" magic @ +0x04 = 0x4d656d48, capacity @ +0x08,
+      length @ +0x0c}` (heap tag 4 family of memh_handle_destroy @
+      0x0805d028, constructor @ 0x0805d10c). Ghidra's 168 bytes and 5
+      `bl` callers are both correct; extent confirmed by the trailing
+      magic literal @ 0x0805d318 (loaded at 0x0805d284) and the next
+      function's `push {r4,lr}` @ 0x0805d31c. Callers binary-verified
+      by decoding every ARM B/BL word in osos.dec: exactly 5 plain
+      `bl` (0x0805d22c, 0x08076144, 0x08091718, 0x08091754,
+      0x080d2d00), none predicated, no tail `b`. Semantics, verified
+      against the raw words: NULL header or bad magic returns -50
+      (`mvn r0,#0x31`); `new_len > capacity` grows; `length <= new_len
+      <= capacity` only records length; a shrink reallocates when it
+      returns >= 0x800 bytes to the heap (`capacity - new_len >=
+      0x800`, the `cmp r1,#0x800; bcs` at 0x0805d2b4) OR drops the
+      buffer below half full (`new_len < capacity/2`, the `cmp
+      r5,r0,lsr #1; bcs` at 0x0805d2bc), else it stays in place.
+      Reallocation is malloc_wrapper(new_len, tag 4) @ 0x080eb67c,
+      memmove min(length, new_len) bytes through the rom_memmove
+      gateway @ 0x08037e00, free_wrapper(old, tag 4) @ 0x080e7970,
+      then capacity/payload updated; a failed allocation returns -108
+      (`mvn r0,#0x6b`) with the header untouched; every success path
+      falls through to `length = new_len; return 0`. Deviations: the
+      copy calls the ported Rust memmove directly instead of the ROM
+      veneer (house precedent: libc/bcopy_guarded.rs; LLVM lowers it
+      to `bl __aeabi_memmove`, same as bcopy_guarded's accepted
+      codegen), and malloc/free go through the ported
+      malloc_wrapper/free_wrapper HEAP_OPS indirection instead of the
+      direct `bl`s — match.py therefore shows the inlined lazy heap
+      init plus ops-slot dispatch around the same guards, the
+      0x800/half-full shrink tests, the min() copy and the two error
+      returns, the shape already accepted for free_tag4/calloc_tag4.
+      `#[inline(never)]` keeps a real BL target for the 5 callers.
+      Host tests (mock heap + 0x3400_0000 u32 slab) cover NULL, bad
+      magic, in-place length update, in-place small shrink,
+      below-half-full shrink realloc, deep shrink realloc with exact
+      copy bound, grow with copy/free/field updates, and alloc-failure
+      rollback.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
