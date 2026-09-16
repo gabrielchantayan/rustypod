@@ -38243,6 +38243,28 @@ functions:
       returned element. Exported in a distinct link section so LLVM retains
       a separately hookable symbol despite its byte-identical body.
 
+  - address: 0x083d5f74
+    ghidra: FUN_083d5f74
+    name: container_element_at_alias_5f74
+    size: 24
+    sig: "void *container_element_at_alias_5f74(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Byte-identical instantiation of container_element_at @ 0x083d5efc.
+      Raw osos.dec establishes the 24-byte extent from push {r4,lr} at
+      0x083d5f74 through pop {r4,pc} at 0x083d5f88; the next independently
+      linked sibling begins at 0x083d5f8c. It implements T *operator[](size_t):
+      read this->vtable[16] (+0x40), call it with this and the live r1 index,
+      then load the returned element slot. Ghidra drops r1 and returns the
+      slot address, but raw blx r2 preserves r1 and the following ldr r0,[r0]
+      returns the element pointer. A complete raw ARM B/BL-immediate decode
+      finds six direct call sites, all unconditional plain bl and no
+      predicated calls. Callers pass indexes and NULL-test the returned
+      element. The dedicated link section keeps this independently hookable
+      byte-identical body from folding; deliberate deviations: none.
+
   - address: 0x083d6870
     ghidra: FUN_083d6870
     name: container_element_at_alias_6870
