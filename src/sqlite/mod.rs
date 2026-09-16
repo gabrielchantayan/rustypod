@@ -159,6 +159,7 @@ pub mod os_file_size;
 pub mod os_open;
 pub mod os_read;
 pub mod os_sync;
+pub mod os_truncate;
 pub mod os_write;
 pub mod vfs_find;
 pub mod write32bits;
