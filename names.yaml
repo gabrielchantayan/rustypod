@@ -292,6 +292,31 @@ functions:
       clz, and lsr rather than ARM ADS cmn plus predicated moves, while retaining
       the aligned load and exact boolean result. Host tests cover zero, one,
       maximum-minus-one, and the maximum sentinel. Deliberate deviations: none.
+  # --- u32 maximum-sentinel predicate alias ---
+  - address: 0x083b4928
+    ghidra: FUN_083b4928
+    name: u32_deref_is_max_b4928_copy
+    size: 20
+    sig: "u32 u32_deref_is_max(const u32 *word)"
+    module: util/u32_deref_is_max
+    status: ported
+    renames:
+      param_1/r0: word
+      "*param_1/r0": word_value
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM words from
+      ldr r0,[r0] at 0x083b4928 through bx lr at 0x083b4938; the separately
+      linked next function begins at 0x083b493c. The function returns one only
+      when its aligned input word is 0xffffffff, otherwise zero. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly four inbound
+      direct calls, all unconditional bl at 0x0824d130, 0x083b4b0c,
+      0x083b4b38, and 0x083b4b60; there are no predicated calls or direct
+      tail-B callers. The callers test slots in a word table where the maximum
+      word marks an absent index, storing the slot value shifted right by one
+      when present. This body is byte-identical to the established
+      u32_deref_is_max port at 0x083b4788, so this ledger-only alias
+      deliberately adds no redundant dispatch seam; hook 0x083b4928 to
+      u32_deref_is_max. Deliberate deviations: none.
   # --- C++ red-black-tree left rotation alias ---
   - address: 0x083c0194
     ghidra: FUN_083c0194
