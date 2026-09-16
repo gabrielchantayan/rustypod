@@ -97631,6 +97631,45 @@ functions:
       terminal/finalization path. Deliberate deviations: those two unported
       callees use seams on host and retailOS addresses on firmware.
 
+  # --- SQLite lock-and-prepare dispatcher ---
+  - address: 0x0837d2fc
+    ghidra: FUN_0837d2fc
+    name: sqlite3_lock_and_prepare
+    size: 92
+    sig: "i32 sqlite3_lock_and_prepare(sqlite3 *db, const char *sql, i32 n_byte, i32 save_sql, sqlite3_stmt **statement_out, const char **tail_out)"
+    module: sqlite/lock_and_prepare
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: sql
+      param_3/r2: n_byte
+      param_4/r3: save_sql
+      param_5/stack: statement_out
+      param_6/stack: tail_out
+      FUN_08382be4: opaque_type_tag_is_allowed
+      FUN_083711a8: btree_enter_all
+      FUN_083811c4: lock_and_prepare_core
+      FUN_08371dc8: btree_leave_all
+    notes: >-
+      Raw osos.dec establishes the true 92-byte extent 0x0837d2fc..0x0837d358:
+      23 ARM words from stmdb sp!,{r2,r3,r4,r5,r6,r7,r8,r9,r10,lr} through
+      ldmia sp!,{r2,r3,r4,r5,r6,r7,r8,r9,r10,pc}; the next distinct function
+      begins with stmdb sp!,{r0,r1,r2,r3} at 0x0837d358. Independent decoding
+      of every ARM B/BL word in osos.dec finds exactly four direct inbound
+      calls, all unconditional plain bl at 0x0838167c, 0x08381fe0, 0x08390de8,
+      and 0x08390e54; no predicated bl targets this entry. The body holds
+      exactly four bl calls, matching Ghidra. This is SQLite's
+      sqlite3LockAndPrepare: gate on the ported safety/tag check
+      opaque_type_tag_is_allowed @ 0x08382be4 (rejection returns SQLITE_MISUSE
+      = 21 = 0x15), then btree_enter_all @ 0x083711a8 (tail-jumps into the
+      nDb/24-byte Db-record walker at 0x0837125c with index zero), the
+      six-argument prepare core @ 0x083811c4, and the ported btree_leave_all
+      @ 0x08371dc8; the core's status is returned. The two stack arguments
+      arrive via ldrd [sp,#0x28] and are re-stacked for the core via
+      strd [sp,#0]. Deliberate deviations: the two unported callees are
+      volatile host seams and retailOS calls on firmware, following the
+      sqlite/prepare convention.
+
   # --- SQLite legacy prepare wrapper ---
   - address: 0x08390dcc
     ghidra: FUN_08390dcc
