@@ -36733,6 +36733,42 @@ functions:
       reproduce their NULL-input result but deliberately do not model
       arbitrary non-NULL unported subtrees.
 
+  - address: 0x08379694
+    ghidra: FUN_08379694
+    name: sqlite_fix_select
+    size: 124
+    sig: "int sqlite3FixSelect(DbFixer *fixer, Select *select)"
+    module: sqlite/fix_select
+    status: ported
+    renames:
+      param_1/r5: fixer
+      param_2/r4: select
+      FUN_08379600: sqlite3FixExprList
+      FUN_08379710: sqlite3FixSrcList
+      FUN_08379598: sqlite3FixExpr
+    notes: >-
+      SQLite 3.5.x sqlite3FixSelect. Raw ARM establishes the 124-byte
+      extent 0x08379694..0x08379710: push {r4,r5,r6,lr} starts at the
+      entry, pop {r4,r5,r6,pc} ends at 0x0837970c, and the independently
+      linked sqlite3FixSrcList prologue begins at 0x08379710. Decoding
+      every aligned ARM B/BL immediate in osos.dec finds exactly four
+      inbound direct BL sites, all unconditional: 0x0837483c
+      (sqlite3FixTriggerStep), 0x08379384 (FUN_083792f4), 0x083795b0
+      (sqlite3FixExpr), and 0x08379788 (sqlite3FixSrcList). No predicated
+      BL or tail B reaches this entry. It returns 0 for NULL, otherwise
+      walks the compound chain via Select.pPrior +0x20, validating each
+      link's pEList +0x00 through sqlite3FixExprList @ 0x08379600, pSrc
+      +0x0c through sqlite3FixSrcList @ 0x08379710, and pWhere +0x10 plus
+      pHaving +0x18 through the ported sqlite_fix_expr; a nonzero result
+      short-circuits with 1. On target the two unported callees remain
+      exact absolute calls (blx through literal slots in LLVM's output,
+      the same deviation fix_expr documents); the match.py diff is
+      exactly that plus LLVM frame setup. Host tests use the
+      FIX_SELECT_OPS boundary to record and control the unported pair;
+      the WHERE/HAVING fixer is the in-tree sqlite_fix_expr called
+      directly, so tests pass NULL for both (its NULL input returns 0)
+      since its failure states live behind its own private ops boundary.
+
   - address: 0x0837acf4
     ghidra: FUN_0837acf4
     name: get_vdbe
