@@ -41869,6 +41869,45 @@ functions:
       differing only in the frame prologue/epilogue (push/pop vs
       `mov pc, lr`). 14 bl call sites; the only copy.
 
+  - address: 0x083dc24c
+    ghidra: FUN_083dc24c
+    name: list_node_pool_erase_owned
+    size: 132
+    sig: "void list_node_pool_erase_owned(u32 *out, OwnedListHeader *header, u32 *node_slot)"
+    module: cxx/list_node_pool_erase_owned
+    status: ported
+    vars: {param_1: out, param_2: header, param_3: node_slot}
+    notes: >-
+      Erase sibling of list_node_pool_acquire @ 0x083dc344 over the same
+      ADS std::list: 20-byte node {next, prev, payload[3]} and 24-byte
+      list header (16-byte pool state, sentinel node word +0x10, count
+      +0x14). Ghidra's 132-byte extent is exact: 33 words from push
+      {r1-r7,lr} @ 0x083dc24c through pop {r1-r7,pc} @ 0x083dc2cc; the
+      next real function begins at 0x083dc2d0. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly four inbound
+      direct calls, all unconditional plain bl (0x08133364, 0x081333b0,
+      0x0813356c, 0x083dc214) and no predicated forms or tail b sites;
+      the body performs exactly one bl, unconditional, to the ported
+      refcounted_body_release_owned_variant @ 0x0839cf4c (called
+      directly; its only predicated instruction is the ldreq that
+      reloads the sentinel for the early-out store). If *node_slot
+      equals the sentinel it is not unlinked: the routine just writes
+      the sentinel back to *out (erase-at-end no-op). Otherwise it
+      splices the node out (prev->next = next, next->prev = prev),
+      decrements the count with plain wrapping sub, releases the owned
+      RefcountedBody handle in payload[0] (callee NULLs the slot),
+      pushes the node onto the pool free list through its next word,
+      and writes the erased node's next to *out. The clear-loop caller
+      @ 0x083dc1d8 iterates cur = sentinel->next until the sentinel
+      feeding each node back through this routine. Deliberate
+      deviation: node links and payload stay u32 target words so the
+      20-byte layout holds on host; target passes &payload[0] straight
+      to the callee while host bounces the 4-byte word through a
+      native 8-byte slot (pointer-width adaptation only, behavior
+      identical). LLVM codegen keeps the same structure (sentinel
+      early-out, double unlink, count--, bl release, free push,
+      successor store) with a different frame and no spill traffic.
+
   - address: 0x083dc344
     ghidra: FUN_083dc344
     name: list_node_pool_acquire

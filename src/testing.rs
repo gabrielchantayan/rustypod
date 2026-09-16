@@ -1065,6 +1065,10 @@ pub mod hints {
     // message and vtable fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const BOOL_MESSAGE_DISPATCH: usize = 0x9d20_0000;
+    // 0x9d30_0000: dedicated to cxx/list_node_pool_erase_owned's raw-u32
+    // ring, header, and refcounted-body fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const LIST_NODE_POOL_ERASE_OWNED: usize = 0x9d30_0000;
     // 0x4400_0000: dedicated to sqlite/expr_worklist's parent-release
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_RELEASE_PARENTS: usize = 0x4400_0000;
