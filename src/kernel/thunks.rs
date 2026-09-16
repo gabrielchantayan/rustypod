@@ -914,6 +914,117 @@ iram_stream_buffer_reinitialize_veneer:
 "#
 );
 
+/// Instruction word and literal in the I2S chunked-transfer thunk at
+/// 0x08037f40.
+///
+/// The boot relocator at 0x080046e0 copies 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (literals verified in osos.dec), so IRAM
+/// target 0x220084dc is the byte-identical mirror of osos
+/// `FUN_080084dc`.
+pub const I2S_CHUNKED_TRANSFER_INSN: u32 = 0xe51f_f004;
+pub const I2S_CHUNKED_TRANSFER_TARGET: u32 = 0x2200_84dc;
+
+/// ABI of the chunked I2S transfer reached by
+/// [`i2s_chunked_transfer_veneer`]: destination in r0, source in r1,
+/// byte length in r2; always returns 0.
+pub type I2sChunkedTransferFn = unsafe extern "C" fn(dst: u32, src: u32, len: u32) -> u32;
+
+/// Host/target dispatch boundary for the unported IRAM target.
+#[derive(Clone, Copy)]
+pub struct I2sChunkedTransferOps {
+    pub transfer: I2sChunkedTransferFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_i2s_chunked_transfer(_dst: u32, _src: u32, _len: u32) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_I2S_CHUNKED_TRANSFER_OPS: I2sChunkedTransferOps = I2sChunkedTransferOps {
+    transfer: missing_i2s_chunked_transfer,
+};
+
+/// The host dispatch boundary for the unported IRAM target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut I2S_CHUNKED_TRANSFER_OPS: I2sChunkedTransferOps =
+    DEFAULT_I2S_CHUNKED_TRANSFER_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn i2s_chunked_transfer_target() -> I2sChunkedTransferFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(I2S_CHUNKED_TRANSFER_OPS.transfer)) }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// i2s_chunked_transfer_veneer — original: `thunk_EXT_FUN_220084dc`
+    /// @ 0x08037f40 (8 bytes; Ghidra's 4-byte extent drops the trailing
+    /// literal word, the next thunk stub starts at 0x08037f48).
+    ///
+    /// One stub of the osos -> IRAM thunk table (see [`ROM_THUNKS`]):
+    /// `ldr pc, [pc, #-4]` loading the literal 0x220084dc. `ldr pc` is a
+    /// tail dispatch preserving every register including LR, so the target
+    /// returns directly to this stub's caller. Decoding every ARM B/BL
+    /// word in osos.dec finds exactly five calls: four plain
+    /// unconditional `bl` at 0x080fa454, 0x0814dc1c, 0x081b07a8, and
+    /// 0x081b07d0, plus one predicated `bleq` at 0x08093734; no tail `b`
+    /// and no aligned data-word references (no virtual dispatch).
+    ///
+    /// Target behaviour (IRAM mirror of `FUN_080084dc` @ 0x080084dc,
+    /// 0xf0 bytes of code ending at the next function 0x080085fc, with
+    /// literal words 0xfff @ 0x080085d0 and 0x1ffe @ 0x080085d4): a
+    /// chunked DMA/I2S memory transfer (dst in r0, src in r1, byte
+    /// length in r2). It ORs the three arguments to pick a unit size:
+    /// all 4-aligned -> unit 2 with byte length >>= 2 and chunk cap
+    /// 0xfff << 2 = 0x3ffc; else 2-aligned -> unit 1, length >>= 1,
+    /// cap 0x1ffe; else unit 0, cap 0xfff. A burst field is 7 when the
+    /// unit-shifted length is a multiple of 8, 3 when a multiple of 4,
+    /// else 0. Setup call FUN_080083c4(0x1c, unit, burst, 0x1c, unit,
+    /// burst, &slot, &controller) (four register + four stack
+    /// arguments; the I2S transfer setup path) fills a slot byte and a
+    /// signed controller byte on the frame. The loop submits
+    /// min(remaining, cap)-byte chunks via the ported
+    /// [`crate::drivers::transfer_default_mode::queue_transfer_with_default_mode`]
+    /// (FUN_08008648: src, dst, chunk, slot, controller on the stack),
+    /// waits per chunk via FUN_08008690(slot, controller), advances
+    /// both pointers, then tears down via FUN_080085fc(slot,
+    /// controller) (the sole recovered caller of
+    /// i2s_transfer_slot_cleanup) and returns 0.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and
+    /// literal. Host builds expose the foreign IRAM boundary as a
+    /// replaceable callback.
+    pub fn i2s_chunked_transfer_veneer(dst: u32, src: u32, len: u32) -> u32;
+}
+
+/// Host implementation of the literal veneer, with the unported IRAM
+/// target supplied by [`I2S_CHUNKED_TRANSFER_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn i2s_chunked_transfer_veneer(dst: u32, src: u32, len: u32) -> u32 {
+    unsafe { i2s_chunked_transfer_target()(dst, src, len) }
+}
+
+// `ldr pc` preserves LR, so the IRAM target returns directly to this
+// stub's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl i2s_chunked_transfer_veneer
+    .type i2s_chunked_transfer_veneer, %function
+i2s_chunked_transfer_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x220084dc
+    .size i2s_chunked_transfer_veneer, . - i2s_chunked_transfer_veneer
+"#
+);
+
 /// Instruction word and literal in the lazy-singleton accessor thunk
 /// at 0x08037f58.
 ///
@@ -1507,7 +1618,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f28, rom_target: 0x220005a0, name: None },
     RomThunk { thunk_addr: 0x08037f30, rom_target: 0x22004154, name: None },
     RomThunk { thunk_addr: 0x08037f38, rom_target: 0x2200441c, name: None },
-    RomThunk { thunk_addr: 0x08037f40, rom_target: 0x220084dc, name: None },
+    RomThunk { thunk_addr: 0x08037f40, rom_target: 0x220084dc, name: Some("i2s_chunked_transfer_veneer") },
     RomThunk { thunk_addr: 0x08037f48, rom_target: 0x22003f08, name: None },
     RomThunk { thunk_addr: 0x08037f50, rom_target: 0x22003e70, name: None },
     RomThunk { thunk_addr: 0x08037f58, rom_target: 0x220060e0, name: Some("lazy_singleton_106dc_acquire") },
@@ -1691,7 +1802,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 27] = [
+        let expected: [(u32, &str); 28] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1719,6 +1830,7 @@ mod tests {
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
             (0x22007470, "iram_event_handler_source_veneer"),
             (0x220073b0, "iram_stream_buffer_reinitialize_veneer"),
+            (0x220084dc, "i2s_chunked_transfer_veneer"),
         ];
         for (target, name) in expected {
             let entry = lookup_by_target(target)
@@ -1795,8 +1907,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 27 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 29);
+        // 28 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 30);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -2099,6 +2211,82 @@ mod tests {
             lookup_by_target(CLOCK_CONFIG_DISPATCH_TARGET).unwrap().thunk_addr,
             0x08037f60
         );
+    }
+
+    /// The stub at 0x08037f40 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x220084dc (raw osos.dec words e51ff004 /
+    /// 220084dc); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn i2s_chunked_transfer_veneer_matches_the_literal_veneer() {
+        assert_eq!(I2S_CHUNKED_TRANSFER_INSN, 0xe51f_f004);
+        assert_eq!(I2S_CHUNKED_TRANSFER_TARGET, 0x2200_84dc);
+        assert_eq!(I2S_CHUNKED_TRANSFER_TARGET & 3, 0);
+    }
+
+    /// The thunk table resolves 0x08037f40 to the identified IRAM target.
+    #[test]
+    fn i2s_chunked_transfer_veneer_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(0x08037f40).expect("thunk entry for 0x08037f40");
+        assert_eq!(entry.rom_target, I2S_CHUNKED_TRANSFER_TARGET);
+        assert_eq!(entry.name, Some("i2s_chunked_transfer_veneer"));
+        // The target is unique in the table: exactly one stub reaches it.
+        assert_eq!(
+            lookup_by_target(I2S_CHUNKED_TRANSFER_TARGET).unwrap().thunk_addr,
+            0x08037f40
+        );
+    }
+
+    static mut I2S_CHUNKED_TRANSFER_CALLS: u32 = 0;
+    static mut I2S_CHUNKED_TRANSFER_ARGS: (u32, u32, u32) = (0, 0, 0);
+
+    unsafe extern "C" fn record_i2s_chunked_transfer(dst: u32, src: u32, len: u32) -> u32 {
+        I2S_CHUNKED_TRANSFER_CALLS += 1;
+        I2S_CHUNKED_TRANSFER_ARGS = (dst, src, len);
+        0
+    }
+
+    /// The host port forwards the full dst/src/len triple to the
+    /// injected IRAM target exactly once — the veneer's only observable
+    /// contract (argument registers preserved, status word returned).
+    #[test]
+    fn i2s_chunked_transfer_veneer_forwards_arguments_unchanged() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(I2S_CHUNKED_TRANSFER_CALLS).write(0);
+            core::ptr::addr_of_mut!(I2S_CHUNKED_TRANSFER_OPS).write(I2sChunkedTransferOps {
+                transfer: record_i2s_chunked_transfer,
+            });
+            // A 4-aligned block and a byte-misaligned tail, the two unit
+            // paths the target distinguishes.
+            assert_eq!(i2s_chunked_transfer_veneer(0x1000, 0x2000, 0x800), 0);
+            assert_eq!(i2s_chunked_transfer_veneer(0x1001, 0x2003, 0x7ff), 0);
+            assert_eq!(core::ptr::addr_of!(I2S_CHUNKED_TRANSFER_CALLS).read(), 2);
+            assert_eq!(
+                core::ptr::addr_of!(I2S_CHUNKED_TRANSFER_ARGS).read(),
+                (0x1001, 0x2003, 0x7ff)
+            );
+            // A zero-length transfer and the widest values pass through
+            // untouched.
+            assert_eq!(i2s_chunked_transfer_veneer(0xffff_ffff, 0, 0), 0);
+            assert_eq!(
+                core::ptr::addr_of!(I2S_CHUNKED_TRANSFER_ARGS).read(),
+                (0xffff_ffff, 0, 0)
+            );
+            core::ptr::addr_of_mut!(I2S_CHUNKED_TRANSFER_OPS)
+                .write(DEFAULT_I2S_CHUNKED_TRANSFER_OPS);
+        }
+        drop(guard);
+    }
+
+    /// The default host seam reproduces the target's status-0 return and
+    /// performs no dispatch.
+    #[test]
+    fn i2s_chunked_transfer_veneer_default_seam_returns_zero() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert_eq!(i2s_chunked_transfer_veneer(1, 2, 3), 0);
+        }
+        drop(guard);
     }
 
     static mut CLOCK_CONFIG_DISPATCH_CALLS: u32 = 0;
