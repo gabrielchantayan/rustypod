@@ -225,6 +225,7 @@ pub mod three_word_clear_eighth;
 pub mod three_word_clear_ninth;
 pub mod three_word_clear_tenth;
 pub mod three_word_clear_return;
+pub mod three_word_clear_return_alt;
 pub mod tokenizer;
 pub mod trivial_destructor;
 pub mod trivial_vector8_destruct;
