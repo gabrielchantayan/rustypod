@@ -85651,6 +85651,52 @@ functions:
       review finds the same cursor loop, conditional copy, and 24-byte step;
       its extra setup and indirect call are the deliberate veneer deviation.
 
+  - address: 0x083e8f1c
+    ghidra: FUN_083e8f1c
+    name: vector_copy_construct_range_elem12
+    size: 64
+    sig: "u8 *vector_copy_construct_range_elem12(const u8 *first, const u8 *last, u8 *output, VectorStorage *vector)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: vector
+      r4: source_cursor
+      r5: output_cursor
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      64 bytes exactly (extent 0x083e8f1c..0x083e8f5c, bounded by the
+      b 0x083e8f74 entry of vector_copy_range_u32_alias_8f5c at 0x083e8f5c).
+      Ghidra's reported size and C are both correct. std::vector
+      uninitialized-copy over 0x0c-byte elements (two plain words at +0x00
+      and +0x04 plus a bool at +0x08 - the layout the per-element helper
+      0x083d7e1c constructs: word, word, then the byte masked to its low
+      bit, guarded by `movs r0,r1; bxeq lr`). Word-for-word twin of
+      vector_copy_construct_range_elem16 with 0x0c strides: push
+      {r4-r8,lr}; for each element call the helper (vector, output, source)
+      with both cursors striding +0x0c; loop test is cursor EQUALITY (cmp
+      r4,r6; bne), the helper's return is discarded, and the advanced
+      output cursor is returned. The NULL-output guard lives inside the
+      helper, not in this loop. Call counts, verified by decoding every
+      B/BL word in osos.dec: exactly four inbound direct bl sites
+      (0x083e2794, 0x083e2808, 0x083e2898, 0x083e28ec), all unconditional,
+      no predicated inbound calls; the body itself holds one plain bl (to
+      0x083d7e1c, binary-verified: eb ff bb b5 at 0x083e8f40 resolves to
+      0x083e8f40+8+sext(0xffbbb5)<<2) and no predicated calls. Deviations:
+      helper 0x083d7e1c is unported, so the call goes through the new
+      VECTOR_COPY_CONSTRUCT_ELEM12_OPS dispatch slot (the
+      VECTOR_COPY_CONSTRUCT_ELEM32_OPS pattern) whose target default
+      transmutes VECTOR_COPY_CONSTRUCT_ELEM12_ADDRESS and whose host
+      default is inert; the vector argument is forwarded verbatim although
+      the observed helper overwrites r0 with r1 on entry. Host tests cover
+      the three-element striding walk and returned cursor, the empty
+      range, and the NULL output one-element path. match.py shows the same
+      cursor loop, equality test, and 12-byte steps; its extra setup,
+      literal-pool ops slot, and blx are the deliberate dispatch-veneer
+      deviation shared with the elem16/elem28/elem32 ports.
+
   # --- vector<u32> range-copy template ---
   - address: 0x083e8f5c
     ghidra: thunk_FUN_083e8f74
