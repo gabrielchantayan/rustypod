@@ -126,6 +126,9 @@ pub mod hints {
     // 0x1d30_0000: dedicated to cxx/u32_map_value_slot's raw-u32 node and
     // map fixture; mappings never unmap.
     pub const U32_MAP_VALUE_SLOT: usize = 0x1d30_0000;
+    // 0x1d40_0000: dedicated to cxx/element_registry_slot_for_key's raw-u32
+    // node and map fixture; mappings never unmap, so no other user may share it.
+    pub const ELEMENT_REGISTRY_SLOT_FOR_KEY: usize = 0x1d40_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0xc000_0000 and 0xc100_0000: dedicated to

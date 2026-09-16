@@ -99622,3 +99622,35 @@ functions:
       than adding a redundant retail-address seam. Host tests cover equal and
       unequal interior cursors plus both directions of the adjacent-segment
       boundary alias, rejecting an interior and a non-adjacent segment.
+
+  - address: 0x083db8f4
+    ghidra: FUN_083db8f4
+    name: element_registry_slot_for_key
+    size: 56
+    sig: "u32 *element_registry_slot_for_key(u8 *map, const u32 *key)"
+    module: cxx/element_registry_slot_for_key
+    status: ported
+    renames:
+      param_1/r0: map
+      param_2/r1: key
+      FUN_083c8064: element_registry_tree_walk
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte body
+      0x083db8f4..0x083db92b: `stmib sp,{r1,r2}` materializes
+      `{*key, 0}` at sp+4, then 0x083c8064 receives
+      `(&out, map, &pair)`. Its node result at out+0 is returned as
+      node+0x14, the mapped-value word. 0x083db92c begins the next
+      distinct `str lr,[sp,#-4]!` function. Immediate ARM B/BL decoding
+      finds exactly four inbound direct calls, all unconditional plain bl:
+      0x0816e290, 0x081de194, 0x081de1e4, and 0x081de234; there are no
+      predicated calls, direct tail branches, or data-word references.
+      The body has one plain bl, to the still-unported find-or-insert
+      tree walk 0x083c8064; its descent uses comparator 0x083d7580,
+      node links +8/+0xc, and key +0x10, confirming the ADS
+      map<u32,u32>::operator[] shape. The port routes that verified ABI
+      through ELEMENT_REGISTRY_TREE_WALK: target builds call the fixed
+      load address and host tests install a recorder proving fresh key
+      reads, pair zeroing, map pass-through, flag-byte tolerance, and
+      node+0x14 return. Deliberate deviations: the dead `str r0,[sp]`
+      before frame release is omitted, while the 12-byte result frame is
+      retained so the callee's inserted-flag write at out+4 is valid.
