@@ -667,6 +667,121 @@ ui_manager_begin_pending_operation:
 "#
 );
 
+/// iram_stream_buffer_reinitialize_veneer — original:
+/// `thunk_EXT_FUN_220073b0` @ `0x08038190` (Ghidra reports 4 bytes; raw
+/// osos.dec proves the full **8** bytes are `ldr pc,[pc,#-4]` /
+/// `0xe51ff004` and the target literal `0x220073b0` at `0x08038194`; the
+/// next veneer starts at `0x08038198`).
+///
+/// The relocator at `0x080046e0` copies `0xaed8` bytes from `0x08000000` to
+/// `0x22000000`, so the literal reaches the IRAM mirror of
+/// `FUN_080073b0` @ `0x080073b0`, not mask ROM. That 60-byte body is the
+/// stream-buffer flush-and-reinitialize wrapper: it saves all three
+/// arguments in callee-saved registers, invokes the two stream flush
+/// continuations through the literal veneers at `0x08003848` (->
+/// `0x08201460`) and `0x080038f8` (-> `0x082014c8`, second argument 0),
+/// clears the stream-buffer page-initialization flag byte at `0x2200aed5`,
+/// then tail-calls the page initializer `FUN_080072cc` with the original
+/// three arguments restored. Clearing `0x2200aed5` re-arms the guard
+/// `FUN_080072cc` tests, so the tail call re-runs page setup: the existing
+/// 0x20000-byte allocation is zeroed, the page pointers are rebuilt, and
+/// [`crate::kernel::stream_buffer_page_contexts::stream_buffer_set_page_contexts`]
+/// stores context `page_context` when `zero_page_context` is zero, else 0.
+/// The initializer's r0 result (0) is forwarded to the caller.
+///
+/// Decoding every ARM B/BL word in osos.dec found exactly five direct,
+/// unconditional `bl` callers at 0x081b0eb8, 0x08201c90, 0x08202070,
+/// 0x082360c8, and 0x08237288; there are no predicated calls, direct tail
+/// branches, or aligned raw data-word references. All five sites obtain the
+/// buffer from the `iram_stream_buffer_initializer_veneer` accessor
+/// (0x08037fd8) and pass (buffer, 1, 0). Deviation: target builds use the
+/// exact literal tail veneer; host builds expose the otherwise foreign IRAM
+/// boundary as a replaceable callback.
+pub const IRAM_STREAM_BUFFER_REINITIALIZE_VENEER: u32 = 0x0803_8190;
+pub const IRAM_STREAM_BUFFER_REINITIALIZE_INSN: u32 = 0xe51f_f004;
+pub const IRAM_STREAM_BUFFER_REINITIALIZE_TARGET: u32 = 0x2200_73b0;
+
+/// ABI of the flush-and-reinitialize thunk's mirrored body.
+pub type IramStreamBufferReinitializeFn =
+    unsafe extern "C" fn(stream_buffer: *mut u8, zero_page_context: u32, page_context: u32) -> u32;
+
+/// Host/target dispatch boundary for the IRAM flush-and-reinitialize body.
+#[derive(Clone, Copy)]
+pub struct IramStreamBufferReinitializeOps {
+    pub reinitialize: IramStreamBufferReinitializeFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_iram_stream_buffer_reinitialize(
+    _stream_buffer: *mut u8,
+    _zero_page_context: u32,
+    _page_context: u32,
+) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_IRAM_STREAM_BUFFER_REINITIALIZE_OPS: IramStreamBufferReinitializeOps =
+    IramStreamBufferReinitializeOps {
+        reinitialize: missing_iram_stream_buffer_reinitialize,
+    };
+
+/// Replaceable host boundary for the mirrored flush-and-reinitialize body.
+#[cfg(not(target_arch = "arm"))]
+pub static mut IRAM_STREAM_BUFFER_REINITIALIZE_OPS: IramStreamBufferReinitializeOps =
+    DEFAULT_IRAM_STREAM_BUFFER_REINITIALIZE_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn iram_stream_buffer_reinitialize_target() -> IramStreamBufferReinitializeFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            IRAM_STREAM_BUFFER_REINITIALIZE_OPS.reinitialize
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn iram_stream_buffer_reinitialize_veneer(
+        stream_buffer: *mut u8,
+        zero_page_context: u32,
+        page_context: u32,
+    ) -> u32;
+}
+
+/// Host implementation of the literal veneer. It preserves the three
+/// arguments and the mirrored body's result exactly.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn iram_stream_buffer_reinitialize_veneer(
+    stream_buffer: *mut u8,
+    zero_page_context: u32,
+    page_context: u32,
+) -> u32 {
+    unsafe {
+        iram_stream_buffer_reinitialize_target()(stream_buffer, zero_page_context, page_context)
+    }
+}
+
+// `ldr pc` preserves LR and therefore forwards both the mirrored body's
+// result and its tail call into the page initializer to the original caller.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl iram_stream_buffer_reinitialize_veneer
+    .type iram_stream_buffer_reinitialize_veneer, %function
+iram_stream_buffer_reinitialize_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x220073b0
+    .size iram_stream_buffer_reinitialize_veneer, . - iram_stream_buffer_reinitialize_veneer
+"#
+);
+
 /// Instruction word and literal in the lazy-singleton accessor thunk
 /// at 0x08037f58.
 ///
@@ -1223,7 +1338,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038178, rom_target: 0x22007e38, name: None },
     RomThunk { thunk_addr: 0x08038180, rom_target: 0x22005448, name: None },
     RomThunk { thunk_addr: 0x08038188, rom_target: 0x220072cc, name: None },
-    RomThunk { thunk_addr: 0x08038190, rom_target: 0x220073b0, name: None },
+    RomThunk { thunk_addr: 0x08038190, rom_target: 0x220073b0, name: Some("iram_stream_buffer_reinitialize_veneer") },
     RomThunk { thunk_addr: 0x08038198, rom_target: 0x22005690, name: None },
     RomThunk { thunk_addr: 0x080381a0, rom_target: 0x220056b0, name: None },
     RomThunk { thunk_addr: 0x080381a8, rom_target: 0x220050fc, name: None },
@@ -1333,7 +1448,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 24] = [
+        let expected: [(u32, &str); 25] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1358,6 +1473,7 @@ mod tests {
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
             (0x22007470, "iram_event_handler_source_veneer"),
+            (0x220073b0, "iram_stream_buffer_reinitialize_veneer"),
         ];
         for (target, name) in expected {
             let entry = lookup_by_target(target)
@@ -1434,8 +1550,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 24 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 26);
+        // 25 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 27);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -1702,6 +1818,103 @@ mod tests {
             );
             core::ptr::addr_of_mut!(UI_MANAGER_BEGIN_PENDING_OPERATION_OPS)
                 .write(DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS);
+        }
+        drop(guard);
+    }
+
+    /// The stub at 0x08038190 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x220073b0 (raw osos.dec bytes 04 f0 1f e5
+    /// b0 73 00 22); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn iram_stream_buffer_reinitialize_veneer_matches_literal_veneer() {
+        assert_eq!(IRAM_STREAM_BUFFER_REINITIALIZE_VENEER, 0x0803_8190);
+        assert_eq!(IRAM_STREAM_BUFFER_REINITIALIZE_INSN, 0xe51f_f004);
+        assert_eq!(IRAM_STREAM_BUFFER_REINITIALIZE_TARGET, 0x2200_73b0);
+        assert_eq!(IRAM_STREAM_BUFFER_REINITIALIZE_TARGET & 3, 0);
+        // The relocator mirror covers the target (below 0x2200aed8).
+        assert!(IRAM_STREAM_BUFFER_REINITIALIZE_TARGET < ROM_BASE + 0xaed8);
+    }
+
+    #[test]
+    fn iram_stream_buffer_reinitialize_veneer_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(IRAM_STREAM_BUFFER_REINITIALIZE_VENEER)
+            .expect("thunk entry for stream-buffer reinitialize");
+        assert_eq!(entry.rom_target, IRAM_STREAM_BUFFER_REINITIALIZE_TARGET);
+        assert_eq!(entry.name, Some("iram_stream_buffer_reinitialize_veneer"));
+        assert_eq!(
+            lookup_by_target(IRAM_STREAM_BUFFER_REINITIALIZE_TARGET)
+                .expect("target entry for stream-buffer reinitialize")
+                .thunk_addr,
+            IRAM_STREAM_BUFFER_REINITIALIZE_VENEER
+        );
+    }
+
+    /// With no target installed the default seam returns 0 without
+    /// panicking; on device the stub always reaches the IRAM body instead.
+    #[test]
+    fn iram_stream_buffer_reinitialize_veneer_default_seam_returns_zero() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert_eq!(
+                iram_stream_buffer_reinitialize_veneer(core::ptr::null_mut(), 0, 0),
+                0
+            );
+        }
+        drop(guard);
+    }
+
+    static mut IRAM_STREAM_BUFFER_REINITIALIZE_CALLS: u32 = 0;
+    static mut IRAM_STREAM_BUFFER_REINITIALIZE_ARGS: (usize, u32, u32) = (0, 0, 0);
+
+    unsafe extern "C" fn record_iram_stream_buffer_reinitialize(
+        stream_buffer: *mut u8,
+        zero_page_context: u32,
+        page_context: u32,
+    ) -> u32 {
+        IRAM_STREAM_BUFFER_REINITIALIZE_CALLS += 1;
+        IRAM_STREAM_BUFFER_REINITIALIZE_ARGS =
+            (stream_buffer as usize, zero_page_context, page_context);
+        0x5354_5242
+    }
+
+    #[test]
+    fn iram_stream_buffer_reinitialize_veneer_forwards_all_arguments_and_result() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut stream_buffer = 0u8;
+        unsafe {
+            core::ptr::addr_of_mut!(IRAM_STREAM_BUFFER_REINITIALIZE_CALLS).write(0);
+            core::ptr::addr_of_mut!(IRAM_STREAM_BUFFER_REINITIALIZE_OPS).write(
+                IramStreamBufferReinitializeOps {
+                    reinitialize: record_iram_stream_buffer_reinitialize,
+                },
+            );
+
+            assert_eq!(
+                iram_stream_buffer_reinitialize_veneer(core::ptr::null_mut(), 0, 0),
+                0x5354_5242
+            );
+            assert_eq!(
+                core::ptr::addr_of!(IRAM_STREAM_BUFFER_REINITIALIZE_ARGS).read(),
+                (0, 0, 0)
+            );
+            assert_eq!(
+                iram_stream_buffer_reinitialize_veneer(
+                    core::ptr::addr_of_mut!(stream_buffer),
+                    0xffff_ffff,
+                    0x8000_0001,
+                ),
+                0x5354_5242
+            );
+            assert_eq!(
+                core::ptr::addr_of!(IRAM_STREAM_BUFFER_REINITIALIZE_CALLS).read(),
+                2
+            );
+            assert_eq!(
+                core::ptr::addr_of!(IRAM_STREAM_BUFFER_REINITIALIZE_ARGS).read(),
+                (core::ptr::addr_of!(stream_buffer) as usize, 0xffff_ffff, 0x8000_0001)
+            );
+            core::ptr::addr_of_mut!(IRAM_STREAM_BUFFER_REINITIALIZE_OPS)
+                .write(DEFAULT_IRAM_STREAM_BUFFER_REINITIALIZE_OPS);
         }
         drop(guard);
     }
