@@ -1,76 +1,28 @@
-//! Constructs the shared-handle record used by the process-global registry.
+//! Creates the shared-handle record used by the process-global registry.
 //!
-//! ## Original: `FUN_083d9d5c` @ 0x083d9d5c (196 bytes)
+//! ## Original: `FUN_083d97a0` @ 0x083d97a0 (196 bytes)
 //!
-//! Raw `osos.dec` establishes the extent `0x083d9d5c..0x083d9e20`: 188 bytes
-//! of instructions followed by the two-word literal pool. The next separately
-//! linked function begins at `0x083d9e28`. Decoding every ARM B/BL immediate
-//! finds four inbound predicated `bl` call sites (0x082a9144, 0x082a91cc,
-//! 0x082a921c, and 0x082a926c), no inbound plain calls, and six outbound plain
-//! `bl` instructions (two each to `copy_u32_pair` and the other four direct
-//! targets); there are no predicated outbound calls.
+//! Raw `osos.dec` establishes `0x083d97a0..0x083d9864`: 188 instruction bytes
+//! followed by the two-word literal pool; the next separately linked function
+//! begins at `0x083d986c`. Decoding every ARM B/BL immediate finds four inbound
+//! predicated `bl` call sites and five outbound plain `bl` instructions.
 //!
-//! The constructor selects and records a selector-specific layout size, clears
-//! its embedded state, acquires the process-wide shared handle at +0x2c,
-//! installs the final vtable and selector descriptor, initializes two
-//! `{u32::MAX, 0}` pairs, then delegates payload initialization. Target builds
-//! call the three unported direct targets at their verified retail addresses;
-//! host builds expose ABI seams. Deliberate deviation: the two raw pair-copy
-//! calls are expressed as direct word stores because `copy_u32_pair` is a
-//! leaf copy whose complete semantics are known.
+//! The constructor records a selector-specific layout size, clears embedded
+//! state, acquires the process-wide shared handle at +0x2c, installs the final
+//! vtable and selector descriptor, initializes two `{u32::MAX, 0}` pairs, then
+//! delegates payload initialization. Target builds call the unported payload
+//! initializer at its verified retail address; host builds use an ABI seam.
+//! Deliberate deviation: the two raw pair-copy calls are direct word stores.
 
 use crate::cxx::shared_handle_initialize::shared_handle_initialize;
+use crate::cxx::shared_record_construct::{selector_descriptor_initialize, selector_layout_size, PayloadInitialize};
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
 
-const INITIAL_VTABLE: u32 = 0x089a_879c;
-const FINAL_VTABLE: u32 = 0x089a_86a8;
-const RETAIL_SELECTOR_LAYOUT_SIZE: usize = 0x0826_6b64;
-const RETAIL_SELECTOR_DESCRIPTOR_INITIALIZE: usize = 0x0826_6c18;
-const RETAIL_PAYLOAD_INITIALIZE: usize = 0x083d_9a64;
-
-pub(crate) type SelectorLayoutSize = unsafe extern "C" fn(u32) -> u32;
-pub(crate) type SelectorDescriptorInitialize = unsafe extern "C" fn(*mut u32, u32) -> *mut u32;
-pub(crate) type PayloadInitialize = unsafe extern "C" fn(*mut u32, u32, u32) -> *mut u32;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-pub(crate) unsafe fn selector_layout_size(selector: u32) -> u32 {
-    core::mem::transmute::<usize, SelectorLayoutSize>(RETAIL_SELECTOR_LAYOUT_SIZE)(selector)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_selector_layout_size(_selector: u32) -> u32 { 0 }
-
-/// Host replacement for unported `FUN_08266b64`.
-#[cfg(not(target_os = "none"))]
-pub static mut SELECTOR_LAYOUT_SIZE: SelectorLayoutSize = missing_selector_layout_size;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-pub(crate) unsafe fn selector_layout_size(selector: u32) -> u32 {
-    core::ptr::read_volatile(addr_of!(SELECTOR_LAYOUT_SIZE))(selector)
-}
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-pub(crate) unsafe fn selector_descriptor_initialize(storage: *mut u32, selector: u32) -> *mut u32 {
-    core::mem::transmute::<usize, SelectorDescriptorInitialize>(RETAIL_SELECTOR_DESCRIPTOR_INITIALIZE)(storage, selector)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_selector_descriptor_initialize(storage: *mut u32, _selector: u32) -> *mut u32 { storage }
-
-/// Host replacement for unported `FUN_08266c18`.
-#[cfg(not(target_os = "none"))]
-pub static mut SELECTOR_DESCRIPTOR_INITIALIZE: SelectorDescriptorInitialize = missing_selector_descriptor_initialize;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-pub(crate) unsafe fn selector_descriptor_initialize(storage: *mut u32, selector: u32) -> *mut u32 {
-    core::ptr::read_volatile(addr_of!(SELECTOR_DESCRIPTOR_INITIALIZE))(storage, selector)
-}
+const INITIAL_VTABLE: u32 = 0x089a_875c;
+const FINAL_VTABLE: u32 = 0x089a_8668;
+const RETAIL_PAYLOAD_INITIALIZE: usize = 0x083d_90b0;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -81,7 +33,7 @@ unsafe fn payload_initialize(storage: *mut u32, value: u32, count: u32) -> *mut 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_payload_initialize(storage: *mut u32, _value: u32, _count: u32) -> *mut u32 { storage }
 
-/// Host replacement for unported `FUN_083d9a64`.
+/// Host replacement for unported `FUN_083d90b0`.
 #[cfg(not(target_os = "none"))]
 pub static mut PAYLOAD_INITIALIZE: PayloadInitialize = missing_payload_initialize;
 
@@ -91,8 +43,8 @@ unsafe fn payload_initialize(storage: *mut u32, value: u32, count: u32) -> *mut 
     core::ptr::read_volatile(addr_of!(PAYLOAD_INITIALIZE))(storage, value, count)
 }
 
-/// `shared_record_construct` — retailOS `FUN_083d9d5c` @ `0x083d9d5c` (196
-/// bytes; four incoming predicated `bl` call sites; six outbound plain `bl`
+/// `shared_record_create` — retailOS `FUN_083d97a0` @ `0x083d97a0` (196
+/// bytes; four incoming predicated `bl` call sites; five outbound plain `bl`
 /// instructions and no outbound predicated forms, verified from `osos.dec`).
 ///
 /// # Safety
@@ -101,7 +53,7 @@ unsafe fn payload_initialize(storage: *mut u32, value: u32, count: u32) -> *mut 
 /// meet their respective retailOS contracts.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn shared_record_construct(storage: *mut u32, selector: u32, value: u32, count: u32) -> *mut u32 {
+pub unsafe extern "C" fn shared_record_create(storage: *mut u32, selector: u32, value: u32, count: u32) -> *mut u32 {
     let layout_size = selector_layout_size(selector);
     storage.add(1).write(layout_size);
     storage.add(2).write(0);
@@ -118,26 +70,18 @@ pub unsafe extern "C" fn shared_record_construct(storage: *mut u32, selector: u3
     payload_initialize(storage, value, count);
     storage
 }
-#[cfg(test)]
-extern crate std;
-
-#[cfg(test)]
-use std::sync::Mutex;
-
-
-#[cfg(test)]
-pub(crate) static SHARED_RECORD_CONSTRUCT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use crate::cxx::shared_handle_initialize::{SHARED_HANDLE_GLOBAL, SHARED_HANDLE_INITIALIZE_TEST_LOCK};
+    use crate::cxx::shared_record_construct::{SelectorDescriptorInitialize, SelectorLayoutSize, SELECTOR_DESCRIPTOR_INITIALIZE, SELECTOR_LAYOUT_SIZE};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{LazyLock, Mutex, MutexGuard};
+    use std::sync::{LazyLock, MutexGuard};
 
     const WORDS: usize = 0x100;
-    static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| try_map_u32_slab(hints::SHARED_RECORD_CONSTRUCT, WORDS * 4).map(|p| p as usize));
+    static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| try_map_u32_slab(hints::SHARED_RECORD_CREATE, WORDS * 4).map(|p| p as usize));
     static mut DESCRIPTOR_ARGS: (*mut u32, u32) = (core::ptr::null_mut(), 0);
     static mut PAYLOAD_ARGS: (*mut u32, u32, u32) = (core::ptr::null_mut(), 0, 0);
 
@@ -148,7 +92,7 @@ mod tests {
     struct Reset { _lock: MutexGuard<'static, ()>, layout: SelectorLayoutSize, descriptor: SelectorDescriptorInitialize, payload: PayloadInitialize, shared: u32 }
     impl Drop for Reset { fn drop(&mut self) { unsafe { SELECTOR_LAYOUT_SIZE = self.layout; SELECTOR_DESCRIPTOR_INITIALIZE = self.descriptor; PAYLOAD_INITIALIZE = self.payload; SHARED_HANDLE_GLOBAL = self.shared; } } }
     fn reset() -> Reset {
-        let lock = SHARED_RECORD_CONSTRUCT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = crate::cxx::shared_record_construct::SHARED_RECORD_CONSTRUCT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         unsafe {
             let reset = Reset { _lock: lock, layout: SELECTOR_LAYOUT_SIZE, descriptor: SELECTOR_DESCRIPTOR_INITIALIZE, payload: PAYLOAD_INITIALIZE, shared: SHARED_HANDLE_GLOBAL };
             SELECTOR_LAYOUT_SIZE = layout; SELECTOR_DESCRIPTOR_INITIALIZE = descriptor; PAYLOAD_INITIALIZE = payload;
@@ -161,13 +105,12 @@ mod tests {
     fn initializes_all_embedded_members_and_forwards_arguments() {
         let _shared = SHARED_HANDLE_INITIALIZE_TEST_LOCK.lock();
         let _reset = reset();
-        let Some(fixture) = *FIXTURE else { assert!(note_missing_u32_fixture("cxx/shared_record_construct")); return; };
+        let Some(fixture) = *FIXTURE else { assert!(note_missing_u32_fixture("cxx/shared_record_create")); return; };
         unsafe {
             let words = fixture as *mut u32; core::ptr::write_bytes(words.cast::<u8>(), 0xa5, WORDS * 4);
             let shared = words.add(16); shared.add(7).write(u32::MAX); SHARED_HANDLE_GLOBAL = shared as usize as u32;
-            let storage = words.add(48); assert_eq!(shared_record_construct(storage, 2, 0x1122_3344, 0x5566_7788), storage);
+            let storage = words.add(48); assert_eq!(shared_record_create(storage, 2, 0x1122_3344, 0x5566_7788), storage);
             assert_eq!(*storage, FINAL_VTABLE); assert_eq!(*storage.add(1), 12); assert_eq!(*storage.add(2), 0);
-            assert_eq!(*storage.add(3), 0);
             assert!((3..11).all(|word| *storage.add(word) == 0));
             assert_eq!(*storage.add(11), shared as usize as u32); assert_eq!(*shared.add(7), 0);
             assert_eq!(DESCRIPTOR_ARGS, (storage.add(12), 2)); assert_eq!(*storage.add(12), 0xd000_0002);
@@ -180,11 +123,11 @@ mod tests {
     fn preserves_nonstandard_selector_and_wrapping_layout_result() {
         let _shared = SHARED_HANDLE_INITIALIZE_TEST_LOCK.lock();
         let _reset = reset();
-        let Some(fixture) = *FIXTURE else { assert!(note_missing_u32_fixture("cxx/shared_record_construct selector")); return; };
+        let Some(fixture) = *FIXTURE else { assert!(note_missing_u32_fixture("cxx/shared_record_create selector")); return; };
         unsafe {
             let words = fixture as *mut u32; core::ptr::write_bytes(words.cast::<u8>(), 0, WORDS * 4);
             let shared = words.add(16); SHARED_HANDLE_GLOBAL = shared as usize as u32;
-            let storage = words.add(48); shared_record_construct(storage, u32::MAX, 0, 0);
+            let storage = words.add(48); shared_record_create(storage, u32::MAX, 0, 0);
             assert_eq!(*storage.add(1), 0); assert_eq!(DESCRIPTOR_ARGS, (storage.add(12), u32::MAX));
         }
     }
