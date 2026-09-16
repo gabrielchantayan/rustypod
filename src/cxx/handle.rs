@@ -824,6 +824,61 @@ pub unsafe extern "C" fn refcounted_ptr_assign_secondary_variant(
     dst
 }
 
+/// refcounted_handle_assign — original: `FUN_0839ec2c` @ 0x0839ec2c
+/// (68 bytes; 4 direct `bl` call sites, all unconditional: 0x0826fa5c,
+/// 0x0826fc04, 0x082c7eac, and 0x082c7f94 — verified by decoding every
+/// ARM B/BL word in osos.dec: no tail `b` sites, no predicated inbound
+/// calls, and no aligned image word equals this address, so it is not
+/// virtually dispatched. Raw instructions end with `pop {r4,r5,r6,pc}`
+/// at 0x0839ec6c; the separately linked [`refcounted_handle_copy_assign`]
+/// begins at 0x0839ec70, establishing the exact 68-byte extent. Ghidra's
+/// reported "4 bl" counts those inbound callers; the body itself issues
+/// exactly 2 calls, both predicated `blne`.)
+///
+/// A separately linked copy of [`refcounted_ptr_assign`] @ 0x0839eda0:
+/// `body = *src; *dst = body`, and when `body` is non-NULL its signed
+/// refcount at target +4 is wrapping-incremented under the optional mutex
+/// at +8 (mutex_lock @ 0x0807f5c4 / mutex_unlock @ 0x0807f6a0, both
+/// ported). The mutex field is loaded and NULL-checked independently
+/// before locking and again after incrementing before unlocking; a NULL
+/// mutex leaves the increment unguarded. Returns `dst`. The 17 ARM words
+/// are byte-identical to [`refcounted_ptr_assign_secondary_variant`] @
+/// 0x0839f248 modulo the two `blne` displacements.
+///
+/// Deliberate deviations: volatile target-field accesses retain the stock
+/// load/guard/increment/second-load/guard sequence; LLVM may inline the
+/// ported mutex helpers rather than preserving the stock `blne` pair. A
+/// dedicated target section keeps this separately hookable copy from
+/// folding into its byte-identical siblings.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots. A non-NULL `*src`
+/// must point to a readable/writable [`RefcountedBody`]. Neither slot
+/// pointer is NULL-checked by retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_handle_assign")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_handle_assign(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let body = src.read();
+    dst.write(body);
+    if !body.is_null() {
+        let mutex = core::ptr::addr_of!((*body).mutex).read_volatile();
+        if !mutex.is_null() {
+            mutex_lock(mutex);
+        }
+        let refcount = core::ptr::addr_of!((*body).refcount).read_volatile();
+        core::ptr::addr_of_mut!((*body).refcount).write_volatile(refcount.wrapping_add(1));
+        let mutex = core::ptr::addr_of!((*body).mutex).read_volatile();
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+    dst
+}
+
 /// refcounted_ptr_assign — original: `FUN_0839eda0` @ 0x0839eda0
 /// (68 bytes; 78 `bl` call sites).
 ///
@@ -2760,6 +2815,64 @@ mod tests {
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, i32::MIN);
             assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    #[test]
+    fn handle_assign_null_body_stores_null_and_returns_dst() {
+        unsafe {
+            let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
+            let src: *mut RefcountedBody = core::ptr::null_mut();
+
+            let ret = refcounted_handle_assign(&mut slot, &src);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert!(slot.is_null());
+        }
+    }
+
+    /// Wrapping increment between two fresh, separately NULL-checked mutex
+    /// loads; an empty semaphore cell exercises the lock/unlock pair.
+    #[test]
+    fn handle_assign_wraps_refcount_with_empty_mutex_cell() {
+        unsafe {
+            let mut mutex = Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: &mut mutex,
+            };
+            let src: *mut RefcountedBody = &mut body;
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            let ret = refcounted_handle_assign(&mut slot, &src);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// NULL mutex: the store still happens and the bump is unguarded.
+    #[test]
+    fn handle_assign_bumps_refcount_without_mutex() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 41,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+
+            let ret = refcounted_handle_assign(&mut slot, &slot);
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 42);
         }
     }
 
