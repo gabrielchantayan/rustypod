@@ -108,6 +108,7 @@ pub mod expr_worklist;
 pub mod expr_code_temp;
 pub mod expr_delete;
 pub mod expr_dup;
+pub mod expr_function;
 pub mod expr_height;
 pub mod expr_height_of;
 pub mod expr_list_delete;

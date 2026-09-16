@@ -35760,6 +35760,43 @@ functions:
       it for a recorder. The typed repr(C) Trigger preserves every field's
       target offset on ARM and keeps widened host pointer fields disjoint.
 
+  - address: 0x08377f10
+    ghidra: FUN_08377f10
+    name: expr_function
+    size: 96
+    sig: "Expr *expr_function(Parse *parse, ExprList *list, const Token *token)"
+    module: sqlite/expr_function
+    status: ported
+    vars: {param_1: parse, param_2: list, param_3: token, puVar1: node, uVar2: token_z, uVar3: token_n_dyn}
+    callees:
+      FUN_08374998: db_malloc_zero
+      FUN_08378670: expr_list_delete
+      FUN_083788fc: expr_set_height
+    notes: >-
+      SQLite 3.5.x sqlite3ExprFunction. Raw bytes confirm the 96-byte
+      extent 0x08377f10..0x08377f6f; 0x08377f70 starts the separately
+      linked FUN_08377f70 (stmdb with r7-r9). A whole-image ARM B/BL
+      scan found exactly 4 inbound direct BL forms - all unconditional
+      bl inside the parser's grammar-action block (0x0839aa10,
+      0x0839aa54, 0x0839aa6c, 0x0839ab30), no predicated BL and no tail
+      B. Ghidra's "4 bl call sites" is the inbound count; the body
+      itself holds 3 outbound unconditional bl's, all to already ported
+      callees, so no dispatch seam was added (the Rust port calls them
+      directly, like the original). db is re-loaded from parse +0x00
+      (ldr r0,[r0]); db_malloc_zero allocates 0x44 bytes. OOM releases
+      the argument list through expr_list_delete and returns NULL.
+      Otherwise op = 0x94 (TK_FUNCTION in this build), p_list +0x10 =
+      list, and the token's two words (ldmia r6,{r0,r1}) are stored
+      verbatim into both token (+0x14/+0x18) and span (+0x1c/+0x20) -
+      ownership bit and all - before expr_set_height recomputes the
+      cached height. The repr(C) Expr widens pointer fields on a 64-bit
+      host exactly like expr_height::Expr so p_list lands where the
+      fold reads it; only the 32-bit offsets are asserted. match.py:
+      same structure (allocation, OOM branch, field stores, three
+      direct bl's); the diff is LLVM's fp frame, the swapped
+      fall-through layout, and a second ldm for the span copy (same
+      bytes written).
+
   - address: 0x08377e00
     ghidra: FUN_08377e00
     name: expr_delete
