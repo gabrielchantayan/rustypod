@@ -29900,6 +29900,40 @@ functions:
       commit b25c610 without this ledger entry; entry added after
       re-verifying extent, call count and tests.
 
+  - address: 0x0839ce38
+    ghidra: FUN_0839ce38
+    name: refcounted_body_mutex_unlock_shared
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_shared(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839ce38..0x0839ce48: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_unlock @ 0x0807f6a0; bx lr. The
+      next separately linked function (push {r4,r5,r6,lr}) starts at
+      0x0839ce48. Decoding every ARM B/BL word in osos.dec finds four
+      direct bl callers, all unconditional at 0x0822f15c, 0x0822f194,
+      0x0839cde4, and 0x0839ce1c; no predicated calls, no direct tail b
+      sites, and no word-aligned image word equals this address, so it
+      is not virtually dispatched. This is the mutex-unlock half of the
+      helper pair (lock @ 0x0839ce28, unlock @ 0x0839ce38) linked
+      immediately after refcounted_body_release @ 0x0839cd98, which
+      calls it twice; the other two sites are the release-shaped body at
+      0x0822f0xx, which shares this helper instead of carrying its own
+      copy. It loads the RefcountedBody's optional mutex at target +8
+      and tail-branches to the already ported mutex_unlock only when
+      non-NULL; byte-identical sibling of refcounted_body_mutex_unlock @
+      0x0839d44c, refcounted_body_mutex_unlock_owned @ 0x0839d360,
+      refcounted_body_mutex_unlock_owned_variant @ 0x0839cfec, and
+      refcounted_body_mutex_unlock_array_variant @ 0x0839cf00, kept
+      distinct by a target-only link section. No deliberate behavioral
+      deviations: match.py shows LLVM frame setup plus popeq early-out
+      and a tail b to mutex_unlock (R_ARM_JUMP24), preserving the
+      load/guard/unlock behavior. Host test covers a live mutex signal
+      and the NULL-mutex early-out.
+
   - address: 0x0839d2c0
     ghidra: FUN_0839d2c0
     name: refcounted_body_release_owned
