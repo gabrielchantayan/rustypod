@@ -97156,3 +97156,46 @@ functions:
       operand order with the -2 folded into the load offsets and masks with
       0xffff instead of the lsl/lsr pair (equivalent), plus an fp/lr frame;
       match.py structural diff reviewed and expected.
+
+  # --- object modification commit + touch (backing-store sync, flag/timestamp) ---
+  - address: 0x08050eb4
+    ghidra: FUN_08050eb4
+    name: object_commit_touch
+    size: 80
+    sig: "i32 object_commit_touch(u8 *object)"
+    module: util/object_commit_touch
+    status: ported
+    renames:
+      param_1/r0: object
+      r5: backend (dereferenced twice from object+0x158)
+      FUN_08041104: retail_backend_record_commit (unported veneer)
+      FUN_08050f4c: retail_record_magic_validate (unported veneer)
+      FUN_08054fc4: current_mac_epoch_seconds_with_utc_offset (ported)
+    notes: >-
+      Raw osos.dec confirms the exact 80-byte extent 0x08050eb4..0x08050f04;
+      0x08050f04 is the next function's push {r4-r6,lr} prologue. Decoding
+      every immediate ARM B/BL word in osos.dec finds exactly five bl
+      callers: four unconditional at 0x0804744c, 0x0804849c, 0x0805d9e4, and
+      0x0806c8cc plus one predicated blgt at 0x08431eec; no b tail callers.
+      The body makes two bl calls (0x08041104, ported 0x08054fc4) and one b
+      tail branch to 0x08050f4c. Algorithm: the object word at +0x158 is a
+      pointer-to-pointer dereferenced twice (ldr r0,[r0,#0x158]; ldr
+      r5,[r0]) to the backing store; the commit call's status is
+      sign-extended from an i16 (mov r0,r0,lsl #16; movs r0,r0,asr #16) and
+      returned when nonzero. When the backing store's byte at +0x0c has bit
+      7 set, the flags halfword at +0xb0 is ORed with 0x00ff (raw ldrh
+      r0,[r4,#0xb0]; orr r0,r0,#0xff; strh — Ghidra's decompile wrongly
+      shows param_1[0] |= 0xff00), the current UTC-corrected Mac-epoch
+      timestamp is stored at +0x08, and the tail target 0x08050f4c
+      revalidates the 0x482b record magic and supplies the return value;
+      otherwise the function returns 0. Callers invoke it after mutating
+      the object (e.g. 0x0806c538 sets flags and timestamp first). The two
+      unported callees are reached through literal veneers at their verified
+      load addresses on device and fixture seams on host, matching the
+      established pattern. Host tests prove i16 sign extension of the
+      commit status (0x0000_8001 -> -32767 short-circuit, 0x1234_5678 ->
+      0x5678), the clear-gate no-touch path, and the touch path's exact
+      0x5a00 -> 0x5aff flag merge, timestamp store, and validate-tail
+      return propagation. match.py structural diff reviewed and expected:
+      LLVM splits the lsl/asr pair around the branch, uses ldrsb/cmn/popgt
+      for the bit-7 test, and emits its frame-pointer prologue.
