@@ -98497,6 +98497,33 @@ functions:
       comparison, capacity call, multiply, and three distance terms; LLVM
       adds a function-pointer blx and frame setup.
 
+  # --- aligned u32 exchange ---
+  - address: 0x083ea774
+    ghidra: FUN_083ea774
+    name: exchange_u32_words
+    size: 20
+    sig: "void exchange_u32_words(u32 *first, u32 *second)"
+    module: util/u32_word_exchange
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      r3: second_value
+      r2: first_value
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte body: ldr r3,[r1] at
+      0x083ea774, ldr r2,[r0], str r3,[r0], str r2,[r1], then bx lr at
+      0x083ea784; 0x083ea788 begins the next distinct push prologue. Decoding
+      aligned ARM B/BL-immediate words finds four inbound direct calls, all
+      unconditional plain bl at 0x083d2490, 0x083d27b8, 0x083d2ae0, and
+      0x083d2e08; there are no predicated forms, direct tail branches, or
+      outgoing calls. The function loads both aligned words before storing either
+      value, then exchanges them. This ordering preserves a word when both
+      pointers alias; host tests cover both an adjacent exchange with neighbour
+      preservation and aliasing. match.py reports the expected structural diff:
+      LLVM adds a frame prologue/epilogue but retains the two loads followed by
+      the two opposite stores. Deliberate deviation: volatile Rust accesses
+      preserve the original load-before-store ordering under optimization.
   - address: 0x083eab58
     ghidra: FUN_083eab58
     name: deque_iter_equal_elem4_alias_ab58
