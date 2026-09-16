@@ -10,6 +10,7 @@ pub mod chval;
 pub mod cpp_array_construct;
 pub mod cpp_array_allocate;
 pub mod ctype;
+pub mod cxa_atexit_veneer;
 pub mod cxa_guard;
 pub mod cxa_guard_release_veneer;
 pub mod errno;

@@ -61118,6 +61118,33 @@ functions:
       its focused host test proves that contract. match.py reviewed after the
       ARM release build.
 
+  # --- C++ destructor-registration literal veneer ---
+  - address: 0x080036e8
+    ghidra: FUN_080036e8
+    name: cxa_atexit_veneer
+    size: 8
+    sig: "int cxa_atexit_veneer(void *object, void (*destructor)(void *), int dso_handle)"
+    module: runtime/cxa_atexit_veneer
+    status: ported
+    renames:
+      DAT_080036ec: cxa_atexit_veneer_target
+      FUN_082a02f0: cxa_atexit_veneer_target
+    notes: >-
+      Raw ARM establishes the full eight-byte literal veneer: `ldr pc,
+      [pc, #-4]` at 0x080036e8 followed by target word 0x082a02f0 at
+      0x080036ec; Ghidra reports only the four-byte instruction. The next
+      literal veneer begins at 0x080036f0. Independent raw decoding of every
+      ARM BL instruction finds five direct callers (0x08004db8, 0x08005054,
+      0x0800611c, 0x08006ec4, 0x080074a8), all unconditional; there are no
+      predicated BL forms. At each call site it follows a static constructor
+      and receives `(object, destructor, __dso_handle)`, identifying the
+      literal target as ADS `__cxa_atexit` registration. On ARM the port is
+      the original instruction/literal pair, preserving LR and all general
+      registers through the tail branch. Deliberate host deviation: dispatch
+      to the ported cxa_atexit implementation because the retail literal
+      target is not a host-mappable Rust ABI seam; its literal words are
+      focused-tested and match.py reviewed after the ARM release build.
+
   # --- C++ guard-release literal veneer ---
   - address: 0x080036f0
     ghidra: FUN_080036f0
