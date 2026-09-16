@@ -5390,6 +5390,34 @@ functions:
       structural (lazy init + volatile ops-table loads inlined; tail
       branch through the slot).
 
+  - address: 0x0807b3c8
+    ghidra: FUN_0807b3c8
+    name: string_table_find_prefix
+    size: 124
+    sig: "u32 string_table_find_prefix(const u8 *candidate, usize candidate_len)"
+    module: util/string_table_find_prefix
+    status: ported
+    renames:
+      DAT_0807b444: string_table_base_literal
+      DAT_0890dca4: string_table
+      param_1/r0: candidate
+      param_2/r1: candidate_len
+      uVar4/r4: entry_index
+      FUN_0803105c: strncmp
+    notes: >-
+      Raw ARM extent is 116 instruction bytes plus the 4-byte literal at
+      0x0807b444, ending at 0x0807b444; the next real function begins at
+      0x0807b45c. The function scans exactly 74 runtime-populated string
+      pointers at 0x0890dca4, prefilters each by first byte, then calls
+      strncmp(entry, candidate, candidate_len); it returns the first
+      matching index or 75. Whole-image decode finds five incoming
+      unconditional bl calls (0x08099860, 0x080999e4, 0x08099a28,
+      0x080b5f0c, 0x080b607c), no predicated calls, and one outgoing plain
+      bl to strncmp. Host tests deliberately replace the fixed 32-bit RAM
+      table with native-width pointers; a volatile function pointer retains
+      the comparison call boundary as `blx` rather than LLVM-inlining it as
+      observed by match.py.
+
   - address: 0x0807b180
     ghidra: FUN_0807b180
     name: default_heap_free_bytes_get
