@@ -1774,7 +1774,7 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// `FUN_083cf698` @ 0x083cf698, `FUN_083cf6b0` @ 0x083cf6b0,
 /// `FUN_083cf6c8` @ 0x083cf6c8, `FUN_083cf758` @ 0x083cf758,
 /// `FUN_083cf7b8` @ 0x083cf7b8, `FUN_083cf7e8` @ 0x083cf7e8,
-/// `FUN_083cf860` @ 0x083cf860, `FUN_083cf878` @ 0x083cf878,
+/// `FUN_083cf800` @ 0x083cf800, `FUN_083cf860` @ 0x083cf860, `FUN_083cf878` @ 0x083cf878,
 /// `FUN_083cf8c0` @ 0x083cf8c0, `FUN_083cf890` @ 0x083cf890,
 /// `FUN_083cf908` @ 0x083cf908, `FUN_083cf920` @ 0x083cf920,
 /// `FUN_083cf938` @ 0x083cf938, `FUN_083cf950` @ 0x083cf950,
@@ -1882,6 +1882,20 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// addresses, unequal values in both orders, zero, all-bits-set, and
 /// iterator-shaped records whose trailing word is not read. Deliberate
 /// deviations: none.
+///
+/// `FUN_083cf800` runs from `ldr r0,[r0]` at 0x083cf800 through `bx lr` at
+/// 0x083cf814; the next separately linked equal_deref copy begins at
+/// 0x083cf818, confirming the 24-byte extent. It aligned-loads both u32
+/// operands, compares them, and returns normalized 1 or 0 for equality.
+/// Decoding every ARM B/BL-immediate word in osos.dec finds exactly four
+/// inbound direct calls, all unconditional plain `bl`: 0x081df9f0,
+/// 0x081dfb5c, 0x083c2e68, and 0x083db47c; there are no predicated calls,
+/// direct tail branches, or aligned raw-word references. Its byte-identical
+/// body deliberately reuses [`equal_deref`] rather than adding a redundant
+/// dispatch seam; hook 0x083cf800 to equal_deref. The shared host test
+/// covers equal values at distinct addresses, unequal values in both
+/// orders, zero, all-bits-set, and iterator-shaped records whose trailing
+/// word is not read. Deliberate deviations: none.
 ///
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
 /// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
