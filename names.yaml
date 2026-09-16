@@ -76181,6 +76181,34 @@ functions:
       seam and prove both NULL (no accidental guard) and non-NULL allocation
       forwarding with the exact descriptor. match.py reviewed.
 
+  # --- Tagged allocation release ---
+  - address: 0x0806fb54
+    ghidra: FUN_0806fb54
+    name: release_tagged_allocation
+    size: 32
+    sig: "void release_tagged_allocation(const uint32_t *record)"
+    module: cxx/tagged_allocation_release
+    status: ported
+    renames:
+      param_1/r0: record
+      FUN_08070c04: release_opaque_allocation
+      FUN_0806f174: tag_two_allocation_release_wrapper
+      FUN_0803b3a4: typed_allocation_release_helper
+      DAT_0806f17c/r1: tag_two_allocation_descriptor_0x0891f788
+    notes: >-
+      EXTENT: raw osos.dec words at 0x0806fb54 are e5901000 e3510001
+      05900004 0a000427 e3510002 05900004 0afffd80 e12fff1e; the next
+      independently linked function starts at 0x0806fb74. CALL COUNT:
+      decoding ARM B/BL words found five direct calls, all unconditional bl;
+      there are no predicated bl calls. ALGORITHM: inspect record[0]; tag 1
+      loads record[1] and tail-branches to release_opaque_allocation, tag 2
+      loads record[1] and tail-branches through 0x0806f174 to
+      typed_allocation_release_helper with descriptor 0x0891f788, and other
+      tags return without reading record[1]. Ghidra's fabricated call to
+      0x080c85bc is not present in this function. ARM global assembly
+      preserves the exact words and tail transfers; host tests record both
+      descriptor paths and prove an unrecognized tag needs only the first
+      word. Deliberate deviations: none.
   # --- Opaque allocation release ---
   - address: 0x08070c04
     ghidra: FUN_08070c04
