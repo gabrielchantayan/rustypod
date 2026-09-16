@@ -43,6 +43,7 @@ pub mod pool;
 pub mod releasable_buffer;
 pub mod owned_buffer;
 pub mod zeroing_buffer;
+pub mod two_buffer_owner;
 pub mod three_buffer_owner;
 pub mod three_buffer_owner_create;
 pub mod pool_client;

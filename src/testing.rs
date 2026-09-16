@@ -347,6 +347,10 @@ pub mod hints {
     // 0xb400_0000: dedicated to heap/three_buffer_owner's raw-u32 data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const THREE_BUFFER_OWNER_RELEASE: usize = 0xb400_0000;
+    // 0xcd00_0000: dedicated to heap/two_buffer_owner's raw-u32 buffer and
+    // data fixture; mappings never unmap, so no other user may share this
+    // hint.
+    pub const TWO_BUFFER_OWNER_RELEASE: usize = 0xcd00_0000;
     // 0xc500_0000: dedicated to heap/three_buffer_owner_create's raw-u32
     // allocation fixture; mappings never unmap, so no other user may share
     // this hint.
