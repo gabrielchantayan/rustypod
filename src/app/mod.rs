@@ -143,6 +143,7 @@ pub mod input_action_index;
 pub mod input_sequence_item_acquire;
 pub mod managed_entry;
 pub mod managed_entry_selector;
+pub mod length_prefix_validate;
 pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod layout_recompute_notify;

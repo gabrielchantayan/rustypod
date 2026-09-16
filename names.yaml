@@ -97557,3 +97557,36 @@ functions:
       return propagation. match.py structural diff reviewed and expected:
       LLVM splits the lsl/asr pair around the branch, uses ldrsb/cmn/popgt
       for the bit-7 test, and emits its frame-pointer prologue.
+
+  - address: 0x0804491c
+    ghidra: FUN_0804491c
+    name: length_prefix_validate
+    size: 40
+    sig: "u32 length_prefix_validate(const u8 *input, const LengthPrefixedRequestContext *context)"
+    module: app/length_prefix_validate
+    status: ported
+    vars:
+      param_1/r0: input
+      param_2/r1: context
+      '[context,#0x1e]': length_limit
+      '[context,#0x30]': prefix_flags
+      uVar1/r0: length
+    notes: >-
+      Raw osos.dec confirms the 40-byte body at 0x0804491c through bx lr
+      at 0x08044940, followed by the 0x0000030e literal at 0x08044944;
+      the next independent function starts at 0x08044948. It is a leaf
+      with no outbound BL calls. Binary/asm reference scan finds exactly
+      five inbound direct plain bl calls, at 0x0804827c, 0x08058be0,
+      0x080647c4, 0x08065e68, and 0x08065f54; no predicated BL calls.
+      Bit 1 at context +0x30 selects an input byte or aligned little-endian
+      u16. The routine returns zero only when the decoded value is at least
+      six and no greater than the u16 limit at context +0x1e; otherwise it
+      returns 0x030e. The full-width flags read is volatile to retain the
+      retail observable read width. match.py reports the same flags load,
+      width-selected prefix loads, and lower/upper bounds tests; LLVM uses
+      branches and immediate construction of 0x030e rather than ARM
+      predication and the literal-pool load. The existing
+      validated_length_prefixed_request_dispatch port describes values
+      through five as accepted, but raw bytes, objdump, and its Ghidra C
+      all establish this callee rejects them; that caller is intentionally
+      outside this single-function port.
