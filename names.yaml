@@ -13181,6 +13181,38 @@ functions:
       after an unmapped character zero. Host tests cover both null gates,
       callback receiver and input, mutated-code propagation, and zero-index
       suppression.
+  - address: 0x0804ec64
+    ghidra: FUN_0804ec64
+    name: ft_set_charmap
+    size: 88
+    sig: "FT_Error ft_set_charmap(FtFace *face, FtCharMap charmap)"
+    module: ft/charmap
+    status: ported
+    vars:
+      param_1: face
+      param_2: charmap
+      piVar1: cur
+      piVar2: limit
+    notes: >-
+      FreeType 2.3.0 FT_Set_Charmap (src/base/ftobjs.c). Raw osos.dec words
+      at 0x0804ec64-0x0804ecbb confirm the full 88-byte extent; the next
+      function's `push {r4-r8,lr}` starts at 0x0804ecbc. The body contains
+      zero BL instructions (leaf); exactly four direct `bl` callers exist in
+      osos.asm at 0x080770a8, 0x0807711c, 0x080bf610, and 0x080e6b68 —
+      Ghidra's "5 call sites" overcounts. Null face returns
+      FT_Err_Invalid_Face_Handle (0x23, `moveq r0,#35`); a null
+      face->charmaps (+0x28) returns FT_Err_Invalid_CharMap_Handle (0x26).
+      Otherwise the limit is computed in raw words as charmaps +
+      face->num_charmaps (+0x24), the table is scanned for a pointer equal
+      to charmap, and the matched table entry is stored into face->charmap
+      (+0x5c) with FT_Err_Ok returned; exhausting the table returns
+      FT_Err_Invalid_Argument (6). A negative num_charmaps yields an empty
+      scan in both the original and the port. Caller FUN_080bf59c reads
+      units_per_EM at +0x44 and forwards face->charmap, confirming the
+      FT_FaceRec identity. Host tests cover both null gates, absent entry,
+      empty/negative counts, and first-match installation. LLVM codegen
+      counts down with `subs` instead of the original's pointer-limit loop
+      and sinks the returns behind a shared pop — same structure.
   # --- FreeType glyph loader ---
   - address: 0x0804c9f4
     ghidra: FUN_0804c9f4

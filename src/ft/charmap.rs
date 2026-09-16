@@ -6,7 +6,11 @@
 
 use core::ffi::c_void;
 
-use crate::ft::glyph_slot::{FtCMap, FtFace};
+use crate::ft::error::{
+    FT_ERR_INVALID_ARGUMENT, FT_ERR_INVALID_CHARMAP_HANDLE, FT_ERR_INVALID_FACE_HANDLE,
+    FT_ERR_OK,
+};
+use crate::ft::glyph_slot::{FtCMap, FtCharMap, FtFace};
 
 /// `FT_CMap_ClassRec` through `char_next`.
 ///
@@ -63,6 +67,49 @@ pub unsafe extern "C" fn ft_get_next_char(
     }
 
     result
+}
+
+/// FreeType 2.3 `FT_Set_Charmap` (ftobjs.c) — original: `FUN_0804ec64`
+/// @ 0x0804ec64 (88 bytes, 0 BL instructions; 4 direct callers in osos.asm at
+/// 0x080770a8, 0x0807711c, 0x080bf610, and 0x080e6b68 — Ghidra's "5 call
+/// sites" overcounts).
+///
+/// Selects `face`'s active character map by scanning `face->charmaps` for a
+/// pointer identical to `charmap`.  Null face returns
+/// `FT_Err_Invalid_Face_Handle` (0x23); a null charmap table returns
+/// `FT_Err_Invalid_CharMap_Handle` (0x26).  On the first match the matched
+/// table entry (not the argument) is stored into `face->charmap` and zero is
+/// returned; exhausting `face->num_charmaps` entries returns
+/// `FT_Err_Invalid_Argument` (6).  The original computes the table limit as
+/// `charmaps + num_charmaps` in raw words, so a negative count yields an
+/// empty scan; the port's `0..num_charmaps` range reproduces that.
+/// No deviations.
+///
+/// # Safety
+/// `face`, when non-null, must be a valid `FT_FaceRec`; `face->charmaps`,
+/// when non-null, must point to `face->num_charmaps` readable charmap
+/// pointers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_set_charmap(
+    face: *mut FtFace,
+    charmap: *mut FtCharMap,
+) -> i32 {
+    if face.is_null() {
+        return FT_ERR_INVALID_FACE_HANDLE;
+    }
+    let charmaps = (*face).charmaps.cast::<*mut FtCharMap>();
+    if charmaps.is_null() {
+        return FT_ERR_INVALID_CHARMAP_HANDLE;
+    }
+    for i in 0..(*face).num_charmaps {
+        let cur = *charmaps.offset(i as isize);
+        if cur == charmap {
+            (*face).charmap = cur;
+            return FT_ERR_OK;
+        }
+    }
+    FT_ERR_INVALID_ARGUMENT
 }
 
 #[cfg(test)]
@@ -142,5 +189,77 @@ mod tests {
         assert_eq!(unsafe { ft_get_next_char(&mut face, 0x42, &mut glyph_index) }, 0);
         assert_eq!(glyph_index, 0);
         assert_eq!(NEXT_INPUT.load(Ordering::Relaxed), 0x42);
+    }
+
+    fn blank_charmap() -> FtCharMap {
+        FtCharMap {
+            face: core::ptr::null_mut(),
+            encoding: 0,
+            platform_id: 0,
+            encoding_id: 0,
+        }
+    }
+
+    #[test]
+    fn set_charmap_rejects_null_face_and_null_table() {
+        let mut charmap = blank_charmap();
+        assert_eq!(
+            unsafe { ft_set_charmap(core::ptr::null_mut(), &mut charmap) },
+            FT_ERR_INVALID_FACE_HANDLE
+        );
+
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.num_charmaps = 2;
+        assert_eq!(
+            unsafe { ft_set_charmap(&mut face, &mut charmap) },
+            FT_ERR_INVALID_CHARMAP_HANDLE
+        );
+        assert!(face.charmap.is_null());
+    }
+
+    #[test]
+    fn set_charmap_reports_invalid_argument_when_absent_or_table_empty() {
+        let mut first = blank_charmap();
+        let mut second = blank_charmap();
+        let mut wanted = blank_charmap();
+        let table = [&mut first as *mut FtCharMap, &mut second as *mut FtCharMap];
+
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.charmaps = table.as_ptr() as *mut *mut c_void;
+        face.num_charmaps = 2;
+        assert_eq!(
+            unsafe { ft_set_charmap(&mut face, &mut wanted) },
+            FT_ERR_INVALID_ARGUMENT
+        );
+        assert!(face.charmap.is_null());
+
+        // The original's raw-word limit makes a non-positive count an empty scan.
+        face.num_charmaps = 0;
+        assert_eq!(
+            unsafe { ft_set_charmap(&mut face, table[0]) },
+            FT_ERR_INVALID_ARGUMENT
+        );
+        face.num_charmaps = -1;
+        assert_eq!(
+            unsafe { ft_set_charmap(&mut face, table[0]) },
+            FT_ERR_INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn set_charmap_installs_the_first_matching_table_entry() {
+        let mut first = blank_charmap();
+        let mut second = blank_charmap();
+        let table = [&mut first as *mut FtCharMap, &mut second as *mut FtCharMap];
+
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.charmaps = table.as_ptr() as *mut *mut c_void;
+        face.num_charmaps = 2;
+
+        assert_eq!(unsafe { ft_set_charmap(&mut face, table[1]) }, FT_ERR_OK);
+        assert_eq!(face.charmap, table[1]);
+
+        assert_eq!(unsafe { ft_set_charmap(&mut face, table[0]) }, FT_ERR_OK);
+        assert_eq!(face.charmap, table[0]);
     }
 }
