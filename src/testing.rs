@@ -138,6 +138,10 @@ pub mod hints {
     pub const ELEMENT_REGISTRY_SLOT_FOR_KEY: usize = 0x1d40_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
+    // Dedicated target-layout sqlite3 connection fixtures for
+    // sqlite/close; mappings never unmap.
+    pub const SQLITE_CLOSE: usize = 0x2000_0000;
+    pub const SQLITE_CLOSE_SCHEMA: usize = 0x2100_0000;
     // 0xc000_0000 and 0xc100_0000: dedicated to
     // cxx/opaque_vtable_record_copy_construct's target-width source fixtures.
     pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT: usize = 0xc000_0000;
