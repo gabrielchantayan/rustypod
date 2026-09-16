@@ -49529,6 +49529,49 @@ functions:
       distinct exported call target; host tests prove the null no-dispatch and
       non-null selector-0x11 delegation cases. match.py structural difference
       is expected for the Rust indirect call frame.
+  - address: 0x08037f40
+    ghidra: thunk_EXT_FUN_220084dc
+    name: i2s_chunked_transfer_veneer
+    size: 8
+    sig: "uint32_t i2s_chunked_transfer_veneer(uint32_t dst, uint32_t src, uint32_t len)"
+    module: kernel/thunks
+    status: ported
+    renames: {thunk_EXT_FUN_220084dc: i2s_chunked_transfer_veneer, FUN_080084dc: i2s_chunked_transfer}
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs): `ldr pc,[pc,#-4]` + literal word 0x220084dc.
+      Ghidra reports 4 bytes; the stub is 8 (next stub starts at
+      0x08037f48). Call count binary-verified by decoding every ARM B/BL
+      word in osos.dec: exactly five calls - four plain unconditional bl
+      at 0x080fa454, 0x0814dc1c, 0x081b07a8, and 0x081b07d0, plus one
+      predicated bleq at 0x08093734; zero tail b, and no aligned data
+      word holds the thunk address, so it has no observed virtual
+      dispatch. The relocator at 0x080046e0 copies 0xaed8 bytes from
+      0x08000000 to 0x22000000, so the target is the IRAM mirror of
+      FUN_080084dc @ 0x080084dc (0xf0 bytes of code; the next function
+      opens at 0x080085fc; literal words 0xfff @ 0x080085d0 and 0x1ffe
+      @ 0x080085d4): a chunked DMA/I2S memory transfer (dst r0, src r1,
+      byte length r2). It ORs dst|src|len to pick a unit size - all
+      4-aligned: unit 2, byte length >>= 2, chunk cap 0xfff << 2 =
+      0x3ffc; else 2-aligned: unit 1, length >>= 1, cap 0x1ffe; else
+      unit 0, cap 0xfff. The burst field is 7 when the unit-shifted
+      length is a multiple of 8, 3 when a multiple of 4, else 0. Setup
+      call FUN_080083c4(0x1c, unit, burst, 0x1c, unit, burst, &slot,
+      &controller) (the I2S transfer setup path; four register + four
+      stack arguments) fills a slot byte and a signed controller byte on
+      the frame. The loop submits min(remaining, cap)-byte chunks via
+      the ported queue_transfer_with_default_mode (FUN_08008648: src,
+      dst, chunk, slot, controller on the stack), waits per chunk via
+      FUN_08008690(slot, controller), advances both pointers, then tears
+      down via FUN_080085fc(slot, controller) (the sole recovered caller
+      of i2s_transfer_slot_cleanup) and returns 0. Port keeps the
+      verbatim veneer on ARM via global_asm (ldr pc preserves LR, target
+      returns straight to the caller); host builds dispatch through the
+      volatile I2S_CHUNKED_TRANSFER_OPS seam, default returning the
+      target's status 0. match.py structural: instruction stream
+      identical (ldr pc,[pc,#-4]); the only diff line is the literal
+      word shown as .word vs the Ghidra-side 4-byte truncation.
+
   - address: 0x08037f58
     ghidra: thunk_EXT_FUN_220060e0
     name: lazy_singleton_106dc_acquire
