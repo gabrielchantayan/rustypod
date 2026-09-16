@@ -99954,3 +99954,24 @@ functions:
       that grouped load-before-store behavior under LLVM; match.py reports
       the same null guard, two source loads, and two destination stores, with
       the compiler-added frame and scalar instructions replacing ldm/stm.
+
+  - address: 0x083d72fc
+    ghidra: FUN_083d72fc
+    name: word_key_set_count
+    size: 60
+    sig: "u32 word_key_set_count(const WordKeySet *tree, const u32 *key)"
+    module: cxx/word_key_set_count
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      return/r0: count
+    notes: >-
+      Raw osos.dec words from 0x083d72fc through 0x083d7334 establish the
+      complete 60-byte body; the next real function begins at 0x083d7338.
+      The body has two outgoing plain BL calls, at 0x083d730c to the
+      lower/upper-bound helper 0x083d6644 and at 0x083d7328 to iterator
+      distance 0x083e7c14; neither is predicated. It computes the unsigned
+      word-key equal range, then counts successors from lower to upper.
+      The Rust port inlines those verified unported helper algorithms instead
+      of creating seams; host tests cover empty, absent, edge, and middle runs.

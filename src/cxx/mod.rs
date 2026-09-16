@@ -246,6 +246,7 @@ pub mod trivial_vector12_destruct;
 pub mod wheel_event;
 pub mod word_key_map;
 pub mod word_key_set;
+pub mod word_key_set_count;
 pub mod timer_stop_then_clear_bit_set;
 pub mod transition_addon;
 pub mod typed_allocation_release;
