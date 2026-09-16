@@ -5107,6 +5107,56 @@ functions:
       blx-through-volatile-slot dispatch standing in for the direct bl
       0x083d7ec0 (the documented deviation).
 
+  - address: 0x083e8cb0
+    ghidra: FUN_083e8cb0
+    name: vector_copy_construct_range_elem16_alt
+    size: 64
+    sig: "u8 *vector_copy_construct_range_elem16_alt(const u8 *first, const u8 *last, u8 *output, VectorStorage *vector)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: vector
+      r4: source_cursor
+      r5: output_cursor
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      64 bytes exactly (extent 0x083e8cb0..0x083e8cf0, bounded by the push
+      {r4-r6,lr} of the next function at 0x083e8cf0; binary-verified).
+      Ghidra's reported size and call-site count are both correct.
+      std::vector uninitialized-copy over 0x10-byte elements: push
+      {r4-r8,lr}; for each element call the helper (vector, output, source),
+      stride both cursors by 0x10, terminate on cursor EQUALITY (cmp/bne),
+      return the advanced output cursor. Word-for-word twin of
+      vector_copy_construct_range_elem16 except the per-element helper is
+      0x083d7df4 instead of 0x083d7ec0 - the helper differs (it guards
+      output==NULL, then drives a 4-byte-stride copy chain: bl into the
+      loop-test entry of a stride-4 range copier at 0x083e8c30, tail-branch
+      to 0x083e5b00 on dst+4/src+4), so this is a distinct element type on
+      the same stride, hence the _alt suffix (the two_word_clear_alt
+      precedent). Exactly four inbound direct bl sites (0x08197bf8,
+      0x083c1610, 0x083e2634, 0x083e2714), all unconditional, no predicated
+      inbound calls (verified by decoding every B/BL word in osos.dec); the
+      body itself holds one plain bl (to 0x083d7df4, binary-verified:
+      eb ff bc 46 at 0x083e8cd4 resolves to
+      0x083e8cd4+8+sext(0xffbc46)<<2) and no predicated calls. Deviations:
+      helper 0x083d7df4 is unported, so the call goes through the new
+      VECTOR_COPY_CONSTRUCT_ELEM16_ALT_OPS dispatch slot (the
+      VECTOR_COPY_CONSTRUCT_ELEM16_OPS pattern) whose target default
+      transmutes VECTOR_COPY_CONSTRUCT_ELEM16_ALT_ADDRESS and whose host
+      default is inert; the vector argument is forwarded verbatim although
+      the observed helper never reads its r0. Host tests: one helper call
+      per element with the cursors striding together and the vector pointer
+      forwarded, the exclusive range end (destination untouched by the loop
+      itself), the empty range, and the NULL-output dispatch-and-advance
+      path. match.py structural: same push/mov/loop/call/add-0x10/cmp/bne/
+      return-output shape as the original and identical in diff shape to
+      the accepted vector_copy_construct_range_elem16 port; the diff is the
+      crate fp frame and the blx-through-volatile-slot dispatch standing in
+      for the direct bl 0x083d7df4 (the documented deviation).
+
   - address: 0x083e90b8
     ghidra: FUN_083e90b8
     name: vector_copy_construct_range_elem28
