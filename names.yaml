@@ -67887,6 +67887,40 @@ functions:
       osos.dec 0x083e1ae4. match.py: structural match reviewed.
       absence of mutation.
 
+  # --- returning three-word clear helper (second instance) ---
+  - address: 0x083e7168
+    ghidra: FUN_083e7168
+    name: three_word_clear_return_alt
+    size: 20
+    sig: "u32 *three_word_clear_return_alt(u32 *target)"
+    module: cxx/three_word_clear_return_alt
+    status: ported
+    renames:
+      param_1/r0: target
+      r1: zero
+      param_1_plus_0x00: first_word
+      param_1_plus_0x04: second_word
+      param_1_plus_0x08: third_word
+      return/r0: target
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM instructions
+      from mov r1,#0 at 0x083e7168 through bx lr at 0x083e7178; the separately
+      linked next function FUN_083e717c begins at 0x083e717c. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly four inbound direct
+      calls, all unconditional plain bl at 0x0826a554, 0x0826a58c, 0x082ca9e4,
+      and 0x082caa2c; there are no predicated forms or direct tail branches.
+      The function materializes zero in r1, stores it at target+0, +4, and +8
+      with word stores (str, not strb), preserves r0, and returns. Ghidra
+      declares it void, but callers 0x082ca9e4 and 0x0826a554 consume the
+      preserved target (mov r10,r0 / subsequent stores through r0), so the
+      port returns target. In context it is a C++ container default
+      constructor: caller FUN_082ca98c passes the cleared 12-byte head to the
+      reserve-like helper FUN_083e7048 and the push-back helper FUN_083e7140,
+      matching a {begin, end, end_of_storage} triple. Word-for-word twin of
+      three_word_clear_return at 0x083e5aec. match.py: identical diff to the
+      accepted 0x083e5aec port - LLVM emits a frame-pointer push/pop around an
+      instruction-identical body.
+
   - address: 0x083e717c
     ghidra: FUN_083e717c
     name: trivial_vector8_destruct
