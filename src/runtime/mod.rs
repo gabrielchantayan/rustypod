@@ -40,4 +40,5 @@ pub mod timer_constants;
 pub mod state_transition;
 pub mod state_finalize;
 pub mod state_wait;
+pub mod trim_ctype_whitespace;
 pub mod temporary_buffer;
