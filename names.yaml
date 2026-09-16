@@ -41945,6 +41945,29 @@ functions:
       the end store ahead of it. match.py shows the same block shape,
       capacity math, chunk-link stmia, and both bl boundaries.
 
+  - address: 0x083db2d4
+    ghidra: FUN_083db2d4
+    name: red_black_tree_payload_24_construct
+    size: 88
+    sig: "RedBlackTreePayload24 *red_black_tree_payload_24_construct(RedBlackTreePayload24 *tree, const u8 *comparator, void *allocator)"
+    module: cxx/red_black_tree_payload_24_construct
+    status: ported
+    vars: {param_1: tree, param_2: comparator, param_3: allocator}
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from
+      push {r4-r6,lr} at 0x083db2d4 through pop {r4-r6,pc} at 0x083db328;
+      the next separately linked function begins at 0x083db32c. Decoding
+      every aligned ARM B/BL-immediate word finds four inbound direct calls,
+      all plain unconditional bl (0x081e0304, 0x081e03a0, 0x081e043c,
+      0x081e0bf8), no predicated forms, and one unconditional outbound bl to
+      red_black_tree_payload_24_node_pool_acquire @ 0x083c14c8. The
+      constructor clears the 16-byte embedded pool, header pointer, count,
+      and flag at +0x18; copies *comparator to +0x19; obtains the sentinel;
+      then sets sentinel parent to zero and left/right links to itself.
+      The third ABI argument is deliberately retained but ignored, matching
+      the original. Pointers remain 32-bit target words to preserve the
+      28-byte layout on host builds.
+
   - address: 0x083db4c4
     ghidra: FUN_083db4c4
     name: string_map_lookup_or_insert
