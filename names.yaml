@@ -8774,6 +8774,39 @@ functions:
       list_iter_advance remains a direct call, LLVM adds its fp frame —
       the accepted house deviations.
 
+  - address: 0x083d5e70
+    ghidra: FUN_083d5e70
+    name: iter_equal
+    size: 24
+    sig: "i32 iter_equal(u8 **a, u8 **b)"
+    module: cxx/list_splice
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      return/r0: equal
+    notes: >-
+      Raw ARM extent is exactly 24 bytes at 0x083d5e70..0x083d5e88:
+      ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1;
+      bx lr; list_iter_advance begins immediately at 0x083d5e88.
+      Ghidra's "4 bl call sites" are the inbound callers, verified
+      against the raw binary: 3 unconditional bl at 0x0818a5f0,
+      0x0818a604 and 0x083d5dc4 (list_splice's adopt walk) plus one
+      predicated blne at 0x083d5d90 (list_splice's dead validation);
+      the body itself contains no calls. It is the checked-iterator
+      pointee comparison: 1 when both iterators' current-node words
+      are equal, else 0 — one of the 41 byte-identical equal_deref
+      copies. Previously a private helper inside cxx/list_splice; now
+      a distinct export with link_section .text.iter_equal so LLVM
+      cannot fold it onto equal_deref/iterator_equal, keeping it
+      independently hookable. Host test pins same-node, different-
+      node, NULL==NULL and node!=NULL pointee pairs (fabricated
+      addresses; the pointees are never dereferenced). match.py
+      structural: same two pointer loads and equality select; LLVM
+      computes it branchlessly (sub/clz/lsr) instead of the
+      movne/moveq pair and adds its fp frame — the accepted equal_deref
+      deviations.
+
   - address: 0x083d5e88
     ghidra: FUN_083d5e88
     name: list_iter_advance
@@ -40014,8 +40047,8 @@ functions:
       0x082a7884 2, 0x083cf818 1. Two copies are already spoken for
       under other names: 0x082a1834 is ported as fixed16_eq_indirect
       (fp/fp_misc - a Q16.16 comparator that merely shares the
-      load-cmp-select shape) and 0x083d5e70 is inlined privately in
-      cxx/list_splice as iter_equal; hook every OTHER copy to this
+      load-cmp-select shape) and 0x083d5e70 is exported as
+      iter_equal in cxx/list_splice; hook every OTHER copy to this
       equal_deref symbol. The export carries a distinct link_section
       (.text.equal_deref) so LLVM's identical-function folding cannot
       merge it onto fixed16_eq_indirect - both labels verified present
