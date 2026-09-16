@@ -88328,6 +88328,54 @@ functions:
       0x081e0c4c notes). Deliberate deviation: the veneer dispatch to
       operator_delete is routed through the ported free seam in
       runtime/malloc_rt, matching the 0x083e68a0 instance.
+  - address: 0x083dbb5c
+    ghidra: FUN_083dbb5c
+    name: word_key_map_find
+    size: 168
+    sig: "void word_key_map_find(WordKeyMapNode **out, WordKeyMap *map, const u32 *key)"
+    module: cxx/word_key_map
+    status: ported
+    renames:
+      FUN_083dbb5c: word_key_map_find
+      param_1/r0: out (sret-style result slot)
+      param_2/r1: map
+      param_3/r2: key
+    notes: >-
+      Raw osos.dec fixes the extent at 168 bytes, 0x083dbb5c..0x083dbc04
+      (Ghidra's 168 is correct); the next separately linked function
+      opens str lr, [sp, #-4]! (e52de004) @ 0x083dbc04. Decoding every
+      aligned ARM B/BL word in osos.dec finds exactly four direct
+      inbound calls, all unconditional bl: 0x081f09a0, 0x081f0ad0,
+      0x081f0bdc and 0x081f0f84; no predicated forms or tail branches.
+      The body carries exactly four bls, all unconditional: two to the
+      unsigned word less-than comparator less_unsigned @ 0x083d7598,
+      one to the one-word iterator equality equal_deref @ 0x083cf968
+      and one to the key accessor @ 0x083b6b3c (add r0, r0, #16; bx
+      lr). Algorithm: libstdc++ _Rb_tree::_M_find for a map whose nodes
+      are the 0x10-byte _Rb_tree_node_base header plus a u32 key @
+      +0x10 and a u32 mapped word @ +0x14 (std::map<unsigned, T*>; the
+      caller @ 0x081f09a0 passes the found node's +0x14 into a virtual
+      call). Lower-bound descent from the root (header pointer @
+      map+0x10, root @ header+4): right link +0xc while node_key <
+      *key, else remember the candidate and take the left link +8; the
+      candidate is the answer unless it is the header or *key <
+      candidate_key, in which case the header (end()) is written
+      through the out pointer in r0. Deliberate deviations: the ported
+      exported less_unsigned (cxx/templates) is reached by real calls,
+      preserving the original's two bl boundaries; the key accessor @
+      0x083b6b3c and the one-word equal_deref are few-instruction
+      leaves and are inlined (the byte_key_map precedent); the
+      original's stack-slot parking of candidate/header and the
+      per-step str r8, [sp] zero-store are dead scratch, dropped.
+      match.py structural diff vs worktree --lib archive: same descent
+      loop, same compare/branch skeleton, both bls relocate to
+      less_unsigned; differences are register allocation, the crate fp
+      frame and the two inlined leaves. Host tests (5): empty tree
+      returns the header, every present key in a balanced three-node
+      tree is found, absent keys (below/between/above, including
+      u32::MAX) return the header, a four-node chain exercises both
+      descent directions, and unsigned ordering governs the walk
+      (u32::MAX sorts above 1).
   - address: 0x083dbd9c
     ghidra: FUN_083dbd9c
     name: u32_map_value_slot
