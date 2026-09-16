@@ -21,6 +21,7 @@ pub mod metrics;
 pub mod outline;
 pub mod offset_buffer;
 pub mod service;
+pub mod select_metrics;
 pub mod size;
 pub mod service_metadata;
 pub mod stream;
