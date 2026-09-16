@@ -94293,6 +94293,49 @@ functions:
       absolute address; tests prove the guard avoids an invalid vtable and
       that a nonzero guard dispatches only slot +0x40 with zero as argument.
 
+  # --- guarded virtual +0x04 dispatch through an object handle ---
+  - address: 0x083e72b0
+    ghidra: FUN_083e72b0
+    name: guarded_vtable_slot_04_dispatch
+    size: 36
+    sig: "GuardedSlot04Handle *guarded_vtable_slot_04_dispatch(GuardedSlot04Handle *handle)"
+    module: cxx/guarded_vtable_slot_04_dispatch
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_1_deref/r0: object
+      object_deref/r1: vtable
+      vtable_plus_0x04/r1: virtual_method
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM
+      instructions from push {r4,lr} at 0x083e72b0 through pop {r4,pc} at
+      0x083e72d0; the next function's push {r4,lr} begins at 0x083e72d4,
+      which is the ported sibling guarded_vtable_slot_1c_dispatch (same
+      body, vtable slot +0x1c). Decoding every aligned ARM B/BL-immediate
+      word in osos.dec finds exactly four inbound direct calls, all
+      unconditional plain bl at 0x0808e5bc, 0x0808e5dc, 0x080c6c94, and
+      0x080c6d34; there are no predicated call forms, direct tail-B
+      callers, or aligned image words equal to this entry. The body makes
+      no static calls: the four bl sites attributed to the function are
+      its inbound callers. The argument is a handle (pointer to object
+      pointer; recovered callers pass a stack local such as &local_54): a
+      NULL object word returns the handle unchanged; otherwise the
+      object's vtable word 1 (+0x04) is dispatched as method(object) via
+      predicated blxne, its result discarded, and the original handle
+      returned in r0. Recovered callers use it in cleanup paths alongside
+      an object release, consistent with a close/dispose method, but the
+      concrete virtual method identity remains unrecovered and
+      deliberately unnamed. Target vtable words are 32-bit while host
+      callback pointers are native-width, so the Rust port uses a
+      host-sized typed vtable; this is the only deliberate deviation.
+      match.py confirms the same structure (null guard, double
+      dereference to slot +0x04, blx with the object in r0, handle
+      returned); residual differences are LLVM frame setup and
+      branch-form instead of predicated execution. Host tests prove the
+      NULL guard avoids the vtable, exact slot +0x04 selection, object
+      (not handle) forwarding, handle passthrough, and that neither the
+      handle word nor the object body is written.
+
   # --- guarded virtual +0x1c dispatch through an object handle ---
   - address: 0x083e72d4
     ghidra: FUN_083e72d4
