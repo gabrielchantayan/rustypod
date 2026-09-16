@@ -5057,6 +5057,32 @@ functions:
     status: ported
     notes: fread helper; zero callers in image (dead-linked).
 
+  - address: 0x083e9278
+    ghidra: thunk_FUN_083e9290
+    name: copy_word_range_if_destination
+    size: 40
+    sig: "u32 *copy_word_range_if_destination(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_word_range_if_destination
+    status: ported
+    notes: >-
+      Ghidra reports a 4-byte thunk at the entry; the raw words show the entry
+      `b 0x083e9290` branches to the loop test, whose back-edge reaches the
+      word transfer at 0x083e927c, so the complete callable extent is
+      0x083e9278..0x083e92a0 (40 bytes; the next function at 0x083e92a0 is a
+      byte-identical sibling, thunk_FUN_083e92b8). Four direct inbound BLs
+      (0x083e4fd0, 0x083e5024, 0x083e50a4, 0x083e50e4, from vector growth
+      code), all unconditional; no predicated BLs. Word-at-a-time variant of
+      copy_range_if_destination @ 0x083e93c8: copies [source,end) forward only
+      when destination is non-NULL (both ldr and str are predicated), advances
+      destination regardless, and returns the advanced destination. Codegen
+      deviation: LLVM emits an extra push/pop {fp,lr} frame and folds the
+      entry branch into a cmp/beq prologue; the loop body is instruction-for-
+      instruction identical (modulo ip vs r3 scratch).
+
   - address: 0x083e93c8
     ghidra: thunk_FUN_083e93e0
     name: copy_range_if_destination
