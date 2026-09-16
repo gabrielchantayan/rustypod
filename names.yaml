@@ -30330,6 +30330,35 @@ functions:
       into its byte-identical siblings; host tests use oversized arenas
       because the host structs are wider than the target's 12/8-byte layouts.
 
+  - address: 0x0839ed08
+    ghidra: FUN_0839ed08
+    name: refcounted_ptr_copy_assign_dtor_copy
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_copy_assign_dtor_copy(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+    notes: >-
+      Raw words establish the exact 48-byte extent (0x0839ed08..0x0839ed38),
+      where refcounted_ptr_construct begins, matching Ghidra. Decoding every
+      ARM B/BL word in osos.dec finds exactly 4 direct bl callers, all
+      unconditional (0x08280900, 0x08280d1c, 0x08280d60, 0x08280e30): no
+      predicated forms, no tail b sites, no data-word references, so it is
+      never virtually dispatched. The slot-1-virtual-destructor sibling of
+      refcounted_ptr_copy_assign_slot7 @ 0x0839ede4: distinct slot addresses
+      release the old body via refcounted_body_release_dtor_copy @
+      0x0839ccac, then load *src (the ldr r1,[r4] deliberately follows the
+      release) and acquire it, returning dst. The stock acquire callee @
+      0x0839cc70 is byte-identical to the ported refcounted_body_acquire @
+      0x0839cd5c modulo its two bl displacements (verified word-by-word),
+      so the port calls that canonical implementation - the deliberate
+      deviation. match.py shows the same guard/release/reload/acquire
+      structure; LLVM emits an fp frame and swaps the r4/r5 allocation vs
+      ADS. Host tests cover self-assignment no-op, non-final release with
+      source-mutex acquire, and final slot-1 destruct-then-acquire ordering.
+
   - address: 0x0839eda0
     ghidra: FUN_0839eda0
     name: refcounted_ptr_assign
