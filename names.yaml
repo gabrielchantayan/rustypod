@@ -100183,3 +100183,30 @@ functions:
       dispatch rather than introducing a callee seam. Host fixtures deliberately
       widen vtable pointers and the method slot to native pointer width; target
       builds retain target-width volatile vtable-word reads.
+  - address: 0x083d5f5c
+    ghidra: FUN_083d5f5c
+    name: ui_object_vtable_result_word
+    size: 24
+    sig: "u32 ui_object_vtable_result_word(void *object)"
+    module: ui/object_vtable_result_word
+    status: ported
+    renames:
+      param_1/r0: object
+      "*object/r2": vtable
+      "*(vtable + 0x40)/r2": result_word_method
+      r0: result_word_pointer_then_value
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: six ARM words from
+      push {r4,lr} at 0x083d5f5c through pop {r4,pc} at 0x083d5f70; the next
+      distinct function begins at 0x083d5f74. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly four inbound direct calls,
+      all unconditional bl at 0x0814768c, 0x081476e8, 0x0839c3b0, and
+      0x0839c3f4; there are no predicated direct bl forms. The body performs
+      one indirect blx through vtable slot +0x40 as (object) -> u32 pointer,
+      then returns the aligned word at that pointer. The virtual callee has no
+      recovered static identity, so the port performs the observed indirect
+      dispatch rather than introducing a callee seam. Host fixtures deliberately
+      widen vtable pointers and the method slot to native pointer width; target
+      builds retain target-width volatile vtable-word reads. match.py review
+      found the original vtable load, slot load, indirect call, and result load;
+      LLVM adds a frame pointer and chooses r1 rather than r2 for the method.

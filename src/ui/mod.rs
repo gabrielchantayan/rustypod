@@ -42,6 +42,7 @@ pub mod string_view;
 pub mod string_view_array;
 pub mod vtable_slot_20;
 pub mod vtable_slot_24;
+pub mod object_vtable_result_word;
 pub mod resource_release;
 pub mod object_state;
 pub mod sub_record_lookup;
