@@ -27,6 +27,18 @@
 //! the primary copy, it leaves r0 unchanged, so the cursor address is
 //! returned. This alias reuses the established dispatch seam and shared host
 //! tests; deliberate deviations: none.
+//!
+//! `FUN_083b5cac` at load address `0x083b5cac` is a third byte-identical,
+//! 84-byte (21-word) copy of the same `red_black_tree_advance_cursor` body,
+//! ending with `bx lr` at `0x083b5cfc`; the separately linked sibling begins
+//! at `0x083b5d00`. A complete aligned ARM B/BL decode verifies exactly four
+//! direct inbound calls, all unconditional `bl` at `0x08101e48`,
+//! `0x083c426c`, `0x083c4740`, and `0x083c483c`; there are no predicated
+//! calls, direct tail-`B` transfers, or aligned data-word references. Ghidra
+//! reports the matching 84-byte size. This copy likewise leaves r0 unchanged
+//! and returns the cursor address. It reuses the same exported
+//! [`red_black_tree_advance_cursor`] symbol and shared host tests;
+//! deliberate deviations: none.
 
 /// Base node layout used by the C++ red-black tree implementation.
 ///
