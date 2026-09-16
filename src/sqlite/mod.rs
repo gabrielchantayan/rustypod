@@ -124,6 +124,7 @@ pub mod find_table;
 pub mod find_index;
 pub mod locate_table;
 pub mod free_p4;
+pub mod vdbe_free_ops;
 pub mod get_varint;
 pub mod get_varint64;
 pub mod get_temp_range;

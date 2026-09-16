@@ -108,6 +108,10 @@ pub mod hints {
     pub const QUEUED_MESSAGE_POST: usize = 0x1800_0000;
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
+    // 0x1a10_0000: dedicated to sqlite/vdbe_free_ops's target-layout
+    // Vdbe and VdbeOp array fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const VDBE_FREE_OPS: usize = 0x1a10_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
     // Dedicated raw-u32 owner fixtures for iterator seek tests; mappings
     // never unmap, so each target layout has its own hint.
