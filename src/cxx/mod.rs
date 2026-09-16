@@ -228,6 +228,7 @@ pub mod three_word_clear_return;
 pub mod three_word_clear_return_alt;
 pub mod tokenizer;
 pub mod trivial_destructor;
+pub mod trivial_vector4_destruct;
 pub mod trivial_vector8_destruct;
 pub mod trivial_vector12_destruct;
 pub mod wheel_event;
