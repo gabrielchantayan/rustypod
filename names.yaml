@@ -99790,3 +99790,37 @@ functions:
       established copy_four_words_forward at 0x083da42c. This separately linked
       entry retains its own exported symbol and text section for hooking. No
       deliberate deviations.
+
+  - address: 0x083d9d5c
+    ghidra: FUN_083d9d5c
+    name: shared_record_construct
+    size: 196
+    sig: "u32 *shared_record_construct(u32 *storage, u32 selector, u32 value, u32 count)"
+    module: cxx/shared_record_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: selector
+      param_3/r2: value
+      param_4/r3: count
+      DAT_083d9e20: initial_vtable
+      DAT_083d9e24: final_vtable
+    notes: >-
+      Raw osos.dec establishes the 196-byte extent
+      0x083d9d5c..0x083d9e20: 188 instruction bytes plus the two-word literal
+      pool. The next separately linked function starts at 0x083d9e28; the two
+      words at 0x083d9e20/0x083d9e24 are literals, not code. Decoding every
+      ARM B/BL immediate finds four inbound predicated bl calls at 0x082a9144,
+      0x082a91cc, 0x082a921c, and 0x082a926c, with no inbound plain calls.
+      The body contains six unconditional plain bl instructions and no
+      predicated forms: selector-layout size 0x08266b64, shared-handle
+      initialization 0x082a8b68, selector-descriptor initialization
+      0x08266c18, two copy-u32-pair calls 0x083dc0cc, and payload
+      initialization 0x083d9a64. It records selector-dependent size, clears
+      words +0x08..+0x28, initializes the shared handle at +0x2c, replaces the
+      construction vtable, initializes its selector descriptor, writes two
+      {0xffffffff,0} pairs, then delegates `(storage,value,count)` to the
+      payload initializer and returns storage. The shared-handle callee is
+      ported directly; target builds call the other three verified retail
+      addresses and host builds use ABI seams. Deliberate deviation: the known
+      leaf pair copies are direct word stores.
