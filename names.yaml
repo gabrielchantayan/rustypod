@@ -29939,6 +29939,44 @@ functions:
       refcount wrap. LLVM can inline the ported mutex helpers, so match.py
       reports a larger but structurally equivalent body.
 
+  - address: 0x0839d274
+    ghidra: FUN_0839d274
+    name: refcounted_body_mutex_unlock_slot1
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_slot1(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent
+      0x0839d274..0x0839d284: ldr r0,[r0,#8]; cmp r0,#0; bne
+      mutex_unlock @ 0x0807f6a0; bx lr. The next separately linked
+      function (push {r4,lr}) starts at 0x0839d284. Decoding every A32
+      B/BL word finds four direct callers, all unconditional plain bl at
+      0x0816cedc, 0x0816cf14, 0x0839d220, and 0x0839d258; there are no
+      predicated calls or direct b tail callers. No aligned image word
+      equals this address, so it is not virtually dispatched. The helper
+      loads RefcountedBody.mutex at +8 and tail-branches only when it is
+      non-NULL; body itself has no NULL guard. It is the separately
+      linked unlock half paired with the lock helper @ 0x0839d264 inside
+      the virtual-slot-1 release template refcounted_body_release_slot1
+      @ 0x0839d1d4 (sites 0x0839d220/0x0839d258) and its 0x0816cexx
+      sibling release; names.yaml previously mapped it as
+      unlock_if_mutex_helper in that entry's renames. Port is a direct
+      Rust equivalent in cxx/handle next to its byte-identical siblings
+      refcounted_body_mutex_unlock @ 0x0839d44c and
+      refcounted_body_mutex_unlock_owned @ 0x0839d360; a unique
+      target-only link section keeps LLVM from folding the three
+      together, and the symbol resolves in librustypod.a. Host test
+      proves a live mutex produces exactly one Signal event and the
+      NULL-mutex early-out produces none. match.py (exit 1, diff
+      expected) shows the same ldr/cmp/conditional-unlock structure; the
+      only differences are LLVM's push {fp,lr} frame and the tail branch
+      rendered through a relocation.
+
   - address: 0x0839d360
     ghidra: FUN_0839d360
     name: refcounted_body_mutex_unlock_owned
