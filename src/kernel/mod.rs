@@ -8,6 +8,7 @@ pub mod clock_snapshot_trace;
 pub mod event_handler_source;
 pub mod gateway_request;
 pub mod gateway_signal;
+pub mod gateway_service18;
 pub mod gateway_service19;
 pub mod gateway_wake;
 pub mod gateway_request_blocking;

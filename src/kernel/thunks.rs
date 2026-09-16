@@ -1614,7 +1614,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f08, rom_target: 0x22004230, name: Some("gateway_service19_request") },
     RomThunk { thunk_addr: 0x08037f10, rom_target: 0x22003e1c, name: Some("timer_free_gateway") },
     RomThunk { thunk_addr: 0x08037f18, rom_target: 0x22003b8c, name: None },
-    RomThunk { thunk_addr: 0x08037f20, rom_target: 0x220041fc, name: None },
+    RomThunk { thunk_addr: 0x08037f20, rom_target: 0x220041fc, name: Some("gateway_service18_request") },
     RomThunk { thunk_addr: 0x08037f28, rom_target: 0x220005a0, name: None },
     RomThunk { thunk_addr: 0x08037f30, rom_target: 0x22004154, name: None },
     RomThunk { thunk_addr: 0x08037f38, rom_target: 0x2200441c, name: None },
@@ -1802,7 +1802,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 28] = [
+        let expected: [(u32, &str); 29] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -1818,6 +1818,7 @@ mod tests {
             (0x2200408c, "task_unlock"),
             (0x220042b4, "sem_signal"),
             (0x220041cc, "signal_object"),
+            (0x220041fc, "gateway_service18_request"),
             (0x22004230, "gateway_service19_request"),
             (0x22003e1c, "timer_free_gateway"),
             (0x22004368, "wake_object"),
@@ -1907,8 +1908,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 28 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 30);
+        // 29 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 31);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
