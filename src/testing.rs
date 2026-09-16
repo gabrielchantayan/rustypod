@@ -185,6 +185,10 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const TDAT_NODE_FIND: usize = 0x4c00_0000;
+    // 0x4500_0000: dedicated to ui/tdat_node_find's alternate-key
+    // (node+0x118/+0x11c) lookup fixtures; 0x4500..0x45ff is free of
+    // other hint constants.
+    pub const TDAT_NODE_FIND_ALT_ID: usize = 0x4500_0000;
     // 0x5000_0000: dedicated to app/typed_handler_registry_lookup's raw-u32
     // registry and table fixture; mappings never unmap, so no other test may
     // reuse this hint.
