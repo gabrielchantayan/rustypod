@@ -71374,6 +71374,38 @@ functions:
       through a volatile function-pointer load instead of reproducing the
       retail veneer, preserving the call without LLVM replacing it with an
       AEABI builtin; memory effects are identical.
+  # --- two-buffer owner destructor ---
+  - address: 0x0803dba8
+    ghidra: FUN_0803dba8
+    name: two_buffer_owner_release
+    size: 48
+    sig: "void two_buffer_owner_release(TwoBufferOwner *this)"
+    module: heap/two_buffer_owner
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x04: first
+      param_1_plus_0x08: second
+      FUN_0803eee4: releasable_buffer_release
+      FUN_08043994: traced_free
+    notes: >-
+      Raw extent is exactly 0x0803dba8..0x0803dbd8 (12 ARM instructions),
+      matching Ghidra's 48 bytes; the independently linked sibling at
+      0x0803dbd8 follows immediately, with no trailing literal pool.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly 5 direct
+      callers, matching Ghidra's count: two unconditional BL (0x0803dcf4,
+      0x08062248) and three BLNE (0x0806242c, 0x080cbae0, 0x080cbe24). The
+      BLNE sites gate destruction on their own owner words; the body still
+      returns on NULL. Unlike three_buffer_owner_release, the +0x04/+0x08
+      words are heap pointers (created by the FUN_0803dc50 factory via
+      tagged_word_buffer_create), not embedded buffers, and there is no
+      outer flags gate: the owner is freed unconditionally. Ghidra's C
+      output inlines the traced_free tail target into unrecovered-jumptable
+      noise; the raw body is only the NULL guard, two predicated
+      releasable_buffer_release calls, and the tail branch to traced_free.
+      Deliberate deviation: the retail final tail branch to traced_free is
+      an ordinary returning Rust call; traced_free returns, so behavior is
+      unchanged.
   # --- three-buffer owner destructor ---
   - address: 0x0803deec
     ghidra: FUN_0803deec
