@@ -141,6 +141,7 @@ pub mod hash_function;
 pub mod hash_init;
 pub mod hex_to_int;
 pub mod id_list_delete;
+pub mod id_list_dup;
 pub mod mem;
 pub mod mprintf;
 pub mod mem_extern_release;
