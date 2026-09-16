@@ -7633,6 +7633,34 @@ functions:
       callers ignore (0x0814c724, 0x081fc0c8, dtor @ 0x08214250, drain
       helper @ 0x083ddcbc — binary-verified); port returns void.
 
+  - address: 0x083dfdac
+    ghidra: FUN_083dfdac
+    name: deque_construct
+    size: 64
+    sig: "DequeHead *deque_construct(DequeHead *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    notes: >-
+      Default-constructs a 0x28-byte deque head (the BlockDeque prefix
+      without the trailing map_cap word): pushes a 4-word stack frame,
+      builds the empty iterator there via a real deque_iter_init(_, 0, 0)
+      call (the local 4-byte-element copy @ 0x083da47c, not separately
+      ported), stores it at +0x10 (end), reloads those four words and
+      stores them at +0x00 (begin), then zeroes +0x20 (count) and +0x24
+      (map). With cur = NULL and slot = NULL the call unconditionally
+      yields the all-NULL iterator, so the port inlines DequeIter::NULL
+      and drops the call (deliberate deviation). The original returns
+      r0 = 0 (a zeroed stack slot, not dq); both callers ignore it and
+      the port returns NULL. Exactly 4 plain bl call sites (0x081de2c0,
+      0x081de2cc, 0x082e7ecc, 0x082e7ed8), zero predicated forms, zero
+      tail branches — binary-verified by decoding every ARM B/BL word in
+      osos.dec. Callers embed heads in pool-side control structs
+      (0x081de298 constructs two, then drains one via 0x083dfdec).
+      match.py: expected structural diff — LLVM emits 10 straight word
+      stores vs the original's bl + two 4-word block copies; the zeroed
+      extent and NULL return are identical.
+
   - address: 0x083d64f4
     ghidra: FUN_083d64f4
     name: handle_deref_or_null_alias_64f4
