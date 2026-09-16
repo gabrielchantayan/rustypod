@@ -78209,6 +78209,51 @@ functions:
       deltas are the seam blx indirection, the fp frame, and clz/lsr
       instead of rsbs/movcc for the equality map.
 
+  - address: 0x08050ae0
+    ghidra: FUN_08050ae0
+    name: ui_plst_find_by_persistent_id
+    size: 88
+    sig: "u32 ui_plst_find_by_persistent_id(const u8 *element, u32 _reserved, u32 id_low, u32 id_high)"
+    module: ui/plst_find_by_persistent_id
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: _reserved
+      param_3/r2: id_low
+      param_4/r3: id_high
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+    notes: >-
+      Finds the linked 'plst' element of a 'tdat' UI element whose
+      64-bit persistent identifier (the +0x30/+0x34 doubleword, same
+      field read by ui_element_reference_target_persistent_id
+      0x082a6524) equals {id_high, id_low}. A zero identifier (both
+      halves zero) returns 0 without touching the element; otherwise
+      the walk runs first-plst (0x080522d4) then successor selector
+      (0x08053bd0), comparing high half first (cmp r1,r6 / cmpeq r0,r2)
+      and returning the first exact match or 0. Raw extent is exactly
+      88 bytes: the next function's push {r4,r6,lr} prologue starts at
+      0x08050b38. The body contains exactly two bl instructions, both
+      unconditional (the two callees above); call count verified by
+      decoding every B/BL word in osos.dec: 5 unconditional bl callers
+      (0x08054340, 0x08094800, 0x080ab2f0, 0x080df434, 0x080e5bc8),
+      zero predicated. Ghidra's C is faithful here except for listing
+      the never-read r1 as param_2 (the ldrd overwrites r1); it is kept
+      in the signature as _reserved so the AAPCS lanes for r2/r3 match
+      stock callers. Deviations: the ldrd is split into two aligned u32
+      reads in the original's compare order (observably identical; a
+      'plst' element spans past +0x38), and the port calls the ported
+      callees directly instead of branching to stock. Host tests use a
+      raw-u32 slab fixture (hints::UI_PLST_FIND_BY_PERSISTENT_ID,
+      0xc400_0000, mutex-serialized) covering a zero-id short-circuit
+      on a NULL element, NULL element with a nonzero id, first/middle/
+      last chain matches, a zero low half as a legitimate key, low-only
+      and high-only mismatches, no-match, and that the reserved r1 lane
+      is ignored. match.py --lib <worktree archive>: 22 vs 23
+      instructions; same zero-id guard, high-then-low ldreq/cmpeq pair,
+      two-callee loop and 0/match returns; deltas are the crate fp
+      frame, a dedicated zero register, and no ldrd fusion.
+
   - address: 0x08053bd0
     ghidra: FUN_08053bd0
     name: ui_plst_next
