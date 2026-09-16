@@ -1068,6 +1068,10 @@ pub mod hints {
     // container and nested-class fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const NESTED_LITI_FIELD_CHECK: usize = 0xa1b0_0000;
+    // 0xa1e0_0000: dedicated to cxx/magic_tagged_object_release's raw-u32
+    // object, child-table, and nested-child fixture; mappings never unmap, so
+    // no other user may share this hint.
+    pub const MAGIC_TAGGED_OBJECT_RELEASE: usize = 0xa1e0_0000;
     // 0xa1c0_0000: dedicated to app/liti_field_class_check's raw-u32 object
     // and class-target fixture; mappings never unmap, so no other user may
     // share this hint.
