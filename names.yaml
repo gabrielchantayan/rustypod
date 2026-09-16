@@ -9081,6 +9081,41 @@ functions:
       cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc]
       sequence matches verbatim.
 
+  - address: 0x0805c1b4
+    ghidra: FUN_0805c1b4
+    name: magic_tagged_object_retain
+    size: 108
+    sig: "i32 magic_tagged_object_retain(MagicTaggedObject *object)"
+    module: cxx/magic_tagged_object_retain
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_080d8f64: magic_tagged_object_validate
+      FUN_0808e16c: tagged_counter_try_increment
+    notes: >-
+      Raw osos.dec confirms the 108-byte extent 0x0805c1b4..0x0805c220;
+      the next separately entered function starts at 0x0805c220, exactly
+      matching Ghidra's 108-byte size. Decoding every ARM B/BL word in
+      osos.dec finds four direct call sites, all plain bl
+      (0x08054b0c's wrapper, 0x0805ce98, 0x080df384, 0x080e5ac0); the
+      "5 bl" Ghidra reported includes this function's own predicated
+      recursive blne. The body has three static calls: bl
+      magic_tagged_object_validate, bleq tagged_counter_try_increment
+      gated on the refcount at +0x08 transitioning to 1, and the
+      recursive blne on each active child. Children live in a 0x14-byte
+      stride entry table at +0x70, walked for the unsigned count at
+      +0x10; entry+0x08 is an active byte (ldrb) and entry+0x10 the
+      child pointer. Retain counterpart of magic_tagged_object_release
+      (0x0806c044), sharing its layout constants. Refcount arithmetic
+      wraps like ARM (u32::MAX -> 0 is not treated as first retain).
+      match.py: LLVM allocates two extra callee-saved registers and
+      hoists the null/count entry checks, but the call order, the bleq
+      transition-to-one counter call, the ldrb/blne child walk, and the
+      unsigned loop compare all match the original's structure; the
+      three R_ARM_CALL/JUMP24 relocs resolve to
+      magic_tagged_object_validate, tagged_counter_try_increment, and
+      self.
+
   - address: 0x0805c220
     ghidra: FUN_0805c220
     name: tdat_element_addref_counters

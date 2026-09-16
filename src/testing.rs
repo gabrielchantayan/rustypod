@@ -1076,6 +1076,10 @@ pub mod hints {
     // object, child-table, and nested-child fixture; mappings never unmap, so
     // no other user may share this hint.
     pub const MAGIC_TAGGED_OBJECT_RELEASE: usize = 0xa1e0_0000;
+    // 0xa1f0_0000: dedicated to cxx/magic_tagged_object_retain's raw-u32
+    // object, child-table, and nested-child fixture; mappings never unmap, so
+    // no other user may share this hint.
+    pub const MAGIC_TAGGED_OBJECT_RETAIN: usize = 0xa1f0_0000;
     // 0xa1c0_0000: dedicated to app/liti_field_class_check's raw-u32 object
     // and class-target fixture; mappings never unmap, so no other user may
     // share this hint.
