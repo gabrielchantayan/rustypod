@@ -73785,6 +73785,45 @@ functions:
       callees write and read.
 
 
+  # --- Current time -> raw Macintosh-epoch seconds (no UTC/DST) ---
+  - address: 0x0805b070
+    ghidra: FUN_0805b070
+    name: current_mac_epoch_seconds_raw
+    size: 92
+    sig: "void current_mac_epoch_seconds_raw(u32 *out)"
+    module: time/current_mac_epoch_seconds_raw
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      local_stack/r0: datetime
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_0807ea68: datetime_day_number
+      DAT_0805b0c8: seconds_per_day_literal
+    notes: >-
+      Ghidra reports 88 bytes; the true extent is 92 bytes,
+      0x0805b070..0x0805b0cc: 22 instruction words plus the 0x00015180
+      (86400, seconds per day) literal at 0x0805b0c8. The `b 0x080548ec`
+      word at 0x0805b0cc is a separately linked veneer, and the next real
+      function begins with stmdb sp!, {r4-r11, lr} at 0x0805b0d0. Decoding
+      every ARM B/BL word in osos.dec finds exactly 5 direct BL call
+      sites, all unconditional, with no predicated BL forms and no B tail
+      callers: 0x0805e404, 0x0805e658, 0x0806a758, 0x080946d8, and
+      0x080d7294 (callers pass an out-pointer, e.g. add r0, r4, #0x19c).
+      The body builds a stack DateTime in the r1-r3 spill slots, calls
+      current_datetime_to_normalized_record, calls datetime_day_number on
+      the same record, subtracts the Macintosh-epoch Rata Die day number
+      0xa9b10 (695056 = 1904-01-01, with 0001-01-01 = day 1, matching
+      datetime_to_mac_epoch_seconds), multiplies by 86400, and adds
+      hour*3600 + minute*60 + second (hour*3600 via smulbb #3600,
+      minute*60 via rsb/lsl #4 then lsl #2); all arithmetic wraps. Unlike
+      datetime_to_mac_epoch_seconds it applies no UTC or daylight-saving
+      offset, and it ignores the normalized-record call's return value.
+      The original stores the day-part to *out before overwriting it with
+      the final sum; that dead store is omitted in the port. Stack
+      DateTime padding is indeterminate in retailOS, and the Rust port
+      preserves that by reading only fields the callees initialize.
+
+
   # --- Normalize a Rata Die day-and-seconds pair ---
   - address: 0x081b4d60
     ghidra: FUN_081b4d60
