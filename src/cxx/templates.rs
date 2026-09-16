@@ -503,6 +503,48 @@ pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mu
     iter
 }
 
+/// deque_iter_distance_elem4 — original: `FUN_083eade0` @ 0x083eade0.
+///
+/// **104 bytes**, exactly 26 ARM instructions from 0x083eade0 through
+/// `pop {r4,r5,pc}` at 0x083eae44; the next separately linked function begins
+/// at 0x083eae48. Decoding every ARM B/BL-immediate word in `osos.dec` finds
+/// four incoming direct calls, all unconditional plain `bl` at 0x083dfb34,
+/// 0x083dfb50, 0x083dfb6c, and 0x083eacc8; there are no predicated forms.
+/// Its sole outgoing call is an unconditional `bl` to `deque_seg_capacity`.
+///
+/// Returns the signed distance, in four-byte elements, between two deque
+/// iterators. Iterators in distinct segments include the intervening complete
+/// segments, the left offset from its segment base, and the right offset to
+/// its segment end; iterators in one segment only subtract cursors.
+///
+/// Deliberate deviation: arithmetic explicitly wraps at 32 bits before each
+/// signed shift, preserving target pointer subtraction on 64-bit hosts where
+/// pointer fields occupy eight bytes.
+///
+/// # Safety
+/// `left` and `right` must be valid [`DequeIter`] objects.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_distance_elem4(
+    left: *const DequeIter,
+    right: *const DequeIter,
+) -> i32 {
+    let left = &*left;
+    let right = &*right;
+    let words_between = |a: usize, b: usize| (a as u32).wrapping_sub(b as u32) as i32 >> 2;
+    if left.seg_slot != right.seg_slot {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let segment_capacity = capacity_fn() as i32;
+        (words_between(left.seg_slot as usize, right.seg_slot as usize) - 1) * segment_capacity
+            + words_between(left.cur as usize, left.seg_base as usize)
+            + words_between(right.seg_end as usize, right.cur as usize)
+    } else {
+        words_between(left.cur as usize, right.cur as usize)
+    }
+}
+
 /// deque_iter_equal — original: `FUN_083eaca0` @ 0x083eaca0.
 ///
 /// **68 bytes**, exactly 17 ARM instructions from 0x083eaca0 through
@@ -517,10 +559,8 @@ pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mu
 /// to `FUN_083eade0`: its raw arithmetic treats the end of one segment and
 /// the base of the adjacent segment as the same logical position.
 ///
-/// Deliberate deviation: `FUN_083eade0` has no ledger port, so its verified
-/// 4-byte-deque distance arithmetic is reproduced here rather than adding an
-/// unported target-address dispatch seam. This preserves the callee result
-/// used by this function without assigning that callee any broader identity.
+/// Delegates the boundary arithmetic to the separately hookable
+/// `deque_iter_distance_elem4` port.
 ///
 /// # Safety
 /// `left` and `right` must be valid [`DequeIter`] objects. For the
@@ -536,14 +576,7 @@ pub unsafe extern "C" fn deque_iter_equal(left: *const DequeIter, right: *const 
             return 0;
         }
 
-        let distance = if left.seg_slot != right.seg_slot {
-            (left.seg_slot.offset_from(right.seg_slot) - 1) * 0x20
-                + (left.cur.offset_from(left.seg_base) >> 2)
-                + (right.seg_end.offset_from(right.cur) >> 2)
-        } else {
-            left.cur.offset_from(right.cur) >> 2
-        };
-        if distance != 0 {
+        if deque_iter_distance_elem4(left, right) != 0 {
             return 0;
         }
     }
@@ -8377,6 +8410,38 @@ mod tests {
         assert!(deque.end.seg_base.is_null());
         assert!(deque.end.seg_end.is_null());
         assert!(deque.end.seg_slot.is_null());
+    }
+
+    #[test]
+    fn deque_iter_distance_elem4_counts_same_and_cross_segment_positions() {
+        let same_left = DequeIter {
+            cur: 0x100cusize as *mut u8,
+            seg_base: 0x1000usize as *mut u8,
+            seg_end: 0x1080usize as *mut u8,
+            seg_slot: 0x2000usize as *mut *mut u8,
+        };
+        let same_right = DequeIter {
+            cur: 0x1000usize as *mut u8,
+            ..same_left
+        };
+        let later_segment = DequeIter {
+            cur: 0x300cusize as *mut u8,
+            seg_base: 0x3000usize as *mut u8,
+            seg_end: 0x3080usize as *mut u8,
+            seg_slot: 0x2008usize as *mut *mut u8,
+        };
+        let earlier_segment = DequeIter {
+            cur: 0x4080usize as *mut u8,
+            seg_base: 0x4000usize as *mut u8,
+            seg_end: 0x4080usize as *mut u8,
+            seg_slot: 0x2000usize as *mut *mut u8,
+        };
+
+        unsafe {
+            assert_eq!(deque_iter_distance_elem4(&later_segment, &same_left), 64);
+            assert_eq!(deque_iter_distance_elem4(&same_left, &later_segment), -64);
+            assert_eq!(deque_iter_distance_elem4(&earlier_segment, &later_segment), -35);
+        }
     }
 
     #[test]

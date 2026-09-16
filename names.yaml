@@ -98444,3 +98444,36 @@ functions:
       instructions): LLVM emits a post-increment copy loop, a literal-pool
       blx for the fixed-address notification call, and a shared epilogue —
       same structure as the original.
+
+  - address: 0x083eade0
+    ghidra: FUN_083eade0
+    name: deque_iter_distance_elem4
+    size: 104
+    sig: "i32 deque_iter_distance_elem4(const DequeIter *left, const DequeIter *right)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r4: left, param_2/r5: right, iVar1/r0: segment_capacity}
+    renames:
+      FUN_083da450: deque_seg_capacity
+      param_1: left
+      param_2: right
+      iVar1: segment_capacity
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte body from 0x083eade0
+      through `pop {r4,r5,pc}` at 0x083eae44; 0x083eae48 starts the next
+      separately linked function. It compares the target-width segment-slot
+      fields. Equal slots return signed (left.cur - right.cur) / 4. Distinct
+      slots call deque_seg_capacity at 0x083da450 and return
+      ((left.slot - right.slot) / 4 - 1) * capacity +
+      (left.cur - left.base) / 4 + (right.end - right.cur) / 4. A complete
+      ARM B/BL decode finds four inbound direct calls, all unconditional
+      plain bl at 0x083dfb34, 0x083dfb50, 0x083dfb6c, and 0x083eacc8; no
+      predicated forms. The body has one unconditional outgoing bl, to the
+      ported capacity member. The Rust port explicitly truncates pointer
+      arithmetic to target u32 before signed shifts, so host pointer width
+      and map-entry width do not alter the ARM result; it loads the capacity
+      function pointer volatile to preserve the independently hookable call
+      boundary. Host tests cover same-segment, forward cross-segment, and
+      negative cross-segment distances. match.py reports the same slot
+      comparison, capacity call, multiply, and three distance terms; LLVM
+      adds a function-pointer blx and frame setup.
