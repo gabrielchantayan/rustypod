@@ -167,6 +167,7 @@ pub mod utoa;
 pub mod video_engine;
 pub mod validator;
 pub mod vtable_query;
+pub mod vtable_slot_0x40_result_word;
 pub mod wang_hash;
 pub mod hash_word;
 pub mod word_list;

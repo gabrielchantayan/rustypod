@@ -100135,3 +100135,29 @@ functions:
       proves slot selection, receiver/index forwarding, and returned-word
       loading. Deliberate deviation: an empty inline-assembly compiler barrier
       prevents folding with identical wrappers; it emits no ARM instruction.
+  # --- vtable-slot-0x40 result-word accessor ---
+  - address: 0x083d6aa8
+    ghidra: FUN_083d6aa8
+    name: vtable_slot_0x40_result_word
+    size: 24
+    sig: "u32 vtable_slot_0x40_result_word(void *object)"
+    module: util/vtable_slot_0x40_result_word
+    status: ported
+    renames:
+      param_1/r0: object
+      "*object/r2": vtable
+      "*(vtable + 0x40)/r2": result_word_method
+      r0: result_word_pointer_then_value
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: six ARM words from
+      push {r4,lr} at 0x083d6aa8 through pop {r4,pc} at 0x083d6abc; the next
+      distinct function begins at 0x083d6ac0. Decoding every aligned ARM
+      B/BL-immediate word in osos.dec finds exactly four inbound direct calls,
+      all unconditional bl at 0x08124040, 0x08298958, 0x083d1300, and
+      0x083d1344; there are no predicated direct bl forms. The body loads
+      object's vtable slot +0x40, calls it as (object) -> u32 pointer, then
+      returns the aligned word at that pointer. The virtual callee has no
+      recovered static identity, so the port performs the observed indirect
+      dispatch rather than introducing a callee seam. Host fixtures deliberately
+      widen vtable pointers and the method slot to native pointer width; target
+      builds retain target-width volatile vtable-word reads.
