@@ -100308,3 +100308,33 @@ functions:
       builds retain target-width volatile vtable-word reads. match.py review
       found the original vtable load, slot load, indirect call, and result load;
       LLVM adds a frame pointer and chooses r1 rather than r2 for the method.
+  - address: 0x083d2384
+    ghidra: FUN_083d2384
+    name: byte_pair_prefix_init
+    size: 44
+    sig: "u8 *byte_pair_prefix_init(u8 *dst, const u8 *a, const u8 *b)"
+    module: cxx/byte_pair_prefix_init
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: a
+      param_3/r2: b
+      r0: return_dst_pointer
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent: eleven ARM words
+      from ldrb r3,[r1] at 0x083d2384 through bx lr at 0x083d23ac; the next
+      function begins at 0x083d23b0 with push {r4-r8,lr}, and there is no
+      literal pool. Decoding every ARM BL word in osos.dec finds exactly
+      four inbound direct calls, all unconditional bl at 0x08269230,
+      0x08269aa4, 0x083d2164, and 0x083d2378; the body itself contains zero
+      bl instructions, plain or predicated. The body stores *a at dst[0],
+      *b at dst[1], then *a again at dst[2] and *b again at dst[3] (words
+      e5d11000/e5d21000 have a zero imm12, so Ghidra's decompilation is
+      correct), stores a zero word at dst[4..8], and returns dst unchanged
+      in r0. All four callers pass pointers to two u32 stack slots as a/b
+      and a 0x24-byte operator-new-like (FUN_082aadd4) heap object as dst,
+      then store 1.0f at offset 8. The port duplicates only the low byte of
+      each source word; the zero word uses write_volatile so LLVM keeps a
+      single str. match.py confirms the load/store core matches the
+      original; LLVM adds a frame-pointer prologue/epilogue and schedules
+      the zero-word store one instruction earlier.
