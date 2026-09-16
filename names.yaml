@@ -61526,6 +61526,43 @@ functions:
       bucket, branch on node presence, then increment/return by outcome;
       LLVM adds its volatile seam load and frame, producing 27 instructions
       versus the original 18.
+  - address: 0x0805eb04
+    ghidra: FUN_0805eb04
+    name: obj_bsearch
+    size: 112
+    sig: "void *obj_bsearch(const void *key, const void *base, uint nmemb, uint size, int (*compar)(const void *, const void *))"
+    module: crypto/obj_bsearch
+    status: ported
+    renames:
+      param_1/r0/r11: key
+      param_2/r1/r7: base
+      param_3/r2/r5: nmemb
+      param_4/r4/r8: size
+      param_5/r9: compar
+    notes: >-
+      OpenSSL crypto/objects/obj_dat.c OBJ_bsearch, the generic binary
+      search shared by the NID lookups. Raw ARM extent is exactly 112
+      bytes (0x0805eb04-0x0805eb74, matching Ghidra); the separately
+      linked successor @ 0x0805eb74 is a word-pair comparator tail-calling
+      the ADS string block @ 0x08030f64. Decoding every ARM B/BL word in
+      osos.dec confirms five unconditional BL callers (0x0805ee20,
+      0x0805f0dc, 0x0805f320, 0x0806ea04, 0x08070df0), zero predicated
+      forms; the body itself has no BL — the comparator rides the fifth
+      (stack) argument through blx r9. Algorithm: lo=0/hi=nmemb, mid=
+      (lo+hi)/2 (the original adds the sign bit back before asr #1, a
+      no-op for non-negative counts), elem = base + size*mid via a 32-bit
+      wrapping mla; order<0 keeps the left half (hi=mid), order>0 the
+      right (lo=mid+1), 0 returns elem; nmemb==0 and exhaustion return
+      NULL. Deliberate deviations: the stack-passed fifth argument is a
+      normal Rust parameter and unsigned lo/hi makes the signed-divide
+      fixup unnecessary; #[inline(never)] keeps it a real bl target.
+      Host tests cover hit on every element of a 64-entry table, misses
+      in every gap, empty and single-element tables, out-of-range keys,
+      and size-1/size-8 strides. match.py structural: same lo/hi loop,
+      mla element address, blx comparator and three-way branch; LLVM
+      halves with lsr (equivalent for non-negative sums), reloads the
+      stack argument through fp, and adds its frame — 30 instructions
+      versus the original 28.
   - address: 0x0805ef18
     ghidra: FUN_0805ef18
     name: obj_nid2obj
