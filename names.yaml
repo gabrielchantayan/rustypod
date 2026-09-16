@@ -101353,3 +101353,34 @@ functions:
       0x08382c18 validator. Null and nonzero +0x1e objects return 7; a
       rejected object returns 21; otherwise return the AND of +0x14/+0x18.
       Host edge-case tests pass and match.py structural review was completed.
+  # --- reference-counted vtable release ---
+  - address: 0x0838d878
+    ghidra: FUN_0838d878
+    name: refcounted_vtable_release
+    size: 40
+    sig: "void refcounted_vtable_release(u32 *owner, u32 *object)"
+    module: cxx/refcounted_vtable_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: object
+      "object+0x00": vtable
+      "object+0x04": reference_count
+      "vtable+0x10": destroy (identity unresolved)
+      "owner+0x40": observed_word
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte body at
+      0x0838d878..0x0838d89f: ldr/subs/str/bxne, an otherwise-unused owner+0x40
+      load, then tail dispatch through the object's vtable slot +0x10. The
+      next real function begins at 0x0838d8a4 with push {r4-r11,lr};
+      0x0838d8a0 is a literal-pool word, not code. Full-image ARM
+      B/BL-immediate decoding finds exactly four incoming direct calls, all
+      unconditional plain bl at 0x082beb10, 0x083752d8, 0x0838ad84, and
+      0x0838ae40; there are zero predicated bl callers. The slot target has no
+      recovered identity in names.yaml, so the port dispatches the semantic
+      vtable slot rather than inventing a callee seam. Host tests cover a live
+      count, zero transition and zero-count underflow. match.py reports the
+      same decrement, owner load and tail dispatch, with LLVM frame setup and
+      a popne replacing bxne. Deliberate host deviation: native-width vtable
+      function pointers replace target u32 slot words; target code retains the
+      physical ARM layout.
