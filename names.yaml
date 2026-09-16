@@ -9085,6 +9085,37 @@ functions:
       directly observed positive-counter behavior and adds no dispatch seam.
       No deliberate deviations.
 
+  - address: 0x0806c044
+    ghidra: FUN_0806c044
+    name: magic_tagged_object_release
+    size: 116
+    sig: "i32 magic_tagged_object_release(u32 *object)"
+    module: cxx/magic_tagged_object_release
+    status: ported
+    renames:
+      param_1/r0: object
+      "*(object + 0x08)": reference_count
+      "*(object + 0x10)": child_count
+      "*(object + 0x18)": tagged_counter
+      "*(object + 0x70)": child_entries
+      FUN_080d8f64: magic_tagged_object_validate
+      FUN_0809f744: tagged_counter_try_decrement
+    notes: >-
+      Raw ARM establishes the exact 116-byte extent 0x0806c044..0x0806c0b8;
+      the separately entered function at 0x0806c0b8 follows immediately.
+      It validates the opaque first-word tag, rejects invalid objects and a
+      zero reference count with -0x32, decrements +0x08, and when it reaches
+      zero attempts a tagged-counter decrement at +0x18. If the +0x70 entry
+      table exists, it recursively releases each active +0x14-byte entry's
+      child pointer. Whole-image ARM B/BL-immediate decoding verifies five
+      inbound direct BL sites: four plain BL (0x08054b90, 0x0805cfac,
+      0x080df45c, and 0x080e5c4c) and one predicated BLNE (0x0806c098);
+      there are no tail B callers. The raw body has one plain BL, one BLEQ,
+      and one BLNE recursive call. The Rust port directly invokes the
+      already-ported validator and tagged-counter helper, and directly
+      recurses rather than branching into stock code; otherwise no deliberate
+      deviations.
+
   - address: 0x0806c0b8
     ghidra: FUN_0806c0b8
     name: tdat_element_release_counters
