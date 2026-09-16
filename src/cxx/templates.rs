@@ -582,6 +582,54 @@ pub unsafe extern "C" fn deque_iter_equal(left: *const DequeIter, right: *const 
     }
     1
 }
+/// deque_iter_equal_elem4_alias_ab58 — original: `FUN_083eab58` @
+/// 0x083eab58.
+///
+/// **68 bytes**, exactly 17 ARM instructions from 0x083eab58 through
+/// 0x083eab98; the next separately linked function begins at 0x083eab9c.
+/// Decoding every ARM B/BL-immediate word in `osos.dec` finds four inbound
+/// direct calls, all unconditional plain `bl`: 0x083de56c, 0x083de5ac,
+/// 0x083de6b8, and 0x083de77c. There are no predicated direct calls.
+///
+/// Returns the widened C++ bool 1 when two 4-byte deque iterators denote the
+/// same position, else 0. Equal `cur` fields are immediately equal. Distinct
+/// cursors can only match at a segment boundary; this copy calls its adjacent
+/// `deque_iter_distance_elem4` instantiation at 0x083ead78, whose verified
+/// arithmetic treats the end of one segment and the following base as the
+/// same logical position.
+///
+/// # Deliberate deviation
+///
+/// The adjacent distance-member copy has the same verified algorithm as the
+/// existing [`deque_iter_distance_elem4`] port at 0x083eade0, so this alias
+/// directly calls that port rather than adding a redundant retail-address seam.
+///
+/// # Safety
+///
+/// `left` and `right` must be valid [`DequeIter`] objects. For the
+/// non-identical cursor path, their segment pointers and slots must describe
+/// elements in their respective valid segment and map allocations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_equal_elem4_alias_ab58")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_equal_elem4_alias_ab58(
+    left: *const DequeIter,
+    right: *const DequeIter,
+) -> u32 {
+    let left = &*left;
+    let right = &*right;
+    if left.cur != right.cur {
+        if left.cur != left.seg_base && right.cur != right.seg_base {
+            return 0;
+        }
+
+        if deque_iter_distance_elem4(left, right) != 0 {
+            return 0;
+        }
+    }
+    1
+}
+
 
 
 /// deque_iter_init_elem4_alias_a3e4 — original: `FUN_083da3e4` @
@@ -8471,6 +8519,8 @@ mod tests {
         unsafe {
             assert_eq!(deque_iter_equal(&left, &same_position), 1);
             assert_eq!(deque_iter_equal(&left, &different_position), 0);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&left, &same_position), 1);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&left, &different_position), 0);
         }
     }
 
@@ -8513,6 +8563,10 @@ mod tests {
             assert_eq!(deque_iter_equal(&second_begin, &first_end), 1);
             assert_eq!(deque_iter_equal(&first_end, &second_interior), 0);
             assert_eq!(deque_iter_equal(&first_end, &third_begin), 0);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&first_end, &second_begin), 1);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&second_begin, &first_end), 1);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&first_end, &second_interior), 0);
+            assert_eq!(deque_iter_equal_elem4_alias_ab58(&first_end, &third_begin), 0);
         }
     }
     #[test]
