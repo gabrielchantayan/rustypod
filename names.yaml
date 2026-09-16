@@ -28650,6 +28650,33 @@ functions:
       as "destroy me"; the two readings never collide because a leaked
       rep is the sole owner by definition. Returns `dst`.
 
+  - address: 0x083d7df4
+    ghidra: FUN_083d7df4
+    name: cxx_string_vector_entry_copy_ctor
+    size: 40
+    sig: "u8 *cxx_string_vector_entry_copy_ctor(void *owner, u8 *destination, const u8 *source)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: destination
+      param_3/r2: source
+      return/r0: vector_head
+    notes: >-
+      Raw ARM is exactly 10 instructions at 0x083d7df4..0x083d7e18; the
+      independent `movs r0,r1` at 0x083d7e1c begins the next constructor.
+      The owner is not read. A NULL destination returns before reading the
+      source; otherwise it calls cxx_string_copy_ctor @ 0x083d8c30 for the
+      one-word COW string at +0x00 and tail-branches to the unported vector
+      copy constructor @ 0x083e5b00 for the three-word vector head at +0x04,
+      returning destination+4. Decoding every aligned ARM B/BL immediate in
+      osos.dec finds four direct unconditional inbound bl sites (0x08197bf8,
+      0x083c1610, 0x083e2634, 0x083e2714), no predicated inbound BL sites;
+      the body has one plain BL and one tail B. Deviation: volatile dispatch
+      slots retain both call boundaries; the vector constructor remains
+      unported, while the slots also permit four-byte target-layout host
+      fixtures.
+
   - address: 0x083d7e58
     ghidra: FUN_083d7e58
     name: cxx_string_pair_entry_copy_ctor
