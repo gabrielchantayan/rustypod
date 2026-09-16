@@ -915,6 +915,49 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign_slot7(
 }
 
 ///
+/// refcounted_ptr_copy_assign_dtor_copy — original: `FUN_0839ed08` @
+/// 0x0839ed08 (48 bytes; 4 direct `bl` call sites, all unconditional:
+/// 0x08280900, 0x08280d1c, 0x08280d60, and 0x08280e30, verified by decoding
+/// every ARM `B`/`BL` word in `osos.dec`; no predicated calls, no tail `b`
+/// sites, and no aligned image word equals this address, so it is not
+/// virtually dispatched). Raw instructions end with `pop {r4,r5,r6,pc}` at
+/// 0x0839ed34; the separately linked [`refcounted_ptr_construct`] begins at
+/// 0x0839ed38, matching Ghidra's 48-byte extent exactly.
+///
+/// C++ copy-assignment for a refcounted handle slot — the
+/// slot-1-virtual-destructor sibling of [`refcounted_ptr_copy_assign_slot7`].
+/// Distinct slot addresses first release the old body through
+/// [`refcounted_body_release_dtor_copy`] @ 0x0839ccac, then load `*src` and
+/// acquire it through the separately linked acquire copy @ 0x0839cc70, and
+/// return `dst`. The source load intentionally follows the release exactly
+/// as the ARM's `ldr r1,[r4]` does. 0x0839cc70 is byte-identical to the
+/// ported [`refcounted_body_acquire`] @ 0x0839cd5c modulo its two `bl`
+/// displacements (verified word-by-word from `osos.dec`), so this port calls
+/// that canonical implementation — the deliberate codegen deviation from
+/// stock, whose LLVM may also inline the callees while retaining the
+/// guard/release/load/acquire order.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL
+/// bodies must satisfy [`refcounted_body_release_dtor_copy`]'s and
+/// [`refcounted_body_acquire`]'s requirements. The firmware does not
+/// NULL-check either slot pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_assign_dtor_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign_dtor_copy(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_dtor_copy(dst);
+        refcounted_body_acquire(dst, src.read());
+    }
+    dst
+}
+
+///
 /// refcounted_ptr_copy_construct — original: `FUN_0839ef3c` @ `0x0839ef3c`
 /// (24 bytes). Raw decoding establishes the exact extent: the next separately
 /// linked function begins at `0x0839ef54`. Decoding every ARM `B`/`BL` word
@@ -4563,6 +4606,102 @@ mod tests {
                 events(),
                 std::vec![Event::HeapFree(old_ptr as *mut u8 as usize, 2)],
                 "the old body is released before the source is acquired"
+            );
+        }
+
+        // --- refcounted_ptr_copy_assign_dtor_copy @ 0x0839ed08 -----------
+
+        /// Self-assignment is a no-op: no release, no acquire, and the
+        /// body refcount is untouched.
+        #[test]
+        fn dtor_copy_assign_self_assignment_is_a_no_op() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            let ret = unsafe { refcounted_ptr_copy_assign_dtor_copy(&mut slot, &slot) };
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(body.refcount, 1);
+            assert!(events().is_empty());
+        }
+
+        /// A non-final release of the old body only decrements it; the
+        /// new body is then installed and bumped under its own mutex.
+        #[test]
+        fn dtor_copy_assign_shared_release_then_acquires_source() {
+            let _bench = bench();
+            let mut semaphore = 0x77;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x5555_6666,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let mut dst = &mut old as *mut RefcountedBody;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = unsafe { refcounted_ptr_copy_assign_dtor_copy(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1);
+            assert_eq!(new.refcount, 2);
+            assert_eq!(
+                events(),
+                std::vec![Event::Wait(0x77), Event::Signal(0x77)],
+                "the new body's mutex wraps only the acquire increment"
+            );
+        }
+
+        /// A final slot-1 release dispatches vtable word 1 and frees the
+        /// old body before `*src` is loaded and acquired — the recording
+        /// heap keeps the freed body readable so the ordering is visible.
+        #[test]
+        fn dtor_copy_assign_final_release_then_acquires_source() {
+            let _bench = bench();
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut old = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let old_ptr = &mut old as *mut RefcountedBody;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut dst = old_ptr;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = unsafe { refcounted_ptr_copy_assign_dtor_copy(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(new.refcount, 2);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Destructor(implementation_ptr as usize),
+                    Event::HeapFree(old_ptr as *mut u8 as usize, 2),
+                ],
+                "the old body is destructed and freed before the source is acquired"
             );
         }
 
