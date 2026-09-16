@@ -101560,3 +101560,38 @@ functions:
       returns, while retaining the null guard, aligned +0x40 load, and exact
       boolean result. Host tests cover null, both tags, and adjacent nonmatching
       values. Deliberate deviations: volatile access preserves the target load.
+
+  # ---- SQLite connection close (src/sqlite/close.rs) ----
+  - address: 0x083824b0
+    ghidra: FUN_083824b0
+    name: sqlite3_close
+    size: 208
+    sig: "void sqlite3_close(sqlite3 *db)"
+    module: sqlite/close
+    status: ported
+    renames:
+      param_1/r0/r4: db
+      iVar3/r5: database_index
+      iVar2/r0: btree_close_result
+      bVar1/r7: closed_work
+      FUN_083789ac: fault_begin_benign
+      FUN_08372b50: sqlite3BtreeClose
+      FUN_082bead4: sqlite3VtabUnlockList
+      FUN_083789f8: fault_end_benign
+      FUN_083767ec: sqlite3ExpirePreparedStatements
+      FUN_0838209c: sqlite3ResetInternalSchema
+    notes: >-
+      SQLite 3.5.x sqlite3_close. Raw ARM establishes the exact 208-byte
+      extent 0x083824b0..0x08382580: the next separately linked function
+      begins with push at 0x08382580. Decoding every ARM immediate B/BL word
+      within that extent finds seven direct calls, all plain unconditional
+      bl at 0x083824c0, 0x083824e8, 0x08382500, 0x08382528, 0x08382530,
+      0x08382544, and 0x08382550; there are no predicated BL calls. This
+      corrects Ghidra's four-call report. The close path enters fault-benign
+      mode, closes every non-NULL 24-byte aDb entry's pBt (+4) and clears it,
+      unlocks virtual tables, then leaves fault-benign mode. SQLITE_InternChanges
+      (+0x0c bit 4) expires pVdbe and resets internal schema. A non-NULL
+      xCommitCallback (+0xb0) receives pCommitArg (+0xac) when a Btree close
+      returned nonzero or activeVdbeCnt (+0x1c) is zero. The unported Btree,
+      vtable, schema-reset, and host callback boundaries use a volatile seam;
+      target builds retain their raw retailOS targets.
