@@ -38489,6 +38489,28 @@ functions:
       tests prove virtual dispatch, index forwarding, slot dereference, NULL
       element propagation, and parity with the primary accessor.
 
+  - address: 0x083d6c6c
+    ghidra: FUN_083d6c6c
+    name: container_element_at_alias_6c6c
+    size: 24
+    sig: "void *container_element_at_alias_6c6c(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Byte-identical container_element_at instantiation. Raw osos.dec fixes
+      six instructions from 0x083d6c6c through pop {r4,pc} at 0x083d6c80;
+      the next separately linked helper begins at 0x083d6c84. The function
+      dispatches this and index through vtable slot 0x40 to obtain an
+      element-slot address, then loads its element pointer. Ghidra omits r1,
+      but raw blx r2 preserves the index. Complete ARM B/BL-immediate decoding
+      finds exactly four inbound calls — plain unconditional bl at 0x081b9318,
+      0x081b93a4, 0x083d1f68, and 0x083d1fa0 — and no predicated forms.
+      The dedicated Rust link section retains this independently hookable
+      byte-identical alias. Host tests cover virtual slot dispatch, index
+      forwarding, element-slot dereference, NULL-element propagation, and
+      equality with the primary accessor. Deliberate deviations: none.
+
 
   - address: 0x083d48dc
     ghidra: FUN_083d48dc
