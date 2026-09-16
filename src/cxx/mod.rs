@@ -238,6 +238,7 @@ pub mod trivial_vector4_destruct;
 pub mod trivial_vector8_destruct;
 pub mod trivial_vector12_destruct;
 pub mod wheel_event;
+pub mod word_key_map;
 pub mod word_key_set;
 pub mod timer_stop_then_clear_bit_set;
 pub mod transition_addon;
