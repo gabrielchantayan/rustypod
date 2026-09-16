@@ -49529,6 +49529,44 @@ functions:
       distinct exported call target; host tests prove the null no-dispatch and
       non-null selector-0x11 delegation cases. match.py structural difference
       is expected for the Rust indirect call frame.
+  - address: 0x08037f20
+    ghidra: thunk_EXT_FUN_220041fc
+    name: gateway_service18_request
+    size: 8
+    sig: "u32 gateway_service18_request(u32 input, u32 r1_clobbered, u32 arg2, u32 arg3)"
+    module: kernel/gateway_service18
+    status: ported
+    renames:
+      thunk_EXT_FUN_220041fc: gateway_service18_request
+      EXT_FUN_220041fc: gateway_service18_request
+      DAT_08037f24: gateway_service18_rom_target
+    notes: >-
+      Raw osos.dec proves the Ghidra 4-byte function is an 8-byte ADS literal
+      veneer: e51ff004 (ldr pc,[pc,#-4]) at 0x08037f20 and target word
+      0x220041fc at 0x08037f24; the sibling veneer opens at 0x08037f28.
+      The relocator at 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+      0x22000000, so the target mirrors the 52-byte body at 0x080041fc
+      (0x080041fc..0x08004230, ending at the service-19 sibling). The body
+      reserves seven words, stores r0 at sp+24, selector 18 (0x12) at sp+4,
+      clobbers r1 with add r1,sp,#4 and stores that subrecord self-pointer
+      at sp+16, r2 at sp+20, r3 at sp+12, passes sp+4 to the foreign
+      0x08003660 gateway dispatcher, then reloads sp+24 as the return value:
+      the verified wire protocol is {18, _, arg3, &subrecord, arg2, input}
+      and the caller's r1 never reaches the dispatcher. Decoding every ARM
+      B/BL word in osos.dec finds exactly five direct calls — unconditional
+      bl at 0x08084c0c, 0x080c9c64, 0x08393684, and 0x08393828, plus one
+      predicated blne at 0x080e1878 — matching Ghidra's call-site count; no
+      tail branches. No data word holds the thunk or mirror address; the
+      target literal above is the sole 0x220041fc word. Callers hand over
+      (object, 250|2000|mem|r7, 0, small_const) tuples suggesting an
+      (object, timeout) shape, but selector 18's RTXC operation is not
+      otherwise identified, so the port calls the existing
+      message_dispatch_veneer seam and names only the established wire
+      protocol. Host tests prove store positions, the self-pointer word,
+      dispatcher-rewritten input return, and unguarded full-width inputs.
+      match.py is structurally expected to differ because Rust calls the
+      dispatcher seam rather than tail-loading PC from the veneer literal;
+      LLVM also reorders the private-frame stores, which is unobservable.
   - address: 0x08037f40
     ghidra: thunk_EXT_FUN_220084dc
     name: i2s_chunked_transfer_veneer
