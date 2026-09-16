@@ -17998,6 +17998,39 @@ functions:
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
 
+  - address: 0x083d4db8
+    ghidra: FUN_083d4db8
+    name: slot_array_index_in_bounds
+    size: 24
+    sig: "i32 slot_array_index_in_bounds(const SlotArray *this, i32 index)"
+    module: cxx/slot_array_index_in_bounds
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Raw osos.dec is exactly six ARM words from 0x083d4db8 through
+      bx lr at 0x083d4dcc; the next function is the empty bx lr at
+      0x083d4dd0 (the container's inert Tracker instrumentation) and the
+      owning insert routine starts at 0x083d4dd4, so Ghidra's 24 is
+      right. Decoding every ARM B/BL word finds four direct call sites,
+      all plain unconditional bl (zero predicated): 0x081ef1e0 (registry
+      add, gating a virtual release on failure), 0x081ef308 (checked
+      getter returning data[index] or 0), 0x083d4e54 (insert validating
+      its free-slot scan result, which is -1 when full), and 0x083d4f38
+      (remove-at-index). Algorithm: return 1 iff 0 <= index < slots
+      (word at this+0x04); the load is predicated on index >= 0, so a
+      negative index returns 0 without dereferencing this. The owning
+      container is the same 0x18-byte object-slot-array template as the
+      element_table arrays ({data, slots, used, options, growth,
+      tracker_label}); the bound is slots (allocated capacity), not
+      used, because insert stores into freed holes. match.py: structural
+      match (same cmp/predicated-select algorithm, single slots load,
+      0/1 result); LLVM adds a frame and uses bmi plus an explicit
+      zero return instead of ADS's fully predicated movle/movgt.
+      Host tests in src/cxx/slot_array_index_in_bounds.rs prove full
+      in-range acceptance, boundary and i32::MAX rejection, negative
+      index with a NULL this (no dereference, as insert relies on for
+      its -1 result), empty array, and negative-capacity rejection.
+
   - address: 0x083d4cf4
     ghidra: FUN_083d4cf4
     name: element_array7_construct

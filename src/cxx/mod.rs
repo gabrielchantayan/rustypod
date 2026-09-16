@@ -8,6 +8,7 @@ pub mod record_work_pump;
 pub mod array_element_at;
 pub mod array_index_stride20;
 pub mod array_index_stride24;
+pub mod slot_array_index_in_bounds;
 pub mod byte_key_map;
 pub mod byte_key_word_map;
 pub mod character_class;
