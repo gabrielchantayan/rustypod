@@ -51,6 +51,8 @@ pub mod resource_reader_read_exact;
 pub mod resource_reader_seek_absolute;
 /// HFS B-tree node fetch and validation @ 0x08053d6c.
 pub mod hfs_btree_get_node;
+/// HFS B-tree node free-space probe @ 0x08053e14.
+pub mod hfs_btree_free_space;
 pub mod hfs_btree_get_record;
 /// HFS B-tree key-length decoder @ 0x080537f8.
 pub mod hfs_btree_key_length;
