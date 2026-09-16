@@ -1397,6 +1397,45 @@ fn strstreambuf_active_buffer_capacity_selects_the_mode_area() {
     }
 }
 
+/// strstreambuf_copy_active_buffer — retailOS `FUN_083d7064` @ load address
+/// **0x083d7064** (208 bytes, 0x083d7064..0x083d7130; the next independent
+/// helper begins at 0x083d7134).
+///
+/// Raw ARM contains four unconditional and four predicated `bl` instructions:
+/// it obtains the selected area capacity twice through
+/// [`strstreambuf_active_buffer_capacity`], allocates a temporary COW string
+/// only for a nonzero capacity, copies the buffer at target word `this + 8`,
+/// copy-constructs `destination`, then releases the temporary. Zero capacity
+/// copy-constructs directly from the shared empty representation. The
+/// temporary makes the returned string an owning COW value rather than an
+/// alias of the stream buffer. No deliberate deviations.
+///
+/// # Safety
+///
+/// `destination` must point to uninitialized storage for one COW string.
+/// `this` must be a valid target-layout strstreambuf whose selected buffer
+/// covers its reported capacity.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_copy_active_buffer(
+    destination: *mut *mut u8,
+    this: *const u8,
+) {
+    let capacity = strstreambuf_active_buffer_capacity(this) as u32;
+    let mut temporary = empty_rep_data();
+
+    if capacity != 0 {
+        let source = (this.add(8) as *const u32).read() as usize as *const u8;
+        temporary = cxx_string_rep_reserve(core::ptr::null_mut(), 0, capacity, capacity);
+        core::ptr::copy_nonoverlapping(source, temporary, capacity as usize);
+    }
+
+    cxx_string_copy_ctor(destination, &temporary);
+    cxx_string_release(&mut temporary);
+}
+
+
+
 /// `strstreambuf_set_buffer_owned` — original: `FUN_083da558` @ load address
 /// **0x083da558** (24 bytes, 0x083da558..0x083da56c; the separately linked
 /// bit-1 sibling begins at 0x083da570). Whole-image ARM B/BL decoding finds
@@ -3034,6 +3073,39 @@ mod tests {
         }
         assert_eq!(untouched, [0xa5; 2], "zero-capacity strncpy writes nothing");
         assert_eq!(zero_capacity, 0, "the accessor's empty fallback has strlen zero");
+    }
+    /// `strstreambuf_copy_active_buffer` copies the selected target-width buffer
+    /// into an owning COW string, including embedded NUL bytes, and maps a zero
+    /// capacity to the shared empty representation.
+    #[test]
+    fn strstreambuf_copy_active_buffer_owns_selected_capacity() {
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+        let _arena = arena();
+        let Some(fixture) = try_map_u32_slab(hints::STRSTREAMBUF_COPY_ACTIVE_BUFFER, 0x1000) else {
+            assert!(note_missing_u32_fixture("cxx/strstreambuf_copy_active_buffer"));
+            return;
+        };
+        unsafe {
+            fixture.write_bytes(0, 0x1000);
+            let source = fixture.add(0x100);
+            source.copy_from_nonoverlapping(b"a\0b".as_ptr(), 3);
+            (fixture.add(4) as *mut u32).write(0x04);
+            (fixture.add(8) as *mut u32).write(source as usize as u32);
+            (fixture.add(0x14) as *mut u32).write(source as usize as u32);
+            (fixture.add(0x1c) as *mut u32).write(source.add(3) as usize as u32);
+
+            let mut copied = core::ptr::null_mut();
+            strstreambuf_copy_active_buffer(&mut copied, fixture);
+            assert_eq!(core::slice::from_raw_parts(copied, 3), b"a\0b");
+            assert_eq!((*data_rep(copied)).length, 3);
+            cxx_string_release(&mut copied);
+
+            (fixture.add(0x1c) as *mut u32).write(source as usize as u32);
+            strstreambuf_copy_active_buffer(&mut copied, fixture);
+            assert_eq!(copied, empty_rep_data());
+            cxx_string_release(&mut copied);
+        }
     }
 }
 

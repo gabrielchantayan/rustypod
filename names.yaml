@@ -28418,6 +28418,28 @@ functions:
   # (12 header + NUL + 1 spare) via operator_new_checked @ 0x08266c70;
   # deallocation via the 4-byte veneer 0x08266f2c = `b 0x082aad24`
   # (plain operator delete - the size and third argument are discarded).
+  - address: 0x083d7064
+    ghidra: FUN_083d7064
+    name: strstreambuf_copy_active_buffer
+    size: 208
+    sig: "void strstreambuf_copy_active_buffer(char **destination, const Strstreambuf *this)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: this}
+    renames:
+      FUN_083d7134: strstreambuf_active_buffer_capacity
+      FUN_083d8518: cxx_string_rep_reserve
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw ARM spans 0x083d7064..0x083d7130 (208 bytes, including the two
+      literal words after the final pop); the next independent helper starts
+      at 0x083d7134. It contains four unconditional and four predicated bl
+      instructions. The selected strstreambuf area capacity is measured,
+      copied through a temporary COW string when nonzero, copy-constructed
+      into destination, then released; zero capacity copies the shared empty
+      representation. The temporary ensures destination owns its bytes rather
+      than aliases the strstreambuf buffer. No deliberate deviations.
   - address: 0x0825c8fc
     ghidra: FUN_0825c8fc
     name: cxx_string_pair_destroy
