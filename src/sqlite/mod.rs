@@ -117,6 +117,7 @@ pub mod expr_list_walk;
 pub mod expr_new;
 pub mod expr_span;
 pub mod fix_expr;
+pub mod fix_init;
 pub mod fix_select;
 pub mod walk_expr;
 pub mod find_element_given_hash;

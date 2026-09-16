@@ -36733,6 +36733,47 @@ functions:
       reproduce their NULL-input result but deliberately do not model
       arbitrary non-NULL unported subtrees.
 
+  - address: 0x08379654
+    ghidra: FUN_08379654
+    name: sqlite_fix_init
+    size: 64
+    sig: "int sqlite3FixInit(DbFixer *fixer, Parse *parse, int iDb, const char *zType, const Token *pName)"
+    module: sqlite/fix_init
+    status: ported
+    renames:
+      param_1/r0: fixer
+      param_2/r1: parse
+      param_3/r2: i_db
+      param_4/r3: z_type
+      param_5/stack: name
+    notes: >-
+      SQLite 3.5.x sqlite3FixInit. Raw ARM establishes the 64-byte extent
+      0x08379654..0x08379694: entry push of lr at 0x08379654, final
+      pop {pc} at 0x08379690, and the independently linked
+      sqlite3FixSelect prologue begins at 0x08379694. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly four inbound
+      direct BL sites, all unconditional: 0x0836fe2c (FUN_0836fd5c),
+      0x08373de0 (FUN_08373cfc), 0x08374828 (sqlite3FixTriggerStep), and
+      0x08379368 (FUN_083792f4). No predicated BL or tail B reaches this
+      entry. The guard is cmp r2,#0; blt fail then cmp r2,#1; bne body —
+      exactly the upstream iDb<0 || iDb==1 check, so index 0 (main)
+      enters the body (Ghidra renders it correctly as -1 < param_3 &&
+      param_3 != 1; the blt is easy to misread as beq from the raw word
+      0xba000001). Body: DbFixer.word0 = Parse* itself; word1 =
+      db->aDb[iDb].pSchema with db = Parse.db +0x00, aDb = sqlite3.aDb
+      +0x08, sizeof(Db) = 0x18 computed as add r2,r2,r2,lsl#1 + ldr
+      [r1,r2,lsl#3], pSchema at offset 0; words 2 and 3 store zType and
+      pName via stmib r0!,{r1,r3,lr}. The fifth argument arrives on the
+      stack: str lr,[sp,#-4]! then ldr lr,[sp,#4] reloads pName from the
+      slot above the pushed lr. Returns 0 on rejection, 1 otherwise.
+      match.py diff vs the original is LLVM frame setup (push {fp,lr},
+      mov fp,sp) and the return tail; the guard, both pointer loads, the
+      3*iDb shift scaling, and the stmib store are structurally
+      identical. Host tests build a raw-u32 Parse/sqlite3/Db-array page
+      via try_map_u32_slab (hint SQLITE_FIX_INIT) and cover iDb in
+      {-2,-1,1} rejected, {0,2,3,7} filling the fixer with the correct
+      per-index schema word.
+
   - address: 0x08379694
     ghidra: FUN_08379694
     name: sqlite_fix_select
