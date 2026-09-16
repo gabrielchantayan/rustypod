@@ -1823,6 +1823,43 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  - address: 0x080038e8
+    ghidra: FUN_080038e8
+    name: record_fields_compare_tail_veneer
+    size: 8
+    sig: "void record_fields_compare_tail_veneer(void *record) __attribute__((noreturn))"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: record
+      DAT_080038ec: record_fields_compare_tail_veneer_target
+      FUN_0829fdac: record_fields_compare (enclosing comparator)
+      FUN_0829f8fc: tri_byte_field_equal ({u8, i8, i8} field equality)
+    notes: >-
+      Ghidra's 4-byte extent omits the ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x080038e8 and literal
+      0x0829fe4c at 0x080038ec; the next veneer starts at 0x080038f0, so
+      the true size is 8 bytes. Decoding every immediate ARM BL word in
+      osos.dec finds exactly five direct callers: four unconditional bl
+      (0x08006b0c, 0x08006b24, 0x08008064, 0x08008090) and one predicated
+      blne (0x08007464); no aligned data word holds 0x080038e8, so the
+      veneer is not dispatched through a table. The literal deliberately
+      enters the trailing half of the 240-byte record-equality comparator
+      FUN_0829fdac at 0x0829fe4c, not a normal function entry: the tail
+      calls the 3-byte {u8, i8, i8} field-equality helper FUN_0829f8fc on
+      the +0x8c subfields, helper FUN_0829f9f8 on the +0x91 subfields,
+      then chains predicated word compares of the +0xac/+0xb0 pairs and
+      the +0xb1 byte pair, returning 1 when every trailing field matches
+      and 0 otherwise. The tail reads both records from callee-saved
+      r4/r5 and pops {r4, r5, r6, pc}, an ARM register/stack ABI a Rust
+      wrapper cannot reproduce; the only normal register value common to
+      all recovered callers is the first record pointer in r0, and the
+      remaining ABI is intentionally not inferred. The ARM port is
+      verbatim global assembly (match.py: identical ldr pc,[pc,#-4] plus
+      the 0x0829fe4c literal word); the host-only noreturn shim is the
+      deliberate deviation because a normal host call cannot supply that
+      ARM context.
+
   # --- display command resource selectors ---
   - address: 0x0800483c
     ghidra: FUN_0800483c

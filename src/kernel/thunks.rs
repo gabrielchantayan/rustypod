@@ -153,6 +153,79 @@ kernel_indirect_dispatch:
 "#
 );
 
+/// Load address and literal contents of the record-fields comparator tail
+/// veneer `FUN_080038e8` @ `0x080038e8` (8 bytes: 4-byte instruction plus
+/// its target word; Ghidra reports only the 4-byte instruction).
+///
+/// Raw `osos.dec` is `ldr pc, [pc, #-4]` / literal `0x0829fe4c`; the next
+/// veneer starts at `0x080038f0`, so the true occupied range is 8 bytes.
+/// Decoding every immediate ARM BL word in `osos.dec` finds exactly five
+/// direct callers: four unconditional `bl` (`0x08006b0c`, `0x08006b24`,
+/// `0x08008064`, `0x08008090`) and one predicated `blne` (`0x08007464`);
+/// a binary scan finds no aligned data word holding `0x080038e8`, so the
+/// veneer is not dispatched through a table.
+///
+/// The literal deliberately enters the trailing half of the 240-byte
+/// record-equality comparator `FUN_0829fdac` at `0x0829fe4c`, not a normal
+/// function entry. From there the comparator tail calls the 3-byte
+/// `{u8, i8, i8}` field-equality helper `FUN_0829f8fc` on the +0x8c
+/// subfields, the helper `FUN_0829f9f8` on the +0x91 subfields, then
+/// chains predicated word compares of the +0xac/+0xb0 pairs and the +0xb1
+/// byte pair, returning 1 when every trailing field matches and 0
+/// otherwise (`0x0829fe94`/`0x0829fe98`). The tail reads the two records
+/// from callee-saved r4/r5 and pops `{r4, r5, r6, pc}`, an ARM register
+/// and stack ABI a Rust wrapper cannot reproduce; the only normal
+/// register value common to all recovered callers is the first record
+/// pointer in r0. The remaining ABI is intentionally not inferred.
+pub const RECORD_FIELDS_COMPARE_TAIL_VENEER: u32 = 0x0800_38e8;
+pub const RECORD_FIELDS_COMPARE_TAIL_VENEER_INSN: u32 = 0xe51f_f004;
+pub const RECORD_FIELDS_COMPARE_TAIL_VENEER_TARGET: u32 = 0x0829_fe4c;
+
+// The literal target reads callee-saved r4/r5 and consumes the immediate
+// caller's saved frame. Keep the transfer verbatim so every register and
+// the caller's frame forward unchanged. There is no deliberate ARM
+// deviation.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// record_fields_compare_tail_veneer — original: `FUN_080038e8` @
+    /// `0x080038e8` (8 bytes).
+    ///
+    /// Loads the literal target `0x0829fe4c` directly into PC, tail-
+    /// dispatching into the record-equality comparator tail with the
+    /// caller's r0 first-record pointer and unmodified remaining machine
+    /// context.
+    pub fn record_fields_compare_tail_veneer(record: *mut u8) -> !;
+}
+
+/// Host-only stand-in for the register- and frame-sensitive ARM tail
+/// dispatch.
+///
+/// The retailOS comparator tail is unmapped on hosts and reads ARM
+/// callee-saved registers plus its caller's saved frame, so a normal host
+/// call cannot represent the transfer. It terminates instead of
+/// returning, matching the veneer's no-normal-ABI contract.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn record_fields_compare_tail_veneer(record: *mut u8) -> ! {
+    let _ = record;
+    unreachable!("record_fields_compare_tail_veneer comparator tail unavailable on host")
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl record_fields_compare_tail_veneer
+    .type record_fields_compare_tail_veneer, %function
+record_fields_compare_tail_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x0829fe4c
+    .size record_fields_compare_tail_veneer, . - record_fields_compare_tail_veneer
+"#
+);
+
 /// Load address and literal contents of the opaque state-terminal continuation
 /// veneer `thunk_FUN_082aad24` @ `0x08003728` (8 bytes: 4-byte instruction
 /// plus its target word; Ghidra reports only the instruction).
@@ -2015,6 +2088,18 @@ mod tests {
         assert_eq!(STATE_TERMINAL_CONTINUATION_INSN, 0xe51f_f004);
         assert_eq!(STATE_TERMINAL_CONTINUATION_TARGET, 0x081c_d998);
         assert_eq!(STATE_TERMINAL_CONTINUATION_TARGET & 3, 0);
+    }
+
+    /// The raw veneer at 0x080038e8 is one `ldr pc, [pc, #-4]` instruction
+    /// plus its literal target word pointing at the comparator tail
+    /// 0x0829fe4c inside FUN_0829fdac; both constants and the target's word
+    /// alignment are independently fixed by osos.dec.
+    #[test]
+    fn record_fields_compare_tail_veneer_matches_literal_transfer() {
+        assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER, 0x0800_38e8);
+        assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER_TARGET, 0x0829_fe4c);
+        assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER_TARGET & 3, 0);
     }
 
     static OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
