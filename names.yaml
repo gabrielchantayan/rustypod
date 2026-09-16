@@ -101331,3 +101331,25 @@ functions:
       tail); the diff is LLVM's fp/lr frame, the embedded-table literal,
       and write-back index forms vs the original's add-based high-half
       addressing.
+  # --- object validation status ---
+  - address: 0x0839020c
+    ghidra: FUN_0839020c
+    name: object_validation_status
+    size: 64
+    sig: "u32 object_validation_status(const u8 *object)"
+    module: util/object_validation_status
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      r0: validation_or_status
+      r1: status_mask_b
+    notes: >-
+      Raw osos.dec establishes the true 64-byte extent
+      0x0839020c..0x0839024c: push {r4,lr} through pop {r4,pc}; the next
+      distinct function begins at 0x0839024c. Decoding every aligned ARM
+      B/BL-immediate word finds four incoming direct calls, all unconditional
+      bl at 0x082ccf70, 0x082dc060, 0x082dc07c, and 0x08390580, with no
+      predicated bl callers. The sole outgoing call is the unported
+      0x08382c18 validator. Null and nonzero +0x1e objects return 7; a
+      rejected object returns 21; otherwise return the AND of +0x14/+0x18.
+      Host edge-case tests pass and match.py structural review was completed.
