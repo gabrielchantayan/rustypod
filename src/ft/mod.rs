@@ -15,6 +15,7 @@ pub mod t1_builder;
 pub mod conditional_offset;
 pub mod error;
 pub mod glyph_slot;
+pub mod list;
 pub mod memory;
 pub mod module;
 pub mod metrics;
