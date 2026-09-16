@@ -38094,6 +38094,29 @@ functions:
       host tests cover equal, ordered, and high-bit unsigned values.
 
 
+  - address: 0x083d6b40
+    ghidra: FUN_083d6b40
+    name: container_element_at_alias_6b40
+    size: 24
+    sig: "void *container_element_at_alias_6b40(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: index, return/r0: element}
+    notes: >-
+      Raw osos.dec establishes the six-instruction 24-byte extent from
+      push {r4,lr} at 0x083d6b40 through pop {r4,pc} at 0x083d6b54; the
+      next independently linked sibling begins at 0x083d6b58. It is a
+      byte-identical container_element_at instantiation: reads this->vtable,
+      invokes slot +0x40 with this and the live r1 index, then loads and
+      returns the pointed-to element word. Ghidra's one-argument signature
+      and virtual-method return are wrong: raw blx r2 preserves r1 and the
+      following ldr r0,[r0] returns the element slot value. Decoding inbound
+      ARM branches finds exactly four direct calls, all unconditional plain
+      bl; there are no predicated forms. The dedicated Rust text section
+      keeps this independently hookable copy from folding into its
+      byte-identical siblings. Deliberate deviations: none; host tests cover
+      indexes 0 and 1 plus a non-NULL slot containing a NULL element.
+
   - address: 0x083d5efc
     ghidra: FUN_083d5efc
     name: container_element_at
