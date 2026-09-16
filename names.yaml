@@ -67959,6 +67959,34 @@ functions:
       raw disassembly: osos.dec 0x083e717c. match.py structural review is
       recorded with this port.
 
+  # --- COW string range destroyer ---
+  - address: 0x083e5950
+    ghidra: FUN_083e5950
+    name: cxx_string_range_destroy
+    size: 40
+    sig: "void cxx_string_range_destroy(void *ignored, CxxString *begin, CxxString *end)"
+    module: cxx/string_range_destroy
+    status: ported
+    renames:
+      param_1/r0: ignored
+      param_2/r1/r4: begin
+      param_3/r2/r5: end
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw ARM extent is exactly 0x083e5950..0x083e5978: 10 instruction words,
+      with the next independently linked function (pushing r4..r8) starting at
+      0x083e5978. r0 is never used; r1 (begin) and r2 (end) are saved into
+      r4/r5 and the loop moves each four-byte COW string slot into r0, calls
+      cxx_string_release @ 0x083d8b04, advances by four bytes, and repeats
+      until begin == end. Decoding every ARM B/BL word in osos.dec verifies
+      exactly one unconditional bl inside the function, no predicated calls,
+      and four direct, unconditional bl callers at 0x083e5a84, 0x083e5b94,
+      0x083e5c54, and 0x083e5cc8; there are no direct tail b calls. Host tests
+      prove ordered releases across a three-slot range, empty-range and
+      single-slot behavior. LLVM codegen keeps the same loop (mov r0, slot;
+      bl release; add 4; cmp; bne) and adds an equivalent empty-range
+      early-out (cmp r1, r2; bxeq lr).
+
   # --- COW string vector destructor ---
   - address: 0x083e5b88
     ghidra: FUN_083e5b88
