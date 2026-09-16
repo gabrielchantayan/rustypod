@@ -179,6 +179,7 @@ pub mod set_string_formatted;
 pub mod snprintf;
 pub mod str_accum;
 pub mod strdup;
+pub mod stmt_lru_remove;
 pub mod token_copy;
 pub mod trigger_delete;
 pub mod strhash;

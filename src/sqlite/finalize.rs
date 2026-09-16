@@ -17,10 +17,11 @@
 //! statement pointer non-NULL. This body retains its own NULL guard because
 //! the other eight callers do not supply one.
 //!
-//! Deliberate deviation: neither direct callee is ported. Target builds call
-//! their exact retailOS load addresses through volatile, replaceable seams;
-//! host tests install recorders. No mutex call appears in the verified
-//! 32-byte body, so none is introduced here.
+//! Deliberate deviation: `stmtLruRemove` (`0x08391d64`) is now ported
+//! (`super::stmt_lru_remove`) and target builds call it directly; only
+//! `sqlite3VdbeFinalize` remains a volatile, replaceable seam to its exact
+//! retailOS load address. Host tests install recorders for both. No mutex
+//! call appears in the verified 32-byte body, so none is introduced here.
 
 use super::vdbe::Vdbe;
 
@@ -36,8 +37,7 @@ pub type VdbeFinalize = unsafe extern "C" fn(*mut Vdbe) -> i32;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_stmt_lru_remove(statement: *mut Vdbe) {
-    let remove: StatementLruRemove = core::mem::transmute(STMT_LRU_REMOVE_ADDRESS);
-    remove(statement);
+    super::stmt_lru_remove::stmt_lru_remove(statement.cast());
 }
 
 #[cfg(target_os = "none")]
