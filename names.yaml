@@ -100338,3 +100338,47 @@ functions:
       single str. match.py confirms the load/store core matches the
       original; LLVM adds a frame-pointer prologue/epilogue and schedules
       the zero-word store one instruction earlier.
+  - address: 0x083d2328
+    ghidra: FUN_083d2328
+    name: scaled_byte_pair_record_construct
+    size: 92
+    sig: "u8 *scaled_byte_pair_record_construct(u8 *this, u32 key, const u8 *a, const u8 *b)"
+    module: cxx/scaled_byte_pair_record_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: key
+      param_3/r2: a
+      param_4/r3: b
+      r0: return_this_pointer
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent: 23 ARM words from
+      push {r4-r8,lr} at 0x083d2328 through pop {r4-r8,pc} at 0x083d2380;
+      the next function is byte_pair_prefix_init at 0x083d2384, and there
+      is no literal pool. Decoding every ARM B/BL immediate word in
+      osos.dec finds exactly four inbound direct calls, all unconditional
+      bl at 0x08269840, 0x08269994, 0x082699c8, and 0x0826a5d8; there are
+      no predicated bl forms, no tail b transfers, and no aligned
+      data-word references to the entry. The body itself makes four bl
+      calls (0x083d2384 byte_pair_prefix_init, 0x0826f3bc, 0x083d351c,
+      0x083d2e44), matching Ghidra's count. The constructor fills a
+      0x24-byte record (all four callers allocate it via the operator
+      new-like FUN_082aadd4(0x24) and pass key 0x32 plus two zeroed stack
+      slots as a/b): byte-pair header at +0x00..+0x08, 1.0f (0x3f800000;
+      word e3a015fe is mov r1,#0xfe ROR 10) at +0x08, zero at +0x14,
+      table value at +0x18, zero at +0x1c/+0x20, sub-record init at
+      +0x10, then the finalizer derives +0x0c as
+      double_to_u32_saturating(ceil(__dmul(__f2d(+0x08), __u2d(+0x18)))).
+      Callee 0x0826f3bc is a sorted-table binary search (40 entries, key
+      in r0, value in r0); its raw words are a complete standalone
+      function (push {r1-r4,lr} .. pop {r1-r4,pc}), contradicting the
+      earlier identified entry that read it as an interior tail of
+      0x0826f340. Callees 0x0826f3bc, 0x083d351c, and 0x083d2e44 remain
+      unported firmware and are reached through the
+      SCALED_BYTE_PAIR_RECORD_OPS seam (firmware transmutes on target,
+      panics on host); no callee identity was invented. Host tests verify
+      every field store, the key forwarding, the lookup/init/finalize
+      call order, and that +0x0c/+0x10 are left to the callees. match.py:
+      identical call/store sequence; the diff is LLVM's fp frame and the
+      seam blx indirection plus an intra-archive bl relocation for
+      byte_pair_prefix_init.
