@@ -78292,6 +78292,32 @@ functions:
       its identity and ABI cannot be established from the available image.
       Porting a Rust seam would invent both; retain this identified entry
       until the target code is available.
+  - address: 0x08386384
+    ghidra: FUN_08386384
+    name: sqlite_utf8_char_len
+    size: 80
+    sig: "i32 sqlite_utf8_char_len(const u8 *text, i32 byte_limit)"
+    module: sqlite/utf8_char_len
+    status: ported
+    renames:
+      param_1/r2: cursor
+      param_2/r1: byte_limit
+      iVar2/r0: character_count
+      bVar1/r3: leading_byte
+    notes: >-
+      SQLite 3.5.9's sqlite3Utf8CharLen, recovered from the raw 80-byte ARM
+      body 0x08386384..0x083863d4; sqlite_utf8_read opens immediately after at
+      0x083863d4. Raw ARM decoding finds four inbound call sites
+      (0x082d7f20, 0x0836f0ac, 0x08376234, 0x0838169c), all unconditional
+      plain BL, with zero predicated BL and zero direct B tail sites. It counts
+      each non-NUL byte strictly before the signed limit as one UTF-8 character
+      and skips its following 10xxxxxx bytes without validating their sequence.
+      A negative limit uses 0xffffffff as the terminating address. In
+      particular, the continuation scan does not retest the limit, so a
+      sequence beginning in range is counted even if its continuation bytes
+      cross it. The Rust port uses volatile reads to preserve each byte load
+      and avoid LLVM recognizing a libc string primitive; no behavioral
+      deviations.
   - address: 0x083863d4
     ghidra: FUN_083863d4
     name: sqlite_utf8_read
