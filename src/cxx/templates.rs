@@ -104,6 +104,7 @@
 //! ported in `heap/block_deque`): that one is the same four-word copy
 //! with the **source in r2**, and it exists exactly once.
 
+use crate::cxx::handle::{refcounted_body_attach, RefcountedBody};
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{string_object_assign, string_object_destroy, StringObject};
 use crate::libc::memcmp::memcmp;
@@ -5303,6 +5304,85 @@ pub unsafe extern "C" fn vector_copy_construct_range_elem20(
         (vector_copy_construct_elem20_ops().copy_construct)(vector, output, first);
         first = first.wrapping_add(0x14);
         output = output.wrapping_add(0x14);
+    }
+    output
+}
+
+/// vector_copy_construct_range_attach — original: `FUN_083e8a44` @
+/// 0x083e8a44 (56 bytes; extent 0x083e8a44..0x083e8a7c, bounded by the
+/// `b test` loop entry of the next leaf function at 0x083e8a7c;
+/// reference `ipod-decomp/decomp/c/038/083e8a44_FUN_083e8a44.c`).
+///
+/// `std::vector<RefcountedBody*>` uninitialized-copy over a slot range:
+/// for each source slot in `[first, last)` it attaches the slot's body
+/// into the output cursor via the ported [`refcounted_body_attach`] @
+/// 0x0839d370 (store the body pointer, bump its refcount), returning
+/// the advanced output cursor:
+///
+/// ```text
+/// 083e8a44  push {r4, r5, r6, lr}
+/// 083e8a48  mov  r6, r1           ; last
+/// 083e8a4c  mov  r5, r2           ; output cursor
+/// 083e8a50  mov  r4, r0           ; source cursor
+/// 083e8a54  b    test
+/// loop:
+/// 083e8a58  movs r0, r5           ; NULL-check the DESTINATION cursor
+/// 083e8a5c  ldrne r1, [r4]        ; body = *first
+/// 083e8a60  blne 0x0839d370       ; refcounted_body_attach(output, body)
+/// 083e8a64  add  r4, r4, #4
+/// 083e8a68  add  r5, r5, #4
+/// test:
+/// 083e8a6c  cmp  r4, r6
+/// 083e8a70  bne  loop
+/// 083e8a74  mov  r0, r5           ; return advanced output
+/// 083e8a78  pop  {r4, r5, r6, pc}
+/// ```
+///
+/// **Call count**, verified by decoding every B/BL word in osos.dec:
+/// exactly four inbound direct `bl` sites (0x083e0ce0, 0x083e0d4c,
+/// 0x083e0dd8, 0x083e0e18 — reallocation/insert paths of the refcounted
+/// vector), all unconditional; no predicated calls target this entry.
+/// The body itself contains exactly ONE `bl`: the predicated `blne` to
+/// [`refcounted_body_attach`]; its only other branch is the `bne`
+/// back-edge. Ghidra reports the 56-byte size correctly (the "4 bl"
+/// figure counts inbound callers) and its C matches this decode.
+///
+/// As in the sibling range copiers, the loop terminates on cursor
+/// EQUALITY. The `movs` guard re-checks the output CURSOR on every
+/// iteration, so a NULL initial output skips only the FIRST attach —
+/// after the cursor advances it is non-NULL and later bodies land at
+/// 0x4, 0x8, ... No caller passes NULL (the guard exists for the
+/// generic vector algorithms sharing this shape); that path is
+/// therefore not host-testable (address 0 cannot be fixture-mapped).
+///
+/// # Deviations
+///
+/// None: the per-element helper [`refcounted_body_attach`] is already
+/// ported, so this calls the real Rust body directly (no ops seam).
+/// Cursors advance with `wrapping_add` so the NULL-output path can run
+/// on host without forming out-of-bounds pointers.
+///
+/// # Safety
+/// `first` and `last` must delimit a whole number of contiguous readable
+/// `*mut RefcountedBody` slots; whenever `output` is non-NULL it must
+/// be writable for the same number of slots, and each non-NULL body
+/// must satisfy [`refcounted_body_attach`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_construct_range_attach(
+    mut first: *const *mut RefcountedBody,
+    last: *const *mut RefcountedBody,
+    mut output: *mut *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    while first != last {
+        // `movs r0, r5` predicates BOTH the body load and the attach on
+        // the CURRENT destination cursor being non-NULL: an initial NULL
+        // output skips the first attach only.
+        if !output.is_null() {
+            refcounted_body_attach(output, first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
     }
     output
 }
@@ -10537,6 +10617,111 @@ mod tests {
             assert_eq!(LOOKUP_CALLS, 1);
             assert_eq!(REMOVE_CALLS, 0, "-1 skips the remove dispatch");
             assert_eq!(WRONG_SLOT_CALLS, 0);
+        }
+    }
+
+    fn body(refcount: i32) -> RefcountedBody {
+        RefcountedBody {
+            opaque0: 0,
+            refcount,
+            mutex: core::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn attach_range_attaches_every_body_and_returns_advanced_output() {
+        unsafe {
+            let mut bodies = [body(0), body(7), body(-3)];
+            let mut slots: [*mut RefcountedBody; 3] = [
+                &mut bodies[0],
+                &mut bodies[1],
+                &mut bodies[2],
+            ];
+            let mut out: [*mut RefcountedBody; 3] = [core::ptr::null_mut(); 3];
+            let end = vector_copy_construct_range_attach(
+                slots.as_ptr(),
+                slots.as_ptr().add(3),
+                out.as_mut_ptr(),
+            );
+            assert_eq!(end, out.as_mut_ptr().add(3));
+            assert_eq!(out[0], &mut bodies[0] as *mut _);
+            assert_eq!(out[1], &mut bodies[1] as *mut _);
+            assert_eq!(out[2], &mut bodies[2] as *mut _);
+            // Each attach bumps the (unguarded) refcount exactly once.
+            assert_eq!(bodies[0].refcount, 1);
+            assert_eq!(bodies[1].refcount, 8);
+            assert_eq!(bodies[2].refcount, -2);
+            // Source slots are read, never written.
+            assert_eq!(slots[0], &mut bodies[0] as *mut _);
+        }
+    }
+
+    #[test]
+    fn attach_range_empty_range_returns_output_untouched() {
+        unsafe {
+            let mut b = body(5);
+            let mut slot_cell: *mut RefcountedBody = &mut b;
+            let slot: *const *mut RefcountedBody = &mut slot_cell;
+            let mut out: [*mut RefcountedBody; 1] = [core::ptr::null_mut()];
+            let end = vector_copy_construct_range_attach(slot, slot, out.as_mut_ptr());
+            assert_eq!(end, out.as_mut_ptr());
+            assert!(out[0].is_null());
+            assert_eq!(b.refcount, 5);
+        }
+    }
+
+    #[test]
+    fn attach_range_single_element_advances_both_cursors_once() {
+        unsafe {
+            let mut b = body(41);
+            let mut slot: *mut RefcountedBody = &mut b;
+            let mut out: [*mut RefcountedBody; 2] = [core::ptr::null_mut(); 2];
+            let end = vector_copy_construct_range_attach(
+                &slot,
+                (&slot as *const *mut RefcountedBody).add(1),
+                out.as_mut_ptr(),
+            );
+            assert_eq!(end, out.as_mut_ptr().add(1));
+            assert_eq!(out[0], &mut b as *mut _);
+            assert!(out[1].is_null(), "second slot is past the range");
+            assert_eq!(b.refcount, 42);
+        }
+    }
+
+    /// One record with a NULL output: the `movs` guard skips the only
+    /// attach, but the output cursor still advances by one slot (host
+    /// stride is `size_of::<*mut RefcountedBody>()`). A second record
+    /// would attach at 0x4/0x8, exactly like the original, so that path
+    /// is not host-testable.
+    #[test]
+    fn attach_range_null_output_skips_only_attach_and_still_advances() {
+        unsafe {
+            let mut b = body(9);
+            let mut slot: *mut RefcountedBody = &mut b;
+            let end = vector_copy_construct_range_attach(
+                &slot,
+                (&slot as *const *mut RefcountedBody).add(1),
+                core::ptr::null_mut(),
+            );
+            assert_eq!(end, (core::ptr::null_mut() as *mut *mut RefcountedBody).wrapping_add(1));
+            assert_eq!(b.refcount, 9, "no attach happened");
+        }
+    }
+
+    #[test]
+    fn attach_range_null_body_is_stored_without_a_bump() {
+        unsafe {
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let mut out: *mut RefcountedBody = 0xdeadbeef as *mut RefcountedBody;
+            let end = vector_copy_construct_range_attach(
+                &slot,
+                (&slot as *const *mut RefcountedBody).add(1),
+                &mut out,
+            );
+            assert_eq!(end, (&mut out as *mut *mut RefcountedBody).add(1));
+            // The attach's store is unconditional: the NULL body lands
+            // in the destination slot and no refcount is touched.
+            assert!(out.is_null());
         }
     }
 }
