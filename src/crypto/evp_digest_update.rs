@@ -111,8 +111,9 @@ pub struct EvpMd {
     pub update: unsafe extern "C" fn(ctx: *mut EvpMdCtx, data: *const u8, count: u32) -> i32,
     /// +0x18: called by `EVP_DigestFinal_ex` with `r0=ctx`, `r1=md`.
     pub finish: unsafe extern "C" fn(ctx: *mut EvpMdCtx, md: *mut u8) -> i32,
-    /// +0x1c: never loaded by any of the four ported entry points, so
-    /// its ABI is unobserved and it stays an untyped word.
+    /// +0x1c: the algorithm copy callback, tail-called as `copy(ctx, src)`
+    /// by `evp_md_ctx_copy_ex` @ 0x0804acb4 when non-NULL. Kept an untyped
+    /// word because no ported descriptor fills it with a typed function.
     pub slot_1c: usize,
     /// +0x20: called by `EVP_DigestFinal_ex` and
     /// `EVP_MD_CTX_cleanup` with `r0=ctx` when non-NULL.
