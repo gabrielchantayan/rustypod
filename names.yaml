@@ -30271,6 +30271,42 @@ functions:
       wider than the target's 12/8-byte layouts.
 
 
+  - address: 0x0839ec2c
+    ghidra: FUN_0839ec2c
+    name: refcounted_handle_assign
+    size: 68
+    sig: "RefcountedBody **refcounted_handle_assign(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1: src
+      iVar1/r4: body
+    notes: >-
+      Raw bytes establish the exact 68-byte extent
+      (0x0839ec2c..0x0839ec70), where the separately linked
+      refcounted_handle_copy_assign begins. Decoding every ARM B/BL word in
+      osos.dec finds exactly 4 direct BL callers, all unconditional
+      (0x0826fa5c, 0x0826fc04, 0x082c7eac, 0x082c7f94): no tail B sites, no
+      predicated inbound calls, and no aligned image word equals the
+      address, so it is not virtually dispatched. Ghidra's reported "4 bl"
+      counts those inbound callers; the body itself issues exactly 2 calls,
+      both predicated blne to the ported mutex_lock @ 0x0807f5c4 and
+      mutex_unlock @ 0x0807f6a0 (Ghidra's decompiled C shows the callees
+      but drops their body+8 argument). It stores *src into *dst
+      unconditionally, then for a non-NULL body wrapping-increments the
+      signed refcount at target +4 between two independently NULL-checked
+      loads of the optional mutex at +8, and returns dst. Byte-identical to
+      refcounted_ptr_assign @ 0x0839eda0 and
+      refcounted_ptr_assign_secondary_variant @ 0x0839f248 modulo the two
+      blne displacements. Deliberate deviations: volatile target-field
+      accesses retain the load/guard/increment/second-load/guard sequence;
+      LLVM inlines the ported mutex helpers rather than retaining the stock
+      blne pair; a dedicated target section prevents folding into the
+      byte-identical siblings. Host tests cover NULL body, wrapping
+      i32::MAX increment with an empty-mutex-cell lock/unlock pair, and an
+      unguarded bump with a NULL mutex.
+
   - address: 0x0839ec70
     ghidra: FUN_0839ec70
     name: refcounted_handle_copy_assign
