@@ -122,6 +122,7 @@ pub mod stream_seek;
 pub mod stream_seek_tagged_entry;
 pub mod stream_tell;
 pub mod string_pool;
+pub mod string_table_find_prefix;
 pub mod startup_relocation_offset;
 pub mod str_fold_upper;
 pub mod strided_cursor_advance;
