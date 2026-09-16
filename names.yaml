@@ -1613,7 +1613,8 @@ functions:
       obtain the buffer from the 0x08037fd8 accessor and pass (buffer, 1, 0).
       The relocator at 0x080046e0 copies osos 0x08000000..0x0800aed8 into
       IRAM 0x22000000, making target 0x220073b0 the byte-identical mirror of
-      the unported FUN_080073b0 @ 0x080073b0. That 60-byte body saves all
+      the ported stream_buffer_reinitialize @ 0x080073b0. That 64-byte body
+      saves all
       three arguments, invokes the two stream flush continuations through
       literal veneers 0x08003848 (-> 0x08201460) and 0x080038f8 (->
       0x082014c8, second argument 0), clears the stream-buffer
@@ -2013,6 +2014,49 @@ functions:
       producer path 0x08006b64 increments it when it reaches an exhausted
       page. Raw ARM is `mov r1,#0; str r1,[r0,#0x28]; mov r0,#0; bx lr`:
       exactly one word store, then the literal zero success return.
+
+  # --- RAM stream-buffer flush and reinitialize ---
+  - address: 0x080073b0
+    ghidra: FUN_080073b0
+    name: stream_buffer_reinitialize
+    size: 64
+    sig: "u32 stream_buffer_reinitialize(StreamBuffer *stream_buffer, u32 zero_page_context, u32 page_context)"
+    module: kernel/stream_buffer_reinitialize
+    status: ported
+    renames:
+      FUN_080073b0: stream_buffer_reinitialize
+      param_1/r0: stream_buffer
+      param_2/r1: zero_page_context
+      param_3/r2: page_context
+      thunk_FUN_08201460: stream_buffer_flush_enter (veneer 0x08003848 -> 0x08201460)
+      FUN_080038f8: stream_buffer_flush_exit (veneer -> 0x082014c8)
+      DAT_080073ec: stream_buffer_pages_ready (target RAM @ 0x2200aed5)
+      FUN_080072cc: stream_buffer_page_initialize
+    notes: >-
+      Ghidra's 60-byte extent omits the 4-byte literal pool word 0x2200aed5
+      at 0x080073ec; the stream-buffer constructor FUN_080073f0 starts at
+      0x080073f0, so the true extent is 64 bytes. Decoding every ARM B/BL
+      word in osos.dec found exactly five direct bl callers (0x080054e8,
+      0x08005534, 0x08005580, 0x0800563c, 0x08007618), all unconditional
+      with zero predicated forms, plus one tail b from FUN_08007f88 at
+      0x08007fc8; the five veneer callers of 0x08038190 reach the IRAM
+      mirror 0x220073b0. The body saves all three arguments in r4-r6, calls
+      the first stream flush continuation through literal veneer 0x08003848
+      (-> 0x08201460), the second through 0x080038f8 (-> 0x082014c8) with
+      (first result, 0), clears the page-initialization flag byte
+      0x2200aed5, then tail-calls page initializer 0x080072cc with the
+      original arguments restored, forwarding its r0 result. Clearing the
+      flag re-arms the initializer's guard, re-running page setup. The
+      continuations are mid-function entries that read the object from
+      callee-saved r4 (0x08201460 is `mov r0,r4; blx r1`), an ABI Rust
+      cannot express, so ARM builds replicate the exact register flow in
+      assembly and reach the veneers/initializer through absolute
+      literal-loaded blx/bx (the patch payload links separately from the
+      stock image); match.py confirms identical structure modulo those
+      three documented branch forms. Host builds use replaceable inert
+      seams and private flag storage; tests prove argument forwarding, the
+      (result, 0) second-continuation contract, flag clearing, call order,
+      and result forwarding.
 
   # --- UI allocation-table slot creation ---
   - address: 0x08004c78
