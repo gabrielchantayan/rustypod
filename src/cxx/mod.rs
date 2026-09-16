@@ -116,6 +116,7 @@ pub mod release;
 pub mod retain;
 pub mod resource_handle_release;
 pub mod opaque_handle_release;
+pub mod opaque_handle_acquire;
 pub mod resource_handle_initialize;
 pub mod resource_handle_execute;
 pub mod zero_selector_timeout_dispatch;
