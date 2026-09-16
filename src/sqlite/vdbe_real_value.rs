@@ -168,6 +168,33 @@ pub unsafe extern "C" fn vdbe_real_value(p_mem: *mut Mem) -> f64 {
     0.0
 }
 
+/// vdbe_real_value_thunk — original: `thunk_FUN_0838c7ec` @ 0x08391774
+/// (**4 bytes**, 0x08391774..0x08391778; two more independently assigned
+/// thunks occupy 0x08391778 and 0x0839177c, and the next separately linked
+/// function starts with `push {r4,lr}` at 0x08391780, binary-decoded).
+///
+/// **4 direct `bl` call sites, all unconditional** (0x082b28e0, 0x083682ac,
+/// 0x0838fa54, and 0x08392a04); **0 predicated `bl` call sites and 0 tail
+/// `b` call sites**, verified by decoding every ARM `B`/`BL` word in
+/// `work/firmware/osos.dec`.
+///
+/// The sole word `b 0x0838c7ec` (0xeaffec1c) transfers without changing
+/// `lr`, the `p_mem` argument, or the stack: a plain tail transfer into
+/// [`vdbe_real_value`]. The adjacent words @ 0x08391778 and 0x0839177c are
+/// separately assigned thunks to `vdbe_int_value` @ 0x0838b5c4.
+///
+/// No deliberate deviation: the forwarded call inherits the stock
+/// tail-transfer ABI (`p_mem` in r0 untouched, `lr` preserved, and the
+/// target's `double` result pair returned to the original caller). The
+/// dedicated section prevents LLVM from folding this independently
+/// hookable 0x08391774 seam into [`vdbe_real_value`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vdbe_real_value_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_real_value_thunk(p_mem: *mut Mem) -> f64 {
+    unsafe { vdbe_real_value(p_mem) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -317,6 +344,30 @@ mod tests {
             std::vec![
                 Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
                 Event::NulTerminate((&mut value as *mut Mem) as usize),
+            ],
+        );
+    }
+
+    #[test]
+    fn thunk_forwards_the_real_and_text_arms_to_vdbe_real_value() {
+        let _guard = bench();
+        let mut real = mem(MEM_REAL);
+        real.r = -0.5;
+        assert_eq!(unsafe { vdbe_real_value_thunk(&mut real) }, -0.5);
+        assert!(events().is_empty());
+
+        let mut text = *b"7\0";
+        let mut value = mem(MEM_STR);
+        value.z = text.as_mut_ptr();
+        unsafe { *core::ptr::addr_of_mut!(ATOF_RESULT) = 7.0; }
+        assert_eq!(unsafe { vdbe_real_value_thunk(&mut value) }, 7.0);
+        assert_eq!(value.flags, MEM_STR);
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
+                Event::NulTerminate((&mut value as *mut Mem) as usize),
+                Event::AtoF(text.as_ptr() as usize),
             ],
         );
     }
