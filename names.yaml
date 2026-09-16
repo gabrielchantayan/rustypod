@@ -65329,6 +65329,58 @@ functions:
       zero and sign-bit-set inputs, and exhaustive DateTime-range comparison
       with the independent textbook Gregorian predicate.
 
+  # --- RTC clock-state refresh + day-of-year fill (time/clock_state) ---
+  - address: 0x080642a4
+    ghidra: FUN_080642a4
+    name: fetch_clock_state
+    size: 104
+    sig: "void fetch_clock_state(ClockState *state)"
+    module: time/clock_state
+    status: ported
+    vars: {param_1: state, DAT_08064308: shadow record @ 0x08a662e0,
+      FUN_0806418c: RTC clock getter (unported, seam), FUN_080d6fe0:
+      day-of-year tail (reproduced as clock_state_day_of_year), FUN_08074410:
+      Gregorian leap test (inlined), DAT_080d7034: 0x089caaa0 (leap-year
+      days-in-month table literal)}
+    notes: >-
+      Refresh the 12-byte clock-state record from the RTC and fill its
+      day-of-year. Ghidra's 100 bytes is instructions only; the true extent
+      0x080642a4..0x0806430c adds the literal-pool word @ 0x08064308 =
+      0x08a662e0 (shadow record) reached by the body's own ldr r5,[pc,#0x58].
+      5 unconditional bl call sites (raw-word decode cross-checked with
+      osos.asm): 0x08044a60 (FUN_08044a44), 0x08056544 (FUN_08056524, the
+      current-calendar query), 0x08056824 (FUN_08056800), 0x080684c0
+      (FUN_08068490), 0x080fc40c (FUN_080fc3d8); no predicated bl. Record
+      layout recovered from the getter FUN_0806418c's stores and caller
+      FUN_08056524's reads: +0 u16 year (RTC byte + 2000), +2 month (1=Jan),
+      +3 day, +4 i16 yday (OUT), +6 i8 UTC offset in signed 15-minute
+      units, +7 DST-active flag, +8 hour, +9 minute, +10 second, +11 status
+      (bit0 clock valid, bit1 zone/DST valid). Algorithm: copy
+      status/zone bytes from the shadow record, call the getter (0, state)
+      ignoring its return, re-copy the zone bytes (the getter never writes
+      +6/+7), then status = state.status & ~2 | shadow.status & 2, and
+      tail-branch to the day-of-year helper @ 0x080d6fe0. The helper
+      (52 bytes + table literal @ 0x080d7034 = runtime 0x089caaa0, image
+      0x089d5978 under the scatterload skew, decrypted, contents verified
+      {31,29,31,30,31,30,31,31,30,31,30,31}) computes yday = day-1 +
+      sum(table[0..month-1]) with February corrected to 28 in common years
+      under FUN_08074410's Gregorian test (year % 4 == 0, centuries via
+      year/100 % 4 == 0: 1900 common, 2000 leap); the loop bound is the
+      signed compare i < (i32)month - 1, so month 0/1 runs zero iterations.
+      Deviations: the unported getter dispatches through the CLOCK_STATE_GET
+      seam (fixed address 0x0806418c on target -> blx, host mock in tests),
+      the shadow record is a host static vs fixed 0x08a662e0 on target, the
+      tail b is an #[inline(never)] Rust call, the leap test's divide runs
+      through the ported __rt_udivmod (runtime/rt_div.rs), shadow reads are
+      volatile so LLVM cannot fold the duplicated copies, and LLVM peels the
+      helper's first two month iterations into cumulative sums (same
+      results, proven by tests). Host tests (5): full refresh with shadow
+      zone-byte preservation and status-bit1 merge, shadow-bit1-clear merge,
+      getter error ignored + leap February = 29, century divide-by-100 rule
+      (1900 vs 2000), and month 0/1 zero-iteration boundary. match.py:
+      fetch_clock_state same shape (shadow bias by +6, blx seam dispatch,
+      and #0xfd in place of bic); helper structurally peeled but sum-equal.
+
   # --- Raw object-state byte predicate (cxx/object_state) ---
   - address: 0x080395d8
     ghidra: FUN_080395d8
