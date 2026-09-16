@@ -28189,6 +28189,41 @@ functions:
       private word and lookup seams to prove signed-bound inclusion, wrapping
       direct arithmetic, lookup forwarding, success, and fallback behavior.
 
+  - address: 0x083998a4
+    ghidra: FUN_083998a4
+    name: interp_stack_pop_release
+    size: 76
+    sig: "u32 interp_stack_pop_release(u32 *stack)"
+    module: util/interp_stack_pop_release
+    status: ported
+    renames:
+      param_1/r0: stack
+      iVar1: top
+      uVar2: opcode
+      FUN_08399670: interp_opcode_release
+    notes: >-
+      Raw osos.dec extent is exactly 19 ARM instructions, 76 bytes from
+      0x083998a4 through 0x083998ef; the next separately linked function
+      begins with push {r4-r11,lr} at 0x083998f0, confirming Ghidra's size.
+      Decoding every ARM B/BL word finds exactly 4 direct call sites, all
+      unconditional plain bl (0x0837f228, 0x08382748, 0x0839b69c,
+      0x0839b710), with zero predicated forms; the body holds exactly one
+      bl, to the opcode-release dispatcher at 0x08399670. The retailOS "T"
+      interpreter (driver 0x0837f110, "__T__ syntax error" reporter) keeps a
+      value stack in its context: word 0 is the signed top index, words 1..3
+      are header fields, each 20-byte slot sits at word 3 + top * 5. The pop
+      reads slot word 1, passes its low byte plus a pointer to slot word 2 to
+      unported 0x08399670 (a jump table over tag ranges 0x9b..0xee that frees
+      the tagged payload), decrements the top index, and returns the tag
+      byte; a negative top returns 0 without touching memory. One error path
+      drains the stack via while (top >= 0) pop(). The dispatcher is
+      unported, so target builds call 0x08399670 through a transmuted seam
+      and host tests install a recording double (guarded by
+      INTERP_OPCODE_RELEASE_TEST_LOCK). match.py: same signed-empty guard,
+      same top*20+12 slot arithmetic, tag extraction, payload-pointer call,
+      and top-1 store; expected diffs are LLVM's ldrb for ldr+and #0xff and
+      blx through the seam word instead of the stock direct bl.
+
   - address: 0x0836b5b0
     ghidra: FUN_0836b5b0
     name: gpio_pin_configure

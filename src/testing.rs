@@ -1408,6 +1408,12 @@ pub static TASK_HOOKS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::ne
 pub static SCHEDULER_LABEL_FIND_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that swaps
+/// `util::interp_stack_pop_release::INTERP_OPCODE_RELEASE`. The interpreter
+/// value-stack pop owns this seam today; future ports of sibling stack
+/// helpers must reuse this lock so seam restoration cannot race.
+pub static INTERP_OPCODE_RELEASE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps
 /// `app::event_code_queue::EVENT_CODE_QUEUE_HOOKS`. The queue module's own
 /// tests and the `app::class_8c00` timer-rearm tests both install
 /// recording enqueues into that one mutable global, so a module-private
