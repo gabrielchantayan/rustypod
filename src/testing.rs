@@ -347,6 +347,10 @@ pub mod hints {
     // 0xb400_0000: dedicated to heap/three_buffer_owner's raw-u32 data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const THREE_BUFFER_OWNER_RELEASE: usize = 0xb400_0000;
+    // 0xc500_0000: dedicated to heap/three_buffer_owner_create's raw-u32
+    // allocation fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const THREE_BUFFER_OWNER_CREATE: usize = 0xc500_0000;
     // 0x6d00_0000: dedicated to ui/string_view_array's derived-view
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const STRING_VIEW_ARRAY: usize = 0x6d00_0000;
