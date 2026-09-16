@@ -71,3 +71,5 @@ pub mod drive_slot;
 pub mod drive_slot_flush;
 /// Path prefix drive-index resolver @ 0x082c3000.
 pub mod path_drive_index;
+/// Volume-prefixed music-library path construction @ 0x0806b4a0.
+pub mod music_path_resolve;
