@@ -20,11 +20,11 @@
 //! input ordinate for ascending profiles, its wrapping negation for
 //! descending profiles, or the input abscissa while no profile is active).
 //!
-//! The profile allocator/finalizer and arithmetic helpers remain retailOS
-//! calls (`0x080767a8`, `0x08076228`, `0x0804d1a8`, and `0x08031568`).
-//! They, plus host-only stores into the firmware-addressed scanline buffer,
-//! are explicit volatile callback seams; target builds call or write the
-//! retail layout directly and host tests replace them.
+//! The profile allocator and arithmetic helpers remain retailOS calls
+//! (`0x080767a8`, `0x0804d1a8`, and `0x08031568`). They, plus host-only
+//! stores into the firmware-addressed scanline buffer, are explicit volatile
+//! callback seams; target builds call or write the retail layout directly and
+//! host tests replace them.
 
 /// Direction byte stored at state offset `0x68`.
 pub const PROFILE_ASCENDING: u8 = 1;
@@ -55,8 +55,8 @@ pub struct RasterProfileState {
     pub previous_y: i32,
     pub lower_limit: i32,
     pub upper_limit: i32,
-    _padding_58_59: [u8; 2],
-    /// Set by profile creation and consumed by the segment emitter.
+    /// Number of completed profiles at state offset `0x58`.
+    pub profile_count: u16,
     pub profile_pending: u8,
     /// Whether the final emitted ordinate lies exactly on a scanline boundary.
     pub reusable_final_scanline: u8,
@@ -99,9 +99,6 @@ pub struct RasterProfileOps {
     pub reverse_profile_accumulator: unsafe extern "C" fn(*mut RasterProfileState),
 }
 
-unsafe extern "C" fn missing_end_profile(_: *mut RasterProfileState) -> u32 {
-    1
-}
 
 unsafe extern "C" fn missing_begin_profile(_: *mut RasterProfileState, _: i32) -> u32 {
     1
@@ -122,12 +119,6 @@ unsafe extern "C" fn missing_store_scanline_x(_: *mut RasterProfileState, _: u32
 
 unsafe extern "C" fn missing_set_profile_first_scanline(_: *mut RasterProfileState, _: i32) {}
 
-#[cfg(target_arch = "arm")]
-unsafe extern "C" fn retail_end_profile(state: *mut RasterProfileState) -> u32 {
-    let callback: unsafe extern "C" fn(*mut RasterProfileState) -> u32 =
-        core::mem::transmute(0x0807_6228usize);
-    callback(state)
-}
 
 #[cfg(target_arch = "arm")]
 unsafe extern "C" fn retail_begin_profile(
@@ -162,7 +153,7 @@ unsafe extern "C" fn retail_quotient_remainder(numerator: i32, denominator: i32)
 #[cfg(target_arch = "arm")]
 const DEFAULT_RASTER_PROFILE_OPS: RasterProfileOps = RasterProfileOps {
     // These wrappers tail into retailOS routines that remain unported.
-    end_profile: retail_end_profile,
+    end_profile,
     begin_profile: retail_begin_profile,
     emit_segment: raster_profile_emit_segment,
     scaled_divide: retail_scaled_divide,
@@ -174,7 +165,7 @@ const DEFAULT_RASTER_PROFILE_OPS: RasterProfileOps = RasterProfileOps {
 
 #[cfg(not(target_arch = "arm"))]
 const DEFAULT_RASTER_PROFILE_OPS: RasterProfileOps = RasterProfileOps {
-    end_profile: missing_end_profile,
+    end_profile,
     begin_profile: missing_begin_profile,
     emit_segment: raster_profile_emit_segment,
     scaled_divide: missing_scaled_divide,
@@ -219,6 +210,91 @@ unsafe fn current_direction(state: *mut RasterProfileState) -> u8 {
 #[inline(always)]
 unsafe fn profile_is_pending(state: *mut RasterProfileState) -> u8 {
     core::ptr::addr_of!((*state).profile_pending).read_volatile()
+}
+
+#[repr(C)]
+struct RasterProfile {
+    _padding_00_07: [u8; 8],
+    first_scanline: u32,
+    _padding_0c_0f: [u8; 4],
+    height: i32,
+    _accumulator: i32,
+    _padding_18_1b: [u8; 4],
+    next_profile: u32,
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn raster_trace_level() -> i32 {
+    core::ptr::read_volatile((0x08b2_09dcusize + 0x28) as *const i32)
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_RASTER_TRACE_LEVEL: i32 = 0;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn raster_trace_level() -> i32 {
+    core::ptr::addr_of!(HOST_RASTER_TRACE_LEVEL).read_volatile()
+}
+
+/// end_profile — original: `FUN_08076228` @ `0x08076228` (204 bytes; 1
+/// plain `bl` + 2 predicated `bl` instructions).
+///
+/// Finishes the active FreeType raster profile by deriving its height from the
+/// scanline cursor and its recorded first scanline. A positive height links a
+/// fresh 0x20-byte profile at the cursor; a negative height stores status 99,
+/// and exhaustion stores status 98. The three trace calls are retained, but
+/// host builds use a test-controlled trace level rather than dereferencing
+/// the firmware trace object at `0x08b209dc`.
+///
+/// # Safety
+/// `state`, its active profile, and its scanline buffer must be valid retailOS
+/// layout objects. The pointer fields are 32-bit firmware addresses.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn end_profile(state: *mut RasterProfileState) -> u32 {
+    static NEGATIVE_HEIGHT: &[u8] = b"End_Profile: negative height encountered!\n\0";
+    static ENDING_PROFILE: &[u8] = b"Ending profile %lx, start = %ld, height = %ld\n\0";
+    static OVERFLOW: &[u8] = b"overflow in End_Profile\n\0";
+
+    let active = (*state).active_profile as usize as *mut RasterProfile;
+    let height = ((*
+        state).scanline_cursor.wrapping_sub((*active).first_scanline) as i32) >> 2;
+    if height < 0 {
+        crate::ft::trace::ft_error_trace(NEGATIVE_HEIGHT.as_ptr(), 0, 0, 0);
+        (*state).raster_status = 99;
+        return 1;
+    }
+
+    if height > 0 {
+        if raster_trace_level() > 5 {
+            crate::ft::trace::ft_error_trace(
+                ENDING_PROFILE.as_ptr(),
+                active as usize as u32,
+                (*active).first_scanline,
+                height as u32,
+            );
+        }
+        (*active).height = height;
+        let new_profile = (*state).scanline_cursor as usize as *mut RasterProfile;
+        (*state).active_profile = new_profile as usize as u32;
+        (*state).scanline_cursor = (*state).scanline_cursor.wrapping_add(0x20);
+        (*new_profile).height = 0;
+        (*new_profile).first_scanline = (*state).scanline_cursor;
+        (*active).next_profile = new_profile as usize as u32;
+        (*state).profile_count = (*state).profile_count.wrapping_add(1);
+    }
+
+    if (*state).scanline_cursor < (*state).scanline_end {
+        (*state).reusable_final_scanline = 0;
+        return 0;
+    }
+    if raster_trace_level() > 0 {
+        crate::ft::trace::ft_error_trace(OVERFLOW.as_ptr(), 0, 0, 0);
+    }
+    (*state).raster_status = 98;
+    1
 }
 
 /// raster_profile_append_edge — original: `FUN_080e99d8` @ `0x080e99d8`
@@ -477,6 +553,13 @@ mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::LazyLock;
+
+    const PROFILE_SLAB_LEN: usize = 0x1000;
+    static PROFILE_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::RASTER_PROFILE_END, PROFILE_SLAB_LEN).map(|pointer| pointer as usize)
+    });
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -644,7 +727,7 @@ mod tests {
             previous_y: 10,
             lower_limit: 20,
             upper_limit: 40,
-            _padding_58_59: [0; 2],
+            profile_count: 0,
             profile_pending: 0,
             reusable_final_scanline: 0,
             active_profile: 0,
@@ -821,4 +904,62 @@ mod tests {
         assert_eq!(profile.scanline_cursor, 0x100);
         unsafe { assert_eq!(TRACE.scanline_store_calls, 0) };
     }
+    #[test]
+    fn end_profile_links_next_profile_and_advances_profile_count() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = *PROFILE_SLAB else {
+            assert!(note_missing_u32_fixture("util/raster_profile end"));
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            base.write_bytes(0, PROFILE_SLAB_LEN);
+            let active = base.cast::<RasterProfile>();
+            let cursor = base.add(0x100);
+            (*active).first_scanline = (cursor as usize as u32).wrapping_sub(8);
+            let mut profile = state();
+            profile.active_profile = active as usize as u32;
+            profile.scanline_cursor = cursor as usize as u32;
+            profile.scanline_end = (base as usize as u32).wrapping_add(0x140);
+            profile.profile_pending = u8::MAX;
+            profile.profile_count = u16::MAX;
+            profile.reusable_final_scanline = 1;
+
+            assert_eq!(end_profile(&mut profile), 0);
+            let next = cursor.cast::<RasterProfile>();
+            assert_eq!((*active).height, 2);
+            assert_eq!((*active).next_profile, next as usize as u32);
+            assert_eq!((*next).height, 0);
+            assert_eq!((*next).first_scanline, (cursor as usize as u32).wrapping_add(0x20));
+            assert_eq!(profile.active_profile, next as usize as u32);
+            assert_eq!(profile.scanline_cursor, (cursor as usize as u32).wrapping_add(0x20));
+            assert_eq!(profile.profile_pending, u8::MAX);
+            assert_eq!(profile.profile_count, 0);
+            assert_eq!(profile.reusable_final_scanline, 0);
+        }
+    }
+
+    #[test]
+    fn end_profile_rejects_negative_height_without_mutating_cursor() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = *PROFILE_SLAB else {
+            assert!(note_missing_u32_fixture("util/raster_profile end"));
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            base.write_bytes(0, PROFILE_SLAB_LEN);
+            let active = base.cast::<RasterProfile>();
+            let cursor = base.add(0x100);
+            (*active).first_scanline = (cursor as usize as u32).wrapping_add(4);
+            let mut profile = state();
+            profile.active_profile = active as usize as u32;
+            profile.scanline_cursor = cursor as usize as u32;
+
+            assert_eq!(end_profile(&mut profile), 1);
+            assert_eq!(profile.raster_status, 99);
+            assert_eq!(profile.scanline_cursor, cursor as usize as u32);
+        }
+    }
+
 }

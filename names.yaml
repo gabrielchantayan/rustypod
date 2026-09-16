@@ -44750,6 +44750,35 @@ functions:
       replaced by ObservableArray and only the condition-variable seam
       remains.
 
+  - address: 0x08076228
+    ghidra: FUN_08076228
+    name: end_profile
+    size: 204
+    sig: "u32 end_profile(RasterProfileState *state)"
+    module: util/raster_profile
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      iVar1/r1/r0: active_profile
+      iVar3/r5: height
+      iVar4/r1: scanline_cursor
+      DAT_080762f4: ft_raster_trace
+      FUN_0804d17c: ft_error_trace
+    notes: >-
+      Raw ARM extent is exactly 0x08076228..0x080762f4: 51 words followed by
+      the 0x08b209dc trace-object literal and three NUL-terminated strings;
+      the next code begins at 0x08076370. Raw decoding verifies one plain bl
+      (0x08076258) plus two predicated blge instructions (0x0807627c and
+      0x080762e0), all to ft_error_trace @ 0x0804d17c. It computes
+      (scanline_cursor - active_profile->first_scanline) >> 2; a negative
+      result reports status 99, a positive result links and initializes the
+      next 0x20-byte profile, and exhaustion reports status 98. Deliberate
+      host-only deviation: the firmware trace object's +0x28 level is a
+      test-controlled static; target code volatile-loads 0x08b20a04.
+      Reference C: decomp/c/005/08076228_FUN_08076228.c; raw disassembly:
+      osos.dec 0x08076228. Host tests cover positive linking/profile-count
+      wrap and negative-height non-mutation.
+
   - address: 0x080e99d8
     ghidra: FUN_080e99d8
     name: raster_profile_append_edge
@@ -44777,8 +44806,8 @@ functions:
       and does not advance previous_x/previous_y; success writes both and
       returns the carried value in the high word. Reference C:
       decomp/c/008/080e99d8_FUN_080e99d8.c; assembly: osos.asm
-      0x080e99d8. Unported dependencies 0x08076228, 0x080767a8, and
-      0x080e9b24 are volatile RasterProfileOps seams (retail entry-point
+      `0x08076228` is now the direct `end_profile` port; 0x080767a8 and
+      0x080e9b24 remain volatile RasterProfileOps seams (retail entry-point
       wrappers on ARM, mocks in host tests). match.py structural: direction
       branches, signed comparisons, callback error joins, descending
       negations, and final pair/state stores are retained; ops-table calls

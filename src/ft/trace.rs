@@ -69,6 +69,7 @@ pub unsafe fn ft_set_trace_sink(sink: Option<FtTraceSink>) -> Option<FtTraceSink
 /// `format` must be a NUL-terminated string valid for the installed
 /// sink, and the arguments must match its conversions.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn ft_error_trace(format: *const u8, arg1: u32, arg2: u32, arg3: u32) {
     if let Some(sink) = core::ptr::addr_of!(FT_TRACE_SINK).read_volatile() {
         sink(format, arg1, arg2, arg3);
