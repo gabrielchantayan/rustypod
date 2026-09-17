@@ -43,6 +43,9 @@ pub mod hints {
     // LC_CTYPE table fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STRING_TRIM_CTYPE: usize = 0x7f40_0000;
+    // 0x7f80_0000: dedicated to codegen/interference's raw-u32 graph and
+    // arena fixture; mappings never unmap, so no other user may share it.
+    pub const CG_INTERFERENCE_EDGE_LINK: usize = 0x7f80_0000;
     // 0xde00_0000: dedicated to app/path_entry_load_to_heap's raw-u32
     // buffered-loader source fixture; mappings never unmap, so no other user
     // may share this hint.
