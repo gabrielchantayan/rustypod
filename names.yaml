@@ -50405,6 +50405,29 @@ functions:
       `strne` out-count store kept; LLVM uses a frame pointer and an
       indirect blx for the fixed-address helper instead of the original's
       direct bl.
+  - address: 0x08267864
+    ghidra: FUN_08267864
+    name: two_string_record_assign
+    size: 68
+    sig: "TwoStringRecord *two_string_record_assign(TwoStringRecord *this, const TwoStringRecord *source)"
+    module: cxx/two_string_record_assign
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      FUN_082774a8: string_object_assign
+    notes: >-
+      Raw extent is exactly 0x08267864..0x082678a8: 17 ARM words ending in
+      `pop {r4,r5,r6,pc}`, followed by the separately linked constructor at
+      0x082678a8. The decoded body copies the three opaque words at +0/+4/+8,
+      then calls string_object_assign @ 0x082774a8 for embedded StringObjects
+      at +12 and +20, preserving that order, and returns this. Its two internal
+      BL instructions are unconditional; whole-image B/BL decoding finds four
+      unconditional inbound BL sites and no predicated inbound sites. The
+      record's class role is unidentified, so its first three words remain
+      opaque. `repr(C)` gives the target 32-bit member order on ARM while
+      allowing StringObject pointers to widen on host tests; no behavioral
+      deviation is made.
   - address: 0x08267914
     ghidra: FUN_08267914
     name: record_string_byte_vector_assign
