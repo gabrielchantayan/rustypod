@@ -104637,3 +104637,34 @@ functions:
       match.py confirms the load-before-store structure; LLVM expands the
       original ldm/stm into scalar loads and stores with a frame. Deliberate
       deviations: none.
+
+  # --- deferred selected-value pair adjustment tail call ---
+  - address: 0x0829b764
+    ghidra: FUN_0829b764
+    name: selected_value_pair_adjust
+    size: 68
+    sig: "void selected_value_pair_adjust(void *unused, void *selection, const i32 *input, i32 *output, i32 multiplier)"
+    status: identified
+    renames:
+      param_1/r0: unused
+      param_2/r1: selection
+      param_3/r2: input
+      param_4/r3: output
+      param_5/stack: multiplier
+      DAT_089cfddc: selection_config
+    notes: >-
+      Deferred: raw osos.dec establishes the 64-byte instruction body at
+      0x0829b764..0x0829b7a4, followed by its 4-byte literal
+      0x089cfddc at 0x0829b7a4; the next real function begins at
+      0x0829b7a8. The body calls 0x08291d90 once with selection and
+      selection_config's byte tag, subtracts selection_config+4 from its
+      result, multiplies the difference by multiplier, copies the input pair
+      to output, then tail-branches to 0x081b4d54 with (output, product).
+      The latter target is not named or ported, and its ABI and effect on the
+      output pair cannot be established from this wrapper. Ghidra instead
+      incorrectly attributes a division-based continuation after the tail
+      branch. Raw caller decoding finds exactly four inbound direct calls, all
+      unconditional plain BL at 0x0829b7dc, 0x0829b7fc, 0x0829b82c, and
+      0x0829b84c; the body has one unconditional plain BL and no predicated
+      BL instructions. Porting would require inventing the unresolved tail
+      callee's contract, so this entry remains identified.
