@@ -107248,3 +107248,34 @@ functions:
       and contracts have not been verified, so publishing one would not be a
       faithful port. No callee identity or behavioral name beyond this
       verified wrapper role has been invented.
+  - address: 0x0823b4c8
+    ghidra: FUN_0823b4c8
+    name: raster_span_setup
+    size: 192
+    sig: "void raster_span_setup(RasterSpanDescriptor *descriptor, const RasterSpanSource *source, u32 x, u32 y)"
+    module: util/raster_span_setup
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      param_2/r1: source
+      param_3/r2: x
+      param_4/r3: y
+      r4: x_mod_8
+      r5: primary_offset
+      r12: source_stride_low16
+      DAT_0823b588: raster_span_callback
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent
+      0x0823b4c8..0x0823b584. The word at 0x0823b588 is the literal callback
+      address 0x08a1b5a4; the next independently linked function begins with
+      push {r1-r11,lr} at 0x0823b58c. Decoding every aligned A32 B/BL
+      immediate finds four direct incoming plain BL calls (0x082409f0,
+      0x08240e80, 0x08241da8, 0x08242c88) and no predicated BL forms. It
+      copies source +0x94/+0x98 dimensions and stride, derives primary and
+      secondary addresses from x/y modulo-eight offsets, selects shifts for
+      format and layout bytes, then stores the callback literal. Raw ldrsb
+      instructions establish that those bytes are source +0x64/+0x65; Ghidra
+      incorrectly renders the format field as +100. Deliberate deviations:
+      Rust names opaque layouts, emulates register-shift counts >=32 as zero,
+      and retains the unknown callback as a u32 instead of inventing a callee
+      identity.
