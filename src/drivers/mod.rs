@@ -3,6 +3,7 @@ pub mod ata_cmd;
 pub mod ata_command_execute;
 pub mod ata_command_submit_wait;
 pub mod ata_taskfile_program;
+pub mod ata_command_wait;
 pub mod ata_operation_state_set;
 pub mod ata_semaphore;
 pub mod ata_work_loop;
