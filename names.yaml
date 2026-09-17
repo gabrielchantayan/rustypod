@@ -103680,3 +103680,29 @@ functions:
       0x10 <= low < 0x100, otherwise 2. The Rust port uses the existing
       board_version seam and substitutes a host static for the fixed cache
       byte; volatile accesses preserve the separate signed byte reads/store.
+  - address: 0x082b38e0
+    ghidra: FUN_082b38e0
+    name: allocate_cursor
+    size: 216
+    sig: "VdbeCursor *allocate_cursor(Vdbe *p, i32 i_cur, VdbeOp *p_op, i32 i_db, i32 is_btree_cursor)"
+    module: sqlite/allocate_cursor
+    status: ported
+    renames:
+      param_1: p
+      param_2: i_cur
+      param_3: p_op
+      param_4: i_db
+      param_5: is_btree_cursor
+      FUN_0838affc: sqlite3VdbeFreeCursor
+      FUN_0838bdb0: sqlite3VdbeMemGrow
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      SQLite 3.5.9's private allocateCursor in vdbe.c. Raw extent
+      0x082b38e0..0x082b39b8 is delimited by the closing ldmia at
+      0x082b39b4 and the next stmdb entry at 0x082b39b8. Decoding every
+      aligned B/BL word in osos.dec finds four direct callers: three plain
+      bl and one blne. It selects aMem[nMem-iCur], frees and clears an old
+      apCsr slot, grows and clears a 0x80-byte cursor plus optional 0x60
+      Btree state and 8*nField type words, then initializes iDb, nField,
+      aType, and pCursor. sqlite3VdbeFreeCursor @ 0x0838affc remains a
+      typed target/host dispatch seam because it is unported.

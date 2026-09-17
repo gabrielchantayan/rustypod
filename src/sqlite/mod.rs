@@ -233,6 +233,7 @@ pub mod result_text;
 pub mod result_error;
 pub mod step;
 pub mod vdbe;
+pub mod allocate_cursor;
 pub mod vdbe_unbind;
 pub mod vdbe_mem_apply_affinity;
 pub mod vdbe_mem_set_double;
