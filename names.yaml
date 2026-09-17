@@ -84,6 +84,31 @@ functions:
       zero without reading owner, otherwise it returns bit 1 of owner byte
       +0x15. The virtual callee is represented by the established
       ScopedContextValidity ABI rather than an invented function identity.
+  # --- AppMotor bounded state setter ---
+  - address: 0x08296228
+    ghidra: FUN_08296228
+    name: app_motor_set_state_and_broadcast
+    size: 20
+    sig: "void app_motor_set_state_and_broadcast(void *app_motor, u32 state)"
+    module: app/app_motor
+    status: ported
+    renames:
+      param_1/r0: app_motor
+      param_2/r1: state
+      FUN_0807f5cc: condvar_broadcast
+    notes: >-
+      Raw extent is exactly 0x08296228..0x0829623c: bx lr is at
+      0x08296238 and the distinct app_motor_set_pending_state starts with
+      cmp r1,#0 at 0x0829623c. Raw words are cmp r1,#4; strbls r1,
+      [r0,#0x22c]; addls r0,r0,#0x238; bls 0x0807f5cc; bx lr. Decoding
+      every aligned ARM B/BL immediate in osos.dec finds four direct inbound
+      BL calls, all unconditional plain BL (0x08295a40, 0x08296888,
+      0x08296b2c, 0x08296bec), and no predicated BL forms. State values
+      through 4 inclusive update the low-byte state then tail-call
+      condvar_broadcast on the embedded CondVar; larger values are a no-op.
+      Deliberate deviations: opaque storage uses byte offsets to preserve
+      the target's 32-bit layout on hosts, and Rust represents the terminal
+      conditional ARM B as a normal call and return.
   # --- AppMotor pending-state setter ---
   - address: 0x0829623c
     ghidra: FUN_0829623c
