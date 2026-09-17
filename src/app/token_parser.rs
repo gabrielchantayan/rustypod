@@ -14,9 +14,10 @@
 //! verified by decoding every ARM B/BL word in `osos.dec`: 0x08178468,
 //! 0x0817848c, 0x08178514, 0x0817858c, 0x08178604, and 0x08178620.
 //!
-//! Deliberate deviation: the lookup target `0x082a4f88` is not ported. Target
-//! builds reach its known address through a typed function pointer; host tests
-//! install a volatile seam. Its semantic identity is intentionally not guessed.
+//! Deliberate deferral: the lookup is now identified as
+//! `string_object_find_casefolded`, but its bounded case-fold comparator
+//! depends on an unrecovered retail table. Target builds therefore retain the
+//! typed known-address call and host tests install a volatile seam.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
