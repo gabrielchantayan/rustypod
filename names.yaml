@@ -102563,3 +102563,29 @@ functions:
       0x0836a3d4, and 0x0836aa60; all are unconditional plain bl, with no
       predicated calls. Host tests use separate target-width global/controller
       words and verify both timeout and signaled paths still make the store.
+
+  # --- RTC-seeded random-word wrapper ---
+  - address: 0x0834f3e4
+    ghidra: FUN_0834f3e4
+    name: rtc_seeded_random_word
+    size: 68
+    sig: "u32 rtc_seeded_random_word(u32 discarded_r0, u32 discarded_r1, u32 retained_r2, u32 retained_r3)"
+    module: runtime/rtc_seeded_random_word
+    status: ported
+    renames:
+      DAT_0834f428: service_r1_literal
+      FUN_080548ec: rtc_seeded_random_service
+    notes: >-
+      Raw osos.dec establishes the 68-byte extent: 16 instruction words at
+      0x0834f3e4..0x0834f424 plus literal 0x3370d3fd at 0x0834f428; the
+      next separately linked function starts at 0x0834f42c with
+      push {r4,r5,r6,lr}. Decoding every ARM BL-immediate reports four
+      unconditional plain BL call sites and no predicated BL calls. The
+      apparent subtraction loop is an obfuscated one-shot wrapper: it sets
+      r0 to zero, sets r1 to literal+1, leaves inbound r2/r3 intact, calls
+      0x080548ec exactly once, and returns that service's r0. The callee
+      initializes an RTC-seeded PRNG when needed and produces its next word;
+      it remains unported. The target implementation retains the retail ARM
+      register sequence and calls a fixed-address veneer. Host builds use a
+      replaceable callback solely to prove the complete four-register ABI
+      and result forwarding.
