@@ -298,6 +298,7 @@ pub mod slot_request_release;
 pub mod slot_signal_reset;
 pub mod slot_value_process;
 pub mod four_slot_key_index;
+pub mod registered_entry_cancel;
 pub mod usb_transfer_schedule;
 pub mod collection_item_find_by_pair;
 pub mod collection_item_find_by_key;
