@@ -104527,3 +104527,26 @@ functions:
       and all-ones values while preserving distinct preceding words.
       match.py confirms the load-and-return structure; LLVM may add a frame
       around the equivalent load. Deliberate deviations: none.
+  - address: 0x0829cff8
+    ghidra: FUN_0829cff8
+    name: active_slot_count
+    size: 60
+    sig: "u8 active_slot_count(const u8 *slots)"
+    module: cxx/active_slot_count
+    status: ported
+    renames:
+      param_1/r0: slots
+      r0: active_slot_count
+      r1: slot_index
+      r2: slots
+      "slots + slot_index * 0x14 + 0x10": active_flag
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: 15 ARM words from
+      mov r2,r0 at 0x0829cff8 through bx lr at 0x0829d030; the next distinct
+      leaf begins with mov r0,#21 at 0x0829d034. Decoding every aligned A32
+      B/BL-immediate word identifies four direct inbound plain BL calls and
+      no predicated BL calls. The function counts consecutive nonzero active
+      bytes at +0x10 in up to four 0x14-byte slots, stopping at the first zero.
+      match.py reports LLVM's equivalent fixed-loop unrolling rather than the
+      original indexed loop. The opaque byte layout deliberately preserves
+      target offsets and stride on hosts with wider pointers.
