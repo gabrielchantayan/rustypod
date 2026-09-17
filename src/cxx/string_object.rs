@@ -451,6 +451,46 @@ pub struct StringRecordWithStringAt0x0c {
     pub string: StringObject,
 }
 
+/// Original load address of the outer vtable planted by
+/// [`string_owner_destroy`] (literal-pool word @ 0x0820bf20).
+pub const STRING_OWNER_VTABLE_ADDRESS: usize = 0x089922c8;
+
+/// Host identity for the otherwise undecoded outer class vtable.
+pub static STRING_OWNER_VTABLE: usize = STRING_OWNER_VTABLE_ADDRESS;
+
+/// Decoded prefix of an otherwise unidentified polymorphic owner whose
+/// second and third ARM words are an embedded [`StringObject`].
+#[repr(C)]
+pub struct StringOwner {
+    /// +0x00 on ARM — outer class vtable.
+    pub vtable: *const usize,
+    /// +0x04 on ARM — embedded string subobject.
+    pub string: StringObject,
+}
+
+/// string_owner_destroy — original: `FUN_0820bef8` @ 0x0820bef8 (40 bytes;
+/// 10 instructions followed by the two literal-pool words at
+/// 0x0820bf20/0x0820bf24). **4 direct `bl` call sites**, all unconditional
+/// and zero predicated, verified by decoding ARM branch words in
+/// `osos.dec`.
+///
+/// Raw ARM starts at `push {r4,lr}` @ 0x0820bef8 and ends at `pop {r4,pc}`
+/// @ 0x0820bf1c; 0x0820bf20 is data, while the next function starts
+/// `push {r4,r5,r6,lr}` @ 0x0820bf28. It re-plants the outer vtable
+/// (0x089922c8), re-plants the embedded StringObject vtable (0x089a6044),
+/// releases the embedded payload through `string_object_release_payload` @
+/// 0x08275d74, then returns `this`. Deliberate deviation: both ROM vtable
+/// identities are represented by host statics; the release callee is already
+/// ported and called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_owner_destroy(this: *mut StringOwner) -> *mut StringOwner {
+    (*this).vtable = &STRING_OWNER_VTABLE;
+    (*this).string.vtable = &STRING_OBJECT_VTABLE;
+    string_object_release_payload(&mut (*this).string);
+    this
+}
+
 
 /// string_default_construct — original: `FUN_08277440` @ 0x08277440
 /// (20 bytes, 280 `bl` call sites).
@@ -3573,6 +3613,48 @@ pub(crate) mod tests {
             object,
         );
         StaticComparisonObjectGuard(prior)
+    }
+
+    #[test]
+    fn string_owner_destroy_replants_vtables_and_returns_owner() {
+        let mut owner = StringOwner {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+        };
+
+        let returned = unsafe { string_owner_destroy(&mut owner) };
+
+        assert!(core::ptr::eq(returned, &mut owner));
+        assert!(core::ptr::eq(owner.vtable, &STRING_OWNER_VTABLE));
+        assert!(core::ptr::eq(owner.string.vtable, &STRING_OBJECT_VTABLE));
+        assert!(owner.string.payload.is_null());
+    }
+
+    #[test]
+    fn string_owner_destroy_leaves_unrelated_trailing_storage_untouched() {
+        #[repr(C)]
+        struct OwnerWithTail {
+            owner: StringOwner,
+            tail: usize,
+        }
+
+        let mut fixture = OwnerWithTail {
+            owner: StringOwner {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+            },
+            tail: 0xfeed_face,
+        };
+
+        unsafe { string_owner_destroy(&mut fixture.owner) };
+
+        assert_eq!(fixture.tail, 0xfeed_face);
     }
 
 
