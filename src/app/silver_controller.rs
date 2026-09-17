@@ -306,6 +306,50 @@ pub unsafe extern "C" fn silver_controller_construct(this: *mut u8, name: *const
         this
     }
 }
+/// silver_controller_construct_flagged — original: `FUN_08212c10` @
+/// 0x08212c10 (**48 bytes**: 11 instructions plus one literal-pool word;
+/// **4 plain `bl` sites and 0 predicated `bl` sites**, decoded from every
+/// ARM branch-with-link word in `osos.dec`). Ghidra's 44-byte extent drops
+/// the vtable literal at 0x08212c3c; `cmp r0, #0` starts the next function
+/// at 0x08212c40.
+///
+/// Runs [`silver_controller_construct`], replaces its vtable with the
+/// derived controller's loaded-image vtable, initializes the derived
+/// sentinel word at +0xb0 to -1, and stores whether `enabled` is nonzero
+/// at +0xb4. The caller-visible class identity is not yet known; this
+/// name deliberately describes only the verified constructor behavior.
+///
+/// Deliberate deviation: the ARM `movs`/`movne` pair normalizes every
+/// nonzero value to one; Rust expresses that directly with `u8::from`.
+///
+/// # Safety
+///
+/// `this` and `name` must satisfy [`silver_controller_construct`]'s
+/// requirements, and the resulting object must have writable bytes through
+/// offset +0xb4.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn silver_controller_construct_flagged(
+    this: *mut u8,
+    name: *const u8,
+    enabled: u32,
+) -> *mut u8 {
+    const DERIVED_VTABLE_ADDRESS: u32 = 0x0899_2c90;
+    const DERIVED_SENTINEL_OFFSET: usize = 0xb0;
+    const DERIVED_ENABLED_OFFSET: usize = 0xb4;
+
+    unsafe {
+        let this = silver_controller_construct(this, name);
+        core::ptr::write_volatile(this.cast(), DERIVED_VTABLE_ADDRESS);
+        core::ptr::write_volatile(this.add(DERIVED_SENTINEL_OFFSET).cast(), u32::MAX);
+        core::ptr::write_volatile(
+            this.add(DERIVED_ENABLED_OFFSET),
+            u8::from(enabled != 0),
+        );
+        this
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -518,6 +562,28 @@ mod tests {
         assert_eq!(BINDING_MAP_OFFSET - AUXILIARY_MAP_OFFSET, CONTAINER_SIZE);
         assert_eq!(DEMO_MODE_OFFSET, 0x44);
         assert_eq!(VTABLE_ADDRESS, 0x0898_4570);
+    }
+
+    #[test]
+    fn flagged_constructor_replaces_the_vtable_and_normalizes_the_flag() {
+        if SLAB.is_none() && note_missing_u32_fixture("app::silver_controller") {
+            return;
+        }
+
+        for (enabled, expected) in [(0, 0), (1, 1), (2, 1), (u32::MAX, 1)] {
+            let (_guard, object, _, _) = bench();
+
+            let returned = unsafe {
+                silver_controller_construct_flagged(object, b"TCFlagged\0".as_ptr(), enabled)
+            };
+
+            unsafe {
+                assert_eq!(returned, object);
+                assert_eq!(word_at(object, 0), 0x0899_2c90);
+                assert_eq!(word_at(object, 0xb0), u32::MAX);
+                assert_eq!(object.add(0xb4).read(), expected);
+            }
+        }
     }
 
     #[test]
