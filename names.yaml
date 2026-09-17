@@ -100469,6 +100469,42 @@ functions:
       host tests use a below-4GiB target-layout fixture. match.py reports the
       expected structural diff: Rust lowers the tail transfer as direct reads.
 
+  - address: 0x08279338
+    ghidra: FUN_08279338
+    name: path_object_join_cstr
+    size: 56
+    sig: "StringObject *path_object_join_cstr(StringObject *this, const char *source)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      local_8/sp: temporary_path
+      r4: this (preserved across all three calls and returned)
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_08279374: path_object_join
+      FUN_08277484: string_object_destroy
+      DAT_08279370: PATH_OBJECT_VTABLE_ADDRESS (0x089a60d8)
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte all-code extent
+      0x08279338..0x0827936f: `push {r2,r3,r4,lr}; mov r4,r0; mov
+      r0,sp; bl 0x08277304; ldr r1,[0x08279370]; str r1,[r0]; mov
+      r1,r0; mov r0,r4; bl 0x08279374; mov r4,r0; mov r0,sp; bl
+      0x08277484; mov r0,r4; pop {r2,r3,r4,pc}`. The next separately
+      linked function begins at 0x08279374. The three outbound direct BL
+      targets are ported: construct a temporary StringObject from source,
+      overwrite its vtable with the PathObject identity literal
+      0x089a60d8, join it onto this, destroy the temporary, and return the
+      join result saved in r4. Full-image ARM B/BL-immediate decoding finds
+      four inbound plain unconditional BL callers (0x08069cac, 0x081a2a44,
+      0x081a2c58, and 0x082a55fc), zero predicated callers. The Rust port
+      uses MaybeUninit stack storage for the target's two-word temporary and
+      calls all ported helpers directly. LLVM elides the raw `mov r4,r0`
+      because path_object_join is proven to return this; this is
+      value-identical. Its vtable remains a ROM identity on host, not a
+      host-callable dispatch table. Host test covers the empty-source clear
+      path, return identity, and preservation of an empty destination.
+
   # --- PathObject path join ---
   - address: 0x08279374
     ghidra: FUN_08279374
