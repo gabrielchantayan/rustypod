@@ -36,6 +36,7 @@ pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
+pub mod buffered_read_context_destroy;
 pub mod empty_destructor;
 pub mod empty_destructor_1e741c;
 pub mod empty_destructor_1d6030;
