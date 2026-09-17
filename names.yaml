@@ -13206,6 +13206,37 @@ functions:
       at 0x08369bec; host tests inject its result. Port deviation: none on
       target.
 
+  # --- PMU mode-register application (drivers/pmu) ---
+  - address: 0x082e57a8
+    ghidra: FUN_082e57a8
+    name: pmu_apply_mode_registers
+    size: 44
+    sig: "void pmu_apply_mode_registers(u32 mode)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: mode
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d09c: pmu_write_register_0x1a_0x6f
+      FUN_0836d560: pmu_write_mode_registers
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM extent is exactly 44 bytes, 0x082e57a8..0x082e57d0: the
+      following push {r4,r5,r6,lr} at 0x082e57d4 begins a separate function.
+      Decoding every ARM B/BL word in osos.dec finds four direct inbound
+      callers, all plain unconditional bl (cond=e), at 0x0836a7a4,
+      0x0836a87c, 0x0836caa8, and 0x0836cca0; zero predicated forms. The
+      function waits on semaphores 17 then 5, writes byte 0x6f to PCF50635
+      register 0x1a, then byte 10 to register 0x1d. It writes mode != 0 to
+      register 0x1b only if the 0x1d write returns zero, releases 5 then 17
+      unconditionally, and ignores every other transfer status. Its five
+      direct callee edges resolve to existing Rust semaphore and PMU-I2C
+      ports; this deliberately replaces retail direct bl edges with ordinary
+      Rust calls. Host tests cover nonzero-mode serialization, lock order,
+      and the failed-second-write path that skips register 0x1b.
+
   # --- PMU board-version status bit (drivers/pmu) ---
   - address: 0x082e5b64
     ghidra: FUN_082e5b64
