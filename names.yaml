@@ -102589,3 +102589,28 @@ functions:
       register sequence and calls a fixed-address veneer. Host builds use a
       replaceable callback solely to prove the complete four-register ABI
       and result forwarding.
+
+  # --- Encoded target-word pair predicate ---
+  - address: 0x08346f48
+    ghidra: FUN_08346f48
+    name: encoded_pair_matches_magic
+    size: 72
+    sig: "u32 encoded_pair_matches_magic(const u32 *words)"
+    module: util/encoded_pair_matches_magic
+    status: ported
+    renames:
+      DAT_08346f90: first_word_multiplier
+      DAT_08346f94: indirect_word_multiplier
+    notes: >-
+      Raw osos.dec establishes 17 instruction words at 0x08346f48..0x08346f8c
+      followed by the two 32-bit multiplier literals 0x0a7e377f and
+      0x76b4197f; the next real function begins at 0x08346f98 with
+      push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}. The function has no
+      outbound BL instructions. Its four inbound direct call sites are plain
+      BL and there are no predicated BL call sites. It reads words[0] and the
+      u32 target pointer in words[1], multiplying each dereferenced word
+      modulo 2^32 and returning one only when both products equal one. The
+      corresponding accepted words are 0xed99887f and 0xd561a67f. Ghidra's
+      `int *` parameter obscures the target-width pointer field; the Rust
+      port intentionally uses adjacent u32 words rather than a host pointer
+      field, preserving the 32-bit target layout.
