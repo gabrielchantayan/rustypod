@@ -26142,6 +26142,24 @@ functions:
       unknown table, a Rust implementation or host behavior model would
       fabricate observable output; this wrapper remains deliberately
       unported until that table is recovered.
+  - address: 0x08275e94
+    ghidra: FUN_08275e94
+    name: utf8_decode_codepoint_at_index
+    size: 56
+    sig: "unsigned int utf8_decode_codepoint_at_index(const char *text, int index)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: text, param_2: limit, local_10: cursor, iStack_c: remaining, uVar1: codepoint}
+    notes: >-
+      Raw osos.dec words establish 0x08275e94..0x08275ecc as the 56-byte
+      all-code body; the next distinct entry begins at 0x08275ecc. Four
+      inbound direct calls are unconditional BL instructions (zero predicated);
+      the body makes one unconditional direct BL to utf8_next_codepoint @
+      0x08276214. A negative index returns zero before reading text. Otherwise
+      it tests the literal byte at the current cursor, decodes through the
+      zero-based index, and returns the final decoder result. A decoder-returned
+      zero does not itself terminate the loop: only the next literal NUL check
+      does. No deliberate deviations; the existing direct decoder port is used.
   - address: 0x08276214
     ghidra: FUN_08276214
     name: utf8_next_codepoint
