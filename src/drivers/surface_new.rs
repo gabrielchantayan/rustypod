@@ -232,6 +232,50 @@ pub unsafe extern "C" fn surface_new(
     unsafe { ctor(block, format, width, stride, height, flags, plane0, plane1, plane2, plane3) }
 }
 
+/// `render_context_create_image_surface` — original: `FUN_0828d458` @
+/// `0x0828d458` (136 bytes; 2 verified BL instructions: one plain `bl` and
+/// one predicated `blne`).
+///
+/// Raw ARM spans `0x0828d458..0x0828d4e0`; the next real function starts at
+/// `0x0828d4e0` with `push {r4, lr}`. Binary decoding finds four direct
+/// callers, all plain `bl`: `0x0828c7cc`, `0x0828cc98`, `0x0828e1b4`, and
+/// `0x0828e3b4`. It maps image format RGB565 (`0x0565`) to surface format 2
+/// and grayscale (`0x0065`) or packed 24-bit-alpha (`0x1888`) to format 3.
+/// Any other image format takes the predicated fatal `heap_panic` call. It
+/// constructs a surface with the image's `+0x04` plane base, width
+/// `+0x2c - +0x24`, stride `+0x28 - +0x20`, height `image + 0x08`, and
+/// fixed flags 2. Deliberate deviations: none.
+///
+/// Both pointers must be four-byte aligned; `image` must also contain an
+/// aligned format halfword at `+0x14`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn render_context_create_image_surface(
+    render_context: *const u8,
+    image: *const u8,
+) -> *mut u8 {
+    let image_format = unsafe { (image.add(0x14) as *const u16).read() };
+    let surface_format = match image_format {
+        0x0565 => 2,
+        0x0065 | 0x1888 => 3,
+        _ => unsafe { crate::heap::veneers::heap_panic() },
+    };
+    let plane0 = unsafe { (image.add(4) as *const u32).read() };
+    let width = unsafe {
+        (render_context.add(0x2c) as *const u32)
+            .read()
+            .wrapping_sub((render_context.add(0x24) as *const u32).read())
+    };
+    let stride = unsafe {
+        (render_context.add(0x28) as *const u32)
+            .read()
+            .wrapping_sub((render_context.add(0x20) as *const u32).read())
+    };
+    let height = unsafe { (image.add(8) as *const u32).read() };
+
+    unsafe { surface_new(surface_format, width, stride, height, 2, plane0, 0, 0, 0) }
+}
+
 /// A rectangle consumed by the unported surface rasterizer
 /// `FUN_0810674c`. The original passes this four-word record as
 /// `{x_min, x_max, y_min, y_max}`.
@@ -651,5 +695,48 @@ mod tests {
             (0, 0, 0),
             "format 0 requires its fourth argument to remain zero"
         );
+    }
+    #[repr(align(4))]
+    struct AlignedBytes<const N: usize>([u8; N]);
+
+    #[test]
+    fn image_bounds_forward_geometry_plane_and_recognized_formats() {
+        let mut bounds = AlignedBytes([0; 0x30]);
+        let mut image = AlignedBytes([0; 0x18]);
+        set_word(&mut bounds.0, 0x20, 0xffff_fffe);
+        set_word(&mut bounds.0, 0x24, 0x0000_0010);
+        set_word(&mut bounds.0, 0x28, 0x0000_0003);
+        set_word(&mut bounds.0, 0x2c, 0x0000_0030);
+        set_word(&mut image.0, 4, 0xdead_beef);
+        set_word(&mut image.0, 8, 0x0000_0140);
+        image.0[0x14..0x16].copy_from_slice(&0x0565u16.to_le_bytes());
+
+        let constructed = unsafe { arena().add(12) };
+        let guard = mock(constructed);
+        unsafe {
+            assert_eq!(
+                render_context_create_image_surface(bounds.0.as_ptr(), image.0.as_ptr()),
+                constructed
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_ARGS),
+                std::vec![
+                    arena() as usize, 2, 0x20, 5, 0x140, 2, 0xdead_beef, 0, 0, 0,
+                ],
+                "RGB565 maps to surface format 2; geometry and plane preserve raw argument order"
+            );
+
+            (*ptr::addr_of_mut!(CTOR_ARGS)).clear();
+            set_word(&mut bounds.0, 0x20, 5);
+            set_word(&mut bounds.0, 0x28, 3);
+            image.0[0x14..0x16].copy_from_slice(&0x0065u16.to_le_bytes());
+            render_context_create_image_surface(bounds.0.as_ptr(), image.0.as_ptr());
+            assert_eq!(
+                (&*ptr::addr_of!(CTOR_ARGS))[1..5],
+                [3, 0x20, (u32::MAX - 1) as usize, 0x140],
+                "grayscale maps to surface format 3 and subtraction intentionally wraps"
+            );
+        }
+        restore(guard);
     }
 }
