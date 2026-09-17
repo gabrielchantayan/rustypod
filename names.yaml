@@ -102749,3 +102749,42 @@ functions:
       port implements the thunk's forwarded body rather than its single tail
       branch. Deliberate deviation: volatile byte accesses prevent LLVM from
       substituting a freestanding libc string primitive.
+  - address: 0x082e46c0
+    ghidra: FUN_082e46c0
+    name: resource_metadata_lookup
+    size: 112
+    sig: "i32 resource_metadata_lookup(void *resource, void *out)"
+    module: util/resource_metadata_lookup
+    status: ported
+    renames:
+      param_1/r0: resource
+      param_2/r1: out
+      iVar1/r0: guard
+      iVar2/r0/r4: node
+      uVar4/r7: published_status
+      uVar3/r6: result
+      FUN_082c3000: acquire_guard (unported seam)
+      FUN_082d7934: lock_guard (unported seam)
+      FUN_082e15d8: lookup_resource (unported seam)
+      FUN_082e1390: copy_metadata (unported seam)
+      FUN_082e19cc: release_node (unported seam)
+      FUN_082d7954: unlock_guard (unported seam)
+      FUN_083690a8: publish_status (unported seam)
+    notes: >-
+      Raw osos.dec confirms the exact 112-byte extent
+      0x082e46c0..0x082e4730: 28 ARM words ending in
+      `ldmia sp!,{r4-r8,pc}`, followed by the distinct one-word branch
+      thunk at 0x082e4730. Decoding every word in the body finds seven
+      unconditional plain bl instructions and no predicated bl forms.
+      An independent full-binary ARM decode finds four inbound direct call
+      sites, all unconditional plain bl at 0x081bcc20, 0x081bcce4,
+      0x081bcd88, and 0x081bde18; no predicated call reaches this entry.
+      The function acquires and locks a guard, searches resource, and on a
+      non-NULL node copies metadata from its word +0x04 to out, releases the
+      node, unlocks, and publishes status 0. A NULL node unlocks and publishes
+      status 2; a negative guard result returns -1 without later calls.
+      The seven callee identities are unproven and absent from names.yaml, so
+      structural names and target-address/host callback seams are deliberate.
+      match.py reports the expected direct-BLX seam and LLVM frame differences
+      while preserving the acquire/lock/lookup/copy/release/unlock/publish
+      control-flow structure.

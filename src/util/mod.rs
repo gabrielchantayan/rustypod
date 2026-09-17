@@ -130,6 +130,7 @@ pub mod store_static_descriptor;
 pub mod store_four_u32s;
 pub mod store_four_u32_be;
 pub mod store_u32_be;
+pub mod resource_metadata_lookup;
 pub mod stream_seek;
 pub mod stream_seek_tagged_entry;
 pub mod stream_tell;
