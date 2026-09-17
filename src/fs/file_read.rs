@@ -90,6 +90,30 @@ pub unsafe extern "C" fn retail_file_read(
     retail_file_read_body_entry()(handle, count, buffer, transferred, 0)
 }
 
+/// `retail_file_read_mode_2` — original: `FUN_08277c74` @ `0x08277c74`
+/// (28 bytes; four verified direct `bl` call sites, all unconditional).
+///
+/// Calls `0x082784d4` as `(handle, count, buffer, transferred, 2)` and
+/// returns its status unchanged. The raw seven-word wrapper only replaces the
+/// body's opaque fifth control word; it neither dereferences nor validates its
+/// inputs. Deliberate deviation: as with [`retail_file_read`], Rust calls the
+/// resident target through the existing volatile typed boundary so host tests
+/// can observe the ABI.
+///
+/// # Safety
+///
+/// All five values must satisfy the unrecovered body's ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retail_file_read_mode_2(
+    handle: *mut core::ffi::c_void,
+    count: u32,
+    buffer: *mut u8,
+    transferred: *mut u32,
+) -> i32 {
+    retail_file_read_body_entry()(handle, count, buffer, transferred, 2)
+}
+
 #[cfg(test)]
 pub(crate) unsafe fn reset_retail_file_read_body() {
     core::ptr::addr_of_mut!(RETAIL_FILE_READ_BODY).write_volatile(missing_retail_file_read_body);
@@ -158,6 +182,53 @@ mod tests {
                     0,
                 ],
             );
+        }
+    }
+
+    #[test]
+    fn mode_2_forwards_every_input_word_and_replaces_only_control() {
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
+        let _reset = Reset;
+        let mut transferred = 0;
+        unsafe {
+            RETURN_STATUS = -23;
+            core::ptr::addr_of_mut!(RETAIL_FILE_READ_BODY).write_volatile(recording_body);
+            assert_eq!(
+                retail_file_read_mode_2(
+                    0x1234_5678usize as *mut core::ffi::c_void,
+                    u32::MAX,
+                    0x8765_4321usize as *mut u8,
+                    &mut transferred,
+                ),
+                -23,
+            );
+            assert_eq!(CALLS, 1);
+            assert_eq!(
+                RECEIVED,
+                [
+                    0x1234_5678,
+                    u32::MAX as usize,
+                    0x8765_4321,
+                    (&mut transferred as *mut u32) as usize,
+                    2,
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn mode_2_forwards_null_and_zero_without_a_wrapper_guard() {
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
+        let _reset = Reset;
+        unsafe {
+            RETURN_STATUS = 5;
+            core::ptr::addr_of_mut!(RETAIL_FILE_READ_BODY).write_volatile(recording_body);
+            assert_eq!(
+                retail_file_read_mode_2(core::ptr::null_mut(), 0, core::ptr::null_mut(), core::ptr::null_mut()),
+                5,
+            );
+            assert_eq!(CALLS, 1);
+            assert_eq!(RECEIVED, [0, 0, 0, 0, 2]);
         }
     }
 

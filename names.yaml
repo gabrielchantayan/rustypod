@@ -73401,6 +73401,32 @@ functions:
       canned handle, empty string still reaches the resolver, and a
       4-byte-aligned (not 8) out is stored without touching guard words.
 
+  # --- Mode-2 platform C++ file read wrapper (fs/file_read) ---
+  - address: 0x08277c74
+    ghidra: FUN_08277c74
+    name: retail_file_read_mode_2
+    size: 28
+    sig: "i32 retail_file_read_mode_2(void *handle, u32 count, u8 *buffer, u32 *transferred)"
+    module: fs/file_read
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: count
+      param_3/r2: buffer
+      param_4/r3: transferred
+      param_5/stack: control
+    notes: >-
+      Verified as exactly 28 bytes (seven ARM words) from osos.dec:
+      0x08277c74..0x08277c90, followed by the distinct 0x08277c90 function.
+      The wrapper contains one unconditional bl (0x08277c88 ->
+      0x082784d4), zero predicated bl instructions, and has four inbound
+      direct calls, all unconditional bl. Algorithm: save transferred as the
+      fifth body argument, replace r3 with control word 2, then return
+      0x082784d4's status unchanged. The body identity and control-word
+      meaning remain deliberately unrecovered. Deviation: call the existing
+      volatile typed body seam rather than branch directly, so host tests can
+      observe the exact five-word ABI.
+
   # --- Platform C++ file read wrapper (fs/file_read) ---
   - address: 0x082784b8
     ghidra: FUN_082784b8

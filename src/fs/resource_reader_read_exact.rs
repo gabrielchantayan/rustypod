@@ -13,10 +13,9 @@
 //!
 //! # Deliberate deviation
 //!
-//! `FUN_08277c74` is a 28-byte wrapper around the already-modelled unrecovered
-//! body at `0x082784d4`; it supplies the fifth body argument `2`. This port
-//! reaches that existing volatile body seam directly with the same five-word
-//! ABI instead of adding a duplicate seam for the thin wrapper.
+//! Rust calls [`crate::fs::file_read::retail_file_read_mode_2`] through the
+//! existing volatile body seam. This preserves the wrapper's five-word ABI
+//! while letting host tests observe its opaque resident-target boundary.
 
 use core::ffi::c_void;
 
@@ -55,10 +54,9 @@ pub unsafe extern "C" fn resource_reader_read_exact(
 ) -> u32 {
     let handle = unsafe { (*reader).file_handle as usize as *mut c_void };
     let mut transferred = transferred_initial;
-    let read_body = unsafe {
-        core::ptr::read_volatile(core::ptr::addr_of!(crate::fs::file_read::RETAIL_FILE_READ_BODY))
+    let status = unsafe {
+        crate::fs::file_read::retail_file_read_mode_2(handle, count, buffer, &mut transferred)
     };
-    let status = unsafe { read_body(handle, count, buffer, &mut transferred, 2) };
     (status == 0 && transferred == count) as u32
 }
 
