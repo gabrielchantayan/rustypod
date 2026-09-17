@@ -104611,3 +104611,29 @@ functions:
       match.py reports LLVM's equivalent fixed-loop unrolling rather than the
       original indexed loop. The opaque byte layout deliberately preserves
       target offsets and stride on hosts with wider pointers.
+  - address: 0x0829b854
+    ghidra: FUN_0829b854
+    name: opaque_four_word_copy_from_word7
+    size: 16
+    sig: "void opaque_four_word_copy_from_word7(u32 *out, const u32 *source)"
+    module: cxx/opaque_four_word_copy_from_word7
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      "source + 0x1c": opaque_value_words
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: add r1,#0x1c at
+      0x0829b854, ldmia r1,{r1,r2,r3,ip}, stmia r0,{r1,r2,r3,ip}, then bx lr
+      at 0x0829b860; the next distinct function begins at 0x0829b864 with
+      ldr r0,[r0,#0x30]. Decoding every aligned A32 B/BL-immediate word finds
+      exactly four inbound direct calls, all unconditional plain BL at
+      0x081098d4, 0x081dcb7c, 0x081e8684, and 0x082711d4; no predicated BL
+      calls reach this entry. It loads the opaque four-word range at
+      source+0x1c through source+0x28 before any output store, preserving
+      overlap behavior. The wider record and value types remain unidentified,
+      so the port names only the verified word range. Host tests cover an
+      exact copy and an overlap that would fail if stores interleaved reads.
+      match.py confirms the load-before-store structure; LLVM expands the
+      original ldm/stm into scalar loads and stores with a frame. Deliberate
+      deviations: none.
