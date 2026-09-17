@@ -654,6 +654,9 @@ pub mod hints {
     // raw-u32 tagged-payload-word fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const TAGGED_PAYLOAD_WORD_READ_SIGNED_FIELD_0X52: usize = 0x9d10_0000;
+    // 0x0834_0000: dedicated to util/scaled_word_list_from_i32's raw-u32
+    // output fixture; mappings never unmap, so no other user may share it.
+    pub const SCALED_WORD_LIST_FROM_I32: usize = 0x0834_0000;
     // 0xfc00_0000: dedicated to util/object_masked_word_refresh's raw-u32
     // owner fixture; mappings never unmap, so no other user may share it.
     pub const OBJECT_MASKED_WORD_REFRESH: usize = 0xfc00_0000;
