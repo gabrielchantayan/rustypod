@@ -12,9 +12,9 @@
 //! remains in r0 and is therefore this routine's result; Ghidra incorrectly
 //! reports a void signature.
 //!
-//! Deliberate deviation: `FUN_082c62f0` is not ported (and has no ledger entry),
-//! so target builds call its verified retailOS address while host tests install
-//! a recording seam.
+//! Deliberate deviation: the disk readiness and dispatch helpers used by the
+//! port remain unported; `disk_block_write` calls their verified retailOS
+//! addresses on target builds. Host tests retain a recording writer seam.
 
 /// Target word index of the cache-entry context pointer (`+0x08`).
 const CACHE_ENTRY_CONTEXT_WORD: usize = 2;
@@ -25,20 +25,8 @@ const CACHE_ENTRY_PAYLOAD_OFFSET: usize = 0x18;
 /// Target word index of the device selector in a cache context (`+0x78`).
 const CACHE_CONTEXT_DEVICE_WORD: usize = 30;
 
+#[cfg(not(target_os = "none"))]
 type DiskBlockWrite = unsafe extern "C" fn(u32, u32, *mut u8, u32, u32) -> u32;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn disk_block_write(
-    device: u32,
-    block_index: u32,
-    source: *mut u8,
-    block_count: u32,
-    flags: u32,
-) -> u32 {
-    let function: DiskBlockWrite = core::mem::transmute(0x082c62f0usize);
-    function(device, block_index, source, block_count, flags)
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn unavailable_write(
@@ -88,7 +76,17 @@ pub unsafe extern "C" fn cache_entry_flush(entry: *mut u8) -> u32 {
 
     let device = *context.cast::<u32>().add(CACHE_CONTEXT_DEVICE_WORD) & 0xffff;
     let block_index = *entry_words.add(CACHE_ENTRY_BLOCK_INDEX_WORD);
-    disk_block_write(device, block_index, entry.add(CACHE_ENTRY_PAYLOAD_OFFSET), 1, 0)
+    {
+        #[cfg(target_os = "none")]
+        {
+            super::disk_block::disk_block_write(device, block_index, entry.add(CACHE_ENTRY_PAYLOAD_OFFSET), 1, 0)
+        }
+
+        #[cfg(not(target_os = "none"))]
+        {
+            disk_block_write(device, block_index, entry.add(CACHE_ENTRY_PAYLOAD_OFFSET), 1, 0)
+        }
+    }
 }
 
 #[cfg(test)]
