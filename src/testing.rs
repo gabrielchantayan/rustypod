@@ -1280,6 +1280,10 @@ pub mod hints {
     // and Db-record fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SQLITE_LOCK_AND_PREPARE: usize = 0x6100_0000;
+    // 0xdead_0000: dedicated to util/encoded_pair_matches_magic's raw-u32
+    // target-layout pair fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const ENCODED_PAIR_MATCHES_MAGIC: usize = 0xdead_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
