@@ -56108,6 +56108,29 @@ functions:
       vtable word; it proves both branches, including the deferred
       0x7fffffff sentinel, `u32::MAX` old-index wrap edge, exact call
       order, return values, and no wrapper-owned length mutation.
+  - address: 0x0827213c
+    ghidra: FUN_0827213c
+    name: zero_three_words_four_halfwords
+    size: 36
+    sig: "void *zero_three_words_four_halfwords(void *dst)"
+    module: util/zero_three_words_four_halfwords
+    status: ported
+    renames:
+      param_1/r0: dst (the 20-byte packed record to clear)
+    notes: >-
+      Raw osos.dec establishes the 36-byte extent: 0x0827213c begins
+      `mov r1,#0`, 0x0827215c is `bx lr`, and the `cmp r1,#5` at
+      0x08272160 begins the distinct next function. Decoding every ARM B/BL
+      word finds four direct inbound calls, all unconditional `bl` at
+      0x0807463c, 0x08080f30, 0x0810ef38, and 0x0810f728; there are no
+      predicated BL forms. The function clears aligned words at +0x0, +0x4,
+      and +0x8, then aligned halfwords at +0xc, +0xe, +0x10, and +0x12. It
+      leaves r0 unchanged, so the Rust ABI returns `dst` despite Ghidra's
+      void prototype. The fields have no independently verified type or
+      consumer identity, so the name records the verified representation
+      rather than inventing a layout type. Deviations: none. Host tests prove
+      the exact 20-byte write range, full-width clearing, and return value.
+
   - address: 0x08271c84
     ghidra: FUN_08271c84
     name: observable_array_clear

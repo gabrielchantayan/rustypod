@@ -173,6 +173,7 @@ pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
 pub mod zero_four_words;
 pub mod zero_three_words;
+pub mod zero_three_words_four_halfwords;
 pub mod u32_word_swap;
 pub mod u32_word_exchange;
 pub mod u8_pair_copy;
