@@ -62,6 +62,7 @@ pub mod draw_state_line;
 pub mod draw_state_stroke;
 pub mod draw_state_style;
 pub mod draw_state_get_style;
+pub mod draw_state_get_background_color;
 pub mod draw_state_surface;
 pub mod handler_list_construct;
 pub mod handle;
