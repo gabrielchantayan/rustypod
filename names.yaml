@@ -27950,6 +27950,35 @@ functions:
       live average, expiration clear, and wrapping sum. match.py
       structural diff reviewed after the release ARM build.
 
+  - address: 0x08292cac
+    ghidra: FUN_08292cac
+    name: control_state_store_notify_restore
+    size: 60
+    sig: "void control_state_store_notify_restore(u32 state)"
+    module: kernel/control_state
+    status: ported
+    renames:
+      param_1/r0: state
+      FUN_081d2204: framework_root_instance (ported)
+      FUN_08292e6c: control_state_flags (ported)
+      FUN_08292e84: control_state_store (ported)
+      vtable+0x19c: framework_root_control_state_notification
+    notes: >-
+      Raw ARM establishes the 60-byte code-only extent
+      0x08292cac..0x08292ce8: `push {r4,r5,r6,lr}` through the tail
+      `b 0x08292e84`; the next separately linked function begins with
+      `push {r4,lr}` at 0x08292ce8. A complete ARM immediate-branch scan
+      finds four direct inbound BL call sites: three unconditional and one
+      BLEQ; no other predicated BL callers exist. The body has three direct BL calls
+      (framework_root_instance, control_state_flags, control_state_store)
+      plus one indirect BLX through framework-root vtable slot +0x19c.
+      It saves the low-12-bit flags, stores the requested state through the
+      guarded setter, invokes that unidentified virtual notification slot on
+      the root, then tail-restores the saved low flags through the same
+      setter. The Rust target path performs the actual four-byte-entry
+      vtable dispatch; host builds use a callback seam because host pointers
+      are eight bytes. Host test proves root forwarding, notification order,
+      and the intentional low-12-bit restore.
   - address: 0x08292d08
     ghidra: FUN_08292d08
     name: controller_history_select_with_callback
