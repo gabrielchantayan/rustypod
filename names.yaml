@@ -106256,3 +106256,34 @@ functions:
       target pointers preserve the 4-byte field layout on 64-bit hosts. Host
       tests cover empty, singleton, multi-byte reverse-order, and field
       preservation behavior.
+
+  - address: 0x082677a0
+    ghidra: FUN_082677a0
+    name: buffered_read_context_destroy
+    size: 40
+    sig: "void *buffered_read_context_destroy(void *context)"
+    module: cxx/buffered_read_context_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      "[context + 0x0c]": allocation
+      "[context + 0x10]": length
+      "[context + 0x14]": state
+      FUN_082aad14: operator_delete_tag3 (direct, ported in heap/veneers - no seam)
+    notes: >-
+      Raw osos.dec establishes the true 40-byte extent
+      0x082677a0..0x082677c8: the ten words end in pop {r4,pc}, and the
+      next independently linked function begins with push {r4,lr} at
+      0x082677c8. The body has one plain BL to operator_delete_tag3 at
+      0x082aad14 and no predicated calls. A whole-image raw A32 B/BL decode
+      finds four incoming plain BL calls (0x08267af4, 0x08267b78,
+      0x08267d34, 0x08267d60) and no predicated callers. Algorithm: delete
+      the target-width allocation word at +0x0c, clear it and the +0x10
+      length, clear state byte +0x14, and return context. Deliberate
+      deviation: the direct ARM call is the existing direct Rust
+      operator_delete_tag3 port; target pointer fields remain u32 words on
+      hosts, and volatile accesses preserve store ordering. Host tests cover
+      installed and NULL allocations, result-field clearing, untouched input
+      fields, and return identity. match.py reports the same load/call/clear
+      sequence; LLVM uses a larger frame prologue and unresolved relocation
+      display for the existing Rust callee.
