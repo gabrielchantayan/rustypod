@@ -104913,3 +104913,33 @@ functions:
       branch. Host tests cover initial quantization truncation, a multi-second
       conversion, and __d2u's u32 saturation path. match.py structural diff
       reviewed after the ARM release build.
+
+  # --- quoted input candidate selection ---
+  - address: 0x082940b0
+    ghidra: FUN_082940b0
+    name: quoted_input_candidate_find
+    size: 108
+    sig: "QuotedInputCandidate *quoted_input_candidate_find(QuotedInputCandidateOwner *owner, u32 selector)"
+    module: app/quoted_input_candidate_find
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: selector
+      "[owner+0x38]": candidates
+      "[owner+0xc4]": candidate_order_index
+      DAT_0829411c: quoted_input_candidate_order_table
+      vtable_plus_0x14: accepts_selector
+    notes: >-
+      Raw osos.dec establishes the true 108-byte extent
+      0x082940b0..0x0829411c; the next real function begins at 0x0829411c.
+      Decoding the ARM branch words finds four inbound unconditional plain bl
+      calls and no predicated bl form. The body has no direct BL: it performs
+      one indirect blx through each attempted candidate's vtable +0x14 slot.
+      A zero candidate_order_index returns NULL. Otherwise table
+      0x089d04bc[index-1] supplies four byte indexes; candidates at owner+0x38
+      are tried in that order with selector, and the first nonzero method result
+      returns its candidate. The candidate and virtual-method identities remain
+      unrecovered and are deliberately not invented. Host pointers are
+      native-width, so repr(C) preserves target field order while tests install
+      a typed vtable and fixture table. match.py's structural diff was reviewed
+      after the ARM release build: LLVM unrolls the fixed four-attempt loop.
