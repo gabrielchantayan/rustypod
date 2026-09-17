@@ -107432,3 +107432,41 @@ functions:
       Deliberate deviation: Rust calls that port directly rather than emitting
       the retail fixed-address tail branch; inline(never) retains a separately
       addressable hook target.
+  - address: 0x0821e0c4
+    ghidra: FUN_0821e0c4
+    name: controller_extra_info_layout_dispatch
+    size: 128
+    sig: "void controller_extra_info_layout_dispatch(u8 *controller)"
+    module: app/controller_extra_info_layout
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      "[controller + 0xdc]": timer
+      "[controller + 0xe2]": extra_info_pending
+      FUN_081f77a4: volume_controller_get (target seam, unported)
+      FUN_081f78ec: volume_controller_has_extra_info (target seam, unported)
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_0821754c: app_controller_dispatch_layout
+      FUN_083d8b04: cxx_string_release
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte extent
+      0x0821e0c4..0x0821e144: 32 A32 instruction words, ending with
+      pop {r2,r3,r4,pc}; 0x0821e144 begins the NUL-terminated
+      "GotoExtraInfoLayout" data, followed by "GotoExtraInfoLoadingLayout".
+      A whole-image raw A32 disassembly finds four direct inbound plain BL
+      calls (0x0821dcec, 0x0821e080, 0x0821e8f4, 0x0821f038) and zero
+      predicated BL forms. The body itself makes ten unconditional BL calls
+      and no predicated calls. It clears controller byte +0xe2, obtains the
+      volume controller, selects the extra-info layout when its predicate is
+      nonzero and the loading layout otherwise, constructs/releases the
+      temporary COW string around app_controller_dispatch_layout, then only
+      on the loading path starts the target-width timer pointer at +0xdc for
+      1000 ms and restarts it. The two volume-controller callees remain
+      unported with fixed-address target seams and explicit host operations;
+      all other calls use established direct Rust seams. Host tests cover
+      both predicate outcomes, layout selection, the mandatory release, the
+      byte clear, and timer calls only on the loading path. match.py reports
+      the expected structural diff: LLVM uses literal-loaded BLX target seams
+      and a larger frame rather than ADS's direct BL sequence.
