@@ -3870,6 +3870,75 @@ pub unsafe extern "C" fn cg_block_bind_registers(codegen: *mut CgCodegen) {
         cell = slot(cell, CG_VREG_LIST_NEXT).read();
     }
 }
+// --- cg_call_template_init (0x08243084) ------------------------------
+
+/// `cg_call_template_init` — original: `FUN_08243084` @ **0x08243084**
+/// (56 bytes exactly, `0x08243084..0x082430bc`; the literal pool begins at
+/// `0x082430bc` and `push {r4,lr}` opens the distinct next function at
+/// `0x082430c4`).
+///
+/// Decoding every ARM B/BL word in `osos.dec` verifies **4 direct inbound
+/// `bl` call sites**, all unconditional (0x08255f54, 0x08255f5c, 0x08255f64,
+/// 0x08255f80); there are no predicated BL forms. The leaf writes the
+/// eight-word call-emission template in the original's store order and
+/// returns the unchanged destination. The two instruction words are copied
+/// from the verified literal source at `0x083e2f10`: `bl 0x083e9c80`
+/// (`0xeb001b5a`) followed by `mov r0,r5` (`0xe1a00005`).
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `template` must be non-NULL, four-byte aligned, and writable for eight
+/// `u32`s.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.cg_call_template_init")]
+#[inline(never)]
+pub unsafe extern "C" fn cg_call_template_init(template: *mut u32) -> *mut u32 {
+    template.add(2).write(0);
+    template.write(4);
+    template.add(7).write(0);
+    template.add(6).write(0);
+    template.add(1).write(0x140c);
+    template.add(3).write(0);
+    template.add(4).write(0xeb00_1b5a);
+    template.add(5).write(0xe1a0_0005);
+    template
+}
+
+
+#[cfg(test)]
+mod cg_call_template_init_tests {
+    use super::cg_call_template_init;
+
+    #[test]
+    fn initializes_only_the_eight_word_call_template_and_returns_it() {
+        let mut words = [0xaaaa_aaaa; 10];
+        let template = unsafe { words.as_mut_ptr().add(1) };
+
+        let returned = unsafe { cg_call_template_init(template) };
+
+        assert_eq!(returned, template);
+        assert_eq!(
+            words,
+            [
+                0xaaaa_aaaa,
+                4,
+                0x140c,
+                0,
+                0,
+                0xeb00_1b5a,
+                0xe1a0_0005,
+                0,
+                0,
+                0xaaaa_aaaa,
+            ]
+        );
+    }
+}
+
+
+
 
 // --- cg_cell_table_create (0x082430c4) and its cell-init seam -------
 
