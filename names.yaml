@@ -93802,6 +93802,43 @@ functions:
       unchanged. No NULL guard exists for a flagged page's cache pointer.
       Host tests cover inactive, head, interior, and tail pages using a
       dedicated target-width fixture. Deliberate deviations: none.
+  - address: 0x082de78c
+    ghidra: FUN_082de78c
+    name: pcache_truncate
+    size: 136
+    sig: "void pcache_truncate(PCache *cache)"
+    module: sqlite/pcache_truncate
+    status: ported
+    vars: {param_1/r0/r6: cache, uVar3/r7: limit, piVar2/r5: page_link, iVar1/r4: page}
+    renames:
+      "*(u32*)(cache+0x24)": cache->truncateLimit
+      "*(PgHdr**)(cache+0x88)": cache->pPage
+      "*(u32*)(cache+0x40)": cache->pageSize
+      "*(u32*)(cache+0x44)": cache->nPage
+      "*(u32*)(page+0x04)": page->pgno
+      "*(i16*)(page+0x22)": page->nRef
+      "*(PgHdr**)(page+0x18)": page->pNext
+      "*(void**)(page+0x34)": page->pData
+      FUN_08396050: unported_hash_unlink
+      FUN_082d906c: pcache_remove_from_lru_list
+      FUN_083906f4: tracked_free
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      Raw osos.dec establishes the exact body 0x082de78c..0x082de814: the
+      next independently entered function starts with push at 0x082de814.
+      The body has five outbound unconditional bl instructions (to the IRAM
+      memzero veneer, FUN_08396050, pcache_remove_from_lru_list, and
+      tracked_free twice) and no predicated bl. Decoding every ARM B/BL
+      immediate in the image finds four inbound unconditional bl at
+      0x082de6f0, 0x0837eac8, 0x0837edb4, and 0x0837ee3c; no predicated
+      inbound bl. This is SQLite pcacheTruncate: it walks pPage until pgno is
+      within truncateLimit, clears referenced page payloads, or removes an
+      unreferenced page from the page/hash/LRU structures then frees payload
+      and header and decrements nPage. FUN_08396050 is unported, so its
+      verified target-word hash unlink is reproduced locally; its opaque
+      leading FUN_082d8e30 call is deliberately omitted because its identity
+      is not established. Host tests cover the referenced-page zeroing and
+      stop-at-limit path with target-width pointers.
   - address: 0x082b5ab4
     ghidra: FUN_082b5ab4
     name: btree_balance_page
