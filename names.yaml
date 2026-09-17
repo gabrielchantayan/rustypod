@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829e100
+    ghidra: FUN_0829e100
+    name: object_child_count_is_positive
+    size: 28
+    sig: "u32 object_child_count_is_positive(const u32 *object)"
+    module: app/object_child_count_is_positive
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: child_record_or_result
+      "*(u32 *)(object + 8)": child_record
+      "*(i32 *)(child_record + 4)": signed_count
+    notes: >-
+      Raw osos.dec establishes the true 28-byte extent
+      0x0829e100..0x0829e11c; 0x0829e11c begins the next distinct push
+      prologue. Decoding every A32 B/BL word finds four direct unconditional
+      plain BL callers (0x0815fa94, 0x081b9ef0, 0x081d1698, 0x0829e124) and
+      zero predicated BL callers. It loads object +8 as a target-width child
+      pointer; null returns zero, otherwise it returns one exactly when the
+      signed child word at +4 is positive. The unrecovered layouts use raw
+      u32 words, deliberately preserving the verified four-byte target
+      offsets on 64-bit hosts.
   - address: 0x082a273c
     ghidra: FUN_082a273c
     name: object_has_resolved_flag_0x40
