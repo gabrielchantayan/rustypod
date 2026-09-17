@@ -17,6 +17,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082c59dc
+    ghidra: FUN_082c59dc
+    name: embedded_resource_parser_entry
+    size: 8
+    sig: "u32 embedded_resource_parser_entry(u32 *result, const void *input, u32 input_len)"
+    status: identified
+    renames:
+      r0: result
+      r1: input
+      r2: input_len
+      r3: embedded_resource_descriptor
+      DAT_082c59e4: EMBEDDED_RESOURCE_DESCRIPTOR
+    notes: >-
+      Deferred: raw osos.dec establishes the true eight-byte extent
+      0x082c59dc..0x082c59e4: `ldr r3, [pc]` loads
+      EMBEDDED_RESOURCE_DESCRIPTOR (0x0890b4c0), then `b 0x0803a7f0`.
+      0x082c59e4 is its literal-pool word, and 0x082c59e8 begins the next
+      distinct `ldr r3, [pc]; b` thunk. Ghidra's call to 0x0803a99c is
+      incorrect: 0x0803a7f0 is the actual branch target. Raw binary
+      disassembly independently finds four incoming plain BL calls
+      (0x08273580, 0x082c58ac, 0x082d3f84, 0x082d3ff4) and no incoming
+      predicated BL calls. A faithful Rust port requires the unported
+      0x0803a7f0 parser and its descriptor ABI; neither its semantic
+      identity nor a Rust seam is established, so this thunk must remain
+      identified rather than inventing a callee.
   - address: 0x080a83c0
     ghidra: FUN_080a83c0
     name: configured_path_prefix_matches
