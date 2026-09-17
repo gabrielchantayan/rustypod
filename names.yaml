@@ -102848,3 +102848,33 @@ functions:
       limit. No deliberate semantic deviations: the Rust explicit
       shift >= 32 case matches ARM register-LSR zero results and avoids
       a host oversized-shift panic.
+
+  - address: 0x082e26e8
+    ghidra: FUN_082e26e8
+    name: ascii_uppercase_record_copy
+    size: 136
+    sig: "void ascii_uppercase_record_copy(u8 *destination, const u8 *source)"
+    module: util/ascii_uppercase_record_copy
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      FUN_082e4764: fixed_length_ascii_uppercase_copy (unported)
+    notes: >-
+      Raw osos.dec confirms the 34-word, 136-byte extent
+      0x082e26e8..0x082e2770; the push at 0x082e2770 begins the next
+      real function. Decoding each word finds two unconditional direct bl
+      instructions (to 0x082e4764 for lengths 8 and 3) and no predicated
+      bl instructions. Independent inbound decoding finds four plain bl
+      sites and no predicated calls: 0x082e27d0, 0x082e334c,
+      0x082e3388, and 0x082e4924. It uppercases ASCII a..z in source
+      bytes 0..10, then copies source bytes 11..31 unchanged through
+      byte, halfword, and word transfers. Every transfer reads before it
+      writes, including the redundant second halfword copy at offset 20.
+      Deliberate deviation: the two calls to the unported helper are
+      transcribed inline, avoiding an unverified seam; volatile accesses
+      preserve the firmware's freestanding load/store behavior. Host tests
+      cover lowercase bounds, non-ASCII bytes, the unchanged suffix, and
+      exact overlap. match.py is expected to differ in the inlined helper
+      and LLVM frame while retaining the two-part folded-prefix and
+      structured suffix-copy shape.
