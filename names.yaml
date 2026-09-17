@@ -107543,3 +107543,29 @@ functions:
       literal-loaded table and LLVM uses a larger frame than ADS's direct BL
       sequence. Host tests cover no matching items, inclusive boundary
       retention, cursor reset, failed scan suppression, and release ordering.
+
+  - address: 0x082156b8
+    ghidra: FUN_082156b8
+    name: deque_iterator_current_or_zero
+    size: 56
+    sig: "u32 deque_iterator_current_or_zero(const u32 *iterator)"
+    module: cxx/deque_iterator_current_or_zero
+    status: ported
+    renames:
+      param_1/r0/r5: iterator
+      r4/r0: current_word_or_zero
+      FUN_083d7610: container_is_empty
+      FUN_083da34c: deque_iter_assign_alias_a34c
+    notes: >-
+      Raw osos.dec fixes the true 56-byte body at
+      0x082156b8..0x082156ef: the next distinct `push {r0-r6,lr}` begins at
+      0x082156f0. Whole-image A32 branch decoding finds exactly four inbound
+      unconditional plain BL callers (0x082155f4, 0x08215824, 0x082158c4,
+      and 0x082158f4), with zero predicated BL callers. It saves r0-r3 as a
+      four-word iterator temporary, calls the established
+      container_is_empty alias at 0x083d7610, and returns zero if the count
+      word at iterator+0x20 is zero. Otherwise it calls the established
+      deque_iter_assign_alias_a34c at 0x083da34c to forward-copy all four
+      iterator words, then returns the copied current word. No seam or
+      invented callee identity is introduced; the Rust port calls those
+      existing ports directly and retains aligned u32 word offsets on hosts.
