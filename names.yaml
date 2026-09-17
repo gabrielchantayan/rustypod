@@ -40412,6 +40412,27 @@ functions:
       element. The dedicated link section keeps this independently hookable
       byte-identical body from folding; deliberate deviations: none.
 
+  - address: 0x0829cef0
+    ghidra: FUN_0829cef0
+    name: container_element_at_veneer_9cef0
+    size: 8
+    sig: "void *container_element_at_veneer_9cef0(void *owner, usize index)"
+    module: cxx/templates
+    status: ported
+    renames: {param_1: owner, param_2: index}
+    notes: >-
+      Raw osos.dec establishes the complete two-word ARM body `add r0,r0,#0x24;
+      b 0x083d5f74` at 0x0829cef0..0x0829cef7, agreeing with Ghidra's
+      eight-byte extent. The next real function begins at 0x0829cef8 with
+      `ldr r0,[r0,#0x7c]; bx lr`. The branch target is the already ported
+      container_element_at_alias_5f74, a T *operator[](size_t) instantiation
+      that dispatches through vtable +0x40 and loads the resulting element
+      slot. Raw ARM B/BL-immediate decoding finds four direct inbound BL
+      calls, all unconditional: 0x081177dc, 0x0828bb38, 0x0828bbec, and
+      0x082a69d4; no predicated BL forms reach this veneer. The port adjusts
+      owner to its embedded container at +0x24 and calls the target with the
+      unchanged index; LLVM may lower that call to the original tail branch.
+
   - address: 0x083d6870
     ghidra: FUN_083d6870
     name: container_element_at_alias_6870
