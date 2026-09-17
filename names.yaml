@@ -104720,3 +104720,39 @@ functions:
       the port deliberately retains an opaque pointer rather than inventing
       a concrete collection type. Deliberate deviation: LLVM emits a standard
       frame prologue/epilogue around the same ldr body.
+
+  # --- Markup text resource selector (app/markup_text_resource) ---
+  - address: 0x08299100
+    ghidra: FUN_08299100
+    name: string_object_assign_markup_text_resource
+    size: 104
+    sig: "StringObject *string_object_assign_markup_text_resource(StringObject *out, const void *source)"
+    module: app/markup_text_resource
+    status: identified
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      "source+0x4c": markup_text
+      DAT_08299174: NOTE_RESOURCE_ID
+      DAT_08299190: INSTRUCTIONS_RESOURCE_ID
+    notes: >-
+      Raw osos.dec proves the true extent is 104 bytes, from the `push
+      {r4,r5,r6,lr}` at 0x08299100 through the tail branch at 0x08299164;
+      the next independently linked item is the `<<<note>>>` literal at
+      0x08299168. The function case-fold-compares the two-word StringObject
+      at source+0x4c with `<<<note>>>` and then `<<<instructions_text>>>`.
+      A note match resolves string resource 0x6d65, an instructions-text
+      match invokes string_object_assign_payload(out, source+0x4c), and
+      every other input resolves string resource 0x6d58; resolved strings
+      are assigned through string_object_assign_payload. Raw decoding finds
+      four internal unconditional BL instructions (0x082a50a8 twice,
+      0x0827233c, and 0x0827239c), zero predicated BL instructions, and
+      four inbound unconditional BL callers (0x08123eac, 0x08124280,
+      0x081b2794, and 0x0829d674). It is deliberately not ported: both
+      comparisons enter string_object_utf8_strcasecmp_safe @ 0x082a50a8,
+      whose required core @ 0x0827609c remains unresolved because its
+      runtime fold table is not established (cxx/string_object.rs documents
+      the static-image table anomaly at 0x083ed1dd). The current Rust seam's
+      default returns equal for arbitrary input, so implementing this
+      selector would silently route every source through the note path rather
+      than faithfully reproduce retailOS.
