@@ -50405,6 +50405,34 @@ functions:
       `strne` out-count store kept; LLVM uses a frame pointer and an
       indirect blx for the fixed-address helper instead of the original's
       direct bl.
+  - address: 0x08267914
+    ghidra: FUN_08267914
+    name: record_string_byte_vector_assign
+    size: 68
+    sig: "StringByteVectorRecord *record_string_byte_vector_assign(StringByteVectorRecord *this, const StringByteVectorRecord *source)"
+    module: cxx/string_byte_vector_record
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      FUN_082774a8: string_object_assign
+      FUN_083e6234: byte_vector_assign
+    notes: >-
+      Raw extent is exactly 0x08267914..0x08267958: 17 ARM words ending in
+      `pop {r4,r5,r6,pc}`, followed by a separately linked constructor at
+      0x08267958. Decoding all B/BL words in osos.dec found four unconditional
+      inbound BL sites (0x08268034, 0x083e3f4c, 0x083e3f64, 0x083e3fb0) and
+      no predicated calls. The body saves this/source,
+      assigns the embedded StringObject through string_object_assign @
+      0x082774a8, copies the opaque +8 word, assigns the three-word byte-vector
+      subobject at +12 through FUN_083e6234, copies bytes +24/+25 and the +28
+      word, and returns this. FUN_083e6234 is an unported vector assignment
+      whose allocation, element-copy, and release protocol is exposed as the
+      host-swappable BYTE_VECTOR_ASSIGN seam; this is the sole deliberate
+      deviation. repr(C) named fields preserve the target's 32-bit member
+      layout when StringObject pointers widen on host. match.py reports the
+      same two nested-call positions and scalar-copy order; its additional
+      frame setup and volatile seam load replace the retail direct second BL.
   - address: 0x082774a8
     ghidra: FUN_082774a8
     name: string_object_assign
