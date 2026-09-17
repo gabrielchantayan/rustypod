@@ -74,6 +74,28 @@ pub unsafe extern "C" fn fixed16_to_f32(x: i32) -> u32 {
     __d2f(__dscalb(__i2d(x), -FIXED16_SHIFT))
 }
 
+/// fixed16_words_to_f32 — original: `FUN_0825d800` @ 0x0825d800 (44 bytes).
+///
+/// Converts `count` consecutive signed Q16.16 words from `src` to IEEE-754
+/// f32 bit patterns in `dst`. The raw ARM body spans 0x0825d800..0x0825d82b;
+/// the `stmdb` at 0x0825d82c starts the next function. It has one direct,
+/// unconditional in-body `bl` to `fixed16_to_f32`, no predicated direct
+/// calls, and four unconditional inbound `bl` call sites. The entry branch
+/// decrements before the first load, so zero count returns without touching
+/// either buffer. No deliberate behavioral deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_words_to_f32")]
+pub unsafe extern "C" fn fixed16_words_to_f32(src: *const i32, dst: *mut u32, count: u32) {
+    let mut src = src;
+    let mut dst = dst;
+    for _ in 0..count {
+        *dst = fixed16_to_f32(*src);
+        src = src.add(1);
+        dst = dst.add(1);
+    }
+}
+
 /// f32_to_fixed16_sat — original: `FUN_080a67dc` @ 0x080a67dc (48 bytes).
 ///
 /// Converts the IEEE-754 float whose bit pattern is `x` into a Q16.16
@@ -230,6 +252,44 @@ mod tests {
         assert_eq!(fixed_to_float(0x7fff_ffbf), 0x46ff_ffff);
         assert_eq!(fixed_to_float(0x7fff_ffc0), 0x4700_0000);
         assert_eq!(fixed_to_float(i32::MIN), 0xc700_0000);
+    }
+
+    #[test]
+    fn fixed16_words_to_f32_converts_consecutive_words_only() {
+        let source = [
+            0x55aa_55aai32,
+            i32::MIN,
+            -1,
+            0,
+            1,
+            0x7fff_ffc0,
+            i32::MAX,
+        ];
+        let mut destination = [0xfeed_face_u32; 7];
+
+        unsafe {
+            fixed16_words_to_f32(source.as_ptr().add(1), destination.as_mut_ptr().add(2), 4);
+        }
+
+        assert_eq!(destination[..2], [0xfeed_face; 2]);
+        assert_eq!(destination[2], fixed16_to_float_reference(i32::MIN));
+        assert_eq!(destination[3], fixed16_to_float_reference(-1));
+        assert_eq!(destination[4], fixed16_to_float_reference(0));
+        assert_eq!(destination[5], fixed16_to_float_reference(1));
+        assert_eq!(destination[6], 0xfeed_face);
+
+        unsafe {
+            fixed16_words_to_f32(source.as_ptr(), destination.as_mut_ptr(), 0);
+        }
+        assert_eq!(destination, [
+            0xfeed_face,
+            0xfeed_face,
+            fixed16_to_float_reference(i32::MIN),
+            fixed16_to_float_reference(-1),
+            fixed16_to_float_reference(0),
+            fixed16_to_float_reference(1),
+            0xfeed_face,
+        ]);
     }
 
     #[test]
