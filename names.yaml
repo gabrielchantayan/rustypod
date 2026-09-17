@@ -33474,6 +33474,44 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- B-tree factory for one attached database (src/sqlite/btree_factory.rs) ----
+  - address: 0x0837126c
+    ghidra: FUN_0837126c
+    name: btree_factory
+    size: 148
+    sig: "int btree_factory(Connection *db, const char *filename, int omit_journal, int n_cache, uint flags, Btree **pp_btree)"
+    module: sqlite/btree_factory
+    status: ported
+    vars: {param_1: db, param_2: filename, param_3: omit_journal, param_4: n_cache, param_5: flags, param_6: pp_btree}
+    notes: >-
+      SQLite 3.5.x's sqlite3BtreeFactory. Extent verified from raw
+      bytes: the pop {r3,r4,r5,r6,r7,pc} is at 0x083712f0, the
+      ":memory:" literal it addresses sits at 0x083712f4..0x08371300,
+      and the next function's push {r4,lr} begins at 0x08371300, so
+      the true extent is 148 bytes - Ghidra's 136 counts only the
+      code. 4 bl call sites (0x082b5430, 0x082dbfb0, 0x0837da94,
+      0x08388eac), zero predicated, verified by decoding every B/BL
+      word in osos.dec; the body holds one plain bl and one bleq.
+      btree_flags = (omit_journal != 0) | (db->flags (+0x0c) & 0x1000
+      ? 2 : 0); a NULL filename becomes ":memory:" when db->temp_store
+      (byte at +0x1d) == 2; VFS flags with 0x100
+      (SQLITE_OPEN_MAIN_DB) are rewritten to (flags & !0x100) | 0x200
+      (SQLITE_OPEN_TEMP_DB) when the resolved filename is NULL or
+      empty. Then sqlite3BtreeOpen @ 0x083723a8 runs as (filename,
+      db, pp_btree, btree_flags, flags) with flags stacked, and on
+      SQLITE_OK the predicated bleq runs sqlite3BtreeSetCacheSize @
+      0x08372cb8 as (*pp_btree, n_cache). Both callees are UNPORTED
+      (no ledger entries; identities verified from their
+      decompilations - 0x08372cb8 is enter/max(n,10)-latch/leave) and
+      ride the BTREE_FACTORY_OPS seam; the wired default open fails
+      with SQLITE_CANTOPEN (14) and leaves pp_btree untouched, so the
+      factory propagates the failure and never invents a B-tree -
+      the same end state the original reaches when the real open
+      fails. match.py shows the expected deviations: blx through the
+      two seam slots, LLVM frame setup, and LLVM folding the flag
+      rewrite to bic #768/orr #512, semantically identical to the
+      original's bic #0x100/orr #0x200.
+
   # ---- Column default-value attachment (src/sqlite/column_default.rs) ----
   - address: 0x0837354c
     ghidra: FUN_0837354c
