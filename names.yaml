@@ -69375,6 +69375,45 @@ functions:
       result forwarding, and sixteen consecutively numbered general
       registers across two calls.
 
+  - address: 0x08240800
+    ghidra: FUN_08240800
+    name: cg_emit_component_add_bias
+    size: 220
+    sig: "cg_virtual_reg_t *cg_emit_component_add_bias(void *ctx, cg_block_t *block, cg_virtual_reg_t *lhs, cg_virtual_reg_t *rhs)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/fp: lhs
+      param_4/r3/sl: rhs
+      uVar1/r6/r0: result
+      uVar2/r7: sum
+      uVar3/r8: bias
+      uVar4/r9: biased
+      uVar5/r5: zero
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM confirms the 220-byte, 55-word extent from `push
+      {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}` at 0x08240800 through the `pop`
+      at 0x082408d8; the next sibling starts at 0x082408dc. There is no
+      literal pool. Decoding every ARM B/BL word in osos.dec finds four
+      direct callers, all unconditional BL (zero predicated and zero tail
+      B): 0x0823e018, 0x0823e134, 0x0823e148, and 0x0823e160, all in
+      FUN_0823dac4. The helper creates result, sum, bias, biased, and zero
+      general virtual registers; emits LDI bias,128 and LDI zero,0; then
+      appends sum = lhs + rhs (opcode 1), biased = sum - bias (opcode 13),
+      and result = opcode16(biased,zero). It returns result. The leading
+      ctx is saved but never read. Deliberate deviation: opcode 16 has no
+      verified semantic identity, so its numeric opcode is retained rather
+      than inventing one. All three direct factories were already ported,
+      so no dispatch seam was added. Host coverage proves opaque operands
+      and ctx pass through without dereference, register creation sequence,
+      both materialized immediates, all five IR records and exact operands,
+      opcodes, append order, and returned register.
+
   - address: 0x082408dc
     ghidra: FUN_082408dc
     name: cg_emit_masked_offset_bias
