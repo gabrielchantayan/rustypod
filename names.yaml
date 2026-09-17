@@ -103835,3 +103835,30 @@ functions:
       Otherwise refresh zero returns one and nonzero returns the vtable method
       result. Host tests cover the loader, deferred, and refresh predicates;
       match.py structural review recorded.
+
+  # --- retailOS opaque candidate acceptance predicate ---
+  - address: 0x082a6448
+    ghidra: FUN_082a6448
+    name: candidate_is_accepted
+    size: 124
+    sig: "u32 candidate_is_accepted(const void *context, const void *candidate, u32 relation)"
+    module: ui/candidate_is_accepted
+    status: ported
+    renames:
+      param_1/r5: context
+      param_2/r6: candidate
+      param_3/r7: relation
+      iVar2/r4: payload_address
+    notes: >-
+      Raw osos.dec words establish the exact 31-word extent
+      0x082a6448..0x082a64c4; the next real function starts at 0x082a64c4.
+      Independent ARM branch-word decoding finds four plain unconditional BL
+      instructions and zero predicated BL instructions: object payload accessor
+      0x08054454, then opaque predicates 0x08061608, 0x0806154c, and
+      0x08061578(candidate, relation). It accepts only if every predicate
+      returns zero, then rejects payload+0x8f bit 0x40 when the ported accessor
+      produced a payload and context[1]+0x18d bit 0x40. The opaque predicates
+      have verified ABI and zero-is-acceptance behavior but unrecovered
+      type-level identities, so target builds use resident-address veneers and
+      host tests inject matching seams. The already ported first callee is
+      invoked directly as Rust; otherwise there are no deliberate deviations.

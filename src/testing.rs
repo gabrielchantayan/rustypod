@@ -1331,6 +1331,9 @@ pub mod hints {
     // target-width owner and buffer fixtures; mappings never unmap.
     pub const BUFFER_RESULT_TAKE: usize = 0x082c_0000;
     pub const BUFFER_RESULT_TAKE_REJECT: usize = 0x082d_0000;
+    // 0x7600_0000: dedicated to ui/candidate_is_accepted's target-width
+    // context, candidate, and payload fixture; mappings never unmap.
+    pub const CANDIDATE_IS_ACCEPTED: usize = 0x7600_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
