@@ -7752,6 +7752,36 @@ functions:
       reloads, the inlined stop sequences with the 'stop'/'run ' FourCC
       stores, the mov r0,#4000 delay store, and the indirect arm tail.
 
+  - address: 0x08217348
+    ghidra: FUN_08217348
+    name: timer_reset_4000_if_running
+    size: 56
+    sig: "void timer_reset_4000_if_running(u8 *this)"
+    module: app/timer_reset
+    status: ported
+    renames:
+      param_1/r0: this (unidentified controller class; timer at +0xb8)
+      FUN_0812c3b0: timer_is_running
+      FUN_0812c6b0: timer_stop
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart (tail branch)
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent
+      (0x08217348..0x08217380): the next function begins push {r4,lr} at
+      0x08217380. Four incoming direct call sites are all unconditional bl
+      (0x082167f0, 0x08216850, 0x08217618, 0x082176ac); there are zero
+      predicated bl and zero tail-b callers. The body has three direct,
+      unconditional bl calls (timer_is_running, timer_stop,
+      timer_start_after), then tail-branches to timer_restart. It first
+      reads +0xb8 and returns if timer_is_running answers zero. Otherwise it
+      reloads +0xb8 before each timer helper, stops, programs 4000 ms, and
+      re-arms the timer. Ghidra's 0x08217348 body incorrectly absorbs later
+      code after the tail branch. All helpers were already ported directly;
+      no seam was introduced. Rust renders the final tail branch as a normal
+      call and uses volatile +0xb8 loads to preserve each stock reload. Host
+      tests cover both the stopped no-op and running stop/reprogram/restart
+      paths using the existing TIMER_RESET_4000 fixture slab.
+
   - address: 0x08216d70
     ghidra: FUN_08216d70
     name: stop_progress_layout_transition
