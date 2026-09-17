@@ -104280,3 +104280,25 @@ functions:
       invent a concrete resource type. Host tests use a unique sub-4-GiB
       fixture to preserve the firmware's u32 pointer fields and cover all
       three zero guards plus the forwarded pointer/index return path.
+  # --- opaque subobject accessor ---
+  - address: 0x082a1ffc
+    ghidra: FUN_082a1ffc
+    name: object_subobject_at_0c
+    size: 8
+    sig: "void *object_subobject_at_0c(void *object)"
+    module: app/object_subobject_at_0c
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: embedded_subobject
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent: add r0,r0,#0xc
+      at 0x082a1ffc followed by bx lr at 0x082a2000; 0x082a2004 begins the
+      next distinct push {r4,lr} prologue. Direct caller disassembly finds
+      exactly four inbound unconditional plain BL calls at 0x08117800,
+      0x08118218, 0x0828a598, and 0x0828b9d8, and no predicated BL calls.
+      The leaf returns object+0x0c without reading or validating it; callers
+      treat it as an embedded opaque subobject. LLVM adds a frame prologue and
+      epilogue around the equivalent add; match.py confirms the body add.
+      Deliberate deviation: Rust wrapping_add preserves unchecked address
+      arithmetic without imposing allocation or dereference preconditions.
