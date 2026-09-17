@@ -46141,6 +46141,37 @@ functions:
       instead of the original's direct b - same target, same
       pass-through of the divisor in r1.
 
+  - address: 0x082573c8
+    ghidra: FUN_082573c8
+    name: fixed16_sin_degrees
+    size: 176
+    sig: "i32 fixed16_sin_degrees(angle: i32) -> i32"
+    module: fp/fp_misc
+    status: identified
+    vars:
+      param_1: angle
+      DAT_08257470: ONE_FIFTH (0x3333)
+      DAT_08257474: SIN_DEGREES_TABLE (0x08a79af8)
+      FUN_082a184c: fixed16_gt_indirect
+      FUN_082a188c: fixed16_mul_indirect
+    notes: >-
+      Q16.16 signed sine-like lookup over degrees. Raw osos.dec confirms
+      the true extent is 0x082573c8-0x08257477: 168 bytes of instructions
+      followed by its two-word literal pool, then the next function begins
+      at 0x08257478. It has 3 plain BL instructions (0x08257408,
+      0x08257428, 0x08257444), not 4: the reported four are incoming
+      call sites at 0x0827cf54, 0x0827d02c, 0x0827d138, and 0x0827d244.
+      It folds angles at 180.0 degrees, reflects the positive half at
+      90.0 degrees, scales the folded angle by 1/5, selects an 8-byte
+      table entry by its integer Q16.16 part, and evaluates
+      (fixed16_mul_indirect(entry, folded_angle) + entry[1]) >> 8;
+      angles at or above 180.0 negate the result. Port deferred: the
+      literal table pointer 0x08a79af8 maps to file offset 0x00a79af8,
+      beyond the 10,597,864-byte osos.dec body (the read returns zero
+      bytes), so neither table coefficient is available from raw firmware.
+      Ghidra's C cannot establish those missing values; synthesizing them
+      would change observable fixed-point outputs. The existing helpers
+      fixed16_gt_indirect and fixed16_mul_indirect are already ported.
   - address: 0x082a1834
     ghidra: FUN_082a1834
     name: fixed16_eq_indirect
