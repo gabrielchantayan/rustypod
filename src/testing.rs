@@ -394,6 +394,9 @@ pub mod hints {
     // KeyInfo, collation-array, and tracked-allocation fixtures; mappings
     // never unmap, so no other user may share this hint.
     pub const SQLITE_INDEX_KEY_INFO: usize = 0x8300_0000;
+    // 0x8400_0000: dedicated to sqlite/expr_list_key_info's raw-u32 Parse,
+    // ExprList, KeyInfo, and allocation fixtures; mappings never unmap.
+    pub const SQLITE_EXPR_LIST_KEY_INFO: usize = 0x8400_0000;
     // 0x7600_0000: dedicated to app/resource_chain's
     // resource_chain_find_on_current_task chain fixture (the context
     // block carries the chain head as a raw u32 word); mappings never

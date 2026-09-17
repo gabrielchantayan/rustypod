@@ -103056,3 +103056,33 @@ functions:
       nonzero. Target defaults preserve those two unported call ABIs; host uses
       a seam because target function pointers are 32-bit. Deliberate deviations:
       none.
+  - address: 0x082d76a8
+    ghidra: FUN_082d76a8
+    name: key_info_from_expr_list
+    size: 152
+    sig: "KeyInfo *key_info_from_expr_list(Parse *parse, ExprList *list)"
+    module: sqlite/expr_list_key_info
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: list
+      r5: key_info
+      r6: item
+      r7: expression_count
+      r8: db
+      r9: parse
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte extent from push
+      {r4-r10,lr} at 0x082d76a8 through pop {r4-r10,pc} at 0x082d773c; the
+      next function begins with push {r4-r10,lr} at 0x082d7740. Whole-image
+      ARM decoding finds four inbound direct plain bl calls at 0x08367e88,
+      0x0838317c, 0x08383238, and 0x08383424, with no predicated inbound bl
+      calls. The body makes two plain unconditional calls, db_malloc_zero @
+      0x08374998 and expr_coll_seq @ 0x08377bf0; no predicated calls. SQLite
+      3.5.9's sqlite3KeyInfoFromExprList allocates 5*nExpr+20 bytes,
+      stores the schema encoding at +0x04, nField at +0x08, places aSortOrder
+      after nExpr collation words, resolves every expression collation,
+      substitutes db+0x2c on a NULL result, and copies each
+      ExprList_item+0x08 sort-order byte. Deliberate
+      deviation: target pointers use u32 words, preserving firmware offsets
+      on 64-bit host fixtures.
