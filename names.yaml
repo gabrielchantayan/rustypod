@@ -15637,6 +15637,27 @@ functions:
       shown 0x08276aa0 call is the tail target's callee, not this
       function's direct branch.
 
+  - address: 0x082e00f8
+    ghidra: FUN_082e00f8
+    name: shared_data_allocate
+    size: 8
+    sig: "u8 *shared_data_allocate(void)"
+    module: fs/shared_data
+    status: ported
+    renames:
+      FUN_082e2f74: shared_data_pool_recycle
+    notes: >-
+      Raw ARM is exactly two words: mov r0,#0; b 0x082e2f74. The next
+      separately entered function starts at 0x082e0100, establishing the
+      8-byte extent and disproving Ghidra's unrelated C body. Decoding every
+      ARM B/BL word in osos.dec found four inbound direct calls, all plain bl
+      at 0x082e0114, 0x082e1278, 0x082e236c, and 0x082e2420; no predicated
+      BL calls. It invokes shared_data_pool_recycle with NULL, selecting that
+      pool function's allocation/pop path for a 0x54-byte shared-data block.
+      Deliberate deviation: Rust performs a normal call through the existing
+      fixed-address firmware/recording-host pool boundary rather than the
+      original tail branch.
+
   - address: 0x082e19cc
     ghidra: FUN_082e19cc
     name: path_node_release
