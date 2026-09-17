@@ -104450,3 +104450,28 @@ functions:
       equivalent add. Deliberate deviation: Rust wrapping_add preserves
       unchecked address arithmetic without imposing allocation or
       dereference preconditions.
+  # --- opaque record +0x0c word accessor ---
+  - address: 0x0829ed44
+    ghidra: FUN_0829ed44
+    name: opaque_record_word_at_0c
+    size: 8
+    sig: "u32 opaque_record_word_at_0c(const OpaqueRecordWordAt0c *record)"
+    module: cxx/opaque_record_word_at_0c
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1_plus_0xc/r0: value
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent: ldr r0,[r0,#0xc]
+      at 0x0829ed44 followed by bx lr at 0x0829ed48. The next real function
+      begins at 0x0829ed4c with mov r0,#0x5a; bx lr. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly four inbound direct
+      calls, all unconditional plain BL at 0x081a7c50, 0x081efe0c,
+      0x081efe5c, and 0x081efe94; no predicated BL calls reach this entry.
+      It returns the unvalidated 32-bit word at record+0x0c. Recovered
+      callers pass the result to callback vtable slots, but the concrete
+      record type and wider word meaning remain unidentified, so the port
+      models only the verified layout. Host tests cover zero, one, sign-bit,
+      and all-ones values while preserving distinct preceding words.
+      match.py confirms the load-and-return structure; LLVM may add a frame
+      around the equivalent load. Deliberate deviations: none.
