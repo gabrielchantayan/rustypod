@@ -106176,3 +106176,32 @@ functions:
       identity, so the port retains an offset-based name. Host tests cover
       raw values, an unaligned base, neighboring-byte guards, and no mutation.
       Reference C: decomp/c/026/0826cb70_FUN_0826cb70.c.
+
+  # --- Reverse byte cursor pop (cxx/reverse_byte_cursor_pop) ---
+  - address: 0x08268090
+    ghidra: FUN_08268090
+    name: reverse_byte_cursor_pop
+    size: 36
+    sig: "u8 reverse_byte_cursor_pop(void *cursor)"
+    module: cxx/reverse_byte_cursor_pop
+    status: ported
+    renames:
+      param_1/r0: cursor
+      r1: end
+      r2: previous_end
+    notes: >-
+      Raw osos.dec words e590100c e5902008 e1520001 12412001 15511001
+      03a01000 1580200c e1a00001 e12fff1e establish the exact 36-byte
+      extent 0x08268090..0x082680b0. The bx lr is immediately followed at
+      0x082680b4 by a separate structurally identical cursor operation using
+      words +0x14/+0x18; Ghidra's displayed next boundary at 0x082680d8
+      therefore omits that real function. The port reads the target-width
+      begin and end words at +0x08/+0x0c, returns zero without mutation when
+      they are equal, otherwise decrements and stores end before returning the
+      byte at the decremented address. Recovered C identifies two direct
+      plain-BL callers (0x08213e20 and 0x08223294) and no predicated BL
+      callers; the four-call Ghidra report conflates the adjacent identical
+      function. No callee or seam is involved. Deliberate deviation: raw u32
+      target pointers preserve the 4-byte field layout on 64-bit hosts. Host
+      tests cover empty, singleton, multi-byte reverse-order, and field
+      preservation behavior.
