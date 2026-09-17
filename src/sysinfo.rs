@@ -40,6 +40,23 @@ const BOARD_VERSION_SENTINEL: u32 = 0x7fff_ffff;
 /// tests can drive both cache states without mapping retailOS RAM.
 #[cfg(not(target_os = "none"))]
 static mut HOST_CACHED_BOARD_VERSION: u32 = BOARD_VERSION_SENTINEL;
+/// Diagnostics cluster's cached board-generation classification byte. The
+/// original's literal-pool word at 0x082bc668 holds this address.
+#[cfg(target_os = "none")]
+const DIAGNOSTICS_BOARD_GENERATION_CACHE: usize = 0x089c_ae8c;
+
+/// Sentinel used by the diagnostics board-generation cache.
+const DIAGNOSTICS_BOARD_GENERATION_UNINITIALIZED: i8 = -1;
+
+/// Host replacement for the diagnostics cache byte at 0x089cae8c.
+#[cfg(not(target_os = "none"))]
+static mut HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE: i8 =
+    DIAGNOSTICS_BOARD_GENERATION_UNINITIALIZED;
+
+#[cfg(test)]
+static HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 /// Serializes test-only writes to the host board-version cache so other
 /// modules can exercise callers of [`board_version`] without racing this
 /// module's cache tests.
@@ -157,6 +174,63 @@ pub unsafe extern "C" fn board_version() -> u32 {
         }
     }
     cache.read_volatile()
+}
+
+#[inline(always)]
+unsafe fn diagnostics_board_generation_cache_slot() -> *mut i8 {
+    #[cfg(target_os = "none")]
+    {
+        DIAGNOSTICS_BOARD_GENERATION_CACHE as *mut i8
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE)
+    }
+}
+
+/// diagnostics_board_generation — original: `FUN_082bc614` @ 0x082bc614
+/// (84 code bytes plus its 4-byte literal-pool word at 0x082bc668; the
+/// next function starts at 0x082bc66c, so the true occupied range is
+/// 88 bytes).
+///
+/// Binary-verified call sites: **2 plain, unconditional `bl` instructions**
+/// (`bl 0x080e624c` at 0x082bc628 and 0x082bc630); no predicated `bl`
+/// instructions. The function has four direct callers.
+///
+/// Reads a signed cache byte at 0x089cae8c. If it is -1, obtains the
+/// board-version word twice: the first read supplies its high halfword,
+/// and the second supplies its low halfword. It stores and returns 1 only
+/// for high halfword 0x13 and low halfword 0x10 through 0xff inclusive;
+/// every other pair stores and returns 2. A non-sentinel cache byte is
+/// returned unchanged.
+///
+/// Deliberate deviations: `board_version` is the existing Rust seam for
+/// `FUN_080e624c`; host builds substitute a static for the fixed cache
+/// address. Volatile byte accesses retain the original's separate signed
+/// `ldrsb` reads and byte store.
+///
+/// # Safety
+///
+/// On target, 0x089cae8c must be a readable and writable cache byte.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn diagnostics_board_generation() -> i32 {
+    let cache = diagnostics_board_generation_cache_slot();
+    let cached_generation = cache.read_volatile();
+    if cached_generation != DIAGNOSTICS_BOARD_GENERATION_UNINITIALIZED {
+        return cached_generation as i32;
+    }
+
+    let version_high = board_version() >> 16;
+    let version_low = board_version() as u16;
+    let generation = if version_high == 0x13 && (0x10..0x100).contains(&version_low) {
+        1
+    } else {
+        2
+    };
+    cache.write_volatile(generation);
+    cache.read_volatile() as i32
 }
 
 #[cfg(test)]
@@ -295,5 +369,59 @@ mod tests {
             0,
             "a cached zero is not mistaken for the sentinel"
         );
+    }
+
+    struct DiagnosticsFixture {
+        _generation_guard: MutexGuard<'static, ()>,
+        _board_version: HostCachedBoardVersion,
+    }
+
+    impl DiagnosticsFixture {
+        fn install(version: u32) -> DiagnosticsFixture {
+            let generation_guard = HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsafe {
+                core::ptr::addr_of_mut!(HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE)
+                    .write(DIAGNOSTICS_BOARD_GENERATION_UNINITIALIZED);
+            }
+            DiagnosticsFixture {
+                _generation_guard: generation_guard,
+                _board_version: install_host_cached_board_version(version),
+            }
+        }
+    }
+
+    impl Drop for DiagnosticsFixture {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE)
+                    .write(DIAGNOSTICS_BOARD_GENERATION_UNINITIALIZED);
+            }
+        }
+    }
+
+    #[test]
+    fn diagnostics_board_generation_accepts_only_the_verified_version_window() {
+        for (version, expected) in [
+            (0x0013_0010, 1),
+            (0x0013_00ff, 1),
+            (0x0013_000f, 2),
+            (0x0013_0100, 2),
+            (0x0012_0010, 2),
+        ] {
+            let _fixture = DiagnosticsFixture::install(version);
+            assert_eq!(unsafe { diagnostics_board_generation() }, expected, "{version:#010x}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_board_generation_returns_a_non_sentinel_cached_byte() {
+        let _fixture = DiagnosticsFixture::install(0x0013_0010);
+        unsafe {
+            core::ptr::addr_of_mut!(HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE).write(-7);
+        }
+
+        assert_eq!(unsafe { diagnostics_board_generation() }, -7);
     }
 }
