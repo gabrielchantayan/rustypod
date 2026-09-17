@@ -62136,6 +62136,28 @@ functions:
       the stock all-loads-before-stores ordering for overlapping buffers and
       prevent LLVM from substituting a copy intrinsic.
 
+  # --- Opaque record payload length ---
+  - address: 0x082a1ec0
+    ghidra: FUN_082a1ec0
+    name: opaque_record_payload_length
+    size: 8
+    sig: "u32 opaque_record_payload_length(const OpaqueRecord *record)"
+    module: cxx/opaque_record_payload_length
+    status: ported
+    renames:
+      param_1/r0: record
+    notes: >-
+      Raw osos.dec is exactly `ldr r0,[r0,#8]; bx lr` from 0x082a1ec0 through
+      0x082a1ec4; the separately linked next leaf begins `ldr r0,[r0,#12]` at
+      0x082a1ec8, establishing the eight-byte extent. A binary scan of every
+      ARM B/BL-immediate word found four direct inbound calls, all
+      unconditional plain bl (zero predicated forms): 0x081043b8, 0x081043f8,
+      0x08104488, and 0x081044ac. No direct tail branches target this leaf.
+      It has no NULL, alignment, or bounds guard: it returns the opaque
+      record's 32-bit word at byte offset +0x08. The concrete record type and
+      field role remain unrecovered; the semantic name is limited to the
+      caller-verified use as a payload length. No deliberate deviations.
+
   - address: 0x0818a0bc
     ghidra: FUN_0818a0bc
     name: facade_for_selector
