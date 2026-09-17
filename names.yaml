@@ -67698,6 +67698,35 @@ functions:
       plus one indirection and the crate's fp frame, r0 passed through
       untouched.
 
+  # --- StringObject: UTF-8 codepoint truncation ---
+  - address: 0x08277044
+    ghidra: FUN_08277044
+    name: string_object_truncate_codepoints
+    size: 120
+    sig: "void string_object_truncate_codepoints(StringObject *this, int index)"
+    module: cxx/string_object_truncate_codepoints
+    status: ported
+    vars:
+      param_1/r0: "this"
+      param_2/r1: "index"
+      param_1_plus_0x04: "payload"
+      vtable_plus_0x08: "resize"
+      vtable_plus_0x0c: "clear"
+    notes: >-
+      Raw osos.dec establishes the true 120-byte extent
+      0x08277044..0x082770bc; the next distinct function begins with
+      `cmp r0,#0` at 0x082770bc. The body has two plain BL calls
+      (utf8_codepoint_count_safe @ 0x082770e0 and the unported index walker
+      @ 0x082a50c4), zero predicated BL calls, one unpredicated virtual BLX,
+      and a predicated virtual BX tail dispatch. Every direct caller was
+      decoded: four total, one plain BL (0x08130dbc) and three predicated
+      forms (blhi 0x08053a4c; blgt 0x08277258 and its 0x082772dc sibling).
+      It returns unchanged when the payload's codepoint count is at most the
+      index; otherwise index <= 0 dispatches vtable+0x0c, while a positive
+      index obtains the corresponding UTF-8 byte offset and calls vtable+0x08
+      with byte_count+1 and flag 1, NUL-terminating a non-NULL result. The
+      virtual callees have no recovered concrete identity, so Rust uses a
+      typed vtable with verified target slots rather than an invented seam.
   # --- StringObject: bounded UTF-16 assignment ---
   - address: 0x08277164
     ghidra: FUN_08277164

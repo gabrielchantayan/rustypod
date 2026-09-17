@@ -175,6 +175,7 @@ pub mod ostream_insert_string;
 pub mod stream_write_owner_construct;
 pub mod string_object;
 pub mod string_object_remove_trailing_codepoint;
+pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
 pub mod string_object_less;
 pub mod string_from_vtable_slot_50;
