@@ -176,6 +176,41 @@ pub unsafe extern "C" fn view_event_complete(this: *mut u8) -> u32 {
     unsafe { commit(this) };
     EVENT_HANDLED
 }
+/// view_event_complete_thunk — original: `thunk_FUN_0810dfc0` @
+/// 0x08260880 (4 bytes: `eafab5ce` = `b 0x0810dfc0`).
+///
+/// The next word at 0x08260884 starts a distinct function, establishing the
+/// veneer’s exact extent. Raw ARM B/BL-immediate decoding finds seven inbound
+/// direct transfers: two plain `bl`, no predicated `bl`, and five tail `b`.
+/// This veneer forwards the view unchanged to [`view_event_complete`], whose
+/// timer-stop and staged-flag-commit behavior supplies the handled verdict.
+/// Deliberate deviations: none. ARM builds emit the original direct tail
+/// branch; hosts use the equivalent Rust forwarding call for behavioral tests.
+///
+/// # Safety
+///
+/// `this` has the same validity requirements as [`view_event_complete`].
+#[cfg(not(target_arch = "arm"))]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_event_complete_thunk(this: *mut u8) -> u32 {
+    unsafe { view_event_complete(this) }
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl view_event_complete_thunk
+    .type view_event_complete_thunk, %function
+view_event_complete_thunk:
+    b       view_event_complete
+    .size view_event_complete_thunk, . - view_event_complete_thunk
+"#
+);
+
 
 /// view_event_apply_mapped_staged_flags — original: `FUN_0810de48` @
 /// 0x0810de48 (16 bytes exactly; 19 plain `bl` and 75 plain tail `b`
@@ -559,7 +594,7 @@ mod tests {
     fn a_view_with_a_timer_stops_it_then_commits_and_reports_handled() {
         let guard = mock(0x0855_1234);
         unsafe {
-            assert_eq!(view_event_complete(view()), 1, "the handled verdict");
+            assert_eq!(view_event_complete_thunk(view()), 1, "the handled verdict");
             assert_eq!(
                 *addr_of!(CALLS),
                 std::vec!["stop", "commit"],
@@ -578,7 +613,7 @@ mod tests {
     fn a_view_without_a_timer_only_commits() {
         let guard = mock(0);
         unsafe {
-            assert_eq!(view_event_complete(view()), 1, "handled either way");
+            assert_eq!(view_event_complete_thunk(view()), 1, "handled either way");
             assert_eq!(
                 *addr_of!(CALLS),
                 std::vec!["commit"],
