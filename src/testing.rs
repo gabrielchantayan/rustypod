@@ -871,6 +871,10 @@ pub mod hints {
     // factory-result fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const MOV_ATOM_TABLE_LOOKUP: usize = 0x9c00_0000;
+    // 0x9d00_0000: dedicated to util/linked_list_append's raw-u32 anchor
+    // and intrusive-node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const LINKED_LIST_APPEND: usize = 0x9d00_0000;
     // 0x8e00_0000: dedicated to ui/element_reference_item's raw-u32
     // reference, vtable, element, header, and slot fixtures; mappings never
     // unmap, so no other user may share this hint.

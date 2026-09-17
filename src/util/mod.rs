@@ -72,6 +72,7 @@ pub mod id3_synchsafe_u28_decode;
 pub mod le_read;
 pub mod linked_list_count;
 pub mod linked_list_find_and_promote;
+pub mod linked_list_append;
 pub mod list_find;
 pub mod predicate_list_find;
 pub mod lazy_slot_table_entry;
