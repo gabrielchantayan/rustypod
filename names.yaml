@@ -101503,6 +101503,23 @@ functions:
       Deliberate host-only representation: stream is a u32 word pointer,
       preserving the target's four-byte field layout on 64-bit hosts.
 
+  # --- Literal status return ---
+  - address: 0x08261da0
+    ghidra: FUN_08261da0
+    name: cxx_return_constant_0x52
+    size: 8
+    sig: "u32 cxx_return_constant_0x52(void)"
+    module: cxx/return_constant_0x52
+    status: ported
+    notes: >-
+      Raw osos.dec words `e3a00052 e12fff1e` establish the exact 8-byte
+      extent 0x08261da0..0x08261da8: `mov r0,#0x52; bx lr`; the next
+      independently linked function begins at 0x08261da8. A whole-image ARM
+      B/BL decode finds exactly four inbound direct calls, all unconditional
+      plain BL at 0x081e6b8c, 0x0839e8a0, 0x0839ea0c, and 0x0839f3e8; no
+      predicated BL form reaches this address. The function does not read r0-r3
+      or memory and returns literal status 0x52. Rust deliberately exposes no
+      ignored parameters while retaining the target return value.
   # --- Opaque layout-record constructor ---
   - address: 0x08261da8
     ghidra: FUN_08261da8
