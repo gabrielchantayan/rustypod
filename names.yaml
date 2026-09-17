@@ -103513,3 +103513,23 @@ functions:
       agrees with the ARM register/stack argument layout. The original SQLite
       local-helper source name is not established, so
       expr_code_pair deliberately describes the verified two-expression work.
+
+
+  - address: 0x082c3718
+    ghidra: FUN_082c3718
+    name: date_time_parse_clear_flags
+    size: 20
+    sig: "void date_time_parse_clear_flags(DateTime *result)"
+    module: sqlite/date_time_parse_clear_flags
+    vars: {param_1/r0: result}
+    status: ported
+    notes: >-
+      Raw extent is exact: 0x082c3718..0x082c372c contains five ARM
+      instructions, ending bx lr; the next separately entered function is the
+      clock_gettime veneer at 0x082c372c. Binary decoding finds four direct
+      BL call sites, all unconditional (0x082df120, 0x082df284, 0x082df2d0,
+      and 0x082df5f8), and zero predicated BL call sites. The helper clears
+      DateTime bytes +0x28, +0x29, and +0x2b in that order, preserving +0x2a.
+      The raw implementation also preserves r0, but all verified call sites
+      use the void ABI result. No deliberate deviations. Host test covers each
+      changed byte and preservation of +0x2a and all preceding bytes.

@@ -101,6 +101,7 @@ pub mod key;
 pub mod restore_cursor_position;
 pub mod save_cursor_position;
 pub mod cursor_moveto;
+pub mod date_time_parse_clear_flags;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;
