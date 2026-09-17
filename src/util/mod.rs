@@ -157,6 +157,7 @@ pub mod text_layout_fit_glyph_count;
 pub mod tagged_counter;
 pub mod tagged_header_low_bits;
 pub mod tagged_resource_payload;
+pub mod tagged_buffer_payload_address;
 pub mod positive_counter_decrement;
 pub mod tagged_payload_address;
 pub mod tagged_payload_read_signed_field_0x52;
