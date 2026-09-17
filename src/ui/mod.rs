@@ -45,6 +45,7 @@ pub mod vtable_slot_24;
 pub mod object_vtable_result_word;
 pub mod resource_release;
 pub mod object_state;
+pub mod shared_context_pair_38;
 pub mod sub_record_lookup;
 pub mod record_descriptor_pack;
 pub mod tagged_object_link;
