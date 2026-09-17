@@ -33706,6 +33706,45 @@ functions:
       inconsistent, dead value (the C function is void, and none of the
       36 call sites consume r0); ported as void.
 
+  - address: 0x083711a8
+    ghidra: FUN_083711a8
+    name: btree_enter_all
+    size: 196
+    sig: "void btree_enter_all(sqlite3 *db)"
+    module: sqlite/btree_lock
+    status: ported
+    renames:
+      param_1/r0: database
+      iVar5/r3: index
+      iVar2/r1: btree
+      iVar4/r1: node
+      uVar3: record_offset
+    notes: >-
+      Extent verified from raw osos.dec: 49 ARM words at
+      0x083711a8..0x0837126c, from mov r3,#0; push {lr} through
+      ldmia sp!,{pc}; the next distinct function begins with mov ip,r0;
+      stmdb sp!,{r3-r7,lr} at 0x0837126c. Decoding every ARM B/BL word in
+      the image finds exactly four direct call sites: unconditional plain
+      bl at 0x082b54c4, 0x0837d328, and 0x0838f1c8, plus one predicated
+      blle at 0x083820ac; matching Ghidra's count of four. SQLite's
+      sqlite3BtreeEnterAll with the shared-cache half of sqlite3BtreeEnter
+      inlined: walk signed sqlite3.nDb 24-byte Db records (pBt at +4),
+      skip null or non-sharable handles, otherwise wantToLock++; an
+      already-locked handle stops there. An unlocked handle is walked back
+      along Btree.pPrev (+0x14) to its BtShared sibling-list head, forward
+      along pNext (+0x10) to the first unlocked sibling (dead in the common
+      case - the head's locked was just proven 0), then every successor's
+      locked byte is cleared where set (the advance is unconditional, so
+      an unlocked successor is NOT an assertion hang), and locked is
+      incremented on that sibling and all successors. Ghidra's C mangles
+      both loops (it turns the prev-walk into a do/while that loses the
+      head and invents a pNext end-walk); the raw words and match.py's
+      disassembly agree with the port. Deliberate deviation: aDb, pBt,
+      and sibling links stay target-width u32 words, with host tests
+      mapping their fixture below 4 GiB (dedicated hint 0x4243_0000).
+      Codegen diff is the usual frame-pointer prologue plus LLVM peeling
+      of the prev-walk; same loads, same four loop nests.
+
   # ---- B-tree write-transaction probe (src/sqlite/btree_in_trans.rs) ----
   - address: 0x08371bdc
     ghidra: FUN_08371bdc
