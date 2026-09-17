@@ -14,6 +14,8 @@
 //! - [`service_context_selection_construct`] — `FUN_082a5ee4` @ 0x082a5ee4.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
+//! - [`scoped_context_owner_byte_15_bit_1`] — `FUN_082a32e8` @ 0x082a32e8,
+//!   a validity-gated predicate over bit 1 of the token owner's byte +0x15.
 //! - [`scoped_context_owner_validity`] — `FUN_0806b410` @ 0x0806b410,
 //!   a NULL-safe owner-to-'tdat'-element predicate.
 //! - [`scoped_context_is_valid`] — `FUN_082a3dcc` @ 0x082a3dcc, an
@@ -806,6 +808,41 @@ pub unsafe extern "C" fn scoped_context_owner_flags_bit_3(
     let flags = ((*this).owner as *const u32).add(OWNER_FLAGS_SLOT).read();
     (flags & OWNER_FLAGS_MASK_8) >> 3
 }
+
+/// Byte offset of the owner flag tested by `FUN_082a32e8`. The field's
+/// semantic identity does not survive in the image, so the name retains the
+/// verified offset.
+const OWNER_BYTE_15_OFFSET: usize = 0x15;
+
+/// scoped_context_owner_byte_15_bit_1 — original: `FUN_082a32e8` @
+/// 0x082a32e8 (52 bytes, exact: thirteen ARM instructions through `pop
+/// {r4, pc}`; the next separately linked function starts at 0x082a331c).
+/// **4 direct unconditional plain `bl` callers, 0 predicated `bl` callers**,
+/// verified by decoding every ARM B/BL word in `osos.dec` (at 0x0821ecb8,
+/// 0x08223000, 0x08226c80, and 0x0823959c).
+///
+/// Dispatches the scoped-context vtable's +0x08 validity slot. A zero result
+/// returns zero without reading the owner; any nonzero result returns bit 1
+/// of the owner's byte at +0x15.
+///
+/// Deliberate deviation: [`ScopedContext`] models the token with `#[repr(C)]`
+/// fields and this port uses an indexed byte read rather than the original's
+/// literal `ldrb` offset. Both retain the target address on ARM and keep host
+/// fixtures self-consistent; LLVM branches where ADS predicates the read and
+/// bit extraction.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_byte_15_bit_1(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (u32::from((*this).owner.add(OWNER_BYTE_15_OFFSET).read()) & 2) >> 1
+}
+
 
 
 /// The mask tested against the owner's +0xbc flags word, serialized as
@@ -2437,6 +2474,60 @@ mod tests {
         };
 
         assert_eq!(unsafe { scoped_context_owner_word_5c_or_zero(&token) }, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &token as *const ScopedContext as usize);
+        }
+    }
+
+    #[test]
+    fn owner_byte_15_bit_1_short_circuits_before_a_null_owner() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        assert_eq!(unsafe { scoped_context_owner_byte_15_bit_1(&token) }, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &token as *const ScopedContext as usize);
+        }
+    }
+
+    #[test]
+    fn owner_byte_15_bit_1_extracts_only_the_requested_bit() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut owner = [0u8; OWNER_BYTE_15_OFFSET + 1];
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: owner.as_mut_ptr(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        for (byte, expected) in [(0x00, 0), (0x01, 0), (0x02, 1), (0xfd, 0), (0xff, 1)] {
+            reset_validity_recording(0x8000_0000);
+            owner[OWNER_BYTE_15_OFFSET] = byte;
+            assert_eq!(
+                unsafe { scoped_context_owner_byte_15_bit_1(&token) },
+                expected,
+                "owner byte {byte:#04x}"
+            );
+        }
         unsafe {
             assert_eq!(VALIDITY_CALLS, 1);
             assert_eq!(VALIDITY_TOKEN as usize, &token as *const ScopedContext as usize);

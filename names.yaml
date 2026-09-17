@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a32e8
+    ghidra: FUN_082a32e8
+    name: scoped_context_owner_byte_15_bit_1
+    size: 52
+    sig: "u32 scoped_context_owner_byte_15_bit_1(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0: scoped_context
+      r4: scoped_context
+      r0: scoped_context_vtable_or_owner_byte
+      r1: validity_slot
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x082a32e8..0x082a331b; 0x082a331c is the next separately linked
+      function's push prologue. Decoding every A32 B/BL word finds four
+      direct unconditional plain BL callers (0x0821ecb8, 0x08223000,
+      0x08226c80, 0x0823959c) and zero predicated BL callers. It dispatches
+      the ScopedContext vtable's +0x08 validity slot with this; zero returns
+      zero without reading owner, otherwise it returns bit 1 of owner byte
+      +0x15. The virtual callee is represented by the established
+      ScopedContextValidity ABI rather than an invented function identity.
   - address: 0x082a331c
     ghidra: FUN_082a331c
     name: object_has_resolved_flag_0x800
