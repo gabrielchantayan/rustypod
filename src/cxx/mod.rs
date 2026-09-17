@@ -151,6 +151,7 @@ pub mod streambuf_slot_peek_byte;
 pub mod streambuf_slot_consume;
 pub mod stream_read;
 pub mod stream_read_cxx_string;
+pub mod stream_read_string_record_map;
 pub mod stream_write;
 pub mod stream_write_exact;
 pub mod stream_state_set;

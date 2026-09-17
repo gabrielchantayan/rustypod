@@ -103725,3 +103725,39 @@ functions:
       Btree state and 8*nField type words, then initializes iDb, nField,
       aType, and pCursor. sqlite3VdbeFreeCursor @ 0x0838affc remains a
       typed target/host dispatch seam because it is unported.
+
+  # --- stream string-record map deserializer ---
+  - address: 0x082aaf10
+    ghidra: FUN_082aaf10
+    name: stream_read_string_record_map
+    size: 180
+    sig: "void *stream_read_string_record_map(void *owner, void *map)"
+    module: cxx/stream_read_string_record_map
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: map
+      local_2c: entry_count
+      FUN_083d8134: stream_read
+      FUN_080745b8: stream_read_cxx_string
+      FUN_083e5aec: three_word_clear_return
+      FUN_082aae1c: unported stream entry decoder
+      FUN_083db32c: unported string-map value lookup
+      FUN_08197ab8: unported string-record constructor
+      FUN_08197c68: unported string-record assignment
+      FUN_08197c28: unported string-record destructor
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte code extent
+      0x082aaf10..0x082aafc4: the closing pop is at 0x082aafc0, followed by
+      the two-word literal pool at 0x082aafc4 and 0x082aafc8, and the next
+      separately linked function begins at 0x082aafcc. Decoding every aligned
+      ARM B/BL word verifies eleven unconditional bl instructions in the body,
+      no predicated calls, and four direct unconditional bl callers at
+      0x081cdc74, 0x081e033c, 0x081e03d8, and 0x081e0474. It reads an entry
+      count, then per entry reads a COW string, constructs the fixed-key record,
+      decodes it, assigns the mapped string, and destroys both temporaries.
+      The still-unported entry decoder, map lookup, and string-record helpers
+      are fixed retailOS target calls; host tests install recording operations
+      to prove zero-count behavior, per-entry iteration, assignment, and both
+      releases. match.py structural review recorded.
