@@ -192,6 +192,7 @@ pub mod object_byte_at_5;
 pub mod object_bytes_64_or_6c_nonzero;
 pub mod object_offset_48;
 pub mod object_flag_nibble;
+pub mod object_flag_0x8_is_set;
 pub mod object_flag_0x100_is_set;
 pub mod object_owner_set;
 pub mod object_dispatch_entry;

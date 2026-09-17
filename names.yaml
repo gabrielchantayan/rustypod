@@ -103980,3 +103980,27 @@ functions:
       signed wraparound and aliasing dst with each input; match.py finds the
       same three subtractions and final 12-byte copy, with LLVM coalescing
       loads and differing call/frame layout.
+  # --- opaque object bit-0x08 predicate ---
+  - address: 0x082a5d34
+    ghidra: FUN_082a5d34
+    name: object_flag_0x8_is_set
+    size: 16
+    sig: "u32 object_flag_0x8_is_set(const u8 *object)"
+    module: app/object_flag_0x8_is_set
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x18/r0: flags
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: ldrb r0,[r0,#0x18];
+      and r0,r0,#8; lsr r0,r0,#3; bx lr at 0x082a5d34..0x082a5d40. The
+      separately linked sibling predicate begins at 0x082a5d44. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly four
+      inbound direct calls, all unconditional BL, and no predicated BL calls.
+      It returns object byte +0x18 bit 0x08 normalized to zero or one. The
+      recovered controller-item callers pair it with sibling bit 0x10, but
+      the object's wider type and flag meaning remain unidentified. Host tests
+      cover set, clear, neighboring bits, and adjacent-byte preservation.
+      match.py shows LLVM adds a frame and uses a register-mask bit extract
+      instead of the stock immediate-mask/shift pair; both return the same 0/1
+      value. Deliberate deviations: that equivalent codegen only.
