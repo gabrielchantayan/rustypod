@@ -61924,6 +61924,36 @@ functions:
       is the crate fp frame and the three seams' blx dispatch in
       place of the direct bls.
 
+  - address: 0x08271598
+    ghidra: FUN_08271598
+    name: beeper_construct
+    size: 84
+    sig: "Beeper *beeper_construct(Beeper *storage, u32 timing_source)"
+    module: app/beeper_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1/r5: timing_source
+      DAT_082715ec: BEEPER_VTABLE
+      DAT_082715f0: BEEPER_NAME
+      FUN_08277304: string_object_construct_from_cstr
+    notes: >-
+      Raw osos.dec words establish the exact 84-byte code extent
+      0x08271598..0x082715eb: the literal pool begins at 0x082715ec and
+      the next push-prologue begins at 0x082715f8. The body has one
+      unconditional plain BL, 0x082715d0 -> 0x08277304, and no predicated
+      BL. Its four direct BL call sites are all plain and unconditional
+      (zero predicated). It installs literal vtable 0x089a5cfc, writes
+      mode 3, interval 8, next-deadline 0, and repeat-limit -1; constructs
+      the embedded StringObject at +0x20 from the literal "Beeper"; then
+      clears +0x28, writes byte 1 at +0x2c while preserving +0x2d..+0x2f,
+      and records timing_source at +0x34. The port calls the established
+      string_object_construct_from_cstr port directly on target and
+      preserves its returned-member-minus-0x20 pointer flow. Deliberate
+      host-only deviation: StringObject uses native-width pointers, so the
+      host path writes the two target words at +0x20/+0x24 directly rather
+      than model heap allocation. Host test pins every written field,
+      unmodified words and byte tail, bounds guards, and return storage.
   - address: 0x08271724
     ghidra: FUN_08271724
     name: iterator_state_release
