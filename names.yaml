@@ -107048,3 +107048,23 @@ functions:
       0x083ee1c1..0x083f25ec region of osos.dec. Its nonzero-input result
       therefore cannot be recovered from the available raw firmware; no
       Rust seam or approximation was introduced.
+  - address: 0x0824bf74
+    ghidra: FUN_0824bf74
+    name: zero_four_bytes
+    size: 24
+    sig: "u8 *zero_four_bytes(u8 *dst)"
+    module: util/zero_four_bytes
+    status: ported
+    renames:
+      param_1/r0: dst
+      r1: zero
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte extent
+      0x0824bf74..0x0824bf8b: mov r1,#0; strb r1,[r0,#3]; strb r1,[r0,#2];
+      strb r1,[r0,#1]; strb r1,[r0]; bx lr. The next independently linked
+      function begins at 0x0824bf8c. Decoding all aligned A32 B/BL immediate
+      words finds four direct inbound unconditional plain BL calls and zero
+      predicated BL calls. The helper clears four bytes in descending offset
+      order and preserves dst in r0; Ghidra's void signature is inaccurate
+      because callers rely on the preserved destination pointer. Rust preserves
+      the byte-wise store order and returned pointer; no deliberate deviation.
