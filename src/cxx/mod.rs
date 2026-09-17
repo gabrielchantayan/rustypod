@@ -23,6 +23,7 @@ pub mod color_copy;
 pub mod color_pack;
 pub mod color_unpack;
 pub mod pixel_format_source_tag_supported;
+pub mod rgba8_cursor_read;
 pub mod rgba8_cursor_write;
 pub mod rgba8_cursor_write_rgb555a1;
 pub mod rgba8_cursor_write_rgba4444;
