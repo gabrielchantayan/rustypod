@@ -102664,3 +102664,32 @@ functions:
       It has no outgoing calls. Host tests cover no carry, low-word overflow
       with high-word wrap, and zero. match.py structural review was completed.
       Deliberate deviations: none.
+  - address: 0x082e82f8
+    ghidra: FUN_082e82f8
+    name: posix_mutex_init
+    size: 152
+    sig: "u32 posix_mutex_init(PosixMutex *mutex, u8 *attr)"
+    module: kernel/posix_mutex
+    status: ported
+    renames:
+      param_1/r0: mutex
+      param_2/r1: attr
+      piVar3/r5: effective_attr
+      FUN_082e84a4: pthread_mutexattr_init
+      FUN_0808b1c0: kernel_object_allocate
+    notes: >-
+      Raw osos.dec establishes the true 152-byte extent
+      0x082e82f8..0x082e8390: 136 bytes of code followed by the MTXA,
+      default-attribute, and MUTX literal words; the next real function is
+      posix_mutex_lock at 0x082e8390. Decoding every ARM B/BL word finds two
+      outgoing plain bl calls (pthread_mutexattr_init at 0x082e84a4 and
+      kernel_object_allocate at 0x0808b1c0), with no predicated bl calls.
+      Four inbound direct plain bl sites are 0x08261e14, 0x0826219c,
+      0x082e83b8, and 0x082e8400. NULL mutex and invalid MTXA attrs return
+      0x1a. A NULL attr lazily initializes the default attr at 0x089cfcbc;
+      allocation failure maps to 0x27. Success copies attr+4, clears owner,
+      reserved, and recursion fields, and writes MUTX. Host tests cover a
+      valid explicit attr and allocation failure. match.py structural review
+      was completed. Deliberate deviations: the unported attr initializer and
+      kernel allocator dispatch through hook-ready seams; host defaults model
+      their decoded effects with a nonzero semaphore handle.

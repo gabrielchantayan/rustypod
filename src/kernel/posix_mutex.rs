@@ -254,10 +254,9 @@ pub struct PosixMutexOps {
 /// correctly seen as *unheld* rather than as "held by us".
 pub const PRE_KERNEL_THREAD: u32 = 1;
 
-/// Default: no semaphore layer, so there is nothing to initialize —
-/// report success and let the object be used as it stands.
-unsafe extern "C" fn missing_init_static(_mutex: *mut PosixMutex, _attr: *mut u8) -> u32 {
-    0
+/// Default forwards to this module's complete port of the lazy initializer.
+unsafe extern "C" fn missing_init_static(mutex: *mut PosixMutex, attr: *mut u8) -> u32 {
+    posix_mutex_init(mutex, attr)
 }
 
 /// Default: before the kernel runs there is exactly one thread.
@@ -308,6 +307,177 @@ pub const DEFAULT_POSIX_MUTEX_OPS: PosixMutexOps = PosixMutexOps {
 /// kernel layer installs the real ROM helpers.
 pub static mut POSIX_MUTEX_OPS: PosixMutexOps = DEFAULT_POSIX_MUTEX_OPS;
 
+/// `posix_mutex_init` — original: `FUN_082e82f8` @ **0x082e82f8**
+/// (**152 bytes**, 0x082e82f8..0x082e8390: 136 bytes of code plus the
+/// three-word literal pool). Raw `osos.dec` decoding finds **2 plain `bl`**
+/// calls (0x082e84a4 and 0x0808b1c0), and no predicated `bl` calls.
+///
+/// Initializes a mutex from a validated `MTXA` attribute. A NULL attribute
+/// selects and lazily initializes the global default; then object type 3 is
+/// allocated into the embedded semaphore cell. On success it copies the
+/// attribute word at +4, clears owner, reserved state, and recursion, and
+/// writes `MUTX`. Deliberate deviation: the attribute initializer and kernel
+/// allocator remain explicit dispatch seams; their host defaults model the
+/// decoded stores and a successful allocation with handle 1.
+pub const MUTEXATTR_MAGIC: u32 = 0x4d54_5841;
+pub const MUTEX_LIVE_MAGIC: u32 = 0x4d55_5458;
+pub const ERR_SEMAPHORE_CREATE_FAILED: u32 = 0x27;
+const MUTEXATTR_DEFAULT_HALFWORD: u16 = 0xffc2;
+const MUTEXATTR_PROCESS_SCOPE_BIT: u16 = 8;
+const MUTEX_OBJECT_TYPE: u32 = 3;
+
+pub type PthreadMutexattrInit = unsafe extern "C" fn(attr: *mut u8) -> u32;
+pub type KernelObjectAllocate = unsafe extern "C" fn(kind: u32, out: *mut u32) -> u32;
+
+#[derive(Clone, Copy)]
+pub struct PosixMutexInitOps {
+    pub attr_init: PthreadMutexattrInit,
+    pub allocate: KernelObjectAllocate,
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_DEFAULT_MUTEX_ATTR: [u8; 8] = [0; 8];
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn host_pthread_mutexattr_init(attr: *mut u8) -> u32 {
+    if attr.is_null() {
+        return ERR_INVALID_OBJECT;
+    }
+    attr.cast::<u32>().write(MUTEXATTR_MAGIC);
+    attr.add(4).cast::<u16>().write(MUTEXATTR_DEFAULT_HALFWORD);
+    let scope = attr.add(6).cast::<u16>();
+    scope.write((scope.read() & !0x3f) | MUTEXATTR_PROCESS_SCOPE_BIT);
+    0
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn host_kernel_object_allocate(_kind: u32, out: *mut u32) -> u32 {
+    out.write(1);
+    0
+}
+
+unsafe extern "C" fn default_pthread_mutexattr_init(attr: *mut u8) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let init: PthreadMutexattrInit = core::mem::transmute(0x082e84a4usize);
+        init(attr)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        host_pthread_mutexattr_init(attr)
+    }
+}
+
+unsafe extern "C" fn default_kernel_object_allocate(kind: u32, out: *mut u32) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let allocate: KernelObjectAllocate = core::mem::transmute(0x0808b1c0usize);
+        allocate(kind, out)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        host_kernel_object_allocate(kind, out)
+    }
+}
+
+pub const DEFAULT_POSIX_MUTEX_INIT_OPS: PosixMutexInitOps = PosixMutexInitOps {
+    attr_init: default_pthread_mutexattr_init,
+    allocate: default_kernel_object_allocate,
+};
+
+pub static mut POSIX_MUTEX_INIT_OPS: PosixMutexInitOps = DEFAULT_POSIX_MUTEX_INIT_OPS;
+
+#[inline(always)]
+fn init_ops() -> PosixMutexInitOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(POSIX_MUTEX_INIT_OPS)) }
+}
+
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn posix_mutex_init(mutex: *mut PosixMutex, attr: *mut u8) -> u32 {
+    if mutex.is_null() {
+        return ERR_INVALID_OBJECT;
+    }
+    let ops = init_ops();
+    let attr = if attr.is_null() {
+        #[cfg(target_os = "none")]
+        let default = 0x089c_fcbcusize as *mut u8;
+        #[cfg(not(target_os = "none"))]
+        let default = core::ptr::addr_of_mut!(HOST_DEFAULT_MUTEX_ATTR).cast::<u8>();
+        if default.cast::<u32>().read() != MUTEXATTR_MAGIC {
+            let status = (ops.attr_init)(default);
+            if status != 0 {
+                return status;
+            }
+        }
+        default
+    } else {
+        attr
+    };
+    if attr.cast::<u32>().read() != MUTEXATTR_MAGIC {
+        return ERR_INVALID_OBJECT;
+    }
+    if (ops.allocate)(MUTEX_OBJECT_TYPE, core::ptr::addr_of_mut!((*mutex).sem_handle)) != 0 {
+        return ERR_SEMAPHORE_CREATE_FAILED;
+    }
+    (*mutex).attr_flags = attr.add(4).cast::<u32>().read();
+    (*mutex).owner = 0;
+    (*mutex).reserved_08 = 0;
+    (*mutex).recursion = 0;
+    (*mutex).magic = MUTEX_LIVE_MAGIC;
+    0
+}
+
+
+#[cfg(test)]
+mod init_tests {
+    extern crate std;
+    use super::*;
+    use std::sync::Mutex;
+
+    static LOCK: Mutex<()> = Mutex::new(());
+    static mut ALLOC_STATUS: u32 = 0;
+
+    unsafe extern "C" fn attr_init(attr: *mut u8) -> u32 {
+        attr.cast::<u32>().write(MUTEXATTR_MAGIC);
+        attr.add(4).cast::<u32>().write(0x0030_0000);
+        0
+    }
+
+    unsafe extern "C" fn allocate(kind: u32, out: *mut u32) -> u32 {
+        assert_eq!(kind, MUTEX_OBJECT_TYPE);
+        if ALLOC_STATUS == 0 {
+            out.write(0x1234_5678);
+        }
+        ALLOC_STATUS
+    }
+
+    #[test]
+    fn initializes_explicit_attr_and_preserves_failure_state() {
+        let _lock = LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            POSIX_MUTEX_INIT_OPS = PosixMutexInitOps { attr_init, allocate };
+            ALLOC_STATUS = 0;
+        }
+        let mut mutex = PosixMutex {
+            magic: 0xa5a5_a5a5, owner: 9, reserved_08: 8, attr_flags: 7,
+            reserved_10: 6, recursion: 5, sem_handle: 4,
+        };
+        let mut attr = [0u8; 8];
+        attr[..4].copy_from_slice(&MUTEXATTR_MAGIC.to_le_bytes());
+        attr[4..].copy_from_slice(&0x0030_0000u32.to_le_bytes());
+        assert_eq!(unsafe { posix_mutex_init(&mut mutex, attr.as_mut_ptr()) }, 0);
+        assert_eq!(mutex.magic, MUTEX_LIVE_MAGIC);
+        assert_eq!((mutex.owner, mutex.reserved_08, mutex.recursion), (0, 0, 0));
+        assert_eq!((mutex.attr_flags, mutex.sem_handle), (0x0030_0000, 0x1234_5678));
+
+        let snapshot_magic = mutex.magic;
+        unsafe { ALLOC_STATUS = 1 };
+        assert_eq!(unsafe { posix_mutex_init(&mut mutex, attr.as_mut_ptr()) }, ERR_SEMAPHORE_CREATE_FAILED);
+        assert_eq!(mutex.magic, snapshot_magic);
+        unsafe { POSIX_MUTEX_INIT_OPS = DEFAULT_POSIX_MUTEX_INIT_OPS };
+    }
+}
 
 /// semaphore_cell_acquire — original: `FUN_080a3c7c` @ **0x080a3c7c** (40
 /// bytes; **5 unconditional `bl` call sites**, no predicated calls).
