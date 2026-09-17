@@ -133,6 +133,27 @@ pub unsafe extern "C" fn isspace(c: i32) -> i32 {
     i32::from(core::ptr::read_volatile(table.wrapping_offset(c as isize)) & 1)
 }
 
+/// isxdigit — original: `FUN_082d735c` @ 0x082d735c (32 bytes).
+///
+/// Verified by decoding every ARM B/BL word in osos.dec: 4 plain,
+/// unconditional `bl` call sites and no predicated forms. Calls
+/// `__rt_ctype_table_addr`, loads the current LC_CTYPE table pointer, then
+/// returns bit 7 of `flags ^ (flags << 2)`: 0x80 for ASCII hexadecimal
+/// digits and zero otherwise. There is deliberately no NULL or bounds guard:
+/// as in retailOS, the caller must supply an installed table and an index it
+/// can read. The return is the original bit mask, not a normalized boolean.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn isxdigit(c: i32) -> i32 {
+    let table = core::ptr::read_volatile(crate::runtime::errno::__rt_ctype_table_addr())
+        as usize as *const u8;
+    let flags = core::ptr::read_volatile(table.wrapping_offset(c as isize));
+    i32::from((flags ^ (flags << 2)) & 0x80)
+}
+
+
+
+
 
 
 #[cfg(test)]
@@ -151,6 +172,10 @@ mod tests {
     });
     static ISSPACE_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::CTYPE_ISSPACE, CTYPE_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+    static ISXDIGIT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::CTYPE_ISXDIGIT, CTYPE_FIXTURE_LEN)
             .map(|pointer| pointer as usize)
     });
 
@@ -285,6 +310,35 @@ mod tests {
             table.add(b' ' as usize).write(0x02);
             assert_eq!(isspace(b'A' as i32), 1);
             assert_eq!(isspace(b' ' as i32), 0);
+        }
+    }
+
+    #[test]
+    fn isxdigit_reads_the_installed_table_and_returns_the_original_mask() {
+        let _guard = CTYPE_TABLE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(base) = *ISXDIGIT_FIXTURE else {
+            assert!(note_missing_u32_fixture("runtime::ctype::isxdigit"));
+            return;
+        };
+        unsafe {
+            let table = (base as *mut u8).add(1);
+            ptr::write_bytes(base as *mut u8, 0, CTYPE_FIXTURE_LEN);
+            ptr::copy_nonoverlapping(CTYPE_FLAGS.as_ptr(), table, CTYPE_FLAGS.len());
+
+            let slot = __rt_ctype_table_addr();
+            let _reset = CtypeTableSlotReset { slot, saved: slot.read_volatile() };
+            slot.write_volatile(table as usize as u32);
+
+            for c in -1..=255 {
+                let expected = i32::from((0x30..=0x39).contains(&c) || (0x41..=0x46).contains(&c) || (0x61..=0x66).contains(&c)) * 0x80;
+                assert_eq!(isxdigit(c), expected, "isxdigit({c:#x})");
+            }
+
+            // The instructions are `eor flags, flags, flags, lsl #2; and #0x80`.
+            table.add(b'A' as usize).write(0x20);
+            table.add(b'0' as usize).write(0xa0);
+            assert_eq!(isxdigit(b'A' as i32), 0x80);
+            assert_eq!(isxdigit(b'0' as i32), 0);
         }
     }
 }

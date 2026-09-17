@@ -4385,6 +4385,27 @@ functions:
       0 tail b); callers therefore do not gate this classifier. No NULL or
       bounds guard exists in retailOS or this port.
 
+  - address: 0x082d735c
+    ghidra: FUN_082d735c
+    name: isxdigit
+    size: 32
+    sig: "i32 isxdigit(i32 c)"
+    module: ctype
+    status: ported
+    renames:
+      param_1: c
+      piVar1: ctype_table_slot
+    notes: >-
+      Raw extent is exactly 32 bytes at 0x082d735c..0x082d7378; the distinct
+      following function begins at 0x082d737c. The ARM body calls the already
+      ported __rt_ctype_table_addr @ 0x0802eca0, loads its LC_CTYPE table
+      word, and returns table[c] ^ (table[c] << 2) masked by 0x80: 0x80 for
+      ASCII hexadecimal digits, else zero. Decoding every ARM B/BL word in
+      osos.dec verified 4 plain unconditional bl call sites (0 predicated
+      forms, 0 tail b). No NULL or bounds guard exists in retailOS or this
+      port. LLVM folds the Rust seam into an equivalent direct volatile
+      libspace slot load; this is a codegen-only deviation.
+
   - address: 0x08032fec
     ghidra: FUN_08032fec
     name: _chval
