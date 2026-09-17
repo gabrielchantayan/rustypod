@@ -513,6 +513,50 @@ pub unsafe extern "C" fn cg_emit_lerp_u8_from_immediate(
     cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, start_reg, start);
     cg_emit_lerp_u8(ctx, block, start_reg, end, factor)
 }
+/// cg_emit_component_add_bias — original: `FUN_08240800` @ 0x08240800
+/// (220 bytes: 55 instruction words, 0x08240800-0x082408d8; the next
+/// function begins at 0x082408dc with its own `push`).
+///
+/// Four direct call sites, all unconditional `bl` (no predicated forms or
+/// tail branches), are in `FUN_0823dac4`: 0x0823e018, 0x0823e134,
+/// 0x0823e148, and 0x0823e160.
+///
+/// Creates five general registers, materializes 128 and zero, then emits
+/// `sum = lhs + rhs`, `biased = sum - 128`, and the backend's as-yet
+/// unclassified opcode-16 operation on `biased` and zero. Returns that
+/// operation's result.
+///
+/// # Deviations
+///
+/// The leading context is saved by retailOS but never read; this ABI-
+/// preserving port deliberately ignores it. Opcode 16 has no established
+/// semantic name, so its verified numeric value is retained rather than
+/// inventing one. All direct factories are already ported, so no dispatch
+/// seam is needed.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_component_add_bias(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    lhs: *mut CgVirtualReg,
+    rhs: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let proc = block_proc(block);
+    let result = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let sum = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let bias = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let biased = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let zero = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, bias, 128);
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, zero, 0);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, sum, lhs, rhs);
+    cg_create_inst_binary(block, CG_INST_OPCODE_SUB, biased, sum, bias);
+    cg_create_inst_binary(block, 16, result, biased, zero);
+    result
+}
+
+
 
 
 #[cfg(test)]
@@ -681,6 +725,63 @@ mod tests {
         }
         assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 2);
     }
+    #[test]
+    fn component_add_bias_materializes_constants_and_preserves_operand_order() {
+        const LHS: usize = 0x1234_0000;
+        const RHS: usize = 0x5678_0000;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let result = unsafe {
+            cg_emit_component_add_bias(
+                usize::MAX as *mut u8,
+                block,
+                LHS as *mut CgVirtualReg,
+                RHS as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut instructions = [core::ptr::null_mut(); 5];
+            for slot in instructions.iter_mut() {
+                assert!(!inst.is_null(), "the block holds five instructions");
+                *slot = inst;
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert!(inst.is_null(), "the block holds exactly five instructions");
+
+            let [bias_ldi, zero_ldi, add, subtract, select] = instructions;
+            let bias = field(bias_ldi, CG_INST_LOAD_IMMED_DEST);
+            let zero = field(zero_ldi, CG_INST_LOAD_IMMED_DEST);
+            let sum = field(add, CG_INST_BINARY_DEST);
+            let biased = field(subtract, CG_INST_BINARY_DEST);
+
+            assert_eq!(field(result as *mut u8, CG_VREG_NO), 0);
+            assert_eq!(field(sum as *mut u8, CG_VREG_NO), 1);
+            assert_eq!(field(bias as *mut u8, CG_VREG_NO), 2);
+            assert_eq!(field(biased as *mut u8, CG_VREG_NO), 3);
+            assert_eq!(field(zero as *mut u8, CG_VREG_NO), 4);
+
+            assert_eq!(inst_opcode(bias_ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(bias_ldi, CG_INST_LOAD_IMMED_VALUE), 128);
+            assert_eq!(inst_opcode(zero_ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(zero_ldi, CG_INST_LOAD_IMMED_VALUE), 0);
+
+            assert_eq!(inst_opcode(add), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE0), LHS);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE1), RHS);
+            assert_eq!(inst_opcode(subtract), CG_INST_OPCODE_SUB as u8);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE0), sum);
+            assert_eq!(field(subtract, CG_INST_BINARY_SOURCE1), bias);
+            assert_eq!(inst_opcode(select), 16);
+            assert_eq!(field(select, CG_INST_BINARY_DEST), result as usize);
+            assert_eq!(field(select, CG_INST_BINARY_SOURCE0), biased);
+            assert_eq!(field(select, CG_INST_BINARY_SOURCE1), zero);
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 5);
+    }
+
     #[test]
     fn emits_subtract_with_opaque_context_and_operands() {
         let mut f = Fixture::new();
