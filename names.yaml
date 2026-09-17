@@ -106099,3 +106099,23 @@ functions:
       from names.yaml and has no Rust port, so the target
       calls its verified absolute entry; the host test seam records the
       +0x10 argument rather than inventing a callee identity.
+
+  # --- opaque object +0x94 byte accessor ---
+  - address: 0x0826cb70
+    ghidra: FUN_0826cb70
+    name: object_byte_at_94
+    size: 8
+    sig: "u8 object_byte_at_94(const void *object)"
+    module: app/object_byte_at_94
+    status: ported
+    renames:
+      param_1/r0: object
+    notes: >-
+      True extent is 8 bytes: ldrb r0,[r0,#0x94]; bx lr. The next real
+      function starts at 0x0826cb78. Raw osos.dec decoding identifies four
+      unconditional bl callers (0x08157690, 0x08157ce8, 0x081586b4, and
+      0x08185554) and no predicated bl callers. The recovered callers use the
+      byte as a nonzero event gate but do not establish a semantic field
+      identity, so the port retains an offset-based name. Host tests cover
+      raw values, an unaligned base, neighboring-byte guards, and no mutation.
+      Reference C: decomp/c/026/0826cb70_FUN_0826cb70.c.
