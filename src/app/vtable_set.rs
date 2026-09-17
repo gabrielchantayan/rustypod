@@ -3645,6 +3645,27 @@ pub static mut ITERATOR_STATE_LINK: unsafe extern "C" fn(
 /// unported, so it has no local effect.
 unsafe extern "C" fn iterator_state_link_unported(_owner: *mut u8, _state: *mut u32) {}
 
+/// iterator_state_is_valid — original: `FUN_0829baa8` @ 0x0829baa8 (24
+/// bytes exactly, 0x0829baa8..0x0829bac0; six instructions, no literal
+/// pool; four plain `bl` callers and zero predicated `bl` callers,
+/// independently decoded from `osos.dec`).
+///
+/// Tests the iterator position word at +0x08. Only the two invalid sentinels
+/// -1 and -5 return false; every other signed value, including the ordinary
+/// before-first (-2) and end (-3) sentinels, returns true. The ARM sequence
+/// is `ldr; cmn #1; cmnne #5; moveq #0; movne #1; bx lr`. Deliberate
+/// deviations: Rust expresses the paired conditional moves as comparisons;
+/// it preserves the target's 32-bit word layout by indexing `state[2]`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_is_valid(state: *const u32) -> bool {
+    let position = state.add(2).read() as i32;
+    if position == -1 {
+        return false;
+    }
+    position != -5
+}
+
 /// iterator_state_seek — original: `FUN_08155dc4` @ 0x08155dc4 (108
 /// bytes exactly, 0x08155dc4..0x08155e30; 27 instructions, no literal
 /// pool; five plain `bl` callers and zero predicated `bl` callers,
@@ -3665,8 +3686,7 @@ unsafe extern "C" fn iterator_state_link_unported(_owner: *mut u8, _state: *mut 
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn iterator_state_seek(state: *mut u32, position: i32) {
-    let current = state.add(2).read() as i32;
-    if current == -1 || current == -5 {
+    if !iterator_state_is_valid(state) {
         return;
     }
 
@@ -5245,6 +5265,33 @@ pub(crate) mod tests {
         ITERATOR_LINK_STATE = core::ptr::null_mut();
         core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
             .write_volatile(recording_iterator_state_link);
+    }
+
+    #[test]
+    fn iterator_state_is_valid_rejects_only_its_two_invalid_sentinels() {
+        let mut state = [0xaaaa_aaaau32, 0xbbbb_bbbb, 0, 0xdddd_dddd];
+        unsafe {
+            for (position, expected) in [
+                (i32::MIN, true),
+                (-5, false),
+                (-4, true),
+                (-3, true),
+                (-2, true),
+                (-1, false),
+                (0, true),
+                (i32::MAX, true),
+            ] {
+                state[2] = position as u32;
+                assert_eq!(
+                    iterator_state_is_valid(state.as_ptr()),
+                    expected,
+                    "position {position}"
+                );
+                assert_eq!(state[0], 0xaaaa_aaaa, "does not alter state");
+                assert_eq!(state[1], 0xbbbb_bbbb, "does not alter state");
+                assert_eq!(state[3], 0xdddd_dddd, "does not alter state");
+            }
+        }
     }
 
     #[test]
