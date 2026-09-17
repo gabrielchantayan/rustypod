@@ -83,6 +83,7 @@
 //! default (that module's documented "a later port replaces its
 //! default" pattern).
 
+#[cfg(test)]
 use super::mutex_attr_init::{
     MUTEXATTR_DEFAULT_HALFWORD, MUTEXATTR_MAGIC, MUTEXATTR_PROCESS_SCOPE_BIT,
     MUTEXATTR_SCOPE_CLEAR_MASK,
@@ -94,10 +95,6 @@ use super::mutex_attr_init::{
 #[cfg(target_os = "none")]
 const PTHREAD_MUTEXATTR_SETTYPE_ADDRESS: usize = 0x082e84dc;
 
-/// Load address of the wrapped mutex initializer; the wired target
-/// default branches here.
-#[cfg(target_os = "none")]
-const POSIX_MUTEX_INIT_ADDRESS: usize = 0x082e82f8;
 
 /// The `kind` argument the veneer always passes (`mov r1, #0x0`):
 /// NORMAL — non-recursive, non-error-checking; clearing bits 4..5 of
@@ -168,52 +165,6 @@ unsafe fn host_model_pthread_mutexattr_settype(attr: *mut usize, kind: u32) -> u
     0
 }
 
-/// Host backing for the process-wide default attr object @ 0x089cfcbc:
-/// 8 bytes, lazily run through the attr initializer's stores on first
-/// use, exactly like the firmware's (whose static image bytes there
-/// are "act\0", not the magic).
-#[cfg(not(target_os = "none"))]
-static mut HOST_DEFAULT_ATTR: [u8; 8] = [0; 8];
-
-/// Host model of the wrapped mutex initializer: the decoded body of
-/// 0x082e82f8..0x082e8380, minus the kernel-object allocator (a fixed
-/// nonzero sentinel handle stands in for it). Not compiled on target,
-/// where the wired default calls the firmware body.
-#[cfg(not(target_os = "none"))]
-unsafe fn host_model_posix_mutex_init(mutex: *mut u8, attr: *mut usize) -> u32 {
-    if mutex.is_null() {
-        return MUTEX_INIT_INVALID;
-    }
-    // A NULL attr selects the process-wide default attr object, which
-    // is lazily run through pthread_mutexattr_init's stores first.
-    let attr = if attr.is_null() {
-        let default = core::ptr::addr_of_mut!(HOST_DEFAULT_ATTR).cast::<u8>();
-        if default.cast::<u32>().read() != MUTEXATTR_MAGIC {
-            default.cast::<u32>().write(MUTEXATTR_MAGIC);
-            default.add(4).cast::<u16>().write(MUTEXATTR_DEFAULT_HALFWORD);
-            let halfword = default.add(6).cast::<u16>();
-            halfword.write(
-                (halfword.read() & !MUTEXATTR_SCOPE_CLEAR_MASK) | MUTEXATTR_PROCESS_SCOPE_BIT,
-            );
-        }
-        default.cast::<usize>()
-    } else {
-        attr
-    };
-    if attr.cast::<u32>().read() != MUTEXATTR_MAGIC {
-        return MUTEX_INIT_INVALID;
-    }
-    // The kernel-object allocator @ 0x0808b1c0 (mask ROM): the model
-    // plants a fixed nonzero handle instead of allocating.
-    mutex.add(0x14).cast::<u32>().write(HOST_MODEL_SEM_HANDLE);
-    let attr_word = attr.cast::<u8>().add(4).cast::<u32>().read();
-    mutex.add(0x0c).cast::<u32>().write(attr_word);
-    mutex.add(0x04).cast::<u32>().write(0);
-    mutex.add(0x08).cast::<u32>().write(0);
-    mutex.add(0x12).cast::<u16>().write(0);
-    mutex.cast::<u32>().write(MUTEX_LIVE_MAGIC);
-    0
-}
 
 /// Wired default for the unported `pthread_mutexattr_settype` @
 /// 0x082e84dc: the firmware body on target, the behavioral host model
@@ -232,19 +183,12 @@ unsafe extern "C" fn default_pthread_mutexattr_settype(attr: *mut usize, kind: u
     }
 }
 
-/// Wired default for the unported mutex initializer @ 0x082e82f8: the
-/// firmware body on target, the behavioral host model elsewhere.
+/// Wired default for the ported mutex initializer @ 0x082e82f8.
 unsafe extern "C" fn default_posix_mutex_init(mutex: *mut u8, attr: *mut usize) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let init: PosixMutexInit = core::mem::transmute(POSIX_MUTEX_INIT_ADDRESS);
-        init(mutex, attr)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        host_model_posix_mutex_init(mutex, attr)
-    }
+    crate::kernel::posix_mutex::posix_mutex_init(
+        mutex.cast::<crate::kernel::posix_mutex::PosixMutex>(),
+        attr.cast::<u8>(),
+    )
 }
 
 /// Indirect dispatch for the two wrapped callees of
@@ -658,22 +602,13 @@ mod tests {
         assert_eq!(bad.0, snapshot, "the attr is untouched");
         assert_eq!(wrapper.0, [0xa5u8; 0x1c], "the mutex is untouched");
 
-        // A NULL attr selects the process-wide default attr object,
-        // lazily initialized on first use — and the mutex is planted
-        // from ITS fields (type NORMAL, process-scope bit set).
-        unsafe { core::ptr::addr_of_mut!(HOST_DEFAULT_ATTR).write_bytes(0, 1) };
+        // A NULL attr selects the process-wide default attr object and
+        // lazily initializes it before planting the mutex from its fields.
         let mut wrapper = Wrapper([0xa5u8; 0x1c]);
         let this = wrapper.0.as_mut_ptr();
-
         assert_eq!(unsafe { init(this, core::ptr::null_mut()) }, 0);
-
         let mut expected_attr = [0u8; 8];
         reference_attr_init(&mut expected_attr);
-        assert_eq!(
-            unsafe { *core::ptr::addr_of!(HOST_DEFAULT_ATTR) },
-            expected_attr,
-            "the default attr object was lazily initialized"
-        );
         let attr_word = u32::from_le_bytes(expected_attr[4..8].try_into().unwrap());
         assert_eq!(wrapper_word(&wrapper, 0x00), MUTEX_LIVE_MAGIC);
         assert_eq!(wrapper_word(&wrapper, 0x0c), attr_word);
