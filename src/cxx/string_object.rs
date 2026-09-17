@@ -637,6 +637,46 @@ pub unsafe extern "C" fn string_object_assign_payload(
     strcpy(destination, payload);
 }
 
+/// string_object_assign_bytes — original: `FUN_08277188` @ 0x08277188
+/// (88 bytes, all code; next function starts at 0x082771e0; **4 direct `bl`
+/// call sites** — all unconditional, zero predicated).
+///
+/// Raw ARM first uses `movs r6, r1; cmpne r2, #0`, so either a NULL byte span
+/// or a zero byte count tail-dispatches vtable slot +0xc with `this`. Otherwise
+/// it requests `byte_count + 1` bytes through slot +0x8 with flags zero,
+/// copies exactly that inclusive count through ROM `__rt_memcpy`, then writes
+/// a NUL at the copied range's final byte. Allocation failure returns without
+/// copying or clearing. The explicit terminator overwrites the last copied
+/// source byte even if it was nonzero.
+///
+/// The raw body has one ordinary `bl` (the memcpy veneer) and one indirect
+/// `blx` through vtable slot +0x8; neither is predicated. Its virtual slots
+/// use the existing [`STRING_OBJECT_ASSIGN_CSTR_OPS`] boundary because the
+/// modeled vtable stores ROM identities rather than host-callable pointers.
+/// This is the deliberate host representation deviation; target behavior is
+/// otherwise direct.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_bytes(
+    this: *mut StringObject,
+    source: *const u8,
+    byte_count: u32,
+) {
+    if source.is_null() || byte_count == 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let requested_size = byte_count.wrapping_add(1) as usize;
+    let destination = assign_cstr_allocate_op()(this, requested_size, 0);
+    if destination.is_null() {
+        return;
+    }
+
+    __rt_memcpy(destination, source, requested_size);
+    destination.add(requested_size - 1).write(0);
+}
+
 /// string_object_assign_utf16_cstr — original: FUN_0827654c @ 0x0827654c
 /// (92 bytes, all code; three BL references). Ghidra's 192-byte extent
 /// includes the separate encoder at 0x082766f8 reached by a tail BNE.
@@ -3659,6 +3699,54 @@ pub(crate) mod tests {
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
             std::vec![this as usize, this as usize],
             "both branch forms dispatch vtable slot +0xc with only this"
+        );
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_bytes_copies_the_requested_span_and_forces_its_last_byte_to_nul() {
+        let mut destination = [0xa5u8; 16];
+        let source = [b'a', 0, b'b', 0xcc, b'z'];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_bytes(this, source.as_ptr(), 4) };
+
+        let allocations =
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() };
+        assert_eq!(allocations, std::vec![(this as usize, 5, 0)]);
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(&destination[..5], &[b'a', 0, b'b', 0xcc, 0]);
+        assert_eq!(object.payload, 0xcafe_f00d as *mut u8);
+    }
+
+    #[test]
+    fn assign_bytes_guards_null_or_zero_and_does_not_fallback_after_allocation_failure() {
+        let source = [b'a'];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe {
+            string_object_assign_bytes(this, core::ptr::null(), 4);
+            string_object_assign_bytes(this, source.as_ptr(), 0);
+            string_object_assign_bytes(this, source.as_ptr(), 1);
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize, this as usize],
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 2, 0)],
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
     }
