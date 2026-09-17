@@ -107326,3 +107326,26 @@ functions:
       invents virtual dispatch from its instructions. A faithful Rust port
       would require unverified dispatch seams for both callees, so none was
       introduced.
+
+  - address: 0x0822b54c
+    ghidra: FUN_0822b54c
+    name: media_player_state_reset
+    size: 148
+    sig: "void media_player_state_reset(u8 *state)"
+    module: app/media_player_state_reset
+    status: ported
+    vars: {param_1: state, DAT_0820_8578: default_substate_reset, DAT_0821_4dbc: selected_substate_reset}
+    notes: >-
+      Raw ARM extent is exactly 148 bytes, 0x0822b54c..0x0822b5dc; the next
+      separately linked function begins at 0x0822b5e0. The body has nine
+      unconditional BL instructions plus one BLNE at 0x0822b560. Four
+      incoming call sites are plain BLs (0x0820a65c, 0x082205a0,
+      0x0822aad0, 0x0822b670); none is predicated. It conditionally releases
+      the owner cursor at +0x14 based on mode_selected_byte, resets exactly
+      one mode-dependent subobject (+0x330 when flag bit 0 at +0x5f8 is
+      clear, +0x38 when set), stores {0,0,-1} at +0x2c, and replaces the
+      adjacent target-width shared-cell slots +0x890/+0x894 with empty
+      handles. The substate reset callees remain unidentified/unported:
+      device code calls their verified retail addresses; host seams record
+      their calls and model only the observable empty u32 target slots, since
+      8-byte host pointers cannot represent adjacent 4-byte target slots.

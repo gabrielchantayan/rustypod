@@ -171,6 +171,7 @@ pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
 pub mod mode_selected_extent;
 pub mod mode_selected_position_set;
+pub mod media_player_state_reset;
 pub mod media_player;
 pub mod music_selection_state_reset;
 pub mod class_9400_current_item_matches_media_player;
