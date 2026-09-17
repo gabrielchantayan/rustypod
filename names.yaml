@@ -55787,6 +55787,29 @@ functions:
       normalize; LLVM emits the shift as `lsr` with the amount masked
       by 31 (in-contract no-op) and adds the crate's fp frame.
 
+  - address: 0x082a4f10
+    ghidra: FUN_082a4f10
+    name: bit_set_word_hash
+    size: 68
+    sig: "u32 bit_set_word_hash(const BitSet *set, u32 word)"
+    module: cxx/bit_set
+    status: ported
+    vars: {param_1: set, param_2: word}
+    notes: >-
+      Hashes one word by summing a 16-entry nibble table from least to most
+      significant nonzero nibble. Raw extent is 68 bytes,
+      0x082a4f10..0x082a4f54: 17 ARM words ending in the table-address
+      literal 0x089a8b30; the next real function begins `ldr r0,[r0,#16]`
+      at 0x082a4f58. Binary decoding finds four unconditional `bl` callers
+      (0x0827495c, 0x08274990, 0x082749cc, 0x082749f8), zero predicated
+      `bl` callers. The only internal call is the verified
+      iram_memcpy_veneer @ 0x08037df8, used solely to copy the table to the
+      stack. The receiver is never read. Rust uses the exact immutable
+      table directly, deliberately eliminating that local copy; its
+      wrapping addition and zero-input result match the ARM loop. Host tests
+      cover zero, one-nibble, leading-zero, mixed-nibble, repeated-nibble,
+      and overflow-heavy words plus receiver independence.
+
   # --- C++ layer owner-tracked mutex (0x082e8390 / 0x082e83d8) ---
   #
   # NOT the RTXC mutex of kernel/sync_mutex (0x080744a4 & co.): this pair
