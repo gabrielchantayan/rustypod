@@ -67661,6 +67661,36 @@ functions:
       proving all split boundaries and u32::MAX while retaining calendar
       fields.
 
+  # --- time: strict Rata Die day-and-seconds ordering ---
+  - address: 0x0829d974
+    ghidra: FUN_0829d974
+    name: day_and_seconds_is_before
+    size: 56
+    sig: "u32 day_and_seconds_is_before(const DayAndSeconds *left, const DayAndSeconds *right)"
+    module: time/day_and_seconds_is_before
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: left_day_number
+      r3: right_day_number
+      param_1_plus_0x04/r0: left_seconds_since_midnight
+      param_2_plus_0x04/r1: right_seconds_since_midnight
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent: ldr r2,[r0] at
+      0x0829d974 through bx lr at 0x0829d9a8; the next separately linked
+      comparator begins with ldr r2,[r0] at 0x0829d9ac. It returns one exactly
+      when left.day_number is unsigned-less than right.day_number, or when
+      days match and left.seconds_since_midnight is unsigned-less than the
+      right value; otherwise it returns zero. Decoding the body finds no BL
+      instructions. A complete raw branch-immediate scan finds four plain BL
+      callers (0x08127ac8, 0x0829bd70, 0x0829bdb4, and 0x0829d844), zero
+      predicated BL callers, and one predicated BEQ tail caller at 0x0829bdc8.
+      Host tests cover differing days, equal days with earlier/later/equal
+      seconds, and unsigned u32 boundary ordering. Deliberate deviations: the
+      retail anonymous two-word record is the existing repr(C) DayAndSeconds
+      type, and the ARM word result is explicitly typed as u32.
+
   # --- Vincent JIT: pipeline emission sugar ---
   - address: 0x082605f0
     ghidra: FUN_082605f0
