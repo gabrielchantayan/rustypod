@@ -103484,3 +103484,32 @@ functions:
       operation. Its nonzero result is normalized to one. The Rust port
       deliberately retains both callees as verified-address target seams and
       uses host recording seams for their observable arguments and results.
+
+  - address: 0x082c3c98
+    ghidra: FUN_082c3c98
+    name: expr_code_pair
+    sig: "void expr_code_pair(Parse *parse, Expr *first_expr, int *first_out_in_reg, int *first_out_temp_reg, Expr *second_expr, int *second_out_in_reg, int *second_out_temp_reg)"
+    module: sqlite/expr_code_pair
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: first_expr
+      param_3/r2: first_out_in_reg
+      param_4/r3: first_out_temp_reg
+      param_5/[sp]: second_expr
+      param_6/[sp+4]: second_out_in_reg
+      param_7/[sp+8]: second_out_temp_reg
+      FUN_08377b9c: expr_code_temp
+    notes: >-
+      Raw extent is exact: 0x082c3c98..0x082c3d08 contains 116 bytes, ending
+      with pop {r4,r5,r6,r7,r8,pc}; the next separately entered function
+      starts at 0x082c3d0c. Binary decoding finds two unconditional bl
+      instructions (0x082c3cd0 and 0x082c3d00), both to the already ported
+      expr_code_temp at 0x08377b9c, and zero predicated bl instructions.
+      For each of two input expressions it follows +8 while byte +0 is 'V',
+      sets the 16-bit flags field at +2 bit 0x0200, calls expr_code_temp with
+      the corresponding temporary-register output, and stores its returned
+      input register in the other output. Ghidra's seven-argument signature
+      agrees with the ARM register/stack argument layout. The original SQLite
+      local-helper source name is not established, so
+      expr_code_pair deliberately describes the verified two-expression work.

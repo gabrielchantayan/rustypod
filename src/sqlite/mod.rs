@@ -119,6 +119,7 @@ pub mod expr_code_move;
 pub mod expr_cache_affinity_change;
 pub mod expr_worklist;
 pub mod expr_code_temp;
+pub mod expr_code_pair;
 pub mod expr_delete;
 pub mod expr_dup;
 pub mod expr_function;
