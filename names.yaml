@@ -105541,3 +105541,29 @@ functions:
       than inventing a callee seam. match.py finds the same lock, handle,
       nested +0x54, conditional, unlock, and return structure; LLVM inlines
       the already-ported counted-mutex helpers and merges the two unlock tails.
+  - address: 0x0827ba4c
+    ghidra: FUN_0827ba4c
+    name: video_engine_release_pending_handles
+    size: 64
+    sig: "void video_engine_release_pending_handles(u32 *state)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      DAT_0827ba90: video_engine_release_context_slot
+      "*(u32 *)(state + 0xd8)": high_pending_handle
+      "*(u32 *)(state + 0xd4)": low_pending_handle
+      FUN_08272800: video_engine_release_one_handle_and_delete
+    notes: >-
+      Raw osos.dec establishes the true 64-byte extent
+      0x0827ba4c..0x0827ba8c; 0x0827ba90 is a literal-pool word and
+      0x0827ba94 begins the next distinct push prologue. The body has two
+      plain BL calls, both to FUN_08272800 at 0x0827ba6c and 0x0827ba84,
+      and no predicated BL calls. The four direct inbound callers are plain
+      BLs at 0x08152750, 0x08152a14, 0x08152e60, and 0x08153064; there are
+      no predicated inbound BL calls. It loads the context from 0x089d00d4,
+      releases nonzero target-width handles at +0xd8 then +0xd4 through the
+      existing video_engine_release_one_handle_and_delete port, and clears
+      each released word. Deliberate deviation: that callee discards the
+      context argument, so host builds pass NULL rather than map its resident
+      firmware global; target builds retain the volatile global load.
