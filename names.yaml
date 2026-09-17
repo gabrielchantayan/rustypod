@@ -23440,6 +23440,30 @@ functions:
       dereferenced without NULL guards. Rust uses a normal call for the
       tail dispatch, preserving the observable output.
 
+  - address: 0x082a255c
+    ghidra: FUN_082a255c
+    name: ui_element_horizontal_adjustment_available
+    size: 64
+    sig: "int ui_element_horizontal_adjustment_available(const UiElement *element)"
+    module: ui/horizontal_adjustment_available
+    status: ported
+    renames:
+      param_1/r0: element
+      "element+0x50": leading_target
+      "element+0x54": leading_flags
+      "element+0x68": trailing_target
+      "element+0x6c": trailing_flags
+    notes: >-
+      Raw extent is 0x082a255c..0x082a259c; the next distinct function
+      starts at 0x082a259c. It returns 1 precisely when either target word
+      (+0x68 before +0x50) is zero while its associated flag word has bit
+      0x20 set; otherwise it returns 0. The retail short-circuit read order
+      is trailing pair, then leading pair. Decoding every ARM B/BL word in
+      osos.dec finds exactly four direct unconditional bl call sites, zero
+      predicated bl forms, zero tail-b references, and no data-word
+      references. Rust preserves the read order and has no deliberate
+      deviations.
+
   - address: 0x082a2604
     ghidra: FUN_082a2604
     name: ui_element_content_bounds

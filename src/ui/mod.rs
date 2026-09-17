@@ -13,6 +13,7 @@ pub mod hash_glyph_cells_to_rgb565;
 pub mod rgba4444_pack;
 pub mod rgb555a1_pack;
 pub mod content_bounds;
+pub mod horizontal_adjustment_available;
 pub mod first_collection_item_bounds;
 pub mod collection_current_item_word;
 pub mod collection_first_item_word_at_1c;
