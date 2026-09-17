@@ -2532,6 +2532,32 @@ pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
     (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
 }
 
+/// microseconds_to_timespec — original: `FUN_08261e68` @ `0x08261e68`
+/// (40 bytes: nine instructions through `pop {r4,pc}` at `0x08261e8c`
+/// plus the `0x000f4240` literal at `0x08261e90`; the next real function
+/// begins at `0x08261e94`). A complete ARM B/BL-immediate decode of
+/// `osos.dec` finds exactly four direct, unconditional `bl` call sites
+/// (0x08196240, 0x08196284, 0x081fe558, 0x081fe59c), with zero predicated
+/// forms.
+///
+/// Divides signed `microseconds` by 1_000_000 through ADS `__rt_sdiv`.
+/// Stores the truncating quotient at `out[0]` (seconds) and the signed
+/// remainder times 1_000 at `out[1]` (nanoseconds). There is no NULL guard,
+/// matching the two aligned word stores in the original.
+///
+/// Deliberate deviation: ADS returns its quotient and remainder in r0/r1;
+/// Rust receives the latter through `__rt_sdivmod`'s out-parameter. The
+/// stores, signed truncation, and wrapping multiply are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.microseconds_to_timespec")]
+#[inline(never)]
+pub unsafe extern "C" fn microseconds_to_timespec(out: *mut i32, microseconds: i32) {
+    let mut remainder = 0;
+    let seconds = __rt_sdivmod(microseconds, 1_000_000, &mut remainder);
+    out.write(seconds);
+    out.add(1).write(remainder.wrapping_mul(1_000));
+}
+
 /// milliseconds_to_timespec — original: `FUN_08261e94` @ 0x08261e94
 /// (**40 bytes**: nine instructions through `pop {r4,pc}` at
 /// 0x08261eb8 plus the 0x000f4240 literal at 0x08261ebc; the next
@@ -5885,6 +5911,36 @@ mod tests {
         assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
         assert_eq!(unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) }, 0);
         assert_eq!(out, 0x01);
+    }
+
+    // ---- microseconds_to_timespec ----
+
+    fn micros_to_timespec(microseconds: i32) -> [i32; 2] {
+        let mut out = [0x5a5a_5a5a; 2];
+        unsafe { microseconds_to_timespec(out.as_mut_ptr(), microseconds) };
+        out
+    }
+
+    #[test]
+    fn microseconds_to_timespec_splits_signed_microseconds_at_seconds() {
+        for (microseconds, expected) in [
+            (0, [0, 0]),
+            (999_999, [0, 999_999_000]),
+            (1_000_000, [1, 0]),
+            (1_999_999, [1, 999_999_000]),
+            (-1, [0, -1_000]),
+            (-999_999, [0, -999_999_000]),
+            (-1_000_000, [-1, 0]),
+            (-1_999_999, [-1, -999_999_000]),
+        ] {
+            assert_eq!(micros_to_timespec(microseconds), expected, "{microseconds}");
+        }
+    }
+
+    #[test]
+    fn microseconds_to_timespec_keeps_signed_division_at_i32_bounds() {
+        assert_eq!(micros_to_timespec(i32::MAX), [2_147, 483_647_000]);
+        assert_eq!(micros_to_timespec(i32::MIN), [-2_147, -483_648_000]);
     }
 
     // ---- milliseconds_to_timespec ----

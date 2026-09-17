@@ -57123,6 +57123,32 @@ functions:
       blx-through-dispatch difference.
 
 
+  - address: 0x08261e68
+    ghidra: FUN_08261e68
+    name: microseconds_to_timespec
+    size: 40
+    sig: "void microseconds_to_timespec(i32 *out, i32 microseconds)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: microseconds
+      FUN_08031568: __rt_sdiv (quotient in r0, remainder in r1)
+      DAT_08261e90: microseconds_per_second (1000000)
+    notes: >-
+      Raw osos.dec is nine ARM instructions from 0x08261e68 through the
+      pop at 0x08261e8c plus the 0x000f4240 literal at 0x08261e90; the
+      next real function begins at 0x08261e94, so the true extent is 40
+      bytes. It divides signed microseconds by 1000000 through ADS
+      __rt_sdiv, stores quotient seconds at out+0, and stores the signed
+      remainder * 1000 nanoseconds at out+4. Decoding every ARM B/BL
+      immediate in osos.dec finds exactly 4 direct call sites, all
+      unconditional bl (0x08196240, 0x08196284, 0x081fe558, 0x081fe59c),
+      with zero predicated forms and no data-word references. Deliberate
+      deviation: Rust receives the ADS r1 remainder through the ported
+      __rt_sdivmod out-parameter; stores, signed truncation, and wrapping
+      multiply match.
+
   - address: 0x08261e94
     ghidra: FUN_08261e94
     name: milliseconds_to_timespec
