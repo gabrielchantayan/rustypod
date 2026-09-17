@@ -100,6 +100,7 @@ pub mod facade_registry_walk;
 pub mod facade_for_selector;
 pub mod fixed3_assign;
 pub mod fixed3_add_scaled;
+pub mod fixed3_sum;
 pub mod fixed_point;
 pub mod fixed_value;
 pub mod global_flag_table;

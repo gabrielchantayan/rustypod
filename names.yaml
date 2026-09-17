@@ -103900,3 +103900,30 @@ functions:
       type-level identities, so target builds use resident-address veneers and
       host tests inject matching seams. The already ported first callee is
       invoked directly as Rust; otherwise there are no deliberate deviations.
+
+  # --- fixed-point triple sum ---
+  - address: 0x082a5db0
+    ghidra: FUN_082a5db0
+    name: fixed3_sum
+    size: 92
+    sig: "void fixed3_sum(dst: *mut FixedPoint3, left: *const FixedPoint3, right: *const FixedPoint3)"
+    module: app/fixed3_sum
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: left
+      param_3/r2: right
+      local_0c: sum
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x082a5db0..0x082a5e0c:
+      push {r1-r7,lr} through pop {r1-r7,pc}; 0x082a5e0c starts the next
+      real function (push {r4,lr}). Decoding every ARM B/BL word finds four
+      unconditional BL instructions and no predicated BL: fixed16_add_indirect
+      at 0x082a5dc8 and 0x082a5dd8 for z then y, fixed_point3_set at
+      0x082a5df4, and the __rt_memcpy veneer at 0x082a5e04. The x words are
+      loaded directly and added with wrapping 32-bit ADD; y and z use the
+      same wrapping Q16.16 helper. The three sums are materialized in the
+      stack-local 12-byte FixedPoint3 then copied to dst, so aliasing dst with
+      either input is safe. The port calls the established __rt_memcpy Rust
+      seam directly instead of the 0x08037db0 ROM veneer; this is the only
+      deliberate deviation. Host tests cover i32 wrapping and dst/left alias.
