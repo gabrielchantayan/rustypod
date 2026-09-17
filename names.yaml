@@ -106352,3 +106352,37 @@ functions:
       offsets, NULL output forwarding, zero reserved argument, and u16
       result narrowing. match.py is expected to differ in the veneer and
       Rust frame while retaining the field-load/call/narrow structure.
+
+  - address: 0x082631a4
+    ghidra: FUN_082631a4
+    name: text_layout_counted_apply
+    size: 88
+    sig: "void text_layout_counted_apply(void *target, const u8 *text, const void *layout, u32 arg4, u32 arg5, u32 arg6, u32 arg7)"
+    module: ui/text_layout_counted_apply
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1: text
+      param_3/r2: layout
+      param_4/r3: arg4
+      param_5/[sp]: arg5
+      param_6/[sp+4]: arg6
+      param_7/[sp+8]: arg7
+      FUN_080f0048: utf8_codepoint_count_permissive
+      FUN_08262d84: counted_text_layout_apply_helper (unported direct callee)
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x082631a4..0x082631fc: the 22 ARM words end in
+      pop {r4,r5,r6,r7,r8,r9,sl,pc}, and the next independently linked
+      function begins with push {r4,r5,r6,r7,r8,r9,sl,fp,lr} at 0x082631fc.
+      The body has two plain BL calls, first to the existing permissive UTF-8
+      counter at 0x080f0048 and then to unported 0x08262d84; there are no
+      predicated calls. A whole-image raw A32 decode finds four incoming plain
+      BL calls (0x081a14cc, 0x081b31f0, 0x081eaa44, 0x08290b68) and no
+      predicated BL callers. The wrapper counts text, zero-extends its low
+      halfword, then forwards target, text, count, layout, arg4, a zero
+      reserved argument, and arg5 through arg7. The 0x08262d84 identity is
+      not claimed; its seam name derives only from this verified contract.
+      Deliberate deviation: target builds call the exact stock load address,
+      while host tests install a recording seam and prove UTF-8 count
+      truncation plus every forwarded argument.
