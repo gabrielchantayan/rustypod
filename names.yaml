@@ -69579,6 +69579,30 @@ functions:
       two adjacent flag strb into one strh and CSE-ing away the second
       of the original's two header-slot reloads, and the crate's fp
       frame.
+  - address: 0x082628f4
+    ghidra: FUN_082628f4
+    name: clock_source_base_construct
+    size: 20
+    sig: "void *clock_source_base_construct(void *this, u8 kind)"
+    module: cxx/clock_source_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: kind
+      DAT_08262904: clock_source_base_vtable
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x082628f4..0x08262907: ldr r2,[pc,#8]; str r2,[r0];
+      strb r1,[r0,#4]; bx lr; literal 0x089a80b0 at 0x08262904.
+      The next real function begins at 0x08262908. Independent ARM
+      branch-immediate decoding finds 4 direct plain unconditional bl
+      callers and 0 predicated bl callers. It initializes the shared
+      clock-source prefix `{ u32 vtable, u8 kind }`, passing r0 through
+      unchanged. No deliberate deviations. Host tests cover kind values
+      0, 1, 0x5a, and 0xff, the returned pointer, aligned vtable write,
+      byte offset 4, and untouched adjacent bytes. match.py is expected
+      to retain the literal load and two stores while differing in the
+      crate frame and LLVM code generation.
   - address: 0x08262908
     ghidra: FUN_08262908
     name: clock_source_destroy

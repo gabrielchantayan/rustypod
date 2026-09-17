@@ -19,11 +19,7 @@
 //!
 //! # Deliberate deviation
 //!
-//! The unported base constructor 0x082628f4 uses the existing volatile
-//! `CLOCK_SOURCE_OPS` seam. Its default is the binary-verified base body, not
-//! a stub; this port only supplies the distinct kind and derived vtable.
-
-use super::clock_source_construct::CLOCK_SOURCE_OPS;
+//! None. The shared base constructor 0x082628f4 is now ported directly.
 
 /// Literal-pool vtable word at 0x08262ab4.
 pub const VTABLE_ADDRESS: u32 = 0x089a_80f0;
@@ -42,8 +38,7 @@ const CLOCK_KIND: u8 = 0;
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn clock_source_construct_zero(this: *mut u8) -> *mut u8 {
-    let base = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CLOCK_SOURCE_OPS)) };
-    let this = unsafe { (base.construct_base)(this, CLOCK_KIND) };
+    let this = unsafe { super::clock_source_base_construct::clock_source_base_construct(this, CLOCK_KIND) };
     unsafe { this.cast::<u32>().write(VTABLE_ADDRESS) };
     this
 }
@@ -53,9 +48,6 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::clock_source_construct::{
-        tests::OPS_LOCK, BASE_VTABLE_ADDRESS, DEFAULT_CLOCK_SOURCE_OPS,
-    };
 
     #[repr(align(4))]
     struct Clock([u8; 16]);
@@ -68,7 +60,6 @@ mod tests {
 
     #[test]
     fn it_builds_a_kind_zero_clock_without_touching_neighbours() {
-        let _guard = OPS_LOCK.lock();
         let mut clock = Clock([0xa5; 16]);
 
         let returned = unsafe { clock_source_construct_zero(clock.0.as_mut_ptr()) };
@@ -76,18 +67,6 @@ mod tests {
         assert_eq!(returned, clock.0.as_mut_ptr());
         assert_eq!(clock.word(), VTABLE_ADDRESS);
         assert_eq!(clock.0[4], 0, "mov r1, #0 reaches the base");
-        assert_eq!(clock.0[5..], [0xa5; 11]);
-    }
-
-    #[test]
-    fn the_shared_default_base_preserves_its_verified_layout() {
-        let mut clock = Clock([0xa5; 16]);
-
-        let returned = unsafe { (DEFAULT_CLOCK_SOURCE_OPS.construct_base)(clock.0.as_mut_ptr(), 0) };
-
-        assert_eq!(returned, clock.0.as_mut_ptr());
-        assert_eq!(clock.word(), BASE_VTABLE_ADDRESS);
-        assert_eq!(clock.0[4], 0);
         assert_eq!(clock.0[5..], [0xa5; 11]);
     }
 }
