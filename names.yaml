@@ -106891,3 +106891,22 @@ functions:
       directly because that fill wrapper is unported. Host tests cover both
       delimiters and exhausted input; match.py reports the expected structural
       difference from Rust frames and seam dispatches.
+  - address: 0x08256d74
+    ghidra: FUN_08256d74
+    name: copy_four_words_forward_property
+    size: 36
+    sig: "u32 copy_four_words_forward_property(const u32 *source, u32 *destination)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      r0: final_word_return
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent 0x08256d74..0x08256d98:
+      four aligned ldr/str pairs at offsets 0, 4, 8, and 12, followed by bx
+      lr; 0x08256d98 starts the next independent push prologue. Whole-image
+      A32 branch decoding finds four direct inbound unconditional plain BL
+      calls (0x0824d2a4, 0x0824f180, 0x08250340, 0x08255758) and no predicated
+      BL calls. It copies four words in ascending order; the final source word
+      remains in r0 and is returned. Deliberate deviations: none.
