@@ -19,11 +19,11 @@
 #[cfg(not(target_os = "none"))]
 use core::ptr;
 
-type WriteCachePositionValue = unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32;
+pub(crate) type WriteCachePositionValue = unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn write_cache_position_value(
+pub(crate) unsafe fn write_cache_position_value(
     cache: *mut u8,
     position: u32,
     value: u32,
@@ -35,7 +35,7 @@ unsafe fn write_cache_position_value(
 
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
-struct CachePositionDefaultValueHostOps {
+struct CachePositionValueHostOps {
     write: WriteCachePositionValue,
 }
 
@@ -46,29 +46,42 @@ unsafe extern "C" fn unavailable_write_cache_position_value(
     _value: u32,
     _packed_value: u32,
 ) -> u32 {
-    panic!("cache_position_write_default_value called without a host writer seam")
+    panic!("a FAT port called common cache-position writer without a host seam")
 }
 
 #[cfg(not(target_os = "none"))]
-const DEFAULT_CACHE_POSITION_DEFAULT_VALUE_HOST_OPS: CachePositionDefaultValueHostOps =
-    CachePositionDefaultValueHostOps {
+const DEFAULT_CACHE_POSITION_VALUE_HOST_OPS: CachePositionValueHostOps =
+    CachePositionValueHostOps {
         write: unavailable_write_cache_position_value,
     };
 
 #[cfg(not(target_os = "none"))]
-static mut CACHE_POSITION_DEFAULT_VALUE_HOST_OPS: CachePositionDefaultValueHostOps =
-    DEFAULT_CACHE_POSITION_DEFAULT_VALUE_HOST_OPS;
+static mut CACHE_POSITION_VALUE_HOST_OPS: CachePositionValueHostOps =
+    DEFAULT_CACHE_POSITION_VALUE_HOST_OPS;
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn write_cache_position_value(
+pub(crate) unsafe fn write_cache_position_value(
     cache: *mut u8,
     position: u32,
     value: u32,
     packed_value: u32,
 ) -> u32 {
-    let ops = ptr::read_volatile(ptr::addr_of!(CACHE_POSITION_DEFAULT_VALUE_HOST_OPS));
+    let ops = ptr::read_volatile(ptr::addr_of!(CACHE_POSITION_VALUE_HOST_OPS));
     (ops.write)(cache, position, value, packed_value)
+}
+
+#[cfg(all(test, not(target_os = "none")))]
+pub(crate) static CACHE_POSITION_VALUE_WRITE_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+#[cfg(all(test, not(target_os = "none")))]
+pub(crate) unsafe fn replace_write_cache_position_value(
+    write: WriteCachePositionValue,
+) -> WriteCachePositionValue {
+    let previous = CACHE_POSITION_VALUE_HOST_OPS.write;
+    CACHE_POSITION_VALUE_HOST_OPS = CachePositionValueHostOps { write };
+    previous
 }
 
 /// Selects the format-specific default and writes it through the common cache writer.
@@ -152,11 +165,11 @@ mod tests {
     #[test]
     fn selects_sixteen_bit_default_for_non_eight_formats() {
         let _guard = TEST_LOCK.lock();
-        let previous = unsafe { replace_writer(recording_writer) };
+        let previous = unsafe { replace_write_cache_position_value(recording_writer) };
 
         let (result, call) = unsafe { call_with_format(3, 0xdead_beef, 0x7654_3210) };
 
-        unsafe { replace_writer(previous) };
+        unsafe { replace_write_cache_position_value(previous) };
         assert_eq!(result, 0xa5a5_5a5a);
         assert_eq!(call.value, 0x0000_ffff);
         assert_eq!(call.position, 0x1234_5678);
@@ -166,21 +179,16 @@ mod tests {
     #[test]
     fn selects_twenty_eight_bit_default_only_for_format_eight() {
         let _guard = TEST_LOCK.lock();
-        let previous = unsafe { replace_writer(recording_writer) };
+        let previous = unsafe { replace_write_cache_position_value(recording_writer) };
 
         let (_, format_eight_call) = unsafe { call_with_format(8, 0, 0x0123_4567) };
         let (_, other_format_call) = unsafe { call_with_format(9, u32::MAX, 0x89ab_cdef) };
 
-        unsafe { replace_writer(previous) };
+        unsafe { replace_write_cache_position_value(previous) };
         assert_eq!(format_eight_call.value, 0x0fff_ffff);
         assert_eq!(format_eight_call.packed_value, 0x0123_4567);
         assert_eq!(other_format_call.value, 0x0000_ffff);
         assert_eq!(other_format_call.packed_value, 0x89ab_cdef);
     }
 
-    unsafe fn replace_writer(write: WriteCachePositionValue) -> WriteCachePositionValue {
-        let previous = CACHE_POSITION_DEFAULT_VALUE_HOST_OPS.write;
-        CACHE_POSITION_DEFAULT_VALUE_HOST_OPS = CachePositionDefaultValueHostOps { write };
-        previous
-    }
 }

@@ -73335,6 +73335,40 @@ functions:
       bytes is exact. 29 call sites, verified by decoding every B/BL word
       in osos.dec: all 29 are plain bl, with no predicated forms.
 
+  - address: 0x082e18f8
+    ghidra: FUN_082e18f8
+    name: fat_cluster_chain_release
+    size: 60
+    sig: "void fat_cluster_chain_release(FatVolume *volume, u32 start_cluster, u32 replacement_value, u32 packed_value)"
+    module: fs/fat_cluster_chain_release
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: start_cluster
+      r2: replacement_value
+      r3: packed_value
+      r4: next_cluster
+      r5: current_cluster
+      r6: saved volume
+      FUN_082e0378: fat_next_cluster
+      FUN_082e03f4: common cache-position writer (resident boundary 0x082e39f4)
+    notes: >-
+      Raw extent is exactly 60 instruction bytes, from the push at 0x082e18f8
+      through the pop at 0x082e1930; the next independently entered function
+      begins at 0x082e1934. Ghidra's two-argument signature is incomplete:
+      raw instructions preserve incoming r2 and r3 across the loop and pass
+      both unchanged to common writer 0x082e39f4 after each next-cluster read.
+      It therefore reads each successor before writing replacement_value for
+      the current nonzero cluster, including a final read of zero when the
+      chain is empty. Four inbound direct calls were verified by decoding all
+      ARM B/BL words in osos.dec: plain bl at 0x082e0240, 0x082e4294, and
+      0x082e64b0, plus blne at 0x082e6790; no direct B tail calls. The port
+      reuses the existing common cache-position writer resident boundary and
+      host seam rather than inferring its cache-update behavior. match.py
+      exits 1 with the expected structural diff: LLVM saves additional
+      registers to preserve r2/r3 and loads the resident writer address for
+      a blx, while retaining the read-before-write loop and zero termination.
+
   - address: 0x082e1960
     ghidra: FUN_082e1960
     name: shared_data_release
