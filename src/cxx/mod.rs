@@ -111,6 +111,7 @@ mod object_state;
 pub mod opaque_type_tag_is_allowed;
 pub mod opaque_result_destroy;
 pub mod opaque_record_word_at_0c;
+pub mod opaque_collection_count;
 pub mod opaque_pair_equal;
 pub mod opaque_context_initialize;
 pub mod opaque_header_literal_construct;
