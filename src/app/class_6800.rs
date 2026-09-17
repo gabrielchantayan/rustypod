@@ -109,6 +109,7 @@
 
 use crate::heap::veneers::malloc_wrapper;
 use crate::app::registry::demo_mode_instance;
+use crate::app::resource_chain::ResourceProvider;
 use crate::kernel::task::current_task_ctx_block;
 
 /// Runtime class id of the object built here. It is both the registry
@@ -358,6 +359,16 @@ pub struct Class6800Ops {
     pub parent_construct: FrameworkBaseParentConstruct,
 }
 
+
+/// Remaining unported dependency of [`framework_resource_provider_construct`].
+#[derive(Clone, Copy)]
+pub struct ResourceProviderLinkOps {
+    /// `FUN_082722a0` refcounts and replaces the provider's +0x14 link.
+    pub set_next: unsafe extern "C" fn(
+        provider: *mut ResourceProvider,
+        next: *mut ResourceProvider,
+    ),
+}
 /// Remaining unported tail call of
 /// [`framework_base_reset_current_task_targets`].
 #[derive(Clone, Copy)]
@@ -472,6 +483,20 @@ pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
 /// parent to prove return forwarding.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
+unsafe extern "C" fn unported_resource_provider_set_next(
+    _provider: *mut ResourceProvider,
+    _next: *mut ResourceProvider,
+) {}
+
+/// Wired default for the unresolved refcounted provider-link setter.
+pub const DEFAULT_RESOURCE_PROVIDER_LINK_OPS: ResourceProviderLinkOps =
+    ResourceProviderLinkOps { set_next: unported_resource_provider_set_next };
+
+/// Active seam for `FUN_082722a0`, whose ownership implementation is not yet
+/// ported.
+pub static mut RESOURCE_PROVIDER_LINK_OPS: ResourceProviderLinkOps =
+    DEFAULT_RESOURCE_PROVIDER_LINK_OPS;
+
 /// The literal loaded from 0x08110c78 before the tail branch to
 /// `FUN_0812c534`. It lands on an apparent ARM branch immediately before a
 /// separately decoded function, not on recognizable table data.
@@ -570,6 +595,11 @@ unsafe fn framework_base_initialize_ops() -> FrameworkBaseInitializeOps {
 #[inline(always)]
 unsafe fn framework_base_state_ops() -> FrameworkBaseStateOps {
     core::ptr::read_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_STATE_OPS))
+}
+
+#[inline(always)]
+unsafe fn resource_provider_link_ops() -> ResourceProviderLinkOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(RESOURCE_PROVIDER_LINK_OPS))
 }
 
 /// framework_base_initialize — original: `FUN_081108b4` @ 0x081108b4
@@ -858,6 +888,37 @@ pub unsafe extern "C" fn framework_task_target_base_construct(
     this
 }
 
+/// framework_resource_provider_construct — original: `FUN_08272438` @
+/// 0x08272438 (56 bytes of code plus the literal-pool word at 0x08272470;
+/// **4 plain `bl` call sites and 0 predicated calls**, binary-scanned from
+/// `work/firmware/osos.dec`; this body itself has two direct `bl`s).
+///
+/// Constructs a framework base, installs the resource-provider vtable
+/// 0x089a5de0, clears its +0x14 provider link, and hands the supplied link to
+/// the refcounted setter @ 0x082722a0. The base constructor's returned
+/// pointer, rather than incoming `storage`, is used for every subsequent
+/// access and returned unchanged. There are no NULL guards.
+///
+/// Deliberate deviation: the setter's refcounting implementation is unported,
+/// so it remains an explicit [`RESOURCE_PROVIDER_LINK_OPS`] seam rather than
+/// inventing ownership behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_resource_provider_construct(
+    storage: *mut Class6800,
+    next: *mut ResourceProvider,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut Class6800 {
+    let this = framework_base_construct(storage, initial_target, create_link);
+    core::ptr::addr_of_mut!((*this).vtable).write_volatile(
+        0x089a_5de0usize as *const Class6800Vtable,
+    );
+    core::ptr::addr_of_mut!((*this).default_target).write_volatile(core::ptr::null_mut());
+    (resource_provider_link_ops().set_next)(this.cast(), next);
+    this
+}
+
 /// class_6800_new — original: `FUN_08177e84` @ 0x08177e84
 /// (72 bytes of code + the 4-byte vtable literal @ 0x08177ecc;
 /// **128 `bl` call sites**, binary-scanned).
@@ -1029,6 +1090,10 @@ mod tests {
     static mut RUNNING_TASK_NODE_SEQUENCE_INDEX: usize = 0;
     static mut RESET_ENTRY_LIST_CALLS: usize = 0;
     static mut RESET_ENTRY_LIST: *const u32 = ptr::null();
+    static mut RESOURCE_PROVIDER_SET_NEXT_CALLS: usize = 0;
+    static mut RESOURCE_PROVIDER_SET_NEXT_ARGS: (*mut ResourceProvider, *mut ResourceProvider) =
+        (ptr::null_mut(), ptr::null_mut());
+    static mut OBSERVED_PROVIDER_LINK_AT_SET: *mut u8 = ptr::null_mut();
 
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
@@ -1072,6 +1137,16 @@ mod tests {
         RESET_ENTRY_LIST = entries;
     }
 
+
+    unsafe extern "C" fn record_resource_provider_set_next(
+        provider: *mut ResourceProvider,
+        next: *mut ResourceProvider,
+    ) {
+        RESOURCE_PROVIDER_SET_NEXT_CALLS += 1;
+        RESOURCE_PROVIDER_SET_NEXT_ARGS = (provider, next);
+        OBSERVED_PROVIDER_LINK_AT_SET =
+            ptr::read_volatile(ptr::addr_of!((*provider.cast::<Class6800>()).default_target));
+    }
     unsafe extern "C" fn record_alloc(
         _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
         size: usize,
@@ -1194,6 +1269,12 @@ mod tests {
         RESET_ENTRY_LIST_CALLS = 0;
         RESET_ENTRY_LIST = ptr::null();
         CLASS_6800_OPS = Class6800Ops { parent_construct: record_parent_construct };
+        RESOURCE_PROVIDER_SET_NEXT_CALLS = 0;
+        RESOURCE_PROVIDER_SET_NEXT_ARGS = (ptr::null_mut(), ptr::null_mut());
+        OBSERVED_PROVIDER_LINK_AT_SET = 0xa5a5_a5a5usize as *mut u8;
+        RESOURCE_PROVIDER_LINK_OPS = ResourceProviderLinkOps {
+            set_next: record_resource_provider_set_next,
+        };
         FRAMEWORK_TASK_RESET_OPS = FrameworkTaskResetOps {
             apply_entry_list: record_reset_entry_list,
         };
@@ -1239,6 +1320,7 @@ mod tests {
         FRAMEWORK_ROOT_HOLDER.instance = ptr::null_mut();
         REGISTERED = RegistryEntry { class_id: 0, instance: ptr::null_mut() };
         CLASS_REGISTRY.vtable = ptr::null();
+        RESOURCE_PROVIDER_LINK_OPS = DEFAULT_RESOURCE_PROVIDER_LINK_OPS;
     }
 
     unsafe fn restore_task_hooks(saved_hooks: crate::kernel::task::TaskHooks) {
@@ -1523,6 +1605,56 @@ mod tests {
             drop(guard);
         }
         drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn resource_provider_constructor_installs_vtable_clears_link_and_sets_next() {
+        let mut input = poisoned();
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(input);
+        let mut next = ResourceProvider {
+            vtable: ptr::null(),
+            state_below_next: [ptr::null_mut(); 4],
+            next: ptr::null_mut(),
+        };
+
+        unsafe {
+            let guard = install_mocks();
+            PARENT_RESULT = ptr::addr_of_mut!(object);
+            let result = framework_resource_provider_construct(
+                storage,
+                ptr::addr_of_mut!(next),
+                0x2468,
+                0,
+            );
+
+            assert_eq!(result, ptr::addr_of_mut!(object), "the base constructor's r0 is returned");
+            assert_eq!(PARENT_CALLS, 1, "the base constructor retains its parent call");
+            assert_eq!(
+                object.vtable,
+                0x089a_5de0usize as *const Class6800Vtable,
+                "the literal at 0x08272470 replaces the base vtable"
+            );
+            assert!(object.default_target.is_null(), "the +0x14 link is cleared first");
+            assert_eq!(RESOURCE_PROVIDER_SET_NEXT_CALLS, 1);
+            assert_eq!(
+                RESOURCE_PROVIDER_SET_NEXT_ARGS,
+                (ptr::addr_of_mut!(object).cast(), ptr::addr_of_mut!(next)),
+                "the setter receives the base result and supplied provider"
+            );
+            assert!(
+                OBSERVED_PROVIDER_LINK_AT_SET.is_null(),
+                "the link is cleared before the refcounted setter runs"
+            );
+            assert_eq!(
+                input.vtable,
+                0xa5a5_a5a5usize as *const Class6800Vtable,
+                "all stores use the base constructor's relocated return"
+            );
+
+            restore();
+            drop(guard);
+        }
     }
 
     #[test]
