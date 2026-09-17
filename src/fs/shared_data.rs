@@ -100,6 +100,24 @@ static mut SHARED_DATA_POOL_RECYCLE: SharedDataPoolRecycle = missing_shared_data
 unsafe fn shared_data_pool_recycle(data: *mut u8) -> *mut u8 {
     core::ptr::read_volatile(core::ptr::addr_of!(SHARED_DATA_POOL_RECYCLE))(data)
 }
+/// shared_data_allocate — original: `FUN_082e00f8` @ `0x082e00f8` (8 bytes;
+/// four binary-verified plain `bl` call sites at `0x082e0114`, `0x082e1278`,
+/// `0x082e236c`, and `0x082e2420`; no predicated `bl` calls).
+///
+/// The two-word veneer clears r0 and tail-branches to
+/// `shared_data_pool_recycle` @ `0x082e2f74`, whose NULL-input path pops a
+/// 0x54-byte block from the shared-data pool. The next separately entered
+/// function begins at `0x082e0100`; Ghidra's larger body is unrelated.
+///
+/// Deliberate deviation: the unported pool boundary remains a fixed-address
+/// call on firmware and a recording seam on hosts, so this Rust function uses
+/// a normal call rather than the original tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn shared_data_allocate() -> *mut u8 {
+    shared_data_pool_recycle(core::ptr::null_mut())
+}
+
 /// shared_data_initialize — original: `FUN_082e2e9c` @ `0x082e2e9c` (84
 /// bytes: 80 bytes of code plus the 4-byte list-head literal at `0x082e2eec`;
 /// the next independently entered function starts at `0x082e2ef0`).
@@ -192,6 +210,8 @@ mod tests {
 
     static mut SEMAPHORE_EVENTS: Vec<u8> = Vec::new();
     static mut RECYCLED: Vec<usize> = Vec::new();
+    static mut ALLOCATED: *mut u8 = core::ptr::null_mut();
+
 
     unsafe extern "C" fn record_wait(_semaphore: usize) -> usize {
         (*addr_of_mut!(SEMAPHORE_EVENTS)).push(0);
@@ -208,6 +228,12 @@ mod tests {
         data
     }
 
+    unsafe extern "C" fn record_allocate(data: *mut u8) -> *mut u8 {
+        (*addr_of_mut!(RECYCLED)).push(data as usize);
+        ALLOCATED
+    }
+
+
     struct Bench {
         saved_kernel: RomThunkOps,
         _guard: MutexGuard<'static, ()>,
@@ -221,6 +247,8 @@ mod tests {
             (*addr_of_mut!(SEMAPHORE_EVENTS)).clear();
             (*addr_of_mut!(RECYCLED)).clear();
             set_shared_data_list_head(core::ptr::null_mut());
+            ALLOCATED = core::ptr::null_mut();
+
             addr_of_mut!(SHARED_DATA_POOL_RECYCLE).write(record_recycle);
             let saved_kernel = addr_of!(ROM_KERNEL).read_volatile();
             let mut patched_kernel = saved_kernel;
@@ -252,6 +280,22 @@ mod tests {
         unsafe {
             assert!((*addr_of!(SEMAPHORE_EVENTS)).is_empty());
             assert!((*addr_of!(RECYCLED)).is_empty());
+        }
+    }
+
+    #[test]
+    fn allocate_pops_a_pool_block_through_null_recycle() {
+        let _bench = bench();
+        let Some(slab) = (unsafe { slab() }) else {
+            assert!(crate::testing::note_missing_u32_fixture("fs/shared_data_allocate"));
+            return;
+        };
+
+        unsafe {
+            ALLOCATED = slab;
+            addr_of_mut!(SHARED_DATA_POOL_RECYCLE).write(record_allocate);
+            assert_eq!(shared_data_allocate(), slab);
+            assert_eq!((*addr_of!(RECYCLED)).clone(), std::vec![0]);
         }
     }
 

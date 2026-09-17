@@ -55,11 +55,14 @@
 //! predicated calls or tail branches. It pops a zeroed 0x1c-byte node, obtains
 //! a 0x54-byte shared-data block, stores that block in the node's +0x04 word,
 //! and recycles the node when the data allocation fails. Deliberate
-//! deviation: both allocation boundaries remain retailOS fixed-address calls
-//! on target and recording host seams in tests because neither helper is
-//! ported.
+//! deviation: node-pool allocation remains a retailOS fixed-address call on
+//! target and a recording host seam. Shared-data allocation now calls the
+//! ported `shared_data_allocate` veneer, which retains its own pool boundary.
 
 use super::shared_data::shared_data_release;
+#[cfg(target_os = "none")]
+use super::shared_data::shared_data_allocate as shared_data_pool_allocate;
+
 
 /// Width of a target pointer field: 4 on ARMv5TE and pointer-sized in the
 /// host fixtures, so widened host pointers never overlap adjacent fields.
@@ -104,9 +107,7 @@ unsafe fn pool_pop() -> *mut u8 {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn shared_data_allocate() -> *mut u8 {
-    let allocate: unsafe extern "C" fn() -> *mut u8 =
-        core::mem::transmute(0x082e_00f8usize);
-    allocate()
+    shared_data_pool_allocate()
 }
 
 #[cfg(not(target_os = "none"))]
