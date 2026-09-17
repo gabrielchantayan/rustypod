@@ -24306,6 +24306,25 @@ functions:
       1 bl call site. Walks the block chain newest-first freeing
       payload then header, then tail-branches into free() for the
       arena head itself.
+  - address: 0x082b2e98
+    ghidra: FUN_082b2e98
+    name: cg_interference_edge_link
+    size: 80
+    sig: "void cg_interference_edge_link(cg_heap_t *heap, uint32_t *source, uint32_t *target)"
+    module: codegen/interference
+    status: ported
+    vars: {param_1: heap, param_2: source, param_3: target}
+    notes: >-
+      Raw ARM establishes the 80-byte extent through the next function at
+      0x082b2ee8. The body has one plain bl (cg_heap_alloc) and no predicated
+      bl; a whole-image raw scan finds four plain incoming bl call sites and
+      no predicated incoming bl. Equal source/target +4 identities return
+      immediately; otherwise word +4 of source is an edge-list head and word
+      +4 of target is its identity. A duplicate leaves the list unchanged; a
+      miss allocates an 8-byte {next, target_identity} edge and appends it.
+      Deliberate host deviation: target pointers remain u32 words rather than
+      host pointers, preserving target record offsets and links.
+
 
   - address: 0x082b2f1c
     ghidra: FUN_082b2f1c

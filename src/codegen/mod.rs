@@ -41,6 +41,9 @@ pub mod file_directory_entry;
 /// accessor in the codegen address block.
 pub mod field_10_low_u16;
 pub mod heap;
+/// `cg_interference_edge_link` @ 0x082b2e98 — prepends a missing
+/// target-width edge identity to a code-generator interference list.
+pub mod interference;
 /// `cg_register_bitset_create` @ 0x082c0c54 — allocates the code generator's
 /// register-count header and its zeroed 32-bit bitset words.
 pub mod register_bitset;
