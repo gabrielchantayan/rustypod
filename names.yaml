@@ -17,6 +17,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827fdd0
+    ghidra: FUN_0827fdd0
+    name: kind_0x21_message_post
+    size: 76
+    sig: "u32 kind_0x21_message_post(u32 first_payload, u32 second_payload, u32 third_payload, void *target, u32 fifth_payload, void *dispatch_target)"
+    module: app/kind_0x21_message_post
+    status: ported
+    renames:
+      param_1/r0/r7: first_payload
+      param_2/r1/r8: second_payload
+      param_3/r2/r9: third_payload
+      param_4/r3/r4: target
+      param_5/stack/r5: fifth_payload
+      param_6/stack/r6: dispatch_target
+      FUN_082669e4: message_kind_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_0827fe1c: kind_0x21_message_construct
+      FUN_08110e4c: message_dispatch
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x0827fdd0..0x0827fe1b; 0x0827fe1c starts the derived constructor
+      with its own push prologue. The four direct call sites are all
+      unconditional plain BL instructions and there are no predicated BL
+      call sites. The body allocates 32 bytes from the message-kind arena,
+      invokes the constructor entry at 0x0827fe1c, then tail-branches to
+      the unported 0x08110e4c dispatcher. The port shares that established
+      target-only seam; host tests replace the target vtable callback.
   - address: 0x0829e100
     ghidra: FUN_0829e100
     name: object_child_count_is_positive

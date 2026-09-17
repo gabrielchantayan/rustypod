@@ -53,45 +53,43 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(ThreeWordMessage, payload)];
 const _: [u8; 0x14] = [0; core::mem::offset_of!(ThreeWordMessage, payload_flag)];
 const _: [u8; THREE_WORD_MESSAGE_SIZE] = [0; core::mem::size_of::<ThreeWordMessage>()];
 
-/// ABI of `FUN_08110e4c`, the unported tail dispatcher. This caller always
-/// supplies a NULL second argument, so its otherwise opaque target type stays
-/// an untyped pointer.
-pub type ThreeWordMessageDispatch = unsafe extern "C" fn(*mut ThreeWordMessage, *mut u8) -> u32;
+/// ABI of `FUN_08110e4c`, the unported tail dispatcher.
+pub type MessageDispatch = unsafe extern "C" fn(*mut MessageKind, *mut u8) -> u32;
 
 /// RetailOS load address of the unported dispatcher.
 pub const THREE_WORD_MESSAGE_DISPATCH_ADDRESS: usize = 0x0811_0e4c;
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn retail_three_word_message_dispatch(
-    message: *mut ThreeWordMessage,
+unsafe extern "C" fn retail_message_dispatch(
+    message: *mut MessageKind,
     target: *mut u8,
 ) -> u32 {
-    let dispatch: ThreeWordMessageDispatch = unsafe {
+    let dispatch: MessageDispatch = unsafe {
         core::mem::transmute(THREE_WORD_MESSAGE_DISPATCH_ADDRESS)
     };
     unsafe { dispatch(message, target) }
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_three_word_message_dispatch(
-    _message: *mut ThreeWordMessage,
+unsafe extern "C" fn missing_message_dispatch(
+    _message: *mut MessageKind,
     _target: *mut u8,
 ) -> u32 {
-    panic!("three_word_message_post requires dispatcher 0x08110e4c")
+    panic!("message dispatch requires dispatcher 0x08110e4c")
 }
 
 /// Active boundary for unported `FUN_08110e4c`; target code calls retailOS and
 /// host tests replace it with a recording implementation.
 #[cfg(target_os = "none")]
-pub static mut THREE_WORD_MESSAGE_DISPATCH: ThreeWordMessageDispatch = retail_three_word_message_dispatch;
+pub static mut MESSAGE_DISPATCH: MessageDispatch = retail_message_dispatch;
 
 /// Active host boundary for unported `FUN_08110e4c`.
 #[cfg(not(target_os = "none"))]
-pub static mut THREE_WORD_MESSAGE_DISPATCH: ThreeWordMessageDispatch = missing_three_word_message_dispatch;
+pub static mut MESSAGE_DISPATCH: MessageDispatch = missing_message_dispatch;
 
 #[inline(always)]
-fn three_word_message_dispatch() -> ThreeWordMessageDispatch {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(THREE_WORD_MESSAGE_DISPATCH)) }
+pub fn message_dispatch() -> MessageDispatch {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(MESSAGE_DISPATCH)) }
 }
 
 macro_rules! three_word_message_post_body {
@@ -141,7 +139,7 @@ pub unsafe extern "C" fn three_word_message_post(
         message_kind_arena_pool,
         fixed_block_pool_alloc,
         message_kind_construct,
-        three_word_message_dispatch()
+        |message: *mut ThreeWordMessage, target: *mut u8| unsafe { message_dispatch()(message.cast(), target) }
     )
 }
 

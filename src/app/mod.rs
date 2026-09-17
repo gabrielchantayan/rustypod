@@ -185,6 +185,7 @@ pub mod message_arena;
 pub mod message_0x13_arena;
 pub mod message_kind;
 pub mod message_kind_arena;
+pub mod kind_0x21_message_post;
 pub mod member_release;
 pub mod negate_i32_in_place;
 pub mod node_list;
