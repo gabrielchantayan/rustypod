@@ -60218,6 +60218,29 @@ functions:
       for the cursor words, and reassociated shift/mask sequences
       (value-identical).
 
+  - address: 0x082d81c8
+    ghidra: FUN_082d81c8
+    name: word_list_init_capacity_10
+    size: 28
+    sig: "WordList *word_list_init_capacity_10(WordList *this)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      Constructor for a ten-word inline WordList. Raw ARM words establish
+      the exact 28-byte extent 0x082d81c8..0x082d81e3: count = 0
+      (strh [r0]), capacity = 10 (strh [r0,#2]), and entries = this + 8
+      (str [r0,#4]); r0 is preserved and returned. The next distinct
+      function is the capacity-six constructor at 0x082d81e4. The body
+      contains zero plain and zero predicated BL instructions. Direct
+      inbound calls are exactly four plain BLs (0x082cdd6c, 0x082cead4,
+      0x082cf7d0, 0x082d9c0c), with zero predicated calls, counted by
+      decoding every B/BL word in osos.dec rather than trusting Ghidra.
+      The Rust port writes the same target repr(C) header fields and leaves
+      all ten inline words uninitialized; host tests pin the dirty-header,
+      return-value, capacity, entry-pointer, and untouched-tail contracts.
+
   - address: 0x082d81e4
     ghidra: FUN_082d81e4
     name: word_list_init
