@@ -104878,3 +104878,38 @@ functions:
       port therefore reads a u32 at the verified target byte offset instead of
       assigning an unverified object layout. LLVM may add a frame around the
       same load-and-return body; this is the sole deliberate codegen deviation.
+
+  # --- quantized stream offset to milliseconds ---
+  - address: 0x082958dc
+    ghidra: FUN_082958dc
+    name: stream_offset_to_milliseconds
+    size: 76
+    sig: "u32 stream_offset_to_milliseconds(const u8 *stream, u32 offset)"
+    module: app/stream_offset_to_milliseconds
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: offset
+      "[stream+0x418]": units_per_second
+      "[stream+0x430]": offset_quantum
+      FUN_08036f14: __rt_udiv
+      FUN_083eb9b4: __u2d
+      FUN_083eba48: __dmul
+      FUN_083eb238: __ddiv
+      FUN_083eb880: __d2u
+    notes: >-
+      Raw osos.dec extent is exactly 0x082958dc..0x08295928: the next
+      separately linked function begins at 0x08295930 after this function's
+      two-word 1000.0 literal. Decoding the instruction words establishes
+      five unconditional plain BL calls (not Ghidra's reported four), zero
+      predicated BL calls, and one plain-B tail call to __d2u. The function
+      reads stream+0x418 and stream+0x430, truncates offset by the latter
+      with __rt_udiv, converts both quantities to double, computes
+      (offset/offset_quantum)*1000.0/units_per_second, then tail-converts
+      through __d2u. The opaque context's field semantics are limited to
+      their observed arithmetic roles. Deliberate deviation: volatile
+      function-pointer loads retain the soft-float call boundaries; LLVM
+      emits an indirect tail branch for __d2u rather than the retail direct
+      branch. Host tests cover initial quantization truncation, a multi-second
+      conversion, and __d2u's u32 saturation path. match.py structural diff
+      reviewed after the ARM release build.
