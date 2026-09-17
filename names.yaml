@@ -14033,6 +14033,33 @@ functions:
       LLVM did not fold the body; the symbol resolves in
       librustypod.a next to region_ref_lock.
 
+  - address: 0x08280530
+    ghidra: FUN_08280530
+    name: region_elem_assign
+    size: 72
+    sig: "u32 region_elem_assign(void *dst, const void *src)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+      piVar3: region
+    notes: >-
+      Binary-verified extent: 72 bytes at 0x08280530..0x08280578; the next
+      function begins at 0x08280578. Full raw ARM B/BL decoding finds four
+      unconditional bl call sites (0x0814b91c, 0x0814c214, 0x0814c4d0,
+      0x081a8804), no predicated forms, and no tail b sites. It locks dst
+      and src, releases dst's old region reference through 0x082803c0,
+      copies src +0x4/+0x8, unconditionally increments the copied region's
+      u32 refcount, then tail-branches to unlock src and returns that status.
+      A NULL source region is therefore invalid, despite Ghidra's invented
+      error path. The Rust port uses the pre-existing REGION_ELEM_OPS release
+      seam for the unported 0x082803c0 callee; all other field access is by
+      word index to preserve target offsets on host fixtures. Host coverage
+      proves the live-reference replacement order, copied companion word,
+      wrapping retain, and unlock return status. match.py structural review
+      is expected to show Rust seam calls rather than retail direct bl.
+
   - address: 0x082805b8
     ghidra: FUN_082805b8
     name: region_ref_is_empty
