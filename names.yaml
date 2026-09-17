@@ -86235,6 +86235,40 @@ functions:
       the table's runtime-mutability across calls. Host tests cover first,
       middle duplicate, final, absent, and full-width nonmatching keys.
 
+  # --- keyed USB transfer scheduling ---
+  - address: 0x082937c0
+    ghidra: FUN_082937c0
+    name: usb_transfer_schedule
+    size: 172
+    sig: "i32 usb_transfer_schedule(void *request, u32 key, u32 transfer_kind, u32 packet_size, u32 transfer_flag, u32 completion)"
+    module: app/usb_transfer_schedule
+    status: ported
+    renames:
+      param_1/r0: request
+      param_2/r1: key
+      param_3/r2: transfer_kind
+      param_4/r3: packet_size
+      param_5: transfer_flag (unused)
+      param_6: completion
+      DAT_0829386c: slot_key_table
+      iVar1/r4: slot
+      iVar2/r0: submit_result
+    notes: >-
+      Raw osos.dec establishes a 172-byte code extent from 0x082937c0 through
+      `bx lr` at 0x08293868; 0x0829386c is the PC-relative 0x089d04c4 table
+      literal and the separately linked next function begins at 0x08293870.
+      Decoding every ARM B/BL-immediate word finds four inbound direct plain
+      bl call sites — 0x08105360, 0x08160c00, 0x08160c24, and 0x081e1bb8 —
+      with zero predicated bl forms. It selects one of four 24-byte keyed
+      slots, sets kind-1 or kind-3 flags at +0x11/+0x12, defaults a zero packet
+      size to 0x40 or 0x200 according to usb_high_speed_mode_active, and
+      forwards request + 0x34, key, kind, packet size, and completion to the
+      unported 0x081071ec USB submitter. Positive results are stored at +0xc
+      and returned as zero; nonpositive results clear +0xc and return the
+      signed low byte. Target builds call the documented ported lookup and
+      high-speed helpers directly and call 0x081071ec by its verified raw
+      address; host tests use seams for the live table and unported submitter.
+
 
   # --- input-delta feedback level update ---
   - address: 0x0829329c
