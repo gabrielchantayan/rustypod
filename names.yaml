@@ -103154,3 +103154,32 @@ functions:
       and a non-positive result to 11. The host uses a volatile BIO_write seam
       because target BIO pointers are 32-bit; firmware calls the verified
       retailOS address directly. Deliberate deviations: none.
+  - address: 0x082d408c
+    ghidra: FUN_082d408c
+    name: obfuscated_buffer_prepare
+    size: 72
+    sig: "u32 obfuscated_buffer_prepare(u8 *buffer, u32 *size_slot)"
+    module: util/obfuscated_buffer_prepare
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: size_slot
+      r3: supplied_size
+      r5: required_buffer_size
+      "*size_slot": supplied_size
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent: 18 ARM words from
+      push {r4,r5,r6,lr} at 0x082d408c through pop {r4,r5,r6,pc} at
+      0x082d40d0. The following words at 0x082d40d4 and 0x082d40d8 are the
+      literal-pool values 0x362 and 0x088fa545; the next distinct function
+      begins at 0x082d40dc. Decoding every aligned ARM B/BL immediate finds
+      four direct inbound BL calls, all unconditional at 0x081637d4,
+      0x082729e0, 0x08272a0c, and 0x082d42b0, with no inbound predicated BL
+      calls. The body has one unconditional outbound BL to 0x08093440 and no
+      predicated BLs. It returns 1 for a NULL size slot; otherwise it writes
+      0x362 to that slot, returning 12 unless buffer is non-NULL and its old
+      capacity is at least 0x362. On success it invokes the decoded callee
+      transform, XORing each buffer byte with its index plus 0x11, then returns
+      0. The callee has no asserted semantic identity; its raw decoded
+      byte-transform body is a private Rust helper so the patch remains
+      self-contained.
