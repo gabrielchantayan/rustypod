@@ -103927,6 +103927,27 @@ functions:
       either input is safe. The port calls the established __rt_memcpy Rust
       seam directly instead of the 0x08037db0 ROM veneer; this is the only
       deliberate deviation. Host tests cover i32 wrapping and dst/left alias.  # --- fixed-point three-vector difference ---
+  - address: 0x082a5d44
+    ghidra: FUN_082a5d44
+    name: object_flag_0x10_is_set
+    size: 16
+    sig: "u32 object_flag_0x10_is_set(const u8 *object)"
+    module: util/object_flag_0x10_is_set
+    status: ported
+    renames:
+      param_1/r0: object
+    notes: >-
+      Raw osos.dec establishes the true 16-byte extent
+      0x082a5d44..0x082a5d50: `ldrb r0,[r0,#0x18]; and r0,r0,#0x10; mov
+      r0,r0,lsr #4; bx lr`. The next real function starts at 0x082a5d54
+      with `push {r1-r7,lr}`. Decoding every aligned ARM B/BL-immediate
+      word across osos.dec finds exactly four incoming plain unconditional
+      BLs (0x081357d4, 0x081358ac, 0x0813596c, 0x0815ef60) and no
+      predicated BL forms. The callers set and clear the same byte's 0x10
+      bit while selecting opaque records, but do not establish a type-level
+      meaning, so the port names the proven field role rather than inventing
+      one. It returns the bit normalized to 0 or 1, has no NULL guard, and
+      does not modify the object. Deliberate deviations: none.
   - address: 0x082a5d54
     ghidra: FUN_082a5d54
     name: fixed3_difference
