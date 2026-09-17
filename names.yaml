@@ -105178,3 +105178,33 @@ functions:
       identities, so target builds call their verified addresses; host tests
       inject those boundaries and a local target-layout table. No other
       deliberate deviations.
+
+  # --- coordinate-owner initial render dispatch ---
+  - address: 0x0828c80c
+    ghidra: FUN_0828c80c
+    name: coordinate_owner_initial_dispatch
+    size: 104
+    sig: "u64 coordinate_owner_initial_dispatch(u8 *owner, u32 input_word)"
+    module: ui/coordinate_owner_initial_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: input_word
+      param_1+0x20: current_state
+      param_1+0x3e: initial_dispatch_complete
+      param_1+0x78: render_context
+      param_1+0xb4: saved_render_state
+      FUN_0828d848: coordinate-owner current-state dispatch (unported direct target call)
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte extent
+      0x0828c80c..0x0828c870: the next distinct push prologue starts at
+      0x0828c874. Decoding every aligned ARM B/BL-immediate word independently
+      finds four incoming direct plain BL calls at 0x0816d49c, 0x081814fc,
+      0x08181560, and 0x0818458c, with no predicated BL forms. The body has
+      one unconditional direct BL instruction, to 0x0828d848. If render_context
+      is nonzero and initial_dispatch_complete is clear, it saves the four
+      saved_render_state words, replaces them with current_state, dispatches,
+      restores the saved words, and sets initial_dispatch_complete. The callee's
+      broader identity is unrecovered, so target builds call its verified raw
+      address and host tests inject a recording boundary. The original returns
+      r0/r1 unchanged; the port returns their corresponding packed u64 value.
