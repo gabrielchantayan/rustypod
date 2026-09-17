@@ -103622,3 +103622,32 @@ functions:
       The raw implementation also preserves r0, but all verified call sites
       use the void ABI result. No deliberate deviations. Host test covers each
       changed byte and preservation of +0x2a and all preceding bytes.
+
+  # --- shared-context memory bounds accessor ---
+  - address: 0x082bc848
+    ghidra: FUN_082bc848
+    name: shared_context_memory_bounds
+    size: 52
+    sig: "void shared_context_memory_bounds(u32 *memory_base_out, u32 *memory_size_out)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: memory_base_out
+      param_2/r1: memory_size_out
+      iVar1: shared_context_base
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw extent is exact: 0x082bc848..0x082bc878 contains 52 bytes and ends
+      in pop {r4,r5,r6,pc}; the next real function starts at 0x082bc87c.
+      Binary decoding finds four direct inbound bl instructions, all
+      unconditional (0x080c9fc0, 0x080d1cb8, 0x080d6bd4, 0x0815227c), and
+      zero predicated bl instructions. It calls the ported retailOS lazy
+      shared-context getter at 0x08369bec; if it returns non-null, it writes
+      context+0xe4 to a non-null first output and context+0xe0 to a non-null
+      second output, independently. The e0 word is consumed as a capacity by
+      three recovered callers, while e4 is used as their base; the concrete
+      memory region identity is not recovered. The Rust port retains those
+      ABI output and null semantics, but omits the original's unused
+      r4-r6 save set. Focused host tests cover field order, null outputs, and
+      a null context. Rust implementation: src/ui/object_state.rs::
+      shared_context_memory_bounds.
