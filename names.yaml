@@ -107767,3 +107767,30 @@ functions:
       match.py structural output retains the initial sentinel store, link-read
       call, status gate, and target comparison; LLVM uses a larger frame and
       reorders the equivalent initial head/target checks.
+
+  # --- polymorphic string-owner destructor ---
+  - address: 0x0820bef8
+    ghidra: FUN_0820bef8
+    name: string_owner_destroy
+    size: 40
+    sig: "StringOwner *string_owner_destroy(StringOwner *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0820bf20: STRING_OWNER_VTABLE_ADDRESS
+      DAT_0820bf24: STRING_OBJECT_VTABLE_ADDRESS
+      FUN_08275d74: string_object_release_payload
+    notes: >-
+      Raw osos.dec establishes the true 40-byte body:
+      0x0820bef8..0x0820bf1c, followed by literal-pool words
+      0x089922c8 and 0x089a6044 at 0x0820bf20/0x0820bf24; the next function
+      begins with push {r4,r5,r6,lr} at 0x0820bf28. The destructor plants the
+      outer vtable, plants the embedded StringObject vtable at this+4,
+      releases that member's payload through the ported
+      string_object_release_payload @ 0x08275d74, and returns this. A
+      decoded whole-image ARM B/BL scan finds four direct inbound calls, all
+      plain unconditional BL instructions and no predicated BL form. Ghidra
+      reverses the two literal assignments and misses that the release input
+      is the embedded member. Host vtable identities are modeled by statics;
+      the release call is direct because its callee is ported.
