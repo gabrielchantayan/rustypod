@@ -17,6 +17,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08274458
+    ghidra: FUN_08274458
+    name: base64_table_char
+    size: 20
+    sig: "u8 base64_table_char(u32 index)"
+    module: crypto/base64_table_char
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0827446c: base64_table
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x08274458..0x0827446b: cmp r0,#0x40; ldrcc r1,[pc,#8];
+      ldrbcc r0,[r1,r0]; movcs r0,#0x3f; bx lr. The following word is the
+      literal table address 0x083ed338, and 0x08274470 begins the next
+      independently linked function with push {r4-r9,sl,lr}. A whole-image
+      raw A32 branch decode finds four incoming plain BL calls and no
+      predicated BL calls. It returns the indexed stock-table byte for values
+      below 64, otherwise ASCII question-mark (0x3f). Deliberate deviation:
+      the fixed firmware table is transcribed as a Rust constant, including
+      its intentional NUL bytes.
   - address: 0x0827c158
     ghidra: FUN_0827c158
     name: tagged_buffer_release

@@ -46,6 +46,7 @@ pub mod asn1_adb;
 pub mod buffered_writer_write;
 pub mod base64_encode;
 pub mod base64_decode;
+pub mod base64_table_char;
 pub mod bio_printf;
 pub mod bio_new;
 pub mod bio_puts;
