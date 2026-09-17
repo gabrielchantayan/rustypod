@@ -105841,3 +105841,33 @@ functions:
       that unresolved operation. match.py reports the same count load, key
       comparison, element access, and final insertion dispatch, with LLVM
       choosing a prechecked loop and indirect BLX for the ROM target.
+  - address: 0x08274f10
+    ghidra: FUN_08274f10
+    name: object_base_construct
+    size: 44
+    sig: "void *object_base_construct(void *object)"
+    module: heap/object_base_construct
+    status: ported
+    renames:
+      param_1/r0: object
+      DAT_08274f3c: object_base_vtable
+      DAT_08274f40: object_base_instance_counter
+      "[object + 0x00]": vtable
+      "[object + 0x04]": instance_id
+      "[object + 0x08]": base_state_08
+      "[object + 0x0c]": base_state_0c
+    notes: >-
+      Raw osos.dec establishes the 44-byte extent 0x08274f10..0x08274f3c:
+      ten executable ARM words followed by the two literal-pool words at
+      0x08274f3c and 0x08274f40; 0x08274f44 starts the next real function.
+      The constructor has zero direct calls, plain or predicated. Its four
+      direct incoming call sites are plain bl forms (the four Ghidra callers
+      independently agree); no predicated incoming bl was found. It installs
+      vtable 0x089a5f98, clears target words +8 and +12, assigns the current
+      0x08a09f00 instance-counter word at +4, then increments it with u32
+      wrapping arithmetic while preserving r0. Deliberate deviation: firmware
+      startup owns that global's initial value; the replacement payload's
+      corresponding Rust static starts at zero. Explicit u32 object words
+      preserve target offsets on 64-bit hosts. match.py showed the same store,
+      load, increment, and counter-store sequence, with LLVM adding a standard
+      frame and literal-pool layout.

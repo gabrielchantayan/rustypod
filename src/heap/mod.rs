@@ -26,6 +26,7 @@ pub mod managed_handle;
 pub mod memh_handle;
 pub mod memh_set_len;
 pub mod object_destroy_dispatch;
+pub mod object_base_construct;
 pub mod fixa;
 pub mod fixa_owner_create;
 pub mod mailbox_receive_gateway;
