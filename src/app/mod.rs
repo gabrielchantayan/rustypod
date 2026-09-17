@@ -93,6 +93,7 @@ pub mod keyed_record_pair_lookup;
 pub mod event_hub;
 pub mod event_listener_controller_available;
 pub mod event_list;
+pub mod rb_tree_pool_destruct;
 pub mod event_payload_message;
 pub mod event_source;
 pub mod facade_registry_walk;

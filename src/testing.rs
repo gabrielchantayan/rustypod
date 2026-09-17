@@ -651,6 +651,10 @@ pub mod hints {
     // owner/nested-object fixtures; mappings never unmap, so no other user
     // may share this hint.
     pub const NESTED_OBJECT_VALUE: usize = 0xb300_0000;
+    // 0xee10_0000: dedicated to app/rb_tree_pool_destruct's raw-u32 tree,
+    // header, and chunk-record fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const RB_TREE_POOL_DESTRUCT: usize = 0xee10_0000;
     // 0xd600_0000: dedicated to sqlite/corrupt_schema's raw-u32 InitData,
     // connection, string, and allocator-result fixture; mappings never
     // unmap, so no other user may share this hint.
