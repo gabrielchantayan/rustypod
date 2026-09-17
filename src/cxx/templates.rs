@@ -2390,6 +2390,36 @@ pub unsafe extern "C" fn container_element_at_alias_5f74(this: *mut u8, index: u
     let element_slot = vtable.add(ELEMENT_SLOT_VTABLE_INDEX).read();
     element_slot(this, index).read()
 }
+/// container_element_at_veneer_9cef0 — original: `FUN_0829cef0` @ 0x0829cef0
+/// (8 bytes; four plain `bl` call sites, no predicated calls).
+///
+/// Raw `osos.dec` establishes the complete two-word body: `add r0,r0,#0x24;
+/// b 0x083d5f74`. The following `ldr r0,[r0,#0x7c]; bx lr` at 0x0829cef8 is
+/// the next unrelated function. The branch target is the already ported
+/// [`container_element_at_alias_5f74`], the `T *operator[](size_t)`
+/// instantiation that dispatches through vtable +0x40 and loads the returned
+/// element-slot word.
+///
+/// The four direct callers at 0x081177dc, 0x0828bb38, 0x0828bbec, and
+/// 0x082a69d4 are unconditional plain `bl`; no predicated BL reaches the
+/// veneer. It adjusts an owning object's address to its embedded container at
+/// +0x24, preserving the original `index` and result. Deliberate deviation:
+/// Rust expresses the ARM tail branch as a call; LLVM may lower it back to a
+/// tail branch.
+///
+/// # Safety
+///
+/// `owner + 0x24` must satisfy [`container_element_at_alias_5f74`]'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_veneer_9cef0")]
+#[inline(never)]
+pub unsafe extern "C" fn container_element_at_veneer_9cef0(
+    owner: *mut u8,
+    index: usize,
+) -> *mut u8 {
+    container_element_at_alias_5f74(owner.add(0x24), index)
+}
+
 
 
 
@@ -6903,6 +6933,32 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn element_at_veneer_9cef0_adjusts_to_embedded_container() {
+        unsafe {
+            let mut vtable = [fake_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut a: u8 = 1;
+            let mut b: u8 = 2;
+            #[repr(align(8))]
+            struct AlignedOwner([u8; 4 + 0x24 + core::mem::size_of::<FakeContainer>()]);
+            let mut storage = AlignedOwner([0; 4 + 0x24 + core::mem::size_of::<FakeContainer>()]);
+            let owner = storage.0.as_mut_ptr().add(4);
+            let container = owner.add(0x24).cast::<FakeContainer>();
+            container.write(FakeContainer {
+                vtable: vtable.as_mut_ptr(),
+                slots: [&mut a, &mut b, core::ptr::null_mut()],
+            });
+            for index in 0..3 {
+                assert_eq!(
+                    container_element_at_veneer_9cef0(owner, index),
+                    container_element_at_alias_5f74(container.cast(), index),
+                    "index {index}"
+                );
+            }
+        }
+    }
+
 
     #[test]
     fn element_at_alias_5f44_matches_primary() {
