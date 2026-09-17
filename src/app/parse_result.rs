@@ -152,6 +152,33 @@ pub unsafe extern "C" fn parse_result_is_ok(record: *const u8) -> u32 {
     (record.read() == 1) as u32
 }
 
+/// parse_result_clear — original: `FUN_08283154` @ 0x08283154 (20 bytes;
+/// **4 plain `bl` call sites, 0 predicated `bl` call sites**, plus one
+/// tail `b`, binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Clears the 4-byte parser-result record with `mov r1, #0; strb r1, [r0];
+/// strb r1, [r0, #1]; strh r1, [r0, #2]; bx lr`, then returns `record` in
+/// the preserved r0. The true extent is 0x08283154..0x08283167: the
+/// preceding `parse_result_is_ok` ends at 0x08283153, and the distinct
+/// initializer begins at 0x08283168; there is no literal pool.
+///
+/// Deliberate deviation: volatile stores prevent LLVM from combining the
+/// byte/byte/halfword store sequence into a word store with different
+/// alignment-fault behavior.
+///
+/// # Safety
+///
+/// `record` must cover four writable bytes and be halfword-aligned, exactly
+/// as required by the original `strh`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn parse_result_clear(record: *mut u8) -> *mut u8 {
+    record.write_volatile(0);
+    record.add(1).write_volatile(0);
+    (record.add(2) as *mut u16).write_volatile(0);
+    record
+}
+
 /// parse_result_destroy — original: `FUN_08283178` @ 0x08283178
 /// (4 bytes; **46 `bl` call sites, all unconditional, 0 `b`**,
 /// binary-scanned by decoding every B/BL word in osos.dec).
@@ -249,6 +276,18 @@ mod tests {
         let mut record = Record([0u8; 5]);
         unsafe { parse_result_init(record.0.as_mut_ptr(), 0xff, 0xff, 0xffff) };
         assert_eq!(&record.0[..4], &[0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn clear_zeroes_only_the_result_record_and_returns_it() {
+        let mut record = Record([0xffu8; 5]);
+        let out = record.0.as_mut_ptr();
+
+        let returned = unsafe { parse_result_clear(out) };
+
+        assert_eq!(returned, out, "r0 passes through the clear");
+        assert_eq!(&record.0[..4], &[0, 0, 0, 0]);
+        assert_eq!(record.0[4], 0xff, "clear does not overrun the record");
     }
 
     #[test]

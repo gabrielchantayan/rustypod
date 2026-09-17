@@ -55030,6 +55030,31 @@ functions:
       guard byte, all-zero, all-ones, and the cluster's {2, 5, 0x3a00}
       error shape.
 
+  - address: 0x08283154
+    ghidra: FUN_08283154
+    name: parse_result_clear
+    size: 20
+    sig: "u8 *parse_result_clear(u8 *record)"
+    module: app/parse_result
+    status: ported
+    renames:
+      param_1: record
+    notes: >-
+      Clears the 4-byte parser-result record with the raw ARM sequence
+      `mov r1,#0; strb r1,[r0]; strb r1,[r0,#1]; strh r1,[r0,#2]; bx lr`.
+      The three writes cover status u8 +0x00, code u8 +0x01, and detail
+      LE u16 +0x02; r0 is never changed, so the port returns record.
+      Raw words establish the exact 20-byte extent 0x08283154..0x08283167:
+      parse_result_is_ok ends at 0x08283153 and the distinct initializer
+      begins at 0x08283168, with no literal pool. Decoding every ARM B/BL
+      word in osos.dec found four direct, unconditional bl calls
+      (0x080faa54, 0x080fb4c4, 0x080fbee4, 0x080fc1d8), no predicated bl
+      calls, and one tail b at 0x080a89e8. The port deliberately uses
+      volatile byte/byte/halfword stores so LLVM cannot combine them into
+      a word write whose alignment-fault behavior differs from the original.
+      Host test verifies the returned pointer, the cleared four-byte record,
+      and the guard byte immediately after it.
+
   - address: 0x08283144
     ghidra: FUN_08283144
     name: parse_result_is_ok
