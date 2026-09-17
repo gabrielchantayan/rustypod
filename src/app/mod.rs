@@ -353,3 +353,5 @@ pub mod view_timer;
 pub mod strided_buffer_entry;
 pub mod output_buffer_reset;
 pub mod stream_selection_change;
+
+pub mod item_collection_dispatch;

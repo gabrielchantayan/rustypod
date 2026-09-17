@@ -656,6 +656,10 @@ pub mod hints {
     // header, and chunk-record fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const RB_TREE_POOL_DESTRUCT: usize = 0xee10_0000;
+    // 0x8280_0000: dedicated to app/item_collection_dispatch's raw-u32
+    // context, owner, and collection fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const ITEM_COLLECTION_DISPATCH: usize = 0x8280_0000;
     // 0xd600_0000: dedicated to sqlite/corrupt_schema's raw-u32 InitData,
     // connection, string, and allocator-result fixture; mappings never
     // unmap, so no other user may share this hint.
