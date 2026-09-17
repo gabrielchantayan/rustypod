@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827c158
+    ghidra: FUN_0827c158
+    name: tagged_buffer_release
+    size: 52
+    sig: "void tagged_buffer_release(void *buffer)"
+    module: cxx/tagged_buffer_release
+    status: ported
+    renames:
+      param_1/r0/r4: buffer
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x0827c158..0x0827c18c: the next independently linked function begins
+      with push {r4,lr} at 0x0827c18c. The 13 words contain one plain
+      internal bl to operator_delete_tag3 @ 0x082aad14 and no predicated
+      calls. A whole-image raw ARM branch decode finds four direct callers,
+      all plain bl (0x0827c1b4, 0x0827c1f8, 0x0827c84c, 0x083e41e8), and
+      zero predicated calls. Algorithm: for state byte +0 equal to 3 or 4,
+      delete the target-width allocation word at +8 through tag-3 delete,
+      then clear that word; always write the -1/0xff empty sentinel to +0.
+      Deliberate deviation: the direct ARM call is the existing direct Rust
+      operator_delete_tag3 port; target pointer fields stay u32 words on host.
   - address: 0x0827fdd0
     ghidra: FUN_0827fdd0
     name: kind_0x21_message_post

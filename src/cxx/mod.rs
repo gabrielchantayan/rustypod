@@ -264,6 +264,7 @@ pub mod byte_pair_prefix_init;
 pub mod scaled_byte_pair_record_construct;
 pub mod wheel_event;
 pub mod word_key_map;
+pub mod tagged_buffer_release;
 pub mod word_key_set;
 pub mod word_key_set_count;
 pub mod timer_stop_then_clear_bit_set;
