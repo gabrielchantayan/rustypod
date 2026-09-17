@@ -61984,6 +61984,31 @@ functions:
       or alignment check. Deliberate deviation: Rust's u8 return is the
       zero-extended r0 value produced by ARM ldrb. Host tests cover zero,
       high-bit, and sentinel style values plus adjacent-byte preservation.
+  # --- Draw-state background-colour getter ---
+  - address: 0x082a1d64
+    ghidra: FUN_082a1d64
+    name: draw_state_get_background_color
+    size: 8
+    sig: "void draw_state_get_background_color(u8 *dst, const u8 *record)"
+    module: cxx/draw_state_get_background_color
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: record
+      param_2_plus_0x15/r1: background_color
+    notes: >-
+      Raw osos.dec is exactly two ARM instructions (8 bytes), `add
+      r1,r1,#0x15; b 0x082720ac`, from 0x082a1d64 through 0x082a1d68; the
+      separately linked next function begins at 0x082a1d6c. A binary scan of
+      every ARM B/BL-immediate word finds four inbound direct calls, all
+      unconditional plain bl with zero predicated forms. The tail target is
+      the separately ported color_copy_unaligned helper, which copies four
+      bytes at ascending addresses with volatile byte accesses. This wrapper
+      binds its source to the draw-state background-colour field at +0x15;
+      callers save it before changing the drawing state and restore it
+      afterward. The function has no NULL, bounds, or alignment checks.
+      Deliberate deviation: Rust invokes the direct helper port rather than
+      tail-branching; the helper preserves the original byte-copy order.
 # --- Tagged payload signed-field +0x52 getter ---
   - address: 0x082a1d74
     ghidra: FUN_082a1d74
