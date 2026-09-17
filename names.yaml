@@ -18977,6 +18977,32 @@ functions:
       load-test/conditional-call/unconditional-call/mov r0,#1 shape;
       the diff is the ops-table blx indirection and the crate fp frame.
 
+  - address: 0x08260880
+    ghidra: thunk_FUN_0810dfc0
+    name: view_event_complete_thunk
+    size: 4
+    sig: "u32 view_event_complete_thunk(u8 *this)"
+    module: app/view_event
+    status: ported
+    vars:
+      param_1/r0: this (the view/controller)
+      FUN_0810dfc0: view_event_complete (ported target @ 0x0810dfc0)
+    notes: >-
+      Raw osos.dec word eafab5ce decodes as b 0x0810dfc0. The next word,
+      0xe92d4070 at 0x08260884, is push {r4,r5,r6,lr} for a distinct
+      following function, so this veneer is exactly four bytes. Decoding every
+      ARM B/BL-immediate word in osos.dec finds seven direct inbound transfers:
+      two plain bl (0x08239f6c and 0x0823a2c8), no predicated bl, and five
+      tail b (0x08226e78, 0x082273dc, 0x0822a02c, 0x08234078, 0x082398f4).
+      Ghidra's four bl references are not raw-code-grounded. The veneer
+      forwards r0 unchanged to the separately ported view_event_complete and
+      returns its handled verdict. ARM builds preserve the tail branch through
+      a relocation-safe assembly reference; hosts use an equivalent Rust call.
+      Host tests cover timer-present and timer-absent forwarding. match.py
+      confirms the single ARM b shape; its unresolved static-library relocation
+      is displayed as stream_buffer_refill_level_advance rather than the final
+      view_event_complete target.
+
   - address: 0x0810dfe8
     ghidra: FUN_0810dfe8
     name: stop_view_timer
