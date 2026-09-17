@@ -36,4 +36,5 @@ pub mod sfnt;
 pub mod trace;
 pub mod trig;
 pub mod word_cursor;
+pub mod too_many_hints;
 pub mod types;

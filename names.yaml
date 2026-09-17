@@ -13873,6 +13873,24 @@ functions:
       port deliberately uses byte-wise volatile accesses, so unaligned input
       is defined; aligned records match the retail halfword-load helpers.
 
+  - address: 0x082d33fc
+    ghidra: FUN_082d33fc
+    name: ft_too_many_hints
+    size: 8
+    sig: "i32 ft_too_many_hints()"
+    module: ft/too_many_hints
+    status: ported
+    vars: {}
+    notes: >-
+      Raw extent is exactly 8 bytes at 0x082d33fc..0x082d3403; the distinct
+      following function begins at 0x082d3404. The two raw instructions are
+      mov r0, #0x16 and bx lr, returning FreeType's FT_Err_Too_Many_Hints
+      without reading arguments or changing memory. Decoding every ARM B/BL
+      word in osos.dec finds four plain unconditional BL callers
+      (0x08051984, 0x080519e0, 0x0805a088, 0x0805a0e4), zero predicated BL
+      callers, and one tail B caller at 0x082d33f8. The Rust port has no
+      deliberate deviations.
+
   - address: 0x0805cfb4
     ghidra: FUN_0805cfb4
     name: bzero
