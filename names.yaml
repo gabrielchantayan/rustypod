@@ -27724,6 +27724,35 @@ functions:
       is the crate fp frame, the ops-table blx indirections and LLVM
       inlining timer_schedule_shim's argument rotation.
 
+  - address: 0x08291fb4
+    ghidra: FUN_08291fb4
+    name: string_object_opaque_base_destroy
+    size: 24
+    sig: "StringObject *string_object_opaque_base_destroy(StringObject *owner)"
+    module: cxx/string_object_opaque_base_destroy
+    status: ported
+    vars:
+      param_1: owner
+      FUN_083d0af0: opaque_base_destroy
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the exact six-instruction, 24-byte body
+      0x08291fb4..0x08291fcb: `push {r4,lr}; add r0,r0,#8; bl
+      0x083d0af0; pop {r4,lr}; sub r0,r0,#8; b 0x08277484`. The next
+      separately linked function begins with `cmp r1,#0xd00` at
+      0x08291fcc. Ghidra's 24-byte extent is right but it misidentifies
+      the tail branch as a call to string_object_release_payload
+      (0x08275d74); raw code targets the ported string_object_destroy
+      (0x08277484). Four inbound direct BL call sites were independently
+      identified (0x0839c8b0, 0x0839c908, 0x083e757c, 0x083e75ac), all
+      unconditional; no predicated BL forms. Algorithm: destroy the
+      opaque base subobject at target offset +8 through 0x083d0af0,
+      subtract eight from that callee's returned pointer, and tail-call
+      string_object_destroy on the leading StringObject. The base
+      destructor remains unidentified, so target builds call its fixed
+      retailOS address and host tests use an injectable seam; no identity
+      is inferred.
+
   - address: 0x08292a70
     ghidra: FUN_08292a70
     name: wheel_sample_is_touched
