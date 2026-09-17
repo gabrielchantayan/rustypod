@@ -82,21 +82,22 @@ unsafe fn disk_readiness_check(device: u32, wait_for_ready: u32) -> u32 {
 }
 
 #[inline(always)]
-unsafe fn disk_read_dispatch(
+unsafe fn disk_block_dispatch(
     device: u32,
     block_index: u32,
-    destination: *mut u8,
+    buffer: *mut u8,
     block_count: u32,
+    operation: u32,
 ) -> u32 {
     #[cfg(target_os = "none")]
     {
         let dispatch: DiskReadDispatch = core::mem::transmute(DISK_READ_DISPATCH_ADDRESS);
-        dispatch(device, block_index, destination, block_count, 1)
+        dispatch(device, block_index, buffer, block_count, operation)
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        (host_ops().dispatch)(device, block_index, destination, block_count, 1)
+        (host_ops().dispatch)(device, block_index, buffer, block_count, operation)
     }
 }
 
@@ -124,7 +125,43 @@ pub unsafe extern "C" fn disk_block_read(
         return 0;
     }
 
-    (disk_read_dispatch(device, block_index, destination, block_count) != 0) as u32
+    (disk_block_dispatch(device, block_index, destination, block_count, 1) != 0) as u32
+}
+
+/// Gates a disk-block write on readiness and the four valid device slots.
+///
+/// Original: `FUN_082c62f0` at load address `0x082c62f0`, 108 bytes
+/// (`0x082c62f0..0x082c635c`), four direct plain `bl` call sites, and no
+/// predicated `bl` call sites (raw-binary verified).
+///
+/// The function checks readiness with the caller's `flags`, rejects device
+/// selectors above three, then dispatches a write operation (`0`) and
+/// normalizes its nonzero result to one.
+///
+/// # Deliberate deviations
+///
+/// The readiness and dispatch helpers remain unported, so target builds call
+/// their verified retailOS addresses and host tests install recording seams.
+///
+/// # Safety
+///
+/// `source` must satisfy the unported disk dispatcher's buffer contract when
+/// readiness succeeds and `device` is below four.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.disk_block_write")]
+#[inline(never)]
+pub unsafe extern "C" fn disk_block_write(
+    device: u32,
+    block_index: u32,
+    source: *mut u8,
+    block_count: u32,
+    flags: u32,
+) -> u32 {
+    if disk_readiness_check(device, flags) == 0 || device >= 4 {
+        return 0;
+    }
+
+    (disk_block_dispatch(device, block_index, source, block_count, 0) != 0) as u32
 }
 
 #[cfg(test)]
@@ -233,6 +270,35 @@ mod tests {
         unsafe {
             assert_eq!(READINESS_CALL, Some((0, 0xffff_ffff)));
             assert_eq!(DISPATCH_CALL, Some((0, 0, core::ptr::null_mut(), 0, 1)));
+        }
+    }
+
+    #[test]
+    fn write_forwards_flags_and_uses_write_operation() {
+        let _lock = TEST_LOCK.lock();
+        let _reset = unsafe { install_recorder(1, u32::MAX) };
+        let source = 0x1234_5000usize as *mut u8;
+
+        let result = unsafe { disk_block_write(3, 0x89ab_cdef, source, 0x42, 0xa5a5_5a5a) };
+
+        assert_eq!(result, 1);
+        unsafe {
+            assert_eq!(READINESS_CALL, Some((3, 0xa5a5_5a5a)));
+            assert_eq!(DISPATCH_CALL, Some((3, 0x89ab_cdef, source, 0x42, 0)));
+        }
+    }
+
+    #[test]
+    fn write_rejects_out_of_range_device_after_readiness() {
+        let _lock = TEST_LOCK.lock();
+        let _reset = unsafe { install_recorder(1, 1) };
+
+        let result = unsafe { disk_block_write(4, 0, core::ptr::null_mut(), 0, 0) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(READINESS_CALL, Some((4, 0)));
+            assert_eq!(DISPATCH_CALL, None);
         }
     }
 }

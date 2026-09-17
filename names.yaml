@@ -103379,3 +103379,34 @@ functions:
       cleanup ordering. match.py confirms the guard, field offsets, call
       sequence, and cleanup structure; LLVM's larger frame, direct Rust
       memcpy/memzero calls, and literal-loaded blx stock seams are deliberate.
+  # --- Four-slot disk block write gate ---
+  - address: 0x082c62f0
+    ghidra: FUN_082c62f0
+    name: disk_block_write
+    size: 108
+    sig: "u32 disk_block_write(u32 device, u32 block_index, u8 *source, u32 block_count, u32 flags)"
+    module: fs/disk_block
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: block_index
+      param_3/r2: source
+      param_4/r3: block_count
+      param_5/[sp]: flags
+      r4: valid_device_sentinel
+      r5: dispatch_device
+      r6: block_index
+      r7: source
+      r8: block_count
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte extent
+      0x082c62f0..0x082c635c: the following word at 0x082c635c is the next
+      distinct cmp/bxeq entry. Full ARM-word decoding finds four incoming
+      plain BL calls at 0x082b1f04, 0x082e15a4, 0x082e3c94, and 0x082e4b7c,
+      with no incoming predicated BL calls. The wrapper calls the unported
+      readiness helper FUN_082c3174 with device and flags, rejects selectors
+      4 and above, then calls the unported dispatch wrapper FUN_083653cc with
+      device, block index, source, block count, and a final zero write
+      operation. Its nonzero result is normalized to one. The Rust port
+      deliberately retains both callees as verified-address target seams and
+      uses host recording seams for their observable arguments and results.
