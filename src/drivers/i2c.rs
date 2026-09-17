@@ -737,6 +737,13 @@ pub(crate) mod tests {
         )
     }
 
+    /// Returns complete raw-I2C write packets while a [`RawI2cFixture`]
+    /// holds [`OPS_LOCK`].
+    pub(crate) unsafe fn raw_i2c_packets_for_test() -> Vec<Vec<u8>> {
+        (*addr_of!(RAW_WRITE_PACKETS)).clone()
+    }
+
+
     fn install_0x39_read(write_status: i32, read_status: i32) -> (MutexGuard<'static, ()>, RomThunkOps) {
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {

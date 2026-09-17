@@ -26,7 +26,7 @@
 //! their already-ported Rust functions, replacing direct `bl` edges with
 //! normal Rust calls.
 
-use crate::drivers::i2c::pmu_i2c_read;
+use crate::drivers::i2c::{pmu_i2c_read, pmu_i2c_write};
 use crate::kernel::task_lock::{kernel_sem17_signal, kernel_sem17_wait, kernel_sem5_signal, kernel_sem5_wait};
 use crate::sysinfo::board_version;
 
@@ -107,11 +107,45 @@ pub unsafe extern "C" fn pmu_register_0x4b_bit2(
     ((status_byte & 4) >> 2) as u32
 }
 
+/// pmu_apply_mode_registers — original: `FUN_082e57a8` @ `0x082e57a8`
+/// (44 bytes; 4 plain `bl` call sites, 0 predicated `bl`, binary-verified).
+///
+/// Holds PMU transaction semaphores 17 then 5, writes 0x6f to PCF50635
+/// register 0x1a, then writes 10 to register 0x1d. Only when that second
+/// write succeeds does it write `mode != 0` to register 0x1b. It always
+/// releases semaphore 5 then 17 and returns no value.
+///
+/// # Deviations
+///
+/// Retail's five direct callee edges are ordinary Rust calls to the existing
+/// semaphore and PMU-I2C ports; ignored status words and release order remain
+/// unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_apply_mode_registers(mode: u32) {
+    let first_value = 0x6f_u8;
+    let mut second_value = 10_u8;
+
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    pmu_i2c_write(0x1a, 1, &first_value);
+    let status = pmu_i2c_write(0x1d, 1, &mut second_value);
+    if status == 0 {
+        let mode_value = (mode != 0) as u8;
+        pmu_i2c_write(0x1b, 1, &mode_value);
+    }
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+}
+
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::drivers::i2c::tests::{install_raw_i2c_for_test, raw_i2c_calls_for_test};
+    use crate::drivers::i2c::tests::{
+        install_raw_i2c_for_test, raw_i2c_calls_for_test, raw_i2c_packets_for_test,
+    };
     use crate::sysinfo::install_host_cached_board_version;
     extern crate std;
 
@@ -172,6 +206,39 @@ mod tests {
         let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
         assert_eq!(writes, std::vec![(0x73, 1, PMU_REGISTER_0X4B as u8)]);
         assert!(reads.is_empty(), "a failed register write suppresses the read");
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
+    #[test]
+    fn mode_registers_write_all_values_and_release_locks() {
+        let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+        unsafe { pmu_apply_mode_registers(0xfeed_beef) };
+
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert_eq!(writes, std::vec![(0x73, 2, 0x1a), (0x73, 2, 0x1d), (0x73, 2, 0x1b)]);
+        assert!(reads.is_empty());
+        assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![
+            std::vec![0x1a, 0x6f],
+            std::vec![0x1d, 10],
+            std::vec![0x1b, 1],
+        ]);
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
+    #[test]
+    fn mode_registers_skip_final_write_after_second_write_error() {
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+
+        unsafe { pmu_apply_mode_registers(0) };
+
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert_eq!(writes, std::vec![(0x73, 2, 0x1a), (0x73, 2, 0x1d)]);
+        assert!(reads.is_empty());
+        assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![
+            std::vec![0x1a, 0x6f],
+            std::vec![0x1d, 10],
+        ]);
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
     }
 
