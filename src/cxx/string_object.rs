@@ -2187,6 +2187,35 @@ pub unsafe extern "C" fn string_object_equals(
         0
     }
 }
+/// string_object_differs — original: `FUN_082aad94` @ 0x082aad94 (40 bytes,
+/// all code; the next separately linked function begins at 0x082aadbc; four
+/// direct `bl` call sites, all plain and zero predicated, binary-scanned).
+///
+/// Loads this object's raw payload, then compares it through the ported
+/// [`utf8_strcmp_safe`] against the NULL-safe C string returned by
+/// [`string_object_c_str`] for `other`. It returns 1 exactly when the
+/// comparison is nonzero and 0 when it is equal. The raw ARM is `push
+/// {r4,lr}; mov r4,r0; mov r0,r1; bl 0x082a50b0; mov r1,r0; ldr
+/// r0,[r4,#4]; bl 0x08276d64; cmp r0,#0; movne r0,#1; pop {r4,pc}`.
+/// Neither object pointer is guarded, matching the firmware fault behavior.
+///
+/// Deliberate deviations: none — both direct callees are existing Rust ports;
+/// the volatile payload load preserves the firmware's post-call load order.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_differs(
+    this: *const StringObject,
+    other: *const StringObject,
+) -> i32 {
+    let other_cstr = string_object_c_str(other);
+    let payload = core::ptr::read_volatile(core::ptr::addr_of!((*this).payload));
+    if utf8_strcmp_safe(payload as *const u8, other_cstr) != 0 {
+        1
+    } else {
+        0
+    }
+}
+
 /// string_object_differs_from_static_object — original: `FUN_0829ba1c` @
 /// 0x0829ba1c (40 bytes, all code; six direct `bl` call sites, all
 /// unconditional, binary-scanned by decoding every ARM B/BL word in
@@ -5968,6 +5997,34 @@ pub(crate) mod tests {
             assert_eq!(string_object_equals(&empty, &text), 0);
             assert_eq!(string_object_equals(&text, &empty), 0);
         }
+    }
+
+    #[test]
+    fn string_object_differs_inverts_utf8_equality_and_preserves_null_payloads() {
+        let mut matching_payload = *b"caf\xc3\xa9\0";
+        let mut differing_payload = *b"caf\xc3\xa8\0";
+        let matching = StringObject {
+            vtable: core::ptr::null(),
+            payload: matching_payload.as_mut_ptr(),
+        };
+        let differing = StringObject {
+            vtable: core::ptr::null(),
+            payload: differing_payload.as_mut_ptr(),
+        };
+        let empty = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_differs(&matching, &matching), 0);
+            assert_eq!(string_object_differs(&matching, &differing), 1);
+            assert_eq!(string_object_differs(&empty, &empty), 0);
+            assert_eq!(string_object_differs(&empty, &matching), 1);
+            assert_eq!(string_object_differs(&matching, &empty), 1);
+        }
+        assert_eq!(matching_payload, *b"caf\xc3\xa9\0");
+        assert_eq!(differing_payload, *b"caf\xc3\xa8\0");
     }
 
     #[test]

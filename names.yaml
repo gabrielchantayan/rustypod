@@ -6578,6 +6578,27 @@ functions:
       instruction-for-instruction the same shape the accepted tag-2
       operator_new @ 0x082aadd4 produces (26 instructions each).
 
+  - address: 0x082aad94
+    ghidra: FUN_082aad94
+    name: string_object_differs
+    size: 40
+    sig: "int string_object_differs(const StringObject *this, const StringObject *other)"
+    module: cxx/string_object
+    vars: {param_1/r0: this, param_2/r1: other, r4: this_saved, uVar1/r0: other_cstr, iVar2/r0: compare_result}
+    status: ported
+    notes: >-
+      Raw osos.dec confirms ten ARM words at 0x082aad94..0x082aadb8; the next
+      separately linked function begins at 0x082aadbc. It saves this in r4,
+      calls string_object_c_str @ 0x082a50b0 over other, loads this's raw
+      payload word, calls utf8_strcmp_safe @ 0x08276d64, then `cmp r0,#0;
+      movne r0,#1` returns 1 only for a nonzero comparator result. There are
+      exactly four direct BL calls (0x081a2860, 0x081a2b5c, 0x081bcf40,
+      0x081bcf64), all unconditional; no predicated BL reaches this address.
+      Neither object pointer is guarded, so NULL this or other faults. Both
+      callees are already ported and are called directly; deliberate
+      deviations: none. Host tests cover equal and unequal decoded UTF-8 and
+      every NULL-payload combination without writing either payload.
+
   - address: 0x082aad14
     ghidra: FUN_082aad14
     name: operator_delete_tag3
