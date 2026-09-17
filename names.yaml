@@ -24752,6 +24752,32 @@ functions:
       performs the same single volatile TECNT read, while avoiding a new
       dispatch seam for the unported wrapper.
 
+  - address: 0x0826c994
+    ghidra: FUN_0826c994
+    name: opaque_string_owner_destroy
+    size: 20
+    sig: "OpaqueStringOwner *opaque_string_owner_destroy(OpaqueStringOwner *this)"
+    module: cxx/opaque_string_owner_destroy
+    status: ported
+    vars:
+      param_1: this
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec words establish the exact five-instruction, 20-byte body
+      0x0826c994..0x0826c9a7: `push {r4,lr}; add r0,r0,#4; bl
+      0x08277484; sub r0,r0,#4; pop {r4,pc}`. The next separately linked
+      function begins at 0x0826c9a8 with `push {r0,r1,r2,r3,r4,lr}`.
+      Binary-wide ARM branch decoding identifies four inbound direct BL call
+      sites (0x081a2998, 0x081a2bb8, 0x083d0ec0, 0x083d0f18), all
+      unconditional; no predicated BL forms. The sole verified callee is the
+      ported string_object_destroy on an embedded StringObject at target
+      offset +4. It returns that subobject pointer, which the final `sub`
+      rebases to this; the leading opaque word is untouched. The containing
+      class is unidentified, so the name is structural. Deliberate host
+      deviation: the Rust layout uses a usize header and subtracts
+      size_of::<usize>() after the direct callee call, preserving one-word
+      return dataflow under pointer widening.
+
   # --- Vincent 3D software JIT: IR arena + node builders -------------
   # 0x082b0000-0x082e0000 is a mixed third-party block (SQLite, zlib,
   # OpenSSL, RTXCbug, FreeType). The cluster below belongs to the
