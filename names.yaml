@@ -47737,6 +47737,32 @@ functions:
       resolves to the separate sibling checkout, which lacks this
       worktree's new symbol; --lib selects this worktree's archive.
 
+  - address: 0x08280fe0
+    ghidra: FUN_08280fe0
+    name: fixed_value_triplet_destroy
+    size: 32
+    sig: "FixedValue *fixed_value_triplet_destroy(FixedValue *this)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_081384a0: refcounted_base_destroy
+    notes: >-
+      Raw ARM is exactly the eight instruction words
+      0x08280fe0..0x08280ffc (32 bytes); the next separately linked function
+      begins at 0x08281000. It calls refcounted_base_destroy on the three
+      consecutive FixedValue slots in reverse order: this+0x30, this+0x18,
+      then this. The first two calls are plain unconditional bl and the final
+      call is an unconditional b tail call after restoring lr; its return
+      therefore remains this. Decoding all inbound ARM B/BL words finds four
+      direct call sites — 0x0815252c, 0x08152534, 0x0815253c, and 0x08152544
+      — all plain unconditional bl, with no predicated BL forms or exact raw
+      DATA-word references. The Rust direct calls deliberately preserve the
+      destruction order but not the final tail-call code-generation detail.
+      Host test uses distinct payloads and unlinked flag patterns for all
+      slots, proving return identity, each vtable transition, and preservation
+      of the fields this destructor must not touch.
+
   # --- Bounded formatter byte output (printf/format_bounded_byte) ---
   - address: 0x08280f7c
     ghidra: FUN_08280f7c

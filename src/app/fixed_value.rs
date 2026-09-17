@@ -237,6 +237,34 @@ pub unsafe extern "C" fn fixed_value_triplet_default_init(
     let after_second = fixed_value_default_init(after_first.add(1));
     fixed_value_default_init(after_second.add(1)).sub(2)
 }
+/// `fixed_value_triplet_destroy` — original: `FUN_08280fe0` @ 0x08280fe0
+/// (32 bytes: eight ARM instructions; the next separately linked function
+/// begins at 0x08281000).
+///
+/// Binary decoding verifies four direct call sites — 0x0815252c, 0x08152534,
+/// 0x0815253c, and 0x08152544 — all plain unconditional `bl`; there are no
+/// predicated `bl` calls. The body destroys the three 0x18-byte
+/// [`FixedValue`] slots in reverse order (+0x30, +0x18, then +0x00), returning
+/// the initial pointer. The final stock call is an unconditional `b` tail
+/// call to [`refcounted_base_destroy`]; direct Rust calls deliberately retain
+/// the same destruction order but not that tail-call code-generation detail.
+///
+/// # Safety
+///
+/// `this` must identify three consecutive, live, 4-byte-aligned [`FixedValue`]
+/// objects with 0x48 writable bytes in total. A linked slot must carry valid
+/// timing-wheel links; stock has no NULL or bounds checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed_value_triplet_destroy(
+    this: *mut FixedValue,
+) -> *mut FixedValue {
+    refcounted_base_destroy(this.add(2));
+    refcounted_base_destroy(this.add(1));
+    refcounted_base_destroy(this)
+}
+
+
 
 
 /// value_aux_max — original: `FUN_08273a40` @ 0x08273a40 (20 bytes:
@@ -538,6 +566,43 @@ mod tests {
                 object.opaque,
                 [0x1111_1111 ^ index, 0x2222_2222 ^ index],
                 "slot {index}: +0x0c..+0x13 stay dirty",
+            );
+        }
+    }
+
+    #[test]
+    fn triplet_destroy_runs_in_reverse_without_touching_payloads() {
+        let mut objects = [dirty(), dirty(), dirty()];
+        for (index, object) in objects.iter_mut().enumerate() {
+            let index = index as u32;
+            object.vtable = 0xdead_beef ^ index;
+            object.value_q16 = (0x0bad_f00d_u32.wrapping_add(index)) as i32;
+            object.aux = 0xcafe_babe_u32.wrapping_sub(index);
+            object.opaque = [0x1111_1111 ^ index, 0x2222_2222 ^ index];
+            object.flags = [0, 2, 0xffff_fffe][index as usize];
+        }
+
+        let this = objects.as_mut_ptr();
+        assert_eq!(unsafe { fixed_value_triplet_destroy(this) }, this);
+
+        for (index, object) in objects.iter().enumerate() {
+            let index = index as u32;
+            assert_eq!(object.vtable, REFCOUNTED_BASE_VTABLE, "slot {index}");
+            assert_eq!(object.flags, [0, 2, 0xffff_fffe][index as usize], "slot {index}");
+            assert_eq!(
+                object.value_q16,
+                (0x0bad_f00d_u32.wrapping_add(index)) as i32,
+                "slot {index}: +0x04 stays untouched",
+            );
+            assert_eq!(
+                object.aux,
+                0xcafe_babe_u32.wrapping_sub(index),
+                "slot {index}: +0x08 stays untouched",
+            );
+            assert_eq!(
+                object.opaque,
+                [0x1111_1111 ^ index, 0x2222_2222 ^ index],
+                "slot {index}: +0x0c..+0x13 stay untouched",
             );
         }
     }
