@@ -53069,6 +53069,37 @@ functions:
       return; the diff is the crate's fp frame and LLVM rotating the loop
       (counter seeded at -1 with mvn and incremented at the loop head
       instead of the original's predicated addne).
+  - address: 0x082771e0
+    ghidra: FUN_082771e0
+    name: string_object_remove_trailing_codepoint
+    size: 128
+    sig: "int string_object_remove_trailing_codepoint(StringObject *this, unsigned int codepoint)"
+    module: cxx/string_object_remove_trailing_codepoint
+    status: ported
+    renames:
+      param_1: this
+      param_2: codepoint
+      local_18: cursor
+      iVar2: removed
+      iVar3: codepoint_count
+      FUN_08276214: utf8_next_codepoint
+      FUN_08276288: utf8_prev_codepoint
+      FUN_08277044: string_object_truncate_codepoints
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte extent
+      0x082771e0..0x08277260: the next word is the separate function's
+      `push {r3,r4,r5,r6,r7,lr}`. The body contains two plain BL calls
+      (utf8_next_codepoint @ 0x08276214 and utf8_prev_codepoint @
+      0x08276288) plus one predicated BLGT to 0x08277044; the latter is
+      the unported StringObject truncation helper, retained as a typed
+      seam rather than assigned an invented stronger identity. It NULL
+      guards the payload, forward-counts decoded sequences while testing
+      the raw byte before each decode (so the terminator is not consumed),
+      reverse-decodes equal trailing codepoints, calls the truncation
+      helper with count-minus-removed only when removal occurred, and
+      returns removed. The four known incoming callers are plain BLs:
+      three in FUN_08279198 and one in FUN_08279374. Host tests cover NULL,
+      no suffix, repeated ASCII suffixes, and multibyte suffixes.
   # --- IRAM veneers for the ADS block-memory routines ---
   # 0x22000000 is S5L8702 *internal SRAM*, not mask ROM as the header of
   # kernel/thunks.rs says (mask ROM is at 0x20000000). The relocator @
