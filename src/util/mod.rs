@@ -110,6 +110,7 @@ pub mod selector_slot_address;
 pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
 pub mod state_flags;
+pub mod scaled_word_list_from_i32;
 pub mod scoped_global_guard_destroy;
 pub mod status_flag_priority;
 pub mod signed_clamp_i32;

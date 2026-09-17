@@ -102614,3 +102614,31 @@ functions:
       `int *` parameter obscures the target-width pointer field; the Rust
       port intentionally uses adjacent u32 words rather than a host pointer
       field, preserving the 32-bit target layout.
+  - address: 0x08346ecc
+    ghidra: FUN_08346ecc
+    name: scaled_word_list_from_i32
+    size: 116
+    sig: "void scaled_word_list_from_i32(u32 *words, i32 value)"
+    module: util/scaled_word_list_from_i32
+    status: ported
+    renames:
+      param_1/r0: words
+      param_2/r1: value
+      r4: word_count
+      r5: magnitude
+      r6: sign_extension
+      r7: words
+      r8: value
+      r9: zero
+      r10: word_multiplier
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent from 0x08346ecc
+      through the two literal words at 0x08346f40 and 0x08346f44; the next
+      separately entered function begins at 0x08346f48. Four inbound direct
+      calls are unconditional bl, with no predicated bl calls; this leaf has
+      no outgoing calls. It stores a signed count scaled by 0xda8ebbff at
+      words[0], then one magnitude word multiplied by 0xff5fdd7f at words[1].
+      ARM's wrapping negate of i32::MIN sign-extends into a second scaled
+      magnitude word. Host tests cover zero, signed single-word values, and
+      i32::MIN. match.py structural review was completed. Deliberate
+      deviations: none.
