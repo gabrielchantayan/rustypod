@@ -3778,6 +3778,27 @@ functions:
       preserves the unguarded output pointer and intermediate PWRCON0
       store with volatile MMIO; host tests use the existing PWRCON seam.
 
+  - address: 0x0836af80
+    ghidra: FUN_0836af80
+    name: timer_e_counter_read
+    size: 16
+    sig: "u32 timer_e_counter_read(void)"
+    module: drivers/timer
+    status: ported
+    renames: {FUN_0836af80: timer_e_counter_read,
+      DAT_0836af8c: timer_register_base}
+    notes: >-
+      Ghidra reports only the 12-byte instruction body, but raw osos.dec
+      establishes the true 16-byte extent 0x0836af80..0x0836af90: `ldr
+      r0,[pc,#4]; ldr r0,[r0,#0xb4]; bx lr`, followed by literal
+      0x3c700000; the next function starts at 0x0836af90. It returns one
+      volatile Timer E TECNT sample from 0x3c7000b4. Decoding every ARM B/BL
+      word finds four direct call sites, all unconditional (0x080877a4,
+      0x08093760, 0x0814d074, 0x0814d0e4), and zero predicated BL calls.
+      This separately linked copy has the same behavior as usec_timer_read
+      at 0x08001edc; the Rust target uses volatile MMIO and host tests use
+      its existing deterministic timer-counter seam.
+
   - address: 0x08037df0
     ghidra: thunk_EXT_FUN_22001f38
     name: iram_msec_delay_veneer

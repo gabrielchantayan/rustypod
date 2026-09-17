@@ -205,6 +205,37 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
         read_usec_timer_counter()
     }
 }
+/// timer_e_counter_read — original: `FUN_0836af80` @ 0x0836af80
+/// (**16 bytes**, 0x0836af80..0x0836af90: 12 bytes of instructions plus the
+/// `0x3c70_0000` literal; the next function starts at 0x0836af90).
+///
+/// **4 direct `bl` call sites: 4 unconditional (`0x080877a4`,
+/// `0x08093760`, `0x0814d074`, and `0x0814d0e4`) and 0 predicated**, verified
+/// by decoding every ARM `B`/`BL` word in `work/firmware/osos.dec`.
+///
+/// Loads the Timer E `TECNT` word at 0x3c70_00b4 and returns it in `r0`.
+/// This is a separately linked copy of [`usec_timer_read`] at 0x08001edc;
+/// its callers branch directly here, while `usec_timer_read_thunk` tail-
+/// branches here from 0x08056658. Deliberate code-generation deviation: LLVM
+/// combines the target's base-plus-offset addressing into a direct
+/// `0x3c70_00b4` literal before the volatile load. Host builds use the same
+/// deterministic counter seam as the existing reader because the physical
+/// register is unavailable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.timer_e_counter_read")]
+#[inline(never)]
+pub unsafe extern "C" fn timer_e_counter_read() -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        return read_usec_timer_counter();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        read_usec_timer_counter()
+    }
+}
+
 
 /// usec_timer_read_thunk — original: `thunk_FUN_0836af80` @ 0x08056658
 /// (**4 bytes**, 0x08056658..0x0805665c; the next function starts with
@@ -645,6 +676,23 @@ mod usec_timer_tests {
         for count in [0, 1, 0x1234_5678, u32::MAX] {
             HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
             assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+
+    #[test]
+    fn relocated_timer_e_reader_returns_one_raw_counter_sample() {
+        let _guard = configure_usec_timer(0, 1);
+
+        for count in [0, 1, 0x1234_5678, u32::MAX] {
+            HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+
+            assert_eq!(unsafe { timer_e_counter_read() }, count);
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed),
+                count.wrapping_add(1)
+            );
         }
     }
 
