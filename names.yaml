@@ -7815,6 +7815,42 @@ functions:
       --lib) preserves the +0xc1 gate, +0xc4 timer path, +0xb0 literal-one
       activity call and final byte clear; LLVM inlines ported timer_stop.
 
+  # --- Flagged Silver-controller derived constructor ---
+  - address: 0x08212c10
+    ghidra: FUN_08212c10
+    name: silver_controller_construct_flagged
+    size: 48
+    sig: "void *silver_controller_construct_flagged(void *this, const char *name, u32 enabled)"
+    module: app/silver_controller
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+      param_3/r2: enabled
+      DAT_08212c3c: derived controller vtable (0x08992c90)
+      "this+0xb0": derived sentinel word
+      "this+0xb4": enabled flag byte
+      FUN_08134db4: silver_controller_construct (already ported)
+    notes: >-
+      EXTENT CORRECTED: Ghidra reports 44 code bytes, but ldr r1,[pc,#24]
+      at 0x08212c1c consumes the literal vtable word 0x08992c90 at
+      0x08212c3c. The next real function begins cmp r0,#0 at 0x08212c40,
+      so the true extent is 0x08212c10..0x08212c40 = 48 bytes: eleven
+      instructions plus that literal. Decoding every aligned ARM B/BL word
+      in osos.dec finds exactly four inbound unconditional plain-bl calls
+      (0x082183d0, 0x08228c3c, 0x0822d078, and 0x08234788), with zero
+      predicated bl calls. Algorithm: call the ported
+      silver_controller_construct(this, name), replace its vtable with the
+      loaded-image value 0x08992c90, store -1 at +0xb0, then normalize
+      enabled to 0/1 and store it at +0xb4. The class identity remains
+      unidentified, so the semantic name records only the verified
+      flagged-constructor behavior. Rust uses volatile field stores to
+      preserve the raw ARM write order; LLVM otherwise legally moved the
+      vtable store after the sentinel store. match.py reports the same
+      call/flag normalization/store structure; LLVM adds its standard
+      frame and materializes the literal later, so it is not
+      instruction-exact.
+
   # --- Controller context-scope virtual dispatch ---
   - address: 0x0821995c
     ghidra: FUN_0821995c
