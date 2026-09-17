@@ -102788,3 +102788,33 @@ functions:
       match.py reports the expected direct-BLX seam and LLVM frame differences
       while preserving the acquire/lock/lookup/copy/release/unlock/publish
       control-flow structure.
+
+  - address: 0x082e4358
+    ghidra: FUN_082e4358
+    name: fat_block_to_cluster
+    size: 52
+    sig: "u32 fat_block_to_cluster(const FatVolume *volume, u32 block)"
+    module: fs/fat_cluster_for_offset
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: block
+      DAT_+0x74: first_data_block
+      DAT_+0x1ce: cluster_block_shift
+      DAT_+0x1d8: cache_block_limit
+    notes: >-
+      Raw osos.dec confirms the 13-word, 52-byte extent
+      0x082e4358..0x082e438c; the next real function begins at
+      0x082e438c. It maps a block in the half-open
+      [first_data_block, cache_block_limit) range to FAT cluster
+      ((block - first_data_block) >> (cluster_block_shift & 0xff)) + 2;
+      every other block returns zero. Independent decoding of every ARM
+      B/BL immediate finds four inbound direct calls: three unconditional
+      plain bl calls at 0x082e2970, 0x082e2b94, and 0x082e3384, plus
+      predicated bleq at 0x082e2a14; there are no direct tail branches.
+      The paired inverse is fat_cluster_to_block_index @ 0x082e01cc,
+      which confirms +0x74 as first data block, +0x1ce as the
+      blocks-per-cluster shift, and +0x1d8 as the exclusive cache-block
+      limit. No deliberate semantic deviations: the Rust explicit
+      shift >= 32 case matches ARM register-LSR zero results and avoids
+      a host oversized-shift panic.
