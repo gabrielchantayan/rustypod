@@ -107569,3 +107569,35 @@ functions:
       iterator words, then returns the copied current word. No seam or
       invented callee identity is introduced; the Rust port calls those
       existing ports directly and retains aligned u32 word offsets on hosts.
+
+
+  - address: 0x08214614
+    ghidra: FUN_08214614
+    name: locked_state_copy
+    size: 44
+    sig: "u32 locked_state_copy(MutexHandoff *handoff, const u8 *source)"
+    module: app/locked_state_copy
+    status: ported
+    renames:
+      param_1/r0/r4: handoff
+      param_2/r1/r5: source
+      param_1_plus_0x1c/r0: destination_state_records
+      FUN_081fca10: mutex_handoff_lock
+      FUN_081d6034: unresolved_state_records_copy
+      FUN_081fca40: mutex_handoff_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent
+      0x08214614..0x08214640: push {r4,r5,r6,lr}, three calls, mov r0,#1,
+      and pop {r4,r5,r6,pc}; the next separately entered function begins at
+      0x08214640 with push {r4-r9,lr}. The body contains exactly three
+      unconditional plain BL calls (0x081fca10 mutex_handoff_lock,
+      0x081d6034, and 0x081fca40 mutex_handoff_unlock), and no predicated BL
+      calls. It protects and copies the 0x294-byte state block at handoff+0x1c
+      then returns one. The two mutex handoff callees are established Rust
+      ports. The middle callee's raw 88-byte loop copies 18 records of 0x24
+      bytes plus the two following words, but has no names.yaml identity or
+      Rust port; target builds retain a verified fixed-address veneer to
+      0x081d6034 and host tests inject that sole copy operation. match.py
+      reports the intended structural diff: LLVM adds a frame and the fixed
+      address operation is a literal veneer, while retaining lock, copy,
+      unlock, target +0x1c, and return-one order.
