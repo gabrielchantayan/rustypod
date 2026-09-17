@@ -55853,6 +55853,34 @@ functions:
       blend selection, all-distinct translated edges and ARM wrapping,
       and empty-rect plus record/input non-mutation.
 
+  - address: 0x08264550
+    ghidra: FUN_08264550
+    name: draw_state_set_surface_and_clip
+    size: 20
+    sig: "void draw_state_set_surface_and_clip(u8 *record, u32 surface, const Rect *clip)"
+    module: cxx/draw_state_clip
+    status: ported
+    renames:
+      param_1/r0: record (the 0x44-byte scoped draw-state record)
+      param_2/r1: surface (the caller-selected draw-target surface identity)
+      param_3/r2: clip (the caller-computed four-word QuickDraw clip rect)
+    notes: >-
+      Raw osos.dec words at 0x08264550 are `str r1,[r0,#0x1c]!; ldm
+      r2,{r1,r2,r3,ip}; add r0,r0,#0x18; stm r0,{r1,r2,r3,ip}; bx lr`;
+      the next independent function begins at 0x08264564 with
+      `str r1,[r0,#0x2c]`. This establishes the exact 20-byte extent
+      with no literal pool. Four unconditional BL call sites and zero
+      predicated BL call sites were independently counted from raw ARM
+      branch encodings; all four provide a stack or record-resident
+      aligned Rect. The function stores the raw 32-bit surface identity
+      at record+0x1c, then copies all four clip words verbatim to
+      record+0x34..+0x40; it neither origin-moves nor mutates the input,
+      unlike sibling surface_attach. The final stm leaves record+0x34 in
+      r0, but sampled callers do not consume it, so the Rust port
+      deliberately exposes void. Host tests prove distinct signed words,
+      boundary-valued input, exact field offsets, surrounding-byte
+      preservation, and source non-mutation.
+
   - address: 0x08264518
     ghidra: FUN_08264518
     name: surface_attach
