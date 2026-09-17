@@ -104780,3 +104780,25 @@ functions:
       default returns equal for arbitrary input, so implementing this
       selector would silently route every source through the note path rather
       than faithfully reproduce retailOS.
+
+  - address: 0x08298af4
+    ghidra: FUN_08298af4
+    name: opaque_collection_secondary_count
+    size: 8
+    sig: "u32 opaque_collection_secondary_count(const OpaqueCollection *object)"
+    module: cxx/opaque_collection_secondary_count
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xa0": secondary_entry_count
+    notes: >-
+      Raw osos.dec establishes the true eight-byte extent 0x08298af4..0x08298afc:
+      `ldr r0,[r0,#0xa0]; bx lr`; the independently linked next function starts
+      at 0x08298afc. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      four direct inbound calls, all unconditional plain bl (0x081b2398,
+      0x081b265c, 0x0829d4f0, and 0x0829d6e0), with zero predicated forms.
+      Callers use the unguarded aligned word at +0xa0 as the loop bound for
+      secondary entries; the collection layout is otherwise unrecovered. The
+      port therefore reads a u32 at the verified target byte offset instead of
+      assigning an unverified object layout. LLVM may add a frame around the
+      same load-and-return body; this is the sole deliberate codegen deviation.
