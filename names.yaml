@@ -106315,3 +106315,40 @@ functions:
       fields, and return identity. match.py reports the same load/call/clear
       sequence; LLVM uses a larger frame prologue and unresolved relocation
       display for the existing Rust callee.
+
+  - address: 0x082634e0
+    ghidra: FUN_082634e0
+    name: text_layout_fit_glyph_count
+    size: 72
+    sig: "u16 text_layout_fit_glyph_count(u8 *layout, const u8 *text, u32 glyph_count, u32 max_advance, u32 *measured_advance)"
+    module: util/text_layout_fit_glyph_count
+    status: ported
+    renames:
+      param_1/r0: layout
+      param_2/r1: text
+      param_3/r2: glyph_count
+      param_4/r3: max_advance
+      param_5/[sp]: measured_advance
+      "[layout + 0x1c]": font
+      "[layout + 0x20]": metric_context
+      "[layout + 0x28]": layout_flags
+      FUN_080a7aa0: glyph_fit_engine (unported direct callee)
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte extent
+      0x082634e0..0x08263528: the final `pop {r4,pc}` is immediately
+      followed by the next real function's `push {r0-r11,lr}`. The one
+      internal call is a plain `bl 0x080a7aa0`; there are no predicated
+      calls. The wrapper loads target-width font word +0x1c, passes text and
+      glyph count unchanged, passes embedded metric context +0x20 and byte
+      flags +0x28, forwards max advance and optional measured-advance output,
+      supplies a final zero argument, then zero-extends the callee's low
+      halfword result. A whole-image raw A32 decode finds four incoming plain
+      BL calls (0x08262ee8, 0x08263c28, 0x08263d10, 0x08263f20) and no
+      predicated BL callers. The unported callee's identity is not claimed:
+      `glyph_fit_engine` is a local behavioral seam name derived from its
+      verified argument and return contract. Deliberate deviation: ARM calls
+      it through a literal veneer for payload relocation; host tests install
+      a callback seam and prove every forwarded argument, the embedded field
+      offsets, NULL output forwarding, zero reserved argument, and u16
+      result narrowing. match.py is expected to differ in the veneer and
+      Rust frame while retaining the field-load/call/narrow structure.
