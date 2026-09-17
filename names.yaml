@@ -103341,3 +103341,41 @@ functions:
       boundaries; host tests call the already ported helpers directly.
       The Rust comparison tests packed C-bit output in place of ARM CPSR
       flags; this deliberately preserves retailOS NaN and denormal behavior.
+
+  # --- Buffered result take and release ---
+  - address: 0x082c691c
+    ghidra: FUN_082c691c
+    name: buffer_result_take_and_release
+    size: 136
+    sig: "u32 buffer_result_take_and_release(void *owner, void *out)"
+    module: util/buffer_result_take
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: out
+      "owner+0x04": buffer (u32 target pointer)
+      "buffer+0x4c": active_data
+      "buffer+0x50": state
+      "buffer+0x54": result[20]
+      "buffer+0x68": payload_len
+      "buffer+0x6c": payload[4096]
+      DAT_082c69a4: ERROR_INVALID_BUFFER_RESULT
+    notes: >-
+      Raw osos.dec establishes a 136-byte extent: 32 ARM words from
+      0x082c691c through the return at 0x082c699c and the owned
+      0xffff5bd9 literal at 0x082c69a4; the next distinct push prologue is
+      0x082c69a8. The four direct inbound call sites are plain unconditional
+      bl (0x0804371c, 0x08318248, 0x08392ddc, and 0x08392df8), with no
+      predicated BL. The body itself has six unconditional BL and none
+      predicated: stock transform 0x08064fb8, ROM __rt_memcpy through
+      0x08037db0, two IRAM memzero calls through 0x08037db8, owner release
+      0x0839e164, and operator_delete 0x082aad24. It rejects NULL inputs,
+      payload_len > 4096, or an active-data pointer other than result+0x54;
+      otherwise it sets state=2, transforms payload, copies the 20-byte
+      result, clears header/payload, releases the owner, and deletes the
+      buffer. The transform and release identities remain unported, so the
+      device port makes fixed-address calls with their raw recovered ABIs;
+      host seams are inert by default and tests record call arguments and
+      cleanup ordering. match.py confirms the guard, field offsets, call
+      sequence, and cleanup structure; LLVM's larger frame, direct Rust
+      memcpy/memzero calls, and literal-loaded blx stock seams are deliberate.

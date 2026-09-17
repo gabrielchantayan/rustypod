@@ -8,6 +8,7 @@ pub mod ascii_string_to_uppercase;
 pub mod ascii_uppercase_record_copy;
 pub mod align;
 pub mod be_read;
+pub mod buffer_result_take;
 pub mod beload;
 pub mod berec;
 pub mod ber_tlv_encoded_size;

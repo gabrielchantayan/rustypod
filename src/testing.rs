@@ -1309,6 +1309,10 @@ pub mod hints {
     // target-layout pair fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const ENCODED_PAIR_MATCHES_MAGIC: usize = 0xdead_0000;
+    // 0x082c_0000/0x082d_0000: dedicated to util/buffer_result_take's
+    // target-width owner and buffer fixtures; mappings never unmap.
+    pub const BUFFER_RESULT_TAKE: usize = 0x082c_0000;
+    pub const BUFFER_RESULT_TAKE_REJECT: usize = 0x082d_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
