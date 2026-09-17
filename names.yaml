@@ -107691,3 +107691,24 @@ functions:
       through four return it unchanged and higher classes add the helper's
       alignment padding. FUN_082142d8 has no names.yaml identity, so its
       verified arithmetic is inlined without creating a seam.
+  - address: 0x08212bc8
+    ghidra: FUN_08212bc8
+    name: template_binding_name_or_special_default
+    size: 44
+    sig: "const char *template_binding_name_or_special_default(void *this)"
+    module: app/template_binding
+    status: ported
+    vars: {param_1: this, DAT_08212bf4: SPECIAL_NAME_SENTINEL_CSTR_ADDRESS, DAT_08212bf8: SPECIAL_NAME_DEFAULT_CSTR_ADDRESS}
+    notes: >-
+      Raw osos.dec confirms 44 bytes of code at 0x08212bc8..0x08212bf3
+      followed by its two-word literal pool at 0x08212bf4..0x08212bfb;
+      the next real function begins at 0x08212bfc. Four direct incoming
+      BL calls (0x082182e0, 0x08228b2c, 0x0822ce88, 0x08234618) are all
+      unconditional; no predicated BL targets this address. Saves this,
+      calls template_binding_name_or_default @ 0x081346e4, then compares
+      the returned C string with the one-byte sentinel at 0x083f53bc
+      through strcmp @ 0x08391e38. A mismatch tail-branches to
+      template_binding_name_or_default with the saved this; a match
+      returns the literal-pool default 0x083f53cc. The ROM pointer targets
+      are non-text byte runs, so the Rust port deliberately models their
+      binary-verified contents as [0xa6, 0] and [0x01, 0].

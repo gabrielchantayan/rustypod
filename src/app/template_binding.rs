@@ -135,6 +135,50 @@ pub unsafe extern "C" fn template_binding_name_or_default(this: *mut u8) -> *con
     &NAME_DEFAULT_CSTR
 }
 
+/// ROM address of the one-byte sentinel compared by
+/// [`template_binding_name_or_special_default`] (literal-pool word @
+/// 0x08212bf4 holds this address, binary-verified).
+pub const SPECIAL_NAME_SENTINEL_CSTR_ADDRESS: usize = 0x083f53bc;
+
+/// ROM address of the special default (literal-pool word @ 0x08212bf8 holds
+/// this address, binary-verified).
+pub const SPECIAL_NAME_DEFAULT_CSTR_ADDRESS: usize = 0x083f53cc;
+
+/// Modeled bytes at [`SPECIAL_NAME_SENTINEL_CSTR_ADDRESS`].
+pub static SPECIAL_NAME_SENTINEL_CSTR: [u8; 2] = [0xa6, 0x00];
+
+/// Modeled bytes at [`SPECIAL_NAME_DEFAULT_CSTR_ADDRESS`].
+pub static SPECIAL_NAME_DEFAULT_CSTR: [u8; 2] = [0x01, 0x00];
+
+/// template_binding_name_or_special_default — original: `FUN_08212bc8` @
+/// 0x08212bc8 (44 bytes of code; next real function starts at 0x08212bfc
+/// after its two-word literal pool; four plain `bl` callers and no predicated
+/// `bl` callers, binary-scanned over `osos.dec`).
+///
+/// Returns [`SPECIAL_NAME_DEFAULT_CSTR`] when the embedded name equals the
+/// one-byte [`SPECIAL_NAME_SENTINEL_CSTR`]. Otherwise tail-dispatches to
+/// [`template_binding_name_or_default`], which handles its distinct sentinel
+/// and returns the stored name.
+///
+/// Deliberate deviation: the two ROM pointers resolve to non-text byte runs
+/// on the host, so their binary-verified byte contents are modeled as statics.
+///
+/// # Safety
+///
+/// `this` must point into a readable allocation containing a valid
+/// [`StringObject`] at byte offset [`NAME_OFFSET`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn template_binding_name_or_special_default(
+    this: *mut u8,
+) -> *const u8 {
+    let name = this.add(NAME_OFFSET) as *const StringObject;
+    if strcmp(string_object_c_str(name), SPECIAL_NAME_SENTINEL_CSTR.as_ptr()) != 0 {
+        return template_binding_name_or_default(this);
+    }
+    SPECIAL_NAME_DEFAULT_CSTR.as_ptr()
+}
+
 /// Explicit host-model boundary for the two callees of
 /// [`template_binding_map_assign`], neither of which is ported yet.
 #[derive(Clone, Copy)]
@@ -289,6 +333,37 @@ mod tests {
         assert_eq!(result, unsafe { string_object_c_str(name) });
         assert_ne!(result, &NAME_DEFAULT_CSTR as *const u8);
         assert_eq!(unsafe { result.read() }, 0);
+    }
+
+    #[test]
+    fn special_sentinel_selects_its_binary_verified_default() {
+        let mut name = [0xa6u8, 0x00];
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result = unsafe { template_binding_name_or_special_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, SPECIAL_NAME_DEFAULT_CSTR.as_ptr());
+        assert_eq!(unsafe { result.read() }, 0x01);
+    }
+
+    #[test]
+    fn special_sentinel_prefix_delegates_to_the_base_accessor() {
+        let mut name = [0xa6u8, b'x', 0x00];
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result = unsafe { template_binding_name_or_special_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, name.as_ptr());
+    }
+
+    #[test]
+    fn special_accessor_delegates_the_base_sentinel() {
+        let mut name = [0x12u8, 0x00];
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result = unsafe { template_binding_name_or_special_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, &NAME_DEFAULT_CSTR as *const u8);
     }
 
     static OPS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
