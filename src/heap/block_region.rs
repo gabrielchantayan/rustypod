@@ -16,6 +16,10 @@
 //!   sites: 11 unconditional and 4 `blne`): initializes the embedded
 //!   recursive mutex, then locks the source region while copying and
 //!   retaining its two reference fields.
+//! - `region_elem_assign` — original: `FUN_08280530` @ 0x08280530
+//!   (72 bytes; 4 unconditional `bl` call sites): locks both elements,
+//!   releases the old destination reference, copies the source's two
+//!   reference words, retains its region, and unlocks the source.
 //! - `block_to_region_start` — original: `FUN_08280430` @ 0x08280430
 //!   (48 bytes; 9 `bl` call sites, binary-verified — osos.asm drops
 //!   one): locks the element's region, reads the region start address
@@ -454,6 +458,39 @@ pub unsafe extern "C" fn region_elem_copy_construct(dst: *mut u8, src: *const u8
     dst
 }
 
+/// region_elem_assign — original: `FUN_08280530` @ 0x08280530 (72 bytes;
+/// the next function starts at 0x08280578).
+///
+/// Raw ARM B/BL decoding finds four unconditional `bl` call sites
+/// (0x0814b91c, 0x0814c214, 0x0814c4d0, 0x081a8804), no predicated forms,
+/// and no tail-`b` sites. Locks `dst`, then `src`; releases dst's old
+/// reference; copies src +0x4/+0x8; increments the new region's u32
+/// refcount; and tail-calls the source unlock, whose status is returned.
+///
+/// The retail code dereferences src's region unconditionally after locking,
+/// so a NULL source region is invalid input. The existing `REGION_ELEM_OPS`
+/// release slot is the deliberate seam for the still-unported
+/// `region_release` @ 0x082803c0; device and host behavior otherwise retain
+/// the target's word-index layout and wrapping refcount arithmetic.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_elem_assign(dst: *mut u8, src: *const u8) -> u32 {
+    region_ref_lock(dst);
+    region_ref_lock(src);
+    (elem_op!(region_release))(dst);
+
+    let region = ptr_field(src, ELEM_REGION_INDEX);
+    #[cfg(target_os = "none")]
+    dst.add(ELEM_REGION_INDEX * WORD).cast::<*mut u8>().write(region);
+    #[cfg(not(target_os = "none"))]
+    (dst.add(ELEM_REGION_INDEX * WORD) as *mut *mut u8).write_unaligned(region);
+    u32_field(dst, 2).write((src.add(2 * WORD).cast::<u32>()).read());
+
+    let refs = region.cast::<u32>().read();
+    region.cast::<u32>().write(refs.wrapping_add(1));
+    region_ref_unlock(src)
+}
+
 /// block_to_region_start — original: `FUN_08280430` @ 0x08280430
 /// (48 bytes).
 ///
@@ -808,6 +845,73 @@ mod tests {
         assert!(events().is_empty(), "NULL region short-circuits both helpers");
         restore_mutex();
     }
+
+    // ---- region_elem_assign ---------------------------------------
+
+    /// Assignment locks destination and source before releasing the old
+    /// destination reference, then retains and unlocks the new source.
+    #[test]
+    fn assign_replaces_live_reference_in_the_retail_order() {
+        let _guard = mock_all();
+        let mut dst = [0usize; 5];
+        let mut src = [0usize; 5];
+        let mut old_region = [0usize; 3];
+        let mut new_region = [0usize; 3];
+        let dst_ptr = dst.as_mut_ptr().cast::<u8>();
+        let src_ptr = src.as_mut_ptr().cast::<u8>();
+        let old_region_ptr = old_region.as_mut_ptr().cast::<u8>();
+        let new_region_ptr = new_region.as_mut_ptr().cast::<u8>();
+        unsafe {
+            write_ptr_field(old_region_ptr, REGION_MUTEX_INDEX, 0x5100usize as *mut u8);
+            write_ptr_field(new_region_ptr, REGION_MUTEX_INDEX, 0x5200usize as *mut u8);
+            new_region_ptr.cast::<u32>().write(u32::MAX);
+            write_elem(dst_ptr, old_region_ptr);
+            u32_field(dst_ptr, 2).write(0x1111_2222);
+            write_elem(src_ptr, new_region_ptr);
+            u32_field(src_ptr, 2).write(0xa5a5_5a5a);
+
+            assert_eq!(region_elem_assign(dst_ptr, src_ptr), 0);
+            assert_eq!(ptr_field(dst_ptr, ELEM_REGION_INDEX), new_region_ptr);
+            assert_eq!(u32_field(dst_ptr, 2).read(), 0xa5a5_5a5a);
+            assert_eq!(new_region_ptr.cast::<u32>().read(), 0);
+        }
+        assert_eq!(
+            steps(),
+            std::vec![
+                ("lock", 0x5100),
+                ("lock", 0x5200),
+                ("release", dst_ptr as usize),
+                ("unlock", 0x5200),
+            ],
+            "lock(dst) -> lock(src) -> release(dst) -> retain -> unlock(src)"
+        );
+        restore_all();
+    }
+
+    /// The final ARM instruction is a tail branch to the source unlock, so
+    /// its nonzero status—not either ignored lock status—becomes r0.
+    #[test]
+    fn assign_returns_the_source_unlock_status() {
+        let _guard = mock_all();
+        let mut dst = [0usize; 5];
+        let mut src = [0usize; 5];
+        let mut old_region = [0usize; 3];
+        let mut new_region = [0usize; 3];
+        let dst_ptr = dst.as_mut_ptr().cast::<u8>();
+        let src_ptr = src.as_mut_ptr().cast::<u8>();
+        let old_region_ptr = old_region.as_mut_ptr().cast::<u8>();
+        let new_region_ptr = new_region.as_mut_ptr().cast::<u8>();
+        unsafe {
+            write_ptr_field(old_region_ptr, REGION_MUTEX_INDEX, 0x5300usize as *mut u8);
+            write_ptr_field(new_region_ptr, REGION_MUTEX_INDEX, 0x5400usize as *mut u8);
+            write_elem(dst_ptr, old_region_ptr);
+            write_elem(src_ptr, new_region_ptr);
+            REGION_MUTEX_OPS.unlock = step_unlock_status;
+            assert_eq!(region_elem_assign(dst_ptr, src_ptr), 0x27);
+        }
+        restore_all();
+    }
+
     /// The shipped defaults are the real mutex pair: the seed walk runs
     /// a genuine acquire/release on the region's mutex object and the
     /// mapping comes out unchanged.
@@ -882,6 +986,11 @@ mod tests {
     unsafe extern "C" fn step_unlock(mutex: *mut u8) -> u32 {
         (*core::ptr::addr_of_mut!(STEPS)).push(("unlock", mutex as usize));
         0
+    }
+
+    unsafe extern "C" fn step_unlock_status(mutex: *mut u8) -> u32 {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("unlock", mutex as usize));
+        0x27
     }
 
     unsafe extern "C" fn step_release(elem: *mut u8) {
