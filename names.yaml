@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a331c
+    ghidra: FUN_082a331c
+    name: object_has_resolved_flag_0x800
+    size: 84
+    sig: "u32 object_has_resolved_flag_0x800(u32 *object)"
+    module: app/object_has_resolved_flag_0x800
+    status: ported
+    renames:
+      param_1/r0: object
+      r4: object
+      r0: resolved_object
+      r1: vtable_slot_08_or_successor_link
+    notes: >-
+      Raw osos.dec establishes the true 84-byte extent
+      0x082a331c..0x082a3370; 0x082a3370 is the next distinct push prologue.
+      Disassembly independently finds four incoming plain BL calls
+      (0x081798b4, 0x0821dc9c, 0x0821efd8, 0x0823a4e4) and no incoming
+      predicated BL calls. It calls the object's vtable +8 predicate, uses
+      the cached +8 resolved-object word when present, otherwise calls
+      0x082a2cac with object and its +4 successor link, then returns bit 11
+      of the resolved object's +0x1c flags. The target retains both original
+      call ABIs; host tests install seams because neither callee is ported.
   - address: 0x082c59dc
     ghidra: FUN_082c59dc
     name: embedded_resource_parser_entry

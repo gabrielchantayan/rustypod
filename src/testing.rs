@@ -1334,6 +1334,10 @@ pub mod hints {
     // 0x7600_0000: dedicated to ui/candidate_is_accepted's target-width
     // context, candidate, and payload fixture; mappings never unmap.
     pub const CANDIDATE_IS_ACCEPTED: usize = 0x7600_0000;
+    // 0x7700_0000: dedicated to app/object_has_resolved_flag_0x800's
+    // target-width object, successor, and payload fixtures; mappings never
+    // unmap, so no other user may share this hint.
+    pub const OBJECT_HAS_RESOLVED_FLAG_0X800: usize = 0x7700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
