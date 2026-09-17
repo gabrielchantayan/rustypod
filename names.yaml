@@ -102372,3 +102372,30 @@ functions:
       returned nonzero or activeVdbeCnt (+0x1c) is zero. The unported Btree,
       vtable, schema-reset, and host callback boundaries use a volatile seam;
       target builds retain their raw retailOS targets.
+  # --- ATA operation state selector ---
+  - address: 0x0836ce80
+    ghidra: FUN_0836ce80
+    name: ata_operation_state_set
+    size: 44
+    sig: "u32 ata_operation_state_set(AtaCommandDevice *device, u32 state)"
+    module: drivers/ata_operation_state_set
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: state
+      r0: operation_count_or_wait_result
+      r1: wait_timeout_ticks
+      r2: requested_state
+      r3: ata_mmio_base
+    notes: >-
+      Raw osos.dec establishes the 44-byte instruction extent from 0x0836ce80
+      through bx lr at 0x0836cea8; its literal pool is 0x0836ceac..0x0836ceb4
+      and the next real function starts at 0x0836ceb8. Decoding all aligned
+      ARM branch immediates finds zero plain BL and zero predicated BL calls;
+      the only transfer is bne 0x0805695c, a tail call to waiter_wait. The
+      function writes state to ATA MMIO 0x38700014, returns zero for NULL
+      device or zero device+0x48 operation word, and otherwise waits on the
+      id at 0x089d0448 for the fixed 5000-tick literal. Host tests cover the
+      pre-guard MMIO store, zero operation-word path, waiter arguments, and
+      timeout mapping. match.py structural review was completed. Deliberate
+      deviation: the relocation-safe Rust call replaces the stock tail branch.

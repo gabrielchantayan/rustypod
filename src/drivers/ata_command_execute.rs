@@ -51,6 +51,7 @@ pub struct AtaCommandDevice {
     pub status_source: u32,
     pub _reserved_40: u32,
     pub ready: u32,
+    pub operation_count: u32,
 }
 
 pub type AtaStatusRead = unsafe extern "C" fn(status_source: *mut u8, status_out: *mut u32) -> u32;
@@ -158,6 +159,7 @@ mod tests {
         status_source: 0,
         _reserved_40: 0,
         ready: 0,
+        operation_count: 0,
     };
     static mut STATUSES: [u32; 2] = [0; 2];
     static mut STATUS_READS: usize = 0;
@@ -195,6 +197,7 @@ mod tests {
             status_source: source as usize as u32,
             _reserved_40: 0,
             ready: 0,
+            operation_count: 0,
         };
         STATUSES = statuses;
         STATUS_READS = 0;
