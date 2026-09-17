@@ -76886,6 +76886,34 @@ functions:
       expected retail triple. match.py structural diff reviewed after the ARM
       release build.
 
+  # --- opaque entry-match source payload ---
+  - address: 0x0826fb44
+    ghidra: FUN_0826fb44
+    name: entry_match_source_payload
+    size: 8
+    sig: "u32 entry_match_source_payload(const u8 *source)"
+    module: app/entry_match_source_payload
+    status: ported
+    renames:
+      param_1/r0: source
+      r0: collection / payload
+    notes: >-
+      Raw ARM establishes the exact two-instruction, 8-byte extent
+      0x0826fb44..0x0826fb4c; Ghidra's reported 24-byte extent incorrectly
+      includes the separately linked matched_entry_select_nth body beginning
+      at 0x0826fb4c. It loads the target-width word at source+4, then tail
+      branches to 0x080514d0. That target returns zero for a null input and
+      otherwise loads its word at +0x0c, so this port combines the verified
+      operation without inventing a callee identity or creating a seam.
+      Decoding every ARM B/BL word in osos.dec finds exactly four inbound
+      unconditional plain BL sites (0x0812f9e0, 0x081b765c, 0x081f8fc8, and
+      0x08211648), zero predicated BL sites, no inbound plain-B tail sites,
+      and zero outbound BL instructions. The source and collection words
+      remain u32 target pointers even on hosts; tests map them below 4 GiB.
+      Deliberate deviation: Rust inlines the retail tail branch; the observed
+      null and payload-load behavior is unchanged. match.py structural diff
+      reviewed after the ARM release build.
+
   # --- matched opaque entry selection ---
   - address: 0x0826fb4c
     ghidra: FUN_0826fb4c

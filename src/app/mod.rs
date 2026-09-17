@@ -86,6 +86,7 @@ pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod element_registry;
 pub mod entry_match_first;
+pub mod entry_match_source_payload;
 pub mod entry_match_index;
 pub mod event_code_queue;
 pub mod event_subscription_init;
