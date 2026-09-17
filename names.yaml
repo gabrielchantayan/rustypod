@@ -88268,6 +88268,34 @@ functions:
       non-3 execution-status mapping. match.py structural review (exit-1 diff
       expected) retains the validation, early-return, MMIO read/write, four
       call stages, and final status mapping.
+  - address: 0x0836c6c8
+    ghidra: FUN_0836c6c8
+    name: ata_taskfile_program
+    size: 152
+    sig: "u32 ata_taskfile_program(AtaCommandDevice *device, const u8 *command, u32 flags)"
+    module: drivers/ata_taskfile_program
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: command
+      param_3/r2: flags
+      DAT_0836c760: ata_device_signature
+      FUN_080c4ba8: ata_pio_write_byte
+      return/r0: status
+    notes: >-
+      Raw osos.dec has 152 instruction bytes at 0x0836c6c8..0x0836c75f,
+      followed by the "Ide1" literal at 0x0836c760; the next real function
+      begins at 0x0836c764. Decoding every ARM B/BL immediate finds exactly
+      four inbound unconditional plain bl calls at 0x0836beec, 0x0836c0d8,
+      0x0836c638, and 0x0836d008, with no predicated forms or direct tail
+      branches. Seven body bl calls invoke the already ported
+      ata_pio_write_byte, writing command bytes +10, +5..+9, and +11 to the
+      ATA task-file offsets +0x18, +0x4..+0x14, and +0x1c. It validates the
+      Ide1 signature and, only when flags is zero, the device +0x44 ready
+      word; failure returns 7 and success returns zero. No deliberate
+      deviations: the shared PIO port preserves readiness polling and
+      volatile byte stores. Host tests cover invalid-device short-circuiting
+      and the flags-ready exception with sparse destination-byte checks.
 
   - address: 0x0839b864
     ghidra: FUN_0839b864

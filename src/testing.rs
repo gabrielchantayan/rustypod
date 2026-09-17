@@ -79,6 +79,9 @@ pub mod hints {
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;
     pub const ATA_COMMAND_SUBMIT_WAIT: usize = 0x6500_0000;
+    // 0x7f70_0000: dedicated to drivers/ata_taskfile_program's raw-u32
+    // task-file fixture; mappings never unmap, so no other user may share it.
+    pub const ATA_TASKFILE_PROGRAM: usize = 0x7f70_0000;
     // 0x6600_0000: dedicated to ui/object_stack_push's raw-u32 owner items
     // array and growth-allocation slab; mappings never unmap, so no other
     // user may share this hint.
