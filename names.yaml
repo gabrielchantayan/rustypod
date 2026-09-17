@@ -67792,6 +67792,27 @@ functions:
     notes: >-
       15 unconditional BL references and one conditional BLGT. Read payload before checking index/count; NULL payload, negative index or nonpositive count returns. Walk start/end by decoder steps guarded only by literal NUL, move remaining bytes including NUL over the removed region, then request exact reduced inclusive size with preserve flag 1. Even a past-end index still requests resizing. Allocation return is discarded: failure leaves the already-erased bytes in place. Uses the ported character-pointer helper for the first walk and preserves its malformed-sequence behavior. Existing virtual allocator remains unported; no new boundary. ARM review: 49 versus 53 instructions; LLVM moves guards ahead of the nonvolatile payload load, inlines length, and lowers memmove to __aeabi_memmove. Valid-object behavior and mutation-before-allocation order are preserved.
 
+  - address: 0x08276fe0
+    ghidra: FUN_08276fe0
+    name: string_object_strip_leading_codepoint
+    size: 100
+    sig: "int string_object_strip_leading_codepoint(StringObject *this, unsigned int codepoint)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "codepoint"
+      local_18: "cursor"
+      iVar2: "matched_count"
+    notes: >-
+      Raw ARM establishes the 0x64-byte extent through the next entry at
+      0x08277044. One plain BL calls the ported utf8_next_codepoint and one
+      BLGT calls the ported string_object_erase; both calls are direct Rust
+      seams. Loads the payload before NULL testing, decodes and counts only
+      consecutive leading codepoints matching the target, then erases exactly
+      that count from index zero. NUL, mismatch, NULL payload and malformed
+      decoding retain retail behavior. ARM review: 32 LLVM instructions versus
+      25 ADS; equivalent cursor spill, decode loop, and conditional erase.
   - address: 0x082768dc
     ghidra: FUN_082768dc
     name: string_object_append_cstr
