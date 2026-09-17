@@ -107327,6 +107327,24 @@ functions:
       would require unverified dispatch seams for both callees, so none was
       introduced.
 
+  - address: 0x0822b0e4
+    ghidra: FUN_0822b0e4
+    name: context_shared_cell_payload_word_or_default
+    size: 76
+    sig: "u32 context_shared_cell_payload_word_or_default(const u8 *context)"
+    module: app/context_shared_cell_payload_word
+    status: ported
+    vars: {param_1: context}
+    notes: >-
+      Raw ARM extent is exactly 76 bytes, 0x0822b0e4..0x0822b12c; the next
+      separately linked function starts at 0x0822b130. Four incoming calls
+      are plain BLs and none is predicated, independently counted by decoding
+      osos.dec. The original creates and releases a temporary empty shared
+      cell solely to compare its NULL cell word with the target-width slot at
+      context +0x890. It returns 3 for an empty slot; otherwise it obtains
+      the payload through handle_deref_or_null and returns payload word 1
+      (+4). The Rust port deliberately elides the temporary construct,
+      compare, and release because they have no observable effect.
   - address: 0x0822b54c
     ghidra: FUN_0822b54c
     name: media_player_state_reset
