@@ -10919,6 +10919,27 @@ functions:
       body to sys_stub_ret0 — objdump shows the two ARM symbols at one
       address (match.py finds it under sys_stub_ret0's label).
 
+  - address: 0x082bd01c
+    ghidra: FUN_082bd01c
+    name: install_iram_stub
+    size: 40
+    sig: "void *install_iram_stub(u32 selector)"
+    module: libc/iram_stub
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact extent
+      0x082bd01c..0x082bd044: bx lr at 0x082bd040, then literals
+      0x2203ff00 and 0x083e8b55; the separately entered successor starts
+      at 0x082bd04c. Selectors 0..4 choose eight-byte records at a
+      nine-byte stride from the fixed executable table and tail-branch
+      with bne to strncpy @ 0x080310d4, installing them at IRAM
+      0x2203ff00. Selectors >=5 return the slot without writing. Raw
+      decoding finds exactly four direct inbound BL instructions
+      (0x081d1bc4, 0x081e62d4, 0x08392f9c, 0x08392fac), all plain;
+      no predicated inbound BL and no outbound BL. Rust deliberately
+      parameterizes those fixed addresses in a private helper for host
+      fixtures; the exported entry retains the original constants.
+
   # --- retailOS diagnostic printf (stdio/debug_printf) ---
   - address: 0x082bd4a8
     ghidra: FUN_082bd4a8
