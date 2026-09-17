@@ -105346,3 +105346,34 @@ functions:
       0x08168e24); there are no predicated BL forms. The record's class
       identity is unrecovered, so the semantic name deliberately describes
       only this verified vtable-preserving assignment.
+
+  - address: 0x0828088c
+    ghidra: FUN_0828088c
+    name: locked_handle_resolve
+    size: 80
+    sig: "void *locked_handle_resolve(LockedHandleOwner *owner)"
+    module: cxx/locked_handle_resolve
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x38": outer handle
+      "owner+0x78": counted mutex
+      "resolved object+0x54": nested handle
+      FUN_08094404: mutex_lock_counted
+      FUN_083d603c: handle_deref_or_null alias
+      FUN_081375b0: nested handle nonzero-head predicate
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent from 0x0828088c
+      through 0x082808db; the next independently linked function begins with
+      push {r0,r1,r4,r5,lr} at 0x082808dc. The body contains five plain,
+      unconditional direct BL instructions (lock, outer handle resolve,
+      predicate, and unlock on each return path) and zero predicated BL
+      instructions. It locks owner+0x78, resolves owner+0x38, and returns the
+      current outer-handle target only when the resolved object's +0x54 handle
+      resolves to an object with a nonzero first word; it unlocks in both
+      paths. The unported 0x081375b0 predicate is represented privately from
+      its verified raw behavior, preserving its two nested-handle reads rather
+      than inventing a callee seam. match.py finds the same lock, handle,
+      nested +0x54, conditional, unlock, and return structure; LLVM inlines
+      the already-ported counted-mutex helpers and merges the two unlock tails.

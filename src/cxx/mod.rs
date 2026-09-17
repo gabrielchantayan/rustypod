@@ -84,6 +84,7 @@ pub mod magic_tagged_object_retain;
 pub mod list_cursor_clear;
 pub mod list_cursor_release;
 pub mod locked_vtable_slot_16_dispatch;
+pub mod locked_handle_resolve;
 pub mod magic_tagged_object;
 pub mod mutex;
 pub mod mutex_opaque_context_construct;
