@@ -28098,6 +28098,34 @@ functions:
       pair into one barrel-shifter `and r0, r1, r0, lsr #15`, plus its
       usual fp frame.
 
+  - address: 0x08292f9c
+    ghidra: FUN_08292f9c
+    name: registered_entry_channel_post
+    size: 60
+    sig: "u32 registered_entry_channel_post(void *controller, u32 entry_id, i32 enable)"
+    module: app/registered_entry_channel_post
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: entry_id
+      param_3/r2: enable
+      r4: controller
+      r5: entry_id
+      r0: slot_index
+    notes: >-
+      Raw ARM verifies 60 bytes exactly, 0x08292f9c..0x08292fd8: the next
+      word is the registration-table literal 0x089d04c4 and the separate
+      following function starts with `push {r4,r5,r6,lr}` at 0x08292fdc.
+      Complete A32 decode finds four inbound direct calls: three plain bl
+      (0x081609a0, 0x08160d6c, 0x08160d7c) and one blne (0x08160a28).
+      The body has three plain direct bl calls and no predicated forms:
+      channel_control_apply_enable @ 0x081085d0 receives controller+0x34,
+      entry_id, and the live third argument; four_slot_key_index @
+      0x08293048 selects the 0x18-byte record; mailbox_slot_post @
+      0x0808e2a8 receives its +0x04 handle cell. It returns zero. Target
+      calls the existing three ports directly; host tests inject all calls
+      and a local table because retail RAM is unmapped.
+
   - address: 0x0824f1e8
     ghidra: FUN_0824f1e8
     name: video_frame_dispatch_operation
