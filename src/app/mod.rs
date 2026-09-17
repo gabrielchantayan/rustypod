@@ -238,6 +238,7 @@ pub mod pending_object_release;
 pub mod queue_complete;
 pub mod completion_gate;
 pub mod queued_message;
+pub mod object_child_count_is_positive;
 pub mod queued_message_create_and_post;
 pub mod pointer_queue;
 pub mod query_param_list;
