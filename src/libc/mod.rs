@@ -10,6 +10,7 @@ pub mod forward_byte_copy_returning_dst;
 pub mod counted_copy;
 pub mod bounded_copy;
 pub mod cstr_copy;
+pub mod cstr_find_from;
 pub mod bzero;
 pub mod zero_unwritten_suffix;
 pub mod halfword_load;

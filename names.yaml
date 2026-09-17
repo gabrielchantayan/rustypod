@@ -77002,6 +77002,31 @@ functions:
       words before/after the context and +0x00..+0x40/+0x5c stay
       untouched.
 
+  - address: 0x08297d58
+    ghidra: FUN_08297d58
+    name: cstr_find_from
+    size: 160
+    sig: "int cstr_find_from(const char *const *haystack_slot, const char *needle, int start_offset)"
+    module: libc/cstr_find_from
+    status: ported
+    vars: {param_1: haystack_slot, param_2: needle, param_3: start_offset}
+    notes: >-
+      Raw osos.dec decoding (load base 0x08000000) establishes the exact
+      160-byte extent 0x08297d58..0x08297df8: the next function begins
+      with mov r3,#0 at 0x08297df8. Loads the C-string pointer from the
+      one-word heap-string holder, rejects a NULL payload, skips
+      start_offset non-NUL bytes, then scans candidates while enough
+      haystack bytes remain for needle. It calls strlen_safe
+      (0x0810b610) twice and memcmp (0x08030f64) once; all three internal
+      calls are unconditional BL. Whole-image branch decoding finds four
+      incoming unconditional BL sites (0x0809e734, 0x081132f4,
+      0x08113374, 0x08113884) and no predicated forms. Empty needle
+      matches at the first eligible non-NUL position; a start at the NUL
+      returns -1. Port preserves these semantics through the existing
+      strlen_safe and memcmp seams; LLVM inlines those seams in the ARM
+      build, so match.py reports a structural diff (expected) but retains
+      the skip, length-bound, and byte-comparison loops.
+
   - address: 0x08297e34
     ghidra: FUN_08297e34
     name: heap_string_data
