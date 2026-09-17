@@ -62649,6 +62649,29 @@ functions:
       `bxne lr` for the already-bound path and materializes
       `-(cursor + 0x28)` as `mvn #43; sub` rather than `add #40; rsb`.
 
+  - address: 0x0826041c
+    ghidra: FUN_0826041c
+    name: pixel_write_red_alpha
+    size: 44
+    sig: "void pixel_write_red_alpha(void *context, u32 *output_cursor, const u8 *rgba)"
+    module: app/pixel_write_red_alpha
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: output_cursor
+      param_3/r2: rgba
+    notes: >-
+      44-byte leaf, extent verified directly from the eleven decoded ARM
+      words at 0x0826041c through bx lr at 0x08260444 and the next function
+      entry at 0x08260448. It writes rgba[0] then rgba[3] at the cursor
+      stored through r1, advancing that target-width cursor after each byte:
+      red-alpha output. A full raw A32 branch-immediate census finds four
+      plain bl callers and no predicated bl callers. Rust uses volatile
+      accesses to retain the original interleaved cursor load/store ordering
+      and prevent byte-store coalescing; firmware accesses are nonvolatile.
+      Host tests cover nonzero cursor placement, guard-byte preservation,
+      repeated append behavior, and ignored r0. match.py (exit 1, diff
+      expected) checks the target code shape against the original.
   - address: 0x08260558
     ghidra: FUN_08260558
     name: align_up
