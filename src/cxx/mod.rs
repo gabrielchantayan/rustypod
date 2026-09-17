@@ -122,6 +122,7 @@ pub mod opaque_collection_count;
 pub mod opaque_collection_secondary_count;
 pub mod opaque_pair_equal;
 pub mod opaque_context_initialize;
+pub mod opaque_context_drain;
 pub mod opaque_header_literal_construct;
 pub mod opaque_layout_construct;
 pub mod opaque_pair_copy_from_word8;

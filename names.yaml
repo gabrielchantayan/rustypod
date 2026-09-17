@@ -69675,6 +69675,40 @@ functions:
       conditional initializer/early return, NULL selector, and final
       dispatcher transfer; the diffs are the host/target seam `blx`
       calls, LLVM frame, and literal-pool words.
+  - address: 0x08262918
+    ghidra: thunk_FUN_082e7d4c
+    name: drain_opaque_context
+    size: 4
+    sig: "u32 drain_opaque_context(u32 *context)"
+    module: cxx/opaque_context_drain
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      "context+0x08": pending_object_deque
+      FUN_082e7e54: opaque_context_initialize (unported seam)
+      FUN_083da458: deque_iter_assign
+      FUN_083dfdec: deque_pop_front_elem4
+      FUN_080860c0: gateway_signal_object wrapper
+    notes: >-
+      The assigned four-byte veneer is raw word 0xea02150b, "b
+      0x082e7d4c". The target has a 132-byte extent
+      0x082e7d4c..0x082e7dcf: a 128-byte instruction body followed by
+      its 0x434e4453 literal at 0x082e7dcc; the next independently
+      linked push prologue starts at 0x082e7dd0. Raw ARM branch-immediate
+      decoding finds four direct plain unconditional bl callers
+      (0x0818ac90, 0x0839e83c, 0x0839e9a8, and 0x0839f384), zero
+      predicated bl callers, and no tail branches. NULL context returns
+      0x1a. A matching context magic calls 0x082e7e54 with a NULL
+      selector and returns its nonzero status; otherwise it drains the
+      nonempty deque at context+8, copying its front object word,
+      popping it, and passing it to 0x080860c0, returning the final
+      signal status. Deviation: the opaque initializer remains an
+      unported fixed-address target on device and zero-status host
+      boundary; iterator copy, four-byte deque pop, and signal wrapper
+      call their existing Rust ports rather than retail direct bl
+      instructions. Host tests cover NULL rejection, initialization
+      early return, magic bypass, empty deque handling, pop/signal
+      ordering, and final status propagation.
   - address: 0x0826291c
     ghidra: FUN_0826291c
     name: initialize_opaque_context
