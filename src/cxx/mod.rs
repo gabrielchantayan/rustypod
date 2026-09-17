@@ -38,6 +38,7 @@ pub mod context_child_handle;
 pub mod context_record_resolve;
 pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
+pub mod deque_layout_copy;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod buffered_read_context_destroy;
