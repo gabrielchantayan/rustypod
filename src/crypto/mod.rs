@@ -49,6 +49,7 @@ pub mod base64_decode;
 pub mod bio_printf;
 pub mod bio_new;
 pub mod bio_puts;
+pub mod bio_handle_write;
 pub mod bio_free;
 pub mod free_ex_data;
 pub mod new_ex_data;

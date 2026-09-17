@@ -103129,3 +103129,28 @@ functions:
       ExprList_item+0x08 sort-order byte. Deliberate
       deviation: target pointers use u32 words, preserving firmware offsets
       on 64-bit host fixtures.
+  - address: 0x082d4438
+    ghidra: FUN_082d4438
+    name: bio_handle_write
+    size: 60
+    sig: "u32 bio_handle_write(const BioWriteHandle *handle, const u8 *data, i32 len)"
+    module: crypto/bio_handle_write
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: data
+      param_3/r2: len
+      handle_plus_0x00: kind
+      handle_plus_0x10: bio
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: 15 ARM words from
+      cmp r0,#0 at 0x082d4438 through pop {r4,pc} at 0x082d4470; the next
+      separately linked function begins at 0x082d4474. Whole-image ARM
+      decoding finds four inbound direct BL calls: plain bl at 0x0816482c and
+      predicated blne at 0x08196618, 0x08196c00, and 0x08196c64. The body has
+      one plain unconditional bl, BIO_write at 0x0803da74, and no predicated
+      calls. It returns 1 for a null handle or data pointer, 14 when
+      handle->kind is not 1, otherwise maps a positive BIO_write result to 0
+      and a non-positive result to 11. The host uses a volatile BIO_write seam
+      because target BIO pointers are 32-bit; firmware calls the verified
+      retailOS address directly. Deliberate deviations: none.
