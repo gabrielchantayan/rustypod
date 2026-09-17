@@ -40095,6 +40095,30 @@ functions:
       0x082520b8, 0x082a1538), zero predicated bl callers, and zero direct
       tail branches. The dedicated Rust text section preserves this separately
       hookable target against identical-code folding.
+  - address: 0x0824cccc
+    ghidra: FUN_0824cccc
+    name: deque_layout_copy_construct
+    size: 192
+    sig: "u32 *deque_layout_copy_construct(u32 *dst, const u32 *src)"
+    module: cxx/deque_layout_copy
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    renames:
+      FUN_0824c774: deque_iter_assign_alias_c774
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw ARM establishes the 192-byte extent from 0x0824cccc through pop
+      {r4,r5,r6,pc} at 0x0824cd88; the next independently linked function
+      begins with mov r3,r0 at 0x0824cd8c. It copy-constructs a 37-word
+      deque-related layout: two 16-byte deque iterators, seven scalar words,
+      three further 16-byte iterator-like groups, then nine words at +0x6c.
+      It finishes by copying only bits 0..7 of the +0x90 control word,
+      retaining destination bits 8..31. Decoding every ARM B/BL-immediate
+      word finds three unconditional internal bl instructions (two to
+      deque_iter_assign_alias_c774 and one to iram_memcpy_veneer), no
+      predicated bl instructions, and four inbound plain bl call sites at
+      0x08240c38, 0x08240c54, 0x08240c6c, and 0x08240c78. Rust calls the
+      ported memcpy body directly rather than reproducing its veneer.
   - address: 0x083d9ff8
     ghidra: FUN_083d9ff8
     name: deque_iter_init_elem4_alias_9ff8
