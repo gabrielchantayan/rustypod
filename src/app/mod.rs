@@ -191,6 +191,7 @@ pub mod node_list;
 pub mod child_table_reconcile;
 pub mod notes_dispatcher_status;
 pub mod notes_dispatcher_status_strings;
+pub mod notes_dispatcher_append_timestamp;
 pub mod no_content_layout_default;
 pub mod object_byte_at_5;
 pub mod object_bytes_64_or_6c_nonzero;
