@@ -102965,3 +102965,34 @@ functions:
       exact overlap. match.py is expected to differ in the inlined helper
       and LLVM frame while retaining the two-part folded-prefix and
       structured suffix-copy shape.
+  - address: 0x082de8f4
+    ghidra: FUN_082de8f4
+    name: stream_ensure_available
+    size: 96
+    sig: "u32 stream_ensure_available(void *stream, u32 requested)"
+    module: app/stream_ensure_available
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: requested
+      r4: stream
+      r5: status
+      r6: requested
+      stream_plus_0x0e: available_byte_count
+      stream_plus_0x6c: reader
+      stream_plus_0x78: callback_record
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent: 24 ARM words from
+      push {r4-r6,lr} at 0x082de8f4 through pop {r4-r6,pc} at 0x082de950;
+      the separately linked next function begins with push {r2-r9,lr} at
+      0x082de954. The four inbound direct calls are unconditional bl at
+      0x082dd4b0, 0x082ded14, 0x0837dcac, and 0x0837ee60; no inbound
+      predicated bl calls exist. The body has two unconditional plain bl calls,
+      to FUN_0837db74 and FUN_0837cafc, and no predicated bl calls. If the
+      +0x0e available-byte count is smaller than requested, it clears
+      callback_record+8 when present and invokes the reader's +0x1c vtable slot
+      with requested. A zero status stores requested's low byte; nonzero statuses
+      return unchanged except 5, which repeats while FUN_0837cafc returns
+      nonzero. Target defaults preserve those two unported call ABIs; host uses
+      a seam because target function pointers are 32-bit. Deliberate deviations:
+      none.
