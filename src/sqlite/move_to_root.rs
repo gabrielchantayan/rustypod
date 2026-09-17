@@ -17,9 +17,9 @@
 //! `MemPage + 0x04` is zero. The final state is VALID exactly when the
 //! current page's `nCell` halfword at `+0x14` is nonzero.
 //!
-//! Deliberate deviations: `sqlite3BtreeClearCursor` @ 0x082c3528 and
-//! `getAndInitPage` @ 0x082d05d0 remain unported and use one volatile
-//! dispatch boundary. Existing ports `release_via_field_0x48` @ 0x0836761c,
+//! Deliberate deviation: `getAndInitPage` @ 0x082d05d0 remains unported and
+//! uses a volatile dispatch boundary. Existing ports
+//! `btree_clear_cursor` @ 0x082c3528, `release_via_field_0x48` @ 0x0836761c,
 //! `load_be32` @ 0x0837a158, and `btree_move_to_child` @ 0x082d99d0 are
 //! direct calls. Cursor, Btree, and MemPage pointer fields remain target
 //! `u32` words so their ARM offsets do not widen on a 64-bit host.
@@ -27,6 +27,7 @@
 use crate::cxx::release::release_via_field_0x48;
 use crate::util::beload::load_be32;
 use crate::sqlite::move_to_child::btree_move_to_child;
+use crate::sqlite::btree_clear_cursor::btree_clear_cursor;
 
 const CUR_BTREE: usize = 0x00;
 const CUR_ROOT_PAGE: usize = 0x14;
@@ -48,20 +49,12 @@ const CURSOR_VALID: u8 = 1;
 const CURSOR_REQUIRESEEK: u8 = 2;
 const CURSOR_FAULT: u8 = 3;
 
-pub type ClearCursorFn = unsafe extern "C" fn(cursor: *mut u8);
 pub type GetAndInitPageFn = unsafe extern "C" fn(shared: u32, page_number: u32, page_out: *mut u32, flags: u32) -> i32;
 
 /// Unported calls reached by the b-tree cursor movement ports.
 #[derive(Clone, Copy)]
 pub struct BtreeMoveToRootOps {
-    pub clear_cursor: ClearCursorFn,
     pub get_and_init_page: GetAndInitPageFn,
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_clear_cursor(cursor: *mut u8) {
-    let clear_cursor: ClearCursorFn = core::mem::transmute(0x082c_3528usize);
-    clear_cursor(cursor);
 }
 
 #[cfg(target_os = "none")]
@@ -72,12 +65,6 @@ unsafe extern "C" fn retail_get_and_init_page(shared: u32, page_number: u32, pag
 }
 
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_clear_cursor(_cursor: *mut u8) {
-    panic!("btree_move_to_root requires sqlite3BtreeClearCursor @ 0x082c3528")
-}
-
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_get_and_init_page(_shared: u32, _page_number: u32, _page_out: *mut u32, _flags: u32) -> i32 {
     panic!("btree_move_to_root requires getAndInitPage @ 0x082d05d0")
 }
@@ -85,17 +72,15 @@ unsafe extern "C" fn missing_get_and_init_page(_shared: u32, _page_number: u32, 
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = BtreeMoveToRootOps {
-    clear_cursor: retail_clear_cursor,
     get_and_init_page: retail_get_and_init_page,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = BtreeMoveToRootOps {
-    clear_cursor: missing_clear_cursor,
     get_and_init_page: missing_get_and_init_page,
 };
 
-/// Active dispatch boundary for the two still-stock b-tree cursor services.
+/// Active dispatch boundary for the still-stock page acquisition service.
 pub static mut BTREE_MOVE_TO_ROOT_OPS: BtreeMoveToRootOps = DEFAULT_BTREE_MOVE_TO_ROOT_OPS;
 
 #[inline(always)]
@@ -141,7 +126,7 @@ pub unsafe extern "C" fn btree_move_to_root(cursor: *mut u8) -> i32 {
         if state == CURSOR_FAULT {
             return read_u32(cursor, CUR_SAVED_RC) as i32;
         }
-        (move_to_root_ops().clear_cursor)(cursor);
+        btree_clear_cursor(cursor);
     }
 
     let root_page = read_u32(cursor, CUR_ROOT_PAGE);
@@ -216,7 +201,6 @@ mod tests {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Event {
-        Clear,
         Get { shared: u32, page: u32, flags: u32 },
     }
 
@@ -228,9 +212,6 @@ mod tests {
         child_replacement: u32,
     }
 
-    unsafe extern "C" fn mock_clear_cursor(_cursor: *mut u8) {
-        MOCK.lock().events.push(Event::Clear);
-    }
 
     unsafe extern "C" fn mock_get_and_init_page(shared: u32, page: u32, out: *mut u32, flags: u32) -> i32 {
         let mut mock = MOCK.lock();
@@ -256,7 +237,6 @@ mod tests {
     unsafe fn install_mocks() -> OpsGuard {
         let old = BTREE_MOVE_TO_ROOT_OPS;
         BTREE_MOVE_TO_ROOT_OPS = BtreeMoveToRootOps {
-            clear_cursor: mock_clear_cursor,
             get_and_init_page: mock_get_and_init_page,
         };
         OpsGuard(old)
@@ -344,7 +324,7 @@ mod tests {
             assert_eq!(cursor.add(CUR_VALID_N_KEY).read(), 0);
             assert_eq!(cursor.add(CUR_E_STATE).read(), CURSOR_VALID);
         }
-        assert_eq!(events(), vec![Event::Clear]);
+        assert!(events().is_empty());
     }
 
     #[test]

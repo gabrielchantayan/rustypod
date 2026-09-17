@@ -87,7 +87,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::sqlite::move_to_root::{BtreeMoveToRootOps, BTREE_MOVE_TO_ROOT_OPS, BTREE_MOVE_TO_ROOT_TEST_LOCK, ClearCursorFn};
+    use crate::sqlite::move_to_root::{BtreeMoveToRootOps, BTREE_MOVE_TO_ROOT_OPS, BTREE_MOVE_TO_ROOT_TEST_LOCK};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use parking_lot::Mutex;
     use std::sync::LazyLock;
@@ -119,7 +119,6 @@ mod tests {
         replacement: u32,
     }
 
-    unsafe extern "C" fn mock_clear_cursor(_cursor: *mut u8) {}
 
     unsafe extern "C" fn mock_get_and_init_page(shared: u32, page: u32, out: *mut u32, flags: u32) -> i32 {
         let mut mock = MOCK.lock();
@@ -141,7 +140,6 @@ mod tests {
     unsafe fn install_mock() -> OpsGuard {
         let old = BTREE_MOVE_TO_ROOT_OPS;
         BTREE_MOVE_TO_ROOT_OPS = BtreeMoveToRootOps {
-            clear_cursor: mock_clear_cursor as ClearCursorFn,
             get_and_init_page: mock_get_and_init_page,
         };
         OpsGuard(old)

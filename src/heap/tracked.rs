@@ -240,6 +240,7 @@ pub unsafe extern "C" fn tracked_alloc_tail(size: i32) -> *mut u8 {
 /// recorded size from the running byte counter, and releases the block
 /// with caller tag 57. NULL is ignored.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn tracked_free(payload: *mut u8) {
     if payload.is_null() {
         return;

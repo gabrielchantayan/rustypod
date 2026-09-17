@@ -33918,10 +33918,9 @@ functions:
       otherwise it refreshes pBt->db, clears and unlinks the cursor in both
       directions, releases its page owner, unlocks, clears overflow state,
       then leaves. Target builds directly call the ported btree_enter,
-      release_via_field_0x48, and btree_leave plus the three unported retail
-      addresses 0x082c3528, 0x083960e8, and 0x082d6d08. Deliberate host-only
-      deviation: a private dispatch table models the three unported calls
-      and lock boundaries because target 32-bit cursor/Btree pointer slots
+      sqlite3BtreeClearCursor, release_via_field_0x48, and btree_leave; the
+      two unported retail addresses 0x083960e8 and 0x082d6d08 use a private
+      host dispatch table because target 32-bit cursor/Btree pointer slots
       widen on the host. Tests cover null pBtree, head and middle unlinking,
       db refresh, and operation ordering. match.py is expected to differ in
       LLVM frame/register allocation and absolute-call relocations while
@@ -34287,6 +34286,29 @@ functions:
       successful key clearing, and failure retention.
 
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
+  - address: 0x082c3528
+    ghidra: FUN_082c3528
+    name: btree_clear_cursor
+    size: 32
+    sig: "void btree_clear_cursor(BtCursor *cursor)"
+    module: sqlite/btree_clear_cursor
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      param_1+0x43: cursor->eState
+      param_1+0x44: cursor->pOverflow
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent
+      0x082c3528..0x082c3548: the next separately linked function begins
+      with push {r4-r9,lr} at 0x082c3548. Decoding every ARM B/BL word finds
+      four inbound direct calls, all unconditional plain bl at 0x082d9b30,
+      0x08370b6c, 0x08371678, and 0x08372db0; no predicated bl targets this
+      function. Its sole outbound call is plain bl tracked_free @ 0x083906f4.
+      SQLite's sqlite3BtreeClearCursor frees cursor->pOverflow, then writes
+      zero to pOverflow and eState in that order. There are no deliberate
+      deviations; tracked_free is the direct port of the raw callee.
+
   - address: 0x082d05d0
     ghidra: FUN_082d05d0
     name: get_and_init_page
@@ -34371,7 +34393,7 @@ functions:
       param_1+0x42: cursor->validNKey
       param_1+0x43: cursor->eState
       param_1+0x50: cursor->skip
-      FUN_082c3528: sqlite3BtreeClearCursor (BTREE_MOVE_TO_ROOT_OPS.clear_cursor seam)
+      FUN_082c3528: sqlite3BtreeClearCursor (direct ported callee)
       FUN_082d05d0: getAndInitPage (BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam)
       FUN_0836761c: release_via_field_0x48 (direct ported callee)
       FUN_0837a158: load_be32/sqlite3Get4byte (direct ported callee)
@@ -34391,12 +34413,12 @@ functions:
       idx, info.nSize, atLast, and validNKey clear; an empty page with its
       raw +0x04 flag clear descends through the big-endian child word at
       aData + hdrOffset + 8; eState finally follows current pPage.nCell.
-      Deliberate deviation: unported sqlite3BtreeClearCursor @ 0x082c3528
-      and getAndInitPage @ 0x082d05d0 share the volatile
-      BTREE_MOVE_TO_ROOT_OPS boundary (retail defaults on target, explicit
-      mocks on host). Ported release_via_field_0x48 @ 0x0836761c,
-      load_be32 @ 0x0837a158, and btree_move_to_child @ 0x082d99d0 are
-      direct calls. Host tests cover fault precedence, seek clearing,
+      Deliberate deviation: unported getAndInitPage @ 0x082d05d0 remains the
+      volatile BTREE_MOVE_TO_ROOT_OPS.get_and_init_page boundary (retail
+      default on target, explicit host mock). Ported sqlite3BtreeClearCursor
+      @ 0x082c3528, release_via_field_0x48 @ 0x0836761c, load_be32 @
+      0x0837a158, and btree_move_to_child @ 0x082d99d0 are direct calls.
+      Host tests cover fault precedence, seek clearing,
       page-acquisition failure with cache
       preservation, successful empty-root descent and big-endian child
       decoding, and the raw +0x04 no-descent gate.

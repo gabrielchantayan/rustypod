@@ -77,6 +77,7 @@ pub mod btree_lock;
 pub mod btree_in_trans;
 pub mod btree_cursor;
 pub mod btree_close_cursor;
+pub mod btree_clear_cursor;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
 pub mod btree_update_meta;
