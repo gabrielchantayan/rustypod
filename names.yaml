@@ -105892,3 +105892,24 @@ functions:
       preserve target offsets on 64-bit hosts. match.py showed the same store,
       load, increment, and counter-store sequence, with LLVM adding a standard
       frame and literal-pool layout.
+  - address: 0x082724ac
+    ghidra: FUN_082724ac
+    name: unresolved_08111190_destructor_veneer
+    size: 4
+    sig: "void *unresolved_08111190_destructor_veneer(void *object)"
+    module: null
+    status: identified
+    renames:
+      FUN_08111190: unresolved_08111190_destructor
+    notes: >-
+      Raw osos.dec establishes this is a four-byte ARM tail-call veneer:
+      `b 0x08111190`; 0x082724b0 (`bx lr`) is the next real function. It has
+      no outbound BL calls. Decoding every ARM B/BL encoding independently
+      finds four plain inbound BL calls at 0x081a73a8, 0x081dadc8,
+      0x081dddd4, and 0x081e943c, and no predicated inbound BL calls.
+      Ghidra incorrectly assigns the 0x08111190 destructor body to this
+      veneer. The destination is an unported 340-byte routine
+      (0x08111190..0x081112e4, followed by its two literal-pool words) that
+      walks owned state and dispatches several unresolved callees and virtual
+      destructors. No established semantic identity or Rust seam exists for
+      that target, so replacing this veneer alone cannot preserve its behavior.
