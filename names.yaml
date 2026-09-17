@@ -40291,6 +40291,25 @@ functions:
       the C++ block. The port reads the vtable by SLOT INDEX (0x40/4),
       not byte offset, so it is correct on a 64-bit test host.
 
+  - address: 0x0829baa8
+    ghidra: FUN_0829baa8
+    name: iterator_state_is_valid
+    size: 24
+    sig: "bool iterator_state_is_valid(state: *const u32)"
+    module: app/vtable_set
+    status: ported
+    vars: {param_1/r0: state}
+    notes: >-
+      Raw osos.dec words at 0x0829baa8 are ldr r0,[r0,#8]; cmn r0,#1;
+      cmnne r0,#5; moveq r0,#0; movne r0,#1; bx lr. The next independent
+      function starts at 0x0829bac0, so the true extent is 24 bytes.
+      Decoding every direct ARM BL in osos.dec finds four unconditional
+      plain callers (0x08155bb4, 0x08155dd0, 0x08155e40, 0x0829ba7c) and
+      zero predicated callers. The predicate rejects only state+0x08 values
+      -1 and -5; all other signed positions, including -2 and -3, are valid.
+      Ghidra invents two additional callers by splitting/inlining surrounding
+      iterator code. Rust indexes the third u32 word rather than using a host
+      byte offset; this deliberately preserves the target 32-bit layout.
   - address: 0x0829bac0
     ghidra: FUN_0829bac0
     name: container_element_at_alias_9bac0
