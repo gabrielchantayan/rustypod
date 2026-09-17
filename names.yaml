@@ -69828,6 +69828,33 @@ functions:
       preserves only that verified role and offset. No deliberate deviations.
       Host tests cover zero, all-low-byte-set, observed dispatch codes with
       unrelated high bits, the aligned +8 word position, and no mutation.
+
+  # --- Q16.16 four-word componentwise multiply (app/fixed4_componentwise_mul) ---
+  - address: 0x0829f848
+    ghidra: FUN_0829f848
+    name: fixed4_componentwise_mul
+    size: 92
+    sig: "void fixed4_componentwise_mul(u32 *dst, const i32 *left, const i32 *right)"
+    module: app/fixed4_componentwise_mul
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: left
+      param_3/r2: right
+      param_2[3]: preserved_w
+    notes: >-
+      Raw ARM establishes the true extent as 0x0829f848..0x0829f8a4; the
+      next separately linked function starts at 0x0829f8a4. Its four direct
+      BL instructions are all unconditional: fixed16_mul at 0x0829f860,
+      0x0829f870, and 0x0829f880, then store_four_u32s at 0x0829f89c.
+      There are no predicated BL forms. The component products are signed
+      Q16.16 truncating multiplies of left/right z, y, then x; left[3] is
+      loaded after those products and all four words are stored together.
+      Decoding the raw firmware found four inbound plain BL callers at
+      0x0824c158, 0x0824c3c0, 0x0824c3dc, and 0x0824c3f8, with no predicated
+      or tail callers. The Rust port uses the existing behavior-equivalent
+      fixed16_mul and store_four_u32s seams. Host tests cover signed
+      truncation, INT_MIN, fourth-word preservation, and destination aliasing.
   # --- Resource callback cache refresh/getter (app/resource/cache) ---
   - address: 0x08047020
     ghidra: FUN_08047020

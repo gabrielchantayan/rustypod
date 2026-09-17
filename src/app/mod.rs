@@ -102,6 +102,7 @@ pub mod fixed3_assign;
 pub mod fixed3_add_scaled;
 pub mod fixed3_difference;
 pub mod fixed3_sum;
+pub mod fixed4_componentwise_mul;
 pub mod fixed_point;
 pub mod fixed_value;
 pub mod global_flag_table;
