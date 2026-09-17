@@ -23610,6 +23610,44 @@ functions:
       the 64-bit host; the 'plst' fixture's firmware u32 links use a unique
       below-4-GiB slab.
 
+  - address: 0x082a5f7c
+    ghidra: FUN_082a5f7c
+    name: tdat_selection_copy_to_context
+    size: 140
+    sig: "u32 tdat_selection_copy_to_context(TdatContextSelectionSource *source, ScopedContext *destination)"
+    module: app/scoped_context
+    renames:
+      param_1/r4: source
+      param_2/r6: destination
+      "source vtable+0xc": selection_available
+      "source vtable+0x54": context_available
+      "source+0x4": identifier_source
+      "source+0x8": tdat_registry
+      "identifier_source+0x218/+0x21c": node_identifier
+      "tdat_registry+0xf60": tdat_element
+      FUN_08050d10: ui_tdat_find_node_by_id
+      FUN_08270394: scoped_context_construct
+      FUN_08270418: scoped_context_copy_fields
+    status: ported
+    notes: >-
+      Raw ARM is exactly 0x082a5f7c..0x082a6008 (35 instructions, 140
+      bytes); the next word at 0x082a600c is a distinct push {r4,lr}
+      prologue. Ghidra's 144-byte extent includes that next prologue. The
+      source's virtual +0xc and +0x54 gates run in order; either zero result
+      returns zero without reading later fields. Both gates permit a lookup
+      of identifier_source+0x218/+0x21c in the tdat element at
+      tdat_registry+0xf60. A missing node returns zero. A found node seeds a
+      mode-zero temporary ScopedContext, whose payload is copied to
+      destination, then returns one. Decoding every ARM B/BL word in
+      osos.dec finds four direct callers (0x080b5540, 0x0812cb50,
+      0x081753e0, 0x08238784), all unconditional plain BL, with no
+      predicated forms. The body itself has three direct plain BL instructions
+      (0x082a5fd4, 0x082a5fec, 0x082a5ff8), two indirect BLX virtual calls,
+      and no predicated direct calls. The virtual target identities are not
+      established, so the port preserves slots rather than inventing callees.
+      Host tests cover both gates and a valid 'tdat'-tagged lookup miss,
+      proving no destination mutation on every zero result.
+
   - address: 0x082a63c0
     ghidra: FUN_082a63c0
     name: ui_element_reference_target_field_210
