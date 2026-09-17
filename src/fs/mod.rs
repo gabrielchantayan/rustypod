@@ -4,6 +4,8 @@
 pub mod fat_dirent;
 /// FAT data-cluster to cache-block-index conversion @ 0x082e01cc.
 pub mod fat_cluster_to_block;
+/// FAT cache-block-index to data-cluster conversion @ 0x082e4358.
+pub mod fat_cluster_for_offset;
 pub mod path_limits;
 /// Finder `.DS_Store` metadata-path substring predicate @ 0x0809e718.
 pub mod ds_store_path;
