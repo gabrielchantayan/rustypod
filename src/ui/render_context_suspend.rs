@@ -19,28 +19,29 @@
 //!
 //! # Deliberate deviations
 //!
-//! The three unported presentation operations retain their verified retail
-//! addresses on device and use recording seams in host tests. Their concrete
-//! object types are not inferred here. The raw ARM comparison uses all of r1,
-//! while the store truncates it to a byte; the public argument therefore stays
-//! `u32`, rather than being narrowed to `bool` or `u8`.
+//! The two unported presentation operations retain their verified retail
+//! addresses on device and use recording seams in host tests. The resource
+//! release is ported in [`crate::ui::render_context_release_resource`]. The
+//! raw ARM comparison uses all of r1, while the store truncates it to a byte;
+//! the public argument therefore stays `u32`, rather than being narrowed to
+//! `bool` or `u8`.
 
 use core::mem::size_of;
 use core::ptr;
 
 use crate::ui::invalidate::ui_element_invalidate;
+use crate::ui::render_context_release_resource::render_context_release_resource;
 use crate::ui::rect::{rect_is_empty, Rect};
 
 /// ABI of the setup operation at retailOS address 0x0828c700.
 type RenderContextEnsurePresentation = unsafe extern "C" fn(*mut u8);
-/// ABI of the resource release operation at retailOS address 0x0828d4e0.
+/// ABI of the presentation release operation at retailOS address 0x0828cd54.
 type RenderContextReleaseSlot = unsafe extern "C" fn(*mut u8, *mut u32);
 
 /// Unported calls preserved by [`render_context_set_suspended`].
 #[derive(Clone, Copy)]
 struct RenderContextSuspendOps {
     ensure_presentation: RenderContextEnsurePresentation,
-    release_resource: RenderContextReleaseSlot,
     release_presentation: RenderContextReleaseSlot,
 }
 
@@ -50,11 +51,6 @@ unsafe extern "C" fn firmware_ensure_presentation(context: *mut u8) {
     ensure(context);
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_resource(context: *mut u8, slot: *mut u32) {
-    let release: RenderContextReleaseSlot = core::mem::transmute(0x0828_d4e0usize);
-    release(context, slot);
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_release_presentation(context: *mut u8, slot: *mut u32) {
@@ -71,14 +67,12 @@ unsafe extern "C" fn missing_release_slot(_context: *mut u8, _slot: *mut u32) {}
 #[cfg(target_os = "none")]
 const DEFAULT_RENDER_CONTEXT_SUSPEND_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
     ensure_presentation: firmware_ensure_presentation,
-    release_resource: firmware_release_resource,
     release_presentation: firmware_release_presentation,
 };
 
 #[cfg(not(target_os = "none"))]
 const DEFAULT_RENDER_CONTEXT_SUSPEND_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
     ensure_presentation: missing_ensure_presentation,
-    release_resource: missing_release_slot,
     release_presentation: missing_release_slot,
 };
 
@@ -145,7 +139,7 @@ pub unsafe extern "C" fn render_context_set_suspended(context: *mut u8, suspende
 
         let ops = render_context_suspend_ops();
         if ptr::addr_of!((*context_fields).presentation_resource).read() != 0 {
-            (ops.release_resource)(context, ptr::addr_of_mut!((*context_fields).presentation_resource));
+            render_context_release_resource(context, ptr::addr_of_mut!((*context_fields).presentation_resource));
         }
         (ops.release_presentation)(context, ptr::addr_of_mut!((*context_fields).presentation));
         return 0;
@@ -182,9 +176,8 @@ mod tests {
         ENSURE_CALLS.fetch_add(1, Ordering::SeqCst);
     }
 
-    unsafe extern "C" fn record_resource_release(_context: *mut u8, slot: *mut u32) {
+    unsafe extern "C" fn record_resource_release(_context: *mut u8) {
         RELEASE_LOG.fetch_add(1, Ordering::SeqCst);
-        slot.write(0);
     }
 
     unsafe extern "C" fn record_presentation_release(_context: *mut u8, slot: *mut u32) {
@@ -194,7 +187,6 @@ mod tests {
 
     const TEST_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
         ensure_presentation: record_ensure,
-        release_resource: record_resource_release,
         release_presentation: record_presentation_release,
     };
 
@@ -211,6 +203,14 @@ mod tests {
             return;
         };
         let context = storage.cast::<RenderContext>();
+        let resource = unsafe {
+            storage.add(0x200).cast::<crate::ui::render_context_release_resource::RenderContextResource>()
+        };
+        static RESOURCE_VTABLE: crate::ui::render_context_release_resource::RenderContextResourceVtable =
+            crate::ui::render_context_release_resource::RenderContextResourceVtable {
+                unresolved_00: 0,
+                release: record_resource_release,
+            };
 
         unsafe {
             let old_ops = RENDER_CONTEXT_SUSPEND_OPS;
@@ -238,7 +238,8 @@ mod tests {
 
             reset_context(context);
             ptr::addr_of_mut!((*context).presentation).write(0x44);
-            ptr::addr_of_mut!((*context).presentation_resource).write(0x33);
+            ptr::addr_of_mut!((*resource).vtable).write(&RESOURCE_VTABLE);
+            ptr::addr_of_mut!((*context).presentation_resource).write(resource as usize as u32);
             RELEASE_LOG.store(0, Ordering::SeqCst);
             assert_eq!(render_context_set_suspended(storage, 1), 0);
             assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 11);

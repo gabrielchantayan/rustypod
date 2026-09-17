@@ -23366,6 +23366,27 @@ functions:
       The runtime RW globals are modeled as crate statics rather than their
       fixed RAM addresses. Host tests cover sentinel retention, boundary
       rejection without a call, and NULL secondary-display fallback.
+  - address: 0x0828d4e0
+    ghidra: FUN_0828d4e0
+    name: render_context_release_resource
+    size: 36
+    sig: "void render_context_release_resource(void *context, u32 *resource_slot)"
+    module: ui/render_context_release_resource
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: resource_slot
+      "*resource_slot": resource
+      "resource->vtable+0x04": release
+    notes: >-
+      Raw osos.dec words prove the nine-instruction, 36-byte extent from
+      0x0828d4e0 through 0x0828d500; the next real function starts at
+      0x0828d504. Decoding raw inbound branches finds exactly four direct,
+      unconditional bl callers and zero predicated callers. The body has no
+      direct bl, instead calling the unresolved resource vtable entry at +0x04
+      with the original context in r0, then clearing the resource slot. The
+      ARM port is the exact recovered instruction sequence; the typed host
+      vtable avoids interpreting widened host pointers as target u32 words.
   - address: 0x0828dda0
     ghidra: FUN_0828dda0
     name: render_context_set_suspended

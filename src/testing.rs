@@ -778,6 +778,10 @@ pub mod hints {
     // render-context fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const RENDER_CONTEXT_SUSPEND: usize = 0xa700_0000;
+    // 0xa800_0000: dedicated to ui/render_context_release_resource's raw-u32
+    // resource fixture; mappings never unmap, so no other user may share this
+    // hint.
+    pub const RENDER_CONTEXT_RELEASE_RESOURCE: usize = 0xa800_0000;
     // 0x8a00_0000: dedicated to app/layout_state activation's target-width
     // profile-pointer fixture; mappings never unmap, so no other user may
     // share this hint.

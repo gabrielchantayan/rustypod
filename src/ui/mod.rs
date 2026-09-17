@@ -29,6 +29,7 @@ pub mod manager_pending_operation;
 pub mod table_slot_allocate;
 pub mod render_context;
 pub mod render_context_suspend;
+pub mod render_context_release_resource;
 pub mod render_owner_clip;
 pub mod render_request_from_descriptor;
 pub mod render_cell_state;
