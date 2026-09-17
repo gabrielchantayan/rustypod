@@ -1660,6 +1660,37 @@ functions:
       four-byte vtable word as a typed host pointer-width callback cell; its
       final typed call represents ARM bxeq. Deliberate deviations: none.
 
+  # --- component vtable payload tail dispatch ---
+  - address: 0x0829f288
+    ghidra: FUN_0829f288
+    name: component_vtable_slot_12_payload_tail_dispatch
+    size: 20
+    sig: "u32 component_vtable_slot_12_payload_tail_dispatch(ComponentVtableSlot12PayloadOwner *owner)"
+    module: cxx/component_vtable_slot_12_payload_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0xc0: component
+      param_1_plus_0x1d8/r1: payload
+      component_deref: vtable
+      vtable_plus_0x0c: component_dispatch
+      method_return/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: ldr r1,[r0,#0x1d8],
+      ldr r0,[r0,#0xc0], ldr r2,[r0], ldr r2,[r2,#0x0c], bx r2 at
+      0x0829f288..0x0829f298; the separately linked next function begins at
+      0x0829f29c. It forwards the owner payload at +0x1d8 in r1, replaces
+      owner in r0 with the opaque component at +0xc0, and tail-dispatches that
+      component through vtable +0x0c, returning its u32 result unchanged. The
+      component and virtual method identities remain unrecovered and are
+      deliberately not invented. Independent raw-image decoding and Ghidra
+      assembly each find four inbound plain unconditional bl calls at
+      0x0820daa4, 0x0820db00, 0x0820db3c, and 0x0820dbc8; no predicated bl
+      forms or direct tail branches target the wrapper. Host coverage proves
+      only vtable slot +0x0c is selected, the component replaces owner as the
+      virtual receiver, the payload is forwarded, and the u32 result is
+      preserved. Rust uses native-width host vtable cells while repr(C)
+      preserves the verified target word offsets.
   # --- component vtable tail dispatch ---
   - address: 0x081159bc
     ghidra: FUN_081159bc
