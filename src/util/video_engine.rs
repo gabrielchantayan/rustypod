@@ -374,6 +374,78 @@ pub unsafe extern "C" fn video_engine_set_property(command: u32, key: u32, value
     }
     property_dispatch(engine, command, key, value);
 }
+/// Firmware entry of the frame-property dispatcher (`FUN_08254824`,
+/// unported).
+#[cfg(target_arch = "arm")]
+const FRAME_PROPERTY_DISPATCH_ADDR: usize = 0x0825_4824;
+
+/// ABI of the frame-property dispatcher: engine followed by the three
+/// caller-supplied property words.
+type VideoEngineFramePropertyDispatch = unsafe extern "C" fn(*mut u8, u32, u32, u32);
+
+/// Host-test stand-in for `FUN_08254824`.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_FRAME_PROPERTY_DISPATCH: Option<VideoEngineFramePropertyDispatch> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_set_frame_property`].
+#[cfg(not(target_arch = "arm"))]
+pub unsafe fn set_mock_frame_property_dispatch(
+    dispatch: Option<VideoEngineFramePropertyDispatch>,
+) {
+    core::ptr::addr_of_mut!(MOCK_FRAME_PROPERTY_DISPATCH).write(dispatch);
+}
+
+/// Calls the resident frame-property dispatcher.
+fn frame_property_dispatch(engine: *mut u8, group: u32, property: u32, value: u32) {
+    #[cfg(target_arch = "arm")]
+    unsafe {
+        let dispatch: VideoEngineFramePropertyDispatch =
+            core::mem::transmute(FRAME_PROPERTY_DISPATCH_ADDR);
+        dispatch(engine, group, property, value);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    unsafe {
+        match core::ptr::addr_of!(MOCK_FRAME_PROPERTY_DISPATCH).read() {
+            Some(dispatch) => dispatch(engine, group, property, value),
+            None => panic!(
+                "video_engine_set_frame_property requires dispatcher 0x08254824"
+            ),
+        }
+    }
+}
+
+/// video_engine_set_frame_property — retailOS `FUN_082d223c` @ **0x082d223c**
+/// (48 bytes, `0x082d223c..0x082d2268`; the next separately linked wrapper
+/// starts at `0x082d226c`).
+///
+/// The raw ARM body saves `(group, property, value)`, calls
+/// [`video_engine_get`], then silently returns for a NULL session. Otherwise
+/// it restores the words after the engine pointer and tail-branches to the
+/// unported frame-property dispatcher `FUN_08254824`. An aligned
+/// B/BL-immediate decode of `osos.dec` finds four inbound calls — plain `bl`
+/// at 0x0825c000, 0x082810f4, 0x0828112c, and 0x08281408 — and no predicated
+/// BL calls. The callers all submit group 0x2300 and property 0x2200, but
+/// this wrapper deliberately performs no argument validation.
+///
+/// # Deliberate deviation
+///
+/// `FUN_08254824` is unported. Target builds call its resident firmware
+/// entry; host tests install a recording seam. The NULL-session path never
+/// touches the seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_frame_property(
+    group: u32,
+    property: u32,
+    value: u32,
+) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    frame_property_dispatch(engine, group, property, value);
+}
 /// Firmware entry of the video-engine control-code enabler
 /// (`FUN_08252be4`, unported).
 #[cfg(target_arch = "arm")]
@@ -1020,6 +1092,43 @@ mod tests {
             assert_eq!(recorded(), None, "teardown stops the dispatch");
         }
     }
+    // --- video_engine_set_frame_property (FUN_082d223c) ---
+
+    #[test]
+    fn frame_property_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            *addr_of_mut!(RECORDED) = None;
+            set_mock_frame_property_dispatch(Some(recording_dispatch));
+            set_mock_instance(ptr::null_mut());
+            video_engine_set_frame_property(0x2300, 0x2200, 0x2100);
+            assert_eq!(recorded(), None, "no dispatch without a session");
+        }
+    }
+
+    #[test]
+    fn frame_property_prepends_instance_and_preserves_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_frame_property_dispatch(Some(recording_dispatch));
+            set_mock_instance(engine.as_mut_ptr());
+            for &(group, property, value) in &[
+                (0x2300, 0x2200, 0),
+                (0x2300, 0x2200, 0x2101),
+                (0, 0xffff_ffff, 0xffff_ffff),
+            ] {
+                *addr_of_mut!(RECORDED) = None;
+                video_engine_set_frame_property(group, property, value);
+                assert_eq!(
+                    recorded(),
+                    Some((engine.as_mut_ptr(), group, property, value)),
+                    "the wrapper prepends the current instance without validation"
+                );
+            }
+        }
+    }
+
     // --- video_engine_enable_control (FUN_082d12b0) ---
 
     static mut ENABLE_CONTROL_RECORDED: Option<(*mut u8, u32, u32)> = None;
