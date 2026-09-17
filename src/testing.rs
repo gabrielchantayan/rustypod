@@ -1338,6 +1338,10 @@ pub mod hints {
     // target-width object, successor, and payload fixtures; mappings never
     // unmap, so no other user may share this hint.
     pub const OBJECT_HAS_RESOLVED_FLAG_0X800: usize = 0x7700_0000;
+    // 0x7800_0000: dedicated to util/object_selected_payload_index's
+    // target-width object, descriptor, and payload fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const OBJECT_SELECTED_PAYLOAD_INDEX: usize = 0x7800_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -1574,5 +1578,9 @@ pub static INPUT_SEQUENCE_ITEM_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::
 /// Serializes tests that mutate the shared UI sequence identifier at
 /// `0x089c_fcc4`, including callers that consume an identifier.
 pub static SEQUENCE_ID_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes tests that replace object-selected-payload lookup's virtual and
+/// stock tail-call seams.
+pub static OBJECT_SELECTED_PAYLOAD_INDEX_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
 /// Serializes host tests that replace `ui::pool_entry_create::FIXED_POOL_OPS`.
 pub static UI_POOL_ENTRY_CREATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
