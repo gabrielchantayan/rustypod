@@ -125,6 +125,7 @@ pub mod opaque_pair_equal;
 pub mod opaque_context_initialize;
 pub mod opaque_context_activate;
 pub mod opaque_context_drain;
+pub mod opaque_context_set_limit;
 pub mod opaque_header_literal_construct;
 pub mod opaque_layout_construct;
 pub mod return_constant_0x52;
