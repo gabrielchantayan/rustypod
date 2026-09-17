@@ -52055,6 +52055,35 @@ functions:
       successor, destruction ordering, and header bookkeeping. match.py:
       original 56 instructions vs Rust 55; same initial header sret,
       full-range predicate/destruction/reset, and advance-then-erase loop.
+  - address: 0x082a7f50
+    ghidra: FUN_082a7f50
+    name: rb_tree_pool_destruct
+    size: 136
+    sig: "void *rb_tree_pool_destruct(void *tree)"
+    module: app/rb_tree_pool_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: tree
+      r5: chunk
+      local_18: header
+      local_14: begin
+      param_2/param_3/param_4: >-
+        not arguments; Ghidra promotes scratch stack words from the
+        push prologue. The function takes only tree.
+    notes: >-
+      Raw ARM extent is exactly 0x082a7f50..0x082a7fd4; the next function
+      starts at 0x082a7fd8. Its body contains three direct unconditional BL
+      instructions (0x083bcf44 once and cxx_array_dealloc @ 0x08266f2c
+      twice), with no predicated BL. The four direct caller BLs are
+      0x0809dbf8, 0x0809dc24, 0x0809df84, and 0x0809dfb0. When tree+0x10
+      is non-null, it erases [header->left, header) through 0x083bcf44,
+      links the re-read header at tree+0x04, then unlinks each tree+0x00
+      12-byte chunk before freeing its +0x08 block with its +0x04 capacity
+      and the chunk itself. A null header returns tree without calls. The
+      type-specialized erase callee remains unported and unnamed, so ARM
+      retains an address seam while host tests inject and observe it. Rust
+      compacts redundant ADS stack temporaries only; target-layout pointers
+      remain aligned u32 fields.
   - address: 0x082a7fd8
     ghidra: FUN_082a7fd8
     name: event_list_tree_destruct
