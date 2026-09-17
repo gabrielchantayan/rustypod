@@ -102473,3 +102473,27 @@ functions:
       NULL, zero count, timeout, signal, and waiter arguments. match.py
       structural review completed; the Rust waiter seam replaces the
       relocation-limited stock BL. Deliberate deviations: none.
+
+  - address: 0x08369c78
+    ghidra: FUN_08369c78
+    name: ata_command_wait_idle
+    size: 36
+    sig: "void ata_command_wait_idle(void)"
+    module: drivers/ata_command_wait_idle
+    status: ported
+    vars:
+      DAT_08369c9c: ata_command_global
+      DAT_08369c9c[1]: controller
+      DAT_08369c9c[10]: waiter_id
+      controller[14]: state
+    notes: >-
+      Raw `osos.dec` proves a 36-byte extent: eight instructions
+      (0x08369c78..0x08369c97) plus literal 0x089d03bc, before the distinct
+      next function at 0x08369c9c. It reads waiter_id at global +0x28, calls
+      the ported waiter_wait with timeout zero (which preserves retailOS's
+      zero-to-one tick clamp), ignores its result, then stores state 3 at
+      controller +0x38 through global +0x4. Decoding every ARM branch
+      immediate finds four inbound direct calls at 0x080dbbfc, 0x08369e68,
+      0x0836a3d4, and 0x0836aa60; all are unconditional plain bl, with no
+      predicated calls. Host tests use separate target-width global/controller
+      words and verify both timeout and signaled paths still make the store.
