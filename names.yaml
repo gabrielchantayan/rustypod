@@ -105964,3 +105964,33 @@ functions:
       walks owned state and dispatches several unresolved callees and virtual
       destructors. No established semantic identity or Rust seam exists for
       that target, so replacing this veneer alone cannot preserve its behavior.
+  - address: 0x08271bec
+    ghidra: FUN_08271bec
+    name: observable_array_erase_at
+    size: 152
+    sig: "i32 observable_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_2/r1/r4: index
+      FUN_082a48e4: observable_array_index_is_valid (stock absolute-entry seam)
+      FUN_082a4c74: observable_array_notify_erase (stock absolute-entry seam)
+    notes: >-
+      Raw osos.dec words at 0x08271bec..0x08271c84 establish the true
+      152-byte extent: push {r4,r5,r6,lr}, two direct bl calls
+      (0x082a48e4 validator and 0x082a4c74 observer broadcast), two
+      virtual blx calls at vtable +0xb8/+0xbc, then pop {r4,r5,r6,pc};
+      0x08271c84 begins the independent observable_array_clear wrapper.
+      Four inbound plain bl sites (0x08108b38, 0x08108bf8, 0x0810f9dc,
+      0x081b936c) and zero predicated bl forms. LAST_ELEMENT_INDEX selects
+      len-1 only for a positive length; other indexes require the direct signed validator.
+      A valid non-final erase shifts [index+1, len-1] left with direction
+      -1 through +0xb8, then calls +0xbc with -1 and broadcasts the index.
+      Host tests use native callback vtables; target code retains the
+      target-width vtable words and the two stock absolute-entry seams.
+      match.py reports its expected structural diff: LLVM uses an fp frame
+      and literal-loaded blx calls for the two direct stock entries, while
+      preserving validation, conditional move, finish, notification, and
+      returned index order. Host tests cover last sentinel, middle shift,
+      and invalid-index early return.
