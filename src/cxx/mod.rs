@@ -6,6 +6,7 @@ pub mod bit_set;
 pub mod string_record;
 pub mod record_work_pump;
 pub mod array_element_at;
+pub mod sorted_pointer_array_insert;
 pub mod array_index_stride20;
 pub mod strided_array_find_index;
 pub mod active_slot_count;

@@ -105657,3 +105657,34 @@ functions:
       each released word. Deliberate deviation: that callee discards the
       context argument, so host builds pass NULL rather than map its resident
       firmware global; target builds retain the volatile global load.
+
+  - address: 0x08277654
+    ghidra: FUN_08277654
+    name: sorted_pointer_array_insert
+    size: 88
+    sig: "void sorted_pointer_array_insert(u8 *owner, u8 *record)"
+    module: cxx/sorted_pointer_array_insert
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1: record
+      "*(StridedArray *)(owner + 0x80)": array
+      "*(i32 *)(record + 0x38)": sort_key
+      FUN_082a4cf8: array_element_at
+      FUN_08271ad8: unresolved_array_insert_pointer_at
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x08277654..0x082776ac; the next push prologue starts at 0x082776ac.
+      The body has two plain BL calls, to array_element_at at 0x08277684 and
+      the unresolved array insertion dispatch at 0x082776a4, with no
+      predicated BL calls. Decoding all ARM B/BL words independently finds
+      four plain inbound BL calls at 0x08277888, 0x0828e188, 0x0828e388, and
+      0x0828e588, and no predicated inbound BL calls. It finds the first
+      array record whose signed +0x38 key is greater than or equal to the
+      incoming record's key, then inserts before it; equal keys insert first.
+      Host tests cover empty, head, tail, and equal-key insertion. Deliberate
+      deviation: FUN_08271ad8 has no established identity, so target builds
+      dispatch directly to its verified ROM address and host tests inject only
+      that unresolved operation. match.py reports the same count load, key
+      comparison, element access, and final insertion dispatch, with LLVM
+      choosing a prechecked loop and indirect BLX for the ROM target.
