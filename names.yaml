@@ -104004,3 +104004,32 @@ functions:
       match.py shows LLVM adds a frame and uses a register-mask bit extract
       instead of the stock immediate-mask/shift pair; both return the same 0/1
       value. Deliberate deviations: that equivalent codegen only.
+
+  - address: 0x082a5618
+    ghidra: FUN_082a5618
+    name: path_object_duplicate_join
+    size: 52
+    sig: "StringObject *path_object_duplicate_join(StringObject *this, const StringObject *unused, const StringObject *source)"
+    module: app/path_object_duplicate_join
+    status: ported
+    renames:
+      param_1/r0: this (destination PathObject storage)
+      param_2/r1: unused (never read by the raw ARM body)
+      param_3/r2: source (copied into the stack temporary and joined onto it)
+      FUN_082792b4: path_object_copy_construct (ported direct callee)
+      FUN_08279374: path_object_join (ported direct callee)
+      FUN_08277484: string_object_destroy (ported direct callee)
+    notes: >-
+      Raw osos.dec words establish 13 ARM instructions at
+      0x082a5618..0x082a564c: push {r2-r6,lr}; save this in r5 and source
+      in r4; copy-construct a stack PathObject from source; join source onto
+      it; copy-construct this from that temporary; then destroy the temporary.
+      The next separately linked function begins with push {r4,lr} at
+      0x082a564c, so Ghidra's 52-byte extent is correct. Binary-wide ARM
+      branch decoding finds four plain inbound BL calls and zero predicated
+      BL calls. r1 is never read. The final destructor return remains in r0,
+      although observed callers ignore it. Deliberate deviation: Rust models
+      the ARM stack object with MaybeUninit while preserving the direct
+      ported-callee boundaries. Host test covers the empty-source path;
+      match.py (exit 1, expected structural diff) finds the same four-call
+      sequence, with LLVM adding a frame and explicit r1 moves.
