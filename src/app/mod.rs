@@ -159,6 +159,7 @@ pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod layout_recompute_notify;
 pub mod opaque_record_source_get;
+pub mod locked_state_copy;
 pub mod opaque_record_source_entry_count;
 pub mod lazy_handle_manager;
 pub mod lazy_handle_manager_acquire;
