@@ -59979,6 +59979,24 @@ functions:
       (no dispatch, NULL head for an unused register, unpublished on
       exit) and ::block_emit_seams_stay_wired_to_the_defaults.
 
+  - address: 0x08243084
+    ghidra: FUN_08243084
+    name: cg_call_template_init
+    size: 56
+    sig: "u32 *cg_call_template_init(u32 *template)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: template (eight-word call-emission template; returned unchanged)
+    notes: >-
+      Four direct inbound bl call sites, all unconditional:
+      0x08255f54, 0x08255f5c, 0x08255f64, and 0x08255f80. No predicated
+      bl forms. Raw ARM is mov r1,#0; mov r2,#4; stores template words
+      {4, 0x140c, 0, 0, 0xeb001b5a, 0xe1a00005, 0, 0} in register/store
+      order and bx lr. The final two words are the raw contents loaded
+      from 0x083e2f10: bl 0x083e9c80 and mov r0,r5. Ghidra's 56-byte
+      size is exact; 0x082430bc is its literal pool and 0x082430c4
+      starts cg_cell_table_create. No deliberate deviations.
   - address: 0x082430c4
     ghidra: FUN_082430c4
     name: cg_cell_table_create
