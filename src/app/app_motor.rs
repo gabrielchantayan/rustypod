@@ -113,6 +113,28 @@ pub unsafe extern "C" fn app_motor_set_pending_state(app_motor: *mut u8, state: 
     crate::kernel::condvar::condvar_broadcast(app_motor.add(0x238).cast());
 }
 
+/// app_motor_set_state_and_broadcast — original: `FUN_08296228` @
+/// 0x08296228 (20 bytes; four unconditional direct `bl` callers, no
+/// predicated forms).
+///
+/// For state values 0 through 4 inclusive, stores the low byte at
+/// AppMotor+0x22c and tail-branches to
+/// [`crate::kernel::condvar::condvar_broadcast`] on the embedded CondVar at
+/// +0x238. Values above 4 return without touching the AppMotor.
+///
+/// Deliberate deviation: the opaque AppMotor layout is represented by byte
+/// offsets rather than a host-layout-dependent struct. Rust expresses the
+/// terminal conditional ARM B as a normal call and return.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn app_motor_set_state_and_broadcast(app_motor: *mut u8, state: u32) {
+    if state <= 4 {
+        app_motor.add(0x22c).write(state as u8);
+        crate::kernel::condvar::condvar_broadcast(app_motor.add(0x238).cast());
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -300,6 +322,45 @@ mod tests {
             app_motor_set_pending_state(app_motor.0.as_mut_ptr(), 0x100);
             assert_eq!(app_motor.0[0x264], 0);
             assert_eq!(app_motor.0[0x22c], 0);
+        }
+    }
+
+    #[test]
+    fn state_broadcast_accepts_each_defined_state() {
+        let mut app_motor = AppMotorPendingStateFixture([0; 0x265 + core::mem::size_of::<crate::kernel::condvar::CondVar>()]);
+        unsafe {
+            let condvar = app_motor.0.as_mut_ptr().add(0x238).cast::<crate::kernel::condvar::CondVar>();
+            condvar.write(crate::kernel::condvar::CondVar {
+                lock_obj: ptr::null_mut(),
+                waiters: crate::kernel::condvar::ListHead { head: ptr::null_mut(), tail: ptr::null_mut() },
+            });
+            for state in 0..=4 {
+                app_motor.0[0x22c] = 0xa5;
+                app_motor_set_state_and_broadcast(app_motor.0.as_mut_ptr(), state);
+                assert_eq!(app_motor.0[0x22c], state as u8);
+            }
+        }
+    }
+
+    #[test]
+    fn state_broadcast_rejects_out_of_range_state_without_waking_waiters() {
+        use crate::kernel::condvar::{CondVar, ListHead, WaitNode};
+        let mut app_motor = AppMotorPendingStateFixture([0; 0x265 + core::mem::size_of::<CondVar>()]);
+        let mut object = 0x101u32;
+        let mut waiter = WaitNode { next: ptr::null_mut(), object: &mut object };
+        unsafe {
+            let condvar = app_motor.0.as_mut_ptr().add(0x238).cast::<CondVar>();
+            condvar.write(CondVar {
+                lock_obj: ptr::null_mut(),
+                waiters: ListHead { head: (&mut waiter as *mut WaitNode).cast(), tail: (&mut waiter as *mut WaitNode).cast() },
+            });
+            app_motor.0[0x22c] = 0xa5;
+
+            app_motor_set_state_and_broadcast(app_motor.0.as_mut_ptr(), 5);
+
+            assert_eq!(app_motor.0[0x22c], 0xa5);
+            assert_eq!((*condvar).waiters.head, &mut waiter as *mut WaitNode as *mut crate::kernel::condvar::ListNode);
+            assert_eq!((*condvar).waiters.tail, &mut waiter as *mut WaitNode as *mut crate::kernel::condvar::ListNode);
         }
     }
 }
