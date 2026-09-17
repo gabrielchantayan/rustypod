@@ -10,12 +10,14 @@
 //! `FUN_082d9c34` clears and fills the active product range before the
 //! reduction sees it, just as it does after the retail stack allocation.
 //!
-//! Deliberate deviation: the 20-byte capacity-ten constructor
-//! `FUN_082d81c8` is reproduced inline rather than becoming a second exported
-//! port. The multiply core `FUN_082d9c34` and reducer `FUN_082cdb04` remain
-//! unported, so [`WORD_LIST_MODULAR_MULTIPLY_OPS`] reaches their firmware
-//! addresses on device and requires host-test replacements. `word_list_copy`
-//! is already ported and is called directly.
+//! The 28-byte capacity-ten constructor `FUN_082d81c8` is independently
+//! ported as `word_list_init_capacity_10`; this function still reproduces its
+//! three header writes inline because its temporary storage is separate from
+//! the host-sized [`WordList`] header. The multiply core `FUN_082d9c34` and
+//! reducer `FUN_082cdb04` remain unported, so
+//! [`WORD_LIST_MODULAR_MULTIPLY_OPS`] reaches their firmware addresses on
+//! device and requires host-test replacements. `word_list_copy` is already
+//! ported and is called directly.
 
 use core::ptr::addr_of_mut;
 

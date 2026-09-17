@@ -88,6 +88,36 @@ pub unsafe extern "C" fn word_list_copy(src: *const WordList, dst: *mut WordList
     (*dst).count = (*src).count;
 }
 
+/// Inline element capacity set by `word_list_init_capacity_10`; the original
+/// hardcodes `mov r2, #10`.
+pub const WORD_LIST_INLINE_CAPACITY_10: u16 = 10;
+
+/// word_list_init_capacity_10 — original: `FUN_082d81c8` @ 0x082d81c8
+/// (28 bytes).
+///
+/// Initializes the header of a ten-word inline [`WordList`]: clears `count`,
+/// sets `capacity` to 10, and points `entries` to the eight bytes immediately
+/// following the header. It deliberately does not initialize those ten words.
+///
+/// Verified extent: seven ARM words ending in `bx lr` at 0x082d81e0; the next
+/// distinct constructor begins at 0x082d81e4. This leaf contains zero plain
+/// and zero predicated `bl` instructions. It has four inbound direct `bl`
+/// call sites (0x082cdd6c, 0x082cead4, 0x082cf7d0, 0x082d9c0c), all plain.
+/// No deliberate deviations.
+///
+/// # Safety
+/// `this` must point at 8 + 10*4 = 48 writable bytes: the 8-byte
+/// [`WordList`] header followed by ten words of inline element storage.
+/// Returns `this`, matching the original's preserved r0.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_init_capacity_10(this: *mut WordList) -> *mut WordList {
+    (*this).count = 0;
+    (*this).capacity = WORD_LIST_INLINE_CAPACITY_10;
+    (*this).entries = (this as *mut u8).add(8) as *mut u32;
+    this
+}
+
 /// Inline element capacity set by the constructor; the original
 /// hardcodes `mov r2, #6`.
 pub const WORD_LIST_INLINE_CAPACITY: u16 = 6;
@@ -134,7 +164,10 @@ pub unsafe extern "C" fn word_list_init(this: *mut WordList) -> *mut WordList {
 mod tests {
     extern crate std;
 
-    use super::{word_list_copy, word_list_init, WordList, WORD_LIST_INLINE_CAPACITY};
+    use super::{
+        word_list_copy, word_list_init, word_list_init_capacity_10, WordList,
+        WORD_LIST_INLINE_CAPACITY, WORD_LIST_INLINE_CAPACITY_10,
+    };
     use std::vec;
 
     fn list(buf: &mut [u32], count: u16) -> WordList {
@@ -226,6 +259,24 @@ mod tests {
         // at byte 8 on this host's repr(C) layout, so the deepest region
         // provably untouched on BOTH layouts is slab[4..].)
         assert_eq!(&slab[4..], &[0xdead_beef; 4], "no scribbling past the header");
+    }
+
+    #[test]
+    fn init_capacity_10_preserves_return_and_leaves_inline_tail_dirty() {
+        // 48-byte firmware slot: 8-byte header + 10 inline words.
+        let mut slab = [0xdead_beefu32; 12];
+        let this = slab.as_mut_ptr() as *mut WordList;
+
+        let ret = unsafe { word_list_init_capacity_10(this) };
+
+        assert_eq!(ret, this, "constructor returns this (r0 preserved)");
+        let list = unsafe { &*this };
+        assert_eq!(list.count, 0, "dirty count must be cleared");
+        assert_eq!(list.capacity, WORD_LIST_INLINE_CAPACITY_10);
+        assert_eq!(list.entries, unsafe { slab.as_mut_ptr().add(2) });
+        // The host pointer field is wider than the retail 32-bit field; this
+        // tail is beyond either representation's header write.
+        assert_eq!(&slab[4..], &[0xdead_beef; 8], "constructor leaves limbs dirty");
     }
 
     #[test]
