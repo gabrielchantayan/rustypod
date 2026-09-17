@@ -148,6 +148,7 @@ pub mod str_fold_upper;
 pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod table_transform_fixed_selector;
+pub mod text_layout_fit_glyph_count;
 pub mod tagged_counter;
 pub mod tagged_header_low_bits;
 pub mod tagged_resource_payload;
