@@ -1858,6 +1858,30 @@ functions:
       0x080005fc; volatile accesses prevent LLVM replacing the retail loop
       with a memcpy intrinsic.
 
+  - address: 0x082c4f7c
+    ghidra: FUN_082c4f7c
+    name: sqlite_corrupt_schema
+    size: 100
+    sig: "void sqlite_corrupt_schema(InitData *init_data, const char *object, const char *detail)"
+    module: sqlite/corrupt_schema
+    status: ported
+    renames:
+      param_1/r0: init_data
+      param_2/r1: object
+      param_3/r2: detail
+    notes: >-
+      Raw osos.dec confirms the 100-byte extent: 25 ARM words from
+      0x082c4f7c through the pop at 0x082c4fdc; literal data starts at
+      0x082c4fe0 and the next real function begins at 0x082c5000. Decoding
+      every direct branch-link instruction in the body finds its single
+      unconditional call to sqlite3SetString @ 0x08384158. Scanning all ARM
+      words for branches to 0x082c4f7c finds four direct call sites, all plain
+      bl and zero predicated bl. It suppresses diagnostic allocation when
+      db->mallocFailed (+0x1e) is nonzero, otherwise concatenates "malformed
+      database schema (" with object (default "?"), ")" and an optional
+      " - " plus nonempty detail; it always stores SQLITE_CORRUPT (11) at
+      InitData +0x0c. Deliberate deviations: host code represents InitData by
+      target-width word indices, preserving its ARM pointer/status offsets.
   - address: 0x080e7ebc
     ghidra: FUN_080e7ebc
     name: byte_copy_signed
