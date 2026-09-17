@@ -105298,3 +105298,25 @@ functions:
       dispatcher identities are not established in names.yaml, so target
       builds use their verified addresses and host tests use typed seams
       rather than inventing names.
+  - address: 0x0828308c
+    ghidra: FUN_0828308c
+    name: vtable_record_assign
+    size: 152
+    sig: "VtableRecord *vtable_record_assign(VtableRecord *destination, const VtableRecord *source)"
+    module: app/vtable_record_assign
+    status: ported
+    renames:
+      param_1/r0: destination (writable 80-byte vtable-headed record; word +0x00 retained)
+      param_2/r1: source (readable 80-byte vtable-headed record)
+    notes: >-
+      Raw osos.dec establishes Ghidra's exact 152-byte extent: push {lr} at
+      0x0828308c through pop {pc} at 0x08283120, with the next separately
+      linked function beginning at 0x08283124. The body copies source bytes
+      +0x04/+0x05/+0x30/+0x3c and aligned words +0x08..+0x2c,
+      +0x34..+0x38, and +0x40..+0x4c; it neither reads nor writes the
+      destination vtable word +0x00 or any intervening padding. The raw body
+      has no outbound BL. Four direct inbound call sites in 0x08168ae8 are
+      unconditional plain BL (at 0x08168c1c, 0x08168d34, 0x08168da8, and
+      0x08168e24); there are no predicated BL forms. The record's class
+      identity is unrecovered, so the semantic name deliberately describes
+      only this verified vtable-preserving assignment.
