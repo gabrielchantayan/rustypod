@@ -107022,3 +107022,29 @@ functions:
       the preserved target after the call. Rust uses volatile stores to retain
       the firmware's descending store order; this is the only deliberate
       deviation.
+  - address: 0x0824c67c
+    ghidra: FUN_0824c67c
+    name: fixed3_normalize
+    size: 36
+    sig: "void fixed3_normalize(i32 *vector)"
+    module: app/fixed3_normalize
+    status: identified
+    renames:
+      param_1/r0: vector
+      r4: vector
+      r1: inverse_length_q16
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte entry body
+      0x0824c67c..0x0824c69f: push {r4,lr}; preserve vector in r4; move it
+      into r1; bl fixed16_dot3 at 0x082a014c; bl fixed16_rsqrt at
+      0x08076154; restore vector into r0 and the inverse length into r1; pop
+      {r4,lr}; then tail-branch to the adjacent three-component Q16.16 scale
+      helper at 0x0824c6f4. The next independently entered function begins
+      at 0x0824c6f4, so Ghidra's inlined scaling expression is outside this
+      function's true extent. Raw B/BL decoding finds four inbound plain
+      unconditional BL calls and zero predicated BL calls. This function
+      cannot be ported faithfully: fixed16_rsqrt (0x08076154) indexes its
+      seed table at 0x083f18b2, inside the undecrypted all-zero
+      0x083ee1c1..0x083f25ec region of osos.dec. Its nonzero-input result
+      therefore cannot be recovered from the available raw firmware; no
+      Rust seam or approximation was introduced.
