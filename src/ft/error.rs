@@ -31,6 +31,10 @@ pub const FT_ERR_INVALID_FACE_HANDLE: i32 = 0x23;
 /// (`ft_set_charmap`'s null-charmaps gate).
 pub const FT_ERR_INVALID_CHARMAP_HANDLE: i32 = 0x26;
 
+/// `FT_Err_Too_Many_Hints` — `mov r0, #0x16` in `ft_too_many_hints`
+/// @ `0x082d33fc`.
+pub const FT_ERR_TOO_MANY_HINTS: i32 = 0x16;
+
 /// `FT_Err_Out_Of_Memory` — `moveq r4, #64` in `ft_mem_qalloc`
 /// @ 0x082cfb1c.
 pub const FT_ERR_OUT_OF_MEMORY: i32 = 0x40;
