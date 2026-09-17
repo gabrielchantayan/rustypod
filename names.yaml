@@ -103651,3 +103651,32 @@ functions:
       r4-r6 save set. Focused host tests cover field order, null outputs, and
       a null context. Rust implementation: src/ui/object_state.rs::
       shared_context_memory_bounds.
+
+  # --- retailOS cached diagnostics board-generation classifier ---
+  - address: 0x082bc614
+    ghidra: FUN_082bc614
+    name: diagnostics_board_generation
+    size: 88
+    sig: "i32 diagnostics_board_generation(void)"
+    module: sysinfo
+    status: ported
+    renames:
+      DAT_089cae8c: diagnostics_board_generation_cache (signed byte cache;
+        literal-pool word at 0x082bc668; -1 means uninitialized)
+      FUN_080e624c: board_version (already-ported lazy board-version query;
+        called twice, once for each inspected halfword)
+    notes: >-
+      Ghidra reports 84 code bytes. Raw osos.dec words decode from
+      0x082bc614 through the pop at 0x082bc664, followed by literal-pool
+      word 0x089cae8c at 0x082bc668; the next real function starts with
+      stmdb sp!,{r4-r8,lr} at 0x082bc66c, making the true occupied size 88
+      bytes. Binary decoding verifies two direct bl calls, both plain and
+      unconditional: bl 0x080e624c at 0x082bc628 and 0x082bc630; there are
+      no predicated bl forms. Four direct callers are 0x082bc66c,
+      0x082bc9ec, 0x082e5648, and 0x082e5aac. The signed byte cache is
+      returned unchanged unless it is -1. On initialization the first
+      board_version result supplies the high halfword and the second supplies
+      the low halfword; it stores 1 only when high == 0x13 and
+      0x10 <= low < 0x100, otherwise 2. The Rust port uses the existing
+      board_version seam and substitutes a host static for the fixed cache
+      byte; volatile accesses preserve the separate signed byte reads/store.
