@@ -104,6 +104,9 @@ pub mod hints {
     // 0x6900_0000: dedicated to cxx/opaque_context_drain's target-width
     // context and deque fixture; mappings never unmap.
     pub const OPAQUE_CONTEXT_DRAIN: usize = 0x6900_0000;
+    // 0x7f90_0000: dedicated to cxx/opaque_context_activate's target-width
+    // context, child, and selected-record fixture; mappings never unmap.
+    pub const OPAQUE_CONTEXT_ACTIVATE: usize = 0x7f90_0000;
     pub const BTREE_PARSE_CELL: usize = 0x1000_0000;
     // 0xb100_0000: dedicated to util/bounded_word_bit_set_contains's raw-u32
     // word-bitmap fixture; mappings never unmap, so no other user may share it.

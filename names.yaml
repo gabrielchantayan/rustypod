@@ -69675,6 +69675,45 @@ functions:
       conditional initializer/early return, NULL selector, and final
       dispatcher transfer; the diffs are the host/target seam `blx`
       calls, LLVM frame, and literal-pool words.
+  - address: 0x08262914
+    ghidra: thunk_FUN_082e7f78
+    name: opaque_context_activate
+    size: 4
+    sig: "u32 opaque_context_activate(u32 *context, u32 unused, u32 selector_or_child)"
+    module: cxx/opaque_context_activate
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1: unused
+      param_3/r2: selector_or_child
+      DAT_082e7ff4: context_magic_0x434e4453
+      "context+0x08": opaque_child
+      "opaque_child+0x20": default_selector
+      FUN_082e7e54: opaque_context_initialize (unported seam)
+      FUN_083dfdec: opaque_child_advance (unported seam)
+      FUN_080860c0: opaque_word_validate (unported seam)
+    notes: >-
+      Raw osos.dec proves this is a four-byte veneer, not the 128-byte target
+      Ghidra assigned to it: its sole word is 0xea021597, "b 0x082e7f78",
+      and the next separately linked veneer begins at 0x08262918. The target
+      body is 0x082e7f78..0x082e7ff4 (128 bytes): push {r4,lr} through
+      pop {r4,pc}, followed by its 0x434e4453 literal at 0x082e7ff4 and the
+      next body at 0x082e7ff8. Independent whole-image ARM branch decoding
+      finds four plain unconditional bl callers and zero predicated bl callers;
+      the target itself contains four unconditional bl instructions and no
+      predicated call. NULL context returns 0x1a. A context whose first word
+      differs from 0x434e4453 is initialized with a NULL selector and returns
+      a nonzero initializer status immediately. Otherwise a non-NULL child at
+      word index two supplies child[8] only when r2 is zero; with both values
+      non-NULL, retailOS copies four words from the selected record, advances
+      the child, then validates the copied first word. The three opaque
+      callees retain their verified addresses and are target indirect calls
+      plus host-test seams; FUN_083da458 is the known four-word copy and is
+      inlined. Host tests cover NULL rejection, initializer early error, and
+      the default-selector child path using a target-width mapped fixture.
+      match.py against the requested veneer exits 1 with the expected
+      structural difference: retailOS is one branch while Rust emits the
+      target body, its seams, frame, and literals.
   - address: 0x08262918
     ghidra: thunk_FUN_082e7d4c
     name: drain_opaque_context
