@@ -290,6 +290,38 @@ pub unsafe extern "C" fn bit_set_test(set: *mut BitSet, word_index: u32, bit_ind
     (words.add(word_index as usize).read() >> bit_index) & 1
 }
 
+/// bit_set_word_hash — original: `FUN_082a4f10` @ 0x082a4f10 (68 bytes,
+/// 0x082a4f10..0x082a4f54 including its final table-address literal; the
+/// next function begins `ldr r0, [r0, #16]` at 0x082a4f58). Four direct
+/// `bl` call sites, all unconditional at 0x0827495c, 0x08274990,
+/// 0x082749cc, and 0x082749f8; no predicated `bl`, verified by decoding
+/// every ARM B/BL word in `osos.dec`.
+///
+/// The original copies a 16-word constant table to its stack through the
+/// IRAM memcpy veneer, then adds the entry indexed by each low-to-high nibble
+/// of `word`, wrapping at 32 bits. `set` is accepted as the member-call
+/// receiver but is never read.
+///
+/// Deliberate deviation: the stack-local table and memcpy call are replaced
+/// by an immutable Rust constant; no observable state or result changes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bit_set_word_hash(_set: *const BitSet, mut word: u32) -> u32 {
+    const NIBBLE_WEIGHTS: [u32; 16] = [
+        0x0812_2160, 0x0812_2124, 0, 0x083a_7014,
+        0x081c_0030, 0x081c_0038, 0x081c_0028, 0x0810_301c,
+        0x0810_30ac, 0x0810_2f80, 0, 0,
+        0x0822_9138, 0, 0, 0x0810_2f44,
+    ];
+
+    let mut hash = 0u32;
+    while word != 0 {
+        hash = hash.wrapping_add(NIBBLE_WEIGHTS[(word & 0xf) as usize]);
+        word >>= 4;
+    }
+    hash
+}
+
 /// bit_set_write — original: `FUN_082746f4` @ 0x082746f4
 /// (128 bytes, 0x082746f4..0x08274770; the next function opens `push
 /// {r4, r5, r6, lr}` at 0x08274774 and there is no trailing literal pool.
@@ -900,6 +932,7 @@ mod tests {
         unsafe {
             assert_eq!(bit_set_test(set, 0, 31), 1, "movne rewrites 0x8000_0000 to 1");
             assert_eq!(bit_set_test(set, 0, 0), 1);
+
             assert_eq!(bit_set_test(set, 0, 10), 1);
             assert_eq!(bit_set_test(set, 0, 1), 0, "a gap between set bits");
         }
@@ -930,6 +963,40 @@ mod tests {
             for bit in [0u32, 1, 15, 31] {
                 assert_eq!(unsafe { bit_set_test(set, word, bit) }, 0);
             }
+        }
+    }
+    // --- bit_set_word_hash @ 0x082a4f10 ---
+
+    #[test]
+    fn word_hash_matches_raw_table_vectors() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = require_set!(&[0], 0);
+        let set = core::ptr::addr_of_mut!(set);
+
+        for &(word, expected) in &[
+            (0x0000_0000, 0x0000_0000),
+            (0x0000_0001, 0x0812_2124),
+            (0x0000_000f, 0x0810_2f44),
+            (0x0000_0010, 0x1024_4284),
+            (0x1234_5678, 0x38c0_f290),
+            (0xdead_beef, 0x0810_2f44),
+            (0xffff_ffff, 0x4081_7a20),
+        ] {
+            assert_eq!(unsafe { bit_set_word_hash(set, word) }, expected, "word {word:#010x}");
+        }
+    }
+
+    #[test]
+    fn word_hash_ignores_the_member_receiver() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut first = require_set!(&[0], 0);
+        let mut second = require_set!(&[u32::MAX], u32::MAX);
+
+        unsafe {
+            assert_eq!(
+                bit_set_word_hash(core::ptr::addr_of_mut!(first), 0x1234_5678),
+                bit_set_word_hash(core::ptr::addr_of_mut!(second), 0x1234_5678),
+            );
         }
     }
 }
