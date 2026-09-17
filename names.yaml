@@ -21102,6 +21102,38 @@ functions:
       shape with the literal after the body; the diff is the crate's
       fp frame and the stm split.
 
+  - address: 0x0827ea20
+    ghidra: FUN_0827ea20
+    name: kind_0x1f_message_construct
+    size: 64
+    sig: "Kind0x1fMessage *kind_0x1f_message_construct(Kind0x1fMessage *storage, u32 first_payload, u32 second_payload, u32 byte_payload, u32 fourth_payload, u32 fifth_payload)"
+    module: app/kind_0x1f_message
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1/r4: first_payload
+      param_3/r2/r5: second_payload
+      param_4/r3/r6: byte_payload
+      param_5/stack/r7: fourth_payload
+      param_6/stack/r8: fifth_payload
+      puVar1/r0: message
+      DAT_0827ea60: KIND_0X1F_MESSAGE_VTABLE
+      FUN_08266a48: message_kind_construct
+    notes: >-
+      The true 64-byte extent is 0x0827ea20..0x0827ea60: 60 bytes of code
+      followed by the vtable literal 0x089a630c at 0x0827ea60; the next real
+      function opens at 0x0827ea64 with cmp r0,#0. Raw A32 decoding finds four
+      direct unconditional bl callers (0x0811a170, 0x0811a23c, 0x0820af2c,
+      and 0x0827e928), zero predicated bl callers, and no image data word
+      equal to this entry. The constructor runs message_kind_construct(storage,
+      0x1f), overwrites the base vtable, stores the first and second opaque
+      payload words at +0x08/+0x0c, stores the low byte of byte_payload at
+      +0x10 while retaining the remaining bytes, then writes the final two
+      payload words at +0x14/+0x18. No deliberate deviations: the already
+      ported base constructor is called directly, preserving its overwritten
+      intermediate root/base vtable writes. Host test verifies target-exact
+      layout, return value, byte truncation, retained byte tail, and guards.
+
   - address: 0x08266a80
     ghidra: thunk_FUN_08275bc8
     name: message_kind_destruct
