@@ -1336,6 +1336,10 @@ pub mod hints {
     // 0x4400_0000: dedicated to ui/pool_entry_create's owner fixture; mappings
     // never unmap, so no other user may share this hint.
     pub const UI_POOL_ENTRY_CREATE: usize = 0x4400_0000;
+    // 0x9d20_0000: dedicated to cxx/reverse_byte_cursor_pop's raw-u32 cursor
+    // and byte-range fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const REVERSE_BYTE_CURSOR_POP: usize = 0x9d20_0000;
     // 0xc400_0000: dedicated to ui/plst_find_by_persistent_id's raw-u32
     // 'tdat' element and linked 'plst' chain fixture; mappings never
     // unmap, so no other test may reuse this hint.
