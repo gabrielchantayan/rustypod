@@ -104977,3 +104977,36 @@ functions:
       native-width, so repr(C) preserves target field order while tests install
       a typed vtable and fixture table. match.py's structural diff was reviewed
       after the ARM release build: LLVM unrolls the fixed four-attempt loop.
+
+  # --- registered-entry cancellation prologue ---
+  - address: 0x08293384
+    ghidra: FUN_08293384
+    name: registered_entry_cancel
+    size: 88
+    sig: "void registered_entry_cancel(u8 *controller, u32 entry_id)"
+    module: app/registered_entry_cancel
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_2/r1/r5: entry_id
+      param_1+0x34: channel_context
+      DAT_082933dc: registration_table
+      FUN_08107700: retail channel deactivation (unported direct target call)
+      FUN_08293048: four_slot_key_index
+      FUN_082931e4: retail cancellation tail (unported direct target call)
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x08293384..0x082933dc: the word at 0x082933dc is the registration
+      table literal 0x089d04c4, and the distinct next push prologue starts at
+      0x082933e0. Decoding every aligned ARM B/BL-immediate word independently
+      finds four incoming direct plain BL calls at 0x08104f50, 0x08160bb4,
+      0x081e1a64, and 0x08294acc, with no predicated BL forms. The body has
+      two unconditional direct BL instructions, to 0x08107700 and the ported
+      four_slot_key_index at 0x08293048, then a plain-B tail dispatch to
+      0x082931e4. It deactivates controller+0x34 for entry_id, finds the
+      matching four-slot record, zeroes bytes +0x13/+0x14 and word +0x08,
+      writes 0xff at +0x10, and tail-dispatches the remaining retail
+      cancellation work. The external routines have no recovered semantic
+      identities, so target builds call their verified addresses; host tests
+      inject those boundaries and a local target-layout table. No other
+      deliberate deviations.
