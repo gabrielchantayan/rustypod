@@ -533,6 +533,44 @@ pub unsafe extern "C" fn shared_context() -> *mut u8 {
     slot.read_volatile()
 }
 
+/// shared_context_memory_bounds — original: `FUN_082bc848` @ `0x082bc848`
+/// (52 bytes; next real function at `0x082bc87c`; four verified direct `bl`
+/// call sites, all unconditional).
+///
+/// Gets the process-wide shared context, then conditionally writes its
+/// memory-base word at `+0xe4` and memory-size word at `+0xe0` through the
+/// corresponding non-null ARM ABI output pointers. Raw ARM performs the
+/// null checks independently and leaves both outputs untouched when the
+/// shared-context getter returns null. Deliberate deviations: the unused ADS
+/// `r4`–`r6` save set is not reproduced.
+///
+/// # Safety
+///
+/// Each non-null output must be writable. When the shared context is
+/// available, it must be readable through offset `0xe7`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn shared_context_memory_bounds(
+    memory_base_out: *mut u32,
+    memory_size_out: *mut u32,
+) {
+    const MEMORY_SIZE_OFFSET: usize = 0xe0;
+    const MEMORY_BASE_OFFSET: usize = 0xe4;
+
+    let context = unsafe { shared_context() };
+    if context.is_null() {
+        return;
+    }
+    unsafe {
+        if !memory_base_out.is_null() {
+            memory_base_out.write((context.add(MEMORY_BASE_OFFSET) as *const u32).read());
+        }
+        if !memory_size_out.is_null() {
+            memory_size_out.write((context.add(MEMORY_SIZE_OFFSET) as *const u32).read());
+        }
+    }
+}
+
 type FormatDottedTriple = unsafe extern "C" fn(u32, *mut u8);
 
 /// Calls the stock dotted-triple formatter, which remains in retailOS.
@@ -2754,6 +2792,45 @@ mod tests {
             0,
             "a set word with bit 0 clear yields 0 (`and r0,r0,#0x1`)"
         );
+    }
+
+    #[test]
+    fn shared_context_memory_bounds_reads_the_two_adjacent_words_in_abi_order() {
+        let mut context = [0xffu8; 0xe8];
+        context[0xe0..0xe4].copy_from_slice(&0x0400_0000u32.to_le_bytes());
+        context[0xe4..0xe8].copy_from_slice(&0x2200_0000u32.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+        let mut memory_base = 0;
+        let mut memory_size = 0;
+
+        unsafe { shared_context_memory_bounds(&mut memory_base, &mut memory_size) };
+
+        assert_eq!(memory_base, 0x2200_0000, "first output is context +0xe4");
+        assert_eq!(memory_size, 0x0400_0000, "second output is context +0xe0");
+    }
+
+    #[test]
+    fn shared_context_memory_bounds_honors_null_outputs_and_a_null_context() {
+        let mut context = [0u8; 0xe8];
+        context[0xe0..0xe4].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        context[0xe4..0xe8].copy_from_slice(&0x89ab_cdefu32.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+        let mut memory_base = 0;
+
+        unsafe { shared_context_memory_bounds(&mut memory_base, core::ptr::null_mut()) };
+        assert_eq!(memory_base, 0x89ab_cdef, "a null size output is skipped");
+
+        unsafe {
+            core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(core::ptr::null_mut());
+        }
+        memory_base = 0xfeed_face;
+        let mut memory_size = 0xdead_beef;
+        unsafe { shared_context_memory_bounds(&mut memory_base, &mut memory_size) };
+        assert_eq!(memory_base, 0xfeed_face, "a null context leaves base untouched");
+        assert_eq!(memory_size, 0xdead_beef, "a null context leaves size untouched");
     }
 
     static CONTEXT_KIND_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
