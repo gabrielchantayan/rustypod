@@ -43,6 +43,7 @@ pub mod mmio_bit_write;
 pub mod piezo;
 pub mod pwrcon;
 pub mod pmu;
+pub mod pmu_operation_retry;
 pub mod sixteen_slot_identity_init;
 pub mod surface;
 pub mod surface_config_from_image;

@@ -56352,6 +56352,35 @@ functions:
       port; host builds use its backing storage. Port deviation: none on
       target.
 
+  # --- retailOS PMU operation retry ---
+  - address: 0x082bc998
+    ghidra: FUN_082bc998
+    name: pmu_operation_retry
+    size: 80
+    sig: "u32 pmu_operation_retry(void *request)"
+    module: drivers/pmu_operation_retry
+    status: ported
+    renames:
+      param_1: request
+      DAT_082bc9e8: system_info_base
+      FUN_082bc910: pmu_operation_attempt
+      FUN_0836bb2c: pmu_failure_recover
+    notes: >-
+      Raw ARM establishes the true 80-byte code extent 0x082bc998-0x082bc9e7:
+      the following word at 0x082bc9e8 is the 0x089caaac system-info literal,
+      and 0x082bc9ec begins the next function with push {r4,r5,r6,lr}.
+      The system-info word at +4 is a retry count; retail adds one, invokes
+      0x082bc910 that many times with the unchanged request pointer, and
+      retains the final status. Each nonzero status brackets 0x0836bb2c with
+      semaphore-5 wait/signal. It clears system-info+4 unconditionally before
+      returning the final status. Decoding every ARM B/BL word finds four
+      direct inbound plain BL callers (0x08051564, 0x0825a9b0, 0x082bc4d0,
+      0x082bc980) and none predicated; the body itself has four unconditional
+      outbound BL calls. The identities of both non-ROM callees remain
+      unrecovered, so target builds use literal veneers to their verified
+      entries and host tests use callback seams. Host tests cover zero retries
+      (one successful attempt) and three failed attempts (three recoveries and
+      semaphore brackets).
   # --- retailOS lazily cached board-version word (sysinfo) ---
   - address: 0x080e624c
     ghidra: FUN_080e624c
