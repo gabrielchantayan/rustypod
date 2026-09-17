@@ -194,9 +194,10 @@
 //! guard of its own and faults inside the base constructor for a NULL
 //! `this`.
 
+use crate::app::path_object_join::path_object_join;
 use crate::cxx::string_object::{
     string_object_assign_payload, string_object_c_str,
-    string_object_construct_from_cstr, string_object_copy_construct,
+    string_object_construct_from_cstr, string_object_copy_construct, string_object_destroy,
     StringObject, StringObjectVtable,
 };
 
@@ -388,6 +389,40 @@ pub unsafe extern "C" fn path_object_assign_from_string_object(
     let source_cstr = string_object_c_str(source);
     string_object_assign_payload(this, source_cstr);
     this
+}
+
+/// path_object_join_cstr — original: `FUN_08279338` @ 0x08279338 (56
+/// bytes, all code; the next separately linked function,
+/// [`path_object_join`], starts at 0x08279374. **Four inbound plain `bl`
+/// call sites, zero predicated; three outbound plain `bl`, zero
+/// predicated**, binary-decoded from `osos.dec`).
+///
+/// onto `this` through [`path_object_join`], destroys the temporary, then
+/// returns the join helper's result. The raw body saves `this` in r4 before
+/// the call, then replaces r4 with the join return after it.
+///
+/// Deliberate deviations: all three direct callees are already ported and
+/// called directly. LLVM elides the raw `mov r4,r0` return preservation
+/// because [`path_object_join`] is proven to return `this`; this is
+/// value-identical. The temporary's vtable is represented by the ROM identity
+/// constant rather than a host-callable vtable.
+///
+/// # Safety
+///
+/// `this` must be valid writable StringObject-derived storage, and `source`
+/// must be readable through its NUL terminator.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_object_join_cstr(
+    this: *mut StringObject,
+    source: *const u8,
+) -> *mut StringObject {
+    let mut temporary = core::mem::MaybeUninit::<StringObject>::uninit();
+    let temporary = string_object_construct_from_cstr(temporary.as_mut_ptr(), source);
+    (*temporary).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+    let result = path_object_join(this, temporary);
+    string_object_destroy(temporary);
+    result
 }
 
 #[cfg(test)]
@@ -1007,5 +1042,24 @@ mod tests {
             "unlike StringObject::operator=, this body has no this == source guard"
         );
         assert_eq!(&output[..payload.len()], &payload);
+    }
+
+    #[test]
+    fn join_cstr_empty_source_leaves_an_empty_destination_unchanged() {
+        let mut destination = StringObject {
+            vtable: PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable,
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(destination);
+        let _bench = path_assign_bench(core::ptr::null_mut());
+
+        assert_eq!(unsafe { path_object_join_cstr(this, b"\0".as_ptr()) }, this);
+        assert_eq!(destination.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS);
+        assert!(destination.payload.is_null());
+        assert_ne!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_CLEAR)) },
+            None,
+            "the temporary must run StringObject's empty-source clear path"
+        );
     }
 }
