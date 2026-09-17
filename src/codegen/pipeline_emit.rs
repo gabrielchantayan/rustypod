@@ -323,6 +323,35 @@ pub unsafe extern "C" fn cg_emit_subtract(
     cg_create_inst_binary(block, CG_INST_OPCODE_SUB, dest, lhs, rhs);
     dest
 }
+/// cg_emit_add — original: `FUN_0824031c` @ 0x0824031c
+/// (64 bytes: 16 instruction words, 0x0824031c-0x08240358; the next real
+/// function starts at 0x0824035c with its own `push`).
+///
+/// Four call sites, all unconditional plain `bl` (no predicated forms and no
+/// tail `b`): 0x0823e004, 0x0823e0f0, 0x0823e104, and 0x0823e11c.
+///
+/// Creates one general-purpose destination virtual register from
+/// `block->proc`, then appends `dest = lhs + rhs` (IR opcode 1) to `block`
+/// and returns `dest`.
+///
+/// # Deviations
+///
+/// The leading context argument is dead on arrival in the original: `ldr
+/// r0,[r1,#4]` overwrites it before any use. The port preserves that ABI
+/// parameter and intentionally never reads it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_add(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    lhs: *mut CgVirtualReg,
+    rhs: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let dest = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, dest, lhs, rhs);
+    dest
+}
+
 
 /// cg_emit_negated_sum — original: `FUN_0823c0dc` @ 0x0823c0dc
 /// (144 bytes: 36 instruction words, 0x0823c0dc-0x0823c168; raw bytes
@@ -812,6 +841,37 @@ mod tests {
                 1,
                 "the rhs is recorded without dereferencing it"
             );
+            assert_eq!(field(dest as *mut u8, CG_VREG_NO), 0);
+            assert_eq!(
+                (dest as *mut u8).add(CG_VREG_TYPE * WORD).read(),
+                CG_REG_TYPE_GENERAL as u8
+            );
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 1);
+    }
+
+    #[test]
+    fn emits_add_with_opaque_context_and_operands() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let dest = unsafe {
+            cg_emit_add(
+                usize::MAX as *mut u8,
+                block,
+                core::ptr::null_mut(),
+                1 as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            assert!(!inst.is_null(), "the binary instruction was appended");
+            assert_eq!(field(inst, CG_INST_NEXT), 0, "the block holds one instruction");
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(inst), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(inst, CG_INST_BINARY_DEST), dest as usize);
+            assert_eq!(field(inst, CG_INST_BINARY_SOURCE0), 0);
+            assert_eq!(field(inst, CG_INST_BINARY_SOURCE1), 1);
             assert_eq!(field(dest as *mut u8, CG_VREG_NO), 0);
             assert_eq!(
                 (dest as *mut u8).add(CG_VREG_TYPE * WORD).read(),

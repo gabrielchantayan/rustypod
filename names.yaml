@@ -69260,6 +69260,36 @@ functions:
       deliberately creates and records it. ctx is dead: the first
       non-prologue instruction overwrites r0 from block+4. No dispatch seam:
       all three direct callees are already ported.
+  - address: 0x0824031c
+    ghidra: FUN_0824031c
+    name: cg_emit_add
+    size: 64
+    sig: "cg_virtual_reg_t *cg_emit_add(void *ctx, cg_block_t *block, cg_virtual_reg_t *lhs, cg_virtual_reg_t *rhs)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/r7: lhs
+      param_4/r3/r6: rhs
+      uVar1/r5: dest
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM verifies the 16-word, 64-byte extent from `push
+      {r3,r4,r5,r6,r7,lr}` at 0x0824031c through `pop
+      {r3,r4,r5,r6,r7,pc}` at 0x08240358; 0x0824035c is the next
+      separately linked function's prologue. Complete-image decoding finds
+      exactly four inbound unconditional plain BLs at 0x0823e004,
+      0x0823e0f0, 0x0823e104, and 0x0823e11c, with zero predicated BLs
+      and zero tail branches. Creates general dest from block->proc with
+      cg_virtual_reg_create(..., 0), then appends opcode-1 ADD
+      dest,lhs,rhs via cg_create_inst_binary and returns dest. ctx is dead:
+      the first non-prologue instruction overwrites r0 with block+4, so the
+      ABI-preserving port intentionally never reads it. Host coverage proves
+      a garbage ctx, NULL lhs and opaque rhs pass through while one general
+      register and one ADD instruction are appended.
+
   - address: 0x0824035c
     ghidra: FUN_0824035c
     name: cg_emit_subtract
