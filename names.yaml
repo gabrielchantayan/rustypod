@@ -103926,4 +103926,36 @@ functions:
       stack-local 12-byte FixedPoint3 then copied to dst, so aliasing dst with
       either input is safe. The port calls the established __rt_memcpy Rust
       seam directly instead of the 0x08037db0 ROM veneer; this is the only
-      deliberate deviation. Host tests cover i32 wrapping and dst/left alias.
+      deliberate deviation. Host tests cover i32 wrapping and dst/left alias.  # --- fixed-point three-vector difference ---
+  - address: 0x082a5d54
+    ghidra: FUN_082a5d54
+    name: fixed3_difference
+    size: 92
+    sig: "void fixed3_difference(FixedPoint3 *dst, const FixedPoint3 *left, const FixedPoint3 *right)"
+    module: app/fixed3_difference
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: left
+      param_3/r2: right
+      r4: left
+      r5: right
+      r6: z_difference
+      r7: dst
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent
+      0x082a5d54..0x082a5db0: 23 ARM words from push {r1-r7,lr} through
+      pop {r1-r7,pc}; the separately linked fixed3_sum begins with push at
+      0x082a5db0. Decoding every aligned ARM B/BL-immediate word finds four
+      direct outbound BL calls, all unconditional: fixed16_sub_indirect at
+      0x082a5d6c and 0x082a5d7c, fixed_point3_set at 0x082a5d98, and the
+      __rt_memcpy veneer at 0x082a5da8; there are no predicated BL forms or
+      tail B calls. It forms left - right as three wrapping Q16.16 words,
+      computing z then y through the indirect helper and x directly, before
+      copying the complete 12-byte stack temporary to dst. This preserves
+      either-input aliasing. The Rust port directly calls the established
+      fixed_point3_set and __rt_memcpy seams rather than the stock veneer;
+      this is the deliberate, behavior-equivalent deviation. Host tests cover
+      signed wraparound and aliasing dst with each input; match.py finds the
+      same three subtractions and final 12-byte copy, with LLVM coalescing
+      loads and differing call/frame layout.
