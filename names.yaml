@@ -26185,6 +26185,28 @@ functions:
       all 11 are unconditional, with no predicated direct calls. The decoder
       at 0x0825d5dc is not yet ported; this port reaches its fixed firmware
       address on target and uses a volatile callback seam in host tests.
+  - address: 0x0825d800
+    ghidra: FUN_0825d800
+    name: fixed16_words_to_f32
+    size: 44
+    sig: "void fixed16_words_to_f32(const int32_t *src, uint32_t *dst, uint32_t count)"
+    module: fp/fp_fixed16
+    status: ported
+    renames:
+      param_1/r0/r4: src
+      param_2/r1/r5: dst
+      param_3/r2/r6: count
+      FUN_080a6810: fixed16_to_f32
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte range
+      0x0825d800..0x0825d82b; the stmdb at 0x0825d82c begins the next
+      function. It first decrements and tests count, returning immediately
+      when it is zero; each remaining signed Q16.16 source word is passed to
+      the already ported fixed16_to_f32 and its IEEE-754 f32 bit pattern stored.
+      It contains one unconditional direct bl (to 0x080a6810) and no
+      predicated direct calls. Decoding all ARM B/BL-immediate words finds
+      four inbound calls, all unconditional bl: 0x082d1590, 0x082d15e0,
+      0x082d1640, and 0x082d16e8. No deliberate behavioral deviations.
   - address: 0x08276d64
     ghidra: FUN_08276d64
     name: utf8_strcmp_safe
