@@ -40291,6 +40291,27 @@ functions:
       the C++ block. The port reads the vtable by SLOT INDEX (0x40/4),
       not byte offset, so it is correct on a 64-bit test host.
 
+  - address: 0x0829ba70
+    ghidra: FUN_0829ba70
+    name: iterator_state_current_index
+    size: 56
+    sig: "i32 iterator_state_current_index(state: *const u32)"
+    module: app/vtable_set
+    status: ported
+    vars: {param_1/r0: state, r4: position, r5: state}
+    notes: >-
+      Raw osos.dec words are push {r4,r5,r6,lr}; ldr r4,[r0,#8]; mov r5,r0;
+      bl 0x0829baa8; cmp r0,#0; beq invalid; cmp r4,#0; ldrge r0,[r5];
+      ldrge r0,[r0,#4]; cmpge r0,r4; bgt return_position; invalid: mvn
+      r4,#0; return_position: mov r0,r4; pop {r4,r5,r6,pc}. The next
+      independent function starts at 0x0829baa8, establishing the 56-byte
+      extent. Decoding direct ARM BL instructions in osos.dec finds four
+      unconditional plain callers and zero predicated callers. It returns
+      state+0x08 only when the existing validity predicate accepts it and
+      0 <= position < the target-width owner's count word at +0x04; all
+      other positions return -1. Rust uses u32 word indices to preserve the
+      target layout on a 64-bit host; the direct Rust call deliberately
+      replaces the ARM BL/register-save sequence.
   - address: 0x0829baa8
     ghidra: FUN_0829baa8
     name: iterator_state_is_valid

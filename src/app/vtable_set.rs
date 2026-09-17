@@ -3665,6 +3665,40 @@ pub unsafe extern "C" fn iterator_state_is_valid(state: *const u32) -> bool {
     }
     position != -5
 }
+/// iterator_state_current_index — original: `FUN_0829ba70` @ 0x0829ba70 (56
+/// bytes exactly, 0x0829ba70..0x0829baa8; fourteen instructions, no literal
+/// pool; four plain `bl` callers and zero predicated `bl` callers,
+/// independently decoded from `osos.dec`).
+///
+/// Returns the iterator's current position only when its state is valid and
+/// the signed position is in the owner collection's half-open `[0, count)`
+/// range; otherwise returns -1. The ARM first calls
+/// [`iterator_state_is_valid`], then only dereferences `owner + 0x04` for a
+/// non-negative position. Deliberate deviation: Rust makes the direct call
+/// rather than preserving the ARM register-save sequence, and indexes
+/// target-width words so host pointers cannot alter the +0x04 count offset.
+///
+/// # Safety
+///
+/// `state` must address at least three readable target-width words. If its
+/// position word is valid and non-negative, word zero must name an owner with
+/// a readable count word at +0x04.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_current_index(state: *const u32) -> i32 {
+    let position = state.add(2).read() as i32;
+    if !iterator_state_is_valid(state) || position < 0 {
+        return -1;
+    }
+
+    let owner = state.read() as usize as *const u32;
+    if position < owner.add(1).read() as i32 {
+        position
+    } else {
+        -1
+    }
+}
+
 
 /// iterator_state_seek — original: `FUN_08155dc4` @ 0x08155dc4 (108
 /// bytes exactly, 0x08155dc4..0x08155e30; 27 instructions, no literal
@@ -5288,6 +5322,38 @@ pub(crate) mod tests {
                     "position {position}"
                 );
                 assert_eq!(state[0], 0xaaaa_aaaa, "does not alter state");
+                assert_eq!(state[1], 0xbbbb_bbbb, "does not alter state");
+                assert_eq!(state[3], 0xdddd_dddd, "does not alter state");
+            }
+        }
+    }
+
+    #[test]
+    fn iterator_state_current_index_requires_a_live_nonnegative_position() {
+        let Some(owner) = try_map_u32_slab(hints::ITERATOR_STATE_CURRENT_INDEX, 0x100) else {
+            assert!(crate::testing::note_missing_u32_fixture("iterator_state_current_index"));
+            return;
+        };
+        let owner = owner as *mut u32;
+        let mut state = [0xaaaa_aaaau32, 0xbbbb_bbbb, 0, 0xdddd_dddd];
+        unsafe {
+            owner.add(1).write(3);
+            state[0] = owner as u32;
+
+            for (position, expected) in [
+                (i32::MIN, -1),
+                (-5, -1),
+                (-4, -1),
+                (-3, -1),
+                (-2, -1),
+                (-1, -1),
+                (0, 0),
+                (2, 2),
+                (3, -1),
+                (i32::MAX, -1),
+            ] {
+                state[2] = position as u32;
+                assert_eq!(iterator_state_current_index(state.as_ptr()), expected, "position {position}");
                 assert_eq!(state[1], 0xbbbb_bbbb, "does not alter state");
                 assert_eq!(state[3], 0xdddd_dddd, "does not alter state");
             }

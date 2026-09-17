@@ -137,6 +137,7 @@ pub mod hints {
     pub const ITERATOR_STATE_SEEK: usize = 0x1c10_0000;
     pub const ITERATOR_STATE_SEEK_CONSTRUCT: usize = 0x1c20_0000;
     pub const ITERATOR_STATE_SEEK_BEGIN: usize = 0x1c30_0000;
+    pub const ITERATOR_STATE_CURRENT_INDEX: usize = 0x1c40_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
     // session and pending-event fixture; mappings never unmap, so no other
     // user may share this hint.
