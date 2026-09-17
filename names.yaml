@@ -391,6 +391,34 @@ functions:
       bit 0x40 is set, clear it, invoke vtable+0x88, then dispatch code 5;
       always tail-dispatch vtable+0x8c. FUN_08110fb4's concrete identity is
       unrecovered, so no semantic callee name is asserted.
+  # --- RGBA8 cursor reader ---
+  - address: 0x0825ebcc
+    ghidra: FUN_0825ebcc
+    name: rgba8_cursor_read
+    size: 76
+    sig: "void rgba8_cursor_read(u8 *components, u32 unused, const u8 **input_cursor)"
+    module: cxx/rgba8_cursor_read
+    status: ported
+    renames:
+      param_1/r0: components
+      param_2/r1: unused
+      param_3/r2: input_cursor
+      r1: input
+      r3: next_input
+      r12: next_input
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 19 ARM words from
+      `push {r4,lr}` at 0x0825ebcc through `pop {r4,pc}` at 0x0825ec14; the
+      separately linked next function begins at 0x0825ec18, with no literal
+      pool. The body reads four bytes from *input_cursor, advances that cursor
+      after each source address is captured, then writes the components in
+      source order. This order makes overlapping input and output ranges
+      observable. Raw aligned ARM branch-word scanning finds four inbound
+      direct calls, all unconditional bl; there are no predicated bl forms or
+      direct tail-B callers. Host tests cover cursor advancement and every
+      relative quadruplet overlap. match.py structural review was completed.
+      Deliberate deviation: volatile Rust accesses preserve the ARM cursor
+      update/load/store ordering against LLVM optimization.
   # --- RGBA8 cursor writer ---
   - address: 0x0825e394
     ghidra: FUN_0825e394
