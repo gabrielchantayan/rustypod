@@ -33668,6 +33668,35 @@ functions:
       inconsistent, dead value (the C function is void, and none of the
       36 call sites consume r0); ported as void.
 
+  # ---- B-tree write-transaction probe (src/sqlite/btree_in_trans.rs) ----
+  - address: 0x08371bdc
+    ghidra: FUN_08371bdc
+    name: btree_in_write_trans
+    size: 32
+    sig: "u32 btree_in_write_trans(const Btree *btree)"
+    module: sqlite/btree_in_trans
+    status: ported
+    renames:
+      param_1/r0: btree
+    notes: >-
+      Extent verified from raw osos.dec: 8 words at 0x08371bdc..0x08371bfc,
+      where the next function begins with `ldr r0,[r0,#0x50]`. Binary
+      decoding of every ARM B/BL word in the image finds exactly 4
+      unconditional plain bl callers (0x082d6ce0, 0x083824e8, 0x08397100,
+      0x08397304) and no predicated form; no image data word equals this
+      address, so the entry is statically bound. SQLite write-transaction
+      probe over Btree.inTrans (byte +0x08; layout pinned with
+      btree_enter): null handle returns 0 without a load, otherwise a
+      strict `cmp #2; moveq r0,#1` returns 1 only for TRANS_WRITE and 0
+      for TRANS_NONE/TRANS_READ and every other byte value. All four
+      callers iterate the sqlite3.aDb table (24-byte Db records, pBt at
+      +4) and consume the result purely as a nonzero test. Ghidra's C
+      matches the raw words here; an earlier hand decode misread the
+      unpadded hex dump as bcc. Codegen diff is the usual frame-pointer
+      prologue plus LLVM's clz/lsr booleanization in place of ADS's
+      predicated moveq - same null branch, same byte load, same
+      compare-against-2 structure.
+
   - address: 0x08371da4
     ghidra: FUN_08371da4
     name: btree_leave
