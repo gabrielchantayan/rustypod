@@ -107412,3 +107412,23 @@ functions:
       verified existing mode_selected_byte Rust port is called directly; the
       unidentified 0x08214a1c remains a fixed-address ARM seam and host tests
       replace it.
+
+  - address: 0x08220538
+    ghidra: thunk_FUN_0822ba50
+    name: mode_selected_position_set_veneer
+    size: 4
+    sig: "u32 mode_selected_position_set_veneer(void *state, u32 mode, u32 position)"
+    module: app/mode_selected_position_set
+    status: ported
+    renames:
+      FUN_0822ba50: mode_selected_position_set
+    notes: >-
+      Raw osos.dec word 0xea002d44 at 0x08220538 decodes as an unconditional
+      B to 0x0822ba50. The true extent is that single four-byte instruction;
+      0x0822053c starts a distinct push-prologue function. Independent
+      decoding finds four inbound unconditional plain BL callers and no
+      predicated BL callers. The veneer forwards state, mode, position, and
+      return value unchanged to the existing mode_selected_position_set port.
+      Deliberate deviation: Rust calls that port directly rather than emitting
+      the retail fixed-address tail branch; inline(never) retains a separately
+      addressable hook target.
