@@ -65224,6 +65224,24 @@ functions:
       branches. Host tests cover NID_undef, resolved low and upper boundary
       entries, unresolved in-range bypass of added, and out-of-range plus
       negative added-hash hits with the exact key tag and nid.
+  - address: 0x082d3a28
+    ghidra: FUN_082d3a28
+    name: i2t_asn1_object
+    size: 8
+    sig: "int i2t_ASN1_OBJECT(char *buffer, int buffer_len, const ASN1_OBJECT *object)"
+    module: crypto/obj_dat
+    vars: {param_1: buffer, param_2: buffer_len, param_3: object, param_4: no_name}
+    status: ported
+    notes: >-
+      OpenSSL's i2t_ASN1_OBJECT: raw words are mov r3, #0 followed by b
+      0x0805f110 (OBJ_obj2txt), so it returns OBJ_obj2txt(buffer, buffer_len,
+      object, 0) and permits a known object name. The true extent is exactly
+      eight bytes, 0x082d3a28-0x082d3a2f; the next separately linked function
+      starts at 0x082d3a30. Decoding every ARM B/BL immediate in osos.dec finds
+      four plain unconditional BL callers (0x0806f6dc, 0x080c9048,
+      0x080d7708, 0x082d3b64) and zero predicated callers. Rust's target
+      dispatch materializes OBJ_obj2txt through a literal and returns through a
+      frame before tail-branching; its host seam verifies no_name.
   - address: 0x0805f074
     ghidra: FUN_0805f074
     name: obj_obj2nid

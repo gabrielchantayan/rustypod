@@ -546,6 +546,66 @@ pub unsafe extern "C" fn obj_obj2nid(object: *const Asn1Object) -> i32 {
     }
     (*slot.read()).nid
 }
+/// i2t_asn1_object — original: `FUN_082d3a28` @ 0x082d3a28 (8 bytes,
+/// `0x082d3a28..0x082d3a2f`; the next separately linked function starts at
+/// `0x082d3a30`). Decoding every ARM B/BL immediate in `osos.dec` finds four
+/// plain unconditional `bl` callers (`0x0806f6dc`, `0x080c9048`,
+/// `0x080d7708`, and `0x082d3b64`) and zero predicated callers.
+///
+/// OpenSSL's `i2t_ASN1_OBJECT`: sets `no_name` to false and tail-branches to
+/// `OBJ_obj2txt`, which renders the object identifier into `buffer`.
+/// Deliberate deviation: the target dispatch materializes `OBJ_obj2txt` from
+/// a literal and returns through a frame before tail-branching; the host seam
+/// lets tests verify the fourth argument.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn i2t_asn1_object(
+    buffer: *mut u8,
+    buffer_len: i32,
+    object: *const Asn1Object,
+) -> i32 {
+    unsafe { obj_obj2txt(buffer, buffer_len, object, 0) }
+}
+
+type ObjObj2txt = unsafe extern "C" fn(*mut u8, i32, *const Asn1Object, i32) -> i32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn obj_obj2txt(
+    buffer: *mut u8,
+    buffer_len: i32,
+    object: *const Asn1Object,
+    no_name: i32,
+) -> i32 {
+    let render: ObjObj2txt = unsafe { core::mem::transmute(0x0805_f110usize) };
+    unsafe { render(buffer, buffer_len, object, no_name) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_obj_obj2txt(
+    _buffer: *mut u8,
+    _buffer_len: i32,
+    _object: *const Asn1Object,
+    _no_name: i32,
+) -> i32 {
+    panic!("i2t_asn1_object requires OBJ_obj2txt at 0x0805f110")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut OBJ_OBJ2TXT: ObjObj2txt = missing_obj_obj2txt;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn obj_obj2txt(
+    buffer: *mut u8,
+    buffer_len: i32,
+    object: *const Asn1Object,
+    no_name: i32,
+) -> i32 {
+    let render = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(OBJ_OBJ2TXT)) };
+    unsafe { render(buffer, buffer_len, object, no_name) }
+}
+
 
 /// obj_nid2obj — original: `FUN_0805ef18` @ 0x0805ef18 (172 bytes: 164
 /// bytes of code plus literal-pool words @ 0x0805efbc and @ 0x0805efc0;
@@ -1299,5 +1359,40 @@ mod tests {
         assert_eq!(unsafe { SEEN_NID }, -1);
         assert_eq!(table.num_retrieve, 2);
         clear(guard);
+    }
+
+    #[test]
+    fn i2t_asn1_object_allows_names_in_obj_obj2txt() {
+        static mut SEEN_BUFFER: *mut u8 = core::ptr::null_mut();
+        static mut SEEN_LEN: i32 = 0;
+        static mut SEEN_OBJECT: *const Asn1Object = core::ptr::null();
+        static mut SEEN_NO_NAME: i32 = -1;
+
+        unsafe extern "C" fn spy(
+            buffer: *mut u8,
+            buffer_len: i32,
+            object: *const Asn1Object,
+            no_name: i32,
+        ) -> i32 {
+            SEEN_BUFFER = buffer;
+            SEEN_LEN = buffer_len;
+            SEEN_OBJECT = object;
+            SEEN_NO_NAME = no_name;
+            17
+        }
+
+        let guard = LHASH_TEST_LOCK.lock();
+        let mut buffer = [0u8; 6];
+        let object = object(7, b"\x2a\x03\x04");
+        unsafe {
+            OBJ_OBJ2TXT = spy;
+            assert_eq!(i2t_asn1_object(buffer.as_mut_ptr(), -3, &object), 17);
+            assert_eq!(SEEN_BUFFER, buffer.as_mut_ptr());
+            assert_eq!(SEEN_LEN, -3);
+            assert_eq!(SEEN_OBJECT as usize, (&object as *const Asn1Object) as usize);
+            assert_eq!(SEEN_NO_NAME, 0);
+            OBJ_OBJ2TXT = missing_obj_obj2txt;
+        }
+        drop(guard);
     }
 }
