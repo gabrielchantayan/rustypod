@@ -66342,6 +66342,35 @@ functions:
       guards around the four-byte destination, and prove successive calls
       advance one halfword each.
 
+  # --- pixel format source-tag predicate ---
+  - address: 0x0825ecf0
+    ghidra: FUN_0825ecf0
+    name: pixel_format_source_tag_supported
+    size: 140
+    sig: "bool pixel_format_source_tag_supported(i32 pixel_format, i32 expected_pixel_format, u32 source_tag)"
+    module: cxx/pixel_format_source_tag_supported
+    status: ported
+    renames:
+      param_1/r0: pixel_format
+      param_2/r1: expected_pixel_format
+      param_3/r2: source_tag
+      DAT_0825ed7c: SOURCE_TAG_1401
+    notes: >-
+      Raw ARM decoding establishes the exact 140-byte extent: 0x0825ecf0
+      begins `cmn r0,#1`, 0x0825ed78 is `bx lr`, 0x0825ed7c is the
+      0x00001401 literal, and 0x0825ed80 starts a distinct function with
+      `push {r4-r11,lr}`. The leaf first rejects -1 or unequal format
+      arguments, then uses its in-body jump table for formats 0..7. Formats
+      0..2 require tag 0x1401; 3 and 5 also admit 0x8363; 4, 6, and 7 also
+      admit 0x8033 and 0x8034; equal out-of-table formats accept any tag.
+      Raw whole-image ARM decoding finds four direct unconditional BL callers
+      (0x0824def8, 0x0825070c, 0x08252a08, 0x08252a20), with no predicated
+      BL callers. The tag identities remain unlabelled because names.yaml
+      and verified callers provide no semantic definition; the port retains
+      their raw numeric values. Host tests cover missing and unequal formats,
+      every jump-table group, rejected near-group tags, and out-of-table
+      behavior.
+
   # --- the second 4-byte colour value copy ---
   - address: 0x082720ac
     ghidra: FUN_082720ac
