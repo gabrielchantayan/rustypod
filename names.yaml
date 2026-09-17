@@ -104324,3 +104324,25 @@ functions:
       epilogue around the equivalent add; match.py confirms the body add.
       Deliberate deviation: Rust wrapping_add preserves unchecked address
       arithmetic without imposing allocation or dereference preconditions.
+  # --- opaque subobject accessor ---
+  - address: 0x082a1dec
+    ghidra: FUN_082a1dec
+    name: object_subobject_at_08
+    size: 8
+    sig: "void *object_subobject_at_08(void *object)"
+    module: app/object_subobject_at_08
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: embedded_subobject
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent: add r0,r0,#8 at
+      0x082a1dec followed by bx lr at 0x082a1df0; 0x082a1df4 begins the next
+      distinct function. Direct caller disassembly finds exactly four inbound
+      unconditional plain BL calls at 0x08100338, 0x0810034c, 0x08297788, and
+      0x0829779c, and no predicated BL calls. The leaf returns object+8
+      without reading or validating it; callers treat it as an embedded opaque
+      subobject. LLVM may add a frame prologue and epilogue around the
+      equivalent add. Deliberate deviation: Rust wrapping_add preserves
+      unchecked address arithmetic without imposing allocation or
+      dereference preconditions.
