@@ -180,6 +180,59 @@ pub extern "C" fn control_state_store(word: u32) {
     set_flags_word(word & !FORCE_STORE_SENTINEL);
 }
 
+/// Original: `FUN_08292cac` @ 0x08292cac (60 bytes,
+/// `0x08292cac..0x08292ce8`; the next independently linked function starts
+/// at 0x08292ce8). It has three plain direct `bl` callers and one `bleq`
+/// caller. Its own body has three direct `bl` instructions and one indirect
+///
+/// Saves the current low-12-bit control state, stores `state`, invokes the
+/// framework-root virtual notification slot, then tail-calls
+/// [`control_state_store`] to restore the saved state. The restore has no
+/// force-store sentinel, exactly as the raw `b 0x08292e84` does.
+///
+/// # Deviation
+///
+/// The framework-root vtable's +0x19c slot remains an unported retailOS
+/// implementation. On ARM this dispatches through the original object and
+/// slot. Host tests install a callback seam because host pointers are wider
+/// than the target's four-byte vtable entries.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn control_state_store_notify_restore(state: u32) {
+    let framework_root = crate::app::class_6800::framework_root_instance();
+    let saved_state = control_state_flags();
+    control_state_store(state);
+    notify_framework_root_control_state(framework_root);
+    control_state_store(saved_state);
+}
+
+#[cfg(target_arch = "arm")]
+unsafe fn notify_framework_root_control_state(framework_root: *mut u8) {
+    let vtable = (framework_root as *const *const u32).read_volatile();
+    let slot = vtable.add(0x19c / core::mem::size_of::<u32>()).read_volatile();
+    let notify: unsafe extern "C" fn(*mut u8) = core::mem::transmute(slot);
+    notify(framework_root);
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn unported_framework_root_control_state_notification(_framework_root: *mut u8) {}
+
+#[cfg(not(target_arch = "arm"))]
+static mut FRAMEWORK_ROOT_CONTROL_STATE_NOTIFICATION: unsafe extern "C" fn(*mut u8) =
+    unported_framework_root_control_state_notification;
+
+#[cfg(not(target_arch = "arm"))]
+unsafe fn notify_framework_root_control_state(framework_root: *mut u8) {
+    FRAMEWORK_ROOT_CONTROL_STATE_NOTIFICATION(framework_root);
+}
+
+#[cfg(all(test, not(target_arch = "arm")))]
+unsafe fn set_framework_root_control_state_notification(
+    notification: unsafe extern "C" fn(*mut u8),
+) {
+    FRAMEWORK_ROOT_CONTROL_STATE_NOTIFICATION = notification;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +356,36 @@ mod tests {
             // ...until the sentinel unlocks it.
             control_state_store(0x020 | FORCE_STORE_SENTINEL);
             assert_eq!(flags_word(), 0x020);
+        }
+    }
+    static mut NOTIFIED_ROOT: *mut u8 = core::ptr::null_mut();
+    static mut NOTIFIED_STATE: u32 = 0;
+
+    unsafe extern "C" fn record_framework_root_notification(root: *mut u8) {
+        NOTIFIED_ROOT = root;
+        NOTIFIED_STATE = flags_word();
+    }
+
+    #[test]
+    fn store_notify_restore_notifies_after_store_then_restores_low_flags() {
+        unsafe {
+            let mut root = [0u8; 1];
+            crate::app::class_6800::FRAMEWORK_ROOT_HOLDER.instance = root.as_mut_ptr();
+            set_framework_root_control_state_notification(record_framework_root_notification);
+            set_mock_flags_word(0x1234_055);
+            NOTIFIED_ROOT = core::ptr::null_mut();
+            NOTIFIED_STATE = 0;
+
+            control_state_store_notify_restore(0x123);
+
+            assert_eq!(NOTIFIED_ROOT, root.as_mut_ptr());
+            assert_eq!(NOTIFIED_STATE, 0x123);
+            assert_eq!(flags_word(), 0x055);
+
+            set_framework_root_control_state_notification(
+                unported_framework_root_control_state_notification,
+            );
+            crate::app::class_6800::FRAMEWORK_ROOT_HOLDER.instance = core::ptr::null_mut();
         }
     }
 }
