@@ -102724,3 +102724,28 @@ functions:
       was completed. Deliberate deviations: the unported attr initializer and
       kernel allocator dispatch through hook-ready seams; host defaults model
       their decoded effects with a nonzero semaphore handle.
+  - address: 0x082e4730
+    ghidra: thunk_FUN_082e474c
+    name: ascii_string_to_uppercase
+    size: 4
+    sig: "void ascii_string_to_uppercase(u8 *destination, const u8 *source)"
+    module: util/ascii_string_to_uppercase
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r2: source_byte
+    notes: >-
+      Raw osos.dec confirms the one-word thunk extent
+      0x082e4730..0x082e4734: `b 0x082e474c`; 0x082e474c is the forwarded
+      copy-and-fold body, and the next separately entered function begins at
+      0x082e4764. Decoding every aligned ARM BL immediate finds four inbound
+      direct call sites, all unconditional plain bl at 0x082e2c2c,
+      0x082e2c38, 0x082e2d78, and 0x082e2d84; there are no predicated bl
+      forms. The body copies a NUL-terminated byte string, folding only ASCII
+      a..z to uppercase and writing the terminating NUL. It reads each source
+      byte before writing its destination byte, making overlap ordering
+      observable. match.py reports the expected structural difference: this
+      port implements the thunk's forwarded body rather than its single tail
+      branch. Deliberate deviation: volatile byte accesses prevent LLVM from
+      substituting a freestanding libc string primitive.

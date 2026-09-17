@@ -4,6 +4,7 @@ pub mod ahtp_state_destroy;
 pub mod afm_next_statement_token;
 pub mod always_succeeds;
 pub mod ascii_to_uppercase;
+pub mod ascii_string_to_uppercase;
 pub mod align;
 pub mod be_read;
 pub mod beload;
