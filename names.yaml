@@ -53069,6 +53069,38 @@ functions:
       return; the diff is the crate's fp frame and LLVM rotating the loop
       (counter seeded at -1 with mvn and incremented at the loop head
       instead of the original's predicated addne).
+  - address: 0x08277188
+    ghidra: FUN_08277188
+    name: string_object_assign_bytes
+    size: 88
+    sig: "void string_object_assign_bytes(StringObject *this, const u8 *source, u32 byte_count)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      param_3: byte_count
+      iVar1: destination
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte extent
+      0x08277188..0x082771dc: `pop {r4,r5,r6,pc}` ends this function and
+      the next function starts with `push {r3,r4,r5,r6,r7,lr}` at
+      0x082771e0. Four direct callers are all plain unconditional bl:
+      0x08046ca0, 0x080be510, 0x081153f4 and 0x08186aa0; no predicated bl
+      callers. The body uses `movs r6,r1; cmpne r2,#0`, so NULL source or
+      zero byte_count tail-dispatches the object's vtable slot +0xc.
+      Otherwise slot +0x8 receives (this, byte_count + 1, 0); a NULL result
+      returns directly, while a non-NULL destination receives exactly
+      byte_count + 1 bytes through the ROM memcpy veneer at 0x08037db0 and
+      then an explicit NUL at destination[byte_count]. The body has one
+      ordinary bl (memcpy) and one unpredicated indirect blx (slot +0x8).
+      The Rust port uses the existing STRING_OBJECT_ASSIGN_CSTR_OPS volatile
+      seam for those virtual slots because host-modeled vtable entries are ROM
+      addresses, then calls the ported __rt_memcpy directly. Host tests cover
+      embedded NUL bytes, forced final termination, NULL/zero guards, and
+      allocation failure. match.py finds the same guard, allocation, copy and
+      terminal-store structure; the host seam expands the virtual call into a
+      volatile function-pointer load.
   - address: 0x082771e0
     ghidra: FUN_082771e0
     name: string_object_remove_trailing_codepoint
