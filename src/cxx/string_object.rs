@@ -1067,6 +1067,36 @@ pub unsafe extern "C" fn string_object_erase(this: *mut StringObject, index: i32
     assign_cstr_allocate_op()(this, old_len.wrapping_sub(removed) as usize, 1);
 }
 
+/// string_object_strip_leading_codepoint — original: `FUN_08276fe0` @
+/// 0x08276fe0 (100 bytes, 0x08276fe0..0x08277040; next function starts at
+/// 0x08277044). One plain `bl` to `utf8_next_codepoint` and one predicated
+/// `blgt` to `string_object_erase`, verified from raw ARM words.
+///
+/// Counts the consecutive leading decoded codepoints equal to `codepoint`,
+/// stopping at NUL or the first mismatch, then erases that many characters
+/// from index zero. The payload is loaded before its NULL check, and malformed
+/// decoder sequences retain the existing decoder's consumption rules.
+///
+/// Deliberate deviations: none. Both direct callees are existing Rust ports.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_strip_leading_codepoint(
+    this: *mut StringObject, codepoint: u32,
+) -> i32 {
+    let mut cursor = (*this).payload as *const u8;
+    let mut count = 0i32;
+    if !cursor.is_null() {
+        while cursor.read() != 0 && utf8_next_codepoint(&mut cursor) == codepoint {
+            count = count.wrapping_add(1);
+        }
+        if count > 0 {
+            string_object_erase(this, 0, count);
+        }
+    }
+    count
+}
+
+
 /// string_object_append_cstr — original: FUN_082768dc @ 0x082768dc
 /// (12 bytes). Tail-call string_object_insert_cstr with INT_MAX as the
 /// character position, preserving its NULL/empty-source and allocation
@@ -5047,6 +5077,50 @@ pub(crate) mod tests {
             assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len(), 1);
         }
         assert_eq!(&old[..3], b"ab\0");
+    }
+    #[test]
+    fn strip_leading_codepoint_removes_only_the_matching_utf8_prefix() {
+        let mut old = [0u8; 24];
+        old[4..12].copy_from_slice(b"\xc3\xa9\xc3\xa9a\xc3\xa9\0");
+        let mut out = [0xa5; 24];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: unsafe { old.as_mut_ptr().add(4) },
+        };
+        let _bench = insert_bench(out.as_mut_ptr());
+
+        assert_eq!(
+            unsafe { string_object_strip_leading_codepoint(&mut object, 0xe9) },
+            2
+        );
+        assert_eq!(&out[..4], b"a\xc3\xa9\0");
+        unsafe {
+            assert_eq!(
+                (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 4, 1)]
+            );
+        }
+    }
+
+    #[test]
+    fn strip_leading_codepoint_stops_at_mismatch_and_skips_erase_when_empty() {
+        let mut old = *b"abc\0\0\0\0\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: old.as_mut_ptr(),
+        };
+        let _bench = insert_bench(core::ptr::null_mut());
+
+        unsafe {
+            assert_eq!(string_object_strip_leading_codepoint(&mut object, b'b' as u32), 0);
+            let mut empty = StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            };
+            assert_eq!(string_object_strip_leading_codepoint(&mut empty, b'a' as u32), 0);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+        }
+        assert_eq!(&old[..4], b"abc\0");
     }
 
     #[test]
