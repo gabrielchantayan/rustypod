@@ -106774,3 +106774,39 @@ functions:
       PC-relative literal loads; the complete input/output mapping is
       preserved. Host tests cover all three selected kinds and adjacent plus
       extreme defaulting values.
+
+  # --- XML delimiter collector ---
+  - address: 0x0825d424
+    ghidra: FUN_0825d424
+    name: xml_collect_until_delimiter
+    size: 160
+    sig: "void xml_collect_until_delimiter(char **output, struct XmlInput **input_slot, unsigned int first_delimiter, unsigned int second_delimiter, unsigned int trim_trailing_whitespace)"
+    module: util/xml_collect_until_delimiter
+    status: ported
+    renames:
+      param_1/r0/r5: output
+      param_2/r1/r4: input_slot
+      param_3/r2/r6: first_delimiter
+      param_4/r3/r7: second_delimiter
+      param_5/stack/r8: trim_trailing_whitespace
+      FUN_083d8c20: cxx_string_default_ctor
+      FUN_0825d5dc: xml_decode_codepoint (unported seam)
+      FUN_0825d7c4: xml_decode_codepoint_and_reset
+      FUN_0825d2fc: xml_is_whitespace (unported seam)
+      FUN_083d888c: cxx_string_replace_fill (unported)
+      FUN_0825d5ac: xml_input_is_exhausted
+    notes: >-
+      Raw ARM proves the exact 160-byte extent 0x0825d424..0x0825d4c3;
+      0x0825d4c4 begins the next prologue. Whole-image A32 branch decoding
+      finds four inbound plain BL calls (0x0825cc60, 0x0825d0e0,
+      0x0825d294, 0x0825d4d8) and zero predicated inbound BL calls. It
+      default-constructs output, checks exhaustion, decodes once without a
+      reset to test both delimiters, then decodes-and-resets a codepoint.
+      When trimming is requested, whitespace terminates only after output is
+      nonempty; otherwise the low byte is appended. The raw append is
+      basic_string::replace(pos, 0, 1, char) at 0x083d888c; its identity is
+      established by its five-argument register setup and COW splice body.
+      Deliberate deviation: Rust calls the ported cxx_string_replace_core
+      directly because that fill wrapper is unported. Host tests cover both
+      delimiters and exhausted input; match.py reports the expected structural
+      difference from Rust frames and seam dispatches.
