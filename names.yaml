@@ -46470,6 +46470,27 @@ functions:
       and an offset source record. match.py structural review is expected to
       differ from ADS code generation.
 
+  - address: 0x082a0100
+    ghidra: FUN_082a0100
+    name: rgba8_to_rgba8888
+    size: 36
+    sig: "u32 rgba8_to_rgba8888(const u8 *components)"
+    module: ui/rgba8888_pack
+    status: ported
+    renames:
+      param_1/r0: components (four source bytes in R, G, B, A order)
+    notes: >-
+      Raw ARM extent is exactly 36 bytes: nine instructions from 0x082a0100
+      through the bx lr at 0x082a0120; the next separately linked function
+      starts at 0x082a0124, and there is no literal pool. Full osos.dec ARM
+      B/BL-word decoding finds four unconditional incoming bl sites and no
+      predicated bl sites. It reads four RGBA8 bytes in order and returns
+      0xRRGGBBAA as a u32, with no NULL, alignment, or bounds guard. The Rust
+      port retains the ARM return-register representation and adds no
+      validation. Host tests cover component order, offset input, and zero/all
+      set values. match.py structural review is expected to differ from ADS
+      code generation.
+
   - address: 0x082a1bc4
     ghidra: FUN_082a1bc4
     name: plist_node_child_count
