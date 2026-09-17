@@ -24209,6 +24209,23 @@ functions:
   #   cg_inst_t (base)       +0 next  +4 block  +8 kind (u8)
   #                          +9 opcode (u8)  +0xc first derived field
 
+  - address: 0x082c1254
+    ghidra: FUN_082c1254
+    name: cg_literal_slot_find_or_create
+    size: 112
+    sig: "size_t cg_literal_slot_find_or_create(cg_codegen_t *codegen, uintptr_t literal, int force_new)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen, param_2: literal, param_3: force_new}
+    notes: >-
+      Literal-pool slot cache. Raw ARM establishes the true 112-byte extent
+      through the next function at 0x082c12c4. The body has one plain bl
+      (cg_heap_alloc) and no predicated bl; a whole-image raw scan finds four
+      plain incoming bl call sites (0x082beb80, 0x082beb90, 0x082bebb4,
+      0x082cc130) and no predicated incoming bl. Walks the +0x20c singly
+      linked {next, literal, output_offset} entries; force_new skips matching.
+      A miss allocates 12 bytes, assigns +0x214, then advances it by four.
+
   - address: 0x082c1a08
     ghidra: FUN_082c1a08
     name: cg_heap_alloc

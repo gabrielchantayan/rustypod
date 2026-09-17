@@ -402,6 +402,12 @@ pub const CG_CODEGEN_HEAP: usize = 2;
 pub const CG_CODEGEN_LABELS: usize = 3;
 /// `cg_codegen_t + 0x10` — the emitted-code buffer.
 pub const CG_CODEGEN_OUTPUT: usize = 4;
+/// `cg_codegen_t + 0x20c` — head of the literal-slot cache. Each 12-byte
+/// entry is `{next, literal, output_offset}`.
+pub const CG_CODEGEN_LITERAL_SLOTS: usize = 0x20c / 4;
+/// `cg_codegen_t + 0x214` — next four-byte output offset assigned to a new
+/// literal-slot cache entry.
+pub const CG_CODEGEN_LITERAL_NEXT: usize = 0x214 / 4;
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
 /// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
@@ -967,6 +973,50 @@ pub unsafe extern "C" fn cg_codegen_create(
 
     codegen as *mut CgCodegen
 }
+/// cg_literal_slot_find_or_create — original: `FUN_082c1254` @ `0x082c1254`
+/// (112 bytes; **4 plain incoming `bl` call sites and 0 predicated incoming
+/// `bl` call sites**, independently raw-binary scanned; its body contains one
+/// plain `bl` to [`cg_heap_alloc`]).
+///
+/// Finds the cached output offset for `literal` in `codegen`'s singly linked
+/// literal-slot cache, or appends a zeroed 12-byte `{next, literal,
+/// output_offset}` entry. `force_new != 0` skips matching and always appends.
+/// New entries receive `codegen->literal_next`, then advance it by four.
+///
+/// No deliberate deviations. Host fields use word indices, preserving the
+/// target's four-byte pointer layout despite host pointer width.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_literal_slot_find_or_create(
+    codegen: *mut CgCodegen,
+    literal: usize,
+    force_new: u32,
+) -> usize {
+    let codegen = codegen as *mut u8;
+    let mut link = slot(codegen, CG_CODEGEN_LITERAL_SLOTS);
+
+    loop {
+        let entry = link.read();
+        if entry.is_null() {
+            let entry = cg_heap_alloc(
+                slot(codegen, CG_CODEGEN_HEAP).read() as *mut CgHeap,
+                record_size(12),
+            );
+            link.write(entry);
+            word(entry, 1).write(literal);
+            let output_offset = word(codegen, CG_CODEGEN_LITERAL_NEXT).read();
+            word(entry, 2).write(output_offset);
+            word(codegen, CG_CODEGEN_LITERAL_NEXT).write(output_offset.wrapping_add(4));
+            break;
+        }
+        if force_new == 0 && word(entry, 1).read() == literal {
+            break;
+        }
+        link = slot(entry, 0);
+    }
+    word(link.read(), 2).read()
+}
+
 
 /// cg_codegen_buffer_create — original: `FUN_082c22b0` @ 0x082c22b0
 /// (52 bytes, 1 `bl` call site: 0x082c0db4, inside the `cg_codegen_t`
@@ -9943,6 +9993,49 @@ mod tests {
             );
 
             *core::ptr::addr_of_mut!(CG_CONSUME_REGISTER_USE_OPS) = saved;
+        }
+        teardown();
+    }
+
+    #[test]
+    fn literal_slot_reuses_an_existing_literal_without_advancing_output() {
+        let _g = setup();
+        unsafe {
+            let heap = cg_heap_create(64);
+            let mut codegen = [0usize; CG_CODEGEN_LITERAL_NEXT + 1];
+            codegen[CG_CODEGEN_HEAP] = heap as usize;
+            let codegen = codegen.as_mut_ptr() as *mut CgCodegen;
+
+            assert_eq!(cg_literal_slot_find_or_create(codegen, 0x28, 0), 0);
+            assert_eq!(cg_literal_slot_find_or_create(codegen, 0x28, 0), 0);
+            assert_eq!(
+                word(codegen as *mut u8, CG_CODEGEN_LITERAL_NEXT).read(),
+                4,
+                "a cache hit must not reserve another output word"
+            );
+            cg_heap_destroy(heap);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn literal_slot_force_new_appends_a_duplicate_literal() {
+        let _g = setup();
+        unsafe {
+            let heap = cg_heap_create(64);
+            let mut codegen = [0usize; CG_CODEGEN_LITERAL_NEXT + 1];
+            codegen[CG_CODEGEN_HEAP] = heap as usize;
+            let codegen = codegen.as_mut_ptr() as *mut CgCodegen;
+
+            assert_eq!(cg_literal_slot_find_or_create(codegen, 0x28, 0), 0);
+            assert_eq!(cg_literal_slot_find_or_create(codegen, 0x28, 1), 4);
+            assert_eq!(cg_literal_slot_find_or_create(codegen, 0x28, 0), 0);
+            assert_eq!(
+                word(codegen as *mut u8, CG_CODEGEN_LITERAL_NEXT).read(),
+                8,
+                "the forced duplicate consumes exactly one four-byte slot"
+            );
+            cg_heap_destroy(heap);
         }
         teardown();
     }
