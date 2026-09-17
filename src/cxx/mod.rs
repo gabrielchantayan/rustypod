@@ -69,6 +69,7 @@ pub mod draw_state_style;
 pub mod draw_state_get_style;
 pub mod draw_state_get_background_color;
 pub mod draw_state_surface;
+pub mod draw_state_clip;
 pub mod handler_list_construct;
 pub mod handle;
 pub mod handle_callback_dispatch;
