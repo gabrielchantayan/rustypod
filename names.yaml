@@ -107387,3 +107387,28 @@ functions:
       the still-unidentified retail processor at 0x0822b8f8 with the second
       handle, then destroys both local slots. The original ignores r2/r3 and
       forwards its fifth stack argument as the processor's fourth argument.
+  - address: 0x0822af50
+    ghidra: FUN_0822af50
+    name: mode_selected_update_if_ready
+    size: 68
+    sig: "u32 mode_selected_update_if_ready(void *state, u32 mode)"
+    module: app/mode_selected_update_if_ready
+    status: ported
+    renames:
+      param_1/r0/r2: state
+      param_2/r1/r4: mode
+      FUN_0822b684: mode_selected_byte
+      FUN_08214a1c: mode_substate_update_unported
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x0822af50..0x0822af93; 0x0822af94 begins the next distinct push
+      prologue. The body contains two unconditional plain BL instructions
+      (to 0x0822b684 and 0x08214a1c), no predicated BL instructions, and
+      four direct unconditional plain BL callers with no predicated callers.
+      Flag bit 0 at state+0x5f8 gates the operation. When set, the already
+      ported mode_selected_byte result must be zero before the function calls
+      the unresolved 0x08214a1c with state+0x38 and mode, forwarding its
+      result; every rejected path returns zero. Deliberate deviation: the
+      verified existing mode_selected_byte Rust port is called directly; the
+      unidentified 0x08214a1c remains a fixed-address ARM seam and host tests
+      replace it.
