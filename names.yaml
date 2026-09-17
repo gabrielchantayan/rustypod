@@ -26800,6 +26800,34 @@ functions:
       embedded StringObject via repr(C) named fields, avoiding 32-bit byte
       offsets on wider hosts. Host tests cover both a non-NULL payload and the
       NULL-to-empty fallback through the direct existing c_str port.
+  - address: 0x0829b360
+    ghidra: FUN_0829b360
+    name: string_record_string_at_0x0c_c_str
+    size: 8
+    sig: "const char *string_record_string_at_0x0c_c_str(const StringRecordWithStringAt0x0c *record)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1+0x0c: string
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw osos.dec confirms exactly two ARM words at 0x0829b360..0x0829b364:
+      `add r0,r0,#0x0c; b 0x082a50b0`. The next independently linked function
+      begins at 0x0829b368, correcting Ghidra's false boundary and +0x10
+      payload-load decompilation. This is a tail-call accessor for the
+      StringObject embedded three words into an otherwise unidentified record;
+      it returns that member's payload at record +0x10, or
+      string_object_c_str's shared empty C string when the payload is NULL.
+      Decoding every ARM B/BL word in osos.dec finds exactly four direct calls,
+      all unconditional plain bl (0x0812702c, 0x081271ac, 0x08299b78, and
+      0x08299bd0), zero predicated calls, and zero tail-b callers. No data
+      word in osos.dec equals 0x0829b360, so it is not a serialized virtual
+      dispatch target. The record's larger identity remains undecoded; Rust's
+      repr(C) StringRecordWithStringAt0x0c models only its three leading ARM
+      words and embedded StringObject, avoiding target byte-offset assumptions
+      on wider hosts. Host tests cover both a non-NULL payload and the
+      NULL-to-empty fallback through the direct existing c_str port.
   - address: 0x0829ba1c
     ghidra: FUN_0829ba1c
     name: string_object_differs_from_static_object
