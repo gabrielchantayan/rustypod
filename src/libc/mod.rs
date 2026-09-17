@@ -14,6 +14,7 @@ pub mod bzero;
 pub mod zero_unwritten_suffix;
 pub mod halfword_load;
 pub mod iram_veneers;
+pub mod iram_stub;
 pub mod memchr;
 pub mod memcmp;
 pub mod memcpy;
