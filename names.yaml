@@ -103811,3 +103811,27 @@ functions:
       are fixed retailOS target calls; host tests install recording operations
       to prove zero-count behavior, per-entry iteration, assignment, and both
       releases. match.py structural review recorded.
+
+  # --- font face readiness gate ---
+  - address: 0x082a6e84
+    ghidra: FUN_082a6e84
+    name: font_face_ensure_ready
+    size: 76
+    sig: "u32 font_face_ensure_ready(void *face, u32 refresh)"
+    module: util/font_face_ensure_ready
+    status: ported
+    renames:
+      param_1/r0: face
+      param_2/r1: refresh
+      FUN_0828fbac: unported font face loader
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte code extent
+      0x082a6e84..0x082a6ed0: the closing pop is at 0x082a6ecc and the next
+      independently entered function begins with stmdb at 0x082a6ed0.
+      Decoding the body finds zero plain bl instructions and one predicated
+      bleq to the unported loader at 0x0828fbac; the ready refresh is a
+      predicated bx through the target-width vtable slot +0x2c. When +0x89 is
+      clear, +0x91 suppresses that loader call and the function returns +0x89.
+      Otherwise refresh zero returns one and nonzero returns the vtable method
+      result. Host tests cover the loader, deferred, and refresh predicates;
+      match.py structural review recorded.

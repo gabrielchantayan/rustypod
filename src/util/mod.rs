@@ -50,6 +50,7 @@ pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;
 pub mod framed_word_buffer_decode;
+pub mod font_face_ensure_ready;
 pub mod matrix_state_apply_transform;
 pub mod fixed_matrix_cursor;
 pub mod field_access;
