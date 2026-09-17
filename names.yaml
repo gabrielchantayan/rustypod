@@ -107712,3 +107712,26 @@ functions:
       returns the literal-pool default 0x083f53cc. The ROM pointer targets
       are non-text byte runs, so the Rust port deliberately models their
       binary-verified contents as [0xa6, 0] and [0x01, 0].
+  - address: 0x08210624
+    ghidra: FUN_08210624
+    name: jpeg_stream_read_u16
+    size: 72
+    sig: "u32 jpeg_stream_read_u16(JpegStream *stream, u32 byte_order)"
+    module: jpeg/stream_read_u16
+    status: ported
+    renames:
+      param_1/r0/r5: stream
+      param_2/r1: byte_order
+      FUN_082105b0: jpeg_stream_read_byte
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x08210624..0x0821066b; 0x0821066c begins the next separately linked
+      function with push {r4,r5,r6,lr}. The four inbound calls at
+      0x0821067c, 0x08210694, 0x082106a4, and 0x082107b0 decode as
+      unconditional plain BL instructions; no predicated BL targets this
+      address. Its two mutually-exclusive paths contain four static plain BL
+      instructions to the established jpeg_stream_read_byte port
+      (0x082105b0), executing two reads per call. Tag 0x4d4d ("MM") returns
+      the first byte as high byte; all other tags return it as low byte.
+      Deliberate deviation: the Rust byte-order comparison is volatile so
+      LLVM cannot hoist the common first read above the original branch.
