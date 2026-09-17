@@ -92,6 +92,7 @@ pub mod cell_size;
 pub mod change_cookie;
 pub mod check_object_name;
 pub mod column_default;
+pub mod column_index;
 pub mod column_mem;
 pub mod context_malloc;
 pub mod corrupt_schema;

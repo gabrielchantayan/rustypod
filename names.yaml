@@ -35753,6 +35753,31 @@ functions:
       defaults); VMPrintf uses the existing SQLITE_VM_PRINTF seam. Host
       tests cover NULL db, cached/create/OOM pErr paths, clear versus
       formatted results, xDel, and the reload.
+  - address: 0x082c4380
+    ghidra: FUN_082c4380
+    name: column_index
+    size: 80
+    sig: "i32 column_index(const Table *table, const char *name)"
+    module: sqlite/column_index
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: name
+      param_1_plus_4: n_col
+      param_1_plus_8: a_col
+      FUN_08384f14: str_icmp
+    notes: >-
+      SQLite's sqlite3ColumnIndex. Raw extent is exactly 80 bytes:
+      0x082c4380..0x082c43d0, where column_mem begins. ARM-word decoding
+      verifies four direct unconditional bl callers and no predicated
+      callers; this body has one unconditional bl to str_icmp @ 0x08384f14.
+      It reloads signed Table.nCol (+0x04) at each loop test, scans
+      20-byte Column records at Table.aCol (+0x08), and compares zName
+      (+0x00) case-insensitively. It returns the first matching index or -1,
+      including for zero or negative nCol. The Rust port has no deliberate
+      behavioral deviation; it reads target pointers as u32 words to retain
+      the firmware layout in host fixtures.
+
   - address: 0x082c43f0
     ghidra: FUN_082c43f0
     name: column_mem
