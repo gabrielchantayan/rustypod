@@ -1394,6 +1394,9 @@ pub mod hints {
     // object and child-record fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const OBJECT_CHILD_COUNT_IS_POSITIVE: usize = 0x7801_0000;
+    // 0x4244_0000: dedicated to util/tagged_buffer_payload_address's raw-u32
+    // descriptor and payload fixture; mappings never unmap.
+    pub const TAGGED_BUFFER_PAYLOAD_ADDRESS: usize = 0x4244_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

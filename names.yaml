@@ -107629,3 +107629,29 @@ functions:
       recovered but unported, so the ARM port calls its verified fixed address;
       host tests install that operation and both virtual calls as explicit
       seams because host function pointers are wider than target words.
+
+  - address: 0x082142ec
+    ghidra: FUN_082142ec
+    name: tagged_buffer_payload_address
+    size: 64
+    sig: "void *tagged_buffer_payload_address(const u32 *descriptor)"
+    module: util/tagged_buffer_payload_address
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      param_1_plus_0x0c/r3: payload
+      FUN_082142d8: alignment_padding
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte body at
+      0x082142ec..0x0821432c; the next separately entered function begins at
+      0x0821432c. Whole-image A32 branch decoding finds four inbound
+      unconditional plain BL callers (0x0818b51c, 0x0818b6a4, 0x0818b6f4,
+      and 0x082974e8) and no predicated BL callers. The body has one
+      unconditional BL to the adjacent 20-byte arithmetic helper at
+      0x082142d8; the predicated BLS 0x08214324 enters this function's return
+      epilogue rather than calling a separate callee. Clear flag 0x08000000
+      returns the target-width pointer at descriptor+0x0c. Set computes the
+      payload at +0x0c, with alignment class bits 0x70000000 >> 26; classes
+      through four return it unchanged and higher classes add the helper's
+      alignment padding. FUN_082142d8 has no names.yaml identity, so its
+      verified arithmetic is inlined without creating a seam.
