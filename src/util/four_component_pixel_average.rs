@@ -11,9 +11,8 @@
 /// means `dst` may alias either source without changing the sampled values.
 ///
 /// Deliberate deviation: the retail body delegates the four ordered stores to
-/// unported `FUN_0824bf5c` @ 0x0824bf5c. This port performs those equivalent
-/// stores directly after retaining all source components, avoiding a new
-/// dispatch seam for that otherwise trivial helper.
+/// `store_four_components`. This port performs those equivalent stores directly
+/// after retaining all source components, avoiding an unnecessary call.
 ///
 /// # Safety
 /// `dst` must be valid for four `u8` writes; `first` and `second` must each be

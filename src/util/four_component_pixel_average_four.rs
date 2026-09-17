@@ -9,9 +9,9 @@
 /// >> 2`, then writes the four floor averages in component order. Retaining
 /// every input before the first write means `dst` may alias any source.
 ///
-/// Deliberate deviation: the retail body calls unported `FUN_0824bf5c` to
-/// write the four computed bytes. This port performs its equivalent ordered
-/// stores directly, avoiding a dispatch seam for that trivial helper.
+/// Deliberate deviation: the retail body calls `store_four_components` to
+/// write the four computed bytes. This port performs equivalent ordered stores
+/// directly, avoiding an unnecessary call.
 ///
 /// # Safety
 /// `dst` must be valid for four `u8` writes; each source must be valid for

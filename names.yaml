@@ -85293,6 +85293,37 @@ functions:
       four ordered volatile byte stores. Host tests exhaust all 65,536
       low-halfword values, prove upper input bits have no effect, and retain
       guards around the destination bytes.
+  # --- Four-component byte store (util/store_four_components) ---
+  - address: 0x0824bf5c
+    ghidra: FUN_0824bf5c
+    name: store_four_components
+    size: 24
+    sig: "u8 *store_four_components(u8 *destination, u8 first, u8 second, u8 third, u8 fourth)"
+    module: util/store_four_components
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: first
+      param_3/r2: second
+      param_4/r3: third
+      param_5/stack: fourth
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x0824bf5c..0x0824bf73:
+      `ldr r12,[sp]; strb r1,[r0]; strb r2,[r0,#1]; strb r3,[r0,#2]; strb
+      r12,[r0,#3]; bx lr`. The next separately linked zeroing sibling begins
+      at 0x0824bf74. It writes the low bytes of four arguments at ascending
+      destination offsets 0..3 and preserves r0 as its return value; there is
+      no NULL, alignment, or bounds guard. Full-image decoding finds exactly
+      four inbound direct call sites, all unconditional plain `bl`:
+      0x0823f92c, 0x0824bde8, 0x0824be94, and 0x08255188; there are zero
+      predicated `bl` calls and no direct plain-B tails. Callers provide
+      computed RGBA components, proving this is a generic four-component
+      store rather than a format-specific conversion. No deliberate
+      deviations: the port performs the same ordered byte stores and returns
+      the original destination pointer. Host tests cover component extremes,
+      an unaligned destination, overwrite behavior, return value, and
+      untouched guards.
+
   # --- Four-component pixel average (util/four_component_pixel_average) ---
   - address: 0x0824bd98
     ghidra: FUN_0824bd98
@@ -85305,7 +85336,7 @@ functions:
       param_1/r0: dst
       param_2/r1: first
       param_3/r2: second
-      FUN_0824bf5c: store_four_components (unported trivial store helper)
+      FUN_0824bf5c: store_four_components (ported direct callee)
     notes: >-
       Raw ARM establishes the true 84-byte extent 0x0824bd98..0x0824bdec:
       Ghidra's 88-byte report absorbs the first instruction of the separately
@@ -85320,9 +85351,8 @@ functions:
       0x082512a8, 0x08251334, 0x082513b4, 0x08251440, 0x082514c8, and
       0x08251550; there are zero predicated calls and zero direct plain-B
       tails. Deliberate deviation: the port retains every source byte, then
-      stores the equivalent four results directly rather than adding a
-      dispatch seam for the unported 24-byte helper FUN_0824bf5c. Host tests
-      cover floor rounding at byte extremes, every 8-bit input pair, and dst
+      stores the equivalent four results directly rather than calling the
+      24-byte helper. Host tests cover floor rounding at byte extremes,
       aliasing each source. match.py against this worktree archive (exit 1,
       structural diff expected) finds the same source-load/floor-average/store
       structure; LLVM emits the independent stores in descending component
@@ -85342,7 +85372,7 @@ functions:
       param_3/r2: second
       param_4/r3: third
       param_5/stack: fourth
-      FUN_0824bf5c: store_four_components (unported trivial store helper)
+      FUN_0824bf5c: store_four_components (ported direct callee)
     notes: >-
       Raw ARM confirms Ghidra's 172-byte extent: 0x0824bdf0 begins with
       push {r3,r4,r5,r6,r7,lr}, the fifth argument is read from sp+24 after
@@ -85355,11 +85385,10 @@ functions:
       B/BL immediate finds exactly six direct call sites, all unconditional
       bl: 0x08250948, 0x08250a1c, 0x08250ae4, 0x08250bb8, 0x08250c88, and
       0x08250d58. There are zero predicated bl call sites and zero direct
-      plain-B tails. No NULL, alignment, or bounds guard exists. Deliberate
-      deviation: Rust retains every source byte then performs the helper's
-      equivalent four ordered stores directly, avoiding a dispatch seam for
-      the unported 24-byte store helper. Host tests cover floor rounding,
-      every attainable four-byte component sum, and dst aliasing each source.
+      plain-B tails. Deliberate deviation: Rust retains every source byte then
+      performs equivalent four ordered stores directly rather than calling the
+      helper. Host tests cover floor rounding, every attainable four-byte
+      component sum, and dst aliasing each source.
 
   # --- Fixed fourteen-byte copy helper (util/copy_fourteen_bytes) ---
   - address: 0x082231c0
