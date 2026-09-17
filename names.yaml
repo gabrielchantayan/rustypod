@@ -103250,3 +103250,45 @@ functions:
       0. The callee has no asserted semantic identity; its raw decoded
       byte-transform body is a private Rust helper so the patch remains
       self-contained.
+
+  # --- fixed-width decimal component parser (unported ABI blocker) ---
+  - address: 0x082d0754
+    ghidra: FUN_082d0754
+    name: parse_fixed_decimal_components
+    size: 164
+    sig: "i32 parse_fixed_decimal_components(const u8 *input, i32 digits, ...)"
+    module: time/parse_fixed_decimal_components
+    status: identified
+    renames:
+      param_1/r0: input
+      param_2/r1: digits
+      param_3/r2: minimum
+      param_4/r3: maximum
+      piVar6: component_spec_cursor
+      iVar3: value
+      iVar7: completed_components
+      pbVar4: separator
+      piVar10: value_out
+      FUN_0802eca0: __rt_ctype_table_addr
+    notes: >-
+      EXTENT: raw osos.dec words begin at 0x082d0754 and the distinct next
+      ARM prologue begins at 0x082d07f8, so the true body is exactly 164
+      bytes (41 words), confirming Ghidra's size. The body has one plain
+      unconditional BL, to the already ported __rt_ctype_table_addr, and no
+      predicated BL. Its three recovered direct callers are the ISO-8601
+      date/time parsers FUN_082deddc, FUN_082df660, and FUN_082df764; they
+      pass two or three component specifications respectively. ALGORITHM:
+      starting with the register-supplied first five-word specification and
+      then walking upward through the caller's variadic argument home, read
+      exactly digits C-locale digit bytes, accumulate wrapping base-10 i32,
+      range-check inclusive minimum/maximum, require an optional separator,
+      store through value_out, and return the number of complete components.
+      BLOCKER: this is a C-variadic entry whose implementation relies on its
+      own stack frame being contiguous with the caller's stacked arguments;
+      later specifications are not passed by pointer. Stable Rust cannot
+      define that ABI or take the address of its incoming variadic home.
+      Replacing it with an explicit specification pointer would not be
+      hook-compatible with the three retail callers, so no Rust seam,
+      invented callee identity, or partial port was added. A faithful port
+      requires an ARM capture trampoline that materializes the register and
+      stack argument home before Rust consumes it.
