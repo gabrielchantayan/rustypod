@@ -107735,3 +107735,35 @@ functions:
       the first byte as high byte; all other tags return it as low byte.
       Deliberate deviation: the Rust byte-order comparison is volatile so
       LLVM cannot hoist the common first read above the original branch.
+  - address: 0x0820c8f4
+    ghidra: FUN_0820c8f4
+    name: mov_chain_table_find_predecessor
+    size: 100
+    sig: "i32 mov_chain_table_find_predecessor(const MovChainTable *table, u32 head, u32 target, u32 *out)"
+    module: mov/chain_table_find_predecessor
+    status: ported
+    renames:
+      param_1/r0/r5: table
+      param_2/r1: head
+      param_3/r2/r4: target
+      param_4/r3: out
+      local_10/stack: current
+      FUN_0820c8a0: mov_chain_table_next
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte, 25-instruction extent
+      0x0820c8f4..0x0820c958; the separately linked next function starts with
+      push {r4,r5,r6,r7,lr} at 0x0820c958. Whole-image A32 B/BL decoding
+      finds four incoming plain unconditional BL instructions at 0x081e46e4,
+      0x081e4a4c, 0x081e4e94, and 0x081e4f98, with zero predicated BL
+      instructions. Its sole internal BL is unconditional and targets the
+      established mov_chain_table_next seam at 0x0820c8a0. The routine writes
+      u32::MAX to out, rejects an end-marker head, then walks the table's
+      next-slot links. Before each lookup it stores the current slot as the
+      predecessor. A target at head is rejected because the stored predecessor
+      remains u32::MAX; a later target returns that predecessor. Invalid links
+      return 2 while preserving the most recently stored predecessor. No NULL
+      guards or cycle detection were added. Host tests cover a multi-hop
+      predecessor, head/end-marker rejection, and invalid-link preservation.
+      match.py structural output retains the initial sentinel store, link-read
+      call, status gate, and target comparison; LLVM uses a larger frame and
+      reorders the equivalent initial head/target checks.
