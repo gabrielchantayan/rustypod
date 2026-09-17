@@ -24269,6 +24269,28 @@ functions:
       identical; the port folds the original's duplicate
       `ldr r1,[r4,#32]` (the record cannot alias the procedure).
 
+  - address: 0x082d6c6c
+    ghidra: FUN_082d6c6c
+    name: word_list_assign_value
+    size: 36
+    sig: "int word_list_assign_value(uint32_t value, WordList *list)"
+    module: util/word_list_assign_value
+    status: ported
+    renames:
+      param_1: value
+      param_2: list
+    notes: >-
+      Assigns a one-word value to the counted-u32 WordList: clears count,
+      unconditionally writes value to entries[0], and sets count to one only
+      for nonzero input. The function returns zero for zero input and one
+      otherwise; Ghidra's void signature loses the r0 result. Raw osos.dec
+      fixes the nine-instruction / 36-byte extent from 0x082d6c6c through bx
+      lr at 0x082d6c8c; the next separately linked function begins with push
+      {r4,lr} at 0x082d6c90. Complete-image decoding finds exactly four
+      inbound unconditional plain BLs (0x082cb464, 0x082cddf0, 0x082cde40,
+      0x08369384) and zero predicated BLs. No deliberate deviations: capacity
+      and entries after index zero remain untouched, and entries is
+      dereferenced even when value is zero.
   - address: 0x082d6c24
     ghidra: FUN_082d6c24
     name: cg_inst_create_base

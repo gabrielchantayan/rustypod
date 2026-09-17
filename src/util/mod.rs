@@ -181,6 +181,7 @@ pub mod vtable_slot_0x40_result_word;
 pub mod wang_hash;
 pub mod hash_word;
 pub mod word_list;
+pub mod word_list_assign_value;
 pub mod word_list_modular_add;
 pub mod word_list_modular_multiply;
 pub mod word_list_modular_square;
