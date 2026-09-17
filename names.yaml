@@ -73190,6 +73190,38 @@ functions:
       including unreachable high mask bits and the zero mask, and the
       NULL base + index 0 case.
 
+  - address: 0x082e19ec
+    ghidra: FUN_082e19ec
+    name: volume_info_query
+    size: 72
+    sig: "u32 volume_info_query(i32 index, u8 *output)"
+    module: fs/volume_info
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: output
+      piVar1/r0: volume_table_entry
+      FUN_082e0e1c: volume_table_lookup
+      FUN_082e1390: volume_info_write_resident
+      FUN_083690a8: ata_report_error
+    notes: >-
+      Raw extent is exact: the 18 ARM words at 0x082e19ec..0x082e1a30 end
+      in `pop {r4,r5,r6,pc}`, and the next separately entered function
+      starts `push {r4,r5,r6,lr}` at 0x082e1a34. Decoding every B/BL word in
+      osos.dec finds exactly four direct callers, all plain bl
+      (0x081bcac4, 0x081bcb14, 0x081bd214, 0x081bdcbc), with zero
+      predicated forms and zero tail branches. The function looks up the
+      mounted-volume table entry with flags zero. A missing entry reports ATA
+      error 9 and returns -1. Otherwise it loads the entry's target-width
+      object pointer then its +0x04 field, gives that pointer and output to
+      FUN_082e1390, reports ATA error 0, and returns zero. FUN_082e1390 has
+      no names.yaml entry and remains a typed resident boundary, not an
+      invented port; target builds call its verified address while host tests
+      install volatile lookup/writer/error recorders. match.py is structural
+      (exit 1 expected): it confirms the lookup, null branch, object +0x04
+      load, resident writer call, and ordered ATA reports; LLVM's frame and
+      host-seam dispatch add instructions.
+
   - address: 0x082e1098
     ghidra: FUN_082e1098
     name: find_zero_cache_position
