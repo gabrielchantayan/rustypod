@@ -182,16 +182,16 @@ pub unsafe extern "C" fn clock_source_construct(this: *mut u8) -> *mut u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// Serializes the tests that swap [`CLOCK_SOURCE_OPS`]; the
     /// default-ops tests take it too, so no test observes another's
     /// recorder.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     struct OpsRestore;
 
@@ -201,8 +201,8 @@ mod tests {
         }
     }
 
-    fn lock_ops() -> (std::sync::MutexGuard<'static, ()>, OpsRestore) {
-        let guard = OPS_LOCK.lock().unwrap();
+    fn lock_ops() -> (parking_lot::MutexGuard<'static, ()>, OpsRestore) {
+        let guard = OPS_LOCK.lock();
         (guard, OpsRestore)
     }
 

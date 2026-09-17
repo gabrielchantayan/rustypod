@@ -69770,6 +69770,34 @@ functions:
       the existing callee ports and seams while their ultimate retail
       targets remain unhooked.
 
+  - address: 0x08262a9c
+    ghidra: FUN_08262a9c
+    name: clock_source_construct_zero
+    size: 28
+    sig: "void *clock_source_construct_zero(void *this)"
+    module: cxx/clock_source_construct_zero
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_082628f4: clock source base constructor (unported seam)
+    notes: >-
+      Raw osos.dec establishes the 28-byte extent 0x08262a9c..0x08262ab7:
+      push {r4,lr}; mov r1,#0; bl 0x082628f4; ldr r1,[pc,#4]; str
+      r1,[r0]; pop {r4,pc}; literal 0x089a80f0 at 0x08262ab4. The
+      separately linked prologue at 0x08262ab8 pins the end and proves
+      Ghidra's reported 24 bytes omitted the literal pool. Whole-image
+      ARM branch decoding finds 4 direct unconditional bl callers and 0
+      predicated bl callers; no direct tail branches target it. This is
+      the kind-0 sibling of clock_source_construct @ 0x08262958: the
+      shared base writes {0x089a80b0, kind}, then this constructor
+      replaces the vtable word with 0x089a80f0 and returns the base's r0.
+      The base is still unported, so the Rust implementation deliberately
+      uses the existing volatile CLOCK_SOURCE_OPS seam whose default
+      reproduces the binary-verified base body exactly. Host tests cover
+      kind zero, vtable replacement, pointer return, and untouched
+      neighbour bytes. match.py is expected to differ at the deliberate
+      seam indirection.
+
 
 
   - address: 0x08262958

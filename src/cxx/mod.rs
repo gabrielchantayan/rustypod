@@ -16,6 +16,7 @@ pub mod byte_key_map;
 pub mod byte_key_word_map;
 pub mod character_class;
 pub mod clock_source_construct;
+pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;
 pub mod color_copy;
 pub mod color_pack;
