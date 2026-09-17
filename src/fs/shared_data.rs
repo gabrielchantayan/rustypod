@@ -100,6 +100,43 @@ static mut SHARED_DATA_POOL_RECYCLE: SharedDataPoolRecycle = missing_shared_data
 unsafe fn shared_data_pool_recycle(data: *mut u8) -> *mut u8 {
     core::ptr::read_volatile(core::ptr::addr_of!(SHARED_DATA_POOL_RECYCLE))(data)
 }
+/// shared_data_initialize — original: `FUN_082e2e9c` @ `0x082e2e9c` (84
+/// bytes: 80 bytes of code plus the 4-byte list-head literal at `0x082e2eec`;
+/// the next independently entered function starts at `0x082e2ef0`).
+/// Raw ARM decoding finds three unconditional `bl` callers (`0x082e12a8`,
+/// `0x082e21c4`, and `0x082e2224`) and one predicated `blne` caller
+/// (`0x082e28cc`), plus one unconditional direct `bl` to `cache_lock_wait`;
+/// its final branch tail-calls `cache_lock_signal`. It initializes a non-NULL
+/// shared-data block's reference count and source metadata, then inserts it
+/// at the head of the list rooted at `0x08a0a720`.
+///
+/// Deliberate deviation: calls the already-ported lock thunks rather than
+/// branching to their retailOS addresses; returning `cache_lock_signal`'s
+/// result preserves the tail branch's r0 result.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn shared_data_initialize(
+    data: *mut u8,
+    volume: u32,
+    cluster: u32,
+    entry_index: u32,
+) -> usize {
+    cache_lock_wait();
+    write_word(data, REFCOUNT_WORD, 1);
+    write_word(data, 0x2c / 4, volume);
+    write_word(data, 0x30 / 4, cluster);
+    write_word(data, 0x34 / 4, entry_index);
+
+    let head = shared_data_list_head();
+    if !head.is_null() {
+        write_link(head, PREVIOUS_WORD, data);
+    }
+    write_link(data, NEXT_WORD, head);
+    write_link(data, PREVIOUS_WORD, core::ptr::null_mut());
+    set_shared_data_list_head(data);
+    cache_lock_signal()
+}
+
 
 /// shared_data_release — original: `FUN_082e1960` @ `0x082e1960` (104 bytes:
 /// 100 code bytes plus its 4-byte list-head literal; the next function starts
@@ -267,6 +304,35 @@ mod tests {
             assert!(shared_data_list_head().is_null());
             assert_eq!((*addr_of!(SEMAPHORE_EVENTS)).clone(), std::vec![0, 1]);
             assert_eq!((*addr_of!(RECYCLED)).clone(), std::vec![middle as usize]);
+        }
+    }
+
+    #[test]
+    fn initialize_links_head_and_preserves_metadata() {
+        let _bench = bench();
+        let Some(slab) = (unsafe {
+            crate::testing::try_map_u32_slab(crate::testing::hints::SHARED_DATA_INITIALIZE, 0x1000)
+        }) else {
+            assert!(crate::testing::note_missing_u32_fixture("fs/shared_data_initialize"));
+            return;
+        };
+        let data = slab;
+        let old_head = unsafe { slab.add(0x80) };
+
+        unsafe {
+            set_shared_data_list_head(old_head);
+            write_link(old_head, PREVIOUS_WORD, core::ptr::null_mut());
+
+            assert_eq!(shared_data_initialize(data, 0x1234_5678, 0x9abc_def0, 15), 0);
+            assert_eq!(read_word(data, REFCOUNT_WORD), 1);
+            assert_eq!(read_word(data, 0x2c / 4), 0x1234_5678);
+            assert_eq!(read_word(data, 0x30 / 4), 0x9abc_def0);
+            assert_eq!(read_word(data, 0x34 / 4), 15);
+            assert_eq!(shared_data_list_head(), data);
+            assert_eq!(read_link(data, NEXT_WORD), old_head);
+            assert!(read_link(data, PREVIOUS_WORD).is_null());
+            assert_eq!(read_link(old_head, PREVIOUS_WORD), data);
+            assert_eq!((*addr_of!(SEMAPHORE_EVENTS)).clone(), std::vec![0, 1]);
         }
     }
 }
