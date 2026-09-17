@@ -106024,3 +106024,28 @@ functions:
       preserving validation, conditional move, finish, notification, and
       returned index order. Host tests cover last sentinel, middle shift,
       and invalid-index early return.
+  - address: 0x0827024c
+    ghidra: FUN_0827024c
+    name: error_payload_from_result
+    size: 108
+    sig: "void error_payload_from_result(ErrorPayload *destination, const Result *source)"
+    module: cxx/error_payload_from_result
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1: source
+      FUN_082ab31c: cxa_guard_acquire (ported, runtime/cxa_guard.rs)
+      FUN_08258d48: default_error_payload_initialize (inlined 20-byte leaf)
+      FUN_082ab338: cxa_guard_release (ported, runtime/cxa_guard.rs)
+    notes: >-
+      Raw osos.dec establishes the true 108-byte extent
+      0x0827024c..0x082702b8: code ends in the tail branch at 0x082702a8,
+      begins with push {r4,r5,r6,lr} at 0x082702b8. Ghidra's 124-byte extent
+      incorrectly absorbs six words of the next function. The result word at
+      source+8 selects either an owning record (flag 1, word copied, detail
+      zero) or a guarded default record. Exact raw decoding found three plain
+      outbound BL calls and zero predicated BL calls: cxa_guard_acquire,
+      default_error_payload_initialize, and cxa_guard_release. The inlined
+      20-byte initializer is a deliberate deviation; raw words at
+      0x08258d48..0x08258d5c prove it solely writes vtable 0x089a76fc and
+      clears byte +4. Host tests cover both the nonzero and default paths.

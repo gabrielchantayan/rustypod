@@ -51,6 +51,7 @@ pub mod opaque_record_payload_length;
 pub mod flagged_pair_copy;
 pub mod flagged_pair_payload;
 pub mod four_word_clear;
+pub mod error_payload_from_result;
 pub mod tagged_value;
 pub mod tagged_pointer_init;
 pub mod tagged_record;
