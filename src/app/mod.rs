@@ -51,6 +51,7 @@ pub mod descriptor_field;
 pub mod descriptor_attachment;
 pub mod callback_dispatch_release;
 pub mod bool_message_dispatch;
+pub mod callback_owner_release;
 pub mod callback_target_reset;
 pub mod locked_callback_predicate;
 pub mod context_callback_dispatch;
