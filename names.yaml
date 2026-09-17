@@ -102448,3 +102448,28 @@ functions:
       pre-guard MMIO store, zero operation-word path, waiter arguments, and
       timeout mapping. match.py structural review was completed. Deliberate
       deviation: the relocation-safe Rust call replaces the stock tail branch.
+
+  # --- ATA command completion wait ---
+  - address: 0x0836a950
+    ghidra: FUN_0836a950
+    name: ata_command_wait
+    size: 56
+    sig: "u32 ata_command_wait(AtaCommandDevice *device)"
+    module: drivers/ata_command_wait
+    status: ported
+    renames:
+      param_1/r0: device
+      r0: operation_count_or_status
+      r1: wait_timeout_ticks
+    notes: >-
+      Raw osos.dec establishes the 56-byte instruction extent from 0x0836a950
+      through the final pop at 0x0836a984; 0x0836a988..0x0836a98c is its
+      two-word literal pool and 0x0836a990 is the next real function.
+      Decoding all aligned ARM branch immediates finds four inbound direct
+      calls, all plain BL with no predicated BL forms. NULL or a zero
+      device+0x48 operation word returns zero. Otherwise the port calls
+      waiter_wait with the id at 0x089d03bc+0x28 and literal 5000 ticks,
+      mapping its timeout result of one to ATA status 0x1f. Host tests cover
+      NULL, zero count, timeout, signal, and waiter arguments. match.py
+      structural review completed; the Rust waiter seam replaces the
+      relocation-limited stock BL. Deliberate deviations: none.
