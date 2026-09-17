@@ -3105,6 +3105,46 @@ pub unsafe extern "C" fn utf8_codepoint_count_safe(text: *const u8) -> usize {
     count
 }
 
+/// `utf8_codepoint_count_bounded` — original: `FUN_08277110` @
+/// 0x08277110 (84 bytes, all code; four plain `bl` call sites and no
+/// predicated `bl` call sites, binary-scanned).
+///
+/// Raw osos.dec establishes the extent 0x08277110..0x08277164: the next
+/// function begins with `cmp r0, #0` at 0x08277164. This is the bounded
+/// counterpart to [`utf8_codepoint_count_safe`]. It returns zero for a NULL
+/// `text`; otherwise it decodes from `text` with [`utf8_next_codepoint`]
+/// until that decoder returns zero or advances the cursor to/past
+/// `text + byte_count`. A codepoint ending exactly at the bound counts, while
+/// one that crosses it does not. The decoder remains deliberately permissive:
+/// malformed two- and three-byte forms can count, whereas unsupported
+/// four-byte leads return zero.
+///
+/// Deviation: none. The retail ARM compares the raw 32-bit cursor and end
+/// addresses unsigned; valid firmware buffers cannot wrap, and this port uses
+/// `wrapping_add` only to express that ARM address addition without Rust
+/// pointer-arithmetic UB.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_codepoint_count_bounded(text: *const u8, byte_count: u32) -> u32 {
+    if text.is_null() {
+        return 0;
+    }
+
+    let end = text.wrapping_add(byte_count as usize);
+    let mut cursor = text;
+    let mut count = 0u32;
+    loop {
+        let codepoint = utf8_next_codepoint(&mut cursor);
+        if codepoint == 0 || (cursor as usize) >= (end as usize) {
+            if codepoint != 0 && cursor == end {
+                count += 1;
+            }
+            return count;
+        }
+        count += 1;
+    }
+}
+
 /// Decodes the codepoint ending immediately before `*cursor` and moves the
 /// cursor backward — original: `FUN_08276288` @ 0x08276288 (116 bytes, all
 /// code; source: `ipod-decomp/decomp/c/026/08276288_FUN_08276288.c`).
@@ -8030,6 +8070,32 @@ pub(crate) mod tests {
         // The decoder masks payload bits without checking them, so a
         // malformed but well-shaped two-byte sequence still counts as one.
         assert_eq!(codepoints(&[0xc3, 0xff, b'x', 0]), 2);
+    }
+
+    // ---- utf8_codepoint_count_bounded -------------------------------
+
+    fn bounded_codepoints(text: &[u8], byte_count: u32) -> u32 {
+        unsafe { utf8_codepoint_count_bounded(text.as_ptr(), byte_count) }
+    }
+
+    #[test]
+    fn utf8_codepoint_count_bounded_handles_null_and_exact_endpoints() {
+        assert_eq!(
+            unsafe { utf8_codepoint_count_bounded(core::ptr::null(), 17) },
+            0
+        );
+        assert_eq!(bounded_codepoints(b"ab\0", 0), 0, "zero bound still decodes but counts none");
+        assert_eq!(bounded_codepoints(b"ab\0", 1), 1);
+        assert_eq!(bounded_codepoints(b"ab\0", 2), 2, "final byte at the bound counts");
+    }
+
+    #[test]
+    fn utf8_codepoint_count_bounded_does_not_count_crossing_sequences() {
+        // The two-byte U+00E9 counts only when its full encoded width fits.
+        assert_eq!(bounded_codepoints(b"a\xc3\xa9b\0", 2), 1);
+        assert_eq!(bounded_codepoints(b"a\xc3\xa9b\0", 3), 2);
+        // A decoder-zero lead terminates the walk before the bound.
+        assert_eq!(bounded_codepoints(b"a\xf0\x9f\x92\xA9b\0", 6), 1);
     }
 
     // ---- utf8_strcmp_safe -------------------------------------------

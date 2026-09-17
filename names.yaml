@@ -53069,6 +53069,28 @@ functions:
       return; the diff is the crate's fp frame and LLVM rotating the loop
       (counter seeded at -1 with mvn and incremented at the loop head
       instead of the original's predicated addne).
+  - address: 0x08277110
+    ghidra: FUN_08277110
+    name: utf8_codepoint_count_bounded
+    size: 84
+    sig: "u32 utf8_codepoint_count_bounded(const u8 *text, u32 byte_count)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: text, param_2: byte_count, local_10: cursor, iVar4: codepoint_count, r5: end}
+    notes: >-
+      Raw osos.dec words establish the exact 84-byte all-code extent
+      0x08277110..0x08277164: `pop {r2,r3,r4,r5,pc}` ends it and the next
+      function starts with `cmp r0,#0` at 0x08277164. Whole-image ARM
+      BL-immediate scan finds four plain unconditional callers
+      (0x08079f38, 0x08116064, 0x0817a684, 0x081a2008) and no predicated
+      BL callers. NULL returns zero; otherwise the spilled cursor is decoded
+      through the ported utf8_next_codepoint and counts only decoded nonzero
+      codepoints that end at or before text + byte_count. A sequence crossing
+      the byte bound and the decoder's zero result do not count. No
+      deviations: the Rust implementation uses wrapping_add only to model the
+      retail ARM's raw 32-bit address addition without Rust pointer UB. Host
+      tests cover NULL, zero/exact ASCII bounds, a split two-byte sequence,
+      and a decoder-zero four-byte lead.
   - address: 0x08277188
     ghidra: FUN_08277188
     name: string_object_assign_bytes
