@@ -300,6 +300,7 @@ pub mod slot_value_process;
 pub mod four_slot_key_index;
 pub mod registered_entry_cancel;
 pub mod registered_entry_activate;
+pub mod registered_entry_channel_post;
 pub mod usb_transfer_schedule;
 pub mod collection_item_find_by_pair;
 pub mod collection_item_find_by_key;
