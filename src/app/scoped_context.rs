@@ -272,6 +272,31 @@ pub struct ServiceContextSelectionSourceVtable {
     _slots_before_selection_available: [usize; 3],
     pub selection_available: unsafe extern "C" fn(*mut ServiceContextSelectionSource) -> u32,
 }
+/// A polymorphic 'tdat' selection source consumed by
+/// [`tdat_selection_copy_to_context`].
+///
+/// The firmware reads this source's 64-bit identifier at +0x218/+0x21c and
+/// follows `tdat_registry` to +0xf60 for the 'tdat' element only after both
+/// virtual gates allow resolution.
+#[repr(C)]
+pub struct TdatContextSelectionSource {
+    pub vtable: *const TdatContextSelectionSourceVtable,
+    pub identifier_source: *const u8,
+    pub tdat_registry: *const u8,
+}
+
+/// The two observed virtual gates of [`TdatContextSelectionSource`].
+///
+/// Their concrete targets have not been established, so the slots retain
+/// virtual dispatch rather than assigning an identity to either callee.
+#[repr(C)]
+pub struct TdatContextSelectionSourceVtable {
+    _slots_before_selection_available: [usize; 3],
+    pub selection_available: unsafe extern "C" fn(*mut TdatContextSelectionSource) -> u32,
+    _slots_before_context_available: [usize; 17],
+    pub context_available: unsafe extern "C" fn(*mut TdatContextSelectionSource) -> u32,
+}
+
 
 /// Pointer-slot index of the service context inside the system root
 /// (the original's `ldr r1, [r1, #0x30]`). Expressed as an index rather
@@ -549,6 +574,66 @@ pub unsafe extern "C" fn service_context_selection_construct(
     );
     scoped_context_copy_fields(destination, temporary);
 }
+/// tdat_selection_copy_to_context — original: `FUN_082a5f7c` @ 0x082a5f7c
+/// (**140 bytes**, exact: `push {r4,lr}` at 0x082a600c begins the next
+/// function; **4 direct `bl` call sites**, all unconditional, and the body
+/// has **3 plain `bl`** plus **2 indirect `blx`** calls, with no predicated
+/// direct calls).
+///
+/// Calls the source's virtual +0x0c and +0x54 gates in order. If both allow
+/// resolution, finds `identifier_source`'s 64-bit identifier at
+/// +0x218/+0x21c in the 'tdat' node list held at `tdat_registry+0xf60`,
+/// constructs a temporary [`ScopedContext`] for that node with mode zero,
+/// and copies its payload to `destination`. Returns one only after that
+/// copy; every failed gate or lookup returns zero without modifying
+/// `destination`.
+///
+/// Deliberate deviations: the two unresolved virtual targets remain vtable
+/// slots, while the established `ui_tdat_find_node_by_id`,
+/// `scoped_context_construct`, and `scoped_context_copy_fields` ports are
+/// called directly. `tdat_registry` is represented as a native pointer; the
+/// +0xf60 element field is addressed as a target-word index, preserving its
+/// ARM offset and host pointer-width consistency.
+///
+/// # Safety
+///
+/// `source` and `destination` must be valid. A source whose first gate
+/// succeeds must have callable +0x0c/+0x54 slots and a valid
+/// `identifier_source`; if the lookup is reached, `tdat_registry` must be
+/// readable through target word slot +0xf60 and contain a valid 'tdat'
+/// element.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tdat_selection_copy_to_context(
+    source: *mut TdatContextSelectionSource,
+    destination: *mut ScopedContext,
+) -> u32 {
+    if ((*(*source).vtable).selection_available)(source) == 0 {
+        return 0;
+    }
+    if ((*(*source).vtable).context_available)(source) == 0 {
+        return 0;
+    }
+
+    let identifier = (*source).identifier_source.add(0x218).cast::<u32>();
+    let element = ((*source).tdat_registry as *const *const u8)
+        .add(0xf60 / 4)
+        .read();
+    let node = crate::ui::tdat_node_find::ui_tdat_find_node_by_id(
+        element,
+        identifier.read(),
+        identifier.add(1).read(),
+    );
+    if node == 0 {
+        return 0;
+    }
+
+    let mut temporary = MaybeUninit::<ScopedContext>::uninit();
+    let temporary = scoped_context_construct(temporary.as_mut_ptr(), node as usize as *mut u8, 0);
+    scoped_context_copy_fields(destination, temporary);
+    1
+}
+
 
 /// copy_service_context_selection — original: `FUN_0812c75c` @ 0x0812c75c
 /// (**104 bytes total**: 16-byte entry plus an 88-byte separately linked
@@ -1747,6 +1832,90 @@ mod tests {
         assert_eq!(destination.vtable, destination_vtable);
         assert_eq!(destination.owner, 0x3333_4444usize as *mut u8);
         assert_eq!(destination.mode, 0x7b);
+    }
+
+    unsafe extern "C" fn tdat_selection_available(
+        _source: *mut TdatContextSelectionSource,
+    ) -> u32 {
+        1
+    }
+
+    unsafe extern "C" fn tdat_selection_unavailable(
+        _source: *mut TdatContextSelectionSource,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn tdat_context_available(
+        _source: *mut TdatContextSelectionSource,
+    ) -> u32 {
+        1
+    }
+
+    unsafe extern "C" fn tdat_context_unavailable(
+        _source: *mut TdatContextSelectionSource,
+    ) -> u32 {
+        0
+    }
+
+    fn tdat_selection_vtable(
+        selection_available: unsafe extern "C" fn(*mut TdatContextSelectionSource) -> u32,
+        context_available: unsafe extern "C" fn(*mut TdatContextSelectionSource) -> u32,
+    ) -> TdatContextSelectionSourceVtable {
+        TdatContextSelectionSourceVtable {
+            _slots_before_selection_available: [0; 3],
+            selection_available,
+            _slots_before_context_available: [0; 17],
+            context_available,
+        }
+    }
+
+    #[test]
+    fn tdat_selection_copy_gates_before_lookup_and_leaves_destination_unchanged() {
+        let mut destination = poisoned_token();
+        let before = (
+            destination.vtable,
+            destination.owner_valid,
+            destination.owner,
+            destination.service_context,
+            destination.registry_token,
+            destination.mode,
+        );
+        let mut first_gate_closed =
+            tdat_selection_vtable(tdat_selection_unavailable, tdat_context_available);
+        let mut source = TdatContextSelectionSource {
+            vtable: &mut first_gate_closed,
+            identifier_source: ptr::null(),
+            tdat_registry: ptr::null(),
+        };
+        assert_eq!(unsafe { tdat_selection_copy_to_context(&mut source, &mut destination) }, 0);
+
+        let mut second_gate_closed =
+            tdat_selection_vtable(tdat_selection_available, tdat_context_unavailable);
+        source.vtable = &mut second_gate_closed;
+        assert_eq!(unsafe { tdat_selection_copy_to_context(&mut source, &mut destination) }, 0);
+
+        let mut element = [0u32; 0x220 / 4];
+        element[1] = 0x7464_6174;
+        let mut registry = [ptr::null::<u8>(); 0xf60 / 4 + 1];
+        registry[0xf60 / 4] = element.as_ptr().cast();
+        let available_vtable =
+            tdat_selection_vtable(tdat_selection_available, tdat_context_available);
+        source.vtable = &available_vtable;
+        source.tdat_registry = registry.as_ptr().cast();
+        source.identifier_source = element.as_ptr().cast();
+        assert_eq!(unsafe { tdat_selection_copy_to_context(&mut source, &mut destination) }, 0);
+        assert_eq!(
+            (
+                destination.vtable,
+                destination.owner_valid,
+                destination.owner,
+                destination.service_context,
+                destination.registry_token,
+                destination.mode,
+            ),
+            before
+        );
     }
 
     #[test]
