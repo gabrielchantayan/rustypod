@@ -272,6 +272,7 @@ pub mod three_word_clear_seventh;
 pub mod three_word_clear_eighth;
 pub mod three_word_clear_ninth;
 pub mod three_word_clear_tenth;
+pub mod three_word_clear_eleventh;
 pub mod three_word_clear_return;
 pub mod three_word_clear_return_alt;
 pub mod tokenizer;
