@@ -106950,3 +106950,28 @@ functions:
       calling unported 0x08038988; it preserves that helper's packed u32
       stores and byte-count truncation. Host tests cover partial masking,
       full-fill rectangle ignorance and offset, and zero-width rectangles.
+
+  # --- video-engine property id to backing word slot ---
+  - address: 0x0825360c
+    ghidra: FUN_0825360c
+    name: video_engine_property_slot
+    size: 60
+    sig: "u32 *video_engine_property_slot(u8 *engine, u32 property_id)"
+    module: util/video_engine_property_slot
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: property_id
+      "engine+0xad8": property_0x8892_slot
+      "engine+0xadc": property_0x8893_slot
+      FUN_0824f388: latch_first_error
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent 0x0825360c..0x08253648:
+      the `pop {r4, pc}` at 0x08253644 is followed by the next independent
+      push prologue at 0x08253648. The body has one unconditional plain BL
+      (0x0825363c -> latch_first_error @ 0x0824f388) and no predicated BL
+      forms. Four direct inbound plain BL call sites are reported for this
+      body; no predicated inbound BL call site was found. Property id 0x8892
+      returns engine + 0xad8 and 0x8893 returns engine + 0xadc; every other
+      id latches 0x500 in engine[0] through the already-ported
+      latch_first_error and returns NULL. Deliberate deviations: none.
