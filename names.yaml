@@ -103315,3 +103315,29 @@ functions:
       invented callee identity, or partial port was added. A faithful port
       requires an ARM capture trampoline that materializes the register and
       stack argument home before Rust consumes it.
+
+  - address: 0x082ccc90
+    ghidra: FUN_082ccc90
+    name: decimal_magnitude_bias
+    size: 116
+    sig: "u64 decimal_magnitude_bias(u64 value)"
+    module: fp/decimal_magnitude_bias
+    status: ported
+    renames:
+      param_1/r0-r1: value
+      r4-r5: decimal_scale
+      r6-r7: magnitude_bias
+    notes: >-
+      Raw osos.dec establishes the true 116-byte extent
+      0x082ccc90..0x082ccd04; 0x082ccd04..0x082ccd13 is the owned
+      four-word literal pool and the next distinct push prologue is
+      0x082ccd14. Every raw ARM B/BL decode finds four direct callers
+      (0x082b6f40, 0x082b707c, 0x082b7198, and 0x082b7360), all
+      unconditional plain bl, with no predicated BL forms. Each iteration
+      calls __dcmpgt (0x083ebe38), __dadd (0x083eaf2c), and __dmul
+      (0x083eba48): begin at scale 1.0 and result 10.0, then add 1.0 to
+      the result and multiply the scale by 10.0 while value exceeds scale.
+      On target, external declarations retain those soft-float call
+      boundaries; host tests call the already ported helpers directly.
+      The Rust comparison tests packed C-bit output in place of ARM CPSR
+      flags; this deliberately preserves retailOS NaN and denormal behavior.
