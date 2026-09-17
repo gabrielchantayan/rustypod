@@ -603,6 +603,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_POSITION: usize = 0xd300_0000;
+    // 0xd600_0000: dedicated to cxx/sorted_pointer_array_insert's raw-u32
+    // array, entry, and record fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const SORTED_POINTER_ARRAY_INSERT: usize = 0xd600_0000;
     // 0xc100_0000: dedicated to cxx/payload_list_owner_destroy's raw-u32
     // owner/list fixture; mappings never unmap, so no other user may share it.
     pub const PAYLOAD_LIST_OWNER_DESTROY: usize = 0xc100_0000;
