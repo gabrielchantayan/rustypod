@@ -15,6 +15,7 @@ pub mod slot_array_index_in_bounds;
 pub mod byte_key_map;
 pub mod byte_key_word_map;
 pub mod character_class;
+pub mod clock_source_base_construct;
 pub mod clock_source_construct;
 pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;

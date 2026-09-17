@@ -2,8 +2,8 @@
 //! (28 bytes).
 //!
 //! The constructor of the kind-1 clock object — the sibling of the
-//! destructor `clock_source_destroy` @ 0x08262908 (already ported) and
-//! of the kind-0 constructor @ 0x08262a9c (not yet ported).
+//! destructor `clock_source_destroy` @ 0x08262908 and of the kind-0
+//! constructor @ 0x08262a9c.
 //!
 //! # Extent, binary-verified
 //!
@@ -97,66 +97,18 @@
 //! in this port: the constructor's own contract is only to *install
 //! the pointer*, which it does verbatim.
 //!
-//! # Deviations
+//! # Deliberate deviations
 //!
-//! The base constructor @ 0x082628f4 is not yet ported, so the call
-//! goes through the [`CLOCK_SOURCE_OPS`] dispatch seam (house
-//! pattern). Its default, [`default_construct_base`], is NOT a stub:
-//! it reproduces the base's four binary-verified instructions exactly
-//! (store base vtable, store kind byte, return this), so with the
-//! default wired the port is behaviorally identical to the original
-//! and hook-ready. A future port of 0x082628f4 replaces the default
-//! without touching this caller. The original's `mov r1, #1` is the
-//! [`CLOCK_KIND`] constant. No frame deviations otherwise: one `bl`,
-//! one literal-word load, one store.
+//! None. The base constructor is now ported directly; the original's `mov
+//! r1, #1` is the [`CLOCK_KIND`] constant.
 
 /// The derived vtable this constructor installs — the original's
 /// literal pool word @ 0x08262970, binary-verified.
 pub const VTABLE_ADDRESS: u32 = 0x089a_80d0;
 
-/// The base vtable the base constructor @ 0x082628f4 installs before
-/// this constructor overwrites it — its literal pool word @
-/// 0x08262904, binary-verified.
-pub const BASE_VTABLE_ADDRESS: u32 = 0x089a_80b0;
+/// The kind byte supplied by the original `mov r1, #1` at 0x0826295c.
+const CLOCK_KIND: u8 = 1;
 
-/// The `kind` byte of the clock this constructor builds — the
-/// original's `mov r1, #1` @ 0x0826295c. The sibling constructor @
-/// 0x08262a9c passes 0.
-pub const CLOCK_KIND: u8 = 1;
-
-/// The one callee of [`clock_source_construct`] that has no port yet.
-#[derive(Clone, Copy)]
-pub struct ClockSourceOps {
-    /// Original 0x082628f4: the base constructor. Installs the base
-    /// vtable at `this + 0x00`, stores `kind` at `this + 0x04`, and
-    /// returns `this`.
-    pub construct_base: unsafe extern "C" fn(this: *mut u8, kind: u8) -> *mut u8,
-}
-
-/// Default boundary before 0x082628f4 is ported: a binary-verified
-/// reproduction of its four instructions (`str 0x089a80b0, [r0]`;
-/// `strb r1, [r0, #4]`; r0 passes through), not a stub.
-unsafe extern "C" fn default_construct_base(this: *mut u8, kind: u8) -> *mut u8 {
-    unsafe {
-        this.cast::<u32>().write(BASE_VTABLE_ADDRESS);
-        *this.add(4) = kind;
-    }
-    this
-}
-
-/// Wired default for [`CLOCK_SOURCE_OPS`].
-pub const DEFAULT_CLOCK_SOURCE_OPS: ClockSourceOps = ClockSourceOps {
-    construct_base: default_construct_base,
-};
-
-/// Active model of the constructor's unported callee. A later port of
-/// 0x082628f4 replaces the default without changing this caller.
-pub static mut CLOCK_SOURCE_OPS: ClockSourceOps = DEFAULT_CLOCK_SOURCE_OPS;
-
-#[inline(always)]
-unsafe fn ops() -> ClockSourceOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CLOCK_SOURCE_OPS)) }
-}
 
 /// clock_source_construct — original: `FUN_08262958` @ 0x08262958
 /// (28 bytes; 41 `bl` call sites, 0 `b`, 0 predicated, 0 data-word
@@ -171,12 +123,11 @@ unsafe fn ops() -> ClockSourceOps {
 /// # Safety
 ///
 /// `this` must point at 5 writable bytes, 4-byte aligned for the
-/// vtable word, or be whatever the wired [`CLOCK_SOURCE_OPS`] base
-/// returns instead.
+/// vtable word.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn clock_source_construct(this: *mut u8) -> *mut u8 {
-    let this = unsafe { (ops().construct_base)(this, CLOCK_KIND) };
+    let this = unsafe { super::clock_source_base_construct::clock_source_base_construct(this, CLOCK_KIND) };
     unsafe { this.cast::<u32>().write(VTABLE_ADDRESS) };
     this
 }
@@ -186,146 +137,19 @@ pub(crate) mod tests {
     extern crate std;
 
     use super::*;
-    use parking_lot::Mutex;
 
-    /// Serializes the tests that swap [`CLOCK_SOURCE_OPS`]; the
-    /// default-ops tests take it too, so no test observes another's
-    /// recorder.
-    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
-
-    struct OpsRestore;
-
-    impl Drop for OpsRestore {
-        fn drop(&mut self) {
-            unsafe { CLOCK_SOURCE_OPS = DEFAULT_CLOCK_SOURCE_OPS };
-        }
-    }
-
-    fn lock_ops() -> (parking_lot::MutexGuard<'static, ()>, OpsRestore) {
-        let guard = OPS_LOCK.lock();
-        (guard, OpsRestore)
-    }
-
-    /// A 16-byte, 4-aligned object with room to spare around the
-    /// `{ u32 vtable, u8 kind }` layout.
     #[repr(align(4))]
     struct Clock([u8; 16]);
 
-    impl Clock {
-        fn filled(fill: u8) -> Self {
-            Clock([fill; 16])
-        }
-
-        fn ptr(&mut self) -> *mut u8 {
-            self.0.as_mut_ptr()
-        }
-
-        fn vtable_word(&self) -> u32 {
-            u32::from_ne_bytes(self.0[0..4].try_into().unwrap())
-        }
-    }
-
     #[test]
     fn it_builds_a_kind1_clock_and_returns_this() {
-        let (_guard, _restore) = lock_ops();
-        let mut clock = Clock::filled(0xa5);
+        let mut clock = Clock([0xa5; 16]);
 
-        let returned = unsafe { clock_source_construct(clock.ptr()) };
+        let returned = unsafe { clock_source_construct(clock.0.as_mut_ptr()) };
 
-        assert_eq!(returned, clock.ptr());
-        assert_eq!(clock.vtable_word(), VTABLE_ADDRESS);
-        assert_eq!(clock.0[4], 1, "the kind byte");
-        assert_eq!(clock.0[5..], [0xa5; 11][..], "no other byte is touched");
-    }
-
-    static mut BASE_CALLS: usize = 0;
-    static mut BASE_SEEN_THIS: *mut u8 = core::ptr::null_mut();
-    static mut BASE_SEEN_KIND: u8 = 0xff;
-    const BASE_SENTINEL_VTABLE: u32 = 0xdead_beef;
-
-    /// A base-constructor recorder that also plants a sentinel vtable,
-    /// so the caller proves the derived store lands *after* the base
-    /// ran.
-    unsafe extern "C" fn recording_construct_base(this: *mut u8, kind: u8) -> *mut u8 {
-        unsafe {
-            BASE_CALLS += 1;
-            BASE_SEEN_THIS = this;
-            BASE_SEEN_KIND = kind;
-            this.cast::<u32>().write(BASE_SENTINEL_VTABLE);
-            *this.add(4) = kind;
-        }
-        this
-    }
-
-    #[test]
-    fn the_base_runs_first_with_kind1_then_the_derived_vtable_lands() {
-        let (_guard, _restore) = lock_ops();
-        unsafe {
-            BASE_CALLS = 0;
-            CLOCK_SOURCE_OPS = ClockSourceOps {
-                construct_base: recording_construct_base,
-            };
-        }
-        let mut clock = Clock::filled(0xa5);
-
-        let returned = unsafe { clock_source_construct(clock.ptr()) };
-
-        assert_eq!(returned, clock.ptr());
-        assert_eq!(unsafe { BASE_CALLS }, 1, "the base runs exactly once");
-        assert_eq!(unsafe { BASE_SEEN_THIS }, clock.ptr());
-        assert_eq!(unsafe { BASE_SEEN_KIND }, 1, "mov r1, #1");
-        assert_eq!(
-            clock.vtable_word(),
-            VTABLE_ADDRESS,
-            "the derived store overwrote the base's sentinel, so it ran second"
-        );
-        assert_eq!(clock.0[4], 1);
-    }
-
-    static mut REDIRECT_TARGET: *mut u8 = core::ptr::null_mut();
-
-    /// A base that returns a *different* object, to pin that the
-    /// vtable store and the return value follow the base's r0, not the
-    /// constructor's argument — the original's `str r1, [r0]` uses the
-    /// r0 the base left behind.
-    unsafe extern "C" fn redirecting_construct_base(_this: *mut u8, _kind: u8) -> *mut u8 {
-        unsafe { REDIRECT_TARGET }
-    }
-
-    #[test]
-    fn the_vtable_store_and_return_follow_the_base_r0() {
-        let (_guard, _restore) = lock_ops();
-        let mut elsewhere = Clock::filled(0xa5);
-        unsafe {
-            REDIRECT_TARGET = elsewhere.ptr();
-            CLOCK_SOURCE_OPS = ClockSourceOps {
-                construct_base: redirecting_construct_base,
-            };
-        }
-        let mut clock = Clock::filled(0xa5);
-
-        let returned = unsafe { clock_source_construct(clock.ptr()) };
-
-        assert_eq!(returned, elsewhere.ptr());
-        assert_eq!(elsewhere.vtable_word(), VTABLE_ADDRESS);
-        assert_eq!(
-            clock.vtable_word(),
-            0xa5a5_a5a5,
-            "the argument object is untouched when the base redirects"
-        );
-    }
-
-    #[test]
-    fn the_default_base_reproduces_the_stock_four_instructions() {
-        let (_guard, _restore) = lock_ops();
-        let mut clock = Clock::filled(0xa5);
-
-        let base = DEFAULT_CLOCK_SOURCE_OPS.construct_base;
-        let returned = unsafe { base(clock.ptr(), 0x5a) };
-
-        assert_eq!(returned, clock.ptr(), "r0 passes through");
-        assert_eq!(clock.vtable_word(), BASE_VTABLE_ADDRESS);
-        assert_eq!(clock.0[4], 0x5a, "the kind byte passes through");
-        assert_eq!(clock.0[5..], [0xa5; 11][..], "no other byte is touched");
+        assert_eq!(returned, clock.0.as_mut_ptr());
+        assert_eq!(u32::from_ne_bytes(clock.0[..4].try_into().unwrap()), VTABLE_ADDRESS);
+        assert_eq!(clock.0[4], CLOCK_KIND);
+        assert_eq!(clock.0[5..], [0xa5; 11]);
     }
 }
