@@ -107,6 +107,7 @@ pub mod view_base;
 pub mod view_transition_mode;
 pub mod view_interaction_mode;
 pub mod range_view;
+pub mod range_release;
 pub mod container_view;
 pub mod set_geometry;
 pub mod geometry_changed;

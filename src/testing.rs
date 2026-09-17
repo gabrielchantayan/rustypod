@@ -101,6 +101,9 @@ pub mod hints {
     pub const LIST_SPLICE: usize = 0x0d00_0000;
     pub const EVENT_LIST: usize = 0x0e00_0000;
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
+    // 0x1600_0000: dedicated to ui/range_release's raw-u32 owner,
+    // operation, cursor, and item fixtures; mappings never unmap.
+    pub const RANGE_RELEASE: usize = 0x1600_0000;
     // 0x6900_0000: dedicated to cxx/opaque_context_drain's target-width
     // context and deque fixture; mappings never unmap.
     pub const OPAQUE_CONTEXT_DRAIN: usize = 0x6900_0000;
