@@ -104181,3 +104181,31 @@ functions:
       match.py reports the same indirect call, two conditional guards,
       conditional payload load/store, and boolean result; LLVM adds a frame
       and register moves, producing 17 instructions versus retailOS's 15.
+  - address: 0x082a3140
+    ghidra: FUN_082a3140
+    name: object_selected_payload_index
+    size: 84
+    sig: "u32 object_selected_payload_index(void *object, u32 index)"
+    module: util/object_selected_payload_index
+    status: ported
+    vars:
+      param_1: object
+      param_2: index
+      iVar2: availability
+      uVar3: selected_payload
+    notes: >-
+      Raw ARM words establish the 84-byte body from 0x082a3140 through
+      0x082a3190; the next distinct push is at 0x082a3194. This disproves
+      Ghidra's 188-byte extent: its decompilation is the direct tail target
+      0x08044834, not this wrapper. Decoding the raw body finds zero plain bl
+      and zero predicated bl instructions; the only call is blx r1 through
+      the object's vtable word at +0x08. A nonzero virtual result permits the
+      wrapper to read object+0x08, test descriptor byte bit 0, obtain the
+      selected target-width pointer at descriptor+0x14, and tail-branch to
+      0x08044834 with that pointer and index. A false virtual result, clear
+      bit, or NULL pointer returns zero. The tail target is not ported and
+      has no established name, so the port models only its verified
+      (payload,index)->u32 ABI through an address-specific seam; it does not
+      invent a concrete resource type. Host tests use a unique sub-4-GiB
+      fixture to preserve the firmware's u32 pointer fields and cover all
+      three zero guards plus the forwarded pointer/index return path.
