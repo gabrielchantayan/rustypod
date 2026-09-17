@@ -34079,6 +34079,60 @@ functions:
       raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
       than the original's aligned ldrh/ldrd/ldr.
 
+  - address: 0x08371c40
+    ghidra: FUN_08371c40
+    name: btree_key
+    size: 108
+    sig: "i32 btree_key(cursor: *mut BtCursor, offset: u32, amt: u32, buf: *mut u8)"
+    module: sqlite/key
+    status: ported
+    vars:
+      param_1/r0/r4: cursor
+      param_2/r1/r5: offset
+      param_3/r2/r6: amt
+      param_4/r3/r7: buf
+      iVar1/r0: rc
+      FUN_08372ae0: btree_restore_cursor_position (direct ported callee)
+      FUN_082b2994: access_payload (unported, BTREE_ACCESS_PAYLOAD_OPS seam)
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeKey. Verified against the 108-byte range
+      0x08371c40..0x08371cac in osos.dec (the next function's
+      `ldrb r2,[r0,#0x43]` prologue begins at 0x08371cac; Ghidra's
+      decomp/c/033/08371c40_FUN_08371c40.c agrees, including the
+      0x082b2994 branch target that the raw `ebfd033a` word resolves
+      to). The body holds exactly two BL instructions
+      (`bl 0x08372ae0` @ 0x08371c68, `bl 0x082b2994` @ 0x08371ca4);
+      the four callers are binary-scanned `bl` sites 0x0836857c
+      (saveCursorPosition's index branch: btree_key_size @ 0x08371cc4,
+      intKey == 0 check, malloc nKey, copy here), 0x083720b8, and
+      vdbeExec OP_Column's 0x08389a7c / 0x0838bd78 (the `beq` beside
+      0x0838bd78 selects 0x08370dfc for table cursors, this function
+      for index cursors).
+      Algorithm: eState (+0x43) below CURSOR_REQUIRESEEK skips the
+      restore with rc = 0 (`movcc r0,#0; bcc` — fall-through, not an
+      early return); otherwise the ported btree_restore_cursor_position
+      runs directly. rc != 0 returns it unchanged. Then MemPage
+      `intKey` (+0x03, reached through the u32 pPage word at +0x18)
+      nonzero returns SQLITE_CORRUPT (11, `movne r0,#0xb`) — table
+      pages have no key bytes. Index pages dispatch the still-unported
+      accessPayload @ 0x082b2994 with the four register arguments
+      verbatim and the eOp/skipNext stack pair zeroed (`str r3,[sp]`,
+      `str r3,[sp,#4]`), returning its code.
+      Deviations: the accessPayload call is a volatile
+      BTREE_ACCESS_PAYLOAD_OPS dispatch (default: success, no copy),
+      the same constrained stand-in as BTREE_MOVETO_OPS; the target
+      pPage pointer field is a u32 word read. match.py (exit 1, diff
+      expected): target 27 instructions vs the port's 41; both share
+      the state gate, restore call, rc short-circuit, intKey gate and
+      zeroed stack words. Expected differences are the seam's literal-
+      pool slot read plus `blx ip` in place of `bl 0x082b2994`, the
+      direct restore call's unresolved `bl 0` relocation, and LLVM
+      expanding the raw u32 pPage read to byte loads/orrs on ARMv5.
+      Host tests cover both skip-restore states, restore failure/success,
+      FAULT saved-rc propagation, the intKey gate with and without a
+      restore, the verbatim six-argument ABI (zeroed eOp/skipNext), and
+      payload-reader rc propagation.
+
   - address: 0x08371cc4
     ghidra: FUN_08371cc4
     name: btree_key_size

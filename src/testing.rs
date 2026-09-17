@@ -93,6 +93,9 @@ pub mod hints {
     // word-bitmap fixture; mappings never unmap, so no other user may share it.
     pub const BOUNDED_WORD_BIT_SET_CONTAINS: usize = 0xb100_0000;
     pub const BTREE_DATA_SIZE: usize = 0x1100_0000;
+    // 0x7200_0000: dedicated to sqlite/key's raw-u32 BtCursor/MemPage
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const BTREE_KEY: usize = 0x7200_0000;
     // 0x7000_0000: dedicated to sqlite/restore_cursor_position's raw-u32
     // BtCursor fixture; mappings never unmap, so no other user may share it.
     pub const BTREE_RESTORE_CURSOR: usize = 0x7000_0000;
