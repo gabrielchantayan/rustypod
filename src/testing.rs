@@ -1130,6 +1130,9 @@ pub mod hints {
     // ExprList and item fixtures; mappings never unmap, so no other user may
     // share this hint.
     pub const SQLITE_EXPR_CODE_EXPR_LIST: usize = 0x0600_0000;
+    // 0x0700_0000: dedicated to sqlite/expr_code_pair's raw-u32 Expr
+    // fixtures; mappings never unmap, so no other user may share this hint.
+    pub const SQLITE_EXPR_CODE_PAIR: usize = 0x0700_0000;
     // 0xd800_0000: dedicated to sqlite/step's target-width Vdbe and
     // connection fixtures; mappings never unmap, so no other user may share it.
     pub const SQLITE_STEP: usize = 0xd800_0000;
