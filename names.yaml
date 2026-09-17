@@ -84117,6 +84117,33 @@ functions:
       0x080c6080 directly. Host tests prove the helper receives zero, ordinary,
       and all-ones roots, then both target-width table words are cleared.
 
+  - address: 0x0828013c
+    ghidra: FUN_0828013c
+    name: linked_list_append
+    size: 40
+    sig: "u32 linked_list_append(LinkedListAnchor *anchor, u32 node)"
+    module: util/linked_list_append
+    status: ported
+    renames:
+      param_1/r0: anchor
+      param_2/r1: node
+      "anchor+0x0": head
+      "anchor+0x4": tail
+      "tail+0x0": next
+    notes: >-
+      Raw ARM establishes the 40-byte extent exactly, from 0x0828013c through
+      0x08280164: `cmp r1,#0; moveq r0,#1; bxeq lr; ldr r2,[r0,#4]; cmp
+      r2,#0; strne r1,[r2]; streq r1,[r0]; str r1,[r0,#4]; mov r0,#0; bx
+      lr`. The next separately linked function starts at 0x08280164. Decoding
+      every ARM B/BL word in osos.dec finds exactly four direct calls, all
+      plain unconditional bl: 0x081c1e78, 0x081c1e84, 0x081c1e90, and
+      0x081c7df8; no call is predicated. A nonzero node appends to the
+      two-word intrusive-list anchor, writing it to the head when empty or to
+      the old tail's first word otherwise, then replacing the tail. A zero
+      node returns one without a memory access; success returns zero. No
+      deliberate behavioral deviations. The Rust signature retains node as a
+      target-width u32 so host pointer width cannot change the firmware layout.
+
   # --- Two-word receiver clear ---
   - address: 0x08280174
     ghidra: FUN_08280174
