@@ -55269,6 +55269,28 @@ functions:
       comparison of the aligned +0x0c words. Vtable, kind, and padding are
       ignored, and neither pointer is NULL-checked. No deliberate deviations.
 
+  # --- Context-scope allocation factory (app/context_scope) ---
+  - address: 0x0825ab04
+    ghidra: FUN_0825ab04
+    name: context_scope_new_from_handle
+    size: 32
+    sig: "void *context_scope_new_from_handle(const void *handle)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: handle}
+    notes: >-
+      Raw words establish the exact eight-instruction extent
+      0x0825ab04..0x0825ab20; 0x0825ab24 starts a separate vtable dispatch
+      stub. Decoding every ARM B/BL word in osos.dec finds four incoming
+      unconditional bl calls and zero predicated calls. The factory saves the
+      handle, obtains 20 bytes through operator_new @ 0x082aadd4, restores it
+      to r1, sets r2 = 0, and tail-branches to the ported
+      context_scope_init_from_handle @ 0x08284118. The allocation is
+      deliberately unguarded: NULL faults at the constructor's first store.
+      The Rust port calls rather than tail-branches to the constructor; its
+      allocation size, handle adaptation, flag, and returned constructor
+      result are otherwise identical.
+
   # --- Application context scope (app/context_scope) ---
   - address: 0x082840e8
     ghidra: FUN_082840e8

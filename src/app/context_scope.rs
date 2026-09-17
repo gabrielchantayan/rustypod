@@ -275,6 +275,33 @@ pub unsafe extern "C" fn context_scope_init_from_handle(
     scope.add(CONTEXT_SCOPE_FLAG).write(flag);
     scope
 }
+/// context_scope_new_from_handle — original: `FUN_0825ab04` @ **0x0825ab04**
+/// (**32 bytes exactly**, 0x0825ab04..0x0825ab20; the separately linked
+/// vtable dispatch stub begins at 0x0825ab24). **4 direct, unconditional
+/// `bl` call sites; no predicated calls**, verified by decoding every ARM
+/// `B`/`BL` word in `osos.dec`.
+///
+/// Allocates one [`CONTEXT_SCOPE_SIZE`]-byte context scope through
+/// [`crate::heap::veneers::operator_new`], then tail-branches to
+/// [`context_scope_init_from_handle`] with `flag = 0`. The allocation is
+/// deliberately unguarded: a NULL result reaches the constructor and faults
+/// at its descriptor store just as the retailOS code does.
+///
+/// Deliberate deviation: Rust calls the constructor rather than emitting the
+/// original tail `b`; the allocation, handle adaptation, flag, and returned
+/// constructor result are unchanged.
+///
+/// # Safety
+///
+/// `handle` must meet [`context_scope_init_from_handle`]'s readability and,
+/// when tagged present, subject-liveness requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_new_from_handle(handle: *const u8) -> *mut u8 {
+    let scope = unsafe { crate::heap::veneers::operator_new(CONTEXT_SCOPE_SIZE) };
+    unsafe { context_scope_init_from_handle(scope, handle, 0) }
+}
+
 
 /// context_scope_copy_construct — original: `FUN_0828414c` @ 0x0828414c
 /// (**48 bytes: 44 code**, 0x0828414c..0x08284174, **plus the 4-byte
@@ -441,6 +468,7 @@ pub unsafe extern "C" fn context_scope_drop(scope: *mut u8) -> *mut u8 {
 /// context is NULL-checked.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
+
 pub unsafe extern "C" fn context_scope_subject_matches_context_field_f40(
     scope: *const u8,
 ) -> u32 {
@@ -469,6 +497,7 @@ mod tests {
         hints, note_missing_u32_fixture, try_map_u32_slab, APP_ROOT_TEST_LOCK,
     };
     use std::sync::{LazyLock, Mutex};
+    use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
 
 
 
@@ -538,6 +567,7 @@ mod tests {
         }
 
         fn at(&self, offset: usize) -> *mut u8 {
+
             unsafe { self.base.add(offset) }
         }
 
@@ -564,6 +594,25 @@ mod tests {
             &[FILL; 7],
             "the flag store is one byte wide; +0x11 onward is untouched"
         );
+    }
+    #[test]
+    fn allocation_factory_uses_tag_2_new_and_default_constructs_the_scope() {
+        let _heap_lock = mock_heap();
+        let mut allocation = Record::new();
+        unsafe {
+            set_alloc_ret(allocation.0.as_mut_ptr());
+            let handle = Handle::new(false, 0xdead_beef);
+            let returned = context_scope_new_from_handle(handle.0.as_ptr());
+
+            assert_eq!(returned, allocation.0.as_mut_ptr());
+        }
+        assert_eq!(alloc_log(), (1, CONTEXT_SCOPE_SIZE, 2));
+        assert_eq!(allocation.word(0), CONTEXT_SCOPE_DESCRIPTOR);
+        assert_eq!(allocation.word(1), 0, "a zero handle tag selects NULL");
+        assert_eq!(allocation.word(2), 0, "NULL subject skips root capture");
+        assert_eq!(allocation.word(3), 0);
+        assert_eq!(allocation.0[CONTEXT_SCOPE_FLAG], 0, "factory fixes flag to zero");
+        assert_eq!(&allocation.0[CONTEXT_SCOPE_FLAG + 1..], &[FILL; 7]);
     }
 
     #[test]
