@@ -23366,6 +23366,35 @@ functions:
       The runtime RW globals are modeled as crate statics rather than their
       fixed RAM addresses. Host tests cover sentinel retention, boundary
       rejection without a call, and NULL secondary-display fallback.
+  - address: 0x0828d458
+    ghidra: FUN_0828d458
+    name: render_context_create_image_surface
+    size: 136
+    sig: "u8 *render_context_create_image_surface(RenderContext *render_context, const Image *image)"
+    module: drivers/surface_new
+    status: ported
+    renames:
+      param_1/r2: render_context
+      param_2/r1: image
+      "image+0x04": plane0
+      "image+0x08": height
+      "image+0x14": pixel_format
+      "render_context+0x24/+0x2c": horizontal_bounds
+      "render_context+0x20/+0x28": vertical_bounds
+      FUN_08030f44: heap_panic
+      FUN_081066a8: surface_new
+    notes: >-
+      Raw osos.dec words prove the 136-byte extent
+      0x0828d458..0x0828d4e0; 0x0828d4e0 is the next function. The body has
+      two BL instructions: one predicated blne heap_panic for an unsupported
+      pixel format, then one plain bl surface_new. Decoding every ARM BL
+      immediate finds exactly four inbound direct callers, all unconditional:
+      0x0828c7cc, 0x0828cc98, 0x0828e1b4, and 0x0828e3b4. RGB565 (0x0565)
+      selects surface format 2; grayscale (0x0065) and packed 24-bit-alpha
+      (0x1888) select format 3. The factory receives width
+      render_context+0x2c - +0x24, stride +0x28 - +0x20, image+0x08 height,
+      flags 2, image+0x04 plane0, and zero plane1..3. Host tests cover
+      RGB565 geometry/plane forwarding plus grayscale and wrapping stride.
   - address: 0x0828d4e0
     ghidra: FUN_0828d4e0
     name: render_context_release_resource
