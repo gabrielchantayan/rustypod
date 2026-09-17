@@ -33655,6 +33655,41 @@ functions:
       0/1 returns; expected differences are LLVM's frame, the explicit
       stack home for the vararg word, and a byte-narrowed flags test
       (ldrb db+13; tsteq #8 == ldreq word db+12; tsteq #0x800).
+  # ---- B-tree cursor close (src/sqlite/btree_close_cursor.rs) ----
+  - address: 0x08370b40
+    ghidra: FUN_08370b40
+    name: btree_close_cursor
+    size: 128
+    sig: "int btree_close_cursor(BtCursor *cursor)"
+    module: sqlite/btree_close_cursor
+    status: ported
+    renames:
+      param_1/r0: cursor
+      puVar1/r5: btree
+      iVar2/r6: shared
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeCloseCursor. Raw ARM proves the exact
+      128-byte extent 0x08370b40..0x08370bc0: `pop {r4,r5,r6,pc}` at
+      0x08370bbc is immediately followed by the separately linked
+      `push {r4,lr}` at 0x08370bc0. Decoding every ARM B/BL word in
+      osos.dec finds four inbound calls, matching Ghidra's total: two plain
+      unconditional bl at 0x08368748 and 0x0837b9bc, plus predicated bleq
+      at 0x08370a50 and blne at 0x0838b014. The body has six plain
+      unconditional bl instructions and no predicated calls: btree_enter,
+      sqlite3BtreeClearCursor, release_via_field_0x48, unlockBtreeIfUnused,
+      clearCursorOverflowCache, btree_leave. A null pBtree is inert;
+      otherwise it refreshes pBt->db, clears and unlinks the cursor in both
+      directions, releases its page owner, unlocks, clears overflow state,
+      then leaves. Target builds directly call the ported btree_enter,
+      release_via_field_0x48, and btree_leave plus the three unported retail
+      addresses 0x082c3528, 0x083960e8, and 0x082d6d08. Deliberate host-only
+      deviation: a private dispatch table models the three unported calls
+      and lock boundaries because target 32-bit cursor/Btree pointer slots
+      widen on the host. Tests cover null pBtree, head and middle unlinking,
+      db refresh, and operation ordering. match.py is expected to differ in
+      LLVM frame/register allocation and absolute-call relocations while
+      preserving the guard, stores, and six-call sequence.
+
   # ---- B-tree cursor wrapper (src/sqlite/btree_cursor.rs) ----
   - address: 0x08370db4
     ghidra: FUN_08370db4
