@@ -27,6 +27,10 @@
 //!   0x089cb1b8 — see below) when the region or its start is NULL,
 //!   unlocks, and returns the start. This is the POOL_OPS `region_start`
 //!   hook of pool.rs: the address the seeded heap block begins at.
+//! - `region_elem_payload_if_live` — original: `FUN_082802e0` @
+//!   0x082802e0 (52 bytes; 4 unconditional `bl` call sites): locks an
+//!   element's region reference, returns its companion payload word only
+//!   while both the region and its start address are non-NULL, then unlocks.
 //! - `region_elem_destroy` — original: `FUN_082804fc` @ 0x082804fc
 //!   (48 bytes + one literal-pool word @ 0x0828052c; 23 `bl` + 1 tail
 //!   `b` call sites, binary-verified by decoding every B/BL word in
@@ -123,6 +127,10 @@ const WORD: usize = core::mem::size_of::<*mut u8>();
 /// Word index of the region object pointer in a deque element
 /// (byte offset 0x4 on the 32-bit target).
 pub const ELEM_REGION_INDEX: usize = 1;
+
+/// Word index of the element's companion payload field (byte offset +0x8
+/// on the 32-bit target).
+pub const ELEM_PAYLOAD_INDEX: usize = 2;
 
 /// Word index of the region start address in a region object
 /// (byte offset 0x4 on the 32-bit target).
@@ -512,6 +520,29 @@ pub unsafe extern "C" fn block_to_region_start(elem: *const u8) -> *mut u8 {
     start
 }
 
+/// region_elem_payload_if_live — original: `FUN_082802e0` @ 0x082802e0
+/// (52 bytes; 4 unconditional `bl` call sites, no predicated calls).
+///
+/// Locks `elem`, then returns its companion payload word only if both the
+/// region reference (`elem + 0x4`) and that region's start (`region + 0x4`)
+/// are non-NULL; otherwise returns NULL. It always unlocks after the
+/// guarded reads. The lock and unlock statuses are deliberately discarded,
+/// exactly as in the original. Pointer fields use word indices to retain the
+/// target's 32-bit layout on 64-bit hosts; no other deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_elem_payload_if_live(elem: *const u8) -> *mut u8 {
+    region_ref_lock(elem);
+    let region = ptr_field(elem, ELEM_REGION_INDEX);
+    let payload = if !region.is_null() && !ptr_field(region, REGION_START_INDEX).is_null() {
+        ptr_field(elem, ELEM_PAYLOAD_INDEX)
+    } else {
+        core::ptr::null_mut()
+    };
+    region_ref_unlock(elem);
+    payload
+}
+
 /// region_elem_destroy — original: `FUN_082804fc` @ 0x082804fc (48
 /// bytes + one literal-pool word; 23 `bl` + 1 tail `b` call sites,
 /// binary-verified).
@@ -601,6 +632,10 @@ mod tests {
         write_ptr_field(elem, ELEM_REGION_INDEX, region);
     }
 
+    unsafe fn write_payload(elem: *mut u8, payload: *mut u8) {
+        write_ptr_field(elem, ELEM_PAYLOAD_INDEX, payload);
+    }
+
     unsafe fn write_region(region: *mut u8, start: *mut u8, mutex: *mut u8) {
         write_ptr_field(region, REGION_START_INDEX, start);
         write_ptr_field(region, REGION_MUTEX_INDEX, mutex);
@@ -657,6 +692,50 @@ mod tests {
             assert_eq!(block_to_region_start(elem.as_ptr()), fallback());
         }
         assert_eq!(events(), std::vec![(true, 0x6000), (false, 0x6000)]);
+        restore_mutex();
+    }
+
+    #[test]
+    fn payload_accessor_returns_the_companion_only_for_a_live_region() {
+        let _guard = mock_mutex();
+        let mut elem = [0usize; 5];
+        let mut region = [0usize; 3];
+        unsafe {
+            write_region(
+                region.as_mut_ptr().cast(),
+                0x2_0000 as *mut u8,
+                0x6100 as *mut u8,
+            );
+            write_elem(elem.as_mut_ptr().cast(), region.as_mut_ptr().cast());
+            write_payload(elem.as_mut_ptr().cast(), 0x3_0000 as *mut u8);
+            assert_eq!(
+                region_elem_payload_if_live(elem.as_ptr().cast()),
+                0x3_0000 as *mut u8
+            );
+        }
+        assert_eq!(events(), std::vec![(true, 0x6100), (false, 0x6100)]);
+        restore_mutex();
+    }
+
+    #[test]
+    fn payload_accessor_rejects_missing_region_or_start() {
+        let _guard = mock_mutex();
+        let mut elem = [0usize; 5];
+        let mut region = [0usize; 3];
+        unsafe {
+            write_payload(elem.as_mut_ptr().cast(), 0x3_0000 as *mut u8);
+            assert!(region_elem_payload_if_live(elem.as_ptr().cast()).is_null());
+            assert!(events().is_empty());
+
+            write_region(
+                region.as_mut_ptr().cast(),
+                core::ptr::null_mut(),
+                0x6200 as *mut u8,
+            );
+            write_elem(elem.as_mut_ptr().cast(), region.as_mut_ptr().cast());
+            assert!(region_elem_payload_if_live(elem.as_ptr().cast()).is_null());
+        }
+        assert_eq!(events(), std::vec![(true, 0x6200), (false, 0x6200)]);
         restore_mutex();
     }
 
