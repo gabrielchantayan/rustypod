@@ -1198,6 +1198,10 @@ pub mod hints {
     // and Btree fixture for sqlite3BtreeLeaveAll; mappings never unmap, so
     // no other user may share this hint.
     pub const BTREE_LEAVE_ALL: usize = 0x4242_0000;
+    // 0x4243_0000: dedicated to sqlite/btree_lock's raw-u32 sqlite3, Db,
+    // and Btree sibling-list fixture for sqlite3BtreeEnterAll; mappings
+    // never unmap, so no other user may share this hint.
+    pub const BTREE_ENTER_ALL: usize = 0x4243_0000;
     // 0x3e00_0000: dedicated to sqlite/ptrmap_put_overflow_cell's raw-u32
     // segmented-entry table and entry-data fixture; mappings never unmap, so
     // no other user may share this hint.
