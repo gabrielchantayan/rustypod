@@ -11,12 +11,13 @@
 //! shared B-tree's database pointer, clears the cursor, unlinks it from the
 //! shared cursor list, releases its page owner, unlocks the shared B-tree if
 //! unused, clears overflow-cache state, and leaves the B-tree. Deliberate
-//! host-only deviation: the three unported boundaries use a private dispatch
+//! host-only deviation: the two unported boundaries use a private dispatch
 //! table because host pointers widen; target builds call their retailOS
-//! addresses directly. The already ported enter, leave, and owner-release
-//! helpers remain direct calls on target.
+//! addresses directly. The already ported enter, clear-cursor, leave, and
+//! owner-release helpers remain direct calls on target.
 
 use crate::cxx::release::release_via_field_0x48;
+use crate::sqlite::btree_clear_cursor::btree_clear_cursor;
 use crate::sqlite::btree_lock::{btree_enter, btree_leave};
 
 const WORD: usize = core::mem::size_of::<*mut u8>();
@@ -46,12 +47,6 @@ unsafe fn set_pointer(base: *mut u8, target_offset: usize, value: *mut u8) {
     (base.add(pointer_offset(target_offset)) as *mut *mut u8).write(value);
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn clear_cursor(cursor: *mut u8) {
-    let operation: CursorBoundary = core::mem::transmute(0x082c_3528usize);
-    operation(cursor);
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -74,7 +69,6 @@ unsafe extern "C" fn unavailable_cursor_boundary(_pointer: *mut u8) {}
 #[derive(Clone, Copy)]
 struct BtreeCloseCursorOps {
     enter: CursorBoundary,
-    clear_cursor: CursorBoundary,
     unlock_if_unused: CursorBoundary,
     clear_overflow_cache: CursorBoundary,
     leave: CursorBoundary,
@@ -83,7 +77,6 @@ struct BtreeCloseCursorOps {
 #[cfg(not(target_os = "none"))]
 const DEFAULT_BTREE_CLOSE_CURSOR_OPS: BtreeCloseCursorOps = BtreeCloseCursorOps {
     enter: unavailable_cursor_boundary,
-    clear_cursor: unavailable_cursor_boundary,
     unlock_if_unused: unavailable_cursor_boundary,
     clear_overflow_cache: unavailable_cursor_boundary,
     leave: unavailable_cursor_boundary,
@@ -121,10 +114,7 @@ pub unsafe extern "C" fn btree_close_cursor(cursor: *mut u8) -> i32 {
     let shared = pointer_at(btree, BTREE_SHARED);
     set_pointer(shared, SHARED_DATABASE, pointer_at(btree, BTREE_DATABASE));
 
-    #[cfg(target_os = "none")]
-    clear_cursor(cursor);
-    #[cfg(not(target_os = "none"))]
-    (host_ops().clear_cursor)(cursor);
+    btree_clear_cursor(cursor);
 
     let previous = pointer_at(cursor, CURSOR_PREV);
     let next = pointer_at(cursor, CURSOR_NEXT);
@@ -173,7 +163,6 @@ mod tests {
     }
 
     unsafe extern "C" fn record_enter(_pointer: *mut u8) { record(1); }
-    unsafe extern "C" fn record_clear(_pointer: *mut u8) { record(2); }
     unsafe extern "C" fn record_unlock(_pointer: *mut u8) { record(3); }
     unsafe extern "C" fn record_overflow(_pointer: *mut u8) { record(4); }
     unsafe extern "C" fn record_leave(_pointer: *mut u8) { record(5); }
@@ -192,7 +181,7 @@ mod tests {
             EVENTS = [0; 5];
             EVENT_COUNT = 0;
             core::ptr::write_volatile(core::ptr::addr_of_mut!(BTREE_CLOSE_CURSOR_OPS), BtreeCloseCursorOps {
-                enter: record_enter, clear_cursor: record_clear, unlock_if_unused: record_unlock,
+                enter: record_enter, unlock_if_unused: record_unlock,
                 clear_overflow_cache: record_overflow, leave: record_leave,
             });
         }
@@ -221,7 +210,7 @@ mod tests {
             assert_eq!(pointer_at(shared.as_mut_ptr().cast(), SHARED_DATABASE), database.as_mut_ptr());
             assert_eq!(pointer_at(shared.as_mut_ptr().cast(), SHARED_CURSOR), next.as_mut_ptr().cast());
             assert!(pointer_at(next.as_mut_ptr().cast(), CURSOR_PREV).is_null());
-            assert_eq!(EVENTS, [1, 2, 3, 4, 5]);
+            assert_eq!(EVENTS, [1, 3, 4, 5, 0]);
         }
     }
 
