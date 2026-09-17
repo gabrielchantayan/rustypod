@@ -78,6 +78,10 @@ pub mod hints {
     // record, and payload fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const VIDEO_ENGINE_FRAME_PAYLOAD: usize = 0xcf00_0000;
+    // 0x6a00_0000: dedicated to util/video_engine's target-width pending
+    // release-state and allocation fixtures; mappings never unmap, so no
+    // other port may share this hint.
+    pub const VIDEO_ENGINE_RELEASE_PENDING_HANDLES: usize = 0x6a00_0000;
     // 0x6400_0000: dedicated to ATA command execution/submission's raw-u32
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;

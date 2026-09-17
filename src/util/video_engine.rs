@@ -610,6 +610,59 @@ unsafe fn video_engine_release_one_handle(handle: *mut u32) {
         None => panic!("video_engine_release_one_handle_and_delete requires helper 0x082d1134"),
     }
 }
+/// Firmware global context slot read by `FUN_0827ba4c`.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_RELEASE_CONTEXT_SLOT: *const *mut u8 = 0x089d_00d4 as *const *mut u8;
+
+/// Reads the context argument preserved by the original release call sites.
+#[inline(always)]
+unsafe fn video_engine_release_context() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        VIDEO_ENGINE_RELEASE_CONTEXT_SLOT.read_volatile()
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::null_mut()
+    }
+}
+
+/// video_engine_release_pending_handles — retailOS `FUN_0827ba4c` @
+/// **0x0827ba4c** (64 bytes; `0x0827ba4c..0x0827ba8c`). The next distinct
+/// function begins at `0x0827ba94`, after the literal word at `0x0827ba90`.
+///
+/// Raw ARM performs two plain `bl` instructions to `FUN_08272800` and no
+/// predicated `bl`: it reads the global context word at `0x089d00d4`, releases
+/// and clears the target-width handle words at `state+0xd8` then `state+0xd4`
+/// when each is nonzero. The low-offset handle is deliberately processed
+/// second. Deliberate deviation: the context argument is semantically ignored
+/// by the already-ported `video_engine_release_one_handle_and_delete`; host
+/// builds therefore use NULL rather than map the resident global slot.
+///
+/// # Safety
+///
+/// `state` must point to writable target-layout state containing valid
+/// target-width allocation words at offsets `0xd4` and `0xd8`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_release_pending_handles(state: *mut u32) {
+    const LOW_HANDLE_WORD: usize = 0xd4 / core::mem::size_of::<u32>();
+    const HIGH_HANDLE_WORD: usize = 0xd8 / core::mem::size_of::<u32>();
+
+    let high_handle = state.add(HIGH_HANDLE_WORD).read() as *mut u32;
+    if !high_handle.is_null() {
+        video_engine_release_one_handle_and_delete(video_engine_release_context(), high_handle);
+        state.add(HIGH_HANDLE_WORD).write(0);
+    }
+
+    let low_handle = state.add(LOW_HANDLE_WORD).read() as *mut u32;
+    if !low_handle.is_null() {
+        video_engine_release_one_handle_and_delete(video_engine_release_context(), low_handle);
+        state.add(LOW_HANDLE_WORD).write(0);
+    }
+}
+
 
 /// video_engine_release_one_handle_and_delete — retailOS `FUN_08272800` @
 /// **0x08272800** (28 bytes; `0x08272800..0x08272818`). The next distinct
@@ -796,6 +849,23 @@ mod tests {
         try_map_u32_slab(hints::VIDEO_ENGINE_FRAME_PAYLOAD, FRAME_PAYLOAD_FIXTURE_LEN)
             .map(|pointer| pointer as usize)
     });
+
+    const RELEASE_PENDING_FIXTURE_LEN: usize = 0x1000;
+    static RELEASE_PENDING_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(
+            hints::VIDEO_ENGINE_RELEASE_PENDING_HANDLES,
+            RELEASE_PENDING_FIXTURE_LEN,
+        )
+        .map(|pointer| pointer as usize)
+    });
+
+    fn release_pending_fixture() -> Option<*mut u32> {
+        let state = (*RELEASE_PENDING_FIXTURE)? as *mut u8;
+        unsafe {
+            ptr::write_bytes(state, 0, RELEASE_PENDING_FIXTURE_LEN);
+            Some(state.cast())
+        }
+    }
 
     fn frame_payload_fixture() -> Option<*mut u8> {
         let fixture = (*FRAME_PAYLOAD_FIXTURE)? as *mut u8;
@@ -1386,9 +1456,17 @@ mod tests {
 
     static mut RELEASED_ONE_HANDLE: Option<(usize, *mut u32)> = None;
     static mut DELETED_HANDLE: Option<(*mut u8, usize)> = None;
+    static mut RELEASED_HANDLE_SEQUENCE: [*mut u32; 2] = [ptr::null_mut(); 2];
+    static mut RELEASED_HANDLE_COUNT: usize = 0;
+
 
     unsafe extern "C" fn record_release_one_handle(count: usize, handle: *mut u32) {
         *addr_of_mut!(RELEASED_ONE_HANDLE) = Some((count, handle));
+        if RELEASED_HANDLE_COUNT < RELEASED_HANDLE_SEQUENCE.len() {
+            RELEASED_HANDLE_SEQUENCE[RELEASED_HANDLE_COUNT] = handle;
+            RELEASED_HANDLE_COUNT += 1;
+        }
+
     }
 
     unsafe extern "C" fn record_operator_delete(
@@ -1422,6 +1500,9 @@ mod tests {
         core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(recording_heap_ops);
         *addr_of_mut!(RELEASED_ONE_HANDLE) = None;
         *addr_of_mut!(DELETED_HANDLE) = None;
+        *addr_of_mut!(RELEASED_HANDLE_SEQUENCE) = [ptr::null_mut(); 2];
+        RELEASED_HANDLE_COUNT = 0;
+
         ReleaseAndDeleteReset { release, heap_ops }
     }
 
@@ -1466,6 +1547,29 @@ mod tests {
                 None,
                 "operator_delete alone supplies the NULL guard"
             );
+        }
+    }
+
+    #[test]
+    fn release_pending_handles_releases_high_word_before_low_word_and_clears_both() {
+        let _guard = LOCK.lock();
+        let Some(state) = release_pending_fixture() else {
+            assert!(note_missing_u32_fixture("util/video_engine release pending handles"));
+            return;
+        };
+        let high_handle = unsafe { state.cast::<u8>().add(0x200).cast::<u32>() };
+        let low_handle = unsafe { state.cast::<u8>().add(0x300).cast::<u32>() };
+        let _reset = unsafe { record_release_and_delete() };
+
+        unsafe {
+            state.add(0xd8 / 4).write(high_handle as usize as u32);
+            state.add(0xd4 / 4).write(low_handle as usize as u32);
+            video_engine_release_pending_handles(state);
+
+            assert_eq!(RELEASED_HANDLE_COUNT, 2);
+            assert_eq!(RELEASED_HANDLE_SEQUENCE, [high_handle, low_handle]);
+            assert_eq!(state.add(0xd8 / 4).read(), 0);
+            assert_eq!(state.add(0xd4 / 4).read(), 0);
         }
     }
 }
