@@ -102642,3 +102642,25 @@ functions:
       magnitude word. Host tests cover zero, signed single-word values, and
       i32::MIN. match.py structural review was completed. Deliberate
       deviations: none.
+  - address: 0x082eac78
+    ghidra: FUN_082eac78
+    name: digest_byte_count_add
+    size: 44
+    sig: "void digest_byte_count_add(DigestState *state, u32 len)"
+    module: util/digest_byte_count_add
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: len
+      uVar1/r2: byte_count_low
+    notes: >-
+      Raw osos.dec establishes the exact eleven-instruction, 44-byte extent
+      0x082eac78..0x082eaca4; the next separately entered function begins
+      at 0x082eaca4. Decoding every ARM B/BL word finds four direct inbound
+      call sites at 0x083180cc, 0x08318168, 0x08318190, and 0x083384a4:
+      all are unconditional plain bl, with no predicated forms. The leaf
+      adds len to the low byte-count word at state +0x44 with wrapping ARM
+      arithmetic, then increments the high word at +0x40 only on carry.
+      It has no outgoing calls. Host tests cover no carry, low-word overflow
+      with high-word wrap, and zero. match.py structural review was completed.
+      Deliberate deviations: none.

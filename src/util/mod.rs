@@ -42,6 +42,7 @@ pub mod encoded_integer_value;
 pub mod encoded_word_block_shift;
 pub mod error_latch;
 pub mod drive;
+pub mod digest_byte_count_add;
 pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;
