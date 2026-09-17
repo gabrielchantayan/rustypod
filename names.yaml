@@ -39,6 +39,34 @@ functions:
       then clear that word; always write the -1/0xff empty sentinel to +0.
       Deliberate deviation: the direct ARM call is the existing direct Rust
       operator_delete_tag3 port; target pointer fields stay u32 words on host.
+  - address: 0x08277d1c
+    ghidra: FUN_08277d1c
+    name: buffered_stream_flush_pending
+    size: 96
+    sig: "u32 buffered_stream_flush_pending(BufferedStreamState *state)"
+    module: app/buffered_stream_flush_pending
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "[state + 0x00]": backing
+      "[state + 0x04]": active
+      "[state + 0x05]": pending
+      "[state + 0x08]": block_index
+      "[state + 0x10]": flush_context
+      "[backing + 0x20]": length
+      "[backing + 0x2c]": block_size
+      FUN_08277dd4: buffered_stream_flush_block_unported
+    notes: >-
+      Raw osos.dec is exactly 96 bytes: 24 ARM words from 0x08277d1c through
+      pop {r4,lr}; bx lr at 0x08277d78; 0x08277d7c starts the next separate
+      function. A whole-image A32 B/BL decode finds four incoming plain BL
+      calls (0x08277ce4, 0x08277ec8, 0x082780e4, 0x08278be4), zero predicated
+      BL callers, and one plain internal BL to 0x08277dd4. When both state
+      bytes +4 and +5 are set, it flushes block_index * backing+0x2c, capped
+      by backing+0x20, then clears +5 even on helper failure. The 0x08277dd4
+      helper is not ported and has no stronger established identity: target
+      Rust calls its fixed address while host tests use an ABI seam. Target
+      pointer fields deliberately remain u32 words on hosts.
   - address: 0x0827fdd0
     ghidra: FUN_0827fdd0
     name: kind_0x21_message_post

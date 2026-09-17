@@ -1344,6 +1344,9 @@ pub mod hints {
     // target-layout pair fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const ENCODED_PAIR_MATCHES_MAGIC: usize = 0xdead_0000;
+    // 0xabcd_0000: dedicated to app/buffered_stream_flush_pending's raw-u32
+    // backing-object fixture; mappings never unmap, so no other user may share it.
+    pub const BUFFERED_STREAM_FLUSH_PENDING: usize = 0xabcd_0000;
     // 0x082c_0000/0x082d_0000: dedicated to util/buffer_result_take's
     // target-width owner and buffer fixtures; mappings never unmap.
     pub const BUFFER_RESULT_TAKE: usize = 0x082c_0000;
