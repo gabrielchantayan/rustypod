@@ -8,6 +8,7 @@ pub mod record_work_pump;
 pub mod array_element_at;
 pub mod array_index_stride20;
 pub mod strided_array_find_index;
+pub mod active_slot_count;
 pub mod array_index_stride24;
 pub mod slot_array_index_in_bounds;
 pub mod byte_key_map;
