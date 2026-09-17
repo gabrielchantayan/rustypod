@@ -77938,6 +77938,37 @@ functions:
       The port retains the original fault-on-NULL store and uses the existing
       stock absolute-entry seam; host test recorder verifies pre-call clearing,
       exact source forwarding, and returned holder identity.
+  # --- track-metadata fetch framework: record release dispatch ---
+  - address: 0x08268734
+    ghidra: FUN_08268734
+    name: metadata_record_release
+    size: 28
+    sig: "void metadata_record_release(MetadataRecordReleaseContext *context, void *record)"
+    module: app/metadata_record
+    status: ported
+    vars: {param_1: context, param_2: record}
+    renames:
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec words at 0x08268734..0x08268750 establish the complete
+      28-byte extent: move record (r1) to r0, load context->vtable and its
+      +0x0c word, then cmp that slot. A NULL slot tail-branches to the
+      ported free @ 0x0802edc8 with record in r0; a non-NULL slot tail-bx's
+      to release_record(record). 0x08268750 starts the separate
+      metadata_record_diagnostics_enabled helper, whose ldr/cmp/movne/bx-lr
+      sequence Ghidra merged into FUN_08268734's erroneous large body after
+      treating the far free branch target as local control flow. Whole-image
+      ARM B/BL decoding found exactly four plain bl callers (0x082685b4,
+      0x08268c68, 0x08268d5c, 0x08268df4), zero predicated bl callers.
+      The Rust port preserves target offsets through repr(C) vtable/context
+      structs and dispatches its optional +0x0c slot or the existing ported
+      free. Deliberate deviations: Rust uses ordinary calls rather than
+      ARM's bx/tail branch and returns void, while the original's tail
+      callees leave an ignored undefined r0 result. Host tests verify exact
+      record forwarding through the virtual slot and the NULL-slot,
+      NULL-record free fallback. match.py exits 1 with the expected
+      structural diff: LLVM emits a frame and free's port adds its NULL and
+      heap-ops indirection checks.
   # --- track-metadata fetch framework: serialized-record scalar reader ---
   - address: 0x0826863c
     ghidra: FUN_0826863c
