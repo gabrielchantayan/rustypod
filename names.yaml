@@ -106999,3 +106999,26 @@ functions:
       returns engine + 0xad8 and 0x8893 returns engine + 0xadc; every other
       id latches 0x500 in engine[0] through the already-ported
       latch_first_error and returns NULL. Deliberate deviations: none.
+  - address: 0x0824c6c4
+    ghidra: FUN_0824c6c4
+    name: three_word_clear_eleventh
+    size: 20
+    sig: "u32 *three_word_clear_eleventh(u32 *target)"
+    module: cxx/three_word_clear_eleventh
+    status: ported
+    renames:
+      param_1/r0: target
+      r1: zero
+      r0: target
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x0824c6c4..0x0824c6d7: mov r1,#0; str r1,[r0,#8]; str r1,[r0,#4];
+      str r1,[r0]; bx lr. The next independently linked function begins at
+      0x0824c6d8. Decoding every aligned A32 B/BL immediate finds four direct
+      inbound unconditional plain BL calls (0x0824cca8, 0x08255f34,
+      0x08255f3c, and 0x08255fcc) and zero predicated BL calls. The helper
+      clears its target's three words in descending offset order and preserves
+      r0; Ghidra's void signature is inaccurate because all callers consume
+      the preserved target after the call. Rust uses volatile stores to retain
+      the firmware's descending store order; this is the only deliberate
+      deviation.
