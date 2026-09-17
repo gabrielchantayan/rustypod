@@ -104111,3 +104111,29 @@ functions:
       ported-callee boundaries. Host test covers the empty-source path;
       match.py (exit 1, expected structural diff) finds the same four-call
       sequence, with LLVM adding a frame and explicit r1 moves.
+
+  - address: 0x082a4460
+    ghidra: FUN_082a4460
+    name: vtable_slot_08_optional_payload_word
+    size: 60
+    sig: "bool vtable_slot_08_optional_payload_word(OptionalPayloadHandle *handle, u32 *result)"
+    module: cxx/vtable_slot_08_optional_payload_word
+    vars: {param_1: handle, param_2: result, iVar2: predicate_result, iVar3: payload}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 15-word body from 0x082a4460 through
+      0x082a4498; the next distinct push begins at 0x082a449c. The only
+      outbound call is indirect `blx r1` through handle's vtable word 2
+      (+0x08). The wrapper calls that predicate with handle, returns false
+      without touching result when it fails, then requires handle+4 to be
+      non-NULL before copying payload+0x10 to *result and returning true.
+      Raw caller decoding finds four unconditional BLs (0x08179780,
+      0x0817c2e0, 0x08231788, 0x082317e8) and no predicated BL calls.
+      The virtual target has no established identity, so the port models its
+      ABI rather than inventing a callee. Host pointer fields and vtable
+      entries widen naturally, while repr(C) preserves the original offsets
+      on ARM; this is the deliberate host-layout-only deviation. Tests cover
+      false dispatch, successful NULL payload, and successful payload copy.
+      match.py reports the same indirect call, two conditional guards,
+      conditional payload load/store, and boolean result; LLVM adds a frame
+      and register moves, producing 17 instructions versus retailOS's 15.
