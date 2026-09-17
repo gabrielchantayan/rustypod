@@ -107213,3 +107213,38 @@ functions:
       above 6 return the default 0x08ac6cfc. The returned values designate
       runtime-initialized predicate objects outside osos.dec, but this leaf
       only returns their literal addresses. Deliberate deviations: none.
+
+  - address: 0x0823c354
+    ghidra: FUN_0823c354
+    name: codegen_pipeline_helper_wrapper
+    size: 116
+    sig: "void codegen_pipeline_helper_wrapper(void *ctx, void *proc, void *block, void *state, void *arg4, void *arg5, void *arg6)"
+    status: identified
+    renames:
+      param_1/r0/r4: ctx
+      param_2/r1/r5: proc
+      param_3/r2/r12: block
+      param_4/r3/r6: state
+      param_5/stack0/r7: arg4
+      param_6/stack1/r8: arg5
+      param_7/stack2: arg6
+      uVar1/r0: pipeline_helper_result
+      FUN_0823fa7c: unported pipeline helper
+      FUN_0823dac4: unported fragment pipeline emitter
+    notes: >-
+      Deferred: raw words establish the exact 116-byte, 29-word body from
+      `stmdb sp!,{r4,r5,r6,r7,r8,lr}` at 0x0823c354 through `ldmia
+      sp!,{r4,r5,r6,r7,r8,pc}` at 0x0823c3c4; the next independently entered
+      function begins with its own push at 0x0823c3c8. It forwards its seven
+      ABI arguments to unported 0x0823fa7c as nine arguments, inserting two
+      zero stack arguments before arg6, then passes that return value as the
+      third argument to unported 0x0823dac4 while passing a zero seventh
+      argument. Decoding every ARM B/BL word in osos.dec finds four direct
+      callers, all plain unconditional bl (0x08244de4, 0x082462b8,
+      0x08248c4c, 0x08249294), and no predicated BL forms. Neither callee
+      has a names.yaml identity or Rust port: 0x0823fa7c is a large
+      pipeline-generator routine and 0x0823dac4 is a large fragment-pipeline
+      emitter. A Rust wrapper would require dispatch seams whose identities
+      and contracts have not been verified, so publishing one would not be a
+      faithful port. No callee identity or behavioral name beyond this
+      verified wrapper role has been invented.
