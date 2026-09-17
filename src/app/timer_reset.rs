@@ -36,7 +36,7 @@
 
 use core::ptr::addr_of;
 
-use crate::drivers::timer::{timer_restart, timer_start_after, timer_stop};
+use crate::drivers::timer::{timer_is_running, timer_restart, timer_start_after, timer_stop};
 
 /// Fixed re-arm delay (`mov r1, #0xfa0`).
 const RESET_DELAY_MS: u32 = 4000;
@@ -73,6 +73,37 @@ pub unsafe extern "C" fn timer_reset_4000(this: *mut u8) {
     unsafe { timer_stop(timer(this)) };
     unsafe { timer_start_after(timer(this), RESET_DELAY_MS) };
     unsafe { timer_restart(timer(this)) };
+}
+
+/// timer_reset_4000_if_running — original: `FUN_08217348` @ 0x08217348
+/// (56 bytes exactly, 0x08217348..0x08217380; the following `push {r4,lr}`
+/// opens the next function). Four unconditional incoming `bl` call sites,
+/// zero predicated `bl` call sites, and no tail callers, binary-verified by
+/// decoding the raw osos.dec branch words.
+///
+/// Reads the controller's +0xb8 timer and returns when it is not in the
+/// retailOS `run ` state. When running, it stops that timer, programs a 4000
+/// ms delay, and restarts it, reloading +0xb8 before every helper.
+///
+/// # Deliberate deviations
+///
+/// The stock final transfer is a tail `b` to `timer_restart`; Rust uses a
+/// normal call. The stock's three direct helpers were already ported, so no
+/// dispatch seam is needed. Volatile field loads retain the stock reload
+/// behavior if `timer_is_running` or `timer_stop` changes +0xb8.
+///
+/// # Safety
+///
+/// `this` must be readable through +0xbb. Its +0xb8 field must be a non-NULL
+/// 32-bit target pointer to a timer object valid for the timer helpers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_reset_4000_if_running(this: *mut u8) {
+    if unsafe { timer_is_running(timer(this)) } != 0 {
+        unsafe { timer_stop(timer(this)) };
+        unsafe { timer_start_after(timer(this), RESET_DELAY_MS) };
+        unsafe { timer_restart(timer(this)) };
+    }
 }
 
 #[cfg(test)]
@@ -285,6 +316,62 @@ mod tests {
                     Event::Arm(fixture.timer_b as usize),
                 ],
                 "only the stop saw timer_a; both reloads observed the swap"
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_a_non_running_timer_unchanged() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(fixture) = fixture() else {
+            assert!(note_missing_u32_fixture("app::timer_reset"));
+            return;
+        };
+        unsafe {
+            reset_fixture(fixture);
+            addr_of_mut!((*fixture.this).timer).write(fixture.timer_a as u32);
+            addr_of_mut!((*fixture.timer_a).period).write(1234);
+            addr_of_mut!((*fixture.timer_a).state).write(TIMER_STATE_STOPPED);
+            let _restore = install_recording_ops();
+
+            timer_reset_4000_if_running(fixture.this.cast());
+
+            assert_eq!(addr_of!((*fixture.timer_a).period).read_volatile(), 1234);
+            assert_eq!(addr_of!((*fixture.timer_a).state).read_volatile(), TIMER_STATE_STOPPED);
+            assert!(events().is_empty(), "non-running timer never reaches stop or restart");
+        }
+    }
+
+    #[test]
+    fn reprograms_and_restarts_a_running_timer() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(fixture) = fixture() else {
+            assert!(note_missing_u32_fixture("app::timer_reset"));
+            return;
+        };
+        unsafe {
+            reset_fixture(fixture);
+            addr_of_mut!((*fixture.this).timer).write(fixture.timer_a as u32);
+            addr_of_mut!((*fixture.timer_a).state).write(TIMER_STATE_RUNNING);
+            let _restore = install_recording_ops();
+
+            timer_reset_4000_if_running(fixture.this.cast());
+
+            assert_eq!(addr_of!((*fixture.timer_a).period).read_volatile(), RESET_DELAY_MS);
+            assert_eq!(addr_of!((*fixture.timer_a).state).read_volatile(), TIMER_STATE_RUNNING);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Trace(fixture.timer_a as usize),
+                    Event::Trace(fixture.timer_a as usize),
+                    Event::Trace(fixture.timer_a as usize),
+                    Event::Trace(fixture.timer_a as usize),
+                    Event::Arm(fixture.timer_a as usize),
+                ],
             );
         }
     }
