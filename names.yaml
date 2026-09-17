@@ -27793,6 +27793,37 @@ functions:
       address and host tests use a recording seam. No selector or
       continuation validation is added.
 
+  - address: 0x082d223c
+    ghidra: FUN_082d223c
+    name: video_engine_set_frame_property
+    size: 48
+    sig: "void video_engine_set_frame_property(u32 group, u32 property, u32 value)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: group
+      param_2/r1: property
+      param_3/r2: value
+      FUN_08252bec: video_engine_get
+      FUN_08254824: video_engine_frame_property_dispatch
+    notes: >-
+      Raw ARM verifies the 48-byte extent
+      0x082d223c..0x082d2268: push r4-r6/lr, save the three incoming
+      words, call video_engine_get, return silently on NULL, otherwise
+      restore `(engine,group,property,value)` and tail-branch (`bne`) to
+      unported FUN_08254824. The next independently linked wrapper begins
+      at 0x082d226c, so Ghidra's reported 48-byte extent is exact despite
+      its C inlining the 0x08254824 dispatcher. Complete aligned
+      B/BL-immediate decoding of osos.dec found exactly four direct inbound
+      calls, all plain bl (0x0825c000, 0x082810f4, 0x0828112c,
+      0x08281408), and no predicated BL calls. Every observed caller passes
+      group 0x2300 and property 0x2200, but the wrapper passes all words
+      unchanged; the dispatcher owns validation. Deliberate deviation:
+      FUN_08254824 remains resident firmware on target through a transmute
+      seam, while host tests install a recording dispatcher. match.py exit
+      1 prints the expected compiler structural diff; it is not an automatic
+      failure.
+
   - address: 0x082d2314
     ghidra: FUN_082d2314
     name: video_engine_set_property
