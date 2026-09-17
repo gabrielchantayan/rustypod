@@ -106077,3 +106077,25 @@ functions:
       20-byte initializer is a deliberate deviation; raw words at
       0x08258d48..0x08258d5c prove it solely writes vtable 0x089a76fc and
       clears byte +4. Host tests cover both the nonzero and default paths.
+  - address: 0x0826f3a8
+    ghidra: FUN_0826f3a8
+    name: owned_chain_table_destroy
+    size: 20
+    sig: "void *owned_chain_table_destroy(void *owner)"
+    module: cxx/owned_chain_table_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      FUN_083d360c: retail chain-table destroy (stock absolute-entry seam; semantic identity unestablished)
+    notes: >-
+      Raw osos.dec words e92d4010 e2800010 eb059095 e2400010 e8bd8010
+      establish the true 20-byte extent 0x0826f3a8..0x0826f3bc; the next
+      independent function begins at 0x0826f3bc with push {r4,lr}. The
+      function passes owner+0x10 to the unresolved 0x083d360c table
+      destructor, discards its return, and returns owner. Exact raw decoding
+      finds one unconditional outbound BL and no predicated direct calls.
+      Four inbound direct call sites at 0x08269b80, 0x08269c34, 0x0826a670,
+      and 0x0826a758 are unconditional plain BL forms. The callee is absent
+      from names.yaml and has no Rust port, so the target
+      calls its verified absolute entry; the host test seam records the
+      +0x10 argument rather than inventing a callee identity.
