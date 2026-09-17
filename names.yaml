@@ -46141,6 +46141,34 @@ functions:
       instead of the original's direct b - same target, same
       pass-through of the divisor in r1.
 
+  - address: 0x082573ac
+    ghidra: FUN_082573ac
+    name: fixed16_pow
+    size: 28
+    sig: "i32 fixed16_pow(base: i32, exponent: i32) -> i32"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: base
+      param_2: exponent
+      FUN_08257478: fixed16_log
+      FUN_082a188c: fixed16_mul_indirect
+      FUN_08257560: fixed16_exp
+    notes: >-
+      Raw osos.dec words decode as seven ARM instructions at
+      0x082573ac-0x082573c4: spill base/exponent, call the Q16.16 log
+      polynomial at 0x08257478 with base, multiply its return by the
+      stack-materialized exponent through fixed16_mul_indirect, then call
+      the Q16.16 exponential polynomial at 0x08257560. Thus this is
+      fixed16_pow(base, exponent) = exp(exponent * log(base)). The next
+      real function begins at 0x082573c8, so Ghidra's 28-byte extent is
+      exact. A complete raw ARM B/BL decode finds four incoming plain BL
+      calls (0x08167a58, 0x081977b8, 0x08273e74, 0x08273ef8) and zero
+      predicated forms. The Rust port retains the established
+      fixed16_mul_indirect implementation and reaches the two unported
+      helpers through host-swappable seams, while target builds call their
+      verified retailOS addresses directly.
+
   - address: 0x082573c8
     ghidra: FUN_082573c8
     name: fixed16_sin_degrees

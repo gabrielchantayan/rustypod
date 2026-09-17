@@ -2733,6 +2733,70 @@ pub unsafe extern "C" fn fixed16_cos(mut angle: i32) -> i32 {
     if negate { result.wrapping_neg() } else { result }
 }
 
+/// Host-swappable entry point for the Q16.16 logarithm helper
+/// `FUN_08257478`. The target build calls its verified retailOS address;
+/// host tests install a deterministic oracle.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_LOG: usize = 0x0825_7478;
+
+/// Host-swappable entry point for the Q16.16 exponential helper
+/// `FUN_08257560`. The target build calls its verified retailOS address;
+/// host tests install a deterministic oracle.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_EXP: usize = 0x0825_7560;
+
+type Fixed16UnaryFn = unsafe extern "C" fn(i32) -> i32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn fixed16_log(value: i32) -> i32 {
+    unsafe { core::mem::transmute::<usize, Fixed16UnaryFn>(0x0825_7478)(value) }
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn fixed16_log(value: i32) -> i32 {
+    let target = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FIXED16_LOG)) };
+    unsafe { core::mem::transmute::<usize, Fixed16UnaryFn>(target)(value) }
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn fixed16_exp(value: i32) -> i32 {
+    unsafe { core::mem::transmute::<usize, Fixed16UnaryFn>(0x0825_7560)(value) }
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn fixed16_exp(value: i32) -> i32 {
+    let target = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FIXED16_EXP)) };
+    unsafe { core::mem::transmute::<usize, Fixed16UnaryFn>(target)(value) }
+}
+
+/// fixed16_pow — original: `FUN_082573ac` @ `0x082573ac` (28 bytes,
+/// exactly seven ARM instructions through `pop {r2,r3,r4,pc}` at
+/// `0x082573c4`; the distinct `fixed16_sin_degrees` starts at
+/// `0x082573c8`).
+///
+/// Raw ARM B/BL decoding finds four direct incoming calls, all plain `bl`
+/// (0x08167a58, 0x081977b8, 0x08273e74, 0x08273ef8); there are no
+/// predicated call forms. Computes `exp(exponent * log(base))` in Q16.16:
+/// it calls the unported Q16.16 log helper at 0x08257478, multiplies that
+/// result by the stack-materialized exponent through
+/// [`fixed16_mul_indirect`], then calls the unported Q16.16 exp helper at
+/// 0x08257560.
+///
+/// Deliberate deviation: the two unported helpers use host-swappable seams;
+/// target builds call their verified retailOS addresses directly. Rust names
+/// replace the source's incidental stack frame and register spills.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed16_pow(base: i32, exponent: i32) -> i32 {
+    let logarithm = unsafe { fixed16_log(base) };
+    let product = unsafe { fixed16_mul_indirect(&exponent, logarithm) };
+    unsafe { fixed16_exp(product) }
+}
+
 #[cfg(test)]
 mod tests {
     static FIXED16_COS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
@@ -6488,5 +6552,46 @@ mod tests {
         assert_eq!(unsafe { fixed16_cos(degree(44) + 0x8000) }, 4_095);
 
         unsafe { FIXED16_COS_TABLE = old_table };
+    }
+    static FIXED16_POW_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static mut FIXED16_POW_LOG_INPUT: i32 = 0;
+    static mut FIXED16_POW_EXP_INPUT: i32 = 0;
+
+    unsafe extern "C" fn fixed16_pow_test_log(base: i32) -> i32 {
+        unsafe { FIXED16_POW_LOG_INPUT = base };
+        match base {
+            0 => -0x0001_8000,
+            1 => 0x0001_8000,
+            _ => 0x0000_c000,
+        }
+    }
+
+    unsafe extern "C" fn fixed16_pow_test_exp(value: i32) -> i32 {
+        unsafe { FIXED16_POW_EXP_INPUT = value };
+        value
+    }
+
+    #[test]
+    fn fixed16_pow_passes_base_and_q16_product_through_unported_helpers() {
+        let _lock = FIXED16_POW_TEST_LOCK.lock();
+        let old_log = unsafe { FIXED16_LOG };
+        let old_exp = unsafe { FIXED16_EXP };
+        unsafe {
+            FIXED16_LOG = fixed16_pow_test_log as usize;
+            FIXED16_EXP = fixed16_pow_test_exp as usize;
+        }
+
+        assert_eq!(unsafe { fixed16_pow(0, 0x0002_0000) }, -0x0003_0000);
+        assert_eq!(unsafe { FIXED16_POW_LOG_INPUT }, 0);
+        assert_eq!(unsafe { FIXED16_POW_EXP_INPUT }, -0x0003_0000);
+
+        assert_eq!(unsafe { fixed16_pow(1, -0x0001_0000) }, -0x0001_8000);
+        assert_eq!(unsafe { FIXED16_POW_LOG_INPUT }, 1);
+        assert_eq!(unsafe { FIXED16_POW_EXP_INPUT }, -0x0001_8000);
+
+        unsafe {
+            FIXED16_LOG = old_log;
+            FIXED16_EXP = old_exp;
+        }
     }
 }
