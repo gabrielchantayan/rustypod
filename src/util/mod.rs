@@ -76,6 +76,7 @@ pub mod linked_list_find_and_promote;
 pub mod linked_list_append;
 pub mod list_find;
 pub mod predicate_list_find;
+pub mod predicate_for_kind;
 pub mod lazy_slot_table_entry;
 pub mod least_common_multiple;
 pub mod mapped_subobject_for_slot;

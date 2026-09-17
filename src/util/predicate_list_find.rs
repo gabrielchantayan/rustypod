@@ -6,16 +6,16 @@
 //! inbound call sites, all unconditional `bl`: 0x082409d8, 0x0824197c,
 //! 0x08241990, 0x082419a4, 0x08242c70, and 0x08253c0c. No predicated call
 //! reaches this body. The function selects a kind-specific predicate through
-//! the unported selector `FUN_082432c8`, walks the list at `list + 0x10`, and
+//! the ported `predicate_for_kind`, walks the list at `list + 0x10`, and
 //! invokes that predicate only for nodes whose byte kind at `+0xc8` equals the
 //! requested full-width kind. The first accepted node yields its `+0xbc` word,
 //! either directly when bit 1 of `+0xc4` is set or as an offset from `list`.
 //!
-//! Deliberate deviations: none on the target. The original selector remains at
-//! 0x082432c8 because it returns runtime-initialized predicate objects outside
-//! osos's decrypted image. Host tests replace that selector with a seam; host
-//! predicate-vtable pointers are native-width, while target pointers remain
-//! four-byte `repr(C)` fields.
+//! Deliberate deviations: none on the target. Host tests retain a local
+//! selector seam because their predicate objects live at fixture addresses;
+//! target builds directly call the ported selector. Host predicate-vtable
+//! pointers are native-width, while target pointers remain four-byte `repr(C)`
+//! fields.
 
 use core::ptr;
 
@@ -59,15 +59,8 @@ struct PredicateNode {
 type PredicateForKind = unsafe extern "C" fn(u32) -> *mut PredicateObject;
 
 #[cfg(target_os = "none")]
-static PREDICATE_FOR_KIND_ADDRESS: usize = 0x0824_32c8;
-
-#[cfg(target_os = "none")]
 unsafe fn predicate_for_kind(kind: u32) -> *mut PredicateObject {
-    // Volatile keeps this as the stock selector call instead of permitting
-    // constant propagation through the firmware entry address.
-    let address = unsafe { ptr::read_volatile(ptr::addr_of!(PREDICATE_FOR_KIND_ADDRESS)) };
-    let select: PredicateForKind = unsafe { core::mem::transmute(address) };
-    unsafe { select(kind) }
+    crate::util::predicate_for_kind::predicate_for_kind(kind) as usize as *mut PredicateObject
 }
 
 #[cfg(all(not(target_os = "none"), test))]

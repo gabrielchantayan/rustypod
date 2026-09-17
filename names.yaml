@@ -107097,3 +107097,32 @@ functions:
       order and preserves dst in r0; Ghidra's void signature is inaccurate
       because callers rely on the preserved destination pointer. Rust preserves
       the byte-wise store order and returned pointer; no deliberate deviation.
+  - address: 0x082432c8
+    ghidra: FUN_082432c8
+    name: predicate_for_kind
+    size: 88
+    sig: "u32 predicate_for_kind(u32 kind)"
+    module: util/predicate_for_kind
+    status: ported
+    renames:
+      param_1/r0: kind
+      DAT_08243320: default_predicate
+      DAT_08243324: predicate_for_kind_2
+      DAT_08243328: predicate_for_kind_3
+      DAT_0824332c: predicate_for_kind_4
+      DAT_08243330: predicate_for_kind_5
+      DAT_08243334: predicate_for_kind_6
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte body at
+      0x082432c8..0x0824331f: cmp kind,#6; addls pc,pc,kind,lsl #2; three
+      default branches; then six literal-load/bx-lr return blocks. The literal
+      pool at 0x08243320..0x08243334 is data, not function body; the next
+      separately linked function begins with push {r4-r6,lr} at 0x08243338.
+      Decoding every aligned A32 B/BL immediate in osos.dec finds four direct
+      inbound calls, all unconditional plain bl at 0x082435f0, 0x08243674,
+      0x08243790, and 0x0824385c; no predicated bl calls reach it. Kinds 2,
+      3, 4, 5, and 6 return respectively 0x08ac6cf0, 0x08ac6d14,
+      0x08ac6d20, 0x08ac6d08, and 0x089cc940; kinds 0, 1, and every value
+      above 6 return the default 0x08ac6cfc. The returned values designate
+      runtime-initialized predicate objects outside osos.dec, but this leaf
+      only returns their literal addresses. Deliberate deviations: none.
