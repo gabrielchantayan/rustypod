@@ -468,6 +468,55 @@ pub unsafe extern "C" fn shared_cell_release(slot: *mut *mut SharedCell) {
 
     slot.write(core::ptr::null_mut());
 }
+/// shared_cell_release_return_slot — retailOS `FUN_08262b2c` @ `0x08262b2c`
+/// (88 bytes; four incoming plain `bl` call sites and no predicated incoming
+/// `bl` forms, verified by decoding every B/BL word in `osos.dec`).
+///
+/// Raw instructions occupy 22 words through `0x08262b80`; the distinct next
+/// function begins at `0x08262b84`. This is the return-`slot` instantiation of
+/// [`shared_cell_release`]: an empty slot returns unchanged; otherwise it
+/// wrapping-decrements the cell refcount, calls vtable word 1 (+4) for a
+/// non-NULL final payload, deletes the reloaded non-NULL cell with tag 2, clears
+/// the slot, and returns it. Its two body calls are predicated (`blxne` through
+/// the vtable and `blne operator_delete`), with no plain direct `bl`.
+///
+/// Deliberate deviation: Rust expresses the predicated calls as guarded calls;
+/// the existing [`operator_delete`] port replaces the direct retailOS branch.
+///
+/// # Safety
+/// Same preconditions as [`shared_cell_release`]. The returned pointer is
+/// always `slot`, including when the slot was initially NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_release_return_slot")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_release_return_slot(
+    slot: *mut *mut SharedCell,
+) -> *mut *mut SharedCell {
+    let cell = slot.read();
+    if cell.is_null() {
+        return slot;
+    }
+
+    let remaining = (*cell).refcount.wrapping_sub(1);
+    (*cell).refcount = remaining;
+    if remaining == 0 {
+        let value = (*slot.read()).value as *mut u8;
+        if !value.is_null() {
+            let vtable = (value as *const usize).read() as *const usize;
+            let plain_destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            plain_destructor(value);
+        }
+
+        let cell = slot.read();
+        if !cell.is_null() {
+            operator_delete(cell.cast());
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+    slot
+}
 
 /// shared_cell_release_secondary — original: `FUN_083b52a0` @ `0x083b52a0`
 /// (84 bytes; 19 incoming `bl` call sites, ALL unconditional — zero
@@ -850,6 +899,48 @@ mod tests {
         assert!(slot.is_null());
         assert!(events().is_empty());
     }
+    #[test]
+    fn return_slot_release_keeps_null_slot_and_returns_its_address() {
+        let _bench = bench();
+        let mut slot: *mut SharedCell = core::ptr::null_mut();
+
+        assert_eq!(
+            unsafe { shared_cell_release_return_slot(&mut slot) },
+            core::ptr::addr_of_mut!(slot)
+        );
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    #[test]
+    fn return_slot_release_dispatches_and_deletes_on_final_drop() {
+        let _bench = bench();
+        let mut vtable = [0usize; 2];
+        vtable[1] = recording_destructor as usize;
+        let mut payload = [vtable.as_mut_ptr() as usize];
+        let payload_ptr = payload.as_mut_ptr() as *mut u8;
+        let mut cell = SharedCell {
+            value: payload_ptr as usize,
+            refcount: 1,
+        };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        let mut slot = cell_ptr;
+
+        assert_eq!(
+            unsafe { shared_cell_release_return_slot(&mut slot) },
+            core::ptr::addr_of_mut!(slot)
+        );
+        assert_eq!(cell.refcount, 0);
+        assert!(slot.is_null());
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::Destructor(payload_ptr as usize),
+                Event::HeapFree(cell_ptr as *mut u8 as usize, 2),
+            ]
+        );
+    }
+
 
     /// Non-final drop (2 -> 1): the count falls and the slot is cleared,
     /// but neither the destructor nor the cell delete runs.

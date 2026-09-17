@@ -29625,6 +29625,35 @@ functions:
       has its own target text section so linker identical-code folding cannot
       erase this device-callable sibling symbol.
 
+  # --- shared-cell handle release, return-slot specialization ---
+  - address: 0x08262b2c
+    ghidra: FUN_08262b2c
+    name: shared_cell_release_return_slot
+    size: 88
+    sig: "SharedCell **shared_cell_release_return_slot(SharedCell **slot)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: slot
+      iVar1/r0: cell
+      iVar2/r1: remaining
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 22-word, 88-byte extent
+      0x08262b2c..0x08262b80; the next separately linked function starts at
+      0x08262b84. Whole-image ARM B/BL decoding finds four incoming direct
+      calls, all plain unconditional bl, and no predicated bl forms. The body
+      itself has no plain direct bl: after a non-NULL slot's signed refcount
+      wrapping decrement reaches zero, it conditionally calls the payload's
+      vtable word 1 (+4) with blxne, reloads the slot, then conditionally calls
+      the ported tag-2 operator_delete with blne. Every non-NULL-cell path
+      clears slot; an initially NULL slot is left unchanged; r0 returns slot.
+      Ghidra's noreturn annotation after operator_delete is false because raw
+      control flow falls through to the clear and return. This is the
+      return-slot specialization of the existing shared-cell release family.
+      Deliberate deviation: Rust uses ordinary guarded calls and the existing
+      operator_delete port instead of the predicated direct branches.
+
   # --- shared-cell handle release, direct payload teardown ---
   - address: 0x08262b84
     ghidra: FUN_08262b84
