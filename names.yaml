@@ -21444,6 +21444,43 @@ functions:
       is deliberately not invented; target Rust calls its address directly
       while host tests pass a recorder to the shared gate body.
 
+  - address: 0x0828a3a0
+    ghidra: FUN_0828a3a0
+    name: notes_dispatcher_append_timestamp
+    size: 180
+    sig: "void notes_dispatcher_append_timestamp(void *owner, const char *timestamp)"
+    module: app/notes_dispatcher_append_timestamp
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r6: timestamp
+      "[owner + 0x4ec]": timestamp_enabled_source
+      "[owner + 0x5b8]": timestamp_array
+      "[owner + 0x5bc]": timestamp_count
+      FUN_0828b1d4: field_dc_as_class_4a80
+      FUN_082725c0: byte_source_at
+      FUN_082aadd4: operator_new
+      FUN_08277440: string_default_construct
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_0827639c: string_object_assign_cstr
+      FUN_0827196c: observable_array_append
+      FUN_0828b69c: notes_log_flush_unported
+    notes: >-
+      Raw osos.dec is exactly 180 bytes, 45 ARM instructions from
+      0x0828a3a0 through `pop {r3,r4,r5,r6,r7,pc}` at 0x0828a450; the
+      next separately linked function begins at 0x0828a454. Raw decoding
+      establishes eleven direct calls in the body and four incoming
+      unconditional bl call sites, with no predicated incoming bl. It reads
+      byte-source index 4 from owner+0x4ec, or (only if the first flag was
+      clear and owner+0xdc casts to class 0x4a80) from that object+0x54. When
+      either flag is nonzero it allocates 20 bytes, default-constructs a
+      StringObject at +12, writes the current normalized datetime at +0,
+      assigns the caller timestamp to the StringObject, and appends the block
+      to owner+0x5b8. If owner+0x5bc exceeds 100 it makes gateway requests
+      (16,1) and (16,250) around the unported notes-log flush @ 0x0828b69c.
+      The Rust port calls every established direct port; only that flush is a
+      fixed-address device call and an injectable host seam.
+
   - address: 0x0828b1d4
     ghidra: FUN_0828b1d4
     name: field_dc_as_class_4a80
