@@ -107601,3 +107601,31 @@ functions:
       reports the intended structural diff: LLVM adds a frame and the fixed
       address operation is a literal veneer, while retaining lock, copy,
       unlock, target +0x1c, and return-one order.
+
+  - address: 0x08214410
+    ghidra: FUN_08214410
+    name: callback_owner_release
+    size: 92
+    sig: "u32 callback_owner_release(CallbackOwner *owner)"
+    module: app/callback_owner_release
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_1_plus_0x14/r0: target
+      param_1_plus_0x20: state
+      param_1_plus_0x24/r1: flags
+      FUN_081f02c0: retail_target_release
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte body at
+      0x08214410..0x0821446b; the next separately entered function begins at
+      0x0821446c with push {r3,r4,r5,r6,r7,lr}. Whole-image A32 branch
+      decoding finds four inbound unconditional plain BL callers
+      (0x0821438c, 0x082145d8, 0x0822ab2c, and 0x0822ab40) and no predicated
+      BL callers. Inside the body, there are two unconditional calls (BLX
+      target vtable slot +0x58 and BL 0x081f02c0) plus one predicated BLXNE
+      target vtable slot +0x5c. When target is nonzero, flag bit zero controls
+      the +0x5c call; it always follows with +0x58 and the retail target
+      release, then clears state and flags and returns one. FUN_081f02c0 is
+      recovered but unported, so the ARM port calls its verified fixed address;
+      host tests install that operation and both virtual calls as explicit
+      seams because host function pointers are wider than target words.
