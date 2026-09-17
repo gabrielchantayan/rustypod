@@ -82,6 +82,7 @@ pub mod object_flags_contain;
 pub mod object_byte_0x21;
 pub mod object_word_0xc0;
 pub mod object_release_slot1;
+pub mod obfuscated_buffer_prepare;
 pub mod object_word_payload_resolve;
 pub mod object_candidate_payload_resolve;
 pub mod object_validation_status;
