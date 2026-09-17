@@ -68,6 +68,8 @@ pub mod storage_transfer;
 pub mod storage_backend_transfer;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
+/// Mounted-volume information query @ 0x082e19ec.
+pub mod volume_info;
 /// Mounted-volume descriptor cursor seek wrapper @ 0x082e628c.
 pub mod volume_seek;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.
