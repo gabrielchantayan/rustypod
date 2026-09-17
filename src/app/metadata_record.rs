@@ -131,6 +131,111 @@ pub unsafe extern "C" fn metadata_record_read_u32(
         value
     }
 }
+
+/// Context and vtable fragment used to release a fetched metadata record.
+/// Both words are 4 bytes apart on the target; native function pointers keep
+/// host fixtures callable without relying on target byte offsets.
+#[repr(C)]
+pub struct MetadataRecordReleaseContext {
+    pub vtable: *const MetadataRecordReleaseVtable,
+}
+
+/// The release slot at context->vtable +0x0c.
+#[repr(C)]
+pub struct MetadataRecordReleaseVtable {
+    pub unresolved_00: [usize; 3],
+    pub release_record: Option<unsafe extern "C" fn(record: *mut u8)>,
+}
+
+/// metadata_record_release — original: `FUN_08268734` @ `0x08268734`
+/// (28 bytes).
+///
+/// Raw ARM words at `0x08268734..0x08268750`:
+///
+/// ```text
+/// 08268734  mov   r2, r0              @ context
+/// 08268738  mov   r0, r1              @ record
+/// 0826873c  ldr   r1, [r2]
+/// 08268740  ldr   r1, [r1, #12]       @ vtable->release_record
+/// 08268744  cmp   r1, #0
+/// 08268748  beq   0x0802edc8          @ free(record)
+/// 0826874c  bxne  r1                  @ release_record(record)
+/// ```
+///
+/// The `bx lr` at `0x0826875c` closes
+/// [`metadata_record_diagnostics_enabled`], not this function. The next
+/// real function boundary is `0x08268750`, making the true extent 28 bytes;
+/// Ghidra's 28-byte body incorrectly includes the far `beq` target as a
+/// local block. A whole-image ARM branch-word decode found four direct calls,
+/// all unconditional `bl` (0x082685b4, 0x08268c68, 0x08268d5c, 0x08268df4)
+/// and zero predicated `bl` calls.
+///
+/// # Algorithm
+///
+/// Tail-dispatch the metadata record to the context vtable's +0x0c release
+/// slot when present; otherwise tail-dispatch to the ported retailOS
+/// [`crate::malloc_rt::free`]. The record is the second input register, not
+/// the context Ghidra ascribes to the fallback call.
+///
+/// Deliberate deviations: Rust returns `()` rather than preserving the
+/// undefined `r0` left by either tail callee; every verified caller ignores
+/// it. The dispatch remains a direct call because Rust cannot express ARM's
+/// register-only `bx` tail transfer.
+///
+/// # Safety
+///
+/// `context` must have a readable vtable word and the vtable must have a
+/// readable +0x0c slot. If that slot is non-NULL it must accept `record`;
+/// otherwise `record` must be acceptable to the retailOS allocator.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.metadata_record_release")]
+#[inline(never)]
+pub unsafe extern "C" fn metadata_record_release(
+    context: *const MetadataRecordReleaseContext,
+    record: *mut u8,
+) {
+    unsafe {
+        match (*(*context).vtable).release_record {
+            Some(release_record) => release_record(record),
+            None => crate::malloc_rt::free(record),
+        }
+    }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    unsafe extern "C" fn record_release(record: *mut u8) {
+        unsafe { *(record.cast::<*mut u8>()) = record };
+    }
+
+    #[test]
+    fn dispatches_non_null_release_slot_with_record_argument() {
+        let vtable = MetadataRecordReleaseVtable {
+            unresolved_00: [0; 3],
+            release_record: Some(record_release),
+        };
+        let context = MetadataRecordReleaseContext { vtable: &vtable };
+        let mut observed = core::ptr::null_mut();
+        let record = &mut observed as *mut *mut u8 as *mut u8;
+
+        unsafe { metadata_record_release(&context, record) };
+
+        assert_eq!(observed, record);
+    }
+
+    #[test]
+    fn null_release_slot_accepts_null_record_via_free_fallback() {
+        let vtable = MetadataRecordReleaseVtable {
+            unresolved_00: [0; 3],
+            release_record: None,
+        };
+        let context = MetadataRecordReleaseContext { vtable: &vtable };
+
+        unsafe { metadata_record_release(&context, core::ptr::null_mut()) };
+    }
+}
 /// Track-metadata fetch context fields recovered by
 /// `metadata_record_diagnostics_enabled`. `diagnostic_log` is the logging
 /// context passed as the first argument to the diagnostic formatter by all
