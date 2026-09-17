@@ -137,6 +137,7 @@ pub mod iap_packet_event_schedule;
 pub mod itunesdb_read_default_field;
 pub mod image_format;
 pub mod gl_pixel_format_to_layout_kind;
+pub mod layout_kind_to_gl_pixel_type;
 pub mod kinded_controller;
 pub mod image_format_descriptor_slot;
 pub mod image_format_descriptor_slots_initialize;

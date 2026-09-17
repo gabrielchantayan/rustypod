@@ -106641,3 +106641,34 @@ functions:
       match.py against the requested veneer exits 1 with the expected
       structural difference: retailOS is a branch while Rust emits the target
       body and its frame.
+
+  # --- OpenGL ES pixel type selection by layout kind ---
+  - address: 0x082604fc
+    ghidra: FUN_082604fc
+    name: layout_kind_to_gl_pixel_type
+    size: 40
+    sig: "u32 layout_kind_to_gl_pixel_type(u32 layout_kind)"
+    module: app/layout_kind_to_gl_pixel_type
+    status: ported
+    renames:
+      param_1/r0: layout_kind
+      DAT_08260524: GL_UNSIGNED_SHORT_5_6_5_REV
+      DAT_08260528: GL_UNSIGNED_SHORT_4_4_4_4_REV
+      DAT_0826052c: GL_UNSIGNED_SHORT_5_5_5_1_REV
+      DAT_08260530: GL_UNSIGNED_BYTE
+    notes: >-
+      Raw osos.dec words prove the 40-byte instruction extent
+      0x082604fc..0x08260524: cmp r0,#5; ldreq r0,[pc,#28]; bxeq lr; cmp
+      r0,#6; ldreq r0,[pc,#20]; bxeq lr; cmp r0,#7; ldrne r0,[pc,#16];
+      ldreq r0,[pc,#8]; bx lr. The four-word literal pool at
+      0x08260524 holds 0x00008363, 0x00008033, 0x00008034, and 0x00001401;
+      the next independently linked leaf begins at 0x08260534. Whole-image
+      A32 branch-immediate decoding finds exactly four incoming plain BL
+      calls at 0x0824df7c, 0x08250728, 0x08251704, and 0x08252a30, and zero
+      predicated BL callers. The selector returns the packed OpenGL ES pixel
+      types 5_6_5_REV, 4_4_4_4_REV, and 5_5_5_1_REV for layout kinds 5, 6,
+      and 7 respectively; all other u32 values return UNSIGNED_BYTE.
+      Deliberate deviation: Rust emits a match rather than conditional
+      PC-relative literal loads; the complete input/output mapping is
+      preserved. Host tests cover all three selected kinds and adjacent plus
+      extreme defaulting values.
