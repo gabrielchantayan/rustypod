@@ -86,6 +86,44 @@ pub unsafe extern "C" fn mode_selected_position_set(
     mode_selected_position_set_path(flag_set)(selected_state, mode, position)
 }
 
+// `mode_selected_position_set_veneer` — original: `thunk_FUN_0822ba50` @
+// `0x08220538` (**4 bytes**, `0x08220538..0x0822053c`; the separately linked
+// next function starts with `push {r4,lr}` at `0x0822053c`).
+//
+// Raw ARM word `0xea002d44` is an unconditional `b 0x0822ba50`. Independent
+// decoding finds four inbound unconditional plain `bl` calls and no
+// predicated `bl` calls. The veneer tail-dispatches unchanged `(state, mode,
+// position)` arguments and its target's result.
+//
+// Deliberate deviation: the target build branches to the existing Rust port
+// symbol rather than the retail fixed address; the ABI-visible tail branch
+// remains a single ARM instruction.
+//
+// Safety: has the same requirements as `mode_selected_position_set`.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl mode_selected_position_set_veneer
+    .type mode_selected_position_set_veneer, %function
+mode_selected_position_set_veneer:
+    b       mode_selected_position_set
+    .size mode_selected_position_set_veneer, . - mode_selected_position_set_veneer
+"#
+);
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(never)]
+pub unsafe extern "C" fn mode_selected_position_set_veneer(
+    state: *mut u8,
+    mode: u32,
+    position: u32,
+) -> u32 {
+    mode_selected_position_set(state, mode, position)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -166,14 +204,14 @@ mod tests {
     }
 
     #[test]
-    fn set_flag_forwards_unchanged_arguments_to_set_state() {
+    fn veneer_forwards_set_flag_arguments_and_result() {
         let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
         let mut state = State([0; STATE_BYTES]);
         state.0[MODE_FLAGS_OFFSET] = 1;
         unsafe {
             let _reset = install();
 
-            assert_eq!(mode_selected_position_set(state.0.as_mut_ptr(), u32::MAX, 0), SET_RETURN);
+            assert_eq!(mode_selected_position_set_veneer(state.0.as_mut_ptr(), u32::MAX, 0), SET_RETURN);
             assert_eq!(SET_STATE, state.0.as_mut_ptr().add(SET_STATE_OFFSET));
             assert_eq!(SET_MODE, u32::MAX);
             assert_eq!(SET_POSITION, 0);
