@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a273c
+    ghidra: FUN_082a273c
+    name: object_has_resolved_flag_0x40
+    size: 88
+    sig: "u32 object_has_resolved_flag_0x40(u32 *object)"
+    module: app/object_has_resolved_flag_0x40
+    status: ported
+    renames:
+      param_1/r0: object
+      r4: object
+      r0: resolved_object
+      r1: vtable_slot_08_or_successor_link
+    notes: >-
+      Raw osos.dec establishes the true 88-byte extent
+      0x082a273c..0x082a2793; 0x082a2794 is the next distinct push prologue.
+      Decoding every A32 B/BL word finds four direct unconditional plain BL
+      callers (0x081fd124, 0x081fd194, 0x08208b04, 0x08208b78) and zero
+      predicated BL callers. It calls the object's vtable +8 predicate, uses
+      the cached +8 resolved-object word when present, otherwise calls
+      0x082a2cac with object and its +4 successor link, then returns bit 6
+      of the resolved object's +0x1c flags. The target retains both original
+      call ABIs; host tests install seams because neither callee is ported.
   - address: 0x082a32e8
     ghidra: FUN_082a32e8
     name: scoped_context_owner_byte_15_bit_1
