@@ -1326,6 +1326,9 @@ pub mod hints {
     // Dedicated raw-u32 input-sequence state fixtures; mappings never unmap.
     pub const INPUT_SEQUENCE_ITEM_FOUND: usize = 0x3d00_0000;
     pub const INPUT_SEQUENCE_ITEM_BUILD: usize = 0x3f00_0000;
+    // 0x0826_0000: dedicated to app/pixel_write_red_alpha's target-width
+    // output cursor fixture; mappings never unmap, so no other user may share it.
+    pub const PIXEL_WRITE_RED_ALPHA: usize = 0x0826_0000;
     // 0x4000_0000: dedicated to ui/notification_dispatch's owner, target,
     // and vtable raw-u32 fixture; mappings never unmap.
     pub const UI_NOTIFICATION_DISPATCH: usize = 0x4000_0000;
