@@ -60429,6 +60429,29 @@ functions:
       seams for the two unported cores, merged count/capacity initialization,
       and a direct word_list_copy call whose archive relocation disassembles
       as address zero.
+  - address: 0x082cf798
+    ghidra: FUN_082cf798
+    name: word_list_modular_scale_assign
+    size: 36
+    sig: "void word_list_modular_scale_assign(u32 scalar, WordList *value, const ModularReductionContext *modulus)"
+    module: util/word_list_modular_scale
+    status: ported
+    renames:
+      param_1: scalar
+      param_2: value
+      param_3: modulus
+    notes: >-
+      Scales each active little-endian u32 limb by scalar through
+      FUN_082d4c50, appends a nonzero carry limb, then tail-dispatches
+      FUN_082cdb04 with r2 = 0 for mode-zero reduction. Raw extent is nine
+      ARM words / 36 bytes: the next distinct function begins at 0x082cf7bc
+      with push {r4,r5,lr}. Decoding raw osos.dec references finds four
+      inbound plain unconditional bl instructions (0x0807c4f4, 0x080eeef0,
+      0x080eefd8, 0x080ef018) and zero predicated calls. The Rust port
+      inlines the tiny scalar core instead of exporting it; the reducer is a
+      volatile seam to its exact firmware address on target and a host model
+      in tests. match.py shows the expected expanded inline multiply loop and
+      volatile indirect reduction dispatch.
   - address: 0x082cf804
     ghidra: FUN_082cf804
     name: word_list_modular_subtract_assign

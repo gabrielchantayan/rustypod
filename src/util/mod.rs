@@ -186,6 +186,7 @@ pub mod word_list_assign_value;
 pub mod word_list_modular_add;
 pub mod word_list_modular_multiply;
 pub mod word_list_modular_square;
+pub mod word_list_modular_scale;
 pub mod word_list_modular_subtract;
 pub mod word_list_is_zero;
 pub mod word_list_matches_value;
