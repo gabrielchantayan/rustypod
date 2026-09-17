@@ -10,19 +10,16 @@
 //! `P4_COLLSEQ`, set P5 to that affinity plus `jump_if_null`, and invalidate
 //! both one-register affinity-cache entries when the affinity mask is nonzero.
 //!
-//! Deliberate deviation: `sqlite3ExprCollSeq` at `0x08370298` and
-//! `sqlite3CompareAffinity` at `0x083735b8` are unported and remain volatile
-//! dispatch seams. Target builds call those exact addresses; host tests install
-//! recorders. The remaining four call targets are ported and called directly.
+//! Deliberate deviation: `sqlite3CompareAffinity` at `0x083735b8` remains a
+//! volatile dispatch seam. `sqlite3BinaryCompareCollSeq` at `0x08370298` is
+//! ported and called directly.
 
 use core::ptr;
+use super::binary_compare_coll_seq::binary_compare_coll_seq;
 
 use super::expr_affinity::{expr_affinity, Expr};
 use super::expr_cache_affinity_change::expr_cache_affinity_change;
 use super::vdbe::{vdbe_add_op4, vdbe_change_p5, Vdbe};
-
-/// Target address of the unresolved collation resolver.
-pub const EXPR_COLL_SEQ_ADDRESS: usize = 0x0837_0298;
 
 /// The target-layout prefix of `Parse` used by this helper.
 #[repr(C)]
@@ -36,43 +33,6 @@ pub struct CodeCompareParse {
 const _: () = {
     assert!(core::mem::offset_of!(CodeCompareParse, p_vdbe) == 0x0c);
 };
-
-pub type ExprCollSeq = unsafe extern "C" fn(
-    parse: *mut CodeCompareParse,
-    left: *mut Expr,
-    right: *mut Expr,
-) -> *mut u8;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_expr_coll_seq(
-    parse: *mut CodeCompareParse,
-    left: *mut Expr,
-    right: *mut Expr,
-) -> *mut u8 {
-    let op: ExprCollSeq = core::mem::transmute(EXPR_COLL_SEQ_ADDRESS);
-    op(parse, left, right)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_expr_coll_seq(
-    _parse: *mut CodeCompareParse,
-    _left: *mut Expr,
-    _right: *mut Expr,
-) -> *mut u8 {
-    panic!("expr_code_compare requires retail helper @ 0x08370298")
-}
-
-pub static mut EXPR_CODE_COMPARE_OP: ExprCollSeq = {
-    #[cfg(target_os = "none")]
-    { retail_expr_coll_seq }
-    #[cfg(not(target_os = "none"))]
-    { missing_expr_coll_seq }
-};
-
-#[inline(always)]
-unsafe fn expr_coll_seq_op() -> ExprCollSeq {
-    ptr::read_volatile(ptr::addr_of!(EXPR_CODE_COMPARE_OP))
-}
 
 pub type ExprCompareAffinity = unsafe extern "C" fn(*mut Expr, u8) -> u8;
 
@@ -116,7 +76,7 @@ pub unsafe extern "C" fn expr_code_compare(
     destination: i32,
     jump_if_null: u8,
 ) -> i32 {
-    let coll_seq = (expr_coll_seq_op())(parse, left, right);
+    let coll_seq = binary_compare_coll_seq(parse.cast(), left, right).cast();
     let affinity = (expr_compare_affinity_op())(left, expr_affinity(right));
     let flags = affinity | jump_if_null;
     let addr = vdbe_add_op4((*parse).p_vdbe, opcode, left_reg, right_reg, destination, coll_seq, -4);
@@ -137,17 +97,6 @@ mod tests {
     use std::vec;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut COLLATION: *mut u8 = ptr::null_mut();
-    static mut SEEN: (*mut Expr, *mut Expr) = (ptr::null_mut(), ptr::null_mut());
-
-    unsafe extern "C" fn record_collation(
-        _parse: *mut CodeCompareParse,
-        left: *mut Expr,
-        right: *mut Expr,
-    ) -> *mut u8 {
-        *ptr::addr_of_mut!(SEEN) = (left, right);
-        COLLATION
-    }
 
     unsafe extern "C" fn record_affinity(_left: *mut Expr, right_affinity: u8) -> u8 {
         right_affinity
@@ -163,11 +112,9 @@ mod tests {
     fn emits_comparison_with_collation_and_jump_flag() {
         let _lock = LOCK.lock();
         unsafe {
-            let saved = ptr::read_volatile(ptr::addr_of!(EXPR_CODE_COMPARE_OP));
-            ptr::write_volatile(ptr::addr_of_mut!(EXPR_CODE_COMPARE_OP), record_collation);
-            let mut ops = vec![core::mem::zeroed(); 1];
             let saved_affinity = ptr::read_volatile(ptr::addr_of!(EXPR_COMPARE_AFFINITY_OP));
             ptr::write_volatile(ptr::addr_of_mut!(EXPR_COMPARE_AFFINITY_OP), record_affinity);
+            let mut ops = vec![core::mem::zeroed(); 1];
             let mut vdbe: Vdbe = core::mem::zeroed();
             let mut db = [0_u8; 0x20];
             vdbe.db = db.as_mut_ptr();
@@ -177,14 +124,12 @@ mod tests {
             parse.p_vdbe = &mut vdbe;
             let mut left = expr(0);
             let mut right = expr(0);
-            COLLATION = 0x1234usize as *mut u8;
+            left.flags = 0x100;
+            left.collating_sequence = 0x1234usize as *mut u8;
             let address = expr_code_compare(&mut parse, &mut left, &mut right, 77, 4, 9, 12, 8);
             assert_eq!(address, 0);
-            assert_eq!(SEEN.0 as usize, (&mut left as *mut Expr) as usize);
-            assert_eq!(SEEN.1 as usize, (&mut right as *mut Expr) as usize);
             assert_eq!((ops[0].opcode, ops[0].p1, ops[0].p2, ops[0].p3, ops[0].p4, ops[0].p4type, ops[0].p5),
-                (77, 4, 9, 12, COLLATION, -4, 8));
-            ptr::write_volatile(ptr::addr_of_mut!(EXPR_CODE_COMPARE_OP), saved);
+                (77, 4, 9, 12, 0x1234usize as *mut u8, -4, 8));
             ptr::write_volatile(ptr::addr_of_mut!(EXPR_COMPARE_AFFINITY_OP), saved_affinity);
         }
     }
@@ -193,11 +138,9 @@ mod tests {
     fn leaves_cache_unmarked_for_no_affinity_and_preserves_null_jump_flag() {
         let _lock = LOCK.lock();
         unsafe {
-            let saved = ptr::read_volatile(ptr::addr_of!(EXPR_CODE_COMPARE_OP));
-            ptr::write_volatile(ptr::addr_of_mut!(EXPR_CODE_COMPARE_OP), record_collation);
-            let mut ops = vec![core::mem::zeroed(); 1];
             let saved_affinity = ptr::read_volatile(ptr::addr_of!(EXPR_COMPARE_AFFINITY_OP));
             ptr::write_volatile(ptr::addr_of_mut!(EXPR_COMPARE_AFFINITY_OP), record_affinity);
+            let mut ops = vec![core::mem::zeroed(); 1];
             let mut vdbe: Vdbe = core::mem::zeroed();
             let mut db = [0_u8; 0x20];
             vdbe.db = db.as_mut_ptr();
@@ -207,9 +150,10 @@ mod tests {
             parse.p_vdbe = &mut vdbe;
             let mut left = expr(0);
             let mut right = expr(0);
+            left.flags = 0x100;
+            left.collating_sequence = 0x2468usize as *mut u8;
             expr_code_compare(&mut parse, &mut left, &mut right, 5, -1, 3, 2, 0x80);
             assert_eq!(ops[0].p5, 0x80);
-            ptr::write_volatile(ptr::addr_of_mut!(EXPR_CODE_COMPARE_OP), saved);
             ptr::write_volatile(ptr::addr_of_mut!(EXPR_COMPARE_AFFINITY_OP), saved_affinity);
         }
     }
