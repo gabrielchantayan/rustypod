@@ -107302,3 +107302,27 @@ functions:
       the original byte-store ordering for +0xbc..+0xbf; match.py reports the
       same store sequence with LLVM's added frame prologue/epilogue (exit 1,
       structural diff expected).
+  - address: 0x0822b66c
+    ghidra: FUN_0822b66c
+    name: unidentified_cleanup_wrapper
+    size: 24
+    sig: "void unidentified_cleanup_wrapper(void *object)"
+    status: identified
+    renames:
+      param_1/r0/r4: object
+      FUN_0822b54c: unidentified_object_cleanup
+      FUN_081f02c0: unidentified_object_release
+    notes: >-
+      Deferred: raw osos.dec words establish the exact 24-byte body
+      0x0822b66c..0x0822b683: push {r4,lr}; preserve object in r4; bl
+      0x0822b54c; restore object to r0; pop {r4,lr}; then tail-branch to
+      0x081f02c0. The next real function begins at 0x0822b684: it has nine
+      independently decoded inbound plain BL calls, whereas this wrapper has
+      four (0x081cc8c4, 0x0820a624, 0x082203fc, and 0x08220570). Decoding all
+      aligned A32 B/BL words finds one outbound unconditional plain BL and
+      zero predicated BL forms in this body; the release call is B, not BL.
+      Neither callee has a names.yaml identity or Rust port. Ghidra's
+      0x0822b66c extent incorrectly absorbs the following function and
+      invents virtual dispatch from its instructions. A faithful Rust port
+      would require unverified dispatch seams for both callees, so none was
+      introduced.
