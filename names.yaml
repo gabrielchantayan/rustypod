@@ -107367,3 +107367,23 @@ functions:
       device code calls their verified retail addresses; host seams record
       their calls and model only the observable empty u32 target slots, since
       8-byte host pointers cannot represent adjacent 4-byte target slots.
+
+  - address: 0x0822af94
+    ghidra: FUN_0822af94
+    name: context_handle_process
+    size: 88
+    sig: "u32 context_handle_process(u8 *context, u8 *output, u8 *unused_2, u8 *unused_3, u8 *changed)"
+    module: app/context_handle_process
+    status: ported
+    vars: {param_1: context, param_2: output, param_3: unused_2, param_4: unused_3, param_5: changed}
+    notes: >-
+      Raw ARM establishes the exact 88-byte body
+      0x0822af94..0x0822afec: the pop at 0x0822afe8 is followed by the
+      separately linked FUN_0822afec. The body has five plain BLs
+      (0x0822afac, 0x0822afb8, 0x0822afcc, 0x0822afd8, 0x0822afe0) and no
+      predicated BLs. Independent decoding finds four inbound plain-BL
+      callers (0x081b6be0, 0x081b735c, 0x0820a4b4, 0x082203e0). It builds a
+      context-selected temporary refcounted handle, copy-assigns it, calls
+      the still-unidentified retail processor at 0x0822b8f8 with the second
+      handle, then destroys both local slots. The original ignores r2/r3 and
+      forwards its fifth stack argument as the processor's fourth argument.
