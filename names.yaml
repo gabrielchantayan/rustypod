@@ -107470,3 +107470,46 @@ functions:
       byte clear, and timer calls only on the loading path. match.py reports
       the expected structural diff: LLVM uses literal-loaded BLX target seams
       and a larger frame rather than ADS's direct BL sequence.
+
+  # --- Opaque range-operation conditional release ---
+  - address: 0x0821b584
+    ghidra: FUN_0821b584
+    name: range_operation_release_outside_interval
+    size: 144
+    sig: "u32 range_operation_release_outside_interval(const u8 *owner, u32 initial_index, u32 scan_items, i32 lower, i32 upper)"
+    module: ui/range_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: initial_index
+      param_3/r2: scan_items
+      param_4/r3: lower
+      param_5/[sp,#32]: upper
+      "[owner + 0x04]": operation_source
+      "[operation + 0x28]": iteration_head
+      "[operation + 0x30]": iteration_cursor
+      FUN_08030f44: heap_panic
+      FUN_081f0700: unresolved_operation_acquire
+      FUN_0811f244: unresolved_operation_next
+      FUN_0811f150: unresolved_operation_release
+    notes: >-
+      Raw ARM proves the 144-byte extent from 0x0821b584 through the closing
+      pop at 0x0821b610; 0x0821b614 starts the next separately linked
+      function. Whole-image A32 decoding finds four inbound unconditional
+      plain BL callers (0x0821ab6c, 0x0821abb8, 0x0821b3fc, 0x0821b470) and
+      no predicated BL callers. The body has three plain BL calls and one
+      predicated BLEQ to heap_panic when either signed interval bound is -1.
+      It acquires an opaque operation from owner+4, copies *operation+0x28
+      into operation+0x30, then, only when scan_items is zero, advances through
+      remaining items. The advance result's +4 signed index inside lower..upper
+      inclusive retains the operation and returns zero; exhaustion or a
+      nonzero scan_items releases it and returns one. Ghidra's unused
+      param_2 is preserved in the ABI. The three direct callees have no
+      established semantic identity in names.yaml, so Rust retains explicit
+      acquire/next/release operation seams rather than inventing one. On target
+      they dispatch to verified fixed addresses; host tests replace the seams.
+      Target pointer fields remain u32 words on 64-bit hosts. match.py reports
+      the expected structural diff: the seam dispatches are BLX through a
+      literal-loaded table and LLVM uses a larger frame than ADS's direct BL
+      sequence. Host tests cover no matching items, inclusive boundary
+      retention, cursor reset, failed scan suppression, and release ordering.
