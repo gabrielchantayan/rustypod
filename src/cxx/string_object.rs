@@ -3027,6 +3027,33 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
     0
 }
 
+/// Decode the UTF-8-like codepoint at a signed index — original:
+/// `FUN_08275e94` @ 0x08275e94 (56 bytes, 0x08275e94..0x08275ecc; all code,
+/// followed by the distinct 0x08275ecc entry). Raw ARM has one internal plain
+/// `bl` to `utf8_next_codepoint`; its four inbound direct `bl` references are
+/// all unconditional, with no predicated calls.
+///
+/// A negative index returns zero without dereferencing `text`. Otherwise this
+/// decodes through [`utf8_next_codepoint`] until it has decoded the zero-based
+/// `index` codepoint or observes a literal NUL byte, returning the final
+/// decoded codepoint (or zero for the terminator). The decoder's permissive
+/// malformed lead behavior is inherited. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.utf8_decode_codepoint_at_index_08275e94")]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_decode_codepoint_at_index(text: *const u8, index: i32) -> u32 {
+    let mut cursor = text;
+    let mut remaining = index;
+    let mut codepoint = 0;
+
+    while remaining >= 0 && cursor.read() != 0 {
+        codepoint = utf8_next_codepoint(&mut cursor);
+        remaining = remaining.wrapping_sub(1);
+    }
+
+    codepoint
+}
+
 /// Encodes a codepoint into the retail UTF-8-like byte form — original:
 /// `FUN_0825c870` @ 0x0825c870 (140 bytes, all code; source:
 /// `ipod-decomp/decomp/c/025/0825c870_FUN_0825c870.c`).
@@ -7822,6 +7849,30 @@ pub(crate) mod tests {
             (0x00bf, 2),
             "the decoder masks a malformed second byte instead of rejecting it"
         );
+    }
+
+    fn decode_codepoint_at_index(bytes: &[u8], index: i32) -> u32 {
+        unsafe { utf8_decode_codepoint_at_index(bytes.as_ptr(), index) }
+    }
+
+    #[test]
+    fn utf8_decode_codepoint_at_index_observes_signed_index_and_literal_terminator() {
+        assert_eq!(decode_codepoint_at_index(&[b'a', b'b', 0], -1), 0);
+        assert_eq!(decode_codepoint_at_index(&[b'a', b'b', 0], 0), b'a' as u32);
+        assert_eq!(decode_codepoint_at_index(&[b'a', b'b', 0], 1), b'b' as u32);
+        assert_eq!(decode_codepoint_at_index(&[b'a', b'b', 0], 2), b'b' as u32);
+    }
+
+    #[test]
+    fn utf8_decode_codepoint_at_index_returns_permissive_multibyte_or_malformed_result() {
+        assert_eq!(decode_codepoint_at_index(&[0xc3, 0xff, b'a', 0], 0), 0x00ff);
+        assert_eq!(
+            decode_codepoint_at_index(&[0xe2, 0x82, 0xac, b'a', 0], 1),
+            b'a' as u32
+        );
+        assert_eq!(decode_codepoint_at_index(&[b'a', 0xf0, 0x9f, 0x92, b'b', 0], 1), 0);
+        assert_eq!(decode_codepoint_at_index(&[0xf0, 0x9f, 0x92, b'b', 0], 0), 0);
+        assert_eq!(decode_codepoint_at_index(&[0xf0, 0x9f, 0x92, b'b', 0], 1), b'b' as u32);
     }
 
     #[test]
