@@ -201,6 +201,7 @@ pub mod object_flag_0x100_is_set;
 pub mod object_owner_set;
 pub mod object_dispatch_entry;
 pub mod opaque_collection_item_count;
+pub mod opaque_object_count_at_70;
 pub mod opaque_collection_entry_data_at;
 pub mod opaque_u16_pair_buffer;
 pub mod opaque_record_payload;
