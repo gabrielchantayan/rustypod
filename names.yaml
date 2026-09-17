@@ -26051,6 +26051,35 @@ functions:
       single `ldrb [r0,#18]` - the same little-endian byte - behind
       the crate fp frame; 4 instructions vs the original's 4.
 
+  - address: 0x082a4f88
+    ghidra: FUN_082a4f88
+    name: string_object_find_casefolded
+    size: 176
+    sig: "int string_object_find_casefolded(const StringObject *this, const char *needle, int start_index)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: this, param_2: needle, param_3: start_index, local_1c: cursor, iVar1: needle_codepoint_count, uVar2: haystack_codepoint_count, iVar3: comparison, iVar4: index}
+    notes: >-
+      Raw osos.dec decoding establishes the exact extent
+      0x082a4f88..0x082a5037 (176 bytes); 0x082a5038 begins the next
+      separately linked function. The body has five direct BL instructions,
+      all plain ARM AL calls and zero predicated BL instructions: two
+      utf8_codepoint_count_safe calls @ 0x082770e0, two
+      utf8_next_codepoint calls @ 0x08276214, and one
+      utf8_casefold_compare_bounded call @ 0x082760f4. It NULL-checks the
+      payload word at this+4, counts the needle and payload codepoints,
+      advances the payload cursor start_index times while rejecting a NUL,
+      then returns the first index whose bounded case-fold comparison equals
+      zero, subject to the unsigned index + needle_count <= haystack_count
+      gate; every failure returns -1. BLOCKED: faithful behavior requires
+      utf8_casefold_compare_bounded @ 0x082760f4, whose case-fold callee
+      0x08276fbc reads the unresolved literal-table address 0x083ed1dd.
+      The existing metadata records that osos.dec contains instruction/data
+      bytes there rather than the required case table, so the comparison
+      cannot be ported faithfully. No Rust implementation, seam change, or
+      host tests are added deliberately; token_parser retains its target
+      call until that dependency is recovered.
+
   - address: 0x082a4f68
     ghidra: FUN_082a4f68
     name: wheel_event_button_code_alias_4f68
