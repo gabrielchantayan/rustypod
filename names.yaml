@@ -107794,3 +107794,24 @@ functions:
       reverses the two literal assignments and misses that the release input
       is the embedded member. Host vtable identities are modeled by statics;
       the release call is direct because its callee is ported.
+
+  # --- opaque record +0x10 word accessor ---
+  - address: 0x0820be84
+    ghidra: FUN_0820be84
+    name: opaque_record_word_at_10
+    size: 8
+    sig: "u32 opaque_record_word_at_10(const OpaqueRecordWordAt10 *record)"
+    module: cxx/opaque_record_word_at_10
+    status: ported
+    vars: {"param_1/r0": record, "r0 (return)": value}
+    notes: >-
+      Raw osos.dec words establish the full 8-byte body: ldr r0,[r0,#0x10]
+      at 0x0820be84 and bx lr at 0x0820be88. The next separately linked
+      function begins at 0x0820be8c with str r1,[r0,#0x10]; bx lr, proving
+      Ghidra's extent. Decoding inbound ARM B/BL words finds four plain
+      unconditional BL call sites and zero predicated BL call sites. The
+      function returns the unchecked opaque record word at +0x10; callers
+      pass it into unrelated operations, so no concrete record or field
+      identity is inferred. Rust models the target's four-byte spacing with
+      four u32 prefix words and preserves the unchecked load behavior. No
+      deliberate deviations.
