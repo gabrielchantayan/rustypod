@@ -106583,3 +106583,35 @@ functions:
       Deliberate deviation: target builds call the exact stock load address,
       while host tests install a recording seam and prove UTF-8 count
       truncation plus every forwarded argument.
+
+  - address: 0x08261d7c
+    ghidra: thunk_FUN_082e7d18
+    name: set_opaque_context_limit
+    size: 4
+    sig: "u32 set_opaque_context_limit(u32 *context, u32 limit)"
+    module: cxx/opaque_context_set_limit
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: limit
+      DAT_082e7d48: opaque_context_magic_0x41485450
+      "context+0x10": limit
+    notes: >-
+      Raw osos.dec verifies the assigned thunk is exactly four bytes: word
+      0xea0217e5, "b 0x082e7d18". The next separately linked veneer begins
+      at 0x08261d80. The target body is 48 bytes from 0x082e7d18 through
+      0x082e7d44, followed by its 0x41485450 literal at 0x082e7d48 and the
+      next function prologue at 0x082e7d4c. Whole-image ARM branch-immediate
+      decoding finds exactly four direct unconditional bl callers
+      (0x08262894, 0x0839e8f4, 0x0839ea60, 0x0839f43c), zero predicated bl
+      callers, and no tail branches. The body returns 0x1a for NULL context,
+      a nonmatching header word, or unsigned limit < 0x800; otherwise it
+      stores limit at word index four and returns zero. The concrete context
+      type is unrecovered and intentionally not invented. Deliberate
+      deviation: Rust emits the verified target body rather than the one-word
+      retail veneer; comparisons, statuses, and target-width word offset are
+      preserved. Host tests cover NULL, magic rejection without a store, both
+      sides of the 0x800 boundary, u32::MAX, and neighbouring-word preservation.
+      match.py against the requested veneer exits 1 with the expected
+      structural difference: retailOS is a branch while Rust emits the target
+      body and its frame.
