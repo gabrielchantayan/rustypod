@@ -105,6 +105,9 @@ pub mod hints {
     // 0x7000_0000: dedicated to sqlite/restore_cursor_position's raw-u32
     // BtCursor fixture; mappings never unmap, so no other user may share it.
     pub const BTREE_RESTORE_CURSOR: usize = 0x7000_0000;
+    // 0x7300_0000: dedicated to sqlite/save_cursor_position's raw-u32
+    // Btree/BtCursor fixture; mappings never unmap, so no other user may share it.
+    pub const BTREE_SAVE_ALL_CURSORS: usize = 0x7300_0000;
     // 0x0837_0000: dedicated to sqlite/fix_init's raw-u32 Parse/sqlite3/
     // Db-array/DbFixer fixture page; all xx00_0000 slots are taken, so it
     // uses the function's own address prefix. Mappings never unmap.

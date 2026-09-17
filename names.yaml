@@ -34264,6 +34264,49 @@ functions:
       raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
       than the original's aligned ldrh/ldrd/ldr.
 
+  - address: 0x083684fc
+    ghidra: FUN_083684fc
+    name: btree_save_all_cursors
+    size: 216
+    sig: "i32 btree_save_all_cursors(btree: *mut Btree, only_for_btree: *mut Btree, except: *mut BtCursor)"
+    module: sqlite/save_cursor_position
+    status: ported
+    vars:
+      param_1/r0: btree
+      param_2/r1/r7: only_for_btree
+      param_3/r2/r8: except
+      iVar2/r4: cursor
+      iVar1/r5: rc
+      iVar6/r6: saved_key
+      FUN_08371cc4: btree_key_size (direct ported callee)
+      FUN_08390b14: sqlite3_malloc (direct ported callee)
+      FUN_08371c40: btree_key (direct ported callee)
+      FUN_0836761c: release_via_field_0x48 (direct ported callee)
+      FUN_082d6d08: clear_saved_overflow (inlined as ported tracked_free plus NULL store)
+      FUN_083906f4: tracked_free (direct ported callee)
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeSaveAllCursors/saveCursorPosition. Raw
+      osos.dec establishes the 216-byte extent 0x083684fc..0x083685d4:
+      0x083685d4 begins the next separately linked function with
+      `ldrb r1,[r1,#0xc]`. The body contains six plain BL instructions
+      (0x0836853c, 0x0836855c, 0x0836857c, 0x08368590, 0x083685a8,
+      0x083685cc) and no predicated BL; four inbound sites are plain BLs.
+      It walks Btree +0x08, skips `except`, and when only_for_btree is
+      non-NULL retains only cursors whose +0x14 Btree word matches it.
+      For each VALID cursor (+0x43 == 1), it records nKey at +0x48; an
+      index page (pPage +0x18, intKey +0x03 == 0) allocates nKey, copies
+      the key and stores its pointer at +0x44. Success releases pPage,
+      NULLs +0x18 and writes REQUIRESEEK (2). Every attempted cursor has
+      its +0x58 overflow cache freed and cleared; an error returns after
+      that cleanup. The raw 0x082d6d08 helper is exactly tracked_free of
+      +0x58 followed by a NULL store, so it is deliberately inlined using
+      the already ported tracked_free rather than creating a redundant seam.
+      Host tests cover eligibility filtering, page/state transition, error
+      propagation, cleanup, and stopping before a later cursor. match.py
+      reports a structural diff (exit 1 expected): LLVM expands the
+      target-layout u32 reads into byte loads and includes direct ported
+      callee relocations rather than retail absolute BL targets.
+
   - address: 0x08371c40
     ghidra: FUN_08371c40
     name: btree_key
