@@ -56008,6 +56008,29 @@ functions:
       volatile accesses, while retaining the load/zero-test/conditional-store/
       final-load sequence.
 
+  # --- retailOS shared-context opaque pair (ui/shared_context_pair_38) ---
+  - address: 0x08369c10
+    ghidra: FUN_08369c10
+    name: shared_context_pair_38_or_zero
+    size: 36
+    sig: "u64 shared_context_pair_38_or_zero(void)"
+    module: ui/shared_context_pair_38
+    status: ported
+    renames:
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw ARM is str lr,[sp,#-4]!; bl 0x08369bec; cmp r0,#0; movne r1,r0;
+      ldrne r1,[r1,#0x3c]; ldrne r0,[r0,#0x38]; moveq r0,#0; moveq r1,#0;
+      ldr pc,[sp],#4. The true 36-byte body occupies 0x08369c10-0x08369c33;
+      the next real function starts at 0x08369c34. Raw decoding verifies four
+      direct inbound bl callers, all unconditional: 0x080c60c8, 0x0814fdb8,
+      0x082d4658, and 0x082d4778; the sole outbound bl to shared_context is
+      unconditional. Fetches the lazy shared context then returns its opaque
+      pair at +0x38 (low word in r0, high word in r1), or two zero words when
+      the context is NULL. The target port calls the existing shared_context
+      port; host builds use its backing storage. Port deviation: none on
+      target.
+
   # --- retailOS lazily cached board-version word (sysinfo) ---
   - address: 0x080e624c
     ghidra: FUN_080e624c
