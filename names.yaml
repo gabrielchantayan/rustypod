@@ -50719,6 +50719,34 @@ functions:
       an explicit `mov r0,#0` on the nobody-accepted path where the
       original lets the failed call's r0=0 fall through.
 
+  - address: 0x08272438
+    ghidra: FUN_08272438
+    name: framework_resource_provider_construct
+    size: 60
+    sig: "Class6800 *framework_resource_provider_construct(Class6800 *storage, ResourceProvider *next, u32 initial_target, u32 create_link)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1: storage
+      param_2: next
+      param_3: initial_target
+      param_4: create_link
+      FUN_081110d0: framework_base_construct
+      DAT_08272470: RESOURCE_PROVIDER_VTABLE_ADDRESS
+      FUN_082722a0: resource_provider_set_next
+    notes: >-
+      Raw ARM is `push {r4,r5,r6,lr}; mov r5,r1; mov r1,r2; mov r2,r3; bl
+      0x081110d0; ldr r1,[pc,#28]; mov r4,r0; str r1,[r0]; mov r1,#0; str
+      r1,[r0,#20]; mov r1,r5; bl 0x082722a0; mov r0,r4; pop {r4,r5,r6,pc}`,
+      followed by literal 0x089a5de0 at 0x08272470. Ghidra excludes that
+      pool word: true extent is 60 bytes, ending before the next push at
+      0x08272474. Four incoming BL calls are all unconditional (no
+      predicated BL); the body has two direct BL calls. It constructs the
+      framework base with (storage, initial_target, create_link), installs
+      its resource-provider vtable, clears +0x14, then calls the refcounted
+      provider-next setter with the base return and incoming next pointer.
+      The setter is identified but unported, so the Rust port retains an
+      explicit typed seam rather than inventing its ownership behavior.
   - address: 0x08277304
     ghidra: FUN_08277304
     name: string_object_construct_from_cstr
