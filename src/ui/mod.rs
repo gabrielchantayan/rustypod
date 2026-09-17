@@ -113,6 +113,7 @@ pub mod geometry_changed;
 pub mod set_x_extent;
 pub mod set_y_extent;
 pub mod layout_apply_pending_offsets;
+pub mod text_layout_counted_apply;
 pub mod view_scroll_position;
 pub mod texture_upload;
 pub mod texture_activate;
