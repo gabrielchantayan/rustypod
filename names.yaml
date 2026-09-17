@@ -105245,3 +105245,31 @@ functions:
       broader identity is unrecovered, so target builds call its verified raw
       address and host tests inject a recording boundary. The original returns
       r0/r1 unchanged; the port returns their corresponding packed u64 value.
+  - address: 0x08283f74
+    ghidra: FUN_08283f74
+    name: item_collection_dispatch
+    size: 120
+    sig: "u32 item_collection_dispatch(const u32 *dispatch_context, void *controller, i32 index, void *collection, u32 action, u32 enabled)"
+    module: app/item_collection_dispatch
+    status: ported
+    renames:
+      param_1/r0: dispatch_context
+      param_2/r1: controller
+      param_3/r2: index
+      param_4/r3: collection
+      param_5/[sp]: action
+      param_6/[sp+4]: enabled
+      "*(u32 *)(dispatch_context + 4)": owner
+      "*(u8 *)(collection + 0x18c)": collection_flag
+    notes: >-
+      Raw osos.dec establishes the true 120-byte extent
+      0x08283f74..0x08283feb; 0x08283fec starts the next distinct function
+      prologue. Direct-call decoding finds four incoming unconditional plain
+      BL calls and zero predicated BL calls. A null collection returns zero.
+      Otherwise index -1 calls the verified 0x08046e50 whole-collection
+      dispatcher with collection byte +0x18c bit 0, -1, and a null result
+      pointer; every other index calls verified 0x08046180 with index and
+      collection repeated in its final arguments, then returns one. Those
+      dispatcher identities are not established in names.yaml, so target
+      builds use their verified addresses and host tests use typed seams
+      rather than inventing names.
