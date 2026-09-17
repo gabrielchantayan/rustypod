@@ -104721,6 +104721,30 @@ functions:
       a concrete collection type. Deliberate deviation: LLVM emits a standard
       frame prologue/epilogue around the same ldr body.
 
+  # --- Opaque object collection-count accessor ---
+  - address: 0x08298afc
+    ghidra: FUN_08298afc
+    name: opaque_object_count_at_70
+    size: 8
+    sig: "u32 opaque_object_count_at_70(const OpaqueObject *object)"
+    module: app/opaque_object_count_at_70
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x70": collection_count
+      r0: collection_count
+    notes: >-
+      Raw osos.dec words prove Ghidra's extent exactly: ldr r0,[r0,#0x70];
+      bx lr at 0x08298afc..0x08298b00, with independently linked successor
+      FUN_08298b04 beginning at 0x08298b04. Complete aligned ARM
+      B/BL-immediate decoding finds four direct inbound calls, all plain
+      unconditional bl instructions at 0x081b23e0, 0x081b26b0, 0x0829d550,
+      and 0x0829d730; there are no predicated bl calls. The callers treat the
+      returned word as a collection-like count, but the concrete object and
+      count unit are unrecovered. The Rust port performs the same unchecked
+      aligned word read with no NULL, bounds, ownership, or range validation;
+      LLVM additionally emits a standard frame prologue/epilogue.
+
   # --- Markup text resource selector (app/markup_text_resource) ---
   - address: 0x08299100
     ghidra: FUN_08299100
