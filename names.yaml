@@ -33432,6 +33432,29 @@ functions:
       pre-decrement to INT_MAX, so that one value still compares instead
       of returning 0.
 
+  # ---- Binary-compare-collation marker (src/sqlite/binary_compare_coll_seq.rs) ----
+  - address: 0x08370298
+    ghidra: FUN_08370298
+    name: binary_compare_coll_seq
+    size: 80
+    sig: "CollSeq *sqlite3BinaryCompareCollSeq(Parse *parse, Expr *left, Expr *right)"
+    module: sqlite/binary_compare_coll_seq
+    status: ported
+    vars: {param_1: parse, param_2: left, param_3: right, uVar1: flags, puVar2: coll}
+    notes: >-
+      Raw osos.dec words establish the true extent 0x08370298..0x083702e7:
+      the next stmdb at 0x083702e8 begins an independent function. The body
+      has one plain outbound bl (0x083702cc to expr_coll_seq) and no
+      predicated bl; the conditional beq at 0x083702e0 is its tail call to
+      expr_coll_seq. Four plain inbound bl call sites were verified in the
+      raw image. SQLite 3.5.9's sqlite3BinaryCompareCollSeq gives an
+      EP_ExpCollate (+0x100) left expression priority, then an explicit right
+      expression, otherwise resolves left before tail-resolving right only
+      after a NULL result.
+      Deliberate deviation: the exported Rust ABI accepts an opaque parse
+      pointer so CodeCompareParse's smaller typed host prefix remains valid;
+      it is cast only at the established expr_coll_seq boundary.
+
   # ---- Begin-write-operation marker (src/sqlite/begin_write_operation.rs) ----
   - address: 0x0837021c
     ghidra: FUN_0837021c
