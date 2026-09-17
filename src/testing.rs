@@ -478,6 +478,9 @@ pub mod hints {
     // 0xc600_0000: dedicated to fs/shared_data's raw-u32 linked-list
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SHARED_DATA_RELEASE: usize = 0xc600_0000;
+    // 0xc610_0000: dedicated to fs/shared_data_initialize's raw-u32
+    // linked-list fixture; mappings never unmap, so no other user may share it.
+    pub const SHARED_DATA_INITIALIZE: usize = 0xc610_0000;
     // 0xca00_0000: dedicated to app/iap_incoming_client_base's raw-u32
     // client-object and thread-context fixtures; mappings never unmap, so
     // no other user may share this hint.
