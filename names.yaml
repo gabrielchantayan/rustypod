@@ -13908,6 +13908,35 @@ functions:
       Unlock twin of region_ref_lock; tail-branches to the C++ mutex
       unlock @ 0x082e83d8 (thunk @ 0x082621ac). 10 bl + 1 tail b sites.
 
+  - address: 0x082802e0
+    ghidra: FUN_082802e0
+    name: region_elem_payload_if_live
+    size: 52
+    sig: "void *region_elem_payload_if_live(const void *elem)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1/r0: elem
+      r4: elem
+      r5: payload
+      iVar1/r0: region
+      iVar2/r0: region_start
+    notes: >-
+      Raw firmware establishes the 0x34-byte extent
+      (0x082802e0..0x08280310; next function at 0x08280314). Four direct
+      call sites are all unconditional BL (0x08119e2c, 0x08119e58,
+      0x0814c50c, 0x0814c530); there are no predicated BL calls. It locks
+      elem's region reference through region_ref_lock, reads elem +0x8 only
+      when both elem +0x4 and region +0x4 are non-NULL, unlocks through
+      region_ref_unlock, and returns that payload word or NULL. The Rust port
+      retains the target word-index layout on 64-bit hosts and deliberately
+      discards both mutex-operation statuses, as the retail instructions do.
+      Host tests cover the live payload and both NULL guards, including the
+      lock/read/unlock event protocol. match.py structural review (exit 1,
+      expected) finds the same two helper calls and guarded field loads; LLVM
+      selects a different saved-register set and moves its zero initialization
+      after the first call.
+
   - address: 0x08280464
     ghidra: FUN_08280464
     name: region_elem_copy_construct
