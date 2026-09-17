@@ -104978,6 +104978,38 @@ functions:
       a typed vtable and fixture table. match.py's structural diff was reviewed
       after the ARM release build: LLVM unrolls the fixed four-attempt loop.
 
+  # --- registered-entry activation ---
+  - address: 0x0829331c
+    ghidra: FUN_0829331c
+    name: registered_entry_activate
+    size: 56
+    sig: "void registered_entry_activate(u8 *controller, u32 entry_id)"
+    module: app/registered_entry_activate
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_2/r1/r5: entry_id
+      param_1+0x34: channel_context
+      DAT_08293354: registration_table
+      FUN_08293048: four_slot_key_index
+      FUN_081076c0: retail channel flag-setting target (unported direct target call)
+      iVar1/r0/r6: slot_index
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x0829331c..0x08293354: the word at 0x08293354 is the registration
+      table literal 0x089d04c4, and a distinct push prologue starts at
+      0x08293358. Decoding every aligned ARM B/BL-immediate word independently
+      finds four incoming direct plain BL calls at 0x08104f80, 0x08160c44,
+      0x08160c50, and 0x081e1be0, with no predicated BL forms. The body has
+      two unconditional direct BL instructions, to ported four_slot_key_index
+      at 0x08293048 and the unported target 0x081076c0. It locates the
+      four-slot record for entry_id, calls that target with controller+0x34 and
+      entry_id, then writes one to record byte +0x13. The callee's broader
+      semantic identity is unrecovered: its name here describes only its
+      verified flag-setting behavior. Target builds retain its verified raw
+      address and fixed table; host tests inject equivalent boundaries. No
+      other deliberate deviations.
+
   # --- registered-entry cancellation prologue ---
   - address: 0x08293384
     ghidra: FUN_08293384
