@@ -92,6 +92,27 @@ pub unsafe extern "C" fn app_motor_get() -> *mut u8 {
     object
 }
 
+/// app_motor_set_pending_state — original: `FUN_0829623c` @ 0x0829623c
+/// (24 bytes; four unconditional direct `bl` callers, no predicated forms).
+///
+/// Stores the low byte of `state` at AppMotor+0x264. A nonzero full-width
+/// `state` also clears AppMotor+0x22c, then tail-branches to
+/// [`crate::kernel::condvar::condvar_broadcast`] on the embedded CondVar at
+/// +0x238.
+///
+/// Deliberate deviation: the opaque AppMotor layout is represented by byte
+/// offsets rather than a host-layout-dependent struct. The target's tail
+/// branch becomes an ordinary Rust call and return.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn app_motor_set_pending_state(app_motor: *mut u8, state: u32) {
+    app_motor.add(0x264).write(state as u8);
+    if state != 0 {
+        app_motor.add(0x22c).write(0);
+    }
+    crate::kernel::condvar::condvar_broadcast(app_motor.add(0x238).cast());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -235,5 +256,50 @@ mod tests {
             assert!(shutdown_chain_head().read().is_null());
         }
         restore(guard);
+    }
+
+    #[repr(align(8))]
+    struct AppMotorPendingStateFixture([u8; 0x265 + core::mem::size_of::<crate::kernel::condvar::CondVar>()]);
+
+    #[test]
+    fn pending_state_stores_low_byte_and_broadcasts_all_waiters() {
+        use crate::kernel::condvar::{CondVar, ListHead, WaitNode};
+        let mut app_motor = AppMotorPendingStateFixture([0; 0x265 + core::mem::size_of::<CondVar>()]);
+        let mut first_object = 0x101u32;
+        let mut second_object = 0x202u32;
+        let mut second = WaitNode { next: ptr::null_mut(), object: &mut second_object };
+        let mut first = WaitNode { next: &mut second, object: &mut first_object };
+        unsafe {
+            let condvar = app_motor.0.as_mut_ptr().add(0x238).cast::<CondVar>();
+            condvar.write(CondVar {
+                lock_obj: ptr::null_mut(),
+                waiters: ListHead { head: (&mut first as *mut WaitNode).cast(), tail: (&mut second as *mut WaitNode).cast() },
+            });
+            app_motor.0[0x22c] = 0x5a;
+
+            app_motor_set_pending_state(app_motor.0.as_mut_ptr(), 0x7f);
+
+            assert_eq!(app_motor.0[0x264], 0x7f);
+            assert_eq!(app_motor.0[0x22c], 0);
+            assert!((*condvar).waiters.head.is_null());
+            assert!((*condvar).waiters.tail.is_null());
+            assert!(first.next.is_null());
+            assert!(second.next.is_null());
+        }
+    }
+
+    #[test]
+    fn zero_state_preserves_latch_but_nonzero_high_word_clears_it() {
+        let mut app_motor = AppMotorPendingStateFixture([0; 0x265 + core::mem::size_of::<crate::kernel::condvar::CondVar>()]);
+        unsafe {
+            app_motor.0[0x22c] = 0x5a;
+            app_motor_set_pending_state(app_motor.0.as_mut_ptr(), 0);
+            assert_eq!(app_motor.0[0x264], 0);
+            assert_eq!(app_motor.0[0x22c], 0x5a);
+
+            app_motor_set_pending_state(app_motor.0.as_mut_ptr(), 0x100);
+            assert_eq!(app_motor.0[0x264], 0);
+            assert_eq!(app_motor.0[0x22c], 0);
+        }
     }
 }
