@@ -168,6 +168,7 @@ pub mod object_has_resolved_flag_0x800;
 pub mod media_command_facade;
 pub mod media_ext;
 pub mod mode_selected_byte;
+pub mod mode_selected_update_if_ready;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
 pub mod mode_selected_extent;
