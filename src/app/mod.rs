@@ -281,6 +281,7 @@ pub mod silver_list_table_resource;
 pub mod stage_progress;
 pub mod singletons;
 pub mod singleton_selection_predecessor;
+pub mod stream_offset_to_milliseconds;
 pub mod settings_item;
 pub mod settings_item_update_state;
 pub mod settings_mode_set;
