@@ -25915,6 +25915,32 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x082a47b8
+    ghidra: FUN_082a47b8
+    name: strided_array_find_index
+    size: 88
+    sig: "i32 strided_array_find_index(const StridedArray *this, const u32 *key)"
+    module: cxx/strided_array_find_index
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: key
+    notes: >-
+      EXTENT - raw osos.dec words run from push {r4,r5,r6,lr} at
+      0x082a47b8 through bxne r3 at 0x082a480c; the next separately
+      linked function starts at 0x082a4810, so Ghidra's claimed 96 bytes
+      includes two unrelated zero-return leaves and the true size is 88.
+      CALL SITES - four incoming direct plain bl callers (the only callers:
+      0x0810ffc4, 0x0819e3e4, 0x0828cd90, and 0x0828cdc0); zero predicated
+      BL callers. Its body has no direct BL: one indirect blx through vtable
+      +0x64 selects an indirect tail bx through +0x8c for zero or +0x94 for
+      nonzero. BODY - return -1 if signed this[+4] <= 0; otherwise forward
+      this and key unchanged to the selected lookup slot. The concrete slot
+      targets are not identified, so the port preserves direct vtable
+      dispatch instead of adding an invented seam. Host vtables widen
+      function pointers; target-only offset assertions preserve +0x64/+0x8c/
+      +0x94.
+
   - address: 0x082a4b94
     ghidra: FUN_082a4b94
     name: strided_array_element_address
