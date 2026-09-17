@@ -104668,3 +104668,27 @@ functions:
       0x0829b84c; the body has one unconditional plain BL and no predicated
       BL instructions. Porting would require inventing the unresolved tail
       callee's contract, so this entry remains identified.
+
+  # --- Opaque collection entry-count accessor (cxx/opaque_collection_count) ---
+  - address: 0x0829b3c8
+    ghidra: FUN_0829b3c8
+    name: opaque_collection_count
+    size: 8
+    sig: "u32 opaque_collection_count(const void *object)"
+    module: cxx/opaque_collection_count
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x58: entry_count
+    notes: >-
+      Raw osos.dec words at 0x0829b3c8 are `ldr r0,[r0,#0x58]; bx lr`;
+      the independently linked next function begins at 0x0829b3d0, proving
+      the true 8-byte extent. Decoding the inbound direct branch words finds
+      exactly four plain unconditional bl callers (0x08126f50, 0x08126f90,
+      0x08126fa0, and 0x081273b8), zero predicated BL callers, no tail B
+      callers, and no data-word references. It returns the unchecked 32-bit
+      entry-count word at object+0x58. The surrounding class is unrecovered:
+      the clear loop in FUN_08126dc0 treats this word as an entry count, so
+      the port deliberately retains an opaque pointer rather than inventing
+      a concrete collection type. Deliberate deviation: LLVM emits a standard
+      frame prologue/epilogue around the same ldr body.
