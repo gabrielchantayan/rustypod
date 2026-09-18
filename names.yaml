@@ -76745,6 +76745,29 @@ functions:
       deviations. Host tests cover zero and u32::MAX limits and prove that
       every adjacent state field is unchanged.
 
+  # --- adaptive tick accumulator timing-state reset ---
+  - address: 0x081bb3d0
+    ghidra: FUN_081bb3d0
+    name: tick_accumulator_reset_timing_state
+    size: 32
+    sig: "TickAccumulator *tick_accumulator_reset_timing_state(TickAccumulator *accumulator)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+    notes: >-
+      Raw ARM establishes the exact 32-byte extent
+      0x081bb3d0..0x081bb3f0: `mov r1,#0; str r1,[r0]; str r1,[r0,#4];
+      str r1,[r0,#8]; str r1,[r0,#12]; str r1,[r0,#16]; str r1,[r0,#20];
+      bx lr`. The next separately linked function begins at 0x081bb3f0 with
+      `ldr r2,[r0,#0x24]`; there is no literal pool. Decoding every ARM
+      B/BL-immediate word in work/firmware/osos.dec finds exactly four direct
+      inbound calls, all plain unconditional bl and zero predicated BL forms.
+      The routine clears TickAccumulator's six-word timing state
+      (last_tick_ms through remainder), preserves every field at +0x18 and
+      later, and returns the incoming pointer unchanged in r0. Ghidra's void
+      prototype omits that preserved r0 return. No deliberate deviations.
+
   # --- Timer E microsecond counter to millisecond tick ---
   - address: 0x081bb384
     ghidra: FUN_081bb384
