@@ -350,6 +350,26 @@ pub unsafe extern "C" fn ata_cmd_get_flags(cmd: *const u8) -> u32 {
 pub unsafe extern "C" fn ata_cmd_set_block_size(cmd: *mut u8, block_size: u32) {
     set_word(cmd, BLOCK_SIZE, block_size);
 }
+/// ata_cmd_set_opaque_word_3c — original: `FUN_0812133c` @ 0x0812133c
+/// (8 bytes exactly, `0x0812133c..0x08121343`; **4 direct `bl` call sites,
+/// all unconditional, no predicated forms**, verified by decoding every ARM
+/// branch word in `osos.dec`: 0x0827a688, 0x0827a820, 0x0827af1c, and
+/// 0x0827b0b0).
+///
+/// Stores the opaque command-block word at +0x3c. The four builders supply
+/// their seventh argument after initializing the adjacent opaque words, but
+/// that does not establish a stronger field identity. The original is exactly
+/// `str r1, [r0, #0x3c]; bx lr`: no validation or NULL guard.
+///
+/// Deviation: none. Its custom section keeps this real `bl` target separate
+/// from otherwise identical word setters.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_cmd_set_opaque_word_3c")]
+pub unsafe extern "C" fn ata_cmd_set_opaque_word_3c(cmd: *mut u8, value: u32) {
+    set_word(cmd, OPAQUE_WORD_3C, value);
+}
+
 
 /// ata_cmd_set_transfer_len — original: `FUN_081212a4` @ 0x081212a4
 /// (8 bytes; 16 call sites, binary-scanned).
@@ -1434,6 +1454,20 @@ mod tests {
         for other in 0..block.0.len() {
             if !(BLOCK_SIZE..BLOCK_SIZE + 4).contains(&other) {
                 assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_word_3c_setter_writes_only_its_word() {
+        for value in [0, 1, 0x1234_5678, u32::MAX] {
+            let mut block = poisoned();
+            unsafe { ata_cmd_set_opaque_word_3c(block.0.as_mut_ptr(), value) };
+            assert_eq!(word_at(&block, OPAQUE_WORD_3C), value);
+            for other in 0..block.0.len() {
+                if !(OPAQUE_WORD_3C..OPAQUE_WORD_3C + 4).contains(&other) {
+                    assert_eq!(block.0[other], 0xa5, "value {value:#x} spilled onto +{other:#x}");
+                }
             }
         }
     }
