@@ -112,6 +112,7 @@ pub mod derived_observable_array_construct;
 pub mod parse_i32_list;
 pub mod pending_event;
 pub mod payload_list_owner_destroy;
+pub mod polymorphic_owner_destroy;
 pub mod owned_chain_table_destroy;
 pub mod null_pointer_status;
 pub mod nested_object_value;

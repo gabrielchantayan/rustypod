@@ -107891,3 +107891,30 @@ functions:
       seam; host tests replace that seam and cover both embedded and distinct
       selected-mutex handoffs. Deliberate deviation: retain the unported reset
       as a seam rather than reimplement its private-state operations.
+
+  # --- nullable polymorphic owner destruction ---
+  - address: 0x081fd554
+    ghidra: FUN_081fd554
+    name: polymorphic_owner_destroy
+    size: 36
+    sig: "PolymorphicOwner *polymorphic_owner_destroy(PolymorphicOwner *owner)"
+    module: cxx/polymorphic_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: owner
+      iVar1/r4: owner
+      "[owner + 0x00]": object
+      "[object + 0x00]": vtable
+      "[vtable + 0x04]": destroy
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte range
+      0x081fd554..0x081fd577: push {r4,lr}; save owner; load owner->object;
+      conditionally load its vtable and slot +4; blxne that destructor; restore
+      owner to r0; pop {r4,pc}. The next independently entered function begins
+      at 0x081fd578 with push {r4,r5,r6,r7,r8,lr}. Decoding inbound A32 branch
+      words finds four unconditional plain BL call sites and zero predicated BL
+      call sites. The dynamically dispatched callee has no static identity, so
+      the port dispatches directly through the object's vtable rather than
+      inventing a seam. Host tests prove both the null bypass and slot-+4
+      dispatch with owner return preservation. match.py reviewed after the ARM
+      release build.
