@@ -78989,6 +78989,40 @@ functions:
       a nonzero result, flag-byte propagation, a zero result, and preservation
       of context storage. Reference C: decomp/c/012/0813e6b0_FUN_0813e6b0.c.
 
+  # --- resource path lookup and UTF-16 materialization ---
+  - address: 0x0813e858
+    ghidra: FUN_0813e858
+    name: resource_path_lookup
+    size: 208
+    sig: "u32 resource_path_lookup(void *context, u32 key, u32 selector, StringObject *out_path, u32 *out_a, u32 *out_b)"
+    module: app/resource_path_lookup
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: key
+      param_3/r2: selector
+      param_4/r3: out_path
+      param_5/stack: out_a
+      param_6/stack: out_b
+      FUN_082792cc: path_object_default_construct
+      FUN_08050418: retail_direct_lookup
+      FUN_08050708: retail_child_lookup
+      FUN_080523bc: retail_path_build
+      FUN_0805a8b4: string_export_counted_utf16
+      FUN_082765a8: string_object_assign_utf16
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 208-byte body from 0x0813e858 through
+      0x0813e927; 0x0813e928 begins the next separately linked function.
+      Decoding the body finds eight unconditional plain BL instructions and no
+      predicated BL forms. It always destroys the temporary PathObject; only a
+      successful lookup/build/export assigns out_path and copies record words
+      +0x18/+0x1c. The three unported resource callees remain fixed-address
+      target calls; host tests inject them and the existing string/path
+      operations. match.py reports an expected structural diff: LLVM uses a
+      smaller stack frame and indirect fixed-address calls while preserving
+      the verified call order.
+
   # --- statically bound empty C++ destructor ---
   - address: 0x0826fc64
     ghidra: FUN_0826fc64
