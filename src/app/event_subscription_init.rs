@@ -101,6 +101,57 @@ unsafe fn lookup_event_descriptor(event_code: u32) -> i32 {
     lookup(event_code)
 }
 
+type EventActivityPredicate = unsafe extern "C" fn(u32) -> u32;
+
+#[cfg(target_os = "none")]
+const RETAIL_EVENT_ACTIVITY_PREDICATE: usize = 0x080f_fea0;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn event_is_active(event_code: u32) -> u32 {
+    let predicate: EventActivityPredicate = core::mem::transmute(RETAIL_EVENT_ACTIVITY_PREDICATE);
+    predicate(event_code)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_event_activity_predicate(_event_code: u32) -> u32 {
+    panic!("install event-subscription host operations before calling this function")
+}
+
+/// Host seam for the unported event-activity predicate at `0x080ffea0`.
+#[cfg(not(target_os = "none"))]
+pub static mut EVENT_ACTIVITY_PREDICATE: EventActivityPredicate = missing_event_activity_predicate;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn event_is_active(event_code: u32) -> u32 {
+    let predicate = core::ptr::read_volatile(core::ptr::addr_of!(EVENT_ACTIVITY_PREDICATE));
+    predicate(event_code)
+}
+
+/// event_subscription_is_active — original: `FUN_0811e834` @ `0x0811e834`
+/// (24 bytes).
+///
+/// Raw ARM spans `0x0811e834..0x0811e84c`; the next independently entered
+/// function begins at `0x0811e84c`. It loads the subscription's event-code
+/// word, calls the unported predicate at `0x080ffea0`, then canonicalizes any
+/// nonzero result to one. Decoding every ARM B/BL word finds four direct
+/// inbound plain `bl` calls at `0x0816f78c`, `0x0816f7b8`, `0x08171b30`, and
+/// `0x081734d0`, with no predicated calls; its sole outbound call is a plain
+/// `bl` to `0x080ffea0`.
+///
+/// Deliberate deviation: the predicate has no recovered names.yaml identity,
+/// so target builds call its verified retail address and host builds use the
+/// volatile seam above. The subscription layout and the wrapper's return
+/// canonicalization are otherwise exact.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.event_subscription_is_active")]
+#[inline(never)]
+pub unsafe extern "C" fn event_subscription_is_active(subscription: *const EventSubscription) -> u32 {
+    (event_is_active((*subscription).event_code) != 0) as u32
+}
+
+
 /// Installs `event_code` and derives its rank and descriptor when it changes.
 ///
 /// # Safety
@@ -161,6 +212,24 @@ mod tests {
     static mut DESCRIPTOR_LOOKUP_CODE: u32 = 0;
     static mut RANK_LOOKUP_COUNT: u32 = 0;
     static mut DESCRIPTOR_LOOKUP_COUNT: u32 = 0;
+    static mut ACTIVITY_PREDICATE_CODE: u32 = 0;
+    static mut ACTIVITY_PREDICATE_RESULT: u32 = 0;
+
+    unsafe extern "C" fn record_activity_predicate(event_code: u32) -> u32 {
+        ACTIVITY_PREDICATE_CODE = event_code;
+        ACTIVITY_PREDICATE_RESULT
+    }
+
+    fn install_activity_predicate() -> std::sync::MutexGuard<'static, ()> {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            addr_of_mut!(ACTIVITY_PREDICATE_CODE).write(0);
+            addr_of_mut!(ACTIVITY_PREDICATE_RESULT).write(0);
+            addr_of_mut!(EVENT_ACTIVITY_PREDICATE).write(record_activity_predicate);
+        }
+        guard
+    }
+
 
     unsafe extern "C" fn record_rank_lookup(event_code: u32) -> i32 {
         RANK_LOOKUP_CODE = event_code;
@@ -254,4 +323,28 @@ mod tests {
         assert_eq!(subscription.event_descriptor, 0);
         assert_eq!(subscription.reserved_05_to_07, [0x22; 3]);
     }
+    #[test]
+    fn activity_wrapper_passes_the_event_code_and_canonicalizes_predicate_results() {
+        let _guard = install_activity_predicate();
+        let subscription = EventSubscription {
+            event_code: 0xc000_0032,
+            active: 0xa5,
+            reserved_05_to_07: [0x5a; 3],
+            event_rank: 0x1111_1111,
+            event_descriptor: 0x2222_2222,
+        };
+
+        unsafe {
+            ACTIVITY_PREDICATE_RESULT = 0;
+            assert_eq!(event_subscription_is_active(&subscription), 0);
+            assert_eq!(ACTIVITY_PREDICATE_CODE, subscription.event_code);
+
+            ACTIVITY_PREDICATE_RESULT = 1;
+            assert_eq!(event_subscription_is_active(&subscription), 1);
+
+            ACTIVITY_PREDICATE_RESULT = u32::MAX;
+            assert_eq!(event_subscription_is_active(&subscription), 1);
+        }
+    }
+
 }
