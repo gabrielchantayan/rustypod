@@ -112365,3 +112365,29 @@ functions:
       no stronger type identity was recovered, so the semantic name describes
       the verified behavior. Rust preserves the target-width accesses with
       volatile aligned reads; no deliberate behavioral deviations.
+  - address: 0x080e7870
+    ghidra: FUN_080e7870
+    name: draw_line_engine
+    size: 148
+    sig: "void draw_line_engine(u8 *surface_body, i32 x1, i32 y1, i32 x2, i32 y2, i32 thickness, u8 *foreground, u8 style, u8 *clip_rect, i32 scaled)"
+    module: cxx/draw_line_engine
+    status: ported
+    renames:
+      param_1: surface_body
+      param_2: x1
+      param_3: y1
+      param_4: x2
+      param_5: y2
+      param_10: scaled
+    notes: >-
+      Raw osos.dec decoding establishes 0x080e7870..0x080e7904 as the true
+      148-byte extent; 0x080e7904 begins an unrelated whitespace scanner.
+      The body has two unconditional BL instructions, to 0x080ea434 and
+      0x080f2efc, and no predicated BL instructions. It reads the aligned
+      surface-body +8 pixel-format word: format 32 with nonzero scaled selects
+      the first renderer after ARM LSL #16 on all four coordinates; every
+      other input selects the second unchanged. The renderers are unported,
+      so target builds call their verified retail addresses and host tests
+      install recording seams. Four inbound unconditional BL call sites were
+      recovered at 0x080878cc, 0x082640f8, 0x08264184, and 0x08264200; none
+      are predicated.
