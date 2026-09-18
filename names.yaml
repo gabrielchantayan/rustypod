@@ -108919,3 +108919,33 @@ functions:
       port decodes the four target pointer words individually before crossing
       the pre-existing typed iterator-advance seam, preserving the 32-bit
       target layout while avoiding overlapping 64-bit host pointer fields.
+  - address: 0x081c5224
+    ghidra: FUN_081c5224
+    name: mov_chunk_offset_table_load_window
+    size: 100
+    sig: "u32 mov_chunk_offset_table_load_window(MovChunkOffsetParser *parser, u32 index)"
+    module: mov/chunk_offset_table_load_window
+    status: ported
+    renames:
+      param_1/r0/r5: parser
+      param_2/r1/r4: index
+      r6: window_count
+      r7: chunk_offset_table
+      "[parser + 0x20]": chunk_offset_table
+      "[parser + 0xe0]": payload_base_lo
+      "[parser + 0xe4]": payload_base_hi
+      "[chunk_offset_table + 0x00]": entry_count
+      "[chunk_offset_table + 0x04]": window_index
+      "[chunk_offset_table + 0x08]": entries
+      FUN_081c3960: unported_u32_window_reader
+    notes: >-
+      Raw osos.dec is exactly 100 bytes from 0x081c5224 through the pop at
+      0x081c5284; 0x081c5288 is the next separate push prologue. The body
+      has one unconditional plain BL, to 0x081c3960, and no predicated BL.
+      Whole-image A32 decoding finds four incoming plain BL calls and no
+      incoming predicated BL calls. It caps the requested stco window at
+      0x4000 and the remaining entry count, then invokes 0x081c3960 with
+      entries, payload_base + index*4 + 16, and that count. A zero helper
+      result advances window_index and returns zero; any nonzero result maps
+      to 3. The helper's stronger identity is unestablished, so target Rust
+      calls its fixed address and host tests install the verified ABI seam.
