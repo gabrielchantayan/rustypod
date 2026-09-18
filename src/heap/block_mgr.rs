@@ -50,6 +50,8 @@
 //! host test) stores the object pointer.
 
 use crate::heap::veneers::heap_panic;
+use crate::cxx::handle::handle_deref_or_null;
+use crate::cxx::templates::not_equal_deref;
 use crate::cxx::list_iter_advance::list_iter_advance;
 
 /// Byte offset of the per-region block size word in the block-manager
@@ -148,6 +150,49 @@ pub unsafe extern "C" fn region_block_count() -> u32 {
         return 0;
     }
     (mgr.add(BLOCK_COUNT_OFFSET) as *const u32).read()
+}
+
+/// manager_client_capacity_total — original: `FUN_0818aca8` @ `0x0818aca8`
+/// (112 bytes; 2 plain, unconditional `bl` instructions and no predicated
+/// `bl` forms; 4 direct `bl` call sites).
+///
+/// Lazily totals the +0x1c capacity word of every client reachable from the
+/// circular client list whose sentinel pointer is at manager +0x28. The
+/// total is cached at manager +0x1bc; `u32::MAX` marks an uncached value.
+/// Each node's client is a two-level handle at +0x8, resolved by the
+/// existing 0x083d64f4 seam. Addition deliberately wraps, matching ARM's
+/// `add`.
+///
+/// Deliberate deviation: typed Rust calls replace the original direct calls
+/// to the byte-identical `not_equal_deref` and `handle_deref_or_null` copies.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn manager_client_capacity_total(manager: *mut u8) -> u32 {
+    const CLIENT_SENTINEL_OFFSET: usize = 0x28;
+    const CAPACITY_CACHE_OFFSET: usize = 0x1bc;
+    const NODE_NEXT_OFFSET: usize = 0;
+    const NODE_CLIENT_HANDLE_OFFSET: usize = 8;
+    const CLIENT_CAPACITY_OFFSET: usize = 0x1c;
+
+    let cache = manager.add(CAPACITY_CACHE_OFFSET).cast::<u32>();
+    if cache.read() != u32::MAX {
+        return cache.read();
+    }
+
+    let sentinel = (manager.add(CLIENT_SENTINEL_OFFSET) as *const u32).read();
+    let mut node = ((sentinel as usize as *mut u8).cast::<u32>()).read();
+    let mut total = 0u32;
+    while not_equal_deref(core::ptr::addr_of!(node), core::ptr::addr_of!(sentinel)) != 0 {
+        let client = handle_deref_or_null(
+            (node as usize as *mut u8)
+                .add(NODE_CLIENT_HANDLE_OFFSET)
+                .cast::<*const *mut u8>(),
+        );
+        total = total.wrapping_add((client.add(CLIENT_CAPACITY_OFFSET) as *const u32).read());
+        node = ((node as usize as *mut u8).cast::<u32>()).read();
+    }
+    cache.write(total);
+    total
 }
 
 
@@ -467,6 +512,54 @@ pub(crate) mod tests {
             assert_eq!(region_block_count(), 0x1234_5678);
         }
         clear_manager();
+    }
+
+    #[test]
+    fn client_capacity_total_caches_empty_and_wrapping_client_lists() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::BLOCK_MGR_CLIENT_CAPACITY,
+            0x1000,
+        ) else {
+            crate::testing::note_missing_u32_fixture("heap/block_mgr");
+            return;
+        };
+
+        unsafe {
+            let manager = slab;
+            let sentinel = slab.add(0x200);
+            let first = slab.add(0x240);
+            let second = slab.add(0x280);
+            let first_handle = slab.add(0x2c0);
+            let second_handle = slab.add(0x300);
+            let first_client = slab.add(0x340);
+            let second_client = slab.add(0x380);
+
+            set_word(manager, 0x28, sentinel as u32);
+            set_word(manager, 0x1bc, u32::MAX);
+            set_word(sentinel, 0, sentinel as u32);
+            assert_eq!(manager_client_capacity_total(manager), 0);
+            assert_eq!(word(manager, 0x1bc), 0, "empty total is cached");
+
+            set_word(manager, 0x1bc, u32::MAX);
+            set_word(sentinel, 0, first as u32);
+            set_word(first, 0, second as u32);
+            set_word(second, 0, sentinel as u32);
+            set_word(first, 8, first_handle as u32);
+            set_word(second, 8, second_handle as u32);
+            set_word(first_handle, 0, first_client as u32);
+            set_word(second_handle, 0, second_client as u32);
+            set_word(first_client, 0x1c, u32::MAX);
+            set_word(second_client, 0x1c, 1);
+            assert_eq!(manager_client_capacity_total(manager), 0);
+            assert_eq!(word(manager, 0x1bc), 0, "ARM addition wraps");
+
+            set_word(first_client, 0x1c, 9);
+            assert_eq!(
+                manager_client_capacity_total(manager),
+                0,
+                "a non-sentinel cache suppresses a later list walk"
+            );
+        }
     }
 
     #[test]

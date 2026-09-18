@@ -102,6 +102,9 @@ pub mod hints {
     pub const CLIENT_POPULATE: usize = 0x0b00_0000;
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;
+    // 0x7fb0_0000: dedicated to heap/block_mgr's target-width client
+    // capacity-cache manager, sentinel, node, handle, and client fixtures.
+    pub const BLOCK_MGR_CLIENT_CAPACITY: usize = 0x7fb0_0000;
     pub const EVENT_LIST: usize = 0x0e00_0000;
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
     // 0x1600_0000: dedicated to ui/range_release's raw-u32 owner,
