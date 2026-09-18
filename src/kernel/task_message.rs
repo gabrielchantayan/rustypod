@@ -1,55 +1,14 @@
-//! Task message-post shim — the synchronous (wait-for-reply) flavor of
-//! the tagged task-message post helper.
+//! Task message posting and receiving.
 //!
-//! - `task_message_post_sync` — original: `FUN_0812bf70` @ 0x0812bf70
-//!   (20 bytes; 2 `bl` call sites: 0x08111050 in `FUN_08110fdc` and
-//!   0x08125228 in `FUN_081251cc`). Pure argument plumbing in front of
-//!   the message-post helper @ 0x0812c088: it forwards (reply_queue,
-//!   target_queue, message, flags) with the wait flag forced to 1, and
-//!   returns the helper's result verbatim. Its mirror image @
-//!   0x0812c628 (`FUN_0812c628`) is the identical 20-byte body with
-//!   `mov r3, #0x0` — the fire-and-forget flavor.
+//! `task_message_post_sync` @ 0x0812bf70 and its fire-and-forget mirror @
+//! 0x0812c628 force the `wait` argument of `task_message_post` below. Both
+//! call sites construct a three-word `{FourCC tag, arg, arg}` message and
+//! obtain their reply and target queue handles from task contexts.
 //!
-//! The helper @ 0x0812c088 (180 bytes, not yet ported) allocates a
-//! message cell from the global pool (locked alloc @ 0x0812bf9c), copies
-//! the 3-word tagged message into it, and posts it through
-//! 0x080944b0 when the wait flag is nonzero (else 0x080f117c). Both
-//! post backends bottom out in the queue send @ 0x0809eb58, whose
-//! fifth argument is the wait-for-reply flag: 0x080944b0 passes 1
-//! (the sender blocks the current task until the reply, per the
-//! param_5 != 0 path there) and 0x080f117c passes 0. So the r3 this
-//! shim forces to 1 selects the synchronous send — hence the name.
-//!
-//! Both call sites build the same 3-word stack message
-//! {FourCC tag, arg, arg} and pass queue handles read out of task
-//! context blocks (+0x1c, cf. `current_task_ctx_block` @ 0x080cb828 in
-//! kernel/task.rs): r0 is the posting task's own (reply) queue, r1 the
-//! target's. The exact semantics of the fourth argument (forwarded
-//! verbatim as the helper's stack argument, and from there to the
-//! queue send's cell-blocking flag) are not yet identified; the name
-//! `flags` follows the data flow, nothing more (the
-//! `timer_schedule_shim` precedent).
-//!
-//! Deviations:
-//! - The helper @ 0x0812c088 is not yet ported, so the call dispatches
-//!   indirectly through the `TASK_MESSAGE_OPS` fn-pointer table (the
-//!   `TimerOps` pattern in drivers/timer.rs) instead of an undefined
-//!   `extern "C"` symbol that would break the freestanding ARM link.
-//!   The default stub returns 0 (post failed), the harmless choice —
-//!   on real hardware the table must be installed before this shim is
-//!   hooked. The slot is read with a volatile field read, the
-//!   `timer_schedule_shim` precedent.
-//! - The original spills its incoming r3 to the stack slot that becomes
-//!   the helper's fifth (stack) argument (`stmdb sp!,{r3,lr};
-//!   str r3,[sp,#0x0]`) — argument plumbing, not a saved register; the
-//!   port expresses the same thing as a five-argument `extern "C"`
-//!   call, which lowers to the same stack-arg store on ARM.
-//! - Ghidra's scouted signature is `void FUN_0812bf70(void)`: it
-//!   recovers neither the four register arguments nor the result. Both
-//!   call sites consume the return value (`iVar2 = FUN_0812bf70(...);
-//!   if (iVar2 != 0) return iVar2;`), so the signature is corrected to
-//!   four arguments returning `u32` — the helper's 1-on-success /
-//!   0-on-failure result.
+//! The lower queue operations remain deliberately narrow data-flow seams:
+//! their retailOS identities have not been established. On target they call
+//! their verified addresses; host tests install deterministic replacements.
+//! This avoids claiming names or signatures unsupported by the raw code.
 
 use crate::kernel::condvar::{list_push_back, ListHead, ListNode};
 use crate::kernel::csem::{csem_post_deferred, CountingSem};
@@ -91,53 +50,133 @@ pub unsafe extern "C" fn task_message_pool_release(cell: *mut ListNode) {
     mutex_unlock(&mut mutex);
 }
 
-/// Indirect dispatch table for the not-yet-ported message-post helper
-/// (see the module header for the design and the default-stub
-/// behavior).
+/// Operations below `task_message_post` whose identities are not yet known.
+///
+/// Each signature is established from the A32 call setup in
+/// `FUN_0812c088`, rather than Ghidra's incomplete prototypes.
 #[derive(Clone, Copy)]
-pub struct TaskMessageOps {
-    /// Message-post helper @ 0x0812c088(reply_queue, target_queue,
-    /// message, wait, flags) -> u32: allocates a message cell from the
-    /// global pool, copies the 3-word tagged `message` into it, and
-    /// posts it to `target_queue` — synchronously (blocking the sender
-    /// for the reply) when `wait` is nonzero. Returns 1 on a
-    /// successful post, 0 on failure. `task_message_post_sync` calls
-    /// it with `wait` forced to 1.
-    pub post_message: unsafe extern "C" fn(
-        reply_queue: usize,
-        target_queue: usize,
-        message: *const u32,
-        wait: u32,
-        flags: u32,
-    ) -> u32,
+pub struct TaskMessagePostOps {
+    pub allocate_cell: unsafe extern "C" fn() -> *mut u32,
+    pub post_without_wait: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32,
+    pub post_with_wait: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32,
+    pub allocation_failed: unsafe extern "C" fn(*mut u32, *mut *const u32),
 }
 
-// Default stub: without the post layer a send has no meaning, and 0
-// (post failed) is the harmless result — both call sites treat nonzero
-// as an error code to propagate, and 0 falls through to the success
-// path with nothing posted. On real hardware TASK_MESSAGE_OPS must be
-// installed before this shim is hooked.
-unsafe extern "C" fn missing_post_message(
-    _reply_queue: usize,
-    _target_queue: usize,
-    _message: *const u32,
-    _wait: u32,
-    _flags: u32,
-) -> u32 {
-    0
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_allocate_cell() -> *mut u32 {
+    let allocate: unsafe extern "C" fn() -> *mut u32 = unsafe { core::mem::transmute(0x0812_bf9cusize) };
+    unsafe { allocate() }
 }
 
-/// The wired default: the not-yet-ported helper is the documented stub
-/// above.
-pub(crate) const DEFAULT_TASK_MESSAGE_OPS: TaskMessageOps = TaskMessageOps {
-    post_message: missing_post_message,
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_post_without_wait(reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32) -> u32 {
+    let post: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32 =
+        unsafe { core::mem::transmute(0x080f_117cusize) };
+    unsafe { post(reply_queue, target_queue, cell, flags) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_post_with_wait(reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32) -> u32 {
+    let post: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32 =
+        unsafe { core::mem::transmute(0x0809_44b0usize) };
+    unsafe { post(reply_queue, target_queue, cell, flags) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_allocation_failed(wait: *mut u32, message: *mut *const u32) {
+    let failed: unsafe extern "C" fn(*mut u32, *mut *const u32) =
+        unsafe { core::mem::transmute(0x080d_c8a4usize) };
+    unsafe { failed(wait, message) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_allocate_cell() -> *mut u32 {
+    panic!("task_message_post requires pool helper 0x0812bf9c")
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_post(_reply_queue: usize, _target_queue: usize, _cell: *mut u32, _flags: u32) -> u32 {
+    panic!("task_message_post requires queue post helper")
+}
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_allocation_failed(_wait: *mut u32, _message: *mut *const u32) {
+    panic!("task_message_post requires allocation-failure helper 0x080dc8a4")
+}
+
+pub(crate) const DEFAULT_TASK_MESSAGE_POST_OPS: TaskMessagePostOps = TaskMessagePostOps {
+    allocate_cell: {
+        #[cfg(target_os = "none")]
+        { firmware_allocate_cell }
+        #[cfg(not(target_os = "none"))]
+        { missing_allocate_cell }
+    },
+    post_without_wait: {
+        #[cfg(target_os = "none")]
+        { firmware_post_without_wait }
+        #[cfg(not(target_os = "none"))]
+        { missing_post }
+    },
+    post_with_wait: {
+        #[cfg(target_os = "none")]
+        { firmware_post_with_wait }
+        #[cfg(not(target_os = "none"))]
+        { missing_post }
+    },
+    allocation_failed: {
+        #[cfg(target_os = "none")]
+        { firmware_allocation_failed }
+        #[cfg(not(target_os = "none"))]
+        { missing_allocation_failed }
+    },
 };
 
-/// The active task-message dispatch table. Defaults to
-/// `DEFAULT_TASK_MESSAGE_OPS`; replaced by host tests (mocks) and
-/// eventually by the ported post helper. Written once at init on
-/// target; tests serialize access.
-pub static mut TASK_MESSAGE_OPS: TaskMessageOps = DEFAULT_TASK_MESSAGE_OPS;
+/// Active seams for the unported allocation and queue-post operations.
+pub static mut TASK_MESSAGE_POST_OPS: TaskMessagePostOps = DEFAULT_TASK_MESSAGE_POST_OPS;
+
+/// task_message_post — original: `FUN_0812c088` @ **0x0812c088**
+/// (**188 bytes** true extent: 180 bytes of code followed by the two literal
+/// words at 0x0812c13c and 0x0812c140; the next function starts at
+/// 0x0812c144).
+///
+/// **4 direct `bl` callers: 3 unconditional and 1 `blne`** (0x0812bf7c,
+/// 0x0812c194, 0x0812c238, 0x0812c634), verified by decoding every A32
+/// branch-with-link word in `osos.dec`. The body makes five unconditional
+/// calls and no predicated calls.
+///
+/// Allocates a message cell, copies seven source words to cell `+4`, then
+/// posts it with or without a wait according to `wait`. A successful backend
+/// post returns 0 and becomes 1 here; a failed post returns the cell to the
+/// pool and becomes 0. On allocation failure, only tag `0x5765_656c` invokes
+/// the observed allocation-failure helper with stack-local `{wait, message}`.
+///
+/// Deliberate deviation: the fixed 28-byte copy is expressed directly instead
+/// of calling unported `FUN_0827210c`; its exact word order is preserved.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_message_post(
+    reply_queue: usize, target_queue: usize, message: *const u32, wait: u32, flags: u32,
+) -> u32 {
+    let cell = unsafe { (core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile().allocate_cell)() };
+    if cell.is_null() {
+        if unsafe { message.read() } == 0x5765_656c {
+            let mut saved_wait = wait;
+            let mut saved_message = message;
+            unsafe { (core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile().allocation_failed)(&mut saved_wait, &mut saved_message) };
+        }
+        return 0;
+    }
+    unsafe {
+        let word0 = message.read(); let word1 = message.add(1).read(); let word2 = message.add(2).read();
+        let word4 = message.add(4).read(); let word5 = message.add(5).read(); let word6 = message.add(6).read();
+        cell.add(1).write(word0); cell.add(2).write(word1); cell.add(3).write(word2);
+        cell.add(4).write(message.add(3).read()); cell.add(5).write(word4); cell.add(6).write(word5); cell.add(7).write(word6);
+    }
+    let ops = unsafe { core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile() };
+    let result = unsafe {
+        if wait == 0 { (ops.post_without_wait)(reply_queue, target_queue, cell, flags) }
+        else { (ops.post_with_wait)(reply_queue, target_queue, cell, flags) }
+    };
+    if result == 0 { 1 } else { unsafe { task_message_pool_release(cell.cast::<ListNode>()); } 0 }
+}
 
 /// Raw receive operation at `FUN_0807a2e8` @ 0x0807a2e8. Its identity is
 /// not yet established beyond the observed queue/cell handoff, so this
@@ -241,17 +280,8 @@ pub unsafe extern "C" fn task_message_receive(
 /// task_message_post_sync — original: `FUN_0812bf70` @ 0x0812bf70 (20
 /// bytes).
 ///
-/// Posts the 3-word tagged `message` to `target_queue` through the
-/// message-post helper @ 0x0812c088 with the wait flag forced to 1 —
-/// the synchronous flavor that blocks the sending task until the reply
-/// (its mirror @ 0x0812c628 forces 0, the fire-and-forget flavor).
-/// `reply_queue` is the posting task's own queue handle and `flags`
-/// rides through verbatim as the helper's stack argument; both follow
-/// the data flow only — see the module header. Returns the helper's
-/// result: 1 on a successful post, 0 on failure. The helper is not yet
-/// ported, so the call dispatches through `TASK_MESSAGE_OPS` (the
-/// `TimerOps` pattern); the Ghidra `void (void)` signature is
-/// corrected to four arguments returning `u32` from the call sites.
+/// Posts the 3-word tagged `message` with `wait` forced to 1, returning
+/// `task_message_post`'s 1-on-success / 0-on-failure result.
 ///
 /// `#[inline(never)]`: the shim is a distinct `bl` target in the
 /// original, and both its call sites are `bl`s. Without it LLVM folds
@@ -266,12 +296,7 @@ pub unsafe extern "C" fn task_message_post_sync(
     message: *const u32,
     flags: u32,
 ) -> u32 {
-    // Reads the fn-pointer field directly rather than the whole table:
-    // the `timer_schedule_shim` precedent (a whole-table volatile read
-    // breaks LLVM's ARM sibling-call lowering). The volatile load keeps
-    // LLVM from constant-folding the default stub into a direct call.
-    let post_message = core::ptr::addr_of!(TASK_MESSAGE_OPS.post_message).read_volatile();
-    post_message(reply_queue, target_queue, message, 1, flags)
+    unsafe { task_message_post(reply_queue, target_queue, message, 1, flags) }
 }
 
 /// Target word containing the task-message transport pointer.
@@ -382,24 +407,40 @@ pub(crate) mod tests {
     use std::vec::Vec;
 
 
-    /// Serializes every test that swaps [`TASK_MESSAGE_OPS`] — including
-    /// `app::queued_message`'s poster tests, which drive the same slot.
+    /// Serializes every test that swaps [`TASK_MESSAGE_POST_OPS`] — including
+    /// `app::queued_message`'s posting tests.
     pub(crate) static OPS_LOCK: StdMutex<()> = StdMutex::new(());
 
-    static CALLS: StdMutex<Vec<(usize, usize, usize, u32, u32)>> = StdMutex::new(Vec::new());
-
-    /// Mock post helper: records the full argument tuple and returns
-    /// the scripted result.
+    static CALLS: StdMutex<Vec<(usize, usize, u32, u32)>> = StdMutex::new(Vec::new());
     static mut MOCK_RESULT: u32 = 0;
+    #[repr(align(8))]
+    struct MockCell([u32; 8]);
+    static mut MOCK_CELL: MockCell = MockCell([0; 8]);
+    static mut MOCK_ALLOCATE: *mut u32 = core::ptr::null_mut();
+    static mut ALLOCATION_FAILURES: u32 = 0;
     static RECEIVE_CALL: StdMutex<Option<(usize, u32, usize)>> = StdMutex::new(None);
     static mut MOCK_RECEIVE_CELL: u32 = 0;
-
     static TRANSPORT_LOCK: StdMutex<()> = StdMutex::new(());
 
+    unsafe extern "C" fn mock_allocate_cell() -> *mut u32 {
+        core::ptr::addr_of!(MOCK_ALLOCATE).read_volatile()
+    }
+    unsafe extern "C" fn mock_post_without_wait(reply: usize, target: usize, cell: *mut u32, flags: u32) -> u32 {
+        CALLS.lock().push((reply, target, 0, flags));
+        core::ptr::addr_of!(MOCK_RESULT).read_volatile()
+    }
+    unsafe extern "C" fn mock_post_with_wait(reply: usize, target: usize, cell: *mut u32, flags: u32) -> u32 {
+        CALLS.lock().push((reply, target, 1, flags));
+        core::ptr::addr_of!(MOCK_RESULT).read_volatile()
+    }
+    unsafe extern "C" fn mock_allocation_failed(_wait: *mut u32, _message: *mut *const u32) {
+        core::ptr::addr_of_mut!(ALLOCATION_FAILURES).write_volatile(
+            core::ptr::addr_of!(ALLOCATION_FAILURES).read_volatile() + 1,
+        );
+    }
+
     unsafe extern "C" fn mock_receive_cell(
-        queue: usize,
-        result: *mut u32,
-        auxiliary: *mut u8,
+        queue: usize, result: *mut u32, auxiliary: *mut u8,
     ) -> u32 {
         let first = unsafe { result.read_volatile() };
         RECEIVE_CALL.lock().replace((queue, first, auxiliary as usize));
@@ -407,94 +448,38 @@ pub(crate) mod tests {
         0
     }
 
-
-    unsafe extern "C" fn mock_post_message(
-        reply_queue: usize,
-        target_queue: usize,
-        message: *const u32,
-        wait: u32,
-        flags: u32,
-    ) -> u32 {
-        CALLS.lock().push((
-            reply_queue,
-            target_queue,
-            message as usize,
-            wait,
-            flags,
-        ));
-        core::ptr::addr_of!(MOCK_RESULT).read_volatile()
-    }
-
-    /// Installs the mock, runs the shim once with the given arguments,
-    /// and returns (shim result, recorded call tuple).
-    fn run_case(
-        result: u32,
-        reply_queue: usize,
-        target_queue: usize,
-        message: *const u32,
-        flags: u32,
-    ) -> (u32, (usize, usize, usize, u32, u32)) {
+    #[test]
+    fn posts_seven_words_and_inverts_backend_status() {
         let _guard = OPS_LOCK.lock();
-        CALLS.lock().clear();
+        let message = [0x1234_5678, 1, 2, 3, 4, 5, 6];
         unsafe {
-            core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(result);
-            core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(TaskMessageOps {
-                post_message: mock_post_message,
+            core::ptr::addr_of_mut!(MOCK_ALLOCATE).write_volatile(core::ptr::addr_of_mut!(MOCK_CELL.0).cast::<u32>());
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
+                allocate_cell: mock_allocate_cell, post_without_wait: mock_post_without_wait,
+                post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
             });
         }
-        let ret = unsafe { task_message_post_sync(reply_queue, target_queue, message, flags) };
-        let calls = CALLS.lock().clone();
-        unsafe {
-            core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(DEFAULT_TASK_MESSAGE_OPS);
-        }
-        assert_eq!(calls.len(), 1, "exactly one post call expected");
-        (ret, calls[0])
+        assert_eq!(unsafe { task_message_post(10, 20, message.as_ptr(), 1, 0x55) }, 1);
+        assert_eq!(unsafe { core::ptr::addr_of!(MOCK_CELL.0).cast::<u32>().add(1).read() }, message[0]);
+        assert_eq!(unsafe { core::ptr::addr_of!(MOCK_CELL.0).cast::<u32>().add(7).read() }, message[6]);
+        assert_eq!(CALLS.lock().as_slice(), &[(10, 20, 1, 0x55)]);
+        unsafe { core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
     }
 
     #[test]
-    fn forces_wait_flag_and_forwards_arguments() {
-        let message: [u32; 3] = [0xdead_beef, 0x1111_2222, 0x3333_4444];
-        let (ret, call) = run_case(1, 0x089c_0010, 0x089c_0020, message.as_ptr(), 0x55);
-        assert_eq!(ret, 1);
-        assert_eq!(
-            call,
-            (0x089c_0010, 0x089c_0020, message.as_ptr() as usize, 1, 0x55)
-        );
-    }
-
-    #[test]
-    fn result_propagates_verbatim() {
-        // 0 (post failed) and nonzero values other than 1 must pass
-        // through untouched — the callers propagate any nonzero value.
-        let message: [u32; 3] = [0x4d53_4721, 7, 8];
-        let (ret, _) = run_case(0, 1, 2, message.as_ptr(), 0);
-        assert_eq!(ret, 0);
-        let (ret, _) = run_case(0x8000_0007, 1, 2, message.as_ptr(), 0);
-        assert_eq!(ret, 0x8000_0007);
-    }
-
-    #[test]
-    fn wait_flag_is_one_even_when_flags_are_zero() {
-        // The original's `mov r3, #0x1` is unconditional: the wait flag
-        // is forced to 1 regardless of every other argument.
-        let (ret, call) = run_case(0, 0, 0, core::ptr::null(), 0);
-        assert_eq!(ret, 0);
-        assert_eq!(call.3, 1);
-        assert_eq!(call.0, 0);
-        assert_eq!(call.1, 0);
-        assert_eq!(call.2, 0);
-        assert_eq!(call.4, 0);
-    }
-
-    #[test]
-    fn default_stub_reports_failure_and_posts_nothing() {
+    fn allocation_failure_notifies_only_the_weel_tag() {
         let _guard = OPS_LOCK.lock();
         unsafe {
-            core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(DEFAULT_TASK_MESSAGE_OPS);
+            core::ptr::addr_of_mut!(MOCK_ALLOCATE).write_volatile(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(ALLOCATION_FAILURES).write_volatile(0);
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
+                allocate_cell: mock_allocate_cell, post_without_wait: mock_post_without_wait,
+                post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
+            });
         }
-        let message: [u32; 3] = [1, 2, 3];
-        let ret = unsafe { task_message_post_sync(10, 20, message.as_ptr(), 30) };
-        assert_eq!(ret, 0);
+        assert_eq!(unsafe { task_message_post(0, 0, [0x5765_656c, 0, 0, 0, 0, 0, 0].as_ptr(), 0, 0) }, 0);
+        assert_eq!(unsafe { core::ptr::addr_of!(ALLOCATION_FAILURES).read_volatile() }, 1);
+        unsafe { core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
     }
 
     #[test]

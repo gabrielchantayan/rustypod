@@ -371,13 +371,8 @@ pub struct MessageTargetOwner {
 /// # Deviations
 ///
 /// - The two post shims are the sync/async pair 0x0812bf70 / 0x0812c628.
-///   Only the sync one is ported
-///   ([`crate::kernel::task_message::task_message_post_sync`]) and it is
-///   called directly. 0x0812c628 is its 20-byte mirror whose entire body
-///   is the same helper call with the wait flag forced to 0, so the
-///   `no_wait` branch makes that call through the already-established
-///   [`crate::kernel::task_message::TASK_MESSAGE_OPS`] slot instead of
-///   re-stubbing a function that is one immediate away from a sibling.
+///   The async mirror is expressed by the shared
+///   [`crate::kernel::task_message::task_message_post`] with `wait == 0`.
 /// - The outgoing message is 28 bytes of defined storage rather than the
 ///   original's 20 — see [`PostedTaskMessage`].
 /// - `current_task_ctx_block()` may report NULL (no current task); the
@@ -430,11 +425,7 @@ pub unsafe extern "C" fn queued_message_post(
         let words = core::ptr::addr_of!(outgoing).cast::<u32>();
 
         if no_wait != 0 {
-            let post = unsafe {
-                core::ptr::addr_of!(crate::kernel::task_message::TASK_MESSAGE_OPS.post_message)
-                    .read_volatile()
-            };
-            unsafe { post(reply_queue, target_queue, words, 0, flags) }
+            unsafe { crate::kernel::task_message::task_message_post(reply_queue, target_queue, words, 0, flags) }
         } else {
             unsafe {
                 crate::kernel::task_message::task_message_post_sync(
@@ -653,7 +644,7 @@ mod post_tests {
 
     use super::*;
     use crate::kernel::task::TaskCtx;
-    use crate::kernel::task_message::{TaskMessageOps, DEFAULT_TASK_MESSAGE_OPS, TASK_MESSAGE_OPS};
+    use crate::kernel::task_message::{TaskMessagePostOps, DEFAULT_TASK_MESSAGE_POST_OPS, TASK_MESSAGE_POST_OPS};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
     use parking_lot::MutexGuard;
@@ -673,28 +664,40 @@ mod post_tests {
     static mut POSTS: Vec<PostCall> = Vec::new();
     static mut RELEASED: Vec<usize> = Vec::new();
     static mut POST_RESULT: u32 = 0;
+    #[repr(align(8))]
+    struct PostCell([u32; 8]);
+    static mut POST_CELL: PostCell = PostCell([0; 8]);
+
+    unsafe extern "C" fn recording_allocate_cell() -> *mut u32 {
+        ptr::addr_of_mut!(POST_CELL.0).cast::<u32>()
+    }
 
     unsafe extern "C" fn recording_post(
-        reply_queue: usize,
-        target_queue: usize,
-        message: *const u32,
-        wait: u32,
-        flags: u32,
+        reply_queue: usize, target_queue: usize, cell: *mut u32, wait: u32, flags: u32,
     ) -> u32 {
         unsafe {
             (*ptr::addr_of_mut!(POSTS)).push(PostCall {
-                reply_queue,
-                target_queue,
-                // The helper copies a fixed 28 bytes, so the test reads
-                // all seven words — the deviation this port exists to
-                // make well-defined.
-                message: message.cast::<PostedTaskMessage>().read(),
-                wait,
-                flags,
+                reply_queue, target_queue,
+                message: cell.add(1).cast::<PostedTaskMessage>().read(),
+                wait, flags,
             });
             ptr::read_volatile(ptr::addr_of!(POST_RESULT))
         }
     }
+
+    unsafe extern "C" fn recording_post_without_wait(
+        reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32,
+    ) -> u32 {
+        unsafe { recording_post(reply_queue, target_queue, cell, 0, flags) }
+    }
+
+    unsafe extern "C" fn recording_post_with_wait(
+        reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32,
+    ) -> u32 {
+        unsafe { recording_post(reply_queue, target_queue, cell, 1, flags) }
+    }
+
+    unsafe extern "C" fn recording_allocation_failed(_wait: *mut u32, _message: *mut *const u32) {}
 
     unsafe extern "C" fn recording_release(message: *mut QueuedMessage) {
         unsafe { (*ptr::addr_of_mut!(RELEASED)).push(message as usize) };
@@ -718,17 +721,18 @@ mod post_tests {
         ctx: *mut TaskCtx,
     }
 
-    /// Installs the recording helper and builds a live envelope/target
-    /// chain in the low slab. Holds `task_message`'s ops lock, the one
-    /// lock guarding [`TASK_MESSAGE_OPS`] crate-wide.
+    /// chain in the low slab. Holds `task_message`'s ops lock.
     fn bench(target_queue: usize) -> Option<(MutexGuard<'static, ()>, Fixture)> {
         let guard = crate::kernel::task_message::tests::OPS_LOCK.lock();
         let slab = (*SLAB)? as *mut u8;
         unsafe {
             (*ptr::addr_of_mut!(POSTS)).clear();
             (*ptr::addr_of_mut!(RELEASED)).clear();
-            ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(TaskMessageOps {
-                post_message: recording_post,
+            ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
+                allocate_cell: recording_allocate_cell,
+                post_without_wait: recording_post_without_wait,
+                post_with_wait: recording_post_with_wait,
+                allocation_failed: recording_allocation_failed,
             });
 
             let vtable = slab.add(OFF_VTABLE).cast::<QueuedMessageVtable>();
@@ -757,7 +761,7 @@ mod post_tests {
     }
 
     fn restore(guard: MutexGuard<'static, ()>) {
-        unsafe { ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(DEFAULT_TASK_MESSAGE_OPS) };
+        unsafe { ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
         drop(guard);
     }
 
@@ -779,9 +783,9 @@ mod post_tests {
             return;
         };
         unsafe {
-            ptr::addr_of_mut!(POST_RESULT).write_volatile(1);
+            ptr::addr_of_mut!(POST_RESULT).write_volatile(0);
             let ret = queued_message_post(fixture.message, fixture.target, NO_WAIT, 0x089c_2000, 0x55);
-            assert_eq!(ret, 1, "the helper's result is returned verbatim");
+            assert_eq!(ret, 1, "a zero backend result becomes helper success");
             assert_eq!(
                 posts(),
                 std::vec![PostCall {
@@ -811,9 +815,9 @@ mod post_tests {
             return;
         };
         unsafe {
-            ptr::addr_of_mut!(POST_RESULT).write_volatile(7);
+            ptr::addr_of_mut!(POST_RESULT).write_volatile(0);
             let ret = queued_message_post(fixture.message, fixture.target, 0, 0x089c_2000, 0);
-            assert_eq!(ret, 7);
+            assert_eq!(ret, 1);
             assert_eq!(posts().len(), 1);
             assert_eq!(posts()[0].wait, 1, "0x0812bf70 forces the wait flag to 1");
             assert!(released().is_empty());
@@ -828,7 +832,7 @@ mod post_tests {
             return;
         };
         unsafe {
-            ptr::addr_of_mut!(POST_RESULT).write_volatile(0);
+            ptr::addr_of_mut!(POST_RESULT).write_volatile(7);
             let ret = queued_message_post(fixture.message, fixture.target, NO_WAIT, 0x089c_2000, 0);
             assert_eq!(ret, 0);
             assert_eq!(posts().len(), 1, "the post is still attempted");
@@ -881,7 +885,7 @@ mod post_tests {
         unsafe {
             // Re-point only the innermost link: the queue must follow.
             (*fixture.ctx).queue_pool = 0x089c_3000usize as *mut u8;
-            ptr::addr_of_mut!(POST_RESULT).write_volatile(1);
+            ptr::addr_of_mut!(POST_RESULT).write_volatile(0);
             queued_message_post(fixture.message, fixture.target, NO_WAIT, 0x089c_2000, 0);
             assert_eq!(posts()[0].target_queue, 0x089c_3000);
         }
