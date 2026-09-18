@@ -1495,6 +1495,14 @@ pub mod hints {
     // 0x7ff0_0000: dedicated to util/indexed_slot_pointer's raw-u32 object
     // and table fixture; mappings never unmap, so no other user may share it.
     pub const INDEXED_SLOT_POINTER: usize = 0x7ff0_0000;
+    // 0x8010_0000: dedicated to app/task_context_observable_dispatch's
+    // target-width current-task-context fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const TASK_CONTEXT_OBSERVABLE_DISPATCH: usize = 0x8010_0000;
+    // 0x8020_0000: dedicated to app/task_context_observable_dispatch's
+    // cached-observable context fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const TASK_CONTEXT_OBSERVABLE_DISPATCH_CACHED: usize = 0x8020_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

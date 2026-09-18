@@ -53737,6 +53737,37 @@ functions:
       archive reports the same call/literal/store/zero/store skeleton;
       the expected differences are LLVM's fp frame and the archive
       relocation rendering the direct callee as the local symbol.
+  - address: 0x08110a60
+    ghidra: FUN_08110a60
+    name: task_context_observable_dispatch
+    size: 68
+    sig: "void task_context_observable_dispatch(u32 argument)"
+    module: app/task_context_observable_dispatch
+    status: ported
+    vars:
+      param_1/r0: argument
+      iVar1: current_task_context
+      piVar2: observable
+      uStack_10: argument_spill
+      FUN_080cb828: current_task_ctx_block
+      FUN_082aadd4: operator_new
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw ARM proves the 68-byte extent 0x08110a60..0x08110aa4: seventeen
+      words from push {r0,r4,r5,lr} through pop {r3,r4,r5,pc}; the unrelated
+      next function starts at 0x08110aa4. It makes four unconditional direct
+      BL calls (current_task_ctx_block twice on the lazy path, operator_new(16),
+      observable_array_construct) and no predicated BL calls, then one
+      register-indirect BLX through the constructed object's vtable +0x1c.
+      It lazily installs the 16-byte observable at the current context's
+      target-width +0x2c word, deliberately re-fetching the context before the
+      store, and dispatches with a pointer to its private stack spill of
+      argument. The runtime slot's concrete identity is unrecovered and is not
+      invented; the target port dispatches it structurally, while host tests
+      use a typed seam. Host pointer widths require target word indexing rather
+      than TaskCtx field offsets. Focused tests cover lazy allocation,
+      construction/publication, argument forwarding, and the cached path.
+
   # --- Silver UI framework: link and owner initializer ---
 
   - address: 0x081108b4
