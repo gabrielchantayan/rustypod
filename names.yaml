@@ -16851,6 +16851,34 @@ functions:
       bit-0 fast path, both guard edge states, constructor-result versus
       reloaded-object return, full default zeroing, and the inert handler.
 
+  - address: 0x081c8544
+    ghidra: FUN_081c8544
+    name: record_manager_current_record_status_failed
+    size: 128
+    sig: "u32 record_manager_current_record_status_failed(void *record_manager, u32 status, u32 selector)"
+    module: app/record_manager
+    status: ported
+    vars: {param_1: record_manager, param_2: status, param_3: selector}
+    renames:
+      FUN_081d9698: selector_pair_init
+      FUN_081d96a0: registration_handle_init
+      FUN_0829e1b4: current_record_handle
+      FUN_081d9734: registration_handle_destroy
+    notes: >-
+      Raw osos.dec decodes to 128 bytes from 0x081c8544 through 0x081c85c0;
+      the next independently linked function begins at 0x081c85c4. It builds
+      selector pair {selector, 0}, initializes a kind-2 registration at the
+      record-manager subobject +0xa0c, retrieves its selected record handle,
+      and dispatches handle vtable slot +0x5c with status. It returns 1 for a
+      NULL selected handle or nonzero dispatch result, otherwise 0, always
+      destroying the registration first. The body has four direct plain bl
+      calls (0x081d9698, 0x081d96a0, 0x0829e1b4, and 0x081d9734) and zero
+      predicated bl calls. On 64-bit hosts the three target words are copied
+      into an explicit target-layout temporary before current-record lookup,
+      and the target-width virtual dispatch has a host seam; firmware retains
+      the native three-word layout and indirect vtable call. Host tests cover
+      absent selected handle plus zero/nonzero vtable status and its argument.
+
   - address: 0x08167b54
     ghidra: FUN_08167b54
     name: recording_buffer_get

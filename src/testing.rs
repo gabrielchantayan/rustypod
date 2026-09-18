@@ -629,6 +629,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_POSITION: usize = 0xd300_0000;
+    // 0xd500_0000: dedicated to app/record_manager's target-width current
+    // record registration fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RECORD_MANAGER_CURRENT_RECORD_STATUS: usize = 0xd500_0000;
     // 0xd400_0000: dedicated to app/operator_cycle_advance_if_successor's
     // target-width parser-state fixture; mappings never unmap, so no other
     // user may share this hint.

@@ -35,6 +35,24 @@
 //! to a frame teardown at `0x081bda64` without establishing that frame. It
 //! cannot safely run as a shutdown handler, and retailOS never runs this
 //! chain, so the registered Rust handler is deliberately a no-op.
+//!
+//! - [`record_manager_current_record_status_failed`] — original:
+//!   `FUN_081c8544` @ `0x081c8544` (**128 bytes**,
+//!   `0x081c8544..0x081c85c4`; the next function begins at `0x081c85c4`).
+//!   Raw ARM decoding finds four plain `bl` calls and zero predicated `bl`
+//!   calls: selector initialization, registration initialization, current
+//!   record lookup, and registration destruction.
+//!
+//!   It forms a kind-two registration over the manager subobject at `+0xa0c`,
+//!   fetches its selected record handle, and returns one when no handle exists
+//!   or that handle's vtable slot `+0x5c` reports a nonzero status. The
+//!   registration is always destroyed before return. On 64-bit hosts the
+//!   target's three-word registration is copied into a local target-layout
+//!   view before calling the existing current-record port, and virtual dispatch
+//!   uses a test seam because a target vtable word cannot contain a host
+//!   function pointer. Firmware builds retain the native layout and indirect
+//!   call exactly.
+
 
 use core::ffi::c_void;
 
@@ -99,6 +117,100 @@ pub unsafe extern "C" fn record_manager_get() -> *mut u8 {
     object
 }
 
+/// ABI of the selected record handle's vtable slot at `+0x5c`.
+pub type CurrentRecordStatus = unsafe extern "C" fn(*mut u8, u32) -> i32;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_current_record_status(_record: *mut u8, _status: u32) -> i32 {
+    panic!("install record-manager current-record host operations before dispatch")
+}
+
+/// Host operation replacing the target-width selected-record vtable dispatch.
+#[cfg(not(target_os = "none"))]
+pub static mut RECORD_MANAGER_CURRENT_RECORD_STATUS: CurrentRecordStatus =
+    missing_current_record_status;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn current_record_status(record: *mut u8, status: u32) -> i32 {
+    let vtable = record.cast::<u32>().read() as usize;
+    let dispatch = (vtable as *const u32).add(0x5c / 4).read() as usize;
+    core::mem::transmute::<usize, CurrentRecordStatus>(dispatch)(record, status)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn current_record_status(record: *mut u8, status: u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(RECORD_MANAGER_CURRENT_RECORD_STATUS))(record, status)
+}
+
+/// record_manager_current_record_status_failed — original: `FUN_081c8544` @
+/// `0x081c8544` (128 bytes; four plain direct `bl` calls, zero predicated).
+///
+/// Builds a kind-two registration for `record_manager + 0xa0c` using
+/// `selector`, then reports failure when its selected handle is absent or its
+/// vtable `+0x5c` status is nonzero. The registration destructor runs on both
+/// paths. On 64-bit hosts only, the temporary registration is copied to an
+/// explicit three-word target view for the already-ported target-width current
+/// record lookup; virtual dispatch goes through
+/// [`RECORD_MANAGER_CURRENT_RECORD_STATUS`]. Those are deliberate host ABI
+/// adaptations, not firmware behavior.
+///
+/// # Safety
+///
+/// `record_manager + 0xa0c` must meet the registration helper and selected
+/// record-handle requirements. A nonzero selected handle must identify an
+/// object whose vtable slot `+0x5c` has this function's ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_manager_current_record_status_failed(
+    record_manager: *mut u8,
+    status: u32,
+    selector: u32,
+) -> u32 {
+    use crate::app::current_record_handle::{current_record_handle, CurrentRecordCursor};
+    use crate::app::registration_handle::{
+        registration_handle_destroy, registration_handle_init, RegistrationHandle,
+    };
+    use crate::app::selector_pair_init::selector_pair_init;
+
+    let mut selector_pair = [0u32; 2];
+    selector_pair_init(selector_pair.as_mut_ptr(), selector, 0);
+
+    let mut registration = core::mem::MaybeUninit::<RegistrationHandle>::uninit();
+    let registration = registration_handle_init(
+        registration.as_mut_ptr(),
+        record_manager.add(0xa0c),
+        2,
+        selector_pair.as_ptr(),
+    );
+
+    #[cfg(target_os = "none")]
+    let record = current_record_handle(registration.cast::<CurrentRecordCursor>()) as *mut u8;
+
+    #[cfg(not(target_os = "none"))]
+    let record = {
+        #[repr(C)]
+        struct TargetRegistrationHandle {
+            vtable: u32,
+            owner: u32,
+            slot_index: i32,
+        }
+        let target_registration = TargetRegistrationHandle {
+            vtable: (*registration).vtable,
+            owner: (*registration).owner as usize as u32,
+            slot_index: (*registration).slot_index,
+        };
+        current_record_handle(
+            core::ptr::addr_of!(target_registration).cast::<CurrentRecordCursor>(),
+        ) as *mut u8
+    };
+
+    let failed = record.is_null() || current_record_status(record, status) != 0;
+    registration_handle_destroy(registration);
+    failed as u32
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -111,10 +223,24 @@ mod tests {
     use std::boxed::Box;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
+    use crate::app::registration_handle::{
+        RegistrationHandleInitOps, RegistrationHandleOps, DEFAULT_REGISTRATION_HANDLE_INIT_OPS,
+        DEFAULT_REGISTRATION_HANDLE_OPS, REGISTRATION_HANDLE_INIT_OPS, REGISTRATION_HANDLE_OPS,
+    };
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::LazyLock;
+
 
     static RECORD_MANAGER_LOCK: Mutex<()> = Mutex::new(());
     static mut CTOR_BLOCKS: Vec<*mut u8> = Vec::new();
     static mut CTOR_RESULT: *mut u8 = ptr::null_mut();
+    static CURRENT_RECORD_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::RECORD_MANAGER_CURRENT_RECORD_STATUS, 0x2000)
+            .map(|pointer| pointer as usize)
+    });
+    static mut CURRENT_RECORD_STATUS_RESULT: i32 = 0;
+    static mut CURRENT_RECORD_STATUS_CALL: Option<(*mut u8, u32)> = None;
+
 
     unsafe extern "C" fn recording_ctor(this: *mut u8) -> *mut u8 {
         (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
@@ -131,6 +257,42 @@ mod tests {
 
     unsafe extern "C" fn box_free(block: *mut u8) {
         drop(Box::from_raw(block as *mut ShutdownNode));
+    }
+
+    unsafe extern "C" fn acquire_current_record(owner: *mut u8, _slot: u32) -> *mut u8 {
+        owner
+    }
+
+    unsafe extern "C" fn reject_current_record(_owner: *mut u8, _slot: u32) -> *mut u8 {
+        ptr::null_mut()
+    }
+
+    unsafe extern "C" fn release_current_record(_owner: *mut u8, _slot: u32) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn dispatch_current_record(record: *mut u8, status: u32) -> i32 {
+        CURRENT_RECORD_STATUS_CALL = Some((record, status));
+        CURRENT_RECORD_STATUS_RESULT
+    }
+
+    unsafe fn install_current_record_ops(acquire: crate::app::registration_handle::RegistrationSlotAcquire) {
+        REGISTRATION_HANDLE_INIT_OPS = RegistrationHandleInitOps {
+            find_slot: DEFAULT_REGISTRATION_HANDLE_INIT_OPS.find_slot,
+            acquire_slot: acquire,
+        };
+        REGISTRATION_HANDLE_OPS = RegistrationHandleOps {
+            release_slot: release_current_record,
+        };
+        RECORD_MANAGER_CURRENT_RECORD_STATUS = dispatch_current_record;
+        CURRENT_RECORD_STATUS_CALL = None;
+    }
+
+    unsafe fn restore_current_record_ops() {
+        REGISTRATION_HANDLE_INIT_OPS = DEFAULT_REGISTRATION_HANDLE_INIT_OPS;
+        REGISTRATION_HANDLE_OPS = DEFAULT_REGISTRATION_HANDLE_OPS;
+        RECORD_MANAGER_CURRENT_RECORD_STATUS = missing_current_record_status;
+        CURRENT_RECORD_STATUS_CALL = None;
     }
 
     fn storage() -> *mut u8 {
@@ -250,4 +412,45 @@ mod tests {
     fn object_extent_covers_the_last_constructor_mutex_word() {
         assert_eq!(RECORD_MANAGER_SIZE, 0xcd8);
     }
+    #[test]
+    fn current_record_status_reports_failure_when_registration_has_no_handle() {
+        let lock = reset();
+        unsafe {
+            install_current_record_ops(reject_current_record);
+            assert_eq!(record_manager_current_record_status_failed(storage(), 7, 3), 1);
+            assert_eq!(CURRENT_RECORD_STATUS_CALL, None);
+            restore_current_record_ops();
+        }
+        restore(lock);
+    }
+
+    #[test]
+    fn current_record_status_returns_vtable_result_and_preserves_status_argument() {
+        let lock = reset();
+        let Some(base) = *CURRENT_RECORD_FIXTURE else {
+            assert!(note_missing_u32_fixture("app::record_manager current-record status"));
+            restore(lock);
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            base.write_bytes(0, 0x2000);
+            let records = base.add(0x1000);
+            records.add(4).cast::<u32>().write(0x1234_5678);
+            let manager = base;
+            manager.add(0xa0c + 4).cast::<u32>().write(records as usize as u32);
+            manager.add(0xa0c + 8).cast::<i32>().write(0);
+
+            install_current_record_ops(acquire_current_record);
+            CURRENT_RECORD_STATUS_RESULT = 0;
+            assert_eq!(record_manager_current_record_status_failed(manager, 0xfeed_face, 9), 0);
+            assert_eq!(CURRENT_RECORD_STATUS_CALL, Some((0x1234_5678usize as *mut u8, 0xfeed_face)));
+
+            CURRENT_RECORD_STATUS_RESULT = -1;
+            assert_eq!(record_manager_current_record_status_failed(manager, 0, 9), 1);
+            restore_current_record_ops();
+        }
+        restore(lock);
+    }
 }
+
