@@ -50414,6 +50414,30 @@ functions:
       literal load, post-index +8 equivalent, helper call, and subtract-8
       remain; the volatile seam becomes an indirect blx.
 
+  - address: 0x0811af38
+    ghidra: FUN_0811af38
+    name: class_6280_clear_pending_and_post_resource
+    size: 36
+    sig: "void class_6280_clear_pending_and_post_resource(Class6280 *view)"
+    module: app/class_6280_clear_pending_and_post_resource
+    status: ported
+    renames:
+      param_1/r0: view
+      "view+0x68": pending
+      "view->vtable+0x58": resource_dispatch
+    notes: >-
+      Raw osos.dec establishes a 36-byte true extent: seven instruction words
+      at 0x0811af38..0x0811af50, followed by literal-pool words 0x00006289
+      and 0x44726177 at 0x0811af54 and 0x0811af58; the next independent
+      function starts at 0x0811af5c. A full raw-image ARM disassembly finds
+      exactly four inbound plain direct bl calls and zero predicated direct bl
+      calls (0x0811b8f8, 0x0811bae4, 0x0811bf34, 0x0811c038). The body clears
+      pending byte +0x68 and tail-dispatches vtable slot +0x58 with value
+      0x44726177 ("warD") and resource 0x6289. The virtual target has no
+      recovered identity, so the port reuses the physical target dispatch and
+      its host-only widened adapter. Rust uses an ordinary call and return
+      instead of the firmware tail branch. Reference C:
+      decomp/c/010/0811af38_FUN_0811af38.c; assembly: osos.asm 0x0811af38.
   - address: 0x0811b9dc
     ghidra: FUN_0811b9dc
     name: class_6280_refresh_ui
