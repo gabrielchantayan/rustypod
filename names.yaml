@@ -32960,6 +32960,36 @@ functions:
       family as the assign. match.py structural: same push/mov-r4/call/
       return-this frame; LLVM may inline the teardown helpers.
 
+  - address: 0x0816cd58
+    ghidra: FUN_0816cd58
+    name: refcounted_ptr_release_dtor_guarded
+    size: 140
+    sig: "RefcountedBody **refcounted_ptr_release_dtor_guarded(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      vtable_plus_0x4: virtual_destructor_slot_1
+      FUN_0839d0c8: refcounted_body_mutex_lock_guarded
+      FUN_0839d0d8: refcounted_body_mutex_unlock_guarded
+    notes: >-
+      Raw osos.dec establishes the 140-byte extent 0x0816cd58..0x0816cde4;
+      the next real function begins with `push {r4,r5,r6,lr}` at 0x0816cde4.
+      Whole-image branch decoding finds four inbound plain bl calls
+      (0x08117cac, 0x08117cc0, 0x0816255c, 0x08162748) and no predicated bl
+      calls. The body has five unconditional direct bl instructions and one
+      predicated blxne virtual-destructor dispatch. NULL body returns slot
+      unchanged; otherwise the 0x0839d0c8/0x0839d0d8 mutex pair brackets a
+      wrapping decrement. The final release invokes implementation vtable word
+      1, retains that implementation, unlocks, deletes/frees the mutex, clears
+      body+8, frees body, and clears slot. The named lock pair is identified
+      only by verified argument and ordering; Rust deliberately reuses the
+      established mutex ports rather than inventing a product identity.
+
   - address: 0x0816ce88
     ghidra: FUN_0816ce88
     name: refcounted_ptr_release_dtor_mutex
