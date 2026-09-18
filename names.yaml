@@ -22864,6 +22864,40 @@ functions:
     sig: "void *lazy_singleton_0x3c(void)"
     module: app/singletons
     status: ported
+
+  - address: 0x0816df90
+    ghidra: FUN_0816df90
+    name: element_registry_remove_for_id
+    size: 144
+    sig: "void element_registry_remove_for_id(ElementRegistry *registry, u32 element_id)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: element registry container
+      param_2/r1: element id
+      local_24: collection iterator state
+      "entry+0x04": element id
+      "entry-vtable+0x10": element teardown
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+      FUN_0817ee04: app_controller_get
+      FUN_0817e9b8: unresolved app-controller element-removal helper
+      FUN_083d125c: container_remove_element
+    notes: >-
+      Raw ARM establishes the complete 144-byte extent
+      0x0816df90..0x0816e020: the next real function starts with
+      push {r3,r4,r5,lr} at 0x0816e020. The body has six unconditional
+      direct bl instructions, no predicated bl instructions, and one
+      indirect blx through entry vtable slot +0x10. A zero id returns
+      immediately. Otherwise it constructs the 20-byte iterator with -2,
+      walks to the first entry whose +0x04 id matches, tears it down,
+      removes its id through 0x0817e9b8, removes the entry from the
+      registry container, then drops the iterator. The 0x0817e9b8
+      helper is deliberately retained as an address boundary because its
+      concrete identity is not recovered. Host tests use an isolated
+      app_controller_get boundary; target builds call the already ported
+      getter directly.
   # --- Class-0x9400 current-item versus media-player predicate ---
   - address: 0x081b5e64
     ghidra: FUN_081b5e64
