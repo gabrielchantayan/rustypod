@@ -16146,6 +16146,33 @@ functions:
     vars: {param_1: rec, param_2: offset}
     notes: Big-endian 32-bit field read. 4 call sites, binary-scanned.
 
+  - address: 0x081f39c8
+    ghidra: FUN_081f39c8
+    name: global_dispatch_target_get
+    size: 76
+    sig: "u8 **global_dispatch_target_get(void)"
+    module: app/global_dispatch_target
+    status: ported
+    renames:
+      DAT_081f3a14: global_dispatch_target_guard (0x089cb204)
+      DAT_081f3a18: global_dispatch_target_slot (0x089cb208)
+      DAT_081f3a1c: fixed_dispatch_target (0x089900d0)
+      DAT_081f3a20: dso_handle (0x089ca09c)
+      DAT_081f3a24: opaque_shutdown_handler_word (0x081e8bc4)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw ARM establishes the 76-byte extent 0x081f39c8..0x081f3a14, followed
+      by a 20-byte literal pool and the next real function at 0x081f3a28.
+      A full decoded B/BL scan finds four inbound unconditional BL calls
+      (0x081533dc, 0x08159650, 0x081596b0, 0x08159744), no predicated BL forms,
+      and no tail branches. The bit-zero guard fast path calls
+      cxa_guard_acquire; on success it stores 0x089900d0 in the fixed slot,
+      registers that slot with cxa_atexit using handler word 0x081e8bc4 and
+      __dso_handle 0x089ca09c, releases the guard, then returns the slot. The
+      handler word has no recovered function identity, so it is retained as
+      the exact target handler and an inert host handler is used instead.
   - address: 0x081f3b30
     ghidra: FUN_081f3b30
     name: load_be32
