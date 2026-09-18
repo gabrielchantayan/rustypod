@@ -72918,6 +72918,34 @@ functions:
       deviations. Host tests cover arbitrary words, zero/all-ones boundaries,
       pointer aliasing, and the absence of mutation.
 
+  # --- event subscription activity predicate ---
+  - address: 0x0811e834
+    ghidra: FUN_0811e834
+    name: event_subscription_is_active
+    size: 24
+    sig: "u32 event_subscription_is_active(const EventSubscription *subscription)"
+    module: app/event_subscription_init
+    status: ported
+    renames:
+      param_1/r0: subscription
+      param_1_plus_0x00: event_code
+      FUN_080ffea0: retail_event_activity_predicate
+      r0: is_active
+    notes: >-
+      Raw firmware spans 0x0811e834..0x0811e84c: `stmdb sp!,{r4,lr}; ldr
+      r0,[r0]; bl 0x080ffea0; cmp r0,#0; movne r0,#1; ldmia sp!,{r4,pc}`.
+      The next independently entered function begins at 0x0811e84c. Thus it
+      passes subscription+0x00 as an untyped event-code word to the sole
+      callee and canonicalizes any nonzero result to one; it has no NULL
+      check or mutation. Raw ARM B/BL decoding finds four direct inbound
+      unconditional plain bl calls at 0x0816f78c, 0x0816f7b8, 0x08171b30,
+      and 0x081734d0, no predicated calls, and one outbound plain bl to
+      0x080ffea0. That callee is not named or ported, so the target calls its
+      verified retail address and host tests install a volatile seam. Tests
+      cover zero, one, and u32::MAX predicate returns and prove the forwarded
+      event code. Reference C: decomp/c/011/0811e834_FUN_0811e834.c;
+      assembly: osos.asm 0x0811e834.
+
   # --- event subscription event-code setter ---
   - address: 0x0811e84c
     ghidra: FUN_0811e84c
