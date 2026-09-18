@@ -107840,3 +107840,26 @@ functions:
       identity is inferred. Rust models the target's four-byte spacing with
       four u32 prefix words and preserves the unchecked load behavior. No
       deliberate deviations.
+
+  # --- opaque object context setter veneer ---
+  - address: 0x0820a4bc
+    ghidra: thunk_FUN_08214368
+    name: object_set_context
+    size: 4
+    sig: "void object_set_context(void *object, u32 context)"
+    module: ui/object_context
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: context
+      "[object + 0x20]": context
+    notes: >-
+      Raw osos.dec establishes the true four-byte extent
+      0x0820a4bc..0x0820a4bf: b 0x0822b060. The next independently linked
+      function begins at 0x0820a4c0 with push {r4,r5,lr}. The first target is
+      another tail veneer to 0x08214368, whose raw body is str r1,[r0,#0x20];
+      bx lr. Decoding inbound A32 branch words finds four direct plain BL
+      call sites and no predicated BL calls. The veneer chain stores the
+      unchecked target-width context word at object +0x20. Deliberate
+      deviation: Rust collapses the two tail veneers into that verified store
+      rather than inventing veneer-target identities.
