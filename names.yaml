@@ -109340,3 +109340,39 @@ functions:
       while target-only layout assertions preserve the +0x28 and +0x24
       offsets. Host tests cover the NULL no-write path and callback target,
       byte, and status propagation.
+
+  # --- resource registration reset ---
+  - address: 0x081a45c4
+    ghidra: FUN_081a45c4
+    name: resource_registration_reset
+    size: 188
+    sig: "void resource_registration_reset(ResourceRegistrationObject *object)"
+    module: app/resource_registration_reset
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x00": vtable
+      "object+0x80..0x84": state_80_to_84
+      "object+0x86": state_86
+      "vtable+0x58": register_resource
+      DAT_081a4680: FIRST_RESOURCE_ID (0x3d0a)
+      DAT_081a4684: RESOURCE_GROUP_MARKER (0x2a2a2a2a)
+      DAT_081a4688: SECOND_RESOURCE_ID (0x3d0b)
+      DAT_081a468c: THIRD_RESOURCE_ID (0x3d0c)
+      DAT_081a4690: FOURTH_RESOURCE_ID (0x3d0d)
+      DAT_081a4694: FIFTH_RESOURCE_ID (0x3d0e)
+      DAT_081a4698: SIXTH_RESOURCE_ID (0x3d0f)
+      FUN_indirect_vtable_58: register_resource (dynamic; no callee identity)
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte extent
+      0x081a45c4..0x081a4680: the final `bx r3` tail dispatch is at
+      0x081a467c and 0x081a4680 begins the literal pool. Decoding the raw
+      whole image finds four inbound direct, unconditional plain BL calls
+      (0x081a3160, 0x081a3ab4, 0x081a3e34, and 0x081a5048) and zero
+      predicated BL forms. The body has five unconditional indirect BLX calls
+      and one unconditional indirect BX tail dispatch through vtable +0x58;
+      no callee identity is invented. It clears bytes +0x80..+0x84 and the
+      halfword at +0x86, then registers IDs 0x3d0a through 0x3d0f with group
+      marker 0x2a2a2a2a. Deliberate deviation: host fixtures use native-width
+      pointer and function-pointer fields; target-only assertions preserve the
+      verified ARM offsets.
