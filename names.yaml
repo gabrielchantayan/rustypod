@@ -164,27 +164,6 @@ functions:
       FUN_0827fe1c: kind_0x21_message_construct
       FUN_08110e4c: message_dispatch
     notes: >-
-      Raw osos.dec establishes the exact 76-byte extent
-      0x0827fdd0..0x0827fe1b; 0x0827fe1c starts the derived constructor
-      with its own push prologue. The four direct call sites are all
-      unconditional plain BL instructions and there are no predicated BL
-      call sites. The body allocates 32 bytes from the message-kind arena,
-      invokes the constructor entry at 0x0827fe1c, then tail-branches to
-      the unported 0x08110e4c dispatcher. The port shares that established
-      target-only seam; host tests replace the target vtable callback.
-  - address: 0x0829e100
-    ghidra: FUN_0829e100
-    name: object_child_count_is_positive
-    size: 28
-    sig: "u32 object_child_count_is_positive(const u32 *object)"
-    module: app/object_child_count_is_positive
-    status: ported
-    renames:
-      param_1/r0: object
-      r0: child_record_or_result
-      "*(u32 *)(object + 8)": child_record
-      "*(i32 *)(child_record + 4)": signed_count
-    notes: >-
       Raw osos.dec establishes the true 28-byte extent
       0x0829e100..0x0829e11c; 0x0829e11c begins the next distinct push
       prologue. Decoding every A32 B/BL word finds four direct unconditional
@@ -109154,3 +109133,37 @@ functions:
       identity, so target builds call that fixed address; host tests install
       a seam. Host tests cover empty collections and u32-wrapping totals
       while checking submission, callback count, and completion-byte write.
+
+
+  # --- retailOS derived UI object constructor ---
+  - address: 0x081b8e74
+    ghidra: FUN_081b8e74
+    name: ui_object_construct
+    size: 188
+    sig: "u8 *ui_object_construct(u8 *this, u32 first, u32 second, u32 third, u32 spec)"
+    module: app/ui_object_construct
+    status: ported
+    renames:
+      FUN_0815c9ac: ui_object_base_construct
+      FUN_0810ebbc: pair_header_base_construct
+      FUN_0826467c: draw_state_construct
+      FUN_081523dc: fixed_value_default_init
+      FUN_08138460: refcounted_base_init
+    notes: >-
+      Raw osos.dec establishes the 188-byte true extent: 47 instructions
+      through the pop at 0x081b8f2c, then three literal-pool words at
+      0x081b8f30/34/38; 0x081b8f3c begins the next function. A raw full-image
+      branch decode finds four inbound unconditional BL sites
+      (0x081850f0, 0x081b8230, 0x081e9650, 0x081e9c68), zero predicated
+      inbound BL sites, and nine unconditional outbound BL instructions. The
+      unidentified five-word base constructor 0x0815c9ac returns the base
+      used for every following offset; the derived constructor installs
+      vtable 0x0898c350, constructs PairHeaderBase members at +0x2f8/+0x3f8,
+      draw-state members at +0x3b0/+0x4b0 and clears their +0x44 words,
+      then initializes FixedValue members at +0x4f8/+0x510 and applies the
+      final words relative to the latter. It returns that latter result
+      minus 0x2e8. Target builds call 0x0815c9ac through a volatile seam;
+      host tests replace it and verify forwarded ABI words, returned-base
+      offset derivation, member vtables, clears, and final return. match.py
+      reports the same construction/store sequence with expected frame and
+      indirect-seam differences.
