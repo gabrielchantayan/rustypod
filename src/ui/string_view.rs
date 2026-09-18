@@ -73,6 +73,7 @@ use crate::cxx::observable_array::{observable_array_construct, ObservableArray};
 use crate::cxx::pair_header::pair_header_base_construct;
 use crate::cxx::string_object::string_default_construct;
 use crate::drivers::timer::timer_schedule_shim;
+use crate::ui::resource_ref_clear::resource_ref_clear;
 
 /// The ROM address of this class's vtable (the constructor's literal-
 /// pool word @ 0x08291cb8, binary-verified; the destructor @ 0x08291cd4
@@ -214,15 +215,6 @@ pub struct StringViewOps {
     ),
 }
 
-/// Exact stand-in for the 0x081e170c leaf: three word clears, returns
-/// its argument. Behaviour-identical to the stock function, so it is
-/// the wired default on target and host alike.
-unsafe extern "C" fn default_clear_resource_ref(resource_ref: *mut u32) -> *mut u32 {
-    resource_ref.write_volatile(0);
-    resource_ref.add(1).write_volatile(0);
-    resource_ref.add(2).write_volatile(0);
-    resource_ref
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_construct_base(
@@ -275,13 +267,13 @@ unsafe extern "C" fn missing_resolve_resources(
 
 /// Wired defaults (the `event_list.rs` split: firmware addresses on
 /// target, panics on host — except the fully decoded
-/// [`default_clear_resource_ref`]).
+/// [`resource_ref_clear`]).
 pub const DEFAULT_STRING_VIEW_OPS: StringViewOps = StringViewOps {
     #[cfg(target_os = "none")]
     construct_base: firmware_construct_base,
     #[cfg(not(target_os = "none"))]
     construct_base: missing_construct_base,
-    clear_resource_ref: default_clear_resource_ref,
+    clear_resource_ref: resource_ref_clear,
     #[cfg(target_os = "none")]
     resolve_resources: firmware_resolve_resources,
     #[cfg(not(target_os = "none"))]
@@ -345,9 +337,9 @@ pub static mut STRING_VIEW_OPS: StringViewOps = DEFAULT_STRING_VIEW_OPS;
 ///   [`STRING_VIEW_VTABLE_ADDRESS`] rather than a modeled static:
 ///   nothing here dispatches through it, and the image's data at that
 ///   address is stale (see the constant's docs).
-/// - The 0x081e170c resource-reference clear rides the ops seam with a
-///   behaviour-identical default ([`default_clear_resource_ref`]) —
-///   the leaf is fully decoded, so there is nothing to stub.
+/// - The 0x081e170c resource-reference clear rides the ops seam through
+///   [`resource_ref_clear`]; the leaf is fully decoded, so there is
+///   nothing to stub.
 ///
 /// # Safety
 /// `view` must point at a writable, 4-byte-aligned [`StringView`],
@@ -489,7 +481,7 @@ mod tests {
 
     unsafe extern "C" fn recording_clear_resource_ref(resource_ref: *mut u32) -> *mut u32 {
         record(Event::ClearResourceRef(resource_ref as usize));
-        default_clear_resource_ref(resource_ref)
+        resource_ref_clear(resource_ref)
     }
 
     unsafe extern "C" fn recording_resolve_resources(
@@ -644,11 +636,11 @@ mod tests {
     }
 
     #[test]
-    fn default_resource_ref_clear_is_the_stock_leaf() {
-        // The 0x081e170c default is behaviour-identical to the stock
-        // leaf: three word clears, returns its argument.
+    fn resource_ref_clear_is_the_stock_leaf() {
+        // The 0x081e170c port is behaviour-identical to the stock leaf:
+        // three word clears, returns its argument.
         let mut buffer = [0xdead_beefu32; 4];
-        let returned = unsafe { default_clear_resource_ref(buffer.as_mut_ptr()) };
+        let returned = unsafe { resource_ref_clear(buffer.as_mut_ptr()) };
         assert_eq!(returned, buffer.as_mut_ptr());
         assert_eq!(buffer, [0, 0, 0, 0xdead_beef]);
     }
