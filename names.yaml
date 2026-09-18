@@ -110186,3 +110186,29 @@ functions:
       a normal call that LLVM lowers to a tail branch, while preserving the
       stock unguarded reads, target-width pointer field, copy-before-offset
       order, and wrapping coordinate translation.
+
+  - address: 0x08164e9c
+    ghidra: FUN_08164e9c
+    name: encoded_field_prefix_size
+    size: 40
+    sig: "u32 encoded_field_prefix_size(const u8 *encoded_field)"
+    module: app/encoded_field_prefix_size
+    status: ported
+    renames:
+      param_1/r0: encoded_field
+      r1: first_byte
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent
+      0x08164e9c..0x08164ec4: ldrb r1,[r0]; mov r0,#0; tst r1,#3; bxeq
+      lr; and r0,r1,#12; mov r1,#1; add r0,r1,r0,lsr#2; cmp r0,#4; bxls
+      lr; bl heap_panic. The following ldrb r0,[r0] at 0x08164ec4 is the
+      next separately linked function. Full-image ARM B/BL decoding finds
+      exactly four inbound plain BL calls (0x08164a68, 0x08164af0,
+      0x08164e38, 0x08164eec) and zero predicated BL calls. Bits 0..1
+      clear returns zero; otherwise bits 2..3 plus one yields a one- through
+      four-byte prefix size. Because the mask constrains this result to four,
+      the raw `cmp`/`bl heap_panic` path is unreachable. Deliberate deviation:
+      LLVM removes that dead fatal branch; structured Rust conditionals replace
+      ARM predicated returns while retaining the volatile first-byte load and
+      result. Host tests cover all 256 first-byte values.
