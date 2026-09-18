@@ -16702,6 +16702,23 @@ functions:
       not exist in osos (confirmed by reading the ARM disassembly of the
       first attempt).
 
+  - address: 0x0812140c
+    ghidra: FUN_0812140c
+    name: ata_cmd_set_lba_mid
+    size: 8
+    sig: "void ata_cmd_set_lba_mid(u8 *cmd, u8 lba_mid)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: lba_mid}
+    notes: >-
+      Raw ARM is `strb r1, [r0, #0x17]; bx lr`; the next separately linked
+      setter begins at 0x08121414, confirming the eight-byte extent. Decoding
+      every ARM B/BL word in osos.dec finds four inbound plain `bl` calls and
+      no predicated `bl` forms. +0x17 is the legacy ATA taskfile LBA-mid
+      register: ata_cmd_set_lba28 writes LBA bits 8..15 there. No NULL guard,
+      validation, return value, or deliberate deviations. #[inline(never)]
+      and a dedicated text section preserve the independent retail BL target.
+
   - address: 0x08121488
     ghidra: FUN_08121488
     name: ata_cmd_set_protocol

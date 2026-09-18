@@ -423,6 +423,24 @@ pub unsafe extern "C" fn ata_cmd_set_sector_count(cmd: *mut u8, count: u8) {
     set_byte(cmd, SECTOR_COUNT, count);
 }
 
+/// ata_cmd_set_lba_mid — original: `FUN_0812140c` @ 0x0812140c (8 bytes;
+/// **4 direct `bl` call sites, all unconditional; no predicated `bl`
+/// forms**, verified by decoding the ARM branch words in `osos.dec`).
+///
+/// Stores the legacy ATA taskfile LBA-mid byte at +0x17. The routine is
+/// exactly `strb r1, [r0, #0x17]; bx lr`: no validation, NULL guard, or
+/// return value. The nearby LBA28 packer stores LBA bits 8..15 at the same
+/// offset, establishing the field identity.
+///
+/// Deviation: none. The custom section keeps this distinct real `bl` target
+/// from otherwise identical byte setters.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_cmd_set_lba_mid")]
+pub unsafe extern "C" fn ata_cmd_set_lba_mid(cmd: *mut u8, lba_mid: u8) {
+    set_byte(cmd, LBA_MID, lba_mid);
+}
+
 /// ata_cmd_set_device_head — original: `FUN_08121344` @ 0x08121344
 /// (8 bytes; 7 direct call sites, verified by decoding every ARM B/BL
 /// word in `osos.dec`: all are unconditional `bl`, at 0x081665e8,
@@ -1492,6 +1510,23 @@ mod tests {
         for other in 0..block.0.len() {
             if other != SECTOR_COUNT {
                 assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_lba_mid_setter_writes_every_byte_value_without_spilling() {
+        let mut storage = [0xa5u8; 0x5a];
+        let cmd = unsafe { storage.as_mut_ptr().add(1) };
+
+        for lba_mid in [0, 0x4f, 0xff] {
+            storage.fill(0xa5);
+            unsafe { ata_cmd_set_lba_mid(cmd, lba_mid) };
+            assert_eq!(storage[LBA_MID + 1], lba_mid);
+            for (offset, value) in storage.iter().copied().enumerate() {
+                if offset != LBA_MID + 1 {
+                    assert_eq!(value, 0xa5, "value {lba_mid:#x} spilled onto +{offset:#x}");
+                }
             }
         }
     }
