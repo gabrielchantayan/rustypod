@@ -87937,6 +87937,34 @@ functions:
       remain volatile; host tests use atomic controller words. Focused tests
       cover modes 0..3, unsupported modes, preservation of the exact saved
       value, and blocking until command-ready.
+  # --- LCD command transaction end ---
+  - address: 0x080dbe20
+    ghidra: FUN_080dbe20
+    name: lcd_end_command_transaction
+    size: 40
+    sig: "void lcd_end_command_transaction(u32 saved_control)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      DAT_080dbe48: LCD_CONTROLLER_BASE
+      puVar1/r4: lcd_controller
+      param_1/r0/r5: saved_control
+    notes: >-
+      Raw ARM establishes the exact 40-byte extent 0x080dbe20..0x080dbe48:
+      `push {r4-r6,lr}; ldr r4,[pc,#28]; mov r5,r0; ldr r0,[r4,#28]; tst
+      r0,#2; beq 0x080dbe2c; mov r0,#1; bl 0x08037ef0; str r5,[r4]; pop
+      {r4,r5,r6,pc}`. The following word at 0x080dbe48 is its
+      0x38300000 literal pool; `cmp r0,#1` at 0x080dbe4c begins the next
+      separately linked function. It polls LCD status +0x1c for command-ready
+      bit 1, delays one microsecond via the ported iram_usec_delay_veneer,
+      then restores the paired begin helper's exact saved control word at
+      +0x00. Raw-image decoding finds one outbound plain BL and exactly four
+      inbound direct call sites — 0x080bb57c, 0x080dbf10, 0x080e3384, and
+      0x080e6994 — all unconditional; there are zero predicated BL forms.
+      No osos data word equals the entry address, so it is not a
+      virtual-dispatch target. Deliberate deviation: target MMIO loads/stores
+      remain volatile; host tests use the existing atomic LCD controller model.
+      Reference C: decomp/c/008/080dbe20_FUN_080dbe20.c.
   # --- LCD command and parameter write ---
   - address: 0x080c99fc
     ghidra: FUN_080c99fc
