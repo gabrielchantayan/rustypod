@@ -112546,3 +112546,36 @@ functions:
       unported RTC-write and notification calls are target-address/host
       volatile dispatch seams; the tiny selection and comparison helpers are
       reproduced inline instead of represented as opaque seams.
+  - address: 0x080dc92c
+    ghidra: FUN_080dc92c
+    name: u16_code_dispatch
+    size: 220
+    sig: "void u16_code_dispatch(u32 code, void *receiver, void *primary_records, u32 primary_record_count, void *secondary_records, u32 secondary_record_count)"
+    module: app/u16_code_dispatch
+    status: ported
+    renames:
+      param_1/r0: code
+      param_2/r1/r5: receiver
+      param_3/r2: primary_records
+      param_4/r3: primary_record_count
+      param_5: secondary_records
+      param_6: secondary_record_count
+      FUN_080edb8c: code_dispatch_lookup
+      FUN_0839eb8c: vtable_word_callback
+    notes: >-
+      Raw osos.dec establishes the exact 220-byte extent
+      0x080dc92c..0x080dca08; the two following literal words belong to this
+      body and the next separately entered function starts at 0x080dca10.
+      Decoding the body finds four direct, unconditional BL instructions:
+      two calls to the binary-search helper at 0x080edb8c and two call sites
+      to vtable_word_callback @ 0x0839eb8c (one loop site executes per
+      secondary word); there are no predicated BL instructions. It searches a
+      12-byte primary table for code's low u16, dispatches an indexed word, and
+      uses a word of 0xffff to select an 8-byte secondary record whose
+      zero-terminated word sequence is dispatched before that 0xffff sentinel.
+      Lookup failure or an out-of-range primary index dispatches 0x3f. The
+      lookup helper's generic binary-search identity and fixed comparator
+      addresses are verified from raw ARM, but its comparator identities are
+      deliberately not invented. Rust calls its verified device address and
+      exposes only that boundary as a host-test seam; it also forwards the
+      comparator register through the already ported vtable wrapper.

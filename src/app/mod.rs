@@ -120,6 +120,7 @@ pub mod entry_match_index;
 pub mod event_code_queue;
 pub mod event_subscription_init;
 pub mod event_code_dispatch;
+pub mod u16_code_dispatch;
 pub mod keyed_event_binding;
 pub mod keyed_record_pair_lookup;
 pub mod event_hub;
