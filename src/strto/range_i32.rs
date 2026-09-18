@@ -15,10 +15,10 @@
 //!
 //! # Deliberate deviations
 //!
-//! `string_from_range` and the decimal parser are not ported. Their existing
-//! firmware entry points are called through [`RANGE_I32_OPS`] on target and
-//! injected in host tests. The StringObject copy constructor, C-string
-//! accessor, and destructor are already ported and remain direct calls.
+//! `string_from_range` is not ported. Its firmware entry point is called
+//! through [`RANGE_I32_OPS`] on target and injected in host tests. The
+//! StringObject copy constructor, C-string accessor, destructor, and decimal
+//! parser are already ported and remain direct calls.
 
 use core::mem::MaybeUninit;
 
@@ -31,20 +31,17 @@ pub static RANGE_I32_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new
 use crate::cxx::string_object::{
     string_object_c_str, string_object_copy_construct, string_object_destroy, StringObject,
 };
+use crate::strto::parse_i32_decimal::parse_i32_decimal;
 
 /// `FUN_080f020c(this, range)`: converts a UTF-16 begin/end range to a
 /// StringObject, stripping outer quotes and resolving backslash escapes.
 pub type Utf16RangeToStringFn = unsafe extern "C" fn(this: *mut StringObject, range: *const u8);
 
-/// `FUN_080e7904(text)`: signed decimal conversion over a NUL-terminated
-/// byte string.
-pub type DecimalI32ParseFn = unsafe extern "C" fn(text: *const u8) -> i32;
 
 /// Unported direct dependencies of [`parse_i32_utf16_range`].
 #[derive(Clone, Copy)]
 pub struct RangeI32Ops {
     pub string_from_range: Utf16RangeToStringFn,
-    pub parse_decimal: DecimalI32ParseFn,
 }
 
 #[cfg(target_os = "none")]
@@ -53,33 +50,20 @@ unsafe extern "C" fn firmware_string_from_range(this: *mut StringObject, range: 
     f(this, range)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_parse_decimal(text: *const u8) -> i32 {
-    let f: DecimalI32ParseFn = core::mem::transmute(0x080e_7904usize);
-    f(text)
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_string_from_range(_this: *mut StringObject, _range: *const u8) {
     panic!("parse_i32_utf16_range requires range converter 0x080f020c")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_parse_decimal(_text: *const u8) -> i32 {
-    panic!("parse_i32_utf16_range requires decimal parser 0x080e7904")
-}
 
-/// Active unported dependencies. Target defaults preserve the retail entry
-/// points; host tests replace them with behavioral fixtures.
+/// Active unported dependency. Target defaults preserve the retail entry
+/// point; host tests replace it with a behavioral fixture.
 pub static mut RANGE_I32_OPS: RangeI32Ops = RangeI32Ops {
     #[cfg(target_os = "none")]
     string_from_range: firmware_string_from_range,
     #[cfg(not(target_os = "none"))]
     string_from_range: missing_string_from_range,
-    #[cfg(target_os = "none")]
-    parse_decimal: firmware_parse_decimal,
-    #[cfg(not(target_os = "none"))]
-    parse_decimal: missing_parse_decimal,
 };
 
 #[inline(always)]
@@ -110,7 +94,7 @@ pub unsafe extern "C" fn parse_i32_utf16_range(range: *const u8) -> i32 {
     string_object_copy_construct(text.as_mut_ptr(), converted.as_ptr());
     string_object_destroy(converted.as_mut_ptr());
 
-    let result = (ops.parse_decimal)(string_object_c_str(text.as_ptr()));
+    let result = parse_i32_decimal(string_object_c_str(text.as_ptr()));
     string_object_destroy(text.as_mut_ptr());
     result
 }
@@ -134,7 +118,6 @@ mod tests {
     static mut ALLOCATION_SIZE: usize = 0;
     static mut RELEASED: [usize; 2] = [0; 2];
     static mut RELEASE_CALLS: usize = 0;
-    static mut PARSER_BYTES: [u8; 64] = [0; 64];
 
     unsafe extern "C" fn convert_fixture(this: *mut StringObject, range: *const u8) {
         CONVERTER_CALLS += 1;
@@ -167,42 +150,6 @@ mod tests {
         (*this).payload = core::ptr::null_mut();
     }
 
-    unsafe extern "C" fn parse_fixture(text: *const u8) -> i32 {
-        let mut length = 0usize;
-        while text.add(length).read() != 0 {
-            PARSER_BYTES[length] = text.add(length).read();
-            length += 1;
-        }
-        PARSER_BYTES[length] = 0;
-        reference_parse(&PARSER_BYTES[..length])
-    }
-
-    /// Independent model of `FUN_080e7904`: it deliberately does not share
-    /// the port's dispatch or its pointer flow.
-    fn reference_parse(text: &[u8]) -> i32 {
-        let mut cursor = 0usize;
-        while cursor < text.len() && matches!(text[cursor], b' ' | b'\t' | b'\n') {
-            cursor += 1;
-        }
-        let negative = if text.get(cursor) == Some(&b'-') {
-            cursor += 1;
-            true
-        } else {
-            if text.get(cursor) == Some(&b'+') {
-                cursor += 1;
-            }
-            false
-        };
-        let mut value = 0i32;
-        while let Some(&byte) = text.get(cursor) {
-            if byte.wrapping_sub(b'0') > 9 {
-                break;
-            }
-            value = value.wrapping_mul(10).wrapping_add((byte - b'0') as i32);
-            cursor += 1;
-        }
-        if negative { value.wrapping_neg() } else { value }
-    }
 
     struct OpsGuard {
         range: RangeI32Ops,
@@ -233,7 +180,6 @@ mod tests {
             };
             core::ptr::addr_of_mut!(RANGE_I32_OPS).write_volatile(RangeI32Ops {
                 string_from_range: convert_fixture,
-                parse_decimal: parse_fixture,
             });
             core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(StringObjectOps {
                 release_payload: record_release,
@@ -248,7 +194,7 @@ mod tests {
         }
     }
 
-    fn check(input: &[u8]) {
+    fn check(input: &[u8], expected: i32) {
         let (_range_lock, _string_lock, _ops) = install_fixtures();
         let range = [0x1234u16, 0x5678];
         unsafe {
@@ -261,12 +207,10 @@ mod tests {
             ALLOCATION_SIZE = 0;
             RELEASED = [0; 2];
             RELEASE_CALLS = 0;
-            PARSER_BYTES.fill(0);
 
-            assert_eq!(parse_i32_utf16_range(range.as_ptr().cast::<u8>()), reference_parse(input));
+            assert_eq!(parse_i32_utf16_range(range.as_ptr().cast::<u8>()), expected);
             assert_eq!(CONVERTER_CALLS, 1);
             assert_eq!(CONVERTER_RANGE, range.as_ptr() as usize);
-            assert_eq!(&PARSER_BYTES[..input.len()], input);
             assert_eq!(RELEASE_CALLS, 2, "both StringObject temporaries are destroyed");
             assert_eq!(RELEASED[0], SOURCE.as_mut_ptr() as usize);
             if input.is_empty() {
@@ -282,22 +226,22 @@ mod tests {
 
     #[test]
     fn parses_whitespace_and_signs_after_range_conversion() {
-        check(b" \t\n-123tail");
-        check(b"+42");
-        check(b"  +");
+        check(b" \t\n-123tail", -123);
+        check(b"+42", 42);
+        check(b"  +", 0);
     }
 
     #[test]
     fn stops_before_non_digits_and_handles_empty_text() {
-        check(b"");
-        check(b"x123");
-        check(b"12\r34");
+        check(b"", 0);
+        check(b"x123", 0);
+        check(b"12\r34", 12);
     }
 
     #[test]
     fn decimal_accumulation_wraps_like_arm() {
-        check(b"2147483648");
-        check(b"-2147483648");
-        check(b"42949672960");
+        check(b"2147483648", i32::MIN);
+        check(b"-2147483648", i32::MIN);
+        check(b"42949672960", 0);
     }
 }
