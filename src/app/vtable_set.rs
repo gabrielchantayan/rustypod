@@ -3883,6 +3883,42 @@ pub unsafe extern "C" fn iterator_state_next(state: *mut u32, out: *mut u8) -> u
     let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
     fetch(state, out)
 }
+///
+/// iterator_state_previous — original: `FUN_08155d98` @ 0x08155d98 (44
+/// bytes exactly, 0x08155d98..0x08155dc4; eleven instructions, no literal
+/// pool; four plain `bl` callers and zero predicated `bl` callers,
+/// binary-scanned).
+///
+/// The reverse half of the collection iterator's next: adopt the buffered
+/// previous index as the position, refresh the bookkeeping, and tail into the
+/// shared guarded fetch:
+///
+/// ```text
+/// state.pos = state.prev      ; ldr r0, [r0, #4]; str r0, [r4, #8]
+/// FUN_08155bac(state)         ; refresh prev +0x04 / next +0x0c
+/// return FUN_08155e30(state, out)
+/// ```
+///
+/// Ghidra incorrectly extends this function through 0x08155e30 and assigns
+/// the fetch guard and vtable dispatch to it. Raw ARM establishes the
+/// independent boundary at 0x08155dc4 and the `b 0x08155e30` tail call.
+/// Deliberate deviation: Rust uses an ordinary call through the existing
+/// [`ITERATOR_STATE_FETCH`] seam because it cannot require a tail call.
+///
+/// # Safety
+///
+/// `state` must address the five-word iterator state (+0x00..+0x13);
+/// `out` flows to the fetch callee unchecked.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_previous(state: *mut u32, out: *mut u8) -> u32 {
+    let previous = state.add(1).read();
+    state.add(2).write(previous);
+    let refresh = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_REFRESH));
+    refresh(state);
+    let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
+    fetch(state, out)
+}
 
 /// Byte offset of the observer-list head word inside the owner object
 /// (`ldr r2, [r0, #0xc]`) — the list [`iterator_state_release`] walks.
@@ -5554,6 +5590,30 @@ pub(crate) mod tests {
                 b"RF",
                 "the refresh runs strictly before the fetch"
             );
+        }
+    }
+
+    #[test]
+    fn iterator_state_previous_adopts_previous_then_refreshes_and_fetches() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        // [owner, prev, pos, next, link]: previous is the -3 end sentinel.
+        let mut state = [0x0855_0000u32, (-3i32) as u32, 5, 2, 0];
+        let mut out = [0u8; 4];
+        unsafe {
+            install_recording_next_ops();
+            NEXT_FETCH_RESULT = 0x8000_0000;
+            let state_ptr = state.as_mut_ptr();
+            let out_ptr = out.as_mut_ptr();
+            let status = iterator_state_previous(state_ptr, out_ptr);
+
+            assert_eq!(status, 0x8000_0000, "the fetch verdict is returned verbatim");
+            assert_eq!(state[2] as i32, -3, "previous at +0x04 becomes position at +0x08");
+            assert_eq!(NEXT_REFRESH_CALLS, 1, "one bookkeeping refresh");
+            assert_eq!(NEXT_FETCH_CALLS, 1, "one guarded fetch");
+            assert_eq!(NEXT_FETCH_STATE, state_ptr, "fetch(state, ...)");
+            assert_eq!(NEXT_FETCH_OUT, out_ptr, "out forwarded verbatim");
+            assert_eq!(&NEXT_ORDER[..NEXT_ORDER_LEN], b"RF", "refresh precedes fetch");
         }
     }
 
