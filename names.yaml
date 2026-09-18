@@ -99094,6 +99094,29 @@ functions:
       are sizes rather than general variable-length continuation bytes. No
       deliberate deviations.
 
+  # --- UI three-item next index ---
+  - address: 0x08144830
+    ghidra: FUN_08144830
+    name: ui_three_item_next_index
+    size: 44
+    sig: "u32 ui_three_item_next_index(const void *owner)"
+    module: ui/three_item_next_index
+    status: ported
+    renames:
+      param_1/r0: owner
+      cVar1/r0: item_index
+    notes: >-
+      Raw osos.dec establishes the 44-byte extent from ldrb r0,[r0,#0xa4] at
+      0x08144830 through bx lr at 0x08144858; the separately linked next
+      function begins with push {r4,r5,r6,lr} at 0x0814485c. The byte at
+      owner+0xa4 maps 1 to 2, 2 to 3, and 3 to 1; all other values return
+      zero. A complete aligned ARM B/BL-immediate decode finds four direct
+      inbound calls, all plain unconditional bl at 0x081456d0, 0x08145768,
+      0x0814589c, and 0x08145af4, and no predicated bl calls. It is a leaf
+      with no outgoing calls. The enclosing owner layout is unrecovered, so
+      the Rust port accesses only this verified byte field. No deliberate
+      deviations.
+
   # --- UI three-item clip refresh ---
   - address: 0x08144cb4
     ghidra: FUN_08144cb4
