@@ -62,11 +62,11 @@
 //! The base guard constructor @ 0x0818a0c4 and facade accessor @
 //! 0x0818a0bc remain retailOS boundaries. The base constructor's device
 //! default calls its fixed firmware address; host tests replace its seam with
-//! a layout-valid mock. The destructor @ 0x08206e6c is ported below and its
-//! device default reaches that port, which calls the still-retail base
-//! teardown @ 0x0818a0fc. Host builds cannot call retailOS: the guard-ctor
-//! seam is a no-op by default and the fetch default fails closed with a
-//! stand-in facade whose slot +0x50 answers 0 ("does not exist" — the
+//! a layout-valid mock. The base teardown @ 0x0818a0fc is ported below; its
+//! still-unidentified deregistration callee @ 0x081e1fe8 retains a typed
+//! device boundary and host recording seam. The guard-ctor seam is a no-op
+//! by default on host, and the fetch default fails closed with a stand-in
+//! facade whose slot +0x50 answers 0 ("does not exist" — the
 //! vtable_set.rs `store_ctor_unported` policy), so the default chain is total
 //! on host and returns the same 0 every call site treats as absent.
 //!
@@ -148,6 +148,9 @@ pub const INTERFACE_GUARD_VTABLE_ADDRESS: u32 = 0x0899_1978;
 /// Firmware load address of the base guard teardown reached by the
 /// destructor's tail branch.
 pub const GUARD_BASE_DESTROY_ADDRESS: usize = 0x0818_a0fc;
+/// Firmware load address of the unported deregistration callee invoked by
+/// the base teardown.
+pub const INTERFACE_GUARD_DEREGISTER_ADDRESS: usize = 0x081e_1fe8;
 /// Firmware load address of the interface-scoped virtual query.
 pub const INTERFACE_GUARD_QUERY_ADDRESS: usize = 0x0807_58e0;
 /// Firmware load address of the unported interface query invoked while the
@@ -262,10 +265,13 @@ unsafe extern "C" fn firmware_guard_interface_resolve(
 pub type FacadeFetch =
     unsafe extern "C" fn(guard: *mut InterfaceGuard, selector: u32) -> *mut FacadeObject;
 
-/// The interface-guard destructor @ 0x08206e6c: unlocks and tears down the
-/// guard, returning `this` via the 0x0818a0fc base-destructor tail.
+/// ABI of the common interface-guard teardown and its derived destructor.
 pub type GuardDestroy =
     unsafe extern "C" fn(this: *mut InterfaceGuard) -> *mut InterfaceGuard;
+/// ABI of the unported base-teardown callee. It receives the owner's +0x24
+/// member in r0 and the guard in r1.
+pub type InterfaceGuardDeregister =
+    unsafe extern "C" fn(owner_member: *mut u8, guard: *mut InterfaceGuard);
 
 /// Boundary default for the guard constructor. Device builds route this
 /// caller seam to [`path_probe_guard_construct`]; host builds preserve the
@@ -363,6 +369,26 @@ unsafe extern "C" fn firmware_guard_destroy(this: *mut InterfaceGuard) -> *mut I
         this
     }
 }
+/// Boundary default for the unported deregistration callee at 0x081e1fe8.
+/// Host tests replace this seam because their u32 owner word is not a real
+/// retailOS interface graph.
+unsafe extern "C" fn firmware_interface_guard_deregister(
+    owner_member: *mut u8,
+    guard: *mut InterfaceGuard,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let deregister: InterfaceGuardDeregister =
+            core::mem::transmute(INTERFACE_GUARD_DEREGISTER_ADDRESS);
+        deregister(owner_member, guard);
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = owner_member;
+        let _ = guard;
+    }
+}
 /// Boundary default for the query operation at `0x08297224`. The target
 /// build preserves its exact firmware call; host tests install a recorder
 /// because the operation's interface graph remains unported.
@@ -408,6 +434,10 @@ pub static mut PATH_PROBE_GUARD_DTOR: GuardDestroy = firmware_guard_destroy;
 /// firmware target; host tests replace it with a recording mock.
 pub static mut INTERFACE_GUARD_QUERY_OPERATION: InterfaceGuardQueryOperation =
     firmware_interface_guard_query_operation;
+/// The active unported base-teardown deregistration callee. Target builds
+/// retain its verified firmware address; host tests install a recorder.
+pub static mut INTERFACE_GUARD_DEREGISTER: InterfaceGuardDeregister =
+    firmware_interface_guard_deregister;
 
 
 #[inline(always)]
@@ -433,25 +463,36 @@ unsafe fn guard_dtor_fn() -> GuardDestroy {
 unsafe fn interface_guard_query_operation_fn() -> InterfaceGuardQueryOperation {
     core::ptr::read_volatile(core::ptr::addr_of!(INTERFACE_GUARD_QUERY_OPERATION))
 }
-
-
-/// Calls the still-retail base guard teardown @ 0x0818a0fc. It installs
-/// the base vtable, deregisters the guard from its interface, and returns
-/// `this`; raw decoding establishes that it is the target of this
-/// destructor's final tail branch. Host builds have no retailOS object
-/// graph, so retaining `this` is the deliberate boundary no-op.
 #[inline(always)]
-pub(crate) unsafe fn interface_guard_base_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
-    #[cfg(target_os = "none")]
-    {
-        let destroy: GuardDestroy = core::mem::transmute(GUARD_BASE_DESTROY_ADDRESS);
-        destroy(this)
-    }
+unsafe fn interface_guard_deregister_fn() -> InterfaceGuardDeregister {
+    core::ptr::read_volatile(core::ptr::addr_of!(INTERFACE_GUARD_DEREGISTER))
+}
 
-    #[cfg(not(target_os = "none"))]
-    {
-        this
-    }
+
+/// interface_guard_base_destroy — original: `FUN_0818a0fc` @ **0x0818a0fc**
+/// (40 instruction bytes; **4 plain `bl` call sites and 0 predicated forms**,
+/// verified by decoding ARM B/BL-immediate words in `osos.dec`: 0x080644fc,
+/// 0x080758fc, 0x080ef4d0, and 0x081efa34).
+///
+/// Installs the shared base vtable, passes the owner word's +0x24 member and
+/// `this` to the unported deregistration callee @ 0x081e1fe8, then returns
+/// `this`. The next distinct function begins at 0x0818a128; 0x0818a124 is
+/// the literal-pool word `0x0898994c`.
+///
+/// Deliberate deviation: the callee's concrete operation remains unrecovered,
+/// so it is a typed fixed-address boundary on device and a recording seam on
+/// host; all local stores and argument offsets match the ARM.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.interface_guard_base_destroy")]
+pub unsafe extern "C" fn interface_guard_base_destroy(
+    this: *mut InterfaceGuard,
+) -> *mut InterfaceGuard {
+    core::ptr::addr_of_mut!((*this).words[0])
+        .write_volatile(INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
+    let owner = (*this).words[1] as usize as *mut u8;
+    interface_guard_deregister_fn()(owner.add(0x24), this);
+    this
 }
 
 /// interface_guard_base_construct — original: `FUN_0818a0c4` @ 0x0818a0c4
@@ -556,13 +597,13 @@ pub unsafe extern "C" fn path_probe_guard_construct(
 /// sites**, every one unconditional; no predicated `bl` forms).
 ///
 /// Re-plants the interface-guard vtable, releases the counted mutex whose
-/// raw pointer is the guard's word at +0x0c, then tail-runs the base
+/// raw pointer is the guard's word at +0x0c, then tail-runs the ported base
 /// teardown @ 0x0818a0fc and returns its `this` result. The raw extent ends
 /// at 0x08206e88 (literal 0x08991978); the next distinct function begins
 /// at 0x08206e8c. The 0x0818a164 release veneer is inlined through the
-/// already-ported [`mutex_unlock_counted`]. Deliberate deviation: on host
-/// the unported base teardown is a no-op that returns `this`; on device it
-/// is called at its verified retailOS address.
+/// already-ported [`mutex_unlock_counted`]. The base teardown's unresolved
+/// deregistration callee remains a fixed-address device boundary and host
+/// recording seam.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn path_probe_guard_destroy(
@@ -754,6 +795,8 @@ pub(crate) mod tests {
             .write_volatile(firmware_guard_destroy);
         core::ptr::addr_of_mut!(INTERFACE_GUARD_QUERY_OPERATION)
             .write_volatile(firmware_interface_guard_query_operation);
+        core::ptr::addr_of_mut!(INTERFACE_GUARD_DEREGISTER)
+            .write_volatile(firmware_interface_guard_deregister);
 
     }
 
@@ -817,6 +860,8 @@ pub(crate) mod tests {
     static mut INTERFACE_QUERY_WORD: u32 = 0;
     static mut INTERFACE_QUERY_RESULT: u32 = 0;
 
+    static mut DEREGISTER_OWNER_MEMBER: *mut u8 = core::ptr::null_mut();
+    static mut DEREGISTER_GUARD: *mut InterfaceGuard = core::ptr::null_mut();
     static mut RELEASED_VTABLE: usize = 0;
 
     /// The mock facade and its vtable; every slot begins as the wrong-slot
@@ -862,6 +907,13 @@ pub(crate) mod tests {
         INTERFACE_QUERY_RESULT
     }
 
+    unsafe extern "C" fn recording_interface_guard_deregister(
+        owner_member: *mut u8,
+        guard: *mut InterfaceGuard,
+    ) {
+        DEREGISTER_OWNER_MEMBER = owner_member;
+        DEREGISTER_GUARD = guard;
+    }
 
     unsafe extern "C" fn recording_fetch(
         guard: *mut InterfaceGuard,
@@ -1207,7 +1259,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn guard_destroy_replants_vtable_releases_and_returns_this() {
+    fn guard_destroy_releases_and_returns_base_guard() {
         let Some(slab) = crate::testing::try_map_u32_slab(
             crate::testing::hints::PATH_PROBE_GUARD_DESTROY,
             core::mem::size_of::<CountedMutex>(),
@@ -1233,8 +1285,8 @@ pub(crate) mod tests {
                 "the base-teardown tail returns this"
             );
             assert_eq!(
-                guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS,
-                "str r1,[r0],#12 re-plants the guard vtable before unlock"
+                guard.words[0], INTERFACE_GUARD_BASE_VTABLE_ADDRESS,
+                "the base teardown overwrites the derived vtable after unlock"
             );
             assert_eq!((*lock).hold_count, 0, "a held lock is released");
 
@@ -1246,10 +1298,38 @@ pub(crate) mod tests {
                 u32::MAX,
                 "unlocking a free counted mutex wraps, as the raw sub does"
             );
-            assert_eq!(guard.words[0], INTERFACE_GUARD_VTABLE_ADDRESS);
+            assert_eq!(guard.words[0], INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
         }
     }
 
+    #[test]
+    fn base_destroy_replants_vtable_and_deregisters_owner_member() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        let Some(owner) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::PATH_PROBE_BASE_DESTROY,
+            0x28,
+        ) else {
+            return;
+        };
+        unsafe {
+            DEREGISTER_OWNER_MEMBER = core::ptr::null_mut();
+            DEREGISTER_GUARD = core::ptr::null_mut();
+            core::ptr::addr_of_mut!(INTERFACE_GUARD_DEREGISTER)
+                .write_volatile(recording_interface_guard_deregister);
+            let mut guard = InterfaceGuard {
+                words: [0, owner as usize as u32, 0, 0],
+            };
+
+            assert_eq!(
+                interface_guard_base_destroy(&mut guard) as usize,
+                core::ptr::addr_of_mut!(guard) as usize,
+            );
+            assert_eq!(guard.words[0], INTERFACE_GUARD_BASE_VTABLE_ADDRESS);
+            assert_eq!(DEREGISTER_OWNER_MEMBER, owner.add(0x24));
+            assert_eq!(DEREGISTER_GUARD as usize, core::ptr::addr_of_mut!(guard) as usize);
+        }
+    }
     #[test]
     fn interface_guard_base_constructor_preserves_word_boundaries_and_flag_low_byte() {
         let _lock = take_lock();
