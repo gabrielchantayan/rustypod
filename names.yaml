@@ -111466,3 +111466,19 @@ functions:
       calls and two predicated indirect BLX dispatches. The vtable targets
       are runtime data and deliberately remain unnamed; host fixtures widen
       their pointer fields while the ARM path uses target u32 words.
+  - address: 0x08121404
+    ghidra: FUN_08121404
+    name: object_set_byte_0x18
+    size: 8
+    sig: "void object_set_byte_0x18(u8 *object, u8 value)"
+    module: util/object_set_byte_0x18
+    status: ported
+    vars: {param_1/r0: object, param_2/r1: value, "object+0x18": stored_byte}
+    notes: >-
+      Raw osos.dec words 0xe5c01018 and 0xe12fff1e establish the complete
+      eight-byte A32 function: strb r1,[r0,#0x18]; bx lr. The separately
+      linked next function begins at 0x0812140c. It stores value at object
+      byte offset 0x18 without null or bounds checks. Full-image A32 decoding
+      finds four inbound plain BL calls and zero predicated BL calls. The
+      concrete object type and byte-field enum are unrecovered, so the Rust
+      port preserves the raw u8-pointer interface and fault behavior.
