@@ -110414,3 +110414,36 @@ functions:
       eight-byte relocation-safe ldr-pc literal veneer rather than the
       stock four-byte PC-relative branch; it preserves the entire incoming
       ABI and tail-call return edge.
+
+  - address: 0x0815770c
+    ghidra: FUN_0815770c
+    name: collection_entry_teardown
+    size: 92
+    sig: "void collection_entry_teardown(void *owner)"
+    module: app/collection_entry_teardown
+    status: ported
+    renames:
+      param_1/r4: owner
+      "owner+0xa8": entry collection
+      "entry-vtable+0x94": entry teardown
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+      FUN_0826d48c: unresolved collection-owner finalizer
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent
+      0x0815770c..0x08157768: the following push {r1,r2,r3,lr} at
+      0x08157768 begins the next independent function. The body contains four
+      plain direct bl instructions (iterator_state_construct,
+      iterator_state_next, iterator_state_cleanup, and the unresolved
+      finalizer 0x0826d48c), zero predicated direct bl instructions, and one
+      unconditional indirect blx through every yielded entry's vtable+0x94.
+      It iterates owner+0xa8 from position -2, invokes the teardown slot for
+      each yielded entry, drops the iterator, then finalizes the owner.
+      FUN_0826d48c has this sole call site and its identity is not recovered,
+      so the port retains a named address seam rather than inventing one.
+      Deliberate deviations: Rust zero-initializes the iterator local where
+      ARM retains uninitialized stack bytes; the constructor owns every field
+      read on a real traversal. Host vtables use native-width function
+      pointers; target builds read the original four-byte vtable and slot
+      words.
