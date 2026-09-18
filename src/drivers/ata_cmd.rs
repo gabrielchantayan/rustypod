@@ -338,6 +338,27 @@ pub unsafe extern "C" fn ata_cmd_get_flags(cmd: *const u8) -> u32 {
     (cmd.add(FLAGS) as *const u32).read_volatile()
 }
 
+/// ata_cmd_get_device_head — original: `FUN_081212d8` @ 0x081212d8
+/// (8 bytes exactly, `0x081212d8..0x081212df`; **4 direct `bl` call
+/// sites, all unconditional, no predicated forms**, verified by decoding
+/// every ARM B/BL word in `osos.dec`: 0x081665a8, 0x0827a3d4,
+/// 0x0827a428, and 0x082832ec).
+///
+/// Reads the legacy ATA taskfile's device/head byte at +0x19. The read-DMA
+/// builder combines its low nibble with `0xe0`, while the identify-data
+/// parser takes that nibble as bits 24..27 of its packed result. The original
+/// is exactly `ldrb r0, [r0, #0x19]; bx lr`: no NULL guard or validation.
+///
+/// Deliberate deviation: the custom section keeps this real `bl` target
+/// separate from otherwise identical byte getters.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_cmd_get_device_head")]
+pub unsafe extern "C" fn ata_cmd_get_device_head(cmd: *const u8) -> u8 {
+    cmd.add(DEVICE_HEAD).read_volatile()
+}
+
+
 /// ata_cmd_set_block_size — original: `FUN_081213e4` @ 0x081213e4
 /// (8 bytes; 12 call sites, binary-scanned).
 ///
@@ -1408,6 +1429,19 @@ mod tests {
         for flags in [0u32, 0x0000_0080, 0x0008_0000, 0xffff_ffff] {
             block.0[FLAGS..FLAGS + 4].copy_from_slice(&flags.to_le_bytes());
             assert_eq!(unsafe { ata_cmd_get_flags(block.0.as_ptr()) }, flags);
+        }
+    }
+
+    #[test]
+    fn device_head_getter_reads_only_its_byte() {
+        // The callers mask this value's low nibble, but this `ldrb` returns
+        // all eight bits and must not touch the command block.
+        let mut block = poisoned();
+        for device_head in [0u8, 0xe0, 0xff] {
+            block.0[DEVICE_HEAD] = device_head;
+            let before = block;
+            assert_eq!(unsafe { ata_cmd_get_device_head(block.0.as_ptr()) }, device_head);
+            assert_eq!(block, before);
         }
     }
 
