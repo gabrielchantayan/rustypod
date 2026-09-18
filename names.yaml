@@ -109167,3 +109167,24 @@ functions:
       offset derivation, member vtables, clears, and final return. match.py
       reports the same construction/store sequence with expected frame and
       indirect-seam differences.
+  - address: 0x0829e100
+    ghidra: FUN_0829e100
+    name: object_child_count_is_positive
+    size: 28
+    sig: "u32 object_child_count_is_positive(const u32 *object)"
+    module: app/object_child_count_is_positive
+    status: ported
+    renames:
+      param_1/r0: object
+      "[object + 0x08]": child
+      "[child + 0x04]": signed_count
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent
+      0x0829e100..0x0829e11c; 0x0829e11c begins the next distinct push
+      prologue. Decoding every A32 B/BL word finds four direct unconditional
+      plain BL callers (0x0815fa94, 0x081b9ef0, 0x081d1698, 0x0829e124) and
+      zero predicated BL callers. It loads object +8 as a target-width child
+      pointer; null returns zero, otherwise it returns one exactly when the
+      signed child word at +4 is positive. The unrecovered layouts use raw
+      u32 words, deliberately preserving the verified four-byte target
+      offsets on 64-bit hosts.
