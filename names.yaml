@@ -112116,3 +112116,32 @@ functions:
       intentionally untouched bytes adjacent to byte/halfword stores. match.py
       structural diff reviewed: LLVM emits the same stores and literal, but
       adds its crate frame and coalesces the adjacent +0/+4 stores.
+
+  # --- buffer transfer initialization ---
+  - address: 0x080f80e4
+    ghidra: FUN_080f80e4
+    name: buffer_transfer_initialize
+    size: 76
+    sig: "u32 buffer_transfer_initialize(u8 *state, u32 length, u32 auxiliary)"
+    module: app/buffer_transfer_initialize
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: length
+      param_3/r2: auxiliary
+      FUN_080f7da8: buffer transfer state initializer (unrecovered)
+      FUN_080087e0: buffer transfer notification dispatch (unrecovered)
+    notes: >-
+      Raw osos.dec words from 0x080f80e4 through 0x080f812c establish a
+      76-byte body; 0x080f8130 starts the next independently entered function.
+      Ghidra's 80-byte extent incorrectly consumes that first word. The body
+      has one outbound unconditional plain BL at 0x080f811c to 0x080f7da8 and
+      no predicated BL. Its final B enters veneer 0x08038040, whose literal
+      target is 0x220087e0; the boot IRAM mirror resolves that to osos
+      0x080087e0. Four inbound direct plain BL sites reach this entry, with no
+      predicated inbound BL. Selector state[0x1e] chooses initializer arguments
+      (auxiliary,state[0x1c],length) for zero or
+      (state[0x1c],auxiliary,length) for one; other values skip initialization.
+      All paths dispatch state[0x1d],selector. The two target identities remain
+      unrecovered, so target builds call verified fixed addresses while hosts
+      use recording seams; Rust returns after dispatch rather than tail-branching.
