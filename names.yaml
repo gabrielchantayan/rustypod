@@ -107964,3 +107964,25 @@ functions:
       returns this unchanged in r0; all callers immediately replace the vtable
       for a derived object. Deliberate deviation: volatile Rust stores preserve
       the observed order; LLVM adds only a standard frame around that body.
+  - address: 0x081fc620
+    ghidra: FUN_081fc620
+    name: object_flags_take
+    size: 24
+    sig: "u32 object_flags_take(void *object, u32 mask)"
+    module: util/object_flags_take
+    status: ported
+    renames:
+      param_1/r0/r2: object
+      param_2/r1: mask
+      r3: previous_flags
+      "[object + 0x44]": flags
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent 0x081fc620..0x081fc638:
+      ldr r3,[r0,#0x44]; mov r2,r0; and r0,r3,r1; bic r1,r3,r1;
+      str r1,[r2,#0x44]; bx lr. The next separately linked function begins
+      with push {r4,r5,r6,lr} at 0x081fc638. Direct callers are four plain
+      unconditional BL instructions at 0x082077d0, 0x082078ac, 0x082078e4,
+      and 0x08207a4c; no predicated BL calls target this function. It returns
+      the intersection of the old +0x44 flag word and mask, then clears every
+      mask bit from that word. Deliberate deviation: opaque storage is
+      byte-addressed to preserve the target offset on 64-bit hosts.
