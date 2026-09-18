@@ -12954,28 +12954,31 @@ functions:
       transfer to the already ported mailbox_slot_create; the slot store and
       no-NULL-guard behavior are identical.
 
-  - address: 0x080dad34
-    ghidra: thunk_FUN_0808e2b0
-    name: unidentified_cleanup_tail
-    size: 4
-    status: identified
+  - address: 0x080dad28
+    ghidra: FUN_080dad28
+    name: mailbox_slot_post_dispatch
+    size: 12
+    sig: "void mailbox_slot_post_dispatch(Mailbox **slot, u32 mode)"
+    module: kernel/kobj
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: mode
+      FUN_0808e2a8: mailbox_slot_post
+      FUN_080c6928: deferred mailbox post wrapper
     notes: >-
-      Deferred: raw osos.dec disproves Ghidra's four-byte function/thunk
-      boundary. At 0x080dad28 the preceding real function starts `push
-      {r4,r5,r6,lr}; mov r4,r0; bl 0x0806ae3c`; 0x080dad34 is its internal
-      `cmp r0,#0`, followed by `popeq {r4,r5,r6,pc}` at 0x080dad38 and
-      cleanup code that continues through the tail branch at 0x080dae3c.
-      The next independently reachable function starts at 0x080dae40, so
-      this is not an isolated 4-byte callable extent and it is not a veneer
-      (the word is 0xe3500000, not `b` or `ldr pc,[pc,#-4]`). A full raw
-      ARM B/BL scan found 4 plain BL sites (0x08085ff4, 0x080935f8,
-      0x080a5390, 0x080b67f4) and 1 predicated BLEQ site (0x081bb920).
-      Those calls enter after r4 was initialized by the parent entry, making
-      r4 a hidden live input; their visible r0 values do not establish a
-      stable ABI or any mailbox/semaphore relationship. Porting this label
-      as the claimed thunk would invent both a callee identity and a Rust ABI,
-      so it remains identified pending recovery of the parent function's
-      object layout and calling convention.
+      Raw osos.dec words establish the true 12-byte extent
+      0x080dad28..0x080dad34: `cmp r1,#1; bne 0x0808e2a8; beq
+      0x080c6928`. Thus every mode except exactly 1 posts the mailbox in
+      `*slot` normally; mode 1 uses the deferred-wake csem-post wrapper,
+      which loads the same slot then tail-branches to csem_post_deferred.
+      The next independently callable entry is 0x080dad34, a separate
+      tail branch to mailbox_slot_signal. Ghidra's claimed 52-byte body
+      incorrectly absorbs adjacent dispatch entries and the predicate helper
+      after them. A full raw ARM B/BL scan found exactly four inbound plain
+      BL sites (0x080935f0, 0x081af8b4, 0x081bb90c, 0x0827db60) and no
+      predicated BL sites. Ported as kernel/kobj.rs's direct conditional;
+      this deliberately replaces the two original tail branches.
 
   - address: 0x080a6bec
     ghidra: FUN_080a6bec
