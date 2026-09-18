@@ -52617,6 +52617,39 @@ functions:
       maximum, and inverted-bound values, base-call arguments, vtable,
       and return identity.
 
+  # --- Silver UI framework: state-80 container constructor ---
+
+  - address: 0x08146f60
+    ghidra: FUN_08146f60
+    name: container_view_construct_state_80
+    size: 48
+    sig: "ContainerViewState80 *container_view_construct_state_80(ContainerViewState80 *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: resources
+      param_3/r2: controller
+      param_4/r3: parent
+      param_5/stack: spec
+      FUN_08158778: container_view_construct (direct, already ported)
+      DAT_08146f8c: CONTAINER_VIEW_STATE_80_VTABLE_ADDRESS
+    notes: >-
+      Raw ARM establishes the true 48-byte extent: 44 bytes of code at
+      0x08146f60..0x08146f88 plus the 0x08986140 vtable literal at
+      0x08146f8c; 0x08146f90 starts the next function. Decoding every
+      ARM B/BL word in osos.dec finds four direct unconditional bl callers
+      (0x081469e0, 0x081851a0, 0x081e96a0, 0x081e9d04), no predicated
+      callers, no tail branches, and no virtual data references. It forwards
+      all five ABI arguments to container_view_construct, installs its own
+      vtable, writes 0x80 at view+0xe8, and returns view. The concrete class
+      identity remains unrecovered, so the name intentionally records the
+      verified state transition rather than inventing a widget role. The Rust
+      port keeps view directly across the base call instead of reproducing
+      register shuffling; this preserves the return contract and avoids
+      host-pointer offset assumptions. Tests cover the chained constructor,
+      vtable replacement, exact byte store, and preservation of +0xe9..+0xeb.
+
   # --- Silver UI framework: the container view constructor ---
 
   - address: 0x08158778
