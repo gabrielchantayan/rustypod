@@ -88982,7 +88982,7 @@ functions:
     status: ported
     renames:
       param_1: owner
-      FUN_081d0e00: collection_current_item_word_dispatch
+      FUN_081d0e00: collection_item_word_dispatch
     notes: >-
       Raw osos.dec establishes the exact 36-byte extent:
       0x0815d888..0x0815d8ac. The separately linked next function begins at
@@ -88992,14 +88992,34 @@ functions:
       0x0815d39c, 0x0815d40c, 0x0815d42c, 0x0815d44c, 0x0815d46c, and
       0x0815e010; there are no predicated bl forms or tail-b transfers. The
       nonzero owner+0x34 and signed-nonnegative owner+0x80 gates are preserved
-      before the b tail transfer to the unported FUN_081d0e00 with owner+0x2c.
-      That target increments the handle to +0x04, dispatches its object's
-      vtable slot +0x40, and dereferences the returned word pointer. No
-      names.yaml entry exists for FUN_081d0e00, so this one-function port
-      models it as a volatile seam with that exact default body rather than
-      inventing its callee identity. Host tests cover both short-circuit gates,
-      the zero boundary of the signed state, the embedded-handle argument, and
-      returned-word propagation. match.py is structural review only.
+      before the b tail transfer to collection_item_word_dispatch with
+      owner+0x2c; the state word remains in r1 and is forwarded as its index.
+      Host tests cover both short-circuit gates. match.py is structural review
+      only.
+
+  # --- Collection item-word virtual dispatch ---
+  - address: 0x081d0e00
+    ghidra: FUN_081d0e00
+    name: collection_item_word_dispatch
+    size: 24
+    sig: "u32 collection_item_word_dispatch(void *collection, u32 index)"
+    module: cxx/collection_item_word_dispatch
+    status: ported
+    renames:
+      param_1: collection
+      param_2: index
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent:
+      0x081d0e00..0x081d0e18. The separately linked next function begins at
+      0x081d0e18 with push {r3,r4,r5,r6,r7,lr}. Whole-image decoding of every
+      ARM B/BL immediate finds exactly four inbound direct calls, all
+      unconditional plain bl at 0x0815dfc4, 0x0815dff4, 0x0815e468, and
+      0x081d0e54; there are no predicated bl forms. The body pre-decrements
+      collection by four bytes, dispatches the vtable pointer stored there at
+      slot +0x40 through indirect blx, and returns the first word of the
+      non-NULL result pointer while forwarding r1 unchanged as index. The
+      virtual method identity remains unknown; Rust uses host-sized vtable
+      entries deliberately because host function pointers exceed 32 bits.
 
   # --- UI element nonzero flag-word query ---
   - address: 0x0815d7d4
