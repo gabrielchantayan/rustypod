@@ -1952,6 +1952,32 @@ functions:
       calls that verified address through a volatile operation seam while host
       tests install a recorder; its identity is deliberately not claimed beyond
       moving the entry to the list front.
+  # --- guarded virtual slot +0x04 dispatch ---
+  - address: 0x08157448
+    ghidra: FUN_08157448
+    name: guarded_vtable_slot_04_dispatch_08157448
+    size: 36
+    sig: "GuardedSlot04Handle08157448 *guarded_vtable_slot_04_dispatch_08157448(GuardedSlot04Handle08157448 *handle)"
+    module: cxx/guarded_vtable_slot_04_dispatch_08157448
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_1_deref: object
+      object_deref: vtable
+      vtable_plus_0x04: vtable_slot_04
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x08157448 through pop {r4,pc} at 0x08157468; the next
+      separately linked function begins at 0x0815746c. Full-image ARM decoding
+      finds exactly four inbound direct calls, all plain unconditional bl at
+      0x08140730, 0x083d04ac, 0x083d04fc, and 0x083e73c0; there are zero
+      predicated direct calls and no direct tail branches. The body has no
+      static calls: when handle +0x00 is non-NULL, it passes that object to the
+      object's vtable slot +0x04 with predicated blxne, discards the result,
+      and returns handle. The virtual method identity remains unrecovered and
+      is deliberately not inferred. Rust uses a native-width typed host vtable
+      callback rather than the target's four-byte vtable word; a dedicated text
+      section prevents folding with the byte-identical 0x083e72b0 port.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760
