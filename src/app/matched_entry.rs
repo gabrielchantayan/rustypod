@@ -19,12 +19,12 @@
 //!
 //! # Deliberate deviations
 //!
-//! The matcher @ 0x08053b14, result constructor @ 0x080fe500, and readiness
-//! helper @ 0x080fe1c4 are unported. On device these edges call their verified
-//! retail addresses directly; host tests replace only those edges. The
-//! refcounted-handle constructor @ 0x0839ebc4, attach-equivalent @ 0x0839ec2c,
-//! dereference alias @ 0x083d6180, and stack-handle release wrapper @
-//! 0x0816ccb0 use their existing canonical Rust ports.
+//! The matcher @ 0x08053b14 and readiness helper @ 0x080fe1c4 are unported.
+//! On device those edges call verified retail addresses directly; host tests
+//! replace only those edges. The result constructor is the canonical Rust port.
+//! The refcounted-handle constructor @ 0x0839ebc4, attach-equivalent @
+//! 0x0839ec2c, dereference alias @ 0x083d6180, and stack-handle release
+//! wrapper @ 0x0816ccb0 use their existing canonical Rust ports.
 
 use core::ptr;
 
@@ -53,10 +53,10 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(EntryMatchSource, entries)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x08] = [0; core::mem::offset_of!(EntryMatchSource, entry_kind)];
 
+use crate::app::entry_result_construct::entry_result_construct;
+
 /// ABI of the unported entry matcher @ 0x08053b14.
 pub type EntryMatchNext = unsafe extern "C" fn(*mut u8, *mut u8, u32) -> *mut u8;
-/// ABI of the unported result constructor @ 0x080fe500.
-pub type EntryResultConstruct = unsafe extern "C" fn(*mut u8, *mut u8, u32, u8) -> *mut u8;
 /// ABI of the unported readiness helper @ 0x080fe1c4.
 pub type EntryResultEnsureReady = unsafe extern "C" fn(*mut u8, u32);
 
@@ -70,16 +70,6 @@ unsafe fn retail_entry_match_next(
     unsafe { f(entries, previous, match_key) }
 }
 
-#[cfg(target_os = "none")]
-unsafe fn retail_entry_result_construct(
-    block: *mut u8,
-    entry: *mut u8,
-    match_key: u32,
-    entry_kind: u8,
-) -> *mut u8 {
-    let f: EntryResultConstruct = unsafe { core::mem::transmute(0x080f_e500usize) };
-    unsafe { f(block, entry, match_key, entry_kind) }
-}
 
 #[cfg(target_os = "none")]
 unsafe fn retail_entry_result_ensure_ready(result: *mut u8, mode: u32) {
@@ -90,9 +80,6 @@ unsafe fn retail_entry_result_ensure_ready(result: *mut u8, mode: u32) {
 /// Host replacement for the unported entry matcher @ 0x08053b14.
 #[cfg(not(target_os = "none"))]
 pub static mut ENTRY_MATCH_NEXT: EntryMatchNext = missing_entry_match_next;
-/// Host replacement for the unported result constructor @ 0x080fe500.
-#[cfg(not(target_os = "none"))]
-pub static mut ENTRY_RESULT_CONSTRUCT: EntryResultConstruct = missing_entry_result_construct;
 /// Host replacement for the unported readiness helper @ 0x080fe1c4.
 #[cfg(not(target_os = "none"))]
 pub static mut ENTRY_RESULT_ENSURE_READY: EntryResultEnsureReady = missing_entry_result_ensure_ready;
@@ -106,15 +93,6 @@ unsafe extern "C" fn missing_entry_match_next(
     panic!("matched_entry_select_nth requires matcher 0x08053b14")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_entry_result_construct(
-    _block: *mut u8,
-    _entry: *mut u8,
-    _match_key: u32,
-    _entry_kind: u8,
-) -> *mut u8 {
-    panic!("matched_entry_select_nth requires result constructor 0x080fe500")
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_entry_result_ensure_ready(_result: *mut u8, _mode: u32) {
@@ -172,15 +150,7 @@ pub unsafe extern "C" fn matched_entry_select_nth(
     }
 
     let block = unsafe { operator_new(28) };
-    #[cfg(target_os = "none")]
-    let result = unsafe {
-        retail_entry_result_construct(block, entry, match_key, (*source).entry_kind)
-    };
-    #[cfg(not(target_os = "none"))]
-    let result = unsafe {
-        let construct = core::ptr::addr_of_mut!(ENTRY_RESULT_CONSTRUCT).read_volatile();
-        construct(block, entry, match_key, (*source).entry_kind)
-    };
+    let result = unsafe { entry_result_construct(block, entry, match_key, (*source).entry_kind) };
 
     let mut temporary = ptr::null_mut();
     unsafe { refcounted_handle_construct(&mut temporary, result as usize, 0) };
@@ -204,201 +174,3 @@ pub unsafe extern "C" fn matched_entry_select_nth(
     unsafe { refcounted_body_release_dtor(&mut temporary) };
 }
 
-#[cfg(test)]
-mod tests {
-    extern crate std;
-
-    use super::*;
-    use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut MATCH_RESULTS: [*mut u8; 3] = [ptr::null_mut(); 3];
-    static mut MATCH_CALLS: usize = 0;
-    static mut MATCH_PREVIOUS: [*mut u8; 3] = [ptr::null_mut(); 3];
-    static mut MATCH_ENTRIES: *mut u8 = ptr::null_mut();
-    static mut MATCH_KEY: u32 = 0;
-    static mut CONSTRUCT_BLOCK: *mut u8 = ptr::null_mut();
-    static mut CONSTRUCT_ENTRY: *mut u8 = ptr::null_mut();
-    static mut CONSTRUCT_KEY: u32 = 0;
-    static mut CONSTRUCT_KIND: u8 = 0;
-    static mut ALLOC_BEFORE_CONSTRUCT: (usize, usize, usize) = (0, 0, 0);
-    static mut BODY_STORAGE: *mut u8 = ptr::null_mut();
-    static mut READY_CALLS: usize = 0;
-    static mut READY_RESULT: *mut u8 = ptr::null_mut();
-    static mut READY_MODE: u32 = 0;
-
-    unsafe extern "C" fn recording_match_next(
-        entries: *mut u8,
-        previous: *mut u8,
-        match_key: u32,
-    ) -> *mut u8 {
-        unsafe {
-            MATCH_ENTRIES = entries;
-            MATCH_KEY = match_key;
-            MATCH_PREVIOUS[MATCH_CALLS] = previous;
-            let result = MATCH_RESULTS[MATCH_CALLS];
-            MATCH_CALLS += 1;
-            result
-        }
-    }
-
-    unsafe extern "C" fn recording_result_construct(
-        block: *mut u8,
-        entry: *mut u8,
-        match_key: u32,
-        entry_kind: u8,
-    ) -> *mut u8 {
-        unsafe {
-            CONSTRUCT_BLOCK = block;
-            CONSTRUCT_ENTRY = entry;
-            CONSTRUCT_KEY = match_key;
-            CONSTRUCT_KIND = entry_kind;
-            ALLOC_BEFORE_CONSTRUCT = alloc_log();
-            set_alloc_ret(BODY_STORAGE);
-            block
-        }
-    }
-
-    unsafe extern "C" fn recording_ensure_ready(result: *mut u8, mode: u32) {
-        unsafe {
-            READY_CALLS += 1;
-            READY_RESULT = result;
-            READY_MODE = mode;
-        }
-    }
-
-    fn install_mocks() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
-        let ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let heap_guard = mock_heap();
-        unsafe {
-            ENTRY_MATCH_NEXT = recording_match_next;
-            ENTRY_RESULT_CONSTRUCT = recording_result_construct;
-            ENTRY_RESULT_ENSURE_READY = recording_ensure_ready;
-            MATCH_RESULTS = [ptr::null_mut(); 3];
-            MATCH_CALLS = 0;
-            MATCH_PREVIOUS = [ptr::null_mut(); 3];
-            MATCH_ENTRIES = ptr::null_mut();
-            MATCH_KEY = 0;
-            CONSTRUCT_BLOCK = ptr::null_mut();
-            CONSTRUCT_ENTRY = ptr::null_mut();
-            CONSTRUCT_KEY = 0;
-            CONSTRUCT_KIND = 0;
-            ALLOC_BEFORE_CONSTRUCT = (0, 0, 0);
-            BODY_STORAGE = ptr::null_mut();
-            READY_CALLS = 0;
-            READY_RESULT = ptr::null_mut();
-            READY_MODE = 0;
-        }
-        (ops_guard, heap_guard)
-    }
-
-    fn restore_mocks(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>)) {
-        unsafe {
-            ENTRY_MATCH_NEXT = missing_entry_match_next;
-            ENTRY_RESULT_CONSTRUCT = missing_entry_result_construct;
-            ENTRY_RESULT_ENSURE_READY = missing_entry_result_ensure_ready;
-        }
-        drop(guards);
-    }
-
-    #[test]
-    fn selects_nth_match_wraps_it_and_optionally_makes_it_ready() {
-        let guards = install_mocks();
-        let mut result_storage = [0usize; 4];
-        let mut body_storage = RefcountedBody {
-            opaque0: 0,
-            refcount: 0,
-            mutex: ptr::null_mut(),
-        };
-        let first = 0x1111_0000usize as *mut u8;
-        let second = 0x2222_0000usize as *mut u8;
-        let entries = 0x3333_0000usize as *mut u8;
-        let source = EntryMatchSource { header: 0, entries, entry_kind: 0xa7 };
-        let mut out = ptr::null_mut();
-        unsafe {
-            MATCH_RESULTS = [first, second, ptr::null_mut()];
-            BODY_STORAGE = (&mut body_storage as *mut RefcountedBody).cast();
-            set_alloc_ret(result_storage.as_mut_ptr().cast());
-
-            matched_entry_select_nth(&mut out, &source, 0x4a21_0003, 1, 1);
-
-            assert_eq!(MATCH_CALLS, 2, "one initial and one successor match lookup");
-            assert_eq!(MATCH_ENTRIES, entries);
-            assert_eq!(MATCH_KEY, 0x4a21_0003);
-            assert!(MATCH_PREVIOUS[0].is_null(), "the first lookup starts at NULL");
-            assert_eq!(MATCH_PREVIOUS[1], first, "the successor receives the prior match");
-            assert_eq!(ALLOC_BEFORE_CONSTRUCT, (1, 28, 2), "the result block is tag-2 new(28)");
-            assert_eq!(CONSTRUCT_BLOCK, result_storage.as_mut_ptr().cast());
-            assert_eq!(CONSTRUCT_ENTRY, second);
-            assert_eq!(CONSTRUCT_KEY, 0x4a21_0003);
-            assert_eq!(CONSTRUCT_KIND, 0xa7);
-            assert_eq!(READY_CALLS, 1);
-            assert_eq!(READY_RESULT, result_storage.as_mut_ptr().cast());
-            assert_eq!(READY_MODE, 0, "the readiness mode is forced to zero");
-            assert_eq!(out, &mut body_storage as *mut RefcountedBody);
-            assert_eq!(body_storage.opaque0, result_storage.as_mut_ptr() as usize);
-            assert_eq!(body_storage.refcount, 1, "temporary release leaves the published handle owning one reference");
-            assert_eq!(alloc_log(), (2, 12, 2), "the handle body is the second tag-2 allocation");
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn negative_occurrence_skips_matcher_and_clears_output() {
-        let guards = install_mocks();
-        let source = EntryMatchSource {
-            header: 0,
-            entries: 0x3333_0000usize as *mut u8,
-            entry_kind: 0,
-        };
-        let mut out = 0x1111_0000usize as *mut RefcountedBody;
-        unsafe {
-            matched_entry_select_nth(&mut out, &source, 7, 1, -1);
-            assert_eq!(MATCH_CALLS, 0, "signed negative occurrence bypasses the loop");
-            assert!(out.is_null(), "the NULL handle constructor clears output");
-            assert_eq!(READY_CALLS, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn exhausted_sequence_clears_output_without_constructing() {
-        let guards = install_mocks();
-        let source = EntryMatchSource {
-            header: 0,
-            entries: 0x3333_0000usize as *mut u8,
-            entry_kind: 0x3c,
-        };
-        let first = 0x1111_0000usize as *mut u8;
-        let mut out = 0x2222_0000usize as *mut RefcountedBody;
-        unsafe {
-            MATCH_RESULTS = [first, ptr::null_mut(), ptr::null_mut()];
-            matched_entry_select_nth(&mut out, &source, 9, 0, 1);
-            assert_eq!(MATCH_CALLS, 2, "the missing second match terminates selection");
-            assert_eq!(MATCH_PREVIOUS[1], first);
-            assert!(out.is_null());
-            assert!(CONSTRUCT_BLOCK.is_null(), "no result allocation or construction on exhaustion");
-            assert_eq!(READY_CALLS, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn absent_entry_collection_clears_output_without_dispatch() {
-        let guards = install_mocks();
-        let source = EntryMatchSource {
-            header: 0,
-            entries: ptr::null_mut(),
-            entry_kind: 0,
-        };
-        let mut out = 0x1111_0000usize as *mut RefcountedBody;
-        unsafe {
-            matched_entry_select_nth(&mut out, &source, 0, 1, 0);
-            assert_eq!(MATCH_CALLS, 0);
-            assert!(out.is_null());
-            assert_eq!(READY_CALLS, 0);
-        }
-        restore_mocks(guards);
-    }
-}

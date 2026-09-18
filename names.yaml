@@ -112085,3 +112085,34 @@ functions:
       semantic identity, so target builds retain its raw-address seam while
       host tests install a recording model. Reference C:
       decomp/c/009/080fe850_FUN_080fe850.c.
+
+  # --- matched entry result construction ---
+  - address: 0x080fe500
+    ghidra: FUN_080fe500
+    name: entry_result_construct
+    size: 44
+    sig: "void *entry_result_construct(void *result, void *matched_entry, u16 match_key, u8 entry_kind)"
+    module: app/entry_result_construct
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: matched_entry
+      param_3/r2: match_key
+      param_4/r3: entry_kind
+      DAT_080fe52c: ENTRY_RESULT_VTABLE (0x089800cc)
+    notes: >-
+      Raw words at 0x080fe500..0x080fe52c decode to eleven instructions;
+      the following word is the vtable literal 0x089800cc and establishes
+      the true 44-byte extent. The constructor writes that vtable at +0,
+      clears words +4/+8/+16 and byte +12, stores matched_entry at +20,
+      the low 16 bits of match_key at +24, and entry_kind at +26, returning
+      result unchanged. Binary call-target accounting finds four incoming
+      direct plain BL sites and zero predicated BL sites; this leaf has zero
+      outbound BL instructions. Ghidra's callers allocate a 28-byte result
+      then pass a matched collection entry, its match key, and source+8 byte,
+      establishing the semantic fields. Target pointer storage remains u32
+      even on hosts; the Rust return preserves the full host pointer. Host
+      tests cover every written field, the low-halfword truncation, and
+      intentionally untouched bytes adjacent to byte/halfword stores. match.py
+      structural diff reviewed: LLVM emits the same stores and literal, but
+      adds its crate frame and coalesces the adjacent +0/+4 stores.
