@@ -20363,6 +20363,27 @@ functions:
       bl) and 0x08100b74 (id 0x6600, 36 bl), both ported, both classes
       unidentified (their ctors never name themselves to the factory).
       Ghidra renders the tail veneer as a recovered-jumptable warning.
+  - address: 0x081cb184
+    ghidra: FUN_081cb184
+    name: demo_mode_class_2600_instance
+    size: 28
+    sig: "void *demo_mode_class_2600_instance(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      Raw osos.dec words from 0x081cb184 through 0x081cb19c establish the
+      28-byte extent; 0x081cb1a0 begins the next function. It calls ported
+      demo_mode_instance (0x081883fc), returns NULL immediately when that
+      result is NULL, then tail-branches to ported object_cast_to_class
+      (0x08275b9c) with class id 0x2600. Therefore it is
+      `demo == NULL ? NULL : object_cast_to_class(demo, 0x2600)`, despite
+      the class behind 0x2600 having no recovered name-registration
+      evidence. Four inbound direct ARM bl instructions exist in osos.dec,
+      at 0x081135f8, 0x0811661c, 0x081cb1c4, and 0x081f43c4; all are
+      unconditional and no predicated BL reaches it. Rust retains the
+      explicit NULL return before the downcast; no deliberate behavioral
+      deviation exists.
+
 
   - address: 0x08171ff8
     ghidra: FUN_08171ff8
