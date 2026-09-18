@@ -11378,6 +11378,28 @@ functions:
       inlines the whole free_wrapper/heap_free chain. match.py 0/24 by
       design (LLVM inlines the ported free_wrapper body).
 
+  - address: 0x080f1524
+    ghidra: FUN_080f1524
+    name: reverse_u32_bytes_into
+    size: 48
+    sig: "void reverse_u32_bytes_into(const u8 *source, u8 *destination)"
+    module: util/reverse_u32_bytes_into
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      iVar2/r1: offset
+      puVar1/r12: source_byte
+    notes: >-
+      Raw osos.dec words establish the true 48-byte body
+      (0x080f1524..0x080f1554), followed by the independently linked
+      0x080f1554 body. Copies source[0..4] to destination[3..0] byte-wise;
+      caller 0x0803c644 uses it to decode big-endian u32 fields. Four direct
+      inbound plain `bl` call sites (0x0803c698, 0x0803c6a4, 0x0803c754,
+      0x0803c794); no direct calls in the function body (zero plain, zero
+      predicated `bl`). Rust uses a loop with volatile byte reads/writes to
+      preserve the original ordering when ranges overlap.
+
   - address: 0x080bead8
     ghidra: FUN_080bead8
     name: heap_mutex_creating
