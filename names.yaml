@@ -62260,6 +62260,32 @@ functions:
       load/store/refresh/tail-fetch sequence - LLVM even emitted the
       pop+bx tail call; the diff is the two seam blx indirections and
       the crate fp frame.
+  - address: 0x08155d98
+    ghidra: FUN_08155d98
+    name: iterator_state_previous
+    size: 44
+    sig: "u32 iterator_state_previous(state: *mut u32, out: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: state
+      param_2/r5: out
+      FUN_08155bac: iterator_state_refresh (ITERATOR_STATE_REFRESH seam)
+      FUN_08155e30: iterator_state_fetch (ITERATOR_STATE_FETCH seam)
+    notes: >-
+      Raw ARM establishes the true 44-byte extent
+      0x08155d98..0x08155dc4; the independent iterator seek starts at
+      0x08155dc4. Decoding every ARM BL word in osos.dec found four plain
+      callers (0x08111268, 0x081b5328, 0x081d1fc8, 0x0826e41c) and zero
+      predicated callers. Algorithm: load state+0x04 (the buffered previous
+      index), store it to state+0x08, call iterator_state_refresh, then
+      tail-branch with (state, out) to iterator_state_fetch. Ghidra
+      incorrectly extends the function through the fetch body. Deliberate
+      deviation: Rust uses ordinary seam calls for the BL and tail B;
+      ITERATOR_STATE_REFRESH and ITERATOR_STATE_FETCH retain the existing
+      family's no-op and zero-return defaults. Host test proves the -3
+      sentinel is adopted, refresh runs before fetch, both receive the
+      original state/out pointers, and the high-bit fetch result propagates.
   - address: 0x08155dc4
     ghidra: FUN_08155dc4
     name: iterator_state_seek
