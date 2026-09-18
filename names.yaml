@@ -111032,3 +111032,38 @@ functions:
       sites. The byte maps 1 to 3, 2 to 1, and 3 to 2; every other value
       maps to zero. The caller uses it as the preceding nonzero selection
       slot. Deliberate deviations: none.
+
+  - address: 0x0814053c
+    ghidra: FUN_0814053c
+    name: range_result_collect
+    size: 168
+    sig: "u32 range_result_collect(context: *const u32, range: *const u32, output: *mut u32)"
+    module: app/range_result_collect
+    status: ported
+    vars:
+      param_1: context
+      param_2: range
+      param_3: output
+      local_14: candidate
+    renames:
+      FUN_0829b86c: context_has_result_handler
+      FUN_081f7278: range_state_construct
+      FUN_08158cf0: four_word_clear
+      FUN_0829b1e8: retail_range_constraint_evaluate
+      FUN_081573f8: retail_range_result_dispatch
+      FUN_0829bd50: retail_range_result_append
+    notes: >-
+      Raw ARM extent is exactly 168 bytes, 0x0814053c..0x081405e4; next
+      function begins at 0x081405e4. Direct outbound calls are six plain
+      unconditional bl instructions, with no predicated bl: context handler
+      presence (0x0829b86c), range-state construct (0x081f7278),
+      four-word clear (0x08158cf0), constraint evaluator (0x0829b1e8),
+      result vtable dispatcher (0x081573f8), and result append
+      (0x0829bd50). Ghidra omitted the two direct constructor/clear calls
+      from its call-site accounting. If context+0x30 is zero returns 0;
+      otherwise iterates the unsigned inclusive range [range+0x00,
+      range+0x08], constructing a state at resolution 1, clearing output,
+      evaluating it, dispatching successes, and returning 1 at the first
+      append success. Candidate increment and comparison intentionally wrap
+      as the original ARM add/bcs loop. Unported direct calls retain exact
+      target veneers on firmware and replaceable host seams.

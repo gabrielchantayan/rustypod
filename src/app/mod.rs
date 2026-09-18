@@ -304,6 +304,7 @@ pub mod registry;
 pub mod registration_handle;
 pub mod selector_pair_init;
 pub mod range_append_boundary_newline;
+pub mod range_result_collect;
 pub mod registration_handle_wrapper;
 pub mod record_manager;
 pub mod recording_buffer;
