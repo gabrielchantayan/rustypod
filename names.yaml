@@ -109102,3 +109102,31 @@ functions:
       but raw ARM shows the tail branch targets mutex_unlock 0x0807f6a0.
       Rust uses the established repr(C) LazyHandleManager layout and has no
       deliberate deviations.
+  # --- Collection weight dispatch ---
+  - address: 0x081ba060
+    ghidra: FUN_081ba060
+    name: collection_weight_dispatch
+    size: 164
+    sig: "void collection_weight_dispatch(CollectionDispatchOwner *owner)"
+    module: app/collection_weight_dispatch
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      owner_plus_0x48: scheduler
+      owner_plus_0x4c: collection
+      owner_plus_0x64: dispatched
+      local_20: item
+      iVar2/r4: total_weight
+      FUN_081f7390: scheduler_submit
+    notes: >-
+      Raw osos.dec decoding establishes the exact 164-byte extent
+      0x081ba060..0x081ba104: the next independently linked function starts
+      at 0x081ba104. The body has seven plain unconditional BL instructions
+      (two each to cursor_init, cursor_advance, and cursor_invalidate; one
+      to 0x081f7390) and no predicated BL. It first sums item word +4 over
+      owner+0x4c, submits the wrapping total to owner+0x48, then walks the
+      collection again and invokes every item vtable slot +0x10 before
+      storing one to owner+0x64. 0x081f7390 has no recovered semantic
+      identity, so target builds call that fixed address; host tests install
+      a seam. Host tests cover empty collections and u32-wrapping totals
+      while checking submission, callback count, and completion-byte write.
