@@ -1489,6 +1489,9 @@ pub mod hints {
     // target-width transport, ring, semaphore, and data fixtures; mappings
     // never unmap, so no other user may share this hint.
     pub const TASK_MESSAGE_TRANSPORT_ENQUEUE: usize = 0x7fe0_0000;
+    // 0x7ff0_0000: dedicated to util/indexed_slot_pointer's raw-u32 object
+    // and table fixture; mappings never unmap, so no other user may share it.
+    pub const INDEXED_SLOT_POINTER: usize = 0x7ff0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
