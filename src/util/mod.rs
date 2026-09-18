@@ -74,6 +74,7 @@ pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
 pub mod indexed_record_value_lookup;
 pub mod id3_synchsafe_u28_decode;
+pub mod increment_shared_counter;
 pub mod le_read;
 pub mod linked_list_count;
 pub mod linked_list_find_and_promote;
