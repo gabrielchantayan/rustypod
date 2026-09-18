@@ -26,6 +26,9 @@
 //!   (124 bytes; **20 `bl` call sites, 19 plain + 1 `blne`**). Sets one
 //!   secondary-display layer's requested enable state and starts or stops the
 //!   display's layer activity when the six requests agree.
+//! - [`display_lock_existing_layers`] — original: `FUN_081d89a8` @
+//!   0x081d89a8 (40 bytes; **4 plain `bl` call sites**). Acquires each
+//!   existing layer's embedded mutex before an operation that spans layers.
 //!
 //! # Why this lives under `drivers/`
 //!
@@ -588,6 +591,42 @@ pub unsafe extern "C" fn display_set_layer_enabled(
         layer_activity_stop_hook()(display);
     }
 }
+/// display_lock_existing_layers — original: `FUN_081d89a8` @ 0x081d89a8
+/// (40 bytes exactly, 0x081d89a8..0x081d89d0; 10 ARM words through
+/// `pop {r4,r5,r6,pc}`). **4 direct callers, all unconditional `bl`** —
+/// 0x081d8b8c, 0x081d8e4c, 0x081d8f6c, and 0x081d928c — verified by
+/// decoding every ARM B/BL immediate in `osos.dec`; there are no predicated
+/// calls or tail branches.
+///
+/// Walks the six display layer slots in ascending order. Each non-NULL layer
+/// receives `mutex_lock(layer + 0x78)`; NULL slots are skipped. The direct
+/// callee 0x081208a4 is a two-instruction wrapper around `mutex_lock` and
+/// returns its layer argument, which this caller discards.
+///
+/// # Deliberate deviations
+///
+/// The wrapper is inlined as the already ported [`mutex_lock`] call. This
+/// preserves its only observable effect and avoids creating a seam for an
+/// otherwise identity-returning helper.
+///
+/// # Safety
+///
+/// `display` must be live. Every non-NULL layer slot must reference an
+/// object containing a live [`Mutex`] at target offset +0x78, exactly as the
+/// original requires.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_lock_existing_layers(display: *mut Display) {
+    let mut index = 0;
+    while index < LAYER_SLOT_COUNT {
+        let layer = layer_slot(display, index as u32).read_volatile();
+        if !layer.is_null() {
+            mutex_lock(layer.add(0x78).cast::<Mutex>());
+        }
+        index += 1;
+    }
+}
+
 
 /// The `driver->vtable[0x68]` ABI used only by
 /// [`display_restore_forced_layers`]. The raw target is a virtual entry, not
@@ -902,6 +941,37 @@ mod tests {
             forced_layers_visible: 0,
             reserved_a6_a7: [0; 2],
         }
+    }
+    #[repr(C, align(8))]
+    struct TestLayerStorage([u8; LAYER_OBJECT_SIZE]);
+
+    #[test]
+    fn lock_existing_layers_skips_null_slots_and_accepts_every_layer_slot() {
+        let _guard = DISPLAY_TEST_LOCK.lock();
+        let mut d = display(INTERNAL_DISPLAY_ID as u8, core::ptr::null_mut());
+        let mut layers = [
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+            TestLayerStorage([0; LAYER_OBJECT_SIZE]),
+        ];
+
+        for (index, layer) in layers.iter_mut().enumerate() {
+            if index != 2 && index != 4 {
+                d.layers[index] = layer.0.as_mut_ptr();
+            }
+        }
+
+        unsafe { display_lock_existing_layers(&mut d) };
+
+        assert!(d.layers[2].is_null());
+        assert!(d.layers[4].is_null());
+        assert_eq!(d.layers[0], layers[0].0.as_mut_ptr());
+        assert_eq!(d.layers[1], layers[1].0.as_mut_ptr());
+        assert_eq!(d.layers[3], layers[3].0.as_mut_ptr());
+        assert_eq!(d.layers[5], layers[5].0.as_mut_ptr());
     }
 
     static mut PANEL_RESTORE_CALLS: usize = 0;
