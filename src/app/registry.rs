@@ -58,6 +58,7 @@
 //! | 0x0810e4ac | [`registry_insert`] | 28 | 8 `bl` + 2 `b` |
 //! | 0x0810e4c8 | [`registry_lookup`] | 40 | 15 `bl` + 1 `b` |
 //! | 0x0810e4f0 | [`registry_assign`] | 60 | 2 `bl` + 1 `b` |
+//! | 0x0810e5b0 | [`registry_remove`] | 56 | 4 `bl` |
 //! | 0x08134ff8 | [`observable_set_notify_enabled`] | 64 | 5 `bl` + 1 `b` |
 //! | 0x08135038 | [`observable_set_changed`] | 8 | 1 `bl` |
 //! | 0x08135040 | [`observable_set_observer`] | 96 | 10 `bl` |
@@ -276,6 +277,30 @@ pub unsafe extern "C" fn registry_find(
         ((*vtable(registry)).entry_at)(registry, index, out);
     }
     index
+}
+
+/// registry_remove — original: `FUN_0810e5b0` @ 0x0810e5b0 (56 bytes;
+/// 4 plain `bl` call sites, 0 predicated `bl` call sites).
+///
+/// Finds `class_id`, then dispatches the registry's +0x2c removal slot
+/// with its index. Returns 1 when the key existed and was dispatched, or
+/// 0 on a miss.
+///
+/// No deliberate deviations. The original reserves an uninitialized
+/// stack `RegistryEntry` solely for `registry_find`; `MaybeUninit`
+/// preserves that property.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_remove(registry: *mut Registry, class_id: u32) -> u32 {
+    let mut entry = core::mem::MaybeUninit::<RegistryEntry>::uninit();
+    let index = registry_find(registry, class_id, entry.as_mut_ptr());
+    if index == -1 {
+        return 0;
+    }
+    let remove_at: unsafe extern "C" fn(*mut Registry, i32) -> usize =
+        core::mem::transmute((*vtable(registry)).unresolved_28[1]);
+    remove_at(registry, index);
+    1
 }
 
 /// registry_lookup — original: `FUN_0810e4c8` @ 0x0810e4c8 (40 bytes;
@@ -1227,6 +1252,12 @@ mod tests {
         0
     }
 
+    unsafe extern "C" fn mock_remove_at(_this: *mut Registry, index: i32) -> usize {
+        trace().push("remove_at");
+        entries().remove(index as usize);
+        0
+    }
+
     unsafe extern "C" fn mock_notify_deferred(_this: *mut Registry) -> *mut u8 {
         trace().push("notify_deferred");
         ptr::read_volatile(ptr::addr_of!(DEFERRED))
@@ -1265,7 +1296,7 @@ mod tests {
         Observer { vtable: &MOCK_OBSERVER_VTABLE }
     }
 
-    static MOCK_VTABLE: RegistryVtable = RegistryVtable {
+    static mut MOCK_VTABLE: RegistryVtable = RegistryVtable {
         unresolved_00: [0; 7],
         insert: mock_insert,
         unresolved_20: 0,
@@ -1291,7 +1322,8 @@ mod tests {
             NOTIFY_RESULT = ptr::null_mut();
             (*ptr::addr_of_mut!(ATTACHED)).clear();
             (*ptr::addr_of_mut!(DETACHED)).clear();
-            CLASS_REGISTRY.vtable = &MOCK_VTABLE;
+            MOCK_VTABLE.unresolved_28[1] = mock_remove_at as usize;
+            CLASS_REGISTRY.vtable = ptr::addr_of!(MOCK_VTABLE);
             CLASS_REGISTRY.changed = 0;
             CLASS_REGISTRY.notify_enabled = 0;
             CLASS_REGISTRY.observer = ptr::null_mut();
@@ -1351,6 +1383,26 @@ mod tests {
             assert_eq!(registry_find(registry(), 0x6600, &mut entry), -1);
             assert_eq!(entry.class_id, 0xdead, "the caller's entry is untouched");
             assert_eq!(*trace(), std::vec!["index_of"], "entry_at is not dispatched");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn remove_dispatches_only_for_a_registered_key() {
+        let guard = mock();
+        unsafe {
+            registry_insert(registry(), 0x8080, instance(1));
+            registry_insert(registry(), 0x6000, instance(2));
+            trace().clear();
+            assert_eq!(registry_remove(registry(), 0x8080), 1);
+            assert_eq!(entries().len(), 1);
+            assert_eq!(entries()[0].class_id, 0x6000);
+            assert_eq!(entries()[0].instance, instance(2));
+            assert_eq!(*trace(), std::vec!["index_of", "entry_at", "remove_at"]);
+
+            trace().clear();
+            assert_eq!(registry_remove(registry(), 0x8080), 0);
+            assert_eq!(*trace(), std::vec!["index_of"]);
         }
         restore(guard);
     }

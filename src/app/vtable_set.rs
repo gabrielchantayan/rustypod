@@ -11131,6 +11131,7 @@ pub(crate) mod tests {
         unreachable!("the insert paths never dispatch +0x4c index_of");
     }
 
+
     unsafe extern "C" fn ins_stub_notify(_this: *mut Registry) -> *mut u8 {
         unreachable!("the insert paths never dispatch the notification slots");
     }

@@ -22645,7 +22645,18 @@ functions:
       only the pair's value word (`str r4, [sp, #4]`, so the EXISTING
       key is what the container sees) and calls 0x0810e460 with the
       index and that pair, returning 1. Never adds an entry.
-
+  - address: 0x0810e5b0
+    ghidra: FUN_0810e5b0
+    name: registry_remove
+    size: 56
+    sig: "u32 registry_remove(Registry *registry, u32 class_id)"
+    module: app/registry
+    status: ported
+    notes: >-
+      4 plain bl call sites and no predicated bl call sites, verified by
+      decoding raw osos.dec. Calls registry_find with an uninitialized stack
+      RegistryEntry, then, only on a hit, dispatches vtable[+0x2c]
+      remove_at(this, index); returns 1 on that path and 0 on a miss.
   - address: 0x0810e460
     ghidra: FUN_0810e460
     name: registry_assign_at
