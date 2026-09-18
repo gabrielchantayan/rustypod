@@ -110676,3 +110676,32 @@ functions:
       object's vtable +0x18 slot with object as the sole argument, then
       returns zero. The virtual callee has no recovered identity, so the
       port represents its ABI without inventing a concrete callee name.
+  # --- transition page clone ---
+  - address: 0x08152c04
+    ghidra: FUN_08152c04
+    name: transition_page_clone
+    size: 184
+    sig: "void transition_page_clone(TransitionPage *destination, const TransitionPage *source, i32 page_displacement, u32 unused)"
+    module: app/transition_page_clone
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: page_displacement
+      param_4/r3: unused
+      "source+0x128": source_transition
+      "destination+0x128": destination_transition
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent
+      0x08152c04..0x08152cbc. The next real function begins at 0x08152cbc
+      with push {r3,r4,r5,r6,r7,lr}. Decoding every ARM branch word finds
+      four plain unconditional bl calls (0x08152c3c to 0x081525bc,
+      0x08152c54 to 0x081607b0, and 0x08152c60/0x08152c6c to
+      0x08281000), with no predicated bl forms. It invokes the unrecovered
+      stock initializer at 0x081525bc with its complete six-word ABI,
+      re-arms destination+0x128 from the source transition target over
+      1000 ms, assigns two fixed triples, then copies page words and adds
+      page_displacement * 0x000f0000 to +0x0c and +0x140. The 0x081525bc
+      callee has no names.yaml identity; target builds retain an exact-address
+      ABI seam rather than inventing one. Host tests model that opaque call
+      and the independently ported child calls' direct field effects.
