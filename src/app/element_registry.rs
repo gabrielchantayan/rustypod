@@ -106,10 +106,18 @@ pub struct ElementVtable {
     /// the same object), but the static image cannot name it — see the
     /// module header.
     pub pre_insert: unsafe extern "C" fn(this: *mut RegistryElement),
+    /// +0x0c: not dispatched here.
+    pub unresolved_0c: usize,
+    /// +0x10: element teardown dispatched by
+    /// [`element_registry_remove_for_id`].
+    pub teardown: unsafe extern "C" fn(this: *mut RegistryElement),
 }
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x08] = [0; core::mem::offset_of!(ElementVtable, pre_insert)];
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(ElementVtable, teardown)];
 
 /// The 0x3c-byte registry object handed out by `lazy_singleton_0x3c`.
 /// Only the vtable word is modeled; the collection head (+0x30) and
@@ -166,6 +174,120 @@ pub unsafe extern "C" fn element_registry_add(
     let mut slot = element;
     let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*registry).vtable));
     ((*vtable).insert)(registry, core::ptr::addr_of_mut!(slot));
+}
+
+/// ABI of the already ported application-controller getter.
+pub type AppControllerGet = unsafe extern "C" fn() -> *mut u8;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_app_controller_get() -> *mut u8 {
+    crate::app::singletons::app_controller_get()
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_element_registry_app_controller_get() -> *mut u8 {
+    panic!("element_registry_remove_for_id requires app_controller_get")
+}
+
+/// Getter boundary used only so host tests can supply an isolated controller.
+#[cfg(target_os = "none")]
+pub static mut ELEMENT_REGISTRY_APP_CONTROLLER_GET: AppControllerGet = firmware_app_controller_get;
+
+#[cfg(not(target_os = "none"))]
+pub static mut ELEMENT_REGISTRY_APP_CONTROLLER_GET: AppControllerGet =
+    missing_element_registry_app_controller_get;
+
+/// Target address of the app-controller's unrecovered element-removal
+/// helper (`FUN_0817e9b8`).
+pub const APP_CONTROLLER_REMOVE_ELEMENT_ADDRESS: usize = 0x0817_e9b8;
+
+/// ABI of `FUN_0817e9b8`: remove `element_id` from the controller's
+/// registered-element vector. Its concrete class role remains unrecovered.
+pub type AppControllerRemoveElement = unsafe extern "C" fn(controller: *mut u8, element_id: u32);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_app_controller_remove_element(controller: *mut u8, element_id: u32) {
+    let remove: AppControllerRemoveElement =
+        core::mem::transmute(APP_CONTROLLER_REMOVE_ELEMENT_ADDRESS);
+    remove(controller, element_id);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_app_controller_remove_element(_controller: *mut u8, _element_id: u32) {
+    panic!("element_registry_remove_for_id requires FUN_0817e9b8")
+}
+
+/// Boundary for the unported `FUN_0817e9b8` controller helper. On device it
+/// calls the recovered load address; host tests install a recording model.
+#[cfg(target_os = "none")]
+pub static mut APP_CONTROLLER_REMOVE_ELEMENT: AppControllerRemoveElement =
+    firmware_app_controller_remove_element;
+
+#[cfg(not(target_os = "none"))]
+pub static mut APP_CONTROLLER_REMOVE_ELEMENT: AppControllerRemoveElement =
+    missing_app_controller_remove_element;
+
+/// element_registry_remove_for_id — original: `FUN_0816df90` @
+/// **0x0816df90** (144 bytes exactly, `0x0816df90..0x0816e020`; the next
+/// function begins with `push {r3,r4,r5,lr}` at 0x0816e020).
+///
+/// Raw ARM contains **6 plain direct `bl` instructions, 0 predicated `bl`
+/// instructions, and 1 indirect `blx`**. The direct calls are the ported
+/// iterator construct/next/cleanup trio, `app_controller_get`, the
+/// unresolved controller helper at 0x0817e9b8, and the ported
+/// `container_remove_element`; the `blx` is element vtable slot +0x10.
+///
+/// If `element_id` is nonzero, walks the registry collection from position
+/// -2. On the first entry whose +0x04 id matches, it dispatches that entry's
+/// teardown slot +0x10, unregisters the id from the app controller, and
+/// removes the entry from the registry container. It always drops the
+/// iterator after beginning the traversal, including exhaustion; id zero
+/// returns before constructing one.
+///
+/// Deliberate deviations: the unrecovered controller helper is a named
+/// target-address boundary, not an invented callee identity.
+/// `app_controller_get` has a host-only getter boundary so tests do not mutate
+/// the process-global singleton cache. Rust cannot guarantee the retail `b`
+/// into the cleanup epilogue after a match.
+///
+/// # Safety
+///
+/// `registry` must be a valid iterator owner and container; every yielded
+/// entry must have a readable id and vtable slot +0x10. The retail body has
+/// no NULL guards.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_registry_remove_for_id(
+    registry: *mut ElementRegistry,
+    element_id: u32,
+) {
+    if element_id == 0 {
+        return;
+    }
+
+    let mut iterator = [0u32; 5];
+    crate::app::vtable_set::iterator_state_construct(iterator.as_mut_ptr(), registry.cast(), -2);
+    let mut element: *mut RegistryElement = core::ptr::null_mut();
+    while crate::app::vtable_set::iterator_state_next(
+        iterator.as_mut_ptr(),
+        core::ptr::addr_of_mut!(element).cast(),
+    ) != 0 {
+        if (*element).id == element_id {
+            let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*element).vtable));
+            ((*vtable).teardown)(element);
+            let get_controller = core::ptr::read_volatile(core::ptr::addr_of!(
+                ELEMENT_REGISTRY_APP_CONTROLLER_GET
+            ));
+            let controller = get_controller();
+            let remove = core::ptr::read_volatile(core::ptr::addr_of!(
+                APP_CONTROLLER_REMOVE_ELEMENT
+            ));
+            remove(controller, element_id);
+            crate::cxx::templates::container_remove_element(registry.cast(), element.cast());
+            break;
+        }
+    }
+    crate::app::vtable_set::iterator_state_cleanup(iterator.as_mut_ptr());
 }
 
 /// The secondary collection subobject of the element family built at
@@ -747,7 +869,12 @@ mod tests {
     }
 
     static ELEMENT_VT: ElementVtable =
-        ElementVtable { unresolved_00_04: [0; 2], pre_insert: rec_pre_insert };
+        ElementVtable {
+            unresolved_00_04: [0; 2],
+            pre_insert: rec_pre_insert,
+            unresolved_0c: 0,
+            teardown: nop_pre_insert,
+        };
     static REGISTRY_VT: RegistryVtable =
         RegistryVtable { unresolved_00_18: [0; 7], insert: rec_insert };
 
@@ -788,7 +915,12 @@ mod tests {
     static REPLACING_VT: RegistryVtable =
         RegistryVtable { unresolved_00_18: [0; 7], insert: replacing_insert };
     static NOP_ELEMENT_VT: ElementVtable =
-        ElementVtable { unresolved_00_04: [0; 2], pre_insert: nop_pre_insert };
+        ElementVtable {
+            unresolved_00_04: [0; 2],
+            pre_insert: nop_pre_insert,
+            unresolved_0c: 0,
+            teardown: nop_pre_insert,
+        };
 
     #[test]
     fn insert_may_replace_the_slot() {
@@ -835,7 +967,12 @@ mod tests {
     static SECOND_REGISTRY_VT: RegistryVtable =
         RegistryVtable { unresolved_00_18: [0; 7], insert: second_insert };
     static SWAP_ELEMENT_VT: ElementVtable =
-        ElementVtable { unresolved_00_04: [0; 2], pre_insert: swapping_pre_insert };
+        ElementVtable {
+            unresolved_00_04: [0; 2],
+            pre_insert: swapping_pre_insert,
+            unresolved_0c: 0,
+            teardown: nop_pre_insert,
+        };
 
     #[test]
     fn registry_vtable_is_loaded_after_pre_insert() {
@@ -1370,5 +1507,13 @@ mod tests {
             REGISTRY_ELEMENT_SECONDARY_ARRAY_VTABLE
         );
         assert_eq!(&entry.0, &[0xa5; 0x54]);
+    }
+    #[test]
+    fn remove_for_zero_id_does_not_construct_an_iterator() {
+        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK.lock();
+        let mut registry = ElementRegistry { vtable: core::ptr::null() };
+        unsafe {
+            element_registry_remove_for_id(core::ptr::addr_of_mut!(registry), 0);
+        }
     }
 }
