@@ -110791,3 +110791,27 @@ functions:
       The raw body leaves r0 unchanged despite Ghidra's void signature; Rust
       returns context to preserve that ABI-visible value. Host tests prove the
       exact first-word store, preservation of following words, and return.
+  - address: 0x0814d2f4
+    ghidra: FUN_0814d2f4
+    name: mov_inline_descriptor_payload
+    size: 16
+    sig: "u32 mov_inline_descriptor_payload(u32 descriptor, u32 *payload_out)"
+    module: mov/inline_descriptor_payload
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      param_2/r1: payload_out
+      "[descriptor + 4]": payload
+      uVar1/r0: status
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0814d2f4..0x0814d304: add r0,r0,#4; str r0,[r1]; mov r0,#0; bx lr.
+      The next real function begins at 0x0814d304 with mov r0,#0. The four
+      inbound plain unconditional BL instructions are at 0x081e3388,
+      0x08206160, 0x0820a230, and 0x0821c100; there are zero predicated BL
+      forms. Callers use the output as the first word of a three-word inline
+      descriptor payload, after a leading type word. The descriptor itself is
+      never dereferenced. The port stores the target-width address as u32 and
+      uses wrapping addition to preserve the ARM add rollover. Deliberate
+      deviations: none. Reference C:
+      decomp/c/013/0814d2f4_FUN_0814d2f4.c; assembly: osos.asm 0x0814d2f4.
