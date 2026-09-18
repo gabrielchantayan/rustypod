@@ -107918,3 +107918,26 @@ functions:
       inventing a seam. Host tests prove both the null bypass and slot-+4
       dispatch with owner return preservation. match.py reviewed after the ARM
       release build.
+
+  # --- flagged pair clear ---
+  - address: 0x081fca5c
+    ghidra: FUN_081fca5c
+    name: flagged_pair_clear
+    size: 16
+    sig: "FlaggedPair *flagged_pair_clear(FlaggedPair *record)"
+    module: cxx/flagged_pair_clear
+    status: ported
+    renames:
+      param_1/r0: record
+      "[record + 0x00]": first
+      "[record + 0x08]": flag
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte range
+      0x081fca5c..0x081fca6b: mov r1,#0; str r1,[r0]; strb r1,[r0,#8]; bx lr.
+      The next independently entered function begins at 0x081fca6c. Decoding
+      inbound A32 branch words finds four unconditional plain BL call sites at
+      0x081b7790, 0x081b7ad4, 0x08214d68, and 0x08214e00, and zero predicated
+      BL call sites. The function clears the observed first word and flag byte,
+      preserves its input pointer in r0 for return, and leaves the second word
+      and trailing bytes unchanged. The C++ type is unrecovered; Rust uses the
+      observed FlaggedPair layout shared with its adjacent copy helper.
