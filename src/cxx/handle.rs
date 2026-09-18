@@ -2672,6 +2672,82 @@ pub unsafe extern "C" fn refcounted_ptr_release_dtor_copy(
     slot.write(core::ptr::null_mut());
     slot
 }
+/// `refcounted_ptr_release_dtor_mutex` — retailOS `FUN_0816ce88` @
+/// `0x0816ce88` (148 bytes; four plain and one predicated `bl` instructions).
+///
+/// Raw ARM runs from `0x0816ce88` through `0x0816cf1c`; the next independently
+/// linked function starts at `0x0816cf20`. The four plain calls are the
+/// virtual destructor, mutex-unlock helper, mutex-delete, and operator-delete;
+/// the optional mutex-lock call is `blne`. It returns `slot`: an empty slot is
+/// unchanged; otherwise the optional mutex guards a wrapping decrement. A
+/// final release invokes implementation vtable word 1 (+4), unlocks, destroys
+/// and frees the mutex, frees the body, and clears the slot.
+///
+/// Deliberate deviation: the predicated lock and local unlock helper become
+/// ordinary guarded calls to the existing mutex ports. LLVM may inline those
+/// helpers rather than retain the retailOS call boundaries; call order and
+/// target-word semantics are unchanged.
+///
+/// # Safety
+///
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, mutex,
+/// implementation, and implementation vtable slot 1 must be live as reached.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_release_dtor_mutex")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_release_dtor_mutex(
+    slot: *mut *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let body = slot.read();
+    if body.is_null() {
+        return slot;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            destructor(implementation);
+        }
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+    slot
+}
+
 
 /// refcounted_ptr_release — original: `FUN_0816cd44` @ 0x0816cd44
 /// (20 bytes; 90 `bl` call sites, mostly the 0x0822xxxx application
@@ -2878,6 +2954,36 @@ pub unsafe extern "C" fn refcounted_body_release_slot1(slot: *mut *mut Refcounte
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dtor_mutex_release_preserves_an_empty_slot_and_returns_it() {
+        let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+        let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+        assert_eq!(
+            unsafe { refcounted_ptr_release_dtor_mutex(slot_ptr) as usize },
+            slot_ptr as usize
+        );
+        assert!(slot.is_null());
+    }
+
+    #[test]
+    fn dtor_mutex_release_decrements_nonfinal_reference_and_clears_slot() {
+        let mut body = RefcountedBody {
+            opaque0: 0,
+            refcount: 2,
+            mutex: core::ptr::null_mut(),
+        };
+        let mut slot = &mut body as *mut RefcountedBody;
+        let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+        assert_eq!(
+            unsafe { refcounted_ptr_release_dtor_mutex(slot_ptr) as usize },
+            slot_ptr as usize
+        );
+        assert_eq!(body.refcount, 1);
+        assert!(slot.is_null());
+    }
 
     #[test]
     fn walks_both_levels() {
