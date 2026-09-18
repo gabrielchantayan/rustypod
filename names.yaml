@@ -17,6 +17,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08165dd0
+    ghidra: FUN_08165dd0
+    name: assign_active_entry_labels
+    size: 60
+    sig: "u32 assign_active_entry_labels(void *owner, ActiveEntry *entries, u16 *next_label)"
+    module: util/assign_active_entry_labels
+    status: ported
+    renames:
+      param_1/r0: owner (unused)
+      param_2/r1: entries
+      param_3/r2: next_label
+      uVar1/r0: assigned_count
+      psVar2/r3: entry
+      "[entry + 0]": label
+      "[entry + 4]": active
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x08165dd0..0x08165e0c. The next real function begins at 0x08165e0c
+      with cmp r1,#0; the final word at 0x08165e08 is b 0x08165ddc, so it is
+      the loop back-edge, not a boundary. Decoding all 15 words finds zero
+      outgoing plain bl and zero outgoing predicated bl instructions. The
+      four direct inbound plain bl calls are 0x08165f94, 0x08165fa8,
+      0x08165fbc, and 0x08165fd0; there are zero inbound predicated bl calls.
+      If entries is null it returns zero without dereferencing next_label.
+      Otherwise it walks eight-byte records until the aligned word at +4 is
+      zero, writes *next_label to the halfword at +0, increments *next_label,
+      and increments its return count with bit 16 cleared after each
+      increment. owner is unused in the raw code, so the port preserves the
+      ABI argument but does not invent an object type. Volatile aligned field
+      accesses preserve the source load/store order; wrapping arithmetic and
+      the explicit bit clear retain the ARM rollover behavior. Reference C:
+      decomp/c/014/08165dd0_FUN_08165dd0.c; assembly: osos.asm 0x08165dd0.
   - address: 0x081660f0
     ghidra: FUN_081660f0
     name: object_set_word_0x40
