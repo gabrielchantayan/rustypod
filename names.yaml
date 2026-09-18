@@ -50101,6 +50101,41 @@ functions:
       and LLVM uses a frame, same deviation shape as
       timer_schedule_shim.
 
+  - address: 0x0812c088
+    ghidra: FUN_0812c088
+    name: task_message_post
+    size: 188
+    sig: "u32 task_message_post(usize reply_queue, usize target_queue, const u32 *message, u32 wait, u32 flags)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: reply_queue
+      param_2/r1: target_queue
+      param_3/r2: message
+      param_4/r3: wait
+      param_5/[sp]: flags
+      iVar1/r4: cell
+      iVar2/r0: post_result
+      FUN_0812bf9c: allocate_cell
+      FUN_0827210c: copy_seven_words
+      FUN_080f117c: post_without_wait
+      FUN_080944b0: post_with_wait
+      FUN_0812c1b4: task_message_pool_release
+      FUN_080dc8a4: allocation_failed
+    notes: >-
+      Raw osos.dec gives a 188-byte true extent: 180 bytes of code at
+      0x0812c088..0x0812c13c, then literal words 0x6d4d6f76 and
+      0x5765656c through 0x0812c144, where the next real function begins.
+      decoding finds four direct BL callers: three unconditional
+      (0x0812bf7c, 0x0812c238, 0x0812c634) and one blne (0x0812c194).
+      The helper allocates a cell, copies seven words to +4, selects the
+      wait/no-wait backend, maps a zero backend result to success, and
+      releases a rejected cell. The 0x5765656c allocation-failure callback
+      is retained. Lower callee identities are deliberately narrow data-flow
+      seams whose target defaults call their verified retailOS addresses;
+      the fixed copy replaces FUN_0827210c directly, preserving its observed
+      word-load and write order.
+
   - address: 0x0810f9f0
     ghidra: FUN_0810f9f0
     name: object_dispatch_entry_construct
