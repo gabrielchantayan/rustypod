@@ -77696,6 +77696,35 @@ functions:
       coverage proves all valid record offsets, full-word propagation,
       uncached reload, and the signed negative-slot path.
 
+  - address: 0x08193e64
+    ghidra: FUN_08193e64
+    name: service_manager_secondary_handler_state_flags_set
+    size: 32
+    sig: "void service_manager_secondary_handler_state_flags_set(u32 *slot_table, i32 slot, u32 state_flags)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_3/r2: state_flags
+      param_1_plus_slot_times_0x20_plus_0x10: state_flags
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x08193e64..0x08193e84: `cmp r1,#3; bge
+      0x08193e80; bics r3,r2,#0xff; andeq r2,r2,#0xff; addeq r0,r0,r1,lsl
+      #5; streq r2,[r0,#16]; bxeq lr; bl 0x08030f44`. It replaces the full
+      +0x10 state-flags word in one of three 8-word secondary handler records,
+      but accepts only values <=0xff. The signed selector comparison admits
+      negative slots, which address unchecked before the table; slots >=3 and
+      oversized values terminate through ported non-returning heap_panic.
+      Decoding every ARM B/BL word in osos.dec found exactly four inbound
+      direct calls — 0x08164908, 0x0818fcc4, 0x081911f4, and 0x08192b18 —
+      all unconditional plain BL; no predicated forms or tail branches. The
+      next `cmp r1,#3` at 0x08193e84 begins the separately linked code getter.
+      Deliberate deviations: none. Host coverage proves all valid slots, zero
+      and maximum byte values, full-word replacement, adjacent-word
+      preservation, and the signed negative-slot path.
+
   - address: 0x08193e84
     ghidra: FUN_08193e84
     name: service_manager_secondary_handler_code_get

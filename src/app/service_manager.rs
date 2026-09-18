@@ -9,6 +9,7 @@
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //! | 0x08193eac | [`service_manager_secondary_handler_code_set`] | 20 | 4 direct |
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
+//! | 0x08193e64 | [`service_manager_secondary_handler_state_flags_set`] | 32 | 4 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
 //! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
@@ -268,6 +269,51 @@ pub unsafe extern "C" fn service_manager_secondary_handler_state_flags_get(
         heap_panic();
     }
     core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(4))
+}
+
+/// service_manager_secondary_handler_state_flags_set — original:
+/// `FUN_08193e64` @ 0x08193e64 (32 bytes; 4 direct, unconditional `bl`
+/// call sites).
+///
+/// Replaces the state-flags word at `+0x10` in one of the service manager's
+/// three secondary 0x20-byte handler records, but only with a byte-sized
+/// value. Raw ARM is `cmp r1,#3; bge 0x08193e80; bics r3,r2,#0xff; andeq
+/// r2,r2,#0xff; addeq r0,r0,r1,lsl #5; streq r2,[r0,#16]; bxeq lr; bl
+/// 0x08030f44`: signed slots below three, including negative values, retain
+/// unchecked before-table addressing; slots three and above, or values above
+/// 0xff, terminate through [`heap_panic`].
+///
+/// The next distinct function begins at 0x08193e84 (`cmp r1,#3`), confirming
+/// the eight-instruction extent. Decoding every ARM `B`/`BL` word in
+/// `osos.dec` found exactly four inbound callers — 0x08164908, 0x0818fcc4,
+/// 0x081911f4, and 0x08192b18 — all unconditional plain `BL`; no predicated
+/// direct calls or tail branches target this address.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_state_flags_set(
+    slot_table: *mut u32,
+    slot: i32,
+    state_flags: u32,
+) {
+    if slot >= 3 || state_flags > u8::MAX as u32 {
+        heap_panic();
+    }
+    core::ptr::write(
+        slot_table
+            .wrapping_offset(slot.wrapping_shl(3) as isize)
+            .add(4),
+        state_flags,
+    );
 }
 
 /// service_manager_secondary_handler_code_get — original: `FUN_08193e84` @
@@ -1177,6 +1223,40 @@ mod secondary_handler_state_flags_get_tests {
                 0xa5,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod secondary_handler_state_flags_set_tests {
+    use super::*;
+
+    #[test]
+    fn replaces_each_state_flags_word_with_byte_values() {
+        let mut table = [0xdead_beefu32; 24];
+
+        unsafe {
+            service_manager_secondary_handler_state_flags_set(table.as_mut_ptr(), 0, 0);
+            service_manager_secondary_handler_state_flags_set(table.as_mut_ptr(), 1, 0x46);
+            service_manager_secondary_handler_state_flags_set(table.as_mut_ptr(), 2, 0xff);
+        }
+
+        assert_eq!(table[4], 0);
+        assert_eq!(table[12], 0x46);
+        assert_eq!(table[20], 0xff);
+        assert_eq!(table[3], 0xdead_beef);
+        assert_eq!(table[5], 0xdead_beef);
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[4] = 0xdead_beef;
+
+        unsafe {
+            service_manager_secondary_handler_state_flags_set(table.as_mut_ptr().add(8), -1, 0xa5);
+        }
+
+        assert_eq!(table[4], 0xa5);
     }
 }
 
