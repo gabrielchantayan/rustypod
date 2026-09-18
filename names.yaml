@@ -110932,3 +110932,25 @@ functions:
       Deliberate deviation: the gateway seam accepts usize rather than the
       target's u32 arguments; target object layout and byte offset are
       preserved.
+
+  - address: 0x08148600
+    ghidra: FUN_08148600
+    name: work_record_construct
+    size: 164
+    sig: "WorkRecord *work_record_construct(WorkRecord *this, u32 context, u32 value, u32 work_kind)"
+    module: app/work_record_construct
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: context, param_3/r2: value, param_4/r3: work_kind, iVar3/r4: record}
+    notes: >-
+      Raw words establish exactly 164 code bytes at 0x08148600..0x081486a4,
+      followed by vtable literal 0x089865b4; the next real function starts at
+      0x081486a8. Independent B/BL decoding finds four inbound unconditional
+      plain BL callers (0x081363cc, 0x0816ca34, 0x08177ef8, 0x081de254) and
+      no predicated forms. The body makes eight unconditional direct BL calls
+      to 0x0814878c, 0x081ba980, 0x0820b20c, 0x08135ba4, 0x0839eba4,
+      0x081bb6b8, 0x081484e0, and 0x0814848c. It installs the vtable and
+      context, chains six nested constructors, clears its state, stores
+      work_kind and -1, then assigns and initializes the record. The six
+      nested constructors and two lifecycle calls remain target-address
+      dispatches; host tests replace them to verify the complete pointer and
+      argument chain.
