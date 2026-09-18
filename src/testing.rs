@@ -1451,6 +1451,9 @@ pub mod hints {
     // 0x7fb0_0000: dedicated to app/media_player_transition_dispatch's
     // raw-u32 object, target-slot, and target fixture; mappings never unmap.
     pub const MEDIA_PLAYER_TRANSITION_DISPATCH: usize = 0x7fb0_0000;
+    // 0x7fc0_0000: dedicated to app/playback_action_flags's raw-u32 player
+    // and nested-state fixture; mappings never unmap.
+    pub const PLAYBACK_ACTION_FLAGS: usize = 0x7fc0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
