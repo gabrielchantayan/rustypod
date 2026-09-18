@@ -109715,3 +109715,23 @@ functions:
       and queue wait have verified target-address seams because their
       identities remain unrecovered; host tests install typed recorders.
       Deliberate deviations: none.
+
+  - address: 0x081890f0
+    ghidra: FUN_081890f0
+    name: transfer_kind_invalidate
+    size: 12
+    sig: "u8 *transfer_kind_invalidate(u8 *record)"
+    module: app/transfer_kind_invalidate
+    status: ported
+    renames:
+      param_1/r0: record
+    notes: >-
+      Raw ARM establishes the exact 12-byte extent 0x081890f0..0x081890fb:
+      mov r1,#0xff; strb r1,[r0,#4]; bx lr. The preceding function ends at
+      0x081890ec; the next real function starts at 0x081890fc with
+      push {r4,lr}, so there is no veneer or literal pool. Independent raw
+      branch-target decoding finds four inbound plain BL calls and no
+      predicated BL calls. Callers initialize byte +0x04 to transfer kind 2,
+      3, or 4, then invoke this routine after the transfer operation; it
+      overwrites that byte with the 0xff invalid sentinel and returns the
+      preserved record pointer. Deliberate deviations: none.
