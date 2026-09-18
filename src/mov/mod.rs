@@ -9,6 +9,7 @@ pub mod chain_table;
 pub mod chain_table_find_predecessor;
 pub mod esds_descriptor_size;
 pub mod fatal_mov_cleanup_no_op;
+pub mod fatal_mov_chunk_offsets_cleanup_no_op;
 pub mod fatal_mov_object_cleanup_no_op;
 pub mod fatal_mov_cleanup_08153bc0_no_op;
 pub mod optional_flagged_byte;

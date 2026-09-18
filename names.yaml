@@ -110630,3 +110630,25 @@ functions:
       Rust signature exposes that observed r0 pass-through even though Ghidra
       inferred void with no arguments. Reference C:
       decomp/c/013/08153bc0_FUN_08153bc0.c; assembly: osos.asm 0x08153bc0.
+  - address: 0x08153788
+    ghidra: FUN_08153788
+    name: fatal_mov_chunk_offsets_cleanup_no_op
+    size: 4
+    sig: "void *fatal_mov_chunk_offsets_cleanup_no_op(void *object)"
+    module: mov/fatal_mov_chunk_offsets_cleanup_no_op
+    status: ported
+    renames:
+      param_1/r0: object
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x08153788..0x0815378c: bx lr. The next real function starts at
+      0x0815378c with cmp r1,#0; this is neither a veneer nor a tail branch.
+      Decoding the complete decrypted image finds two inbound plain
+      unconditional bl calls (0x081c2620 and 0x081c2e24) and no inbound
+      predicated bl calls. Both callers pass the opaque MOV chunk-offset
+      cleanup object from FUN_080b3d7c immediately before the non-returning
+      fatal-error handler at 0x082aad24. The body does not inspect object or
+      change memory; it returns immediately with r0 unchanged. The Rust
+      signature exposes that observed r0 pass-through even though Ghidra
+      inferred void with no arguments. Reference C:
+      decomp/c/013/08153788_FUN_08153788.c; assembly: osos.asm 0x08153788.
