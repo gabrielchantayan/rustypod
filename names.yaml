@@ -18646,6 +18646,21 @@ functions:
       accumulated dot product (e.g. 0x082a01e4 multiplies four field pairs
       at +0/+4/+8/+0xc and sums with adds/adc, confirming the return is
       genuinely 64-bit and not a truncated mul).
+  - address: 0x080f0fb0
+    ghidra: thunk_FUN_080e76b8
+    name: tail_call_retail_080e76b8
+    size: 4
+    sig: "u32 tail_call_retail_080e76b8(u32 r0, u32 r1)"
+    module: util/tail_call_retail_080e76b8
+    status: ported
+    notes: >-
+      Raw osos.dec word 0xeaffd9c0 at 0x080f0fb0 is an unconditional tail
+      branch to the still-unidentified retail target 0x080e76b8; the
+      0x080f0fb4 push begins element_array1_at, establishing a four-byte
+      true extent. Binary decoding finds four plain unconditional inbound bl
+      calls at 0x0824c0a8, 0x0824c1bc, 0x0824c258, and 0x0824c370, with no
+      predicated bl calls. The Rust payload uses a literal tail veneer to
+      preserve the stock r0/r1-to-r0 ABI after relocation.
 
   - address: 0x08094404
     ghidra: FUN_08094404
