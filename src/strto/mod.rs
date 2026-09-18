@@ -4,6 +4,7 @@ pub mod atoi_decimal;
 pub mod decimal_cursor;
 pub mod parse_i32_decimal;
 pub mod range_i32;
+pub mod parse_i32_utf16_bounds;
 pub mod parse_u32_prefix;
 pub mod parse_i16_prefix;
 pub mod strtod;
