@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08149da0
+    ghidra: FUN_08149da0
+    name: increment_shared_counter
+    size: 20
+    sig: "u32 increment_shared_counter(void)"
+    module: util/increment_shared_counter
+    status: ported
+    renames:
+      DAT_08149db4: shared_counter
+      r0: next_counter
+      r1: shared_counter_address
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x08149da0..0x08149db4: ldr r1,[pc,#12]; ldr r0,[r1]; add r0,r0,#1;
+      str r0,[r1]; bx lr. The next real function begins at 0x08149db4 with
+      mov r0,#0x21. The literal resolves to the fixed word 0x089cb1e8.
+      Four direct inbound calls are plain unconditional BL calls and no
+      predicated BL calls were found; the four Ghidra callers retain the
+      returned value as a shared token. The counter's owning subsystem is
+      unrecovered, so its name states only its verified behavior. Deliberate
+      deviation: host builds use private backing for the fixed firmware word;
+      target builds perform volatile accesses at 0x089cb1e8.
   - address: 0x0815556c
     ghidra: FUN_0815556c
     name: fatal_cleanup_no_op
