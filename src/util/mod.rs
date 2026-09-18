@@ -51,6 +51,7 @@ pub mod video_engine_property_slot;
 pub mod drive;
 pub mod digest_byte_count_add;
 pub mod fixed;
+pub mod fixed_record_u16_lookup;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;
 pub mod filesystem_kind_is_hfsplus;

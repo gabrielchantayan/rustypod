@@ -112037,3 +112037,27 @@ functions:
       structural diff: LLVM combines the stock mask-and-bic sequence into
       0x007c1807 and adds its standard frame, while retaining the early return,
       load, level mask/shift, merge, and store.
+  - address: 0x080ffaac
+    ghidra: FUN_080ffaac
+    name: fixed_record_u16_lookup
+    size: 56
+    sig: "u16 fixed_record_u16_lookup(u32 key)"
+    module: util/fixed_record_u16_lookup
+    status: ported
+    renames:
+      param_1/r0: key
+      DAT_080ffae4: runtime_record_table
+      uVar1/r1: record_index
+      r2: record_table
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte code extent
+      0x080ffaac..0x080ffae4: ldr r2,[pc,#48]; mov r1,#0; then a 205-entry
+      20-byte-record scan with ldr/cmp/addeq/ldreqh/bxeq and a blt back-edge.
+      The following literal is 0x083e9d94; the next separately linked
+      function starts at 0x080ffae8 with push {r4,lr}. The body has no
+      direct calls. Whole-image A32 decoding finds four inbound plain BL
+      calls at 0x0816c1c0, 0x0816c1d4, 0x0816c23c, and 0x082851b8, with no
+      predicated BL calls. It returns the little-endian halfword at record
+      +0x0a for the first leading-word match, otherwise zero. The raw image
+      has executable bytes at the runtime table address, so host tests use a
+      private fixture seam while target builds retain the absolute access.
