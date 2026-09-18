@@ -10,6 +10,7 @@
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
 //! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
+//! | 0x08188b5c | [`demo_mode_observer_construct`] | 20 | 4 `bl` |
 //! (Call-site counts are binary-scanned over osos.dec; one of the nine
 //! class-registry `bl`s is the static-init chain @ 0x082afb6c, which runs it
 //! against the statically allocated registry object @ 0x08a79ca4 — the
@@ -147,6 +148,10 @@ pub const REGISTRY_OBSERVER_BASE_VTABLE_ADDRESS: usize = 0x0898_14fc;
 /// [`registry_observer_construct`] (`ldr r1, [pc, #4]` loads it from
 /// 0x082028b8 in the original).
 pub const REGISTRY_OBSERVER_VTABLE_ADDRESS: usize = 0x0899_10ac;
+/// The observer vtable installed by [`demo_mode_observer_construct`].
+/// The literal is at 0x08188b70; its contents are in a stale runtime page,
+/// so this port preserves its pointer rather than modeling its slots.
+pub const DEMO_MODE_OBSERVER_VTABLE_ADDRESS: usize = 0x0898_9918;
 
 /// The registry observer singleton (original: the global word @
 /// 0x089d01ac — see the module-header deviation). NULL until
@@ -510,6 +515,30 @@ pub unsafe extern "C" fn registry_observer_construct(this: *mut u8) -> *mut u8 {
     core::ptr::write_volatile(
         observer.cast::<*const RegistryObserverVtable>(),
         REGISTRY_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+    );
+    observer
+}
+
+/// demo_mode_observer_construct — original: `FUN_08188b5c` @ 0x08188b5c
+/// (20 bytes; **4 plain unconditional `bl` call sites, zero predicated**).
+///
+/// ADS C++ constructor for the 8-byte observer installed by four demo-mode
+/// UI constructors. It forwards `this` to
+/// [`registry_observer_base_construct`], replaces the resulting +0x00 base
+/// vtable with literal `0x08989918`, and returns the base's unmodified
+/// pointer. Raw words `e92d4010 ebfe149d e59f1004 e5801000 e8bd8010`
+/// establish the exact 20-byte code extent; `0x08188b70` is its literal pool
+/// and the next real function begins at `0x08188b74`.
+///
+/// Deliberate deviation: none. The vtable points into a stale runtime page,
+/// so only its address is represented.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_observer_construct(this: *mut u8) -> *mut u8 {
+    let observer = registry_observer_base_construct(this.cast()).cast::<u8>();
+    core::ptr::write_volatile(
+        observer.cast::<*const RegistryObserverVtable>(),
+        DEMO_MODE_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
     );
     observer
 }
@@ -1546,6 +1575,31 @@ mod tests {
                 ptr::read_volatile(ptr::addr_of!(ARENA.vtable)) as usize,
                 REGISTRY_OBSERVER_VTABLE_ADDRESS,
                 "the derived constructor's +0x00 store follows the base vtable"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn demo_mode_observer_constructor_replaces_base_vtable_and_preserves_return() {
+        let guard = mock();
+        unsafe {
+            ptr::addr_of_mut!(ARENA).write(RegistryObserver {
+                vtable: 0xdead_beefusize as *const RegistryObserverVtable,
+                state: u32::MAX,
+            });
+            let observer = ptr::addr_of_mut!(ARENA);
+
+            assert_eq!(demo_mode_observer_construct(observer.cast()), observer.cast());
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(ARENA.state)),
+                0,
+                "the shared base constructor clears +0x04 before the derived store"
+            );
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(ARENA.vtable)) as usize,
+                DEMO_MODE_OBSERVER_VTABLE_ADDRESS,
+                "the derived literal replaces only the +0x00 base vtable"
             );
         }
         restore(guard);
