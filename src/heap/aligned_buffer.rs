@@ -108,22 +108,37 @@ pub unsafe extern "C" fn aligned_buffer_reset(buffer: *mut u8) -> *mut u8 {
     buffer
 }
 
-/// The align-up helper @ 0x081a8198 (24 bytes: `and r2, r0, #0x1f;
-/// rsb r2, r2, #0x20; cmp/str; moveq; add r0, r0, #0x1f; bic r0, r0,
-/// #0x1f; streq; bx lr`), reduced to the half the constructor observes:
-/// the 32-aligned view of the raw block, `(block + 0x1f) & !0x1f`. The
-/// original also writes the pad (`0x20 - (block & 0x1f)`, forced to 0
-/// when the block is already aligned) through an out-pointer, but the
-/// constructor aims that out-pointer at its own saved-r1 stack slot,
-/// which the epilogue pops into a discarded register — the pad is dead
-/// at this call site, so it is not modeled. Kept `#[inline(never)]` so
-/// the constructor's `bl` to the helper survives codegen, matching the
-/// original's two-function structure.
+/// aligned_buffer_align_up — original: `FUN_081a8188` @ `0x081a8188`
+/// (16 bytes exactly, true extent `0x081a8188..0x081a8198`, immediately
+/// followed by the full align-up helper). Raw words decode to `stmdb
+/// sp!, {r3, lr}; mov r1, sp; bl 0x081a8198; ldmia sp!, {r3, pc}`.
+///
+/// Four direct callers (`0x080f075c`, `0x0814e0f0`, `0x0814e2c8`, and
+/// `0x082676c4`) use plain unconditional `bl`; the body has one plain
+/// `bl` and no predicated `bl` forms. It supplies a private stack slot for
+/// the callee's padding out-parameter, discards that result, and returns
+/// the input address rounded up to a 32-byte cache-line boundary.
+/// Deliberate deviations: none.
 #[inline(never)]
-fn align_up_to_cache_line(block: *mut u8) -> *mut u8 {
-    let aligned = (block as usize).wrapping_add(ALIGNED_BUFFER_ALIGNMENT - 1)
-        & !(ALIGNED_BUFFER_ALIGNMENT - 1);
-    aligned as *mut u8
+unsafe fn aligned_buffer_align_up_with_pad(block: *mut u8, pad_out: *mut u32) -> *mut u8 {
+    let address = block as usize as u32;
+    let mut pad = (ALIGNED_BUFFER_ALIGNMENT as u32).wrapping_sub(
+        address & (ALIGNED_BUFFER_ALIGNMENT as u32 - 1),
+    );
+    if pad == ALIGNED_BUFFER_ALIGNMENT as u32 {
+        pad = 0;
+    }
+    pad_out.write(pad);
+    let aligned = address.wrapping_add(ALIGNED_BUFFER_ALIGNMENT as u32 - 1)
+        & !(ALIGNED_BUFFER_ALIGNMENT as u32 - 1);
+    aligned as usize as *mut u8
+}
+
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn aligned_buffer_align_up(block: *mut u8) -> *mut u8 {
+    let mut discarded_pad = 0;
+    unsafe { aligned_buffer_align_up_with_pad(block, &mut discarded_pad) }
 }
 
 /// aligned_buffer_init — original: `FUN_081a81c4` @ 0x081a81c4 (64
@@ -154,13 +169,13 @@ fn align_up_to_cache_line(block: *mut u8) -> *mut u8 {
 /// exactly as the reset half expects. No NULL guard on `buffer`
 /// itself, exactly like the original.
 ///
-/// Deviations: the align-up helper is a private sibling fn rather
-/// than the exported 0x081a8198 (its pad out-store is dead here — see
-/// above), and the `operator_new_tag3` call is direct (ported in
-/// heap/veneers — no seam). Both words are 32-bit target words; host
-/// fixtures must sit below 4 GiB or use small integer stand-ins, which
-/// is what the tests do (the block pointer is only stored and masked,
-/// never dereferenced).
+/// The constructor calls the exported `aligned_buffer_align_up` wrapper,
+/// preserving the original two-function call structure; its internal
+/// padding store remains private to that wrapper. `operator_new_tag3` is
+/// called directly (ported in `heap/veneers` — no seam). Both words are
+/// 32-bit target words; host fixtures must sit below 4 GiB or use small
+/// integer stand-ins, which is what the tests do (the block pointer is
+/// only stored and masked, never dereferenced).
 ///
 /// # Safety
 ///
@@ -177,7 +192,7 @@ pub unsafe extern "C" fn aligned_buffer_init(buffer: *mut u8, size: usize) -> *m
     let allocation = operator_new_tag3(size.wrapping_add(ALIGNED_BUFFER_ALIGNMENT));
     (buffer.add(ALIGNED_BUFFER_ALLOCATION) as *mut u32).write_volatile(allocation as u32);
     if !allocation.is_null() {
-        let data = align_up_to_cache_line(allocation);
+        let data = aligned_buffer_align_up(allocation);
         (buffer as *mut u32).write_volatile(data as u32);
     }
     buffer
@@ -206,6 +221,22 @@ mod tests {
     fn alignment_query_returns_the_cache_line_size_on_every_call() {
         assert_eq!(aligned_buffer_alignment(), 0x20);
         assert_eq!(aligned_buffer_alignment(), ALIGNED_BUFFER_ALIGNMENT as u32);
+    }
+
+    #[test]
+    fn align_up_rounds_every_residue_and_wraps_as_a_target_word() {
+        for residue in 0..ALIGNED_BUFFER_ALIGNMENT as u32 {
+            let block = (ALLOCATION + residue) as usize as *mut u8;
+            let aligned = aligned_buffer_align_up(block) as usize as u32;
+            let expected = (ALLOCATION + residue).wrapping_add(0x1f) & !0x1f;
+            assert_eq!(aligned, expected, "residue {residue:#x}");
+        }
+
+        assert_eq!(
+            aligned_buffer_align_up(0xffff_fff1usize as *mut u8) as usize as u32,
+            0,
+            "the ARM u32 addition wraps at the address-space boundary"
+        );
     }
 
     #[test]
