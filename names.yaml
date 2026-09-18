@@ -53599,6 +53599,32 @@ functions:
       host coverage proves the getter is called once and replaces a
       non-NULL prior +0x24 target.
 
+  # --- Silver UI framework: current task target setter ---
+
+  - address: 0x081110a4
+    ghidra: FUN_081110a4
+    name: framework_task_target_set_current
+    size: 44
+    sig: "void framework_task_target_set_current(FrameworkTaskTarget *target)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1/r0: target
+      r4: target
+      FUN_080cb828: current_task_ctx_block
+      field_0x28: framework_task_target
+      field_0x44: FrameworkTaskTargetVtable::slot_0x44
+    notes: >-
+      Raw words at 0x081110a4..0x081110cc prove the exact 44-byte extent:
+      `push {r4,lr}; mov r4,r0; bl 0x080cb828; cmp r4,#0; str r4,[r0,#0x28];
+      ldrne r0,[r4]; ldrne r1,[r0,#0x44]; movne r0,r4; popne {r4,lr};
+      bxne r1; pop {r4,pc}`. The next independent `push {r4,r5,r6,lr}` is
+      0x081110d0. Whole-image A32 B/BL decoding found four direct callers,
+      all unconditional BL and no predicated BL calls. It stores target in
+      the current TaskCtx +0x28 slot, then invokes target's otherwise opaque
+      vtable +0x44 slot with target when non-NULL; NULL only clears the slot.
+      Rust directly calls ported current_task_ctx_block, uses named repr(C)
+      fields, and asserts the target vtable offset only on 32-bit ARM.
   # --- Silver UI framework: link-owning base constructor ---
 
   - address: 0x081110d0

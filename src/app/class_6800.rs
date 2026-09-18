@@ -173,6 +173,25 @@ const _: [u8; 0x1c] = [0; core::mem::offset_of!(Class6800Vtable, current_target)
 const _: [u8; 0x2c] = [0; core::mem::offset_of!(Class6800Vtable, set_target)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x4c] = [0; core::mem::offset_of!(Class6800Vtable, apply_link_state)];
+/// The only recovered prefix of the task framework target stored in
+/// [`crate::kernel::task::TaskCtx::framework_task_target`].
+#[repr(C)]
+pub struct FrameworkTaskTarget {
+    pub vtable: *const FrameworkTaskTargetVtable,
+}
+
+/// The task target's vtable, known only through the dispatched +0x44 slot.
+#[repr(C)]
+pub struct FrameworkTaskTargetVtable {
+    /// Slots +0x00..+0x40 are not recovered.
+    pub unresolved_00_40: [usize; 17],
+    /// +0x44: invoked with the installed target when it is non-NULL.
+    pub slot_0x44: unsafe extern "C" fn(target: *mut FrameworkTaskTarget),
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x44] = [0; core::mem::offset_of!(FrameworkTaskTargetVtable, slot_0x44)];
+
 
 /// The 28-byte class-0x6800 object.
 ///
@@ -805,6 +824,29 @@ pub unsafe extern "C" fn framework_base_current_task_initial_target() -> *mut u8
     let task_context = current_task_ctx_block();
     core::ptr::read_volatile(core::ptr::addr_of!((*task_context).framework_base_initial_target))
 }
+/// framework_task_target_set_current — original: `FUN_081110a4` @
+/// 0x081110a4 (44 bytes; **4 plain `bl` call sites and 0 predicated
+/// calls**, binary-scanned from `work/firmware/osos.dec`).
+///
+/// target word, then, only for a non-NULL target, tail-dispatches the target
+/// vtable's opaque +0x44 slot with that target. The raw `cmp; str;
+/// ldrne; ldrne; movne; popne; bxne` proves the store precedes the NULL
+/// branch and `movne r0,r4` proves the target is the slot argument.
+///
+/// Deliberate deviation: `FrameworkTaskTargetVtable` uses pointer-sized
+/// filler on the host so its semantic slot can be fixture-backed; the
+/// target-only offset assertion preserves its physical +0x44 layout.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_task_target_set_current(target: *mut FrameworkTaskTarget) {
+    let task_context = current_task_ctx_block();
+    core::ptr::addr_of_mut!((*task_context).framework_task_target).write_volatile(target.cast());
+    if !target.is_null() {
+        let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*target).vtable));
+        ((*vtable).slot_0x44)(target);
+    }
+}
+
 
 /// framework_base_set_current_task_target — original: `FUN_08110ca8` @
 /// 0x08110ca8 (20 bytes; **6 plain `bl` call sites and 0 predicated
@@ -1094,6 +1136,9 @@ mod tests {
     static mut RESOURCE_PROVIDER_SET_NEXT_ARGS: (*mut ResourceProvider, *mut ResourceProvider) =
         (ptr::null_mut(), ptr::null_mut());
     static mut OBSERVED_PROVIDER_LINK_AT_SET: *mut u8 = ptr::null_mut();
+    static mut TASK_TARGET_SLOT_CALLS: usize = 0;
+    static mut TASK_TARGET_SLOT_TARGET: *mut FrameworkTaskTarget = ptr::null_mut();
+
 
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
@@ -1131,6 +1176,11 @@ mod tests {
         RUNNING_TASK_NODE_SEQUENCE_INDEX += 1;
         node
     }
+    unsafe extern "C" fn record_task_target_slot(target: *mut FrameworkTaskTarget) {
+        TASK_TARGET_SLOT_CALLS += 1;
+        TASK_TARGET_SLOT_TARGET = target;
+    }
+
 
     unsafe extern "C" fn record_reset_entry_list(entries: *const u32) {
         RESET_ENTRY_LIST_CALLS += 1;
@@ -1439,6 +1489,63 @@ mod tests {
                 "the existing +0x24 target is overwritten"
             );
 
+            restore_task_hooks(saved_hooks);
+        }
+        drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn setting_non_null_framework_task_target_stores_then_dispatches_its_vtable_slot() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+        let vtable = FrameworkTaskTargetVtable {
+            unresolved_00_40: [0; 17],
+            slot_0x44: record_task_target_slot,
+        };
+        let mut target = FrameworkTaskTarget { vtable: ptr::addr_of!(vtable) };
+
+        unsafe {
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            TASK_TARGET_SLOT_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            framework_task_target_set_current(ptr::addr_of_mut!(target));
+
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "context is fetched once");
+            assert_eq!(task_context.framework_task_target, ptr::addr_of_mut!(target).cast());
+            assert_eq!(TASK_TARGET_SLOT_CALLS, 1);
+            assert_eq!(TASK_TARGET_SLOT_TARGET, ptr::addr_of_mut!(target));
+            restore_task_hooks(saved_hooks);
+        }
+        drop(task_hooks_guard);
+    }
+
+    #[test]
+    fn clearing_framework_task_target_skips_virtual_dispatch() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            task_context.framework_task_target = 0xa5a5usize as *mut u8;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            TASK_TARGET_SLOT_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            framework_task_target_set_current(ptr::null_mut());
+
+            assert!(task_context.framework_task_target.is_null());
+            assert_eq!(TASK_TARGET_SLOT_CALLS, 0);
             restore_task_hooks(saved_hooks);
         }
         drop(task_hooks_guard);
