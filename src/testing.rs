@@ -942,6 +942,9 @@ pub mod hints {
     // 0x9300_0000: dedicated to util/inner_state's selected-resource table
     // and object fixture; mappings never unmap, so no other user may share it.
     pub const OBJECT_SELECT_RESOURCE_INDEX: usize = 0x9300_0000;
+    // 0xa700_0000: dedicated to util/inner_state's raw-u32 query-object cache
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const QUERY_OBJECT_ENSURE: usize = 0xa700_0000;
     // 0x8c00_0000: dedicated to app/descriptor_attachment's raw-u32 owner,
     // descriptor, and link fixtures; mappings never unmap.
     pub const DESCRIPTOR_ATTACHMENT: usize = 0x8c00_0000;

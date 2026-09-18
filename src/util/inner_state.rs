@@ -184,6 +184,38 @@ pub unsafe extern "C" fn query_object_create(mode: u32) -> *mut u8 {
     crate::fp::fp_misc::query_object_construct(object, 0, mode)
 }
 
+/// query_object_ensure — original: `FUN_08109968` @ 0x08109968 (36 bytes;
+/// 4 verified direct `bl` call sites: all unconditional, 0 predicated).
+///
+/// Reads the target-width query-object cache word at `owner + 0xa8`. A
+/// non-NULL cached object is returned unchanged. Otherwise constructs a
+/// mode-zero query object, stores its returned pointer in that cache word,
+/// and returns it. The stock `popne {r4,pc}` preserves the cached `r0`, so
+/// Ghidra's void signature is wrong. The four callers all dereference the
+/// cache after this call; the `0x6217` menu path uses its query-result
+/// interface. Deliberate deviation: the existing [`query_object_create`]
+/// seam returns normally instead of stock's call/return pair; arguments,
+/// cache access, and return value are unchanged.
+///
+/// The cache is a four-byte firmware pointer field. It remains a `u32` on
+/// the host rather than a pointer-wide field, preserving all following
+/// target offsets.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_object_ensure(owner: *mut u8) -> *mut u8 {
+    const QUERY_OBJECT_CACHE: usize = 0xa8;
+
+    let cache = owner.add(QUERY_OBJECT_CACHE) as *mut u32;
+    let object = cache.read() as usize as *mut u8;
+    if !object.is_null() {
+        return object;
+    }
+
+    let object = query_object_create(0);
+    cache.write(object as usize as u32);
+    object
+}
+
 /// inner_set_state_4 — original: `FUN_0813b7c4` @ 0x0813b7c4 (12 bytes).
 ///
 /// Loads the inner object from `object + 0x40` and stores 4 into its
@@ -940,6 +972,7 @@ mod tests {
     fn query_object_create_allocates_72_bytes_and_forwards_mode() {
         let _query_guard = QUERY_FACTORY_TEST_LOCK.lock();
         let _heap_guard = mock_heap();
+
         let _restore = install_query_construct_mock();
 
         let result = unsafe { query_object_create(u32::MAX) };
@@ -951,6 +984,49 @@ mod tests {
             assert_eq!(QUERY_CONSTRUCT_OBJECT, mock_block());
             assert_eq!(QUERY_CONSTRUCT_ID, 0);
             assert_eq!(QUERY_CONSTRUCT_MODE, u32::MAX);
+        }
+    }
+    #[test]
+    fn query_object_ensure_returns_cached_target_width_pointer_without_constructing() {
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+        let _query_guard = QUERY_FACTORY_TEST_LOCK.lock();
+        let _heap_guard = mock_heap();
+        let _restore = install_query_construct_mock();
+        let Some(owner) = try_map_u32_slab(hints::QUERY_OBJECT_ENSURE, 0x1000) else {
+            assert!(note_missing_u32_fixture("util/inner_state::query_object_ensure"));
+            return;
+        };
+        let cached = unsafe { owner.add(0x400) };
+
+        unsafe {
+            (owner.add(0xa8) as *mut u32).write(cached as usize as u32);
+            assert_eq!(query_object_ensure(owner), cached);
+            assert_eq!((owner.add(0xa8) as *const u32).read(), cached as usize as u32);
+            assert_eq!(QUERY_CONSTRUCT_CALLS, 0);
+            assert_eq!(alloc_log().0, 0);
+        }
+    }
+
+    #[test]
+    fn query_object_ensure_constructs_mode_zero_and_caches_returned_pointer() {
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+        let _query_guard = QUERY_FACTORY_TEST_LOCK.lock();
+        let _heap_guard = mock_heap();
+        let _restore = install_query_construct_mock();
+        let Some(owner) = try_map_u32_slab(hints::QUERY_OBJECT_ENSURE, 0x1000) else {
+            assert!(note_missing_u32_fixture("util/inner_state::query_object_ensure"));
+            return;
+        };
+
+        unsafe {
+            (owner.add(0xa8) as *mut u32).write(0);
+            assert_eq!(query_object_ensure(owner), QUERY_CONSTRUCT_RESULT as *mut u8);
+            assert_eq!((owner.add(0xa8) as *const u32).read(), QUERY_CONSTRUCT_RESULT as u32);
+            assert_eq!(QUERY_CONSTRUCT_CALLS, 1);
+            assert_eq!(QUERY_CONSTRUCT_MODE, 0);
+            assert_eq!(alloc_log(), (1, 0x48, 2));
         }
     }
 
