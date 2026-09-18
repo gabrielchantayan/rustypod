@@ -112145,3 +112145,34 @@ functions:
       All paths dispatch state[0x1d],selector. The two target identities remain
       unrecovered, so target builds call verified fixed addresses while hosts
       use recording seams; Rust returns after dispatch rather than tail-branching.
+
+  # --- transfer-slot buffer singleton accessor ---
+  - address: 0x080f7e7c
+    ghidra: FUN_080f7e7c
+    name: transfer_slot_buffer_get
+    size: 112
+    sig: "u8 *transfer_slot_buffer_get(void)"
+    module: app/transfer_slot_buffer
+    status: ported
+    renames:
+      DAT_080f7edc: transfer_slot_buffer_state (ready byte at 0x08a09d34, guard word at +4)
+      DAT_080f7ee0: transfer_slot_buffer (fixed storage at 0x08ae47a8)
+      FUN_080f7eec: transfer_slot_buffer_initialize (unported raw-address seam)
+      DAT_080f7ee4: __dso_handle (0x089ca09c)
+      DAT_080f7ee8: interior_shutdown_handler (0x080ed15c)
+    notes: >-
+      Raw osos.dec words establish a 96-byte ARM body at
+      0x080f7e7c..0x080f7ed8, followed by four literal-pool words through
+      0x080f7ee8; 0x080f7eec begins the adjacent initializer, so the true
+      extent is 112 bytes rather than Ghidra's code-only 96. The body tests
+      guard bit 0, calls cxa_guard_acquire @ 0x082ab31c, calls the adjacent
+      four-slot byte-clear initializer @ 0x080f7eec, registers its returned
+      pointer with cxa_atexit @ 0x082ab1c8 using __dso_handle 0x089ca09c,
+      calls cxa_guard_release @ 0x082ab338, sets the adjacent ready byte, and
+      returns fixed storage 0x08ae47a8. It contains four direct unconditional
+      BL instructions and zero predicated BL instructions. Two decoded inbound
+      plain BL calls at 0x081c7838 and 0x081c7b00 use the buffer with
+      FUN_080f7f08's four transfer slots. The target initializer is a
+      raw-address seam with a host model of its four observed byte clears.
+      Handler literal 0x080ed15c is an interior instruction of a function
+      starting at 0x080ed144, not a callable entry; its Rust handler is inert.
