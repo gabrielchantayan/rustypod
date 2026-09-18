@@ -216,6 +216,7 @@ pub mod indexed_slot_pending_reset;
 pub mod path_object_join;
 pub mod path_object_duplicate_join;
 pub mod indexed_timestamp_bounds;
+pub mod format_duration;
 pub mod indexed_timestamp_window_bounds;
 pub mod indexed_payload_lookup;
 pub mod segmented_entry_lookup;

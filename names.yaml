@@ -21858,6 +21858,23 @@ functions:
       (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x0815d7e4
+    ghidra: FUN_0815d7e4
+    name: format_duration
+    size: 124
+    sig: "void format_duration(u32 unused, u32 milliseconds, u32 include_milliseconds, StringObject *out)"
+    module: app/format_duration
+    status: ported
+    vars: {param_1/r0: unused, param_2/r1: milliseconds, param_3/r2: include_milliseconds, param_4/r3: out, r7: hours, r5: whole_seconds, r4: millis, r0: minutes, r2: seconds}
+    notes: >-
+      Raw osos.dec establishes exactly 124 code bytes from 0x0815d7e4
+      through 0x0815d85c; 0x0815d860 is the 999 literal, followed by
+      "%02d:%02d:%02d" and "%02d:%02d:%02d.%03d", and the next function
+      begins at 0x0815d884. Every ARM B/BL word in the body gives four
+      unconditional plain bl calls and zero predicated bl calls: three
+      __rt_udiv calls and string_object_format. It splits milliseconds into
+      hours, within-hour minutes, seconds, and residual milliseconds, then
+      chooses the short format only when include_milliseconds is zero.
   - address: 0x0815e1ac
     ghidra: FUN_0815e1ac
     name: instance_of_class_5680
