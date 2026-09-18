@@ -108098,6 +108098,33 @@ functions:
       accumulator address. DELIBERATE DEVIATION: the ready gate and literal
       destructor target are not independently ported/identified, so target
       builds retain their retail addresses and host tests supply callbacks.
+  - address: 0x081f92a4
+    ghidra: FUN_081f92a4
+    name: opaque_impl_callback_validate
+    size: 176
+    sig: "int opaque_impl_callback_validate(void *owner)"
+    module: app/opaque_impl_callback_validate
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "[owner + 0x1c]": implementation
+      "[implementation->vtable + 0x7c]": describe_7c
+      "[implementation->vtable + 0xec]": fallback_ec
+      "[implementation->vtable + 0xf0]": predicate_f0
+      "[implementation->vtable + 0x110]": predicate_110
+      "[implementation->vtable + 0x114]": predicate_114
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte body
+      0x081f92a4..0x081f9350; the next separately linked function begins at
+      0x081f9354. Binary-wide ARM branch decoding finds four direct inbound
+      BL call sites (0x0821dcd4, 0x0821e070, 0x0821e8dc, 0x0821f018), all
+      unconditional and zero predicated. It loads the nullable implementation
+      at owner+0x1c, queries opaque vtable words +0xf0/+0x110/+0x114 in order,
+      and returns +0xec when all are zero. Otherwise it constructs a stack
+      StringObject, passes it to opaque slot +0x7c, returns !is_empty, then
+      destroys it. The vtable targets have no established identities; host
+      tests use an explicit slot seam, while target builds dispatch the raw
+      serialized vtable words.
   - address: 0x081f9354
     ghidra: FUN_081f9354
     name: volume_controller_post_commands
