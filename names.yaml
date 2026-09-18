@@ -108999,3 +108999,33 @@ functions:
       predicated BL calls. Ghidra reports the same four call sites. No callee
       identity is involved. Rust uses a repr(C) u32 field so +0x14 remains
       the firmware offset on 64-bit host tests; deliberate deviations: none.
+
+
+  - address: 0x081bc07c
+    ghidra: switchD_082962e8::default
+    name: lazy_handle_manager_release
+    size: 72
+    sig: "void lazy_handle_manager_release(LazyHandleManager *manager, u32 handle)"
+    module: app/lazy_handle_manager_release
+    status: ported
+    renames:
+      param_1/r0/r4/r6: manager
+      param_2/r1/r5: handle
+      "manager+0x08": cached_handle
+      "manager+0x0c": initialized
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec decodes exactly eighteen ARM instruction words from
+      0x081bc07c through the tail branch at 0x081bc0c0; the distinct
+      constructor prologue at 0x081bc0c4 establishes the true 72-byte
+      extent. Whole-image A32 B/BL decoding finds four inbound plain,
+      unconditional BLs at 0x0817f254, 0x081f5c14, 0x081f5fcc, and
+      0x082058d4, with no predicated BL forms. It locks manager+0x00, then
+      clears cached_handle to -1 and initialized to zero only when
+      initialized equals one, cached_handle equals handle, and the matching
+      handle is not -1; it always tail-branches to mutex_unlock. Ghidra
+      invents a call through the ROM semaphore-signal veneer at 0x08037e10,
+      but raw ARM shows the tail branch targets mutex_unlock 0x0807f6a0.
+      Rust uses the established repr(C) LazyHandleManager layout and has no
+      deliberate deviations.

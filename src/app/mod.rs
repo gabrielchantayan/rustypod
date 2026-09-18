@@ -170,6 +170,7 @@ pub mod locked_state_copy;
 pub mod opaque_record_source_entry_count;
 pub mod lazy_handle_manager;
 pub mod lazy_handle_manager_acquire;
+pub mod lazy_handle_manager_release;
 pub mod lazy_static_object;
 pub mod matched_entry;
 pub mod object_has_resolved_flag_0x40;
