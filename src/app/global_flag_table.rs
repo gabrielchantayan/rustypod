@@ -50,6 +50,32 @@ unsafe fn global_flag_table() -> *mut u8 {
 pub unsafe extern "C" fn set_global_flag_byte(index: u32, value: u8) {
     unsafe { global_flag_table().add(index as usize).write_volatile(value) };
 }
+/// get_global_flag_byte — original: `FUN_0819c7a4` @ `0x0819c7a4`
+/// (12 bytes: three instructions plus the literal-pool word at `0x0819c7b0`).
+///
+/// Raw code ends at `bx lr` at `0x0819c7ac`; the next function begins with
+/// `push {r4-r11,lr}` at `0x0819c7b4`. A complete ARM B/BL-word scan finds
+/// four direct callers, all unconditional `bl` instructions and no predicated
+/// `bl` calls.
+///
+/// # Algorithm
+///
+/// Reads global flag-table byte `index`, without a NULL, alignment, or bounds
+/// guard, exactly as `ldr r1, [pc, #4]; ldrb r0, [r1, r0]; bx lr`.
+///
+/// # Deliberate deviation
+///
+/// Host builds read the existing isolated 0x78-byte fixture table; target
+/// builds retain the literal table address and volatile byte load.
+///
+/// # Safety
+///
+/// The retailOS table must cover `index`; the original has no bounds check.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn get_global_flag_byte(index: u32) -> u8 {
+    unsafe { global_flag_table().add(index as usize).read_volatile() }
+}
 
 #[cfg(test)]
 mod tests {
@@ -89,5 +115,16 @@ mod tests {
         assert_eq!(unsafe { table.add(0x58).read_volatile() }, 0x11);
         assert_eq!(unsafe { table.add(0x59).read_volatile() }, 0xe4);
         assert_eq!(unsafe { table.add(0x5a).read_volatile() }, 0x33);
+    }
+
+    #[test]
+    fn reads_values_at_observed_event_indices() {
+        let _guard = TABLE_LOCK.lock();
+        let table = unsafe { reset_table() };
+
+        for (index, value) in [(0x00, 0xa5), (0x1d, 0x01), (0x5a, 0x02), (0x6e, 0xfe), (0x6f, 0x3c), (0x77, 0x7c)] {
+            unsafe { table.add(index).write_volatile(value) };
+            assert_eq!(unsafe { get_global_flag_byte(index as u32) }, value);
+        }
     }
 }
