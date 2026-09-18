@@ -241,12 +241,33 @@ pub unsafe extern "C" fn lcd_begin_command_transaction() -> u32 {
     saved_control
 }
 
+/// lcd_end_command_transaction — original: `FUN_080dbe20` @ `0x080dbe20`
+/// (40 bytes, `0x080dbe20..0x080dbe48`; **4 verified inbound direct,
+/// unconditional `bl` call sites; no predicated inbound calls**). Its body
+/// has one unconditional `bl` to [`crate::drivers::timer::iram_usec_delay_veneer`]
+/// and no predicated calls.
+///
+/// Waits until LCD status +0x1c raises command-ready bit 1, delays one
+/// microsecond, then restores the paired transaction's saved control word to
+/// the LCD controller at +0x00. The raw ARM body preserves `saved_control`
+/// across the wait and delay without validation or a timeout.
+///
+/// Deliberate deviation: target MMIO accesses remain volatile; host builds
+/// use the existing atomic LCD controller model solely for behavioral tests.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lcd_end_command_transaction(saved_control: u32) {
+    unsafe { lcd_wait_command_ready() };
+    unsafe { crate::drivers::timer::iram_usec_delay_veneer(1) };
+    unsafe { lcd_write_control(saved_control) };
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::{lcd_begin_command_transaction, lcd_wait_ready, lcd_write_command,
-        lcd_write_register, lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL,
+    use super::{lcd_begin_command_transaction, lcd_end_command_transaction, lcd_wait_ready,
+        lcd_write_command, lcd_write_register, lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL,
         HOST_LCD_REGISTER_INDEX, HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS,
         LCD_BUSY, LCD_COMMAND_MODE, LCD_COMMAND_READY};
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -387,6 +408,46 @@ mod tests {
         worker.join().unwrap();
         assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), 0x0213);
         assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), 0x1234_5678);
+    }
+    #[test]
+    fn command_transaction_end_restores_all_control_bits_after_command_ready() {
+        let _guard = TEST_LOCK.lock();
+        let _timer = crate::drivers::timer::configure_usec_timer_for_test(0, 1);
+
+        for saved_control in [0, 0x8000_0007, 0x1234_5678, u32::MAX] {
+            reset_host_controller(LCD_COMMAND_READY | LCD_BUSY);
+            HOST_LCD_CONTROL.store(!saved_control, Ordering::SeqCst);
+
+            unsafe { lcd_end_command_transaction(saved_control) };
+
+            assert_eq!(HOST_LCD_CONTROL.load(Ordering::SeqCst), saved_control);
+            assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+        }
+    }
+    #[test]
+    fn command_transaction_end_blocks_until_command_ready() {
+        let _guard = TEST_LOCK.lock();
+        let _timer = crate::drivers::timer::configure_usec_timer_for_test(0, 1);
+        let saved_control = 0xa5a5_5a5a;
+        reset_host_controller(0);
+        HOST_LCD_CONTROL.store(!saved_control, Ordering::SeqCst);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            unsafe { lcd_end_command_transaction(saved_control) };
+            finished_tx.send(()).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(finished_rx.recv_timeout(Duration::from_millis(25)).is_err());
+        assert_eq!(HOST_LCD_CONTROL.load(Ordering::SeqCst), !saved_control);
+
+        HOST_LCD_STATUS.store(LCD_COMMAND_READY, Ordering::SeqCst);
+        finished_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(HOST_LCD_CONTROL.load(Ordering::SeqCst), saved_control);
     }
     #[test]
     fn command_transaction_selects_control_bits_for_supported_modes() {
