@@ -13,6 +13,7 @@
 //! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
 //! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
 //! | 0x08194110 | [`service_handler_set`] | 16 | 5 direct |
+//! | 0x081941a4 | [`service_handler_state_set`] | 20 | 4 direct |
 //! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
@@ -573,6 +574,50 @@ pub unsafe extern "C" fn service_handler_set(slot_table: *mut u32, selector: i32
     core::ptr::write(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize), handler);
 }
 
+/// service_handler_state_set — original: `FUN_081941a4` @ 0x081941a4
+/// (20 bytes; 4 direct, unconditional `bl` call sites).
+///
+/// Stores the supplied state word at `+0x4` in one of the service manager's
+/// three 0x20-byte handler records. Raw ARM is `cmp r1,#3; blge
+/// 0x08030f44; add r0,r0,r1,lsl #5; str r2,[r0,#4]; bx lr`: signed
+/// selectors below three, including negative values, retain the unchecked
+/// address calculation; selectors three and above terminate through
+/// [`heap_panic`].
+///
+/// The next real function begins at 0x081941b8 (`cmp r1,#13`), so the raw
+/// extent is exactly 0x081941a4..0x081941b8. The body contains no plain
+/// `bl` and one predicated `blge` to `heap_panic`. Decoding every ARM
+/// `B`/`BL` word in `osos.dec` found four inbound calls — 0x081648bc,
+/// 0x0818f3fc, 0x0819111c, and 0x08192b70 — all unconditional plain `bl`;
+/// no predicated inbound calls or tail branches target this address.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point at the first word of at least three aligned,
+/// writable eight-word records. Negative selectors intentionally retain
+/// retailOS's unchecked before-table addressing behavior and are not valid
+/// Rust memory accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_handler_state_set")]
+pub unsafe extern "C" fn service_handler_state_set(
+    slot_table: *mut u32,
+    selector: i32,
+    state: u32,
+) {
+    if selector >= 3 {
+        heap_panic();
+    }
+    core::ptr::write(
+        slot_table
+            .wrapping_offset(selector.wrapping_shl(3) as isize)
+            .add(1),
+        state,
+    );
+}
+
 
 /// service_manager_handler_group_for_slot — original: `FUN_081941b8` @
 /// 0x081941b8 (64 bytes; 5 direct `bl` call sites).
@@ -775,6 +820,46 @@ mod handler_set_tests {
         }
 
         assert_eq!(table[0], 0xface_cafe);
+    }
+}
+
+#[cfg(test)]
+mod handler_state_set_tests {
+    use super::*;
+
+    #[test]
+    fn replaces_state_word_in_each_record_without_touching_neighbors() {
+        let mut table = [0xdead_beefu32; 24];
+
+        unsafe {
+            let base = table.as_mut_ptr();
+            service_handler_state_set(base, 0, 0x1111_0000);
+            service_handler_state_set(base, 1, 0x2222_0000);
+            service_handler_state_set(base, 2, 0x3333_0000);
+            service_handler_state_set(base, 1, 0x4444_0000);
+        }
+
+        assert_eq!(table[1], 0x1111_0000);
+        assert_eq!(table[9], 0x4444_0000, "the ARM str replaces, not ORs");
+        assert_eq!(table[17], 0x3333_0000);
+        assert!(
+            table.iter().enumerate().all(|(i, &word)| {
+                matches!(i, 1 | 9 | 17) || word == 0xdead_beef
+            }),
+            "only word one of each eight-word record is written"
+        );
+    }
+
+    #[test]
+    fn signed_negative_selector_remains_unchecked() {
+        let mut table = [0u32; 32];
+
+        unsafe {
+            let base = table.as_mut_ptr().add(8);
+            service_handler_state_set(base, -1, 0xface_cafe);
+        }
+
+        assert_eq!(table[1], 0xface_cafe);
     }
 }
 
