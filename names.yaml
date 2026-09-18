@@ -111010,3 +111010,25 @@ functions:
       nested constructors and two lifecycle calls remain target-address
       dispatches; host tests replace them to verify the complete pointer and
       argument chain.
+  - address: 0x081446a0
+    ghidra: FUN_081446a0
+    name: active_selection_previous_index
+    size: 44
+    sig: "u32 active_selection_previous_index(const void *selection)"
+    module: util/active_selection_previous_index
+    status: ported
+    renames:
+      param_1/r0: selection
+      "[selection + 0xa4]": active_selection_index
+      r0: previous_selection_index
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent
+      0x081446a0..0x081446cc: ldrb r0,[r0,#0xa4] followed by three
+      compare/move/predicated-return arms and a final bx lr. The next real
+      function starts with push {r4,lr} at 0x081446cc. The body has zero
+      plain and zero predicated BL instructions. A whole-image ARM decode
+      finds four inbound unconditional plain BL sites at 0x081456f8,
+      0x08145868, 0x08145a04, and 0x08145b24; no incoming predicated BL
+      sites. The byte maps 1 to 3, 2 to 1, and 3 to 2; every other value
+      maps to zero. The caller uses it as the preceding nonzero selection
+      slot. Deliberate deviations: none.

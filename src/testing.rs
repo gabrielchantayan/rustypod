@@ -1471,6 +1471,10 @@ pub mod hints {
     // 0x7fc0_0000: dedicated to app/playback_action_flags's raw-u32 player
     // and nested-state fixture; mappings never unmap.
     pub const PLAYBACK_ACTION_FLAGS: usize = 0x7fc0_0000;
+    // 0x1357_0000: dedicated to util/active_selection_previous_index's raw-u32
+    // selection-state fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const ACTIVE_SELECTION_PREVIOUS_INDEX: usize = 0x1357_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

@@ -1,6 +1,7 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
 pub mod attr_record;
 pub mod ahtp_state_destroy;
+pub mod active_selection_previous_index;
 pub mod afm_next_statement_token;
 pub mod assign_active_entry_labels;
 pub mod always_succeeds;
