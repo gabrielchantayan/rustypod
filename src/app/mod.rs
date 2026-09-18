@@ -193,6 +193,7 @@ pub mod mode_selected_update_if_ready;
 pub mod mode_two_attachment;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
+pub mod playback_action_flags;
 pub mod mode_selected_extent;
 pub mod mode_selected_position_set;
 pub mod media_player_state_reset;

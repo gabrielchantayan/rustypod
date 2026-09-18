@@ -109882,3 +109882,30 @@ functions:
       expanded beyond its proven role; target builds call 0x0817e0fc and host
       tests use a replaceable seam. Rust's normal call to the ported unlock
       endpoint deliberately replaces the final ARM tail branch.
+  - address: 0x0817b958
+    ghidra: FUN_0817b958
+    name: playback_action_flags
+    size: 96
+    sig: "void playback_action_flags(Player *player, u32 command, u8 *has_action, u8 *is_action_two)"
+    module: app/playback_action_flags
+    status: ported
+    renames:
+      param_1/r0: player
+      param_2/r1: command
+      param_3/r2: has_action
+      param_4/r3: is_action_two
+      player_plus_0x9a8: nested_state
+      FUN_08054de0: nested_state_selector
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent
+      0x0817b958..0x0817b9b8; 0x0817b9b8 begins the next separately linked
+      function. The 24 words contain one plain internal bl to the unported
+      nested-state selector at 0x08054de0 and no predicated BL calls. A
+      whole-image A32 B/BL decode finds four plain inbound BL calls
+      (0x0817918c, 0x081799ec, 0x0817b2bc, and 0x0817b3bc), with zero
+      predicated inbound BL calls. Command 3 is replaced by the nested-state
+      selector result from the target-width word at player+0x9a8; all other
+      commands pass through. The function stores action != 0 and action == 2
+      to its two byte outputs. Deliberate deviation: target code uses a
+      fixed-address literal veneer for the unported callee, while host tests
+      install a callback seam.
