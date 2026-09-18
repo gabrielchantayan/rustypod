@@ -351,6 +351,57 @@ pub unsafe extern "C" fn container_view_construct(
     refresh_clip_rect(view);
     view
 }
+/// A concrete container view whose only recovered state is the byte the
+/// constructor installs at +0xe8.
+#[repr(C)]
+pub struct ContainerViewState80 {
+    /// +0x00..+0xe8 — constructed by [`container_view_construct`].
+    pub base: ContainerView,
+    /// +0xe8 — initialized to 0x80 by `container_view_construct_state_80`.
+    pub state: u8,
+    /// +0xe9..+0xec — allocation padding; the constructor does not touch it.
+    pub padding: [u8; 3],
+}
+
+const _: [u8; 0xec] = [0; core::mem::size_of::<ContainerViewState80>()];
+const _: [u8; 0xe8] = [0; core::mem::offset_of!(ContainerViewState80, state)];
+
+/// The derived class vtable literal at 0x08146f8c.
+pub const CONTAINER_VIEW_STATE_80_VTABLE_ADDRESS: u32 = 0x0898_6140;
+
+
+/// `container_view_construct_state_80` — original: `FUN_08146f60` @
+/// 0x08146f60 (48 bytes: 44 bytes of code plus its vtable literal
+/// 0x08986140 at 0x08146f8c; 0x08146f90 begins the next function).
+///
+/// Raw ARM forwards all five ABI arguments to [`container_view_construct`],
+/// replaces the vtable, then writes `0x80` to state +0xe8 and returns the
+/// view. Four direct, unconditional `bl` callers and no predicated callers
+/// were verified by decoding every ARM B/BL word in `osos.dec`.
+///
+/// The concrete class identity is unrecovered, so the Rust name records the
+/// verified constructor effect rather than inventing a widget role. Retaining
+/// `view` across the base call avoids the original's target-only register
+/// shuffling while preserving its return identity.
+///
+/// # Safety
+/// `view`, `spec`, and the arguments forwarded to [`container_view_construct`]
+/// must satisfy that constructor's safety requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_state_80(
+    view: *mut ContainerViewState80,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ContainerViewState80 {
+    container_view_construct(view.cast::<ContainerView>(), resources, controller, parent, spec);
+    core::ptr::addr_of_mut!((*view).base.vtable).write_volatile(CONTAINER_VIEW_STATE_80_VTABLE_ADDRESS);
+    core::ptr::addr_of_mut!((*view).state).write_volatile(0x80);
+    view
+}
+
 
 /// container_view_children — original: `FUN_081586e0` @ 0x081586e0
 /// (8 bytes exactly: `add r0, r0, #0xa8; bx lr`, no literal pool;
@@ -837,6 +888,35 @@ mod tests {
             unsafe { container_view_children(other_this) } as usize,
             other_this as usize + 0xa8
         );
+    }
+
+    #[test]
+    fn state_80_constructor_chains_then_replaces_vtable_and_state() {
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        let mut view: Box<ContainerViewState80> =
+            Box::new(unsafe { core::mem::transmute([0xcdu8; size_of::<ContainerViewState80>()]) });
+        let spec = spec(0xfeed_beef, 0);
+        let this = &mut *view as *mut ContainerViewState80;
+
+        let returned = unsafe {
+            container_view_construct_state_80(
+                this,
+                0x1234usize as *mut ResourceProvider,
+                core::ptr::null_mut(),
+                0x5678usize as *mut u8,
+                &spec,
+            )
+        };
+
+        assert_eq!(view.base.vtable, CONTAINER_VIEW_STATE_80_VTABLE_ADDRESS);
+        assert_eq!(size_of::<ContainerViewState80>(), 0xec);
+        assert_eq!(offset_of!(ContainerViewState80, state), 0xe8);
+        assert_eq!(view.base.vtable, 0x0898_6140);
+        assert_eq!(view.base.config, 0xfeed_beef);
+        assert_eq!(view.state, 0x80);
+        assert_eq!(view.padding, [0xcd; 3], "the byte store must not widen");
+        assert_eq!(*trace(), std::vec!["linkage_base", "initialize", "container_initialize", "refresh_clip_rect"]);
     }
 
     /// The original is one unconditional `add` with no guard, and
