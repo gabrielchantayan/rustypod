@@ -80397,6 +80397,41 @@ functions:
       the port uses a crate static for the runtime cache word; it is not
       hook-ready until FUN_081cd5b8 is ported.
 
+  # --- PhotoBrowse selection debounce timer ---
+  - address: 0x081cc4fc
+    ghidra: FUN_081cc4fc
+    name: selection_schedule_timer
+    size: 188
+    sig: "void selection_schedule_timer(u8 *controller, u32 selection_index)"
+    module: ui/selection_schedule_timer
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_2/r1/r7: selection_index
+      FUN_082aadd4: operator_new
+      FUN_0811108c: timer_schedule_shim
+      FUN_0812c3b0: timer_is_running
+      FUN_0812c6b0: timer_stop
+      FUN_082a4ee8: bit_set_contains
+      FUN_082746f4: bit_set_write
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw osos.dec words establish the exact 188-byte extent
+      0x081cc4fc..0x081cc5b8: the next separately linked body opens with
+      `push {r4,r5,r6,r7,r8,lr}` at 0x081cc5b8. Direct ARM branch-word
+      decoding finds four plain BL callers and no predicated BL callers.
+      A zero byte at controller+0x18 returns immediately. Otherwise the
+      function lazily allocates 0x2c bytes into the controller's timer word
+      at +0x8e4 and initializes it through timer_schedule_shim(controller,
+      timer, 0, 0); an existing timer is sampled with timer_is_running then
+      stopped. It sets selection_index in the embedded BitSet at +0x8e8 only
+      when absent, then chooses 150 for a fresh timer, 300 for a stopped
+      existing timer, or 10 for a running existing timer. It programs the
+      timer and tail-branches to timer_restart. The Rust port represents the
+      final tail branch as a normal call and keeps target pointers as u32
+      words for host layout fidelity.
+
   # --- Current normalized calendar -> day-and-seconds pair ---
   - address: 0x081b4dcc
     ghidra: FUN_081b4dcc
