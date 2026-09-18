@@ -108665,3 +108665,34 @@ functions:
       offsets widen while repr(C) preserves their ARM layout. match.py reports
       LLVM's larger save frame, an indirect BL to the established Rust callee,
       and a non-predicated conditional virtual call.
+
+  # --- Parser operator-cycle successor transition ---
+  - address: 0x081d1ae0
+    ghidra: FUN_081d1ae0
+    name: operator_cycle_advance_if_successor
+    size: 132
+    sig: "i32 operator_cycle_advance_if_successor(u8 *state, i32 candidate, i32 synchronize)"
+    module: app/operator_cycle_advance_if_successor
+    status: ported
+    renames:
+      param_1/r0/r5: state
+      param_2/r1/r4: candidate
+      param_3/r2/r6: synchronize
+      "state+0xfc": mutex
+      "state+0x104": operator
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte extent 0x081d1ae0..0x081d1b64:
+      33 A32 words ending `mov r0,r4; ldmia sp!,{r4,r5,r6,pc}`; the next
+      separately linked code begins at 0x081d1b64. Full-image A32 B/BL
+      decoding finds four inbound direct BL calls: plain BL at 0x081d1ca4,
+      0x081d1e70, and 0x081d1f4c, plus predicated BLNE at 0x081d1d2c.
+      There are three plain and one predicated call. When synchronize is
+      nonzero it calls mutex_lock(state+0xfc), reads the signed operator byte
+      at +0x104, and advances only the cycle * -> + -> , -> - -> *. It then
+      reloads and returns the signed byte before mutex_unlock(state+0xfc).
+      Both internal calls are predicated BLNE to the already ported mutex
+      functions. No deliberate deviations. Host tests cover every valid
+      transition, invalid preservation, the synchronized zero-handle path,
+      and sign extension of a non-operator byte.

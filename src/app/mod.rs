@@ -262,6 +262,7 @@ pub mod playlist_pointer_marker;
 pub mod pending_event_take;
 pub mod pending_event_discard_all_for_key;
 pub mod pending_event_take_due;
+pub mod operator_cycle_advance_if_successor;
 pub mod pending_event_insert;
 pub mod request_callback_state_reset;
 pub mod pending_object_pair_release;
