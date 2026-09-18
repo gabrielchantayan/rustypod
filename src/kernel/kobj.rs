@@ -350,6 +350,28 @@ pub unsafe extern "C" fn mailbox_slot_delete(slot: *mut *mut Mailbox) {
 pub unsafe extern "C" fn mailbox_slot_post(slot: *mut *mut Mailbox) {
     csem_post(*slot as *mut CountingSem);
 }
+/// mailbox_slot_post_dispatch — original: `FUN_080dad28` @ 0x080dad28
+/// (12 bytes; 4 plain `bl` call sites, no predicated `bl` call sites).
+///
+/// `cmp r1,#1; bne 0x0808e2a8; beq 0x080c6928`: posts the mailbox in
+/// `slot` normally unless `mode` is exactly one, in which case it uses the
+/// deferred-wake post path. Both branches load the mailbox from `slot`; this
+/// wrapper keeps that per-call indirection rather than caching the block.
+///
+/// Raw words establish the true extent as 0x080dad28..0x080dad34: the next
+/// independently callable entry at 0x080dad34 is a separate tail branch.
+/// Ghidra's 52-byte extent incorrectly absorbs adjacent dispatch entries and
+/// the following predicate helper. Deliberate deviations: Rust uses a
+/// conditional call rather than the original pair of tail branches.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_slot_post_dispatch(slot: *mut *mut Mailbox, mode: u32) {
+    if mode == 1 {
+        crate::kernel::csem::csem_post_deferred(*slot as *mut CountingSem);
+    } else {
+        mailbox_slot_post(slot);
+    }
+}
 
 /// mailbox_slot_signal — original: `FUN_0808e2b0` @ 0x0808e2b0
 /// (8 bytes; 52 call sites — 44 `bl`, 1 `blne`, 1 `bleq`, 4 `b`,
@@ -381,6 +403,7 @@ pub(crate) mod tests {
     use crate::runtime::message_dispatch_veneer::{
         MessageDispatchVeneerOps, MESSAGE_DISPATCH_VENEER_OPS,
     };
+    use crate::kernel::task_lock::{self, ROM_KERNEL};
     use std::sync::{Mutex, MutexGuard};
     use parking_lot::MutexGuard as ParkingMutexGuard;
     use std::vec;
@@ -401,6 +424,7 @@ pub(crate) mod tests {
         Free(usize),
         Wait { id: u32, timeout: u32 },
         Wake(u32),
+        DeferredWake(usize),
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -457,6 +481,11 @@ pub(crate) mod tests {
 
     unsafe extern "C" fn mock_wake(id: u32) {
         CALLS.lock().unwrap().push(Call::Wake(id));
+    }
+
+    unsafe extern "C" fn mock_deferred_wake(id: usize) -> usize {
+        CALLS.lock().unwrap().push(Call::DeferredWake(id));
+        0
     }
 
     /// Installs the mock table, clears the log, returns the guard.
@@ -784,6 +813,34 @@ pub(crate) mod tests {
                 drain(),
                 vec![Call::Wake(0x4444_0001), Call::Wake(0x4444_0002)],
                 "each call wakes the waiter of the block installed at that moment"
+            );
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_post_dispatch_uses_deferred_only_for_mode_one() {
+        let _kobj_guard = mock_hooks();
+        let _rom_guard = task_lock::tests::OPS_LOCK.lock().unwrap();
+        unsafe {
+            let saved = ROM_KERNEL;
+            let mut hooks = saved;
+            hooks.rom_svc_22001cbc = mock_deferred_wake;
+            core::ptr::addr_of_mut!(ROM_KERNEL).write(hooks);
+
+            let mut normal = block(u32::MAX, 0x5555_0001);
+            let mut deferred = block(u32::MAX, 0x5555_0002);
+            let mut normal_slot: *mut Mailbox = &mut normal;
+            let mut deferred_slot: *mut Mailbox = &mut deferred;
+            mailbox_slot_post_dispatch(&mut normal_slot, 0);
+            mailbox_slot_post_dispatch(&mut deferred_slot, 1);
+
+            core::ptr::addr_of_mut!(ROM_KERNEL).write(saved);
+            assert_eq!(normal.state, 0);
+            assert_eq!(deferred.state, 0);
+            assert_eq!(
+                drain(),
+                vec![Call::Wake(0x5555_0001), Call::DeferredWake(0x5555_0002)],
+                "only mode one takes the deferred post path"
             );
         }
     }
