@@ -309,6 +309,119 @@ pub unsafe extern "C" fn tick_accumulator_rejects_rate(
     }
 }
 
+/// tick_accumulator_reset_timing_state — original: `FUN_081bb3d0` @
+/// `0x081bb3d0` (**32 bytes**, `0x081bb3d0..0x081bb3f0`; the distinct next
+/// function begins at `0x081bb3f0`).
+///
+/// **4 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites**, verified by decoding every ARM B/BL word in `osos.dec`.
+///
+/// Clears the first six aligned 32-bit timing-state fields
+/// (`last_tick_ms` through `remainder`) and returns the unchanged accumulator
+/// pointer in `r0`. There is deliberately no NULL guard, matching the six
+/// unconditional ARM stores. No deliberate deviations.
+///
+/// # Safety
+///
+/// `accumulator` must be non-NULL, four-byte aligned, and writable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_accumulator_reset_timing_state(
+    accumulator: *mut TickAccumulator,
+) -> *mut TickAccumulator {
+    (*accumulator).last_tick_ms = 0;
+    (*accumulator).backoff_deadline_ms = 0;
+    (*accumulator).next_update_ms = 0;
+    (*accumulator).scale_factor = 0;
+    (*accumulator).scaled_input = 0;
+    (*accumulator).remainder = 0;
+    accumulator
+}
+
+#[cfg(test)]
+mod reset_timing_state_tests {
+    use super::{tick_accumulator_reset_timing_state, TickAccumulator};
+    use core::ptr::addr_of_mut;
+
+    #[test]
+    fn clears_six_timing_words_and_preserves_following_configuration() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator.last_tick_ms = 1;
+            accumulator.backoff_deadline_ms = 2;
+            accumulator.next_update_ms = 3;
+            accumulator.scale_factor = 4;
+            accumulator.scaled_input = 5;
+            accumulator.remainder = 6;
+            accumulator.input_divisor = 7;
+            accumulator.scale_factor_limit = 8;
+            accumulator.update_result = 9;
+            accumulator.mode_enabled = 10;
+            accumulator.scale_suppressed = 11;
+            accumulator.lower_input_bound = 12;
+            accumulator.upper_input_bound = 13;
+            accumulator.backoff_interval_ms = 14;
+
+            let accumulator_ptr = addr_of_mut!(accumulator);
+            assert_eq!(
+                tick_accumulator_reset_timing_state(accumulator_ptr),
+                accumulator_ptr
+            );
+            assert_eq!(
+                [
+                    accumulator.last_tick_ms,
+                    accumulator.backoff_deadline_ms,
+                    accumulator.next_update_ms,
+                    accumulator.scale_factor,
+                    accumulator.scaled_input,
+                    accumulator.remainder,
+                ],
+                [0; 6]
+            );
+            assert_eq!(
+                [
+                    accumulator.input_divisor,
+                    accumulator.scale_factor_limit,
+                    accumulator.update_result,
+                    accumulator.lower_input_bound,
+                    accumulator.upper_input_bound,
+                    accumulator.backoff_interval_ms,
+                ],
+                [7, 8, 9, 12, 13, 14]
+            );
+            assert_eq!(accumulator.mode_enabled, 10);
+            assert_eq!(accumulator.scale_suppressed, 11);
+        }
+    }
+
+    #[test]
+    fn clears_full_width_values() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator.last_tick_ms = u32::MAX;
+            accumulator.backoff_deadline_ms = 0x8000_0000;
+            accumulator.next_update_ms = 0x7fff_ffff;
+            accumulator.scale_factor = 1;
+            accumulator.scaled_input = 0xffff_0000;
+            accumulator.remainder = 0x0000_ffff;
+
+            tick_accumulator_reset_timing_state(addr_of_mut!(accumulator));
+
+            assert_eq!(
+                [
+                    accumulator.last_tick_ms,
+                    accumulator.backoff_deadline_ms,
+                    accumulator.next_update_ms,
+                    accumulator.scale_factor,
+                    accumulator.scaled_input,
+                    accumulator.remainder,
+                ],
+                [0; 6]
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
