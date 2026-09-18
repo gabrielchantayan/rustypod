@@ -9133,6 +9133,27 @@ functions:
       region_block_size (verified against osos.asm); 1 bl caller. No
       separate port; hook this address to the region_block_size symbol.
 
+  - address: 0x081a8188
+    ghidra: FUN_081a8188
+    name: aligned_buffer_align_up
+    size: 16
+    sig: "u8 *aligned_buffer_align_up(u8 *block)"
+    module: heap/aligned_buffer
+    status: ported
+    vars:
+      param_1: block
+      FUN_081a8198: aligned_buffer_align_up_with_pad (private callee)
+    notes: >-
+      True extent is 0x081a8188..0x081a8198: four instructions, immediately
+      followed by the full pad-producing helper at 0x081a8198. Raw words are
+      `stmdb sp!, {r3,lr}; mov r1,sp; bl 0x081a8198; ldmia sp!, {r3,pc}`.
+      Four direct callers are plain unconditional bl (0 predicated bl forms);
+      the body makes one plain bl and no predicated calls. It provides the
+      callee a private stack out-slot for `pad = 0x20 - (block & 0x1f)`,
+      discards that value, and returns `(block + 0x1f) & !0x1f`. The Rust
+      port performs the same target-u32 wrapping arithmetic and retains the
+      private stack-slot store through an inline-never sibling helper. Host
+      tests sweep all 32 residues and the u32 wrap boundary.
   - address: 0x081a81bc
     ghidra: FUN_081a81bc
     name: aligned_buffer_alignment
