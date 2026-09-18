@@ -111343,3 +111343,34 @@ functions:
       target calls retain the fixed allocator address while host tests use a
       volatile ABI seam; raw target pointers remain u32 words so 64-bit host
       pointer widths cannot alter their offsets.
+  - address: 0x0812c444
+    ghidra: FUN_0812c444
+    name: task_message_transport_enqueue
+    size: 60
+    sig: "u32 task_message_transport_enqueue(const u8 *message, u32 deferred)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: message
+      param_2/r1: deferred
+      DAT_0812c468: task_message_transport_slot
+      FUN_08103a80: mutex_locked_transport_enqueue
+      FUN_08103ad0: deferred_transport_enqueue
+      FUN_080fe954: ring_write
+    notes: >-
+      Raw osos.dec establishes the 60-byte extent
+      0x0812c444..0x0812c480: 56 code bytes with a literal-pool word at
+      0x0812c468; the next separately entered function begins at
+      0x0812c480. Full-image aligned A32 B/BL decoding finds four inbound
+      direct BL calls: unconditional at 0x08061910 and 0x0819c974, BLNE at
+      0x0819c99c and 0x0819ccc0; no other predicated BL forms. The entry
+      loads the transport pointer from 0x089cb280, forwards message with r2
+      = 28 and r3 = 0, then tail-branches on deferred: zero goes to
+      0x08103a80 (locks transport+4, writes its +12 ring, unlocks, posts
+      transport+0 on success), nonzero to 0x08103ad0 (writes +36 and posts
+      the deferred semaphore on success). Rust incorporates those verified
+      internal bodies rather than retaining their tail branches; its
+      target-width ring words preserve +4 data, +8 start, +12 read, +16
+      write, and +20 mask. Host test drives both rings through a low-u32
+      fixture, verifies all 28 bytes and signal selection, then verifies a
+      zero-mask failure does not signal.

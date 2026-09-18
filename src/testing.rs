@@ -1482,6 +1482,10 @@ pub mod hints {
     // and emit-marker fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const TASK_MESSAGE_RECEIVE: usize = 0x7fd0_0000;
+    // 0x7fe0_0000: dedicated to kernel/task_message transport enqueue's
+    // target-width transport, ring, semaphore, and data fixtures; mappings
+    // never unmap, so no other user may share this hint.
+    pub const TASK_MESSAGE_TRANSPORT_ENQUEUE: usize = 0x7fe0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
