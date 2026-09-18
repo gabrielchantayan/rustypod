@@ -17825,6 +17825,31 @@ functions:
       write_volatile - plain writes let LLVM collapse the zero run into
       a nonexistent __aeabi_memclr and byte-store the rest.
 
+  - address: 0x08138c80
+    ghidra: FUN_08138c80
+    name: service_handler_slot_state_set
+    size: 172
+    sig: "u32 service_handler_slot_state_set(void *context, i32 slot, i32 state)"
+    module: app/service_handler_slot_state_set
+    status: ported
+    vars: {param_1: context, param_2: slot, param_3: state, iVar1: service_manager, puVar3: slot_state, FUN_0813858c: service_handler_slot_initialize, FUN_08193e84: service_handler_id_read, FUN_08138bd0: registry_find_for_slot, FUN_08030f44: heap_panic}
+    notes: >-
+      Raw ARM extent is 0x08138c80..0x08138d2c (172 bytes); the literals
+      at 0x08138d2c and 0x08138d30 belong to its pool and 0x08138d34 is
+      the next function. Decoding all aligned ARM B/BL immediates in
+      osos.dec finds exactly four direct incoming calls, all plain
+      unconditional bl, and no predicated bl calls. Requires a non-NULL
+      manager, signed slot < 3, and signed state < 7 or calls heap_panic.
+      An initialized (+0xc nonzero) 0x114-byte slot record is untouched.
+      Otherwise states -1/0 call service_handler_slot_initialize
+      0x0813858c; state 6 reads the u16 handler id through
+      service_handler_id_read 0x08193e84, skips ids 0x200..0x2ff, and
+      stores registry_find_for_slot's result at +0x4 (NULL is fatal);
+      every other state only stamps byte +0. Deliberate deviation: the two
+      unported callees are firmware-address seams on target and replaceable
+      host seams; the target descriptor pointer is represented as u32 on
+      64-bit hosts.
+
   - address: 0x08138bd0
     ghidra: FUN_08138bd0
     name: registry_find_for_slot
