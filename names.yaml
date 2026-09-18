@@ -110083,3 +110083,35 @@ functions:
       Deliberate deviation: the still-unported opaque resource releases and
       soft-limit thunk use target-default operation slots so host tests can
       observe their order; target defaults call the verified raw addresses.
+
+  - address: 0x0816b52c
+    ghidra: FUN_0816b52c
+    name: indexed_rect_copy_offset
+    size: 52
+    sig: "void indexed_rect_copy_offset(const u32 *object, i32 index, Rect *out_rect)"
+    module: ui/indexed_rect
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: out_rect
+      object_plus_0xe8: first_index
+      object_plus_0xec: rect_table
+      object_plus_0xf0: origin_x
+      object_plus_0xf4: origin_y
+      FUN_0826c574: rect_offset
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x0816b52c..0x0816b560: a 48-byte body ending in the tail `b
+      0x0826c574`, followed by the next separately linked function at
+      0x0816b560. The body has zero internal plain or predicated bl calls.
+      Whole-image A32 B/BL decoding finds four inbound plain BL calls
+      (0x0816ac98, 0x0816b124, 0x0816b2f4, and 0x08224924) and zero inbound
+      predicated BL calls. It subtracts first_index from index, selects the
+      four-word QuickDraw rect from rect_table, copies it to out_rect, then
+      tail-calls rect_offset with origin_x and origin_y. The existing
+      rect_offset entry at 0x0826c574 is ported and its target-width wrapping
+      arithmetic matches the raw tail call. Deliberate deviation: Rust emits
+      a normal call that LLVM lowers to a tail branch, while preserving the
+      stock unguarded reads, target-width pointer field, copy-before-offset
+      order, and wrapping coordinate translation.

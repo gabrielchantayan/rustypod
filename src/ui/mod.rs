@@ -35,6 +35,7 @@ pub mod render_owner_clip;
 pub mod render_request_from_descriptor;
 pub mod render_cell_state;
 pub mod rect;
+pub mod indexed_rect;
 pub mod noop_f7f4;
 pub mod operation_unavailable;
 pub mod pending_cleanup;
