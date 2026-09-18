@@ -21,6 +21,7 @@ pub mod first_collection_item_bounds;
 pub mod collection_current_item_word;
 pub mod collection_first_item_word_at_1c;
 pub mod three_item_clips;
+pub mod three_item_next_index;
 pub mod flag_2c;
 pub mod flag_bit_2_at_4;
 pub mod nonzero_flags;
