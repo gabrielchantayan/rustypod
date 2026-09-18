@@ -72392,6 +72392,36 @@ functions:
       host tests exhaust all 256 high/low-nibble combinations and prove the
       byte load leaves the complete surrounding object untouched.
 
+  # --- mutex-serialized opaque selection transition ---
+  - address: 0x08161000
+    ghidra: FUN_08161000
+    name: synchronized_selection_transition
+    size: 52
+    sig: "u32 synchronized_selection_transition(SelectionTransitionState *state, u32 requested)"
+    module: app/synchronized_selection_transition
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: requested
+      param_1_plus_0x10: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_08161190: selection_transition_worker
+      FUN_0807f6a0: mutex_unlock
+      r0: transition_result
+    notes: >-
+      Raw ARM extent is exactly 52 bytes, 0x08161000..0x08161034: `push
+      {r4,r5,r6,lr}`; preserve state/request; pass state+0x10 to mutex_lock;
+      call 0x08161190 with the original arguments; pass state+0x10 to
+      mutex_unlock; return the worker result. The next real function begins
+      at 0x08161034. The body has three unconditional direct BL instructions.
+      Decoding every ARM B/BL immediate in osos.dec finds four inbound calls:
+      plain BL at 0x08067f84, 0x0806ba08, and 0x0806ba4c, plus BLNE at
+      0x0825aa18; no tail B callers. The 0x08161190 worker's concrete
+      semantic identity is unrecovered, so the port calls its verified retail
+      address on target and exposes a role-based host seam. Host tests cover
+      requests 0, 1, 2, and u32::MAX, result propagation, argument forwarding,
+      and preservation of every wrapper-owned field.
+
   # --- three-category table-domain predicate ---
   - address: 0x08161258
     ghidra: FUN_08161258
