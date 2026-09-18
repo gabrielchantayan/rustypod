@@ -21832,7 +21832,7 @@ functions:
       param_1_plus_0xb4: frequency-change pending byte
       param_1_plus_0xb8: frequency-change timer
       FUN_0812c6b0: timer_stop
-      FUN_0811ac74: stop tuning timer and set its 4000 ms delay
+      FUN_0811ac74: schedule_tuning_timer
     notes: >-
       Exact 36-byte extent, binary-decoded as push {r4,lr}; mov r4,r0;
       ldr r0,[r0,#0xb8]; bl timer_stop; mov r0,#0; strb r0,[r4,#0xb4];
@@ -21840,13 +21840,39 @@ functions:
       0x0811a8b4. Decoding every ARM B/BL word in osos.dec finds ten
       direct callers: ten unconditional bl, zero predicated bl, and zero
       tail b. It stops the frequency-change timer, clears the pending byte,
-      then tail-branches to the 40-byte helper at 0x0811ac74. Raw decoding
-      verifies that helper stops the tuning timer at controller+0xb0 and
-      starts it after 4000 ms. The Rust port calls the already-ported
-      timer_start_after directly instead of adding a seam for that unported
-      wrapper; the timer effects and order are identical. Host test uses a
-      unique low-address raw-u32 fixture and verifies both timer stops, the
-      pending-byte clear, and the 4000 ms tuning delay.
+      then tail-branches to the 40-byte helper at 0x0811ac74. The port calls
+      schedule_tuning_timer directly; its same low-address raw-u32 fixture
+      verifies both timer stops, the pending-byte clear, and the armed 4000 ms
+      tuning timer.
+
+  - address: 0x0811ac74
+    ghidra: FUN_0811ac74
+    name: schedule_tuning_timer
+    size: 40
+    sig: "void schedule_tuning_timer(u8 *controller)"
+    module: app/tuning_timer
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_1_plus_0xb0: tuning timer
+      FUN_0812c6b0: timer_stop
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte
+      0x0811ac74..0x0811ac9c extent: push {r4,lr}; preserve controller in
+      r4; load controller+0xb0; bl timer_stop; reload it; mov r1,#4000; bl
+      timer_start_after; reload it; pop {r4,lr}; b timer_restart. The next
+      separately linked function begins at 0x0811ac9c with push {r4,lr}.
+      Decoding every A32 BL word in osos.dec finds exactly four direct plain
+      BL callers (0x0811a570, 0x0811a5a4, 0x0811a834, 0x0811ad44) and zero
+      predicated BL callers. It deliberately stops before timer_start_after
+      (which itself stops and records the delay), then tail-branches to
+      timer_restart to set 'run ' and arm the deadline. Deliberate deviation:
+      Rust expresses that final tail branch as a return-position call; r0's
+      leftover is not observable through this void ABI. The existing host
+      fixture verifies the complete parent-to-helper path, including the
+      final armed state and 4000 ms delay.
 
   - address: 0x08266a48
     ghidra: FUN_08266a48

@@ -8,15 +8,15 @@
 //! callers. The function stops the frequency-change timer at controller
 //! `+0xb8`, clears the pending-frequency-change byte at `+0xb4`, then
 //! tail-branches to the 40-byte helper at 0x0811ac74. That helper stops the
-//! tuning timer at `+0xb0` and sets its delay to 4000 ms. The port calls the
-//! already-ported `timer_start_after` directly rather than recreating the
-//! unported tail-call wrapper; observable timer state and call order match.
+//! tuning timer at `+0xb0`, programs its delay to 4000 ms, then restarts it
+//! so it is armed. The port preserves this separate helper rather than
+//! collapsing its call sequence into the parent.
 //!
 //! The controller's timer fields are target-width `u32` pointers. The word
 //! accessors retain the 32-bit firmware layout on the 64-bit host; host
 //! fixtures therefore use a low-address slab.
 
-use crate::drivers::timer::{timer_start_after, timer_stop};
+use crate::drivers::timer::{timer_restart, timer_start_after, timer_stop};
 
 const TUNING_TIMER_OFFSET: usize = 0xb0;
 const FREQUENCY_CHANGE_PENDING_OFFSET: usize = 0xb4;
@@ -27,25 +27,41 @@ const TUNING_DELAY_MS: u32 = 4000;
 unsafe fn target_pointer_at(object: *const u8, offset: usize) -> *mut u8 {
     unsafe { object.add(offset).cast::<u32>().read() as usize as *mut u8 }
 }
+/// schedule_tuning_timer — original: `FUN_0811ac74` @ 0x0811ac74 (40
+/// bytes; 4 direct unconditional `bl` call sites, 0 predicated `bl`).
+///
+/// Raw ARM establishes the exact 0x0811ac74..0x0811ac9c extent: the next
+/// function opens with `push {r4,lr}` at 0x0811ac9c. Stops the controller's
+/// tuning timer at +0xb0, programs its 4000 ms delay, then tail-branches to
+/// `timer_restart` to mark and arm it. The timer pointer is not NULL-checked.
+/// Deliberate deviation: the final tail branch is a normal Rust call; its
+/// leftover r0 value is not part of this void function's ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn schedule_tuning_timer(controller: *mut u8) {
+    let timer = unsafe { target_pointer_at(controller, TUNING_TIMER_OFFSET) };
+    unsafe {
+        timer_stop(timer);
+        timer_start_after(timer, TUNING_DELAY_MS);
+        timer_restart(timer);
+    }
+}
+
 
 /// stop_frequency_change_and_start_tuning_timer — original: `FUN_0811a890`
 /// @ 0x0811a890 (36 bytes; ten direct unconditional `bl` call sites).
 ///
 /// Stops the controller's frequency-change timer, clears its pending byte,
-/// then stops and programs its tuning timer for a 4000 ms delay. Neither
-/// timer pointer is NULL-checked, exactly as in the firmware. The stock body
-/// tail-branches through 0x0811ac74; this port directly calls the ported
-/// `timer_start_after`, which is that wrapper's complete behavior.
+/// then schedules its tuning timer for a 4000 ms delay. Neither timer pointer
+/// is NULL-checked, exactly as in the firmware. The stock body tail-branches
+/// through `schedule_tuning_timer`.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn stop_frequency_change_and_start_tuning_timer(controller: *mut u8) {
     unsafe {
         timer_stop(target_pointer_at(controller, FREQUENCY_CHANGE_TIMER_OFFSET));
         controller.add(FREQUENCY_CHANGE_PENDING_OFFSET).write(0);
-        timer_start_after(
-            target_pointer_at(controller, TUNING_TIMER_OFFSET),
-            TUNING_DELAY_MS,
-        );
+        schedule_tuning_timer(controller);
     }
 }
 
@@ -53,7 +69,7 @@ pub unsafe extern "C" fn stop_frequency_change_and_start_tuning_timer(controller
 mod tests {
     extern crate std;
     use super::*;
-    use crate::drivers::timer::TIMER_STATE_STOPPED;
+    use crate::drivers::timer::{TIMER_PENDING_HEAD, TIMER_STATE_RUNNING, TIMER_STATE_STOPPED};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, TIMER_OPS_TEST_LOCK};
     use std::sync::LazyLock;
 
@@ -63,6 +79,7 @@ mod tests {
     const TUNING_TIMER_OFFSET_IN_SLAB: usize = 0x300;
     const TIMER_PERIOD_OFFSET: usize = 0x04;
     const TIMER_STATE_OFFSET: usize = 0x20;
+    const TIMER_ARMED_OFFSET: usize = 0x1c;
 
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::TUNING_TIMER_SEQUENCE, SLAB_LEN).map(|pointer| pointer as usize)
@@ -95,12 +112,13 @@ mod tests {
             tuning_timer.add(TIMER_STATE_OFFSET).cast::<u32>().write(0x5566_7788);
             tuning_timer.add(TIMER_PERIOD_OFFSET).cast::<u32>().write(17);
 
+            TIMER_PENDING_HEAD = 0;
             stop_frequency_change_and_start_tuning_timer(controller);
 
             assert_eq!(controller.add(FREQUENCY_CHANGE_PENDING_OFFSET).read(), 0);
             assert_eq!(frequency_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read(), TIMER_STATE_STOPPED);
-            assert_eq!(tuning_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read(), TIMER_STATE_STOPPED);
-            assert_eq!(tuning_timer.add(TIMER_PERIOD_OFFSET).cast::<u32>().read(), TUNING_DELAY_MS);
+            assert_eq!(tuning_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read(), TIMER_STATE_RUNNING);
+            assert_eq!(tuning_timer.add(TIMER_ARMED_OFFSET).cast::<u32>().read(), 1);
         }
     }
 }
