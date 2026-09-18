@@ -1506,6 +1506,9 @@ pub mod hints {
     // cached-observable context fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const TASK_CONTEXT_OBSERVABLE_DISPATCH_CACHED: usize = 0x8020_0000;
+    // 0x083e_9000: dedicated to util/fixed_record_u16_lookup's runtime
+    // record-table fixture; mappings never unmap, so no other user may share it.
+    pub const FIXED_RECORD_U16_LOOKUP: usize = 0x083e_9000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -1754,3 +1757,5 @@ pub static UI_OBJECT_BASE_CONSTRUCT_TEST_LOCK: std::sync::Mutex<()> = std::sync:
 /// Serializes tests that replace the media-player transition dispatch seams.
 pub static MEDIA_PLAYER_TRANSITION_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
+/// Serializes host tests that mutate the fixed record table at `0x083e9d94`.
+pub static FIXED_RECORD_U16_LOOKUP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
