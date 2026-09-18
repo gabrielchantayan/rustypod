@@ -23517,6 +23517,31 @@ functions:
       standing in for `bl 0x081fa070`, `[r4]` instead of `[r4, #0x1c]`
       for the crate cache, and LLVM rotating the cache-hit exit.
 
+  - address: 0x081f77d4
+    ghidra: FUN_081f77d4
+    name: media_player_slot_b4_then_volume_controller_update
+    size: 40
+    sig: "u32 media_player_slot_b4_then_volume_controller_update(void *volume_controller)"
+    module: app/media_player_slot_b4_then_volume_controller_update
+    status: ported
+    vars:
+      FUN_08259594: media_player_interface_get
+      "vtable+0xb4": unresolved_media_player_interface_slot_b4
+      FUN_081f9020: volume_controller_update
+    notes: >-
+      Raw words prove the 40-byte extent 0x081f77d4..0x081f77fc: push
+      {r4,lr}; save r0; call media_player_interface_get; load and invoke
+      the returned interface's vtable+0xb4 slot with r1 = 0; restore r0;
+      then tail-branch to 0x081f9020. The next function begins at
+      0x081f77fc with push {r4,lr}. Four inbound direct calls are all
+      unconditional BLs (0x08216900, 0x08217194, 0x0821c834, 0x0821e584);
+      there are zero predicated BL calls, one outbound direct BL, one
+      indirect BLX, and one outbound direct tail branch. The dynamic slot
+      and tail target have no recovered semantic identity, so the Rust port
+      names their verified structural roles. Host seams replace only the
+      firmware global and tail target; the ARM build retains the exact
+      instruction sequence and target veneer.
+
   - address: 0x081f9220
     ghidra: FUN_081f9220
     name: media_player_slot_b0_then_volume_controller_update
