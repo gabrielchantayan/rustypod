@@ -111946,3 +111946,32 @@ functions:
       Deviations: the two unported fixed callees and virtual notification are
       target calls behind host-replaceable operations; raw byte-offset loads
       preserve target-width object layout on 64-bit hosts.
+
+  - address: 0x08109968
+    ghidra: FUN_08109968
+    name: query_object_ensure
+    size: 36
+    sig: "void *query_object_ensure(void *owner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0xa8: query_object_cache
+      FUN_082597a0: query_object_create
+    notes: >-
+      Raw ARM establishes the exact 36-byte extent
+      0x08109968..0x0810998c; the next `push {r2,r3,r4,r5,r6,lr}` at
+      0x0810998c begins a separate function. The body preserves the owner,
+      loads its four-byte query-object cache at +0xa8, and returns immediately
+      with that pointer when non-NULL. Otherwise it calls the established
+      query_object_create(0) port, stores its return in the cache, and returns
+      it. Ghidra's void signature is incorrect: `popne {r4,pc}` preserves the
+      cached r0 and the null path likewise returns the stored constructor
+      result. Full-image decoding finds exactly four inbound direct calls —
+      0x08109128, 0x0810a310, 0x0810a6a4, and 0x08297c54 — all unconditional
+      plain BL; no predicated BL calls. Deliberate deviations: the call returns
+      normally through the existing query_object_create seam rather than the
+      stock instruction sequence; cache access, mode-zero argument, and r0
+      result are preserved. Host tests cover the cached fast path and null
+      cache construction, including the target-width cache word on a 64-bit
+      host.
