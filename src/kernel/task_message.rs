@@ -52,6 +52,8 @@
 //!   0-on-failure result.
 
 use crate::kernel::condvar::{list_push_back, ListHead, ListNode};
+use crate::kernel::csem::{csem_post_deferred, CountingSem};
+use crate::kernel::kobj::{mailbox_slot_post, Mailbox};
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
 /// Original: task-message pool mutex @ 0x089cb284. It brackets every
@@ -272,6 +274,105 @@ pub unsafe extern "C" fn task_message_post_sync(
     post_message(reply_queue, target_queue, message, 1, flags)
 }
 
+/// Target word containing the task-message transport pointer.
+const TASK_MESSAGE_TRANSPORT_SLOT: *mut *mut u32 = 0x089c_b280 as *mut *mut u32;
+
+#[cfg(not(target_os = "none"))]
+static mut MOCK_TASK_MESSAGE_TRANSPORT: *mut u32 = core::ptr::null_mut();
+
+#[inline(always)]
+unsafe fn task_message_transport() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        TASK_MESSAGE_TRANSPORT_SLOT.read_volatile()
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of!(MOCK_TASK_MESSAGE_TRANSPORT).read_volatile()
+    }
+}
+
+/// Writes `len` bytes to the retailOS ring described by `ring`.
+///
+/// The six target words are `{unused, data, start, read, write, mask}`.
+/// The storage pointer is deliberately a target-width word rather than a
+/// host pointer: every consumer of this transport has the firmware layout.
+unsafe fn task_message_ring_write(ring: *mut u32, mut source: *const u8, len: u32) -> u32 {
+    let mask = ring.add(5).read_volatile();
+    let start = ring.add(2).read_volatile();
+    let read = ring.add(3).read_volatile();
+    let mut write = ring.add(4).read_volatile();
+    if len > mask.wrapping_sub(write.wrapping_sub(read).wrapping_add(start) & mask) {
+        return 0;
+    }
+    let data = ring.add(1).read_volatile() as usize as *mut u8;
+    for _ in 0..len {
+        data.add(write as usize).write_volatile(source.read_volatile());
+        write = write.wrapping_add(1) & mask;
+        source = source.add(1);
+    }
+    ring.add(4).write_volatile(write);
+    1
+}
+
+#[cfg(target_os = "none")]
+unsafe fn task_message_transport_lock(slot: *mut u32) {
+    mutex_lock(slot.cast::<Mutex>());
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn task_message_transport_lock(_slot: *mut u32) {}
+
+#[cfg(target_os = "none")]
+unsafe fn task_message_transport_unlock(slot: *mut u32) {
+    mutex_unlock(slot.cast::<Mutex>());
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn task_message_transport_unlock(_slot: *mut u32) {}
+
+/// task_message_transport_enqueue — original: `FUN_0812c444` @ 0x0812c444
+/// (**60 bytes**, 0x0812c444..0x0812c480: 56 code bytes plus the literal
+/// transport-global word at 0x0812c468).
+///
+/// **4 direct `bl` callers: 2 unconditional and 2 `blne`; no other
+/// predicated `bl` forms**, verified by decoding every A32 B/BL word in
+/// `osos.dec` (0x08061910, 0x0819c974, 0x0819c99c, 0x0819ccc0). The
+/// `deferred` flag selects either the mutex-protected ring at transport+12
+/// followed by `mailbox_slot_post`, or the unprotected ring at transport+36
+/// followed by `csem_post_deferred`; both write exactly 28 bytes and signal
+/// only after a successful write. Deliberate deviations: the stock body
+/// tail-branches to internal entries 0x08103a80/0x08103ad0; Rust expresses
+/// their verified bodies directly, preserving their target-word layout. Host
+/// mutex calls are no-ops because the firmware's 4-byte semaphore slot cannot
+/// be cast to the host's 8-byte-pointer `Mutex`; target builds call the
+/// ported mutex wrappers directly.
+///
+/// # Safety
+///
+/// `message` must point to 28 readable bytes. The transport slot and its
+/// ring storage must be valid retailOS target-width objects.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_message_transport_enqueue(message: *const u8, deferred: u32) -> u32 {
+    let transport = task_message_transport();
+    if deferred == 0 {
+        task_message_transport_lock(transport.add(1));
+        let result = task_message_ring_write(transport.add(3), message, 28);
+        task_message_transport_unlock(transport.add(1));
+        if result != 0 {
+            mailbox_slot_post(transport.cast::<*mut Mailbox>());
+        }
+        result
+    } else {
+        let result = task_message_ring_write(transport.add(9), message, 28);
+        if result != 0 {
+            csem_post_deferred(transport.read_volatile() as usize as *mut CountingSem);
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
@@ -292,6 +393,8 @@ pub(crate) mod tests {
     static mut MOCK_RESULT: u32 = 0;
     static RECEIVE_CALL: StdMutex<Option<(usize, u32, usize)>> = StdMutex::new(None);
     static mut MOCK_RECEIVE_CELL: u32 = 0;
+
+    static TRANSPORT_LOCK: StdMutex<()> = StdMutex::new(());
 
     unsafe extern "C" fn mock_receive_cell(
         queue: usize,
@@ -484,6 +587,55 @@ pub(crate) mod tests {
         unsafe {
             assert_eq!(TASK_MESSAGE_FREE_LIST.head.cast::<u32>(), cell);
             assert_eq!(TASK_MESSAGE_FREE_LIST.tail.cast::<u32>(), cell);
+        }
+    }
+
+    #[test]
+    fn transport_enqueue_selects_ring_and_signals_only_after_success() {
+        let _guard = TRANSPORT_LOCK.lock();
+        let Some(slab) = try_map_u32_slab(hints::TASK_MESSAGE_TRANSPORT_ENQUEUE, 0x200) else {
+            return;
+        };
+        let transport = slab.cast::<u32>();
+        let foreground_data = unsafe { slab.add(0x80) };
+        let deferred_data = unsafe { slab.add(0xc0) };
+        let semaphore = unsafe { slab.add(0x180).cast::<u32>() };
+        let message: [u8; 28] = core::array::from_fn(|i| i as u8);
+
+        unsafe {
+            for word in 0..0x80 {
+                transport.add(word).write_volatile(0);
+            }
+            semaphore.write_volatile(0);
+            semaphore.add(1).write_volatile(0);
+            transport.write_volatile(semaphore as usize as u32);
+            transport.add(4).write_volatile(foreground_data as usize as u32);
+            transport.add(8).write_volatile(0x1f);
+            transport.add(10).write_volatile(deferred_data as usize as u32);
+            transport.add(14).write_volatile(0x1f);
+            core::ptr::addr_of_mut!(MOCK_TASK_MESSAGE_TRANSPORT).write_volatile(transport);
+
+            assert_eq!(task_message_transport_enqueue(message.as_ptr(), 0), 1);
+            assert_eq!(transport.add(7).read_volatile(), 28);
+            assert_eq!(semaphore.read_volatile(), 1);
+            for (index, byte) in message.iter().enumerate() {
+                assert_eq!(foreground_data.add(index).read_volatile(), *byte);
+            }
+
+            semaphore.write_volatile(0);
+            assert_eq!(task_message_transport_enqueue(message.as_ptr(), 1), 1);
+            assert_eq!(transport.add(13).read_volatile(), 28);
+            assert_eq!(semaphore.read_volatile(), 1);
+            for (index, byte) in message.iter().enumerate() {
+                assert_eq!(deferred_data.add(index).read_volatile(), *byte);
+            }
+
+            semaphore.write_volatile(0);
+            transport.add(14).write_volatile(0);
+            assert_eq!(task_message_transport_enqueue(message.as_ptr(), 1), 0);
+            assert_eq!(semaphore.read_volatile(), 0);
+            core::ptr::addr_of_mut!(MOCK_TASK_MESSAGE_TRANSPORT)
+                .write_volatile(core::ptr::null_mut());
         }
     }
 
