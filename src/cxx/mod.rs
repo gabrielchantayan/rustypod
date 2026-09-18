@@ -118,6 +118,7 @@ pub mod pending_event;
 pub mod payload_list_owner_destroy;
 pub mod vtable_tagged_payload_construct;
 pub mod polymorphic_owner_destroy;
+pub mod request_destroy;
 pub mod owned_chain_table_destroy;
 pub mod null_pointer_status;
 pub mod nested_object_value;

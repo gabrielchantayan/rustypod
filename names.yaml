@@ -109625,3 +109625,33 @@ functions:
       retailOS addresses on the tested rejection paths; packet completion
       retains the established 0x081d7f14 operation seam. Host tests cover
       both out-of-range statuses and both disabled literal slots.
+
+  - address: 0x0818bc88
+    ghidra: FUN_0818bc88
+    name: request_destroy
+    size: 92
+    sig: "u32 *request_destroy(u32 *request)"
+    module: cxx/request_destroy
+    status: ported
+    renames:
+      param_1/r0: request
+      DAT_0818bce4: request_destroy_vtable
+      FUN_0818cb08: request_subobject_destroy
+      FUN_081fd554: polymorphic_owner_destroy
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_0821596c: queue_wait
+    notes: >-
+      Raw ARM establishes the exact 92-byte extent 0x0818bc88..0x0818bce4:
+      push {r4,r5,r6,lr}, 23 instruction words, pop {r4,r5,r6,pc}; the
+      following word is the 0x08989a00 vtable literal and the next real body
+      starts at 0x0818bce8. The body has four direct unconditional BL calls
+      (0x0818cb08, 0x081fd554, 0x08266f2c, 0x0821596c), no predicated BL.
+      Independent raw branch-target scanning finds four inbound plain BLs at
+      0x081d6170, 0x081f1b20, 0x08267c9c, and 0x08267cb8, with no predicated
+      forms. It installs the vtable, destroys the +0x48 subobject, walks
+      target-word polymorphic owners from request+0x38 through request+0x3c,
+      frees that vector with (capacity - begin) >> 2 and r2=0, waits on the
+      queue object at +0x04, then returns request. The subobject destructor
+      and queue wait have verified target-address seams because their
+      identities remain unrecovered; host tests install typed recorders.
+      Deliberate deviations: none.
