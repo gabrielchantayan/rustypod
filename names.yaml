@@ -77640,6 +77640,41 @@ functions:
       state evolution are covered independently. The tail branch remains an
       ordinary returning call, as documented by traced_free.
 
+  - address: 0x0818fc80
+    ghidra: FUN_0818fc80
+    name: service_handler_reset
+    size: 144
+    sig: "void service_handler_reset(i32 selector, u32 mask)"
+    module: app/service_manager
+    renames:
+      param_1/r0: selector
+      param_2/r1: mask
+      DAT_0818fd0c: service_handler_availability_globals
+      FUN_0818f800: service_handler_masked_event_dispatch
+      FUN_08190430: unported_service_handler_state_routine
+      FUN_08193e64: service_manager_secondary_handler_state_flags_set
+      FUN_08193f24: unported_service_handler_pending_events_clear
+      FUN_08193f50: unported_service_handler_event_mask_update
+      FUN_08194110: service_handler_set
+      FUN_081941a4: service_handler_state_set
+    status: ported
+    notes: >-
+      Raw extent is 0x0818fc80..0x0818fd10: the final instruction is a tail
+      branch to service_handler_state_set at 0x0818fd08 and its
+      availability-global literal is the trailing word at 0x0818fd0c; the
+      next separately linked function begins at 0x0818fd10. The body contains
+      seven unconditional plain BL instructions (to the service-manager veneer,
+      masked event dispatcher, unported state routine, state-flags setter,
+      pending-events clear, event-mask update, and handler setter), no
+      predicated BL, and a tail B to the state setter. Four inbound direct BL
+      call sites are 0x08163b1c, 0x0818ef4c, 0x08190e00, and 0x08192430.
+      It broadcasts mask through the availability global's +0x30 gate, invokes
+      the stock state routine with -1, clears the selected secondary state and
+      event fields, then sets both primary words to one. Deliberate deviations:
+      the runtime availability global is a host stand-in, and the three
+      unported direct callees use volatile host seams while target builds call
+      their verified retail addresses.
+
   # --- service-manager handler access ---
   - address: 0x08194080
     ghidra: FUN_08194080

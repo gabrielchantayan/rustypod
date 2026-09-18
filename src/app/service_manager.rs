@@ -103,6 +103,7 @@
 extern crate std;
 
 use crate::heap::veneers::heap_panic;
+use crate::app::service_handler_masked_event_dispatch::service_handler_masked_event_dispatch;
 
 /// The service-manager singleton (original: the `+4` slot of the holder
 /// global @ 0x089ca948 — see the module header's deviation note).
@@ -1461,4 +1462,229 @@ mod tests {
         );
     }
 
+}
+
+const SERVICE_HANDLER_AVAILABILITY_GLOBALS_ADDRESS: usize = 0x089c_a8d0;
+const SERVICE_HANDLER_AVAILABILITY_GATE_OFFSET: usize = 0x30;
+const RETAIL_SERVICE_HANDLER_STATE_ROUTINE: usize = 0x0819_0430;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn service_handler_availability_gate() -> *mut u8 {
+    (SERVICE_HANDLER_AVAILABILITY_GLOBALS_ADDRESS + SERVICE_HANDLER_AVAILABILITY_GATE_OFFSET) as *mut u8
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_SERVICE_HANDLER_AVAILABILITY_GATE: u32 = 0;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn service_handler_availability_gate() -> *mut u8 {
+    core::ptr::addr_of_mut!(HOST_SERVICE_HANDLER_AVAILABILITY_GATE).cast()
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_state_routine(
+    availability_gate: *mut u8,
+    selector: i32,
+    state: i32,
+) {
+    let routine: unsafe extern "C" fn(*mut u8, i32, i32) =
+        core::mem::transmute(RETAIL_SERVICE_HANDLER_STATE_ROUTINE);
+    routine(availability_gate, selector, state);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_service_handler_state_routine(
+    _availability_gate: *mut u8,
+    _selector: i32,
+    _state: i32,
+) {
+    panic!("install the service-handler state routine host seam before calling service_handler_reset")
+}
+
+/// Host replacement for the unported `FUN_08190430` state routine.
+#[cfg(not(target_os = "none"))]
+pub static mut SERVICE_HANDLER_STATE_ROUTINE: unsafe extern "C" fn(*mut u8, i32, i32) =
+    missing_service_handler_state_routine;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_state_routine(
+    availability_gate: *mut u8,
+    selector: i32,
+    state: i32,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_HANDLER_STATE_ROUTINE))(
+        availability_gate,
+        selector,
+        state,
+    );
+}
+
+/// service_handler_reset — original: `FUN_0818fc80` @ **0x0818fc80**
+/// (144 bytes including the trailing availability-global literal at
+/// 0x0818fd0c; the next separately linked function begins at 0x0818fd10).
+/// The raw body has seven unconditional plain `bl` instructions and no
+/// predicated `bl`; four inbound `bl` calls target it.
+///
+/// Broadcasts `mask` through the handler mask dispatcher using the availability
+/// global's `+0x30` gate, passes state `-1` to the unported state routine, then
+/// clears the selected secondary record's state flags, pending events, and
+/// event mask. Finally it sets the primary handler word to one and tail-calls
+/// the primary state setter with one. The stock state routine has no established
+/// identity, so target builds call 0x08190430 directly and host builds expose a
+/// volatile seam; all other callees are existing Rust ports.
+///
+/// # Safety
+///
+/// The service-manager singleton, its three primary/secondary records, and the
+/// availability global must be initialized. As in retailOS, `selector >= 3`
+/// terminates through one of the called setters.
+
+const RETAIL_SERVICE_HANDLER_PENDING_EVENTS_CLEAR: usize = 0x0819_3f24;
+const RETAIL_SERVICE_HANDLER_EVENT_MASK_UPDATE: usize = 0x0819_3f50;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_pending_events_clear(slot_table: *mut u32, selector: i32) {
+    let routine: unsafe extern "C" fn(*mut u32, i32) =
+        core::mem::transmute(RETAIL_SERVICE_HANDLER_PENDING_EVENTS_CLEAR);
+    routine(slot_table, selector);
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_event_mask_update(
+    slot_table: *mut u32,
+    selector: i32,
+    event: u32,
+    enabled: i32,
+) {
+    let routine: unsafe extern "C" fn(*mut u32, i32, u32, i32) =
+        core::mem::transmute(RETAIL_SERVICE_HANDLER_EVENT_MASK_UPDATE);
+    routine(slot_table, selector, event, enabled);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_service_handler_pending_events_clear(_slot_table: *mut u32, _selector: i32) {
+    panic!("install the service-handler pending-events-clear host seam before calling service_handler_reset")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_service_handler_event_mask_update(
+    _slot_table: *mut u32,
+    _selector: i32,
+    _event: u32,
+    _enabled: i32,
+) {
+    panic!("install the service-handler event-mask-update host seam before calling service_handler_reset")
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut SERVICE_HANDLER_PENDING_EVENTS_CLEAR: unsafe extern "C" fn(*mut u32, i32) =
+    missing_service_handler_pending_events_clear;
+
+#[cfg(not(target_os = "none"))]
+pub static mut SERVICE_HANDLER_EVENT_MASK_UPDATE: unsafe extern "C" fn(*mut u32, i32, u32, i32) =
+    missing_service_handler_event_mask_update;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_pending_events_clear(slot_table: *mut u32, selector: i32) {
+    core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_HANDLER_PENDING_EVENTS_CLEAR))(slot_table, selector);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn invoke_unported_service_handler_event_mask_update(
+    slot_table: *mut u32,
+    selector: i32,
+    event: u32,
+    enabled: i32,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_HANDLER_EVENT_MASK_UPDATE))(
+        slot_table, selector, event, enabled,
+    );
+}
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_reset(selector: i32, mask: u32) {
+    let availability_gate = service_handler_availability_gate();
+    service_handler_masked_event_dispatch(availability_gate, selector as u32, mask);
+    invoke_unported_service_handler_state_routine(availability_gate, selector, -1);
+
+    let slot_table = service_manager_instance_veneer().add(4).cast::<u32>();
+    service_manager_secondary_handler_state_flags_set(slot_table, selector, 0);
+    invoke_unported_service_handler_pending_events_clear(slot_table, selector);
+    invoke_unported_service_handler_event_mask_update(slot_table, selector, 0, 0);
+    service_handler_set(slot_table, selector, 1);
+    service_handler_state_set(slot_table, selector, 1);
+}
+
+#[cfg(test)]
+mod service_handler_reset_tests {
+    use super::*;
+
+    static RESET_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static mut TRANSITION: (usize, i32, i32) = (0, 0, 0);
+    static mut PENDING_CLEAR_SELECTOR: i32 = 0;
+    static mut EVENT_MASK_UPDATE: (i32, u32, i32) = (0, 0, 0);
+
+    unsafe extern "C" fn record_transition(gate: *mut u8, selector: i32, state: i32) {
+        TRANSITION = (gate as usize, selector, state);
+    }
+
+    unsafe extern "C" fn record_pending_events_clear(_slot_table: *mut u32, selector: i32) {
+        PENDING_CLEAR_SELECTOR = selector;
+    }
+
+    unsafe extern "C" fn record_event_mask_update(
+        _slot_table: *mut u32,
+        selector: i32,
+        event: u32,
+        enabled: i32,
+    ) {
+        EVENT_MASK_UPDATE = (selector, event, enabled);
+    }
+
+    #[test]
+    fn clears_selected_secondary_record_and_sets_primary_record() {
+        let _reset_lock = RESET_TEST_LOCK.lock();
+        let _instance_lock = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let mut manager = [0u32; 59];
+            let old_instance = SERVICE_MANAGER_INSTANCE;
+            let old_routine = SERVICE_HANDLER_STATE_ROUTINE;
+            let old_pending_clear = SERVICE_HANDLER_PENDING_EVENTS_CLEAR;
+            let old_event_mask_update = SERVICE_HANDLER_EVENT_MASK_UPDATE;
+            SERVICE_MANAGER_INSTANCE = manager.as_mut_ptr().cast();
+            SERVICE_HANDLER_STATE_ROUTINE = record_transition;
+            SERVICE_HANDLER_PENDING_EVENTS_CLEAR = record_pending_events_clear;
+            SERVICE_HANDLER_EVENT_MASK_UPDATE = record_event_mask_update;
+            TRANSITION = (0, 0, 0);
+            PENDING_CLEAR_SELECTOR = 0;
+            EVENT_MASK_UPDATE = (0, 0, 0);
+
+            let selector = 2;
+            let record = 1 + selector as usize * 8;
+            manager[record + 3] = 1;
+            manager[record + 4] = 0xffff_ffff;
+            service_handler_reset(selector, 0);
+
+            assert_eq!(TRANSITION.1, selector);
+            assert_eq!(TRANSITION.2, -1);
+            assert_eq!(PENDING_CLEAR_SELECTOR, selector);
+            assert_eq!(EVENT_MASK_UPDATE, (selector, 0, 0));
+            assert_eq!(manager[record], 1);
+            assert_eq!(manager[record + 1], 1);
+            assert_eq!(manager[record + 4], 0);
+
+            SERVICE_HANDLER_EVENT_MASK_UPDATE = old_event_mask_update;
+            SERVICE_HANDLER_PENDING_EVENTS_CLEAR = old_pending_clear;
+            SERVICE_HANDLER_STATE_ROUTINE = old_routine;
+            SERVICE_MANAGER_INSTANCE = old_instance;
+        }
+    }
 }
