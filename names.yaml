@@ -22753,6 +22753,29 @@ functions:
       push/pop. Same structure otherwise (load, cmp, align arithmetic,
       bic of the flags byte, subtract).
 
+  - address: 0x0814d6c8
+    ghidra: FUN_0814d6c8
+    name: record_read_trailer_header
+    size: 28
+    sig: "u32 record_read_trailer_header(const u32 *record)"
+    module: util/record_read_trailer_header
+    status: ported
+    vars:
+      param_1/r0: record
+      FUN_0814d51c: record_body_size
+      iVar1/r0: body_size
+      param_1_plus_body_size_plus_0xc: trailer_header
+    notes: >-
+      Raw ARM is seven instructions at 0x0814d6c8 through 0x0814d6e0; the
+      ldr at 0x0814d6e4 begins the next separately linked function, proving
+      the true extent is 28 bytes. It calls record_body_size(record, 4),
+      adds the returned low-24-bit body-size byte offset to record, and reads
+      the u32 trailer header at offset +0x0c. Decoding the raw image finds
+      four direct callers, all plain unconditional bl at 0x0814d578,
+      0x0814d624, 0x081a8268, and 0x081a89c8; no predicated bl callers
+      occur. The record class and trailer field identity remain unidentified,
+      so the port names only this verified read role. No deliberate deviations.
+
   - address: 0x081eb0c4
     ghidra: FUN_081eb0c4
     name: singleton_class_8900
