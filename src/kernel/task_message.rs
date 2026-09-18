@@ -57,7 +57,7 @@ pub unsafe extern "C" fn task_message_pool_release(cell: *mut ListNode) {
 #[derive(Clone, Copy)]
 pub struct TaskMessagePostOps {
     pub allocate_cell: unsafe extern "C" fn() -> *mut u32,
-    pub post_without_wait: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32,
+    pub queue_send: unsafe extern "C" fn(usize, usize, *mut u32, u32, u32, u32) -> u32,
     pub post_with_wait: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32,
     pub allocation_failed: unsafe extern "C" fn(*mut u32, *mut *const u32),
 }
@@ -69,10 +69,12 @@ unsafe extern "C" fn firmware_allocate_cell() -> *mut u32 {
 }
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_post_without_wait(reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32) -> u32 {
-    let post: unsafe extern "C" fn(usize, usize, *mut u32, u32) -> u32 =
-        unsafe { core::mem::transmute(0x080f_117cusize) };
-    unsafe { post(reply_queue, target_queue, cell, flags) }
+unsafe extern "C" fn firmware_queue_send(
+    reply_queue: usize, target_queue: usize, cell: *mut u32, cell_blocking: u32, wait_for_reply: u32, flags: u32,
+) -> u32 {
+    let send: unsafe extern "C" fn(usize, usize, *mut u32, u32, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(0x0809_eb58usize) };
+    unsafe { send(reply_queue, target_queue, cell, cell_blocking, wait_for_reply, flags) }
 }
 
 #[cfg(target_os = "none")]
@@ -94,6 +96,12 @@ unsafe extern "C" fn missing_allocate_cell() -> *mut u32 {
     panic!("task_message_post requires pool helper 0x0812bf9c")
 }
 #[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_queue_send(
+    _reply_queue: usize, _target_queue: usize, _cell: *mut u32, _cell_blocking: u32, _wait_for_reply: u32, _flags: u32,
+) -> u32 {
+    panic!("task_message_post requires queue send helper 0x0809eb58")
+}
+#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_post(_reply_queue: usize, _target_queue: usize, _cell: *mut u32, _flags: u32) -> u32 {
     panic!("task_message_post requires queue post helper")
 }
@@ -109,11 +117,11 @@ pub(crate) const DEFAULT_TASK_MESSAGE_POST_OPS: TaskMessagePostOps = TaskMessage
         #[cfg(not(target_os = "none"))]
         { missing_allocate_cell }
     },
-    post_without_wait: {
+    queue_send: {
         #[cfg(target_os = "none")]
-        { firmware_post_without_wait }
+        { firmware_queue_send }
         #[cfg(not(target_os = "none"))]
-        { missing_post }
+        { missing_queue_send }
     },
     post_with_wait: {
         #[cfg(target_os = "none")]
@@ -131,6 +139,28 @@ pub(crate) const DEFAULT_TASK_MESSAGE_POST_OPS: TaskMessagePostOps = TaskMessage
 
 /// Active seams for the unported allocation and queue-post operations.
 pub static mut TASK_MESSAGE_POST_OPS: TaskMessagePostOps = DEFAULT_TASK_MESSAGE_POST_OPS;
+/// post_without_wait — original: `FUN_080f117c` @ **0x080f117c**
+/// (**40 bytes** exactly, 0x080f117c..0x080f11a4; the next real function
+/// starts with `push {r0,r1,r4,r5,r6,lr}` at 0x080f11a4).
+///
+/// **4 direct `bl` callers: 3 unconditional and 1 `blne`** (0x0808f754,
+/// 0x081214ec, 0x0812c100, 0x08295ad0), verified by decoding every A32
+/// branch-with-link word in `osos.dec`. The body makes one unconditional
+/// `bl` and no predicated calls.
+///
+/// Forwards the first four arguments and fifth stack argument to the queue
+/// send helper @ 0x0809eb58, forcing its wait-for-reply argument to zero.
+/// Deliberate deviation: the A32 stack argument shuffle is represented as a
+/// six-argument Rust call; it preserves the callee's values, including its
+/// return value, rather than reproducing the caller's stack layout.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn post_without_wait(
+    reply_queue: usize, target_queue: usize, cell: *mut u32, cell_blocking: u32, flags: u32,
+) -> u32 {
+    let queue_send = unsafe { core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile().queue_send };
+    unsafe { queue_send(reply_queue, target_queue, cell, cell_blocking, 0, flags) }
+}
 
 /// task_message_post — original: `FUN_0812c088` @ **0x0812c088**
 /// (**188 bytes** true extent: 180 bytes of code followed by the two literal
@@ -172,7 +202,7 @@ pub unsafe extern "C" fn task_message_post(
     }
     let ops = unsafe { core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile() };
     let result = unsafe {
-        if wait == 0 { (ops.post_without_wait)(reply_queue, target_queue, cell, flags) }
+        if wait == 0 { post_without_wait(reply_queue, target_queue, cell, flags, flags) }
         else { (ops.post_with_wait)(reply_queue, target_queue, cell, flags) }
     };
     if result == 0 { 1 } else { unsafe { task_message_pool_release(cell.cast::<ListNode>()); } 0 }
@@ -425,8 +455,10 @@ pub(crate) mod tests {
     unsafe extern "C" fn mock_allocate_cell() -> *mut u32 {
         core::ptr::addr_of!(MOCK_ALLOCATE).read_volatile()
     }
-    unsafe extern "C" fn mock_post_without_wait(reply: usize, target: usize, cell: *mut u32, flags: u32) -> u32 {
-        CALLS.lock().push((reply, target, 0, flags));
+    unsafe extern "C" fn mock_queue_send(
+        reply: usize, target: usize, _cell: *mut u32, _cell_blocking: u32, wait_for_reply: u32, flags: u32,
+    ) -> u32 {
+        CALLS.lock().push((reply, target, wait_for_reply, flags));
         core::ptr::addr_of!(MOCK_RESULT).read_volatile()
     }
     unsafe extern "C" fn mock_post_with_wait(reply: usize, target: usize, cell: *mut u32, flags: u32) -> u32 {
@@ -451,11 +483,13 @@ pub(crate) mod tests {
     #[test]
     fn posts_seven_words_and_inverts_backend_status() {
         let _guard = OPS_LOCK.lock();
+        unsafe { core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(0) };
+        CALLS.lock().clear();
         let message = [0x1234_5678, 1, 2, 3, 4, 5, 6];
         unsafe {
             core::ptr::addr_of_mut!(MOCK_ALLOCATE).write_volatile(core::ptr::addr_of_mut!(MOCK_CELL.0).cast::<u32>());
             core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
-                allocate_cell: mock_allocate_cell, post_without_wait: mock_post_without_wait,
+                allocate_cell: mock_allocate_cell, queue_send: mock_queue_send,
                 post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
             });
         }
@@ -467,13 +501,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn post_without_wait_forces_reply_wait_off_and_forwards_flags() {
+        let _guard = OPS_LOCK.lock();
+        unsafe {
+            CALLS.lock().clear();
+            core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(0x55);
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
+                allocate_cell: mock_allocate_cell, queue_send: mock_queue_send,
+                post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
+            });
+        }
+        let cell = core::ptr::without_provenance_mut::<u32>(0x1234_5000);
+        assert_eq!(unsafe { post_without_wait(10, 20, cell, 0x33, 0) }, 0x55);
+        assert_eq!(unsafe { post_without_wait(11, 21, cell, 0x44, 0x66) }, 0x55);
+        assert_eq!(CALLS.lock().as_slice(), &[(10, 20, 0, 0), (11, 21, 0, 0x66)]);
+        unsafe { core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(0) };
+        unsafe { core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
+    }
+
+    #[test]
     fn allocation_failure_notifies_only_the_weel_tag() {
         let _guard = OPS_LOCK.lock();
         unsafe {
             core::ptr::addr_of_mut!(MOCK_ALLOCATE).write_volatile(core::ptr::null_mut());
             core::ptr::addr_of_mut!(ALLOCATION_FAILURES).write_volatile(0);
             core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
-                allocate_cell: mock_allocate_cell, post_without_wait: mock_post_without_wait,
+                allocate_cell: mock_allocate_cell, queue_send: mock_queue_send,
                 post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
             });
         }

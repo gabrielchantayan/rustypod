@@ -112251,3 +112251,31 @@ functions:
       r0, increments 0x08a09d3c+4, then clears transfer_slot+0x3c. The target
       port preserves the recovered ARM sequence; the unlifted vtable target
       has a typed host fixture only, not an invented callee identity.
+
+  - address: 0x080f117c
+    ghidra: FUN_080f117c
+    name: post_without_wait
+    size: 40
+    sig: "u32 post_without_wait(usize reply_queue, usize target_queue, *mut u32 cell, u32 cell_blocking, u32 flags)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: reply_queue
+      param_2/r1: target_queue
+      param_3/r2: cell
+      param_4/r3: cell_blocking
+      param_5/[sp]: flags
+      FUN_0809eb58: queue_send
+    notes: >-
+      Raw osos.dec gives the exact 40-byte extent 0x080f117c..0x080f11a4;
+      the next function begins with push {r0,r1,r4,r5,r6,lr}. Whole-image
+      A32 decode finds four incoming direct calls: three plain bl at
+      0x0808f754, 0x081214ec, and 0x0812c100, plus blne at 0x08295ad0.
+      The body has one unconditional bl to 0x0809eb58 and no predicated
+      calls. It preserves reply_queue, target_queue, cell, and
+      cell_blocking, writes zero as queue_send's wait-for-reply stack
+      argument, and forwards flags as its final stack argument. The queue
+      send's identity remains intentionally narrow because only this
+      argument contract is established; its target default calls 0x0809eb58
+      and host tests install a recording seam. Rust expresses the ARM stack
+      shuffle as a six-argument seam call; return r0 passes through unchanged.
