@@ -508,7 +508,6 @@ functions:
       r3: embedded_resource_descriptor
       DAT_082c59e4: EMBEDDED_RESOURCE_DESCRIPTOR
     notes: >-
-      Deferred: raw osos.dec establishes the true eight-byte extent
       0x082c59dc..0x082c59e4: `ldr r3, [pc]` loads
       EMBEDDED_RESOURCE_DESCRIPTOR (0x0890b4c0), then `b 0x0803a7f0`.
       0x082c59e4 is its literal-pool word, and 0x082c59e8 begins the next
@@ -112490,3 +112489,28 @@ functions:
       inbound direct calls, all unconditional plain bl, and zero predicated
       bl forms. Rust preserves target-width pointer fields as u32 and uses
       volatile aligned word access; no deliberate behavioral deviations.
+
+  - address: 0x080e28a4
+    ghidra: FUN_080e28a4
+    name: parse_i32_utf16_bounds
+    size: 32
+    sig: "int parse_i32_utf16_bounds(const uint16_t *begin, const uint16_t *end)"
+    module: strto/parse_i32_utf16_bounds
+    status: ported
+    renames:
+      param_1/r0: begin
+      param_2/r1: end
+      FUN_081bb69c: utf16_range_construct
+      FUN_080f01c4: parse_i32_utf16_range
+    notes: >-
+      Raw osos.dec words at 0x080e28a4 establish a 32-byte body ending in
+      pop {r2,r3,r4,pc}; the next independent function starts at 0x080e28c4.
+      Its i32 return is evident because parse_i32_utf16_range leaves its
+      result in r0 for the epilogue.
+      in r0 for the epilogue. The body has two unconditional BL instructions,
+      no predicated BL instructions, and four unconditional inbound BL calls
+      from the date/time component parser at 0x080bbce8. It constructs the
+      two target-width UTF-16 bounds words then parses the range through the
+      existing parse_i32_utf16_range port. Deliberate deviation: Rust
+      represents the stack pair directly and inlines the trivial
+      utf16_range_construct instead of adding a seam.
