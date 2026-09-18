@@ -52,6 +52,29 @@ pub extern "C" fn signed_clamp_i32_q16(value: i32, lower: i32, upper: i32) -> i3
         value
     }
 }
+/// signed_clamp_i32_q16_secondary — original: `FUN_080f0f64` @
+/// 0x080f0f64 (32 bytes; four direct `bl` call sites, all unconditional).
+///
+/// Raw osos.dec words establish the exact eight-instruction body from
+/// 0x080f0f64 through 0x080f0f80; the byte-identical
+/// `signed_clamp_i32` entry begins at 0x080f0f84. It performs signed
+/// lower-then-upper clamping, preserving the lower-bound precedence for an
+/// inverted interval. Whole-image A32 decoding finds four inbound plain
+/// `bl` instructions (0x08255114, 0x08255130, 0x0825514c, and 0x08255168)
+/// and no predicated calls. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+#[link_section = ".text.signed_clamp_i32_q16_secondary"]
+pub extern "C" fn signed_clamp_i32_q16_secondary(value: i32, lower: i32, upper: i32) -> i32 {
+    if value < lower {
+        lower
+    } else if value > upper {
+        upper
+    } else {
+        value
+    }
+}
+
 
 
 #[cfg(test)]
@@ -93,5 +116,17 @@ mod tests {
         assert_eq!(signed_clamp_i32_q16(i32::MAX, 0, 0x10000), 0x10000);
         assert_eq!(signed_clamp_i32_q16(0, 10, -10), 10);
         assert_eq!(signed_clamp_i32_q16(10, 10, -10), -10);
+    }
+
+    #[test]
+    fn secondary_q16_clamp_matches_inbound_call_range_and_signed_edges() {
+        assert_eq!(signed_clamp_i32_q16_secondary(i32::MIN, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16_secondary(-1, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16_secondary(0, 0, 0x10000), 0);
+        assert_eq!(signed_clamp_i32_q16_secondary(0x8000, 0, 0x10000), 0x8000);
+        assert_eq!(signed_clamp_i32_q16_secondary(0x10000, 0, 0x10000), 0x10000);
+        assert_eq!(signed_clamp_i32_q16_secondary(i32::MAX, 0, 0x10000), 0x10000);
+        assert_eq!(signed_clamp_i32_q16_secondary(0, 10, -10), 10);
+        assert_eq!(signed_clamp_i32_q16_secondary(10, 10, -10), -10);
     }
 }

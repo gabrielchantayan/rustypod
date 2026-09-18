@@ -112294,3 +112294,27 @@ functions:
       argument contract is established; its target default calls 0x0809eb58
       and host tests install a recording seam. Rust expresses the ARM stack
       shuffle as a six-argument seam call; return r0 passes through unchanged.
+
+  # --- secondary Q16 signed clamp ---
+  - address: 0x080f0f64
+    ghidra: FUN_080f0f64
+    name: signed_clamp_i32_q16_secondary
+    size: 32
+    sig: "i32 signed_clamp_i32_q16_secondary(i32 value, i32 lower, i32 upper)"
+    module: util/signed_clamp_i32
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: lower
+      param_3/r2: upper
+    notes: >-
+      Raw osos.dec words establish the exact eight-instruction body at
+      0x080f0f64..0x080f0f80; the byte-identical signed clamp at
+      0x080f0f84 is the next real function boundary. The body compares value
+      and lower as signed values, returns lower when value is below it, then
+      compares value and upper as signed values and returns upper when value
+      is above it; otherwise it returns value. This preserves lower-bound
+      precedence for inverted intervals. Whole-image A32 decoding finds four
+      inbound plain BL instructions at 0x08255114, 0x08255130, 0x0825514c,
+      and 0x08255168, with no predicated BL calls. The callers clamp Q16
+      components to 0..0x10000. No deliberate deviations.
