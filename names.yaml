@@ -108549,3 +108549,43 @@ functions:
       unchanged, the method receives the recovered layout pointer, and the
       method is dispatched once per call. match.py reports the same three
       loads and tail bx; only LLVM's frame prologue/epilogue differs.
+
+  # --- iAP packet completion event scheduler ---
+  - address: 0x081d7b6c
+    ghidra: FUN_081d7b6c
+    name: schedule_iap_packet_completion_event
+    size: 192
+    sig: "u32 schedule_iap_packet_completion_event(void *unused_context, IapPacket *packet, u32 completion_state, u32 delay_ms)"
+    module: app/iap_packet_completion_event
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: packet
+      param_3/r2: completion_state
+      param_4/r3: delay_ms
+      DAT_081d7c24: active_service_handler_context_slot (0x089ccb50)
+      DAT_081d7c28: active_context_pending_event_sequence_offset (0x2fa)
+      "packet+0x10": command_tag
+      "context+0x2f4": pending_event_timestamp_ms
+      "context+0x2f8": pending_event_active
+      "context+0x2fa": pending_event_sequence
+      FUN_081d7f14: packet_completion_submit (unrecovered; existing IAP_PACKET_EVENT_SCHEDULE_OPS seam)
+    notes: >-
+      Raw words establish the true extent 0x081d7b6c..0x081d7c2c: 184 bytes
+      of executable code through pop {r4-r8,pc} at 0x081d7c20, then literal
+      words 0x089ccb50 and 0x000002fa; the next separate function starts
+      with push {r4,lr} at 0x081d7c2c. The body has six unconditional plain
+      BL calls (0x080f6b3c, 0x081d7f14, 0x08138fd0, 0x08262958,
+      0x082a1c30, 0x08262908), zero predicated BL calls, and one BLX through
+      the constructed clock's vtable +0x0c. Four direct callers observed in
+      Ghidra are 0x081d7584, 0x081d7928, 0x081d79a8, and 0x081d7ab4.
+      It obtains owner mode and packet command, submits completion, and only
+      upon zero status inserts a zero-payload pending event keyed by owner
+      mode with the pre-increment sequence and delay. Insert success constructs
+      a kind-1 clock, increments the u16 sequence wrapping, obtains its
+      timespec through the vtable, writes milliseconds to +0x2f4, sets +0x2f8,
+      and destroys the clock. Deliberate deviation: unrecovered
+      0x081d7f14 uses the established volatile completion seam; target context
+      is literal-backed while host tests replace it. Host tests cover completion
+      short-circuit, successful sequence wrap/timestamp/state, and exhausted
+      queue state preservation.
