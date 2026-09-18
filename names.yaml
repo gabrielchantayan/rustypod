@@ -109253,3 +109253,35 @@ functions:
       identity. Its Ghidra body performs several virtual and render-context
       operations, so an opaque or guessed Rust dispatch seam would not be a
       faithful callee identity. The three other callees are already ported.
+
+  # --- runtime-global vtable byte query ---
+  - address: 0x081a99a8
+    ghidra: FUN_081a99a8
+    name: global_slot_28_byte_query
+    size: 56
+    sig: "u32 global_slot_28_byte_query(u8 *out)"
+    module: app/global_slot_28_byte_query
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      DAT_081a99e0: GLOBAL_SLOT_28_BYTE_QUERY_ROOT_ADDRESS (0x089ccb68)
+      "global+0x28": target
+      "target+0x00": vtable
+      "vtable+0x24": query_byte
+      FUN_indirect_vtable_24: query_byte (dynamic; no callee identity)
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x081a99a8..0x081a99e0:
+      push {r4,lr} through pop {r4,pc}; 0x081a99e0 is its literal-pool word
+      and the next separately linked function starts at 0x081a99e4. Decoding
+      every A32 B/BL immediate in osos.dec finds exactly four inbound direct
+      calls, all unconditional plain BL (0x0818de7c, 0x0818ded4, 0x0818df54,
+      0x081a9044), with zero predicated BL forms and zero plain-B tail calls.
+      The one outbound call is dynamic BLX through vtable word +0x24, so no
+      callee identity is invented. The body reads global+0x28; NULL returns
+      0x0b without touching out. Otherwise r0 still holds target at BLX, the
+      callback's low return byte is written to out, and the function returns
+      zero. Deliberate deviation: firmware pointers/vtable words are 32 bits;
+      host fixtures use native-width typed pointers and function pointers,
+      while target-only layout assertions preserve the +0x28 and +0x24
+      offsets. Host tests cover the NULL no-write path and callback target,
+      byte, and status propagation.
