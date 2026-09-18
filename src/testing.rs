@@ -345,6 +345,9 @@ pub mod hints {
     // embedded bit-set and timer fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const TIMER_STOP_THEN_CLEAR_BIT_SET: usize = 0xd900_0000;
+    // 0xdb00_0000: dedicated to ui/selection_schedule_timer's target-width
+    // controller, timer, and bit-set fixture; mappings never unmap.
+    pub const SELECTION_SCHEDULE_TIMER: usize = 0xdb00_0000;
     // 0x6c00_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
