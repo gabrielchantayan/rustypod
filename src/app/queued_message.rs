@@ -685,10 +685,10 @@ mod post_tests {
         }
     }
 
-    unsafe extern "C" fn recording_post_without_wait(
-        reply_queue: usize, target_queue: usize, cell: *mut u32, flags: u32,
+    unsafe extern "C" fn recording_queue_send(
+        reply_queue: usize, target_queue: usize, cell: *mut u32, _cell_blocking: u32, wait_for_reply: u32, flags: u32,
     ) -> u32 {
-        unsafe { recording_post(reply_queue, target_queue, cell, 0, flags) }
+        unsafe { recording_post(reply_queue, target_queue, cell, wait_for_reply, flags) }
     }
 
     unsafe extern "C" fn recording_post_with_wait(
@@ -730,7 +730,7 @@ mod post_tests {
             (*ptr::addr_of_mut!(RELEASED)).clear();
             ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
                 allocate_cell: recording_allocate_cell,
-                post_without_wait: recording_post_without_wait,
+                queue_send: recording_queue_send,
                 post_with_wait: recording_post_with_wait,
                 allocation_failed: recording_allocation_failed,
             });
