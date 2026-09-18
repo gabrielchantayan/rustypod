@@ -110334,3 +110334,23 @@ functions:
       port calls it at its verified address on target and uses a role-based
       host seam. Target stream and vtable pointers are read as 32-bit words;
       host-only layouts widen them to retain valid function pointers.
+
+  - address: 0x0815a00c
+    ghidra: FUN_0815a00c
+    name: identity_noop
+    size: 4
+    sig: "u32 identity_noop(u32 value)"
+    module: app/identity_noop
+    status: ported
+    renames:
+      param_1/r0: value
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent 0x0815a00c..0x0815a010:
+      bx lr. The following push {r3,r4,r5,r6,r7,r8,r9,lr} at 0x0815a010
+      begins the next separately linked function. Full-image A32 decoding finds
+      exactly four inbound plain BL calls (0x081c256c, 0x081c2d64, 0x081c348c,
+      and 0x081c4330) and zero predicated BL calls. Each caller passes an
+      opaque non-null result before immediately calling the fatal handler at
+      0x082aad24, but the empty body establishes no higher-level identity.
+      The port therefore names only the verified behavior: return r0 unchanged.
+      Deliberate deviations: none.
