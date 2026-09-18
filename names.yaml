@@ -111760,3 +111760,33 @@ functions:
       new seam: indices below 18 load table+0x24+index*0x24 and all others
       return -1. The opaque layout remains target-width u32 words so +0x04 and
       +0x14 stay exact on 64-bit host builds. Deviation: none.
+
+  # --- owner vtable slot +0xec tail dispatch ---
+  - address: 0x08116e34
+    ghidra: FUN_08116e34
+    name: owner_vtable_slot_ec_tail_dispatch
+    size: 16
+    sig: "u32 owner_vtable_slot_ec_tail_dispatch(OwnerVtableSlotEcDispatchOwner *owner)"
+    module: cxx/owner_vtable_slot_ec_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0x888: dispatch_object
+      dispatch_object_deref: vtable
+      vtable_plus_0xec/r1: dispatch
+      method_return/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: ldr r0,[r0,#0x888],
+      ldr r1,[r0], ldr r1,[r1,#0xec], bx r1 at 0x08116e34..0x08116e40; the
+      separately linked next function begins at 0x08116e44. It replaces owner
+      in r0 with the nested dispatch object at +0x888 and tail-dispatches that
+      object through vtable +0xec, returning its u32 result unchanged. The
+      owner, nested object, and virtual method identities remain unrecovered
+      and are deliberately not invented. Independent raw-image decoding finds
+      three inbound plain unconditional bl calls at 0x08115204, 0x08116464, and
+      0x0812f388, plus one predicated bleq at 0x0812f344; Ghidra assembly
+      agrees on all four calls. There are no direct tail branches. Host coverage
+      proves only vtable slot +0xec is selected, the nested object replaces the
+      owner as virtual receiver, and the u32 result is preserved. Rust uses
+      native-width host vtable cells while repr(C) preserves the verified target
+      word offsets.
