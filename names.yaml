@@ -23305,6 +23305,31 @@ functions:
       for `bl 0x081dfc1c`, `[r4]` instead of `[r4, #4]` for the crate
       cache, and LLVM rotating the cache-hit exit to the top.
 
+  - address: 0x0820ba38
+    ghidra: FUN_0820ba38
+    name: mode_two_attachment
+    size: 56
+    sig: "uint32_t mode_two_attachment(struct ModeTwoAttachment *object, uint32_t mode)"
+    module: app/mode_two_attachment
+    status: ported
+    vars:
+      param_1: object
+      param_2: mode
+      FUN_082aadd4: operator_new
+      FUN_08168a8c: mode_two_attachment_construct
+    notes: >-
+      Raw extent is exactly fourteen ARM words at 0x0820ba38..0x0820ba6c;
+      the next function starts at 0x0820ba70 with `cmp r0, #0`. Raw B/BL
+      decoding finds four inbound plain BL call sites (0x081f1790,
+      0x081fd220, 0x08210c88, 0x08210e24), no predicated inbound BL forms,
+      and two unconditional outgoing BLs: operator_new(0x48) and the
+      unported direct constructor 0x08168a8c. It first stores mode at
+      object+4. Only mode 2 allocates tag-2 storage, constructs it with
+      `(storage, 2)`, writes the returned target word at object+8, and
+      returns 1; every other mode returns the incoming object pointer word.
+      The constructor has no recovered identity, so the Rust port uses a
+      device-address seam with an explicit host-test replacement; its u32
+      result preserves the target's 4-byte pointer field on 64-bit hosts.
   - address: 0x0820b230
     ghidra: thunk_FUN_0820b230
     name: command_dispatcher_get_veneer

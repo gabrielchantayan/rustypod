@@ -172,6 +172,7 @@ pub mod media_command_facade;
 pub mod media_ext;
 pub mod mode_selected_byte;
 pub mod mode_selected_update_if_ready;
+pub mod mode_two_attachment;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
 pub mod mode_selected_extent;
