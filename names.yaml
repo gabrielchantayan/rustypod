@@ -112420,3 +112420,30 @@ functions:
       source alpha plus output/destination aliasing. match.py finds the same
       53 instruction count; expected differences are LLVM's frame/register
       allocation and loop schedule.
+
+  - address: 0x080e75e4
+    ghidra: FUN_080e75e4
+    name: fat_table_sector_count
+    size: 12
+    sig: i32 fat_table_sector_count(i32 table_bits, i32 sector_size)
+    module: fs/fat_table_sector_count
+    status: ported
+    renames:
+      param_1/r0: table_bits
+      param_2/r1: sector_size
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec words at 0x080e75e4 add r0,r0,r1; add r0,r0,#1; and
+      b 0x08031568. The next real function begins at 0x080e75f0 with
+      mov r1,#0x1f, proving the 12-byte extent and correcting the Ghidra
+      overextended boundary. This computes the ARM-wrapping sum of table_bits,
+      sector_size, and one, divided by sector_size through the already ported
+      signed divide runtime __rt_sdiv (0x08031568), with a tail branch rather
+      than a call. Decoding every ARM BL word in osos.dec finds four direct
+      inbound sites, all plain unconditional bl: 0x0818cd48, 0x0818cdbc,
+      0x0818ce14, and 0x0818ce64; no predicated BL forms exist. The FAT
+      formatter caller supplies table-size inputs. Rust deliberately calls the
+      existing no-inline runtime seam instead of emitting an ARM tail branch;
+      match.py shows the expected added frame and call boundary while retaining
+      the two wrapping adds. Host tests cover zero, FAT12/FAT16-sized inputs,
+      overflow, and signed divisor/numerator edge cases.
