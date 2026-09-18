@@ -34,6 +34,7 @@ pub mod class_8c00;
 pub mod settings_value_scale;
 pub mod buffer_refill_request;
 pub mod beeper_construct;
+pub mod vtable_state_construct;
 pub mod buffered_stream_flush_pending;
 pub mod byte_source;
 pub mod buffer_transition_controller;
