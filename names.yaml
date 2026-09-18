@@ -110764,3 +110764,30 @@ functions:
       callee has no names.yaml identity; target builds retain an exact-address
       ABI seam rather than inventing one. Host tests model that opaque call
       and the independently ported child calls' direct field effects.
+
+  - address: 0x0814d310
+    ghidra: FUN_0814d310
+    name: mov_dispatch_context_init
+    size: 12
+    sig: "u32 *mov_dispatch_context_init(u32 *context)"
+    module: mov/dispatch_context
+    status: ported
+    renames:
+      param_1/r0: context
+      DAT_0814d31c: mov_parser_dispatch_vtable (0x08986874)
+      param_1_plus_0x00: dispatch_vtable
+    notes: >-
+      Raw osos.dec establishes the complete 12-byte function:
+      0x0814d310..0x0814d31c is ldr r1,[pc,#4]; str r1,[r0]; bx lr.
+      The next separately linked function begins at 0x0814d31c; that word
+      is the literal 0x08986874. Decoding every aligned ARM B/BL immediate
+      in the full image finds exactly four inbound direct calls, all plain
+      unconditional bl (0x0820a0f8, 0x0820a13c, 0x0821bf50, and
+      0x0821c0d0), with zero predicated bl forms. It writes the MOV parser
+      dispatch-table word to context+0x00. Callers subsequently dispatch
+      through offset +0x24, but the table's concrete C++ class and virtual
+      callee identity are unrecovered; this port deliberately names only the
+      verified dispatch-context role rather than inventing a callee identity.
+      The raw body leaves r0 unchanged despite Ghidra's void signature; Rust
+      returns context to preserve that ABI-visible value. Host tests prove the
+      exact first-word store, preservation of following words, and return.
