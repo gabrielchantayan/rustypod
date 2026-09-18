@@ -867,6 +867,10 @@ pub mod hints {
     // resource fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const RENDER_CONTEXT_RELEASE_RESOURCE: usize = 0xa800_0000;
+    // 0x1337_0000: dedicated to app/transfer_slot_resource_release's raw-u32
+    // transfer-slot and resource fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const TRANSFER_SLOT_RESOURCE_RELEASE: usize = 0x1337_0000;
     // 0x8a00_0000: dedicated to app/layout_state activation's target-width
     // profile-pointer fixture; mappings never unmap, so no other user may
     // share this hint.

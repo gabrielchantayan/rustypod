@@ -112205,3 +112205,27 @@ functions:
       __u2d(units_per_second))). The Rust port preserves that soft-float
       operation order and direct helper boundaries; it returns normally rather
       than tail-branching to __d2u.
+
+  # --- transfer-slot resource release ---
+  - address: 0x080f5af8
+    ghidra: FUN_080f5af8
+    name: transfer_slot_resource_release
+    size: 60
+    sig: "void transfer_slot_resource_release(u8 *transfer_slot)"
+    module: app/transfer_slot_resource_release
+    status: ported
+    renames:
+      param_1: transfer_slot
+      DAT_080f5b34: transfer_slot_resource_release_state (counter at 0x08a09d40)
+      indirect_call: transfer resource vtable slot +0x04 (unrecovered)
+    notes: >-
+      Raw osos.dec words establish the 60-byte body from 0x080f5af8 through
+      0x080f5b30; 0x080f5b34 is its literal-pool word (0x08a09d3c), and the
+      next independently entered function begins at 0x080f5b38. Complete ARM
+      B/BL decoding finds four inbound direct plain BL call sites, all
+      unconditional (0x080f5820, 0x080f588c, 0x080f5ab0, 0x080f5ad0), and no
+      predicated direct calls. It zeros the resource state word at +0x5c,
+      invokes the resource vtable's unresolved +0x04 slot with the resource in
+      r0, increments 0x08a09d3c+4, then clears transfer_slot+0x3c. The target
+      port preserves the recovered ARM sequence; the unlifted vtable target
+      has a typed host fixture only, not an invented callee identity.
