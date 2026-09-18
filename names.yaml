@@ -112391,3 +112391,32 @@ functions:
       install recording seams. Four inbound unconditional BL call sites were
       recovered at 0x080878cc, 0x082640f8, 0x08264184, and 0x08264200; none
       are predicated.
+
+  - address: 0x080e779c
+    ghidra: FUN_080e779c
+    name: rgba_source_over
+    size: 212
+    sig: "void rgba_source_over(u8 *output, const u8 *source, const u8 *destination)"
+    module: app/rgba_source_over
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: source
+      param_3/r2: destination
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec decoding establishes the exact 212-byte extent:
+      53 ARM words from 0x080e779c through `pop {r4,r5,r6,r7,r8,r9,sl,pc}`
+      at 0x080e786c, followed by the next function's `push` at 0x080e7870.
+      One plain direct bl calls __rt_sdiv (0x08031568); no predicated bl
+      exists. The four inbound direct calls are plain bl at 0x0807e48c,
+      0x0807e814, 0x0807e91c, and 0x0807e9ac, with no predicated forms.
+      A zero source alpha copies destination RGBA unchanged. Otherwise the
+      helper computes source-over RGB from the source alpha, destination
+      alpha plus one, and a Q10 quotient of 1024/output-alpha, then stores
+      the output alpha. The Rust RGB loop replaces the ARM unrolling while
+      retaining wrapping 32-bit arithmetic and calls the ported __rt_sdiv
+      seam explicitly. Host tests cover zero, minimum, partial, and maximum
+      source alpha plus output/destination aliasing. match.py finds the same
+      53 instruction count; expected differences are LLVM's frame/register
+      allocation and loop schedule.
