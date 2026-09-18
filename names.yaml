@@ -17825,6 +17825,27 @@ functions:
       write_volatile - plain writes let LLVM collapse the zero run into
       a nonexistent __aeabi_memclr and byte-store the rest.
 
+  - address: 0x0813858c
+    ghidra: FUN_0813858c
+    name: service_handler_slot_initialize
+    size: 84
+    sig: "void service_handler_slot_initialize(void *context, i32 slot)"
+    module: app/service_handler_slot_initialize
+    status: ported
+    vars: {param_1: context, param_2: slot, iVar2: slot_record, uVar1: descriptor, DAT_081385e0: service_handler_slot_table, FUN_08030f44: heap_panic, thunk_EXT_FUN_2200027c: iram_memzero_aligned_veneer, FUN_08138bd0: registry_find_for_slot}
+    notes: >-
+      Raw ARM extent is exactly 84 bytes from 0x0813858c through
+      0x081385df; the word at 0x081385e0 is its slot-table literal and
+      0x081385e4 starts the next function. Complete aligned ARM B/BL
+      decoding finds four direct incoming call sites (0x08138510,
+      0x08138798, 0x08138d1c, 0x08138efc), all plain unconditional bl and
+      no predicated inbound calls. Outbound code has blge heap_panic for
+      signed slot >= 3, then calls the IRAM memzero_aligned veneer for an
+      inactive 0x114-byte record and registry_find_for_slot(context, slot,
+      0), storing its result at +0x04. Deliberate deviation: Rust calls the
+      already ported memzero_aligned through a volatile function pointer
+      rather than the veneer, preventing LLVM builtin substitution.
+
   - address: 0x08138c80
     ghidra: FUN_08138c80
     name: service_handler_slot_state_set

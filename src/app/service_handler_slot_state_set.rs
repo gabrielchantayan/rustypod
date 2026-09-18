@@ -29,20 +29,13 @@ const SERVICE_MANAGER_ROOT_ADDRESS: usize = 0x089c_cc30;
 const SLOT_STATE_TABLE_ADDRESS: usize = 0x08ad_0f34;
 const SLOT_COUNT: usize = 3;
 
-type SlotInitialize = unsafe extern "C" fn(*mut u8, i32);
 type HandlerIdRead = unsafe extern "C" fn(*mut u8, i32) -> u16;
 
 #[derive(Clone, Copy)]
 struct SlotStateOps {
-    initialize: SlotInitialize,
     handler_id_read: HandlerIdRead,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_slot_initialize(context: *mut u8, slot: i32) {
-    let function: SlotInitialize = unsafe { core::mem::transmute(0x0813_858cusize) };
-    unsafe { function(context, slot) }
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_handler_id_read(manager_records: *mut u8, slot: i32) -> u16 {
@@ -51,24 +44,18 @@ unsafe extern "C" fn firmware_handler_id_read(manager_records: *mut u8, slot: i3
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn unavailable_slot_initialize(_context: *mut u8, _slot: i32) {
-    panic!("install a service-handler slot-initialize host seam before calling service_handler_slot_state_set")
-}
-
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn unavailable_handler_id_read(_manager_records: *mut u8, _slot: i32) -> u16 {
     panic!("install a service-handler handler-id-read host seam before calling service_handler_slot_state_set")
 }
 
+
 #[cfg(target_os = "none")]
 static mut SLOT_STATE_OPS: SlotStateOps = SlotStateOps {
-    initialize: firmware_slot_initialize,
     handler_id_read: firmware_handler_id_read,
 };
 
 #[cfg(not(target_os = "none"))]
 static mut SLOT_STATE_OPS: SlotStateOps = SlotStateOps {
-    initialize: unavailable_slot_initialize,
     handler_id_read: unavailable_handler_id_read,
 };
 
@@ -79,22 +66,22 @@ unsafe fn slot_state_ops() -> SlotStateOps {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct SlotStateRecord {
-    state: u8,
+pub(crate) struct SlotStateRecord {
+    pub(crate) state: u8,
     _padding_01: [u8; 3],
-    descriptor: u32,
+    pub(crate) descriptor: u32,
     _padding_08: [u8; 4],
-    initialized: u32,
-    _remainder: [u8; 0x104],
+    pub(crate) initialized: u32,
+    pub(crate) remainder: [u8; 0x104],
 }
 
-const EMPTY_SLOT_STATE_RECORD: SlotStateRecord = SlotStateRecord {
+pub(crate) const EMPTY_SLOT_STATE_RECORD: SlotStateRecord = SlotStateRecord {
     state: 0,
     _padding_01: [0; 3],
     descriptor: 0,
     _padding_08: [0; 4],
     initialized: 0,
-    _remainder: [0; 0x104],
+    remainder: [0; 0x104],
 };
 
 const _: [u8; 0x114] = [0; core::mem::size_of::<SlotStateRecord>()];
@@ -102,19 +89,19 @@ const _: [u8; 0x0c] = [0; core::mem::offset_of!(SlotStateRecord, initialized)];
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn slot_states() -> *mut SlotStateRecord {
+pub(crate) unsafe fn slot_states() -> *mut SlotStateRecord {
     SLOT_STATE_TABLE_ADDRESS as *mut SlotStateRecord
 }
 
 #[cfg(not(target_os = "none"))]
-static mut HOST_SLOT_STATES: [SlotStateRecord; SLOT_COUNT] = [EMPTY_SLOT_STATE_RECORD; SLOT_COUNT];
+pub(crate) static mut HOST_SLOT_STATES: [SlotStateRecord; SLOT_COUNT] = [EMPTY_SLOT_STATE_RECORD; SLOT_COUNT];
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_SERVICE_MANAGER: *mut u8 = ptr::null_mut();
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn slot_states() -> *mut SlotStateRecord {
+pub(crate) unsafe fn slot_states() -> *mut SlotStateRecord {
     ptr::addr_of_mut!(HOST_SLOT_STATES).cast()
 }
 
@@ -154,7 +141,7 @@ pub unsafe extern "C" fn service_handler_slot_state_set(context: *mut u8, slot: 
     let record = unsafe { slot_states().offset(slot as isize) };
     if unsafe { ptr::read_volatile(ptr::addr_of!((*record).initialized)) } == 0 {
         if state == -1 || state == 0 {
-            unsafe { (slot_state_ops().initialize)(context, slot) };
+            unsafe { super::service_handler_slot_initialize::service_handler_slot_initialize(context, slot) };
         } else if state == 6 {
             let id = unsafe { (slot_state_ops().handler_id_read)(manager.add(4), slot) } as u32;
             if !(0x200..=0x2ff).contains(&id) {
@@ -177,16 +164,9 @@ pub(crate) static SERVICE_HANDLER_SLOT_STATE_SET_TEST_LOCK: std::sync::Mutex<()>
 mod tests {
     use super::*;
     use crate::util::table_find::{SLOT_RECORDS, SLOT_RECORDS_LOCK};
-    use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
-    static INITIALIZE_CALLS: AtomicUsize = AtomicUsize::new(0);
-    static INITIALIZE_SLOT: AtomicI32 = AtomicI32::new(-99);
     static HANDLER_ID: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn recording_initialize(_context: *mut u8, slot: i32) {
-        INITIALIZE_CALLS.fetch_add(1, Ordering::SeqCst);
-        INITIALIZE_SLOT.store(slot, Ordering::SeqCst);
-    }
 
     unsafe extern "C" fn fixed_handler_id(_records: *mut u8, _slot: i32) -> u16 {
         HANDLER_ID.load(Ordering::SeqCst) as u16
@@ -194,11 +174,9 @@ mod tests {
 
     unsafe fn install_test_state() -> SlotStateOps {
         let previous = unsafe { ptr::read_volatile(ptr::addr_of!(SLOT_STATE_OPS)) };
-        unsafe { SLOT_STATE_OPS = SlotStateOps { initialize: recording_initialize, handler_id_read: fixed_handler_id } };
+        unsafe { SLOT_STATE_OPS = SlotStateOps { handler_id_read: fixed_handler_id } };
         unsafe { HOST_SLOT_STATES = [EMPTY_SLOT_STATE_RECORD; SLOT_COUNT] };
         unsafe { HOST_SERVICE_MANAGER = 1usize as *mut u8 };
-        INITIALIZE_CALLS.store(0, Ordering::SeqCst);
-        INITIALIZE_SLOT.store(-99, Ordering::SeqCst);
         previous
     }
 
@@ -216,7 +194,6 @@ mod tests {
             HOST_SLOT_STATES[1].state = 3;
             assert_eq!(service_handler_slot_state_set(ptr::null_mut(), 1, 6), 0);
             assert_eq!(HOST_SLOT_STATES[1].state, 3);
-            assert_eq!(INITIALIZE_CALLS.load(Ordering::SeqCst), 0);
             restore_test_state(previous);
         }
     }
@@ -227,8 +204,6 @@ mod tests {
         unsafe {
             let previous = install_test_state();
             service_handler_slot_state_set(0x1234usize as *mut u8, 2, -1);
-            assert_eq!(INITIALIZE_CALLS.load(Ordering::SeqCst), 1);
-            assert_eq!(INITIALIZE_SLOT.load(Ordering::SeqCst), 2);
             assert_eq!(HOST_SLOT_STATES[2].state, 0xff);
             restore_test_state(previous);
         }

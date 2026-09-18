@@ -337,6 +337,7 @@ pub mod empty_record_destructor;
 pub mod service_handler_pending_event_reset;
 pub mod service_handler_slot_bit_update;
 pub mod service_handler_slot_state_reset;
+pub mod service_handler_slot_initialize;
 pub mod service_handler_slot_state_set;
 pub mod silver_controller;
 pub mod silver_list_table;
