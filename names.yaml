@@ -109819,3 +109819,37 @@ functions:
       immediately replaces the base vtable with its derived vtable.
       Deliberate deviation: the base class identity is unestablished, so the
       semantic name describes only the verified vtable-state construction.
+
+  - address: 0x0817dff8
+    ghidra: FUN_0817dff8
+    name: media_player_transition_dispatch
+    size: 132
+    sig: "void media_player_transition_dispatch(void *object, u32 first_value, u32 second_value)"
+    module: app/media_player_transition_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_2/r1/r5: first_value
+      param_3/r2/r6: second_value
+      "[object + 0x00]": state
+      "[object + 0x1c]": handle
+      "[object + 0x20]": target_handle
+      FUN_0817ddd0: state_zero_handler
+      FUN_082317a4: first_value_forward
+      FUN_08231744: second_value_forward
+      FUN_081ded14: dispatcher_get
+      FUN_081df20c: followup_dispatch
+    notes: >-
+      Raw osos.dec establishes 33 ARM words from 0x0817dff8 through the
+      tail branch at 0x0817e078; 0x0817e07c begins the next function with
+      push {r4,r5,r6,lr}. It has two plain direct bl instructions
+      (0x0817ddd0 and 0x081ded14), two predicated blne instructions
+      (0x082317a4 and 0x08231744), and tail-branches to 0x081df20c.
+      It stores state 3 before every return. A prior state of zero calls
+      state_zero_handler then continues; state 3 and values other than
+      0, 5, or 6 return. Nonzero first_value and second_value independently
+      forward target_handle's dereferenced target, handle, and that value.
+      The final dispatcher_get/followup_dispatch sequence preserves the
+      original tail-call arguments. The five callees have no established
+      identities beyond their proven behavior, so target builds call their
+      verified retailOS addresses while host tests use replaceable seams.

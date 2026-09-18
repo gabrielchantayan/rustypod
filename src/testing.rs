@@ -1445,6 +1445,9 @@ pub mod hints {
     // 0x7fa0_0000: dedicated to ui/selection_clear_and_stop_timer's raw-u32
     // controller, embedded BitSet, and timer fixture; mappings never unmap.
     pub const SELECTION_CLEAR_AND_STOP_TIMER: usize = 0x7fa0_0000;
+    // 0x7fb0_0000: dedicated to app/media_player_transition_dispatch's
+    // raw-u32 object, target-slot, and target fixture; mappings never unmap.
+    pub const MEDIA_PLAYER_TRANSITION_DISPATCH: usize = 0x7fb0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -1690,3 +1693,6 @@ pub static UI_POOL_ENTRY_CREATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mut
 /// Serializes host tests that replace the unidentified UI base constructor
 /// used only by `app::ui_object_construct`.
 pub static UI_OBJECT_BASE_CONSTRUCT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes tests that replace the media-player transition dispatch seams.
+pub static MEDIA_PLAYER_TRANSITION_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
