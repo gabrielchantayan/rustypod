@@ -11,6 +11,7 @@ pub mod client_reserve;
 pub mod client_populate;
 pub mod client_take_region;
 pub mod client_register;
+pub mod client_mutex_unlock;
 pub mod dcache;
 pub mod endian_selector;
 pub mod gateway_service1;
