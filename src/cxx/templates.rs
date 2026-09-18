@@ -1300,6 +1300,50 @@ pub unsafe extern "C" fn deque_iter_advance_copy_elem4(
     dst.write(advanced.read());
     dst
 }
+/// deque_element_at — original: `FUN_081cb408` @ 0x081cb408 (48 bytes,
+/// `0x081cb408..0x081cb438`; the next separately linked function starts at
+/// 0x081cb438).
+///
+/// Decoding every aligned ARM branch word in `osos.dec` finds four inbound
+/// unconditional plain `bl` calls (0x0815ae04, 0x0815b14c, 0x0815b1c4, and
+/// 0x0815b2ac), with no predicated `bl` calls. The body calls
+/// [`container_is_empty`] on the deque at `container + 4`; an empty deque
+/// returns NULL. Otherwise it copies the begin iterator, advances that private
+/// copy by `index`, and returns its `cur` word.
+///
+/// Deliberate deviation: the target's four contiguous iterator pointer words
+/// are decoded individually before calling the existing typed advance seam.
+/// This is identical on 32-bit ARM and avoids treating 64-bit host pointers as
+/// four-byte fields.
+///
+/// # Safety
+///
+/// `container` must point to a target-layout header word followed by a readable
+/// block deque. Its iterator advance member must be available through
+/// [`DEQUE_ITER_ADVANCE_ELEM4_OPS`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_element_at")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_element_at(container: *const u8, index: i32) -> *mut u8 {
+    let deque = container.add(4);
+    if container_is_empty(deque) != 0 {
+        return core::ptr::null_mut();
+    }
+
+    let mut copied = [0u32; 4];
+    deque_iter_assign_alias_9fd4(copied.as_mut_ptr(), deque as *const u32);
+    let words = copied.as_ptr();
+    let source = DequeIter {
+        cur: words.read() as usize as *mut u8,
+        seg_base: words.add(1).read() as usize as *mut u8,
+        seg_end: words.add(2).read() as usize as *mut u8,
+        seg_slot: words.add(3).read() as usize as *mut *mut u8,
+    };
+    let mut advanced = DequeIter::NULL;
+    deque_iter_advance_copy_elem4(&mut advanced, &source, index);
+    advanced.cur
+}
+
 
 /// A pair of target words ordered by [`less_u32_pair`].
 ///
@@ -9047,6 +9091,35 @@ mod tests {
         assert_eq!(dst.seg_base as usize, 0x2222);
         assert_eq!(dst.seg_end as usize, 0x3333);
         assert_eq!(dst.seg_slot as usize, 0x4444);
+    }
+    #[test]
+    fn deque_element_at_returns_null_without_advancing_an_empty_target_layout_deque() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let words = [0u32; 12];
+
+        let result = unsafe { deque_element_at(words.as_ptr() as *const u8, i32::MIN) };
+
+        assert!(result.is_null());
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn deque_element_at_advances_a_private_iterator_from_target_words() {
+        let _guard = deque_iter_advance_elem4_guard();
+        unsafe { install_recording_deque_iter_advance_elem4() };
+        let mut words = [0u32; 12];
+        words[1..5].copy_from_slice(&[0x10, 0x20, 0x30, 0x40]);
+        words[9] = 1;
+
+        let result = unsafe { deque_element_at(words.as_ptr() as *const u8, -7) };
+
+        assert_eq!(result as usize, 0x1111);
+        let calls = unsafe { &*core::ptr::addr_of!(DEQUE_ITER_ADVANCE_ELEM4_CALLS) };
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].distance, -7);
+        assert_eq!(calls[0].source, [0x10, 0x20, 0x30, 0x40]);
     }
 
     #[test]
