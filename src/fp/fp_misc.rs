@@ -5412,6 +5412,7 @@ mod tests {
         std::panic!("class6000_ui32_resource_60a4 writes nothing to the registry");
     }
 
+
     unsafe extern "C" fn unreachable_registry_notify(_this: *mut Registry) -> *mut u8 {
         std::panic!("class6000_ui32_resource_60a4 fires no registry notification");
     }
