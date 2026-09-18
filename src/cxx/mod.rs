@@ -297,6 +297,7 @@ pub mod word_key_map;
 pub mod tagged_buffer_release;
 pub mod word_key_set;
 pub mod word_key_set_count;
+pub mod owner_callback_dispatch;
 pub mod timer_stop_then_clear_bit_set;
 pub mod transition_addon;
 pub mod typed_allocation_release;
