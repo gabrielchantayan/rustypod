@@ -43,6 +43,9 @@ pub mod hints {
     // LC_CTYPE table fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STRING_TRIM_CTYPE: usize = 0x7f40_0000;
+    // 0x7f00_0000: dedicated to app/file_record_registry_destruct's
+    // target-width registry fixture; mappings never unmap.
+    pub const FILE_RECORD_REGISTRY_DESTRUCT: usize = 0x7f00_0000;
     // 0x7f80_0000: dedicated to codegen/interference's raw-u32 graph and
     // arena fixture; mappings never unmap, so no other user may share it.
     pub const CG_INTERFERENCE_EDGE_LINK: usize = 0x7f80_0000;
