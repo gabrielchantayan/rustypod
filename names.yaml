@@ -111409,3 +111409,22 @@ functions:
       write, and +20 mask. Host test drives both rings through a low-u32
       fixture, verifies all 28 bytes and signal selection, then verifies a
       zero-mask failure does not signal.
+  - address: 0x08124cd0
+    ghidra: FUN_08124cd0
+    name: callback_dispatch_has_pending
+    size: 28
+    sig: "u32 callback_dispatch_has_pending(const CallbackDispatchContext *context)"
+    module: app/callback_dispatch_has_pending
+    status: ported
+    vars: {param_1/r0: context, "context+0x4": pending_state, "pending_state+0x4": pending_count}
+    notes: >-
+      Raw ARM is exactly seven words from 0x08124cd0 through the bx lr at
+      0x08124ce8; the distinct following function starts at 0x08124cec.
+      It returns zero for a NULL pending_state and otherwise normalizes the
+      signed pending_count word to one iff it is positive. The caller context
+      itself is not NULL-guarded. The body contains no BL instructions.
+      Decoding all ARM B/BL-immediate words finds four incoming calls, all
+      unconditional BL (0x081576ec, 0x0815792c, 0x08157a28, 0x08157be0),
+      and zero predicated BL calls. Rust models the two pointer-bearing
+      records with repr(C); native host pointer width deliberately widens
+      their host offsets while ARM retains the verified +0x4 fields.
