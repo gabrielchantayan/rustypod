@@ -112465,3 +112465,28 @@ functions:
       nonnegative, otherwise computes 0-value in 32-bit two's-complement
       arithmetic; i32::MIN therefore remains i32::MIN. No deliberate
       deviations.
+  - address: 0x080e7514
+    ghidra: FUN_080e7514
+    name: linked_list_refresh_sort_ascending
+    size: 152
+    sig: "void linked_list_refresh_sort_ascending(RefreshSortAnchor *anchor)"
+    module: util/linked_list_refresh_sort_ascending
+    status: ported
+    renames:
+      param_1/r0: anchor
+      piVar2/r1: current_node
+      piVar3/r2: next_node
+      piVar4/r3: previous_next
+      puVar1/r1: refresh_node
+    notes: >-
+      Raw A32 decoding establishes the exact 152-byte instruction body
+      0x080e7514..0x080e75ac; the ldr r2,[r0] at 0x080e75ac begins the
+      next real function. The first loop loads each node key from its
+      +0x08 cursor, advances that cursor by +0x0c stride words times four,
+      and decrements the +0x10 remaining word with ARM wrapping arithmetic.
+      The second loop stably bubble-sorts the singly linked nodes by
+      ascending signed key: adjacent nodes are exchanged only when current
+      key is greater than next key. Whole-image A32 decoding finds four
+      inbound direct calls, all unconditional plain bl, and zero predicated
+      bl forms. Rust preserves target-width pointer fields as u32 and uses
+      volatile aligned word access; no deliberate behavioral deviations.

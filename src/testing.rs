@@ -1513,6 +1513,9 @@ pub mod hints {
     // 0x083e_9000: dedicated to util/fixed_record_u16_lookup's runtime
     // record-table fixture; mappings never unmap, so no other user may share it.
     pub const FIXED_RECORD_U16_LOOKUP: usize = 0x083e_9000;
+    // 0x8030_0000: dedicated to util/linked_list_refresh_sort_ascending's
+    // target-width anchor, nodes, and cursor fixture; mappings never unmap.
+    pub const LINKED_LIST_REFRESH_SORT_ASCENDING: usize = 0x8030_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
