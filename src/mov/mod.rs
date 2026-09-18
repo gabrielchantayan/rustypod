@@ -2,6 +2,7 @@
 pub mod atom_info;
 pub mod atom_table;
 pub mod chunk_offset_table_load_window;
+pub mod u32_window_reader;
 pub mod atom_tree_has_offsets;
 pub mod atom_node;
 pub mod chain_table;
