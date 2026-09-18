@@ -112176,3 +112176,32 @@ functions:
       raw-address seam with a host model of its four observed byte clears.
       Handler literal 0x080ed15c is an interior instruction of a function
       starting at 0x080ed144, not a callable entry; its Rust handler is inert.
+
+  # --- buffered stream offset timestamp conversion ---
+  - address: 0x080f67c4
+    ghidra: FUN_080f67c4
+    name: stream_buffer_offset_to_milliseconds
+    size: 76
+    sig: "u32 stream_buffer_offset_to_milliseconds(const u8 *stream, u32 offset)"
+    module: app/stream_buffer_offset_to_milliseconds
+    status: ported
+    renames:
+      param_1: stream
+      param_2: offset
+      FUN_08036f14: __rt_udiv
+      FUN_083eb9b4: __u2d
+      FUN_083eba48: __dmul
+      FUN_083eb238: __ddiv
+      FUN_083eb880: __d2u
+    notes: >-
+      Raw osos.dec words establish the 76-byte code extent
+      0x080f67c4..0x080f6810: pop {r4-r8,lr}; b __d2u ends the body, with
+      0x080f6810/0x080f6814 the 1000.0 literal and the next function opening
+      at 0x080f6818. It has five direct unconditional plain BL instructions
+      (__u2d twice, __rt_udiv, __dmul, and __ddiv), zero predicated BL
+      instructions, and one plain-B tail call to __d2u. It loads stream+0x418
+      as units_per_second and stream+0x434 as offset_quantum, computes
+      __d2u(__ddiv(__dmul(__u2d(offset / offset_quantum), 1000.0),
+      __u2d(units_per_second))). The Rust port preserves that soft-float
+      operation order and direct helper boundaries; it returns normally rather
+      than tail-branching to __d2u.
