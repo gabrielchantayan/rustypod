@@ -72514,6 +72514,38 @@ functions:
       directly instead of subtracting four from the call result. Raw
       disassembly: osos.dec 0x083e2230; match.py structural review recorded.
 
+  # --- pending-event queue discard ---
+  - address: 0x081e2d48
+    ghidra: FUN_081e2d48
+    name: pending_event_discard_all_for_key
+    size: 76
+    sig: "u8 *pending_event_discard_all_for_key(u8 *this)"
+    module: app/pending_event_discard_all_for_key
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      r6: selected_key (this + 0x2d0)
+      local_14/sp+0x04: discarded_payload
+      local_18/sp+0x08: tag_a (WILDCARD_TAG)
+      local_1c/sp+0x0c: tag_b (WILDCARD_TAG)
+      DAT_081e2d94: WILDCARD_TAG (0xffff)
+      FUN_08138f14: pending_event_take
+    notes: >-
+      Raw ARM extent is exactly 0x081e2d48..0x081e2d94: 19 instruction
+      words, ending in pop {r0-r6,pc}; 0x0000ffff at 0x081e2d94 is its
+      literal-pool word and the next real function begins at 0x081e2d98.
+      Four direct, unconditional BL callers are binary-verified at
+      0x081e2814, 0x081e287c, 0x081e29b4, and 0x081e29d8; there are no
+      predicated BL callers. Its body has one unconditional BL, to the
+      already ported pending_event_take @ 0x08138f14. It reads the selected
+      key at this+0x2d0 once, repeatedly calls pending_event_take with both
+      tag slots initialized to 0xffff and a discarded payload slot, and stops
+      on the first nonzero status. The ARM save/restore of r0 makes the
+      return value this; Rust returns this explicitly. Host tests cover
+      consuming separated matching nodes, preserving nonmatching nodes, and
+      the first-miss pass-through result. Raw disassembly: osos.dec
+      0x081e2d48; match.py structural review recorded.
+
   # --- pending-event queue take ---
   - address: 0x08138f14
     ghidra: FUN_08138f14
