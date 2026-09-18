@@ -89022,6 +89022,30 @@ functions:
       tests use a unique low u32 fixture to prove both volume-byte profiles,
       the exact selector==1 split, field writes, timer stop, and r0 forwarding.
 
+  # --- TTrackExtrasCache entry payload lookup ---
+  - address: 0x081ba040
+    ghidra: FUN_081ba040
+    name: track_extras_cache_entry_payload
+    size: 20
+    sig: "u32 track_extras_cache_entry_payload(void *cache, void *key)"
+    module: app/track_extras_cache_entry_payload
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: key
+      FUN_081ba1ec: unported_entry_lookup
+      "*entry": entry_payload
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: push {r4,lr} at
+      0x081ba040, bl 0x081ba1ec, cmp r0,#0, ldrne r0,[r0], and pop {r4,pc}
+      at 0x081ba050. The next function begins at 0x081ba054 with
+      cmp r1,#0x5500. Whole-image decoding of every ARM B/BL immediate finds
+      exactly four inbound calls, all unconditional plain bl at 0x08084e4c,
+      0x0817c930, 0x081df048, and 0x0821144c; there are no predicated forms.
+      It returns zero for a NULL entry or the matched entry's first word.
+      The unported direct callee 0x081ba1ec is invoked through a volatile
+      fixed-address seam; no broader identity is claimed. Host tests record
+      forwarded arguments and cover both the NULL and non-NULL entry paths.
   # --- TTrackExtrasCache fixed-static accessor ---
   - address: 0x081ba3ac
     ghidra: FUN_081ba3ac

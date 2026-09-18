@@ -374,6 +374,7 @@ pub mod root_slot_190_query;
 pub mod update_dispatch;
 pub mod trace_buffer;
 pub mod track_extras_cache;
+pub mod track_extras_cache_entry_payload;
 pub mod ui_flag_update_forwarder;
 pub mod tbm_app_client_cache;
 pub mod volume_controller_byte_at_90;
