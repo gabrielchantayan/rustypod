@@ -120,6 +120,7 @@ pub mod event_listener_controller_available;
 pub mod event_list;
 pub mod observer_list_register;
 pub mod rb_tree_pool_destruct;
+pub mod opaque_tree_vector_destruct;
 pub mod event_payload_message;
 pub mod event_source;
 pub mod facade_registry_walk;
