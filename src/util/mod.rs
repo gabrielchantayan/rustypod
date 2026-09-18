@@ -53,6 +53,7 @@ pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;
 pub mod fatal_cleanup_no_op;
+pub mod fatal_operation_cleanup_no_op;
 pub mod framed_word_buffer_decode;
 pub mod font_face_ensure_ready;
 pub mod matrix_state_apply_transform;
