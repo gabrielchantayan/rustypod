@@ -15066,6 +15066,34 @@ functions:
       callers. Host coverage proves zeroing both signed counts and the
       subglyph count, copying every outline and tail field, and preserving
       the loader header.
+  - address: 0x080dc854
+    ghidra: FUN_080dc854
+    name: ft_glyph_loader_adjust_points
+    size: 80
+    sig: "void ft_glyph_loader_adjust_points(FtGlyphLoader *loader)"
+    module: ft/cff_builder
+    status: ported
+    renames:
+      param_1/r0: loader
+      "[loader,#0x10]": use_extra
+      "[loader,#0x14]": base.outline
+      "[loader,#0x28]": base.extra_points
+      "[loader,#0x34]": current.outline
+      "[loader,#0x48]": current.extra_points
+    notes: >-
+      FreeType 2.3 FT_GlyphLoader_Adjust_Points
+      (internal/ftgloadr.c). Raw osos.dec words establish the complete
+      80-byte leaf body at 0x080dc854..0x080dc8a4; the distinct following
+      function starts with push {r4,lr} at 0x080dc8a4. It has no direct
+      plain or predicated BL instructions. Decoding every ARM B/BL immediate
+      in osos.dec finds four direct callers: three unconditional plain bl at
+      0x0804c78c, 0x0804c96c, and 0x0804c8a0, plus one predicated bleq at
+      0x0804c8e8. The helper advances current.outline points/tags by the
+      signed base point count, contours by the signed base contour count, and
+      when use_extra is nonzero advances current.extra_points by the point
+      count. The Rust port uses named repr(C) fields, so 64-bit host pointers
+      never corrupt the target's four-byte layout; host tests cover enabled
+      extra points and signed negative offsets with disabled extra points.
   - address: 0x0804cb24
     ghidra: FUN_0804cb24
     name: ft_list_find

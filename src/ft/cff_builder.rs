@@ -172,7 +172,8 @@ const _: [u8; 0x20] = [0; core::mem::size_of::<FtGlyphLoad>()];
 pub struct FtGlyphLoader {
     _reserved_00: u32,
     pub max_points: u32,
-    _reserved_08: [u32; 3],
+    _reserved_08: [u32; 2],
+    pub use_extra: u32,
     pub base: FtGlyphLoad,
     pub current: FtGlyphLoad,
 }
@@ -216,6 +217,39 @@ pub unsafe extern "C" fn ft_glyph_loader_rewind(loader: *mut FtGlyphLoader) {
     loader.base.outline.n_points = 0;
     loader.base.num_subglyphs = 0;
     loader.current = loader.base;
+}
+
+/// `FT_GlyphLoader_Adjust_Points` (FreeType internal/ftgloadr.c) — original:
+/// `FUN_080dc854` @ `0x080dc854`, 80 bytes
+/// (`0x080dc854..0x080dc8a4`; the following `push {r4,lr}` starts the next
+/// function). The body is a leaf with zero plain or predicated `bl`
+/// instructions; four direct callers were verified by decoding every ARM
+/// branch-with-link word in `osos.dec`.
+///
+/// Repositions `current`'s point, tag, and contour cursors from `base` after
+/// its signed outline counts. When `use_extra` is nonzero, it likewise
+/// repositions the auxiliary point cursor. This is the source-identical
+/// FreeType helper; the named fields preserve the target's four-byte pointer
+/// spacing while allowing host pointers to widen.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+/// `loader` must be a valid, writable [`FtGlyphLoader`], and every non-null
+/// base cursor must remain valid for the signed offset. The retail function
+/// has no NULL guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_glyph_loader_adjust_points(loader: *mut FtGlyphLoader) {
+    let loader = unsafe { &mut *loader };
+    let point_count = loader.base.outline.n_points as isize;
+    loader.current.outline.points = unsafe { loader.base.outline.points.offset(point_count) };
+    loader.current.outline.tags = unsafe { loader.base.outline.tags.offset(point_count) };
+    loader.current.outline.contours =
+        unsafe { loader.base.outline.contours.offset(loader.base.outline.n_contours as isize) };
+    if loader.use_extra != 0 {
+        loader.current.extra_points = unsafe { loader.base.extra_points.offset(point_count) };
+    }
 }
 
 /// Firmware load address of the unported glyph-loader grow path
@@ -568,7 +602,8 @@ mod tests {
                 loader: FtGlyphLoader {
                     _reserved_00: 0xdeadbeef,
                     max_points,
-                    _reserved_08: [0xdeadbeef; 3],
+                    _reserved_08: [0xdeadbeef; 2],
+                    use_extra: 0xdeadbeef,
                     base: FtGlyphLoad {
                         outline: FtOutline {
                             n_points: base_points,
@@ -665,7 +700,8 @@ mod tests {
                 loader: FtGlyphLoader {
                     _reserved_00: 0xdeadbeef,
                     max_points,
-                    _reserved_08: [0xdeadbeef; 3],
+                    _reserved_08: [0xdeadbeef; 2],
+                    use_extra: 0xdeadbeef,
                     base: FtGlyphLoad {
                         outline: FtOutline {
                             n_contours: 0,
@@ -875,7 +911,8 @@ mod tests {
         let mut loader = FtGlyphLoader {
             _reserved_00: 0xdeadbeef,
             max_points: 99,
-            _reserved_08: [0xdeadbeef; 3],
+            _reserved_08: [0xdeadbeef; 2],
+            use_extra: 0xdeadbeef,
             base,
             current: FtGlyphLoad {
                 outline: FtOutline {
@@ -908,6 +945,54 @@ mod tests {
         assert_eq!(loader.current.subglyphs, subglyphs.as_mut_ptr().cast());
         assert_eq!(loader.max_points, 99);
         assert_eq!(loader._reserved_00, 0xdeadbeef);
-        assert_eq!(loader._reserved_08, [0xdeadbeef; 3]);
+        assert_eq!(loader._reserved_08, [0xdeadbeef; 2]);
+        assert_eq!(loader.use_extra, 0xdeadbeef);
+    }
+
+    // --- ft_glyph_loader_adjust_points ---
+
+    #[test]
+    fn adjust_points_advances_all_cursors_and_extra_when_enabled() {
+        let mut points = [FtVector { x: 0, y: 0 }; 8];
+        let mut tags = [0u8; 8];
+        let mut contours = [0i16; 8];
+        let mut extra_points = [FtVector { x: 0, y: 0 }; 8];
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.outline.n_points = 3;
+        loader.base.outline.n_contours = 2;
+        loader.base.outline.points = points.as_mut_ptr();
+        loader.base.outline.tags = tags.as_mut_ptr();
+        loader.base.outline.contours = contours.as_mut_ptr();
+        loader.base.extra_points = extra_points.as_mut_ptr();
+        loader.use_extra = 1;
+
+        unsafe { ft_glyph_loader_adjust_points(&mut loader) };
+
+        assert_eq!(loader.current.outline.points, unsafe { points.as_mut_ptr().add(3) });
+        assert_eq!(loader.current.outline.tags, unsafe { tags.as_mut_ptr().add(3) });
+        assert_eq!(loader.current.outline.contours, unsafe { contours.as_mut_ptr().add(2) });
+        assert_eq!(loader.current.extra_points, unsafe { extra_points.as_mut_ptr().add(3) });
+    }
+
+    #[test]
+    fn adjust_points_preserves_extra_cursor_when_disabled() {
+        let mut points = [FtVector { x: 0, y: 0 }; 2];
+        let mut tags = [0u8; 2];
+        let mut contours = [0i16; 2];
+        let mut old_extra = [FtVector { x: 1, y: 1 }; 1];
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.outline.n_points = -1;
+        loader.base.outline.n_contours = -1;
+        loader.base.outline.points = unsafe { points.as_mut_ptr().add(1) };
+        loader.base.outline.tags = unsafe { tags.as_mut_ptr().add(1) };
+        loader.base.outline.contours = unsafe { contours.as_mut_ptr().add(1) };
+        loader.current.extra_points = old_extra.as_mut_ptr();
+
+        unsafe { ft_glyph_loader_adjust_points(&mut loader) };
+
+        assert_eq!(loader.current.outline.points, points.as_mut_ptr());
+        assert_eq!(loader.current.outline.tags, tags.as_mut_ptr());
+        assert_eq!(loader.current.outline.contours, contours.as_mut_ptr());
+        assert_eq!(loader.current.extra_points, old_extra.as_mut_ptr());
     }
 }
