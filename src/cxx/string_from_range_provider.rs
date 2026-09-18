@@ -130,7 +130,6 @@ mod tests {
             let saved = core::ptr::addr_of!(RANGE_I32_OPS).read_volatile();
             core::ptr::addr_of_mut!(RANGE_I32_OPS).write_volatile(RangeI32Ops {
                 string_from_range: converter_fixture,
-                parse_decimal: saved.parse_decimal,
             });
             (lock, RangeOpsGuard(saved))
         }

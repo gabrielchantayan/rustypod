@@ -6842,6 +6842,29 @@ functions:
     status: ported
     notes: 96 call sites; lazy-init + default heap, tail heap_alloc.
 
+  - address: 0x080e7904
+    ghidra: FUN_080e7904
+    name: parse_i32_decimal
+    size: 108
+    sig: "i32 parse_i32_decimal(const char *text)"
+    module: strto/parse_i32_decimal
+    status: ported
+    renames:
+      param_1/r0: text
+      iVar3/r1: value
+      bVar2/r12: negative
+      bVar1/r2: byte
+    notes: >-
+      Raw osos.dec words establish the 108-byte extent
+      0x080e7904..0x080e796c; 0x080e7970 starts the separately linked
+      free_wrapper. The parser skips only space, tab, and LF, consumes one
+      optional sign, then accumulates decimal bytes with modulo-2^32
+      arithmetic and conditionally negates. Decoding the complete body finds
+      zero plain and zero predicated BL instructions. Four incoming plain BL
+      sites were independently found at 0x080f01fc, 0x08113358, 0x081d3c64,
+      and 0x081ee670; no predicated incoming calls. Ported direct and
+      range_i32's prior retailOS dispatch seam was removed.
+
   - address: 0x080e7970
     ghidra: FUN_080e7970
     name: free_wrapper
