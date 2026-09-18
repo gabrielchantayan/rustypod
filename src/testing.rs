@@ -182,6 +182,9 @@ pub mod hints {
     // 0x1d40_0000: dedicated to cxx/element_registry_slot_for_key's raw-u32
     // node and map fixture; mappings never unmap, so no other user may share it.
     pub const ELEMENT_REGISTRY_SLOT_FOR_KEY: usize = 0x1d40_0000;
+    // 0x1d50_0000: dedicated to ui/indexed_rect's raw-u32 rectangle-table
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const INDEXED_RECT_COPY_OFFSET: usize = 0x1d50_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0x1f10_0000: dedicated to cxx/tokenizer_next_string's raw-u32 UTF-16
