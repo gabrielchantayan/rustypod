@@ -72918,6 +72918,33 @@ functions:
       deviations. Host tests cover arbitrary words, zero/all-ones boundaries,
       pointer aliasing, and the absence of mutation.
 
+  # --- event subscription event-code setter ---
+  - address: 0x0811e84c
+    ghidra: FUN_0811e84c
+    name: event_subscription_set_code
+    size: 52
+    sig: "void event_subscription_set_code(EventSubscription *subscription, u32 event_code)"
+    module: app/event_subscription_init
+    status: ported
+    renames:
+      param_1/r0: subscription
+      param_2/r1: event_code
+      param_1_plus_0x00: event_code
+      param_1_plus_0x08: event_rank
+      param_1_plus_0x0c: event_descriptor
+      FUN_080ffcf0: event_rank_lookup
+      FUN_080ffa08: event_descriptor_lookup
+    notes: >-
+      Raw ARM spans 0x0811e84c..0x0811e880; the independent next function
+      begins at 0x0811e880. It returns without mutation when the event-code
+      word already equals r1. Otherwise it writes r1 to +0x00, calls
+      FUN_080ffcf0 with that code and writes its r0 result to +0x08, reloads
+      +0x00, calls FUN_080ffa08, and writes r0 to +0x0c. ARM decoding confirms
+      four direct inbound unconditional BL calls, no predicated calls, and two
+      unconditional outbound BL calls. Neither callee has a names.yaml entry,
+      so target builds call their verified retail addresses and host tests use
+      volatile seams. Reference C: decomp/c/011/0811e84c_FUN_0811e84c.c;
+      assembly: osos.asm 0x0811e84c.
   # --- event subscription constructor ---
   - address: 0x0811e978
     ghidra: FUN_0811e978
@@ -72940,10 +72967,10 @@ functions:
       returns the original subscription pointer. Every ARM B/BL word confirms
       five direct, unconditional BL callers (0x08173790, 0x08284af4,
       0x08284e90, 0x082858f0, and 0x082859d0), no predicated callers, and one
-      outbound BL to 0x0811e84c. The callee has no names.yaml entry; its
-      recovered body updates the event code and derives the +0x08/+0x0c words
-      from the firmware event tables. Target builds call that verified address;
-      host tests use a volatile seam. Reference C:
+      outbound BL to event_subscription_set_code. The callee stores the event
+      code and derives the +0x08/+0x0c words from the firmware event tables;
+      target builds call the Rust port, whose host tests use volatile lookup
+      seams. Reference C:
       decomp/c/011/0811e978_FUN_0811e978.c; assembly: osos.asm 0x0811e978.
 
   # --- opaque object +0x0d equality-to-one predicate ---
