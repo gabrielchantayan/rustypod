@@ -109937,3 +109937,25 @@ functions:
       to its two byte outputs. Deliberate deviation: target code uses a
       fixed-address literal veneer for the unported callee, while host tests
       install a callback seam.
+  - address: 0x08174714
+    ghidra: FUN_08174714
+    name: object_set_byte_0x27
+    size: 8
+    sig: "void object_set_byte_0x27(u8 *object, u8 value)"
+    module: util/object_set_byte_0x27
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: value
+      object_plus_0x27: byte_0x27
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent
+      0x08174714..0x0817471c: strb r1,[r0,#0x27]; bx lr. The next
+      independently linked function begins at 0x0817471c. Whole-image A32
+      B/BL decoding finds four inbound plain BL calls (0x08222758,
+      0x0823441c, 0x08239eb4, and 0x0823a210) and zero inbound predicated
+      BL calls. Each caller obtains the object through the unrecovered
+      singleton accessor at 0x08173848 and supplies a byte result from
+      0x08177d2c; this proves the store but not the object's concrete type
+      or field enum. Rust stores precisely one byte at +0x27 with no NULL
+      guard, preserving stock fault behavior. Deliberate deviations: none.
