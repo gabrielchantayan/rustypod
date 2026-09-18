@@ -17,6 +17,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081caf88
+    ghidra: FUN_081caf88
+    name: optional_pointer_record_init
+    size: 32
+    sig: "void optional_pointer_record_init(OptionalPointerRecord *record, u32 value, u32 context, u8 kind)"
+    module: util/optional_pointer_record_init
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: value
+      param_3/r2: context
+      param_4/r3: kind
+      record_plus_0x0: has_value
+      record_plus_0x1: kind
+      record_plus_0x4: value
+      record_plus_0x8: context
+      record_plus_0xc: reserved
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent
+      0x081caf88..0x081cafa8: movs ip,r1; movne ip,#1; strb ip,[r0];
+      strb r3,[r0,#1]; stmib r0,{r1,r2}; mov r1,#0; str r1,[r0,#12];
+      bx lr. The next independently linked function begins at 0x081cafa8
+      with cmp r1,#0x2600. The function has no internal calls. Whole-image
+      A32 decoding finds four incoming plain BL calls and no incoming
+      predicated BL calls (at 0x082acabc, 0x082acad0, 0x082acae8, and
+      0x082b1458). It initializes an optional-pointer record: has_value is
+      value != 0; kind, value, and context are stored; reserved is cleared.
+      Deliberate deviation: Rust models target pointers as u32 words on host
+      and target, preserving four-byte offsets.
   - address: 0x081cc690
     ghidra: FUN_081cc690
     name: selection_clear_and_stop_timer_when_empty
