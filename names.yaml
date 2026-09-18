@@ -81493,6 +81493,42 @@ functions:
       unconditional plain bl and none predicated: 0x081433fc, 0x0814a950,
       0x081b7630, 0x0822411c, 0x0829df58, and 0x082c8548.
   # --- Opaque storage-backend vtable dispatch ---
+  # --- Opaque storage-backend vtable read dispatch ---
+  - address: 0x08149de8
+    ghidra: FUN_08149de8
+    name: storage_backend_read
+    size: 40
+    sig: "i32 storage_backend_read(StorageBackendDispatcher *dispatcher, u32 block, u32 count, void *buffer, u32 flags)"
+    module: fs/storage_backend_read
+    status: ported
+    renames:
+      param_1/r0: dispatcher
+      param_2/r1: block
+      param_3/r2: count
+      param_4/r3: buffer
+      param_5/stack: flags
+      param_1_plus_0x4: backend
+      backend_plus_0x0: vtable
+      vtable_plus_0x8: storage_backend_read
+    notes: >-
+      Raw osos.dec decodes exactly ten ARM instructions at
+      0x08149de8..0x08149e0c: it pushes r3/lr, moves buffer through lr while
+      copying the fifth argument into the outgoing stack slot, loads
+      dispatcher+4 then backend+0 then vtable+0x08, restores buffer to r3,
+      and invokes the resulting target with blx ip. The next independently
+      linked function begins at 0x08149e10, so the true extent is 40 bytes.
+      Decoding every ARM B/BL-immediate in osos.dec finds four direct callers,
+      all unconditional plain bl at 0x080515ac, 0x08136d10, 0x08162028, and
+      0x082c6408; no predicated bl reaches this wrapper. The matching +0x0c
+      sibling is the existing storage_backend_transfer port, so this +0x08
+      slot is named storage_backend_read from its callers' block-buffer
+      transfers without inferring a concrete backend type. Host tests replace
+      the dynamic vtable call because target-width u32 vtable entries cannot
+      hold native host function pointers. match.py reports 14 Rust
+      instructions versus 10 retail instructions: both preserve the fifth
+      stack argument, load dispatcher/backend/vtable slot two, and blx the
+      result; LLVM adds a frame and black_box return preservation to prevent a
+      tail call.
   - address: 0x08149e10
     ghidra: FUN_08149e10
     name: storage_backend_transfer
