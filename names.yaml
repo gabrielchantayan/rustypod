@@ -77726,6 +77726,35 @@ functions:
       deviations: none. Host coverage proves all valid record offsets,
       halfword truncation, uncached reload, and the signed negative-slot
       path using an allocation that makes the retail address valid.
+  - address: 0x08193eac
+    ghidra: FUN_08193eac
+    name: service_manager_secondary_handler_code_set
+    size: 20
+    sig: "void service_manager_secondary_handler_code_set(u32 *slot_table, i32 slot, u16 code)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_3/r2: code
+      param_1_plus_slot_times_0x20_plus_0x1c: handler_code
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x08193eac..0x08193ec0: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; strh r2,[r0,#28]; bx lr`; the
+      following `cmp r1,#3` at 0x08193ec0 starts the next separately linked
+      function. It writes the low u16 at +0x1c in one of three 8-word
+      secondary handler records, preserving the adjacent high halfword. The
+      signed `blge` admits negative slots, which address unchecked before the
+      table exactly as retailOS does; slots >=3 terminate through ported
+      non-returning heap_panic. Decoding every ARM B/BL word in osos.dec found
+      exactly four inbound direct call sites — 0x081648d8, 0x08192b04,
+      0x08192c6c, and 0x0819303c — all unconditional plain BL; no predicated
+      forms or tail branches. The handler code is named from its paired getter
+      and code-keyed lookup callers, without asserting a concrete identity.
+      Deliberate deviations: none. Host coverage proves all valid record
+      offsets, low-halfword replacement, high-halfword preservation, reload,
+      and the signed negative-slot path.
   - address: 0x08193ee8
     ghidra: FUN_08193ee8
     name: service_manager_slot_handler_get
