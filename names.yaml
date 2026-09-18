@@ -110399,3 +110399,18 @@ functions:
       retains the target instruction sequence exactly; its host-only
       implementation uses volatile byte stores to safely test an unaligned
       fixture. Deliberate deviations: host storage width only.
+  - address: 0x08158740
+    ghidra: thunk_FUN_0826f0a0
+    name: message_0x13_forwarder
+    size: 4
+    sig: "tail ABI forwarder"
+    module: app/message_0x13_forwarder
+    status: ported
+    notes: >-
+      Raw ARM word 0xea045a56 is `b 0x0826f0a0`; the next independently
+      linked function begins at 0x08158744. Full-image A32 decoding finds
+      four plain inbound bl calls at 0x0812ed58, 0x08141454, 0x08146f50,
+      and 0x0816ab70, with zero predicated bl calls. The port is an
+      eight-byte relocation-safe ldr-pc literal veneer rather than the
+      stock four-byte PC-relative branch; it preserves the entire incoming
+      ABI and tail-call return edge.
