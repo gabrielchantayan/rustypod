@@ -184,6 +184,7 @@ pub mod class_9400_current_item_matches_media_player;
 pub mod media_player_queue_refresh;
 pub mod media_player_pending_item;
 pub mod media_player_interface_slot_11c;
+pub mod media_player_interface_slot_110;
 pub mod media_player_interface_status;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
