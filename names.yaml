@@ -107863,3 +107863,31 @@ functions:
       unchecked target-width context word at object +0x20. Deliberate
       deviation: Rust collapses the two tail veneers into that verified store
       rather than inventing veneer-target identities.
+
+  # --- mutex-handoff guarded opaque reset ---
+  - address: 0x08208578
+    ghidra: FUN_08208578
+    name: mutex_handoff_guarded_reset
+    size: 36
+    sig: "u32 mutex_handoff_guarded_reset(MutexHandoff *handoff)"
+    module: ui/mutex_handoff_guarded_reset
+    status: ported
+    renames:
+      param_1/r0: handoff
+      FUN_081fca10: mutex_handoff_lock
+      FUN_0820840c: guarded_reset
+      FUN_081fca40: mutex_handoff_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte range
+      0x08208578..0x0820859b: push {r4,lr}; preserve handoff in r4; call
+      mutex_handoff_lock @ 0x081fca10; call 0x0820840c with that same pointer;
+      call mutex_handoff_unlock @ 0x081fca40; return 1; pop {r4,pc}. The
+      next independently entered function begins at 0x0820859c with push
+      {r3,r4,r5,r6,r7,lr}. Decoding inbound A32 branch words finds four plain
+      unconditional BL call sites and zero predicated BL call sites. The
+      opaque reset callee clears and replaces private state through unported
+      helpers, so its semantic identity is deliberately not invented. Device
+      builds call its verified retail entry 0x0820840c through a fixed-address
+      seam; host tests replace that seam and cover both embedded and distinct
+      selected-mutex handoffs. Deliberate deviation: retain the unported reset
+      as a seam rather than reimplement its private-state operations.
