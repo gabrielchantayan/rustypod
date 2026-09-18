@@ -111975,3 +111975,37 @@ functions:
       result are preserved. Host tests cover the cached fast path and null
       cache construction, including the target-width cache word on a 64-bit
       host.
+
+  # --- audio output level register update ---
+  - address: 0x081071b8
+    ghidra: FUN_081071b8
+    name: audio_output_set_level
+    size: 48
+    sig: "void audio_output_set_level(void *output, u32 level, u32 apply)"
+    module: drivers/audio_output_level
+    status: ported
+    renames:
+      param_1/r0: output (unused by the raw body)
+      param_2/r1: level (low seven bits written to control bits 4..10)
+      param_3/r2: apply (zero leaves the register untouched)
+      DAT_081071e8: preserved control-bit mask 0x007c1ff7
+      DAT_38400800: AUDIO_OUTPUT_CONTROL register
+    notes: >-
+      Raw osos.dec words at 0x081071b8..0x081071e8 are exactly
+      e3520000 012fff1e e1a00201 e3a035e1 e5931800 e2000e7f e59f2010
+      e0011002 e3c11e7f e1810000 e5830800 e12fff1e. The next separately
+      linked function begins at 0x081071e8 with push {r3-r11,lr}, confirming
+      the 48-byte extent; the literal at that address is part of this body.
+      If apply is zero it returns before reading MMIO. Otherwise it keeps
+      only 0x007c1ff7 from the 0x38400800 word, clears bits 4..10, and writes
+      (level & 0x7f) << 4 there; output is never read. Whole-image ARM branch
+      decoding finds three plain BL callers (0x08293728, 0x08293754,
+      0x0829378c) and one predicated BL caller (0x08293e10). Caller context
+      identifies this as an audio-output level operation, but the register's
+      hardware block is not otherwise named. The port deliberately uses
+      volatile MMIO accesses instead of the stock ordinary ldr/str. Host test
+      covers no-op apply=0, low-seven-bit truncation, nonzero apply, field
+      replacement, and reserved-bit clearing. match.py reports an expected
+      structural diff: LLVM combines the stock mask-and-bic sequence into
+      0x007c1807 and adds its standard frame, while retaining the early return,
+      load, level mask/shift, merge, and store.
