@@ -2,6 +2,7 @@
 pub mod attr_record;
 pub mod ahtp_state_destroy;
 pub mod afm_next_statement_token;
+pub mod assign_active_entry_labels;
 pub mod always_succeeds;
 pub mod ascii_to_uppercase;
 pub mod ascii_string_to_uppercase;
