@@ -23129,6 +23129,40 @@ functions:
       records the own queue base and exact code 2 through the existing enqueue
       hook.
 
+  - address: 0x081a5a30
+    ghidra: FUN_081a5a30
+    name: volume_controller_post_byte_90_code
+    size: 40
+    sig: "void volume_controller_post_byte_90_code(EventCodeQueue *this)"
+    module: app/volume_controller_post_byte_90_code
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_081f77a4: volume_controller_get (direct, ported in app/singletons)
+      FUN_081fa044: volume_controller_byte_at_90 (direct, ported in app/volume_controller_byte_at_90)
+      FUN_081de270: event_code_queue_post (tail branch, ported in app/event_code_queue)
+    notes: >-
+      Raw ARM establishes the exact 40-byte extent 0x081a5a30..0x081a5a58:
+      `push {r4,lr}; mov r4,r0; bl volume_controller_get; bl
+      volume_controller_byte_at_90; cmp r0,#1; mov r0,r4; pop {r4,lr};
+      movne r1,#3; moveq r1,#4; b event_code_queue_post`. The next real
+      function begins at 0x081a5a60 with `push {r4,r5,r6,lr}`; the words at
+      0x081a5a58 and 0x081a5a5c are separately linked sibling wrappers
+      selecting event code 5. Ghidra incorrectly absorbs the shared queue
+      lock/push/unlock body from 0x081de270 into this wrapper.
+      Decoding every immediate A32 B/BL word in osos.dec finds exactly four
+      inbound direct plain bl sites, all unconditional, at 0x0817c618,
+      0x0817cb78, 0x0821df50, and 0x082a9b7c; no predicated bl forms or
+      inbound tail-b sites. The body has two direct plain bl calls, no
+      predicated bl calls, and one unconditional tail b. It gets the
+      volume-controller singleton, reads its unsigned +0x90 byte, then
+      posts code 4 exactly when that byte is one and code 3 otherwise. The
+      byte domain remains unknown, so the name deliberately preserves its
+      verified offset. Rust calls the ported queue post normally rather than
+      preserving the tail branch; its void contract makes the original r0
+      residue unobservable. Host test covers zero, one, another nonzero
+      value, and 0xff through the real singleton and enqueue seams.
+
   - address: 0x081a5500
     ghidra: FUN_081a5500
     name: singleton_class_8c00
