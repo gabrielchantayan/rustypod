@@ -99,6 +99,7 @@ pub mod default_navigation_request;
 pub mod current_window;
 pub mod scheduler_lock;
 pub mod selection_index;
+pub mod selection_clear_and_stop_timer;
 pub mod window_list_find_by_key;
 pub mod notification_dispatch;
 pub mod input_state_transition;
