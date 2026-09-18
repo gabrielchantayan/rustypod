@@ -48,7 +48,7 @@ unsafe fn dispatch_resource(view: *mut u8, value: u32, resource: u32) {
 #[cfg(not(target_os = "none"))]
 #[repr(C)]
 pub struct HostClass6280Vtable {
-    _before_resource: [usize; 0x58 / core::mem::size_of::<usize>()],
+    pub _before_resource: [usize; 0x58 / core::mem::size_of::<usize>()],
     pub resource: unsafe extern "C" fn(*mut u8, u32, u32),
 }
 
@@ -80,7 +80,7 @@ unsafe fn dispatch_provider(provider: *mut u8, position: i32) {
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe fn dispatch_resource(view: *mut u8, value: u32, resource: u32) {
+pub(crate) unsafe fn dispatch_resource(view: *mut u8, value: u32, resource: u32) {
     let vtable = ptr::read_volatile(view.cast::<*const HostClass6280Vtable>());
     ((*vtable).resource)(view, value, resource);
 }
