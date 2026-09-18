@@ -112447,3 +112447,21 @@ functions:
       match.py shows the expected added frame and call boundary while retaining
       the two wrapping adds. Host tests cover zero, FAT12/FAT16-sized inputs,
       overflow, and signed divisor/numerator edge cases.
+
+  - address: 0x080e75d8
+    ghidra: FUN_080e75d8
+    name: i32_abs_wrapping
+    size: 12
+    sig: "i32 i32_abs_wrapping(i32 value)"
+    module: util/i32_abs_wrapping
+    status: ported
+    vars: {param_1/r0: value}
+    notes: >-
+      Raw osos.dec words e3500000, b2600000, e12fff1e establish the exact
+      three-instruction extent 0x080e75d8..0x080e75e4: cmp r0,#0; rsblt
+      r0,r0,#0; bx lr. The add at 0x080e75e4 starts the next real function.
+      Whole-image A32 decoding finds four inbound direct plain unconditional
+      bl calls and zero predicated bl calls. It returns value unchanged when
+      nonnegative, otherwise computes 0-value in 32-bit two's-complement
+      arithmetic; i32::MIN therefore remains i32::MIN. No deliberate
+      deviations.
