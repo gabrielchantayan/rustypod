@@ -44971,6 +44971,36 @@ functions:
       has two unconditional bl instructions and one tail b. The port
       expresses the tail branch as a return after unlock and volatile-loads
       the mutex to retain the lock pair despite its null initializer.
+  # --- Task-message receive ---
+  - address: 0x0812c5dc
+    ghidra: FUN_0812c5dc
+    name: task_message_receive
+    size: 68
+    sig: "void task_message_receive(usize queue, u32 *message, u8 *auxiliary)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_2/r1: message
+      param_3/r2: auxiliary
+      local_8: receive_result
+      DAT_0812c620: task_message_emit_tag
+      DAT_0812c624: task_message_emit_post_marker
+    notes: >-
+      Raw osos.dec gives a 68-byte instruction extent from 0x0812c5dc
+      through the pop {r2,r3,r4,pc} at 0x0812c61c. The two literal words
+      at 0x0812c620 (b"emit") and 0x0812c624 (b"pots") belong to this
+      function; the next real function opens at 0x0812c628. Decoding every
+      aligned ARM B/BL word in osos.dec finds four direct unconditional bl
+      callers (0x0812bfec, 0x0812c2f0, 0x08148d04, 0x082921c4), no
+      predicated bl callers, and three unconditional bl instructions in the
+      body. It calls the unported 0x0807a2e8 queue/cell handoff with a
+      two-word stack result, copies seven words from the returned cell +4
+      into message, releases the cell through task_message_pool_release,
+      and writes b"pots" to message[3]+0x20 only when message[0] is
+      b"emit". The 0x0807a2e8 callee identity is deliberately not claimed:
+      the port exposes only a queue/cell seam, calls its retailOS address on
+      target, and requires an installed host operation for tests.
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
   - address: 0x0812c6b0
