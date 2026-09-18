@@ -32960,6 +32960,36 @@ functions:
       family as the assign. match.py structural: same push/mov-r4/call/
       return-this frame; LLVM may inline the teardown helpers.
 
+  - address: 0x0816ce88
+    ghidra: FUN_0816ce88
+    name: refcounted_ptr_release_dtor_mutex
+    size: 148
+    sig: "RefcountedBody **refcounted_ptr_release_dtor_mutex(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0839d274: refcounted_body_mutex_unlock_slot1
+      FUN_0807f650: mutex_delete
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 148-byte extent 0x0816ce88..0x0816cf1c;
+      0x0816cf20 begins the next independently linked function. The body has
+      five BL instructions: four plain (the virtual destructor, mutex-unlock
+      helper, mutex-delete, and operator_delete) and one predicated BLNE to
+      mutex_lock. It returns slot unchanged for a NULL body. Otherwise it locks
+      optional body+8, wrapping-decrements the i32 refcount at +4, and clears
+      slot. A non-final release only unlocks; a final release NULL-guardedly
+      dispatches implementation vtable word 1 (+4), unlocks, deletes/frees the
+      mutex, clears body+8, and tag-2-frees the body. Rust calls existing mutex
+      and heap ports directly rather than the local unlock helper; this is the
+      deliberate call-boundary deviation, preserving the observed ordering.
+
   - address: 0x0816cf24
     ghidra: FUN_0816cf24
     name: refcounted_ptr_release_dtor
