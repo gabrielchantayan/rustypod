@@ -75617,6 +75617,31 @@ functions:
       BIO_write, and BIO_free_all retain verified target-address seams;
       host tests model their ABI boundaries. Deliberate deviations: none.
 
+  - address: 0x0819c7a4
+    ghidra: FUN_0819c7a4
+    name: get_global_flag_byte
+    size: 12
+    sig: "u8 get_global_flag_byte(u32 index)"
+    module: app/global_flag_table
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0819c7b0: global flag-byte table at 0x08a77a8f
+    notes: >-
+      Reads the unguarded global flag-byte-table offset index. Raw ARM is
+      e59f1004 (ldr r1,[pc,#4]), e7d10000 (ldrb r0,[r1,r0]), e12fff1e
+      (bx lr), followed by its 0x08a77a8f literal-pool word at 0x0819c7b0.
+      The preceding bx lr at 0x0819c7a0 closes the prior function and the
+      next function starts with push {r4-r11,lr} at 0x0819c7b4, establishing
+      the exact 12-byte extent. Decoding every ARM B/BL word in osos.dec
+      finds four direct call sites: all plain unconditional bl, with zero
+      predicated forms and zero direct B sites. Callers map staged view-event
+      bytes and read indices 0x5a, 0x6e, and 0x6f before writing the same
+      table through set_global_flag_byte. Deliberate deviation: host builds
+      use the existing local 0x78-byte table for observable tests; target
+      builds retain the literal address and an unguarded volatile byte read.
+      Reference C: decomp/c/016/0819c7a4_FUN_0819c7a4.c.
+
   - address: 0x0819c9d0
     ghidra: FUN_0819c9d0
     name: set_global_flag_byte
