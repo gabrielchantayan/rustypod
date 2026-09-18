@@ -321,6 +321,10 @@ pub mod hints {
     // silently on every host.
     pub const ELEMENT_REFERENCE_PERSISTENT_ID: usize = 0x5a00_0000;
     pub const TIMED_TRANSITION: usize = 0x5c00_0000;
+    // 0x5b00_0000: dedicated to app/transition_page_clone's raw-u32 source,
+    // destination, and transition fixtures; mappings never unmap, so no other
+    // test may share this hint.
+    pub const TRANSITION_PAGE_CLONE: usize = 0x5b00_0000;
     // 0x5d00_0000: dedicated to util/tagged_resource_payload's raw-u32
     // indirect-value fixture; mappings never unmap, so no other test may
     // share this hint.
