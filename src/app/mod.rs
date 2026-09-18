@@ -77,6 +77,7 @@ pub mod volume_controller_post_byte_90_code;
 pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
+pub mod locked_owned_context_destroy;
 pub mod controller_event_category_index;
 pub mod controller_event_is_enabled;
 pub mod controller_history_select;

@@ -109853,3 +109853,32 @@ functions:
       original tail-call arguments. The five callees have no established
       identities beyond their proven behavior, so target builds call their
       verified retailOS addresses while host tests use replaceable seams.
+
+  - address: 0x0817bfe8
+    ghidra: FUN_0817bfe8
+    name: locked_owned_context_destroy
+    size: 92
+    sig: "void locked_owned_context_destroy(void *controller)"
+    module: app/locked_owned_context_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      "controller+0x58": owned_context
+      "controller+0xa4c": mutex
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_0817e0fc: owned_context_destroy
+      FUN_08270414: scoped_context_destroy
+      FUN_082aad24: operator_delete
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent
+      0x0817bfe8..0x0817c043; 0x0817c044 begins a separate selector-return
+      function. The body has four plain unconditional BL instructions and no
+      predicated BL forms: lock through veneer 0x082621a8, destroy the
+      non-NULL owned_context with mode zero, destroy owned_context+4 through
+      scoped_context_destroy, then operator_delete the allocation. It clears
+      controller+0x58 and tail-branches through unlock veneer 0x082621ac.
+      The unported direct destroy helper's identity is deliberately not
+      expanded beyond its proven role; target builds call 0x0817e0fc and host
+      tests use a replaceable seam. Rust's normal call to the ported unlock
+      endpoint deliberately replaces the final ARM tail branch.
