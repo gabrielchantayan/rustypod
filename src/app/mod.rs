@@ -64,6 +64,7 @@ pub mod controller_context_scope_dispatch;
 pub mod controller_opaque_item_vector;
 pub mod controller_timer_pair;
 pub mod controller_transition_volume_post;
+pub mod volume_controller_post_commands;
 pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
