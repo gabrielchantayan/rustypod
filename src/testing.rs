@@ -611,6 +611,9 @@ pub mod hints {
     // cursor fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const OWNER_CURRENT_RECORD_HANDLE: usize = 0xf800_0000;
+    // 0xf600_0000: dedicated to app/opaque_impl_callback_validate's raw-u32
+    // owner and implementation fixture; mappings never unmap.
+    pub const OPAQUE_IMPL_CALLBACK_VALIDATE: usize = 0xf600_0000;
     // 0xd300_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
