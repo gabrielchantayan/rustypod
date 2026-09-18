@@ -8,6 +8,7 @@ pub mod app_screen_position_decrement_if_flagged;
 pub mod app_screen_update_position;
 pub mod active_service_handler_readiness;
 pub mod application_resource_provider;
+pub mod application_message_post_global;
 pub mod application_global_slot_is_clear;
 pub mod application_string_registry;
 pub mod animation;

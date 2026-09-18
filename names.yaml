@@ -108282,3 +108282,34 @@ functions:
       pointers cannot represent host callbacks; target builds call the
       existing ports. match.py reports the same call sequence but LLVM adds a
       frame and folds local callee references into archive relocations.
+
+  # --- application: current-application message forwarder ---
+  - address: 0x081f0724
+    ghidra: FUN_081f0724
+    name: application_message_post_global
+    size: 48
+    sig: "void application_message_post_global(void *owner, u32 message_code, u32 arg, void *payload, u32 flags)"
+    module: app/application_message_post_global
+    status: ported
+    renames:
+      param_1/r0: owner (unread)
+      param_2/r1/r4: message_code
+      param_3/r2/r5: arg
+      param_4/r3/r6: payload
+      param_5/[sp,#24]/r7: flags
+      FUN_0814b460: application_global_get
+      FUN_0814b038: application_message_dispatch
+    notes: >-
+      Raw osos.dec disassembly establishes the complete 48-byte extent
+      0x081f0724..0x081f0753: push {r3,r4-r7,lr}, load the fifth argument
+      from [sp,#24], save r1/r2/r3, plain bl 0x0814b460, restore the saved
+      trailing words into r1/r2/r3, stack-store flags, plain bl
+      0x0814b038, and pop {r3,r4-r7,pc}. The next independently linked
+      function starts with push {r3,r4-r9,lr} at 0x081f0754. The four known
+      direct inbound calls are plain BL; no predicated form is attributed.
+      The wrapper ignores owner and sends the getter's returned application
+      object plus (message_code,arg,payload,flags) unchanged to the dispatcher.
+      Deliberate deviation: both verified but unported callees are volatile
+      target/host seams; their names state only the recovered ABI, not an
+      unproven class identity. Host tests prove getter-result substitution and
+      forwarding of null owner plus high-bit values in every message word.
