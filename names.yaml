@@ -8363,6 +8363,25 @@ functions:
       same guard test and shared-vs-private split; ops-table blx in
       place of bl.
 
+  - address: 0x081fbf80
+    ghidra: FUN_081fbf80
+    name: client_mutex_unlock
+    size: 8
+    sig: "u32 client_mutex_unlock(u8 *client)"
+    module: heap/client_mutex_unlock
+    vars: {param_1: client}
+    status: ported
+    notes: >-
+      Raw words e2800024 ea019888 establish the whole function:
+      add r0, r0, #0x24 then tail b 0x082621ac, the verified
+      posix_mutex_unlock veneer. The next real function begins at
+      0x081fbf88. Four inbound plain bl call sites (0x0814bb18,
+      0x0818a860, 0x08207d14, 0x08207d80) and no predicated bl call
+      sites were independently counted from decoded ARM words. Releases
+      the block-manager client's mutex at +0x24; the existing
+      REGION_MUTEX_OPS seam deliberately substitutes an indirect call
+      for the retail tail branch so host tests can verify that address.
+
   - address: 0x081fc080
     ghidra: FUN_081fc080
     name: client_erase
