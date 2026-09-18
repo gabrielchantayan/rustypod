@@ -204,6 +204,7 @@ pub mod indexed_payload_lookup;
 pub mod segmented_entry_lookup;
 pub mod message_arena;
 pub mod message_0x13_arena;
+pub mod message_0x13;
 pub mod message_kind;
 pub mod message_kind_arena;
 pub mod kind_0x21_message_post;
