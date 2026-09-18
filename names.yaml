@@ -17,6 +17,26 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081660f0
+    ghidra: FUN_081660f0
+    name: object_set_word_0x40
+    size: 8
+    sig: "void object_set_word_0x40(void *object, u32 value)"
+    module: util/object_set_word_0x40
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: value
+      "[object + 0x40]": word_0x40
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent
+      0x081660f0..0x081660f8: str r1,[r0,#0x40]; bx lr. The next separately
+      linked function begins with push {r4,lr} at 0x081660f8. A whole-image
+      A32 decode finds four incoming plain BL calls at 0x081667b4, 0x082831d4,
+      0x082834e4, and 0x082837b8, with zero incoming predicated BL calls.
+      It stores value in the unchecked object's target word at +0x40; neither
+      the object's concrete type nor the word's meaning is recovered from
+      callers. Deliberate deviations: none.
   - address: 0x081a275c
     ghidra: FUN_081a275c
     name: indexed_string_resource_fallback
