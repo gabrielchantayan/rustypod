@@ -109,6 +109,9 @@ pub mod hints {
     // capacity-cache manager, sentinel, node, handle, and client fixtures.
     pub const BLOCK_MGR_CLIENT_CAPACITY: usize = 0x7fb0_0000;
     pub const EVENT_LIST: usize = 0x0e00_0000;
+    // 0x7e00_0000: dedicated to app/observer_list_register's raw-u32
+    // context, intrusive-list anchor, successor, and record fixture.
+    pub const OBSERVER_LIST_REGISTER: usize = 0x7e00_0000;
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
     // 0x1600_0000: dedicated to ui/range_release's raw-u32 owner,
     // operation, cursor, and item fixtures; mappings never unmap.

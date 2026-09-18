@@ -111286,3 +111286,30 @@ functions:
       read path are recovered from its body, but it has no verified Rust
       identity or port, so target code deliberately retains its raw-address
       seam while host tests model and assert the complete forwarded ABI.
+  - address: 0x0812d718
+    ghidra: FUN_0812d718
+    name: observer_list_register
+    size: 116
+    sig: "void observer_list_register(u32 *context, u32 key, u32 value, u32 mode)"
+    module: app/observer_list_register
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: key
+      param_3/r2: value
+      param_4/r3: mode
+      FUN_083dcb1c: observer_record_alloc
+    notes: >-
+      Raw osos.dec words establish the exact 116-byte extent
+      0x0812d718..0x0812d78c: the preceding standalone mov r0,r0 is part of
+      this entry, and 0x0812d78c begins the next push {r4,lr} function.
+      Full-image ARM B/BL decoding finds four inbound direct calls, all plain
+      unconditional bl, and zero predicated BL forms. The body has one direct
+      outbound bl, to unrecovered allocator FUN_083dcb1c @ 0x083dcb1c, with
+      the five-word ABI {context+0x28, 0, value, mode, anchor}. It writes key
+      and value to the allocated record at +0x08/+0x0c under the original
+      `adds r0,#8; stmne` condition, splices that record after the anchor at
+      context+0x38, and wraps the count at +0x3c. Deliberate deviation:
+      target calls retain the fixed allocator address while host tests use a
+      volatile ABI seam; raw target pointers remain u32 words so 64-bit host
+      pointer widths cannot alter their offsets.
