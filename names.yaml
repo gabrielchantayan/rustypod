@@ -112318,3 +112318,27 @@ functions:
       inbound plain BL instructions at 0x08255114, 0x08255130, 0x0825514c,
       and 0x08255168, with no predicated BL calls. The callers clamp Q16
       components to 0..0x10000. No deliberate deviations.
+  - address: 0x080eeb7c
+    ghidra: FUN_080eeb7c
+    name: object_flag_status_code
+    size: 84
+    sig: "u32 object_flag_status_code(const u8 *object)"
+    module: util/object_flag_status_code
+    status: ported
+    renames:
+      param_1: object
+      uVar2: primary_flags
+    notes: >-
+      Raw osos.dec decoding establishes a true 84-byte extent at
+      0x080eeb7c..0x080eebd0: the next independently entered function begins
+      with push {r0-r6,lr} at 0x080eebd0. This leaf has no outbound BL calls.
+      Decoding the complete raw body finds four inbound direct calls, all
+      unconditional plain BL at 0x08078428, 0x0807ba48, 0x08085f80, and
+      0x080c8b64; no predicated BL calls target it. It reads primary flags at
+      object + 0x24 and conditionally secondary flags at +0x28, returning
+      status codes 0 through 4 according to primary bits 0, 1, 4, 5, and 6
+      and secondary bit 2. Ghidra's recovered callers establish that nonzero
+      results are status values consumed by higher-level object flag checks;
+      no stronger type identity was recovered, so the semantic name describes
+      the verified behavior. Rust preserves the target-width accesses with
+      volatile aligned reads; no deliberate behavioral deviations.
