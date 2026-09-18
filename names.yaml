@@ -110652,3 +110652,27 @@ functions:
       signature exposes that observed r0 pass-through even though Ghidra
       inferred void with no arguments. Reference C:
       decomp/c/013/08153788_FUN_08153788.c; assembly: osos.asm 0x08153788.
+  # --- vtable word +0x08 setter then slot +0x18 dispatch ---
+  - address: 0x081534b8
+    ghidra: FUN_081534b8
+    name: word_08_set_then_slot_18_dispatch
+    size: 32
+    sig: "u32 word_08_set_then_slot_18_dispatch(Word08Slot18Object *object, u32 value)"
+    module: cxx/word_08_set_then_slot_18_dispatch
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: value
+      "object+0x08": value
+      "vtable+0x18": dispatch
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent
+      0x081534b8..0x081534d7: push {r4,lr}; str r1,[r0,#8]; load object
+      vtable word +0x18; blx; mov r0,#0; pop {r4,pc}. The next real
+      function begins at 0x081534d8 with push {r4,lr}. Full-image ARM
+      decoding finds four inbound direct plain unconditional bl calls
+      (0x08170e4c, 0x081a5430, 0x081bbe70, and 0x081bbf18) and no
+      predicated bl calls. It stores value at object+0x08, dispatches the
+      object's vtable +0x18 slot with object as the sole argument, then
+      returns zero. The virtual callee has no recovered identity, so the
+      port represents its ABI without inventing a concrete callee name.
