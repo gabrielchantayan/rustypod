@@ -7,6 +7,7 @@ pub mod diag_ring_strings;
 pub mod clock_snapshot_trace;
 pub mod event_handler_source;
 pub mod gateway_request;
+pub mod clear_pending_gateway_request;
 pub mod gateway_signal;
 pub mod gateway_service18;
 pub mod gateway_service19;

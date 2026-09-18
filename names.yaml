@@ -110815,3 +110815,25 @@ functions:
       uses wrapping addition to preserve the ARM add rollover. Deliberate
       deviations: none. Reference C:
       decomp/c/013/0814d2f4_FUN_0814d2f4.c; assembly: osos.asm 0x0814d2f4.
+
+  - address: 0x0814ad9c
+    ghidra: FUN_0814ad9c
+    name: clear_pending_gateway_request
+    size: 48
+    sig: "u32 clear_pending_gateway_request(void *object)"
+    module: kernel/clear_pending_gateway_request
+    status: ported
+    vars: {param_1/r4: object}
+    notes: >-
+      Raw ARM starts with push {r4,lr} at 0x0814ad9c and ends with pop
+      {r4,pc} at 0x0814adc8; the next real function begins at 0x0814adcc.
+      It reads object+0x50, returns 1 immediately when that byte is zero,
+      otherwise calls the ported gateway_request_timed with payload 25 and
+      timeout 250, clears the byte, then returns 1. Independent raw-image
+      decoding finds four direct BL callers: predicated blne at 0x0814ac5c
+      and 0x0814af4c, and plain bl at 0x0814b270 and 0x0814b610; no tail
+      branches. The byte's higher-level service identity is unrecovered, so
+      the name records only the verified pending-request behavior.
+      Deliberate deviation: the gateway seam accepts usize rather than the
+      target's u32 arguments; target object layout and byte offset are
+      preserved.
