@@ -55,6 +55,7 @@ pub mod sub_record_lookup;
 pub mod record_descriptor_pack;
 pub mod tagged_object_link;
 pub mod object_payload;
+pub mod object_context;
 pub mod candidate_is_accepted;
 pub mod object_packed_field;
 pub mod plst_class_check;
