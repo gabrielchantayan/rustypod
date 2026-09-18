@@ -84,6 +84,7 @@ pub mod ptr_vector;
 pub mod object_masked_word_refresh;
 pub mod object_commit_touch;
 pub mod object_flags_contain;
+pub mod object_flags_take;
 pub mod object_flag_0x10_is_set;
 pub mod object_byte_0x21;
 pub mod object_selected_payload_index;
