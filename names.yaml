@@ -110499,3 +110499,22 @@ functions:
       read on a real traversal. Host vtables use native-width function
       pointers; target builds read the original four-byte vtable and slot
       words.
+
+  - address: 0x08155684
+    ghidra: FUN_08155684
+    name: no_op_u32
+    size: 4
+    sig: "u32 no_op_u32(u32 value)"
+    module: runtime/no_op_u32
+    status: ported
+    renames:
+      r0: value / return value
+    notes: >-
+      Raw osos.dec bytes at 0x08155684 are 0xe12fff1e (`bx lr`), and the
+      following 0xe92d4010 (`push {r4,lr}`) at 0x08155688 establishes the
+      exact four-byte extent. Full-image A32 decoding finds four plain
+      direct bl callers (0x081c267c, 0x081c2e80, 0x081c35a0, 0x081c4388)
+      and zero predicated direct bl callers. The instruction reads neither
+      registers nor memory and returns the incoming r0 unchanged. The Rust
+      ABI implementation deliberately guarantees only that observable r0
+      result; the stock instruction incidentally leaves every register intact.
