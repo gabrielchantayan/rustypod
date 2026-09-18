@@ -110260,3 +110260,30 @@ functions:
       refcounted copy constructor at 0x0839f100 is retained as its own
       fixed-address call to preserve the original call structure. Host tests
       cover duplicate early return and multi-element append/retain behavior.
+  - address: 0x081618bc
+    ghidra: FUN_081618bc
+    name: buffered_stream_close
+    size: 56
+    sig: "u32 buffered_stream_close(BufferedStreamCloseState *state)"
+    module: app/buffered_stream_close
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      uVar1/r0/r5: finalize_status
+      "[state + 0x04]": stream
+      "[state + 0x18]": active
+      FUN_0816179c: buffered_stream_finalize_unported
+      "[stream vtable + 0x04]": release
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x081618bc..0x081618f4: push {r4,r5,lr}; mov r4,r0; bl 0x0816179c;
+      then a conditional virtual blx through [stream vtable + 4], zeroing
+      state+4 and state+0x18 before returning the finalizer's r0 result.
+      0x081618f4 begins the next independently linked function with
+      push {r4,r5,r6,lr}. Decoding the 14 raw words finds one plain direct
+      bl and one predicated indirect blxne; the whole-image raw ARM branch
+      decode finds four incoming plain bl callers and zero incoming
+      predicated bl callers. 0x0816179c has no names.yaml identity, so the
+      port calls it at its verified address on target and uses a role-based
+      host seam. Target stream and vtable pointers are read as 32-bit words;
+      host-only layouts widen them to retain valid function pointers.
