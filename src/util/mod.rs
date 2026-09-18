@@ -53,6 +53,7 @@ pub mod digest_byte_count_add;
 pub mod fixed;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;
+pub mod filesystem_kind_is_hfsplus;
 pub mod fatal_cleanup_no_op;
 pub mod fatal_operation_cleanup_no_op;
 pub mod framed_word_buffer_decode;
