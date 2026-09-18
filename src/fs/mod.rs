@@ -6,6 +6,8 @@ pub mod fat_dirent;
 pub mod fat_cluster_to_block;
 /// FAT cache-block-index to data-cluster conversion @ 0x082e4358.
 pub mod fat_cluster_for_offset;
+/// FAT table size bias-and-division helper @ 0x080e75e4.
+pub mod fat_table_sector_count;
 pub mod path_limits;
 /// Finder `.DS_Store` metadata-path substring predicate @ 0x0809e718.
 pub mod ds_store_path;
