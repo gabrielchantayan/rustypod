@@ -18413,7 +18413,7 @@ functions:
       DAT_08206e88: INTERFACE_GUARD_VTABLE_ADDRESS (0x08991978)
       FUN_0818a164: counted-mutex release veneer (inlined through the
         ported mutex_unlock_counted)
-      FUN_0818a0fc: interface_guard_base_destroy (retailOS boundary)
+      FUN_0818a0fc: interface_guard_base_destroy (ported)
     notes: >-
       Raw ARM proves the 28-byte instruction extent: ldr literal, push,
       str r1,[r0],#0xc, bl 0x0818a164, pop, sub r0,#0xc, and tail b
@@ -18429,12 +18429,13 @@ functions:
       through the 0x0818a164 veneer, then tail-runs the base teardown and
       returns this. The release veneer only loads that pointer and calls
       already-ported mutex_unlock_counted, so the port inlines it. The
-      base teardown at 0x0818a0fc remains a retailOS boundary: target
-      builds call its fixed address, while host tests deliberately treat
-      it as a no-op returning this because no host interface graph exists.
-      Host test path_probe::tests::guard_destroy_replants_vtable_releases_and_returns_this
-      proves vtable replacement, release-to-zero, free-lock wrapping, and
-      the returned guard address using a dedicated below-4-GiB fixture.
+      base teardown @ 0x0818a0fc is ported; its 0x081e1fe8 deregistration
+      callee remains a typed fixed-address device boundary and host recording
+      seam. Host tests guard_destroy_releases_and_returns_base_guard and
+      base_destroy_replants_vtable_and_deregisters_owner_member prove the
+      chained vtable replacement, release-to-zero, free-lock wrapping,
+      returned guard address, owner +0x24 argument, and guard argument using
+      dedicated below-4-GiB fixtures.
   - address: 0x08206e9c
     ghidra: FUN_08206e9c
     name: counted_mutex_guard_release
@@ -63845,6 +63846,28 @@ functions:
       field role remain unrecovered; the semantic name is limited to the
       caller-verified use as a payload length. No deliberate deviations.
 
+  - address: 0x0818a0fc
+    ghidra: FUN_0818a0fc
+    name: interface_guard_base_destroy
+    size: 40
+    sig: "InterfaceGuard *interface_guard_base_destroy(InterfaceGuard *guard)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: guard (16-byte scoped interface guard)
+      DAT_0818a124: INTERFACE_GUARD_BASE_VTABLE_ADDRESS (0x0898994c)
+      FUN_081e1fe8: interface_guard_deregister (unported fixed-address boundary)
+    notes: >-
+      Raw osos.dec words prove the 40-byte extent from 0x0818a0fc through
+      0x0818a120: push {r4,lr}; save guard in r4; load literal 0x0898994c
+      from 0x0818a124; store it at guard+0; load guard+4; add 0x24; call
+      0x081e1fe8 with that result in r0 and guard in r1; return guard.
+      The next distinct function begins at 0x0818a128. A raw ARM B/BL scan
+      finds four inbound direct calls, all plain unconditional bl (zero
+      predicated forms): 0x080644fc, 0x080758fc, 0x080ef4d0, 0x081efa34.
+      The 0x081e1fe8 callee's concrete identity remains unrecovered, so the
+      port uses a typed fixed-address device boundary and host recording seam;
+      no local behavior deviates from the ARM.
   - address: 0x0818a0bc
     ghidra: FUN_0818a0bc
     name: facade_for_selector

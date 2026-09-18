@@ -572,6 +572,9 @@ pub mod hints {
     // counted-mutex constructor fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const PATH_PROBE_GUARD_CONSTRUCT: usize = 0xe800_0000;
+    // 0xea00_0000: dedicated to app/path_probe's raw-u32 base-destructor
+    // owner fixture; mappings never unmap, so no other user may share this hint.
+    pub const PATH_PROBE_BASE_DESTROY: usize = 0xea00_0000;
     // 0xe900_0000: dedicated to app/timer_step_value's raw-u32 node and
     // value fixture; mappings never unmap, so no other user may share
     // this hint.
