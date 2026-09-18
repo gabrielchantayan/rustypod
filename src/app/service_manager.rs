@@ -7,7 +7,7 @@
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x08165558 | [`service_manager_initialization_state_get`] | 36 | 6 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
-//! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
+//! | 0x08193eac | [`service_manager_secondary_handler_code_set`] | 20 | 4 direct |
 //! | 0x08193e50 | [`service_manager_secondary_handler_state_flags_get`] | 20 | 10 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
@@ -312,6 +312,51 @@ pub unsafe extern "C" fn service_manager_secondary_handler_code_get(
             .cast::<u16>(),
     )
 }
+
+/// service_manager_secondary_handler_code_set — original: `FUN_08193eac` @
+/// 0x08193eac (20 bytes; 4 direct, unconditional `bl` call sites).
+///
+/// Stores `code` at `+0x1c` in one of the service manager's three secondary
+/// 0x20-byte handler records. Raw ARM is `cmp r1,#3; blge 0x08030f44; add
+/// r0,r0,r1,lsl #5; strh r2,[r0,#28]; bx lr`: signed slots below three,
+/// including negative values, pass the original's bounds check and retain its
+/// unchecked addressing behavior. Slots three and above terminate through
+/// [`heap_panic`].
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly four inbound
+/// direct call sites — 0x081648d8, 0x08192b04, 0x08192c6c, and 0x0819303c —
+/// all unconditional plain `BL`; no predicated direct calls or tail branches
+/// target this address. The following `cmp r1,#3` at 0x08193ec0 begins the
+/// next separately linked function, confirming the five-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three aligned
+/// eight-word records. Negative slots intentionally retain the firmware's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_code_set(
+    slot_table: *mut u32,
+    slot: i32,
+    code: u16,
+) {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::write(
+        slot_table
+            .wrapping_offset(slot.wrapping_shl(3) as isize)
+            .add(7)
+            .cast::<u16>(),
+        code,
+    );
+}
+
 
 /// service_manager_secondary_handler_get — original: `FUN_08193ec0` @
 /// 0x08193ec0 (20 bytes; 27 direct, unconditional `bl` call sites).
@@ -1052,6 +1097,47 @@ mod secondary_handler_code_get_tests {
                 0xbeef,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod secondary_handler_code_set_tests {
+    use super::*;
+
+    #[test]
+    fn writes_each_handler_code_low_halfword_and_reloads() {
+        let mut table = [0u32; 24];
+        table[7] = 0xaaaa_aaaa;
+        table[15] = 0xbbbb_bbbb;
+        table[23] = 0xcccc_cccc;
+
+        unsafe {
+            service_manager_secondary_handler_code_set(table.as_mut_ptr(), 0, 0x1234);
+            service_manager_secondary_handler_code_set(table.as_mut_ptr(), 1, 0);
+            service_manager_secondary_handler_code_set(table.as_mut_ptr(), 2, 0xd000);
+
+            assert_eq!(table[7], 0xaaaa_1234);
+            assert_eq!(table[15], 0xbbbb_0000);
+            assert_eq!(table[23], 0xcccc_d000);
+
+            service_manager_secondary_handler_code_set(table.as_mut_ptr(), 1, 0x0046);
+            assert_eq!(
+                table[15], 0xbbbb_0046,
+                "the ARM strh writes the code halfword on every call"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        let mut table = [0u32; 24];
+        table[7] = 0xffff_ffff;
+
+        unsafe {
+            service_manager_secondary_handler_code_set(table.as_mut_ptr().add(8), -1, 0xbeef);
+        }
+
+        assert_eq!(table[7], 0xffff_beef);
     }
 }
 
