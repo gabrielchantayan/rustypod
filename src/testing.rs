@@ -148,6 +148,7 @@ pub mod hints {
     // may share this hint.
     pub const VDBE_FREE_OPS: usize = 0x1a10_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
+    pub const PENDING_EVENT_DISCARD_ALL_FOR_KEY: usize = 0x1b10_0000;
     // Dedicated raw-u32 owner fixtures for iterator seek tests; mappings
     // never unmap, so each target layout has its own hint.
     pub const ITERATOR_STATE_SEEK: usize = 0x1c10_0000;
