@@ -109785,3 +109785,37 @@ functions:
       3, or 4, then invoke this routine after the transfer operation; it
       overwrites that byte with the 0xff invalid sentinel and returns the
       preserved record pointer. Deliberate deviations: none.
+
+  - address: 0x0817e898
+    ghidra: FUN_0817e898
+    name: vtable_state_construct
+    size: 76
+    sig: "VtableState *vtable_state_construct(VtableState *storage, u32 first_value, const VtableStateSource *source, u32 third_value, u32 fourth_value)"
+    module: app/vtable_state_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: first_value
+      param_3/r2: source
+      param_4/r3: third_value
+      param_5/[sp]: fourth_value
+      DAT_0817e8e0: vtable_state_vtable (0x08989484)
+      "storage+0x00": vtable
+      "storage+0x04": first_value
+      "storage+0x08/+0x0c": source_first_and_second
+      "storage+0x10/+0x14": third_and_fourth_values
+      "storage+0x18..+0x2c": trailing_zero_words
+    notes: >-
+      Raw ARM establishes 72 instruction bytes at 0x0817e898..0x0817e8df:
+      push {lr}, 16 body words, and pop {pc}. The following word at
+      0x0817e8e0 is the 0x08989484 vtable literal; 0x0817e8e4 begins the
+      distinct next function. Decoding every A32 B/BL immediate in osos.dec
+      finds exactly four inbound plain unconditional BL instructions
+      (0x0819bb28, 0x081bb260, 0x081bb670, and 0x081cb574), with no
+      predicated BL calls. It stores r1, installs the literal vtable, copies
+      two words from r2, stores r3 and the stacked fifth argument, and clears
+      six words at +0x18 through +0x2c. It preserves r0 as its return value;
+      Ghidra's void signature omits that ABI behavior. Each known caller
+      immediately replaces the base vtable with its derived vtable.
+      Deliberate deviation: the base class identity is unestablished, so the
+      semantic name describes only the verified vtable-state construction.
