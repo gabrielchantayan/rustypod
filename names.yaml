@@ -95592,6 +95592,29 @@ functions:
       pointer slot with a crate static.
 
 
+  # --- empty record destructor ---
+  - address: 0x08163b18
+    ghidra: FUN_08163b18
+    name: empty_record_destructor
+    size: 4
+    sig: "void *empty_record_destructor(void *object)"
+    module: app/empty_record_destructor
+    status: ported
+    renames:
+      param_1/r0: object (record-owned allocation)
+    notes: >-
+      Raw osos.dec word 0xe12fff1e is exactly `bx lr` at 0x08163b18. The
+      preceding function ends at 0x08163b14; the next separately linked
+      function begins at 0x08163b1c with `stmdb sp!, {r4-r11, lr}`, proving
+      the true size is 4 bytes. It is neither a literal-pool veneer nor a
+      tail branch. Decoding every ARM B/BL immediate finds four direct
+      inbound calls, all unconditional plain bl and no predicated forms:
+      0x0818fdbc, 0x08190578, 0x08190770, and 0x081928a0. Every known caller
+      immediately calls operator_delete, so the verified semantics are a
+      no-op destructor that preserves r0 for that next call. The Rust port
+      accepts and returns the object word without dereferencing it; its
+      dedicated text section deliberately prevents empty-export folding.
+
   # --- service-handler pending-event reset ---
   - address: 0x0818fd78
     ghidra: FUN_0818fd78

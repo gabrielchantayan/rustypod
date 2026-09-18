@@ -23,11 +23,12 @@
 //! pointer, preserving a call and preventing LLVM from recognizing a builtin
 //! clear. `FUN_08138c80` is not ported, so it remains behind the narrowly
 //! scoped lifecycle-request seam: target builds call its verified entry,
-//! while host tests record its arguments. The preceding empty destructor
-//! 0x08163b18 is represented by its observable tail call to the already
-//! ported `operator_delete`. Lock/unlock and pending-event take call their
-//! existing Rust ports directly.
+//! while host tests record its arguments. 0x08163b18 is now the direct
+//! `empty_record_destructor` port, preserving the retail `bl; bl` register
+//! handoff to `operator_delete`. Lock/unlock and pending-event take call
+//! their existing Rust ports directly.
 
+use crate::app::empty_record_destructor::empty_record_destructor;
 use crate::app::pending_event_take::{pending_event_take, WILDCARD_TAG};
 use crate::app::service_manager::service_manager_instance_veneer;
 use crate::heap::veneers::{heap_panic, operator_delete};
@@ -132,9 +133,8 @@ pub unsafe extern "C" fn service_handler_pending_event_reset(
     posix_mutex_lock(lock);
     let object = ptr::read(record.cast::<u32>()) as usize as *mut u8;
     if !object.is_null() {
-        // FUN_08163b18 is exactly `bx lr`, so r0 reaches operator_delete
-        // unchanged in the retail `bl; bl` pair.
-        operator_delete(object);
+        let object = empty_record_destructor(object.cast());
+        operator_delete(object.cast());
     }
 
     let clear = ptr::read_volatile(ptr::addr_of!(MEMZERO_ALIGNED));
