@@ -1410,6 +1410,10 @@ pub mod hints {
     // 0x4244_0000: dedicated to util/tagged_buffer_payload_address's raw-u32
     // descriptor and payload fixture; mappings never unmap.
     pub const TAGGED_BUFFER_PAYLOAD_ADDRESS: usize = 0x4244_0000;
+    // 0x7900_0000: dedicated to cxx/slot_array_owner_get's raw-u32 slot
+    // array and storage fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SLOT_ARRAY_OWNER_GET: usize = 0x7900_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

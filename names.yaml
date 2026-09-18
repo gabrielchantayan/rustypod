@@ -108356,3 +108356,27 @@ functions:
       ordering/latch, old-bound visibility, and context forwarding. match.py
       exits 1 with the expected structural diff: seams add a frame and BLX
       loads, and LLVM reorders independent bound arithmetic.
+  - address: 0x081ef308
+    ghidra: FUN_081ef308
+    name: slot_array_owner_get
+    size: 36
+    sig: "u32 slot_array_owner_get(const SlotArrayOwner *owner, i32 index)"
+    module: cxx/slot_array_owner_get
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r5: index
+      r4: slots
+      "[owner + 0x0c]": slots
+      "[slots + 0x00]": storage
+      FUN_083d4db8: slot_array_index_in_bounds
+    notes: >-
+      Raw osos.dec establishes the exact nine-word, 36-byte body
+      0x081ef308..0x081ef32c; the next independently entered function starts
+      at 0x081ef32c. Decoding all inbound ARM B/BL words finds four plain
+      unconditional BL calls (0x081eeff8, 0x081ef03c, 0x081ef078, and
+      0x081ef0b0) and zero predicated BL calls. The body makes one plain
+      outbound BL to the already ported slot_array_index_in_bounds at
+      0x083d4db8, then conditionally loads storage[index] or returns zero.
+      Deliberate deviation: Rust uses volatile target-word loads to preserve
+      the +0x0c owner and +0x00 slot-array accesses on 64-bit hosts.
