@@ -108949,3 +108949,32 @@ functions:
       result advances window_index and returns zero; any nonzero result maps
       to 3. The helper's stronger identity is unestablished, so target Rust
       calls its fixed address and host tests install the verified ABI seam.
+  - address: 0x081c3960
+    ghidra: FUN_081c3960
+    name: u32_window_reader
+    size: 136
+    sig: "u32 u32_window_reader(U32WindowReadOwner *owner, u32 *output, u32 source_offset_lo, u32 source_offset_hi, u32 word_count)"
+    module: mov/u32_window_reader
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1/r5: output
+      param_3/r2: source_offset_lo
+      param_4/r3/r12: source_offset_hi
+      param_5/[sp+0x18]/r6: word_count
+      "[owner + 0x08]": reader
+      "[reader vtable + 0x10]": read_slot_10
+      "[reader vtable + 0x14]": prepare_slot_14
+      FUN_080743b8: unnamed_u32_byte_swap
+    notes: >-
+      Raw osos.dec is exactly 136 bytes from 0x081c3960 through the pop at
+      0x081c39e4; 0x081c39e8 is the next separate push prologue. The body has
+      one direct unconditional BL, to 0x080743b8, and two indirect BLX calls
+      through target vtable slots +0x14 then +0x10. Whole-image A32 decoding
+      finds four inbound plain BL calls at 0x081c4ff4, 0x081c5198,
+      0x081c5224, and 0x081c538c; there are no inbound predicated BL calls.
+      It first invokes slot +0x14 with output and the supplied 64-bit source
+      offset, then slot +0x10 with word_count*4 bytes and mode 2. Either
+      nonzero result returns 3; otherwise every output word is byte-swapped.
+      The slot identities and 0x080743b8 lack names.yaml identities, so Rust
+      names only their verified behavior and implements the byte swap inline.
