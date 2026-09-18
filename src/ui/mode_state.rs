@@ -17,6 +17,8 @@ unsafe fn mode_state_object_table() -> *const u8 {
 /// Byte stride between pointers in [`MODE_STATE_OBJECT_TABLE`] (`99 * 4`).
 const MODE_STATE_RECORD_STRIDE: isize = 0x18c;
 
+/// Byte offset of the status word in a selected object.
+const MODE_STATE_STATUS_OFFSET: usize = 0x400;
 /// Byte offset of the mode word in a selected object.
 const MODE_STATE_FLAG_OFFSET: usize = 0x860;
 /// Byte offset of the status code in a selected mode substate.
@@ -45,6 +47,33 @@ pub unsafe extern "C" fn indexed_mode_flag(index: i16) -> u32 {
     let object = (object_slot as *const *const u8).read();
     (object.add(MODE_STATE_FLAG_OFFSET) as *const u32).read() & 0x1f
 }
+
+/// indexed_mode_status — original: `FUN_080db5b4` @ `0x080db5b4`
+/// (32 bytes: 28 bytes of code plus the table-pointer literal).
+///
+/// Verified call count: four unconditional `bl` sites (`0x08039a34`,
+/// `0x080aa04c`, `0x080b62e4`, and `0x080cc544`); no predicated calls.
+/// Raw ARM multiplies the signed low halfword of `index` by 99, loads the
+/// selected object pointer from [`MODE_STATE_OBJECT_TABLE`], then returns
+/// the low two bits of its word at `+0x400`.
+///
+/// Deliberate deviations: the table's literal at `0x080db5d0` is shared
+/// through the existing target-global seam; otherwise this is a direct
+/// translation with no bounds or null checks.
+///
+/// # Safety
+///
+/// [`MODE_STATE_OBJECT_TABLE`] must designate a word-aligned table readable
+/// at `index * 0x18c`; the selected entry must contain a live object pointer
+/// readable as a `u32` at `+0x400`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_mode_status(index: i16) -> u32 {
+    let object_slot = mode_state_object_table().offset(index as isize * MODE_STATE_RECORD_STRIDE);
+    let object = (object_slot as *const *const u8).read();
+    (object.add(MODE_STATE_STATUS_OFFSET) as *const u32).read() & 3
+}
+
 
 /// indexed_mode_substate_code — original: `FUN_080dd2a0` @ `0x080dd2a0`
 /// (40 bytes: 36 bytes of code plus a 4-byte literal).
@@ -123,6 +152,27 @@ mod tests {
 
             assert_eq!(indexed_mode_flag(0), 0x1f);
             assert_eq!(indexed_mode_flag(2), 0x15);
+
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(core::ptr::null());
+        }
+    }
+
+    #[test]
+    fn indexes_records_at_arm_stride_and_masks_the_status_word() {
+        let _guard = MODE_STATE_TABLE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut table = ModeStateTable([0; MODE_STATE_RECORD_STRIDE as usize * 3]);
+        let mut first = ModeStateObject([0; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]);
+        let mut third = ModeStateObject([0; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]);
+
+        unsafe {
+            (first.0.as_mut_ptr().add(MODE_STATE_STATUS_OFFSET) as *mut u32).write(0xfeed_beec);
+            (third.0.as_mut_ptr().add(MODE_STATE_STATUS_OFFSET) as *mut u32).write(0x89ab_caf7);
+            install_object(&mut table, 0, first.0.as_ptr());
+            install_object(&mut table, 2, third.0.as_ptr());
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(table.0.as_ptr());
+
+            assert_eq!(indexed_mode_status(0), 0);
+            assert_eq!(indexed_mode_status(2), 3);
 
             core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(core::ptr::null());
         }

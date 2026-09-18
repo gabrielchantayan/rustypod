@@ -8989,6 +8989,31 @@ functions:
       MODE_STATE_OBJECT_TABLE target-global seam; no bounds or null checks
       are present in the original or port.
 
+  # --- indexed UI mode-state status ---
+  - address: 0x080db5b4
+    ghidra: FUN_080db5b4
+    name: indexed_mode_status
+    size: 32
+    sig: "u32 indexed_mode_status(i16 index)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080db5d0: mode_state_object_table
+      return/r0: mode_status
+    notes: >-
+      Raw osos.dec establishes a 32-byte extent: 28 bytes of instructions
+      at 0x080db5b4..0x080db5cc, its pointer-table literal at 0x080db5d0,
+      then the separately linked next function at 0x080db5d4. smulbb uses
+      the signed low halfword of index with 99 to select an object-pointer
+      table record at 0x08b2f648 + index * 0x18c. It reads that object's
+      word +0x400 and returns only its low two bits. The shared
+      MODE_STATE_OBJECT_TABLE target-global seam models the literal; no
+      bounds or null checks exist in the original or port. Decoding every
+      immediate ARM B/BL word in osos.dec finds four inbound direct calls,
+      all unconditional bl at 0x08039a34, 0x080aa04c, 0x080b62e4, and
+      0x080cc544; no predicated forms or direct tail branches reach it.
+
   # --- indexed UI mode-substate status ---
   - address: 0x080dd2a0
     ghidra: FUN_080dd2a0
