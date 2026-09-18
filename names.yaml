@@ -88,12 +88,31 @@ functions:
       0x08149da0..0x08149db4: ldr r1,[pc,#12]; ldr r0,[r1]; add r0,r0,#1;
       str r0,[r1]; bx lr. The next real function begins at 0x08149db4 with
       mov r0,#0x21. The literal resolves to the fixed word 0x089cb1e8.
+
       Four direct inbound calls are plain unconditional BL calls and no
       predicated BL calls were found; the four Ghidra callers retain the
       returned value as a shared token. The counter's owning subsystem is
       unrecovered, so its name states only its verified behavior. Deliberate
       deviation: host builds use private backing for the fixed firmware word;
       target builds perform volatile accesses at 0x089cb1e8.
+  - address: 0x081212d8
+    ghidra: FUN_081212d8
+    name: ata_cmd_get_device_head
+    size: 8
+    sig: "u8 ata_cmd_get_device_head(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      `ldrb r0, [r0, #0x19]; bx lr`. The next independently linked body
+      starts at 0x081212e0, fixing the true 8-byte extent. Decoding every
+      ARM B/BL word in osos.dec finds 4 inbound direct calls, all
+      unconditional bl (0x081665a8, 0x0827a3d4, 0x0827a428, 0x082832ec);
+      no predicated forms. The ATA read-DMA builder ORs the result with
+      0xe0, and the identify-data parser masks the low nibble into bits
+      24..27, identifying the byte as the legacy taskfile device/head
+      field. #[inline(never)] plus a unique target-only section preserves
+      its independently hookable symbol.
   - address: 0x0815556c
     ghidra: FUN_0815556c
     name: fatal_cleanup_no_op
