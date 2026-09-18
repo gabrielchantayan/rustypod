@@ -67,6 +67,7 @@ pub mod controller_layout_dispatch;
 pub mod controller_candidate_notify;
 pub mod controller_extra_info_layout;
 pub mod controller_context_scope_dispatch;
+pub mod controller_screen_dispatch;
 pub mod controller_opaque_item_vector;
 pub mod controller_timer_pair;
 pub mod controller_transition_volume_post;

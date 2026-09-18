@@ -84835,6 +84835,33 @@ functions:
       initialization with the 16-byte tag-2 allocation and second lookup
       asserted.
 
+  # --- controller screen command dispatch ---
+  - address: 0x08183950
+    ghidra: FUN_08183950
+    name: app_controller_dispatch_screen
+    size: 72
+    sig: "void app_controller_dispatch_screen(AppControllerPendingCommand *controller, u32 screen)"
+    module: app/controller_screen_dispatch
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: screen
+      "controller+0x20": first_key
+      "controller+0x24": second_key
+      FUN_08182c78: command_record_resolve_or_allocate (direct, ported in app/controller_pending_command)
+      FUN_0817ee90: pending_command_dispatch (unported tail-call seam; identity not inferred)
+    notes: >-
+      Raw ARM establishes the exact 72-byte extent 0x08183950..0x08183998:
+      the next separately linked function begins with push {r4-r9,r10,lr} at
+      0x08183998. It has four inbound plain BL call sites (0x0819b448,
+      0x082265e4, 0x0823263c, and 0x08238d04) and zero predicated BL call
+      sites. Its only direct BL calls command_record_resolve_or_allocate with
+      controller+0x20, controller+0x24, and allocate=1; it clears record
+      words zero and one, stores screen in word two, writes -1 to word three,
+      then tail-branches to unported FUN_0817ee90 with the controller and key
+      pair. DEVIATION: that tail target remains a volatile host seam wired to
+      its verified 0x0817ee90 retailOS address on device; its identity is not
+      inferred, and the Rust function returns after the normal call.
   - address: 0x080a1d7c
     ghidra: FUN_080a1d7c
     name: string_object_construct_game_path
