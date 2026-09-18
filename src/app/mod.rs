@@ -99,6 +99,7 @@ pub mod encoded_field_prefix_size;
 pub mod firmware_query_low_byte;
 pub mod dual_pool_screen;
 pub mod double_buffer;
+pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
 pub mod fallback_keyed_object;
 pub mod flag_2c_is_one;
