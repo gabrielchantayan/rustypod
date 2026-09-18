@@ -70,6 +70,8 @@ pub mod storage_transfer;
 pub mod storage_backend_transfer;
 /// Opaque storage-backend read dispatch through vtable slot two @ 0x08149de8.
 pub mod storage_backend_read;
+/// Extent-list read wrapper that selects operation one @ 0x08136920.
+pub mod storage_extent_read;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
 /// Mounted-volume information query @ 0x082e19ec.

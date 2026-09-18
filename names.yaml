@@ -111257,3 +111257,32 @@ functions:
       one. The virtual method identity is unrecovered and deliberately not
       inferred. Deliberate deviation: Rust uses a native-width typed host
       vtable callback rather than the target's four-byte vtable word.
+  - address: 0x08136920
+    ghidra: FUN_08136920
+    name: storage_extent_read
+    size: 52
+    sig: "i32 storage_extent_read(u8 *extent_list, u32 block, u32 count, u32 *completed_blocks, u8 *buffer, u32 flags)"
+    module: fs/storage_extent_read
+    status: ported
+    renames:
+      FUN_08136c64: storage_extent_transfer
+      param_1: extent_list
+      param_2: block
+      param_3: count
+      param_4: completed_blocks
+      param_5: buffer
+      param_6: flags
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte extent
+      0x08136920..0x08136954: the following independently entered function
+      begins with push {r4,r5,r6,lr} at 0x08136954. The wrapper preserves its
+      six input words while calling 0x08136c64 with the original first five,
+      an inserted operation value of one, and the original flags word; it
+      returns that helper's status unchanged. Raw disassembly finds one plain
+      unconditional outbound BL (0x08136c64) and no predicated BL calls.
+      Four inbound direct calls are all plain unconditional BL at 0x081bfa98,
+      0x081bfea4, 0x081bfee8, and 0x081c024c; no predicated inbound BL forms
+      target this address. The helper's extent-list semantics and mode-one
+      read path are recovered from its body, but it has no verified Rust
+      identity or port, so target code deliberately retains its raw-address
+      seam while host tests model and assert the complete forwarded ABI.
