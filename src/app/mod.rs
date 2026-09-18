@@ -80,6 +80,7 @@ pub mod controller_context_scope_dispatch;
 pub mod controller_screen_dispatch;
 pub mod controller_opaque_item_vector;
 pub mod controller_timer_pair;
+pub mod controller_scoped_notification_refresh;
 pub mod controller_transition_volume_post;
 pub mod volume_controller_post_commands;
 pub mod volume_controller_post_byte_90_code;

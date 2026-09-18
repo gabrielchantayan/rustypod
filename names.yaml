@@ -111790,3 +111790,38 @@ functions:
       owner as virtual receiver, and the u32 result is preserved. Rust uses
       native-width host vtable cells while repr(C) preserves the verified target
       word offsets.
+
+  # --- controller scoped notification refresh ---
+  - address: 0x08114408
+    ghidra: FUN_08114408
+    name: controller_scoped_notification_refresh
+    size: 200
+    sig: "void controller_scoped_notification_refresh(Controller *controller)"
+    module: app/controller_scoped_notification_refresh
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_1_plus_0x38: scoped_context
+      param_1_plus_0x720: update_target
+      param_1_plus_0x524: expiry_deadline
+      param_1_plus_0x52c: expiring_flag
+      FUN_082a4574: scoped_context_owner_byte_8f_bit_0
+      FUN_081f426c: opaque_update_helper
+      FUN_08111488: controller_timestamp
+      vtable_plus_0x58/r3: notification
+    notes: >-
+      Raw osos.dec establishes the 200-byte extent 0x08114408..0x081144d0:
+      172 bytes of A32 code followed by seven literal words, then the next
+      separately linked function begins with push {r4, lr} at 0x081144d0.
+      The body calls the scoped-context predicate, conditionally updates the
+      opaque +0x720 target and posts (Strtr, 0x5a05), expires byte +0x52c
+      when timestamp >= deadline+1000 using u32 wrapping arithmetic, then
+      posts (Strtr, 0x63c1), (Strtr, 0x63c2), and (Cntl, 0x63c3) via vtable
+      slot +0x58; the final notification is tail-dispatched. Independent raw
+      decoding and the three caller bodies establish four inbound plain
+      unconditional BL sites (two in FUN_08113a68 and one each in
+      FUN_08113028 and FUN_08116e44), with no predicated BL form. The body has
+      three direct BL instructions and three indirect BLX notifications.
+      Deviations: the two unported fixed callees and virtual notification are
+      target calls behind host-replaceable operations; raw byte-offset loads
+      preserve target-width object layout on 64-bit hosts.
