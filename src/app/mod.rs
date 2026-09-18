@@ -180,6 +180,7 @@ pub mod mode_selected_extent;
 pub mod mode_selected_position_set;
 pub mod media_player_state_reset;
 pub mod media_player;
+pub mod media_player_resource_value;
 pub mod music_selection_state_reset;
 pub mod class_9400_current_item_matches_media_player;
 pub mod media_player_queue_refresh;

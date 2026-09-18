@@ -108176,3 +108176,32 @@ functions:
       arguments 0x7f0c, 0x7f0d, and 0x7f0e. Deliberate deviation: Rust uses
       normal calls for the tail dispatch; host builds use a swappable seam
       because 32-bit firmware vtable pointers cannot represent host pointers.
+  - address: 0x081f796c
+    ghidra: FUN_081f796c
+    name: media_player_resource_value
+    size: 84
+    sig: "u32 media_player_resource_value(void)"
+    module: app/media_player_resource_value
+    status: ported
+    renames:
+      FUN_08258d48: tagged_value_default_construct
+      FUN_08259594: media_player_interface_get
+      "[media_player_interface->vtable + 0xe4]": selected_value
+      FUN_082703d0: scoped_context_construct_from_source
+      FUN_082a449c: resource_reference_value
+      FUN_08270414: scoped_context_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte A32 extent
+      0x081f796c..0x081f79bf; 0x081f79c0 starts the distinct next function.
+      The body default-constructs a TaggedValue, passes it to the
+      media-player interface's unresolved virtual slot +0xe4, constructs a
+      zero-mode ScopedContext from that value, reads its resource-reference
+      value, destroys the stack context, and returns the value. Raw branch
+      decoding verifies four direct outgoing plain unconditional BL calls
+      (0x081f7978, 0x081f797c, 0x081f799c, 0x081f79b0), zero predicated BL
+      calls, and the one vtable-mediated BLX at 0x081f798c. The slot target
+      identity remains unresolved; Rust preserves its verified ABI. Host
+      tests use native getter/resource seams because target-width firmware
+      pointers cannot represent host callbacks; target builds call the
+      existing ports. match.py reports the same call sequence but LLVM adds a
+      frame and folds local callee references into archive relocations.
