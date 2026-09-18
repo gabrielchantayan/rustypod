@@ -28257,6 +28257,26 @@ functions:
       the record at +0xc and longjmps through the jump buffer at +0x10.
 
 
+  - address: 0x081e170c
+    ghidra: FUN_081e170c
+    name: resource_ref_clear
+    size: 20
+    sig: "u32 *resource_ref_clear(u32 *resource_ref)"
+    module: ui/resource_ref_clear
+    status: ported
+    renames:
+      param_1/r0: resource_ref
+      r1: zero
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x081e170c..0x081e171f: mov r1,#0; str r1,[r0];
+      str r1,[r0,#4]; str r1,[r0,#8]; bx lr. The separately linked next
+      function starts at 0x081e1720 with cmp r1,#0x83. Decoding the four
+      callers at 0x081861f8, 0x081b9684, 0x08288fc8, and 0x08291c44 confirms
+      four inbound direct bl instructions, all unconditional and none
+      predicated. The leaf clears the three target words at offsets +0/+4/+8
+      and returns its input pointer unchanged. No deliberate deviations.
+
   - address: 0x08291c24
     ghidra: FUN_08291c24
     name: string_view_construct
