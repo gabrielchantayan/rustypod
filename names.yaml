@@ -77838,6 +77838,32 @@ functions:
       proves all valid record offsets, replacement rather than accumulation,
       neighbor preservation, and the signed negative-selector path.
 
+  - address: 0x081941a4
+    ghidra: FUN_081941a4
+    name: service_handler_state_set
+    size: 20
+    sig: "void service_handler_state_set(u32 *slot_table, i32 selector, u32 state)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: selector
+      param_3/r2: state
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x081941a4..0x081941b8: `cmp r1,#3; blge
+      0x08030f44; add r0,r0,r1,lsl #5; str r2,[r0,#4]; bx lr`; the
+      following `cmp r1,#13` at 0x081941b8 begins the next function. It
+      replaces the state word at +0x4 in one of three 8-word handler records.
+      The signed `blge` permits negative selectors, which address unchecked
+      before the table exactly as retailOS does; selectors >=3 terminate
+      through ported non-returning heap_panic. The body contains zero plain BL
+      and one predicated BL (`blge`); raw-image decoding found four inbound
+      direct calls — 0x081648bc, 0x0818f3fc, 0x0819111c, and 0x08192b70 —
+      all unconditional plain BL, with no predicated inbound forms or tail
+      branches. Deliberate deviations: none. Host coverage proves all valid
+      record offsets, replacement rather than accumulation, neighbor
+      preservation, and the signed negative-selector path.
   - address: 0x081941b8
     ghidra: FUN_081941b8
     name: service_manager_handler_group_for_slot
