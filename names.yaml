@@ -110235,3 +110235,28 @@ functions:
       LLVM removes that dead fatal branch; structured Rust conditionals replace
       ARM predicated returns while retaining the volatile first-byte load and
       result. Host tests cover all 256 first-byte values.
+
+  - address: 0x0816223c
+    ghidra: FUN_0816223c
+    name: enumerated_handle_collection_append
+    size: 188
+    sig: "u32 enumerated_handle_collection_append(u32 *collection, u32 *enumerator)"
+    module: app/enumerated_handle_collection
+    status: ported
+    renames:
+      param_1/r4: collection
+      param_2/r5: enumerator
+      local_10: handle
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte extent 0x0816223c..0x081622f8:
+      the return is at 0x081622f4 and 0x081622f8 starts the duplicate-check
+      sibling. A32 decoding finds four plain BL calls (0x08162248, 0x08162260,
+      0x081622ac, 0x081622e0) and one predicated BLNE at 0x081622d4. The
+      duplicate check at 0x081622f8 gates enumeration; each nonzero virtual
+      iterator result appends to the target-width vector at +4 and retains the
+      enumerator in the paired vector at +16. Vector-capacity helpers remain
+      fixed-address target calls with volatile host ABI seams because their
+      recovered identities are only their observed growth behavior. The
+      refcounted copy constructor at 0x0839f100 is retained as its own
+      fixed-address call to preserve the original call structure. Host tests
+      cover duplicate early return and multi-element append/retain behavior.
