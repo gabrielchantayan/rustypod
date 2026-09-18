@@ -14,6 +14,7 @@ pub mod application_global_slot_is_clear;
 pub mod application_string_registry;
 pub mod animation;
 pub mod artwork_slot_available;
+pub mod resource_registration_reset;
 pub mod class_6800;
 pub mod class_6000_property;
 pub mod class_6000_property_6045_i8;
