@@ -108098,3 +108098,30 @@ functions:
       accumulator address. DELIBERATE DEVIATION: the ready gate and literal
       destructor target are not independently ported/identified, so target
       builds retain their retail addresses and host tests supply callbacks.
+  - address: 0x081f9354
+    ghidra: FUN_081f9354
+    name: volume_controller_post_commands
+    size: 104
+    sig: "void volume_controller_post_commands(void *volume_controller)"
+    module: app/volume_controller_post_commands
+    status: ported
+    renames:
+      param_1/r0/r4: volume_controller
+      "[volume_controller + 0x00]": vtable
+      "[vtable + 0x58]": dispatch_fixed_command
+      DAT_081f93b0: command_group
+      DAT_081f93ac: first_command
+      DAT_081f93b4: second_command
+      DAT_081f93b8: third_command
+    notes: >-
+      Raw osos.dec establishes the 104-byte extent
+      0x081f9354..0x081f93bb, including the literal pool at
+      0x081f93ac..0x081f93b8; 0x081f93bc begins the next separately linked
+      function with push {r4-r8,lr}. The executable words contain two plain
+      unconditional blx r3 virtual calls and one bx r3 virtual tail call,
+      with no predicated call. A whole-image raw A32 branch decode finds four
+      direct incoming plain BL callers and no predicated BL callers. Each
+      dispatches vtable slot +0x58 with group 0x44726177 and successive
+      arguments 0x7f0c, 0x7f0d, and 0x7f0e. Deliberate deviation: Rust uses
+      normal calls for the tail dispatch; host builds use a swappable seam
+      because 32-bit firmware vtable pointers cannot represent host pointers.

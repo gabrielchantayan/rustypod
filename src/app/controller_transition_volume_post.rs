@@ -36,6 +36,8 @@ use core::ptr::{addr_of, addr_of_mut};
 
 #[cfg(target_os = "none")]
 use crate::app::singletons::{lazy_singleton_0xbc, volume_controller_get};
+#[cfg(target_os = "none")]
+use crate::app::volume_controller_post_commands::volume_controller_post_commands;
 use crate::drivers::timer::{timer_restart, timer_stop};
 
 const CONTROLLER_DISPATCH_TARGET_OFFSET: usize = 0x20;
@@ -44,7 +46,7 @@ const SINGLETON_SELECTION_SLOT: usize = 0x40;
 const INITIAL_STATE_DISPATCH_SLOT: usize = 0xac;
 const TOGGLED_STATE_DISPATCH_SLOT: usize = 0xb0;
 const TRANSITION_TIMER_OFFSET: usize = 0xa4;
-const VOLUME_POST_OPERATION_ADDRESS: usize = 0x081f_9354;
+// The terminal volume operation is ported in `volume_controller_post_commands`.
 
 /// The controller bytes and receiver word this routine observes. Pointer
 /// fields deliberately remain u32: that is the retail ARM object layout.
@@ -73,6 +75,7 @@ pub struct ControllerTransitionVolumePostOps {
     pub singleton_selection: unsafe extern "C" fn() -> u32,
     pub dispatch_initial_state: unsafe extern "C" fn(*mut u8),
     pub dispatch_toggled_state: unsafe extern "C" fn(*mut u8),
+    #[cfg(not(target_os = "none"))]
     pub post_volume_operation: unsafe extern "C" fn(*mut u8),
     #[cfg(not(target_os = "none"))]
     pub host_volume_controller_get: unsafe extern "C" fn() -> *mut u8,
@@ -115,12 +118,6 @@ unsafe extern "C" fn firmware_dispatch_toggled_state(receiver: *mut u8) {
     unsafe { method(receiver) };
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_post_volume_operation(volume_controller: *mut u8) {
-    let post: unsafe extern "C" fn(*mut u8) =
-        unsafe { core::mem::transmute(VOLUME_POST_OPERATION_ADDRESS) };
-    unsafe { post(volume_controller) };
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_availability() -> u32 {
@@ -154,7 +151,6 @@ pub static mut CONTROLLER_TRANSITION_VOLUME_POST_OPS: ControllerTransitionVolume
         singleton_selection: firmware_singleton_selection,
         dispatch_initial_state: firmware_dispatch_initial_state,
         dispatch_toggled_state: firmware_dispatch_toggled_state,
-        post_volume_operation: firmware_post_volume_operation,
     };
 
 #[cfg(not(target_os = "none"))]
@@ -218,6 +214,9 @@ pub unsafe extern "C" fn controller_transition_volume_post(this: *mut u8) {
     let volume_controller = unsafe { volume_controller_get() };
     #[cfg(not(target_os = "none"))]
     let volume_controller = unsafe { (ops.host_volume_controller_get)() };
+    #[cfg(target_os = "none")]
+    unsafe { volume_controller_post_commands(volume_controller) };
+    #[cfg(not(target_os = "none"))]
     unsafe { (ops.post_volume_operation)(volume_controller) };
 }
 
