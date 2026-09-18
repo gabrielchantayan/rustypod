@@ -26,6 +26,31 @@ const PROPERTY_KEY_6066: u32 = 0x6066;
 const DEFAULT_PROPERTY_6067: u32 = 0x6067;
 const RESOURCE_KIND_DIRP: ResourceKind = ResourceKind(0x4469_7250);
 
+const PROPERTY_KEY_6056: u32 = 0x6056;
+const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
+
+/// `class6000_ui32_property_6056` — original: `FUN_081115cc` @ `0x081115cc`
+/// (12 bytes: three ARM instructions through `0x081115d4`; the next real
+/// function begins at `0x081115d8`). **4 `bl` call sites**, binary-scanned by
+/// decoding every ARM B/BL word in `osos.dec`; all four are unconditional
+/// `bl` instructions, with no predicated `bl` call sites.
+///
+/// Ignores its incoming r0, resolves the class-0x6000 singleton, and
+/// tail-dispatches vtable slot +0xe0 as
+/// `read_typed(store, 0x6056, 0x6000, "Ui32")`, returning that slot's raw
+/// pointer result. The resource's semantic identity is not established.
+///
+/// Deliberate deviation: the stock terminal `bx ip` virtual dispatch is a
+/// Rust call. The otherwise-unused incoming argument remains in the ABI
+/// because all four stock callers pass one.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_ui32_property_6056(_ignored: *mut u8) -> *mut u32 {
+    let store = instance_of_class_6000() as *mut Class6000;
+    let read_typed = (*(*store).vtable).read_typed;
+    read_typed(store, PROPERTY_KEY_6056, CLASS_ID_6000, RESOURCE_KIND_UI32)
+}
+
 /// Returns the first word of class-0x6000's typed `"DirP"` property 0x6066,
 /// or 0x6067 when its virtual lookup answers NULL.
 #[inline(never)]
@@ -212,6 +237,30 @@ mod tests {
                     key: PROPERTY_KEY_6066,
                     class_id: CLASS_ID_6000,
                     kind: RESOURCE_KIND_DIRP,
+                }],
+            );
+        }
+    }
+
+    #[test]
+    fn ui32_property_6056_ignores_input_and_forwards_the_raw_virtual_result() {
+        let mut result = 0x6056;
+        let mut store = Store { vtable: &STORE_VTABLE };
+        let store_ptr = core::ptr::addr_of_mut!(store);
+        let _installed = install(store_ptr, core::ptr::addr_of_mut!(result));
+
+        let got = unsafe { class6000_ui32_property_6056(0x1234_5678 as *mut u8) };
+
+        assert_eq!(got, core::ptr::addr_of_mut!(result));
+        unsafe {
+            assert_eq!(*core::ptr::addr_of!(CAST_CALLS), [CLASS_ID_6000]);
+            assert_eq!(
+                *core::ptr::addr_of!(TYPED_CALLS),
+                [TypedCall {
+                    store: store_ptr.cast(),
+                    key: PROPERTY_KEY_6056,
+                    class_id: CLASS_ID_6000,
+                    kind: RESOURCE_KIND_UI32,
                 }],
             );
         }

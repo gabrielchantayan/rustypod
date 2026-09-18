@@ -20871,6 +20871,32 @@ functions:
       LLVM adds the frame-pointer push/pop every tiny port in this crate
       shows (observable_set_changed precedent).
 
+  - address: 0x081115cc
+    ghidra: FUN_081115cc
+    name: class6000_ui32_property_6056
+    size: 12
+    sig: "u32 *class6000_ui32_property_6056(void *ignored)"
+    module: app/class_6000_property
+    status: ported
+    renames:
+      FUN_08172124: instance_of_class_6000
+      param_1: ignored
+      piVar1: store
+      DAT_08171ff4: RESOURCE_KIND_UI32
+    notes: >-
+      Raw extent is 12 bytes: `push {r4,lr}; bl 0x08172124; pop {r4,lr};
+      b 0x08171fdc`, through 0x081115d4; the next real function begins at
+      0x081115d8. Decoding every ARM B/BL word in osos.dec finds exactly 4
+      direct call sites (0x081a541c, 0x081bbecc, 0x081f9be0, 0x081f9c4c),
+      all plain unconditional bl instructions; no predicated bl, tail branch,
+      or aligned data-word reference targets this entry. The incoming r0 is
+      overwritten by instance_of_class_6000, then the function tail-dispatches
+      vtable slot +0xe0 as `(store, 0x6056, 0x6000, "Ui32")`; it returns the
+      raw pointer result. The key's semantic identity is not established, so
+      the name records its verified class, kind, and literal. Rust uses a call
+      for the terminal virtual tail dispatch while retaining the unused ABI
+      argument; this is the only deliberate deviation.
+
   - address: 0x08171a80
     ghidra: FUN_08171a80
     name: class6000_property_6045_i8
