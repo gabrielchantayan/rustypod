@@ -108637,3 +108637,31 @@ functions:
       call boundary, producing a BLX and stack slot rather than ADS's
       direct BL. Host tests cover rebase, nonmutation, and NULL; match.py
       reports that intentional structural difference.
+
+  - address: 0x081d2914
+    ghidra: FUN_081d2914
+    name: owned_object_observable_array_destroy
+    size: 44
+    sig: "OwnedObjectObservableArray *owned_object_observable_array_destroy(OwnedObjectObservableArray *this)"
+    module: cxx/owned_object_observable_array_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      iVar1/r0: array_slot
+      "*(r0 - 4)": object
+      "r1 loaded from object vtable +4": object_destroy
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte extent
+      0x081d2914..0x081d293f: `e92d4010 e2800050 eb0852de e2404004
+      e5100004 e3500000 15901000 15911004 112fff31 e244004c e8bd8010`.
+      The next real function begins at 0x081d2940 with `push {r4,r5,r6,lr}`.
+      The four inbound direct calls at 0x0820fee0, 0x083d0a54, 0x083d0a98,
+      and 0x083e7534 are plain unconditional BL instructions; the inspected
+      call sites contain no predicated BL form. It invokes the ported
+      observable_array_owned_destroy on this+0x50, then conditionally
+      dispatches the preceding this+0x4c object's vtable slot +4, leaves both
+      member words intact, and returns this. Deliberate deviation: the port
+      uses native host pointers for the two target pointer words, so host
+      offsets widen while repr(C) preserves their ARM layout. match.py reports
+      LLVM's larger save frame, an indirect BL to the established Rust callee,
+      and a non-predicated conditional virtual call.
