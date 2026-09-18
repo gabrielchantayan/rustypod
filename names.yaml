@@ -109959,3 +109959,33 @@ functions:
       0x08177d2c; this proves the store but not the object's concrete type
       or field enum. Rust stores precisely one byte at +0x27 with no NULL
       guard, preserving stock fault behavior. Deliberate deviations: none.
+
+
+  - address: 0x0816eb70
+    ghidra: FUN_0816eb70
+    name: resource_slots_release
+    size: 112
+    sig: "void resource_slots_release(void *this)"
+    module: runtime/resource_slots_release
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_082ca974: release_tracked_resource
+      FUN_080e7970: free_tagged_resource
+      FUN_08159c08: destroy_and_delete_resource
+      FUN_082cacd4: release_pool_resource
+      thunk_FUN_08391408: set_memory_soft_limit
+    notes: >-
+      Raw osos.dec decoding establishes the true 112-byte extent
+      0x0816eb70..0x0816ebe0: four conditional resource releases, then a
+      tail branch through 0x0813eb3c into the soft-limit handler with r0 =
+      0x80000. The body has 5 plain bl instructions and no predicated bl:
+      0x0816eb88 (0x082ca974), 0x0816eba0 (free_wrapper 0x080e7970,
+      tag 0), 0x0816ebb4 (destructor 0x08159c08), 0x0816ebb8
+      (operator_delete 0x082aad24), and 0x0816ebcc (0x082cacd4).
+      Ghidra's 108-byte extent is wrong: it absorbs the following function
+      and misses the tail. Target-word fields at +0x28, +0x2c, +0x30, and
+      +0x34 are released in that order and cleared only after their release.
+      Deliberate deviation: the still-unported opaque resource releases and
+      soft-limit thunk use target-default operation slots so host tests can
+      observe their order; target defaults call the verified raw addresses.
