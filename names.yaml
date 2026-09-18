@@ -17,6 +17,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081cc690
+    ghidra: FUN_081cc690
+    name: selection_clear_and_stop_timer_when_empty
+    size: 52
+    sig: "void selection_clear_and_stop_timer_when_empty(SelectionController *controller, u32 selection_index)"
+    module: ui/selection_clear_and_stop_timer
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: selection_index
+      controller_plus_0x8e4: timer
+      controller_plus_0x8e8: selected_bits
+      selected_bits_plus_0x4: cardinality
+      FUN_08274774: bit_set_clear
+      FUN_0812c6b0: timer_stop
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte extent:
+      0x081cc690..0x081cc6c4, ending at `pop {r4, pc}`; the next separately
+      linked entry begins `push {r4, r5, r6, lr}` at 0x081cc6c4 with no
+      literal pool. It first calls ported bit_set_clear(controller+0x8e8,
+      selection_index). If the resulting selected_bits cardinality at +0x8ec
+      is nonzero it returns. Otherwise it loads controller+0x8e4 and, only
+      when nonzero, performs a predicated tail branch to ported timer_stop.
+      A raw whole-image B/BL decode finds 4 plain bl callers and 0 predicated
+      bl callers. Deliberate deviation:
+      Rust uses a normal return-position call instead of the conditional tail
+      branch; no caller-observable result register is defined by this void
+      function.
   - address: 0x08274458
     ghidra: FUN_08274458
     name: base64_table_char
