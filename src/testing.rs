@@ -607,6 +607,10 @@ pub mod hints {
     // active-context, packet, owner and pending-node fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const IAP_PACKET_EVENT_SCHEDULE: usize = 0xf100_0000;
+    // 0xf180_0000: dedicated to app/iap_packet_completion_event's raw-u32
+    // active-context, packet, owner and pending-node fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const IAP_PACKET_COMPLETION_EVENT: usize = 0xf180_0000;
     // 0xf200_0000: dedicated to app/context_scope_selector's raw-u32
     // subject/context fixture; mappings never unmap, so no other user may
     // share this hint.
