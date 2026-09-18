@@ -407,3 +407,4 @@ pub mod stream_selection_change;
 pub mod context_handle_process;
 pub mod item_collection_dispatch;
 pub mod ui_object_construct;
+pub mod enumerated_handle_collection;
