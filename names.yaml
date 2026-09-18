@@ -108589,3 +108589,22 @@ functions:
       is literal-backed while host tests replace it. Host tests cover completion
       short-circuit, successful sequence wrap/timestamp/state, and exhausted
       queue state preservation.
+
+  - address: 0x081d6204
+    ghidra: FUN_081d6204
+    name: xml_is_whitespace
+    size: 28
+    sig: "u32 xml_is_whitespace(u32 codepoint)"
+    module: util/xml_is_whitespace
+    status: ported
+    renames:
+      param_1/r0: codepoint
+      r0: is_whitespace
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent
+      0x081d6204..0x081d621f; 0x081d6220 begins the next separately linked
+      function with push {r4,r5,r6,lr}. Decoding every A32 B/BL word finds
+      four direct unconditional plain BL callers (0x0818bffc, 0x0818c11c,
+      0x0818c408, and 0x08235920) and zero predicated BL callers. It
+      compares r0 against U+0020, U+0009, U+000D, and U+000A and returns
+      one for equality, zero otherwise.
