@@ -108522,3 +108522,30 @@ functions:
       IAP_PACKET_EVENT_SCHEDULE_OPS seam; target builds invoke 0x081d7f14 and
       host tests install a model. match.py reports the expected structural
       differences from this seam and Rust's stack/frame layout.
+  - address: 0x081d8614
+    ghidra: FUN_081d8614
+    name: strided_buffer_entry_size
+    size: 16
+    sig: "u32 strided_buffer_entry_size(const StridedBuffer *table)"
+    module: app/strided_buffer_entry
+    status: ported
+    renames:
+      param_1/r0: table
+      param_1+0xc: layout
+      layout+0x00: vtable
+      vtable+0x2c: entry_size
+    notes: >-
+      Raw osos.dec establishes the true 16-byte extent
+      0x081d8614..0x081d8624: ldr r0,[r0,#0xc]; ldr r1,[r0];
+      ldr r1,[r1,#0x2c]; bx r1. The next separately linked function starts at
+      0x081d8624 with push {r4,r5,r6,lr}. A whole-image ARM B/BL decode finds
+      four incoming plain unconditional BL calls (0x081d865c, 0x081d86f0,
+      0x08209774, 0x0820981c) and zero incoming predicated BL calls. The
+      function obtains table->layout, loads the layout vtable's +0x2c
+      entry-size method, and tail-dispatches it with the layout pointer. The
+      dynamic vtable target has no fixed firmware identity, so the Rust port
+      directly calls the recovered function pointer rather than introducing a
+      seam. Host tests prove both a zero and u32::MAX return propagate
+      unchanged, the method receives the recovered layout pointer, and the
+      method is dispatched once per call. match.py reports the same three
+      loads and tail bx; only LLVM's frame prologue/epilogue differs.

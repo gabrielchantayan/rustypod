@@ -11,13 +11,37 @@
 //! `base + (index + 1) * stride`; the leading stride is the table header and
 //! all arithmetic wraps at 32 bits, exactly as the ARM `add` / `mla` pair.
 //!
-//! `FUN_081d8614` is not separately ported. It is only three loads followed
-//! by `bx` through this same layout vtable slot, so this port performs the
-//! decoded dispatch directly rather than adding a second dispatch seam or
-//! inventing an identity for the dynamic slot. No deliberate deviations.
+//! `FUN_081d8614` is ported below as [`strided_buffer_entry_size`]. Both
+//! routines dispatch the same dynamic vtable slot directly; no seam is added
+//! because the target is a per-layout virtual method rather than a fixed
+//! firmware callee. No deliberate deviations.
 
 /// A layout vtable's recovered entry-stride selector (`+0x2c` on target).
 pub type StridedBufferEntrySize = unsafe extern "C" fn(*const StridedBufferLayout) -> u32;
+
+/// strided_buffer_entry_size — original: `FUN_081d8614` @ `0x081d8614` (16
+/// bytes; true extent `0x081d8614..0x081d8624`; 4 plain `bl` callers and no
+/// predicated `bl` callers, binary-scanned).
+///
+/// Loads the table's layout, then selects its vtable's `+0x2c` entry-size
+/// method and tail-dispatches it with that layout pointer. The target is
+/// dynamic, so this directly calls the recovered function pointer rather than
+/// inventing a fixed-callee seam. No deliberate deviations.
+///
+/// # Safety
+///
+/// `table` must identify readable [`StridedBuffer`] storage whose `layout`
+/// word identifies a readable [`StridedBufferLayout`] and vtable whose `+0x2c`
+/// entry accepts that layout pointer. As in retailOS, neither pointer is
+/// NULL-checked.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strided_buffer_entry_size(
+    table: *const StridedBuffer,
+) -> u32 {
+    let layout = (*table).layout as usize as *const StridedBufferLayout;
+    ((*(*layout).vtable).entry_size)(layout)
+}
 
 /// The table portion this accessor reads. Every field is a target-width word,
 /// keeping the `+0x04` base and `+0x0c` layout link exact on 64-bit hosts.
@@ -87,7 +111,7 @@ pub unsafe extern "C" fn strided_buffer_entry_at(
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::{strided_buffer_entry_at, StridedBuffer, StridedBufferLayout, StridedBufferLayoutVtable};
+    use super::{strided_buffer_entry_at, strided_buffer_entry_size, StridedBuffer, StridedBufferLayout, StridedBufferLayoutVtable};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -131,6 +155,26 @@ mod tests {
             });
         }
         Some((base.cast(), layout, buffer as u32))
+    }
+
+    #[test]
+    fn dispatches_the_layout_entry_size_method_with_the_original_pointer() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some((table, layout, _)) = fixture() else {
+            note_missing_u32_fixture("app::strided_buffer_entry");
+            return;
+        };
+        ENTRY_SIZE.store(0, Ordering::SeqCst);
+        SEEN_LAYOUT.store(0, Ordering::SeqCst);
+        ENTRY_SIZE_CALLS.store(0, Ordering::SeqCst);
+
+        unsafe {
+            assert_eq!(strided_buffer_entry_size(table), 0);
+            ENTRY_SIZE.store(u32::MAX, Ordering::SeqCst);
+            assert_eq!(strided_buffer_entry_size(table), u32::MAX);
+        }
+        assert_eq!(SEEN_LAYOUT.load(Ordering::SeqCst), layout as usize);
+        assert_eq!(ENTRY_SIZE_CALLS.load(Ordering::SeqCst), 2);
     }
 
     #[test]
