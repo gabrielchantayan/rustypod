@@ -139,6 +139,7 @@ pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
 pub mod iap_packet_completion;
+pub mod iap_packet_completion_schedule;
 pub mod iap_packet_event_dispatch;
 pub mod iap_packet_event_schedule;
 pub mod itunesdb_read_default_field;
