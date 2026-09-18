@@ -9112,6 +9112,25 @@ functions:
       defaults to a no-op — wiring it to dcache_clean is left to the
       drivers/ porter.
 
+  - address: 0x0818a3b4
+    ghidra: FUN_0818a3b4
+    name: manager_event_notify
+    size: 52
+    sig: "i32 manager_event_notify(void *manager, u32 event)"
+    module: heap/manager_notification
+    status: ported
+    notes: >-
+      Raw ARM extent is exactly 0x0818a3b4..0x0818a3e4: prologue,
+      operator_new(12), event-node constructor @ 0x0820768c, conditional
+      heap_panic on a NULL result, then a tail branch to queue operation @
+      0x08261998 with manager+0x3c. 0x0818a3e8 starts the separately linked
+      sibling with a different constructor. The body has 3 plain bl
+      instructions and one predicated bleq; raw image decoding confirms four
+      inbound direct plain bl call sites at 0x08167bdc, 0x0818a6e0,
+      0x081fbf20, and 0x081fc498. The constructor and queue operation remain
+      unported and dispatch through target-addressed seams; the existing
+      operator_new and heap_panic ports are called directly. Rust uses a
+      normal call rather than the original tail branch.
   - address: 0x0818ae48
     ghidra: FUN_0818ae48
     name: block_manager_get
