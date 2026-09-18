@@ -282,6 +282,7 @@ pub mod three_word_clear_eleventh;
 pub mod three_word_clear_return;
 pub mod three_word_clear_return_alt;
 pub mod tokenizer;
+pub mod tokenizer_next_string;
 pub mod trivial_destructor;
 pub mod trivial_vector4_destruct;
 pub mod trivial_vector8_destruct;
