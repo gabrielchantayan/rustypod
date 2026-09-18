@@ -16921,6 +16921,25 @@ functions:
       the LBA28 flows also cap the count at 0x100 (0x082798e4).
       #[inline(never)].
 
+  - address: 0x0812133c
+    ghidra: FUN_0812133c
+    name: ata_cmd_set_opaque_word_3c
+    size: 8
+    sig: "void ata_cmd_set_opaque_word_3c(u8 *cmd, u32 value)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: value}
+    notes: >-
+      Raw osos.dec establishes the full extent: `str r1, [r0, #0x3c]; bx
+      lr`; 0x08121344 starts the distinct device/head setter. Decoding every
+      ARM BL word finds four direct inbound calls, all unconditional:
+      0x0827a688, 0x0827a820, 0x0827af1c, and 0x0827b0b0; no predicated BL
+      forms occur. The callers initialize adjacent opaque words then pass
+      their seventh argument, which establishes only opaque word storage at
+      +0x3c, not a stronger semantic identity. No NULL guard or deliberate
+      deviations. #[inline(never)] and an independent link section preserve
+      this real hook target from identical-code folding.
+
   - address: 0x08121344
     ghidra: FUN_08121344
     name: ata_cmd_set_device_head
