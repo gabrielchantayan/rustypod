@@ -55027,6 +55027,40 @@ functions:
       pointers plus a getter seam; target preserves the recovered 32-bit
       offsets and directly calls the existing media_player_interface_get port.
 
+  - address: 0x081392e8
+    ghidra: FUN_081392e8
+    name: media_player_setting_select
+    size: 136
+    sig: "u32 media_player_setting_select(void *unused, i32 selector, u32 requested_value, u32 record_change)"
+    module: app/media_player_setting_select
+    renames:
+      param_1/r0: unused
+      param_2/r1: selector
+      param_3/r2: requested_value
+      param_4/r3: record_change
+      DAT_08139370: media_player_setting_change
+      FUN_08259928: settings_get
+      FUN_08030f44: heap_panic
+      "vtable+0x108": get_value
+      "vtable+0x104": set_value
+    status: ported
+    notes: >-
+      Raw ARM proves a 136-byte extent: 33 instruction words from
+      0x081392e8 through 0x0813936c plus the global-state literal
+      0x089cca20 at 0x08139370; 0x08139374 opens the next separately linked
+      function. Signed selectors >=3 and requested values >2 return 4.
+      Valid calls get the settings singleton, read vtable slot +0x108, record
+      its low byte and selector only when requested and no change is pending,
+      then call slot +0x104 only when the value differs. The body contains
+      one plain direct bl (settings_get), one predicated bleq (heap_panic),
+      and two dynamic vtable blx calls (one predicated); no virtual callee
+      identity is claimed. Decoding every ARM B/BL immediate in osos.dec finds
+      4 plain inbound bl sites and 0 predicated inbound bl sites. Deliberate
+      deviations: the RW change record is modeled by a crate static; host uses
+      a native-width operation seam, while target dispatches recovered 32-bit
+      vtable slots directly. Volatile change-record accesses preserve the
+      firmware-visible stores.
+
   - address: 0x08138b84
     ghidra: FUN_08138b84
     name: service_handler_lifecycle_state

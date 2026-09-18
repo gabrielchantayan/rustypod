@@ -216,6 +216,7 @@ pub mod media_player_pending_item;
 pub mod media_player_interface_slot_11c;
 pub mod media_player_interface_slot_110;
 pub mod media_player_interface_status;
+pub mod media_player_setting_select;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
 pub mod indexed_slot_pending_reset;
