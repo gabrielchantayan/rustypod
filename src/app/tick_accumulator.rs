@@ -281,6 +281,59 @@ pub unsafe extern "C" fn tick_accumulator_set_scale_factor_limit(
     (*accumulator).scale_factor_limit = scale_factor_limit;
 }
 
+/// tick_accumulator_set_input_divisor — original: `FUN_081bb294` @
+/// `0x081bb294` (**8 bytes**, `0x081bb294..0x081bb29c`; the next separately
+/// linked function begins at `0x081bb29c`).
+///
+/// **3 plain unconditional `bl` call sites and 1 predicated `bl` call site**,
+/// verified by decoding every ARM `B`/`BL` word in `osos.dec`.
+///
+/// Stores `input_divisor` at the aligned 32-bit field `accumulator + 0x18`.
+/// Callers set the divisor from input-rate state and reset it to one after an
+/// output tick. It deliberately has no NULL or range guard, exactly like
+/// `str r1,[r0,#24]`. No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_accumulator_set_input_divisor(
+    accumulator: *mut TickAccumulator,
+    input_divisor: u32,
+) {
+    (*accumulator).input_divisor = input_divisor;
+}
+
+#[cfg(test)]
+mod set_input_divisor_tests {
+    use super::{tick_accumulator_set_input_divisor, TickAccumulator};
+    use core::ptr::addr_of_mut;
+
+    #[test]
+    fn stores_zero_without_changing_adjacent_fields() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator.remainder = u32::MAX;
+            accumulator.input_divisor = 9;
+            accumulator.scale_factor_limit = 0x8000_0000;
+
+            tick_accumulator_set_input_divisor(addr_of_mut!(accumulator), 0);
+
+            assert_eq!(accumulator.remainder, u32::MAX);
+            assert_eq!(accumulator.input_divisor, 0);
+            assert_eq!(accumulator.scale_factor_limit, 0x8000_0000);
+        }
+    }
+
+    #[test]
+    fn stores_full_width_divisor() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+
+            tick_accumulator_set_input_divisor(addr_of_mut!(accumulator), u32::MAX);
+
+            assert_eq!(accumulator.input_divisor, u32::MAX);
+        }
+    }
+}
+
 /// tick_accumulator_rejects_rate — original: `FUN_081bb410` @ `0x081bb410`
 /// (**40 bytes**, `0x081bb410..0x081bb438`; the next separately linked
 /// function begins at `0x081bb438`).

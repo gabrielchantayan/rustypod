@@ -76745,6 +76745,33 @@ functions:
       deviations. Host tests cover zero and u32::MAX limits and prove that
       every adjacent state field is unchanged.
 
+  # --- adaptive tick accumulator input divisor setter ---
+  - address: 0x081bb294
+    ghidra: FUN_081bb294
+    name: tick_accumulator_set_input_divisor
+    size: 8
+    sig: "void tick_accumulator_set_input_divisor(TickAccumulator *accumulator, u32 input_divisor)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      param_2/r1: input_divisor
+      param_1_plus_0x18: input_divisor
+    notes: >-
+      Raw ARM establishes the exact 8-byte extent,
+      0x081bb294..0x081bb29c: `str r1,[r0,#24]; bx lr`; the separately linked
+      next function begins at 0x081bb29c. Decoding every ARM B/BL word in
+      work/firmware/osos.dec finds four direct call sites: three plain
+      unconditional bl calls at 0x0828649c, 0x08287c10, and 0x08292e10, plus
+      one predicated bl call at 0x08292e38. Aligned-word scanning finds no data
+      references. It unconditionally stores its second argument to the
+      TickAccumulator input_divisor field at +0x18; callers configure it from
+      input-rate state and reset it to one after an output tick. The Rust port
+      uses the existing #[repr(C)] TickAccumulator field, preserving the
+      target's 32-bit aligned layout without host-size-dependent offsets. No
+      deliberate deviations. Host tests cover zero and u32::MAX divisors and
+      prove the adjacent remainder and scale_factor_limit fields are unchanged.
+
   # --- adaptive tick accumulator timing-state reset ---
   - address: 0x081bb3d0
     ghidra: FUN_081bb3d0
