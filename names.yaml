@@ -111520,3 +111520,22 @@ functions:
       finds four inbound plain BL calls and zero predicated BL calls. The
       concrete object type and byte-field enum are unrecovered, so the Rust
       port preserves the raw u8-pointer interface and fault behavior.
+  - address: 0x081211a8
+    ghidra: FUN_081211a8
+    name: empty_object_destruct
+    size: 4
+    sig: "u32 empty_object_destruct(u32 this)"
+    module: runtime/empty_object_destruct
+    status: ported
+    vars: {param_1/r0: this}
+    notes: >-
+      Raw osos.dec word 0xe12fff1e establishes this as a four-byte A32
+      function containing only bx lr. The next real function begins at
+      0x081211ac with strb r0,[r0,#0x1a]. Consequently it reads no memory,
+      changes no registers, and returns its incoming r0 unchanged. The paired
+      initializer at 0x081211a4 is also bx lr; its callers use the pair around
+      a four-byte stack slot, identifying this as an empty object destructor.
+      Full-image A32 decoding finds four inbound plain BL calls at 0x08167354,
+      0x0816739c, 0x0818dbe8, and 0x0818dc30, with no predicated BL calls.
+      Rust's host implementation exposes the r0 pass-through for tests; the
+      firmware build is a naked function that emits the original bx lr.

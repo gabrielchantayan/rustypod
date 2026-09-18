@@ -15,6 +15,7 @@ pub mod cxa_guard_acquire_veneer;
 pub mod cxa_guard;
 pub mod cxa_guard_release_veneer;
 pub mod errno;
+pub mod empty_object_destruct;
 pub mod exit;
 pub mod i2c0_idle;
 pub mod global_state;
