@@ -618,6 +618,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_POSITION: usize = 0xd300_0000;
+    // 0xee20_0000: dedicated to app/visible_range_recompute's target-width
+    // state and collection fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const VISIBLE_RANGE_RECOMPUTE: usize = 0xee20_0000;
     // 0xd600_0000: dedicated to cxx/sorted_pointer_array_insert's raw-u32
     // array, entry, and record fixture; mappings never unmap, so no other
     // user may share this hint.

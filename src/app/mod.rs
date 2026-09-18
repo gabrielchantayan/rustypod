@@ -6,6 +6,7 @@ pub mod app_screen_cached_position;
 pub mod app_state_cleanup;
 pub mod app_screen_position_decrement_if_flagged;
 pub mod app_screen_update_position;
+pub mod visible_range_recompute;
 pub mod active_service_handler_readiness;
 pub mod application_resource_provider;
 pub mod application_message_post_global;
