@@ -23,6 +23,7 @@ pub mod class_8780_dispatch_state;
 pub mod class_9300_remove_inactive_items;
 pub mod class_8900;
 pub mod class_6280_set_position;
+pub mod class_6280_refresh_ui;
 pub mod class_8900_prid_first_byte;
 pub mod class_8900_prid_60f3_first_byte;
 pub mod class_8900_prid_60f1_first_byte;
