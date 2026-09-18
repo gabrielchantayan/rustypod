@@ -111539,3 +111539,31 @@ functions:
       0x0816739c, 0x0818dbe8, and 0x0818dc30, with no predicated BL calls.
       Rust's host implementation exposes the r0 pass-through for tests; the
       firmware build is a naked function that emits the original bx lr.
+
+  # --- opaque tree/vector owner destructor ---
+  - address: 0x0811f548
+    ghidra: FUN_0811f548
+    name: opaque_tree_vector_destruct
+    size: 72
+    sig: "u8 *opaque_tree_vector_destruct(u8 *this)"
+    module: app/opaque_tree_vector_destruct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0811f590: opaque_tree_vector_vtable (0x08982f30)
+      FUN_083dc640: opaque_tree_clear (fixed-address seam; identity unrecovered)
+      FUN_083e0c54: refcounted_body_slot_range_release (inlined)
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw ARM establishes exactly 72 instruction bytes, 0x0811f548..0x0811f590:
+      push {r4,r5,r6,lr}; install literal vtable 0x08982f30; clear this+0x18
+      through 0x083dc640; release each refcounted-body slot in the aligned
+      [this+4,this+8) range; then call cxx_array_dealloc with this+4 and
+      (this+0xc - this+4) arithmetic-shifted by two; return this. The next
+      real function begins at 0x0811f594 with bx lr; 0x0811f590 is the literal
+      pool. Full-image A32 decoding found four inbound calls: plain BL at
+      0x081f0b78, 0x081f0b80, and 0x083ccce0 is predicated blne; no other
+      direct calls. Internal calls are three unconditional BLs, none predicated.
+      The unrecovered tree helper remains a fixed-address ARM seam, while its
+      host equivalent is injected for tests. The simple range-release helper
+      is deliberately inlined through the already ported refcounted teardown.
