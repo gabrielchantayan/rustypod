@@ -50434,6 +50434,37 @@ functions:
       forwarding, and raw return-word propagation. match.py structural:
       source +0x88 load, target-vtable load, +0x4c indirect tail dispatch.
 
+  - address: 0x0811c188
+    ghidra: FUN_0811c188
+    name: class_6280_set_position
+    size: 148
+    sig: "void class_6280_set_position(Class6280 *view, int position, unsigned int force)"
+    module: app/class_6280_set_position
+    status: ported
+    renames:
+      param_1/r4: view
+      param_2: position
+      param_3: force
+      "view+0x20": selected_position
+      "view+0x88": position_provider
+      "view+0x8c": status_string
+      "view+0x94": ui_element
+      FUN_0827639c: string_object_assign_cstr
+      FUN_0811b9dc: class_6280_refresh_ui
+    notes: >-
+      Raw osos.dec decoding establishes 0x0811c188..0x0811c21c as the
+      true 148-byte extent: 144 instruction bytes followed by the null
+      StringObject source literal at 0x0811c21c; the next independent
+      function begins at 0x0811c234 after three more literal words.
+      The body has one plain direct bl (0x0827639c), zero predicated direct
+      bl, and four indirect blx calls (provider slot +0x40 and three view
+      slot +0x58 calls). It changes +0x20 when forced or different, clears
+      the embedded status StringObject, notifies the provider, dispatches
+      resource words 0x6280/0x6282/0x6283, then tail-branches to
+      0x0811b9dc. The direct string helper, signed division in the tail body,
+      and UI invalidation are existing ports. Unidentified virtual slots
+      remain physical target dispatches; the host-only widened vtables exist
+      solely to test change/force gating and all three resource updates.
   - address: 0x0811c298
     ghidra: FUN_0811c298
     name: object_dispatch_entry_dispatch_vtable_slot_50
