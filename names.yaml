@@ -111133,3 +111133,29 @@ functions:
       append success. Candidate increment and comparison intentionally wrap
       as the original ARM add/bcs loop. Unported direct calls retain exact
       target veneers on firmware and replaceable host seams.
+
+  # --- vtable slot +0x1b4 decrement-if-nonzero ---
+  - address: 0x0813c4c0
+    ghidra: FUN_0813c4c0
+    name: vtable_slot_1b4_decrement_nonzero
+    size: 28
+    sig: "u32 vtable_slot_1b4_decrement_nonzero(VtableSlot1b4Receiver *receiver)"
+    module: cxx/vtable_slot_1b4_decrement_nonzero
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_1_deref: vtable
+      vtable_plus_0x1b4: vtable_slot_1b4
+      iVar1/r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent: seven ARM words from
+      push {r4,lr} at 0x0813c4c0 through pop {r4,pc} at 0x0813c4d8; the next
+      separately linked function starts at 0x0813c4dc. Full-image ARM decoding
+      finds exactly four inbound direct calls, all plain unconditional bl at
+      0x0810c80c, 0x0810c81c, 0x0810c8b0, and 0x0810c914; there are zero
+      predicated direct calls and no direct tail branches. The body has no
+      static calls: it invokes receiver vtable word 109 (+0x1b4) through blx,
+      returns zero unchanged, and otherwise returns the callback result minus
+      one. The virtual method identity is unrecovered and deliberately not
+      inferred. Deliberate deviation: Rust uses a native-width typed host
+      vtable callback rather than the target's four-byte vtable word.
