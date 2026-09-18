@@ -1681,3 +1681,6 @@ pub static OBJECT_SELECTED_PAYLOAD_INDEX_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
 /// Serializes host tests that replace `ui::pool_entry_create::FIXED_POOL_OPS`.
 pub static UI_POOL_ENTRY_CREATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes host tests that replace the unidentified UI base constructor
+/// used only by `app::ui_object_construct`.
+pub static UI_OBJECT_BASE_CONSTRUCT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
