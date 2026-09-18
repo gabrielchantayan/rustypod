@@ -195,6 +195,7 @@ pub mod mode_selected_position;
 pub mod mode_selected_extent;
 pub mod mode_selected_position_set;
 pub mod media_player_state_reset;
+pub mod media_player_transition_dispatch;
 pub mod media_player;
 pub mod media_player_resource_value;
 pub mod music_selection_state_reset;
