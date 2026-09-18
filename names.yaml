@@ -111428,3 +111428,24 @@ functions:
       and zero predicated BL calls. Rust models the two pointer-bearing
       records with repr(C); native host pointer width deliberately widens
       their host offsets while ARM retains the verified +0x4 fields.
+  - address: 0x08123560
+    ghidra: FUN_08123560
+    name: file_record_registry_destruct
+    size: 120
+    sig: "*mut u8 file_record_registry_destruct(*mut u8 this)"
+    module: app/file_record_registry_destruct
+    status: ported
+    vars: {param_1/r0: this, "this+0x2c": auxiliary_object, "iterator+0x4": iterator_state}
+    notes: >-
+      Raw ARM is exactly 120 bytes, 0x08123560..0x081235d8; the next real
+      function begins at 0x081235d8, so Ghidra's 124-byte extent includes
+      the next prologue word. The body conditionally invokes vtable slot
+      +0x04 for this+0x2c, begins a six-word file-record iterator over this,
+      conditionally invokes that same slot for every yielded non-NULL node,
+      drops iterator+0x4, then calls the 0x0810e6b0 thunk to the ported
+      registry_container_destruct. Full-image A32 decoding found four
+      incoming plain BL calls at 0x0814b810, 0x0814be88, 0x0814bee8, and
+      0x0814bf30, and no predicated BL calls. Its body has three direct BL
+      calls and two predicated indirect BLX dispatches. The vtable targets
+      are runtime data and deliberately remain unnamed; host fixtures widen
+      their pointer fields while the ARM path uses target u32 words.
