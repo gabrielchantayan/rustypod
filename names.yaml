@@ -109553,3 +109553,40 @@ functions:
       the non-NULL global at 0x08a09ee0. Deliberate deviation: the target
       retains the verified raw ARM body because the four direct callees have
       no recovered semantic identities; host tests use operation seams.
+  # --- iAP service packet submit ---
+  - address: 0x08190aa8
+    ghidra: FUN_08190aa8
+    name: iap_service_packet_submit
+    size: 184
+    sig: "u32 iap_service_packet_submit(void *context, u32 service_index, u32 unused, u32 payload_word)"
+    module: app/iap_service_packet_submit
+    status: ported
+    renames:
+      param_1/r0: context (preserved ABI word, unused)
+      param_2/r1/r4: service_index
+      param_3/r2: unused
+      param_4/r3: payload_word
+      DAT_08190b60: service_slot_enabled_flags
+      DAT_08190b64: incoming_process_thread_slot_ids
+      FUN_0819214c: iap_packet_owner_mode_from_index
+      FUN_08193ec0: service_manager_secondary_handler_get
+      FUN_080f6da0: iap_packet_create
+      FUN_081d7270: iap_incoming_process_thread_slot_poll
+      FUN_081d66b8: iap_incoming_process_thread_slot_wait
+    notes: >-
+      Raw ARM establishes the exact 184-byte extent 0x08190aa8..0x08190b60:
+      44 instruction words through `pop {r1-r7,pc}` at 0x08190b5c, then the
+      two literal words 0x089ca8e6 and 0x089ca940; the next separately linked
+      function begins at 0x08190b68. The body contains seven unconditional
+      plain bl instructions (0x08190ab8, 0x08190ae4, 0x08190af0, 0x08190b10,
+      0x08190b20, 0x08190b38, and 0x08190b44) and no predicated BL forms,
+      correcting Ghidra's four-call figure. Only unsigned indices zero and
+      one pass the literal flag test; nonzero flags return zero, while indices
+      two and above and mode-map failure return 11. A passing index maps to
+      owner mode one or two, creates a one-byte lingo-0 command-0x27 packet
+      from the low byte of r3, polls its literal-selected incoming-thread
+      slot, and waits only after poll returns zero. Null packet creation
+      returns 28. The host-only literal-table fixtures avoid dereferencing
+      retailOS addresses on the tested rejection paths; packet completion
+      retains the established 0x081d7f14 operation seam. Host tests cover
+      both out-of-range statuses and both disabled literal slots.

@@ -144,6 +144,7 @@ pub mod context_shared_cell_payload_word;
 pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
+pub mod iap_service_packet_submit;
 pub mod iap_packet_completion;
 pub mod iap_packet_completion_event;
 pub mod iap_packet_completion_schedule;
