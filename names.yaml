@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815556c
+    ghidra: FUN_0815556c
+    name: fatal_cleanup_no_op
+    size: 4
+    sig: "void *fatal_cleanup_no_op(void *object)"
+    module: util/fatal_cleanup_no_op
+    status: ported
+    renames:
+      param_1/r0: object
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x0815556c..0x08155570: bx lr. The next real function starts at
+      0x08155570 with push {r3,r4,r5,r6,r7,lr}. Decoding the complete
+      decrypted image finds four inbound plain unconditional bl calls
+      (0x081c2744, 0x081c2f74, 0x081c3674, and 0x081c4470) and no inbound
+      predicated bl calls. At every call site r0 contains a non-null object
+      immediately after FUN_08155430 and before the non-returning fatal-error
+      handler at 0x082aad24. The body does not inspect object or change
+      memory; it returns immediately with r0 unchanged. The Rust signature
+      exposes that observed r0 pass-through even though Ghidra inferred void
+      with no arguments. Reference C: decomp/c/013/0815556c_FUN_0815556c.c;
+      assembly: osos.asm 0x0815556c.
   - address: 0x08165dd0
     ghidra: FUN_08165dd0
     name: assign_active_entry_labels
