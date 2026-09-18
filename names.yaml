@@ -52753,6 +52753,34 @@ functions:
       volatile typed seam rather than inventing a name. match.py structural
       review is expected to differ at this indirect bridge.
 
+  - address: 0x08178e9c
+    ghidra: FUN_08178e9c
+    name: owner_callback_dispatch
+    size: 92
+    sig: "void owner_callback_dispatch(void *owner, void *object)"
+    module: cxx/owner_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: object
+      FUN_082a2084: object_word4_is_zero
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec proves the 92-byte extent from 0x08178e9c through
+      0x08178ef4; the `ldr r0,[pc,#4]` at 0x08178ef8 begins the separately
+      linked successor. The body has four call instructions, all
+      unconditional: two direct plain BL calls (0x082a2084 and ported
+      operator_new @ 0x082aadd4) and two indirect BLX calls through the
+      owner receivers at +0x24 and +0x50, each vtable slot +0x1c. It always
+      dispatches the first receiver with a writable stack copy of object.
+      Only when 0x082a2084 returns non-zero does it allocate four bytes,
+      store object there, and dispatch the second receiver with a writable
+      pointer to that allocation. No predicated BL instructions occur.
+      The predicate has no established higher-level identity, so the target
+      calls its verified load address and host tests use an exact typed seam;
+      virtual slots similarly use a device dispatcher/host seam. Rust's host
+      pointer-sized test storage differs from the four-byte ARM pointer word.
+
 
   # --- Silver UI framework: root instance getter ---
 

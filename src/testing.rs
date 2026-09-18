@@ -99,6 +99,9 @@ pub mod hints {
     // array and growth-allocation slab; mappings never unmap, so no other
     // user may share this hint.
     pub const OBJECT_STACK_PUSH: usize = 0x6600_0000;
+    // 0x6b00_0000: dedicated to cxx/owner_callback_dispatch's target-width
+    // owner, object, and queued-word-copy fixture; mappings never unmap.
+    pub const OWNER_CALLBACK_DISPATCH: usize = 0x6b00_0000;
     pub const CLIENT_POPULATE: usize = 0x0b00_0000;
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;
