@@ -137,6 +137,105 @@ pub(crate) const DEFAULT_TASK_MESSAGE_OPS: TaskMessageOps = TaskMessageOps {
 /// target; tests serialize access.
 pub static mut TASK_MESSAGE_OPS: TaskMessageOps = DEFAULT_TASK_MESSAGE_OPS;
 
+/// Raw receive operation at `FUN_0807a2e8` @ 0x0807a2e8. Its identity is
+/// not yet established beyond the observed queue/cell handoff, so this
+/// seam deliberately names only that data flow.
+#[derive(Clone, Copy)]
+pub struct TaskMessageReceiveOps {
+    /// Receives a cell from `queue`, writes its address to `result[1]`, and
+    /// receives the caller's auxiliary pointer in both `result[0]` and r2.
+    pub receive_cell: unsafe extern "C" fn(queue: usize, result: *mut u32, auxiliary: *mut u8) -> u32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_receive_cell(
+    queue: usize,
+    result: *mut u32,
+    auxiliary: *mut u8,
+) -> u32 {
+    let receive: unsafe extern "C" fn(usize, *mut u32, *mut u8) -> u32 =
+        unsafe { core::mem::transmute(0x0807_a2e8usize) };
+    unsafe { receive(queue, result, auxiliary) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_receive_cell(
+    _queue: usize,
+    _result: *mut u32,
+    _auxiliary: *mut u8,
+) -> u32 {
+    panic!("task_message_receive requires queue helper 0x0807a2e8")
+}
+
+const DEFAULT_TASK_MESSAGE_RECEIVE_OPS: TaskMessageReceiveOps = TaskMessageReceiveOps {
+    receive_cell: {
+        #[cfg(target_os = "none")]
+        { firmware_receive_cell }
+        #[cfg(not(target_os = "none"))]
+        { missing_receive_cell }
+    },
+};
+
+/// Active seam for the unported queue receive helper.
+pub static mut TASK_MESSAGE_RECEIVE_OPS: TaskMessageReceiveOps = DEFAULT_TASK_MESSAGE_RECEIVE_OPS;
+
+/// The received message's first word, literal `b"emit"` from 0x0812c620.
+pub const TASK_MESSAGE_EMIT_TAG: u32 = 0x7469_6d65;
+/// The marker written to the emitted message's word at `+0x20`, literal
+/// `b"pots"` from 0x0812c624.
+pub const TASK_MESSAGE_EMIT_POST_MARKER: u32 = 0x7374_6f70;
+const TASK_MESSAGE_CELL_PAYLOAD_WORDS: usize = 7;
+
+/// task_message_receive — original: `FUN_0812c5dc` @ **0x0812c5dc**
+/// (**68 bytes** of code, 0x0812c5dc..0x0812c620; the two literal words at
+/// 0x0812c620 and 0x0812c624 precede the next real function at 0x0812c628).
+///
+/// **4 direct, unconditional `bl` callers; 0 predicated `bl` callers**,
+/// verified by decoding all ARM branch-with-link words in `osos.dec`
+/// (0x0812bfec, 0x0812c2f0, 0x08148d04, 0x082921c4). The body has three
+/// unconditional `bl` instructions and no predicated calls.
+///
+/// Receives a task-message cell through the queue helper @ 0x0807a2e8, copies
+/// its seven payload words (cell `+0x04`) to `message`, returns the cell to
+/// the global task-message pool, then stamps `b"pots"` at `message[3]+0x20`
+/// when the copied tag is `b"emit"`.
+///
+/// Deliberate deviation: the queue helper remains an explicitly named
+/// data-flow seam because its callee identity is not established. The target
+/// default calls its retailOS address; the host default panics until a test
+/// installs [`TASK_MESSAGE_RECEIVE_OPS`]. The target's two-word stack result
+/// is represented as `[u32; 2]`, preserving its four-byte fields on hosts.
+///
+/// # Safety
+///
+/// `message` must point to seven writable target words. The installed receive
+/// helper must place a valid pool cell address in `result[1]`; for an `emit`
+/// message, `message[3]` must be a valid writable target address through
+/// `+0x20`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_message_receive(
+    queue: usize,
+    message: *mut u32,
+    auxiliary: *mut u8,
+) {
+    let mut result = [auxiliary as usize as u32, 0];
+    let receive_cell =
+        unsafe { core::ptr::addr_of!(TASK_MESSAGE_RECEIVE_OPS.receive_cell).read_volatile() };
+    unsafe { receive_cell(queue, result.as_mut_ptr(), auxiliary) };
+
+    let cell = result[1] as usize as *mut u32;
+    for word in 0..TASK_MESSAGE_CELL_PAYLOAD_WORDS {
+        unsafe { message.add(word).write_volatile(cell.add(word + 1).read_volatile()) };
+    }
+    unsafe { task_message_pool_release(cell.cast()) };
+
+    if unsafe { message.read_volatile() } == TASK_MESSAGE_EMIT_TAG {
+        let marker = unsafe { message.add(3).read_volatile() } as usize as *mut u32;
+        unsafe { marker.add(8).write_volatile(TASK_MESSAGE_EMIT_POST_MARKER) };
+    }
+}
+
 /// task_message_post_sync — original: `FUN_0812bf70` @ 0x0812bf70 (20
 /// bytes).
 ///
@@ -177,8 +276,10 @@ pub unsafe extern "C" fn task_message_post_sync(
 pub(crate) mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex as StdMutex;
+    use crate::testing::{hints, try_map_u32_slab};
+    use parking_lot::Mutex as StdMutex;
     use std::vec::Vec;
+
 
     /// Serializes every test that swaps [`TASK_MESSAGE_OPS`] — including
     /// `app::queued_message`'s poster tests, which drive the same slot.
@@ -189,6 +290,20 @@ pub(crate) mod tests {
     /// Mock post helper: records the full argument tuple and returns
     /// the scripted result.
     static mut MOCK_RESULT: u32 = 0;
+    static RECEIVE_CALL: StdMutex<Option<(usize, u32, usize)>> = StdMutex::new(None);
+    static mut MOCK_RECEIVE_CELL: u32 = 0;
+
+    unsafe extern "C" fn mock_receive_cell(
+        queue: usize,
+        result: *mut u32,
+        auxiliary: *mut u8,
+    ) -> u32 {
+        let first = unsafe { result.read_volatile() };
+        RECEIVE_CALL.lock().replace((queue, first, auxiliary as usize));
+        unsafe { result.add(1).write_volatile(core::ptr::addr_of!(MOCK_RECEIVE_CELL).read_volatile()) };
+        0
+    }
+
 
     unsafe extern "C" fn mock_post_message(
         reply_queue: usize,
@@ -197,7 +312,7 @@ pub(crate) mod tests {
         wait: u32,
         flags: u32,
     ) -> u32 {
-        CALLS.lock().unwrap().push((
+        CALLS.lock().push((
             reply_queue,
             target_queue,
             message as usize,
@@ -216,8 +331,8 @@ pub(crate) mod tests {
         message: *const u32,
         flags: u32,
     ) -> (u32, (usize, usize, usize, u32, u32)) {
-        let _guard = OPS_LOCK.lock().unwrap();
-        CALLS.lock().unwrap().clear();
+        let _guard = OPS_LOCK.lock();
+        CALLS.lock().clear();
         unsafe {
             core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(result);
             core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(TaskMessageOps {
@@ -225,7 +340,7 @@ pub(crate) mod tests {
             });
         }
         let ret = unsafe { task_message_post_sync(reply_queue, target_queue, message, flags) };
-        let calls = CALLS.lock().unwrap().clone();
+        let calls = CALLS.lock().clone();
         unsafe {
             core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(DEFAULT_TASK_MESSAGE_OPS);
         }
@@ -270,7 +385,7 @@ pub(crate) mod tests {
 
     #[test]
     fn default_stub_reports_failure_and_posts_nothing() {
-        let _guard = OPS_LOCK.lock().unwrap();
+        let _guard = OPS_LOCK.lock();
         unsafe {
             core::ptr::addr_of_mut!(TASK_MESSAGE_OPS).write_volatile(DEFAULT_TASK_MESSAGE_OPS);
         }
@@ -281,7 +396,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pool_release_appends_cells_and_clears_each_link() {
-        let _guard = OPS_LOCK.lock().unwrap();
+        let _guard = OPS_LOCK.lock();
         let mut first = ListNode {
             next: core::ptr::null_mut(),
         };
@@ -311,4 +426,65 @@ pub(crate) mod tests {
             assert!(second.next.is_null());
         }
     }
+    #[test]
+    fn receive_copies_cell_payload_releases_cell_and_stamps_emit_marker() {
+        let _guard = OPS_LOCK.lock();
+        let Some(slab) = try_map_u32_slab(hints::TASK_MESSAGE_RECEIVE, 0x100) else {
+            return;
+        };
+        let cell = slab.cast::<u32>();
+        let marker = unsafe { slab.add(0x40).cast::<u32>() };
+        let auxiliary = unsafe { slab.add(0x80) };
+        let mut message = [0u32; TASK_MESSAGE_CELL_PAYLOAD_WORDS];
+
+        unsafe {
+            cell.write_volatile(0);
+            cell.add(1).write_volatile(TASK_MESSAGE_EMIT_TAG);
+            cell.add(2).write_volatile(0x1111_2222);
+            cell.add(3).write_volatile(0x3333_4444);
+            cell.add(4).write_volatile(marker as usize as u32);
+            cell.add(5).write_volatile(0x5555_5555);
+            cell.add(6).write_volatile(0x6666_6666);
+            cell.add(7).write_volatile(0x7777_7777);
+            marker.add(8).write_volatile(0);
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POOL_MUTEX).write_volatile(Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            });
+            core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST).write_volatile(ListHead {
+                head: core::ptr::null_mut(),
+                tail: core::ptr::null_mut(),
+            });
+            core::ptr::addr_of_mut!(MOCK_RECEIVE_CELL).write_volatile(cell as usize as u32);
+            RECEIVE_CALL.lock().take();
+            core::ptr::addr_of_mut!(TASK_MESSAGE_RECEIVE_OPS).write_volatile(TaskMessageReceiveOps {
+                receive_cell: mock_receive_cell,
+            });
+
+            task_message_receive(0x089c_001c, message.as_mut_ptr(), auxiliary);
+
+            core::ptr::addr_of_mut!(TASK_MESSAGE_RECEIVE_OPS)
+                .write_volatile(DEFAULT_TASK_MESSAGE_RECEIVE_OPS);
+        }
+
+        assert_eq!(
+            message,
+            [
+                TASK_MESSAGE_EMIT_TAG,
+                0x1111_2222,
+                0x3333_4444,
+                marker as usize as u32,
+                0x5555_5555,
+                0x6666_6666,
+                0x7777_7777,
+            ]
+        );
+        assert_eq!(unsafe { marker.add(8).read_volatile() }, TASK_MESSAGE_EMIT_POST_MARKER);
+        assert_eq!(*RECEIVE_CALL.lock(), Some((0x089c_001c, auxiliary as usize as u32, auxiliary as usize)));
+        unsafe {
+            assert_eq!(TASK_MESSAGE_FREE_LIST.head.cast::<u32>(), cell);
+            assert_eq!(TASK_MESSAGE_FREE_LIST.tail.cast::<u32>(), cell);
+        }
+    }
+
 }

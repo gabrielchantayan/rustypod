@@ -656,7 +656,8 @@ mod post_tests {
     use crate::kernel::task_message::{TaskMessageOps, DEFAULT_TASK_MESSAGE_OPS, TASK_MESSAGE_OPS};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
-    use std::sync::{LazyLock, MutexGuard};
+    use parking_lot::MutexGuard;
+    use std::sync::LazyLock;
     use std::vec::Vec;
 
     /// One recorded call into the message-post helper.
@@ -721,9 +722,7 @@ mod post_tests {
     /// chain in the low slab. Holds `task_message`'s ops lock, the one
     /// lock guarding [`TASK_MESSAGE_OPS`] crate-wide.
     fn bench(target_queue: usize) -> Option<(MutexGuard<'static, ()>, Fixture)> {
-        let guard = crate::kernel::task_message::tests::OPS_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = crate::kernel::task_message::tests::OPS_LOCK.lock();
         let slab = (*SLAB)? as *mut u8;
         unsafe {
             (*ptr::addr_of_mut!(POSTS)).clear();
