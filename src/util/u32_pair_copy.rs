@@ -1,16 +1,20 @@
 //! A fixed-width two-word copy helper.
 
-/// copy_u32_pair — retailOS `FUN_081bb6a4` @ 0x081bb6a4 and
-/// `FUN_083dc0cc` @ 0x083dc0cc (20 bytes each).
+/// copy_u32_pair — retailOS `FUN_081b4e10` @ 0x081b4e10,
+/// `FUN_081bb6a4` @ 0x081bb6a4, and `FUN_083dc0cc` @ 0x083dc0cc (20 bytes
+/// each).
 ///
-/// Decoding every ARM B/BL word in `osos.dec` verifies six unconditional
-/// direct `bl` call sites and two unconditional direct `b` tail branches for
-/// the first address, plus five unconditional direct `bl` call sites for the
-/// second; neither has predicated forms. The five-instruction leaf loads word
-/// 0 from `source` and stores it to `destination`, then loads and stores word
-/// 1. It leaves `r0` unchanged, returning `destination`. The second source
-/// load occurs after the first destination store, so overlapping ranges have
-/// ordered forward-copy semantics.
+/// Raw words establish the `FUN_081b4e10` extent as
+/// `0x081b4e10..0x081b4e24`: `ldr r2,[r1]; str r2,[r0]; ldr r1,[r1,#4];
+/// str r1,[r0,#4]; bx lr`; the next separately linked function begins at
+/// 0x081b4e24. Decoding every ARM B/BL word in `osos.dec` verifies four
+/// unconditional direct `bl` call sites (0x08158c88, 0x08158ccc,
+/// 0x08158ce0, and 0x0815fbf8), with no predicated forms. The same
+/// five-instruction leaf loads word 0 from `source` and stores it to
+/// `destination`, then loads and stores word 1. It leaves `r0` unchanged,
+/// returning `destination`. The second source load occurs after the first
+/// destination store, so overlapping ranges have ordered forward-copy
+/// semantics.
 ///
 /// Deliberate deviations: volatile accesses preserve the retail load/store
 /// order against LLVM transformations; they otherwise use the same aligned
@@ -58,22 +62,23 @@ mod tests {
 
     #[test]
     fn matches_two_instruction_pairs_for_all_overlaps() {
-        for destination in 0..=2 {
-            let source = 1;
-            let initial = [0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444];
-            let mut expected = initial;
-            let mut actual = initial;
+        for source in 0..=2 {
+            for destination in 0..=2 {
+                let initial = [0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+                let mut expected = initial;
+                let mut actual = initial;
 
-            reference_ordered_pair_copy(&mut expected, destination, source);
-            let returned = unsafe {
-                copy_u32_pair(
-                    actual.as_mut_ptr().add(destination),
-                    actual.as_ptr().add(source),
-                )
-            };
+                reference_ordered_pair_copy(&mut expected, destination, source);
+                let returned = unsafe {
+                    copy_u32_pair(
+                        actual.as_mut_ptr().add(destination),
+                        actual.as_ptr().add(source),
+                    )
+                };
 
-            assert_eq!(actual, expected, "destination={destination}");
-            assert_eq!(returned, unsafe { actual.as_mut_ptr().add(destination) });
+                assert_eq!(actual, expected, "source={source}, destination={destination}");
+                assert_eq!(returned, unsafe { actual.as_mut_ptr().add(destination) });
+            }
         }
     }
 }

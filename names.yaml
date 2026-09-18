@@ -76973,6 +76973,31 @@ functions:
       retain that load/store order against LLVM transformations. Host tests
       cover full-width values, return identity, neighbour preservation, and
       every two-word overlap position.
+  # --- ordered u32 pair copy ---
+  - address: 0x081b4e10
+    ghidra: FUN_081b4e10
+    name: copy_u32_pair
+    size: 20
+    sig: "u32 *copy_u32_pair(u32 *destination, const u32 *source)"
+    module: util/u32_pair_copy
+    status: ported
+    renames:
+      param_1/r0: destination (aligned two-word output, returned unchanged)
+      param_2/r1: source (aligned two-word input)
+      r2: first_word
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte extent
+      0x081b4e10..0x081b4e24: ldr r2,[r1]; str r2,[r0]; ldr r1,[r1,#4];
+      str r1,[r0,#4]; bx lr. The next separately linked function begins at
+      0x081b4e24 with stm r0,{r1,r2}. Decoding every ARM B/BL word finds four
+      incoming unconditional plain bl calls (0x08158c88, 0x08158ccc,
+      0x08158ce0, 0x0815fbf8) and no predicated BL forms. The target is
+      instruction-identical to the existing 0x081bb6a4 port, so it shares
+      copy_u32_pair: two aligned u32 loads/stores occur in forward order, and
+      r0 returns destination despite Ghidra declaring void. Volatile accesses
+      retain the load/store order against LLVM; host tests cover full-width
+      values, return identity, neighbours, and every two-word overlap
+      position.
   # --- empty u32 pair ---
   - address: 0x081bb6b8
     ghidra: FUN_081bb6b8
