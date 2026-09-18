@@ -71222,6 +71222,33 @@ functions:
       as zero, preventing an incomplete replacement core from exposing
       scratch-register contents; a conforming core has identical output.
 
+  - address: 0x0810e2e4
+    ghidra: FUN_0810e2e4
+    name: controller_base_construct
+    size: 148
+    sig: "void *controller_base_construct(void *this, const char *name)"
+    module: app/controller_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+      FUN_0812d074: controller_prefix_construct
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw ARM decoding establishes the 148-byte code extent
+      0x0810e2e4..0x0810e378; the next byte is the separately addressed
+      "CntrlPrePushFn" literal. It has four unconditional plain bl
+      instructions and no predicated bl: the unidentified inherited-prefix
+      constructor at 0x0812d074, string construction at +0x28/+0x30/+0x38,
+      and observable_array_construct at +0x60. The port preserves each
+      target-layout scalar store and its order, including -1 at +0x5c and
+      the array return-relative vtable, flag, and word stores. The inherited
+      constructor remains a direct target-address seam because names.yaml
+      has no supported identity for 0x0812d074. Host tests inject string
+      construction because target StringObject fields are eight bytes while
+      host pointers are wider; target builds call the existing port directly.
+
   - address: 0x08134db4
     ghidra: FUN_08134db4
     name: silver_controller_construct
