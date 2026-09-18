@@ -247,6 +247,7 @@ pub mod once_initializer;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;
 pub mod parse_result;
+pub mod parse_result_scope;
 pub mod parse_diagnostic;
 pub mod path_exists;
 pub mod quoted_input_candidate_find;

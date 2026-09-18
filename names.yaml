@@ -108608,3 +108608,32 @@ functions:
       0x0818c408, and 0x08235920) and zero predicated BL callers. It
       compares r0 against U+0020, U+0009, U+000D, and U+000A and returns
       one for equality, zero otherwise.
+
+  - address: 0x081d5e54
+    ghidra: FUN_081d5e54
+    name: parse_result_scope_destroy
+    size: 20
+    sig: "u8 *parse_result_scope_destroy(u8 *scope)"
+    module: app/parse_result_scope
+    status: ported
+    renames:
+      param_1/r0: scope
+      iVar1/r0: embedded_result
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte extent:
+      `e92d4010 e2800034 eb02b4c5 e2400034 e8bd8010`, decoding as
+      `push {r4,lr}; add r0,r0,#0x34; bl 0x08283178; sub r0,r0,#0x34;
+      pop {r4,pc}`. The next real function begins at 0x081d5e68 with
+      `push {r4,lr}`; no literal pool lies between them. Full-image A32
+      B/BL decoding finds four plain unconditional BL callers
+      (0x080f9bc0, 0x080fa2ac, 0x080fbe94, 0x080fbebc) and zero
+      predicated BL callers. The paired constructor 0x081d5e2c constructs
+      a +0x20 subobject then initializes a parse-result record at +0x34;
+      this destructor invokes the established parse_result_destroy there
+      and returns the enclosing scope by rebasing the callee's preserved r0.
+      Deliberate deviations: wrapping pointer arithmetic models ARM's
+      register-only arithmetic for NULL/non-dereferenceable inputs. A
+      volatile load of the established Rust callee retains the original
+      call boundary, producing a BLX and stack slot rather than ADS's
+      direct BL. Host tests cover rebase, nonmutation, and NULL; match.py
+      reports that intentional structural difference.
