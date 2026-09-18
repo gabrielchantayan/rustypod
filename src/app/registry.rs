@@ -617,6 +617,32 @@ pub const CLASS_ID_DEMO_MODE: u32 = 0x8080;
 pub unsafe extern "C" fn demo_mode_instance() -> *mut u8 {
     instance_of_class(CLASS_ID_DEMO_MODE)
 }
+/// The class id preserved by `FUN_081cb184`; no class-name registration
+/// evidence identifies the class behind it.
+pub const DEMO_MODE_CLASS_ID_2600: u32 = 0x2600;
+
+/// demo_mode_class_2600_instance — original: `FUN_081cb184` @ 0x081cb184
+/// (28 bytes; **4 unconditional `bl` call sites, 0 predicated**, binary-scanned).
+///
+/// Gets the registered demo-mode singleton and tail-dispatches its checked
+/// downcast to class 0x2600. It explicitly returns NULL before the cast when
+/// the singleton is absent, matching the stock conditional return.
+///
+/// Deliberate deviations: none. The explicit NULL branch retains the stock
+/// call/return control flow rather than relying on the cast veneer to do so.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_class_2600_instance() -> *mut u8 {
+    let demo_mode = demo_mode_instance();
+    if demo_mode.is_null() {
+        return core::ptr::null_mut();
+    }
+    object_cast_to_class(
+        demo_mode.cast::<FrameworkObject>(),
+        DEMO_MODE_CLASS_ID_2600,
+    )
+}
+
 
 /// The `TCDemoMode` vtable, modeled down to the two slots its ported
 /// callers dispatch: +0xec and +0x100. The image's copy of the vtable page
@@ -1573,16 +1599,17 @@ mod tests {
 
     // ---- the cast veneer and the per-class accessors ----
 
-    /// A framework object whose cast accepts exactly one id.
+    /// A framework object whose cast accepts one or two class ids.
     #[repr(C)]
     struct TestObject {
         vtable: *const FrameworkObjectVtable,
         accepts: u32,
+        also_accepts: u32,
     }
 
     unsafe extern "C" fn test_cast(this: *mut FrameworkObject, class_id: u32) -> *mut u8 {
         let object = this as *mut TestObject;
-        if (*object).accepts == class_id {
+        if (*object).accepts == class_id || (*object).also_accepts == class_id {
             this as *mut u8
         } else {
             ptr::null_mut()
@@ -1593,7 +1620,11 @@ mod tests {
         FrameworkObjectVtable { unresolved_00: [0; 5], cast_to_class: test_cast };
 
     fn object_accepting(id: u32) -> TestObject {
-        TestObject { vtable: &TEST_OBJECT_VTABLE, accepts: id }
+        TestObject { vtable: &TEST_OBJECT_VTABLE, accepts: id, also_accepts: 0 }
+    }
+
+    fn object_accepting_both(first: u32, second: u32) -> TestObject {
+        TestObject { vtable: &TEST_OBJECT_VTABLE, accepts: first, also_accepts: second }
     }
 
     const FIELD_DC_CAST_FIXTURE_LEN: usize = 0x1000;
@@ -1692,6 +1723,31 @@ mod tests {
         }
         restore(guard);
     }
+    #[test]
+    fn demo_mode_class_2600_accessor_downcasts_the_demo_mode_singleton() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting_both(CLASS_ID_DEMO_MODE, DEMO_MODE_CLASS_ID_2600);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_DEMO_MODE);
+            assert_eq!(demo_mode_class_2600_instance(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn demo_mode_class_2600_accessor_rejects_the_wrong_dynamic_type() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_DEMO_MODE);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_DEMO_MODE);
+            assert_eq!(demo_mode_instance(), this);
+            assert!(demo_mode_class_2600_instance().is_null());
+        }
+        restore(guard);
+    }
+
 
     #[test]
     fn an_instance_of_the_wrong_class_reads_back_as_null() {
