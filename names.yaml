@@ -77436,6 +77436,31 @@ functions:
       retain the load/store order against LLVM; host tests cover full-width
       values, return identity, neighbours, and every two-word overlap
       position.
+  # --- ordered copy from two u32 pairs ---
+  - address: 0x08158c6c
+    ghidra: FUN_08158c6c
+    name: copy_two_u32_pairs
+    size: 40
+    sig: "u32 *copy_two_u32_pairs(u32 *destination, const u32 *first_source, const u32 *second_source)"
+    module: util/copy_two_u32_pairs
+    status: ported
+    renames:
+      param_1/r0: destination (aligned four-word output, returned unchanged)
+      param_2/r1: first_source (aligned first two-word input)
+      param_3/r2: second_source (aligned final two-word input)
+    notes: >-
+      Raw osos.dec words establish exactly 40 code bytes,
+      0x08158c6c..0x08158c94: push {r4,lr}; ldr r3,[r1]; str r3,[r0]; ldr
+      r1,[r1,#4]; str r1,[r0,#4]; mov r1,r2; add r0,r0,#8; bl
+      0x081b4e10; sub r0,r0,#8; pop {r4,pc}. The next separately linked
+      function begins at 0x08158c94. Decoding every ARM B/BL word found four
+      incoming unconditional plain bl calls (0x081097c0, 0x0812698c,
+      0x081274e8, 0x08271180) and no predicated BL forms. The function
+      forward-copies the first pair, then invokes the established
+      copy_u32_pair helper for the second pair at destination+8, restoring
+      destination as its return value. Deliberate deviation: volatile first
+      pair accesses retain the observed ordered load/store semantics; the
+      helper call uses the existing faithful 0x081b4e10 port.
   # --- empty u32 pair ---
   - address: 0x081bb6b8
     ghidra: FUN_081bb6b8
