@@ -9156,6 +9156,24 @@ functions:
       instructions. Port uses BLOCK_MANAGER instead of the runtime global
       word, matching block_manager_get and region_block_size.
 
+  - address: 0x0818aca8
+    ghidra: FUN_0818aca8
+    name: manager_client_capacity_total
+    size: 112
+    sig: "u32 manager_client_capacity_total(void *manager)"
+    module: heap/block_mgr
+    status: ported
+    notes: >-
+      True extent is 0x0818aca8..0x0818ad17, ending at the next push
+      prologue. Raw ARM has 2 plain, unconditional bl calls (to the
+      byte-identical handle_deref_or_null copy 0x083d64f4 and
+      not_equal_deref 0x083d6f78), no predicated bl forms, and 4 inbound
+      direct bl sites: 0x0818a53c, 0x0818a758, 0x081fbea4, 0x0820785c.
+      On the u32::MAX cache sentinel at manager+0x1bc, traverses the
+      circular list rooted at [manager+0x28], sums each resolved client's
+      +0x1c word with wrapping addition, caches, and returns the total.
+      Rust reuses the existing typed seams for both verified callees.
+
   - address: 0x081a7a9c
     ghidra: thunk_FUN_0818a364
     name: region_block_size_thunk
