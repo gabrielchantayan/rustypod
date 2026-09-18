@@ -109411,3 +109411,36 @@ functions:
       marker 0x2a2a2a2a. Deliberate deviation: host fixtures use native-width
       pointer and function-pointer fields; target-only assertions preserve the
       verified ARM offsets.
+  - address: 0x081a2158
+    ghidra: FUN_081a2158
+    name: conditional_callback_dispatch
+    size: 184
+    sig: "void conditional_callback_dispatch(ConditionalCallbackController *controller, u32 event)"
+    module: app/conditional_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_2/r1/r5: event
+      "[controller + 0x14]": primary_when_enabled
+      "[controller + 0x18]": active_target
+      "[controller + 0x1c]": primary_when_disabled
+      "[controller + 0x20]": fallback_target
+      "[vtable + 0xa0]": dispatch_event
+      DAT_081a2210: first_global_target
+      DAT_081a2214: second_global_target
+      DAT_081a2218: final_global_target
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent
+      0x081a2158..0x081a2210: bx r2 at 0x081a220c is followed by three
+      literal global addresses, then the next distinct push prologue at
+      0x081a221c. The body contains four unconditional plain BL instructions,
+      two predicated BLXNE virtual calls, and an indirect tail BX; raw
+      disassembly identifies four direct plain-BL callers at 0x081a221c,
+      0x081a2254, 0x081a2338, and 0x081a2564. It initializes two unrecovered
+      global contexts, reads their selector bytes, and dispatches vtable slot
+      +0xa0 on a controller target selected from +0x14/+0x18/+0x1c/+0x20.
+      With both selectors nonzero it also dispatches the active target and
+      non-NULL globals at 0x08a09ed8 and 0x08a09edc before tail-dispatching
+      the non-NULL global at 0x08a09ee0. Deliberate deviation: the target
+      retains the verified raw ARM body because the four direct callees have
+      no recovered semantic identities; host tests use operation seams.
