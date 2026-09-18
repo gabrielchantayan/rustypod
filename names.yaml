@@ -110354,3 +110354,23 @@ functions:
       0x082aad24, but the empty body establishes no higher-level identity.
       The port therefore names only the verified behavior: return r0 unchanged.
       Deliberate deviations: none.
+
+  - address: 0x08158d08
+    ghidra: FUN_08158d08
+    name: zero_nine_words
+    size: 104
+    sig: "void zero_nine_words(u8 *dst)"
+    module: util/zero_nine_words
+    status: ported
+    renames:
+      param_1/r0: dst
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte extent
+      0x08158d08..0x08158d70: mov r1,#0; byte stores at dst+0..15,
+      aligned word stores at dst+16, +20, +24, and +28, then byte stores
+      at dst+32..35 and bx lr. The mov r1,#0 at 0x08158d70 begins the next
+      independently linked function. Full-image A32 decoding finds four
+      inbound plain BL calls and zero inbound predicated BL calls. The port
+      retains the target instruction sequence exactly; its host-only
+      implementation uses volatile byte stores to safely test an unaligned
+      fixture. Deliberate deviations: host storage width only.

@@ -183,6 +183,7 @@ pub mod u32_deref_equal;
 pub mod u32_deref_is_max;
 pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
+pub mod zero_nine_words;
 pub mod zero_four_words;
 pub mod zero_four_bytes;
 pub mod zero_three_words;
