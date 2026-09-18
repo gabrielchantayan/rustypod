@@ -108005,3 +108005,33 @@ functions:
       the intersection of the old +0x44 flag word and mask, then clears every
       mask bit from that word. Deliberate deviation: opaque storage is
       byte-addressed to preserve the target offset on 64-bit hosts.
+
+  # --- Two-pair metadata record constructor ---
+  - address: 0x081fadc4
+    ghidra: FUN_081fadc4
+    name: vtable_two_pair_metadata_construct
+    size: 96
+    sig: "void *vtable_two_pair_metadata_construct(void *this, const void *src_pair_at_4, const void *src_pair_at_12, u32 metadata)"
+    module: cxx/vtable_two_pair_metadata_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: src_pair_at_4
+      param_3/r2: src_pair_at_12
+      param_4/r3/r4: metadata
+      DAT_081fae24: metadata_vtable
+      DAT_081fae28: pair_second
+      DAT_081fae2c: pair_first
+      FUN_0811050c: vtable_two_pair_base_construct
+      FUN_081b4e24: store_u32_pair
+    notes: >-
+      Raw ARM establishes a 96-byte executable body at 0x081fadc4..0x081fae24,
+      followed by its three-word literal pool at 0x081fae24..0x081fae30; the
+      next separately linked function starts at 0x081fae30. The direct inbound
+      call count is four plain unconditional BL instructions (0x081dcd48,
+      0x081dce0c, 0x0820b88c, and 0x0820fd44), with no predicated BL forms.
+      It calls the common two-pair base constructor, replaces its vtable with
+      0x08990af8, stores metadata at +0x14, initializes ten following control
+      words as 0,1,0,1,0,0,0,0,0,0, stores (0x0010b6c3,0x00015180) at +0x40,
+      and returns this. The Rust port calls the two already ported direct BL
+      targets and uses volatile derived-field stores to retain retail ordering.

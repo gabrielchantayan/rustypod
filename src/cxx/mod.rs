@@ -321,6 +321,7 @@ pub mod guarded_vtable_slot_1c_dispatch;
 pub mod guarded_vtable_slot_40_dispatch;
 pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
+pub mod vtable_two_pair_metadata_construct;
 pub mod vtable_two_pair_derived_construct;
 pub mod vtable_flag_payload_construct;
 pub mod vtable_shared_handle_construct;
