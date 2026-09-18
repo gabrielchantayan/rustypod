@@ -20493,6 +20493,29 @@ functions:
       bl) and 0x08100b74 (id 0x6600, 36 bl), both ported, both classes
       unidentified (their ctors never name themselves to the factory).
       Ghidra renders the tail veneer as a recovered-jumptable warning.
+  - address: 0x08188b5c
+    ghidra: FUN_08188b5c
+    name: demo_mode_observer_construct
+    size: 20
+    sig: "RegistryObserver *demo_mode_observer_construct(RegistryObserver *this)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1/r0: this, DAT_08188b70: DEMO_MODE_OBSERVER_VTABLE_ADDRESS}
+    notes: >-
+      Raw osos.dec words are e92d4010 ebfe149d e59f1004 e5801000
+      e8bd8010: push {r4,lr}; call the ported
+      registry_observer_base_construct (0x0810dddc); load the literal
+      0x08989918 from 0x08188b70; store it at +0x00; and return the
+      base's unchanged r0. The true code extent is 20 bytes
+      (0x08188b5c..0x08188b70); 0x08188b70 is the literal-pool word and
+      the next real function begins at 0x08188b74. Direct-target decoding
+      finds four inbound calls, all plain unconditional bl, at 0x0828de3c,
+      0x0828dfd4, 0x0828e1d4, and 0x0828e3d4; no predicated BL reaches
+      it. Those callers allocate eight bytes then install this observer
+      via registry_set_observer, identifying its role as the shared
+      TCDemoMode UI observer. Deliberate deviations: none; the vtable
+      contents are unavailable in the stale runtime page, so Rust stores
+      the verified literal address without modeling its slots.
   - address: 0x081cb184
     ghidra: FUN_081cb184
     name: demo_mode_class_2600_instance
