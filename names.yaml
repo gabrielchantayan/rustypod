@@ -108313,3 +108313,46 @@ functions:
       target/host seams; their names state only the recovered ABI, not an
       unproven class identity. Host tests prove getter-result substitution and
       forwarding of null owner plus high-bit values in every message word.
+
+  # --- application: visible range recomputation ---
+  - address: 0x081f036c
+    ghidra: FUN_081f036c
+    name: visible_range_recompute
+    size: 144
+    sig: "void visible_range_recompute(void *state, u32 refresh, u32 unused, u32 context)"
+    module: app/visible_range_recompute
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1: refresh
+      param_3/r2: unused
+      param_4/r3: context
+      "[state + 0x30]": collection
+      "[state + 0x34]": position_twice
+      "[state + 0x38]": visible_low
+      "[state + 0x3c]": visible_high
+      "[state + 0x59]": initial_refresh_complete
+      "[collection + 0x2b4]": base_index
+      "[collection + 0x2b8]": item_count
+      FUN_081f11e0: initial_visible_range_refresh
+      FUN_081f1114: incremental_visible_range_refresh
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte A32 extent
+      0x081f036c..0x081f03f8: the next independently entered function starts
+      with push {r4,r5,r6,r7,r8,lr} at 0x081f03fc. Decoding direct ARM B/BL
+      immediate words finds exactly four inbound plain BL calls
+      (0x081f02e4, 0x081f077c, 0x0821ba20, 0x0821bb98), zero predicated BL
+      forms, and two outbound plain BL calls at 0x081f03d0 and 0x081f03ec.
+      The position word is halved; base - position saturates to zero; base +
+      position wraps at u32 width and is retained only when below item_count,
+      otherwise the high bound is item_count - 1, except zero item_count
+      leaves it zero. A nonzero refresh with a collection invokes the initial
+      target once and latches +0x59, then invokes the incremental target with
+      (state, low, high, context); both calls precede the bound stores.
+      The two callees' class identities are unrecovered, so their names state
+      only verified range-refresh behavior and are volatile target/host seams.
+      The raw body never reads r2; Rust retains it in the public ABI. Host
+      tests prove saturation, wrapping sum, zero-length behavior, first-pass
+      ordering/latch, old-bound visibility, and context forwarding. match.py
+      exits 1 with the expected structural diff: seams add a frame and BLX
+      loads, and LLVM reorders independent bound arithmetic.
