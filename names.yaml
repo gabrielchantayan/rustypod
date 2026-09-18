@@ -79651,6 +79651,34 @@ functions:
       distinct hook target. Host tests cover NULL, unaligned, extreme pointer
       values, pointer preservation, and no object writes; match.py structural
       diff reviewed after the ARM release build.
+  - address: 0x0810704c
+    ghidra: FUN_0810704c
+    name: object_string_construct
+    size: 80
+    sig: "void object_string_construct(StringObject *this, void **object_reference)"
+    module: app/object_string_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: object_reference
+      auStack_108: rendered
+      FUN_0805235c: object_render_cstr
+      FUN_08276474: string_object_assign_payload
+      FUN_08276db4: string_object_text_normalize
+      DAT_0810709c: STRING_OBJECT_VTABLE_ADDRESS
+    notes: >-
+      Raw ARM establishes the exact 80-byte extent 0x0810704c..0x0810709c:
+      the word at 0x0810709c is the 0x089a6044 StringObject vtable literal,
+      and 0x081070a0 starts a separate wrapper. It initializes `this`, loads
+      `*object_reference`, and calls 0x0805235c with a 256-byte stack buffer
+      and capacity 0xff. Only a zero result assigns the rendered C string and
+      invokes 0x08276db4 to normalize it. The body contains three
+      unconditional plain BL instructions (0x0805235c, 0x08276474, and
+      0x08276db4), no predicated BL forms; the three direct call sites are
+      0x08143434, 0x0814aa6c, and 0x082c8400. The two unported direct callees
+      are explicit target-call/host-test seams; host vtable identity uses the
+      existing static representation. Host tests cover renderer failure and
+      successful rendering's indirect source load and exact 0xff capacity.
   - address: 0x08166a3c
     ghidra: FUN_08166a3c
     name: empty_destructor_166a3c
