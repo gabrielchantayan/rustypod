@@ -174,6 +174,9 @@ pub mod hints {
     pub const ELEMENT_REGISTRY_SLOT_FOR_KEY: usize = 0x1d40_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
+    // 0x1f10_0000: dedicated to cxx/tokenizer_next_string's raw-u32 UTF-16
+    // range fixture; mappings never unmap, so no other port may share it.
+    pub const TOKENIZER_NEXT_STRING: usize = 0x1f10_0000;
     // Dedicated target-layout sqlite3 connection fixtures for
     // sqlite/close; mappings never unmap.
     pub const SQLITE_CLOSE: usize = 0x2000_0000;

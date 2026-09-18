@@ -74291,6 +74291,34 @@ functions:
       testing::hints::TOKENIZER (new), one process-wide slab shared via
       LazyLock because the mapper never unmaps.
 
+  # --- UTF-16 tokenizer range-to-string adapter ---
+  - address: 0x081e8768
+    ghidra: FUN_081e8768
+    name: tokenizer_next_string
+    size: 36
+    sig: "void tokenizer_next_string(StringObject *out, TokenizerStringReader *reader)"
+    module: cxx/tokenizer_next_string
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: reader
+      FUN_081613d8: tokenizer_next (ported)
+      FUN_080f020c: string_from_range (unported RANGE_I32_OPS seam)
+    notes: >-
+      Raw words establish the exact 36-byte extent 0x081e8768..0x081e878c:
+      push {r2,r3,r4,lr}, two unconditional bl instructions (to tokenizer_next
+      @ 0x081613d8 and string_from_range @ 0x080f020c), then pop
+      {r2,r3,r4,pc}; the separately linked constructor opens at 0x081e878c.
+      Four inbound direct calls were independently decoded at 0x081361dc,
+      0x081362cc, 0x081362f0, and 0x08136314; all are unconditional bl, with
+      zero predicated calls. The reader embeds its tokenizer at +0x14. The
+      adapter obtains a private stack {begin,end} pair through tokenizer_next,
+      then passes that pair to string_from_range to construct out. Deliberate
+      deviation: the already-ported tokenizer_next is direct, while unported
+      string_from_range uses the established volatile RANGE_I32_OPS seam rather
+      than a duplicate firmware dispatch boundary. Host tests cover a real
+      nonempty token ending at a delimiter and the NULL-cursor exhausted case.
+
   # --- UTF-16 tokenizer constructor (cxx/tokenizer) ---
   - address: 0x08161464
     ghidra: FUN_08161464
