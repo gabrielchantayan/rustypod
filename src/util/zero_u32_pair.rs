@@ -1,14 +1,16 @@
 //! Zeroes a two-word record.
 
-/// `zero_u32_pair` — original: `FUN_080fffcc` @ **0x080fffcc** (16 bytes;
-/// 10 verified unconditional `bl` call sites, no predicated `bl` forms).
+/// `zero_u32_pair` — originals: `FUN_080fffcc` @ **0x080fffcc** and
+/// `FUN_081bb6b8` @ **0x081bb6b8** (each 16 bytes; 10 and 4 verified
+/// unconditional `bl` call sites respectively, no predicated `bl` forms).
 ///
-/// Raw ARM is `mov r1, #0; str r1, [r0]; str r1, [r0, #4]; bx lr`. It writes
-/// zero to two consecutive aligned words and returns the unchanged destination
-/// in `r0`. Ghidra incorrectly declares the return type `void`; chained calls
-/// in `FUN_081f7278` and `FUN_081f72d0` consume the returned pointer. No NULL
-/// guard exists; every decoded caller supplies writable storage. Deviations:
-/// none.
+/// Both raw ARM bodies are `mov r1, #0; str r1, [r0]; str r1, [r0, #4]; bx
+/// lr`. They write zero to two consecutive aligned words and return the
+/// unchanged destination in `r0`. Ghidra incorrectly declares the return type
+/// `void`; chained calls in `FUN_081f7278` and `FUN_081f72d0` consume the
+/// returned pointer. No NULL guard exists; every decoded caller supplies
+/// writable storage. Deliberate deviation: the two instruction-identical
+/// retail entries intentionally share this Rust implementation.
 ///
 /// # Safety
 ///
@@ -46,5 +48,15 @@ mod tests {
         unsafe { zero_u32_pair(words.as_mut_ptr()) };
 
         assert_eq!(words, [0, 0]);
+    }
+
+    #[test]
+    fn zeroes_a_pair_at_the_end_of_a_larger_record() {
+        let mut words = [0xfeed_face, 0x0123_4567, 0x89ab_cdef, u32::MAX];
+        let dst = unsafe { words.as_mut_ptr().add(2) };
+
+        unsafe { zero_u32_pair(dst) };
+
+        assert_eq!(words, [0xfeed_face, 0x0123_4567, 0, 0]);
     }
 }
