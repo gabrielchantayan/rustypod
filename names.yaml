@@ -17,6 +17,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081491a8
+    ghidra: FUN_081491a8
+    name: lazy_static_object_081491a8_get
+    size: 116
+    sig: "u8 *lazy_static_object_081491a8_get(void)"
+    module: app/lazy_static_object_081491a8
+    status: ported
+    renames:
+      DAT_0814920c: lazy_static_object_081491a8_state
+      DAT_08149210: lazy_static_object_081491a8
+      DAT_08149214: dso_handle
+      DAT_08149218: opaque_destructor_word
+      FUN_081492d8: lazy_static_object_081491a8_constructor
+      FUN_08149288: lazy_static_object_081491a8_ready_follow_up
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes the true 116-byte extent: 100 instruction
+      bytes at 0x081491a8..0x08149208 followed by the four-word literal pool
+      at 0x0814920c..0x08149218; the next independently entered function
+      begins at 0x0814921c. Decoding all 25 instruction words finds five
+      plain unconditional BL calls and zero predicated BL calls:
+      cxa_guard_acquire (0x082ab31c), the unported constructor
+      (0x081492d8), cxa_atexit (0x082ab1c8), cxa_guard_release
+      (0x082ab338), and the unported ready follow-up (0x08149288).
+      The guard/ready pair is 0x08a09d1c/+4 and the fixed object is
+      0x08adc720. It tests guard bit zero; an accepted acquire constructs and
+      registers the constructor return with handler word 0x0813e448 and
+      __dso_handle 0x089ca09c, then releases the guard. Independently, a
+      clear ready byte invokes the follow-up before being set. Every path
+      returns the fixed object, never a callee result. Four inbound direct
+      calls are all plain BL (0x080a5394, 0x0819731c, 0x08197360, and
+      0x08197384); there are no predicated inbound BL forms. The constructor,
+      follow-up, and handler have no verified semantic identity, so target
+      builds retain raw-address seams while host tests install models; fixed
+      firmware RAM is represented by crate statics on host.
   - address: 0x08149da0
     ghidra: FUN_08149da0
     name: increment_shared_counter
