@@ -365,6 +365,7 @@ pub mod tbm_app_client_cache;
 pub mod volume_controller_byte_at_90;
 pub mod media_player_slot_b8_then_volume_controller_update;
 pub mod volume_controller_set_byte_at_90;
+pub mod volume_controller_tick_advance;
 pub mod vtable_set;
 pub mod view_event;
 pub mod view_timer;
