@@ -157,6 +157,7 @@ pub mod store_four_components;
 pub mod store_four_u32s;
 pub mod store_four_u32_be;
 pub mod store_u32_be;
+pub mod reverse_u32_bytes_into;
 pub mod resource_metadata_lookup;
 pub mod stream_seek;
 pub mod stream_seek_tagged_entry;
