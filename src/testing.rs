@@ -143,6 +143,9 @@ pub mod hints {
     pub const OBSERVABLE_ARRAY_DRAIN: usize = 0x1500_0000;
     pub const EVENT_SOURCE_DESTRUCT: usize = 0x1600_0000;
     pub const SILVER_CONTROLLER: usize = 0x1700_0000;
+    // 0x7f20_0000: dedicated to app/locked_owned_context_destroy's controller
+    // and owned-context raw-u32-pointer fixture.
+    pub const LOCKED_OWNED_CONTEXT_DESTROY: usize = 0x7f20_0000;
     pub const QUEUED_MESSAGE_POST: usize = 0x1800_0000;
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
