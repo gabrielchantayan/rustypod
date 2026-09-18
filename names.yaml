@@ -508,7 +508,6 @@ functions:
       r3: embedded_resource_descriptor
       DAT_082c59e4: EMBEDDED_RESOURCE_DESCRIPTOR
     notes: >-
-      Deferred: raw osos.dec establishes the true eight-byte extent
       0x082c59dc..0x082c59e4: `ldr r3, [pc]` loads
       EMBEDDED_RESOURCE_DESCRIPTOR (0x0890b4c0), then `b 0x0803a7f0`.
       0x082c59e4 is its literal-pool word, and 0x082c59e8 begins the next
