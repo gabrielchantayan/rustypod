@@ -112514,3 +112514,35 @@ functions:
       existing parse_i32_utf16_range port. Deliberate deviation: Rust
       represents the stack pair directly and inlines the trivial
       utf16_range_construct instead of adding a seam.
+
+  - address: 0x080e1d18
+    ghidra: FUN_080e1d18
+    name: sync_best_clock_source
+    size: 152
+    sig: "bool sync_best_clock_source(void)"
+    module: time/sync_best_clock
+    status: ported
+    renames:
+      DAT_080e1db0: clock_sources
+      DAT_080e1db4: current_clock
+      DAT_080e1db8: selected_clock_source
+      FUN_080caa28: select_oldest_valid_clock_source
+      FUN_0808cde4: compare_clock_records
+      FUN_0806e7e4: rtc_write
+      FUN_0805caa8: clock_changed
+    notes: >-
+      Raw osos.dec establishes the true 152-byte extent
+      0x080e1d18..0x080e1db0: the final executable word is pop
+      {r4,r5,r6,r7,r8,r9,r10,pc} at 0x080e1dac and the three following words
+      are its literal pool (0x08a662ec clock source array, 0x08a662e0 current
+      clock, 0x089caa90 selected index). Whole-image A32 decoding finds four
+      incoming unconditional plain BL calls at 0x08044310, 0x080674f0,
+      0x08067560, and 0x08393a24, with zero incoming predicated BL calls.
+      The body has eight unconditional BL instructions and zero predicated BL
+      instructions. It selects the lowest valid five-slot clock record, writes
+      it through the RTC setter, copies its first 12 bytes into current_clock
+      only when the records differ while preserving bytes 6, 7, and 11, then
+      notifies and publishes the selected index. Deliberate deviations:
+      unported RTC-write and notification calls are target-address/host
+      volatile dispatch seams; the tiny selection and comparison helpers are
+      reproduced inline instead of represented as opaque seams.
