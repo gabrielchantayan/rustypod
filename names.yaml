@@ -78579,6 +78579,42 @@ functions:
       rather than inventing a callee and registers a shutdown-safe no-op,
       matching the observable retail path where this chain is not run.
 
+  # --- Internal LCD panel-driver singleton accessor ---
+  - address: 0x0814ece0
+    ghidra: FUN_0814ece0
+    name: internal_lcd_panel_driver_get
+    size: 92
+    sig: "void *internal_lcd_panel_driver_get(void)"
+    module: app/internal_lcd_panel_driver
+    status: ported
+    renames:
+      DAT_0814ed28: internal_lcd_panel_driver_state_prefix (0x089cc974)
+      DAT_0814ed2c: INTERNAL_LCD_PANEL_DRIVER_GUARD (0x089cc978)
+      DAT_0814ed30: INTERNAL_LCD_PANEL_DRIVER (0x08ac6d2c)
+      DAT_0814ed34: DSO_HANDLE (0x089ca09c = __dso_handle)
+      DAT_0814ed38: internal_lcd_panel_driver_destructor (0x08144998)
+      FUN_0814f824: INTERNAL_LCD_PANEL_DRIVER_CTOR seam (unported constructor)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      EXTENT CORRECTED: Ghidra's 72 bytes are the instructions at
+      0x0814ece0..0x0814ed28. Raw osos.dec has the five-word literal pool
+      at 0x0814ed28..0x0814ed3c, followed by the next real function at
+      0x0814ed3c; the true extent is 92 bytes. Raw decoding establishes
+      four direct outbound BL instructions: four unconditional plain bl and
+      zero predicated BL forms. This is an ADS function-local-static
+      accessor for the internal LCD panel driver. It tests guard bit 0,
+      calls cxa_guard_acquire when clear, constructs the fixed object,
+      registers constructor r0 with cxa_atexit using the raw destructor and
+      __dso_handle, releases the guard, then returns the object literal
+      rather than the constructor result. The constructor's final byte
+      write is at object+0x1e4, establishing a 0x1e8-byte object extent.
+      Deliberate deviations: target RAM state is crate-static; the unported
+      constructor is a volatile target/host seam with an identity host
+      default, and host shutdown registration uses an inert handler for the
+      unported destructor.
+
   # --- current calendar UTC-offset query ---
   - address: 0x080ab558
     ghidra: FUN_080ab558
