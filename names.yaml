@@ -108408,3 +108408,39 @@ functions:
       0x083d4db8, then conditionally loads storage[index] or returns zero.
       Deliberate deviation: Rust uses volatile target-word loads to preserve
       the +0x0c owner and +0x00 slot-array accesses on 64-bit hosts.
+  - address: 0x081e2ff4
+    ghidra: FUN_081e2ff4
+    name: complete_iap_packet_and_schedule_event
+    size: 188
+    sig: "u32 complete_iap_packet_and_schedule_event(u8 *packet, u32 completion_state, u32 delay_ms, u32 unused)"
+    module: app/iap_packet_completion_schedule
+    status: ported
+    renames:
+      param_1/r0/r4: packet
+      param_2/r1/r5: completion_state
+      param_3/r2/r7: delay_ms
+      r6: packet_command
+      r8: owner_mode
+      DAT_081e30ac: packet_event_context_global
+      DAT_081e30b0: packet_event_sequence_offset
+      FUN_080f6b3c: iap_packet_owner_mode
+      FUN_081d7f14: packet_completion_dispatch_unported
+      FUN_08138fd0: pending_event_insert
+      FUN_08262958: clock_source_construct
+      FUN_082a1c30: timespec_to_milliseconds
+      FUN_08262908: clock_source_destroy
+    notes: >-
+      Raw osos.dec establishes the 188-byte true extent
+      0x081e2ff4..0x081e30b0: 180 bytes of code ending in
+      pop {r4-r8,pc}, then literal-pool words 0x089cca14 and 0x000002de;
+      0x081e30b0 begins the next independent push prologue. The body has six
+      direct unconditional BL instructions and zero predicated BL instructions.
+      It gets the packet owner mode and command halfword, dispatches the
+      unported packet completion routine, and on success inserts a zero-payload
+      pending event using the active context at [0x089cca14 + 4]. A successful
+      insert increments context+0x2de, writes the kind-1 clock timestamp in
+      milliseconds to +0x2d8, and sets +0x2dc. The unported completion routine
+      is deliberately represented by the existing volatile
+      IAP_PACKET_EVENT_SCHEDULE_OPS seam; target builds invoke 0x081d7f14 and
+      host tests install a model. match.py reports the expected structural
+      differences from this seam and Rust's stack/frame layout.
