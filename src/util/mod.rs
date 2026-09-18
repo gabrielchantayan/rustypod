@@ -87,6 +87,7 @@ pub mod object_flags_contain;
 pub mod object_flags_take;
 pub mod object_flag_0x10_is_set;
 pub mod object_byte_0x21;
+pub mod object_set_byte_0x27;
 pub mod object_selected_payload_index;
 pub mod object_word_0xc0;
 pub mod object_release_slot1;
