@@ -108808,3 +108808,36 @@ functions:
       functions. No deliberate deviations. Host tests cover every valid
       transition, invalid preservation, the synchronized zero-handle path,
       and sign extension of a non-operator byte.
+
+  # --- Deque element-at helper ---
+  - address: 0x081cb408
+    ghidra: FUN_081cb408
+    name: deque_element_at
+    size: 48
+    sig: "void *deque_element_at(const u8 *container, i32 index)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1/r5: index
+      "container+0x04": deque
+      "deque+0x00": begin_iterator
+      "deque+0x20": element_count
+      FUN_083d75d0: container_is_empty
+      FUN_083d9fd4: deque_iter_assign_alias_9fd4
+      FUN_083d6fdc: deque_iter_advance_copy_elem4
+    notes: >-
+      Raw osos.dec establishes the true 48-byte extent
+      0x081cb408..0x081cb438: the next separately linked function begins
+      with push {r0,r1,r2,r4,r5,lr} at 0x081cb438. The body has three
+      unconditional internal BL instructions, to the existing container-empty
+      predicate at 0x083d75d0, deque iterator copy at 0x083d9fd4, and
+      non-mutating iterator advance at 0x083d6fdc. Whole-image A32 B/BL
+      decoding finds exactly four inbound calls, all plain BL at 0x0815ae04,
+      0x0815b14c, 0x0815b1c4, and 0x0815b2ac; there are no predicated BL
+      calls. It returns NULL for an empty deque; otherwise it copies the
+      target-layout begin iterator at container+4, advances the private copy
+      by the signed index, and returns its current-element word. The Rust
+      port decodes the four target pointer words individually before crossing
+      the pre-existing typed iterator-advance seam, preserving the 32-bit
+      target layout while avoiding overlapping 64-bit host pointer fields.
