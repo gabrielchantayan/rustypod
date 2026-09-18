@@ -50414,6 +50414,38 @@ functions:
       literal load, post-index +8 equivalent, helper call, and subtract-8
       remain; the volatile seam becomes an indirect blx.
 
+  - address: 0x0811b9dc
+    ghidra: FUN_0811b9dc
+    name: class_6280_refresh_ui
+    size: 108
+    sig: "void class_6280_refresh_ui(Class6280 *view)"
+    module: app/class_6280_refresh_ui
+    status: ported
+    renames:
+      param_1/r4: view
+      "view+0x20": position
+      "view+0x2d": mode
+      "view+0x94": ui_element
+      FUN_08031568: __rt_sdiv
+      FUN_0826dd8c: ui_element_refresh_unported
+    notes: >-
+      Raw ARM establishes the exact 108-byte extent:
+      0x0811b9dc push {r4,lr} through the null early-return bx lr at
+      0x0811ba44; the independently entered next function opens at
+      0x0811ba48. The body has two plain direct bl instructions, both to
+      __rt_sdiv (0x08031568), zero predicated bl instructions, and one
+      conditional tail bne to the unported FUN_0826dd8c (0x0826dd8c).
+      A complete raw-image ARM B/BL scan finds exactly four inbound direct
+      plain bl calls, zero predicated inbound bl forms, and no inbound
+      tail branches. Mode byte 3 maps position through
+      (position-76000)*20/1000+18; all other values use
+      (position-88000)*14/1000+20. A null UI element at +0x94 returns
+      without dispatch; otherwise the tail target receives the element,
+      marker, and its +0x80 word. The target is unported and lacks a
+      names.yaml identity, so the target build retains its verified retail
+      address through a call seam and host tests record its exact arguments.
+      This call deliberately replaces the original tail bne; observable
+      arguments and null behavior are unchanged.
   - address: 0x0811c178
     ghidra: FUN_0811c178
     name: object_dispatch_entry_dispatch

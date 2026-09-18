@@ -179,6 +179,9 @@ pub mod hints {
     pub const PENDING_EVENT_TAKE_DUE: usize = 0xbf00_0000;
     pub const ANIMATION_INIT: usize = 0x1c00_0000;
     pub const STRING_RECORD: usize = 0x1d00_0000;
+    // 0x1d20_0000: dedicated to app/class_6280_refresh_ui's raw-u32
+    // UI-element fixture; mappings never unmap.
+    pub const CLASS_6280_REFRESH_UI: usize = 0x1d20_0000;
     // 0x1d10_0000: dedicated to cxx/named_object_cache's target-width owner,
     // container, key, and allocated-object fixture; mappings never unmap.
     pub const NAMED_OBJECT_CACHE: usize = 0x1d10_0000;
