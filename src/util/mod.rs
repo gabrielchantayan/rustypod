@@ -72,6 +72,7 @@ pub mod growable_buffer_append;
 pub mod highest_set_bit;
 pub mod inner_state;
 pub mod interp_stack_pop_release;
+pub mod i32_abs_wrapping;
 pub mod i2s_transfer_slot;
 pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
