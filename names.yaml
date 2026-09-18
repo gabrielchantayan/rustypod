@@ -78989,6 +78989,38 @@ functions:
       a nonzero result, flag-byte propagation, a zero result, and preservation
       of context storage. Reference C: decomp/c/012/0813e6b0_FUN_0813e6b0.c.
 
+  # --- resource child dimensions ---
+  - address: 0x0813e7f8
+    ghidra: FUN_0813e7f8
+    name: resource_child_size_lookup
+    size: 96
+    sig: "u32 resource_child_size_lookup(void *context, u32 unused, u32 selector, i32 *out_height, i32 *out_width)"
+    module: app/resource_child_size_lookup
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: unused
+      param_3/r2: selector
+      param_4/r3: out_height
+      param_5/stack: out_width
+      FUN_08050418: retail_direct_lookup
+      FUN_08050708: retail_child_lookup
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte body
+      0x0813e7f8..0x0813e857; 0x0813e858 begins the next separately linked
+      function. Decoding every ARM B/BL word finds four direct inbound callers
+      (0x0811edd0, 0x0814a850, 0x08208aec, and 0x0820ba20), all unconditional
+      plain BL, with no predicated BL forms. Internally the body makes two
+      unconditional plain BL calls and no predicated BL calls: it passes
+      context+0x40 to FUN_08050418, passes its result and selector to
+      FUN_08050708, then writes signed halfword differences child+0x16 -
+      child+0x12 and child+0x14 - child+0x10 to r3 and the stack output,
+      respectively. The port calls the two still-unported lookup routines at
+      their fixed retail addresses on target builds; host tests inject those
+      boundaries. No deliberate behavioral deviations. Tests cover signed
+      differences, argument order, and preserving both outputs on either
+      failed lookup. Reference C: decomp/c/012/0813e7f8_FUN_0813e7f8.c.
+
   # --- resource path lookup and UTF-16 materialization ---
   - address: 0x0813e858
     ghidra: FUN_0813e858
