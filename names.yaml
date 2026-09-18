@@ -108063,3 +108063,38 @@ functions:
       words as 0,1,0,1,0,0,0,0,0,0, stores (0x0010b6c3,0x00015180) at +0x40,
       and returns this. The Rust port calls the two already ported direct BL
       targets and uses volatile derived-field stores to retain retail ordering.
+
+  # --- volume-controller adaptive-tick advance ---
+  - address: 0x081f9770
+    ghidra: FUN_081f9770
+    name: volume_controller_tick_advance
+    size: 140
+    sig: "void volume_controller_tick_advance(void *context, u32 input)"
+    module: app/volume_controller_tick_advance
+    status: ported
+    renames:
+      param_1/r0: context (ignored)
+      param_2/r1/r4: input
+      DAT_081f97e4: volume_controller_tick_accumulator
+      DAT_081f97e8: volume_controller_tick_guard
+      FUN_081bb450: tick_accumulator_construct
+      FUN_081bb3a0: tick_accumulator_step
+      FUN_081bb29c: singleton_class_8c00_ready_gate
+    notes: >-
+      EXTENT: raw ARM establishes 116 executable bytes from 0x081f9770 through
+      the `pop {r4,pc}` at 0x081f97e0, followed by the six-word literal pool
+      0x081f97e4..0x081f97fc; the next separately linked function begins at
+      0x081f97fc, making the true occupied extent 140 bytes. CALL COUNT:
+      the four direct inbound call sites are all plain unconditional bl (two
+      each in 0x081f77fc and 0x081f9120); there are no predicated BL forms.
+      It uses the fixed 0x34-byte accumulator at 0x089cc26c, whose +0x20 word
+      is both the ADS static guard and the accumulator update-result field.
+      When guard bit zero is clear, cxa_guard_acquire conditionally constructs
+      it with (12, 0, 350), registers the literal destructor target 0x08a78eb0
+      with dso handle 0x081b0638, and releases the guard. It then calls
+      tick_accumulator_step(accumulator, input, 0); a nonzero result sets r0
+      to 1 and tail-branches to singleton_class_8c00_ready_gate. `context` is
+      ignored because the first ARM instruction replaces r0 with the fixed
+      accumulator address. DELIBERATE DEVIATION: the ready gate and literal
+      destructor target are not independently ported/identified, so target
+      builds retain their retail addresses and host tests supply callbacks.
