@@ -112061,3 +112061,27 @@ functions:
       +0x0a for the first leading-word match, otherwise zero. The raw image
       has executable bytes at the runtime table address, so host tests use a
       private fixture seam while target builds retain the absolute access.
+  - address: 0x080fe850
+    ghidra: FUN_080fe850
+    name: vtable_08980110_construct
+    size: 28
+    sig: "void *vtable_08980110_construct(void *this)"
+    module: cxx/vtable_08980110_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_080fe868: vtable_08980110
+      FUN_083cfdc4: base_construct_083cfdc4
+    notes: >-
+      Raw osos.dec words establish the true 28-byte extent: ldr r1,[pc,#16];
+      push {r4,lr}; str r1,[r0],#8; bl 0x083cfdc4; sub r0,r0,#8; pop
+      {r4,pc}, followed by literal-pool word 0x08980110 at 0x080fe868. The
+      next independently entered function begins at 0x080fe86c with
+      push {r4,r5,r6,r7,r8,lr}. Whole-image A32 decoding finds four incoming
+      plain BL sites (0x0817e638, 0x081fa708, 0x081fae98, and 0x0820b934)
+      and zero incoming predicated BL sites. It installs the literal vtable,
+      calls the unrecovered 0x083cfdc4 on the embedded object at +8, and
+      returns the callee result less eight. The callee has no verified
+      semantic identity, so target builds retain its raw-address seam while
+      host tests install a recording model. Reference C:
+      decomp/c/009/080fe850_FUN_080fe850.c.
