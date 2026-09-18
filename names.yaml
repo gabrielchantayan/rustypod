@@ -17,6 +17,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a275c
+    ghidra: FUN_081a275c
+    name: indexed_string_resource_fallback
+    size: 180
+    sig: "StringObject *indexed_string_resource_fallback(StringObject *out, void *collection, i32 index)"
+    module: app/indexed_string_resource_fallback
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: collection
+      param_3/r2: index
+      FUN_08277440: string_default_construct
+      FUN_082773e0: string_object_copy_construct
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_082aad4c: string_object_equals
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      Raw ARM establishes the true 180-byte code extent
+      0x081a275c..0x081a2810: the next real function begins at
+      0x081a2820 after the two-word "Beep" literal. The body contains seven
+      unconditional plain bl instructions, one predicated blne, and one
+      indirect blx through vtable slot +0x40. Full-image ARM decoding finds
+      four inbound direct plain bl sites: 0x0810981c, 0x08109eb0,
+      0x0810a538, and 0x08216460. It default-constructs out, then if index
+      is signed-less-than collection+0x1c, calls the collection member at
+      +0x18 through its +0x40 vtable slot. A nonzero entry word supplies a
+      StringObject one word later; that payload is assigned to out. Unless
+      the resulting text equals "Beep", it instead assigns "Str " resource
+      0x0dad028e from the current task's provider chain. The virtual method
+      has no recovered identity: target builds dispatch its actual slot while
+      host tests install a replacement because host function pointers exceed
+      retailOS's 32-bit vtable words.
   - address: 0x081caf88
     ghidra: FUN_081caf88
     name: optional_pointer_record_init
