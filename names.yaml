@@ -111567,3 +111567,28 @@ functions:
       The unrecovered tree helper remains a fixed-address ARM seam, while its
       host equivalent is injected for tests. The simple range-release helper
       is deliberately inlined through the already ported refcounted teardown.
+
+  # --- indexed table slot pointer ---
+  - address: 0x0811f270
+    ghidra: FUN_0811f270
+    name: indexed_slot_pointer
+    size: 36
+    sig: "u32 *indexed_slot_pointer(const u32 *object, u32 index)"
+    module: util/indexed_slot_pointer
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      FUN_081d5fe0: table_slot_lookup (inlined; target reads table+0x24+index*0x24)
+    notes: >-
+      Raw osos.dec A32 words establish the exact 36-byte extent
+      0x0811f270..0x0811f294: it loads object+0x14, calls the 16-byte
+      table-slot helper at 0x081d5fe0, maps its -1 sentinel to null, otherwise
+      returns object+0x04 plus the result scaled by four. The next real
+      function begins at 0x0811f294. The body has one unconditional internal
+      BL and no predicated calls. Direct raw decoding finds four inbound plain
+      BL calls at 0x081fcc14, 0x08208864, 0x082088d0, and 0x0821b0c0; none
+      is predicated. The helper's behavior is inlined rather than exposed as a
+      new seam: indices below 18 load table+0x24+index*0x24 and all others
+      return -1. The opaque layout remains target-width u32 words so +0x04 and
+      +0x14 stay exact on 64-bit host builds. Deviation: none.
