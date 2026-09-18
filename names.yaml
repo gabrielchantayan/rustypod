@@ -21291,6 +21291,35 @@ functions:
       callback teardown shape. The port preserves this false result
       and intentionally does not inspect either opaque argument.
 
+  - address: 0x081cd7b8
+    ghidra: FUN_081cd7b8
+    name: message_0x13_construct
+    size: 44
+    sig: "Message0x13 *message_0x13_construct(Message0x13 *storage, u32 first_payload, u32 second_payload)"
+    module: app/message_0x13
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1/r4: first_payload
+      param_3/r2/r5: second_payload
+      puVar1/r0: message
+      DAT_081cd7e0: MESSAGE_0X13_VTABLE
+      FUN_08266a48: message_kind_construct
+    notes: >-
+      Raw A32 decoding establishes 36 bytes of instructions
+      (0x081cd7b8..0x081cd7dc) followed by the literal-pool vtable word
+      0x0898db3c at 0x081cd7e0; the next real function opens with push at
+      0x081cd7e4, making the true extent 44 bytes. A complete raw-image
+      branch scan finds four direct unconditional bl callers
+      (0x08133240, 0x08133624, 0x08133bd0, and 0x08272324), zero predicated
+      bl callers, and no tail b. It constructs caller-provided 16-byte
+      message-code-0x13 storage by calling the already-ported
+      message_kind_construct(storage, 0x13), overwriting its vtable with
+      0x0898db3c, then storing the two opaque payload words at +0x08 and
+      +0x0c. No deliberate deviations: the Rust port preserves the base
+      constructor call and ordered volatile stores. match.py confirms the
+      same push/save, kind setup, call, literal-vtable store, payload stores,
+      and return structure; LLVM chooses fp rather than r6 for its frame.
   - address: 0x0811a890
     ghidra: FUN_0811a890
     name: stop_frequency_change_and_start_tuning_timer
