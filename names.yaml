@@ -17,6 +17,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08093440
+    ghidra: FUN_08093440
+    name: xor_index_key
+    size: 40
+    sig: "void xor_index_key(u8 *dst, const u8 *src, i32 len)"
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: len
+      r3: index
+      r12: key
+    notes: >-
+      Raw osos.dec words establish the 40-byte extent
+      0x08093440..0x08093468; 0x08093468 is the next real function boundary
+      (`push {r3,r4,r5,r6,r7,r8,r9,lr}`). The body has zero outbound plain
+      or predicated bl instructions. A whole-image A32 decode finds four
+      inbound direct plain bl calls at 0x080af0e8, 0x080af1fc, 0x082d40c0,
+      and 0x082d461c; no predicated bl forms target this address. It walks
+      forward, storing src[index] XOR (index + 0x11) to dst[index], with the
+      key reduced to a byte. No deliberate deviations.
   - address: 0x080ade34
     ghidra: FUN_080ade34
     name: afm_read_collection_length
