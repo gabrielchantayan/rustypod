@@ -2,6 +2,7 @@
 pub mod ata_cmd;
 pub mod ata_command_execute;
 pub mod ata_fast_io_write;
+pub mod ata_data_transfer_status;
 pub mod ata_command_submit_wait;
 pub mod ata_taskfile_program;
 pub mod ata_command_prepare;
