@@ -102,6 +102,7 @@ pub mod lazy_slot_table_entry;
 pub mod least_common_multiple;
 pub mod mapped_subobject_for_slot;
 pub mod ptr_vector;
+pub mod latin1_to_lowercase;
 pub mod object_masked_word_refresh;
 pub mod object_commit_touch;
 pub mod object_flags_contain;
