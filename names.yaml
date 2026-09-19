@@ -109412,6 +109412,35 @@ functions:
       LLVM adds a frame prologue/epilogue but retains the two loads followed by
       the two opposite stores. Deliberate deviation: volatile Rust accesses
       preserve the original load-before-store ordering under optimization.
+  - address: 0x083ea788
+    ghidra: FUN_083ea788
+    name: string_object_word_merge
+    size: 156
+    sig: "StringObjectWord *string_object_word_merge(const StringObjectWord *left, const StringObjectWord *left_end, const StringObjectWord *right, const StringObjectWord *right_end, StringObjectWord *output)"
+    module: cxx/string_object_word_merge
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: left_end
+      param_3/r2: right
+      param_4/r3: right_end
+      stack0x00000018: output
+      FUN_083d6550: string_object_less
+      FUN_082774a8: string_object_assign
+      FUN_083e9b28: string_object_word_range_copy
+    notes: >-
+      Raw osos.dec establishes the exact 156-byte body at 0x083ea788 through
+      the tail branch at 0x083ea820; 0x083ea824 starts the next separately
+      linked push prologue. The function has three unconditional inbound plain
+      bl calls at 0x083e8538, 0x083e8814, and 0x083e882c, with no predicated
+      forms. Its body has four unconditional plain bl instructions and no
+      predicated bl forms: comparator 0x083d6550, assignment 0x082774a8 on
+      each selection branch, and range-copy 0x083e9b28; the final branch is a
+      tail b to that range-copy. It stably merges two sorted StringObjectWord
+      ranges by choosing right only when right < left, then copies both
+      remainders. Typed record cursors preserve the target's 12-byte layout on
+      host pointers; host tests cover stable equal-key ordering and exhaustion
+      of both input tails.
   - address: 0x083eab58
     ghidra: FUN_083eab58
     name: deque_iter_equal_elem4_alias_ab58

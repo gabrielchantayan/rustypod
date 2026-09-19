@@ -6,6 +6,7 @@ pub mod bit_set;
 pub mod generic_descriptor_lookup;
 pub mod string_record;
 pub mod record_work_pump;
+pub mod string_object_word_merge;
 pub mod array_element_at;
 pub mod sorted_pointer_array_insert;
 pub mod array_index_stride20;
