@@ -220,13 +220,67 @@ pub unsafe extern "C" fn rtc_read_time(
     }
 }
 
+/// build_unix_time — original: `FUN_0806e3dc` @ 0x0806e3dc (148 bytes; 2
+/// verified plain `bl` calls, 0 predicated; 4 direct callers).
+///
+/// Build a signed Unix-seconds word pair from the RTC wall clock, or from
+/// the firmware's static fallback when no primary output was requested.
+/// The ARM body calls `rtc_read_time(days, secs, r2, r3)`, subtracts Julian
+/// day 2440588, then computes `(days - 2440588) * 675 * 128 + secs`; it
+/// sign-extends the wrapped 32-bit result into the adjacent high word.
+/// A primary RTC-read failure returns -42171 and skips the fallback. The
+/// fallback is attempted only after a null primary pointer. Deliberate
+/// deviation: `*mut u32` represents the target's two adjacent 32-bit words
+/// rather than a host `i64`, preserving the ARM layout on 64-bit hosts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn build_unix_time(
+    primary_out: *mut u32,
+    fallback_out: *mut u32,
+    seed_lo: u32,
+    seed_hi: u32,
+) -> i32 {
+    unsafe fn store_unix_time(out: *mut u32, days: u32, secs: u32) {
+        let seconds = (days as i32)
+            .wrapping_add(-2_440_588)
+            .wrapping_mul(675)
+            .wrapping_shl(7)
+            .wrapping_add(secs as i32);
+        unsafe {
+            out.write(seconds as u32);
+            out.add(1).write((seconds >> 31) as u32);
+        }
+    }
+
+    if !primary_out.is_null() {
+        let mut days = seed_lo;
+        let mut secs = seed_hi;
+        let status = unsafe { rtc_read_time(&mut days, &mut secs, seed_lo, seed_hi) };
+        if status != 0 {
+            return -42_171;
+        }
+        unsafe { store_unix_time(primary_out, days, secs) };
+    }
+
+    if !fallback_out.is_null() {
+        let mut days = 0;
+        let mut secs = 0;
+        if unsafe { rtc_static_time_pair(&mut days, &mut secs) } == 0 {
+            unsafe { store_unix_time(fallback_out, days, secs) };
+            return 0;
+        }
+        return -42_171;
+    }
+
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use crate::time::civil::{bcd_datetime_to_days_secs, bcd_to_bin};
     use std::sync::{Mutex, MutexGuard};
-
     /// The ported FUN_0809e3e8 through its raw-pointer ABI, returning
     /// the (days, seconds) pair.
     fn convert(buf: &[u8; 8]) -> (u32, u32) {
@@ -281,7 +335,7 @@ mod tests {
     }
 
     fn install_mock(regs: [u8; 7], status: i32) -> MutexGuard<'static, ()> {
-        let guard = SLOT_LOCK.lock().unwrap();
+        let guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             MOCK_REGS = regs;
             MOCK_STATUS = status;
@@ -674,5 +728,68 @@ mod tests {
         assert_eq!(unsafe { rtc_static_time_pair(&mut days, &mut secs) }, 0);
         assert_eq!(RTC_STATIC_TIME_PAIR, source_before);
         assert_eq!((days, secs), (source_before[0], source_before[1]));
+    }
+    #[test]
+    fn build_unix_time_converts_the_primary_rtc_clock_and_also_fills_fallback() {
+        let guard = install_mock([0, 0, 0, 0, 1, 1, 0x70], 0);
+        let mut primary = [0xcccc_cccc; 2];
+        let mut fallback = [0xcccc_cccc; 2];
+
+        assert_eq!(
+            unsafe {
+                build_unix_time(
+                    primary.as_mut_ptr(),
+                    fallback.as_mut_ptr(),
+                    0x4433_2211,
+                    0x8877_6655,
+                )
+            },
+            0
+        );
+        assert_eq!(primary, [3_155_760_000, 0xffff_ffff]);
+        assert_eq!(fallback, [0x8feb_4265, 0xffff_ffff]);
+        unsafe { assert_eq!(MOCK_CALLS, 1) };
+        restore(guard);
+    }
+
+    #[test]
+    fn build_unix_time_uses_static_fallback_without_reading_the_rtc() {
+        let mut fallback = [0xcccc_cccc; 2];
+
+        assert_eq!(
+            unsafe {
+                build_unix_time(
+                    core::ptr::null_mut(),
+                    fallback.as_mut_ptr(),
+                    0x4433_2211,
+                    0x8877_6655,
+                )
+            },
+            0
+        );
+        assert_eq!(fallback, [0x8feb_4265, 0xffff_ffff]);
+    }
+
+    #[test]
+    fn build_unix_time_stops_after_a_primary_rtc_failure() {
+        let guard = install_mock([0; 7], -1);
+        let mut primary = [0xcccc_cccc; 2];
+        let mut fallback = [0xcccc_cccc; 2];
+
+        assert_eq!(
+            unsafe {
+                build_unix_time(
+                    primary.as_mut_ptr(),
+                    fallback.as_mut_ptr(),
+                    0x4433_2211,
+                    0x8877_6655,
+                )
+            },
+            -42_171
+        );
+        assert_eq!(primary, [0xcccc_cccc; 2]);
+        assert_eq!(fallback, [0xcccc_cccc; 2]);
+        unsafe { assert_eq!(MOCK_CALLS, 1) };
+        restore(guard);
     }
 }
