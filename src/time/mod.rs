@@ -15,6 +15,7 @@ pub mod leap_year;
 pub mod localtime;
 pub mod mac_epoch_to_datetime;
 pub mod local_timestamp;
+pub mod local_to_utc;
 pub mod mktime;
 pub mod month_length;
 pub mod rtc;
