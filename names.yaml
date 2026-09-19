@@ -114866,3 +114866,30 @@ functions:
       target-width mapped words and cover empty, absent, head, interior, and
       tail removal. match.py structural diff reviewed: LLVM emits explicit
       loop and splice branches rather than ARM conditional loads/stores.
+  - address: 0x0806212c
+    ghidra: FUN_0806212c
+    name: callback_table_get
+    size: 36
+    sig: "u8 *callback_table_get(void)"
+    module: app/callback_table
+    status: ported
+    renames:
+      DAT_08062150: callback_table_cache
+      FUN_080620a0: callback_table_source_unported
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte instruction extent
+      0x0806212c..0x0806214f: pop {r4,pc} at 0x0806214c is final; the
+      literal pool word at 0x08062150 is the cache address 0x08a0ea7c; and
+      the next separately entered function starts at 0x08062154. The body
+      has one unconditional direct BL, at 0x08062140 to FUN_080620a0, and
+      zero predicated BL forms. Direct callers are four plain BL instructions
+      at 0x080620c0, 0x08062104, 0x080621bc, and 0x080621ec; no predicated
+      BL calls target this entry. The cache is null-tested, populated from
+      the adjacent leaf accessor, and returned. Callers use returned-table
+      words +4, +12, +16, and +20 as callback targets. FUN_080620a0 returns
+      the fixed word 0x08a0ecc8 but has no verified semantic identity, so
+      target builds preserve its raw-address seam and host tests install a
+      recording source. Host tests cover cache hits and null-result retries.
+      match.py structural diff reviewed: the replaceable source seam emits a
+      BLX and LLVM saves extra callee registers; cache test, call, store, and
+      return structure remain equivalent.

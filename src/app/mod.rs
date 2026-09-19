@@ -146,6 +146,7 @@ pub mod fixed4_componentwise_mul;
 pub mod fixed_point;
 pub mod fixed_value;
 pub mod global_flag_table;
+pub mod callback_table;
 pub mod global_event_dispatch;
 pub mod global_dispatch_target;
 pub mod global_identifier_slot;
