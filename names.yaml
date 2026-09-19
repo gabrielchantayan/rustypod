@@ -116411,3 +116411,42 @@ functions:
       and names.yaml has no verified identities for either target or for
       0x0803e950. No callee seam or Rust module was created rather than invent
       their identities.
+
+  # --- Bignum modular multiply ---
+  - address: 0x0803ff80
+    ghidra: FUN_0803ff80
+    name: bn_mod_mul
+    size: 152
+    sig: "int bn_mod_mul(BigNum *result, const BigNum *a, const BigNum *b, const BigNum *modulus, BnContext *ctx)"
+    module: crypto/bn_mod_mul
+    status: ported
+    renames:
+      param_1/r0/r8: result
+      param_2/r1/r5: a
+      param_3/r2/r6: b
+      param_4/r3/r9: modulus
+      param_5/[sp]/r10: ctx
+      iVar1/r7: temporary
+      iVar2/r0: product_succeeded
+      uVar3/r4: succeeded
+      FUN_0803dec8: tagged_word_buffer_pool_push
+      FUN_0803de0c: tagged_word_buffer_pool_take
+      FUN_08040884: bn_sqr
+      FUN_080400b0: bn_mul
+      FUN_08040438: bn_nnmod
+      FUN_0803dd84: tagged_word_buffer_pool_pop
+    notes: >-
+      Raw osos.dec words establish the exact code extent
+      0x0803ff80..0x08040018: the next independently linked function begins
+      with stmdb at 0x08040018. The body has five unconditional plain BL
+      instructions (0x0803ffa0, 0x0803ffa8, 0x0803ffc8, 0x0803ffe0, and
+      0x0803fffc) and no predicated BL. Ghidra's four-call report omits the
+      unconditional tagged_word_buffer_pool_pop cleanup call at 0x0804000c.
+      It pushes the pool, takes one temporary BigNum, calls bn_sqr only when
+      a and b are pointer-identical and bn_mul otherwise, then calls
+      established BN_nnmod(result, temporary, modulus, ctx) only after a
+      successful product; the pool is popped on every path and the result is
+      one only when both workers return nonzero. The call and argument shape
+      match OpenSSL BN_mod_mul. Deliberate deviation: unported bn_sqr, bn_mul,
+      and bn_nnmod are reached through volatile dispatch slots; target defaults
+      retain their verified retailOS addresses.
