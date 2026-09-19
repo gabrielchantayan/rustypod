@@ -68434,6 +68434,29 @@ functions:
       negative, or unaligned values. Host tests cover each status boundary;
       match.py diff reviewed after the ARM release build.
 
+  - address: 0x08004450
+    ghidra: FUN_08004450
+    name: stream_buffer_request_flags_update
+    size: 48
+    sig: "void stream_buffer_request_flags_update(u32 enable, u32 mask)"
+    module: app/buffer_refill_request
+    status: ported
+    renames:
+      param_1/r0: enable
+      param_2/r1: mask
+      DAT_08004480: stream_buffer_request_controller_flags (target RAM @ 0x2200aebc)
+      FUN_08001e70: cpsr_disable_irq_fiq
+      FUN_08001e84: cpsr_restore_irq_fiq
+    notes: >-
+      Raw osos.dec words establish a 48-byte executable body ending with
+      `b 0x08001e84`; the following 0x08004480 word is its global-pointer
+      literal, not function code. The body has one unconditional internal BL
+      to cpsr_disable_irq_fiq and no predicated BLs. Four unconditional BL
+      callers target this address: 0x080050d0, 0x08005160, 0x08007864, and
+      0x08007888. It masks IRQ/FIQ, volatile-updates target RAM
+      0x2200aebc by clearing mask when enable is zero or setting it
+      otherwise, then restores the saved I/F state.
+
   # --- stream-buffer request flags ---
   - address: 0x08037fe8
     ghidra: thunk_EXT_FUN_22004450
