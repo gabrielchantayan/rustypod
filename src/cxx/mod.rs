@@ -310,6 +310,7 @@ pub mod opaque_indexed_handle_initialize;
 pub mod opaque_descriptor_convert;
 pub mod generic_descriptor_convert;
 pub mod value_compare;
+pub mod record_u16_casefold_compare;
 pub mod vtable;
 pub mod vtable_predicate_state_flag;
 pub mod vtable_predicate_state_scaled_value;

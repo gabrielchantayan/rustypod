@@ -113102,3 +113102,44 @@ functions:
       initialization is unchanged. match.py reports that expected 0/4
       structural prefix after the ARM release build. Host tests cover nonzero
       initial fields and the early-boot static-cell path through this veneer.
+
+  # --- StringPool equal-key case-fold comparator ---
+  - address: 0x080be778
+    ghidra: FUN_080be778
+    name: record_u16_casefold_compare
+    size: 164
+    sig: "int record_u16_casefold_compare(const u8 *left, const u8 *right, const StringObject *right_text)"
+    module: cxx/record_u16_casefold_compare
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      param_3/r2: right_text
+      DAT_080be80c: RECORD_U16_CASEFOLD_FORMATTER_STATE
+      DAT_080be810: RECORD_U16_CASEFOLD_SCRATCH
+      FUN_08186380: RECORD_U16_CASEFOLD_FORMATTER_CTOR seam
+      FUN_08131e00: RECORD_U16_CASEFOLD_RENDER seam
+      FUN_082a50b0: string_object_c_str
+      FUN_0827609c: utf8_strcasecmp_safe seam
+    notes: >-
+      Raw osos.dec establishes the true 164-byte extent: 37 instruction
+      words at 0x080be778..0x080be808 followed by the four-word literal
+      pool 0x080be80c..0x080be818; the next real function starts at
+      0x080be81c. Decoding every ARM BL-immediate word finds exactly four
+      inbound calls, all plain BL (0x0815f254, 0x0815f3a8, 0x0815f3d4,
+      0x0815f424), and no predicated BL. The body itself has six plain BL,
+      zero predicated BL, and a tail B to utf8_strcasecmp_safe @ 0x0827609c.
+      It compares the unsigned u16 fields at left/right +6, returning 1 for
+      left < right and -1 for left > right. Equal keys lazily construct a
+      0x200-byte formatting helper with tag 0x08ad5d98, register its result
+      with cxa_atexit, render left into the fixed scratch StringObject, then
+      case-fold compare scratch.payload against string_object_c_str(right_text).
+      The constructor and renderer have no verified semantic identities and
+      remain typed target-only seams. utf8_strcasecmp_safe is already
+      identified but blocked because its runtime fold table is unresolved;
+      the existing string_object seam is used rather than inventing a table.
+      Deliberate deviations: firmware globals are Rust statics and host tests
+      omit cxa_atexit registration because its firmware allocator is absent.
+      match.py reports exit 1 with the expected seam/host-frame structural
+      diff; the ARM release library builds. Host tests cover both key-order
+      exits and the equal-key lazy-init/render/c_str/casefold argument flow.
