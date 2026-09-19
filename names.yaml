@@ -45279,6 +45279,28 @@ functions:
       not_equal_deref symbol.
 
 
+  - address: 0x083dff14
+    ghidra: FUN_083dff14
+    name: deque_drain_elem4
+    size: 44
+    sig: "BlockDeque *deque_drain_elem4(BlockDeque *deque)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0/r4: deque
+      FUN_083d7630: container_is_empty_alias_7630
+      FUN_083dfdec: deque_pop_front_elem4
+    notes: >-
+      Raw osos.dec establishes the 44-byte extent 0x083dff14..0x083dff40:
+      a pre-test loop calls the count-zero predicate at 0x083d7630 and pops
+      the front four-byte deque element at 0x083dfdec until empty, returning
+      the original deque pointer. The next independently linked function
+      begins with push {r4,r5,r6,lr} at 0x083dff40. Whole-image decoding
+      finds three plain inbound bl calls (0x081a739c, 0x082e7e14, and
+      0x082e7f14), no predicated inbound calls; the body has two plain bl
+      calls and no predicated call. Rust uses the existing deque-pop logic's
+      callback internally so host tests can verify multi-segment draining and
+      deallocation while target behavior remains identical.
   - address: 0x083cf650
     ghidra: FUN_083cf650
     name: equal_deref_f650_copy

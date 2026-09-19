@@ -918,6 +918,49 @@ pub unsafe extern "C" fn deque_pop_front_elem4(deque: *mut BlockDeque) {
         cxx_array_dealloc(ptr, count, elem_size);
     });
 }
+/// deque_drain_elem4 — original: `FUN_083dff14` @ 0x083dff14
+/// (44 bytes; raw extent 0x083dff14..0x083dff40, bounded by the next
+/// independently linked `push {r4,r5,r6,lr}`).
+///
+/// Raw A32 is `push {r4,lr}; mov r4,r0; b test; mov r0,r4; bl
+/// 0x083dfdec; mov r0,r4; bl 0x083d7630; cmp r0,#0; beq loop; mov
+/// r0,r4; pop {r4,pc}`. It repeatedly removes the front four-byte deque
+/// element until the count-based [`container_is_empty`] predicate succeeds,
+/// then returns the original deque pointer. Complete branch-immediate
+/// decoding finds three inbound plain `bl` calls (0x081a739c, 0x082e7e14,
+/// and 0x082e7f14) and no predicated calls; its body has two plain `bl`
+/// calls and no predicated call.
+///
+/// # Deliberate deviations
+///
+/// None. The test-only model below supplies a recording deallocator for the
+/// already-tested pop operation without changing this target path.
+///
+/// # Safety
+///
+/// `deque` must point to a writable valid four-byte-element [`BlockDeque`].
+/// Its count, iterators, and map must describe every element removed.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_drain_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_drain_elem4(deque: *mut BlockDeque) -> *mut BlockDeque {
+    while container_is_empty(deque.cast()) == 0 {
+        deque_pop_front_elem4(deque);
+    }
+    deque
+}
+#[cfg(test)]
+unsafe fn deque_drain_elem4_with<F>(deque: *mut BlockDeque, mut deallocate: F) -> *mut BlockDeque
+where
+    F: FnMut(*mut u8, usize, usize),
+{
+    while container_is_empty(deque.cast()) == 0 {
+        deque_pop_front_elem4_with(deque, &mut deallocate);
+    }
+    deque
+}
+
+
 
 unsafe fn deque_pop_front_elem4_with<F>(deque: *mut BlockDeque, mut deallocate: F)
 where
@@ -11243,6 +11286,50 @@ mod tests {
         assert!(deque.end.seg_base.is_null());
         assert!(deque.end.seg_end.is_null());
         assert!(deque.end.seg_slot.is_null());
+    }
+
+    #[test]
+    fn deque_drain_elem4_removes_all_elements_and_returns_its_argument() {
+        let mut old_segment = [0u32; 32];
+        let mut next_segment = [0u32; 32];
+        let old_base = old_segment.as_mut_ptr().cast::<u8>();
+        let next_base = next_segment.as_mut_ptr().cast::<u8>();
+        let mut map = [old_base, next_base];
+        let begin = DequeIter {
+            cur: old_base.wrapping_add(0x7c),
+            seg_base: old_base,
+            seg_end: old_base.wrapping_add(0x80),
+            seg_slot: map.as_mut_ptr(),
+        };
+        let end = DequeIter {
+            cur: next_base.wrapping_add(4),
+            seg_base: next_base,
+            seg_end: next_base.wrapping_add(0x80),
+            seg_slot: unsafe { map.as_mut_ptr().add(1) },
+        };
+        let mut deque = BlockDeque {
+            begin,
+            end,
+            count: 2,
+            map: map.as_mut_ptr(),
+            map_cap: 2,
+        };
+        let map_ptr = deque.map.cast::<u8>();
+        let mut frees = Vec::new();
+
+        let returned = unsafe {
+            deque_drain_elem4_with(&mut deque, |ptr, count, elem_size| {
+                frees.push((ptr, count, elem_size));
+            })
+        };
+
+        assert!(core::ptr::eq(returned, &mut deque));
+        assert_eq!(frees, std::vec![(old_base, 0x20, 0), (next_base, 0x20, 0), (map_ptr, 2, 0)]);
+        assert_eq!(deque.count, 0);
+        assert!(deque.begin.cur.is_null() && deque.begin.seg_base.is_null());
+        assert!(deque.begin.seg_end.is_null() && deque.begin.seg_slot.is_null());
+        assert!(deque.end.cur.is_null() && deque.end.seg_base.is_null());
+        assert!(deque.end.seg_end.is_null() && deque.end.seg_slot.is_null());
     }
 
     #[test]
