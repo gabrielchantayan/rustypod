@@ -113034,3 +113034,29 @@ functions:
       and nonzero word +0x30. TaggedLinkTarget uses u32 fields so this target
       word retains its four-byte firmware offset on 64-bit hosts. Deliberate
       deviations: none.
+
+  # --- RAM-side mutex creation veneer ---
+  - address: 0x080c6768
+    ghidra: thunk_FUN_080744a4
+    name: mutex_create_veneer
+    size: 4
+    sig: "void mutex_create_veneer(Mutex *mutex)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: mutex
+      FUN_080744a4: mutex_create
+    notes: >-
+      Raw osos.dec word 0xeafeb74d at 0x080c6768 decodes to the sole
+      unconditional tail branch, `b 0x080744a4` (mutex_create); the next
+      separately entered function starts with `stmdb sp!,{r1,r2,r3,lr}` at
+      0x080c676c, proving the true 4-byte extent. Decoding every aligned ARM
+      BL-immediate call targeting this address finds four inbound direct plain
+      BL sites and zero predicated BL sites. The veneer preserves r0 and
+      transfers directly to the already ported mutex_create, which allocates
+      or selects its semaphore cell and zeroes mutex+4. Deliberate deviation:
+      LLVM materializes the exported veneer as frame setup/teardown plus its
+      tail branch, rather than the retail one-word branch; observable mutex
+      initialization is unchanged. match.py reports that expected 0/4
+      structural prefix after the ARM release build. Host tests cover nonzero
+      initial fields and the early-boot static-cell path through this veneer.
