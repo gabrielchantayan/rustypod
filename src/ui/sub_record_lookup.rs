@@ -22,15 +22,88 @@ type QueryDispatch = unsafe extern "C" fn(
     detail: u32,
 ) -> i32;
 
-/// Calls the stock query-dispatch helper, which remains in retailOS.
+/// Query-engine method helper at 0x08065dfc, still provided by retailOS.
+type QueryEngineDispatch = unsafe extern "C" fn(
+    engine: *mut u8,
+    descriptor: *const u8,
+    word3: u32,
+    key: *const u8,
+    descriptor_out: *mut u8,
+    scratch_out: *mut u8,
+    detail: u32,
+) -> i32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn query_engine_dispatch(
+    engine: *mut u8,
+    descriptor: *const u8,
+    word3: u32,
+    key: *const u8,
+    descriptor_out: *mut u8,
+    scratch_out: *mut u8,
+    detail: u32,
+) -> i32 {
+    let dispatch: QueryEngineDispatch = core::mem::transmute(0x0806_5dfcusize);
+    dispatch(engine, descriptor, word3, key, descriptor_out, scratch_out, detail)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_query_engine_dispatch(
+    _engine: *mut u8,
+    _descriptor: *const u8,
+    _word3: u32,
+    _key: *const u8,
+    _descriptor_out: *mut u8,
+    _scratch_out: *mut u8,
+    _detail: u32,
+) -> i32 {
+    panic!("record_query_dispatch requires the 0x08065dfc query-engine dispatch")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut QUERY_ENGINE_DISPATCH: QueryEngineDispatch = missing_query_engine_dispatch;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn query_engine_dispatch(
+    engine: *mut u8,
+    descriptor: *const u8,
+    word3: u32,
+    key: *const u8,
+    descriptor_out: *mut u8,
+    scratch_out: *mut u8,
+    detail: u32,
+) -> i32 {
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(QUERY_ENGINE_DISPATCH));
+    dispatch(engine, descriptor, word3, key, descriptor_out, scratch_out, detail)
+}
+
+/// record_query_dispatch — original: `FUN_0805c0c8` @ `0x0805c0c8` (120
+/// bytes, `0x0805c0c8..0x0805c140`; the next separately entered function
+/// starts at `0x0805c140` with `stmdb sp!,{r4-r7,lr}`). Raw words decode two
+/// plain internal `bl` instructions and no predicated calls. Four inbound
+/// calls are plain unconditional `bl` at `0x0805beb4`, `0x0805bf10`,
+/// `0x0805bfbc`, and `0x0805d880`; there are no predicated `bl` callers.
 ///
-/// This is deliberately a boundary rather than a port of 0x0805c0c8. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original reads the object tag halfword at
-/// `+2`, notes whether it is 0x482b for 0x080433b0, then forwards all
-/// seven arguments through the method pointer at `object + 0x158` via
-/// 0x08065dfc and remaps status 0x20 to 0x30.
-unsafe extern "C" fn firmware_query_dispatch(
+/// Packs `kind` and `word2` into a temporary query descriptor, choosing wide
+/// packing exactly when the object's target-layout tag at `+2` is `0x482b`.
+/// It then invokes the query-engine method pointer stored at target offset
+/// `+0x158`, forwarding `word3`, `key`, `descriptor`, and `detail`; a null
+/// `word2` forces `word3` to zero. Status `0x20` is remapped to `0x30`.
+///
+/// Deliberate deviations: the unported query-engine dispatch at `0x08065dfc`
+/// remains behind a volatile host-test seam, so ARM code calls it indirectly
+/// rather than with the retail direct `bl`. The target pointer is read as a
+/// 32-bit target-layout word, not a host pointer field.
+///
+/// # Safety
+///
+/// `object` must be readable through target offset `0x15b`; `descriptor`
+/// and `scratch_out` must satisfy the retail query-engine dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn record_query_dispatch(
     object: *mut u8,
     kind: u32,
     word2: *const u8,
@@ -39,22 +112,29 @@ unsafe extern "C" fn firmware_query_dispatch(
     descriptor: *const u8,
     detail: u32,
 ) -> i32 {
-    #[cfg(target_os = "none")]
-    {
-        let dispatch: QueryDispatch = core::mem::transmute(0x0805_c0c8usize);
-        dispatch(object, kind, word2, word3, key, descriptor, detail)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = (object, kind, word2, word3, key, descriptor, detail);
-        // A nonzero status keeps host callers on the untouched failure path.
-        -1
-    }
+    let mut packed_descriptor = core::mem::MaybeUninit::<[u8; 520]>::uninit();
+    let wide = ((object.add(2) as *const u16).read() == 0x482b) as i32;
+    crate::ui::record_descriptor_pack::record_descriptor_pack(
+        kind,
+        word2,
+        wide,
+        packed_descriptor.as_mut_ptr().cast(),
+    );
+    let engine = ((object.add(0x158) as *const u32).read() as usize) as *mut u8;
+    let status = query_engine_dispatch(
+        engine,
+        packed_descriptor.as_ptr().cast(),
+        if word2.is_null() { 0 } else { word3 },
+        key,
+        descriptor as *mut u8,
+        packed_descriptor.as_mut_ptr().cast::<u8>().add(516),
+        detail,
+    );
+    if status == 0x20 { 0x30 } else { status }
 }
 
-/// Narrow boundary for the unported 0x0805c0c8 dependency.
-static mut QUERY_DISPATCH: QueryDispatch = firmware_query_dispatch;
+/// Narrow test boundary for the ported record-query dispatcher.
+static mut QUERY_DISPATCH: QueryDispatch = record_query_dispatch;
 
 #[inline(always)]
 unsafe fn query_dispatch_fn() -> QueryDispatch {
@@ -188,13 +268,95 @@ mod tests {
             .unwrap_or(0)
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct EngineCall {
+        engine: usize,
+        kind: u32,
+        word3: u32,
+        key: usize,
+        descriptor_out: usize,
+        detail: u32,
+    }
+
+    static mut ENGINE_CALL: Option<EngineCall> = None;
+
+    unsafe extern "C" fn recording_query_engine_dispatch(
+        engine: *mut u8,
+        packed_descriptor: *const u8,
+        word3: u32,
+        key: *const u8,
+        descriptor_out: *mut u8,
+        _scratch_out: *mut u8,
+        detail: u32,
+    ) -> i32 {
+        core::ptr::addr_of_mut!(ENGINE_CALL).write(Some(EngineCall {
+            engine: engine as usize,
+            kind: crate::libc::rt_unaligned::__rt_uread4(packed_descriptor.add(2)),
+            word3,
+            key: key as usize,
+            descriptor_out: descriptor_out as usize,
+            detail,
+        }));
+        0x20
+    }
+
+    struct EngineDispatchReset;
+
+    impl Drop for EngineDispatchReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(QUERY_ENGINE_DISPATCH).write(missing_query_engine_dispatch);
+            }
+        }
+    }
+
+    #[test]
+    fn record_dispatch_packs_kind_forwards_engine_arguments_and_remaps_status() {
+        let _lock = DISPATCH_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = EngineDispatchReset;
+        unsafe {
+            core::ptr::addr_of_mut!(ENGINE_CALL).write(None);
+            core::ptr::addr_of_mut!(QUERY_ENGINE_DISPATCH).write(recording_query_engine_dispatch);
+        }
+        let mut object = [0u8; 0x15c];
+        unsafe {
+            (object.as_mut_ptr().add(0x158) as *mut u32).write_unaligned(0x1234_5678);
+        }
+        let mut descriptor = [0u8; 16];
+        let status = unsafe {
+            record_query_dispatch(
+                object.as_mut_ptr(),
+                0xdead_beef,
+                core::ptr::null(),
+                0xfeed_face,
+                9 as *const u8,
+                descriptor.as_mut_ptr(),
+                0x55,
+            )
+        };
+        assert_eq!(status, 0x30);
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(ENGINE_CALL).read() },
+            Some(EngineCall {
+                engine: 0x1234_5678,
+                kind: 0xdead_beef,
+                word3: 0,
+                key: 9,
+                descriptor_out: descriptor.as_mut_ptr() as usize,
+                detail: 0x55,
+            })
+        );
+    }
+
     /// Restores the stock-call boundary before another test uses it.
     struct DispatchReset;
 
     impl Drop for DispatchReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(QUERY_DISPATCH).write(firmware_query_dispatch);
+                core::ptr::addr_of_mut!(QUERY_DISPATCH).write(record_query_dispatch);
             }
         }
     }

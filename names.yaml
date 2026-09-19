@@ -115159,3 +115159,36 @@ functions:
       host pointer offsets. Host tests cover length precedence, byte order,
       equality, and zero-length NULL data. match.py structural diff reviewed
       after the ARM release build.
+
+  - address: 0x0805c0c8
+    ghidra: FUN_0805c0c8
+    name: record_query_dispatch
+    size: 120
+    sig: "i32 record_query_dispatch(u8 *object, u32 kind, const u8 *word2, u32 word3, const u8 *key, const u8 *descriptor, u32 detail)"
+    module: ui/sub_record_lookup
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: kind
+      param_3/r2: word2
+      param_4/r3: word3
+      param_5/stack: key
+      param_6/stack: descriptor
+      param_7/stack: detail
+      param_1_plus_0x158: query_engine
+      FUN_080433b0: record_descriptor_pack
+      FUN_08065dfc: query_engine_dispatch
+    notes: >-
+      Raw osos.dec words decode to the 120-byte body
+      0x0805c0c8..0x0805c140; 0x0805c140 begins the separately entered
+      successor. The body has two plain unconditional BL instructions and no
+      predicated BL. Four inbound calls are plain unconditional BL at
+      0x0805beb4, 0x0805bf10, 0x0805bfbc, and 0x0805d880, with zero
+      predicated forms. It packs kind and word2 through ported
+      record_descriptor_pack, selects wide packing when object tag +2 is
+      0x482b, clears word3 for a NULL word2, and invokes the target-layout
+      u32 query-engine pointer at object +0x158; status 0x20 becomes 0x30.
+      The unported 0x08065dfc dispatch remains a volatile seam for host
+      tests, so ARM emits an indirect call rather than the retail direct BL.
+      Host tests cover target-layout engine-word loading, NULL-word2
+      word3 clearing, forwarding, packed kind, and the status remap.
