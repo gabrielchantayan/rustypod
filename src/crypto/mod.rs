@@ -45,6 +45,7 @@ pub mod obj_bsearch;
 pub mod asn1_integer_set;
 pub mod asn1_adb;
 pub mod buffered_writer_write;
+pub mod buffered_writer_flush;
 pub mod base64_encode;
 pub mod base64_decode;
 pub mod base64_table_char;

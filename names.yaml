@@ -114776,3 +114776,26 @@ functions:
       conditional returns, handler-slot load, and tail-dispatch structure;
       extra instructions are the four literal veneers required because the
       payload cannot reach stock targets with direct PC-relative BL.
+
+  # --- Full-page buffered writer transform (crypto) ---
+  - address: 0x08064fb8
+    ghidra: FUN_08064fb8
+    name: buffered_writer_flush
+    size: 152
+    sig: "u32 buffered_writer_flush(BufferedWriterState *state, u8 *page, u32 len)"
+    module: crypto/buffered_writer_flush
+    status: ported
+    notes: >-
+      Raw ARM extent is exactly 152 bytes, 0x08064fb8..0x08065050: the
+      following literal is 0x089cd91c and 0x08065054 begins the distinct
+      sibling. Raw decoding finds eight plain unconditional body bl calls
+      (operator_new, mutex_create, mutex_lock, setup/reset selection,
+      update, finish/complete-reset selection, mutex_unlock) and no
+      predicated bl. It lazily allocates and creates the shared mutex slot
+      at 0x089cd91c, locks it, dispatches the state +0x50 bit-0 setup
+      pair, invokes 0x0808c558(state,page,len), dispatches the bit-1
+      completion pair, unlocks, and returns zero. The transform helpers
+      retain their unresolved identities and use verified target-address
+      calls with host ABI seams; the allocator and mutex calls are direct
+      Rust ports. Host tests cover all four flag combinations and page/len
+      forwarding. Deviation: helper seams replace direct retail bl calls.
