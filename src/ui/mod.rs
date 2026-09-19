@@ -70,6 +70,7 @@ pub mod tagged_link_source_is_valid;
 pub mod tagged_link_target_is_valid;
 pub mod object_payload;
 pub mod object_context;
+pub mod selected_element_context;
 pub mod candidate_is_accepted;
 pub mod object_packed_field;
 pub mod plst_class_check;
