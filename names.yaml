@@ -12954,6 +12954,31 @@ functions:
       transfer to the already ported mailbox_slot_create; the slot store and
       no-NULL-guard behavior are identical.
 
+  - address: 0x080dad34
+    ghidra: thunk_FUN_0808e2b0
+    name: mailbox_slot_signal_thunk
+    size: 4
+    sig: "void mailbox_slot_signal_thunk(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0808e2b0: mailbox_slot_signal (already ported, kernel/kobj.rs)
+    notes: >-
+      One-word pure branch alias: raw word 0xeafecd5d is `b 0x0808e2b0`,
+      forwarding the caller-owned Mailbox pointer slot unchanged to
+      mailbox_slot_signal. The true extent is exactly
+      0x080dad34..0x080dad38: the immediately following raw word
+      0xeafecd55 at 0x080dad38 is a separate `b 0x0808e294` entry.
+      Independent decoding of every ARM B/BL word in osos.dec finds five
+      inbound link calls: four plain bl (0x08085ff4, 0x080935f8,
+      0x080a5390, 0x080b67f4) and one predicated bleq (0x081bb920), with
+      no tail branches. The Rust forwarding call deliberately replaces the
+      PC-relative tail branch; it preserves the unchanged slot argument and
+      mailbox_slot_signal's unconditional dereference and token-spending
+      behavior. Host tests cover both a non-waking positive-to-zero count
+      and the zero-to-negative waiter-wake transition.
+
   - address: 0x080dad28
     ghidra: FUN_080dad28
     name: mailbox_slot_post_dispatch
