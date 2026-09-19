@@ -340,6 +340,7 @@ pub mod vtable_word_callback_repeat;
 pub mod two_string_record_assign;
 pub mod guarded_vtable_slot_04_dispatch;
 pub mod guarded_vtable_slot_04_dispatch_08157448;
+pub mod guarded_vtable_slot_04_dispatch_083e7630;
 pub mod guarded_vtable_slot_1c_dispatch;
 pub mod guarded_vtable_slot_40_dispatch;
 pub mod vtable_object_base_construct;
