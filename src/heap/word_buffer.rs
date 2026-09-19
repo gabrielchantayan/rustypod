@@ -243,6 +243,156 @@ pub unsafe extern "C" fn word_buffer_reset_optional_singleton(
     1
 }
 
+/// marked_word_buffer_compare — original: `FUN_0803e640` @ 0x0803e640
+/// (168 bytes exactly, 0x0803e640..0x0803e6e8; four unconditional direct
+/// `bl` callers and no predicated direct callers).
+///
+/// Orders nullable marked word buffers. NULL sorts below a non-NULL buffer.
+/// Non-NULL buffers compare their marker first, with marker zero ordered
+/// before nonzero; equal markers compare signed length, then compare data
+/// words from the final element back to the first as unsigned values.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// Non-NULL buffers must point to valid [`MarkedWordBuffer`] headers. For
+/// equal markers and lengths greater than zero, their data target words must
+/// address readable, aligned `u32` arrays holding `len` elements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn marked_word_buffer_compare(
+    left: *const MarkedWordBuffer,
+    right: *const MarkedWordBuffer,
+) -> i32 {
+    if left.is_null() {
+        return if right.is_null() { 0 } else { 1 };
+    }
+    if right.is_null() {
+        return -1;
+    }
+
+    let left_marker = unsafe { core::ptr::addr_of!((*left).marker).read_volatile() };
+    let right_marker = unsafe { core::ptr::addr_of!((*right).marker).read_volatile() };
+    if left_marker != right_marker {
+        return if left_marker == 0 { -1 } else { 1 };
+    }
+
+    let left_len = unsafe { core::ptr::addr_of!((*left).len).read_volatile() as i32 };
+    let right_len = unsafe { core::ptr::addr_of!((*right).len).read_volatile() as i32 };
+    let order = if left_marker == 0 { 1 } else { -1 };
+    if right_len < left_len {
+        return order;
+    }
+    if right_len > left_len {
+        return -order;
+    }
+
+    let left_words = unsafe { core::ptr::addr_of!((*left).data).read_volatile() as usize as *const u32 };
+    let right_words = unsafe { core::ptr::addr_of!((*right).data).read_volatile() as usize as *const u32 };
+    let mut index = left_len;
+    while index > 0 {
+        index -= 1;
+        let left_word = unsafe { left_words.add(index as usize).read_volatile() };
+        let right_word = unsafe { right_words.add(index as usize).read_volatile() };
+        if right_word < left_word {
+            return order;
+        }
+        if right_word > left_word {
+            return -order;
+        }
+    }
+    0
+}
+
+#[cfg(test)]
+fn marked_word_buffer_compare_reference(
+    left: Option<(&[u32], u32)>,
+    right: Option<(&[u32], u32)>,
+) -> i32 {
+    match (left, right) {
+        (None, None) => 0,
+        (None, Some(_)) => 1,
+        (Some(_), None) => -1,
+        (Some((left_words, left_marker)), Some((right_words, right_marker))) => {
+            if left_marker != right_marker {
+                return if left_marker == 0 { -1 } else { 1 };
+            }
+            let order = if left_marker == 0 { 1 } else { -1 };
+            if right_words.len() < left_words.len() {
+                return order;
+            }
+            if right_words.len() > left_words.len() {
+                return -order;
+            }
+            for (&left_word, &right_word) in left_words.iter().zip(right_words).rev() {
+                if right_word < left_word {
+                    return order;
+                }
+                if right_word > left_word {
+                    return -order;
+                }
+            }
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+fn compare_fixture(words: *const u32, len: usize, marker: u32) -> MarkedWordBuffer {
+    MarkedWordBuffer { data: words as usize as u32, len: len as u32, capacity: len as u32, marker }
+}
+
+#[cfg(test)]
+fn assert_marked_word_buffer_compare(
+    left: Option<&MarkedWordBuffer>,
+    right: Option<&MarkedWordBuffer>,
+    left_reference: Option<(&[u32], u32)>,
+    right_reference: Option<(&[u32], u32)>,
+) {
+    let left_ptr = left.map_or(core::ptr::null(), |buffer| buffer as *const _);
+    let right_ptr = right.map_or(core::ptr::null(), |buffer| buffer as *const _);
+    assert_eq!(
+        unsafe { marked_word_buffer_compare(left_ptr, right_ptr) },
+        marked_word_buffer_compare_reference(left_reference, right_reference),
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn compare_orders_null_markers_lengths_and_reverse_words() {
+    let Some(slab) = crate::testing::try_map_u32_slab(
+        crate::testing::hints::MARKED_WORD_BUFFER_COMPARE,
+        0x100,
+    ) else {
+        assert!(crate::testing::note_missing_u32_fixture(
+            "heap::word_buffer::marked_word_buffer_compare",
+        ));
+        return;
+    };
+    let words = slab.cast::<u32>();
+    unsafe {
+        let left_words = core::slice::from_raw_parts_mut(words, 3);
+        let right_words = core::slice::from_raw_parts_mut(words.add(8), 3);
+        left_words.copy_from_slice(&[4, 7, 9]);
+        right_words.copy_from_slice(&[4, 8, 1]);
+        let left = compare_fixture(left_words.as_ptr(), 3, 0);
+        let right = compare_fixture(right_words.as_ptr(), 3, 0);
+
+        assert_marked_word_buffer_compare(None, None, None, None);
+        assert_marked_word_buffer_compare(None, Some(&right), None, Some((&right_words[..], 0)));
+        assert_marked_word_buffer_compare(Some(&left), None, Some((&left_words[..], 0)), None);
+        assert_marked_word_buffer_compare(Some(&left), Some(&right), Some((&left_words[..], 0)), Some((&right_words[..], 0)));
+
+        let nonzero_marker = compare_fixture(right_words.as_ptr(), 3, 7);
+        assert_marked_word_buffer_compare(Some(&left), Some(&nonzero_marker), Some((&left_words[..], 0)), Some((&right_words[..], 7)));
+
+        let short = compare_fixture(right_words.as_ptr(), 2, 0);
+        assert_marked_word_buffer_compare(Some(&left), Some(&short), Some((&left_words[..], 0)), Some((&right_words[..2], 0)));
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;

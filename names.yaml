@@ -80412,6 +80412,32 @@ functions:
       otherwise clears marker (+0x0c), resets length (+0x04), writes value
       through data (+0x00), and sets length to one iff value is nonzero.
 
+  - address: 0x0803e640
+    ghidra: FUN_0803e640
+    name: marked_word_buffer_compare
+    size: 168
+    sig: "i32 marked_word_buffer_compare(const MarkedWordBuffer *left, const MarkedWordBuffer *right)"
+    module: heap/word_buffer
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r3: left_len
+      iVar3/lr: right_len
+      uVar2/r0: reverse_order
+      uVar5/r12: forward_order
+    notes: >-
+      Raw extent is exactly 0x0803e640..0x0803e6e8 (42 ARM instructions);
+      the independently linked marked-word-buffer assignment helper begins
+      immediately at 0x0803e6e8. Decoding every ARM B/BL immediate in
+      osos.dec found four direct callers, all unconditional BL at
+      0x08082434, 0x08082460, 0x0808248c, and 0x080824d8; there are no
+      predicated direct callers. NULL left returns +1 only for non-NULL
+      right, while NULL right returns -1 for non-NULL left. Otherwise it
+      orders marker (+0x0c), with zero before nonzero; equal markers order
+      signed length (+0x04), then compare data (+0x00) u32 words backwards
+      as unsigned values. Capacity (+0x08) is not read.
+
   - address: 0x0803e6e8
     ghidra: FUN_0803e6e8
     name: marked_word_buffer_assign
