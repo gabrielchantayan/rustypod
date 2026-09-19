@@ -7110,6 +7110,18 @@ functions:
     module: printf/printf_float_dtoa
     status: ported
 
+  - address: 0x08037504
+    ghidra: FUN_08037504
+    name: ext_mul_ext
+    size: 48
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: >-
+      Multiplies two 12-byte extended values through ext_fp_mul_core and
+      ext_fp_round unless either exponent word has the inf/nan marker, in
+      which case it returns the first operand unchanged. Four unpredicated
+      BL call sites; no predicated BL call sites.
+
   - address: 0x0802e118
     ghidra: FUN_0802e118
     name: block_sub_bytes
