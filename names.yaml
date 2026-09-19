@@ -113011,3 +113011,26 @@ functions:
       the exact three-word state layout and ported direct callees. Host
       builds deliberately allocate size_of::<Mutex>() instead of the
       target's 8-byte allocation because host pointers are wider.
+  # --- UI tagged link target guard ---
+  - address: 0x080c67b8
+    ghidra: FUN_080c67b8
+    name: tagged_link_target_is_valid
+    size: 48
+    sig: "u32 tagged_link_target_is_valid(TaggedLinkTarget const *target)"
+    module: ui/tagged_link_target_is_valid
+    status: ported
+    renames:
+      param_1/r0: target
+      DAT_080c67e8: LINK_TARGET_TAG
+      param_1_plus_0x30: active_word
+    notes: >-
+      Raw osos.dec words establish the true 48-byte extent: cmp r0, #0 at
+      0x080c67b8 through bx lr at 0x080c67e4; the next independently entered
+      function starts at 0x080c67e8. The routine has no outbound BL calls.
+      Decoding every aligned ARM BL-immediate call targeting this address finds
+      four inbound direct calls, all plain BL at 0x0804880c, 0x08048934,
+      0x0805bc54, and 0x08066c2c; there are no predicated BL callers. It
+      returns one only for a non-null target with first-word tag 0x4d526376
+      and nonzero word +0x30. TaggedLinkTarget uses u32 fields so this target
+      word retains its four-byte firmware offset on 64-bit hosts. Deliberate
+      deviations: none.
