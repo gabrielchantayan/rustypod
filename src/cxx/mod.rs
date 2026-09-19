@@ -62,6 +62,7 @@ pub mod empty_destructor_1070b4;
 pub mod empty_destructor_083d8008;
 pub mod empty_destructor_2a1ebc;
 pub mod opaque_record_payload_length;
+pub mod opaque_storage_destroy;
 pub mod flagged_pair_copy;
 pub mod flagged_pair_clear;
 pub mod flagged_pair_payload;

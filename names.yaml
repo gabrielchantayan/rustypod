@@ -117744,3 +117744,40 @@ functions:
       virtual-target identity is inferred. Host vtable entries are native
       pointer width rather than target-width words; this is the deliberate
       host-only deviation.
+
+  # --- opaque owned-storage destructor ---
+  - address: 0x083e7210
+    ghidra: FUN_083e7210
+    name: opaque_storage_destroy
+    size: 60
+    sig: "OpaqueStorageOwner *opaque_storage_destroy(OpaqueStorageOwner *owner)"
+    module: cxx/opaque_storage_destroy
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_1_plus_0x00/r4: object
+      object_plus_0x08/r0: storage
+      object_plus_0x0c/r1: heap_tag
+      FUN_080e7970: free_wrapper
+      FUN_082aad24: operator_delete
+      return/r0: owner
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: fifteen ARM words
+      from `push {r4,r5,r6,lr}` at 0x083e7210 through `pop {r4,r5,r6,pc}` at
+      0x083e7248; the next `push {r4,r5,r6,lr}` at 0x083e724c begins a
+      separate function. The body loads the owner-held object pointer at +0;
+      NULL returns owner. Otherwise it loads object+8, and only when that
+      storage is non-NULL and the object+0x0c tag byte is not 0x3a calls
+      free_wrapper(storage, 0) through its one predicated `blne`; it then
+      calls operator_delete(object) unconditionally and returns owner. The
+      raw body never reads Ghidra's inferred second parameter. The three
+      recovered direct callers are plain `bl` sites in
+      FUN_0810eed4 (decomp/c/010/0810eed4_FUN_0810eed4.c); no predicated
+      inbound call is recovered. Both direct callees are already ported, so
+      no seam was invented. Deliberate deviation: Rust calls those ports
+      directly, whose heap wrapper dispatches through HEAP_OPS rather than
+      retailOS's direct heap path. Host tests prove owner return identity,
+      NULL-object no-op, owned storage-first then tag-2 object release, and
+      the null/0x3a storage gates. match.py reports LLVM's explicit guarded
+      branch and normal calls in place of the original predicated call; the
+      same storage-free then object-delete sequence is retained.
