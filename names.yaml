@@ -3755,6 +3755,36 @@ functions:
       dereference behavior. Host tests cover zero and u32::MAX counts
       through direct backends and kind-2 proxies.
 
+  # --- retailOS UI resource-ID table counted-string reader ---
+  - address: 0x08052c64
+    ghidra: FUN_08052c64
+    name: object_resource_table_counted_string
+    size: 84
+    sig: "i32 object_resource_table_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_table_counted_string
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      FUN_08051dc4: object_backend_for_kind (ported)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw ARM establishes the 84-byte extent exactly: push {r4,lr} starts at
+      0x08052c64 and pop {r4,pc} ends at 0x08052cb4; the next separately
+      entered function begins at 0x08052cb8. Decoding the raw words finds one
+      internal unconditional bl to object_backend_for_kind at 0x08052c7c and
+      a conditional tail bhi to string_pool_read_counted at 0x08052cac, not
+      the five-argument string_pool_read call Ghidra reports. Every ARM BL
+      word in osos.dec finds exactly four direct callers, all plain
+      unconditional bl at 0x08066554, 0x08115920, 0x0813c9a8, and
+      0x0813d500; there are no predicated BL callers. The port clears
+      counted[0], resolves kind 1/2 objects, rejects negative or out-of-range
+      indices with -50, then tail-calls the counted reader using the selected
+      object+0xe70 resource ID and the pool at *(backend+0xf60)+0x118.
+      No deliberate deviations: index remains the reader's dead r3
+      initial-byte-length argument, as it does in the stock tail branch.
+
   # --- retailOS UI 12-byte resource-table counted-string reader ---
   - address: 0x08052e1c
     ghidra: FUN_08052e1c
