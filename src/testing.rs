@@ -1574,6 +1574,9 @@ pub mod hints {
     // 0x8070_0000: dedicated to ui/plst_apply_counted_string's raw-u32
     // item and owner fixture; mappings never unmap, so no other user may share it.
     pub const PLST_APPLY_COUNTED_STRING: usize = 0x8070_0000;
+    // Dedicated target-width ASN1_OBJECT fixtures for crypto/obj_cmp.
+    pub const OBJ_CMP: usize = 0x8080_0000;
+    pub const OBJ_CMP_ZERO: usize = 0x8090_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
