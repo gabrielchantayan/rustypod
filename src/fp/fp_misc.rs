@@ -1459,14 +1459,10 @@ pub unsafe extern "C" fn board_version_halves(_this: *mut u8, high: *mut u16, lo
 /// original's `sp + 0xc` through `sp + 0x1f` frame range.
 const CURRENT_DATETIME_QUERY_BUFFER_SIZE: usize = 0x14;
 
-/// Host-swappable entry point for the current-calendar query
-/// `FUN_08056524` @ 0x08056524 (200 bytes, unported): zeroes a 12-byte
-/// temporary, fetches the clock state through `FUN_080642a4`, and builds a
-/// 20-byte calendar record. Its result is bit 1 of the fetched status,
-/// normalized to 0 or 1; its fields at offsets +2..+6 and +8..+9 are,
-/// respectively, second, minute, hour, day, month, and year. The target
-/// build calls the fixed firmware address directly; host tests swap this
-/// writable cell to install recording mocks.
+/// Host-swappable entry point for current-calendar query callers. Target
+/// builds dispatch directly to the ported
+/// [`crate::time::current_datetime_query::current_datetime_query`]; host
+/// tests swap this writable cell to install recording mocks.
 #[cfg(not(target_os = "none"))]
 pub static mut CURRENT_DATETIME_QUERY: usize = 0x0805_6524;
 #[cfg(test)]
@@ -1483,8 +1479,7 @@ type CurrentDatetimeQueryFn = unsafe extern "C" fn(*mut u8) -> bool;
 #[cfg(target_os = "none")]
 #[inline(always)]
 pub(crate) unsafe fn current_datetime_query(record: *mut u8) -> bool {
-    let query: CurrentDatetimeQueryFn = core::mem::transmute(0x0805_6524usize);
-    query(record)
+    crate::time::current_datetime_query::current_datetime_query(record)
 }
 
 #[cfg(not(target_os = "none"))]

@@ -4,6 +4,7 @@ pub mod clock_state;
 pub mod current_day_and_seconds;
 pub mod current_mac_epoch_seconds;
 pub mod current_mac_epoch_seconds_raw;
+pub mod current_datetime_query;
 pub mod current_datetime;
 pub mod normalize_day_and_seconds;
 pub mod datetime;

@@ -251,6 +251,9 @@ unsafe fn clock_state_day_of_year(state: *mut ClockState) {
 }
 
 #[cfg(test)]
+pub(crate) static CLOCK_STATE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -321,7 +324,7 @@ mod tests {
 
     #[test]
     fn refreshes_calendar_and_preserves_shadow_zone_bytes() {
-        let _guard = STATE_LOCK.lock();
+        let _guard = CLOCK_STATE_TEST_LOCK.lock();
         let mut shadow = zeroed();
         shadow.utc_offset_quarters = -32; // UTC-8
         shadow.dst_active = 1;
@@ -352,7 +355,7 @@ mod tests {
 
     #[test]
     fn shadow_zone_bit_clear_leaves_getter_status_alone() {
-        let _guard = STATE_LOCK.lock();
+        let _guard = CLOCK_STATE_TEST_LOCK.lock();
         let mut shadow = zeroed();
         shadow.status = 0xfc; // bit1 clear
         let saved = unsafe { install(mock_get, shadow) };
@@ -367,7 +370,7 @@ mod tests {
 
     #[test]
     fn getter_error_is_ignored_and_leap_february_counts_29() {
-        let _guard = STATE_LOCK.lock();
+        let _guard = CLOCK_STATE_TEST_LOCK.lock();
         let saved = unsafe { install(mock_get_failing, zeroed()) };
 
         let mut state = zeroed();
@@ -382,7 +385,7 @@ mod tests {
 
     #[test]
     fn century_years_divide_by_100_before_the_four_year_test() {
-        let _guard = STATE_LOCK.lock();
+        let _guard = CLOCK_STATE_TEST_LOCK.lock();
         let saved = unsafe { install(mock_get, zeroed()) };
 
         let mut state = zeroed();
@@ -401,7 +404,7 @@ mod tests {
 
     #[test]
     fn month_zero_and_one_run_zero_table_iterations() {
-        let _guard = STATE_LOCK.lock();
+        let _guard = CLOCK_STATE_TEST_LOCK.lock();
         let mut state = zeroed();
         state.year = 2009;
         state.month = 1;

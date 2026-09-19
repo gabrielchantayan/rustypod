@@ -49173,8 +49173,8 @@ functions:
       local_28: packed_record (10-byte output staging at sp+0; the
         five calendar bytes and year are assigned individually,
         leaving its three padding bytes uninitialized in retailOS)
-      FUN_08056524: current_datetime_query (unported 200-byte clock
-        calendar-record builder behind the CURRENT_DATETIME_QUERY seam)
+      FUN_08056524: current_datetime_query (ported clock calendar-record
+        builder)
       FUN_08030f44: heap_panic (ported, non-returning)
       thunk_EXT_FUN_22000020: __rt_memcpy (the ported ROM veneer
         thunk @ 0x08037db0)
@@ -49191,10 +49191,9 @@ functions:
       unassigned output slots are ABI padding: the retail stack bytes
       are indeterminate before memcpy; the Rust port deliberately
       zero-initializes them, following this module's existing staging
-      buffer convention. FUN_08056524 remains unported behind a
-      host-swappable usize seam (target calls fixed address directly,
-      host tests install a recording mock). Host tests verify a single
-      query, exact field extraction, zeroed padding, and live results
+      FUN_08056524 is ported at time/current_datetime_query; target callers
+      dispatch to it directly, while host tests retain recording seams. They
+      verify a single query, exact field extraction, zeroed padding, and live
       on consecutive calls. match.py structural (exit-1 diff expected):
       query -> zero-status fatal gate -> byte/halfword field staging ->
       __rt_memcpy; expected differences are the seam blx dispatch,
@@ -115293,3 +115292,35 @@ functions:
       tests, so ARM emits an indirect call rather than the retail direct BL.
       Host tests cover target-layout engine-word loading, NULL-word2
       word3 clearing, forwarding, packed kind, and the status remap.
+
+  # --- current calendar query record builder ---
+  - address: 0x08056524
+    ghidra: FUN_08056524
+    name: current_datetime_query
+    size: 204
+    sig: "bool current_datetime_query(u8 *record)"
+    status: ported
+    renames:
+      param_1/r0/r4: record (20-byte calendar output)
+      local_0/sp: state (12-byte ClockState temporary)
+      FUN_080642a4: fetch_clock_state
+      DAT_080565ec: DEFAULT_YEAR (2002)
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent: 50 ARM instruction
+      words at 0x08056524..0x080565ec end in pop at 0x080565e8, followed by
+      the literal DEFAULT_YEAR at 0x080565ec;
+      0x080565f0 starts the separately linked successor. The body has one
+      plain unconditional outgoing BL at 0x08056544 to fetch_clock_state and
+      no predicated BL. Four inbound direct calls are all plain unconditional
+      BL: 0x0808ea00, 0x080a6b10, 0x080ab574, and 0x0825b6d0. It zeroes its
+      temporary, refreshes clock state, substitutes 2002-01-01 at midnight
+      when status bit 0 is clear, writes second/minute/hour/day/month/year,
+      base UTC offset minutes, and DST minutes to the calendar record, then
+      returns status bit 1 normalized to bool. Record padding +7 and +13..15
+      remains untouched. Deliberate deviations: Rust uses a typed ClockState
+      temporary and unaligned-safe output writes; observable field values,
+      write coverage, and return normalization match retailOS. Host tests
+      cover valid zone/DST conversion, untouched padding, default-date
+      substitution, and false status. match.py is expected to differ in
+      frame layout and field-store order around the same fetch/default/store
+      phases.
