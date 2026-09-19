@@ -14428,6 +14428,30 @@ functions:
       backend is invoked directly at 0x080d6d94; host builds substitute
       INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
 
+  # --- default selection traversal token (app) ---
+  - address: 0x080d6d5c
+    ghidra: FUN_080d6d5c
+    name: default_selection_traversal_token
+    size: 8
+    sig: "u32 default_selection_traversal_token(void)"
+    module: app/selection_descriptor_table
+    status: ported
+    renames:
+      DAT_080d6d64: default_selection_traversal_token_word
+    notes: >-
+      Raw words at 0x080d6d5c are e59f0000 e12fff1e: ldr r0,[pc];
+      bx lr. The architectural PC at the load is 0x080d6d64, whose raw
+      word is e92d400e, the opening push {r1-r3,lr} of the next real
+      function. Thus this exact 8-byte function returns 0xe92d400e;
+      it has no literal pool and does not return 0x08939cd8. Decoding
+      inbound branch words finds four unconditional plain bl calls at
+      0x080a5b5c, 0x080a5ba4, 0x080a5c3c, and 0x080a5d84, with zero
+      predicated bl calls. Those callers pass the result as an opaque
+      selection-traversal argument; its concrete identity is unknown, so
+      no stronger callee or table identity is claimed. Host test checks
+      the exact PC-relative word. match.py finds LLVM's added frame and
+      local literal pool, but preserves the PC-relative load and return.
+
   # --- indexed payload lookup mode-one wrapper (app) ---
   - address: 0x080d6e50
     ghidra: FUN_080d6e50
