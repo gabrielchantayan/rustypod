@@ -1596,6 +1596,9 @@ pub mod hints {
     // 0x8060_0000: dedicated to ui/plst_element_load_item's target-width
     // element, source, result, and item fixture; mappings never unmap.
     pub const PLST_ELEMENT_LOAD_ITEM: usize = 0x8060_0000;
+    // 0x8061_0000: dedicated to ui/plst_find_by_selector's raw-u32 element,
+    // cache, and item fixtures; mappings never unmap, so no other user may share it.
+    pub const PLST_FIND_BY_SELECTOR: usize = 0x8061_0000;
     // 0x8070_0000: dedicated to ui/plst_apply_counted_string's raw-u32
     // item and owner fixture; mappings never unmap, so no other user may share it.
     pub const PLST_APPLY_COUNTED_STRING: usize = 0x8070_0000;

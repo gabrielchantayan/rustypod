@@ -13982,6 +13982,27 @@ functions:
       ctx+0x1c; returns 1. Sole caller: kernel_running 0x0809444c
       (= sync_mutex ROM_KERNEL.notify — wire to this port).
 
+  - address: 0x08050b38
+    ghidra: FUN_08050b38
+    name: ui_plst_find_by_selector
+    size: 220
+    sig: "u32 ui_plst_find_by_selector(u8 *element, u32 selector)"
+    module: ui/plst_find_by_selector
+    status: ported
+    notes: >-
+      Raw ARM confirms the 220-byte extent 0x08050b38..0x08050c14: the
+      next function begins with cmp r0,#0 at 0x08050c14. It has four
+      direct callers (0x08053c54, 0x08054808, 0x0817b02c, 0x0817b6d0),
+      all unconditional bl; its body has two unconditional bl and no
+      predicated bl. After the already-ported 'plst' class check and a
+      nonzero-selector guard, it asks the unported 0x080dc49c to populate
+      selector cache 4 only when element+0x234 is NULL, then re-reads that
+      word. The count at cache+0xc and item words from cache+0x10 are
+      searched by each item's +0x10 selector using binary narrowing then
+      a final linear scan. A miss compares element+0x40 as fallback.
+      0x080dc49c has no ledger entry, so its verified address is retained
+      as a narrow host-injectable boundary rather than inventing its name;
+      its ignored return value matches the raw code.
   - address: 0x080613e0
     ghidra: FUN_080613e0
     name: ui_element_is_plst_class
