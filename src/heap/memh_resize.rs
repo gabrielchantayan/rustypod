@@ -10,17 +10,13 @@
 //! the slot NULL. An existing header is resized through `memh_set_len`; a
 //! successful positive relative resize explicitly zeroes the appended bytes.
 //!
-//! Deliberate deviations: the retail constructor calls the unported local
-//! entry @ 0x0805d170, and the zeroing path calls bzero @ 0x0805cfb4. This
-//! port inlines the verified constructor sequence through the existing heap
-//! wrappers and uses Rust volatile byte stores, preserving allocation and
-//! zero-fill semantics without creating unidentified seams.
+//! Deliberate deviations: the retail constructor is now the direct
+//! [`memh_buffer_create`] port. The zeroing path uses Rust volatile byte stores
+//! rather than the unported bzero @ 0x0805cfb4.
 
-use crate::heap::memh_handle::MEMH_MAGIC;
+use crate::heap::memh_buffer_create::memh_buffer_create;
 use crate::heap::memh_set_len::{memh_set_len, MemhBufferHeader};
-use crate::heap::veneers::{calloc_wrapper, free_wrapper, malloc_wrapper};
 
-const MEMH_HEAP_TAG: usize = 4;
 const ERR_BAD_HANDLE: i32 = -50;
 const ERR_ALLOC_FAILED: i32 = -108;
 
@@ -41,23 +37,11 @@ pub unsafe extern "C" fn memh_resize(slot: *mut *mut MemhBufferHeader, delta: i3
 
     let header = *slot;
     if header.is_null() {
-        let new_header = malloc_wrapper(core::mem::size_of::<MemhBufferHeader>(), MEMH_HEAP_TAG)
-            .cast::<MemhBufferHeader>();
-        if new_header.is_null() {
+        let created = memh_buffer_create(delta as u32);
+        if created.is_null() {
             return ERR_ALLOC_FAILED;
         }
-        let payload = calloc_wrapper(delta as u32 as usize, MEMH_HEAP_TAG);
-        if payload.is_null() {
-            free_wrapper(new_header.cast(), MEMH_HEAP_TAG);
-            return ERR_ALLOC_FAILED;
-        }
-        new_header.write(MemhBufferHeader {
-            payload: payload as usize as u32,
-            magic: MEMH_MAGIC,
-            capacity: delta as u32,
-            length: delta as u32,
-        });
-        *slot = new_header;
+        *slot = created;
         return 0;
     }
 
@@ -81,6 +65,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::heap::memh_handle::MEMH_MAGIC;
     use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
