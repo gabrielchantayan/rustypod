@@ -42,6 +42,31 @@ functions:
       result, otherwise NULL. Target builds preserve all 25 original words;
       host builds deliberately use a parser seam because 0x0803a99c is not
       ported.
+  - address: 0x0803a544
+    ghidra: FUN_0803a544
+    name: release_opaque_allocation_089062ec
+    size: 8
+    sig: "void release_opaque_allocation_089062ec(void *allocation)"
+    module: cxx/opaque_allocation_release_089062ec
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_089062ec: opaque_allocation_descriptor
+      FUN_0803b3a4: typed_allocation_release_helper
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent:
+      `ldr r1,[pc]; b 0x0803b3a4` at 0x0803a544..0x0803a54c. The adjacent
+      word at 0x0803a54c is the descriptor literal 0x089062ec, not code;
+      0x0803a550 starts the next separately linked function. Decoding every
+      ARM B/BL word finds four inbound BL calls: one plain unconditional call
+      (0x082b4f84) and three `blne` calls (0x0805f784, 0x0805f7c4, and
+      0x0806f138). The callers own the three conditional gates. This wrapper
+      has no NULL guard: it loads its fixed opaque descriptor and tail-branches
+      to ported typed_allocation_release_helper, which creates the release
+      frame and invokes the unported type-erased release engine with mode zero.
+      The descriptor has no recoverable concrete type, so it is deliberately
+      not invented. ARM builds preserve the three raw words; host builds use
+      the helper's existing volatile recording seam.
   - address: 0x0803c588
     ghidra: FUN_0803c588
     name: singly_linked_list_append

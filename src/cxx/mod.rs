@@ -134,6 +134,7 @@ pub mod mode;
 pub mod object_flags;
 mod object_state;
 pub mod opaque_type_tag_is_allowed;
+pub mod opaque_allocation_release_089062ec;
 pub mod opaque_result_destroy;
 pub mod opaque_record_destroy_and_release;
 pub mod opaque_record_word_at_0c;
