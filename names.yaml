@@ -2604,6 +2604,34 @@ functions:
       direct tail branches, or aligned raw data-word references. ARM builds
       retain the exact literal tail veneer; host builds use a replaceable IRAM
       boundary to prove all arguments and the result are forwarded unchanged.
+  - address: 0x08038208
+    ghidra: thunk_EXT_FUN_220076cc
+    name: ui_manager_dispatch_callback_context
+    size: 8
+    sig: "void ui_manager_dispatch_callback_context(u8 *manager, u32 flag)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_EXT_FUN_220076cc: ui_manager_dispatch_callback_context
+      EXT_FUN_220076cc: ui_manager_dispatch_callback_context
+      param_1/r0: manager
+      param_2/r1: flag
+    notes: >-
+      Ghidra's 4-byte extent omits this ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038208 and literal
+      0x220076cc at 0x0803820c; the next veneer begins at 0x08038210, so the
+      true size is 8 bytes. The relocator at 0x080046e0 copies osos
+      0x08000000..0x0800aed8 into IRAM 0x22000000, making the literal target
+      the mirror of FUN_080076cc @ 0x080076cc. Raw target words decode as
+      ldr r0,[r0,#0x20]; b 0x08003930, where the final veneer targets
+      unresolved external address 0x0818c1a8; the port deliberately does not
+      invent that callee's identity. Decoding every immediate ARM B/BL word in
+      osos.dec finds exactly four inbound calls, all unconditional plain bl at
+      0x08201d0c, 0x08235e00, 0x08236140, and 0x08237304, with no predicated
+      forms, direct tail branches, or aligned raw data-word references. ARM
+      builds retain the exact literal tail veneer; host builds use a
+      replaceable boundary to prove manager and flag forwarding, deliberately
+      leaving the target's manager +0x20 context load unmodeled.
   - address: 0x0833dda8
     ghidra: FUN_0833dda8
     name: xor_6b_in_place
