@@ -117484,3 +117484,27 @@ functions:
       the advanced output cursor. Ghidra's pointer signature and range-copy
       body agree with the raw code. match.py reports the same loop structure;
       LLVM adds an equivalent empty-range early-out and frame pointer.
+
+  - address: 0x083e8eb4
+    ghidra: thunk_FUN_083e8ecc
+    name: vector_copy_range_u8
+    size: 4
+    sig: "u8 *vector_copy_range_u8(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      return/r0: output_end
+    notes: >-
+      Raw 0x083e8eb4 is the one-word `b 0x083e8ecc` veneer, so its true
+      extent is four bytes; the independently linked target body occupies
+      0x083e8ecc..0x083e8ee4 and the next function begins with
+      `push {r4-r8,lr}` at 0x083e8ee4. Whole-image A32 decoding finds three
+      inbound direct unconditional plain BL calls and no predicated BL calls.
+      The target byte-copies [first,last) forward when output is non-NULL;
+      a NULL output skips the source read and store but still advances the
+      cursor, then returns output_end. The Rust export deliberately collapses
+      the veneer into that verified target body and omits Ghidra's unused r3
+      argument.

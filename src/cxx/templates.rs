@@ -4732,6 +4732,41 @@ pub unsafe extern "C" fn vector_copy_range_u32(
     output
 }
 
+/// vector_copy_range_u8 — original: `thunk_FUN_083e8ecc` @ 0x083e8eb4
+/// (4-byte branch veneer; target body `FUN_083e8ecc` is 24 bytes at
+/// 0x083e8ecc..0x083e8ee4). The next independently linked function starts
+/// with `push {r4-r8,lr}` at 0x083e8ee4. Whole-image A32 decoding finds three
+/// inbound direct plain `bl` calls and no predicated `bl` calls.
+///
+/// The veneer branches to a byte-wise forward copy of `[first,last)`, guarded
+/// by the current output cursor: a NULL output skips both the source load and
+/// destination store, but still advances both cursors and returns the advanced
+/// output. Deliberate deviation: this export replaces the veneer with its
+/// verified target body, and omits Ghidra's unused fourth argument.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a contiguous readable byte range. When
+/// `output` is non-NULL, it must be writable for that range. The target copies
+/// forward without overlap protection.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_u8(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            output.write(first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
+
 /// vector_copy_range_pair_u32 — original: `FUN_083e94b8` @ `0x083e94b8`
 /// (44 bytes; raw extent `0x083e94b8..0x083e94e4`, with the separately linked
 /// next function opening at `0x083e94e4`). Three inbound direct calls are
@@ -11315,6 +11350,42 @@ mod tests {
             );
             assert_eq!(end, (core::ptr::null_mut() as *mut *mut RefcountedBody).wrapping_add(1));
             assert_eq!(b.refcount, 9, "no attach happened");
+        }
+    }
+
+    #[test]
+    fn vector_copy_range_u8_copies_empty_and_nonempty_ranges() {
+        unsafe {
+            let source = [0x11u8, 0x22, 0x33];
+            let mut destination = [0xaau8; 4];
+
+            assert_eq!(
+                vector_copy_range_u8(source.as_ptr(), source.as_ptr(), destination.as_mut_ptr()),
+                destination.as_mut_ptr()
+            );
+            assert_eq!(destination, [0xaa; 4]);
+
+            assert_eq!(
+                vector_copy_range_u8(
+                    source.as_ptr(),
+                    source.as_ptr().add(source.len()),
+                    destination.as_mut_ptr(),
+                ),
+                destination.as_mut_ptr().add(source.len())
+            );
+            assert_eq!(destination, [0x11, 0x22, 0x33, 0xaa]);
+        }
+    }
+
+    #[test]
+    fn vector_copy_range_u8_null_output_skips_source_read_and_advances() {
+        unsafe {
+            let first = 0x1 as *const u8;
+            let last = first.wrapping_add(1);
+            assert_eq!(
+                vector_copy_range_u8(first, last, core::ptr::null_mut()),
+                core::ptr::null_mut::<u8>().wrapping_add(1)
+            );
         }
     }
 
