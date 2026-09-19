@@ -426,6 +426,26 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
 pub unsafe extern "C" fn allocate_one_byte() -> *mut u8 {
     operator_new(1)
 }
+/// allocate_three_word_with_cleared_last — original: `FUN_080b3e8c` @
+/// 0x080b3e8c (20 bytes; 4 unconditional `bl` call sites, none predicated).
+///
+/// Raw ARM establishes the true extent `0x080b3e8c..0x080b3e9f`: allocate
+/// 12 bytes through tag-2 [`operator_new`], then clear its last word at
+/// offset 8. The following `mov r0,#1; b 0x082aadd4` begins the separate
+/// [`allocate_one_byte`] entry at 0x080b3ea4; Ghidra's 24-byte extent
+/// incorrectly includes that neighbour.
+///
+/// Deliberate deviation: Rust uses the existing [`operator_new`] seam
+/// instead of a direct retailOS call. Like the original, it has no NULL
+/// guard: allocation failure faults while clearing the final word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_three_word_with_cleared_last() -> *mut u8 {
+    let allocation = operator_new(12);
+    core::ptr::write(allocation.add(8).cast::<u32>(), 0);
+    allocation
+}
+
 
 /// allocate_byte_with_value — original: `FUN_080d6930` @ 0x080d6930
 /// (24 bytes; five unconditional `bl` call sites, none predicated).
@@ -1328,6 +1348,23 @@ pub(crate) mod tests {
             assert_eq!(allocate_one_byte(), BLOCK_A as *mut u8);
             assert_eq!(ALLOC_CALLS, 2);
             assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_three_word_with_cleared_last_preserves_the_first_two_words() {
+        let _lock = mock_heap();
+        let mut storage = [0xA5u8; 12];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            let allocation = allocate_three_word_with_cleared_last();
+
+            assert_eq!(allocation, storage.as_mut_ptr());
+            assert_eq!(storage[..8], [0xA5; 8]);
+            assert_eq!(storage[8..], [0; 4]);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 12);
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }

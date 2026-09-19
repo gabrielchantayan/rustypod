@@ -17340,6 +17340,26 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3e8c
+    ghidra: FUN_080b3e8c
+    name: allocate_three_word_with_cleared_last
+    size: 20
+    sig: "void *allocate_three_word_with_cleared_last(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation
+      r1: zero
+    notes: >-
+      Raw osos.dec establishes a six-instruction, 20-byte extent:
+      `push {r4,lr}; mov r0,#12; bl 0x082aadd4; mov r1,#0; str r1,[r0,#8];
+      pop {r4,pc}` at 0x080b3e8c..0x080b3e9f. The next real entry begins
+      at 0x080b3ea4 with `mov r0,#1; b 0x082aadd4`; Ghidra's 24-byte
+      extent includes its first instruction. Four inbound calls are plain
+      unconditional BL forms; none is predicated. It allocates 12 bytes
+      through tag-2 operator_new then clears only word +8, preserving the
+      first eight allocation bytes. Deliberate deviation: Rust calls the
+      existing operator_new seam rather than the direct retailOS BL.
   - address: 0x080b3ea4
     ghidra: FUN_080b3ea4
     name: allocate_one_byte
