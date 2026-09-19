@@ -3641,6 +3641,47 @@ pub unsafe extern "C" fn vector_bool_iter_advance(iter: *mut VectorBoolIter, dis
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), new_word);
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), rem as u32);
 }
+/// vector_bool_iter_index — original: `FUN_083e6008` @ 0x083e6008
+/// (60 bytes; 3 unconditional `bl` call sites — 0x08269ed4, 0x08269f44,
+/// and 0x08269f6c; two direct calls, to `vector_bool_iter_advance` @
+/// 0x083e5f84 and `vector_bool_reference_init` @ 0x083d79dc; the only copy).
+///
+/// `std::vector<bool>` bit-iterator `operator[]`: copies `iter` into a
+/// stack temporary, advances that copy by `distance`, then initializes
+/// `result` as the temporary's `{word, 1 << bit}` reference proxy. The
+/// source iterator is never modified. The raw body saves `result` in r4,
+/// uses the pushed r0/r3 slots for the first temporary, then converts the
+/// advanced pair through the existing reference constructor.
+///
+/// The original returns with r0 holding `result`, because its final direct
+/// callee leaves that argument intact. The port preserves that incidental
+/// result even though all three callers use the hidden output object.
+///
+/// Deliberate host-only deviation: named-field `read_unaligned` and
+/// `write_unaligned` accesses accept firmware heads that are 4-byte aligned
+/// but not 8-byte aligned for host pointers; target field accesses remain
+/// aligned word loads and stores.
+///
+/// # Safety
+///
+/// `result` must point at writable [`VectorBoolReference`] storage and
+/// `iter` at readable [`VectorBoolIter`] storage. They may alias because
+/// the original completes both source loads before writing `result`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_iter_index(
+    result: *mut VectorBoolReference,
+    iter: *const VectorBoolIter,
+    distance: i32,
+) -> *mut VectorBoolReference {
+    let mut local = VectorBoolIter {
+        word: core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word)),
+        bit: core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit)),
+    };
+    vector_bool_iter_advance(&mut local, distance);
+    vector_bool_reference_init(result, core::ptr::addr_of!(local))
+}
+
 /// vector_bool_iter_increment — original: `FUN_083e5fc0` @ 0x083e5fc0
 /// (36 bytes in raw osos.dec, despite Ghidra's 40-byte report; 5
 /// unconditional `bl` call sites at 0x0826a3d8, 0x083e5dec,
@@ -8420,6 +8461,55 @@ mod tests {
             let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
             assert_eq!(word, base.add(1));
             assert_eq!(bit, 7);
+        }
+    }
+
+    // ---- vector_bool_iter_index ------------------------------------
+
+    /// Indexing advances a copy, preserves the source, and constructs the
+    /// proxy mask at a positive, a negative, and an exact word boundary.
+    #[test]
+    fn vector_bool_iter_index_advances_a_copy_and_builds_a_reference() {
+        unsafe {
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            for (bit, distance) in [(3u32, 29i32), (2, -3), (31, 1)] {
+                let iter = VectorBoolIter { word: base.add(3), bit };
+                let mut result = VectorBoolReference { word: core::ptr::null_mut(), mask: 0 };
+                let returned =
+                    vector_bool_iter_index(core::ptr::addr_of_mut!(result), core::ptr::addr_of!(iter), distance);
+                let (word_index, result_bit) = reference_advance(3, bit, distance);
+                assert_eq!(result.word, base.offset(word_index));
+                assert_eq!(result.mask, 1u32 << result_bit);
+                assert_eq!(returned, core::ptr::addr_of_mut!(result));
+                assert_eq!(iter.word, base.add(3));
+                assert_eq!(iter.bit, bit);
+            }
+        }
+    }
+
+    /// The original loads the iterator into its stack temporary before
+    /// constructing the output, so a 4-byte-aligned destination may overlap
+    /// the source head without changing the selected proxy.
+    #[test]
+    fn vector_bool_iter_index_accepts_unaligned_overlapping_heads() {
+        unsafe {
+            let mut buf = [0u8; 32];
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            let iter = buf.as_mut_ptr().add(4) as *mut VectorBoolIter;
+            let result = iter as *mut VectorBoolReference;
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), base.add(4));
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), 2u32);
+            vector_bool_iter_index(result, iter, -3);
+            assert_eq!(
+                core::ptr::read_unaligned(core::ptr::addr_of!((*result).word)),
+                base.add(3)
+            );
+            assert_eq!(
+                core::ptr::read_unaligned(core::ptr::addr_of!((*result).mask)),
+                1 << 31
+            );
         }
     }
 
