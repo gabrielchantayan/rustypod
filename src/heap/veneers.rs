@@ -409,6 +409,28 @@ pub unsafe extern "C" fn realloc_wrapper(
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
+
+/// operator_new_forwarder — original: `thunk_FUN_082aadd4` @ 0x0805e540
+/// (4 bytes; four plain inbound `bl` calls, none predicated).
+///
+/// Raw `osos.dec` word `ea093223` is the whole body: `b 0x082aadd4`.
+/// The following `stmdb sp!,{r4,r5,r6,lr}` at 0x0805e544 starts the next
+/// real function. The forwarder preserves the requested allocation size in
+/// r0 and tail-branches to the existing tag-2 [`operator_new`], returning
+/// its allocation unchanged, including NULL. Complete aligned A32 branch
+/// decoding finds plain calls at 0x080518fc, 0x080519a0, 0x0805a004, and
+/// 0x0805a0a4; no predicated `bl` or tail-branch calls target this entry.
+///
+/// Deliberate deviation: Rust makes the tail branch an ordinary call through
+/// the ported [`operator_new`] seam. A distinct target-only section retains
+/// this separately linked call target.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.operator_new_forwarder")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn operator_new_forwarder(size: usize) -> *mut u8 {
+    operator_new(size)
+}
+
 /// allocate_one_byte_leading — original: `FUN_080b3d7c` @ 0x080b3d7c (8
 /// bytes; four plain inbound `bl` calls, none predicated).
 ///
@@ -1594,6 +1616,19 @@ pub(crate) mod tests {
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
+
+    #[test]
+    fn operator_new_forwarder_preserves_zero_and_maximum_sizes() {
+        let _lock = mock_heap();
+        unsafe {
+            assert_eq!(operator_new_forwarder(0), BLOCK_A as *mut u8);
+            assert_eq!((ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG), (1, 0, 2));
+
+            assert_eq!(operator_new_forwarder(usize::MAX), BLOCK_A as *mut u8);
+            assert_eq!((ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG), (2, usize::MAX, 2));
+        }
+    }
+
     #[test]
     fn allocate_two_word_with_cleared_last_leading_preserves_the_first_word() {
         let _lock = mock_heap();
