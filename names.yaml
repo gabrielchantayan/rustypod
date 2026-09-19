@@ -10117,6 +10117,27 @@ functions:
       rather than an alias, so a hook at this entry reaches a real
       tail-call veneer; it delegates unchanged to mutex_lock, preserving
       the target's cell and handle guards.
+  - address: 0x080cb820
+    ghidra: thunk_FUN_0807f650
+    name: mutex_delete_veneer
+    size: 4
+    sig: "void mutex_delete_veneer(Mutex *mutex)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: mutex
+      FUN_0807f650: mutex_delete
+    notes: >-
+      Raw osos.dec establishes the exact 4-byte extent
+      0x080cb820..0x080cb824: 0xeafecf8a decodes as
+      `b 0x0807f650`; 0x080cb824 starts the distinct mutex-unlock veneer.
+      This is a true tail-branch veneer to mutex_delete, preserving the
+      cell-destroy and cell-pointer-clear behavior. Decoding every A32 B/BL
+      word in osos.dec finds 4 direct call sites, all unconditional plain
+      `bl` (zero predicated `bl` and zero tail `b` calls). The Rust port is
+      an inline-never forwarding symbol rather than an alias, so a hook at
+      this entry reaches a real symbol; its normal Rust call deliberately
+      represents the firmware tail branch.
   - address: 0x080d7104
     ghidra: thunk_FUN_0807f5c4
     name: mutex_lock_veneer_d7104
