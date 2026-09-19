@@ -116648,3 +116648,31 @@ functions:
       match OpenSSL BN_mod_mul. Deliberate deviation: unported bn_sqr, bn_mul,
       and bn_nnmod are reached through volatile dispatch slots; target defaults
       retain their verified retailOS addresses.
+
+  # --- ASN.1 INTEGER signed conversion ---
+  - address: 0x08039f74
+    ghidra: FUN_08039f74
+    name: asn1_integer_get
+    size: 124
+    sig: "int asn1_integer_get(const uint32_t *value)"
+    module: crypto/asn1_integer_get
+    status: ported
+    renames:
+      param_1/r0/r2: value
+      param_1[0]/r3: length
+      param_1[1]/r3: kind
+      param_1[2]/r12: data
+      uVar1/r0: magnitude
+      iVar2/r2: byte_index
+      uVar3/r3: kind
+    notes: >-
+      Raw osos.dec words establish exactly 124 bytes from 0x08039f74 through
+      ldr pc,[sp],#4 at 0x08039fec; the next separately linked function begins
+      with stmdb at 0x08039ff0. The body has zero outbound BL instructions.
+      Full-image A32 decoding finds four inbound direct calls, all plain BL at
+      0x080ce280, 0x080ce300, 0x080f50f0, and 0x082b4b58; there are no
+      predicated inbound BL forms. It returns zero for NULL headers or data,
+      rejects types other than 2 and 0x102 and lengths above four with -1,
+      assembles the data bytes big-endian, and negates type 0x102 magnitudes.
+      The Rust port uses target-width u32 header words rather than host pointer
+      layout; no behavioral deviations are deliberate.
