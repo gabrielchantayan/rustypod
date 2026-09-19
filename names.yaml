@@ -70282,6 +70282,27 @@ functions:
       the entire observed behavior. No deviations; focused host tests assert
       the zero word and its all-clear bit representation.
 
+  # --- ARM constant-zero result ---
+  - address: 0x0802ec98
+    ghidra: FUN_0802ec98
+    name: constant_zero_result
+    size: 8
+    sig: "u32 constant_zero_result()"
+    module: runtime/constant_zero_result
+    status: ported
+    renames:
+      r0: zero_result
+    notes: >-
+      Raw osos.dec words establish the true 8-byte extent
+      0x0802ec98..0x0802eca0: `mov r0,#0; mov pc,lr`; the next real function
+      starts at 0x0802eca0 with `stmdb sp!,{r4,lr}`. Independent raw ARM
+      disassembly finds four inbound plain BL calls and no predicated BL
+      calls. The leaf ignores all argument registers and memory, returning
+      the zero-valued u32 result in r0. The Rust ABI exposes only this
+      observable result; it deliberately does not promise the original's
+      preservation of registers other than r0. Host tests verify zero output
+      and that repeated calls retain no state.
+
   # --- JPEG decoder: the source byte reader ---
   # The decoder is one global @ 0x08a0a79c with no instance handle: the
   # marker scan (0x0807a7b0), the entropy bit reader (0x0807ec24), DHT

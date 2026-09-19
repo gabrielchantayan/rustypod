@@ -38,6 +38,7 @@ pub mod parameter_descriptor_value;
 pub mod global_parameter_descriptor_value;
 pub mod raise;
 pub mod return_zero;
+pub mod constant_zero_result;
 pub mod no_op_u32;
 pub mod resource_slots_release;
 pub mod random;
