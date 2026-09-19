@@ -60862,6 +60862,46 @@ functions:
       0x089ca5e0 literal at offset 0x20. Rust implementation and focused
       host tests: `src/ui/object_state.rs::timestamp_baseline`.
 
+  # --- opaque collection entry copy ---
+  - address: 0x08054ba4
+    ghidra: FUN_08054ba4
+    name: opaque_collection_copy_entry
+    size: 196
+    sig: "i32 opaque_collection_copy_entry(const u32 *collection, u32 entry_index, u32 *result)"
+    module: app/opaque_collection_copy_entry
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: entry_index
+      param_3/r2: result
+      "*(collection + 0x10)": entry_count
+      "*(collection + 0x70)": entries
+      FUN_080d8f64: magic_tagged_object_validate
+      FUN_0805cfb4: bzero
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw osos.dec decoding establishes the exact 196-byte body from
+      0x08054ba4 through 0x08054c64; the following push {r2,r3,r4,lr} at
+      0x08054c68 starts the next real function. It has four direct inbound
+      unconditional plain bl calls (0x08054b4c, 0x0805cf70, 0x080df3f0,
+      and 0x080e5b60), zero predicated bl calls, and three unconditional
+      outgoing calls: magic_tagged_object_validate, bzero, and the ported
+      indexed_payload_lookup. After validation, an index outside entry_count
+      or a zero word at collection+0x08 returns -50 without writing result.
+      Otherwise it zeroes the five-word result, copies entry words +0/+4/+12
+      to result +0/+4/+16 and entry byte +10 to result byte +9. A nonzero
+      entry byte +8 writes one at result byte +8 and copies entry +16 to
+      result +12; otherwise a zero entry +12 writes the address of entry +16,
+      while nonzero entry +12 calls indexed_payload_lookup with the index at
+      collection+0x18 and entry +16. Target-width pointer fields are modeled
+      as u32 words; the host lookup uses a native temporary before narrowing
+      to the result field. Host tests cover invalid validation/index inputs,
+      direct-entry byte/word overlap, and the self-referential payload case.
+      match.py structural review: 49 ADS instructions versus 97 LLVM
+      instructions; the larger Rust body is chiefly LLVM-expanded bzero and
+      the magic-tag validation relocation, while preserving branch order,
+      entry stride, field accesses, and lookup boundary.
+
   # --- shared-context kind halfword accessor ---
   - address: 0x08054ab8
     ghidra: FUN_08054ab8
