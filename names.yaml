@@ -7660,6 +7660,40 @@ functions:
       target-only text section prevents folding with cxx_array_dealloc.
       match.py structural review found the expected ABI frame plus a final
       branch relocation for the Rust call in place of the retail tail branch.
+  - address: 0x0804939c
+    ghidra: FUN_0804939c
+    name: magic_tagged_object_destroy
+    size: 140
+    sig: "void magic_tagged_object_destroy(u32 *object)"
+    module: cxx/magic_tagged_object_destroy
+    status: ported
+    renames:
+      param_1/r0/r5: object
+      "object+0x04": reference_count
+      "object+0x10": child_count
+      "object+0x70": child_entries
+      FUN_080d8f64: magic_tagged_object_validate
+      FUN_0805d070: free_tag4
+      FUN_0805cfb4: bzero
+    notes: >-
+      Raw osos.dec establishes the exact 140-byte extent
+      0x0804939c..0x08049428: the following push-prologue is a separately
+      entered function. Whole-image ARM decoding finds four direct inbound BL
+      forms: two plain BL at 0x08057da8 and 0x08057e6c, plus two predicated
+      BLNE at 0x080493e8 (recursive) and 0x08049448. The body has four plain
+      BL instructions (validation, entry-table free, bzero, owner free) plus
+      one predicated recursive BLNE. It validates the magic tag, decrements a
+      nonzero +0x04 reference count, and only on final release recursively
+      destroys active 0x14-byte-entry children, frees the +0x70 entry table,
+      clears object+0x18 for 0x74 bytes, and frees the owner with tag 4.
+      Target pointers remain u32 words to retain ARM layout on 64-bit hosts.
+      Deliberate deviations: Rust calls the ported helpers and recursive
+      target directly rather than using retail branches; Rust also cannot
+      guarantee the final tail branch. Host tests cover invalid/live counts
+      and final-release active-child recursion, release order, and tail
+      clearing. match.py reports the same validation, decrement, recursive
+      BLNE walk, entry free, bzero call, and final free/tail structure; LLVM
+      adds an ABI frame and uses different conditional branch encodings.
 
   - address: 0x08048a0c
     ghidra: FUN_08048a0c
