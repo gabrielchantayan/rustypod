@@ -13881,6 +13881,33 @@ functions:
       ported i32). match.py structural (cmp/ldrne tail exact; prefix is
       the volatile hook-table ldrd noise).
 
+  - address: 0x08079fc8
+    ghidra: FUN_08079fc8
+    name: selector_dispatch_with_word_transform
+    size: 108
+    sig: "void selector_dispatch_with_word_transform(u32 count, u32 *word, const u8 *selector, bool byte_swap)"
+    module: util
+    status: identified
+    renames:
+      param_1/r0: count
+      param_2/r1: word
+      param_3/r2: selector
+      param_4/r3: byte_swap
+    notes: >-
+      Raw osos.dec words establish the true 108-byte extent
+      0x08079fc8..0x0807a034: count < 16 reaches the adjacent
+      0x0807a038 helper, which complements *word only for selectors 4..7;
+      otherwise byte_swap reverses *word before selector[0] indexes the
+      0x0807a008 dispatch table. The eight raw targets are
+      0x0806f160, 0x0806f150, 0x0806f158, 0x0806f188, 0x0806f160,
+      0x0806f190, 0x0806f198, and 0x0806f1a0; each is an interior basic
+      block of the unrelated 0x0806fxxx control-flow region, not a
+      independently identified callable seam. Ghidra incorrectly absorbs
+      that region into this function and invents calls. Binary scan finds
+      4 plain BL call sites (0x080ea648, 0x080f05fc, 0x080f19d0,
+      0x080f30ec) and no predicated BL call sites. A Rust replacement
+      cannot faithfully reproduce its required tail transfers without
+      porting or naming those destination blocks, so remain identified.
   - address: 0x0807a080
     ghidra: FUN_0807a080
     name: queue_pool_create
