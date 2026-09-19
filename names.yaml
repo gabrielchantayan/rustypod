@@ -3785,6 +3785,44 @@ functions:
       No deliberate deviations: index remains the reader's dead r3
       initial-byte-length argument, as it does in the stock tail branch.
 
+  # --- retailOS UI 20-byte resource-vector counted-string reader ---
+  - address: 0x08052a0c
+    ghidra: FUN_08052a0c
+    name: object_resource_vector20_counted_string
+    size: 116
+    sig: "i32 object_resource_vector20_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_vector20_counted_string
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      r6: backend
+      r7: resource_vector
+      FUN_08051dc4: object_backend_for_kind (ported)
+      FUN_083d7640: vector_size_elem20 (ported)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e92d41f0 e1a03000 e3a00000 e1c200b0 e1a00003 e1a05002
+      e1a04001 ebfffce5 e3550000 e1a06000 0a000007 e3540000 ba000005
+      e2830b03 e2800f99 e1a07000 eb0e12fb e1500004 8a000001 e3e00031
+      e8bd81f0 e5970000 e0841104 e7901101 e5960f60 e1a02005 e8bd41f0
+      e2800f46 ea01ab8e decode from push {r4-r8,lr} at 0x08052a0c
+      through tail b 0x080bd8bc at 0x08052a7c; the next separately entered
+      function starts at 0x08052a80, proving the 116-byte extent. The body
+      has two internal plain BL calls, to object_backend_for_kind and
+      vector_size_elem20, and no predicated BL call. Whole-image ARM
+      immediate decoding finds four inbound plain BL callers at 0x080664a4,
+      0x081158e8, 0x0813bd44, and 0x0813d0fc; no predicated BL callers.
+      It clears counted[0], rejects negative or out-of-range indices into
+      object+0xe64's 20-byte vector with -50, then tail-calls the counted
+      reader for the selected first-word ID through backend+0xf60+0x118.
+      Ghidra incorrectly reports the tail branch as a five-argument
+      string_pool_read call. Rust passes zero for its dead fourth argument;
+      stock preserves object, but the counted reader clears its local
+      byte-length output before it can be observed. Host tests cover
+      negative/out-of-range rejection and the second valid 20-byte record.
+
   # --- retailOS UI 12-byte resource-table counted-string reader ---
   - address: 0x08052e1c
     ghidra: FUN_08052e1c
