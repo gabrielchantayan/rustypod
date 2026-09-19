@@ -106,7 +106,9 @@
 
 use crate::cxx::handle::{refcounted_body_attach, RefcountedBody};
 use crate::cxx::string::cxx_string_release;
-use crate::cxx::string_object::{string_object_assign, string_object_destroy, StringObject};
+use crate::cxx::string_object::{
+    string_object_assign, string_object_copy_construct, string_object_destroy, StringObject,
+};
 use crate::libc::memcmp::memcmp;
 use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
@@ -5259,6 +5261,54 @@ pub unsafe extern "C" fn vector_copy_construct_range_elem16(
     }
     output
 }
+/// vector_copy_construct_range_string_pair — original: `FUN_083e8dfc` @
+/// 0x083e8dfc (72 bytes; true extent 0x083e8dfc..0x083e8e44, bounded by the
+/// next `push {r4, r5, r6, lr}` at 0x083e8e44; reference
+/// `ipod-decomp/decomp/c/038/083e8dfc_FUN_083e8dfc.c`).
+///
+/// `std::vector<T>` uninitialized-copy over a half-open range of 0x10-byte
+/// elements, each a pair of adjacent 0x08-byte StringObjects. For every
+/// element it calls the StringObject copy constructor at +0, then at +8,
+/// advancing both cursors by 0x10 and returning the advanced output cursor.
+/// The output-null check is deliberately per element: a NULL output skips both
+/// constructors but still advances both cursors.
+/// ported `string_object_copy_construct` @ 0x082773e0, and no predicated
+/// calls. Ghidra's 72-byte extent and C loop match the raw decode; the three
+/// reported call sites are inbound, rather than a third body call.
+///
+/// # Deviations
+///
+/// None on target: both direct calls use the ported callee. Host pointers are
+/// wider than retailOS fields, so the host test inspects the 0x10-byte cursor
+/// protocol through aligned word storage rather than treating two host
+/// `StringObject` values as a 16-byte retail pair.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a whole number of contiguous 0x10-byte
+/// StringObject-pair elements. When `output` is non-NULL, it must be writable
+/// for the same number of elements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_construct_range_string_pair(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            string_object_copy_construct(output.cast::<StringObject>(), first.cast::<StringObject>());
+            string_object_copy_construct(
+                output.add(8).cast::<StringObject>(),
+                first.add(8).cast::<StringObject>(),
+            );
+        }
+        first = first.wrapping_add(0x10);
+        output = output.wrapping_add(0x10);
+    }
+    output
+}
+
 
 /// Firmware load address of `FUN_083d7df4`, the 0x10-byte element
 /// copy-construct helper [`vector_copy_construct_range_elem16_alt`] calls
@@ -10325,6 +10375,59 @@ mod tests {
             "the NULL-output guard lives in the helper, not the loop"
         );
     }
+    #[test]
+    fn copy_construct_range_string_pair_constructs_both_members_and_advances() {
+        // Aligned, zero-payload words make both StringObject copy constructors
+        // take their no-allocation path. The +8 cursor is the retailOS word
+        // stride, not the host StringObject size.
+        let source = [0usize; 4];
+        let mut destination = [usize::MAX; 4];
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        let returned = unsafe {
+            vector_copy_construct_range_string_pair(
+                source.as_ptr().cast::<u8>(),
+                unsafe { source.as_ptr().cast::<u8>().add(0x10) },
+                output,
+            )
+        };
+
+        assert_eq!(returned, unsafe { output.add(0x10) });
+        assert_eq!(destination[0], &STRING_OBJECT_VTABLE as *const _ as usize);
+        assert_eq!(destination[1], &STRING_OBJECT_VTABLE as *const _ as usize);
+        assert_eq!(destination[2], 0, "the second constructor NULLs its payload");
+    }
+
+    #[test]
+    fn copy_construct_range_string_pair_empty_and_null_output_preserve_raw_guards() {
+        let source = [0usize; 2];
+        let mut destination = [0usize; 2];
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        assert_eq!(
+            unsafe {
+                vector_copy_construct_range_string_pair(
+                    source.as_ptr().cast::<u8>(),
+                    source.as_ptr().cast::<u8>(),
+                    output,
+                )
+            },
+            output,
+            "empty ranges do not dereference either cursor"
+        );
+        assert_eq!(
+            unsafe {
+                vector_copy_construct_range_string_pair(
+                    core::ptr::null(),
+                    0x10usize as *const u8,
+                    core::ptr::null_mut(),
+                )
+            },
+            0x10usize as *mut u8,
+            "NULL output skips both constructors but advances by one pair"
+        );
+    }
+
 
     static COPY_CONSTRUCT_ELEM16_ALT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
