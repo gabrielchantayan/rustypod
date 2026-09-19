@@ -143,7 +143,7 @@ mod tests {
 
     use super::*;
     use crate::app::event_code_dispatch::{
-        EVENT_CODE_DISPATCH_WORKER, EVENT_CODE_DISPATCH_WORKER_TEST_LOCK,
+        missing_event_code_map, EVENT_CODE_DISPATCH, EVENT_CODE_DISPATCH_TEST_LOCK, EVENT_CODE_MAP,
     };
     use crate::app::feedback_level_mode_set::{
         missing_feedback_mode_apply, missing_feedback_mode_profile, FEEDBACK_MODE_APPLY,
@@ -180,6 +180,10 @@ mod tests {
         EVENT_FLAG = flag;
     }
 
+    unsafe extern "C" fn map_event_code(_event_code: u32, mapped_code: *mut u8) -> u32 {
+        core::ptr::write(mapped_code, 4);
+        1
+    }
     unsafe extern "C" fn missing_event(_event_code: u32, _flag: u32) {}
 
     unsafe fn install(initial_notified_level: i8) {
@@ -190,7 +194,8 @@ mod tests {
         FEEDBACK_LEVEL_PREPARE = record_prepare;
         FEEDBACK_MODE_PROFILE = profile_is_one;
         FEEDBACK_MODE_APPLY = record_mode;
-        EVENT_CODE_DISPATCH_WORKER = record_event;
+        EVENT_CODE_MAP = map_event_code;
+        EVENT_CODE_DISPATCH = record_event;
         PREPARE_CALLS = 0;
         PREPARED_LEVEL = 0;
         MODE_CALLS = 0;
@@ -208,14 +213,15 @@ mod tests {
                 FEEDBACK_LEVEL_PREPARE = missing_feedback_level_prepare;
                 FEEDBACK_MODE_PROFILE = missing_feedback_mode_profile;
                 FEEDBACK_MODE_APPLY = missing_feedback_mode_apply;
-                EVENT_CODE_DISPATCH_WORKER = missing_event;
+                EVENT_CODE_MAP = missing_event_code_map;
+                EVENT_CODE_DISPATCH = missing_event;
             }
         }
     }
 
     #[test]
     fn sentinel_cache_notifies_and_propagates_the_requested_level() {
-        let _event_guard = EVENT_CODE_DISPATCH_WORKER_TEST_LOCK.lock();
+        let _event_guard = EVENT_CODE_DISPATCH_TEST_LOCK.lock();
         let _guard = TEST_LOCK.lock();
         let _reset = Reset;
         unsafe {
@@ -235,7 +241,7 @@ mod tests {
 
     #[test]
     fn matching_notification_classes_preserve_the_cache_and_skip_the_event() {
-        let _event_guard = EVENT_CODE_DISPATCH_WORKER_TEST_LOCK.lock();
+        let _event_guard = EVENT_CODE_DISPATCH_TEST_LOCK.lock();
         let _guard = TEST_LOCK.lock();
         let _reset = Reset;
         unsafe {
@@ -259,7 +265,7 @@ mod tests {
 
     #[test]
     fn boundary_crossing_uses_signed_level_before_truncating_the_cache_byte() {
-        let _event_guard = EVENT_CODE_DISPATCH_WORKER_TEST_LOCK.lock();
+        let _event_guard = EVENT_CODE_DISPATCH_TEST_LOCK.lock();
         let _guard = TEST_LOCK.lock();
         let _reset = Reset;
         unsafe {

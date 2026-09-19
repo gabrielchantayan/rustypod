@@ -98236,12 +98236,34 @@ functions:
       0x081e2340, 0x083934d4) and one bleq (0x0814911c); its predicate is
       caller-owned. Four unconditional b transfers enter the entry at
       0x0809eab4, 0x080c6924, 0x0811f814, and 0x081e2324. No aligned DATA word
-      references it. It clears the shared worker's second argument, then falls
-      through. The worker maps the event through unported FUN_080e4d44, polls
-      0x089ca864+2 while sleeping one RTXC tick, then calls unported
-      FUN_08064820 with mapped code and zero flag. Deliberate deviation: ARM
-      code uses a literal tail veneer to the retail worker because the payload
-      cannot fall through; host tests use a volatile worker seam.
+      references it. It clears the shared worker's second argument, then calls
+      the ported event_code_dispatch body directly.
+
+  - address: 0x080873f8
+    ghidra: FUN_080873f8
+    name: event_code_dispatch
+    size: 88
+    sig: "void event_code_dispatch(u32 event_code, u32 flag)"
+    module: app/event_code_dispatch
+    status: ported
+    renames:
+      param_1/r0: event_code
+      param_2/r1/r6: flag
+      FUN_080e4d44: event_code_map
+      DAT_0808744c: event_dispatch_readiness
+      thunk_EXT_FUN_22003d44: rom_task_delay
+      FUN_08064820: event_code_submit
+    notes: >-
+      Raw words establish an 88-byte extent from 0x080873f8 through
+      0x0808744c; 0x08087450 starts the next function, so Ghidra's reported
+      84-byte size is short. The body has three plain bl instructions at
+      0x0808740c, 0x0808742c, and 0x08087444, and zero predicated bl
+      instructions. It returns for event code zero or an unsuccessful map; on
+      success it polls byte +2 at 0x089ca864, calling ROM task delay with
+      (0,1) until ready, then submits the mapped byte and original flag. ARM
+      builds retain the three verified address seams (0x080e4d44, 0x22003d44,
+      and 0x08064820); host tests use volatile map, readiness, delay, and
+      submit callbacks.
 
   # --- Render-cell visibility state update ---
   - address: 0x08084ae8
