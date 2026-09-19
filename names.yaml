@@ -115999,3 +115999,31 @@ functions:
       low-word product differs. Deliberate deviation: divide-by-zero inherits
       the existing Rust __aeabi_ldivmod seam, which returns zero rather than
       invoking the retail ADS divide-by-zero handler.
+  - address: 0x0804c8f4
+    ghidra: FUN_0804c8f4
+    name: opaque_record_destroy_and_release
+    size: 40
+    sig: "void opaque_record_destroy_and_release(OpaqueRecord *record)"
+    module: cxx/opaque_record_destroy_and_release
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      r5: allocator
+      FUN_0804c97c: opaque_record_destroy_contents_unported
+      FUN_082cfae8: allocator_release_unported
+    notes: >-
+      Raw osos.dec establishes the exact ten-word, 40-byte body at
+      0x0804c8f4..0x0804c918: push {r4,r5,r6,lr}; movs r4,r0; popeq
+      {r4,r5,r6,pc}; ldr r5,[r4]; mov r0,r4; bl 0x0804c97c; mov r1,r4;
+      mov r0,r5; pop {r4,r5,r6,lr}; b 0x082cfae8. The following push at
+      0x0804c91c is the next independently entered function. Thus this body
+      has one plain internal BL and no predicated calls. Whole-image A32
+      branch-word decoding finds four inbound plain BL calls
+      (0x0804c160, 0x08086944, 0x080a1f9c, 0x082b32b0) and zero predicated
+      inbound BL calls. NULL returns; otherwise it saves the record's
+      allocator/context word, invokes the unported contents destructor, and
+      tail-dispatches saved allocator plus record to the unported generic
+      allocator release. The Rust port uses fixed-address target seams for
+      those two verified-but-unported helpers; host recorders prove that the
+      allocator is saved before destruction and the release receives both
+      original pointers.
