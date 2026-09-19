@@ -353,3 +353,4 @@ pub mod vtable_flag_payload_construct;
 pub mod vtable_shared_handle_construct;
 pub mod vtable_08980110_construct;
 pub mod vector_default_slot;
+pub mod vector8_erase;
