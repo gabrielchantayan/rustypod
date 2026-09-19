@@ -70830,6 +70830,35 @@ functions:
       mutex edge case, then verify the final free receives the owner and
       tag 10.
 
+  # --- ui: RGB565 byte-opacity blend ---
+  - address: 0x080966f4
+    ghidra: FUN_080966f4
+    name: rgb565_opacity_blend
+    size: 184
+    sig: "void rgb565_opacity_blend(const u8 *opacity, const u16 *target, Rgb565Transform transform, u16 *destination)"
+    module: ui/rgb565_opacity_blend
+    status: ported
+    renames:
+      param_1/r0: opacity
+      param_2/r1/r7: target
+      param_3/r2/r5: transform
+      param_4/r3/r6: destination
+      uVar6/r4: opacity_value
+      uVar2/r2: transformed_destination
+      uVar5/r3: target_color
+    notes: >-
+      Raw ARM establishes the 184-byte executable extent
+      0x080966f4..0x080967ac; the next push begins at 0x080967ac. The body
+      contains three unconditional BLX callback instructions and no BL or
+      predicated-call instructions. Four direct inbound call sites are plain
+      BL instructions. It returns untouched for zero opacity; otherwise it
+      transforms destination, linearly interpolates RGB565's masked 5/6/5
+      fields toward target using signed division rounded toward zero, then
+      transforms and stores the packed result. The apparent full-opacity
+      fast path is unreachable: r4 is zero-extended with ldrb before its
+      comparison to 0x100. Host tests cover zero opacity without a callback,
+      half-opacity independent field interpolation, and negative deltas.
+
   # --- time: unsigned Unix seconds -> packed calendar record ---
   - address: 0x080964cc
     ghidra: FUN_080964cc
