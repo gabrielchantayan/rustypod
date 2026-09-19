@@ -34,6 +34,7 @@ pub mod message_0x10;
 pub mod message_0x2e;
 pub mod message_dispatch_veneer;
 pub mod opaque_tail_dispatch_veneer;
+pub mod opaque_node_context_dispatch_veneer;
 pub mod qsort;
 pub mod parameter_descriptor_value;
 pub mod global_parameter_descriptor_value;

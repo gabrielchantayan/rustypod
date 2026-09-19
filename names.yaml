@@ -17,6 +17,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080034a8
+    ghidra: FUN_080034a8
+    name: dispatch_opaque_node_context
+    size: 8
+    sig: "u32 dispatch_opaque_node_context(void *node, void *context)"
+    module: runtime/opaque_node_context_dispatch_veneer
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: context
+      DAT_080034ac: opaque_node_context_dispatch_target
+    notes: >-
+      Raw osos.dec words establish the true eight-byte veneer extent
+      0x080034a8..0x080034af: ldr pc,[pc,#-4] and literal 0x082cbb54.
+      0x080034b0 begins the next separate veneer, so Ghidra's 44-byte extent
+      is incorrect. Whole-image ARM decoding finds four incoming plain BL
+      calls (0x080007ec, 0x080010ac, 0x08001190, and 0x08001458) and no
+      predicated BL calls. All callers establish node in r0 and context in r1;
+      0x082cbb54 immediately reads context + 12. The destination has no
+      established semantic identity, so target builds retain the exact literal
+      tail veneer and host builds provide a two-argument volatile seam.
   - address: 0x0803a7f0
     ghidra: FUN_0803a7f0
     name: generic_descriptor_lookup
