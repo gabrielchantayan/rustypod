@@ -115948,3 +115948,29 @@ functions:
       the seam target in a literal and uses blx r1, adding a frame-pointer
       prologue; match.py confirms the call, NULL branch, +0x3c load, and
       return structure.
+
+  - address: 0x0805009c
+    ghidra: FUN_0805009c
+    name: signed_div_quotient_round_up
+    size: 60
+    sig: "u32 signed_div_quotient_round_up(u32 numerator_low, u32 numerator_high, u32 divisor)"
+    module: runtime/signed_div_quotient_round_up
+    status: ported
+    renames:
+      param_1/r0: numerator_low
+      param_2/r1: numerator_high
+      param_3/r2: divisor
+      iVar1/r0_after_bl: quotient_low
+    notes: >-
+      Raw osos.dec words e92d41f0 e3a06000 e1a03006 e1a08001 e1a07000
+      e1a05002 ebff7b5e e1a04000 e0000095 e1560008 e1a02007 01500002
+      12844001 e1a00004 e8bd81f0 establish the exact 60-byte extent
+      0x0805009c..0x080500d8; the next separately entered function begins
+      at 0x080500d8. There is one unconditional plain bl to __aeabi_ldivmod
+      at 0x0802ee34 and no predicated bl; full-image references find four
+      incoming unconditional plain bl calls at 0x08042348, 0x0804235c,
+      0x0804b8e8, and 0x0804b924. The helper computes a signed quotient and
+      increments its low word when the numerator high word is nonzero or the
+      low-word product differs. Deliberate deviation: divide-by-zero inherits
+      the existing Rust __aeabi_ldivmod seam, which returns zero rather than
+      invoking the retail ADS divide-by-zero handler.

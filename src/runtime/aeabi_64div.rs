@@ -111,6 +111,7 @@ pub fn ldivmod_full(num: i64, den: i64) -> (i64, i64) {
 /// this returns the quotient and the remainder is discarded. Use
 /// `ldivmod_full` when both are needed.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __aeabi_ldivmod(num: i64, den: i64) -> i64 {
     ldivmod_full(num, den).0
 }
