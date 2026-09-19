@@ -4452,6 +4452,24 @@ functions:
     notes: Reads CPSR and computes 1 & ~(cpsr >> 7), returning one exactly
       when the IRQ-disable I bit is clear. The FIQ-disable F bit does not
       affect the result, and CPSR is not modified.
+  - address: 0x08038270
+    ghidra: thunk_EXT_FUN_22001e98
+    name: cpsr_irq_enabled_iram_veneer
+    size: 8
+    sig: "u32 cpsr_irq_enabled_iram_veneer(void)"
+    module: drivers/interrupts
+    status: ported
+    renames:
+      0x22001e98: cpsr_irq_enabled_iram_mirror
+    notes: >-
+      Raw osos.dec words at 0x08038270 are ldr pc, [pc, #-4] followed by the
+      literal 0x22001e98; the next independent veneer begins at 0x08038278,
+      making the true extent 8 bytes rather than Ghidra's 4-byte instruction
+      extent. The IRAM target is the copied mirror of cpsr_irq_enabled at
+      0x08001e98. Independent assembly counts find four inbound plain BL
+      calls and no predicated BL calls. The Rust wrapper calls the existing
+      CPSR predicate; unlike the literal-load tail transfer, it only preserves
+      the ABI-observable r0 result.
 
   - address: 0x08001f04
     ghidra: FUN_08001f04
