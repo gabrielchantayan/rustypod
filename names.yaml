@@ -17,6 +17,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803c588
+    ghidra: FUN_0803c588
+    name: singly_linked_list_append
+    size: 48
+    sig: "void singly_linked_list_append(u32 *head, u32 *node)"
+    module: util/singly_linked_list_append
+    status: ported
+    renames:
+      param_1/r0: head
+      param_2/r1: node
+      puVar1/r2: current
+      puVar3/r3: tail
+      "[node + 0x0]": next
+    notes: >-
+      Raw osos.dec words at 0x0803c588 establish a 48-byte leaf ending in
+      bx lr at 0x0803c5b4; 0x0803c5b8 begins the next independently entered
+      function with stmdb sp!, {r2,r3,r4,lr}. It traverses the target-width
+      next word at +0 until NULL, clears node->next, and stores node through
+      head or the old tail. Four inbound calls are unconditional plain BL
+      (0x08047c48, 0x0805dfd4, 0x0805e030, 0x0805e120); no inbound predicated
+      BL form exists. Rust deliberately uses u32 link words so target
+      addresses retain their four-byte layout on 64-bit hosts.
   - address: 0x080911c4
     ghidra: FUN_080911c4
     name: display_refresh

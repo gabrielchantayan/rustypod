@@ -154,6 +154,7 @@ pub mod range_state;
 pub mod request_queue_clear_matching_entries;
 pub mod dynamic_array_remove;
 pub mod singly_linked_list_remove;
+pub mod singly_linked_list_append;
 pub mod service_manager_get;
 pub mod selector_record_address;
 pub mod selector_slot_address;
