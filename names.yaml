@@ -57120,6 +57120,30 @@ functions:
       typed pointer-to-pointer rather than a literal offset, preserving
       target layout and host pointer width. scoped_context_is_valid now
       directly calls this port, removing its former ROM dispatch seam.
+  - address: 0x0806b488
+    ghidra: FUN_0806b488
+    name: enum_value_bitset
+    size: 24
+    sig: "u64 enum_value_bitset(u32 value)"
+    module: util/enum_value_bitset
+    status: ported
+    renames:
+      param_1/r0: value
+      local_14/sp: output_words
+      FUN_08055b70: enum_to_bitset_writer_unported
+    notes: >-
+      Raw ARM extent is exactly 0x0806b488..0x0806b49f: push
+      {r0,r1,r2,r3,r4,lr}; mov r1,sp; bl 0x08055b70; ldrd r0,[sp];
+      add sp,sp,#16; pop {r4,pc}. The next separately linked function starts
+      at 0x0806b4a0 with push {r3,r4,r5,lr}. Decoding every ARM B/BL immediate
+      in osos.dec finds exactly four direct inbound plain BL callers
+      (0x080c6b30, 0x080c6b7c, 0x080e2158, and 0x080e2198), zero predicated
+      forms, and no direct tail-B callers; the body contains one plain BL to
+      0x08055b70. The callee writes three 32-bit words selected by value. This
+      wrapper returns its first two words as a u64 and deliberately discards
+      the third, exactly as the LDRD return. FUN_08055b70 has no recovered
+      semantic identity or Rust port, so the target calls its verified retail
+      address directly and host tests use an explicit seam.
   - address: 0x0806b4a0
     ghidra: FUN_0806b4a0
     name: music_path_resolve
