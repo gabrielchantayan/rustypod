@@ -114399,3 +114399,25 @@ functions:
       a verified fixed-address call on device and a volatile host-test seam;
       Rust call/return replaces the retail register-save sequence while
       preserving all nine helper arguments and its r0 result.
+  - address: 0x08077284
+    ghidra: FUN_08077284
+    name: latin1_to_lowercase
+    size: 124
+    sig: "u32 latin1_to_lowercase(u32 code)"
+    module: util/latin1_to_lowercase
+    status: ported
+    renames:
+      DAT_08077300: latin1_lowercase_table_initialized
+      DAT_08077304: latin1_lowercase_table
+      param_1/r0: code
+    notes: >-
+      Raw osos.dec establishes the 124-byte instruction extent
+      0x08077284..0x08077300; the next independently entered function begins
+      The body returns inputs above 0xde unchanged. Otherwise, it lazily
+      initializes 223 u16 entries: ASCII A..Z and Latin-1 C0..DE except D7
+      gain 0x20, while every other entry is unchanged, then returns table[code].
+      Whole-image A32 decoding finds three inbound plain BL calls at
+      0x080693f0, 0x08069414, and 0x0806945c, plus one predicated BLNE at
+      0x08069470. The Rust port uses a compile-time immutable equivalent
+      table because initialization state and table storage are not observable
+      through the function ABI.
