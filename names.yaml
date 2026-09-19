@@ -7222,6 +7222,26 @@ functions:
     status: ported
     notes: 32KB heap @ 0x08a12710, desc @ 0x08a1a710, global @ 0x089ca638.
 
+  - address: 0x0805e540
+    ghidra: thunk_FUN_082aadd4
+    name: operator_new_forwarder
+    size: 4
+    sig: "void *operator_new_forwarder(size_t size)"
+    module: heap/veneers
+    status: ported
+    notes: >-
+      Raw osos.dec word ea093223 proves the complete four-byte extent
+      0x0805e540..0x0805e543: `b 0x082aadd4`; the following
+      `stmdb sp!,{r4,r5,r6,lr}` starts the next real function at 0x0805e544.
+      The branch preserves size in r0 and tail-transfers to the already
+      ported tag-2 operator_new, returning its allocation unchanged,
+      including NULL. Complete aligned A32 branch decoding finds four
+      inbound plain BL calls (0x080518fc, 0x080519a0, 0x0805a004, and
+      0x0805a0a4), no predicated BL calls, and no inbound tail branches.
+      Rust deliberately uses an ordinary call through the existing
+      operator_new seam because it cannot guarantee a tail branch; its
+      target-only section preserves the separately linked entry.
+
   - address: 0x082a94d0
     ghidra: FUN_082a94d0
     name: shared_handle_owner_destroy
