@@ -177,6 +177,54 @@ pub unsafe extern "C" fn mapped_block_window_mark_dirty() {
     ptr::write_volatile(ptr::addr_of_mut!((*mapped_block_window()).dirty), 1);
 }
 
+/// allocation_bitmap_mark_bit — original: `FUN_080d70a8` @ 0x080d70a8
+/// (60 raw bytes; 0x080d70e4 is its `ldmia sp!, {r4, pc}` return and
+/// 0x080d70e8 begins the next independently entered function).
+///
+/// A complete decode of the raw extent finds no outbound `bl` instructions.
+/// Four inbound direct calls are all unconditional `bl`; no predicated `bl`
+/// targets this address. It returns the allocation-bitmap sector containing
+/// `bit_index` through `out_sector`, then sets that bit in the supplied
+/// 0x200-byte bitmap sector with the on-disk MSB-first bit ordering.
+///
+/// Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `bitmap_descriptor`, `bitmap`, and `out_sector` must be valid writable
+/// firmware pointers. The stock function has no bounds or NULL checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn allocation_bitmap_mark_bit(
+    bitmap_descriptor: *const AllocationBitmapDescriptor,
+    bit_index: u32,
+    bitmap: *mut u8,
+    out_sector: *mut u32,
+) {
+    let bitmap_sector_count = ptr::read(ptr::addr_of!((*bitmap_descriptor).bitmap_sector_count));
+    let bitmap_start_sector = ptr::read(ptr::addr_of!((*bitmap_descriptor).bitmap_start_sector));
+    ptr::write(
+        out_sector,
+        (bitmap_sector_count >> 9)
+            .wrapping_mul(bitmap_start_sector)
+            .wrapping_add(bit_index >> 12),
+    );
+
+    let byte = bitmap.add(((bit_index & 0xfff) >> 3) as usize);
+    ptr::write(byte, ptr::read(byte) | (0x80 >> (bit_index & 7)));
+}
+
+/// Firmware allocation-bitmap descriptor fields observed by
+/// [`allocation_bitmap_mark_bit`]. The layout retains the target's 32-bit
+/// offsets on 64-bit hosts.
+#[repr(C)]
+pub struct AllocationBitmapDescriptor {
+    _before_bitmap_sector_count: [u8; 0x28],
+    pub bitmap_sector_count: u32,
+    _before_bitmap_start_sector: [u8; 0x54],
+    pub bitmap_start_sector: u32,
+}
+
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -602,6 +650,7 @@ mod tests {
     #[test]
     fn map_returns_resolver_error_without_beginning_window() {
         let _lock = TEST_LOCK.lock();
+
         let Some(owner) = (unsafe { install_map_fixture(0x1111, 0, 0) }) else {
             assert!(note_missing_u32_fixture("fs::block_window"));
             return;
@@ -648,6 +697,44 @@ mod tests {
             }
             HOST_MAPPED_BLOCK_WINDOW = ptr::null_mut();
         }
+    }
+    #[test]
+    fn mark_bit_uses_msb_first_sector_local_bitmap_offsets() {
+        let descriptor = AllocationBitmapDescriptor {
+            _before_bitmap_sector_count: [0; 0x28],
+            bitmap_sector_count: 0x600,
+            _before_bitmap_start_sector: [0; 0x54],
+            bitmap_start_sector: 0x1234,
+        };
+        let mut bitmap = [0x01; 0x200];
+        let mut sector = 0;
+
+        unsafe {
+            allocation_bitmap_mark_bit(&descriptor, 0x1ff8, bitmap.as_mut_ptr(), &mut sector);
+        }
+
+        assert_eq!(sector, 3 * 0x1234 + 1);
+        assert_eq!(bitmap[0x1ff], 0x81);
+        assert_eq!(bitmap[0], 0x01);
+    }
+
+    #[test]
+    fn mark_bit_preserves_set_bits_and_wraps_sector_arithmetic() {
+        let descriptor = AllocationBitmapDescriptor {
+            _before_bitmap_sector_count: [0; 0x28],
+            bitmap_sector_count: 0xffff_fe00,
+            _before_bitmap_start_sector: [0; 0x54],
+            bitmap_start_sector: 0xffff_ffff,
+        };
+        let mut bitmap = [0; 0x200];
+        bitmap[0] = 0x80;
+        let mut sector = 0;
+
+        unsafe {
+            allocation_bitmap_mark_bit(&descriptor, 0x1000, bitmap.as_mut_ptr(), &mut sector);
+        }
+        assert_eq!(sector, 0x7f_ff_ffu32.wrapping_mul(0xffff_ffff).wrapping_add(1));
+        assert_eq!(bitmap[0], 0x80);
     }
 }
 
