@@ -71,6 +71,7 @@ pub mod i2a_asn1_object;
 pub mod digest_init;
 pub mod digest_update_u32;
 pub mod evp_digest_init_ex;
+pub mod evp_digest;
 pub mod evp_digest_final_ex;
 pub mod evp_digest_update;
 pub mod evp_md_ctx_cleanup;
