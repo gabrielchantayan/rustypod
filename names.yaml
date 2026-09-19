@@ -114337,3 +114337,38 @@ functions:
       match.py structural review: LLVM coalesces the two source calls to one
       element lookup path and inlines bcopy to __aeabi_memmove; the index,
       four-byte word path, and non-word overlap-safe copy remain explicit.
+  # --- Trace-buffer entry submission wrapper ---
+  - address: 0x0807c724
+    ghidra: FUN_0807c724
+    name: trace_buffer_entry_submit
+    size: 64
+    sig: "u32 trace_buffer_entry_submit(u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5, u32 arg6, u32 arg7, u32 arg8)"
+    module: app/trace_buffer_entry_submit
+    status: ported
+    renames:
+      param_1/r0/r9: arg1
+      param_2/r1/r10: arg2
+      param_3/r2/r11: arg3
+      param_4/r3/r4: arg4
+      param_5/stack/r5: arg5
+      param_6/stack/r6: arg6
+      param_7/stack/r7: arg7
+      param_8/stack/r8: arg8
+      FUN_0814a08c: trace_buffer_get
+      FUN_0814a1c0: unported trace_buffer_entry_submit
+    notes: >-
+      Raw osos.dec words from the push at 0x0807c724 through pop at
+      0x0807c760 establish the exact 64-byte extent
+      0x0807c724..0x0807c764; the next independently entered function starts
+      at 0x0807c764. It saves all eight caller words, calls trace_buffer_get
+      at 0x0814a08c, and calls the next-function unported trace-buffer entry
+      submitter at 0x0814a1c0 with the returned buffer plus all eight original
+      words. It has two outbound unconditional plain BL instructions and no
+      predicated BL instructions. Independent whole-image A32 BL-immediate
+      decoding finds four inbound direct plain BL calls (0x080c68f4,
+      0x0813a6b0, 0x0813a8e0, and 0x0813a990), and zero predicated inbound
+      BL calls. Ghidra's void return is inaccurate: the final helper result
+      remains in r0. Deliberate deviation: the unported 0x0814a1c0 target is
+      a verified fixed-address call on device and a volatile host-test seam;
+      Rust call/return replaces the retail register-save sequence while
+      preserving all nine helper arguments and its r0 result.

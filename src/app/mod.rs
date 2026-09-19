@@ -422,6 +422,7 @@ pub mod root_pending_process;
 pub mod root_slot_190_query;
 pub mod update_dispatch;
 pub mod trace_buffer;
+pub mod trace_buffer_entry_submit;
 pub mod track_extras_cache;
 pub mod track_extras_cache_entry_payload;
 pub mod ui_flag_update_forwarder;
