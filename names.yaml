@@ -11231,6 +11231,35 @@ functions:
       kernel_sem5_signal, so match.py shows an expected structural diff
       (indirect call through hook slot 2, `mov r0, #0x11` intact).
 
+  - address: 0x08061768
+    ghidra: FUN_08061768
+    name: scoped_context_owner_dispatch_tdat_message
+    size: 84
+    sig: "u32 scoped_context_owner_dispatch_tdat_message(u8 *owner, u32 value)"
+    module: app/scoped_context_tdat_message
+    vars:
+      param_1/r0: owner
+      param_2/r1: value
+      param_1_plus_0x0: element
+      param_1_plus_0x16: dispatch_ack
+      DAT_080617b8: TDAT_MESSAGE (0x7464706c)
+      FUN_0806b410: scoped_context_owner_validity
+      FUN_0805cfb4: bzero
+      FUN_080442a0: tdat_dispatch_message
+    status: ported
+    notes: >-
+      Raw osos.dec words establish 80 instruction bytes at
+      0x08061768..0x080617b8 plus literal-pool word 0x7464706c at
+      0x080617b8; the next separately linked function begins at 0x080617bc.
+      It has four direct unconditional bl callers (0x08046ecc, 0x0806a7b0,
+      0x0806ccf0, and 0x080e5030), zero predicated bl callers, and makes
+      three unconditional calls itself: validate owner, bzero a 16-byte
+      argument record, and dispatch the literal message to owner->element.
+      The record contains owner, value, zero, zero. It returns the dispatch
+      result only when owner+0x16 is exactly one; all invalid or
+      unacknowledged cases return 0xffffffce. Rust calls the three ported
+      callees directly and uses u32 temporary words to preserve target
+      pointer-field layout on 64-bit hosts.
   - address: 0x0806aa3c
     ghidra: FUN_0806aa3c
     name: ui_element_is_tdat_class
