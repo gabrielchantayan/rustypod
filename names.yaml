@@ -113174,3 +113174,31 @@ functions:
       match.py reports exit 1 with the expected seam/host-frame structural
       diff; the ARM release library builds. Host tests cover both key-order
       exits and the equal-key lazy-init/render/c_str/casefold argument flow.
+
+  # --- ATA PIO byte-read primitive ---
+  - address: 0x080bb610
+    ghidra: FUN_080bb610
+    name: ata_pio_read_byte
+    size: 52
+    sig: "int ata_pio_read_byte(const u8 *source, u8 *destination)"
+    module: drivers/ata_pio_read_byte
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      DAT_080bb644: ATA_PIO_BASE
+    notes: >-
+      Raw osos.dec words establish the true 52-byte extent: 13 words from
+      0x080bb610 through bx lr at 0x080bb640, including the 0x38700000
+      literal pool at 0x080bb644; the next independently entered function
+      starts at 0x080bb648. Decoding every aligned ARM BL-immediate word
+      targeting this address finds four inbound direct calls, all plain BL,
+      and no predicated BL forms. The body has no BL calls. It waits for ATA
+      PIO READY bit 1 at 0x38700078, volatile-copies the source byte to the
+      destination, waits for bit 0, then overwrites the destination with the
+      byte at 0x3870007c and returns zero. Deliberate deviation: host builds
+      model the fixed MMIO registers with atomics; device builds use volatile
+      physical reads. Host tests gate each ready bit independently and verify
+      the controller byte overwrites the intermediate source byte. match.py
+      reports exit 1 with the expected stack frame and host-independent MMIO
+      materialization structural diff; the ARM release library builds.

@@ -11,6 +11,7 @@ pub mod ata_semaphore;
 pub mod ata_work_loop;
 pub mod ata_taskfile_register_read;
 pub mod ata_stop_transmission;
+pub mod ata_pio_read_byte;
 pub mod ata_pio_read_halfword;
 pub mod ata_pio_write_byte;
 pub mod ata_pio_write_halfword;
