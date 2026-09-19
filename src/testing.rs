@@ -1552,6 +1552,9 @@ pub mod hints {
     // raw target-width choice-state fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const CHOICE_STATE_PRUNE_DUPLICATE_TAIL: usize = 0x1358_0000;
+    // 0x1359_0000: dedicated to app/opaque_collection_copy_entry's raw-u32
+    // collection and entry-table fixture; mappings never unmap.
+    pub const OPAQUE_COLLECTION_COPY_ENTRY: usize = 0x1359_0000;
     // 0x7fd0_0000: dedicated to kernel/task_message's raw-u32 receive-cell
     // and emit-marker fixture; mappings never unmap, so no other user may
     // share this hint.
