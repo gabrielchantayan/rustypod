@@ -1825,6 +1825,111 @@ context_value_commit_veneer:
 "#
 );
 
+/// Osos load address of the opaque retail selection-dispatch veneer.
+pub const RETAIL_SELECTION_DISPATCH_VENEER: u32 = 0x0800_37d8;
+
+/// Instruction word and literal in the opaque retail selection-dispatch veneer.
+pub const RETAIL_SELECTION_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const RETAIL_SELECTION_DISPATCH_TARGET: u32 = 0x080e_d0f4;
+
+/// ABI inferred from the four direct callers of
+/// [`retail_selection_dispatch_veneer`].
+pub type RetailSelectionDispatchFn =
+    unsafe extern "C" fn(u32, *mut u32, u32, u32) -> u32;
+
+/// Host/target dispatch boundary for the unported retail selection routine.
+#[derive(Clone, Copy)]
+pub struct RetailSelectionDispatchOps {
+    pub dispatch: RetailSelectionDispatchFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_retail_selection_dispatch(
+    _context: u32,
+    _records: *mut u32,
+    _selection: u32,
+    _index: u32,
+) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_RETAIL_SELECTION_DISPATCH_OPS: RetailSelectionDispatchOps =
+    RetailSelectionDispatchOps {
+        dispatch: missing_retail_selection_dispatch,
+    };
+
+/// Host replacement for the unported retail selection routine.
+#[cfg(not(target_arch = "arm"))]
+pub static mut RETAIL_SELECTION_DISPATCH_OPS: RetailSelectionDispatchOps =
+    DEFAULT_RETAIL_SELECTION_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn retail_selection_dispatch_target() -> RetailSelectionDispatchFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            RETAIL_SELECTION_DISPATCH_OPS.dispatch
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// retail_selection_dispatch_veneer — original:
+    /// `thunk_FUN_080ed0f4` @ 0x080037d8 (8 bytes; Ghidra reports only the
+    /// four-byte instruction).
+    ///
+    /// Raw ARM is `ldr pc, [pc, #-4]` followed by literal 0x080ed0f4, so this
+    /// veneer tail-dispatches without changing r0-r3 or LR. The next distinct
+    /// veneer starts at 0x080037e0. Complete ARM B/BL decoding finds exactly
+    /// four direct call sites, all plain unconditional `bl` (0x08005814,
+    /// 0x08005834, 0x08005934, and 0x08005a08); there are no predicated forms.
+    ///
+    /// The callers pass a context value, record array, selection, and index in
+    /// r0-r3, but the target's standalone Ghidra C has no recovered parameter
+    /// use and no verified semantic identity.
+    ///
+    /// Deliberate deviation: none on ARM. Host builds inject the target and
+    /// expose r0-r3 explicitly, preserving the observable dispatch and result.
+    pub fn retail_selection_dispatch_veneer(
+        context: u32,
+        records: *mut u32,
+        selection: u32,
+        index: u32,
+    ) -> u32;
+}
+
+/// Host implementation of the opaque retail selection-dispatch veneer.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retail_selection_dispatch_veneer(
+    context: u32,
+    records: *mut u32,
+    selection: u32,
+    index: u32,
+) -> u32 {
+    retail_selection_dispatch_target()(context, records, selection, index)
+}
+
+// `ldr pc` preserves LR and every general-purpose register, so ARM must retain
+// the raw literal tail transfer rather than materializing a Rust call.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl retail_selection_dispatch_veneer
+    .type retail_selection_dispatch_veneer, %function
+retail_selection_dispatch_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x080ed0f4
+    .size retail_selection_dispatch_veneer, . - retail_selection_dispatch_veneer
+"#
+);
+
 /// Osos load address of the event-handler source child-enabled veneer.
 pub const EVENT_HANDLER_SOURCE_CHILD_ENABLED_VENEER: u32 = 0x0800_3950;
 
@@ -2408,6 +2513,50 @@ mod tests {
         assert_eq!(RETAIL_CONTINUATION_DISPATCH_INSN, 0xe51f_f004);
         assert_eq!(RETAIL_CONTINUATION_DISPATCH_TARGET, 0x080e_a68c);
         assert_eq!(RETAIL_CONTINUATION_DISPATCH_TARGET & 3, 0);
+    }
+
+    static mut RETAIL_SELECTION_DISPATCH_ARGS: [usize; 4] = [0; 4];
+
+    unsafe extern "C" fn record_retail_selection_dispatch(
+        context: u32,
+        records: *mut u32,
+        selection: u32,
+        index: u32,
+    ) -> u32 {
+        RETAIL_SELECTION_DISPATCH_ARGS = [context as usize, records as usize, selection as usize, index as usize];
+        0xa5a5_5a5a
+    }
+
+    #[test]
+    fn retail_selection_dispatch_forwards_all_register_arguments_and_result() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(RETAIL_SELECTION_DISPATCH_ARGS).write([0; 4]);
+            core::ptr::addr_of_mut!(RETAIL_SELECTION_DISPATCH_OPS).write(
+                RetailSelectionDispatchOps {
+                    dispatch: record_retail_selection_dispatch,
+                },
+            );
+            assert_eq!(
+                retail_selection_dispatch_veneer(0x1020_3040, 0x1234usize as *mut u32, 2, 17),
+                0xa5a5_5a5a
+            );
+            assert_eq!(
+                core::ptr::addr_of!(RETAIL_SELECTION_DISPATCH_ARGS).read(),
+                [0x1020_3040, 0x1234, 2, 17]
+            );
+            core::ptr::addr_of_mut!(RETAIL_SELECTION_DISPATCH_OPS)
+                .write(DEFAULT_RETAIL_SELECTION_DISPATCH_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn retail_selection_dispatch_matches_literal_veneer() {
+        assert_eq!(RETAIL_SELECTION_DISPATCH_VENEER, 0x0800_37d8);
+        assert_eq!(RETAIL_SELECTION_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(RETAIL_SELECTION_DISPATCH_TARGET, 0x080e_d0f4);
+        assert_eq!(RETAIL_SELECTION_DISPATCH_TARGET & 3, 0);
     }
 
 
