@@ -57290,6 +57290,40 @@ functions:
       (0x0820208c). Host tests cover the disabled path, the request-mask and
       delegated-result path, and cleanup's result precedence and flag clear.
 
+  # --- IRAM fixed singleton lazy initialization ---
+  - address: 0x080060e0
+    ghidra: FUN_080060e0
+    name: lazy_singleton_106dc_target_acquire
+    size: 104
+    sig: "void *lazy_singleton_106dc_target_acquire(void)"
+    module: kernel/lazy_singleton_106dc
+    status: ported
+    renames:
+      FUN_080060e0: lazy_singleton_106dc_target_acquire
+      DAT_08006138: singleton_106dc_state
+      DAT_0800613c: singleton_106dc_object
+      DAT_08006140: dso_handle
+      DAT_08006144: singleton_106dc_destructor
+    notes: >-
+      Raw words at 0x080060e0..0x08006147 establish 88 bytes of
+      instructions followed by the four-word literal pool
+      (0x22008cdc, 0x220106dc, 0x089ca09c, 0x22006ab4); the following
+      `mov r1,#0` at 0x08006148 starts the next real function. Ghidra's
+      88-byte extent omits the pool, so the true extent is 104 bytes.
+      The function body contains four plain unconditional bl calls and
+      zero predicated forms: guard acquire, constructor, atexit
+      registration, and guard release. The IRAM mirror at 0x220060e0 is
+      byte-identical under the boot relocator. It tests bit 0 of state+4,
+      calls the verified guard acquire veneer 0x080036e0, then on success
+      calls unported constructor 0x08006988 with the fixed object,
+      registers its return via 0x080036e8 with destructor 0x22006ab4 and
+      __dso_handle 0x089ca09c, and releases the guard via 0x080036f0.
+      Separately it sets state byte +0 to 1 if zero, then returns the
+      fixed object. Target uses the fixed addresses and address-backed
+      constructor/destructor seams; host uses static fixtures and a no-op
+      destructor. Host tests cover first acquisition, repeat acquisition,
+      the independent state byte, and a nonzero bit-0-clear guard rejected
+      by cxa_guard_acquire.
   # --- shared UI manager lazy initialization ---
   - address: 0x08005018
     ghidra: FUN_08005018
