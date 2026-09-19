@@ -2340,6 +2340,32 @@ functions:
       is deliberately not inferred. Rust uses a native-width typed host vtable
       callback rather than the target's four-byte vtable word; a dedicated text
       section prevents folding with the byte-identical 0x083e72b0 port.
+  # --- owned guarded slot +0x04 replacement ---
+  - address: 0x083e73a0
+    ghidra: FUN_083e73a0
+    name: owned_guarded_slot_04_replace
+    size: 48
+    sig: "void owned_guarded_slot_04_replace(void **slot, void *replacement)"
+    module: cxx/owned_guarded_slot_04_replace
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: replacement
+      slot_deref: old_object
+      FUN_08157448: guarded_vtable_slot_04_dispatch_08157448
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      push {r4,r5,r6,lr} at 0x083e73a0 through pop {r4,r5,r6,pc} at 0x083e73cc; the
+      next separately linked function begins at 0x083e73d0. Full-image ARM
+      decoding finds three inbound plain bl calls at 0x08124620, 0x08140308,
+      and 0x0815fc18, plus one predicated beq tail branch at 0x08140324; there
+      are no predicated bl calls. The body returns without writes when old_object
+      equals replacement; otherwise it dispatches a non-NULL old_object through
+      the already ported guarded vtable slot +0x04 wrapper @ 0x08157448, calls
+      the already ported tag-2 operator_delete @ 0x082aad24, then stores
+      replacement. The host implementation deliberately uses native-width
+      repr(C) pointers and the existing typed-vtable and heap-operation seams.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760
