@@ -409,6 +409,24 @@ pub unsafe extern "C" fn realloc_wrapper(
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
+
+/// allocate_one_byte — original: `FUN_080b3ea4` @ 0x080b3ea4 (8 bytes;
+/// 4 unconditional `bl` call sites, none predicated).
+///
+/// Raw ARM is `mov r0,#1; b 0x082aadd4`: overwrite the otherwise
+/// argument-less entry's return register with a one-byte size, then
+/// tail-branch to the ported tag-2 [`operator_new`]. The next word
+/// (`push {r4,lr}` at 0x080b3eac) starts a separate eight-byte allocator
+/// veneer, so Ghidra's wider inferred call sequence is not this function.
+///
+/// Deliberate deviation: Rust makes the tail branch an ordinary call; it
+/// retains the size, tag-2 allocation path, and NULL return unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_one_byte() -> *mut u8 {
+    operator_new(1)
+}
+
 /// allocate_byte_with_value — original: `FUN_080d6930` @ 0x080d6930
 /// (24 bytes; five unconditional `bl` call sites, none predicated).
 ///
@@ -1295,6 +1313,25 @@ pub(crate) mod tests {
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
+
+    #[test]
+    fn allocate_one_byte_forwards_the_fixed_size_and_allocator_result() {
+        let _lock = mock_heap();
+        unsafe {
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(allocate_one_byte().is_null());
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+
+            set_alloc_ret(BLOCK_A as *mut u8);
+            assert_eq!(allocate_one_byte(), BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_CALLS, 2);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
     #[test]
     fn allocate_byte_with_value_allocates_one_tag2_byte_and_stores_all_values() {
         let _lock = mock_heap();

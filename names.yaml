@@ -17340,6 +17340,27 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3ea4
+    ghidra: FUN_080b3ea4
+    name: allocate_one_byte
+    size: 8
+    sig: "void *allocate_one_byte(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation
+    notes: >-
+      Raw osos.dec words establish the exact eight-byte extent
+      0x080b3ea4..0x080b3eac: `mov r0,#1; b 0x082aadd4`. The following
+      `push {r4,lr}` begins a distinct allocator veneer. Four inbound direct
+      calls are plain unconditional BL forms and zero are predicated. This
+      no-argument entry overwrites r0 with one, then tail-branches to the
+      existing tag-2 operator_new @ 0x082aadd4; it returns that allocation
+      unchanged, including NULL. Ghidra instead reconstructs two calls
+      through unrelated allocator state. Deliberate deviation: Rust uses an
+      ordinary call to the existing operator_new seam because it has no
+      guaranteed tail calls.
+
   - address: 0x080c6080
     ghidra: FUN_080c6080
     name: mov_atom_node_destroy
