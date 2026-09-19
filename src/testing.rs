@@ -634,6 +634,10 @@ pub mod hints {
     // 0xa100_0000: dedicated to fs/cache_entry_flush's raw-u32 context link;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const CACHE_ENTRY_FLUSH: usize = 0xa100_0000;
+    // 0xed10_0000: dedicated to util/request_queue_clear_matching_entries'
+    // raw-u32 queue and entry fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const REQUEST_QUEUE_CLEAR_MATCHING_ENTRIES: usize = 0xed10_0000;
     // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
     // root/context fixture; mappings never unmap, so no other user may share it.
     pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;

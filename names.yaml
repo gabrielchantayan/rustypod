@@ -57157,6 +57157,31 @@ functions:
       called directly. LLVM inlines the strcpy bodies and lowers the
       constant 20-byte prefix copy to __aeabi_memcpy (weak, from
       compiler_builtins) — semantics identical to the original BLs.
+  - address: 0x0806b544
+    ghidra: FUN_0806b544
+    name: request_queue_clear_matching_entries
+    size: 112
+    sig: "void request_queue_clear_matching_entries(u32 request_id, u32 context)"
+    module: util/request_queue_clear_matching_entries
+    status: ported
+    renames:
+      param_1/r0/r7: request_id
+      param_2/r1/r5: context
+      DAT_0806b5b4: request_queue_global
+      FUN_08058c3c: move_entry_to_queue_end
+    notes: >-
+      Raw osos.dec words establish the 112-byte extent
+      0x0806b544..0x0806b5b4: the next word is the 0x08a0aa78 literal pool
+      entry and 0x0806b5b8 begins a distinct push {r4,r5,r6,lr} function.
+      A complete ARM branch decode finds four inbound direct call sites
+      (0x080471c0, 0x08048418, 0x0805d68c, and 0x0805d6b4), all plain BL;
+      the body contains one unconditional plain BL to 0x08058c3c and zero
+      predicated BL forms. It scans the global queue from +4, clears each
+      entry's request ID (+8) and context (+24) when IDs match and context is
+      zero or matches, then calls 0x08058c3c only for a matching entry with a
+      successor. The unported helper is a verified direct retail-call seam on
+      device and an observable host-test seam; entry fields use target-width
+      word indices to avoid host pointer-width layout changes.
   - address: 0x082a3dcc
     ghidra: FUN_082a3dcc
     name: scoped_context_is_valid
