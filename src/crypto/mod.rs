@@ -79,6 +79,7 @@ pub mod evp_md_ctx_init;
 pub mod evp_sha1;
 pub mod evp_pkey;
 pub mod obj_dat;
+pub mod obj_name_alias_register;
 pub mod xor_f6_in_place;
 pub mod standard_cipher_table_one;
 pub mod standard_cipher_table_two;
