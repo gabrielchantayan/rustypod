@@ -117692,3 +117692,29 @@ functions:
       cursor. match.py exits 1 for its expected structural diff: LLVM adds an
       empty-range branch and frame-pointer save while retaining the guarded
       BLNE attach and four-byte cursor loop.
+  - address: 0x083e7630
+    ghidra: FUN_083e7630
+    name: guarded_vtable_slot_04_dispatch_083e7630
+    size: 32
+    sig: "void **guarded_vtable_slot_04_dispatch_083e7630(void **handle)"
+    module: cxx/guarded_vtable_slot_04_dispatch_083e7630
+    status: ported
+    renames:
+      param_1/r0/r4: handle
+      "[handle + 0x0]": object
+      "[object + 0x0]": vtable
+      "[vtable + 0x4]": virtual_slot_04
+    notes: >-
+      Raw osos.dec words establish the true 32-byte extent
+      0x083e7630..0x083e764c: push {r4,lr}, move handle to r4, load and
+      compare handle's object word, conditionally load vtable slot +0x04 and
+      blxne it with object in r0, return handle, then pop {r4,pc}.
+      0x083e7650 begins the next function with push {r2,r3,r4,r5,r6,lr};
+      Ghidra's 36-byte extent includes that instruction. A whole-image A32
+      decode finds three inbound direct plain bl calls at 0x08139698,
+      0x08139854, and 0x08139908, with no predicated direct BL forms. The
+      body has no direct bl and one predicated indirect blxne. The recovered
+      cleanup callers establish only slot +0x04 behavior; no concrete
+      virtual-target identity is inferred. Host vtable entries are native
+      pointer width rather than target-width words; this is the deliberate
+      host-only deviation.
