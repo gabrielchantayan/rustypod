@@ -11792,6 +11792,36 @@ functions:
       already-ported predicate and counter decrement rather than branching into
       stock code; otherwise no deliberate deviations.
 
+  - address: 0x08050708
+    ghidra: FUN_08050708
+    name: entry_match_find_eligible
+    size: 144
+    sig: "u32 entry_match_find_eligible(const u8 *container, u32 key)"
+    module: app/entry_match_find_eligible
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1: key
+      r6: matching_entry
+      FUN_080522bc: entry_match_first
+      FUN_08053bb8: entry_match_successor
+    notes: >-
+      Raw ARM starts at 0x08050708 and ends at 0x08050798; the next separately
+      linked function begins with push {r4-r11,lr} at 0x08050798, confirming
+      the 144-byte extent. It obtains the first validated list entry through
+      entry_match_first, follows validated successor words through
+      entry_match_successor, and returns the first entry whose +0x08 word
+      equals key and whose signed +0x0c word is zero or minus one. Although
+      Ghidra recovers a fallback-candidate block, raw setup holds r3 at one,
+      making that block unreachable. Decoding every ARM B/BL-immediate word in
+      osos.dec verifies four inbound unconditional plain bl calls
+      (0x08106e54, 0x08106ed0, 0x0813e820, 0x0813e89c) and zero predicated BL
+      forms. The Rust port directly calls the existing selector seams rather
+      than branching to retailOS; otherwise its aligned target-width loads and
+      reachable control flow are unchanged. match.py confirms the same list
+      traversal, key comparison, sentinel-state test, and zero-on-exhaustion
+      shape; LLVM omits the permanently unreachable fallback path.
+
   - address: 0x080522bc
     ghidra: FUN_080522bc
     name: entry_match_first
