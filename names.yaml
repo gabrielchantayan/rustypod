@@ -17,6 +17,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080913dc
+    ghidra: FUN_080913dc
+    name: bit_buffer_set_bit
+    size: 88
+    sig: "u32 bit_buffer_set_bit(u32 *buffer, i32 bit_index, u32 context)"
+    module: util/bit_buffer_set_bit
+    status: ported
+    renames:
+      param_1/r0/r5: buffer
+      param_2/r1/r4: bit_index
+      param_3/r2: context
+      param_1_plus_0x00: bit_length
+      param_1_plus_0x08: byte_buffer
+      FUN_0808ab4c: bit_buffer_ensure_capacity_unported
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte body from 0x080913dc through
+      pop {r4,r5,r6,pc} at 0x08091430; 0x08091434 begins the next separately
+      entered function. Whole-image A32 decoding finds three inbound plain BL
+      calls (0x0809c248, 0x0809c260, 0x080cd9a4), one inbound predicated BLEQ
+      at 0x0809c274, one plain internal BL at 0x08091404 to the unported
+      capacity helper 0x0808ab4c, and no predicated internal BLs. Negative
+      indices return zero without dereferencing buffer. Otherwise it grows to
+      bit_index + 1 when needed, forwarding context in r2, updates bit_length,
+      and sets the selected byte's MSB-first bit. Ghidra omitted the live r2
+      context argument; the Rust signature restores it. Host tests use a
+      target-width pointer fixture and an ABI seam for the verified but
+      unported capacity helper.
   - address: 0x08093440
     ghidra: FUN_08093440
     name: xor_index_key
