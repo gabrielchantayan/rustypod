@@ -117228,3 +117228,25 @@ functions:
       The veneer resolves to 0x0804bacc, whose identity remains unestablished;
       target Rust calls that verified target directly while host tests replace
       it with a callback seam.
+
+  # --- stack-sensitive literal tail dispatch ---
+  - address: 0x080038b0
+    ghidra: thunk_FUN_0829fefc
+    name: comparison_mid_function_continuation_veneer
+    size: 8
+    status: identified
+    renames:
+      DAT_080038b4: comparison_mid_function_continuation_target
+    notes: >-
+      Ghidra's four-byte extent omits the owned literal word. Raw osos.dec
+      words establish the exact eight-byte veneer 0x080038b0..0x080038b8:
+      e51ff004 (ldr pc, [pc, #-4]) and literal 0x0829fefc; the next distinct
+      veneer starts at 0x080038b8. The four inbound direct plain unconditional
+      BL call sites are 0x080069d8, 0x08006a6c, 0x08007ed4, and 0x08007f14;
+      no predicated BL forms were found. The literal target is not a callable
+      function entry: raw code at 0x0829fea0 pushes {r4,r5,r6,lr}, initializes
+      r4/r5 from r0/r1, and reaches 0x0829fefc only after that setup. Entering
+      0x0829fefc directly consumes live r4/r5 and eventually pops
+      {r4,r5,r6,pc} from a frame this veneer never creates. It therefore has
+      no Rust-callable ABI; porting it would invent a register and stack
+      contract and cannot be faithful.
