@@ -871,6 +871,96 @@ ui_manager_begin_pending_operation:
     .size ui_manager_begin_pending_operation, . - ui_manager_begin_pending_operation
 "#
 );
+/// ui_manager_dispatch_callback_context — original:
+/// `thunk_EXT_FUN_220076cc` @ `0x08038208` (Ghidra reports 4 bytes; raw
+/// osos.dec proves the full **8** bytes are `ldr pc,[pc,#-4]` /
+/// `0xe51ff004` and the target literal `0x220076cc` at `0x0803820c`; the
+/// next veneer starts at `0x08038210`).
+///
+/// The relocator at `0x080046e0` mirrors the target as `FUN_080076cc` @
+/// `0x080076cc`. Its two instructions load `manager + 0x20` into r0 then
+/// tail-branch to the unresolved external veneer at `0x08003930`
+/// (`0x0818c1a8`); r1 passes through unchanged. All four observed callers
+/// acquire the UI manager through `0x22007470` and pass it with flag 1.
+///
+/// Decoding every ARM B/BL word in osos.dec found exactly four direct,
+/// unconditional `bl` callers at 0x08201d0c, 0x08235e00, 0x08236140, and
+/// 0x08237304; there are no predicated calls, direct tail branches, or
+/// aligned raw data-word references. Deviation: target builds use the exact
+/// literal tail veneer; host builds expose the unresolved IRAM boundary as a
+/// replaceable callback and do not model its `manager + 0x20` load.
+pub const UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_VENEER: u32 = 0x0803_8208;
+pub const UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_INSN: u32 = 0xe51f_f004;
+pub const UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_TARGET: u32 = 0x2200_76cc;
+
+/// ABI at the UI manager's callback-context dispatch veneer.
+pub type UiManagerDispatchCallbackContextFn =
+    unsafe extern "C" fn(manager: *mut u8, flag: u32);
+
+/// Host/target dispatch boundary for the unresolved IRAM callback target.
+#[derive(Clone, Copy)]
+pub struct UiManagerDispatchCallbackContextOps {
+    pub dispatch: UiManagerDispatchCallbackContextFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_ui_manager_dispatch_callback_context(
+    _manager: *mut u8,
+    _flag: u32,
+) {
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS: UiManagerDispatchCallbackContextOps =
+    UiManagerDispatchCallbackContextOps {
+        dispatch: missing_ui_manager_dispatch_callback_context,
+    };
+
+/// Replaceable host boundary for the mirrored callback-context dispatch body.
+#[cfg(not(target_arch = "arm"))]
+pub static mut UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS: UiManagerDispatchCallbackContextOps =
+    DEFAULT_UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn ui_manager_dispatch_callback_context_target() -> UiManagerDispatchCallbackContextFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS.dispatch
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn ui_manager_dispatch_callback_context(manager: *mut u8, flag: u32);
+}
+
+/// Host implementation of the literal veneer. It preserves both arguments.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_manager_dispatch_callback_context(manager: *mut u8, flag: u32) {
+    unsafe { ui_manager_dispatch_callback_context_target()(manager, flag) }
+}
+
+// `ldr pc` preserves LR and r1; the target loads the callback context into
+// r0 then tail-dispatches its unresolved external continuation.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl ui_manager_dispatch_callback_context
+    .type ui_manager_dispatch_callback_context, %function
+ui_manager_dispatch_callback_context:
+    ldr     pc, [pc, #-4]
+    .word   0x220076cc
+    .size ui_manager_dispatch_callback_context, . - ui_manager_dispatch_callback_context
+"#
+);
+
 
 /// stream_buffer_flush_enter — original:
 /// `thunk_FUN_08201460` @ `0x08003848` (Ghidra reports 4 bytes; raw
@@ -1974,7 +2064,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x080381f0, rom_target: 0x220050f4, name: None },
     RomThunk { thunk_addr: 0x080381f8, rom_target: 0x220056d0, name: None },
     RomThunk { thunk_addr: 0x08038200, rom_target: 0x22005114, name: Some("ui_manager_begin_pending_operation") },
-    RomThunk { thunk_addr: 0x08038208, rom_target: 0x220076cc, name: None },
+    RomThunk { thunk_addr: 0x08038208, rom_target: 0x220076cc, name: Some("ui_manager_dispatch_callback_context") },
     RomThunk { thunk_addr: 0x08038210, rom_target: 0x22005cb0, name: None },
     RomThunk { thunk_addr: 0x08038218, rom_target: 0x22005228, name: None },
     RomThunk { thunk_addr: 0x08038220, rom_target: 0x22004ee4, name: None },
@@ -2069,7 +2159,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 29] = [
+        let expected: [(u32, &str); 30] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -2093,6 +2183,7 @@ mod tests {
             (0x22005018, "ui_manager_acquire"),
             (0x2200509c, "ui_manager_finish_pending_operation"),
             (0x22005114, "ui_manager_begin_pending_operation"),
+            (0x220076cc, "ui_manager_dispatch_callback_context"),
             (0x2200200c, "clock_config_dispatch_veneer"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
@@ -2175,8 +2266,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 29 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 31);
+        // 30 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 32);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -2694,6 +2785,73 @@ mod tests {
             );
             core::ptr::addr_of_mut!(UI_MANAGER_BEGIN_PENDING_OPERATION_OPS)
                 .write(DEFAULT_UI_MANAGER_BEGIN_PENDING_OPERATION_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn ui_manager_dispatch_callback_context_matches_literal_veneer() {
+        assert_eq!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_VENEER, 0x0803_8208);
+        assert_eq!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_INSN, 0xe51f_f004);
+        assert_eq!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_TARGET, 0x2200_76cc);
+        assert_eq!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_TARGET & 3, 0);
+    }
+
+    #[test]
+    fn ui_manager_dispatch_callback_context_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_VENEER)
+            .expect("thunk entry for callback-context dispatch");
+        assert_eq!(
+            entry.rom_target,
+            UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_TARGET
+        );
+        assert_eq!(entry.name, Some("ui_manager_dispatch_callback_context"));
+        assert_eq!(
+            lookup_by_target(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_TARGET)
+                .expect("target entry for callback-context dispatch")
+                .thunk_addr,
+            UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_VENEER
+        );
+    }
+
+    static mut UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_CALLS: u32 = 0;
+    static mut UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_ARGS: (usize, u32) = (0, 0);
+
+    unsafe extern "C" fn record_ui_manager_dispatch_callback_context(
+        manager: *mut u8,
+        flag: u32,
+    ) {
+        UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_CALLS += 1;
+        UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_ARGS = (manager as usize, flag);
+    }
+
+    #[test]
+    fn ui_manager_dispatch_callback_context_forwards_observed_and_edge_arguments() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut manager = [0u8; 0x24];
+        unsafe {
+            core::ptr::addr_of_mut!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_CALLS).write(0);
+            core::ptr::addr_of_mut!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS).write(
+                UiManagerDispatchCallbackContextOps {
+                    dispatch: record_ui_manager_dispatch_callback_context,
+                },
+            );
+            ui_manager_dispatch_callback_context(core::ptr::addr_of_mut!(manager).cast(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_ARGS).read(),
+                (core::ptr::addr_of!(manager) as usize, 1)
+            );
+            ui_manager_dispatch_callback_context(core::ptr::null_mut(), 0xffff_ffff);
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_CALLS).read(),
+                2
+            );
+            assert_eq!(
+                core::ptr::addr_of!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_ARGS).read(),
+                (0, 0xffff_ffff)
+            );
+            core::ptr::addr_of_mut!(UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS)
+                .write(DEFAULT_UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS);
         }
         drop(guard);
     }
