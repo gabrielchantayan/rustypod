@@ -17618,6 +17618,38 @@ functions:
       0x08042fc4). The Rust port retains the two unported direct callees as
       volatile host seams and calls their retailOS addresses on target.
 
+  - address: 0x08042efc
+    ghidra: FUN_08042efc
+    name: ft_buffered_stream_init_data
+    size: 104
+    sig: "i32 ft_buffered_stream_init_data(u32 data, FtBufferedStream *stream, u32 buffer_size, u32 tag)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r0: data
+      param_2/r1: stream
+      param_3/r2: buffer_size
+      param_4/r3: tag
+      local_1c: io_context
+      FUN_0805b764: data-backed I/O-context constructor (unported)
+      FUN_080f06f4: buffered-stream initializer (unported)
+      FUN_08042cfc: ft_buffered_stream_finalize
+    notes: >-
+      Raw osos.dec decoding verifies the 104-byte body from push at
+      0x08042efc through the `data` literal at 0x08042f64; the next real
+      function starts with push at 0x08042f68. The tag mismatch path returns
+      -50. A matching tag creates an input I/O context through unported
+      0x0805b764, then initializes the target stream through unported
+      0x080f06f4. An initializer error finalizes the stream only after a
+      successful context creation. Full binary B/BL decoding finds four
+      inbound plain bl callers at 0x08063aa0, 0x08063f28, 0x080aaffc, and
+      0x080b4cbc. Its outbound calls are two plain bl (0x0805b764 and
+      0x080f06f4) and one conditional blne (0x08042cfc). The two unported
+      callees remain volatile host seams and indirect dispatches to their
+      verified retailOS entries on target; their broader identities are not
+      inferred.
+
+
   - address: 0x0813b714
     ghidra: FUN_0813b714
     name: berec_test_bit

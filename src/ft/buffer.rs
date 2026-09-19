@@ -111,6 +111,135 @@ unsafe fn buffered_stream_io_context_finalize() -> BufferedStreamIoContextFinali
     core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_IO_CONTEXT_FINALIZE))
 }
 
+/// ABI of the unported data-backed I/O-context constructor at `0x0805b764`.
+///
+/// The raw call site passes `out_context`, `data`, input mode `1`, the
+/// `data` tag, and the requested buffer size.
+pub type BufferedStreamDataContextCreateFn =
+    unsafe extern "C" fn(out_context: *mut u32, data: u32, is_input: u32, tag: u32, buffer_size: u32) -> i32;
+
+/// ABI of the unported buffered-stream initializer at `0x080f06f4`.
+pub type BufferedStreamInitializeFn =
+    unsafe extern "C" fn(stream: *mut FtBufferedStream, data: u32, is_input: u32, buffer_size: u32, io_context: u32) -> i32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_buffered_stream_data_context_create(
+    out_context: *mut u32,
+    data: u32,
+    is_input: u32,
+    tag: u32,
+    buffer_size: u32,
+) -> i32 {
+    let create: BufferedStreamDataContextCreateFn = core::mem::transmute(0x0805b764usize);
+    create(out_context, data, is_input, tag, buffer_size)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_buffered_stream_data_context_create(
+    _out_context: *mut u32,
+    _data: u32,
+    _is_input: u32,
+    _tag: u32,
+    _buffer_size: u32,
+) -> i32 {
+    panic!("ft_buffered_stream_init_data requires data-context constructor 0x0805b764")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_buffered_stream_initialize(
+    stream: *mut FtBufferedStream,
+    data: u32,
+    is_input: u32,
+    buffer_size: u32,
+    io_context: u32,
+) -> i32 {
+    let initialize: BufferedStreamInitializeFn = core::mem::transmute(0x080f06f4usize);
+    initialize(stream, data, is_input, buffer_size, io_context)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_buffered_stream_initialize(
+    _stream: *mut FtBufferedStream,
+    _data: u32,
+    _is_input: u32,
+    _buffer_size: u32,
+    _io_context: u32,
+) -> i32 {
+    panic!("ft_buffered_stream_init_data requires stream initializer 0x080f06f4")
+}
+
+/// Host-replaceable direct calls retained as volatile seams. The two callees
+/// are absent from `names.yaml`; target builds invoke their verified retailOS
+/// entries.
+pub static mut BUFFERED_STREAM_DATA_CONTEXT_CREATE: BufferedStreamDataContextCreateFn =
+    firmware_buffered_stream_data_context_create;
+pub static mut BUFFERED_STREAM_INITIALIZE: BufferedStreamInitializeFn =
+    firmware_buffered_stream_initialize;
+
+#[inline(always)]
+unsafe fn buffered_stream_data_context_create() -> BufferedStreamDataContextCreateFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_DATA_CONTEXT_CREATE))
+}
+
+#[inline(always)]
+unsafe fn buffered_stream_initialize() -> BufferedStreamInitializeFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_INITIALIZE))
+}
+
+/// ft_buffered_stream_init_data — original: `FUN_08042efc` @ `0x08042efc`
+/// (104 bytes; 4 verified direct inbound `bl` call sites). Its body has two
+/// plain `bl` calls and one `blne`.
+///
+/// Validates the `data` tag, creates an input I/O context for `data`, then
+/// initializes `stream` with that context and the requested buffer size. If
+/// context creation succeeds but stream initialization fails, it finalizes the
+/// partially initialized stream. A foreign tag returns -50 without calls.
+///
+/// Deliberate deviation: the unported context constructor at `0x0805b764` and
+/// stream initializer at `0x080f06f4` are volatile dispatch seams on host and
+/// indirect dispatches to their verified retailOS entries on target. Raw `osos.dec`
+/// decoding confirms the body ends with literal `0x64617461` at `0x08042f64`;
+/// # Safety
+///
+/// `stream` must be a valid, aligned writable [`FtBufferedStream`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ft_buffered_stream_init_data")]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_init_data(
+    data: u32,
+    stream: *mut FtBufferedStream,
+    buffer_size: u32,
+    tag: u32,
+) -> i32 {
+    const DATA_TAG: u32 = u32::from_le_bytes(*b"atad");
+
+    if tag != DATA_TAG {
+        return -50;
+    }
+
+    let mut io_context = 0;
+    let result = buffered_stream_data_context_create()(
+        &mut io_context,
+        data,
+        1,
+        tag,
+        buffer_size,
+    );
+    if result != 0 {
+        return result;
+    }
+
+    let result = buffered_stream_initialize()(stream, data, 1, buffer_size, io_context);
+    if result != 0 {
+        ft_buffered_stream_finalize(stream);
+    }
+    result
+}
+
+#[cfg(test)]
+pub(crate) static BUFFERED_STREAM_INIT_DATA_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
 /// ft_buffered_stream_finalize — original: `FUN_08042cfc` @ `0x08042cfc`
 /// (104 bytes; 8 verified direct `bl` call sites: 6 unconditional and 2
 /// `blne`).
@@ -558,5 +687,143 @@ mod tests {
 
         assert_eq!(stream.cursor, 0);
         assert_eq!(stream.buffer_end, u32::MAX);
+    }
+}
+
+#[cfg(test)]
+mod init_data_tests {
+    use super::{
+        ft_buffered_stream_init_data, BufferedStreamDataContextCreateFn, BufferedStreamInitializeFn,
+        FtBufferedStream, BUFFERED_STREAM_DATA_CONTEXT_CREATE,
+        BUFFERED_STREAM_FINALIZE_TEST_LOCK, BUFFERED_STREAM_INIT_DATA_TEST_LOCK,
+        BUFFERED_STREAM_INITIALIZE, BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
+    };
+    static mut CREATE_RESULT: i32 = 0;
+    static mut INITIALIZE_RESULT: i32 = 0;
+    static mut CREATE_CALLS: usize = 0;
+    static mut INITIALIZE_CALLS: usize = 0;
+    static mut CREATE_ARGS: (u32, u32, u32, u32) = (0, 0, 0, 0);
+    static mut INITIALIZE_CONTEXT: u32 = 0;
+
+    unsafe extern "C" fn record_create(
+        out_context: *mut u32,
+        data: u32,
+        is_input: u32,
+        tag: u32,
+        buffer_size: u32,
+    ) -> i32 {
+        CREATE_CALLS += 1;
+        CREATE_ARGS = (data, is_input, tag, buffer_size);
+        out_context.write(0x1234_5678);
+        CREATE_RESULT
+    }
+
+    unsafe extern "C" fn record_initialize(
+        stream: *mut FtBufferedStream,
+        _data: u32,
+        _is_input: u32,
+        _buffer_size: u32,
+        io_context: u32,
+    ) -> i32 {
+        INITIALIZE_CALLS += 1;
+        INITIALIZE_CONTEXT = io_context;
+        (*stream).magic = u32::from_le_bytes(*b"ffub");
+        (*stream).is_input = 1;
+        INITIALIZE_RESULT
+    }
+
+    unsafe extern "C" fn ignore_io_context_finalize(_io_context: u32) {}
+
+    fn stream() -> FtBufferedStream {
+        FtBufferedStream {
+            magic: 0,
+            finalized: 0,
+            is_input: 0,
+            state_reserved: [0; 2],
+            io_context: 0,
+            io_reserved: [0; 2],
+            buffer_allocation: 0,
+            cursor: 0,
+            buffer_start: 0,
+            buffer_end: 0,
+            position_reserved: 0,
+            cached_position: 0,
+        }
+    }
+
+    #[test]
+    fn foreign_tag_returns_minus_50_without_calling_either_callee() {
+        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
+        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
+        unsafe {
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
+            BUFFERED_STREAM_INITIALIZE = record_initialize;
+            CREATE_CALLS = 0;
+            INITIALIZE_CALLS = 0;
+        }
+        let mut stream = stream();
+
+        assert_eq!(unsafe { ft_buffered_stream_init_data(1, &mut stream, 0x20000, 0) }, -50);
+        unsafe {
+            assert_eq!(CREATE_CALLS, 0);
+            assert_eq!(INITIALIZE_CALLS, 0);
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
+            BUFFERED_STREAM_INITIALIZE = original_initialize;
+        }
+    }
+
+    #[test]
+    fn context_creation_error_propagates_without_initializing_the_stream() {
+        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
+        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
+        unsafe {
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
+            BUFFERED_STREAM_INITIALIZE = record_initialize;
+            CREATE_RESULT = -108;
+            CREATE_CALLS = 0;
+            INITIALIZE_CALLS = 0;
+        }
+        let mut stream = stream();
+
+        assert_eq!(unsafe { ft_buffered_stream_init_data(0x89ab_cdef, &mut stream, 0x1000, u32::from_le_bytes(*b"atad")) }, -108);
+        unsafe {
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(INITIALIZE_CALLS, 0);
+            assert_eq!(CREATE_ARGS, (0x89ab_cdef, 1, u32::from_le_bytes(*b"atad"), 0x1000));
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
+            BUFFERED_STREAM_INITIALIZE = original_initialize;
+        }
+    }
+
+    #[test]
+    fn initialization_error_finalizes_the_created_input_stream() {
+        let _finalize_lock = BUFFERED_STREAM_FINALIZE_TEST_LOCK.lock();
+        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
+        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
+        let original_finalize = unsafe { BUFFERED_STREAM_IO_CONTEXT_FINALIZE };
+        unsafe {
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
+            BUFFERED_STREAM_INITIALIZE = record_initialize;
+            BUFFERED_STREAM_IO_CONTEXT_FINALIZE = ignore_io_context_finalize;
+            CREATE_RESULT = 0;
+            INITIALIZE_RESULT = -7;
+            CREATE_CALLS = 0;
+            INITIALIZE_CALLS = 0;
+        }
+        let mut stream = stream();
+
+        assert_eq!(unsafe { ft_buffered_stream_init_data(3, &mut stream, 0, u32::from_le_bytes(*b"atad")) }, -7);
+        unsafe {
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(INITIALIZE_CALLS, 1);
+            assert_eq!(INITIALIZE_CONTEXT, 0x1234_5678);
+            assert_eq!(stream.magic, 0);
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
+            BUFFERED_STREAM_INITIALIZE = original_initialize;
+            BUFFERED_STREAM_IO_CONTEXT_FINALIZE = original_finalize;
+        }
     }
 }
