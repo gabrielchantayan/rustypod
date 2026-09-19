@@ -135,6 +135,7 @@ pub mod plane_cursor;
 pub mod q15_mul;
 pub mod q15_multiply_add_saturating;
 pub mod operation_dispatch;
+pub mod enum_value_bitset;
 pub mod query_object_release;
 pub mod field_query_result_release;
 pub mod record_body_size;
