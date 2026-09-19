@@ -409,6 +409,34 @@ pub unsafe extern "C" fn realloc_wrapper(
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
+/// allocate_two_word_with_cleared_last_leading — original: `FUN_080b3d84` @
+/// 0x080b3d84 (24 bytes; one plain direct `bl` in its body; four plain
+/// inbound `bl` calls, none predicated).
+///
+/// Raw `osos.dec` words `e92d4010 e3a00008 eb07dc10 e3a01000 e5801004
+/// e8bd8010` establish the true extent 0x080b3d84..0x080b3d9b: `push
+/// {r4,lr}; mov r0,#8; bl 0x082aadd4; mov r1,#0; str r1,[r0,#4]; pop
+/// {r4,pc}`. The following `push {r4,lr}` at 0x080b3d9c begins
+/// [`allocate_byte_with_value_leading`]. Raw A32 decoding finds the four
+/// inbound plain `bl` at 0x081c25e0, 0x081c2de4, 0x081c34fc, and
+/// 0x081c4284; no predicated `bl` targets this entry. Allocates eight tag-2
+/// bytes through [`operator_new`], clears only its final word, and returns the
+/// allocation.
+///
+/// Deliberate deviation: Rust calls the existing [`operator_new`] seam rather
+/// than the direct retailOS BL. Like retailOS, no NULL guard precedes the word
+/// store, so allocation failure faults. A target-only section keeps this
+/// separately linked target distinct from structurally similar allocators.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_two_word_with_cleared_last_leading")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_two_word_with_cleared_last_leading() -> *mut u8 {
+    let allocation = operator_new(8);
+    core::ptr::write(allocation.add(4).cast::<u32>(), 0);
+    allocation
+}
+
+
 /// allocate_byte_with_value_leading — original: `FUN_080b3d9c` @
 /// 0x080b3d9c (24 bytes; one plain direct `bl` in its body; four plain
 /// inbound `bl` calls, none predicated).
@@ -1545,6 +1573,23 @@ pub(crate) mod tests {
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
+    #[test]
+    fn allocate_two_word_with_cleared_last_leading_preserves_the_first_word() {
+        let _lock = mock_heap();
+        let mut storage = [0xA5u8; 8];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            let allocation = allocate_two_word_with_cleared_last_leading();
+
+            assert_eq!(allocation, storage.as_mut_ptr());
+            assert_eq!(storage[..4], [0xA5; 4]);
+            assert_eq!(storage[4..], [0; 4]);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 8);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
 
     #[test]
     fn allocate_byte_with_value_initial_allocates_one_tag2_byte_and_stores_all_values() {
