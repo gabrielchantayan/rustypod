@@ -23,12 +23,15 @@ const POLL_LIMIT: u32 = 10;
 pub static mut INDEXED_STATE_TABLE: *const u32 = core::ptr::null();
 
 #[inline(always)]
-unsafe fn state_table() -> *const u32 {
+pub(crate) unsafe fn indexed_state_table() -> *const u32 {
     #[cfg(target_os = "none")]
     return RETAIL_STATE_TABLE;
     #[cfg(not(target_os = "none"))]
     return core::ptr::addr_of!(INDEXED_STATE_TABLE).read_volatile();
 }
+
+#[cfg(test)]
+pub(crate) static INDEXED_STATE_TABLE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// Stores `requested_state` in the selected retail state record and polls an
 /// acknowledgement for state one. `selector` is the signed halfword received
@@ -36,7 +39,7 @@ unsafe fn state_table() -> *const u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn indexed_state_set_and_poll(selector: i16, requested_state: i32) -> u32 {
-    let record = state_table()
+    let record = indexed_state_table()
         .offset(selector as isize * (STATE_RECORD_STRIDE / 4) as isize)
         .read_volatile() as usize as *mut u8;
     let state = record.add(REQUEST_STATE_OFFSET).cast::<u32>();
@@ -62,14 +65,12 @@ mod tests {
 
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use parking_lot::Mutex;
     use std::sync::LazyLock;
 
     const FIXTURE_LEN: usize = 0x1000;
     static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::INDEXED_STATE_SET_AND_POLL, FIXTURE_LEN).map(|pointer| pointer as usize)
     });
-    static LOCK: Mutex<()> = Mutex::new(());
 
     unsafe fn install_fixture() -> Option<*mut u8> {
         let base = (*FIXTURE)? as *mut u8;
@@ -82,7 +83,7 @@ mod tests {
 
     #[test]
     fn zero_request_clears_the_selected_record_state() {
-        let _lock = LOCK.lock();
+        let _lock = INDEXED_STATE_TABLE_TEST_LOCK.lock();
         let Some(base) = (unsafe { install_fixture() }) else {
             assert!(note_missing_u32_fixture("util/indexed_state_set_and_poll"));
             return;
@@ -95,7 +96,7 @@ mod tests {
 
     #[test]
     fn one_request_sets_state_and_returns_when_acknowledged() {
-        let _lock = LOCK.lock();
+        let _lock = INDEXED_STATE_TABLE_TEST_LOCK.lock();
         let Some(base) = (unsafe { install_fixture() }) else {
             assert!(note_missing_u32_fixture("util/indexed_state_set_and_poll"));
             return;
@@ -107,7 +108,7 @@ mod tests {
 
     #[test]
     fn other_requests_leave_the_selected_record_unchanged() {
-        let _lock = LOCK.lock();
+        let _lock = INDEXED_STATE_TABLE_TEST_LOCK.lock();
         let Some(base) = (unsafe { install_fixture() }) else {
             assert!(note_missing_u32_fixture("util/indexed_state_set_and_poll"));
             return;

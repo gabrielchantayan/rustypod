@@ -112907,3 +112907,30 @@ functions:
       predicated BL calls. It indexes a pointer table using signed selector
       times 0x18c, stores requested_state at record+0x400, and for state one
       polls that volatile word for at most ten reads. No deliberate deviations.
+
+  - address: 0x080cc64c
+    ghidra: FUN_080cc64c
+    name: indexed_state_status
+    size: 68
+    sig: "u32 indexed_state_status(i16 selector, u32 mode, u32 *out)"
+    module: util/indexed_state_status
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: mode
+      param_3/r2: out
+      DAT_080cc690: retail_state_table
+      iVar1/r0: state_record
+      uVar2/r0: status
+    notes: >-
+      Raw osos.dec words establish the true 68-byte extent
+      (0x080cc64c..0x080cc690): the literal pointer table begins at
+      0x080cc690 and the next independently linked body begins at
+      0x080cc694. The signed-halfword selector is multiplied by 99 to
+      index the shared 0x08b2f648 state-record table. Mode zero returns
+      the low 27 bits of record+0xa98; mode one returns record+0xb18;
+      every other mode returns 0xffffff06 without writing out. Binary
+      scan found four inbound direct plain BL calls and zero predicated
+      BL calls; this leaf has no outbound calls. match.py reports a
+      structural diff (LLVM uses a frame and a mode equality branch),
+      reviewed as semantically equivalent; no deliberate deviations.
