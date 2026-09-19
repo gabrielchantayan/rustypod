@@ -3115,6 +3115,38 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- RAM stream-buffer current page context ---
+  - address: 0x0800722c
+    ghidra: FUN_0800722c
+    name: current_page_context
+    size: 52
+    sig: "u32 current_page_context(const StreamBuffer *stream_buffer)"
+    module: kernel/current_page_context
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      FUN_08007470: event_handler_source
+      FUN_080074e8: dispatch_event_loop_callback
+      param_1_plus_0x00: allocation_start
+      param_1_plus_0x08: producer_position
+      param_1_plus_0x34: page_contexts
+      param_1_plus_0x13c: fallback_page_context
+      iVar1/r0: callback_active
+      uVar2/r0: page_index
+    notes: >-
+      Raw words at 0x0800722c decode to a 52-byte body ending with
+      `pop {r4,pc}` at 0x080725c; the next independently linked function
+      begins at 0x08007260. It calls event_handler_source, then dispatches
+      that source's +0x20 callback. A nonzero callback result selects the
+      fallback word at +0x13c. Zero selects +0x34 plus four times
+      `((producer_position - allocation_start) >> 12)`. Decoding every ARM
+      B/BL word in osos.dec found four direct callers: four unconditional bl,
+      zero predicated bl, and zero tail branches. The Rust port calls the
+      existing event-handler and callback ports directly. Its host source
+      backing was expanded through +0x20 so the already-ported callback
+      dispatcher can perform the same read; this is the only deliberate
+      host-layout deviation.
+
   # --- RAM stream-buffer mode-zero dispatch ---
   - address: 0x08007260
     ghidra: FUN_08007260
