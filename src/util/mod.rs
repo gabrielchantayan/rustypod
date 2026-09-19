@@ -80,6 +80,7 @@ pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
 pub mod indexed_record_value_lookup;
 pub mod indexed_slot_pointer;
+pub mod indexed_state_set_and_poll;
 pub mod id3_synchsafe_u28_decode;
 pub mod increment_shared_counter;
 pub mod le_read;

@@ -112866,3 +112866,25 @@ functions:
       ((field_0x28 >> 9) * field_0x80) + (bit_index >> 12), then ORs
       0x80 >> (bit_index & 7) into bitmap[(bit_index & 0xfff) >> 3].
       No deliberate deviations.
+  - address: 0x080d39a0
+    ghidra: FUN_080d39a0
+    name: indexed_state_set_and_poll
+    size: 92
+    sig: "u32 indexed_state_set_and_poll(i16 selector, i32 requested_state)"
+    module: util/indexed_state_set_and_poll
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: requested_state
+      DAT_080d39fc: indexed_state_record_table
+      "[record + 0x400]": requested_state
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte code extent
+      0x080d39a0..0x080d39fc: the final word is bx lr and the following
+      word is the table-address literal at 0x080d39fc; mov r1,#99 at
+      0x080d3a00 begins the next independently entered function. A full-image
+      A32 decode finds four inbound plain unconditional BL calls at
+      0x08039a24, 0x080a6100, 0x080a6138, and 0x080aa03c, with zero inbound
+      predicated BL calls. It indexes a pointer table using signed selector
+      times 0x18c, stores requested_state at record+0x400, and for state one
+      polls that volatile word for at most ten reads. No deliberate deviations.
