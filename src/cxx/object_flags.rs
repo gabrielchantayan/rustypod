@@ -1307,6 +1307,30 @@ unsafe fn namespace_provider_value_release(
         );
     }
 }
+/// namespace_provider_value_release_default_mode — original: `FUN_0803b098`
+/// @ `0x0803b098` (8 bytes, `0x0803b098..0x0803b0a0`; the next separately
+/// linked function begins at `0x0803b0a0`).
+/// Verified inbound branches: four plain, unconditional `bl` calls
+/// (0x0803ad00, 0x0803b02c, 0x080cc7c0, and 0x080d3cbc); no predicated `bl`
+/// calls.
+///
+/// Clears the incoming third ABI argument to zero, then tail-dispatches the
+/// value slot and descriptor to the type-erased release engine. The release
+/// engine's concrete identity remains unrecovered.
+///
+/// Deliberate deviations: none on ARM: `match.py` verifies LLVM emits the
+/// fixed-address tail jump after `mov r2,#0`. Host builds use the existing
+/// volatile seam through [`namespace_provider_value_release`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_value_release_default_mode(
+    value_slot: *mut usize,
+    descriptor: *const u8,
+    _incoming_mode: u32,
+) {
+    namespace_provider_value_release(value_slot, descriptor, 0);
+}
+
 
 /// Reads one provider entry while retaining the target's direct accessor call
 /// and the host's disjoint pointer-sized provider words.
@@ -4000,6 +4024,33 @@ mod tests {
         assert_eq!(value, 0x1111_2222, "the scalar tail-dispatch leaves its slot intact");
         assert_eq!(recorded_destroy_frees().0, 0);
     }
+    #[test]
+    fn namespace_provider_value_release_default_mode_discards_incoming_mode() {
+        let _reset = install_recording_provider_release();
+        let mut value = 0x1111_2222usize;
+
+        unsafe {
+            namespace_provider_value_release_default_mode(
+                &mut value,
+                0x0bad_a57usize as *const u8,
+                0x400,
+            )
+        };
+
+        let (count, calls) = recorded_provider_release_calls();
+        assert_eq!(count, 1);
+        assert_eq!(
+            calls[0],
+            ProviderReleaseCall {
+                value_slot: core::ptr::addr_of_mut!(value) as usize,
+                value: 0x1111_2222,
+                descriptor: 0x0bad_a57,
+                mode: 0,
+            }
+        );
+        assert_eq!(value, 0x1111_2222, "the wrapper only forwards the value slot");
+    }
+
 
     #[test]
     fn namespace_provider_release_value_releases_all_entries_then_destroys_collection() {
