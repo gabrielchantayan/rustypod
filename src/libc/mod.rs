@@ -8,6 +8,7 @@ pub mod swap_byte_ranges;
 pub mod forward_byte_copy;
 pub mod forward_byte_copy_returning_dst;
 pub mod counted_copy;
+pub mod copy_byte_range_returning_end;
 pub mod bounded_copy;
 pub mod cstr_copy;
 pub mod cstr_compare_normalized;
