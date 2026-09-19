@@ -394,6 +394,27 @@ pub unsafe extern "C" fn mailbox_slot_post_dispatch(slot: *mut *mut Mailbox, mod
 pub unsafe extern "C" fn mailbox_slot_signal(slot: *mut *mut Mailbox) {
     csem_signal(*slot as *mut CountingSem);
 }
+/// mailbox_slot_signal_thunk — original: `thunk_FUN_0808e2b0` @
+/// 0x080dad34 (4 bytes: `eafecd5d` = `b 0x0808e2b0`; the following
+/// `b 0x0808e294` @ 0x080dad38 starts the next independently callable
+/// thunk).
+///
+/// Direct branch alias of [`mailbox_slot_signal`]: forwards the caller-owned
+/// mailbox slot unchanged, so that function reloads its current mailbox and
+/// spends one semaphore token. Raw ARM B/BL decoding finds five inbound link
+/// calls: four plain `bl` at 0x08085ff4, 0x080935f8, 0x080a5390, and
+/// 0x080b67f4, plus one predicated `bleq` at 0x081bb920; no tail branches.
+///
+/// Deliberate deviations: the Rust forwarding call is not the stock
+/// PC-relative tail branch, but preserves the slot pointer, unconditional
+/// dereference, and all [`mailbox_slot_signal`] effects.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mailbox_slot_signal_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_slot_signal_thunk(slot: *mut *mut Mailbox) {
+    mailbox_slot_signal(slot);
+}
+
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -876,6 +897,35 @@ pub(crate) mod tests {
             assert_eq!(drain(), vec![Call::Wake(0x2222_0007)], "wakes this block's waiter");
         }
     }
+    #[test]
+    fn mailbox_slot_signal_thunk_spends_the_installed_blocks_token() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut cell = block(1, 0x2525_0001);
+            let mut slot: *mut Mailbox = &mut cell;
+
+            mailbox_slot_signal_thunk(&mut slot);
+
+            assert_eq!(cell.state, 0);
+            assert_eq!(slot, &mut cell as *mut Mailbox, "the forwarded slot is read, never written");
+            assert!(drain().is_empty(), "a nonnegative result does not wake");
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_thunk_preserves_the_negative_count_wake_path() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut cell = block(0, 0x2525_0002);
+            let mut slot: *mut Mailbox = &mut cell;
+
+            mailbox_slot_signal_thunk(&mut slot);
+
+            assert_eq!(cell.state, u32::MAX, "the thunk reaches the -1 transition");
+            assert_eq!(drain(), vec![Call::Wake(0x2525_0002)]);
+        }
+    }
+
 
     #[test]
     fn mailbox_slot_signal_keeps_driving_the_count_negative() {
