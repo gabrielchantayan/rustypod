@@ -112741,3 +112741,32 @@ functions:
       zero with the returned module. Missing table, module, or callback returns
       zero. The callback-table interface has no verified public identity, so
       the port deliberately retains its target-word representation.
+
+  - address: 0x080d7610
+    ghidra: FUN_080d7610
+    name: choice_state_prune_duplicate_tail
+    size: 152
+    sig: "void choice_state_prune_duplicate_tail(void *owner)"
+    module: util/choice_state_prune_duplicate_tail
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_plus_0x14: choice_state
+      psVar1: state
+      psVar1_plus_0x00: frame_count
+      psVar1_plus_0x02: entry_count
+      psVar1_plus_0x04: entry_pairs
+      psVar1_plus_0x08: final_markers
+      psVar1_plus_0x0c: predecessor_indices
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte extent from 0x080d7610
+      through pop {r4,pc} at 0x080d76a4; the next separately entered function
+      begins with push {r4,r5,r6,r7,r8,r9,sl,lr} at 0x080d76a8. Whole-image
+      A32 decoding finds four inbound plain BL calls (0x080e00b0, 0x080e00e8,
+      0x080e011c, and 0x080e0d3c), zero inbound predicated forms, and no
+      internal BL instructions. If entry_count exceeds one, it compares the
+      terminal `(u32,u32)` pair to the pair selected by the prior frame (or
+      pair zero for the first frame). Equal pairs with terminal marker byte one
+      decrement entry_count. A positive frame_count then makes its final
+      predecessor index refer to entry_count - 1. Target pointers remain u32
+      words, preserving the retailOS offsets on hosts. No deliberate deviations.

@@ -19,6 +19,7 @@ pub mod bit_buffer_copy;
 pub mod big_endian_word_bit_index;
 pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
+pub mod choice_state_prune_duplicate_tail;
 pub mod checked_byte_block;
 pub mod checked_runtime_scale;
 pub mod collection_item_at;

@@ -1498,6 +1498,10 @@ pub mod hints {
     // selection-state fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const ACTIVE_SELECTION_PREVIOUS_INDEX: usize = 0x1357_0000;
+    // 0x1358_0000: dedicated to util/choice_state_prune_duplicate_tail's
+    // raw target-width choice-state fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const CHOICE_STATE_PRUNE_DUPLICATE_TAIL: usize = 0x1358_0000;
     // 0x7fd0_0000: dedicated to kernel/task_message's raw-u32 receive-cell
     // and emit-marker fixture; mappings never unmap, so no other user may
     // share this hint.
