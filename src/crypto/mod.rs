@@ -44,6 +44,7 @@ pub mod tagged_reference_retain;
 pub mod obj_bsearch;
 pub mod obj_cmp;
 pub mod asn1_integer_set;
+pub mod asn1_integer_get;
 pub mod asn1_adb;
 pub mod buffered_writer_write;
 pub mod buffered_writer_flush;

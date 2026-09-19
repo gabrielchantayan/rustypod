@@ -12,12 +12,12 @@
 //! 24-byte ADB table for its matching value, then use `default_tt`. A missing
 //! selector returns NULL and records `(13, 110, 164, 0, 0)` when requested.
 //!
-//! Deliberate deviations: `ASN1_INTEGER_get` @ 0x08039f74 is unported, so it
-//! remains a volatile host seam and a direct firmware call on target. The
-//! already ported `OBJ_obj2nid` is called directly on target and represented
-//! by the same test seam on host. Target pointer fields remain raw `u32`
-//! words, avoiding 64-bit host-layout drift.
+//! Deliberate deviations: `ASN1_INTEGER_get` @ 0x08039f74 and
+//! `OBJ_obj2nid` are called directly on target and represented by volatile
+//! host seams. Target pointer fields remain raw `u32` words, avoiding 64-bit
+//! host-layout drift.
 
+use crate::crypto::asn1_integer_get::asn1_integer_get;
 #[cfg(target_os = "none")]
 use crate::crypto::obj_dat::{obj_obj2nid, Asn1Object};
 use crate::kernel::diag_ring_record::diag_ring_record;
@@ -25,28 +25,12 @@ use crate::kernel::diag_ring_record::diag_ring_record;
 const ADB_MASK: u32 = 0x300;
 const ADB_OID: u32 = 0x100;
 
-type Selector = unsafe extern "C" fn(*const u32) -> i32;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn asn1_integer_get(value: *const u32) -> i32 {
-    let function: Selector = unsafe { core::mem::transmute(0x0803_9f74usize) };
-    unsafe { function(value) }
-}
+type Selector = unsafe extern "C" fn(*const u32) -> i32;
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_asn1_integer_get(_value: *const u32) -> i32 {
-    panic!("asn1_do_adb requires ASN1_INTEGER_get 0x08039f74")
-}
-
-#[cfg(not(target_os = "none"))]
-pub static mut ASN1_INTEGER_GET: Selector = missing_asn1_integer_get;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn asn1_integer_get(value: *const u32) -> i32 {
-    let function = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(ASN1_INTEGER_GET)) };
-    unsafe { function(value) }
+    panic!("asn1_do_adb requires OBJ_obj2nid 0x0805f074")
 }
 
 #[cfg(not(target_os = "none"))]
@@ -181,7 +165,10 @@ mod tests {
         let table = unsafe { base.add(64) };
         let default_template = unsafe { base.add(128) };
         unsafe {
-            ASN1_INTEGER_GET = selector_99;
+            base.add(160).write(1);
+            base.add(161).write(2);
+            base.add(162).write(base.add(164) as usize as u32);
+            (base.add(164) as *mut u8).write(99);
             base.write(base.add(160) as usize as u32);
             template.write(0x200);
             template.add(4).write(adb as usize as u32);

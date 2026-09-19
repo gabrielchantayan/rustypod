@@ -1462,6 +1462,9 @@ pub mod hints {
     // table, and containing-value fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const ASN1_DO_ADB: usize = 0x5550_0000;
+    // 0x55a0_0000: dedicated target-width ASN1_INTEGER fixtures for crypto/asn1_integer_get;
+    // mappings never unmap, so no other user may share this hint.
+    pub const ASN1_INTEGER_GET: usize = 0x55a0_0000;
     // 0x5d00_0000: dedicated to ui/element_refresh's raw-u32 element fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const UI_ELEMENT_REFRESH: usize = 0x5d00_0000;
