@@ -225,6 +225,7 @@ pub mod path_escape_record;
 pub mod string_encoding;
 pub mod string_export_counted_utf16;
 pub mod templates;
+pub mod fixed_record_range_copy;
 pub mod signed_key_tree_find;
 pub mod equal_key_tree_clear;
 pub mod u32_map_value_slot;

@@ -117410,3 +117410,25 @@ functions:
       [begin,end) forward into dst and returns the end cursor. Volatile byte
       accesses deliberately prevent LLVM memcpy substitution; target builds
       place the leaf in a unique section to prevent identical-code folding.
+  - address: 0x083e9b68
+    ghidra: FUN_083e9b68
+    name: fixed_record_range_copy
+    size: 60
+    sig: "void *fixed_record_range_copy(const u8 *src, const u8 *end, u8 *dst)"
+    module: cxx/fixed_record_range_copy
+    status: ported
+    renames:
+      param_1/r0/r4: src
+      param_2/r1/r6: end
+      param_3/r2/r5: dst
+      thunk_EXT_FUN_22000188: memcpy_forward_words
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent 0x083e9b68..0x083e9ba3:
+      push {r4-r6,lr} through pop {r4-r6,pc}; the next independently linked
+      function starts at 0x083e9ba4. Its 15 words contain one plain internal bl
+      to the memcpy veneer at 0x08037df8. Whole-image A32 decoding finds three
+      inbound direct BL calls: plain bl at 0x080596b0 and 0x083e1d74 plus
+      predicated blne at 0x080540e8. It copies 24-byte records from src until
+      src equals end, returning the advanced dst. Deliberate deviation: Rust
+      calls the established memcpy_forward_words body directly instead of its
+      IRAM veneer; this retains its grouped forward-copy behavior and return.

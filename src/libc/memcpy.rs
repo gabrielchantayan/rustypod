@@ -24,6 +24,7 @@
 /// forward, grouped-load-before-store operation; use [`crate::libc::memmove`]
 /// when an overlap-safe copy is required.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn memcpy_forward_words(
     mut dst: *mut u8,
     mut src: *const u8,
