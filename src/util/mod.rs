@@ -148,6 +148,7 @@ pub mod raster_profile;
 pub mod raster_span_setup;
 pub mod replace_owned_pointer;
 pub mod range_state;
+pub mod request_queue_clear_matching_entries;
 pub mod service_manager_get;
 pub mod selector_record_address;
 pub mod selector_slot_address;
