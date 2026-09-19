@@ -45,6 +45,19 @@ pub unsafe extern "C" fn default_heap_free_bytes_get() -> u32 {
     default_heap.cast::<u32>().read()
 }
 
+/// default_heap_free_bytes_below_5_mib — original: `FUN_080765ec` @
+/// `0x080765ec` (28 bytes; one plain `bl`, no predicated `bl` calls).
+///
+/// Calls `default_heap_free_bytes_get`, then returns the ARM condition-code
+/// result of an unsigned comparison with `0x0050_0000`: one when fewer than
+/// 5 MiB remain and zero otherwise. The `u32` return deliberately preserves
+/// the raw ARM register result rather than exposing Rust's host `bool` ABI.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn default_heap_free_bytes_below_5_mib() -> u32 {
+    (default_heap_free_bytes_get() < 0x0050_0000) as u32
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -127,6 +140,28 @@ mod tests {
 
             assert_eq!(first_result, first_free_bytes);
             assert_eq!(second_result, second_free_bytes);
+        }
+    }
+
+    #[test]
+    fn detects_only_free_byte_counts_strictly_below_five_mib() {
+        let _lock = GLOBALS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut below = 0x004f_ffffu32;
+        let mut at_limit = 0x0050_0000u32;
+        let mut above = 0x0050_0001u32;
+
+        unsafe {
+            let old_heap = replace_default_heap(core::ptr::addr_of_mut!(below).cast());
+            let below_result = default_heap_free_bytes_below_5_mib();
+            replace_default_heap(core::ptr::addr_of_mut!(at_limit).cast());
+            let at_limit_result = default_heap_free_bytes_below_5_mib();
+            replace_default_heap(core::ptr::addr_of_mut!(above).cast());
+            let above_result = default_heap_free_bytes_below_5_mib();
+            replace_default_heap(old_heap);
+
+            assert_eq!(below_result, 1);
+            assert_eq!(at_limit_result, 0);
+            assert_eq!(above_result, 0);
         }
     }
 }
