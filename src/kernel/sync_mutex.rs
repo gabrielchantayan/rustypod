@@ -207,6 +207,21 @@ pub unsafe extern "C" fn mutex_create(mutex: *mut Mutex) {
     (*mutex).unused = 0;
 }
 
+/// `mutex_create_veneer` — original: `thunk_FUN_080744a4` @ 0x080c6768
+/// (4 bytes).
+///
+/// Raw word `0xeafeb74d` is an unconditional `b 0x080744a4`; 0x080c676c
+/// begins the next independently entered push-prologue function. Four
+/// inbound calls are plain `bl`; none is predicated. It preserves every
+/// argument and tail-branches to [`mutex_create`]. Deliberate deviation:
+/// LLVM materializes this exported veneer with a frame setup/teardown before
+/// its tail branch; observable mutex initialization is unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_create_veneer(mutex: *mut Mutex) {
+    mutex_create(mutex);
+}
+
 /// Cell-create thunk @ 0x8056724, inlined: static cell while the heap is
 /// in early boot, otherwise a 4-byte heap allocation; the ROM define
 /// fills *cell with the semaphore handle either way.
@@ -758,6 +773,24 @@ mod tests {
             vec![Call::EarlyFlag, Call::Define(1, early_cell() as usize)],
             "no heap allocation on the early-boot path"
         );
+    }
+
+    #[test]
+    fn create_veneer_preserves_mutex_create_semantics() {
+        let _lock = mock_kernel();
+        unsafe { EARLY_FLAG_RET = 1 };
+        let mut m = Mutex {
+            sem_cell: 0xdead_beef as *mut u32,
+            unused: 0xfeed_face,
+        };
+        unsafe { mutex_create_veneer(&mut m) };
+        assert_eq!(m.sem_cell, early_cell());
+        assert_eq!(m.unused, 0);
+        assert_eq!(
+            calls(),
+            vec![Call::EarlyFlag, Call::Define(1, early_cell() as usize)]
+        );
+        assert_eq!(unsafe { *m.sem_cell }, MOCK_HANDLE);
     }
 
     #[test]
