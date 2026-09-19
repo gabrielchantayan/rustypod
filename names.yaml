@@ -114240,3 +114240,31 @@ functions:
       instead of a direct retailOS BL and uses a host callback seam only for
       the unresolved dispatch target; it otherwise preserves the target ABI
       and result semantics.
+  - address: 0x0807fd9c
+    ghidra: FUN_0807fd9c
+    name: tracked_object_register
+    size: 160
+    sig: "void tracked_object_register(u32 object)"
+    module: ui/tracked_object_register
+    status: ported
+    renames:
+      param_1/r0/r5: object
+      DAT_0807fe34: tracked_object_registry_state (0x089cc8a0)
+      DAT_0807fe38: tracked_object_records (0x08a79d94)
+      FUN_0808ccc8: unported tracked-object activation target
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM establishes the true 160-byte extent 0x0807fd9c..0x0807fe3c:
+      38 instruction words through the non-returning bl heap_panic at
+      0x0807fe30; 0x0807fe3c begins the next independently entered function.
+      It has two outbound plain unconditional bl calls (0x0807fe04 to
+      unported 0x0808ccc8, then 0x0807fe30 to heap_panic), no outbound
+      predicated bl calls, and four inbound direct plain bl calls
+      (0x0828df14, 0x0828e0a8, 0x0828e2b8, 0x0828e4ac), with no predicated
+      inbound forms. Mode word +4 equal to two clears all 30 eight-byte
+      records; it then accepts only an all-zero pair, activates object with
+      r1=1, stores object plus object+0x12c, and increments state+8.
+      Deliberate deviations: the unnamed 0x0808ccc8 target is a typed
+      target-address seam and host callback; host builds use same-shaped
+      backing for the fixed state and records. Host tests cover first-pair
+      registration and the mode-two full-table clear before registration.
