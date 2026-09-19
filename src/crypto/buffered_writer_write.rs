@@ -14,20 +14,14 @@
 //! Validates a handle, source, and the recovered buffered-state invariant:
 //! `pending_len < 0x1000` and the word at `+0x4c` equals the embedded storage
 //! address at `+0x54`. It appends source bytes to the page at `+0x6c`. Every
-//! full page is handed to the unported `FUN_08064fb8`, then clears the state
-//! word at `+0x50`, reloads the pending count at `+0x68`, and clears it before
-//! continuing. The final partial page remains buffered. The error word is the
-//! raw literal `0xffff5bd9`.
-//!
-//! # Deliberate deviations
-//!
-//! `FUN_08064fb8` has no established Rust port, so the full-page handoff is a
-//! volatile host seam; device builds call its verified retailOS entry. The
-//! port directly uses the already ported `__rt_memcpy` rather than reproducing
-//! the ROM thunk at `0x08037db0`.
+//! full-page handoff is [`buffered_writer_flush`], which selects the retail
+//! hardware-transform helpers from the state flags. The port directly uses the
+//! already ported `__rt_memcpy` rather than reproducing the ROM thunk at
+//! `0x08037db0`.
 
 use core::ptr;
 
+use crate::crypto::buffered_writer_flush::buffered_writer_flush;
 use crate::libc::rt_memcpy::__rt_memcpy;
 
 /// Number of bytes in one recovered output page.
@@ -70,37 +64,9 @@ const _: [u8; 0x68] = [0; core::mem::offset_of!(BufferedWriterState, pending_len
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x6c] = [0; core::mem::offset_of!(BufferedWriterState, page)];
 
-/// ABI of the unported full-page handoff at `FUN_08064fb8`.
-pub type BufferedWriterFlush = unsafe extern "C" fn(*mut BufferedWriterState, *mut u8, u32) -> u32;
-
-const BUFFERED_WRITER_FLUSH_ADDRESS: usize = 0x0806_4fb8;
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_buffered_writer_flush(
-    _state: *mut BufferedWriterState,
-    _page: *mut u8,
-    _len: u32,
-) -> u32 {
-    panic!("buffered_writer_write requires installed host BUFFERED_WRITER_FLUSH")
-}
-
-/// Host execution model for the unported full-page handoff.
-#[cfg(not(target_os = "none"))]
-pub static mut BUFFERED_WRITER_FLUSH: BufferedWriterFlush = missing_buffered_writer_flush;
-
 #[inline(always)]
 unsafe fn flush_page(state: *mut BufferedWriterState) {
-    #[cfg(target_os = "none")]
-    {
-        let flush: BufferedWriterFlush = unsafe { core::mem::transmute(BUFFERED_WRITER_FLUSH_ADDRESS) };
-        unsafe { flush(state, ptr::addr_of_mut!((*state).page).cast(), BUFFERED_WRITER_PAGE_SIZE) };
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let flush = unsafe { ptr::read_volatile(ptr::addr_of!(BUFFERED_WRITER_FLUSH)) };
-        unsafe { flush(state, ptr::addr_of_mut!((*state).page).cast(), BUFFERED_WRITER_PAGE_SIZE) };
-    }
+    unsafe { buffered_writer_flush(state, ptr::addr_of_mut!((*state).page).cast(), BUFFERED_WRITER_PAGE_SIZE) };
 }
 
 /// buffered_writer_write — original: `FUN_080569a8` @ 0x080569a8 (188 bytes;
@@ -170,6 +136,10 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::crypto::buffered_writer_flush::{
+        BufferedWriterFlushOps, BUFFERED_WRITER_FLUSH_OPS, BUFFERED_WRITER_TRANSFORM_MUTEX,
+    };
+    use crate::kernel::sync_mutex::Mutex as KernelMutex;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use parking_lot::Mutex;
     use std::sync::LazyLock;
@@ -182,6 +152,7 @@ mod tests {
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::BUFFERED_WRITER_WRITE, FIXTURE_LEN).map(|pointer| pointer as usize)
     });
+    static mut TEST_TRANSFORM_MUTEX: KernelMutex = KernelMutex { sem_cell: core::ptr::null_mut(), unused: 0 };
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct FlushCalls {
@@ -215,7 +186,7 @@ mod tests {
         state: *mut BufferedWriterState,
         page: *mut u8,
         len: u32,
-    ) -> u32 {
+    ) {
         let mut calls = FLUSH_CALLS.lock();
         let index = calls.count;
         calls.count += 1;
@@ -228,26 +199,41 @@ mod tests {
         if let Some(pending) = *FLUSH_PENDING_MUTATION.lock() {
             unsafe { (*state).pending_len = pending };
         }
-        0
     }
+    unsafe extern "C" fn no_op_setup(_state: *mut BufferedWriterState) {}
+    unsafe extern "C" fn no_op_finish(_state: *mut BufferedWriterState, _storage: *mut u8) {}
 
     struct FlushGuard {
-        old: BufferedWriterFlush,
+        old_ops: BufferedWriterFlushOps,
+        old_mutex: *mut KernelMutex,
     }
 
     impl FlushGuard {
         unsafe fn install() -> Self {
-            let old = unsafe { ptr::read_volatile(ptr::addr_of!(BUFFERED_WRITER_FLUSH)) };
-            unsafe { BUFFERED_WRITER_FLUSH = recording_flush };
+            let old_ops = unsafe { ptr::read_volatile(ptr::addr_of!(BUFFERED_WRITER_FLUSH_OPS)) };
+            let old_mutex = unsafe { BUFFERED_WRITER_TRANSFORM_MUTEX };
+            unsafe {
+                BUFFERED_WRITER_TRANSFORM_MUTEX = core::ptr::addr_of_mut!(TEST_TRANSFORM_MUTEX);
+                BUFFERED_WRITER_FLUSH_OPS = BufferedWriterFlushOps {
+                    setup: no_op_setup,
+                    reset: no_op_setup,
+                    complete_reset: no_op_setup,
+                    update: recording_flush,
+                    finish: no_op_finish,
+                };
+            }
             *FLUSH_CALLS.lock() = FlushCalls::new();
             *FLUSH_PENDING_MUTATION.lock() = None;
-            Self { old }
+            Self { old_ops, old_mutex }
         }
     }
 
     impl Drop for FlushGuard {
         fn drop(&mut self) {
-            unsafe { BUFFERED_WRITER_FLUSH = self.old };
+            unsafe {
+                BUFFERED_WRITER_FLUSH_OPS = self.old_ops;
+                BUFFERED_WRITER_TRANSFORM_MUTEX = self.old_mutex;
+            }
         }
     }
 
