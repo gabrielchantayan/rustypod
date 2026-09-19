@@ -46788,6 +46788,31 @@ functions:
       accepts a firmware-aligned head on a 64-bit host; target code uses
       aligned named-field accesses.
 
+  - address: 0x083e6008
+    ghidra: FUN_083e6008
+    name: vector_bool_iter_index
+    size: 60
+    sig: "VectorBoolReference *vector_bool_iter_index(VectorBoolReference *result, const VectorBoolIter *iter, i32 distance)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: result, param_2: iter, param_3: distance, local_18: advanced_iter, local_10: reference_iter}
+    notes: >-
+      Raw osos.dec establishes the true 60-byte body from 0x083e6008 through
+      0x083e6040; 0x083e6044 starts the next independently entered function
+      with push {r2,r3,r4,r5,r6,r7,r8,r9,sl,lr}. It contains two direct,
+      unconditional BL instructions: vector_bool_iter_advance @ 0x083e5f84
+      and vector_bool_reference_init @ 0x083d79dc; no predicated BL exists.
+      Whole-image A32 decoding finds three inbound plain BL calls at
+      0x08269ed4, 0x08269f44, and 0x08269f6c, with no predicated callers.
+      This is std::vector<bool> bit-iterator operator[]: copy the source
+      iterator to a stack temporary, advance it by distance, then construct
+      result as its {word, 1 << bit} proxy. The source is loaded before the
+      output is written, so aliasing is valid. The final constructor leaves
+      r0 as result; the Rust port deliberately returns that incidental value,
+      though all callers consume the hidden output object. Host-only
+      read_unaligned/write_unaligned accesses preserve firmware 4-byte head
+      alignment on 64-bit hosts; target builds retain aligned word accesses.
+
   - address: 0x083e5fe8
     ghidra: FUN_083e5fe8
     name: vector_bool_reference_assign

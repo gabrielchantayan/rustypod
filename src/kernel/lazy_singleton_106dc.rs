@@ -25,7 +25,11 @@ const DESTRUCTOR_ADDRESS: usize = 0x2200_6ab4;
 const DSO_HANDLE: i32 = 0x089c_a09c;
 
 #[cfg(not(target_os = "none"))]
-static mut HOST_STATE: [u8; 8] = [0; 8];
+#[repr(align(4))]
+struct HostState([u8; 8]);
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_STATE: HostState = HostState([0; 8]);
 #[cfg(not(target_os = "none"))]
 static mut HOST_OBJECT: u8 = 0;
 
@@ -34,7 +38,7 @@ unsafe fn state() -> *mut u8 {
     #[cfg(target_os = "none")]
     { STATE_ADDRESS as *mut u8 }
     #[cfg(not(target_os = "none"))]
-    { core::ptr::addr_of_mut!(HOST_STATE).cast() }
+    { core::ptr::addr_of_mut!(HOST_STATE.0).cast() }
 }
 
 #[inline(always)]
@@ -127,7 +131,7 @@ mod tests {
     fn reset() -> MutexGuard<'static, ()> {
         let lock = LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
-            HOST_STATE = [0; 8];
+            HOST_STATE = HostState([0; 8]);
             HOST_OBJECT = 0;
             CONSTRUCTIONS = 0;
             SINGLETON_106DC_CONSTRUCTOR = recording_constructor;
