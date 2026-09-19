@@ -113252,3 +113252,25 @@ functions:
       the controller byte overwrites the intermediate source byte. match.py
       reports exit 1 with the expected stack frame and host-independent MMIO
       materialization structural diff; the ARM release library builds.
+  - address: 0x080b3ec0
+    ghidra: FUN_080b3ec0
+    name: context_finalize_if_present
+    size: 20
+    sig: "u32 context_finalize_if_present(void *context)"
+    module: util/context_finalize_if_present
+    status: ported
+    renames:
+      param_1/r0: context
+      FUN_080489fc: retail_context_finalizer_unrecovered
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x080b3ec0..0x080b3ed4: push {r4,lr}; cmp r0,#0; blne 0x080489fc;
+      mov r0,#0; pop {r4,pc}. The next separately entered function begins at
+      0x080b3ed4 with push {r4-r11,lr}. Decoding the five words finds zero
+      outgoing plain bl instructions and one predicated blne. A whole-image
+      A32 branch decode finds four incoming plain bl calls at 0x0806175c,
+      0x080635b0, 0x080636a0, and 0x08065ce4, and zero predicated inbound
+      calls. It invokes the unrecovered retailOS routine at 0x080489fc only
+      for a non-null context, discards that routine's result, and returns
+      zero. The callee has no verified semantic identity, so the target build
+      uses a raw-address seam and host tests install a recording seam.
