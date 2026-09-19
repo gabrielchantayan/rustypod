@@ -115324,3 +115324,34 @@ functions:
       substitution, and false status. match.py is expected to differ in
       frame layout and field-store order around the same fetch/default/store
       phases.
+
+  # --- record metadata lookup wrapper (app) ---
+  - address: 0x0805572c
+    ghidra: FUN_0805572c
+    name: record_metadata_lookup
+    size: 56
+    sig: "u32 record_metadata_lookup(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record[0]: index_base
+      record[11]: metadata_entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x0805572c..0x08055764:
+      stmdb sp!,{r4,lr}; save payload_out in r12; load metadata_entry from
+      record +0x2c and index_base from +0; retain encoded_length_out in r4;
+      pass index_base +0x118, metadata_entry, payload_out, and
+      encoded_length_out to the ported indexed_payload_lookup; then, only
+      when encoded_length_out is non-NULL, replace its word with logical
+      right shift by one. The backend status in r0 passes through unchanged.
+      The following mov r2,r1 at 0x08055764 begins the distinct tail-wrapper
+      function, so there is no literal pool. Decoding inbound ARM branches
+      finds four unconditional plain bl calls and zero predicated bl calls.
+      The Rust port deliberately reads record fields as target u32 words,
+      rather than host pointer fields, so the +0/+0x2c layout remains
+      four-byte ARM ABI offsets on 64-bit host tests. It reuses the established
+      indexed_payload_lookup backend seam; no backend identity is invented.

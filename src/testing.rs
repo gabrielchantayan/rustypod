@@ -757,6 +757,9 @@ pub mod hints {
     // provider/registry fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const APPLICATION_STRING_REGISTRY: usize = 0xf500_0000;
+    // 0xf800_0000: dedicated to app/indexed_payload_lookup's raw-u32 record
+    // and index fixture; mappings never unmap, so no other user may share it.
+    pub const RECORD_METADATA_LOOKUP: usize = 0xf800_0000;
     // 0xf600_0000: dedicated to app/string_table's raw-u32 COW value
     // fixture for the signed-decimal getter; mappings never unmap, so no
     // other user may share this hint.
