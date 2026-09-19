@@ -410,6 +410,30 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
 
+/// allocate_byte_with_value_early — original: `FUN_080b3dec` @ 0x080b3dec
+/// (24 bytes; one plain direct `bl` in its body, none predicated).
+///
+/// Raw `osos.dec` words `e92d4010 e1a04000 e3a00001 eb07dbf5 e5c04000
+/// e8bd8010` establish the true extent 0x080b3dec..0x080b3e03: `push
+/// {r4,lr}; mov r4,r0; mov r0,#1; bl 0x082aadd4; strb r4,[r0]; pop
+/// {r4,pc}`. The following `push {r4,lr}` at 0x080b3e04 begins
+/// [`allocate_three_word_with_cleared_last_early`]. It allocates one tag-2
+/// byte through [`operator_new`], stores `value` unconditionally, then returns
+/// the allocation.
+///
+/// Deliberate deviation: the direct retailOS allocator BL becomes the existing
+/// Rust [`operator_new`] seam. Like the original, no NULL guard precedes the
+/// byte store, so allocation failure faults. A target-only section keeps this
+/// independently linked call target distinct from identical byte allocators.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_byte_with_value_early")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_byte_with_value_early(value: u8) -> *mut u8 {
+    let allocation = operator_new(1);
+    allocation.write(value);
+    allocation
+}
+
 /// allocate_three_word_with_cleared_last_early — original: `FUN_080b3e04`
 /// @ 0x080b3e04 (20 bytes; 4 unconditional `bl` call sites, none
 /// predicated).
@@ -1574,6 +1598,24 @@ pub(crate) mod tests {
             for (calls, value) in [0u8, 1, 0xff].into_iter().enumerate() {
                 storage[0] = !value;
                 let allocation = allocate_byte_with_value_alternate(value);
+                assert_eq!(allocation, storage.as_mut_ptr());
+                assert_eq!(storage[0], value);
+                assert_eq!(ALLOC_CALLS, calls + 1);
+                assert_eq!(LAST_ALLOC_SIZE, 1);
+                assert_eq!(LAST_ALLOC_TAG, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn allocate_byte_with_value_early_allocates_one_tag2_byte_and_stores_all_values() {
+        let _lock = mock_heap();
+        let mut storage = [0u8; 1];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            for (calls, value) in [0u8, 1, 0xff].into_iter().enumerate() {
+                storage[0] = !value;
+                let allocation = allocate_byte_with_value_early(value);
                 assert_eq!(allocation, storage.as_mut_ptr());
                 assert_eq!(storage[0], value);
                 assert_eq!(ALLOC_CALLS, calls + 1);
