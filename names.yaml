@@ -115355,3 +115355,35 @@ functions:
       rather than host pointer fields, so the +0/+0x2c layout remains
       four-byte ARM ABI offsets on 64-bit host tests. It reuses the established
       indexed_payload_lookup backend seam; no backend identity is invented.
+
+  # --- record indexed payload lookup at 0x1c8 (app) ---
+  - address: 0x080556e0
+    ghidra: FUN_080556e0
+    name: record_indexed_payload_lookup_at_0x1c8
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x1c8(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record[0]: index_base
+      record[13]: indexed_payload_entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x080556e0..0x08055718:
+      stmdb sp!,{r4,lr}; save payload_out in r12; load
+      indexed_payload_entry from record +0x34 and index_base from +0; retain
+      encoded_length_out in r4; pass index_base +0x1c8,
+      indexed_payload_entry, payload_out, and encoded_length_out to the
+      ported indexed_payload_lookup; then, only when encoded_length_out is
+      non-NULL, replace its word with logical right shift by one. The backend
+      status in r0 passes through unchanged. The following mov r2,r1 at
+      0x08055718 begins the distinct wrapper function, so there is no literal
+      pool. Decoding inbound ARM branches finds four unconditional plain bl
+      calls and zero predicated bl calls. The Rust port deliberately reads
+      record fields as target u32 words, rather than host pointer fields, so
+      the +0/+0x34 layout remains four-byte ARM ABI offsets on 64-bit host
+      tests. It reuses the established indexed_payload_lookup backend seam;
+      no backend identity is invented.
