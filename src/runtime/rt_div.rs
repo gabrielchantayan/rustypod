@@ -118,7 +118,10 @@ pub unsafe extern "C" fn __rt_sdiv(num: i32, den: i32) -> i32 {
 /// `__rt_sdiv` @ 0x08031568 — signed divide, quotient returned and
 /// remainder stored through `rem` (the original returns both in r0/r1;
 /// pre-EABI C callers that want both go through this wrapper).
+// `#[inline(never)]`: callers that consume the r1 remainder preserve the
+// original signed-divide call boundary for match.py review.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __rt_sdivmod(num: i32, den: i32, rem: *mut i32) -> i32 {
     let (quot, r) = sdiv_core(num, den);
     *rem = r;

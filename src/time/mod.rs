@@ -12,6 +12,7 @@ pub mod day_number;
 pub mod day_seconds_to_datetime;
 pub mod day_and_seconds_is_before;
 pub mod leap_year;
+pub mod legacy_leap_year;
 pub mod localtime;
 pub mod mac_epoch_to_datetime;
 pub mod local_timestamp;
