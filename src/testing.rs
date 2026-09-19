@@ -1561,6 +1561,9 @@ pub mod hints {
     // layout fixtures; mappings never unmap, so no other user may share them.
     pub const TAGGED_RECORD_STORAGE_ADDRESS: usize = 0x8040_0000;
     pub const TAGGED_RECORD_STORAGE_ADDRESS_RESULT: usize = 0x8050_0000;
+    // 0x8060_0000: dedicated to ui/plst_element_load_item's target-width
+    // element, source, result, and item fixture; mappings never unmap.
+    pub const PLST_ELEMENT_LOAD_ITEM: usize = 0x8060_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

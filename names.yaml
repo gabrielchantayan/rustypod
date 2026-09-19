@@ -14531,6 +14531,35 @@ functions:
       at 0x08369bec; host tests inject its result. Port deviation: none on
       target.
 
+  # --- PLST element item load + completion notification (ui/plst_element_load_item) ---
+  - address: 0x08067d7c
+    ghidra: FUN_08067d7c
+    name: plst_element_load_item
+    size: 220
+    sig: "u32 plst_element_load_item(void *element, u32 item, u32 clear_active, u32 arg)"
+    module: ui/plst_element_load_item
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r5: item
+      param_3/r2: clear_active
+      FUN_08047844: retail_item_load
+      FUN_080648e0: retail_item_state_reset
+      FUN_08066bb8: tagged_list_notify
+    notes: >-
+      Raw osos.dec proves the 220-byte instruction extent
+      0x08067d7c..0x08067e54. The following word at 0x08067e58 is the
+      0x63736866 ("fhsc") notification key; 0x08067e5c begins the next
+      independently linked function. Raw ARM B/BL decoding finds four direct
+      calls: three plain bl (0x08067de4, 0x08067e30, 0x08067e4c) and one
+      predicated blne (0x08067e20). It clears requested active state, rejects
+      active/inhibited elements or zero source counts, loads the requested
+      item, numbers non-NULL returned entries, releases the result, resets
+      element state, and notifies the tagged list. The three non-ported callees
+      dispatch to their verified retail addresses on target and are injected by
+      host tests; free_tag4 is the existing direct port. The notification key's
+      semantic identity is not recovered or invented.
+
   # --- RTC context word masking (time/rtc) ---
   - address: 0x08067e6c
     ghidra: FUN_08067e6c
