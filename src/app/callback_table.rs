@@ -80,14 +80,14 @@ pub unsafe extern "C" fn callback_table_get() -> *mut u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
 
-    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    pub(crate) static CALLBACK_TABLE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static SOURCE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static mut SOURCE_VALUE: *mut u8 = core::ptr::null_mut();
 
@@ -96,7 +96,7 @@ mod tests {
         unsafe { SOURCE_VALUE }
     }
 
-    unsafe fn reset(source_value: *mut u8) {
+    pub(crate) unsafe fn reset_callback_table_for_test(source_value: *mut u8) {
         unsafe {
             HOST_CALLBACK_TABLE_CACHE = core::ptr::null_mut();
             SOURCE_VALUE = source_value;
@@ -105,9 +105,13 @@ mod tests {
         SOURCE_CALLS.store(0, Ordering::SeqCst);
     }
 
+    unsafe fn reset(source_value: *mut u8) {
+        unsafe { reset_callback_table_for_test(source_value) };
+    }
+
     #[test]
     fn caches_nonnull_source_result() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = CALLBACK_TABLE_TEST_LOCK.lock();
         let mut table = [0u8; 24];
         unsafe { reset(table.as_mut_ptr()) };
 
@@ -118,7 +122,7 @@ mod tests {
 
     #[test]
     fn null_source_result_is_retried() {
-        let _lock = TEST_LOCK.lock();
+        let _lock = CALLBACK_TABLE_TEST_LOCK.lock();
         unsafe { reset(core::ptr::null_mut()) };
 
         assert!(unsafe { callback_table_get() }.is_null());
