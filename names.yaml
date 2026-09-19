@@ -14531,6 +14531,28 @@ functions:
       at 0x08369bec; host tests inject its result. Port deviation: none on
       target.
 
+  # --- RTC context word masking (time/rtc) ---
+  - address: 0x08067e6c
+    ghidra: FUN_08067e6c
+    name: rtc_context_mask_words
+    size: 68
+    sig: "void rtc_context_mask_words(u32 *words, u32 byte_len)"
+    module: time/rtc
+    vars: {param_1/r4: words, param_2/r5: byte_len, uVar4/r2: context_word}
+    status: ported
+    notes: >-
+      Raw ARM extent is 0x08067e6c..0x08067eb0; the following word
+      0xa4253891 is its literal mask and 0x08067eb4 starts the distinct
+      sibling transform. It calls rtc_context_field (FUN_080561a4), loads
+      the field's second word, complements it, then XORs that result and
+      0xa4253891 into each aligned word in [words, words + (byte_len >> 2)).
+      The low byte_len bits below a full word are ignored, but the context
+      accessor runs even when byte_len < 4. Independent raw branch scan found
+      three direct callers, all plain bl instructions, and no predicated bl
+      callers; Ghidra's four-call reference count includes a non-call
+      reference. ABI: words in r0, byte_len in r1; no return value or null
+      checks. Port deviation: none.
+
   # --- PMU mode-register application (drivers/pmu) ---
   - address: 0x082e57a8
     ghidra: FUN_082e57a8
