@@ -113774,3 +113774,28 @@ functions:
       14-byte text buffer from its incoming words, reads text through the
       unported 0x080962f0 reader, and scans it using the literal format pointer
       0x083e8ba4. It returns the reader result and ignores sscanf's result.
+  - address: 0x08099b60
+    ghidra: FUN_08099b60
+    name: tagged_record_storage_address
+    size: 48
+    sig: "u8 *tagged_record_storage_address(const u32 *base_address_word, const u32 *descriptor)"
+    module: util/tagged_record_storage_address
+    status: ported
+    renames:
+      param_1/r0: base_address_word
+      param_2/r1: descriptor
+      param_3/r2: base
+      descriptor[4]: layout
+      layout[1]: flags
+      layout[5]: storage_offset
+    notes: >-
+      Raw osos.dec words fix the extent at 48 bytes,
+      0x08099b60..0x08099b90; 0x08099b90 starts the next independently
+      linked body (`push {r0-r11,lr}`). The leaf contains zero direct bl
+      instructions. An independent whole-image A32 branch decode finds four
+      inbound unconditional bl calls (0x082b4c28, 0x082b4c5c, 0x082b4c90,
+      0x082b4cf8) and zero predicated bl calls. It returns NULL unless the
+      caller's base word, descriptor layout pointer, and layout flag bit 1
+      are all present; otherwise it returns base + layout[5] with ARM u32
+      wrapping. Deliberate deviation: Rust models firmware pointer fields as
+      u32 words, and host tests map low-address fixture slabs.
