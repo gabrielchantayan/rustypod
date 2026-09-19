@@ -566,6 +566,10 @@ pub mod hints {
     // 0xc610_0000: dedicated to fs/shared_data_initialize's raw-u32
     // linked-list fixture; mappings never unmap, so no other user may share it.
     pub const SHARED_DATA_INITIALIZE: usize = 0xc610_0000;
+    // 0xc620_0000: dedicated to mov/atom_node's raw-u32 recursive
+    // post-order destructor fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const MOV_ATOM_NODE_DESTROY: usize = 0xc620_0000;
     // 0xca00_0000: dedicated to app/iap_incoming_client_base's raw-u32
     // client-object and thread-context fixtures; mappings never unmap, so
     // no other user may share this hint.

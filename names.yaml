@@ -17298,6 +17298,26 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080c6080
+    ghidra: FUN_080c6080
+    name: mov_atom_node_destroy
+    size: 52
+    sig: "void mov_atom_node_destroy(MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    vars: {param_1/r0: node, r4: node}
+    notes: >-
+      Raw ARM establishes the exact 52-byte body
+      0x080c6080..0x080c60b4; the next real function begins with
+      push {r4,r5,r6,r7,r8,lr} at 0x080c60b4. NULL returns through
+      popeq. Otherwise recursively destroys child-B +0x04, child-A
+      +0x00, then duplicate-fourcc +0x08; calls the ported
+      mov_atom_node_clear_links @ 0x0814d2e0; and tail-branches to
+      the ported tag-2 operator_delete @ 0x082aad24. Four direct
+      plain BL call sites, zero predicated BL forms, verified from
+      osos.dec. Rust's final tail branch is an ordinary call+return;
+      its observable destruction order and void ABI are identical.
+
   - address: 0x081f3aa0
     ghidra: FUN_081f3aa0
     name: mov_atom_tree_has_offsets

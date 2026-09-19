@@ -284,6 +284,48 @@ pub unsafe extern "C" fn mov_atom_node_clear_links(node: *mut MovAtomNode) -> *m
     }
     node
 }
+
+/// MOV atom node recursive destructor — original: `FUN_080c6080` @
+/// **0x080c6080** (52 bytes, 0x080c6080..0x080c60b4, 13 instructions, no
+/// literal pool). The next real function begins at 0x080c60b4. Raw ARM
+/// decoding finds **4 direct `bl` call sites**, all unconditional plain
+/// `bl` (zero predicated forms), plus one unconditional tail `b` to
+/// `operator_delete` @ 0x082aad24.
+///
+/// Recursively destroys child-B (+0x04), child-A (+0x00), then the
+/// duplicate-fourcc chain (+0x08); clears those three links through
+/// [`mov_atom_node_clear_links`]; and tail-releases the node through the
+/// tag-2 [`crate::heap::veneers::operator_delete`]. A NULL node returns
+/// before loading any fields.
+///
+/// # Deliberate deviations
+///
+/// The stock tail branch is an ordinary Rust call and return. The callee
+/// returns `void`, so this preserves the observable ABI and destruction
+/// order.
+///
+/// # Safety
+///
+/// Every non-NULL node and every non-NULL target-width link reachable from it
+/// must point to one writable [`MovAtomNode`] allocation owned by the tag-2
+/// heap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_destroy")]
+pub unsafe extern "C" fn mov_atom_node_destroy(node: *mut MovAtomNode) {
+    if node.is_null() {
+        return;
+    }
+
+    unsafe {
+        mov_atom_node_destroy((*node).child_b as usize as *mut MovAtomNode);
+        mov_atom_node_destroy((*node).child_a as usize as *mut MovAtomNode);
+        mov_atom_node_destroy((*node).dup_chain as usize as *mut MovAtomNode);
+        mov_atom_node_clear_links(node);
+        crate::heap::veneers::operator_delete(node.cast::<u8>());
+    }
+}
+
 /// MOV atom node conditional child-B setter — original: `FUN_0814d21c` @
 /// 0x0814d21c (20 bytes, 0x0814d21c..0x0814d230, 5 instructions, no
 /// literal pool). The next separately linked function starts at 0x0814d230.
@@ -380,9 +422,8 @@ pub unsafe extern "C" fn mov_atom_node_set_child_a_if_present(
 ///
 /// # Deliberate deviations
 ///
-/// The unported allocator helper remains a direct target call on firmware.
-/// Host builds use an inert stand-in so the target-width table teardown can
-/// be tested without invoking firmware code.
+/// The ported MOV-node post-order destructor releases the table root before
+/// both target-width table words are cleared.
 ///
 /// # Safety
 ///
@@ -398,39 +439,30 @@ pub unsafe extern "C" fn mov_atom_table_clear(table: *mut u32) {
     unsafe { core::ptr::write_volatile(table.add(1), 0) };
 }
 
-/// Calls the retail MOV-node post-order destructor and allocator release
-/// helper at 0x080c6080.
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn mov_atom_node_destroy(node: *mut MovAtomNode) {
-    let destroy: unsafe extern "C" fn(*mut MovAtomNode) =
-        unsafe { core::mem::transmute(0x080c_6080usize) };
-    unsafe { destroy(node) };
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn mov_atom_node_destroy(node: *mut MovAtomNode) {
-    #[cfg(test)]
-    LAST_DESTROYED_NODE.store(node as usize as u32, core::sync::atomic::Ordering::Relaxed);
-    let _ = node;
-}
-
-#[cfg(test)]
-static LAST_DESTROYED_NODE: core::sync::atomic::AtomicU32 =
-    core::sync::atomic::AtomicU32::new(0);
 
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
+    use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::LazyLock;
 
     /// 0x28 bytes of heap-block stand-in, word-aligned, poisoned so the
     /// fields the initializer must NOT touch (+0x0c, +0x20) are
     /// observable. Serialized by the heap ops lock via `mock_heap()`.
     static mut NODE_BUF: [u32; 10] = [0; 10];
+
+    const DESTROY_NODE_COUNT: usize = 4;
+    const DESTROY_NODE_BYTES: usize = DESTROY_NODE_COUNT * core::mem::size_of::<MovAtomNode>();
+    static DESTROY_NODES: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::MOV_ATOM_NODE_DESTROY, DESTROY_NODE_BYTES).map(|pointer| pointer as usize)
+    });
+
+    fn destroy_nodes() -> Option<*mut MovAtomNode> {
+        (*DESTROY_NODES).map(|address| address as *mut MovAtomNode)
+    }
 
     const POISON: u32 = 0xaaaa_aaaa;
 
@@ -747,19 +779,60 @@ mod tests {
     }
 
     #[test]
-    fn clears_root_and_count_after_destroying_every_root_value() {
-        for root in [0, 0x1020_3040, u32::MAX] {
-            let mut table = [root, 0xa5a5_a5a5];
-            LAST_DESTROYED_NODE.store(0xdead_beef, core::sync::atomic::Ordering::Relaxed);
+    fn destroys_child_b_child_a_then_duplicate_chain_before_releasing_root() {
+        let _heap = mock_heap();
+        let Some(nodes) = destroy_nodes() else {
+            assert!(note_missing_u32_fixture("mov/atom_node_destroy"));
+            return;
+        };
 
-            unsafe { mov_atom_table_clear(table.as_mut_ptr()) };
+        unsafe {
+            core::ptr::write_bytes(nodes.cast::<u8>(), 0, DESTROY_NODE_BYTES);
+            let root = nodes;
+            let child_b = nodes.add(1);
+            let child_a = nodes.add(2);
+            let duplicate = nodes.add(3);
+            (*root).child_b = child_b as usize as u32;
+            (*root).child_a = child_a as usize as u32;
+            (*root).dup_chain = duplicate as usize as u32;
 
+            mov_atom_node_destroy(root);
+
+            for node in [root, child_b, child_a, duplicate] {
+                assert_eq!(((*node).child_a, (*node).child_b, (*node).dup_chain), (0, 0, 0));
+            }
             assert_eq!(
-                LAST_DESTROYED_NODE.load(core::sync::atomic::Ordering::Relaxed),
-                root,
-                "the helper receives the original root, including NULL",
+                free_log(),
+                (4, root.cast::<u8>(), 2),
+                "post-order visits all descendants before releasing the root with tag 2",
             );
+        }
+    }
+
+    #[test]
+    fn destroy_null_is_a_complete_no_op() {
+        let _heap = mock_heap();
+
+        unsafe { mov_atom_node_destroy(core::ptr::null_mut()) };
+
+        assert_eq!(free_log().0, 0, "NULL returns before the delete veneer");
+    }
+
+    #[test]
+    fn clears_root_and_count_after_destroying_the_root() {
+        let _heap = mock_heap();
+        let Some(nodes) = destroy_nodes() else {
+            assert!(note_missing_u32_fixture("mov/atom_node_destroy"));
+            return;
+        };
+        unsafe {
+            core::ptr::write_bytes(nodes.cast::<u8>(), 0, DESTROY_NODE_BYTES);
+            let mut table = [nodes as usize as u32, 0xa5a5_a5a5];
+
+            mov_atom_table_clear(table.as_mut_ptr());
+
             assert_eq!(table, [0, 0], "both target-width table words clear");
+            assert_eq!(free_log(), (1, nodes.cast::<u8>(), 2));
         }
     }
 }
