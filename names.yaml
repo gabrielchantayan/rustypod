@@ -117880,3 +117880,25 @@ functions:
       copies the source COW strings, then sets end and capacity. Rust retains
       the target-width u32 pointer fields and calls the existing allocator and
       string-copy ports; the duplicated size calculation is intentional.
+  - address: 0x083e41d4
+    ghidra: FUN_083e41d4
+    name: tagged_buffer_range_release
+    size: 40
+    sig: "void tagged_buffer_range_release(void *ignored, void *begin, void *end)"
+    module: cxx/tagged_buffer_range_release
+    status: ported
+    renames:
+      param_1/r0: ignored
+      param_2/r1/r4: begin/current
+      param_3/r2/r5: end
+      FUN_0827c158: tagged_buffer_release
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent
+      0x083e41d4..0x083e41fc: the following mov r1,#0 at 0x083e4200 begins
+      the next independently linked function. The ten ARM words contain one
+      plain bl to tagged_buffer_release @ 0x0827c158 and no predicated calls.
+      Algorithm: walk the half-open [begin,end) range in ascending address
+      order, calling tagged_buffer_release for each 16-byte entry; r0 is
+      unused. Deliberate deviation: none; the existing Rust callee boundary
+      is retained, and byte-pointer stepping fixes the target's 16-byte stride
+      when host pointers are wider.
