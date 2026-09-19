@@ -6,6 +6,10 @@
 const PWRCON0: *mut u32 = 0x3c50_0048 as *mut u32;
 const PWRCON1: *mut u32 = 0x3c50_004c as *mut u32;
 const CPSR_IF_MASK: u32 = 0xc0;
+use crate::drivers::timer::iram_msec_delay_veneer;
+use crate::heap::veneers::operator_new;
+use crate::kernel::sync_mutex::{mutex_create, mutex_lock, mutex_unlock, Mutex as RtxcMutex};
+
 
 /// Disables IRQ and FIQ and returns their prior CPSR mask, matching
 /// `FUN_08001e70` exactly.
@@ -285,6 +289,86 @@ pub unsafe extern "C" fn pwrcon_acquire_clock_2() -> u32 {
     was_enabled
 }
 
+/// Shared state at `0x089cab58`: an unknown word, the reference count, and
+/// the lazily allocated RTXC mutex.
+#[repr(C)]
+struct PwrconClockPairState {
+    unused: u32,
+    references: u32,
+    mutex: *mut RtxcMutex,
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_PWRCON_CLOCK_PAIR_STATE: PwrconClockPairState = PwrconClockPairState {
+    unused: 0,
+    references: 0,
+    mutex: core::ptr::null_mut(),
+};
+
+#[inline(always)]
+unsafe fn pwrcon_clock_pair_state() -> *mut PwrconClockPairState {
+    #[cfg(target_os = "none")]
+    {
+        0x089c_ab58 as *mut PwrconClockPairState
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(HOST_PWRCON_CLOCK_PAIR_STATE)
+    }
+}
+
+/// pwrcon_clock_pair_4_8_reference — original: `FUN_080c87d4` @
+/// `0x080c87d4` (**184 bytes**; raw `osos.dec` words put the next real
+/// function at `0x080c8890`).
+///
+/// Raw ARM decoding finds **8 direct, unconditional `bl` instructions** in
+/// the body (operator-new, mutex-create, mutex-lock, five IRAM veneers) and
+/// no predicated `bl`; the four Ghidra call sites omit repeated targets.
+/// Lazily allocates and creates an 8-byte RTXC mutex, locks it, and adjusts
+/// the reference count in the global at `0x089cab58`. The 0→1 transition
+/// enables PWRCON0 mask 4 and PWRCON1 mask 8, then waits five milliseconds;
+/// the 1→0 transition gates those masks in the reverse call order. The
+/// final instruction tail-branches to `mutex_unlock`.
+///
+/// Deliberate deviation: host builds allocate `size_of::<RtxcMutex>()`
+/// rather than the target's 8 bytes because host pointers are wider; the
+/// target call remains `operator_new(8)`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pwrcon_clock_pair_4_8_reference(enable: u32) {
+    unsafe {
+        let state = pwrcon_clock_pair_state();
+        if (*state).mutex.is_null() {
+            #[cfg(target_os = "none")]
+            let mutex_size = 8;
+            #[cfg(not(target_os = "none"))]
+            let mutex_size = core::mem::size_of::<RtxcMutex>();
+
+            let mutex = operator_new(mutex_size).cast::<RtxcMutex>();
+            mutex_create(mutex);
+            (*state).mutex = mutex;
+        }
+
+        mutex_lock((*state).mutex);
+        if enable == 0 {
+            (*state).references = (*state).references.wrapping_sub(1);
+            if (*state).references == 0 {
+                iram_pwrcon_update_masks_veneer(4, 0, 0);
+                iram_pwrcon_update_masks_veneer(0, 8, 0);
+            }
+        } else {
+            (*state).references = (*state).references.wrapping_add(1);
+            if (*state).references == 1 {
+                iram_pwrcon_update_masks_veneer(0, 8, 1);
+                iram_pwrcon_update_masks_veneer(4, 0, 1);
+                iram_msec_delay_veneer(5);
+            }
+        }
+        mutex_unlock((*state).mutex);
+    }
+}
+
 
 
 #[cfg(test)]
@@ -549,5 +633,53 @@ mod tests {
         };
         assert_ne!(veneer as usize, 0);
         assert_ne!(veneer as usize, body as usize);
+    }
+
+    static mut CLOCK_PAIR_MUTEX: RtxcMutex = RtxcMutex {
+        sem_cell: core::ptr::null_mut(),
+        unused: 0,
+    };
+
+    unsafe fn configure_clock_pair(references: u32) {
+        let state = pwrcon_clock_pair_state();
+        (*state).unused = 0;
+        (*state).references = references;
+        (*state).mutex = addr_of_mut!(CLOCK_PAIR_MUTEX);
+    }
+
+    #[test]
+    fn clock_pair_last_release_gates_both_masks_in_retail_order() {
+        let _ops = install(0, 0);
+        unsafe {
+            configure_clock_pair(1);
+            pwrcon_clock_pair_4_8_reference(0);
+            let state = pwrcon_clock_pair_state();
+            assert_eq!((*state).references, 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 4);
+            assert_eq!(*addr_of!(TEST_PWRCON1), 8);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                [
+                    "enter", "read0", "write0", "read1", "write1", "exit",
+                    "enter", "read0", "write0", "read1", "write1", "exit",
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn clock_pair_nonfinal_transition_only_adjusts_the_reference_count() {
+        let _ops = install(0xffff_ffff, 0xffff_ffff);
+        unsafe {
+            configure_clock_pair(2);
+            pwrcon_clock_pair_4_8_reference(0);
+            let state = pwrcon_clock_pair_state();
+            assert_eq!((*state).references, 1);
+            assert!((*addr_of!(CALL_LOG)).is_empty());
+
+            pwrcon_clock_pair_4_8_reference(1);
+            assert_eq!((*state).references, 2);
+            assert!((*addr_of!(CALL_LOG)).is_empty());
+        }
     }
 }

@@ -112980,3 +112980,34 @@ functions:
       BL calls; this leaf has no outbound calls. match.py reports a
       structural diff (LLVM uses a frame and a mode equality branch),
       reviewed as semantically equivalent; no deliberate deviations.
+
+  - address: 0x080c87d4
+    ghidra: FUN_080c87d4
+    name: pwrcon_clock_pair_4_8_reference
+    size: 184
+    sig: "void pwrcon_clock_pair_4_8_reference(u32 enable)"
+    module: drivers/pwrcon
+    status: ported
+    renames:
+      param_1/r0: enable
+      DAT_080c888c: pwrcon_clock_pair_state
+      local_8: mutex
+      FUN_082aadd4: operator_new
+      FUN_080744a4: mutex_create
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      thunk_EXT_FUN_22000318: iram_pwrcon_update_masks_veneer
+      thunk_EXT_FUN_22001f38: iram_msec_delay_veneer
+    notes: >-
+      Raw osos.dec words establish the 184-byte extent
+      0x080c87d4..0x080c888c; the literal at 0x080c888c is
+      0x089cab58 and 0x080c8890 starts the next push-prologue function.
+      Decoding the body finds eight unconditional direct BL instructions
+      (operator_new, mutex_create, mutex_lock, five IRAM-veneer calls),
+      no predicated BL, and a final tail branch to mutex_unlock. It lazily
+      creates the mutex in global word +8, then refcounts a clock pair:
+      0->1 clears PWRCON1 mask 8 then PWRCON0 mask 4 and delays 5 ms;
+      1->0 sets PWRCON0 mask 4 then PWRCON1 mask 8. The target port uses
+      the exact three-word state layout and ported direct callees. Host
+      builds deliberately allocate size_of::<Mutex>() instead of the
+      target's 8-byte allocation because host pointers are wider.
