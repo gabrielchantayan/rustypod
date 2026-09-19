@@ -23,6 +23,7 @@
 ///
 /// Zero-fills `len` bytes at `dst`. Negative `len` writes nothing.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn bzero(dst: *mut u8, len: i32) {
     if len < 0 {
         return;
