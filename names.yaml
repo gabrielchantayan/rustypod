@@ -50928,6 +50928,35 @@ functions:
       stores; LLVM folds the provably empty raw loops into the equivalent
       predicated mask arithmetic, reorders the two -1 stores, and adds its
       ABI frame.
+  - address: 0x08059a04
+    ghidra: FUN_08059a04
+    name: inner_clear_16_byte_vector_cache
+    size: 144
+    sig: "void inner_clear_16_byte_vector_cache(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: inner
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw osos.dec decoding establishes the 144-byte instruction body from
+      0x08059a04 through the pop at 0x08059a90. The following 0x00000c2c
+      literal is data at 0x08059a94, and 0x08059a98 begins the next distinct
+      function. Decoding every ARM B/BL word finds exactly four direct
+      callsites, all plain unconditional bl (0x080667b0, 0x08066a48,
+      0x08068ed0, 0x0813d028); no predicated call enters. The one body bl
+      calls the ported free_tag4 @ 0x0805d070. The function frees and clears
+      a nonzero tag-4 word at inner+0xea0, retracts the 16-byte-element
+      vector end at +0xed8 by (end - begin) & ~15, writes -1 at +0x24, and
+      clears the u16 cursor at +0xc2c. The apparent copy loop has source ==
+      end and its destroy loop is a no-op for the trivially destructible
+      element, so the Rust port deliberately expresses their resulting
+      masked rewind directly. The object_select_resource_index seam was
+      removed for a direct call (three unported slots remain). Host tests
+      cover the tag-4 release, owned-field writes, null allocation, and
+      unaligned-tail retention. match.py retains the free guard/call,
+      16-byte mask rewind, and final stores; LLVM folds the provably empty
+      raw loops, reorders independent final stores, and adds its ABI frame.
   - address: 0x08059a98
     ghidra: FUN_08059a98
     name: inner_clear_cached_results
