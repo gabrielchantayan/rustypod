@@ -65,6 +65,7 @@ pub mod bn_num_bits_word;
 pub mod bn_bn2bin;
 pub mod bn_add;
 pub mod bn_mod_mul_montgomery;
+pub mod bn_mod_mul;
 pub mod bn_ucmp;
 pub mod cipher_name;
 pub mod i2a_asn1_object;

@@ -201,6 +201,9 @@ pub unsafe extern "C" fn bn_mod_mul_montgomery(
         succeeded
     }
 }
+#[cfg(test)]
+pub(crate) static BN_WORKER_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 #[cfg(test)]
 mod tests {
@@ -208,10 +211,8 @@ mod tests {
 
     use super::*;
     use crate::heap::tagged_word_buffer_pool::TAGGED_WORD_BUFFER_POOL_CAPACITY;
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::MutexGuard;
     use std::vec::Vec;
-
-    static WORKER_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: Vec<Call> = Vec::new();
     static mut PRODUCT_SUCCEEDS: bool = true;
     static mut REDUCTION_SUCCEEDS: bool = true;
@@ -286,7 +287,7 @@ mod tests {
     }
 
     fn install(product_succeeds: bool, reduction_succeeds: bool) -> WorkerGuard {
-        let guard = WORKER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = BN_WORKER_LOCK.lock();
         unsafe {
             (*core::ptr::addr_of_mut!(CALLS)).clear();
             core::ptr::addr_of_mut!(PRODUCT_SUCCEEDS).write(product_succeeds);
