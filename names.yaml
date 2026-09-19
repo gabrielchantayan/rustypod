@@ -116852,3 +116852,33 @@ functions:
       assembles the data bytes big-endian, and negates type 0x102 magnitudes.
       The Rust port uses target-width u32 header words rather than host pointer
       layout; no behavioral deviations are deliberate.
+  - address: 0x08038080
+    ghidra: thunk_EXT_FUN_220040fc
+    name: gateway_service5_request
+    size: 8
+    sig: "u32 gateway_service5_request(u32 arg0, u32 arg1)"
+    module: kernel/gateway_service5
+    status: ported
+    renames:
+      param_1/r0: arg0
+      param_2/r1: arg1
+      FUN_08003660: message_dispatch_veneer
+      "[request + 0x0]": service
+      "[request + 0xc]": arg0
+      "[request + 0x10]": arg1
+      "[request + 0x18]": output
+    notes: >-
+      Raw osos.dec words establish that 0x08038080 is an eight-byte ADS
+      literal veneer, `ldr pc,[pc,#-4]` followed by target 0x220040fc; the
+      next real veneer begins at 0x08038088. The boot relocator's verified
+      IRAM copy makes that target byte-identical to the 60-byte body at
+      0x080040fc..0x08004134. Whole-image A32 decoding finds three inbound
+      plain BL calls (0x08165c1c, 0x08393154, and 0x08393900) and no
+      predicated BL calls; Ghidra's four-byte extent omits the literal word.
+      The mirrored body builds `{5, _, _, arg0, arg1, _, 0, 1, 0}`, dispatches
+      it through the unported RTXC service veneer 0x08003660, and returns the
+      dispatcher's rewritten output word. The selector's higher-level
+      identity is unknown, so the name records only the verified wire
+      protocol. Deliberate deviation: Rust uses the existing dispatcher seam,
+      adding a normal return edge where the original literal veneer tail
+      branches.
