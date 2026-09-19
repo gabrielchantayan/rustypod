@@ -74,6 +74,7 @@ pub mod first_entry_payload;
 pub mod four_component_pixel_average;
 pub mod four_component_pixel_average_four;
 pub mod global_state;
+pub mod global_slot_release;
 pub mod growable_buffer_append;
 pub mod highest_set_bit;
 pub mod inner_state;
