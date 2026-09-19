@@ -13779,6 +13779,22 @@ functions:
       thunk 0x08037e38 with r0=0 (faithful quirk: id 0, not rec->id).
       Full pool returns NULL.
 
+  - address: 0x080865bc
+    ghidra: FUN_080865bc
+    name: status_byte_to_result
+    size: 36
+    sig: "u32 status_byte_to_result(u32 status)"
+    module: runtime/status_byte_to_result
+    status: ported
+    notes: >-
+      Raw ARM words verify the true 36-byte extent: four compare/conditional
+      return paths end at 0x080865df and the following independent function
+      starts at 0x080865e0. Maps status words 0, 1, and 0xff to 0, 1, and
+      0xffffffff respectively; every other word maps to 0. Decoding direct
+      branches identifies four plain BL call sites and no predicated BL call
+      sites. Ghidra's inferred int argument is valid at the ABI boundary:
+      callers pass either zero or a zero-extended byte. Rust's match replaces
+      the ARM conditional returns without changing the returned r0 word.
   - address: 0x080865e8
     ghidra: FUN_080865e8
     name: register_current_task
