@@ -3419,6 +3419,62 @@ mod tests {
         }
     }
 }
+/// cxx_string_vector_copy_ctor — original: `FUN_083e5b00` @ 0x083e5b00
+/// (136 bytes; 0x083e5b00..0x083e5b88, bounded by `FUN_083e5b88`).
+///
+/// Raw ARM contains four plain `bl` instructions — `vector_size_elem4` twice,
+/// `operator_new_checked`, and the string range copy at 0x083e8e7c — and no
+/// predicated `bl`. It zeroes the three-word destination vector head, allocates
+/// `min(source.len(), 32)` COW-string slots, copy-constructs the source range,
+/// then sets end to the source length and capacity to the allocated length.
+/// The duplicate size call is deliberate. There are no deviations: target
+/// pointer fields remain u32 words on hosts as on ARM.
+#[repr(C)]
+pub struct CxxStringVectorStorage {
+    pub begin: u32,
+    pub end: u32,
+    pub capacity: u32,
+}
+
+type StringVectorRangeCopy = unsafe extern "C" fn(*const u8, *const u8, *mut u8) -> *mut u8;
+
+unsafe extern "C" fn cxx_string_vector_range_copy(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        cxx_string_copy_ctor(output.cast(), first.cast());
+        first = first.wrapping_add(4);
+        output = output.wrapping_add(4);
+    }
+    output
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.cxx_string_vector_copy_ctor")]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_vector_copy_ctor(
+    destination: *mut CxxStringVectorStorage,
+    source: *const CxxStringVectorStorage,
+) -> *mut CxxStringVectorStorage {
+    (*destination).begin = 0;
+    (*destination).end = 0;
+    (*destination).capacity = 0;
+    let source_begin = (*source).begin as usize as *const u8;
+    let source_end = (*source).end as usize as *const u8;
+    let source_span = ((*source).end as usize).wrapping_sub((*source).begin as usize);
+    let length = source_span / 4;
+    let allocation = crate::heap::veneers::operator_new_checked(length.min(32) * 4);
+    (*destination).begin = allocation as usize as u32;
+    let range_copy: StringVectorRangeCopy = cxx_string_vector_range_copy;
+    range_copy(source_begin, source_end, allocation);
+    let source_length = source_span / 4;
+    (*destination).end = allocation.add(source_length * 4) as usize as u32;
+    (*destination).capacity = allocation.add(length.min(32) * 4) as usize as u32;
+    destination
+}
+
 
 /// cxx_string_vector_entry_copy_ctor — original: `FUN_083d7df4` @
 /// 0x083d7df4.
@@ -3437,12 +3493,11 @@ mod tests {
 /// constructor to be linked into the payload and permits target-layout
 /// (four-byte pointer) host fixtures.
 pub const CXX_STRING_VECTOR_ENTRY_COPY_CTOR_ADDRESS: usize = 0x083d_7df4;
-const CXX_STRING_VECTOR_ENTRY_VECTOR_COPY_CTOR_ADDRESS: usize = 0x083e_5b00;
+
 
 pub type CxxStringCopyConstruct =
     unsafe extern "C" fn(*mut *mut u8, *const *mut u8) -> *mut *mut u8;
 pub type VectorCopyConstruct = unsafe extern "C" fn(*mut u8, *const u8) -> *mut u8;
-
 #[derive(Clone, Copy)]
 pub struct CxxStringVectorEntryCopyCtorOps {
     pub copy_string: CxxStringCopyConstruct,
@@ -3454,17 +3509,15 @@ unsafe extern "C" fn firmware_vector_copy_construct(
     destination: *mut u8,
     source: *const u8,
 ) -> *mut u8 {
-    let function: VectorCopyConstruct =
-        core::mem::transmute(CXX_STRING_VECTOR_ENTRY_VECTOR_COPY_CTOR_ADDRESS);
-    function(destination, source)
+    cxx_string_vector_copy_ctor(destination.cast(), source.cast()).cast()
 }
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_vector_copy_construct(
     destination: *mut u8,
-    _source: *const u8,
+    source: *const u8,
 ) -> *mut u8 {
-    destination
+    cxx_string_vector_copy_ctor(destination.cast(), source.cast()).cast()
 }
 
 pub const DEFAULT_CXX_STRING_VECTOR_ENTRY_COPY_CTOR_OPS: CxxStringVectorEntryCopyCtorOps =

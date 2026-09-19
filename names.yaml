@@ -117863,3 +117863,20 @@ functions:
       the null/0x3a storage gates. match.py reports LLVM's explicit guarded
       branch and normal calls in place of the original predicated call; the
       same storage-free then object-delete sequence is retained.
+
+  - address: 0x083e5b00
+    ghidra: FUN_083e5b00
+    name: cxx_string_vector_copy_ctor
+    size: 136
+    sig: "CxxStringVectorStorage *cxx_string_vector_copy_ctor(CxxStringVectorStorage *destination, const CxxStringVectorStorage *source)"
+    module: cxx/string
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 136-byte extent 0x083e5b00..0x083e5b88,
+      bounded by the next push at 0x083e5b88. It has four plain bl
+      instructions (two vector-size calls, operator_new_checked, and the
+      COW-string range copy) and no predicated bl. It clears the target
+      three-word vector head, allocates min(source length, 32) string slots,
+      copies the source COW strings, then sets end and capacity. Rust retains
+      the target-width u32 pointer fields and calls the existing allocator and
+      string-copy ports; the duplicated size calculation is intentional.
