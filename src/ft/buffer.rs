@@ -67,22 +67,61 @@ unsafe fn backing_stream_tell() -> BackingStreamTellFn {
     core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_TELL))
 }
 
-/// ABI of the unported output-buffer flush helper at `0x08042d68`.
-pub type BufferedStreamFlushFn = unsafe extern "C" fn(stream: *mut FtBufferedStream) -> i32;
+/// ABI of the unported backing-stream write helper at `0x0805b834`.
+pub type BackingStreamWriteFn =
+    unsafe extern "C" fn(io_context: u32, transferred: *mut u32, data: u32) -> i32;
 
-/// ABI of the unported I/O-context finalizer at `0x0805b6d8`.
-pub type BufferedStreamIoContextFinalizeFn = unsafe extern "C" fn(io_context: u32);
+/// ABI of the unported backing-stream seek helper at `0x0805b804`.
+pub type BackingStreamSeekFn = unsafe extern "C" fn(io_context: u32, position: u64) -> i32;
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_buffered_stream_flush(stream: *mut FtBufferedStream) -> i32 {
-    let flush: BufferedStreamFlushFn = core::mem::transmute(0x08042d68usize);
-    flush(stream)
+unsafe extern "C" fn firmware_backing_stream_write(
+    io_context: u32,
+    transferred: *mut u32,
+    data: u32,
+) -> i32 {
+    let write: BackingStreamWriteFn = core::mem::transmute(0x0805b834usize);
+    write(io_context, transferred, data)
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_buffered_stream_flush(_stream: *mut FtBufferedStream) -> i32 {
-    panic!("buffered_stream_finalize requires flush helper 0x08042d68")
+unsafe extern "C" fn firmware_backing_stream_write(
+    _io_context: u32,
+    _transferred: *mut u32,
+    _data: u32,
+) -> i32 {
+    panic!("ft_buffered_stream_flush requires backing write 0x0805b834")
 }
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_backing_stream_seek(io_context: u32, position: u64) -> i32 {
+    let seek: BackingStreamSeekFn = core::mem::transmute(0x0805b804usize);
+    seek(io_context, position)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_backing_stream_seek(_io_context: u32, _position: u64) -> i32 {
+    panic!("ft_buffered_stream_flush requires backing seek 0x0805b804")
+}
+
+/// Host-replaceable direct calls retained as volatile seams. The two helpers
+/// are unported in `names.yaml`; target builds invoke their verified retailOS
+/// entries.
+pub static mut BACKING_STREAM_WRITE: BackingStreamWriteFn = firmware_backing_stream_write;
+pub static mut BACKING_STREAM_SEEK: BackingStreamSeekFn = firmware_backing_stream_seek;
+
+#[inline(always)]
+unsafe fn backing_stream_write() -> BackingStreamWriteFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_WRITE))
+}
+
+#[inline(always)]
+unsafe fn backing_stream_seek() -> BackingStreamSeekFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_SEEK))
+}
+
+/// ABI of the unported I/O-context finalizer at `0x0805b6d8`.
+pub type BufferedStreamIoContextFinalizeFn = unsafe extern "C" fn(io_context: u32);
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_buffered_stream_io_context_finalize(io_context: u32) {
@@ -95,16 +134,10 @@ unsafe extern "C" fn firmware_buffered_stream_io_context_finalize(_io_context: u
     panic!("buffered_stream_finalize requires I/O-context finalizer 0x0805b6d8")
 }
 
-/// Host-replaceable direct calls retained as volatile seams. Neither helper is
-/// ported in `names.yaml`; target builds invoke its verified retailOS entry.
-pub static mut BUFFERED_STREAM_FLUSH: BufferedStreamFlushFn = firmware_buffered_stream_flush;
+/// Host-replaceable direct call retained as a volatile seam because the
+/// finalizer is unported in `names.yaml`.
 pub static mut BUFFERED_STREAM_IO_CONTEXT_FINALIZE: BufferedStreamIoContextFinalizeFn =
     firmware_buffered_stream_io_context_finalize;
-
-#[inline(always)]
-unsafe fn buffered_stream_flush() -> BufferedStreamFlushFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_FLUSH))
-}
 
 #[inline(always)]
 unsafe fn buffered_stream_io_context_finalize() -> BufferedStreamIoContextFinalizeFn {
@@ -250,11 +283,11 @@ pub(crate) static BUFFERED_STREAM_INIT_DATA_TEST_LOCK: parking_lot::Mutex<()> =
 /// flush result is retained across the subsequent teardown; an invalid tag
 /// returns -50 without modifying the record.
 ///
-/// Deliberate deviation: the unported flush helper at `0x08042d68` and
-/// I/O-context finalizer at `0x0805b6d8` are volatile dispatch seams on host
-/// and indirect calls to their verified retailOS entries on target. Raw
-/// `osos.dec` decoding confirms the body ends at the literal `0x62756666`
-/// at `0x08042d64`, immediately before the distinct function at `0x08042d68`.
+/// Deliberate deviation: the I/O-context finalizer at `0x0805b6d8` remains a
+/// volatile dispatch seam on host and an indirect call to its verified
+/// retailOS entry on target. Raw `osos.dec` decoding confirms the body ends
+/// at the literal `0x62756666` at `0x08042d64`, immediately before this
+/// module's flush port at `0x08042d68`.
 ///
 /// # Safety
 ///
@@ -270,7 +303,7 @@ pub unsafe extern "C" fn ft_buffered_stream_finalize(stream: *mut FtBufferedStre
 
     (*stream).finalized = 1;
     let result = if (*stream).is_input == 0 {
-        buffered_stream_flush()(stream)
+        ft_buffered_stream_flush(stream)
     } else {
         0
     };
@@ -287,6 +320,64 @@ pub unsafe extern "C" fn ft_buffered_stream_finalize(stream: *mut FtBufferedStre
 #[cfg(test)]
 pub(crate) static BUFFERED_STREAM_FINALIZE_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
+/// ft_buffered_stream_flush — original: `FUN_08042d68` @ `0x08042d68`
+/// (140 bytes; 4 verified direct inbound `bl` call sites, all plain).
+///
+/// Flushes an output buffer through its backing I/O context, requiring the
+/// backing writer to consume the entire signed `cursor - buffer_start` span;
+/// a short successful write becomes -34. For input streams, gets the logical
+/// buffered position and seeks the backing context to it. Output mode always
+/// resets the buffered cursor range, including after a write error; input mode
+/// resets it only after both backing operations succeed.
+///
+/// Deliberate deviation: the unported backing write at `0x0805b834` and seek
+/// at `0x0805b804` are volatile dispatch seams on host and indirect calls to
+/// their verified retailOS entries on target. Rust explicitly preserves the
+/// ARM signed comparison and wrapping subtraction for output spans.
+///
+/// # Safety
+///
+/// `stream` must point to a valid, aligned writable [`FtBufferedStream`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ft_buffered_stream_flush")]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_flush(stream: *mut FtBufferedStream) -> i32 {
+    let stream = &mut *stream;
+    if stream.is_input != 0 {
+        let mut position = 0;
+        let result = buffered_stream_tell(stream, &mut position);
+        if result != 0 {
+            return result;
+        }
+        let result = backing_stream_seek()(stream.io_context, position);
+        if result != 0 {
+            return result;
+        }
+        ft_buffered_stream_reset_buffer_cursor(stream);
+        return 0;
+    }
+
+    let expected = stream.cursor.wrapping_sub(stream.buffer_start);
+    let result = if (expected as i32) <= 0 {
+        0
+    } else {
+        let mut transferred = expected;
+        let result = backing_stream_write()(
+            stream.io_context,
+            &mut transferred,
+            stream.buffer_start,
+        );
+        if result != 0 {
+            result
+        } else if transferred != expected {
+            -34
+        } else {
+            0
+        }
+    };
+    ft_buffered_stream_reset_buffer_cursor(stream);
+    result
+}
 
 /// buffered_stream_tell — original: `FUN_08042e70` @ `0x08042e70` (140
 /// bytes; 10 verified direct `bl` call sites, all unconditional).
@@ -415,19 +506,26 @@ mod tests {
     use parking_lot::MutexGuard;
     use super::{
         buffered_stream_tell, ft_buffered_stream_buffered_bytes, ft_buffered_stream_finalize,
-        ft_buffered_stream_reset_buffer_cursor, BackingStreamTellFn, BufferedStreamFlushFn,
-        BufferedStreamIoContextFinalizeFn, FtBufferedStream, BACKING_STREAM_TELL,
+        ft_buffered_stream_flush, ft_buffered_stream_reset_buffer_cursor, BackingStreamSeekFn,
+        BackingStreamTellFn, BackingStreamWriteFn, BufferedStreamIoContextFinalizeFn,
+        FtBufferedStream, BACKING_STREAM_SEEK, BACKING_STREAM_TELL, BACKING_STREAM_WRITE,
         BACKING_STREAM_TELL_TEST_LOCK, BUFFERED_STREAM_FINALIZE_TEST_LOCK,
-        BUFFERED_STREAM_FLUSH, BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
+        BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
     };
 
     static mut BACKING_RESULT: i32 = 0;
     static mut BACKING_POSITION: u64 = 0;
     static mut BACKING_CONTEXT: u32 = 0;
     static mut BACKING_CALLS: usize = 0;
-    static mut FLUSH_RESULT: i32 = 0;
-    static mut FLUSH_CALLS: usize = 0;
-    static mut FLUSH_SAW_FINALIZED: u8 = 0;
+    static mut WRITE_RESULT: i32 = 0;
+    static mut WRITE_TRANSFERRED: u32 = 0;
+    static mut WRITE_CONTEXT: u32 = 0;
+    static mut WRITE_DATA: u32 = 0;
+    static mut WRITE_CALLS: usize = 0;
+    static mut SEEK_RESULT: i32 = 0;
+    static mut SEEK_POSITION: u64 = 0;
+    static mut SEEK_CONTEXT: u32 = 0;
+    static mut SEEK_CALLS: usize = 0;
     static mut FINALIZE_CONTEXT: u32 = 0;
     static mut FINALIZE_CALLS: usize = 0;
 
@@ -444,14 +542,16 @@ mod tests {
 
     struct FinalizeSeams {
         _lock: MutexGuard<'static, ()>,
-        flush: BufferedStreamFlushFn,
+        write: BackingStreamWriteFn,
+        seek: BackingStreamSeekFn,
         finalize_context: BufferedStreamIoContextFinalizeFn,
     }
 
     impl Drop for FinalizeSeams {
         fn drop(&mut self) {
             unsafe {
-                BUFFERED_STREAM_FLUSH = self.flush;
+                BACKING_STREAM_WRITE = self.write;
+                BACKING_STREAM_SEEK = self.seek;
                 BUFFERED_STREAM_IO_CONTEXT_FINALIZE = self.finalize_context;
             }
         }
@@ -464,10 +564,23 @@ mod tests {
         BACKING_RESULT
     }
 
-    unsafe extern "C" fn record_flush(stream: *mut FtBufferedStream) -> i32 {
-        FLUSH_CALLS += 1;
-        FLUSH_SAW_FINALIZED = (*stream).finalized;
-        FLUSH_RESULT
+    unsafe extern "C" fn record_backing_write(
+        context: u32,
+        transferred: *mut u32,
+        data: u32,
+    ) -> i32 {
+        WRITE_CALLS += 1;
+        WRITE_CONTEXT = context;
+        WRITE_DATA = data;
+        transferred.write(WRITE_TRANSFERRED);
+        WRITE_RESULT
+    }
+
+    unsafe extern "C" fn record_backing_seek(context: u32, position: u64) -> i32 {
+        SEEK_CALLS += 1;
+        SEEK_CONTEXT = context;
+        SEEK_POSITION = position;
+        SEEK_RESULT
     }
 
     unsafe extern "C" fn record_io_context_finalize(io_context: u32) {
@@ -493,14 +606,22 @@ mod tests {
         unsafe {
             let seams = FinalizeSeams {
                 _lock: lock,
-                flush: BUFFERED_STREAM_FLUSH,
+                write: BACKING_STREAM_WRITE,
+                seek: BACKING_STREAM_SEEK,
                 finalize_context: BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
             };
-            BUFFERED_STREAM_FLUSH = record_flush;
+            BACKING_STREAM_WRITE = record_backing_write;
+            BACKING_STREAM_SEEK = record_backing_seek;
             BUFFERED_STREAM_IO_CONTEXT_FINALIZE = record_io_context_finalize;
-            FLUSH_RESULT = 0;
-            FLUSH_CALLS = 0;
-            FLUSH_SAW_FINALIZED = 0;
+            WRITE_RESULT = 0;
+            WRITE_TRANSFERRED = 0;
+            WRITE_CONTEXT = 0;
+            WRITE_DATA = 0;
+            WRITE_CALLS = 0;
+            SEEK_RESULT = 0;
+            SEEK_POSITION = 0;
+            SEEK_CONTEXT = 0;
+            SEEK_CALLS = 0;
             FINALIZE_CONTEXT = 0;
             FINALIZE_CALLS = 0;
             seams
@@ -611,6 +732,51 @@ mod tests {
         assert_eq!(position, 0x1122_3344_5566_7788);
         unsafe { assert_eq!(BACKING_CALLS, 1); }
     }
+    #[test]
+    fn flush_writes_output_span_and_rejects_short_write() {
+        let _seams = install_finalizer();
+        let mut stream = stream(0, 0x140, 0x100, 0);
+        stream.io_context = 0x1234_5678;
+        stream.io_reserved[1] = 0x80;
+        unsafe { WRITE_TRANSFERRED = 0x40; }
+
+        assert_eq!(unsafe { ft_buffered_stream_flush(&mut stream) }, 0);
+        unsafe {
+            assert_eq!(WRITE_CALLS, 1);
+            assert_eq!(WRITE_CONTEXT, 0x1234_5678);
+            assert_eq!(WRITE_DATA, 0x100);
+        }
+        assert_eq!(stream.cursor, 0x100);
+        assert_eq!(stream.buffer_end, 0x17f);
+
+        stream.cursor = 0x120;
+        unsafe { WRITE_TRANSFERRED = 0x1f; }
+        assert_eq!(unsafe { ft_buffered_stream_flush(&mut stream) }, -34);
+        assert_eq!(stream.cursor, 0x100);
+    }
+
+    #[test]
+    fn flush_seeks_input_position_and_propagates_seek_error() {
+        let _backing = install_backing();
+        let _seams = install_finalizer();
+        let mut stream = stream(1, 0x100, 0, 0x10f);
+        stream.io_context = 0xfeed_cafe;
+        stream.cached_position = 0x200;
+
+        assert_eq!(unsafe { ft_buffered_stream_flush(&mut stream) }, 0);
+        unsafe {
+            assert_eq!(SEEK_CALLS, 1);
+            assert_eq!(SEEK_CONTEXT, 0xfeed_cafe);
+            assert_eq!(SEEK_POSITION, 0x20e);
+        }
+        assert_eq!(stream.cursor, 1);
+        assert_eq!(stream.buffer_end, 0);
+
+        unsafe { SEEK_RESULT = -17; }
+        assert_eq!(unsafe { ft_buffered_stream_flush(&mut stream) }, -17);
+        unsafe { assert_eq!(SEEK_CALLS, 2); }
+    }
+
 
     #[test]
     fn finalizer_rejects_a_foreign_tag_without_side_effects() {
@@ -622,7 +788,7 @@ mod tests {
         assert_eq!(stream.magic, 0);
         assert_eq!(stream.finalized, 0);
         unsafe {
-            assert_eq!(FLUSH_CALLS, 0);
+            assert_eq!(WRITE_CALLS, 0);
             assert_eq!(FINALIZE_CALLS, 0);
         }
     }
@@ -630,15 +796,14 @@ mod tests {
     #[test]
     fn finalizer_flushes_output_retains_error_and_zeros_the_record() {
         let _seams = install_finalizer();
-        unsafe { FLUSH_RESULT = -17; }
+        unsafe { WRITE_RESULT = -17; }
         let mut stream = stream(0, 0x140, 0x100, 0);
         stream.io_context = 0x1234_5678;
         stream.position_reserved = 0xa5a5_a5a5;
 
         assert_eq!(unsafe { ft_buffered_stream_finalize(&mut stream) }, -17);
         unsafe {
-            assert_eq!(FLUSH_CALLS, 1);
-            assert_eq!(FLUSH_SAW_FINALIZED, 1);
+            assert_eq!(WRITE_CALLS, 1);
             assert_eq!(FINALIZE_CALLS, 1);
             assert_eq!(FINALIZE_CONTEXT, 0x1234_5678);
             let bytes = core::slice::from_raw_parts(
@@ -656,8 +821,9 @@ mod tests {
         stream.io_context = 0xfeed_cafe;
 
         assert_eq!(unsafe { ft_buffered_stream_finalize(&mut stream) }, 0);
+
         unsafe {
-            assert_eq!(FLUSH_CALLS, 0);
+            assert_eq!(WRITE_CALLS, 0);
             assert_eq!(FINALIZE_CALLS, 1);
             assert_eq!(FINALIZE_CONTEXT, 0xfeed_cafe);
         }

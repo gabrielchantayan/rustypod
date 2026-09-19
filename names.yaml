@@ -1761,6 +1761,37 @@ functions:
       red_black_tree_rotate_right. Its shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the
       transferred middle subtree. Deliberate deviations: none.
+  - address: 0x08042d68
+    ghidra: FUN_08042d68
+    name: ft_buffered_stream_flush
+    size: 140
+    sig: "i32 ft_buffered_stream_flush(FtBufferedStream *stream)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r0: stream
+      "[stream + 0x5]": is_input
+      "[stream + 0x8]": io_context
+      "[stream + 0x18]": cursor
+      "[stream + 0x1c]": buffer_start
+      FUN_08042e70: buffered_stream_tell
+      FUN_0805b804: backing stream seek (unported)
+      FUN_0805b834: backing stream write (unported)
+      FUN_08076b30: ft_buffered_stream_reset_buffer_cursor
+    notes: >-
+      Raw osos.dec decodes exactly 35 ARM words from 0x08042d68 through the
+      branch at 0x08042df0; 0x08042df4 begins the next function. Four direct
+      inbound calls are all plain bl (0x08042d34, 0x0804321c, 0x08043300,
+      0x0808cdc8); there are no predicated inbound BL calls. Input mode gets
+      the logical position, seeks the +8 I/O context, then resets the buffered
+      cursor. Output mode writes the positive signed cursor-buffer_start span,
+      maps a short successful write to -34, and resets even after a write
+      error. The unported write and seek calls are volatile host seams and
+      retailOS-address dispatches on target. match.py reports a structural
+      diff: LLVM emits indirect seam calls and different stack/control-flow
+      layout, while preserving the mode split, signed span test, error paths,
+      short-write mapping, and reset placement.
+
   # --- C++ red-black-tree left rotation ---
   - address: 0x083c5a5c
     ghidra: FUN_083c5a5c
