@@ -10449,6 +10449,22 @@ functions:
       List ops: list_pop_front 0x080f10b8, list_push_back 0x080f1158,
       list_remove 0x080f10ec.
 
+  - address: 0x0807f740
+    ghidra: FUN_0807f740
+    name: parse_hash_radix_i32
+    size: 72
+    sig: "i32 parse_hash_radix_i32(const u8 **cursor, const u8 *end)"
+    module: strto/hash_radix_i32
+    status: ported
+    notes: >-
+      Parses a signed decimal prefix, or `radix#signed-digits` when that
+      prefix is immediately followed by '#'. Valid hash radices are 2..36;
+      arithmetic wraps modulo 2^32 and the cursor stops at the first rejected
+      byte. Raw extent 0x0807f740..0x0807f788; four incoming plain bl calls,
+      no predicated bl calls. It calls the unnamed generic radix worker
+      0x08087490 once and tail-branches to it after '#'; the Rust port inlines
+      that worker because names.yaml has no confirmed semantic name for it.
+
   - address: 0x080ed9c8
     ghidra: FUN_080ed9c8
     name: condvar_bind
