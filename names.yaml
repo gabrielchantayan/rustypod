@@ -115573,3 +115573,39 @@ functions:
       structural review: LLVM may choose a different frame and branch shape,
       but must retain the nested check and conditional word-0 load. Reference
       C: decomp/c/003/08053bb8_FUN_08053bb8.c.
+
+  # --- HFS allocation-record preparation (blocked) ---
+  - address: 0x08053a98
+    ghidra: FUN_08053a98
+    name: hfs_allocation_record_prepare
+    size: 100
+    sig: "i32 hfs_allocation_record_prepare(HfsAllocationContext *context, u32 allocation_id, u32 *out_record)"
+    status: identified
+    renames:
+      param_1/r0/r4: context
+      param_2/r1: allocation_id
+      param_3/r2/r5: out_record
+      context_plus_0x04: allocator_receiver
+      context_plus_0x1c: record_size
+      context_plus_0x3c: allocation_method
+      context_plus_0x4c: allocation_count
+      out_record_deref: allocated_record
+      FUN_08044e24: external_record_initialize
+    notes: >-
+      Blocked from a faithful Rust port. Raw osos.dec words establish the
+      exact 100-byte extent 0x08053a98..0x08053afc: push {r4,r5,r6,lr} at
+      entry and the next independently linked body begins with cmp r0,#0 at
+      0x08053afc. Full-image ARM B/BL decoding finds four inbound direct
+      calls, all unconditional plain BL at 0x0803bcc4, 0x080411e0,
+      0x0804b640, and 0x08068350; there are zero predicated BL calls. The
+      body calls the runtime vtable slot context+0x3c as
+      (context+4, allocation_id, 8, out_record), returns its nonzero status
+      unchanged, otherwise increments context+0x4c, calls 0x08044e24 with
+      (*out_record, record_size), and writes u16 14 at
+      *out_record+record_size-2. Address 0x08044e24 is a branch veneer to
+      0x08037dc8, whose target is the undecompiled external 0x220002d4.
+      Its operation and ABI cannot be established from this image; in
+      particular the visible argument registers do not prove whether it is a
+      two-argument initializer or consumes the stale r2=8. The allocation
+      method is likewise runtime vtable data. A Rust replacement would have
+      to invent both callback contracts, so this entry remains identified.
