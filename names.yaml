@@ -100575,6 +100575,36 @@ functions:
       bits set, and surrounding-byte preservation. Deliberate deviations:
       none. match.py review is structural, not instruction-exact.
 
+  # --- XTEA counter big-endian writer ---
+  - address: 0x080b44a4
+    ghidra: FUN_080b44a4
+    name: xtea_store_u32_be
+    size: 40
+    sig: "void xtea_store_u32_be(u8 *destination, u32 value)"
+    module: util/xtea_store_u32_be
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: value
+      r2: byte
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte body from lsr r2,r1,#24 at
+      0x080b44a4 through bx lr at 0x080b44c8; the next real function begins at
+      0x080b44cc. It stores value as four big-endian bytes at destination
+      +0..+3 via four ordered strb instructions, accepting unaligned pointers
+      and adding no NULL or bounds guard. Decoding every aligned ARM B/BL
+      immediate in osos.dec finds exactly four inbound direct calls, all plain
+      unconditional bl at 0x08056e94, 0x08056eac, 0x08056f34, and 0x08056f40;
+      no predicated BL, tail branch, or aligned raw data-word reference targets
+      this entry. All calls are in XTEA transform FUN_08056e44, which
+      serializes successive counters and encrypted words before XORing its
+      eight-byte keystream into the caller buffer. The entry is byte-identical
+      to the separately linked 0x080b447c function, but has its own exported
+      symbol and text section so it remains a distinct hook target. Volatile
+      stores preserve the ordered byte writes under LLVM optimization. Host
+      tests cover byte order, values with high bits set, every valid alignment,
+      and surrounding-byte preservation. Deliberate deviations: none.
+
   # --- Runtime-global callback dispatch ---
   - address: 0x080b1a28
     ghidra: FUN_080b1a28
