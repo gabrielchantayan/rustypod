@@ -7687,6 +7687,37 @@ functions:
       same r0/r1 swap into __aeabi_memmove; LLVM uses a framed non-tail
       `bl __aeabi_memmove` where the original tail-branches the veneer.
 
+  - address: 0x0805d170
+    ghidra: FUN_0805d170
+    name: memh_buffer_create
+    size: 100
+    sig: "MemhBufferHeader *memh_buffer_create(u32 size)"
+    module: heap/memh_buffer_create
+    status: ported
+    renames:
+      param_1/r0/r5: size
+      piVar1/r4: header
+      iVar2/r0: payload
+      DAT_0805d1d0: MEMH_MAGIC
+      FUN_080eb67c: malloc_wrapper
+      FUN_0807b254: calloc_wrapper
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Raw osos.dec establishes a 96-byte instruction body at
+      0x0805d170..0x0805d1d0 plus the required 0x4d656d48 ("MemH") literal
+      at 0x0805d1d0; 0x0805d1d4 begins the separate malloc_tag4 veneer, so
+      the true extent is 100 bytes. It allocates a 16-byte header through
+      malloc_wrapper(16, 4), then a zeroed size-byte payload through
+      calloc_wrapper(size, 4). It writes {payload, "MemH", size, size} on
+      success; header failure returns NULL, while payload failure releases
+      the header through free_wrapper(header, 4) then returns NULL. Decoding
+      every aligned ARM branch word independently finds four inbound plain bl
+      call sites (0x0805a500, 0x0805b680, 0x0805d258, 0x080d2ce4), zero
+      predicated bl call sites, and three plain outgoing bl instructions
+      (allocator, zeroing allocator, free), with no predicated bl. The Rust
+      port directly calls all three already ported wrappers; this replaces
+      retail direct BL instructions with the wrappers' documented HEAP_OPS
+      dispatch and is the only deliberate deviation.
   - address: 0x0805d1dc
     ghidra: FUN_0805d1dc
     name: calloc_tag4
