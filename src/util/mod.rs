@@ -55,6 +55,7 @@ pub mod empty_destructor_08057164;
 pub mod error_latch;
 pub mod video_engine_property_slot;
 pub mod cursor_read_be_bytes;
+pub mod dispatch_if_optional_link_valid;
 pub mod drive;
 pub mod digest_byte_count_add;
 pub mod fixed;
