@@ -410,6 +410,33 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
 
+/// allocate_three_word_with_cleared_last_initial — original: `FUN_080b3dd4`
+/// @ 0x080b3dd4 (24 bytes; one plain direct `bl` in its body; four plain
+/// inbound `bl` calls, none predicated).
+///
+/// Raw `osos.dec` words `e92d4010 e3a0000c eb07dbfc e3a01000 e5801008
+/// e8bd8010` establish the exact extent 0x080b3dd4..0x080b3deb: `push
+/// {r4,lr}; mov r0,#12; bl 0x082aadd4; mov r1,#0; str r1,[r0,#8]; pop
+/// {r4,pc}`. The following `push {r4,lr}` at 0x080b3dec begins
+/// [`allocate_byte_with_value_early`]. Raw A32 decoding finds the four
+/// inbound plain `bl` at 0x081c2758, 0x081c2f88, 0x081c3688, and
+/// 0x081c4484; no predicated `bl` targets this entry. Allocates 12 bytes
+/// through tag-2 [`operator_new`], clears only its last word, and returns the
+/// allocation.
+///
+/// Deliberate deviation: Rust calls the existing [`operator_new`] seam rather
+/// than the direct retailOS BL. Like retailOS, no NULL guard precedes the word
+/// store, so allocation failure faults. A target-only section keeps this
+/// separately linked target distinct from its structurally identical siblings.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_three_word_with_cleared_last_initial")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_three_word_with_cleared_last_initial() -> *mut u8 {
+    let allocation = operator_new(12);
+    core::ptr::write(allocation.add(8).cast::<u32>(), 0);
+    allocation
+}
+
 /// allocate_byte_with_value_early — original: `FUN_080b3dec` @ 0x080b3dec
 /// (24 bytes; one plain direct `bl` in its body, none predicated).
 ///
@@ -1462,6 +1489,23 @@ pub(crate) mod tests {
             assert_eq!(p, BLOCK_A as *mut u8);
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(LAST_ALLOC_SIZE, 24);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_three_word_with_cleared_last_initial_preserves_the_first_two_words() {
+        let _lock = mock_heap();
+        let mut storage = [0xA5u8; 12];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            let allocation = allocate_three_word_with_cleared_last_initial();
+
+            assert_eq!(allocation, storage.as_mut_ptr());
+            assert_eq!(storage[..8], [0xA5; 8]);
+            assert_eq!(storage[8..], [0; 4]);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 12);
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }

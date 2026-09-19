@@ -17340,6 +17340,30 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3dd4
+    ghidra: FUN_080b3dd4
+    name: allocate_three_word_with_cleared_last_initial
+    size: 24
+    sig: "void *allocate_three_word_with_cleared_last_initial(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation
+      r1: zero
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec words e92d4010 e3a0000c eb07dbfc e3a01000 e5801008
+      e8bd8010 establish the exact 24-byte extent 0x080b3dd4..0x080b3deb:
+      `push {r4,lr}; mov r0,#12; bl 0x082aadd4; mov r1,#0; str r1,[r0,#8];
+      pop {r4,pc}`. The next real function begins at 0x080b3dec with
+      `push {r4,lr}`. Complete raw A32 branch decoding finds four inbound
+      direct calls at 0x081c2758, 0x081c2f88, 0x081c3688, and 0x081c4484,
+      all plain unconditional BL forms; no predicated BL calls target this
+      entry. The body has one plain BL, to tag-2 operator_new @ 0x082aadd4.
+      It allocates 12 bytes then clears only word +8, preserving the first
+      eight allocation bytes. Deliberate deviation: Rust calls the existing
+      operator_new seam instead of the direct retailOS BL; no NULL guard is
+      added, so allocation failure faults on the word store as in retailOS.
   - address: 0x080b3dec
     ghidra: FUN_080b3dec
     name: allocate_byte_with_value_early
