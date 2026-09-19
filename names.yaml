@@ -112742,6 +112742,32 @@ functions:
       zero. The callback-table interface has no verified public identity, so
       the port deliberately retains its target-word representation.
 
+  - address: 0x080d7360
+    ghidra: FUN_080d7360
+    name: ata_fast_io_write
+    size: 72
+    sig: "u32 ata_fast_io_write(u32 operation, u32 argument)"
+    module: drivers/ata_fast_io_write
+    status: ported
+    renames:
+      param_1/r0: operation
+      param_2/r1: argument
+      DAT_080d73a8: ata_fast_io_config
+      DAT_080d73ac: ata_fast_io_command
+      FUN_08077490: ata_fast_io_submit
+      FUN_082bd4a8: debug_printf
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte body from 0x080d7360 through
+      pop {r4,pc} at 0x080d73a4; the next separately linked body begins at
+      0x080d73d0 after configuration and diagnostic literals. Decoding every
+      instruction finds two plain internal BLs (0x080d7388 and 0x080d739c) and
+      zero predicated internal BLs. The four inbound calls are plain BLs at
+      0x08074f10, 0x080a96fc, 0x080a9708, and 0x080a9720. It packs the
+      runtime configuration's +0x0c word, operation, argument, and bit 15,
+      submits the fixed 0x000400a7 command with a NULL status pointer and the
+      +0x14 deadline, then reports the stock failure string or returns one.
+      The runtime configuration is stale in osos.dec, so the host port uses a
+      target-width static and seams for the two verified but unported calls.
   - address: 0x080d7610
     ghidra: FUN_080d7610
     name: choice_state_prune_duplicate_tail
