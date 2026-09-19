@@ -39,6 +39,7 @@ pub mod no_op_u32;
 pub mod resource_slots_release;
 pub mod random;
 pub mod rtc_seeded_random_word;
+pub mod rtc_seeded_random_service;
 pub mod rt_div;
 pub mod setjmp;
 pub mod shutdown_chain;
