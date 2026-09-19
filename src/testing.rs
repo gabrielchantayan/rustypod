@@ -92,6 +92,9 @@ pub mod hints {
     // status-source fixtures; mappings never unmap, so neither port shares it.
     pub const ATA_COMMAND_EXECUTE: usize = 0x6400_0000;
     pub const ATA_COMMAND_SUBMIT_WAIT: usize = 0x6500_0000;
+    // 0x6900_0000: dedicated to drivers/ata_command_prepare's target-width
+    // ATA status-source fixture; mappings never unmap.
+    pub const ATA_COMMAND_PREPARE: usize = 0x6900_0000;
     // 0x6700_0000: dedicated to drivers/ata_command_wait_idle's paired
     // target-width command-global and controller-state fixtures.
     pub const ATA_COMMAND_WAIT_IDLE: usize = 0x6700_0000;

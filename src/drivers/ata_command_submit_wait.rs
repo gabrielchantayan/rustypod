@@ -19,14 +19,12 @@
 //! and execute with a 5000-ms timeout. Only execution status 3 is success;
 //! all other execution statuses map to `0x59`.
 //!
-//! The fixed-address preparation `0x080b1ae8` still uses a literal veneer and
-//! volatile host callback seam. Task-file programming `0x0836c6c8`,
-//! operation-state selection `0x0836ce80`, and execution `0x080d7b7c` are
-//! direct Rust ports. This preparation veneer is the only deliberate
-//! code-generation deviation; behavior and call order are retained.
+//! The preparation, task-file programming, operation-state selection, and
+//! execution stages are direct Rust ports; no deliberate deviations remain.
 
 use core::ptr;
 use crate::drivers::ata_command_execute::{ata_command_execute, AtaCommandDevice};
+use crate::drivers::ata_command_prepare::ata_command_prepare;
 use crate::drivers::ata_operation_state_set::ata_operation_state_set;
 use crate::drivers::ata_taskfile_program::ata_taskfile_program;
 
@@ -38,20 +36,6 @@ pub const ATA_EXECUTION_COMPLETE: u32 = 3;
 pub const ATA_COMMAND_TIMEOUT_MS: u32 = 5_000;
 
 
-pub type AtaCommandPrepare = unsafe extern "C" fn(device: *mut AtaCommandDevice) -> u32;
-
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_prepare(_device: *mut AtaCommandDevice) -> u32 {
-    0
-}
-
-#[cfg(not(target_arch = "arm"))]
-
-
-
-/// Host-only seam for the stock preparation function at `0x080b1ae8`.
-#[cfg(not(target_arch = "arm"))]
-pub static mut ATA_COMMAND_PREPARE: AtaCommandPrepare = missing_prepare;
 
 /// Host replacement for ATA MMIO `0x38700000..0x38700013`.
 #[cfg(not(target_os = "none"))]
@@ -70,37 +54,6 @@ fn ata_command_mmio_word() -> *mut u32 {
     }
 }
 
-#[cfg(target_arch = "arm")]
-extern "C" {
-    fn retail_ata_command_prepare(device: *mut AtaCommandDevice) -> u32;
-}
-
-#[cfg(not(target_arch = "arm"))]
-unsafe fn retail_ata_command_prepare(device: *mut AtaCommandDevice) -> u32 {
-    ptr::read_volatile(ptr::addr_of!(ATA_COMMAND_PREPARE))(device)
-}
-
-
-
-
-// The original's PC-relative calls cannot reach from the patch payload.
-#[cfg(target_arch = "arm")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .text
-    .p2align 2
-    .globl retail_ata_command_prepare
-    .type retail_ata_command_prepare, %function
-retail_ata_command_prepare:
-    ldr     pc, [pc, #-4]
-    .word   0x080b1ae8
-    .size retail_ata_command_prepare, . - retail_ata_command_prepare
-
-
-
-"#
-);
 
 /// ata_command_submit_wait — original: `FUN_0836be8c` @ `0x0836be8c`
 /// (156-byte raw extent: 144 instruction bytes plus a 12-byte literal pool).
@@ -128,7 +81,7 @@ pub unsafe extern "C" fn ata_command_submit_wait(
         return ATA_DEVICE_NOT_READY;
     }
 
-    let preparation = retail_ata_command_prepare(device);
+    let preparation = ata_command_prepare(device);
     if preparation != 0 {
         return preparation;
     }
@@ -177,14 +130,7 @@ mod tests {
     };
     static mut COMMAND: [u8; 12] = [0; 12];
     static mut CALL_LOG: Vec<&'static str> = Vec::new();
-    static mut PREPARE_RESULT: u32 = 0;
     static mut EXECUTE_STATUS: u32 = 0;
-
-    unsafe extern "C" fn record_prepare(device: *mut AtaCommandDevice) -> u32 {
-        assert_eq!(device, addr_of_mut!(DEVICE));
-        CALL_LOG.push("prepare");
-        PREPARE_RESULT
-    }
 
 
 
@@ -208,10 +154,8 @@ mod tests {
         };
         COMMAND = [0; 12];
         CALL_LOG.clear();
-        PREPARE_RESULT = 0;
         EXECUTE_STATUS = 0;
         ATA_COMMAND_MMIO_WORDS = [0, 0, 0, 0, 0xa5a5_5a5a];
-        ATA_COMMAND_PREPARE = record_prepare;
         ATA_STATUS_READ = record_status_read;
         Some(guard)
     }
@@ -231,25 +175,13 @@ mod tests {
     }
 
     #[test]
-    fn propagates_preparation_failure_without_later_stages() {
-        let Some(_guard) = (unsafe { arrange() }) else {
-            assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
-            return;
-        };
-        unsafe { PREPARE_RESULT = 0x58 };
-        assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0x58);
-        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare"]);
-        assert_eq!(unsafe { ATA_COMMAND_MMIO_WORDS[4] }, 0xa5a5_5a5a);
-    }
-
-    #[test]
     fn executes_after_taskfile_programming_and_maps_completion_status() {
         let Some(_guard) = (unsafe { arrange() }) else {
             assert!(note_missing_u32_fixture("drivers::ata_command_submit_wait"));
             return;
         };
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0);
-        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare", "execute"]);
+        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["execute", "execute"]);
         assert_eq!(unsafe { ATA_COMMAND_MMIO_WORDS[4] }, 0xa5a5_5a5a);
 
         unsafe {
@@ -257,7 +189,7 @@ mod tests {
             EXECUTE_STATUS = ATA_STATUS_ERROR;
         }
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, ATA_EXECUTION_FAILED);
-        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["prepare", "execute"]);
+        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["execute", "execute"]);
     }
 
 }
