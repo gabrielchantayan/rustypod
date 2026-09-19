@@ -410,6 +410,28 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
 
+/// allocate_three_word_with_cleared_last_early — original: `FUN_080b3e04`
+/// @ 0x080b3e04 (20 bytes; 4 unconditional `bl` call sites, none
+/// predicated).
+///
+/// Raw `osos.dec` words establish the true extent `0x080b3e04..0x080b3e17`:
+/// `push {r4,lr}; mov r0,#12; bl 0x082aadd4; mov r1,#0; str r1,[r0,#8];
+/// pop {r4,pc}`. The following `mov r0,#1; b 0x082aadd4` at 0x080b3e1c
+/// begins [`allocate_one_byte_early`]. Allocates 12 bytes through tag-2
+/// [`operator_new`], clears only its last word, and returns the allocation.
+///
+/// Deliberate deviation: Rust calls the existing [`operator_new`] seam
+/// rather than the direct retailOS BL. Like retailOS, no NULL guard precedes
+/// the word store, so allocation failure faults.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_three_word_with_cleared_last_early")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_three_word_with_cleared_last_early() -> *mut u8 {
+    let allocation = operator_new(12);
+    core::ptr::write(allocation.add(8).cast::<u32>(), 0);
+    allocation
+}
+
 /// allocate_one_byte_early — original: `FUN_080b3e1c` @ `0x080b3e1c`
 /// (8 bytes; 4 plain `bl` call sites, none predicated).
 ///
@@ -1416,6 +1438,23 @@ pub(crate) mod tests {
             assert_eq!(p, BLOCK_A as *mut u8);
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(LAST_ALLOC_SIZE, 24);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_three_word_with_cleared_last_early_preserves_the_first_two_words() {
+        let _lock = mock_heap();
+        let mut storage = [0xA5u8; 12];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            let allocation = allocate_three_word_with_cleared_last_early();
+
+            assert_eq!(allocation, storage.as_mut_ptr());
+            assert_eq!(storage[..8], [0xA5; 8]);
+            assert_eq!(storage[8..], [0; 4]);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 12);
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
