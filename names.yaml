@@ -14378,6 +14378,36 @@ functions:
       dirty value becomes 1 while the adjacent modeled context regions
       and status byte remain untouched.
 
+  # --- RTC context configuration-byte setter (time/rtc) ---
+  - address: 0x08067af4
+    ghidra: FUN_08067af4
+    name: rtc_context_set_configuration_byte
+    size: 44
+    sig: "u32 rtc_context_set_configuration_byte(RtcContextOwner *owner, u8 value)"
+    module: time/rtc
+    vars:
+      param_1: owner
+      param_2: value
+      iVar1: context
+    status: ported
+    notes: >-
+      Raw-binary extent is exactly 44 bytes: `stmdb sp!,{r4,lr}; ldr
+      r2,[r0,#0xf00]; ldrb r3,[r2,#0xb70]; cmp r3,r1; moveq r0,#0;
+      ldmiaeq sp!,{r4,pc}; strb r1,[r2,#0xb70]; ldr r0,[r0,#0xf00];
+      bl 0x0805e66c; mov r0,#1; ldmia sp!,{r4,pc}`. The next separately
+      linked function begins at 0x08067b20. Decoding every ARM B/BL word
+      in osos.dec found 4 inbound direct bl call sites, all unconditional
+      (0x08112f48, 0x08114fbc, 0x0816f794, 0x0817220c), and no predicated
+      bl call sites; the body has one unconditional bl to the ported
+      rtc_context_mark_dirty @ 0x0805e66c. It compares the nested RTC
+      context's +0xb70 byte with value, returns zero without writing when
+      equal, otherwise writes the full low byte, marks the context +0xb90
+      dirty, and returns one. The field's product role is unrecovered, so
+      its name is descriptive rather than speculative. Deviation: direct
+      Rust call to the already ported dirty marker replaces the retail bl.
+      Host test covers equal and changed byte values (including 0xff),
+      return values, dirty marking, and adjacent-byte preservation.
+
   # --- RTC context handle (time/rtc) ---
   - address: 0x08056124
     ghidra: FUN_08056124
