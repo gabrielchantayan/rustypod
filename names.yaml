@@ -13092,6 +13092,32 @@ functions:
       fixed-pool allocator FUN_0805de1c through FIXED_POOL_OPS; target builds
       dispatch to its stock address. Calls ported sequence_id_next directly.
 
+  - address: 0x0808e25c
+    ghidra: FUN_0808e25c
+    name: ui_operation_stop
+    size: 44
+    sig: "void ui_operation_stop(void *operation)"
+    module: ui/operation_stop
+    status: ported
+    callers:
+      0x0811f5e0: bl
+      0x0812c408: bl
+      0x082280f4: bl
+      0x08295ed4: bl
+    notes: >-
+      Raw extent is exactly 0x0808e25c..0x0808e288; the three following words
+      are the literal pool, and the next function's push begins at 0x0808e294.
+      It locks the UI-operation mutex at 0x089ca318, writes the literal
+      0x73746f70 ("stop") at operation +0x18, broadcasts the condition
+      variable at 0x08a1070c, then tail-branches to mutex_unlock. Decoding
+      every aligned A32 B/BL word in osos.dec finds four direct callers, all
+      unconditional bl (0x0811f5e0, 0x0812c408, 0x082280f4, 0x08295ed4), and
+      zero predicated BL forms. Its two direct BL calls are mutex_lock
+      (0x0807f5c4) and condvar_broadcast (0x0807f5cc); the unlock is the
+      final unconditional B to 0x0807f6a0. Host tests use typed local kernel
+      objects because host pointers are wider than the target's four-byte
+      fields; target builds use the verified firmware globals.
+
   # --- Batch: RTXC kernel-object layer (opcode-2 objects, task objects,
   # --- message-queue nodes) ---
   - address: 0x0805675c

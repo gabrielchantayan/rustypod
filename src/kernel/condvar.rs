@@ -308,6 +308,7 @@ unsafe fn list_remove(list: *mut ListHead, node: *mut ListNode) {
 /// wake order). Does not touch the caller's mutex; the original is called
 /// with the surrounding lock already held.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn condvar_broadcast(condvar: *mut CondVar) {
     let h = hooks();
     loop {
