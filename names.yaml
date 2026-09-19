@@ -113581,3 +113581,40 @@ functions:
       for a non-null context, discards that routine's result, and returns
       zero. The callee has no verified semantic identity, so the target build
       uses a raw-address seam and host tests install a recording seam.
+
+  # --- ATA command mode preparation ---
+  - address: 0x080b1ae8
+    ghidra: FUN_080b1ae8
+    name: ata_command_prepare
+    size: 80
+    sig: "u32 ata_command_prepare(AtaCommandDevice *device)"
+    module: drivers/ata_command_prepare
+    status: ported
+    renames:
+      param_1/r0: device
+      "device+0x0c": current_mode
+      "device+0x3c": status_source
+      "device+0x4c": cached_mode
+      DAT_080b1b38: ATA_COMMAND_PREPARE_TIMEOUT_MS
+      FUN_080d7b7c: ata_command_execute
+      FUN_080c4ba8: ata_pio_write_byte
+    notes: >-
+      Raw osos.dec establishes the 80-byte instruction body at
+      0x080b1ae8..0x080b1b37. Its 5000-ms literal is at 0x080b1b38 and the
+      next independently linked function begins at 0x080b1b3c. Whole-image
+      A32 branch decoding finds four inbound direct calls, all unconditional
+      plain bl at 0x0836bec8, 0x0836c088, 0x0836c530, and 0x0836cf00; there
+      are zero predicated inbound forms. The body has two unconditional direct
+      bl calls. It loads cached_mode and current_mode as halfwords. Unless the
+      cached mode is one, it calls the already-ported ata_command_execute with
+      5000 ms and maps only its timeout result one to 0x58. A changed mode is
+      written through the already-ported ata_pio_write_byte to status_source
+      plus 0x18 using only its low byte, then stored as a full halfword in the
+      cache. The existing AtaCommandDevice target-width layout preserves all
+      observed offsets. Deliberate deviation: r2 and r3 are passed as zero to
+      ata_command_execute because raw code leaves them unconstrained, its r2
+      argument is unused, and its status reader overwrites the r3-derived word
+      before inspection. Host tests cover changed-mode execution, low-byte PIO
+      output, halfword cache update, and the cached-mode-one no-execute/no-write
+      gate. match.py reports the same two-stage execution/PIO structure, with
+      expected extra register preservation and direct Rust call layout.
