@@ -117459,3 +117459,28 @@ functions:
       addresses and host builds expose volatile typed seams. Host tests sort
       both below-threshold and 180-byte ranges through deterministic leaf and
       merge replacements.
+
+  - address: 0x083e94b8
+    ghidra: FUN_083e94b8
+    name: vector_copy_range_pair_u32
+    size: 44
+    sig: "u32 (*vector_copy_range_pair_u32(const u32 (*first)[2], const u32 (*last)[2], u32 (*output)[2]))[2]"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      return/r0: output_end
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte extent
+      0x083e94b8..0x083e94e4: push {lr} at the entry, a branch to the compare
+      header, a predicated two-word forward-copy loop, and pop {pc}; the next
+      independently linked function begins at 0x083e94e4. Whole-image A32
+      decoding finds three inbound direct calls, all unconditional plain BL
+      instructions, and no predicated BL calls. The function copies aligned
+      eight-byte pairs in [first,last) forward when output is non-NULL,
+      otherwise advances the output cursor without reading first, then returns
+      the advanced output cursor. Ghidra's pointer signature and range-copy
+      body agree with the raw code. match.py reports the same loop structure;
+      LLVM adds an equivalent empty-range early-out and frame pointer.
