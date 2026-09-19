@@ -12,6 +12,9 @@ pub const METADATA_U16_B1C_OFFSET: usize = 0xb1c;
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B89_OFFSET: usize = 0xb89;
+/// Byte offset of this byte in the metadata block.
+pub const METADATA_BYTE_B70_OFFSET: usize = 0xb70;
+
 /// Byte offset of this unsigned word in the metadata block.
 pub const METADATA_WORD_B74_OFFSET: usize = 0xb74;
 
@@ -76,6 +79,30 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
     (metadata.add(METADATA_BYTE_B89_OFFSET) as *const u8).read() as u32
 }
 
+/// ft_service_metadata_byte_at_b70 — original: `FUN_08054fb0` @ `0x08054fb0`
+/// (12 bytes; four unconditional `bl` call sites, zero predicated `bl` call
+/// sites, binary-scanned).
+///
+/// Raw `osos.dec` words establish the complete function: `ldr r0,[r0,#0xf00]`
+/// at 0x08054fb0, `ldrb r0,[r0,#0xb70]` at 0x08054fb4, and `bx lr` at
+/// 0x08054fb8. The next separately linked function begins at 0x08054fbc.
+/// This loads the metadata pointer word at `service_context + 0xf00`, then
+/// returns its unsigned byte at `metadata + 0xb70`; `ldrb` zero-extends into
+/// `r0`. The concrete layouts and ownership are not recovered, so this
+/// deliberately retains raw dereferences with no NULL or bounds checks.
+///
+/// Deliberate deviations: none. Direct ARM call sites are 0x08112f30,
+/// 0x08172300, 0x081734dc, and 0x081734f0.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_byte_at_b70(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(METADATA_BYTE_B70_OFFSET) as *const u8).read() as u32
+}
+
+
 /// ft_service_metadata_pointer — original: `FUN_080512c4` @ `0x080512c4`
 /// (8 bytes).
 ///
@@ -127,6 +154,9 @@ mod tests {
         METADATA_BYTE_B89_OFFSET,
         ft_service_metadata_word_at_b74,
         METADATA_WORD_B74_OFFSET,
+        ft_service_metadata_byte_at_b70,
+        METADATA_BYTE_B70_OFFSET,
+
     };
 
     #[repr(C)]
@@ -144,6 +174,10 @@ mod tests {
 
     #[repr(align(4))]
     struct MetadataByteB89Fixture([u8; METADATA_BYTE_B89_OFFSET + 1]);
+
+    #[repr(align(4))]
+    struct MetadataByteB70Fixture([u8; METADATA_BYTE_B70_OFFSET + 1]);
+
 
     #[repr(align(4))]
     struct MetadataWordB74Fixture([u8; METADATA_WORD_B74_OFFSET + 4]);
@@ -234,6 +268,42 @@ mod tests {
         assert_eq!(
             unsafe {
                 ft_service_metadata_byte_at_b50(
+                    (&service_context as *const ServiceContextFixture).cast(),
+                )
+            },
+            0x83,
+            "the raw load needs exactly the recovered one byte",
+        );
+    }
+    #[test]
+    fn reads_the_unsigned_byte_at_b70_with_arm_zero_extension() {
+        let mut metadata = MetadataByteB70Fixture([0; METADATA_BYTE_B70_OFFSET + 1]);
+        metadata.0[METADATA_BYTE_B70_OFFSET] = 0xff;
+        let service_context = ServiceContextFixture {
+            before_metadata: [0x5a; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.0.as_ptr(),
+        };
+
+        let result = unsafe {
+            ft_service_metadata_byte_at_b70(
+                (&service_context as *const ServiceContextFixture).cast(),
+            )
+        };
+        assert_eq!(result, 0x0000_00ff, "ldrb zero-extends into r0");
+    }
+
+    #[test]
+    fn reads_the_final_byte_of_the_minimal_b70_metadata_prefix() {
+        let mut metadata = MetadataByteB70Fixture([0; METADATA_BYTE_B70_OFFSET + 1]);
+        metadata.0[METADATA_BYTE_B70_OFFSET] = 0x83;
+        let service_context = ServiceContextFixture {
+            before_metadata: [0; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.0.as_ptr(),
+        };
+
+        assert_eq!(
+            unsafe {
+                ft_service_metadata_byte_at_b70(
                     (&service_context as *const ServiceContextFixture).cast(),
                 )
             },
