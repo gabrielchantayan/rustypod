@@ -113314,6 +113314,31 @@ functions:
       the controller byte overwrites the intermediate source byte. match.py
       reports exit 1 with the expected stack frame and host-independent MMIO
       materialization structural diff; the ARM release library builds.
+  - address: 0x080b3e6c
+    ghidra: FUN_080b3e6c
+    name: allocate_four_word_with_cleared_last
+    size: 24
+    sig: "void *allocate_four_word_with_cleared_last(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte extent
+      0x080b3e6c..0x080b3e83: push {r4,lr}; mov r0,#16; bl operator_new;
+      mov r1,#0; str r1,[r0,#12]; pop {r4,pc}. The next separately linked
+      function starts at 0x080b3e84 with `mov r0,#1; b 0x082aadd4`.
+      Decoding every aligned ARM B/BL immediate word targeting this address
+      finds four incoming direct calls, all plain BL, and no predicated BL
+      forms. The body has one unconditional BL, to the already-ported tag-2
+      operator_new, allocates exactly four words, clears only its final word,
+      and returns the allocation; it has no NULL guard, so allocation failure
+      faults on the store. Deliberate deviation: the direct retailOS allocator
+      call is the existing operator_new seam. Host test verifies the exact
+      tag-2 16-byte request, returned pointer, preserved first three words,
+      and zeroed final word. match.py structural review should retain the
+      allocation/store/return skeleton; expected differences are Rust's
+      ordinary call through the allocator seam rather than the retailOS BL.
   - address: 0x080b3ec0
     ghidra: FUN_080b3ec0
     name: context_finalize_if_present
