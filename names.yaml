@@ -117296,3 +117296,22 @@ functions:
       this port deliberately retains it as a named retail tail-call seam;
       target builds use the same literal-PC transfer and host tests replace
       that fixed target with a callback.
+  - address: 0x080035d0
+    ghidra: thunk_FUN_080cc22c
+    name: tail_call_retail_080cc22c
+    size: 8
+    sig: "u32 tail_call_retail_080cc22c(void *object)"
+    module: runtime/opaque_tail_dispatch_veneer
+    status: ported
+    renames:
+      DAT_080035d4: retail_080cc22c
+      param_1/r0: object
+    notes: >-
+      Raw osos.dec words establish the exact eight-byte literal veneer:
+      e51ff004 (ldr pc, [pc, #-4]) at 0x080035d0 and target 0x080cc22c at
+      0x080035d4; the next distinct veneer begins at 0x080035d8. Independent
+      raw ARM branch decoding finds four inbound plain unconditional BL sites
+      (0x08002fb0, 0x08003054, 0x080046a8, 0x08005e34) and no predicated BL
+      sites. The target has no verified semantic identity, so the port retains
+      an address-named literal tail-call seam: ARM builds emit the exact
+      instruction/literal pair and host tests replace the target callback.
