@@ -642,6 +642,9 @@ pub mod hints {
     // head and node fixture; mappings never unmap, so no other user may share
     // this hint.
     pub const SINGLY_LINKED_LIST_REMOVE: usize = 0xee30_0000;
+    // 0xee40_0000: dedicated to util/dynamic_array_remove's raw-u32 backing
+    // storage fixture; mappings never unmap, so no other user may share it.
+    pub const DYNAMIC_ARRAY_REMOVE: usize = 0xee40_0000;
     // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
     // root/context fixture; mappings never unmap, so no other user may share it.
     pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;
