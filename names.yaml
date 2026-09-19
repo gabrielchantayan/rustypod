@@ -14460,6 +14460,32 @@ functions:
       +0x1a90, mla 365, 0x99, -0x7d2d, 0xe10, mvnne #4); the original's
       two bl calls become one blx through the slot.
 
+  # --- Unix time builder (time/rtc) ---
+  - address: 0x0806e3dc
+    ghidra: FUN_0806e3dc
+    name: build_unix_time
+    size: 148
+    sig: "i32 build_unix_time(u32 *primary_out, u32 *fallback_out, u32 seed_lo, u32 seed_hi)"
+    module: time/rtc
+    vars: {param_1: primary_out, param_2: fallback_out, param_3: seed_lo, param_4: seed_hi, iVar2: rtc_day_offset, iVar3: unix_seconds}
+    status: ported
+    notes: >-
+      Builds a signed Unix-seconds pair from the wall-clock `(days,
+      seconds-of-day)` output: `(days - 2440588) * 675 * 128 + seconds`,
+      with each operation wrapping at 32 bits; `mov r1,r0,asr #31` writes
+      the sign-extension word. Raw 0x0806e3dc-0x0806e46f confirms the
+      148-byte extent through `ldmia sp!,{r2,r3,r4,r5,r6,r7,r8,pc}` at
+      0x0806e46c; 0x0806e470 onward is its literal pool, and the next
+      real function starts at 0x0806e488. It has exactly 2 plain `bl`
+      calls (0x0806e400 rtc_read_time and 0x0806e444
+      rtc_static_time_pair), no predicated `bl`, and 4 direct callers.
+      A non-null primary failure returns -42171 (literal 0xffff5b45) and
+      skips fallback; otherwise a non-null fallback is independently
+      generated from FUN_08056130's static pair. ABI: outputs are
+      writable adjacent u32 word pairs; r2/r3 seed rtc_read_time's
+      scratch buffer. Port deviation: host uses u32-word pointers rather
+      than an i64 pointer so the target's 4-byte field offsets survive
+      native 64-bit pointer layout.
   # --- RTC context status (time/rtc) ---
   - address: 0x08056198
     ghidra: FUN_08056198
