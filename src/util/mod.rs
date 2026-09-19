@@ -53,6 +53,7 @@ pub mod encoded_integer_value;
 pub mod encoded_word_block_shift;
 pub mod error_latch;
 pub mod video_engine_property_slot;
+pub mod cursor_read_be_bytes;
 pub mod drive;
 pub mod digest_byte_count_add;
 pub mod fixed;

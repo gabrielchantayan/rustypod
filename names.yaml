@@ -114045,3 +114045,31 @@ functions:
       forwarding, path-object vtable identity, guard/dispatch/destruction
       ordering, storage destruction, and preservation of an untouched
       flag_out by a recording opaque slot.
+
+  # --- variable-width big-endian cursor reader ---
+  - address: 0x08087fe0
+    ghidra: FUN_08087fe0
+    name: cursor_read_be_bytes
+    size: 44
+    sig: "u32 cursor_read_be_bytes(const u8 **cursor, u32 count)"
+    module: util/cursor_read_be_bytes
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: count
+      pbVar1/r2: byte_cursor
+      uVar2/r3: value
+    notes: >-
+      Raw ARM establishes the exact 44-byte extent
+      0x08087fe0..0x0808800c: `ldr r2,[r0]; mov r3,#0; cmp r1,#0;
+      ldrbne r12,[r2],#1; subne r1,r1,#1; andne r1,r1,#0xff; orrne
+      r3,r12,r3,lsl #8; bne 0x08087fe8; str r2,[r0]; mov r0,r3; bx lr`.
+      The next separately entered function starts at 0x0808800c. Raw ARM
+      branch decoding finds exactly four inbound direct BL instructions, all
+      plain unconditional `bl` and no predicated forms: 0x080885f4,
+      0x082c3314, 0x082c3328, and 0x082c334c. It reads from the caller-owned
+      byte cursor, accumulates bytes big-endian, and writes back the advanced
+      cursor. The conditional decrement masks only the new count's low byte:
+      zero consumes nothing, 1..=256 consume that many bytes, and larger
+      counts consume one byte then wrap within 1..=256. No NULL or bounds
+      guard; no deliberate deviations.
