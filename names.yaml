@@ -113900,3 +113900,29 @@ functions:
       are all present; otherwise it returns base + layout[5] with ARM u32
       wrapping. Deliberate deviation: Rust models firmware pointer fields as
       u32 words, and host tests map low-address fixture slabs.
+  - address: 0x08090b70
+    ghidra: FUN_08090b70
+    name: global_slot_release
+    size: 20
+    sig: "u32 global_slot_release(u32 slot_index)"
+    module: util/global_slot_release
+    status: ported
+    renames:
+      param_1/r0/r4: slot_index
+      FUN_0814a08c: global_slot_table_get_unported
+      FUN_08149fa0: global_slot_release_impl_unported
+    notes: >-
+      Raw osos.dec establishes the true 20-byte extent: push {r4,lr} at
+      0x08090b70 through the tail B 0x08149fa0 at 0x08090b84; the independent
+      next function starts at 0x08090b88. Ghidra's 168-byte body crosses that
+      boundary. The wrapper has one unconditional internal BL, at 0x08090b78
+      to the unported global slot-table getter 0x0814a08c, and no predicated
+      internal BLs. Whole-image A32 decoding finds four inbound unconditional
+      BL calls at 0x0813a418, 0x0813a798, 0x0813aadc, and 0x0813ab54, with no
+      predicated inbound BL calls. It preserves slot_index over the getter
+      then tail-transfers the table and index to 0x08149fa0, which returns 2
+      for an invalid slot, 18 for an active slot, and 0 after releasing it.
+      The ARM port uses literal veneers for the two unported retail targets;
+      host tests replace them with recording seams. Deliberate deviation:
+      literal veneers replace the original PC-relative BL/B because relocated
+      payload code cannot encode those original displacements.
