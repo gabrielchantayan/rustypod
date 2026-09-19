@@ -248,6 +248,22 @@ pub unsafe extern "C" fn mutex_lock_veneer(mutex: *mut Mutex) {
     mutex_lock(mutex);
 }
 
+/// mutex_lock_veneer_d7104 — original: `thunk_FUN_0807f5c4` @ 0x080d7104
+/// (4 bytes; zero direct `bl` call sites, zero predicated `bl` call sites).
+///
+/// Raw `osos.dec` establishes the complete one-word body
+/// `b 0x0807f5c4` (`0xeafea12e`); 0x080d7108 starts the distinct
+/// `mutex_delete` veneer. This is a tail-branch veneer to [`mutex_lock`]:
+/// it forwards `mutex` unchanged, preserving the target's cell and
+/// zero-handle guards. Deliberate deviation: Rust expresses the tail branch
+/// as a normal call so this separately hookable entry remains a real symbol.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.mutex_lock_veneer_d7104")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_lock_veneer_d7104(mutex: *mut Mutex) {
+    mutex_lock(mutex);
+}
+
 
 /// mutex_unlock — original: `FUN_0807f6a0` @ 0x0807f6a0 (8 bytes), with
 /// the guard thunk @ 0x8056710 inlined. The mutexes are non-recursive
@@ -840,6 +856,33 @@ mod tests {
             mutex_lock_veneer(&mut zero_handle);
         }
         assert_eq!(calls(), vec![Call::Wait(0x3d)]);
+    }
+
+    /// The 0x080d7104 tail veneer forwards the live handle and retains the
+    /// canonical lock's NULL-cell and zero-handle guards.
+    #[test]
+    fn lock_veneer_d7104_delegates_to_mutex_lock() {
+        let _lock = mock_kernel();
+        let mut live_cell: u32 = 0x4d;
+        let mut live = Mutex {
+            sem_cell: &mut live_cell,
+            unused: 0,
+        };
+        let mut null_cell = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        let mut zero_handle_cell: u32 = 0;
+        let mut zero_handle = Mutex {
+            sem_cell: &mut zero_handle_cell,
+            unused: 0,
+        };
+        unsafe {
+            mutex_lock_veneer_d7104(&mut live);
+            mutex_lock_veneer_d7104(&mut null_cell);
+            mutex_lock_veneer_d7104(&mut zero_handle);
+        }
+        assert_eq!(calls(), vec![Call::Wait(0x4d)]);
     }
 
 
