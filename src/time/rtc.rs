@@ -160,6 +160,33 @@ pub unsafe extern "C" fn rtc_context_field() -> *mut u8 {
     unsafe { current_context().wrapping_add(RTC_CONTEXT_FIELD_OFFSET) }
 }
 
+/// rtc_context_mask_words — original: `FUN_08067e6c` @ 0x08067e6c (68 bytes;
+/// 3 verified direct `bl` call sites, all unconditional; 0 predicated).
+///
+/// Fetch the shared RTC context's opaque field, complement its second word,
+/// XOR that value and the fixed `0xa425_3891` mask into every complete word of
+/// `words`. The retail loop uses `byte_len >> 2`, so it leaves a final
+/// one-to-three-byte tail untouched and still fetches the context field when
+/// no complete words are requested. It neither checks pointers nor returns a
+/// value. Deliberate deviations: none.
+///
+/// # Safety
+/// `words` must be four-byte aligned and valid for reads and writes through
+/// `byte_len >> 2` complete `u32` words. The current RTC context must provide
+/// an aligned eight-byte field.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_mask_words(words: *mut u32, byte_len: u32) {
+    const FIXED_MASK: u32 = 0xa425_3891;
+
+    let context_word = unsafe { rtc_context_field().add(4).cast::<u32>().read_volatile() };
+    let mask = !context_word ^ FIXED_MASK;
+    for index in 0..(byte_len >> 2) {
+        let word = unsafe { words.add(index as usize) };
+        unsafe { word.write_volatile(word.read_volatile() ^ mask) };
+    }
+}
+
 /// rtc_static_time_pair — original: `FUN_08056130` @ 0x08056130 (28 bytes).
 ///
 /// Copy the firmware's read-only fallback `(day_count, seconds_of_day)` pair
@@ -697,6 +724,36 @@ mod tests {
         // The original only adds 0x38 after its getter call; a null
         // getter result becomes the non-null field address, without a load.
         assert_eq!(unsafe { rtc_context_field() as usize }, RTC_CONTEXT_FIELD_OFFSET);
+
+        drop(_reset);
+        drop(guard);
+    }
+
+    #[test]
+    fn rtc_context_mask_words_transforms_complete_words_and_ignores_byte_tails() {
+        const CONTEXT_WORD: u32 = 0x1b2c_3d4e;
+        const MASK: u32 = !CONTEXT_WORD ^ 0xa425_3891;
+
+        let mut context = [0u32; 24];
+        context[RTC_CONTEXT_FIELD_OFFSET / 4 + 1] = CONTEXT_WORD;
+        let guard = install_current_context(context.as_mut_ptr().cast());
+        let _reset = ContextSourceReset;
+
+        for byte_len in 0..48u32 {
+            let original = [
+                0x0000_0000, 0x1122_3344, 0x89ab_cdef, 0xffff_ffff, 0x55aa_aa55, 0xfeed_beef,
+                0x2468_ace0, 0x1357_9bdf, 0xc001_d00d, 0x7654_3210, 0xaaaa_5555, 0x1234_5678,
+            ];
+            let mut actual = original;
+            let mut expected = original;
+            for word in expected.iter_mut().take((byte_len >> 2) as usize) {
+                *word ^= MASK;
+            }
+
+            unsafe { rtc_context_mask_words(actual.as_mut_ptr(), byte_len) };
+
+            assert_eq!(actual, expected, "byte_len={byte_len}");
+        }
 
         drop(_reset);
         drop(guard);
