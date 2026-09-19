@@ -115770,3 +115770,37 @@ functions:
       two-argument initializer or consumes the stale r2=8. The allocation
       method is likewise runtime vtable data. A Rust replacement would have
       to invent both callback contracts, so this entry remains identified.
+
+  # --- Indexed ImageLibrary table entry lookup ---
+  - address: 0x080525b8
+    ghidra: FUN_080525b8
+    name: liti_indexed_entry_lookup
+    size: 64
+    sig: "u32 liti_indexed_entry_lookup(const u8 *object, u32 index)"
+    module: app/liti_indexed_entry_lookup
+    status: ported
+    renames:
+      param_1/r2: object
+      param_2/r3: index
+      param_1_plus_0x18: entry_count
+      param_1_plus_0x1c: entries
+      FUN_08057bb4: liti_field_class_check
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent at
+      0x080525b8..0x080525f4: the final pop {pc} is followed by the next
+      separately linked function's push {r4,r5,r6,lr} at 0x080525f8.
+      Full-image decoding of every aligned ARM B/BL-immediate word finds four
+      inbound direct calls, all unconditional plain bl at 0x08106d20,
+      0x08106d5c, 0x08106f74, and 0x08107038; no predicated bl forms occur.
+      It first calls liti_field_class_check(object). On success it compares
+      the target-width count at object+0x18 against index, then returns the
+      u32 table entry at *(object+0x1c) + index*4 only when the index is
+      strictly in range and the table pointer is non-NULL; every other path
+      returns zero. The enclosing object type and table-element identity are
+      not otherwise established, so the port uses field-offset and entry names
+      only. Host tests cover NULL, a valid nonzero table element, the exact
+      count boundary, a NULL table, and a non-'liti' object. match.py is a
+      structural review: modern LLVM may choose a different stack frame and
+      conditional-return form while retaining the guard, strict unsigned bound,
+      NULL table gate, and indexed word load. Deliberate deviations: none.
+      Reference C: decomp/c/003/080525b8_FUN_080525b8.c.

@@ -1384,6 +1384,10 @@ pub mod hints {
     // and class-target fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LITI_FIELD_CLASS_CHECK: usize = 0xa1c0_0000;
+    // 0xa1d0_0000: dedicated to app/liti_indexed_entry_lookup's raw-u32
+    // object, class-target, and table fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const LITI_INDEXED_ENTRY_LOOKUP: usize = 0xa1d0_0000;
     // 0x2b00_0000: dedicated to crypto/buffered_writer_write's raw-u32
     // handle and page-state fixture; mappings never unmap, so no other user
     // may share this hint.
