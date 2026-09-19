@@ -7784,6 +7784,27 @@ functions:
       shape already accepted for calloc_tag4 @ 0x0805d1dc and
       free_tag4 @ 0x0805d070.
 
+  - address: 0x0805d0cc
+    ghidra: FUN_0805d0cc
+    name: memh_get_len
+    size: 36
+    sig: "u32 memh_get_len(const MemhBufferHeader *header)"
+    module: heap/memh_get_len
+    vars: {param_1/r0: header}
+    status: ported
+    notes: >-
+      Raw osos.dec words confirm the 36-byte instruction body at
+      0x0805d0cc..0x0805d0ef: it returns the +0x0c length only for a
+      non-NULL header whose +0x04 word equals 0x4d656d48 ("MemH"), otherwise
+      zero. The following word at 0x0805d0f0 is that literal, not code, and
+      0x0805d0f4 starts the separate next function. Decoding every aligned
+      ARM BL word in osos.dec finds exactly four inbound plain bl calls
+      (0x0805d204, 0x080916e0, 0x0809bda8, 0x080d2418), no predicated bl
+      calls, and no tail branch. Rust shares MEMH_MAGIC with the existing
+      MemH ports instead of retaining the retail PC-relative literal load;
+      MemhBufferHeader's u32 fields preserve the target +0x04 and +0x0c
+      offsets on 64-bit host tests. Host tests cover NULL, bad magic, and a
+      valid maximum-range length.
   - address: 0x0805d1e4
     ghidra: FUN_0805d1e4
     name: memh_resize
