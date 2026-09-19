@@ -76372,6 +76372,33 @@ functions:
       accepted 0x083e5aec port - LLVM emits a frame-pointer push/pop around an
       instruction-identical body.
 
+  # --- byte-identical returning three-word clear ---
+  - address: 0x083e6e60
+    ghidra: FUN_083e6e60
+    name: three_word_clear_twelfth
+    size: 20
+    sig: "u32 *three_word_clear_twelfth(u32 *target)"
+    module: cxx/three_word_clear_twelfth
+    status: ported
+    renames:
+      param_1/r0: target
+      r1: zero
+      param_1_plus_0x00: first_word
+      param_1_plus_0x04: second_word
+      param_1_plus_0x08: third_word
+      return/r0: target
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: five ARM instructions
+      from mov r1,#0 at 0x083e6e60 through bx lr at 0x083e6e70; the separately
+      linked next function FUN_083e6e74 begins at 0x083e6e74. Decoding every
+      aligned ARM B/BL immediate in osos.dec finds exactly three inbound direct
+      calls, all unconditional plain bl at 0x0816f370, 0x0816f488, and
+      0x0816f544; there are no predicated calls. The function stores zero as
+      32-bit words at target+0, +4, and +8, preserves r0, and returns it.
+      Ghidra declares void, but all three callers consume that preserved target,
+      so Rust returns target; no other behavioral deviations. Dedicated link
+      section prevents identical-code folding. Reference C:
+      decomp/c/038/083e6e60_FUN_083e6e60.c; disassembly: osos.dec 0x083e6e60.
   - address: 0x083e717c
     ghidra: FUN_083e717c
     name: trivial_vector8_destruct
