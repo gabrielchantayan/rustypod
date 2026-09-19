@@ -73921,6 +73921,26 @@ functions:
       fixed nonzero offset flag and preserve negative and i32::MIN timestamps.
 
 
+  # --- opaque FreeType service-context metadata byte accessor ---
+  - address: 0x08054fb0
+    ghidra: FUN_08054fb0
+    name: ft_service_metadata_byte_at_b70
+    size: 12
+    sig: "u32 ft_service_metadata_byte_at_b70(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_first_ldr: metadata
+    notes: >-
+      Raw osos.dec words are `ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb70]; bx
+      lr`; the 12-byte body ends at 0x08054fbc, where the next separately
+      linked function begins. The first aligned load obtains the opaque
+      metadata pointer at service_context+0xf00 and ldrb returns the
+      zero-extended byte at metadata+0xb70 with no NULL or bounds checks.
+      Raw ARM decoding finds four unconditional plain bl callers at
+      0x08112f30, 0x08172300, 0x081734dc, and 0x081734f0; zero predicated bl
+      callers. Ghidra identifies the same dereference but misses two callers.
   # --- opaque FreeType service-context metadata word accessor ---
   - address: 0x08054ffc
     ghidra: FUN_08054ffc
