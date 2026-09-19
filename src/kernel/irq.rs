@@ -328,6 +328,7 @@ unsafe fn vic_vector_init() {
 /// 0x22008c70 is set, calls the IRQ_ENTER RTXC service through the hook
 /// table; if that claims the anchor, runs the one-time VIC/table init and
 /// the IRQ_REGISTER / IRQ_FINISH services.
+#[inline(never)]
 unsafe fn rtxc_irq_enter() {
     if bus_read32(ROM_IRQ_FLAG) & 1 != 0 {
         return;
@@ -343,6 +344,27 @@ unsafe fn rtxc_irq_enter() {
         RTXC_REGISTER_OBJ_B,
     );
     veneer_call(hook_table::IRQ_FINISH, ROM_IRQ_FLAG, 0, 0);
+}
+
+/// rtxc_irq_enter_veneer — retailOS veneer @ 0x08038090 (8 bytes, including
+/// its literal target word) -> IRAM 0x22004d7c.
+///
+/// Decoded raw words are `ldr pc, [pc, #-4]` / `0x22004d7c`; the next veneer
+/// starts at 0x08038098. Four direct callers use unconditional `bl`, with no
+/// predicated `bl` forms. The IRAM target runs the RTXC IRQ-entry bookkeeping,
+/// then returns the IRQ dispatch-table base in r0.
+///
+///
+/// `rtxc_irq_enter` is `#[inline(never)]` so this exported hook remains a
+/// separate call target instead of absorbing the established target port.
+/// Deliberate deviation: call the established Rust target rather than jumping
+/// into IRAM. Its table is Rust BSS, so return that table's address rather
+/// than the retailOS ROM-SRAM address 0x22010200.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtxc_irq_enter_veneer() -> *mut u8 {
+    rtxc_irq_enter();
+    addr_of_mut!(IRQ_TABLE).cast()
 }
 
 /// vic_dispatch — original: `FUN_08004dfc` @ 0x08004dfc (0x64 bytes).
@@ -788,6 +810,32 @@ mod tests {
         let _f = Fixture::new(); // fixture leaves flag = 1
         unsafe { rtxc_irq_enter() };
         assert!(veneer_log().is_empty());
+    }
+
+    #[test]
+    fn enter_veneer_returns_dispatch_table_on_all_early_exits() {
+        {
+            let _f = Fixture::new(); // flag is set
+            assert_eq!(
+                unsafe { rtxc_irq_enter_veneer() },
+                addr_of_mut!(IRQ_TABLE).cast::<u8>()
+            );
+            assert!(veneer_log().is_empty());
+        }
+
+        {
+            let _f = Fixture::new();
+            w32(ROM_IRQ_FLAG, 0);
+            unsafe { *addr_of_mut!(VENEER_RETURN) = 0 };
+            assert_eq!(
+                unsafe { rtxc_irq_enter_veneer() },
+                addr_of_mut!(IRQ_TABLE).cast::<u8>()
+            );
+            assert_eq!(
+                veneer_log(),
+                &[(hook_table::IRQ_ENTER, ROM_IRQ_FLAG, 0, 0)]
+            );
+        }
     }
 
     #[test]
