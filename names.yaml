@@ -114520,3 +114520,40 @@ functions:
       400-year, signed-negative, sign-bit-set, and all-ones register inputs;
       match.py finds the same save/divide/remainder-select/low-two-bit-test
       shape, with expected Rust stack setup and boolean lowering.
+
+  - address: 0x08070884
+    ghidra: FUN_08070884
+    name: resource_load_dispatch
+    size: 128
+    sig: "u32 resource_load_dispatch(u8 *state, i32 selector, u32 payload)"
+    module: app/resource_load_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1/r5: selector
+      param_3/r2/r6: payload
+      FUN_08043b94: resource_op_dispatch
+      FUN_080ce220: state_prepare
+      FUN_0806fdec: selector_normalize
+      FUN_0806fdb4: handler_for_selector
+      r3: handler_dispatch_slot
+    notes: >-
+      Raw osos.dec decoding establishes the exact 128-byte instruction extent
+      0x08070884..0x08070903: `bx r3` at 0x08070900 is the tail virtual
+      dispatch, and the next real function opens with `push {r4,r5,r6,lr}` at
+      0x08070904. There are four plain, unconditional inbound BL call sites
+      (0x08070964, 0x08070970, 0x0807d9e4, and 0x080ae540) and no predicated
+      BL forms. The body has four plain BL instructions, also no predicated
+      forms: resource_op_dispatch(9,3,0,0), state_prepare(state),
+      resource_op_dispatch(10,3,0,0), and selector_normalize(selector).
+      It prepares an uninitialized state (+0x24 & 0x100 clear), succeeds for
+      selector -1, otherwise returns -1 for a failed normalization or tail
+      dispatches the resolved handler's +0x0c slot with handler, state, and
+      payload. The callee identities are deliberately role names only; their
+      recovered bodies do not establish stronger identities. Target builds use
+      literal veneers for the four stock callees and preserve the final tail
+      dispatch; host builds use widened typed handler slots and recording
+      seams. match.py reports the same prologue, flag gate, argument setup,
+      conditional returns, handler-slot load, and tail-dispatch structure;
+      extra instructions are the four literal veneers required because the
+      payload cannot reach stock targets with direct PC-relative BL.
