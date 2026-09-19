@@ -1,22 +1,25 @@
-//! `afm_next_statement_token` — original: `FUN_080add84` @ `0x080add84`
-//! (176 bytes, `0x080add84..0x080ade33`; the following function starts at
-//! `0x080ade34`).
+//! AFM lexical cursor helpers.
 //!
-//! Raw decoding of every ARM `B`/`BL` word in `osos.dec` found seven direct
-//! `bl` call sites, all unconditional: `0x0809981c`, `0x0809985c`,
-//! `0x08099898`, `0x08099928`, `0x080999a4`, `0x080b5f34`, and `0x080b608c`.
-//! There are no predicated or tail-branch callers.
+//! Ports:
+//! - `afm_scan_token_to_delimiter` — original: `FUN_080ade68` @ `0x080ade68`
+//!   (128 bytes, `0x080ade68..0x080adee7`; the following function starts at
+//!   `0x080adee8`). Raw ARM decoding finds four inbound direct `bl` call
+//!   sites, all unconditional (`0x080addb4`, `0x080adddc`, `0x080addf4`,
+//!   `0x080b61b4`); no predicated `bl` call sites.
+//! - `afm_next_statement_token` — original: `FUN_080add84` @ `0x080add84`
+//!   (176 bytes, `0x080add84..0x080ade33`; the following function starts at
+//!   `0x080ade34`).
 //!
-//! The AFM parser owns a cursor whose state distinguishes semicolon, line-end,
-//! and end-of-input delimiters. With `next_line == 0`, this function consumes
-//! words through the next semicolon or line boundary, then returns the first
-//! token of the following statement. With `next_line != 0`, it first consumes
-//! through the following line boundary. It returns that token's start and
-//! stores its byte length when `length` is non-NULL; end-of-input returns NULL
-//! and stores zero. The two scanner helpers are unported (`FUN_080ade68` and
-//! `FUN_080c84a4`), so target builds call their retail addresses. Host tests
-//! install faithful scanner seams. Deliberate deviations: host-only seams
-//! force end-of-input unless a test installs the recovered helpers.
+//! `afm_scan_token_to_delimiter` skips horizontal whitespace, returns the
+//! first non-whitespace byte's address, then consumes through horizontal
+//! whitespace or an AFM delimiter. It sets the cursor state for semicolon,
+//! line-end, EOF, and control-Z delimiters. Deliberate deviation: its
+//! unported `FUN_080c850c` call is inlined because its raw behavior is fully
+//! recovered and the call's return value is unused.
+//!
+//! `afm_next_statement_token` advances the cursor to the first token of the
+//! following statement. Its line-end helper remains a retail target on-device
+//! and a host seam in tests.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
@@ -40,11 +43,57 @@ pub struct AfmScanner {
 
 type ScannerStep = unsafe extern "C" fn(*mut AfmScanner) -> *mut u8;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn scan_token_to_delimiter(scanner: *mut AfmScanner) -> *mut u8 {
-    let step: ScannerStep = unsafe { core::mem::transmute(0x080a_de68usize) };
-    unsafe { step(scanner) }
+/// `afm_scan_token_to_delimiter` — original: `FUN_080ade68` @ `0x080ade68`
+/// (128 bytes).
+///
+/// Skip horizontal whitespace, then consume a token through its delimiter.
+/// The cursor and delimiter state use the exact `AfmScanner` offsets from
+/// the original. The caller must provide a valid scanner and readable
+/// `[cursor, end)` range.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn afm_scan_token_to_delimiter(scanner: *mut AfmScanner) -> *mut u8 {
+    if unsafe { (*scanner).delimiter_state >= 1 } {
+        return core::ptr::null_mut();
+    }
+
+    loop {
+        let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
+            let cursor = unsafe { (*scanner).cursor };
+            unsafe { (*scanner).cursor = cursor.add(1) };
+            unsafe { cursor.read() as u32 }
+        } else {
+            u32::MAX
+        };
+
+        match byte {
+            0x20 | 0x09 => continue,
+            0x0d | 0x0a => unsafe { (*scanner).delimiter_state = 2 },
+            0x3b => unsafe { (*scanner).delimiter_state = 1 },
+            u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
+            _ => {
+                let token_start = unsafe { (*scanner).cursor.sub(1) };
+                loop {
+                    let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
+                        let cursor = unsafe { (*scanner).cursor };
+                        unsafe { (*scanner).cursor = cursor.add(1) };
+                        unsafe { cursor.read() as u32 }
+                    } else {
+                        u32::MAX
+                    };
+                    match byte {
+                        0x20 | 0x09 => return token_start,
+                        0x0d | 0x0a => unsafe { (*scanner).delimiter_state = 2 },
+                        0x3b => unsafe { (*scanner).delimiter_state = 1 },
+                        u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
+                        _ => continue,
+                    }
+                    return token_start;
+                }
+            }
+        }
+        return core::ptr::null_mut();
+    }
 }
 
 #[cfg(target_os = "none")]
@@ -60,29 +109,19 @@ unsafe extern "C" fn unavailable_scanner_step(scanner: *mut AfmScanner) -> *mut 
     core::ptr::null_mut()
 }
 
-/// Host seam for the two unported lexical helpers.
+/// Host seam for the unported line-end helper.
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct AfmTokenScannerOps {
-    pub scan_token_to_delimiter: ScannerStep,
     pub scan_to_line_end: ScannerStep,
 }
 
 #[cfg(not(target_os = "none"))]
-pub const DEFAULT_AFM_TOKEN_SCANNER_OPS: AfmTokenScannerOps = AfmTokenScannerOps {
-    scan_token_to_delimiter: unavailable_scanner_step,
-    scan_to_line_end: unavailable_scanner_step,
-};
+pub const DEFAULT_AFM_TOKEN_SCANNER_OPS: AfmTokenScannerOps =
+    AfmTokenScannerOps { scan_to_line_end: unavailable_scanner_step };
 
 #[cfg(not(target_os = "none"))]
 pub static mut AFM_TOKEN_SCANNER_OPS: AfmTokenScannerOps = DEFAULT_AFM_TOKEN_SCANNER_OPS;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn scan_token_to_delimiter(scanner: *mut AfmScanner) -> *mut u8 {
-    let step = unsafe { core::ptr::read_volatile(addr_of!(AFM_TOKEN_SCANNER_OPS.scan_token_to_delimiter)) };
-    unsafe { step(scanner) }
-}
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
@@ -108,11 +147,11 @@ pub unsafe extern "C" fn afm_next_statement_token(
     let token_start = if next_line == 0 {
         loop {
             while unsafe { (*scanner).delimiter_state < 1 } {
-                unsafe { scan_token_to_delimiter(scanner) };
+                unsafe { afm_scan_token_to_delimiter(scanner) };
             }
 
             unsafe { (*scanner).delimiter_state = 0 };
-            let token_start = unsafe { scan_token_to_delimiter(scanner) };
+            let token_start = unsafe { afm_scan_token_to_delimiter(scanner) };
             if !token_start.is_null()
                 || unsafe { (*scanner).delimiter_state >= 3 }
                 || unsafe { (*scanner).delimiter_state < 1 }
@@ -127,7 +166,7 @@ pub unsafe extern "C" fn afm_next_statement_token(
             }
 
             unsafe { (*scanner).delimiter_state = 0 };
-            let token_start = unsafe { scan_token_to_delimiter(scanner) };
+            let token_start = unsafe { afm_scan_token_to_delimiter(scanner) };
             if !token_start.is_null()
                 || unsafe { (*scanner).delimiter_state >= 3 }
                 || unsafe { (*scanner).delimiter_state < 2 }
@@ -183,31 +222,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn recovered_scan_token_to_delimiter(scanner: *mut AfmScanner) -> *mut u8 {
-        unsafe { next_non_horizontal_space(scanner) };
-        if unsafe { (*scanner).delimiter_state >= 1 } {
-            return null_mut();
-        }
-        let token_start = unsafe { (*scanner).cursor.wrapping_sub(1) };
-
-        loop {
-            let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
-                let byte = unsafe { (*scanner).cursor.read() };
-                unsafe { (*scanner).cursor = (*scanner).cursor.wrapping_add(1) };
-                byte as u32
-            } else {
-                u32::MAX
-            };
-            match byte {
-                32 | 9 => return token_start,
-                13 | 10 => unsafe { (*scanner).delimiter_state = 2 },
-                59 => unsafe { (*scanner).delimiter_state = 1 },
-                u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
-                _ => continue,
-            }
-            return token_start;
-        }
-    }
 
     unsafe extern "C" fn recovered_scan_to_line_end(scanner: *mut AfmScanner) -> *mut u8 {
         unsafe { next_non_horizontal_space(scanner) };
@@ -237,7 +251,6 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             addr_of_mut!(AFM_TOKEN_SCANNER_OPS).write(AfmTokenScannerOps {
-                scan_token_to_delimiter: recovered_scan_token_to_delimiter,
                 scan_to_line_end: recovered_scan_to_line_end,
             });
         }
@@ -258,6 +271,44 @@ mod tests {
         };
         let parser = AfmParser { context: null_mut(), scanner: &mut scanner };
         (parser, scanner)
+    }
+
+    #[test]
+    fn token_scanner_skips_horizontal_space_and_stops_before_it() {
+        let mut bytes = *b" \tToken next";
+        let (_, mut scanner) = fixture(&mut bytes);
+
+        let token = unsafe { afm_scan_token_to_delimiter(&mut scanner) };
+
+        assert_eq!(unsafe { core::slice::from_raw_parts(token, 5) }, b"Token");
+        assert_eq!(unsafe { scanner.cursor.offset_from(bytes.as_mut_ptr()) }, 8);
+        assert_eq!(scanner.delimiter_state, 0);
+    }
+
+    #[test]
+    fn token_scanner_records_semicolon_and_line_end_delimiters() {
+        let mut semicolon = *b"one;";
+        let (_, mut scanner) = fixture(&mut semicolon);
+        assert_eq!(unsafe { afm_scan_token_to_delimiter(&mut scanner) }, semicolon.as_mut_ptr());
+        assert_eq!(scanner.delimiter_state, 1);
+
+        let mut line = *b"two\n";
+        let (_, mut scanner) = fixture(&mut line);
+        assert_eq!(unsafe { afm_scan_token_to_delimiter(&mut scanner) }, line.as_mut_ptr());
+        assert_eq!(scanner.delimiter_state, 2);
+    }
+
+    #[test]
+    fn token_scanner_handles_control_z_and_end_of_input() {
+        let mut control_z = *b"\x1a";
+        let (_, mut scanner) = fixture(&mut control_z);
+        assert!(unsafe { afm_scan_token_to_delimiter(&mut scanner) }.is_null());
+        assert_eq!(scanner.delimiter_state, 3);
+
+        let mut empty = [];
+        let (_, mut scanner) = fixture(&mut empty);
+        assert!(unsafe { afm_scan_token_to_delimiter(&mut scanner) }.is_null());
+        assert_eq!(scanner.delimiter_state, 3);
     }
 
     #[test]

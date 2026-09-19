@@ -17,6 +17,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ade68
+    ghidra: FUN_080ade68
+    name: afm_scan_token_to_delimiter
+    size: 128
+    sig: "u8 *afm_scan_token_to_delimiter(AfmScanner *scanner)"
+    module: util/afm_next_statement_token
+    status: ported
+    renames:
+      param_1/r0: scanner
+      "[scanner + 0x0]": cursor
+      "[scanner + 0x8]": end
+      "[scanner + 0xc]": delimiter_state
+      FUN_080c850c: afm_next_non_horizontal_space
+    notes: >-
+      Raw osos.dec decoding fixes the 128-byte extent at
+      0x080ade68..0x080adee8; 0x080adee8 begins the next function with
+      mov r3,r0. The body has one plain unconditional bl, to the unported
+      0x080c850c, and zero predicated bl instructions. A whole-image A32
+      decode finds four inbound direct plain bl calls at 0x080addb4,
+      0x080adddc, 0x080addf4, and 0x080b61b4; no predicated bl forms target
+      this address. It skips spaces and tabs, returns the first non-whitespace
+      byte, then advances through that token until horizontal whitespace,
+      semicolon, line ending, control-Z, or EOF; delimiter_state becomes 1,
+      2, or 3 for the latter cases. Deliberate deviation: the verified
+      behavior of the unported 0x080c850c is inlined because its return value
+      is unused by this function, allowing identical host and target behavior.
   - address: 0x0813a318
     ghidra: FUN_0813a318
     name: filesystem_kind_is_hfsplus
