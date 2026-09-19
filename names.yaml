@@ -115804,3 +115804,40 @@ functions:
       conditional-return form while retaining the guard, strict unsigned bound,
       NULL table gate, and indexed word load. Deliberate deviations: none.
       Reference C: decomp/c/003/080525b8_FUN_080525b8.c.
+
+  # --- Selected resource path load ---
+  - address: 0x080523bc
+    ghidra: FUN_080523bc
+    name: selected_resource_path_load
+    size: 200
+    sig: "i32 selected_resource_path_load(const u32 *entry, u32 selector, u8 *loaded_out, u16 *output)"
+    module: app/selected_resource_path_load
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: selector
+      param_3/r2: loaded_out
+      param_4/r3: output
+      FUN_08057c04: entry_nested_liti_class_check
+      FUN_08052484: selected_index_resolver
+      FUN_0808e16c: tagged_counter_try_increment
+      FUN_0809e3d0: indexed_payload_lookup
+      FUN_0805c924: resource_path_materializer
+      FUN_0809f744: tagged_counter_try_decrement
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte extent
+      0x080523bc..0x08052484: the immediately following push {r4,r5,r6,lr}
+      begins 0x08052484. The body contains exactly six unconditional plain
+      BL instructions (0x08057c04, 0x08052484, 0x0808e16c, 0x0809e3d0,
+      0x0805c924, and 0x0809f744), with zero predicated BL instructions.
+      It rejects a NULL entry, a failed nested-'liti' check, zero selector,
+      or unresolved index with -50. Otherwise it retains the index while
+      looking up the path descriptor at entry+0x20; if lookup supplies a
+      path, it halves the encoded byte length and calls the materializer with
+      a prefix at nested_container[2]+0x7c4 only for a leading UTF-16 colon.
+      It always releases after a resolved index and writes loaded_out=0 only
+      on materializer success. The 0x08057c04 wrapper is directly represented
+      by nested_liti_class_check. Resolver 0x08052484 and materializer
+      0x0805c924 have no established identity, so target builds retain fixed
+      calls and host tests replace neither path because rejection tests do not
+      cross those boundaries. Reference C: decomp/c/003/080523bc_FUN_080523bc.c.
