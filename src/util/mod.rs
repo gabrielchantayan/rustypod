@@ -208,6 +208,7 @@ pub mod u16_le_store_last_byte;
 pub mod offset_table_entry_span;
 pub mod span_validation;
 pub mod u16_pair_copy;
+pub mod zeroing_bump_alloc;
 pub mod u32_pair_store;
 pub mod u32_pair_copy;
 pub mod expand_u32_pair_to_u64_pair;

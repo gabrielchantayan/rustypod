@@ -77644,6 +77644,35 @@ functions:
       a second-entry match, miss, negative signed count, ignored seek errors,
       and direct-reader failure preserving the caller output. Reference C:
       decomp/c/004/080570cc_FUN_080570cc.c.
+  - address: 0x08057184
+    ghidra: FUN_08057184
+    name: zeroing_bump_alloc
+    size: 100
+    sig: "u8 *zeroing_bump_alloc(u32 requested_len)"
+    module: util/zeroing_bump_alloc
+    status: ported
+    renames:
+      param_1/r0: requested_len
+      DAT_080571e8: zeroing_bump_arena_state
+      uVar2/r0: cursor
+      iVar3/r2: consumed
+      uVar4/r4: allocation
+      FUN_08057210: backward_zero_fill
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent
+      0x08057184..0x080571e8: pop {r4,pc} returns at 0x080571e4 and the final
+      word is the 0x08b2f7e8 arena-state literal; the next separately entered
+      function starts at 0x080571ec. A whole-image A32 decode finds exactly
+      four inbound plain bl calls (0x08039290, 0x08057740, 0x08057820, and
+      0x08075f78), zero predicated inbound calls, zero plain outbound bl, and
+      one predicated blne to backward_zero_fill at 0x08057210. The state is
+      {enabled, cursor, remaining}: it aligns the requested size, consumes
+      cursor misalignment plus that size, rejects signed remaining <= consumed,
+      advances cursor, and zeroes consumed bytes from the aligned result.
+      Deliberate deviation: Rust performs the zero-fill locally rather than
+      branching to the separately linked retail leaf. Host tests cover
+      misaligned slack consumption and zeroing, disabled state, and exact
+      exhaustion. Reference C: decomp/c/004/08057184_FUN_08057184.c.
 
   - address: 0x08057874
     ghidra: FUN_08057874
