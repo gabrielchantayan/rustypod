@@ -240,6 +240,28 @@ pub unsafe extern "C" fn iram_pwrcon_update_masks_veneer(
     body(pwrcon0_mask, pwrcon1_mask, enable)
 }
 
+/// pwrcon_restore_clock_2 — original: `FUN_080ce0b8` @ `0x080ce0b8`
+/// (**16 bytes**; raw decoding shows the next function begins at
+/// `0x080ce0c8`).
+///
+/// **4 unconditional `bl` call sites** at `0x0836b1e0`, `0x0836b2f0`,
+/// `0x0836b44c`, and `0x0836b55c`; decoding every ARM `B`/`BL` word in
+/// `osos.dec` finds no predicated calls. The body itself is a tail `b` to
+/// the IRAM PWRCON veneer at `0x08037de8`, not a `bl`.
+///
+/// Moves the saved active-low clock-2 state into `r2`, then updates PWRCON0
+/// mask 2 through the IRAM veneer: a zero state sets the bit (keeps the
+/// clock gated), and any nonzero state clears it (restores the clock).
+/// Deliberate deviation: the Rust source uses a regular call expression;
+/// whether LLVM tail-calls it is unobservable because the original and
+/// callee both preserve `lr` and return the veneer result in `r0`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pwrcon_restore_clock_2(was_enabled: u32) -> u32 {
+    unsafe { iram_pwrcon_update_masks_veneer(2, 0, was_enabled) }
+}
+
+
 /// pwrcon_acquire_clock_2 — original: `FUN_080c996c` @ `0x080c996c`
 /// (44 bytes; next function begins at `0x080c9998`).
 ///
@@ -454,6 +476,30 @@ mod tests {
             assert_eq!(iram_pwrcon_update_masks_veneer(0x000f_0c03, 0xf000_1034, 2), 0);
             assert_eq!(*addr_of!(TEST_PWRCON0), 0xf000_030c, "PWRCON0 clears its mask");
             assert_eq!(*addr_of!(TEST_PWRCON1), 0x0fff_0200, "PWRCON1 clears its mask");
+        }
+    }
+
+    #[test]
+    fn restore_clock_2_gates_a_clock_that_was_previously_disabled() {
+        let _ops = install(0xffff_fffd, 0xfeed_beef);
+        unsafe {
+            assert_eq!(pwrcon_restore_clock_2(0), 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0xffff_ffff);
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0xfeed_beef);
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["enter", "read0", "write0", "read1", "write1", "exit"],
+            );
+        }
+    }
+
+    #[test]
+    fn restore_clock_2_restores_any_nonzero_enabled_state() {
+        let _ops = install(0xffff_ffff, 0xfeed_beef);
+        unsafe {
+            assert_eq!(pwrcon_restore_clock_2(2), 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0xffff_fffd);
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0xfeed_beef);
         }
     }
 

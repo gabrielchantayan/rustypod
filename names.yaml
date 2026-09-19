@@ -4491,6 +4491,25 @@ functions:
       0x0836b1bc, 0x0836b274, 0x0836b378, and 0x0836b51c; no predicated
       callers. The port retains the veneer call rather than calling the
       mirrored body directly, preserving the original transaction topology.
+  - address: 0x080ce0b8
+    ghidra: FUN_080ce0b8
+    name: pwrcon_restore_clock_2
+    size: 16
+    sig: "u32 pwrcon_restore_clock_2(u32 was_enabled)"
+    module: drivers/pwrcon
+    status: ported
+    renames: {param_1: was_enabled, thunk_EXT_FUN_22000318: iram_pwrcon_update_masks_veneer}
+    notes: >-
+      Raw osos.dec words decode as mov r2,r0; mov r0,#2; mov r1,#0; b
+      0x08037de8. The next real function begins at 0x080ce0c8, proving
+      this 16-byte extent; Ghidra's apparent indirect call is the known
+      0x08037de8 IRAM veneer. Decoding every ARM B/BL word finds four
+      unconditional bl callers (0x0836b1e0, 0x0836b2f0, 0x0836b44c,
+      0x0836b55c), no predicated calls, and no direct B callers. It restores
+      active-low PWRCON0 clock-2 state: zero sets mask 2 and nonzero clears
+      it. The Rust source calls the existing veneer normally; its possible
+      call/return rather than tail-transfer codegen is ABI-unobservable
+      because both paths return the veneer result in r0.
   - address: 0x080003b8
     ghidra: FUN_080003b8
     name: startup_wait_status_clear
