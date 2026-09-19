@@ -1356,6 +1356,10 @@ pub mod hints {
     // 0xe400_0000: dedicated to ui/element_change_notify's target-width
     // element fixture; mappings never unmap, so no other user may share it.
     pub const UI_ELEMENT_CHANGE_NOTIFY: usize = 0xe400_0000;
+    // 0xa1a0_0000: dedicated to app/entry_match_next's raw-u32 container,
+    // entry chain, and nested-class fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const ENTRY_MATCH_NEXT: usize = 0xa1a0_0000;
     // 0xa1b0_0000: dedicated to app/nested_liti_class_check's raw-u32
     // container and nested-class fixture; mappings never unmap, so no other
     // user may share this hint.
