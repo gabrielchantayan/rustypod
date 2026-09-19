@@ -6491,6 +6491,38 @@ functions:
       0x083d7ec0 (the documented deviation).
 
   - address: 0x083e8dbc
+  - address: 0x083e8d7c
+    ghidra: FUN_083e8d7c
+    name: cxx_string_pair_entry_uninitialized_copy
+    size: 64
+    sig: "u8 *cxx_string_pair_entry_uninitialized_copy(const u8 *first, const u8 *last, u8 *output, void *owner)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: owner
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      r7: owner
+      return/r0: output_cursor
+    notes: >-
+      Raw ARM is exactly 16 instructions at 0x083e8d7c..0x083e8db8; the
+      independent 8-byte string-pair range constructor at 0x083e8dbc fixes
+      the 64-byte extent. It COW-constructs the leading 12-byte string-pair
+      entry of every 40-byte record in [first,last), forwarding owner as r0
+      to cxx_string_pair_entry_copy_ctor @ 0x083d7e88, then returns the
+      advanced output cursor. Raw B/BL decoding finds four inbound direct
+      unconditional BL sites (0x0825c1a0, 0x0825c61c, 0x083d7e88, and
+      0x083e3410) and no predicated inbound BLs; the body has one plain BL
+      and no predicated BLs. Deliberate deviation: the ARM port uses a
+      volatile opaque helper pointer so LLVM retains owner although the
+      helper currently discards it; this emits blx instead of retailOS's
+      direct bl. Host tests verify two 40-byte records, COW sharing/cloning,
+      trailer copying, untouched trailing bytes, returned end, and an empty
+      null range. match.py finds the same cursor loop and 0x28 strides.
     ghidra: FUN_083e8dbc
     name: cxx_string_pair_uninitialized_copy
     size: 64
