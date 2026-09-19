@@ -113716,3 +113716,35 @@ functions:
       output, halfword cache update, and the cached-mode-one no-execute/no-write
       gate. match.py reports the same two-stage execution/PIO structure, with
       expected extra register preservation and direct Rust call layout.
+
+  # --- Glyph fitting engine ---
+  - address: 0x080a7aa0
+    ghidra: FUN_080a7aa0
+    name: glyph_fit_engine
+    size: 144
+    sig: "u32 glyph_fit_engine(u32 font, const u8 *text, u32 glyph_count, void *metric_context, u32 layout_flags, u32 max_advance, u32 *measured_advance, u32 reserved)"
+    module: util/glyph_fit_engine
+    status: ported
+    renames:
+      param_2/r1: text
+      param_3/r2: glyph_count
+      param_4/r3: metric_context
+      param_5/stack: layout_flags
+      param_6/stack: max_advance
+      param_7/stack: measured_advance
+      FUN_0809e224: metric_table_resolve
+      FUN_0807a0c8: utf8_next_codepoint_permissive
+      FUN_08080f18: glyph_advance
+    notes: >-
+      Raw osos.dec establishes the 144-byte body at 0x080a7aa0..0x080a7b2f;
+      the next separately entered function begins at 0x080a7b30. The body
+      contains three unconditional plain bl calls and no predicated bl calls.
+      Whole-image A32 branch decoding finds four plain inbound bl calls at
+      0x0808f574, 0x0808f5ec, 0x08263244, and 0x08263514, with no predicated
+      inbound forms. It resolves a metric table from metric_context, then
+      permissively decodes up to glyph_count UTF-8 codepoints and accumulates
+      signed glyph advances until the next width would exceed max_advance.
+      measured_advance is written only if a metric table was resolved. The
+      decoder is already ported. Deliberate deviation: the unported metric
+      resolver and glyph-advance callees use raw-address ARM veneers; host
+      tests install observed-ABI seams for them.
