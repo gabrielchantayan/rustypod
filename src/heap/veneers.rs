@@ -449,6 +449,29 @@ pub unsafe extern "C" fn allocate_one_byte_alternate() -> *mut u8 {
     operator_new(1)
 }
 
+/// allocate_byte_with_value_alternate — original: `FUN_080b3e54` @
+/// 0x080b3e54 (24 bytes; 4 unconditional `bl` call sites, none predicated).
+///
+/// Raw osos.dec establishes the true extent `0x080b3e54..0x080b3e6b`:
+/// `push {r4,lr}; mov r4,r0; mov r0,#1; bl 0x082aadd4; strb r4,[r0];
+/// pop {r4,pc}`. The next `push {r4,lr}` at 0x080b3e6c begins
+/// [`allocate_four_word_with_cleared_last`]. It allocates exactly one tag-2
+/// byte through [`operator_new`], stores the input byte, and returns the
+/// allocation.
+///
+/// Deliberate deviation: the direct retailOS allocator call is the existing
+/// Rust [`operator_new`] seam. Like the original, no NULL guard precedes the
+/// byte store, so allocation failure faults. Its own target-only section keeps
+/// this distinct `bl` target from folding into the identical 0x080d6930 port.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_byte_with_value_alternate")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_byte_with_value_alternate(value: u8) -> *mut u8 {
+    let allocation = operator_new(1);
+    allocation.write(value);
+    allocation
+}
+
 /// allocate_four_word_with_cleared_last — original: `FUN_080b3e6c` @
 /// 0x080b3e6c (24 bytes; 4 unconditional `bl` call sites, none predicated).
 ///
@@ -1455,6 +1478,24 @@ pub(crate) mod tests {
             for (calls, value) in [0u8, 1, 0xff].into_iter().enumerate() {
                 storage[0] = !value;
                 let allocation = allocate_byte_with_value(value);
+                assert_eq!(allocation, storage.as_mut_ptr());
+                assert_eq!(storage[0], value);
+                assert_eq!(ALLOC_CALLS, calls + 1);
+                assert_eq!(LAST_ALLOC_SIZE, 1);
+                assert_eq!(LAST_ALLOC_TAG, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn allocate_byte_with_value_alternate_allocates_one_tag2_byte_and_stores_all_values() {
+        let _lock = mock_heap();
+        let mut storage = [0u8; 1];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            for (calls, value) in [0u8, 1, 0xff].into_iter().enumerate() {
+                storage[0] = !value;
+                let allocation = allocate_byte_with_value_alternate(value);
                 assert_eq!(allocation, storage.as_mut_ptr());
                 assert_eq!(storage[0], value);
                 assert_eq!(ALLOC_CALLS, calls + 1);
