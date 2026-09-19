@@ -383,6 +383,38 @@ pub unsafe extern "C" fn cxx_string_pair_copy_ctor(
     cxx_string_copy_ctor(destination, source);
     cxx_string_copy_ctor(destination.add(1), source.add(1))
 }
+/// cxx_string_pair_uninitialized_copy — retailOS `FUN_083e8dbc` @ `0x083e8dbc`
+/// (64 bytes; three direct, unconditional `bl` call sites at 0x0825c684,
+/// 0x083e37b4, and 0x083e3894; no predicated `bl` call sites).
+///
+/// Raw ARM spans 0x083e8dbc..0x083e8df8; the next independent function opens
+/// with `push {r4-r6,lr}` at 0x083e8dfc. It uninitialized-copies the
+/// half-open range of 8-byte COW string-pair records, passing its r3 context
+/// to `cxx_string_pair_copy_ctor` for every record, and returns the output
+/// cursor. There are no deliberate deviations.
+///
+/// # Safety
+///
+/// `first..last` must be a valid range of target-layout string pairs, and
+/// `output` must provide one uninitialized pair for each source pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_uninitialized_copy(
+    first: *const *mut u8,
+    last: *const *mut u8,
+    output: *mut *mut u8,
+    context: *mut u8,
+) -> *mut *mut u8 {
+    let mut source_cursor = first;
+    let mut output_cursor = output;
+    while source_cursor != last {
+        cxx_string_pair_copy_ctor(context, output_cursor, source_cursor);
+        source_cursor = source_cursor.add(2);
+        output_cursor = output_cursor.add(2);
+    }
+    output_cursor
+}
+
 
 
 #[cfg(target_arch = "arm")]
@@ -2149,6 +2181,64 @@ mod tests {
             );
             assert_eq!((*data_rep(source.second)).refcount, -1);
             assert_eq!((*data_rep(destination.second)).refcount, 0);
+        }
+    }
+
+    #[test]
+    fn pair_uninitialized_copy_constructs_every_pair_and_returns_end() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            build(&mut first, b"shared");
+            build(&mut second, b"leaked");
+            (*data_rep(second)).refcount = -1;
+            let source = [
+                CxxStringPair { first, second },
+                CxxStringPair { first, second },
+            ];
+            let mut output = [
+                CxxStringPair {
+                    first: core::ptr::null_mut(),
+                    second: core::ptr::null_mut(),
+                },
+                CxxStringPair {
+                    first: core::ptr::null_mut(),
+                    second: core::ptr::null_mut(),
+                },
+            ];
+
+            assert_eq!(
+                cxx_string_pair_uninitialized_copy(
+                    source.as_ptr().cast(),
+                    source.as_ptr().add(2).cast(),
+                    output.as_mut_ptr().cast(),
+                    core::ptr::null_mut(),
+                ),
+                output.as_mut_ptr().add(2).cast(),
+            );
+            assert_eq!((*data_rep(first)).refcount, 2);
+            for pair in &output {
+                assert_eq!(pair.first, first);
+                assert_ne!(pair.second, second);
+                assert_eq!(
+                    core::slice::from_raw_parts(pair.second, 7),
+                    b"leaked\0",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pair_uninitialized_copy_empty_null_range_does_not_dereference() {
+        unsafe {
+            assert!(cxx_string_pair_uninitialized_copy(
+                core::ptr::null(),
+                core::ptr::null(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+            .is_null());
         }
     }
 

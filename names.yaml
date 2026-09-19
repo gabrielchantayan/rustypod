@@ -6490,6 +6490,32 @@ functions:
       blx-through-volatile-slot dispatch standing in for the direct bl
       0x083d7ec0 (the documented deviation).
 
+  - address: 0x083e8dbc
+    ghidra: FUN_083e8dbc
+    name: cxx_string_pair_uninitialized_copy
+    size: 64
+    sig: "char **cxx_string_pair_uninitialized_copy(char *const *first, char *const *last, char **output, void *context)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: context
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      r7: context
+      return/r0: output_cursor
+    notes: >-
+      Raw ARM is exactly 16 instructions at 0x083e8dbc..0x083e8df8; the
+      independent range-copy constructor at 0x083e8dfc fixes the 64-byte
+      extent. It COW-constructs every 8-byte string pair in [first,last) at
+      output, forwarding context as r0 to cxx_string_pair_copy_ctor @
+      0x083d7e98, then returns the advanced output cursor. Decoding every
+      aligned ARM BL immediate in osos.dec finds three direct unconditional
+      callers (0x0825c684, 0x083e37b4, and 0x083e3894) and no predicated BL
+      callers. No deliberate deviations.
   - address: 0x083e8dfc
     ghidra: FUN_083e8dfc
     name: vector_copy_construct_range_string_pair
