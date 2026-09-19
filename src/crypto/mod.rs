@@ -72,6 +72,7 @@ pub mod bn_mod_mul_montgomery;
 pub mod bn_mod_mul;
 pub mod bn_ucmp;
 pub mod cipher_name;
+pub mod standard_cipher_table_offset;
 pub mod i2a_asn1_object;
 pub mod digest_init;
 pub mod digest_update_u32;

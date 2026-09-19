@@ -69011,6 +69011,33 @@ functions:
       byte is NUL), return packing, and a reference-model sweep;
       match.py structural diff reviewed after the ARM release build.
 
+  # --- proprietary STANDARD cipher: table-half selector ---
+  - address: 0x0802de14
+    ghidra: FUN_0802de14
+    name: standard_cipher_table_offset
+    size: 60
+    sig: "u32 standard_cipher_table_offset(u32 select_second_half, const u8 *name, u32 table, u32 *table_offset_out)"
+    module: crypto/standard_cipher_table_offset
+    status: ported
+    renames:
+      param_1/r0: select_second_half
+      param_2/r1: name
+      param_3/r2: table
+      param_4/r3: table_offset_out
+      FUN_0802ddcc: cipher_name_is_standard
+    notes: >-
+      60-byte wrapper (0x0802de14..0x0802de50), verified from raw osos.dec
+      words and the next function boundary at 0x0802de50. It has one plain
+      BL, at 0x0802de28 to cipher_name_is_standard, and four incoming BL
+      call sites (0x0802a2b8, 0x0802a46c, 0x0802a634, 0x0802a7fc). A rejected
+      name returns 0 without dereferencing table_offset_out. An accepted name
+      stores table + 4 for a zero selector or table + 0x1004 otherwise, then
+      returns 1; addition wraps modulo 2^32. Rust retains the existing
+      validator seam and expresses only the observed r0 return value, rather
+      than the validator's caller-irrelevant r1 packing. Host tests cover
+      both table halves, rejection with a null output pointer, and overflow;
+      match.py structural diff reviewed after the ARM release build.
+
   # --- proprietary STANDARD cipher: second byte lookup table ---
   - address: 0x0802de84
     ghidra: FUN_0802de84
