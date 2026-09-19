@@ -6491,6 +6491,33 @@ functions:
       0x083d7ec0 (the documented deviation).
 
   - address: 0x083e8dbc
+  - address: 0x083e8d2c
+    ghidra: FUN_083e8d2c
+    name: cxx_string_pair_word_uninitialized_copy
+    size: 80
+    sig: "u8 *cxx_string_pair_word_uninitialized_copy(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/string_pair_word_uninitialized_copy
+    status: ported
+    renames:
+      param_1/r0/r4: first/source_cursor
+      param_2/r1/r6: last
+      param_3/r2/r5: output/output_cursor
+      "[record + 0x0]": first_string
+      "[record + 0x4]": second_string
+      "[record + 0x8]": trailing_word
+      return/r0: output_cursor
+    notes: >-
+      Raw osos.dec decoding fixes the true extent at 0x083e8d2c..0x083e8d7c:
+      the next independent function opens with push {r4-r8,lr} at
+      0x083e8d7c. Three inbound direct BL sites are plain and none is
+      predicated; the body contains two unconditional BL instructions, both
+      resolving to cxx_string_copy_ctor @ 0x083d8c30. This is std::vector's
+      uninitialized-copy loop for 12-byte records of two COW strings and an
+      opaque trailing word. It checks output for NULL before any source read,
+      then COW-constructs the two strings, copies the word, advances both
+      cursors by 12 bytes, and returns output's final cursor. No deliberate
+      deviations: target-width byte offsets preserve the ARM record layout;
+      host tests use a raw-u32 fixture and a test-only copy observation seam.
   - address: 0x083e8d7c
     ghidra: FUN_083e8d7c
     name: cxx_string_pair_entry_uninitialized_copy
