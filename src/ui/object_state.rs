@@ -321,6 +321,42 @@ pub unsafe extern "C" fn indexed_object_element(
             .wrapping_mul(index.wrapping_sub(1)) as usize,
     )
 }
+/// indexed_object_write_element — original: `FUN_0807f880` @ `0x0807f880`
+/// (68 bytes; 4 inbound direct `bl` call sites, all unconditional).
+///
+/// Raw ARM spans `0x0807f880..0x0807f8c4`; the independent next function
+/// begins at `0x0807f8c4`. The two mutually exclusive calls to
+/// [`indexed_object_element`] are plain, unconditional `bl` instructions;
+/// neither branch has a predicated `bl`. It resolves the indexed element through
+/// [`indexed_object_element`]. For four-byte elements it copies precisely one
+/// aligned word from `source`; for every other element size it tail-calls
+/// [`crate::libc::bcopy::bcopy`] to make an overlap-safe byte copy of that
+/// size. The supplied one-based `index` is forwarded unchanged to the element
+/// resolver, matching the raw call.
+///
+/// Deliberate deviation: the stock non-word path tail-branches through the
+/// ROM bcopy adapter at `0x08042cbc`; this reaches its direct Rust port.
+///
+/// # Safety
+///
+/// `object` must meet [`indexed_object_element`]'s requirements. `source`
+/// must be readable for `object.element_size` bytes and the resolved target
+/// writable for that many bytes; both word-path pointers must be aligned.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_object_write_element(
+    object: *const IndexedObject,
+    index: u32,
+    source: *const u8,
+) {
+    let target = indexed_object_element(object, index);
+    if (*object).element_size == 4 {
+        target.cast::<u32>().write(source.cast::<u32>().read());
+    } else {
+        crate::libc::bcopy::bcopy(source, target, (*object).element_size as usize);
+    }
+}
+
 
 
 /// Function-pointer signature shared by [`scaled_field_total`] and the
@@ -2020,6 +2056,7 @@ mod tests {
         assert_eq!(
             unsafe { indexed_object_element(&wrong_tag, 1) },
             core::ptr::null_mut(),
+
             "a tag mismatch must not dereference the null storage-pointer slot"
         );
         assert_eq!(unsafe { indexed_object_element(&zero_index, 0) }, core::ptr::null_mut());
@@ -2053,6 +2090,43 @@ mod tests {
             unsafe { storage.as_mut_ptr().add(24) },
             "the inclusive final index uses stride * (index - 1)"
         );
+    }
+    #[test]
+    fn indexed_object_write_element_word_path_copies_only_one_word() {
+        let mut storage = [0xa5u8; 8];
+        let storage_pointer = storage.as_mut_ptr();
+        let object = IndexedObject {
+            type_tag: INDEXED_OBJECT_TAG,
+            element_size: 4,
+            element_count: 2,
+            reserved: [0; 2],
+            storage_ready: 1,
+            storage_pointer_slot: &storage_pointer,
+        };
+        let source = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+        unsafe { indexed_object_write_element(&object, 2, source.as_ptr()) };
+
+        assert_eq!(&storage[..4], &[0xa5; 4], "the first element is untouched");
+        assert_eq!(&storage[4..], &source[..4], "ldr/str transfers one word");
+    }
+
+    #[test]
+    fn indexed_object_write_element_nonword_path_is_overlap_safe() {
+        let mut storage = [1u8, 2, 3, 4, 5, 6, 7, 0xa5];
+        let storage_pointer = unsafe { storage.as_mut_ptr().add(1) };
+        let object = IndexedObject {
+            type_tag: INDEXED_OBJECT_TAG,
+            element_size: 7,
+            element_count: 1,
+            reserved: [0; 2],
+            storage_ready: 1,
+            storage_pointer_slot: &storage_pointer,
+        };
+
+        unsafe { indexed_object_write_element(&object, 1, storage.as_ptr()) };
+
+        assert_eq!(storage, [1, 1, 2, 3, 4, 5, 6, 7]);
     }
 
 

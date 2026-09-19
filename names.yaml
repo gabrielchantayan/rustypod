@@ -114268,3 +114268,30 @@ functions:
       target-address seam and host callback; host builds use same-shaped
       backing for the fixed state and records. Host tests cover first-pair
       registration and the mode-two full-table clear before registration.
+  # --- retailOS indexed-object element writer ---
+  - address: 0x0807f880
+    ghidra: FUN_0807f880
+    name: indexed_object_write_element
+    size: 68
+    sig: "void indexed_object_write_element(const IndexedObject *object, u32 index, const void *source)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0/r4: indexed_object
+      param_2/r1: index
+      param_3/r2/r5: source
+      FUN_080512cc: indexed_object_element
+      FUN_08042cbc: bcopy
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x0807f880..0x0807f8c4; the next independently entered function begins
+      at 0x0807f8c4. It forwards r0/r1 unchanged to indexed_object_element,
+      then selects a four-byte ldr/str copy or tail-branches to bcopy with
+      source, resolved indexed target, and object+4 byte count. Four inbound
+      direct calls are all unconditional plain bl; no predicated forms target
+      this address. Deliberate deviation: the Rust port
+      calls the ported bcopy directly instead of tail-branching through its
+      retailOS entry.
+      match.py structural review: LLVM coalesces the two source calls to one
+      element lookup path and inlines bcopy to __aeabi_memmove; the index,
+      four-byte word path, and non-word overlap-safe copy remain explicit.
