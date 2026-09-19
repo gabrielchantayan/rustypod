@@ -112717,3 +112717,27 @@ functions:
       have no stronger established identities: target Rust calls their verified
       fixed addresses and host tests use ABI seams. Cursor byte pointers remain
       u32 target words on hosts.
+  - address: 0x080d9a98
+    ghidra: FUN_080d9a98
+    name: cff_invoke_pshinter_module_callback
+    size: 64
+    sig: "u32 cff_invoke_pshinter_module_callback(u32 *face_slot)"
+    module: ft/cff_pshinter_callback
+    status: ported
+    renames:
+      param_1/r0: face_slot
+      iVar1/r0: pshinter_module
+      puVar2/r4: callback_table
+      FUN_0804c500: ft_get_module
+    notes: >-
+      Raw osos.dec establishes a 64-byte instruction body from 0x080d9a98
+      through pop {r4,pc} at 0x080d9ad4. The adjacent "pshinter" literal at
+      0x080d9ad8 is data, and 0x080d9ae4 begins the next function. It has one
+      plain internal BL (0x080d9ab4 to ft_get_module), zero predicated internal
+      BLs, three plain inbound BL sites (0x080834e8, 0x0808351c, 0x0809045c),
+      and zero predicated inbound BL sites. It loads a target-width CFF state
+      callback table at face->+0x28c->+0x7d4, looks up "pshinter" through the
+      face library at face->+0x60->+4, then tail-dispatches callback-table word
+      zero with the returned module. Missing table, module, or callback returns
+      zero. The callback-table interface has no verified public identity, so
+      the port deliberately retains its target-word representation.

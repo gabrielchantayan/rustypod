@@ -8,6 +8,7 @@ pub mod buffer_skip;
 pub mod calc;
 pub mod charmap;
 pub mod cff_builder;
+pub mod cff_pshinter_callback;
 pub mod cff_index;
 pub mod cff_parse_fixed;
 pub mod cff_sid;
