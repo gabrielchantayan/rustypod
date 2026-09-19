@@ -8,19 +8,12 @@
 /// when the caller supplied a non-null buffer of at least that size, it first
 /// applies the stock byte transform `byte ^ (index + 0x11)` across all 0x362
 /// bytes and returns 0. A smaller capacity returns 12 without touching the
-/// buffer. Deliberate deviation: the fully decoded, single-call callee at
-/// `0x08093440` is kept as a private helper rather than an unresolved retailOS
-/// call, so the payload remains self-contained.
+/// buffer. No deliberate deviation: its transform is the separately linked
+/// `xor_index_key` port of retailOS `0x08093440`.
+
+use super::xor_index_key::xor_index_key;
 
 const REQUIRED_BUFFER_SIZE: u32 = 0x362;
-
-#[inline(always)]
-unsafe fn xor_index_key_in_place(buffer: *mut u8, len: usize) {
-    for index in 0..len {
-        let value = buffer.add(index).read();
-        buffer.add(index).write(value ^ (index as u8).wrapping_add(0x11));
-    }
-}
 
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -31,7 +24,7 @@ pub unsafe extern "C" fn obfuscated_buffer_prepare(buffer: *mut u8, size_slot: *
 
     let supplied_size = size_slot.read();
     if !buffer.is_null() && supplied_size >= REQUIRED_BUFFER_SIZE {
-        xor_index_key_in_place(buffer, REQUIRED_BUFFER_SIZE as usize);
+        xor_index_key(buffer, buffer, REQUIRED_BUFFER_SIZE as i32);
         size_slot.write(REQUIRED_BUFFER_SIZE);
         return 0;
     }
