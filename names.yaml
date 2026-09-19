@@ -77644,6 +77644,26 @@ functions:
       a second-entry match, miss, negative signed count, ignored seek errors,
       and direct-reader failure preserving the caller output. Reference C:
       decomp/c/004/080570cc_FUN_080570cc.c.
+  - address: 0x08057164
+    ghidra: FUN_08057164
+    name: empty_destructor_08057164
+    size: 4
+    sig: "void empty_destructor_08057164(void)"
+    module: util/empty_destructor_08057164
+    status: ported
+    renames: {}
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x08057164..0x08057168: the sole instruction is bx lr, and the next
+      separately entered function starts at 0x08057168. It neither reads
+      arguments nor changes memory, preserving r0 exactly. A whole-image A32
+      decode finds exactly four inbound direct BL calls: two plain
+      unconditional BL at 0x08038f04 and 0x08038f24, and two predicated BLNE
+      at 0x08038f1c and 0x08038f30; there are no outbound calls. The shared
+      caller uses it as an empty destructor for three optional fields. No
+      deliberate deviation: the target port is naked bx lr, preserving the
+      original register return state. Reference C:
+      decomp/c/004/08057164_FUN_08057164.c.
   - address: 0x08057184
     ghidra: FUN_08057184
     name: zeroing_bump_alloc
