@@ -53348,6 +53348,30 @@ functions:
       void. Reference C: decomp/c/000/08004298_FUN_08004298.c; assembly
       0x08004298.
 
+  - address: 0x08038250
+    ghidra: thunk_EXT_FUN_22004298
+    name: task_unblock_range_entry
+    size: 8
+    sig: "void task_unblock_range_entry(u32 start_task_id, u32 end_task_id)"
+    module: heap/task_unblock_range_gateway
+    status: ported
+    renames:
+      EXT_FUN_22004298: task_unblock_range_gateway
+      DAT_08038254: iram_task_unblock_range_target
+    notes: >-
+      Raw words prove Ghidra's four-byte function extent is incomplete: the
+      veneer is ldr pc, [pc, #-4] at 0x08038250 followed by target literal
+      0x22004298 at 0x08038254, for a true eight-byte extent. The boot
+      relocator copies the retailOS mirror at 0x08004298 to this IRAM address.
+      Decoding every aligned ARM B/BL word in osos.dec finds four direct BL
+      calls: unconditional at 0x082bf1e4, 0x082bfc18, and 0x08394068, plus
+      predicated blle at 0x0839408c; no plain B targets the veneer. The
+      mirror's selector-30 request frame and RTXCbug callers establish
+      KS_unblock(start, end), with an inclusive task-id range. Rust replaces
+      the literal-PC veneer with a separately linked entry that invokes the
+      existing mirror-body port; this preserves the ARM EABI arguments and
+      void result while making the relocation explicit.
+
 
   - address: 0x08037ea0
     ghidra: thunk_EXT_FUN_220043c0
