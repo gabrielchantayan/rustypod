@@ -6490,6 +6490,39 @@ functions:
       blx-through-volatile-slot dispatch standing in for the direct bl
       0x083d7ec0 (the documented deviation).
 
+  - address: 0x083e8dfc
+    ghidra: FUN_083e8dfc
+    name: vector_copy_construct_range_string_pair
+    size: 72
+    sig: "u8 *vector_copy_construct_range_string_pair(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Binary-verified 72-byte extent 0x083e8dfc..0x083e8e44, ending at pop
+      {r4-r6,pc}; the next function opens with push {r4-r6,lr} at
+      0x083e8e44. std::vector uninitialized-copy of 0x10-byte pairs of
+      adjacent StringObjects: per element, output==NULL skips construction;
+      otherwise it directly calls the ported StringObject copy constructor
+      0x082773e0 at output/source +0 and +8, then advances both cursors by
+      0x10. It terminates only on cursor equality and returns output_cursor.
+      Three inbound direct BL sites are 0x0812bb84 and 0x083e3ad8 twice, all
+      unconditional; no predicated inbound calls. Raw body words contain two
+      plain BLs (0xebfa396f and 0xebfa396c, each resolving to 0x082773e0) and
+      no predicated BLs. Ghidra C and size match; its three reported call
+      sites are inbound. No target deviation: direct calls reach the ported
+      callee. Host tests cover paired construction with null payloads, empty
+      range, and NULL-output skip-and-advance; they use aligned words because
+      host pointers are wider than retailOS pointer fields. match.py shows
+      the same paired direct calls and 0x10 cursor advances; LLVM adds its
+      frame and rotates the equality-tested loop.
   - address: 0x083e8cb0
     ghidra: FUN_083e8cb0
     name: vector_copy_construct_range_elem16_alt
