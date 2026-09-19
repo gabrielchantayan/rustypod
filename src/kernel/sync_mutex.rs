@@ -304,6 +304,23 @@ pub unsafe extern "C" fn mutex_delete(mutex: *mut Mutex) {
     (*mutex).sem_cell = core::ptr::null_mut();
 }
 
+/// mutex_delete_veneer — original: `thunk_FUN_0807f650` @ 0x080cb820
+/// (4 bytes; 4 unconditional `bl` call sites, zero predicated `bl` call
+/// sites).
+///
+/// Raw `osos.dec` establishes the complete one-word body `b 0x0807f650`
+/// (`0xeafecf8a`); 0x080cb824 begins the distinct mutex-unlock veneer.
+/// This passes the mutex unchanged to [`mutex_delete`], preserving cell
+/// destruction and pointer clearing. Deliberate deviation: Rust expresses
+/// the tail branch as a normal call so this separately hookable entry
+/// remains a real symbol.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_delete_veneer(mutex: *mut Mutex) {
+    mutex_delete(mutex);
+}
+
+
 /// A heap-owned object whose only identified members are two mutexes.
 ///
 /// On the 32-bit target `secondary` starts at +0x2c: the 8-byte primary
@@ -887,7 +904,7 @@ mod tests {
 
 
     #[test]
-    fn delete_heap_cell_deletes_and_frees() {
+    fn delete_veneer_heap_cell_deletes_and_frees() {
         let _lock = mock_kernel();
         let mut m = Mutex {
             sem_cell: core::ptr::null_mut(),
@@ -896,7 +913,7 @@ mod tests {
         unsafe { mutex_create(&mut m) };
         CALLS.lock().unwrap().clear();
         let cell = m.sem_cell;
-        unsafe { mutex_delete(&mut m) };
+        unsafe { mutex_delete_veneer(&mut m) };
         assert_eq!(
             calls(),
             vec![Call::Delete(1, cell as usize), Call::Free(cell as usize)]
