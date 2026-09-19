@@ -410,6 +410,27 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
 
+/// allocate_one_byte_early — original: `FUN_080b3e1c` @ `0x080b3e1c`
+/// (8 bytes; 4 plain `bl` call sites, none predicated).
+///
+/// Raw `osos.dec` words `e3a00001 ea07dbeb` establish the exact extent
+/// `0x080b3e1c..0x080b3e23`: `mov r0,#1; b 0x082aadd4`. The following
+/// `push {r4,lr}` at `0x080b3e24` begins an independent function. This
+/// argument-less entry overwrites r0 with the one-byte allocation size, then
+/// tail-branches to the existing tag-2 [`operator_new`], returning its
+/// allocation unchanged, including NULL.
+/// Deliberate deviation: Rust models the tail transfer as a call through the
+/// existing allocator seam. Current ARM code restores its frame then
+/// tail-branches; that extra frame setup is ABI-invisible. A distinct
+/// target-only section retains this separately linked retailOS `bl` target
+/// despite identical later siblings.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_one_byte_early")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_one_byte_early() -> *mut u8 {
+    operator_new(1)
+}
+
 /// allocate_one_byte — original: `FUN_080b3ea4` @ 0x080b3ea4 (8 bytes;
 /// 4 unconditional `bl` call sites, none predicated).
 ///
@@ -1395,6 +1416,24 @@ pub(crate) mod tests {
             assert_eq!(p, BLOCK_A as *mut u8);
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(LAST_ALLOC_SIZE, 24);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_one_byte_early_forwards_fixed_size_and_null_unchanged() {
+        let _lock = mock_heap();
+        unsafe {
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(allocate_one_byte_early().is_null());
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+
+            set_alloc_ret(BLOCK_A as *mut u8);
+            assert_eq!(allocate_one_byte_early(), BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_CALLS, 2);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
