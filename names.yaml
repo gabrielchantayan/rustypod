@@ -77701,6 +77701,29 @@ functions:
       assembly, store, and 0/1 return shape. Reference C:
       decomp/c/004/080578c4_FUN_080578c4.c.
 
+  - address: 0x080578fc
+    ghidra: thunk_FUN_08057924
+    name: cstr_compare_normalized
+    size: 4
+    sig: "i32 cstr_compare_normalized(const u8 *left, const u8 *right)"
+    module: libc/cstr_compare_normalized
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      FUN_08057924: unnamed shared compare loop
+    notes: >-
+      Raw ARM establishes this function is exactly the 4-byte veneer at
+      0x080578fc: b 0x08057924. Decoding every ARM B/BL word in osos.dec
+      independently finds four inbound direct calls, all unconditional plain
+      bl and zero predicated forms. The target joins an unnamed shared loop
+      that compares NUL-terminated strings by unsigned byte and normalizes
+      the first mismatch to -1 or 1, returning 0 on equality. Rust inlines
+      that verified target behavior because the target has no names.yaml seam;
+      this deliberately replaces the tail branch while preserving the veneer
+      entry result. match.py prints the expected structural diff: one original
+      branch versus the Rust comparison loop. Reference C:
+      decomp/c/004/080578fc_thunk_FUN_08057924.c.
   - address: 0x08057bdc
     ghidra: FUN_08057bdc
     name: nested_liti_class_check
