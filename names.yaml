@@ -115841,3 +115841,32 @@ functions:
       0x0805c924 have no established identity, so target builds retain fixed
       calls and host tests replace neither path because rejection tests do not
       cross those boundaries. Reference C: decomp/c/003/080523bc_FUN_080523bc.c.
+  # --- Fixed-descriptor allocation release ---
+  - address: 0x08051080
+    ghidra: FUN_08051080
+    name: release_opaque_allocation_08939b88
+    size: 12
+    sig: "void release_opaque_allocation_08939b88(void *allocation)"
+    module: cxx/opaque_allocation_release_08939b88
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_08051088/r1: opaque_allocation_descriptor_0x08939b88
+      FUN_0803b3a4: typed_allocation_release_helper
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      EXTENT: raw osos.dec is 12 bytes, not Ghidras reported 8:
+      ldr r1,[pc]; b 0x0803b3a4; literal 0x08939b88. The next separate
+      function begins at 0x0805108c (ldr r0,[pc]), proving the trailing
+      literal belongs here. CALL COUNT: decoding every ARM B/BL immediate
+      word in osos.dec finds exactly four direct call sites: four
+      unconditional plain bl at 0x08075168, 0x080d7e40, 0x080f0198, and
+      0x08396d14, with zero predicated bl forms. This wrapper has no NULL
+      guard and forwards even NULL into 0x0803b3a4. ALGORITHM: load the
+      fixed opaque descriptor in r1 and tail-branch to 0x0803b3a4; that
+      helper makes a temporary {allocation, descriptor} frame and calls the
+      unported type-erased release engine 0x080c85bc with r2=0. The
+      descriptors concrete type is not recoverable, so no identity was
+      invented. match.py reports the expected structural diff: the emitted
+      literal relocation and local-symbol branch operand differ from the
+      retail absolute forms. Deliberate deviations: none.
