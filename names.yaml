@@ -80949,6 +80949,32 @@ functions:
       state evolution are covered independently. The tail branch remains an
       ordinary returning call, as documented by traced_free.
 
+  # --- flagged pointer group destructor ---
+  - address: 0x0803a168
+    ghidra: FUN_0803a168
+    name: flagged_pointer_group_destroy
+    size: 116
+    sig: "void flagged_pointer_group_destroy(FlaggedPointerGroup *this)"
+    module: heap/flagged_pointer_group
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x0: first
+      param_1_plus_0x4: second
+      param_1_plus_0xc: auxiliary_associated
+      param_1_plus_0x10: auxiliary
+      param_1_plus_0x14: flags
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 0x0803a168..0x0803a1dc (29 instructions);
+      the next independently linked allocation factory begins at 0x0803a1dc.
+      Decoding every word finds no plain BL, three BLNE instructions to
+      traced_free, and a final BNE tail branch to traced_free. An independent
+      inbound scan finds four direct plain BL call sites. NULL this returns;
+      flags bit 2 frees non-NULL first then second and clears both, bit 3 frees
+      non-NULL auxiliary and clears it plus auxiliary_associated, and bit 0
+      scalar-deletes this. Deliberate deviation: the final tail branch is an
+      ordinary returning Rust call because traced_free returns normally.
   - address: 0x0818fc80
     ghidra: FUN_0818fc80
     name: service_handler_reset
