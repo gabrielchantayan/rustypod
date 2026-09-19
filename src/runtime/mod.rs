@@ -43,6 +43,7 @@ pub mod rtc_seeded_random_word;
 pub mod rtc_seeded_random_service;
 pub mod rt_div;
 pub mod setjmp;
+pub mod set_stack_pointer;
 pub mod shutdown_chain;
 pub mod startup_wait;
 pub mod timer_constants;

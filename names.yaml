@@ -5566,6 +5566,16 @@ functions:
     module: setjmp
     status: ported
     notes: EXACT MATCH. push {r0,r1}; ldm sp,{sl,sp}; mov pc,lr.
+  - address: 0x08038c80
+    ghidra: FUN_08038c80
+    name: set_stack_pointer
+    size: 8
+    sig: "void set_stack_pointer(u32 new_stack_pointer)"
+    module: set_stack_pointer
+    status: ported
+    notes: >-
+      Raw words e1a0d000/e12fff1e: installs r0 in sp then bx lr. True boundary
+      is 0x08038c88; four plain BL callers and zero predicated BL callers.
 
   - address: 0x08000020
     name: __rt_memcpy
