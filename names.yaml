@@ -116141,3 +116141,35 @@ functions:
       Deliberate deviation: named #[repr(C)] context fields replace the ARM
       stack words and ordinary Rust calls replace the short-circuit branches;
       on ARM the context remains 16 bytes and callback order is unchanged.
+
+  - address: 0x080498f8
+    ghidra: FUN_080498f8
+    name: diag_ring_block_get_or_create
+    size: 208
+    sig: "DiagEventRing *diag_ring_block_get_or_create(void)"
+    module: kernel/diag_ring_block_get_or_create
+    status: ported
+    renames:
+      DAT_080499c8: task_index_table
+      DAT_080499cc: diag_ring_fallback
+      FUN_0808475c: task_table_prepare_unported
+      FUN_08044174: current_context_id
+      FUN_08043c18: traced_alloc
+      FUN_08086a88: task_table_release_unported
+    notes: >-
+      Raw osos.dec establishes the exact 208-byte extent
+      0x080498f8..0x080499c8: 52 ARM instruction words; its two literal-pool
+      words follow at 0x080499c8/0x080499cc, and the next independently
+      entered function begins at 0x080499d0. The body contains four plain
+      direct BL instructions (prepare @ 0x0808475c, current_context_id @
+      0x08044174, traced_alloc @ 0x08043c18, release @ 0x08086a88) and one
+      predicated BLNE to release; it also invokes task-table virtual slots
+      +0x1c twice and +0x20 once. It prepares the task table, looks up the
+      current context id's diagnostic ring, or allocates 332 bytes, stamps
+      the owner, clears head/tail plus pointer/flag arrays, registers it,
+      then confirms the table retained the exact candidate. A retained
+      registration handle is released; a rejected candidate is released and
+      the fallback pointer is returned. Target code uses the verified fixed
+      service entries and u32 vtable fields. Host tests use an operation-table
+      seam for the unported table/release services; diag_ring_record retains
+      its pre-existing host-only getter seam for its own callers.

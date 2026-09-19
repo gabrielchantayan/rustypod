@@ -78,6 +78,8 @@
 //!   the firmware does not have.
 
 use crate::drivers::ata_cmd::traced_free;
+#[cfg(target_os = "none")]
+use crate::kernel::diag_ring_block_get_or_create::diag_ring_block_get_or_create;
 
 /// Ring capacity: 16 slots per task, decoded from both the `% 0x10`
 /// wraparound here and the reset loop bound `cmp r0,#16` @ 0x08049770.
@@ -156,8 +158,13 @@ pub unsafe extern "C" fn diag_ring_record(
     data0: u32,
     data1: u32,
 ) {
-    let Some(getter) = block_getter() else { return };
-    let block = getter();
+    #[cfg(target_os = "none")]
+    let block = diag_ring_block_get_or_create();
+    #[cfg(not(target_os = "none"))]
+    let block = {
+        let Some(getter) = block_getter() else { return };
+        getter()
+    };
     if block.is_null() {
         return;
     }
