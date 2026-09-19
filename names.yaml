@@ -17,6 +17,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ade34
+    ghidra: FUN_080ade34
+    name: afm_read_collection_length
+    size: 52
+    sig: "u32 afm_read_collection_length(AfmParser *parser, u32 *length)"
+    module: util/afm_next_statement_token
+    status: ported
+    renames:
+      param_1/r0: parser
+      param_2/r1: length
+      FUN_080b616c: afm_descriptor_parser
+    notes: >-
+      Raw osos.dec words establish the 52-byte extent
+      0x080ade34..0x080ade68; 0x080ade68 is the next real function boundary
+      (`push {r2,r3,r4,lr}`). The body has one plain unconditional bl to
+      0x080b616c and zero predicated bl instructions. A whole-image A32
+      decode finds four inbound direct plain bl calls at 0x08099900,
+      0x080999a8, 0x080b5ec0, and 0x080b6030; no predicated bl forms target
+      this address. It builds one type-3 descriptor, asks the descriptor
+      parser to fill it, writes its value only when exactly one descriptor was
+      parsed, and returns 0 or 0xa0. Deliberate deviation: the unported
+      descriptor parser remains a direct retail call on-device and is a host
+      seam in tests.
   - address: 0x080ade68
     ghidra: FUN_080ade68
     name: afm_scan_token_to_delimiter

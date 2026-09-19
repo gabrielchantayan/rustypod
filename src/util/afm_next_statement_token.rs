@@ -20,6 +20,14 @@
 //! `afm_next_statement_token` advances the cursor to the first token of the
 //! following statement. Its line-end helper remains a retail target on-device
 //! and a host seam in tests.
+//!
+//! `afm_read_collection_length` — original: `FUN_080ade34` @ `0x080ade34`
+//! (52 bytes, `0x080ade34..0x080ade67`; `0x080ade68` begins the next
+//! function). Raw ARM decoding finds one plain unconditional `bl`, to
+//! `FUN_080b616c`, and no predicated `bl` instructions. It asks the AFM
+//! descriptor parser for one type-3 value, stores it on success, and returns
+//! `0xa0` otherwise. Deliberate deviation: the unported descriptor parser is
+//! a direct retail call on-device and a host seam in tests.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
@@ -128,6 +136,79 @@ pub static mut AFM_TOKEN_SCANNER_OPS: AfmTokenScannerOps = DEFAULT_AFM_TOKEN_SCA
 unsafe fn scan_to_line_end(scanner: *mut AfmScanner) -> *mut u8 {
     let step = unsafe { core::ptr::read_volatile(addr_of!(AFM_TOKEN_SCANNER_OPS.scan_to_line_end)) };
     unsafe { step(scanner) }
+}
+
+#[repr(C)]
+struct AfmValueDescriptor {
+    kind: u32,
+    value: u32,
+}
+
+type DescriptorParser = unsafe extern "C" fn(*mut AfmParser, *mut AfmValueDescriptor, u32) -> u32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn parse_afm_descriptor(
+    parser: *mut AfmParser,
+    descriptor: *mut AfmValueDescriptor,
+) -> u32 {
+    let parse: DescriptorParser = unsafe { core::mem::transmute(0x080b_616cusize) };
+    unsafe { parse(parser, descriptor, 1) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_descriptor_parser(
+    _parser: *mut AfmParser,
+    _descriptor: *mut AfmValueDescriptor,
+    _count: u32,
+) -> u32 {
+    0
+}
+
+/// Host seam for the unported AFM descriptor parser.
+#[cfg(not(target_os = "none"))]
+#[derive(Clone, Copy)]
+pub struct AfmDescriptorParserOps {
+    pub parse: DescriptorParser,
+}
+
+#[cfg(not(target_os = "none"))]
+pub const DEFAULT_AFM_DESCRIPTOR_PARSER_OPS: AfmDescriptorParserOps =
+    AfmDescriptorParserOps { parse: unavailable_descriptor_parser };
+
+#[cfg(not(target_os = "none"))]
+pub static mut AFM_DESCRIPTOR_PARSER_OPS: AfmDescriptorParserOps =
+    DEFAULT_AFM_DESCRIPTOR_PARSER_OPS;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn parse_afm_descriptor(
+    parser: *mut AfmParser,
+    descriptor: *mut AfmValueDescriptor,
+) -> u32 {
+    let parse = unsafe { core::ptr::read_volatile(addr_of!(AFM_DESCRIPTOR_PARSER_OPS.parse)) };
+    unsafe { parse(parser, descriptor, 1) }
+}
+
+/// Read the single count value that precedes an AFM collection.
+///
+/// `parser` and `length` must be valid pointers. The output is changed only
+/// when the descriptor parser reports that it consumed one descriptor.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn afm_read_collection_length(
+    parser: *mut AfmParser,
+    length: *mut u32,
+) -> u32 {
+    let mut descriptor = core::mem::MaybeUninit::<AfmValueDescriptor>::uninit();
+    let descriptor = descriptor.as_mut_ptr();
+    unsafe { (*descriptor).kind = 3 };
+    if unsafe { parse_afm_descriptor(parser, descriptor) } == 1 {
+        unsafe { length.write((*descriptor).value) };
+        0
+    } else {
+        0xa0
+    }
 }
 
 /// Advance an AFM scanner to the first token of the following statement.
@@ -369,5 +450,63 @@ mod tests {
         assert_eq!(unsafe { core::slice::from_raw_parts(token, 4) }, b"next");
         assert_eq!(unsafe { scanner.cursor.offset_from(bytes.as_mut_ptr()) }, bytes.len() as isize);
         restore_default(guard);
+    }
+    unsafe extern "C" fn parse_collection_length(
+        _parser: *mut AfmParser,
+        descriptor: *mut AfmValueDescriptor,
+        count: u32,
+    ) -> u32 {
+        assert_eq!(count, 1);
+        assert_eq!(unsafe { (*descriptor).kind }, 3);
+        unsafe { (*descriptor).value = 37 };
+        1
+    }
+
+    unsafe extern "C" fn reject_collection_length(
+        _parser: *mut AfmParser,
+        _descriptor: *mut AfmValueDescriptor,
+        _count: u32,
+    ) -> u32 {
+        0
+    }
+
+    #[test]
+    fn collection_length_stores_the_single_type_three_descriptor_value() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            addr_of_mut!(AFM_DESCRIPTOR_PARSER_OPS).write(AfmDescriptorParserOps {
+                parse: parse_collection_length,
+            });
+        }
+        let mut length = u32::MAX;
+
+        let status = unsafe { afm_read_collection_length(null_mut(), &mut length) };
+
+        assert_eq!(status, 0);
+        assert_eq!(length, 37);
+        unsafe {
+            addr_of_mut!(AFM_DESCRIPTOR_PARSER_OPS).write(DEFAULT_AFM_DESCRIPTOR_PARSER_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn collection_length_preserves_output_when_descriptor_parse_fails() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            addr_of_mut!(AFM_DESCRIPTOR_PARSER_OPS).write(AfmDescriptorParserOps {
+                parse: reject_collection_length,
+            });
+        }
+        let mut length = 0x1234_5678;
+
+        let status = unsafe { afm_read_collection_length(null_mut(), &mut length) };
+
+        assert_eq!(status, 0xa0);
+        assert_eq!(length, 0x1234_5678);
+        unsafe {
+            addr_of_mut!(AFM_DESCRIPTOR_PARSER_OPS).write(DEFAULT_AFM_DESCRIPTOR_PARSER_OPS);
+        }
+        drop(guard);
     }
 }
