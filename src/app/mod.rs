@@ -119,6 +119,7 @@ pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod element_registry;
 pub mod entry_match_first;
+pub mod entry_match_find_eligible;
 pub mod entry_match_next;
 pub mod entry_match_successor;
 pub mod entry_match_source_payload;
