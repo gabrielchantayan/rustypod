@@ -3,6 +3,7 @@ pub mod condvar;
 pub mod control_state;
 pub mod csem;
 pub mod diag_ring_record;
+pub mod diag_ring_block_get_or_create;
 pub mod diag_ring_strings;
 pub mod clock_snapshot_trace;
 pub mod event_handler_source;
