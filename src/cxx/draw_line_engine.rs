@@ -10,7 +10,7 @@
 
 /// ABI shared by the two retail line renderers.
 pub type DrawLineRenderer = unsafe extern "C" fn(
-    *const u8, i32, i32, i32, i32, i32, *const u8, u8, *const u8,
+    *const u8, i32, i32, i32, i32, i32, *const u8, i32, *const u8,
 );
 
 #[derive(Clone, Copy)]
@@ -22,7 +22,7 @@ pub struct DrawLineEngineOps {
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_scaled_renderer(
     surface: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, thickness: i32,
-    foreground: *const u8, style: u8, clip_rect: *const u8,
+    foreground: *const u8, style: i32, clip_rect: *const u8,
 ) {
     let renderer: DrawLineRenderer = unsafe { core::mem::transmute(0x080e_a434usize) };
     unsafe { renderer(surface, x1, y1, x2, y2, thickness, foreground, style, clip_rect) }
@@ -31,7 +31,7 @@ unsafe extern "C" fn firmware_scaled_renderer(
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_integer_renderer(
     surface: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, thickness: i32,
-    foreground: *const u8, style: u8, clip_rect: *const u8,
+    foreground: *const u8, style: i32, clip_rect: *const u8,
 ) {
     let renderer: DrawLineRenderer = unsafe { core::mem::transmute(0x080f_2efcusize) };
     unsafe { renderer(surface, x1, y1, x2, y2, thickness, foreground, style, clip_rect) }
@@ -39,7 +39,7 @@ unsafe extern "C" fn firmware_integer_renderer(
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_renderer(
-    _: *const u8, _: i32, _: i32, _: i32, _: i32, _: i32, _: *const u8, _: u8, _: *const u8,
+    _: *const u8, _: i32, _: i32, _: i32, _: i32, _: i32, _: *const u8, _: i32, _: *const u8,
 ) { panic!("draw_line_engine renderer is unavailable on host") }
 
 #[cfg(target_os = "none")]
@@ -65,7 +65,7 @@ pub static mut DRAW_LINE_ENGINE_OPS: DrawLineEngineOps = DEFAULT_DRAW_LINE_ENGIN
 #[inline(never)]
 pub unsafe extern "C" fn draw_line_engine(
     surface_body: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, thickness: i32,
-    foreground: *const u8, style: u8, clip_rect: *const u8, scaled: i32,
+    foreground: *const u8, style: i32, clip_rect: *const u8, scaled: i32,
 ) {
     let pixel_format = unsafe { (surface_body.add(8) as *const i32).read() };
     let ops = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DRAW_LINE_ENGINE_OPS)) };
@@ -83,8 +83,8 @@ mod tests {
     use std::sync::Mutex;
     static LOCK: Mutex<()> = Mutex::new(());
     static mut CALL: Option<(bool, [i32; 4])> = None;
-    unsafe extern "C" fn scaled(_: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, _: i32, _: *const u8, _: u8, _: *const u8) { unsafe { CALL = Some((true, [x1, y1, x2, y2])) } }
-    unsafe extern "C" fn integer(_: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, _: i32, _: *const u8, _: u8, _: *const u8) { unsafe { CALL = Some((false, [x1, y1, x2, y2])) } }
+    unsafe extern "C" fn scaled(_: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, _: i32, _: *const u8, _: i32, _: *const u8) { unsafe { CALL = Some((true, [x1, y1, x2, y2])) } }
+    unsafe extern "C" fn integer(_: *const u8, x1: i32, y1: i32, x2: i32, y2: i32, _: i32, _: *const u8, _: i32, _: *const u8) { unsafe { CALL = Some((false, [x1, y1, x2, y2])) } }
     fn run(format: i32, selector: i32) -> (bool, [i32; 4]) {
         let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut surface = [0u32; 3]; surface[2] = format as u32;

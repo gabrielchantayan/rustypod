@@ -125,7 +125,7 @@ pub type DrawStateLineEngine = unsafe extern "C" fn(
     y2: i32,
     thickness: i32,
     foreground: *const u8,
-    style: u8,
+    style: i32,
     clip_rect: *const u8,
     scaled: i32,
 );
@@ -145,7 +145,7 @@ unsafe extern "C" fn firmware_draw_state_line_engine(
     y2: i32,
     thickness: i32,
     foreground: *const u8,
-    style: u8,
+    style: i32,
     clip_rect: *const u8,
     scaled: i32,
 ) {
@@ -175,7 +175,7 @@ unsafe extern "C" fn missing_draw_state_line_engine(
     _y2: i32,
     _thickness: i32,
     _foreground: *const u8,
-    _style: u8,
+    _style: i32,
     _clip_rect: *const u8,
     _scaled: i32,
 ) {
@@ -260,7 +260,7 @@ pub unsafe extern "C" fn draw_state_line(this: *mut u8, x1: i32, y1: i32, x2: i3
             state.origin_y.wrapping_add(y2),
             1,
             state.foreground.as_ptr(),
-            state.style,
+            state.style as i32,
             state.clip_rect.as_ptr(),
             0,
         );
@@ -302,7 +302,7 @@ pub unsafe extern "C" fn draw_state_line_to(draw_state: *mut u8, x: i32, y: i32)
             state.origin_y.wrapping_add(y),
             1,
             state.foreground.as_ptr(),
-            state.style,
+            state.style as i32,
             state.clip_rect.as_ptr(),
             0,
         );
@@ -313,13 +313,18 @@ pub unsafe extern "C" fn draw_state_line_to(draw_state: *mut u8, x: i32, y: i32)
 
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    extern crate std;
+
+    pub static DRAW_STATE_LINE_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     const GUARD: u8 = 0xa5;
 
     #[derive(Clone, Copy, PartialEq, Debug)]
@@ -331,7 +336,7 @@ mod tests {
         y2: i32,
         thickness: i32,
         foreground: usize,
-        style: u8,
+        style: i32,
         clip_rect: usize,
         scaled: i32,
         point_during_call: (i32, i32),
@@ -347,7 +352,7 @@ mod tests {
         y2: i32,
         thickness: i32,
         foreground: *const u8,
-        style: u8,
+        style: i32,
         clip_rect: *const u8,
         scaled: i32,
     ) {
@@ -423,7 +428,7 @@ mod tests {
     }
 
     fn with_recorder<T>(run: impl FnOnce() -> T) -> T {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = test_support::DRAW_STATE_LINE_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let previous = unsafe { DRAW_STATE_LINE_OPS };
         unsafe {
             SEEN = None;
