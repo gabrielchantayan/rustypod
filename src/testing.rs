@@ -1613,6 +1613,7 @@ pub mod hints {
     pub const OBJECT_RESOURCE_STRING: usize = 0x80e0_0000;
     pub const OBJECT_RESOURCE_TABLE_COUNTED_STRING: usize = 0x80f0_0000;
     pub const OBJECT_RESOURCE_VECTOR20_COUNTED_STRING: usize = 0x8100_0000;
+    pub const OBJECT_RESOURCE_VECTOR24_COUNTED_STRING: usize = 0x8110_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

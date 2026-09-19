@@ -3755,6 +3755,40 @@ functions:
       dereference behavior. Host tests cover zero and u32::MAX counts
       through direct backends and kind-2 proxies.
 
+  # --- retailOS UI 24-byte resource-vector counted-string reader ---
+  - address: 0x080528ec
+    ghidra: FUN_080528ec
+    name: object_resource_vector24_counted_string
+    size: 108
+    sig: "i32 object_resource_vector24_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_vector24_counted_string
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      r7: backend
+      FUN_08051dc4: object_backend_for_kind (ported)
+      FUN_083d7750: vector_size_elem24 (ported)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e92d41f0 e1a05000 e3a00000 e1c200b0 e1a00005 e1a06002
+      e1a04001 ebfffd2d e3560000 e1a07000 0a000005 e3540000 ba000003
+      e2850eeb eb0e1389 e1500004 8a000001 e3e00031 e8bd81f0 e5950eb0
+      e0841084 e7901181 e5970f60 e1a02006 e8bd41f0 e2800f72 ea01abd8
+      decode from push {r4-r8,lr} at 0x080528ec through tail b
+      0x080bd8bc at 0x08052954; the next separately entered function starts
+      at 0x08052958, proving the 108-byte extent. The body has two internal
+      plain BL calls, to object_backend_for_kind and vector_size_elem24, and
+      no predicated BL call. Whole-image ARM immediate decoding finds four
+      inbound plain BL callers and no predicated BL callers. It clears
+      counted[0], rejects negative or out-of-range indices into object+0xeb0's
+      24-byte vector with -50, then tail-calls the counted reader for the
+      selected first-word ID through backend+0xf60+0x1c8. Ghidra incorrectly
+      reports the tail branch as a five-argument string_pool_read call. Rust
+      passes zero for its dead fourth argument; stock preserves object, but the
+      counted reader clears its local byte-length output before it can be
+      observed.
   # --- retailOS UI resource-ID table counted-string reader ---
   - address: 0x08052c64
     ghidra: FUN_08052c64
