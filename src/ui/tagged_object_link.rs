@@ -20,13 +20,15 @@
 //!
 //! The concrete identities of the two tagged object families and their list
 //! implementations are not recovered. The source membership scan
-//! (0x080e2d70), insertion (0x0803bbfc), and removal (0x080646b8) therefore
-//! remain volatile firmware boundaries. The stock `bzero` calls only clear
-//! the temporary records before the pointer words are written; initialized
-//! Rust arrays produce the same records, so the already-ported bzero has no
-//! unnecessary seam here.
+//! (0x080e2d70) and insertion (0x0803bbfc) remain volatile firmware
+//! boundaries; removal now uses the ported dynamic-array operation. The stock
+//! `bzero` calls only clear the temporary records before the pointer words are
+//! written; initialized Rust arrays produce the same records, so the
+//! already-ported bzero has no unnecessary seam here.
 
 use core::ptr;
+use crate::util::dynamic_array_remove::dynamic_array_remove;
+
 
 /// First-word tag required by the source guard at 0x080b49a4.
 pub const LINK_SOURCE_TAG: u32 = 0x4d53_6e64;
@@ -109,16 +111,10 @@ unsafe extern "C" fn missing_list_insert(_list: *mut u8, _entry: *const u32) -> 
     panic!("tagged_object_link requires list insertion 0x0803bbfc")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_list_remove(list: *mut u8, count: u32, index: u32) -> u32 {
-    let function: ListRemove = core::mem::transmute(0x0806_46b8usize);
-    function(list, count, index)
+unsafe extern "C" fn ported_list_remove(list: *mut u8, count: u32, index: u32) -> u32 {
+    dynamic_array_remove(list.cast(), count, index)
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_list_remove(_list: *mut u8, _count: u32, _index: u32) -> u32 {
-    panic!("tagged_object_link requires list removal 0x080646b8")
-}
 
 #[cfg(target_os = "none")]
 static mut SOURCE_CONTAINS_TARGET: SourceContainsTarget = retail_source_contains_target;
@@ -130,10 +126,7 @@ static mut LIST_INSERT: ListInsert = retail_list_insert;
 #[cfg(not(target_os = "none"))]
 static mut LIST_INSERT: ListInsert = missing_list_insert;
 
-#[cfg(target_os = "none")]
-static mut LIST_REMOVE: ListRemove = retail_list_remove;
-#[cfg(not(target_os = "none"))]
-static mut LIST_REMOVE: ListRemove = missing_list_remove;
+static mut LIST_REMOVE: ListRemove = ported_list_remove;
 
 #[inline(always)]
 unsafe fn source_contains_target_fn() -> SourceContainsTarget {
