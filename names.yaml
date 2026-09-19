@@ -70591,6 +70591,33 @@ functions:
       spill's product); 7 instructions either way.
       #[inline(never)] for the 25 `bl` targets.
 
+  - address: 0x0803d69c
+    ghidra: FUN_0803d69c
+    name: bio_push
+    size: 76
+    sig: "BIO *bio_push(BIO *head, BIO *tail)"
+    module: crypto/bio_push
+    status: ported
+    renames:
+      param_1/r0/r4: head
+      param_2/r1/r0: tail
+      r2: last
+      "head + 0x24": next_bio
+      "tail + 0x28": prev_bio
+      FUN_0803d294: bio_ctrl
+    notes: >-
+      OpenSSL BIO_push. Raw ARM establishes the 76-byte extent
+      0x0803d69c..0x0803d6e8: `pop {r4,pc}` ends the body and 0x0803d6e8
+      starts a separately linked function, with no literal pool. Full-image
+      decoding finds four inbound direct calls, all unconditional BL at
+      0x08060048, 0x08060294, 0x0806032c, and 0x08272918; there are no
+      predicated BL calls. NULL head returns tail unchanged. Otherwise the
+      body walks next_bio (+0x24) to the terminal BIO, writes tail there,
+      writes tail->prev_bio (+0x28) only for a non-NULL tail, calls
+      BIO_ctrl(head, BIO_CTRL_PUSH=6, 0, NULL), ignores that result, and
+      returns head. No deliberate deviations: the shared Bio layout retains
+      target-width pointer words and host tests map its three-node fixture
+      below 4 GiB.
   - address: 0x0803d8a8
     ghidra: FUN_0803d8a8
     name: bio_s_mem
