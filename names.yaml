@@ -112688,3 +112688,32 @@ functions:
       deliberately not invented. Rust calls its verified device address and
       exposes only that boundary as a host-test seam; it also forwards the
       comparator register through the already ported vtable wrapper.
+  - address: 0x080d9cac
+    ghidra: FUN_080d9cac
+    name: bit_buffer_copy
+    size: 192
+    sig: "u32 bit_buffer_copy(u32 *state, const u8 *source, u32 source_bit_offset, u32 bit_count, u32 *destination, u32 context)"
+    module: util/bit_buffer_copy
+    status: ported
+    renames:
+      param_1/r0/r6: state
+      param_2/r1/r7: source
+      param_3/r2/r4: source_bit_offset
+      param_4/r3/r5: bit_count
+      param_5: destination
+      param_6: context
+      FUN_080cd984: bit_buffer_prepare_unported
+      FUN_080a9328: bit_buffer_select_cursor_unported
+      FUN_0808ab4c: bit_buffer_ensure_capacity_unported
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent from 0x080d9cac
+      through pop {r3-r9,pc} at 0x080d9d68; 0x080d9d6c begins the next
+      separately entered function. Whole-image A32 decode finds four incoming
+      plain BL calls (0x080913a0, 0x080913c4, 0x080a9288, 0x080a92ac), zero
+      predicated BL callers, and three plain internal BL calls (0x080d9ccc,
+      0x080d9ce4, 0x080d9cfc). It prepares state, selects a cursor, ensures
+      capacity, stores bit_count in cursor word zero, then copies source bits
+      MSB-first into cursor word +2's byte buffer. The three unported helpers
+      have no stronger established identities: target Rust calls their verified
+      fixed addresses and host tests use ABI seams. Cursor byte pointers remain
+      u32 target words on hosts.

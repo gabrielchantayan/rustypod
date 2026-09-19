@@ -15,6 +15,7 @@ pub mod beload;
 pub mod berec;
 pub mod ber_tlv_encoded_size;
 pub mod bitfield;
+pub mod bit_buffer_copy;
 pub mod big_endian_word_bit_index;
 pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;

@@ -386,6 +386,9 @@ pub mod hints {
     // 0x6f00_0000: dedicated to app/service_handler_pending_event_reset's
     // session fixture; mappings never unmap, so no other test may reuse it.
     pub const SERVICE_HANDLER_PENDING_EVENT_RESET: usize = 0x6f00_0000;
+    // 0x6f10_0000: dedicated to util/bit_buffer_copy's raw-u32 cursor and
+    // output-buffer fixture; mappings never unmap, so no other user may share it.
+    pub const BIT_BUFFER_COPY: usize = 0x6f10_0000;
     // 0x9200_0000: dedicated to app/service_handler_status's raw-u32 query
     // object fixture; mappings never unmap, so no other user may share it.
     pub const SERVICE_HANDLER_STATUS_QUERY: usize = 0x9200_0000;
