@@ -1605,6 +1605,11 @@ pub mod hints {
     // 0x80b0_0000: dedicated to app/entry_match_successor's raw-u32 entry,
     // nested-container, and target fixture; mappings never unmap.
     pub const ENTRY_MATCH_SUCCESSOR: usize = 0x80b0_0000;
+    // 0x80c0_0000 and 0x80d0_0000: dedicated to
+    // ui/object_resource_counted_string's raw-u32 object and entry-table
+    // fixtures; mappings never unmap, so no other user may share them.
+    pub const OBJECT_RESOURCE_COUNTED_STRING: usize = 0x80c0_0000;
+    pub const OBJECT_RESOURCE_COUNTED_STRING_VALID: usize = 0x80d0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
