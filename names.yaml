@@ -3732,6 +3732,29 @@ functions:
       unrecovered. No NULL or bounds guard is added: direct dereferences match
       retailOS exactly.
 
+  # --- retailOS kind-resolved UI backend resource count ---
+  - address: 0x0805417c
+    ghidra: FUN_0805417c
+    name: object_resource_count
+    size: 16
+    sig: "u32 object_resource_count(const void *object)"
+    module: ui/object_resource_count
+    status: ported
+    vars: {param_1: object, iVar1: backend}
+    notes: >-
+      Raw words e52de004 ebfff70f e5900f68 e49df004 decode to
+      `str lr,[sp,#-4]!; bl 0x08051dc4; ldr r0,[r0,#0xf68];
+      ldr pc,[sp],#4`; the next real function starts at 0x0805418c, so
+      the true extent is 16 bytes. Resolves object through
+      object_backend_for_kind @ 0x08051dc4 (kind 1 returns self; kind 2
+      reads proxy+0xefc), then returns backend+0xf68, the resource-table
+      count. Four direct plain BL callers at 0x081118d8, 0x08113a24,
+      0x0811458c, and 0x0813c300; no predicated BL callers. Rust delegates
+      the tag dispatch to the existing resolver seam and deliberately adds
+      no null, kind, alignment, or bounds guard, preserving the stock
+      dereference behavior. Host tests cover zero and u32::MAX counts
+      through direct backends and kind-2 proxies.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
