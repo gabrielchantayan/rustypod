@@ -5,9 +5,12 @@
 //! bounds do not imply that the input or output is NUL-terminated.
 
 use super::string_object::{
-    string_object_c_str, string_object_destroy, utf8_codepoint_count_safe,
-    utf8_next_codepoint, StringObject, StringObjectVtable, STRING_OBJECT_VTABLE_ADDRESS,
+    string_object_assign_payload, string_object_c_str, string_object_construct_from_utf16,
+    string_object_destroy, utf8_codepoint_count_safe, utf8_next_codepoint, StringObject,
+    StringObjectVtable, STRING_OBJECT_VTABLE_ADDRESS,
 };
+
+use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
 
 #[inline(always)]
 unsafe fn write_cursor_byte(cursor: *mut *mut u8, byte: u8) {
@@ -262,6 +265,91 @@ pub unsafe extern "C" fn utf8_span_to_utf16_counted(
         out_count.write(written as u32);
     }
     string_object_destroy(&mut temporary);
+    0
+}
+
+/// utf16_to_utf8_capped — original: FUN_08046d94 @ 0x08046d94 (188 bytes,
+/// 0x08046d94..0x08046e50). Raw ARM has ten plain `bl` instructions and one
+/// predicated `blne`; four inbound direct calls are all plain `bl`.
+///
+/// Construct a temporary StringObject from at most `max_code_units` UTF-16
+/// units. While its UTF-8 byte length exceeds `max_bytes`, ask retailOS's
+/// still-unported 0x082a52a0 helper for a copy without its final codepoint,
+/// assign that copy back, and destroy the intermediate. Copy the surviving
+/// UTF-8 codepoints to `destination`, return zero, and optionally report its
+/// byte length excluding the NUL. The bound is unsigned, exactly as the ARM
+/// `bhi` comparison.
+///
+/// Deliberate deviation: 0x082a52a0 has no verified identity or Rust port, so
+/// it remains a fixed-address target seam. Its observed `(out, source,
+/// codepoint_count - 1)` ABI and returned StringObject state are preserved;
+/// host tests install the same boundary explicitly.
+type StringObjectWithoutLastCodepointHelper =
+    unsafe extern "C" fn(*mut StringObject, *const StringObject, i32);
+
+#[cfg(target_os = "none")]
+const STRING_OBJECT_WITHOUT_LAST_CODEPOINT_ADDRESS: usize = 0x082a_52a0;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn string_object_without_last_codepoint(
+    out: *mut StringObject, source: *const StringObject, codepoint_count: i32,
+) {
+    let helper: StringObjectWithoutLastCodepointHelper =
+        core::mem::transmute(STRING_OBJECT_WITHOUT_LAST_CODEPOINT_ADDRESS);
+    helper(out, source, codepoint_count);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_string_object_without_last_codepoint(
+    _out: *mut StringObject, _source: *const StringObject, _codepoint_count: i32,
+) {
+}
+
+#[cfg(not(target_os = "none"))]
+static mut STRING_OBJECT_WITHOUT_LAST_CODEPOINT_HELPER: StringObjectWithoutLastCodepointHelper =
+    unavailable_string_object_without_last_codepoint;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn string_object_without_last_codepoint(
+    out: *mut StringObject, source: *const StringObject, codepoint_count: i32,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_WITHOUT_LAST_CODEPOINT_HELPER))(
+        out, source, codepoint_count,
+    )
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf16_to_utf8_capped(
+    source: *const u16,
+    max_code_units: i32,
+    destination: *mut u8,
+    max_bytes: u32,
+    out_bytes: *mut u32,
+) -> i32 {
+    let mut text = core::mem::MaybeUninit::<StringObject>::uninit();
+    let text = string_object_construct_from_utf16(text.as_mut_ptr(), source, max_code_units);
+
+    while max_bytes < (strlen_safe_plus1((*text).payload) as u32).wrapping_sub(1) {
+        let mut shortened = core::mem::MaybeUninit::<StringObject>::uninit();
+        let shortened = shortened.as_mut_ptr();
+        string_object_without_last_codepoint(
+            shortened,
+            text,
+            utf8_codepoint_count_safe((*text).payload) as i32,
+        );
+        string_object_assign_payload(text, (*shortened).payload);
+        string_object_destroy(shortened);
+    }
+
+    let byte_len = (strlen_safe_plus1((*text).payload) as u32).wrapping_sub(1);
+    utf8_copy_codepoints(destination, string_object_c_str(text), utf8_codepoint_count_safe((*text).payload) as i32);
+    if !out_bytes.is_null() {
+        out_bytes.write(byte_len);
+    }
+    string_object_destroy(text);
     0
 }
 
@@ -907,5 +995,120 @@ mod tests {
             assert_eq!(count, 6);
             assert_eq!(actual, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod utf16_to_utf8_capped_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::cxx::string_object::{
+        StringObjectAssignCstrOps, StringObjectOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        STRING_OBJECT_OPS,
+    };
+    use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
+    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut STORAGE: [[u8; 16]; 4] = [[0; 16]; 4];
+    static mut NEXT_STORAGE: usize = 0;
+    static mut SHORTENED: [u8; 16] = [0; 16];
+
+    unsafe extern "C" fn allocate(
+        this: *mut StringObject, requested_size: usize, _flags: u32,
+    ) -> *mut u8 {
+        assert!(requested_size <= 16);
+        let storage = core::ptr::addr_of_mut!(STORAGE[NEXT_STORAGE]);
+        NEXT_STORAGE += 1;
+        let storage = storage.cast::<u8>();
+        (*this).payload = storage;
+        storage
+    }
+
+    unsafe extern "C" fn clear(this: *mut StringObject) {
+        (*this).payload = core::ptr::null_mut();
+    }
+
+    unsafe extern "C" fn release(_this: *mut StringObject) {}
+
+    unsafe extern "C" fn without_last_codepoint(
+        out: *mut StringObject, source: *const StringObject, codepoint_count: i32,
+    ) {
+        assert_eq!(codepoint_count, 3);
+        SHORTENED[..4].copy_from_slice(b"A\xc2\xa2\0");
+        (*out).vtable = (*source).vtable;
+        (*out).payload = core::ptr::addr_of_mut!(SHORTENED).cast();
+    }
+
+    struct SeamGuard {
+        assign: StringObjectAssignCstrOps,
+        object: StringObjectOps,
+        helper: StringObjectWithoutLastCodepointHelper,
+    }
+
+    impl SeamGuard {
+        unsafe fn install() -> Self {
+            let guard = Self {
+                assign: core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CSTR_OPS).read_volatile(),
+                object: core::ptr::addr_of!(STRING_OBJECT_OPS).read_volatile(),
+                helper: core::ptr::addr_of!(STRING_OBJECT_WITHOUT_LAST_CODEPOINT_HELPER).read_volatile(),
+            };
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
+                StringObjectAssignCstrOps { allocate_payload: allocate, clear_payload: clear },
+            );
+            core::ptr::addr_of_mut!(STRING_OBJECT_OPS)
+                .write_volatile(StringObjectOps { release_payload: release });
+            core::ptr::addr_of_mut!(STRING_OBJECT_WITHOUT_LAST_CODEPOINT_HELPER)
+                .write_volatile(without_last_codepoint);
+            NEXT_STORAGE = 0;
+            STORAGE = [[0; 16]; 4];
+            SHORTENED = [0; 16];
+            guard
+        }
+    }
+
+    impl Drop for SeamGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(self.assign);
+                core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(self.object);
+                core::ptr::addr_of_mut!(STRING_OBJECT_WITHOUT_LAST_CODEPOINT_HELPER)
+                    .write_volatile(self.helper);
+            }
+        }
+    }
+
+    #[test]
+    fn trims_a_final_codepoint_to_the_unsigned_byte_bound() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _assign = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _object = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = unsafe { SeamGuard::install() };
+        let source = [b'A' as u16, 0xa2, b'B' as u16, 0];
+        let mut destination = [0xff; 8];
+        let mut byte_count = u32::MAX;
+
+        assert_eq!(unsafe {
+            utf16_to_utf8_capped(source.as_ptr(), 3, destination.as_mut_ptr(), 3, &mut byte_count)
+        }, 0);
+        assert_eq!(&destination[..3], b"A\xc2\xa2");
+        assert_eq!(byte_count, 3);
+    }
+
+    #[test]
+    fn empty_input_needs_no_destination_or_trimming() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _assign = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _object = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = unsafe { SeamGuard::install() };
+        let source = [0u16];
+        let mut byte_count = u32::MAX;
+
+        assert_eq!(unsafe {
+            utf16_to_utf8_capped(source.as_ptr(), 1, core::ptr::null_mut(), 0, &mut byte_count)
+        }, 0);
+        assert_eq!(byte_count, 0);
     }
 }

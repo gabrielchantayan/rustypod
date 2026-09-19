@@ -116207,3 +116207,37 @@ functions:
       service entries and u32 vtable fields. Host tests use an operation-table
       seam for the unported table/release services; diag_ring_record retains
       its pre-existing host-only getter seam for its own callers.
+
+  - address: 0x08046d94
+    ghidra: FUN_08046d94
+    name: utf16_to_utf8_capped
+    size: 188
+    sig: "int utf16_to_utf8_capped(const unsigned short *source, int max_code_units, unsigned char *destination, unsigned int max_bytes, unsigned int *out_bytes)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r1: source
+      param_2/r2: max_code_units
+      param_3/r6: destination
+      param_4/r4: max_bytes
+      param_5/r5: out_bytes
+      FUN_082773b4: string_object_construct_from_utf16
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      FUN_08275e20: strlen_safe_plus1
+      FUN_082a50b0: string_object_c_str
+      FUN_082766a0: utf8_copy_codepoints
+    notes: >-
+      Raw osos.dec words establish the 47-word body
+      0x08046d94..0x08046e50, with the next independently linked function
+      beginning at 0x08046e50. It has ten unconditional BL instructions and
+      one predicated BLNE; independently decoded inbound direct calls are
+      four unconditional BL and no predicated BL. It constructs a bounded
+      UTF-16 StringObject, repeatedly obtains a separate StringObject missing
+      its final UTF-8 codepoint through the unresolved helper @ 0x082a52a0
+      until its byte length fits the unsigned cap, then copies its codepoints
+      to destination and optionally returns the byte length excluding NUL.
+      The unresolved helper stays a fixed-address target call and injectable
+      host seam; its verified argument positions and observable result are
+      preserved rather than assigning an unverified callee identity.
