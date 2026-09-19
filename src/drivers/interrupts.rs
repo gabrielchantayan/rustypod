@@ -93,6 +93,25 @@ pub unsafe extern "C" fn cpsr_irq_enabled() -> u32 {
         host_cpsr::irq_enabled()
     }
 }
+ 
+/// IRAM CPSR IRQ-enabled veneer — `thunk_EXT_FUN_22001e98` @ `0x08038270`
+/// (8 bytes including its target literal).
+///
+/// Raw `osos.dec` words are `ldr pc, [pc, #-4]` and `0x22001e98`; the next
+/// independent veneer starts at `0x08038278`. The literal transfers to the
+/// IRAM mirror of `cpsr_irq_enabled` at `0x08001e98`. Four plain direct `bl`
+/// instructions target this veneer; no predicated direct `bl` instructions do.
+/// It returns whether CPSR's IRQ-disable bit is clear, without modifying CPSR.
+///
+/// Deliberate deviation: the stock literal-load tail transfer preserves the
+/// target's register behavior; this ABI call only guarantees its observable
+/// `r0` result.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cpsr_irq_enabled_iram_veneer() -> u32 {
+    unsafe { cpsr_irq_enabled() }
+}
+
 
 /// Deterministic local CPSR seam for host behavioral tests.
 #[cfg(not(target_os = "none"))]
@@ -167,6 +186,11 @@ mod tests {
                     cpsr_irq_enabled(),
                     expected,
                     "IRQ state for CPSR {cpsr:#010x}",
+                );
+                assert_eq!(
+                    cpsr_irq_enabled_iram_veneer(),
+                    expected,
+                    "IRAM veneer IRQ state for CPSR {cpsr:#010x}",
                 );
             }
         }
