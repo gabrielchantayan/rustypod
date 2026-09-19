@@ -50304,6 +50304,46 @@ functions:
       store/notify tuple, status propagation without notification, and all
       class/NULL guard no-call paths.
 
+  # --- 'plst' item counted-string application (ui/plst_apply_counted_string) ---
+  - address: 0x080671c4
+    ghidra: FUN_080671c4
+    name: plst_apply_counted_string
+    size: 124
+    sig: "int plst_apply_counted_string(u8 *item, const uint16_t *counted)"
+    module: ui/plst_apply_counted_string
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      param_2/r1: counted
+      param_1_plus_0x0: owner
+      param_1_plus_0x1d: active_flag
+      param_1_plus_0x20: alternate_value
+      param_1_plus_0x28: string_pool_entry_id
+      param_1_deref_plus_0x48: tagged_handler_list
+      param_1_deref_plus_0xcc: inline_string_pool
+      DAT_08067240: APPLY_COUNTED_STRING_NOTIFY_TAG
+      FUN_08067c48: alternate_apply (seam, unported)
+      FUN_080be81c: string_pool_store_counted
+      FUN_0805d340: mark_active (seam, unported)
+      FUN_08066bb8: tagged_list_notify (seam, unported)
+    notes: >-
+      Raw ARM covers 0x080671c4 through the return at 0x0806723c, followed by
+      literal-pool word 0x63706c69 at 0x08067240; the independently linked
+      next function starts at 0x08067244, confirming the 124-byte extent.
+      Decoding every ARM B/BL word in osos.dec finds four direct callers, all
+      plain unconditional bl (0x0803bef4, 0x080477b0, 0x08061160, and
+      0x080670b0), with zero predicated calls. With item+0x1d bit 0 clear it
+      calls unported 0x08067c48 on item+0x20 and returns its status. Otherwise
+      it passes (*item)+0xcc, counted, and item+0x28 to ported
+      string_pool_store_counted, then unconditionally calls unported
+      0x0805d340 and unported 0x08066bb8. The notification receives
+      (*item)+0x48, raw tag 0x63706c69, item, stack payload (1, 0), and a
+      trailing zero; its status is discarded. Deliberate deviation: the three
+      unported callees dispatch through PLST_APPLY_COUNTED_STRING_OPS, whose
+      target defaults retain their verified retail addresses. Host tests prove
+      the inactive alternate-only path and the active store, mark, and exact
+      notification ABI, including store-status propagation.
+
   # --- UI element change notification (ui/element_change_notify) ---
   - address: 0x0805d398
     ghidra: FUN_0805d398
