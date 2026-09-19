@@ -85,6 +85,7 @@ pub mod element_change_notify;
 pub mod navigation_mode;
 pub mod tdat_payload;
 pub mod pool_entry_create;
+pub mod operation_stop;
 pub mod tdat_first_plst;
 pub mod tdat_node_find;
 pub mod element_reference;
