@@ -114175,3 +114175,35 @@ functions:
       zero consumes nothing, 1..=256 consume that many bytes, and larger
       counts consume one byte then wrap within 1..=256. No NULL or bounds
       guard; no deliberate deviations.
+
+  # --- checked RTXC signal-object wrapper ---
+  - address: 0x080860c0
+    ghidra: FUN_080860c0
+    name: gateway_signal_object_checked
+    size: 36
+    sig: "u32 gateway_signal_object_checked(const u32 *object_slot)"
+    module: kernel/gateway_signal_checked
+    status: ported
+    renames:
+      param_1/r0/r4: object_slot
+      param_1_deref/r0: object
+      FUN_08037e78: gateway_signal_object
+      return/r0: status
+    notes: >-
+      Raw words at 0x080860c0 are e92d4010 e5900000 e3500000 03a0001a
+      08bd8010 ebfec767 e1b00000 13a00027 e8bd8010: push {r4,lr}, load
+      object, return 0x1a if zero, otherwise plain bl 0x08037e78, then
+      movs/movne maps every nonzero gateway status to 0x27. The next
+      independently linked push {r4,lr} starts at 0x080860e4, so the true
+      extent is exactly 36 bytes. ARM branch-immediate decoding finds one
+      internal plain bl and no predicated internal bl, plus four inbound
+      direct plain bl calls and no predicated inbound bl calls. The target
+      is the verified literal veneer to ROM/IRAM signal service
+      0x220041cc, already ported as kernel/gateway_signal's
+      gateway_signal_object. Deliberate deviation: calls that port rather
+      than branching to the veneer; its gateway request and returned status
+      preserve the retail contract. Host tests cover zero-id early rejection,
+      successful nonzero ids, and translation of both one and all-ones
+      nonzero gateway statuses. No NULL guard, matching retail's initial
+      ldr r0,[r0]. Raw disassembly: osos.dec 0x080860c0; match.py
+      structural review recorded.
