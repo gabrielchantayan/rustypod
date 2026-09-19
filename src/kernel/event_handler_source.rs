@@ -74,18 +74,18 @@ fn event_handler_source_destructor() -> ShutdownHandlerFn {
 }
 
 #[cfg(not(target_os = "none"))]
-#[repr(C)]
+#[repr(C, align(4))]
 struct HostEventHandlerSourceState {
     guard: u32,
     ready: u8,
-    source: u8,
+    source: [u32; 9],
 }
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_EVENT_HANDLER_SOURCE_STATE: HostEventHandlerSourceState = HostEventHandlerSourceState {
-    guard: 0,
-    ready: 0,
-    source: 0,
+    guard: 1,
+    ready: 1,
+    source: [0; 9],
 };
 
 unsafe fn event_handler_source_state() -> (*mut u32, *mut u8, *mut u8) {
@@ -103,7 +103,7 @@ unsafe fn event_handler_source_state() -> (*mut u32, *mut u8, *mut u8) {
         let state = core::ptr::addr_of_mut!(HOST_EVENT_HANDLER_SOURCE_STATE);
         (
             core::ptr::addr_of_mut!((*state).guard),
-            core::ptr::addr_of_mut!((*state).source),
+            core::ptr::addr_of_mut!((*state).source).cast::<u8>(),
             core::ptr::addr_of_mut!((*state).ready),
         )
     }
