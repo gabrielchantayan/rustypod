@@ -115503,6 +115503,43 @@ functions:
       the Rust implementation; host tests inject the RTC, timer, session, and
       entropy operations. No other deliberate deviations.
 
+  - address: 0x08053b14
+    ghidra: FUN_08053b14
+    name: entry_match_next
+    size: 72
+    sig: "u8 *entry_match_next(const u8 *container, u8 *previous, u32 match_key)"
+    module: app/entry_match_next
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1: previous
+      param_3/r2: match_key
+      param_1_plus_0x24: first_entry
+      param_2_plus_0x0: successor
+      param_2_plus_0x4: nested_container
+      param_2_plus_0x8: entry_match_key
+      FUN_080522bc: entry_match_first
+      FUN_08053bb8: entry_match_successor
+    notes: >-
+      Raw ARM establishes the exact 72-byte extent 0x08053b14..0x08053b5c:
+      push {r4,lr}; reject a NULL container; retain match_key in r4; select
+      entry_match_first(container) if previous is NULL, otherwise begin at
+      entry_match_successor(previous); compare each candidate's aligned word
+      at +0x08 to match_key and advance with entry_match_successor until a
+      match or NULL. The following push {r4,r5,r6,lr} at 0x08053b5c begins
+      the next real function. Decoding every ARM B/BL-immediate word in
+      osos.dec finds four inbound unconditional plain bl calls (0x0826f924,
+      0x0826f9d0, 0x0826fae4, and 0x0826fb90) and zero predicated bl calls.
+      The body has two unconditional BL instructions, to 0x080522bc and
+      0x08053bb8. Rust directly calls the already-ported helpers rather than
+      their retailOS addresses; their validation and aligned target-width
+      reads preserve the original behavior. Host tests use the unique
+      hints::ENTRY_MATCH_NEXT raw-u32 slab and cover NULL container, list-head
+      selection, duplicate keys after a predecessor, no match, and invalid
+      list-head validation. match.py is a structural review: LLVM may differ
+      in frame/register allocation and branch layout but must retain first-or-
+      successor selection, +0x08 comparison, and successor loop. Reference C:
+      decomp/c/003/08053b14_FUN_08053b14.c.
   - address: 0x08053bb8
     ghidra: FUN_08053bb8
     name: entry_match_successor

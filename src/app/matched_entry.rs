@@ -19,9 +19,10 @@
 //!
 //! # Deliberate deviations
 //!
-//! The matcher @ 0x08053b14 and readiness helper @ 0x080fe1c4 are unported.
-//! On device those edges call verified retail addresses directly; host tests
-//! replace only those edges. The result constructor is the canonical Rust port.
+//! The matcher @ 0x08053b14 is the canonical [`entry_match_next`] Rust port.
+//! The readiness helper @ 0x080fe1c4 remains a verified retail edge on device
+//! and a host-test replacement. The result constructor is the canonical Rust
+//! port.
 //! The refcounted-handle constructor @ 0x0839ebc4, attach-equivalent @
 //! 0x0839ec2c, dereference alias @ 0x083d6180, and stack-handle release
 //! wrapper @ 0x0816ccb0 use their existing canonical Rust ports.
@@ -53,23 +54,11 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(EntryMatchSource, entries)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x08] = [0; core::mem::offset_of!(EntryMatchSource, entry_kind)];
 
+use crate::app::entry_match_next::entry_match_next;
 use crate::app::entry_result_construct::entry_result_construct;
 
-/// ABI of the unported entry matcher @ 0x08053b14.
-pub type EntryMatchNext = unsafe extern "C" fn(*mut u8, *mut u8, u32) -> *mut u8;
 /// ABI of the unported readiness helper @ 0x080fe1c4.
 pub type EntryResultEnsureReady = unsafe extern "C" fn(*mut u8, u32);
-
-#[cfg(target_os = "none")]
-unsafe fn retail_entry_match_next(
-    entries: *mut u8,
-    previous: *mut u8,
-    match_key: u32,
-) -> *mut u8 {
-    let f: EntryMatchNext = unsafe { core::mem::transmute(0x0805_3b14usize) };
-    unsafe { f(entries, previous, match_key) }
-}
-
 
 #[cfg(target_os = "none")]
 unsafe fn retail_entry_result_ensure_ready(result: *mut u8, mode: u32) {
@@ -77,27 +66,15 @@ unsafe fn retail_entry_result_ensure_ready(result: *mut u8, mode: u32) {
     unsafe { f(result, mode) }
 }
 
-/// Host replacement for the unported entry matcher @ 0x08053b14.
-#[cfg(not(target_os = "none"))]
-pub static mut ENTRY_MATCH_NEXT: EntryMatchNext = missing_entry_match_next;
 /// Host replacement for the unported readiness helper @ 0x080fe1c4.
 #[cfg(not(target_os = "none"))]
 pub static mut ENTRY_RESULT_ENSURE_READY: EntryResultEnsureReady = missing_entry_result_ensure_ready;
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_entry_match_next(
-    _entries: *mut u8,
-    _previous: *mut u8,
-    _match_key: u32,
-) -> *mut u8 {
-    panic!("matched_entry_select_nth requires matcher 0x08053b14")
-}
-
-
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_entry_result_ensure_ready(_result: *mut u8, _mode: u32) {
     panic!("matched_entry_select_nth requires readiness helper 0x080fe1c4")
 }
+
 
 /// matched_entry_select_nth — original: `FUN_0826fb4c` @ **0x0826fb4c**
 /// (200 bytes; 10 unconditional direct `bl` call sites).
@@ -109,9 +86,9 @@ unsafe extern "C" fn missing_entry_result_ensure_ready(_result: *mut u8, _mode: 
 /// # Safety
 ///
 /// `out` and `source` must be valid aligned pointers; `source` is dereferenced
-/// without a NULL guard. The source fields and all installed entry operations
-/// must satisfy their retail pointer contracts. Existing contents of `out` are
-/// not released on a no-result path, matching the original.
+/// without a NULL guard. Its entries and every matched entry must satisfy
+/// [`entry_match_next`]'s retail pointer contract. Existing contents of `out`
+/// are not released on a no-result path, matching the original.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn matched_entry_select_nth(
@@ -130,15 +107,7 @@ pub unsafe extern "C" fn matched_entry_select_nth(
     let mut entry = ptr::null_mut();
     let mut found = 0u32;
     loop {
-        #[cfg(target_os = "none")]
-        {
-            entry = unsafe { retail_entry_match_next(entries, entry, match_key) };
-        }
-        #[cfg(not(target_os = "none"))]
-        {
-            let matcher = unsafe { core::ptr::addr_of_mut!(ENTRY_MATCH_NEXT).read_volatile() };
-            entry = unsafe { matcher(entries, entry, match_key) };
-        }
+        entry = unsafe { entry_match_next(entries, entry, match_key) };
         if entry.is_null() {
             unsafe { refcounted_handle_construct(out, 0, 0) };
             return;
