@@ -6,6 +6,7 @@ pub mod byteswap;
 pub mod byte_block_checksum_forwarder;
 pub mod byte_block_checksum_veneer;
 pub mod buffer_state;
+pub mod signed_div_quotient_round_up;
 pub mod chval;
 pub mod cpp_array_construct;
 pub mod cpp_array_allocate;
