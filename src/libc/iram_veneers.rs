@@ -115,6 +115,29 @@ pub unsafe extern "C" fn iram_memzero_veneer(dst: *mut u8, len: usize) -> *mut u
     body(dst, len)
 }
 
+/// RetailOS branch veneer @ 0x08044e24 (4 bytes; 3 plain `bl`, 1 `blne`) to
+/// the IRAM memzero veneer @ 0x08037dc8.
+///
+/// The sole `b 0x08037dc8` preserves r0-r3 and lr, so it zero-fills `len`
+/// bytes at `dst` and returns the original `dst`. The next real entry starts
+/// at 0x08044e28, confirming the four-byte extent.
+///
+/// Deliberate deviation: use a volatile indirect call rather than a direct
+/// branch so LLVM retains this as a distinct hookable call target and does
+/// not inline or substitute the memset-shaped callee.
+///
+/// # Safety
+/// `dst` must be valid for `len` bytes. Any alignment is accepted.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn memzero_branch_veneer(dst: *mut u8, len: usize) -> *mut u8 {
+    let veneer = core::ptr::read_volatile(
+        &(iram_memzero_veneer as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
+    );
+    veneer(dst, len)
+}
+
+
 /// Veneer @ 0x08037f70 -> IRAM 0x220001f4 (8 bytes; 6 `bl`: five
 /// unconditional, one `blne`; no tail branches).
 /// The target @ 0x080001f4 is 136 bytes: branch to the forward word-copy
@@ -211,6 +234,28 @@ mod tests {
         }
     }
 
+    /// The 0x08044e24 branch veneer preserves the IRAM veneer’s byte effects
+    /// and return value across unaligned destinations and short/word/block
+    /// boundary lengths.
+    #[test]
+    fn memzero_branch_veneer_matches_iram_veneer() {
+        const SIZE: usize = 96;
+        for dst_off in 0..8usize {
+            for len in [0usize, 1, 3, 4, 5, 31, 32, 33, 64] {
+                let mut through_branch = pattern(SIZE, 41);
+                let mut through_iram = through_branch.clone();
+                unsafe {
+                    let branch = memzero_branch_veneer(through_branch.as_mut_ptr().add(dst_off), len);
+                    let iram = iram_memzero_veneer(through_iram.as_mut_ptr().add(dst_off), len);
+                    assert_eq!(branch, through_branch.as_mut_ptr().add(dst_off));
+                    assert_eq!(iram, through_iram.as_mut_ptr().add(dst_off));
+                }
+                assert_eq!(through_branch, through_iram, "dst_off={dst_off} len={len}");
+            }
+        }
+    }
+
+
     /// The 0x220001f4 transfer preserves `memmove` byte effects for forward,
     /// backward, identical-range, and zero-length cases. The final case
     /// exercises the unguarded predicated-call contract without dereferencing
@@ -284,5 +329,12 @@ mod tests {
         assert_ne!(copy as usize, clear as usize);
         assert_ne!(copy as usize, overlap as usize);
         assert_ne!(clear as usize, overlap as usize);
+        let branch = unsafe {
+            core::ptr::read_volatile(
+                &(memzero_branch_veneer as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
+            )
+        };
+        assert_ne!(branch as usize, 0);
+        assert_ne!(branch as usize, clear as usize);
     }
 }
