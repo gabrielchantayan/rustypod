@@ -306,6 +306,7 @@ pub mod timer_stop_then_clear_bit_set;
 pub mod transition_addon;
 pub mod typed_allocation_release;
 pub mod opaque_allocation_release;
+pub mod opaque_allocation_release_08939b88;
 pub mod opaque_descriptor_lookup;
 pub mod opaque_indexed_handle_initialize;
 pub mod opaque_descriptor_convert;
