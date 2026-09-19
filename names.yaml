@@ -114494,3 +114494,29 @@ functions:
       0x08069470. The Rust port uses a compile-time immutable equivalent
       table because initialization state and table storage are not observable
       through the function ABI.
+
+  # --- Legacy Gregorian leap-year test (time/legacy_leap_year) ---
+  - address: 0x08074410
+    ghidra: FUN_08074410
+    name: is_legacy_leap_year
+    size: 40
+    sig: "i32 is_legacy_leap_year(u32 year)"
+    module: time/legacy_leap_year
+    status: ported
+    vars: {param_1/r0/r4: year, r0: quotient/boolean_result, r1: signed_remainder}
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte extent
+      0x08074410..0x08074438: save year in r4; signed-divide it by 100
+      through FUN_08031568 (__rt_sdiv); when r1 remainder is zero replace
+      the candidate with r0 quotient; test candidate & 3; return canonical
+      0 or 1. Thus the observed u16 calendar years follow the Gregorian
+      rule: ordinary multiples of 4 leap, centuries common unless their
+      century quotient is a multiple of 4 (1900 common, 2000 leap). Raw
+      assembly confirms four unconditional plain inbound BL calls at
+      0x0803be2c, 0x0803be48, 0x080d6ff4, and 0x080d704c; no predicated BL
+      calls. Rust uses the ported __rt_sdivmod out-pointer wrapper to model
+      the ADS r1 remainder and marks it #[inline(never)] so this port retains
+      its real divide call boundary. Host tests cover ordinary, century,
+      400-year, signed-negative, sign-bit-set, and all-ones register inputs;
+      match.py finds the same save/divide/remainder-select/low-two-bit-test
+      shape, with expected Rust stack setup and boolean lowering.
