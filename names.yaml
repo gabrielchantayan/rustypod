@@ -113748,3 +113748,29 @@ functions:
       decoder is already ported. Deliberate deviation: the unported metric
       resolver and glyph-advance callees use raw-address ARM veneers; host
       tests install observed-ABI seams for them.
+
+  - address: 0x080a7444
+    ghidra: FUN_080a7444
+    name: device_property_read_integer
+    size: 56
+    sig: "u32 device_property_read_integer(u8 *property, i32 *value, u32 seed2, u32 seed3)"
+    module: app/device_property_read_integer
+    status: ported
+    renames:
+      param_1/r0: property
+      param_2/r1: value
+      param_3/r2: seed2
+      param_4/r3: seed3
+      FUN_080962f0: device_property_read_text
+      FUN_0802f92c: sscanf
+    notes: >-
+      Raw osos.dec establishes the 56-byte body at 0x080a7444..0x080a747b;
+      the next separately entered code begins at 0x080a7480 after the
+      0x080a747c literal pool. Its two outbound calls are unconditional plain
+      bl instructions to 0x080962f0 and sscanf at 0x0802f92c; there are no
+      predicated outbound bl instructions. Whole-image A32 branch decoding
+      finds four plain inbound bl calls at 0x081d3d78, 0x081d3f98, 0x081d56b0,
+      and 0x081d5890, with no predicated inbound calls. The helper seeds a
+      14-byte text buffer from its incoming words, reads text through the
+      unported 0x080962f0 reader, and scans it using the literal format pointer
+      0x083e8ba4. It returns the reader result and ignores sscanf's result.
