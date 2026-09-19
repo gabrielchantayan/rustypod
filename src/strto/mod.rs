@@ -2,6 +2,7 @@
 pub mod atoi_dead_sign;
 pub mod atoi_decimal;
 pub mod decimal_cursor;
+pub mod hash_radix_i32;
 pub mod parse_i32_decimal;
 pub mod range_i32;
 pub mod parse_i32_utf16_bounds;
