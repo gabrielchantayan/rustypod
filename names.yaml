@@ -112818,3 +112818,27 @@ functions:
       decrement entry_count. A positive frame_count then makes its final
       predecessor index refer to entry_count - 1. Target pointers remain u32
       words, preserving the retailOS offsets on hosts. No deliberate deviations.
+
+  - address: 0x080d70a8
+    ghidra: FUN_080d70a8
+    name: allocation_bitmap_mark_bit
+    size: 60
+    sig: "void allocation_bitmap_mark_bit(const AllocationBitmapDescriptor *bitmap_descriptor, u32 bit_index, u8 *bitmap, u32 *out_sector)"
+    module: fs/block_window
+    status: ported
+    renames:
+      param_1/r0: bitmap_descriptor
+      param_2/r1: bit_index
+      param_3/r2: bitmap
+      param_4/r3: out_sector
+      param_1_plus_0x28: bitmap_sector_count
+      param_1_plus_0x80: bitmap_start_sector
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte extent from 0x080d70a8
+      through ldmia sp!, {r4,pc} at 0x080d70e4; 0x080d70e8 begins the next
+      separately entered function. Whole-image A32 decoding finds four inbound
+      plain BL calls (0x0807cd84, 0x0807cda8, 0x0807cddc, and 0x0807ce24),
+      zero predicated BL calls, and no outbound BL instructions. It stores
+      ((field_0x28 >> 9) * field_0x80) + (bit_index >> 12), then ORs
+      0x80 >> (bit_index & 7) into bitmap[(bit_index & 0xfff) >> 3].
+      No deliberate deviations.
