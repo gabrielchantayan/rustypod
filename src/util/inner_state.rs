@@ -175,6 +175,16 @@ const INDEX_CACHE_END: usize = 0xee4;
 /// Fields reset to the -1 sentinel when the index cache is cleared.
 const INDEX_CACHE_INDEX: usize = 0x28;
 const INDEX_CACHE_CURSOR: usize = 0xe2c;
+/// Byte offset of the tag-4 allocation released by
+/// [`inner_clear_16_byte_vector_cache`].
+const VECTOR16_CACHE_ALLOCATION: usize = 0xea0;
+/// Byte offsets delimiting the logical 16-byte-element vector.
+const VECTOR16_CACHE_BEGIN: usize = 0xed4;
+const VECTOR16_CACHE_END: usize = 0xed8;
+/// Fields reset when the 16-byte vector cache is cleared.
+const VECTOR16_CACHE_INDEX: usize = 0x24;
+const VECTOR16_CACHE_CURSOR: usize = 0xc2c;
+
 
 
 
@@ -639,6 +649,51 @@ pub unsafe extern "C" fn inner_clear_index_cache(inner: *mut u8) {
     (inner.add(INDEX_CACHE_INDEX) as *mut u32).write(u32::MAX);
     (inner.add(INDEX_CACHE_CURSOR) as *mut u32).write(u32::MAX);
 }
+/// inner_clear_16_byte_vector_cache — original: `FUN_08059a04` @
+/// `0x08059a04` (144 instruction bytes; its `0x00000c2c` literal is at
+/// `0x08059a94`, and `0x08059a98` starts the distinct next function).
+///
+/// Raw decoding of every ARM immediate B/BL word in `osos.dec` finds four
+/// direct callers, all plain unconditional `bl`: `0x080667b0`, `0x08066a48`,
+/// `0x08068ed0`, and `0x0813d028`. There are no predicated calls. The body's
+/// single `bl` targets the ported [`crate::heap::veneers::free_tag4`] @
+/// `0x0805d070`.
+///
+/// Releases and clears a nonzero tag-4 allocation at `inner + 0xea0`, then
+/// erases the logical contents of the 16-byte-element vector at
+/// `+0xed4/+0xed8` by retracting the end pointer by the element-aligned span
+/// `(end - begin) & !15`. It finally writes -1 to `+0x24` and clears the u16
+/// cursor at `+0xc2c`.
+///
+/// Deliberate deviation: the raw empty-source copy loop and no-op destroy
+/// walk for the trivially destructible element are expressed as their
+/// resulting end-pointer mask rather than introducing seams for either.
+///
+/// # Safety
+///
+/// `inner` must address writable, suitably aligned storage through `+0xedb`
+/// and a writable u16 at `+0xc2c`. Its nonzero allocation word must be a
+/// valid tag-4 allocation. The vector bounds must be target 32-bit addresses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_clear_16_byte_vector_cache(inner: *mut u8) {
+    let allocation = (inner.add(VECTOR16_CACHE_ALLOCATION) as *const u32).read();
+    if allocation != 0 {
+        crate::heap::veneers::free_tag4(allocation as usize as *mut u8);
+        (inner.add(VECTOR16_CACHE_ALLOCATION) as *mut u32).write(0);
+    }
+
+    let begin = (inner.add(VECTOR16_CACHE_BEGIN) as *const u32).read();
+    let end = (inner.add(VECTOR16_CACHE_END) as *const u32).read();
+    if begin != end {
+        (inner.add(VECTOR16_CACHE_END) as *mut u32)
+            .write(end.wrapping_sub(end.wrapping_sub(begin) & !15));
+    }
+
+    (inner.add(VECTOR16_CACHE_INDEX) as *mut u32).write(u32::MAX);
+    (inner.add(VECTOR16_CACHE_CURSOR) as *mut u16).write(0);
+}
+
 
 /// Object word holding the selected resource pointer.
 const SELECTED_RESOURCE: usize = 4;
@@ -659,7 +714,6 @@ struct ObjectSelectionOps {
     activate_resource: ActivateResource,
     call_080be1c8: ObjectCleanup,
     call_08059700: ObjectCleanup,
-    call_08059a04: ObjectCleanup,
 }
 
 #[cfg(target_os = "none")]
@@ -682,11 +736,6 @@ unsafe extern "C" fn firmware_call_08059700(object: *mut u8) {
 }
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_call_08059a04(object: *mut u8) {
-    let call: ObjectCleanup = core::mem::transmute(0x0805_9a04usize);
-    call(object);
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_activate_resource(_resource: *mut u8, _mode: u32) {
@@ -703,7 +752,6 @@ const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
     activate_resource: firmware_activate_resource,
     call_080be1c8: firmware_call_080be1c8,
     call_08059700: firmware_call_08059700,
-    call_08059a04: firmware_call_08059a04,
 };
 
 #[cfg(not(target_os = "none"))]
@@ -711,7 +759,6 @@ const DEFAULT_OBJECT_SELECTION_OPS: ObjectSelectionOps = ObjectSelectionOps {
     activate_resource: missing_activate_resource,
     call_080be1c8: missing_object_cleanup,
     call_08059700: missing_object_cleanup,
-    call_08059a04: missing_object_cleanup,
 };
 
 /// Unported operations which flank the already-ported inner-state resets.
@@ -735,11 +782,11 @@ static mut OBJECT_SELECTION_OPS: ObjectSelectionOps = DEFAULT_OBJECT_SELECTION_O
 /// selection-dependent object state in the stock call order, returning zero
 /// even when the final callback-dispatch reset reports a status.
 ///
-/// Deliberate deviation: four unported callees remain volatile operation slots
+/// Deliberate deviation: three unported callees remain volatile operation slots
 /// on host and direct firmware calls on target. Their identities are not
-/// inferred from their addresses; the seven already-ported cleanup calls remain
+/// inferred from their addresses; the eight already-ported cleanup calls remain
 /// direct Rust calls. This preserves the ARM call boundaries and lets host
-/// tests observe the full sequence.
+/// tests observe the remaining unported sequence.
 ///
 /// # Safety
 ///
@@ -768,7 +815,7 @@ pub unsafe extern "C" fn object_select_resource_index(object: *mut u8, index: i3
     (ops.call_08059700)(object);
     inner_clear_selection_cache(object);
     inner_reset_transient_state(object);
-    (ops.call_08059a04)(object);
+    inner_clear_16_byte_vector_cache(object);
     inner_clear_index_cache(object);
     inner_clear_cached_results(object);
     let _ = inner_dispatch_selected_resource(object);
@@ -1244,6 +1291,14 @@ mod tests {
         fn set_word(&mut self, offset: usize, value: u32) {
             self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         }
+        fn halfword(&self, offset: usize) -> u16 {
+            u16::from_le_bytes(self.bytes[offset..offset + 2].try_into().unwrap())
+        }
+
+        fn set_halfword(&mut self, offset: usize, value: u16) {
+            self.bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+
 
         fn clear(&mut self) {
             unsafe { inner_clear_cached_results(self.bytes.as_mut_ptr()) };
@@ -1788,6 +1843,53 @@ mod tests {
     static mut SELECTED_RESOURCE_SELECT_CALLS: u32 = 0;
     static mut SELECTED_RESOURCE_DISPATCH_CALLS: u32 = 0;
     static mut SELECTED_RESOURCE_RESOLVE_OBJECT: *mut u8 = core::ptr::null_mut();
+
+    // ---- inner_clear_16_byte_vector_cache -------------------------------
+
+    #[test]
+    fn vector16_cache_clear_releases_allocation_and_only_resets_its_fields() {
+        let _heap_guard = mock_heap();
+        let mut fixture = CacheFixture::new();
+        fixture.set_word(VECTOR16_CACHE_ALLOCATION, 0x1111_2222);
+        fixture.set_word(VECTOR16_CACHE_BEGIN, 0x1000);
+        fixture.set_word(VECTOR16_CACHE_END, 0x1030);
+        fixture.set_word(VECTOR16_CACHE_INDEX, 7);
+        fixture.set_halfword(VECTOR16_CACHE_CURSOR, u16::MAX);
+        let mut expected = fixture.bytes;
+        expected[VECTOR16_CACHE_ALLOCATION..VECTOR16_CACHE_ALLOCATION + 4]
+            .copy_from_slice(&0u32.to_le_bytes());
+        expected[VECTOR16_CACHE_END..VECTOR16_CACHE_END + 4]
+            .copy_from_slice(&0x1000u32.to_le_bytes());
+        expected[VECTOR16_CACHE_INDEX..VECTOR16_CACHE_INDEX + 4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[VECTOR16_CACHE_CURSOR..VECTOR16_CACHE_CURSOR + 2]
+            .copy_from_slice(&0u16.to_le_bytes());
+
+        unsafe { inner_clear_16_byte_vector_cache(fixture.bytes.as_mut_ptr()) };
+
+        assert_eq!(free_log(), (1, 0x1111_2222usize as *mut u8, 4));
+        assert_eq!(fixture.bytes, expected);
+    }
+
+    #[test]
+    fn vector16_cache_clear_skips_null_release_and_retains_unaligned_tail() {
+        let _heap_guard = mock_heap();
+        let mut fixture = CacheFixture::new();
+        fixture.set_word(VECTOR16_CACHE_ALLOCATION, 0);
+        fixture.set_word(VECTOR16_CACHE_BEGIN, 0x1000);
+        fixture.set_word(VECTOR16_CACHE_END, 0x1023);
+        fixture.set_word(VECTOR16_CACHE_INDEX, 0);
+        fixture.set_halfword(VECTOR16_CACHE_CURSOR, 0x1234);
+
+        unsafe { inner_clear_16_byte_vector_cache(fixture.bytes.as_mut_ptr()) };
+
+        assert_eq!(free_log().0, 0);
+        assert_eq!(fixture.word(VECTOR16_CACHE_ALLOCATION), 0);
+        assert_eq!(fixture.word(VECTOR16_CACHE_BEGIN), 0x1000);
+        assert_eq!(fixture.word(VECTOR16_CACHE_END), 0x1003);
+        assert_eq!(fixture.word(VECTOR16_CACHE_INDEX), u32::MAX);
+        assert_eq!(fixture.halfword(VECTOR16_CACHE_CURSOR), 0);
+    }
     static mut SELECTED_RESOURCE_SELECT_INNER: *mut u8 = core::ptr::null_mut();
     static mut SELECTED_RESOURCE_SELECT_OBJECT: *mut u8 = core::ptr::null_mut();
     static mut SELECTED_RESOURCE_DISPATCH_ROOT: *mut u8 = core::ptr::null_mut();
@@ -2068,9 +2170,6 @@ mod tests {
     }
 
 
-    unsafe extern "C" fn mock_call_08059a04(object: *mut u8) {
-        record_object_selection_call(4, object);
-    }
 
     struct ObjectSelectionOpsRestore;
 
@@ -2095,7 +2194,6 @@ mod tests {
                     activate_resource: mock_activate_selected_resource,
                     call_080be1c8: mock_call_080be1c8,
                     call_08059700: mock_call_08059700,
-                    call_08059a04: mock_call_08059a04,
                 },
             );
         }
@@ -2159,11 +2257,13 @@ mod tests {
             assert_eq!(object.add(SELECTED_RESOURCE_INDEX).cast::<u32>().read(), 2);
             assert_eq!(OBJECT_SELECTION_RESOURCE, 0x89ab_cdefusize as *mut u8);
             assert_eq!(OBJECT_SELECTION_MODE, 0);
-            assert_eq!(OBJECT_SELECTION_CALL_COUNT, 4);
-            assert_eq!(OBJECT_SELECTION_STAGES, [1, 2, 3, 4, 0]);
-            assert_eq!(OBJECT_SELECTION_OBJECTS[1..4], [object as usize; 3]);
+            assert_eq!(OBJECT_SELECTION_CALL_COUNT, 3);
+            assert_eq!(OBJECT_SELECTION_STAGES, [1, 2, 3, 0, 0]);
+            assert_eq!(OBJECT_SELECTION_OBJECTS[1..3], [object as usize; 2]);
             assert_eq!(object.add(INDEX_CACHE_INDEX).cast::<u32>().read(), u32::MAX);
             assert_eq!(object.add(INDEX_CACHE_CURSOR).cast::<u32>().read(), u32::MAX);
+            assert_eq!(object.add(VECTOR16_CACHE_INDEX).cast::<u32>().read(), u32::MAX);
+            assert_eq!(object.add(VECTOR16_CACHE_CURSOR).cast::<u16>().read(), 0);
             assert_eq!(object.add(BUFFER_CURSOR_END).cast::<u32>().read(), 0x1000);
             assert_eq!(object.add(BUFFER_INDEX).cast::<u32>().read(), u32::MAX);
             assert_eq!(object.add(BUFFER_SELECTION).cast::<u16>().read(), 0);
