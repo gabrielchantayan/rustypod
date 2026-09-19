@@ -115891,3 +115891,30 @@ functions:
       invented. match.py reports the expected structural diff: the emitted
       literal relocation and local-symbol branch operand differ from the
       retail absolute forms. Deliberate deviations: none.
+  - address: 0x08050ac8
+    ghidra: FUN_08050ac8
+    name: ui_selected_element_context
+    size: 24
+    sig: "u32 ui_selected_element_context(void *owner)"
+    module: ui/selected_element_context
+    status: ported
+    renames:
+      param_1/r0: owner
+      FUN_08050c14: retail_find_selected_element (fixed-address seam, unported)
+      iVar1/r0_after_bl: selected_element
+      selected_element_plus_0x3c: selected_element_context
+    notes: >-
+      Raw osos.dec words e92d4010 eb000050 e3500000 1590003c 03a00000
+      e8bd8010 establish the exact 24-byte extent 0x08050ac8..0x08050ae0;
+      the next separately entered function begins with stmdb sp!,{r4-r6,lr}
+      at 0x08050ae0. The body has one unconditional plain bl, at
+      0x08050acc to 0x08050c14, and no predicated bl. Full-image ARM branch
+      decoding finds four incoming unconditional plain bl calls, at
+      0x0805ca80, 0x08063548, 0x0806363c, and 0x0806e668. It forwards owner
+      to 0x08050c14, returns zero on a NULL selected element, otherwise
+      returns its aligned u32 at +0x3c. 0x08050c14 lacks a ledger entry, so
+      the port retains it as a narrow fixed-address seam rather than claiming
+      an unrecovered callee identity. Deliberate deviation: LLVM materializes
+      the seam target in a literal and uses blx r1, adding a frame-pointer
+      prologue; match.py confirms the call, NULL branch, +0x3c load, and
+      return structure.
