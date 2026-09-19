@@ -609,8 +609,18 @@ fn ext_div_ext_val(a: &Ext, b: &Ext, adj: i32) -> Ext {
     }
 }
 
-/// `ext_mul_ext` entry — original: `FUN_08037504` @ 0x08037504. Result to
-/// `out` (the original returned it in r0/r1/r2).
+/// Extended multiply entry point.
+///
+/// Original: `FUN_08037504` at load address `0x08037504`, 48 bytes. Raw
+/// firmware contains four unpredicated `bl` call sites and no predicated
+/// `bl` call sites to this function. It rejects either inf/nan-marked input;
+/// otherwise it multiplies the two 12-byte extended values with
+/// [`ext_fp_mul_core`] and rounds the result through [`ext_fp_round`].
+///
+/// Deliberate ABI deviation: retailOS returns the three result words in
+/// `r0`–`r2`; this seam writes them to `out`, so its Rust callers can carry a
+/// complete extended value without an ARM-specific aggregate-return ABI.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_mul_ext(a: *const u32, b: *const u32, adj: i32, out: *mut u32) {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
@@ -1462,6 +1472,20 @@ mod tests {
         unsafe { ext_mul_ext(a.as_ptr(), b.as_ptr(), 0, r.as_mut_ptr()) };
         assert_eq!(r[1] >> 31, 1);
         assert_eq!(r[0] & 0x4000_0000, 0);
+    }
+
+    #[test]
+    fn ext_mul_ext_preserves_marker_operand_and_multiplies_one() {
+        let one = [0x3fff, 0x8000_0000, 0];
+        let mut result = [0u32; 3];
+        unsafe { ext_mul_ext(one.as_ptr(), one.as_ptr(), 0, result.as_mut_ptr()) };
+        assert_eq!(result, one);
+
+        let marked = [0x4000_3fff, 0x8123_4567, 0x89ab_cdef];
+        unsafe { ext_mul_ext(marked.as_ptr(), one.as_ptr(), 0, result.as_mut_ptr()) };
+        assert_eq!(result, marked);
+        unsafe { ext_mul_ext(one.as_ptr(), marked.as_ptr(), 0, result.as_mut_ptr()) };
+        assert_eq!(result, one);
     }
 
     // ---- block cipher helpers ----
