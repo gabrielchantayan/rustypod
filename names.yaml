@@ -114207,3 +114207,36 @@ functions:
       nonzero gateway statuses. No NULL guard, matching retail's initial
       ldr r0,[r0]. Raw disassembly: osos.dec 0x080860c0; match.py
       structural review recorded.
+  - address: 0x08080f18
+    ghidra: FUN_08080f18
+    name: record_dispatch_result
+    size: 68
+    sig: "i32 record_dispatch_result(u32 first, u32 second, u32 third, u32 option)"
+    module: app/record_dispatch_result
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: third
+      param_4/r3: option
+      auStack_34: record
+      local_28: record signed result field
+      FUN_0827213c: zero_three_words_four_halfwords
+      FUN_080ed6e8: unported dispatch target
+    notes: >-
+      Raw osos.dec words e92d407f e24dd018 e1a06000 e28d0004 e1a05003
+      e1a04001 eb07c481 e28d3020 e1a02004 e1a01006 e28d0004 e58d5000
+      eb01b1e6 e3500000 11dd01f0 e28dd028 e8bd8070 establish the exact
+      68-byte extent 0x08080f18..0x08080f5b; 0x08080f5c begins a distinct
+      function. The body has two plain unconditional BL calls, to the existing
+      zero_three_words_four_halfwords port at 0x0827213c and the semantically
+      unresolved dispatch target at 0x080ed6e8; it has no predicated BL form.
+      Complete aligned A32 BL-immediate decoding finds four inbound direct
+      plain BL calls at 0x0807b1ec, 0x0807b234, 0x0808790c, and 0x080a7af8,
+      with no predicated inbound form. It clears a 20-byte transient record,
+      dispatches it with the four forwarded argument values (the third through
+      a local word), and returns the signed halfword at record +0x0c only when
+      the dispatch result is nonzero. Rust calls the existing zeroing port
+      instead of a direct retailOS BL and uses a host callback seam only for
+      the unresolved dispatch target; it otherwise preserves the target ABI
+      and result semantics.
