@@ -17,6 +17,7 @@ pub mod t1_pfb_header;
 pub mod conditional_offset;
 pub mod error;
 pub mod glyph_slot;
+pub mod glyph_loader;
 pub mod list;
 pub mod memory;
 pub mod module;

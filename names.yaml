@@ -116027,3 +116027,29 @@ functions:
       those two verified-but-unported helpers; host recorders prove that the
       allocator is saved before destruction and the release receives both
       original pointers.
+
+  - address: 0x0804c798
+    ghidra: FUN_0804c798
+    name: ft_glyphloader_check_subglyphs
+    size: 120
+    sig: >-
+      i32 ft_glyphloader_check_subglyphs(FtGlyphLoader *loader, u32 n_subglyphs)
+    module: ft/glyph_loader
+    status: ported
+    renames:
+      param_1/r0/r4: loader
+      param_2/r1: n_subglyphs
+      r6: new_max_subglyphs
+      FUN_082cfc3c: ft_mem_realloc
+      FUN_080e2d58: ft_glyphloader_adjust_subglyphs
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte body at
+      0x0804c798..0x0804c810; the following stmdb at 0x0804c810 begins the
+      next function. It has one plain internal BL (ft_mem_realloc) and one
+      predicated BLEQ (ft_glyphloader_adjust_subglyphs); whole-image
+      branch-word decoding finds four inbound plain BL calls and no
+      predicated inbound calls. Checks the aggregate base/current/pending
+      subglyph count against max_subglyphs, rounds growth to an even count,
+      renews 32-byte records, then adjusts current.subglyphs on success.
+      The six-instruction adjust helper is inlined because its sole observed
+      caller is this function and its body is exactly that pointer assignment.
