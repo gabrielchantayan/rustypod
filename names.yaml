@@ -117067,3 +117067,21 @@ functions:
       a unique text section to prevent identical-code folding. Host tests
       cover pointer preservation and prove that a live object has no modified
       byte.
+  - address: 0x08027698
+    ghidra: FUN_08027698
+    name: empty_destructor_08027698
+    size: 4
+    sig: "void empty_destructor_08027698(void)"
+    module: util/empty_destructor_08027698
+    status: ported
+    renames: {}
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x08027698..0x0802769c: the sole instruction is bx lr, and the next
+      distinct function starts at 0x0802769c. It neither reads arguments nor
+      changes memory, preserving r0 exactly. A whole-image A32 decode finds
+      four inbound direct plain unconditional BL calls and no predicated BL
+      calls; there are no outbound calls. The callers use it as an empty
+      destructor. No deliberate deviation: the target port is naked bx lr,
+      preserving the original register return state. Reference C:
+      decomp/c/001/08027698_FUN_08027698.c.
