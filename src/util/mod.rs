@@ -27,6 +27,7 @@ pub mod clear_optional_byte;
 pub mod clear_u16_three_word_record;
 pub mod bswap;
 pub mod context_field;
+pub mod context_finalize_if_present;
 pub mod copy_four_bytes;
 pub mod copy_fourteen_bytes;
 pub mod copy_two_u32_pairs;
