@@ -16125,6 +16125,32 @@ functions:
       call sites (0x0804ce48, 0x0804e6c0, 0x0804e708, 0x080ccdf0) and no
       predicated BL. The Rust port retains target-width links as volatile u32
       words so host pointer width cannot alter the ARM layout.
+  - address: 0x0804c360
+    ghidra: FUN_0804c360
+    name: ft_done_face
+    size: 100
+    sig: "FT_Error ft_done_face(FtFace *face)"
+    module: ft/face
+    status: ported
+    vars:
+      param_1/r5: face
+      unaff_r4: driver
+      uVar2/r6: memory
+      iVar1/r3: face_list_node
+    notes: >-
+      FreeType 2.3 FT_Done_Face (src/base/ftobjs.c). Raw osos.dec confirms
+      the complete 100-byte body at 0x0804c360..0x0804c3c4; 0x0804c3c4 is
+      a distinct function. It has four outgoing unconditional plain bl calls
+      (FT_List_Find @ 0x0804cb24, FT_List_Remove @ 0x0804cb4c, ft_mem_free
+      @ 0x082cfae8, and the face-destruction helper @ 0x0807c2f8), with no
+      predicated outgoing calls. Decoding every ARM BL-immediate in osos.dec
+      finds three incoming plain bl calls (0x0804da08, 0x0812e4bc,
+      0x0819d9c4) and one incoming predicated blne (0x08080798). Null face,
+      null driver, or no matching driver-list node returns
+      FT_Err_Invalid_Face_Handle (0x23); otherwise it unlinks and frees the
+      node, destroys the face, and returns zero. The two unported callees
+      remain fixed-address seams; host recorders verify their order and
+      arguments while ft_list_find and ft_mem_free call their existing ports.
   - address: 0x0804cb24
     ghidra: FUN_0804cb24
     name: ft_list_find
