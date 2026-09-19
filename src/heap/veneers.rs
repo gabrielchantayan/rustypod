@@ -449,6 +449,25 @@ pub unsafe extern "C" fn allocate_one_byte_alternate() -> *mut u8 {
     operator_new(1)
 }
 
+/// allocate_four_word_with_cleared_last — original: `FUN_080b3e6c` @
+/// 0x080b3e6c (24 bytes; 4 unconditional `bl` call sites, none predicated).
+///
+/// Raw osos.dec establishes the exact extent `0x080b3e6c..0x080b3e83`:
+/// allocate 16 bytes through tag-2 [`operator_new`], then clear its final
+/// word at offset 12. The following `mov r0,#1; b 0x082aadd4` starts the
+/// separate [`allocate_one_byte_alternate`] entry at 0x080b3e84.
+///
+/// Deliberate deviation: Rust uses the existing [`operator_new`] seam instead
+/// of a direct retailOS call. Like the original, it has no NULL guard:
+/// allocation failure faults while clearing the final word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_four_word_with_cleared_last() -> *mut u8 {
+    let allocation = operator_new(16);
+    core::ptr::write(allocation.add(12).cast::<u32>(), 0);
+    allocation
+}
+
 /// allocate_three_word_with_cleared_last — original: `FUN_080b3e8c` @
 /// 0x080b3e8c (20 bytes; 4 unconditional `bl` call sites, none predicated).
 ///
@@ -1406,6 +1425,23 @@ pub(crate) mod tests {
             assert_eq!(storage[8..], [0; 4]);
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(LAST_ALLOC_SIZE, 12);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_four_word_with_cleared_last_preserves_the_first_three_words() {
+        let _lock = mock_heap();
+        let mut storage = [0xA5u8; 16];
+        unsafe {
+            set_alloc_ret(storage.as_mut_ptr());
+            let allocation = allocate_four_word_with_cleared_last();
+
+            assert_eq!(allocation, storage.as_mut_ptr());
+            assert_eq!(storage[..12], [0xA5; 12]);
+            assert_eq!(storage[12..], [0; 4]);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 16);
             assert_eq!(LAST_ALLOC_TAG, 2);
         }
     }
