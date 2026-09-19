@@ -11455,6 +11455,38 @@ functions:
       than retail bl targets and LLVM unrolling the fixed ten-counter group;
       both retain the same 24 attempted increments and ignored results.
 
+  - address: 0x0805cde4
+    ghidra: FUN_0805cde4
+    name: plst_task_resource_callback
+    size: 80
+    sig: "void plst_task_resource_callback(u32 *task)"
+    module: ui/plst_task_resource_callback
+    status: ported
+    renames:
+      param_1/r0: task
+      "task+0x00": element
+      "task+0x14": result_state
+      "task+0x1d": task_flags
+      "element+0x40": task_back_reference
+      FUN_08061650: plst_task_is_active
+      FUN_0806b604: resource_callback_dispatch
+      DAT_0805ce34: RESOURCE_CALLBACK
+    notes: >-
+      Raw osos.dec words from 0x0805cde4 through the pop {r4,pc} at
+      0x0805ce30 establish an 80-byte extent; the callback literal
+      0x080cc284 is at 0x0805ce34, outside the body, and the next real
+      function prologue starts at 0x0805ce38. The body contains two plain bl
+      calls (0x08061650 and 0x0806b604), zero predicated bl calls. Decoding
+      all direct B/BL callers finds four inbound plain bl calls (0x08048210,
+      0x0806d440, 0x0806d500, and 0x0806d690), zero predicated forms. The
+      activity gate leaves an inactive task untouched. An active unflagged
+      task gets one at +0x14; an active flagged task dispatches the literal
+      callback with
+      context one, then clears +0x14 only when element+0x40 still refers to
+      task. Deliberate deviations: the existing Rust activity predicate
+      replaces 0x08061650, and resource_callback_dispatch is a volatile seam
+      for host tests. The literal's semantic identity is not claimed.
+
   - address: 0x080646b8
     ghidra: FUN_080646b8
     name: dynamic_array_remove

@@ -20,6 +20,15 @@ const ELEMENT_RESOURCE_WORD: usize = 0x3c / core::mem::size_of::<u32>();
 const ELEMENT_ACTIVITY_FLAGS_OFFSET: usize = 0x1ac;
 const ELEMENT_ACTIVITY_NONZERO_OFFSET: usize = 0x1b0;
 
+/// Recovered `0x08061650` gate shared by PLST task ports.
+pub(crate) unsafe fn plst_task_is_active(task: *mut u32) -> u32 {
+    if task.is_null() {
+        return 0;
+    }
+    let element = task.add(TASK_ELEMENT_WORD).read() as usize as *const u8;
+    (ui_element_is_plst_class(element) != 0 && task.add(TASK_ACTIVE_LINK_WORD).read() != 0) as u32
+}
+
 /// Boundaries for the four unported calls made by this routine.
 pub type PlstTaskNotify = unsafe extern "C" fn(*mut u8, u32, *mut u32, u32, u32);
 pub type PlstTaskFlaggedHandler = unsafe extern "C" fn(*mut u32);
@@ -127,14 +136,10 @@ fn ops() -> PlstTaskCompleteOps {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.plst_task_complete")]
 pub unsafe extern "C" fn plst_task_complete(task: *mut u32) -> i32 {
-    if task.is_null() {
+    if plst_task_is_active(task) == 0 {
         return -50;
     }
-
-    let element = task.add(TASK_ELEMENT_WORD).read() as usize as *mut u8;
-    if ui_element_is_plst_class(element) == 0 || task.add(TASK_ACTIVE_LINK_WORD).read() == 0 {
-        return -50;
-    }
+    let element = task.read() as usize as *mut u8;
 
     let active_ops = ops();
     (active_ops.notify)(
