@@ -114997,3 +114997,32 @@ functions:
       shared Rust seams add a frame and replace direct BL targets with local
       relocations, while preserving the table/slot guards, conversion, and
       final indirect dispatch.
+
+  - address: 0x0805eb74
+    ghidra: FUN_0805eb74
+    name: obj_cmp
+    size: 32
+    sig: "int obj_cmp(const ASN1_OBJECT *a, const ASN1_OBJECT *b)"
+    module: crypto/obj_cmp
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      param_1_plus_0x0c: a_length
+      param_2_plus_0x0c: b_length
+      param_1_plus_0x10: a_data
+      param_2_plus_0x10: b_data
+      FUN_08030f64: memcmp
+    notes: >-
+      Raw osos.dec words decode to the 32-byte body
+      0x0805eb74..0x0805eb94; 0x0805eb94 starts the separately entered
+      successor. Four inbound calls are plain unconditional BL at
+      0x0806f414, 0x0806f5e4, 0x08071414, and 0x08084a50; there are no
+      predicated BL callers. The body contains no BL: it loads ASN1_OBJECT
+      length at +0x0c, returns its wrapping signed difference if nonzero,
+      otherwise tail-branches to ported memcmp @ 0x08030f64 with data
+      pointers at +0x10 and the common length. The target uses 32-bit
+      pointers; the port reads target-layout u32 words rather than assuming
+      host pointer offsets. Host tests cover length precedence, byte order,
+      equality, and zero-length NULL data. match.py structural diff reviewed
+      after the ARM release build.
