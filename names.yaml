@@ -116268,3 +116268,30 @@ functions:
       The unresolved helper stays a fixed-address target call and injectable
       host seam; its verified argument positions and observable result are
       preserved rather than assigning an unverified callee identity.
+  - address: 0x08046a88
+    ghidra: FUN_08046a88
+    name: pascal_utf8_to_counted_u16
+    size: 64
+    sig: "void pascal_utf8_to_counted_u16(const u8 *source, u16 *destination, u32 ignored, u32 initial_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1/r4: destination
+      param_3/r2: ignored
+      param_4/r3: initial_count
+      local_c: decoded_count
+      FUN_08046b44: utf8_span_to_utf16_counted_veneer
+      FUN_08046c74: utf8_span_to_utf16_counted
+    notes: >-
+      Raw osos.dec words establish the exact 64-byte body
+      0x08046a88..0x08046ac8; 0x08046ac8 begins the next real function with
+      push {r4,r5,r6,r7,r8,lr}. The body has one plain unconditional BL at
+      0x08046ab8 and no predicated BL instructions. Four inbound direct calls
+      are plain BL at 0x0805225c, 0x08054dd4, 0x08054ef4, and 0x08055f84;
+      there are no predicated inbound BL forms. It clears destination's count,
+      interprets source[0] as a byte-span length, and passes source + 1 to
+      the verified 0x08046b44 veneer with a 255-codepoint bound before storing
+      the returned decoded count as u16. The Rust port deliberately calls the
+      veneer target 0x08046c74 through its existing host/target seam rather
+      than creating a port for the four-byte veneer.

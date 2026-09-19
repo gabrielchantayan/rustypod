@@ -451,6 +451,50 @@ pub unsafe extern "C" fn utf8_to_utf16_counted_buffer(
     status
 }
 
+/// pascal_utf8_to_counted_u16 — original: FUN_08046a88 @ 0x08046a88
+/// (64 bytes, `0x08046a88..0x08046ac8`). Raw ARM words establish one
+/// unconditional outbound `bl` at 0x08046ab8 and no predicated `bl`; four
+/// inbound direct calls at 0x0805225c, 0x08054dd4, 0x08054ef4, and 0x08055f84
+/// are all plain `bl`.
+///
+/// Clear the leading UTF-16 count when `destination` is non-NULL. For a
+/// non-NULL Pascal-style UTF-8 source, its first byte is the span length and
+/// bytes after it are converted through the existing 0x08046c74 helper into
+/// `destination + 1`, capped at 255 codepoints. Store the helper's count,
+/// truncated to u16, at the leading word. The third ABI argument is ignored;
+/// callers treat this routine as void.
+///
+/// Deliberate deviation: stock calls the four-byte `FUN_08046b44` veneer,
+/// whose verified target is 0x08046c74. This port invokes the existing shared
+/// target seam directly rather than adding a second port for that veneer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pascal_utf8_to_counted_u16(
+    source: *const u8,
+    destination: *mut u16,
+    _ignored: u32,
+    initial_count: u32,
+) {
+    if destination.is_null() {
+        return;
+    }
+
+    destination.write(0);
+    if source.is_null() {
+        return;
+    }
+
+    let mut decoded_count = initial_count;
+    utf8_to_utf16_counted_buffer_helper(
+        source.add(1),
+        source.read() as u32,
+        destination.add(1),
+        0xff,
+        &mut decoded_count,
+    );
+    destination.write(decoded_count as u16);
+}
+
 /// cstr_to_counted_u16 — original: FUN_08045f54 @
 /// 0x08045f54 (92 bytes, all code; eight direct `bl` call sites verified by
 /// scanning osos.dec: 0x0805825c, 0x08058288, 0x080582c8, 0x08058790,
@@ -593,6 +637,38 @@ mod tests {
             -50
         );
         assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 0);
+    }
+
+    #[test]
+    fn pascal_buffer_uses_leading_length_and_preserves_stock_clear_order() {
+        let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = install_counted_buffer_recorder();
+        let source = [3_u8, b'A', 0xc2, 0xa2, b'Z'];
+        let mut destination = [0xbeef_u16; 3];
+
+        unsafe {
+            pascal_utf8_to_counted_u16(
+                source.as_ptr(), destination.as_mut_ptr(), 0x1234_5678, 0xfeed,
+            );
+        }
+        assert_eq!(destination, [2, 0x1234, 0]);
+        let (seen_source, seen_len, seen_destination, seen_max, seen_count) =
+            unsafe { COUNTED_BUFFER_ARGS };
+        assert_eq!(seen_source, unsafe { source.as_ptr().add(1) as usize });
+        assert_eq!(seen_len, 3);
+        assert_eq!(seen_destination, unsafe { destination.as_mut_ptr().add(1) as usize });
+        assert_eq!(seen_max, 0xff);
+        assert_ne!(seen_count, 0);
+        assert_eq!(unsafe { COUNTED_BUFFER_INITIAL_COUNT }, 0xfeed);
+
+        unsafe {
+            pascal_utf8_to_counted_u16(
+                core::ptr::null(), destination.as_mut_ptr(), 0, 0,
+            );
+            pascal_utf8_to_counted_u16(source.as_ptr(), core::ptr::null_mut(), 0, 0);
+        }
+        assert_eq!(destination, [0, 0x1234, 0]);
+        assert_eq!(unsafe { COUNTED_BUFFER_CALLS }, 1);
     }
 
     #[test]
