@@ -56965,6 +56965,24 @@ functions:
       loading PC from the literal; this preserves its no-argument,
       source-pointer ABI while keeping the call on the ported path.
 
+  - address: 0x08044e24
+    ghidra: thunk_EXT_FUN_220002d4
+    name: memzero_branch_veneer
+    size: 4
+    sig: "void *memzero_branch_veneer(void *dst, size_t len)"
+    module: libc/iram_veneers
+    status: ported
+    notes: >-
+      Raw word 0xeaffcbe7 decodes as `b 0x08037dc8`, the already-ported
+      IRAM memzero veneer; the next real function begins at 0x08044e28, so
+      the true extent is one word, not an inferred thunk/pool pair. Decoding
+      every ARM BL immediate in osos.dec finds exactly four inbound calls:
+      three plain (0x08053ae0, 0x08057f7c, 0x080580a0) and one predicated
+      blne (0x08058e44). The branch preserves r0-r3 and lr, tail-transferring
+      `(dst, len)` to memzero and returning its original dst result. Rust
+      deliberately uses a volatile indirect call to iram_memzero_veneer so
+      this remains a distinct hookable symbol instead of being inlined.
+
   - address: 0x08037dc8
     ghidra: thunk_EXT_FUN_220002d4
     name: iram_memzero_veneer
