@@ -116882,3 +116882,38 @@ functions:
       protocol. Deliberate deviation: Rust uses the existing dispatcher seam,
       adding a normal return edge where the original literal veneer tail
       branches.
+  - address: 0x08037e68
+    ghidra: thunk_EXT_FUN_22003be8
+    name: dispatch_message_0x2e
+    size: 8
+    sig: "u32 dispatch_message_0x2e(u32 first_word, u32 second_word, u32 third_word, u32 fourth_word, u32 fifth_word)"
+    module: runtime/message_0x2e
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003be8: dispatch_message_0x2e
+      EXT_FUN_22003be8: dispatch_message_0x2e
+      FUN_08003be8: dispatch_message_0x2e
+      FUN_08003660: message_dispatch_veneer
+      DAT_08037e6c: dispatch_message_0x2e_target
+      "[request + 0x0]": message_selector
+      "[request + 0x4]": return_word
+      "[request + 0x8]": first_word
+      "[request + 0xc]": fourth_word
+      "[request + 0x10]": second_word
+      "[request + 0x14]": third_word
+      "[request + 0x18]": fifth_word
+    notes: >-
+      Raw osos.dec proves the eight-byte ADS veneer at 0x08037e68: ldr
+      pc,[pc,#-4] (0xe51ff004) followed by literal 0x22003be8; the next
+      veneer begins at 0x08037e70. The boot relocator maps that IRAM target to
+      the 64-byte osos mirror at 0x08003be8..0x08003c24, ending before the
+      next function at 0x08003c28. The mirrored body builds the exact
+      seven-word request {0x2e, 0, r0, r3, r1, r2, stack_arg5}, dispatches it
+      through the 0x08003660 literal veneer (target 0x0802dca8), and returns
+      the dispatcher-rewritten request word one. Full-image A32 decoding finds
+      four inbound direct calls, all plain BL at 0x0805668c, 0x080566a8,
+      0x08086088, and 0x0808b224; there are zero predicated BL calls. The
+      selector's higher-level identity remains unrecovered, so the name records
+      only the verified wire protocol. Deliberate deviation: Rust invokes the
+      established writable dispatcher seam rather than the foreign literal
+      veneer, adding a normal return edge.
