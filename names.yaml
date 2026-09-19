@@ -106287,6 +106287,31 @@ functions:
       both outcomes. Deliberate deviation: Rust models the tail transfer
       as a normal call and uses a native-pointer host seam; LLVM selects target
       tail-call codegen.
+  - address: 0x080c9944
+    ghidra: FUN_080c9944
+    name: global_event_dispatch_slot_1c
+    size: 36
+    sig: "u32 global_event_dispatch_slot_1c(u32 event_code)"
+    module: app/global_event_dispatch
+    status: ported
+    renames:
+      param_1/r0/r2: event_code
+      DAT_080c9968: global_event_dispatch_object
+      global_object_plus_0x1c: dispatch_slot_1c
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      ldr r1,[0x080c9968] at 0x080c9944 through bx lr at 0x080c9964; the
+      literal global-object-pointer address 0x089ca95c is at 0x080c9968 and
+      the next separately linked function begins at 0x080c996c. Decoding every
+      aligned ARM B/BL-immediate word finds four inbound direct calls: plain bl
+      at 0x081e687c, 0x081f48e4, and 0x081f49a4, plus predicated bleq at
+      0x081f475c. No direct BL occurs within the body; when the global object
+      is non-NULL, bxne tail-dispatches its +0x1c entry with the event word and
+      returns that result, otherwise it returns 0x11. The target identity is
+      not recoverable and is not invented. Deliberate deviation: Rust models
+      the tail transfer as a normal call and extends the existing native-width
+      host seam for the shared global object; LLVM selects target tail-call
+      codegen. Host tests cover the NULL status and forwarding of zero.
   - address: 0x080903ec
     ghidra: FUN_080903ec
     name: cff_parse_fixed
