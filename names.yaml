@@ -53108,6 +53108,32 @@ functions:
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
 
+  # --- Type 1 PFB segment header reader ---
+  - address: 0x0807d4d4
+    ghidra: FUN_0807d4d4
+    name: t1_read_pfb_segment_header
+    size: 116
+    sig: "i32 t1_read_pfb_segment_header(FtStream *stream, u16 *tag, u32 *size, i32 error)"
+    module: ft/t1_pfb_header
+    status: ported
+    renames:
+      param_1: stream
+      param_2: tag
+      param_3: size
+      param_4: error
+      local_18: error
+      uVar2: segment_tag
+      uVar3: segment_size
+    notes: >-
+      Raw words from 0x0807d4d4 through the next function boundary at
+      0x0807d548 establish the 116-byte extent and two unpredicated BL
+      instructions (FT_Stream_ReadShort at 0x0807d4f8 and
+      FT_Stream_ReadLongLE at 0x0807d52c), with no predicated BL. The helper
+      clears tag and size, reads the big-endian PFB tag, and reads the
+      following little-endian size only for tags 0x8001 and 0x8002. The
+      incoming r3 is a carried error value; the port makes it an explicit
+      fourth ABI argument rather than relying on register state.
+
   # --- MPEG video header parser: user-data start-code scan ---
   - address: 0x0807d724
     ghidra: FUN_0807d724
