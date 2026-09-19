@@ -17340,6 +17340,27 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3e84
+    ghidra: FUN_080b3e84
+    name: allocate_one_byte_alternate
+    size: 8
+    sig: "void *allocate_one_byte_alternate(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation
+    notes: >-
+      Raw osos.dec establishes the exact 0x080b3e84..0x080b3e8b extent:
+      `mov r0,#1; b 0x082aadd4`. The following `push {r4,lr}` begins the
+      distinct 20-byte allocator at 0x080b3e8c. Complete raw ARM decoding
+      finds four inbound plain unconditional BL calls and no predicated BL
+      calls. This no-argument entry overwrites r0 with one, then
+      tail-branches to the existing tag-2 operator_new @ 0x082aadd4,
+      returning that allocation unchanged, including NULL. Ghidra's
+      reconstructed allocator-state calls are outside this eight-byte body.
+      Deliberate deviation: Rust uses an ordinary call through the existing
+      operator_new seam; its dedicated target text section retains this
+      otherwise identical 0x080b3ea4 sibling as a separate linked target.
   - address: 0x080b3e8c
     ghidra: FUN_080b3e8c
     name: allocate_three_word_with_cleared_last

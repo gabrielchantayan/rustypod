@@ -426,6 +426,29 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
 pub unsafe extern "C" fn allocate_one_byte() -> *mut u8 {
     operator_new(1)
 }
+
+/// allocate_one_byte_alternate — original: `FUN_080b3e84` @ 0x080b3e84
+/// (8 bytes; 4 unconditional `bl` call sites, none predicated).
+///
+/// Raw ARM establishes the exact extent `0x080b3e84..0x080b3e8b`:
+/// `mov r0,#1; b 0x082aadd4`. The next word, `push {r4,lr}` at
+/// 0x080b3e8c, begins the separate
+/// [`allocate_three_word_with_cleared_last`] entry. This alternate entry
+/// overwrites its otherwise dead argument register with a one-byte size and
+/// tail-branches to tag-2 [`operator_new`], returning its allocation
+/// unchanged, including NULL.
+///
+/// Deliberate deviation: Rust makes the tail branch an ordinary call through
+/// the existing allocator seam. A distinct target-only section preserves this
+/// separately linked retailOS `bl` target despite its identical sibling at
+/// 0x080b3ea4.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.allocate_one_byte_alternate")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocate_one_byte_alternate() -> *mut u8 {
+    operator_new(1)
+}
+
 /// allocate_three_word_with_cleared_last — original: `FUN_080b3e8c` @
 /// 0x080b3e8c (20 bytes; 4 unconditional `bl` call sites, none predicated).
 ///
@@ -1346,6 +1369,24 @@ pub(crate) mod tests {
 
             set_alloc_ret(BLOCK_A as *mut u8);
             assert_eq!(allocate_one_byte(), BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_CALLS, 2);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn allocate_one_byte_alternate_forwards_fixed_size_and_null_unchanged() {
+        let _lock = mock_heap();
+        unsafe {
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(allocate_one_byte_alternate().is_null());
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 1);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+
+            set_alloc_ret(BLOCK_A as *mut u8);
+            assert_eq!(allocate_one_byte_alternate(), BLOCK_A as *mut u8);
             assert_eq!(ALLOC_CALLS, 2);
             assert_eq!(LAST_ALLOC_SIZE, 1);
             assert_eq!(LAST_ALLOC_TAG, 2);
