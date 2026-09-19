@@ -116110,3 +116110,34 @@ functions:
       deviation: the unidentified 0x0805e7dc name-registration worker is a
       typed volatile seam; the established NID-name ports are also dispatched
       through target/host typed seams for fixture-controlled host coverage.
+
+  # --- OpenSSL one-shot digest wrapper ---
+  - address: 0x0804a564
+    ghidra: FUN_0804a564
+    name: evp_digest
+    size: 160
+    sig: "i32 evp_digest(const u8 *data, u32 count, u8 *md, u32 *size, const EvpMd *digest, void *implementation)"
+    module: crypto/evp_digest
+    status: ported
+    renames:
+      param_1/r0: data
+      param_2/r1: count
+      param_3/r2: md
+      param_4/r3: size
+      param_5: digest
+      param_6: implementation
+      local_28..uStack_1c: context
+      FUN_0804a6bc: evp_digest_init_ex
+      FUN_0804a728: evp_digest_update
+      FUN_0804a604: evp_digest_final_ex
+      FUN_0804ac2c: evp_md_ctx_cleanup
+    notes: >-
+      Raw ARM is exactly 40 words at 0x0804a564..0x0804a604; the next
+      push-prologue at 0x0804a604 begins EVP_DigestFinal_ex. It has four
+      unconditional internal BL calls (init, update, final, cleanup) and no
+      predicated BL calls. The wrapper zeroes its four-word stack context,
+      sets flag bit 0, invokes init/update/final with short-circuit failure,
+      always cleans up, and returns one only when every stage succeeds.
+      Deliberate deviation: named #[repr(C)] context fields replace the ARM
+      stack words and ordinary Rust calls replace the short-circuit branches;
+      on ARM the context remains 16 bytes and callback order is unchanged.
