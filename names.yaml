@@ -117387,3 +117387,26 @@ functions:
       pops {r4,r5,r6,r7,r8,pc}. Its ABI requires registers and a caller frame
       established by earlier code, so a Rust function would invent a register
       and stack contract and cannot faithfully replace this veneer.
+  - address: 0x083e9e38
+    ghidra: FUN_083e9e38
+    name: copy_byte_range_returning_end
+    size: 24
+    sig: "u8 *copy_byte_range_returning_end(const u8 *begin, const u8 *end, u8 *dst)"
+    module: libc/copy_byte_range_returning_end
+    status: ported
+    renames:
+      param_1/r0: begin
+      param_2/r1: end
+      param_3/r2: dst
+      r3: byte
+    notes: >-
+      Raw osos.dec words establish the exact six-word, 24-byte extent
+      0x083e9e38..0x083e9e50: cmp r0,r1; ldrbne r3,[r0],#1;
+      strbne r3,[r2],#1; bne 0x083e9e38; mov r0,r2; bx lr. The next real
+      function begins at 0x083e9e50 with the same separately linked copy-loop
+      body. Whole-image A32 decoding finds three inbound direct plain BL calls
+      at 0x080fd008, 0x080fd01c, and 0x080fd038, with no predicated BL calls.
+      There are no outbound plain or predicated BL instructions. It copies
+      [begin,end) forward into dst and returns the end cursor. Volatile byte
+      accesses deliberately prevent LLVM memcpy substitution; target builds
+      place the leaf in a unique section to prevent identical-code folding.
