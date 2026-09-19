@@ -247,16 +247,49 @@ pub unsafe extern "C" fn ft_buffered_stream_buffered_bytes(
     }
 }
 
+/// ft_buffered_stream_reset_buffer_cursor — original: `FUN_08076b30` @
+/// `0x08076b30` (44 bytes; 4 verified direct inbound `bl` call sites: 3
+/// unconditional and 1 `bleq`).
+///
+/// Reinitializes the buffered range after an allocation or mode transition.
+/// Output mode starts at `buffer_start` and exposes the record's `+0x10`
+/// length word ending inclusively at `buffer_start + length - 1`; input mode
+/// starts the cursor one byte after the inclusive end at `buffer_start`.
+///
+/// Deliberate deviation: Rust expresses the ARM `add`/`sub` arithmetic with
+/// wrapping operations, preserving zero-length and full-range behavior.
+///
+/// # Safety
+///
+/// `stream` must point to a valid, aligned writable [`FtBufferedStream`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_reset_buffer_cursor(
+    stream: *mut FtBufferedStream,
+) {
+    let stream = &mut *stream;
+    let buffer_start = stream.buffer_start;
+    if stream.is_input == 0 {
+        stream.cursor = buffer_start;
+        stream.buffer_end = buffer_start
+            .wrapping_add(stream.io_reserved[1])
+            .wrapping_sub(1);
+    } else {
+        stream.cursor = buffer_start.wrapping_add(1);
+        stream.buffer_end = buffer_start;
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use parking_lot::MutexGuard;
     use super::{
         buffered_stream_tell, ft_buffered_stream_buffered_bytes, ft_buffered_stream_finalize,
-        BackingStreamTellFn, BufferedStreamFlushFn, BufferedStreamIoContextFinalizeFn,
-        FtBufferedStream, BACKING_STREAM_TELL, BACKING_STREAM_TELL_TEST_LOCK,
-        BUFFERED_STREAM_FINALIZE_TEST_LOCK, BUFFERED_STREAM_FLUSH,
-        BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
+        ft_buffered_stream_reset_buffer_cursor, BackingStreamTellFn, BufferedStreamFlushFn,
+        BufferedStreamIoContextFinalizeFn, FtBufferedStream, BACKING_STREAM_TELL,
+        BACKING_STREAM_TELL_TEST_LOCK, BUFFERED_STREAM_FINALIZE_TEST_LOCK,
+        BUFFERED_STREAM_FLUSH, BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
     };
 
     static mut BACKING_RESULT: i32 = 0;
@@ -499,5 +532,31 @@ mod tests {
             assert_eq!(FINALIZE_CALLS, 1);
             assert_eq!(FINALIZE_CONTEXT, 0xfeed_cafe);
         }
+    }
+
+    #[test]
+    fn reset_buffer_cursor_uses_output_range_and_preserves_wrapping() {
+        let mut stream = stream(0, 0, 0x100, 0);
+        stream.io_reserved[1] = 0;
+        unsafe { ft_buffered_stream_reset_buffer_cursor(&mut stream); }
+        assert_eq!(stream.cursor, 0x100);
+        assert_eq!(stream.buffer_end, 0xff);
+
+        stream.buffer_start = u32::MAX;
+        stream.io_reserved[1] = 2;
+        unsafe { ft_buffered_stream_reset_buffer_cursor(&mut stream); }
+        assert_eq!(stream.cursor, u32::MAX);
+        assert_eq!(stream.buffer_end, 0);
+    }
+
+    #[test]
+    fn reset_buffer_cursor_uses_empty_input_range() {
+        let mut stream = stream(1, 0, u32::MAX, 0);
+        stream.io_reserved[1] = 0xdead_beef;
+
+        unsafe { ft_buffered_stream_reset_buffer_cursor(&mut stream); }
+
+        assert_eq!(stream.cursor, 0);
+        assert_eq!(stream.buffer_end, u32::MAX);
     }
 }

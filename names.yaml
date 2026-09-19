@@ -16890,6 +16890,34 @@ functions:
       inclusive end; the permitted sub/add also wraps for the full
       0..=u32::MAX input range.
 
+
+  - address: 0x08076b30
+    ghidra: FUN_08076b30
+    name: ft_buffered_stream_reset_buffer_cursor
+    size: 44
+    sig: "void ft_buffered_stream_reset_buffer_cursor(FtBufferedStream *stream)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r0: stream
+      "[stream + 0x5]": is_input
+      "[stream + 0x10]": buffer_size
+      "[stream + 0x18]": cursor
+      "[stream + 0x1c]": buffer_start
+      "[stream + 0x20]": buffer_end
+    notes: >-
+      Raw osos.dec decodes exactly 11 ARM words from 0x08076b30 through bx lr
+      at 0x08076b58; 0x08076b5c begins the next function. This leaf resets
+      the 48-byte `buff`-tagged FreeType stream's cursor range. Output mode
+      (byte +5 zero) sets cursor to buffer_start and sets the inclusive end
+      to buffer_start + buffer_size - 1. Input mode makes an empty range by
+      setting cursor to buffer_start + 1 and end to buffer_start. Raw aligned
+      ARM B/BL scanning found four direct inbound calls: three plain bl at
+      0x08042dac, 0x08043210, and 0x080f0794, plus one bleq at 0x0808cdd8;
+      there are no callees. The Rust port preserves wrapping ARM arithmetic
+      for zero buffer size and boundary values. match.py found the same loads,
+      mode split, arithmetic, and cursor/end stores, but LLVM emitted a branch
+      rather than the stock predicated instructions.
   - address: 0x08042cfc
     ghidra: FUN_08042cfc
     name: ft_buffered_stream_finalize
