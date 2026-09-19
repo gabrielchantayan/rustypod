@@ -17,6 +17,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080911c4
+    ghidra: FUN_080911c4
+    name: display_refresh
+    size: 8
+    sig: "u32 display_refresh(void)"
+    module: ui/display_refresh
+    status: ported
+    renames:
+      DAT_080af72c: display_transaction_state
+      DAT_080af730: display_service_pointer
+      FUN_080c907c: wait_for_display_idle
+      FUN_080c996c: pwrcon_acquire_clock_2
+    notes: >-
+      Raw osos.dec establishes that the assigned entry is an 8-byte wrapper:
+      mov r0,#1 at 0x080911c4 and B 0x080af6b8 at 0x080911c8; 0x080911cc is
+      the next separately entered function. The shared target body is 124
+      bytes, 0x080af6b8..0x080af734. It has two unconditional BL calls
+      (0x080af6c8/0x080af6e0), one predicated BLNE (0x080af720), and one
+      indirect BLX through vtable slot 3 (0x080af710). The wrapper's four
+      inbound plain BL callers are 0x081a5a04, 0x081a5c50, 0x081a621c, and
+      0x081a69e0. It waits for low busy bits, enables clock 2, brackets the
+      320x240 indirect presentation with the display refreshing word, then
+      waits again. The indirect target remains unnamed because names.yaml
+      contains no verified identity for that vtable slot.
   - address: 0x080913dc
     ghidra: FUN_080913dc
     name: bit_buffer_set_bit
