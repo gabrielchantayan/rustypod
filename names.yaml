@@ -117485,6 +117485,39 @@ functions:
       body agree with the raw code. match.py reports the same loop structure;
       LLVM adds an equivalent empty-range early-out and frame pointer.
 
+  - address: 0x083e8e7c
+    ghidra: FUN_083e8e7c
+    name: cxx_string_range_copy_construct
+    size: 56
+    sig: "char **cxx_string_range_copy_construct(char *const *first, char *const *last, char **destination)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: destination
+      r4: destination_cursor
+      r5: source_cursor
+      r6: last
+      FUN_083d8c30: cxx_string_copy_ctor
+      return/r0: destination_end
+    notes: >-
+      Raw osos.dec establishes the 56-byte extent
+      0x083e8e7c..0x083e8eb0: the following independent vector range helper
+      begins at 0x083e8eb4. The body has no plain BL and exactly one predicated
+      BLNE, at 0x083e8e94, resolving to cxx_string_copy_ctor @ 0x083d8c30;
+      this corrects Ghidra's three-call-site report. It is the C++ uninitialized
+      copy loop for one-word COW strings: walk [first,last), copy-construct
+      each word only when destination is non-NULL, advance both cursors by one
+      target word, and return the advanced destination cursor. The NULL guard
+      deliberately precedes the source read. No behavioral deviations; the
+      Rust use of wrapping pointer increments solely avoids host-side
+      pointer-arithmetic UB for the raw empty/null cursor case. Host tests
+      cover multi-word copying with the shared empty representation and an
+      empty range. match.py exit 1 is the expected structural diff: LLVM adds
+      an empty-range early exit and a frame pointer while retaining the
+      guarded predicated call and four-byte cursor loop.
+
   - address: 0x083e8eb4
     ghidra: thunk_FUN_083e8ecc
     name: vector_copy_range_u8

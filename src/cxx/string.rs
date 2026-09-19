@@ -536,6 +536,75 @@ pub unsafe extern "C" fn cxx_string_pair_range_destroy(
     }
 }
 
+/// cxx_string_range_copy_construct — retailOS `FUN_083e8e7c` @ load address
+/// **0x083e8e7c** (56 bytes, 0x083e8e7c..0x083e8eb0; the independent vector
+/// range helper begins at 0x083e8eb4).
+///
+/// Raw ARM contains no plain `bl` and one predicated `blne`, to
+/// [`cxx_string_copy_ctor`], rather than the three call sites Ghidra reports.
+/// It copy-constructs each one-word COW string in `[first, last)` into
+/// `destination`, advancing all cursors at the target's four-byte word stride,
+/// and returns the end of the destination range. The `movs r0, r4` guard means
+/// a null destination skips the constructor without reading its source; this
+/// port uses `wrapping_add` so that zero-length and null-cursor behavior does
+/// not introduce Rust pointer-arithmetic UB. No deliberate deviations.
+///
+/// # Safety
+///
+/// `first..last` must be a valid half-open range of COW string words. When
+/// `destination` is non-null, it must have room for the same number of words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_range_copy_construct(
+    mut first: *const *mut u8,
+    last: *const *mut u8,
+    mut destination: *mut *mut u8,
+) -> *mut *mut u8 {
+    while first != last {
+        if !destination.is_null() {
+            cxx_string_copy_ctor(destination, first);
+        }
+        first = first.wrapping_add(1);
+        destination = destination.wrapping_add(1);
+    }
+    destination
+}
+
+#[cfg(test)]
+#[test]
+fn cxx_string_range_copy_constructs_each_word_and_returns_end() {
+    let source = [empty_rep_data(), empty_rep_data(), empty_rep_data()];
+    let mut destination = [core::ptr::null_mut(); 3];
+
+    let end = unsafe {
+        cxx_string_range_copy_construct(
+            source.as_ptr(),
+            source.as_ptr().wrapping_add(source.len()),
+            destination.as_mut_ptr(),
+        )
+    };
+
+    assert_eq!(destination, source);
+    assert_eq!(end, destination.as_mut_ptr().wrapping_add(destination.len()));
+}
+
+#[cfg(test)]
+#[test]
+fn cxx_string_range_copy_empty_range_preserves_destination_cursor() {
+    let mut destination = core::ptr::null_mut();
+
+    let end = unsafe {
+        cxx_string_range_copy_construct(
+            core::ptr::null(),
+            core::ptr::null(),
+            core::ptr::addr_of_mut!(destination),
+        )
+    };
+
+    assert_eq!(end, core::ptr::addr_of_mut!(destination));
+    assert!(destination.is_null());
+}
+
 
 /// cxx_string_from_cstr — original @ 0x083d8b5c.
 ///
