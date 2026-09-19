@@ -17340,6 +17340,28 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3d7c
+    ghidra: FUN_080b3d7c
+    name: allocate_one_byte_leading
+    size: 8
+    sig: "void *allocate_one_byte_leading(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation_size_then_allocation
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec words e3a00001 ea07dc13 establish the exact eight-byte
+      extent 0x080b3d7c..0x080b3d83: `mov r0,#1; b 0x082aadd4`. The next
+      real function begins at 0x080b3d84 with `push {r4,lr}`. Complete raw
+      A32 branch decoding finds four inbound direct calls at 0x081c25e8,
+      0x081c2dec, 0x081c350c, and 0x081c4294, all plain unconditional BL
+      forms; no predicated BL calls target this entry. The body has no BL:
+      it replaces the otherwise dead r0 input with one then tail-branches to
+      tag-2 operator_new @ 0x082aadd4, returning that allocation unchanged,
+      including NULL. Deliberate deviation: Rust calls the existing
+      operator_new seam rather than tail-branching; its target-only section
+      preserves this separately linked BL target.
   - address: 0x080b3d84
     ghidra: FUN_080b3d84
     name: allocate_two_word_with_cleared_last_leading
