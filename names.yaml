@@ -117432,3 +117432,30 @@ functions:
       src equals end, returning the advanced dst. Deliberate deviation: Rust
       calls the established memcpy_forward_words body directly instead of its
       IRAM veneer; this retains its grouped forward-copy behavior and return.
+  - address: 0x083e970c
+    ghidra: FUN_083e970c
+    name: record_range_stable_sort
+    size: 156
+    sig: "void record_range_stable_sort(u8 *first, u8 *last, void *compare)"
+    module: cxx/record_range_stable_sort
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: last
+      param_3/r2/r7: compare
+      r5: middle
+      FUN_083e8274: record_range_insertion_sort
+      FUN_083e97a8: record_range_merge
+    notes: >-
+      Raw osos.dec establishes the exact 39-word, 156-byte body
+      0x083e970c..0x083e97a8, ending in pop {r2,r3,r4,r5,r6,r7,r8,pc}; the
+      next independently linked function begins at 0x083e97a8. Decoding every
+      branch word finds six unconditional plain BL calls (three to __rt_sdiv,
+      two self-recursions, and record_range_merge) and one predicated BLT tail
+      call to record_range_insertion_sort at 0x083e8274. It recursively splits
+      12-byte record ranges at count/2, then merges the sorted halves; ranges
+      below 180 bytes tail-call the insertion-sort leaf. The leaf and merge
+      helpers are unrecovered, so target builds use their verified fixed
+      addresses and host builds expose volatile typed seams. Host tests sort
+      both below-threshold and 180-byte ranges through deterministic leaf and
+      merge replacements.
