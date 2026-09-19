@@ -117659,3 +117659,36 @@ functions:
       cursor, then returns output_end. The Rust export deliberately collapses
       the veneer into that verified target body and omits Ghidra's unused r3
       argument.
+
+  - address: 0x083e8c0c
+    ghidra: FUN_083e8c0c
+    name: vector_copy_construct_range_attach_8c0c
+    size: 56
+    sig: "RefcountedBody **vector_copy_construct_range_attach_8c0c(const RefcountedBody **first, const RefcountedBody **last, RefcountedBody **output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: last
+      param_3/r2/r5: output
+      FUN_0839d370: refcounted_body_attach
+      return/r0: output_end
+    notes: >-
+      Raw osos.dec words establish the exact 56-byte extent
+      0x083e8c0c..0x083e8c44: push {r4,r5,r6,lr} through pop
+      {r4,r5,r6,pc}, with the next independently linked function's
+      push {r4,lr} at 0x083e8c44. Whole-image A32 decoding independently
+      finds three inbound direct unconditional plain BL calls at 0x0811f338,
+      0x083e0f0c, and 0x083e1008, with no inbound predicated BL calls.
+      The body contains no plain BL and exactly one predicated BLNE at
+      0x083e8c28 to the already ported refcounted_body_attach @ 0x0839d370.
+      It copies the [first,last) RefcountedBody-pointer range into
+      uninitialized output: the current output cursor gates both source load
+      and attach, then both cursors advance one target word and output_end is
+      returned. Deliberate deviation: wrapping cursor increments avoid host
+      pointer-arithmetic UB for the raw NULL-output path; a dedicated target
+      section prevents identical-body folding. Host tests cover refcount
+      wrapping at i32::MAX, a negative refcount, output contents, and end
+      cursor. match.py exits 1 for its expected structural diff: LLVM adds an
+      empty-range branch and frame-pointer save while retaining the guarded
+      BLNE attach and four-byte cursor loop.

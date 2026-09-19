@@ -5803,6 +5803,50 @@ pub unsafe extern "C" fn vector_copy_construct_range_attach(
     }
     output
 }
+/// vector_copy_construct_range_attach_8c0c — original: `FUN_083e8c0c` @
+/// 0x083e8c0c (56 bytes; exact extent 0x083e8c0c..0x083e8c44, ending before
+/// the next independent `push {r4,lr}` entry).
+///
+/// Copies a `std::vector<RefcountedBody*>` range into uninitialized output.
+/// Each iteration conditionally attaches the source body when the current
+/// output cursor is non-NULL, then advances both target-word cursors and
+/// returns the output end.
+///
+/// Raw A32 words verify zero plain `bl` instructions and one predicated
+/// `blne` at 0x083e8c28, targeting the already ported
+/// [`refcounted_body_attach`] @ 0x0839d370.
+///
+/// # Deviations
+///
+/// `wrapping_add` preserves target cursor wrapping while avoiding host
+/// pointer-arithmetic UB for the raw NULL-output path.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit readable `RefcountedBody` slots. A
+/// non-NULL `output` must be writable for the same number of slots, and each
+/// non-NULL body must satisfy [`refcounted_body_attach`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.vector_copy_construct_range_attach_8c0c"
+)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_construct_range_attach_8c0c(
+    mut first: *const *mut RefcountedBody,
+    last: *const *mut RefcountedBody,
+    mut output: *mut *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    while first != last {
+        if !output.is_null() {
+            refcounted_body_attach(output, first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
 
 
 
@@ -11433,6 +11477,23 @@ mod tests {
             assert_eq!(out[0], &mut b as *mut _);
             assert!(out[1].is_null(), "second slot is past the range");
             assert_eq!(b.refcount, 42);
+        }
+    }
+    #[test]
+    fn attach_range_8c0c_attaches_and_returns_the_target_word_end() {
+        unsafe {
+            let mut bodies = [body(i32::MAX), body(-1)];
+            let slots = [&mut bodies[0] as *mut _, &mut bodies[1] as *mut _];
+            let mut out: [*mut RefcountedBody; 2] = [core::ptr::null_mut(); 2];
+            let end = vector_copy_construct_range_attach_8c0c(
+                slots.as_ptr(),
+                slots.as_ptr().add(2),
+                out.as_mut_ptr(),
+            );
+            assert_eq!(end, out.as_mut_ptr().add(2));
+            assert_eq!(out, slots);
+            assert_eq!(bodies[0].refcount, i32::MIN);
+            assert_eq!(bodies[1].refcount, 0);
         }
     }
 
