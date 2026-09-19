@@ -70512,6 +70512,31 @@ functions:
       `mov r8,#105; orr r8,r8,#512`) and the inlined halving search.
       #[inline(never)] for the 57 `bl` targets.
 
+  - address: 0x08039cac
+    ghidra: FUN_08039cac
+    name: asn1_time_print
+    size: 452
+    sig: "int asn1_time_print(BIO *bio, ASN1_TIME *time)"
+    module: crypto/asn1_time_print
+    status: ported
+    renames:
+      param_1/r0/r5: bio
+      param_2/r1/r2: time
+      "time + 0x00": length
+      "time + 0x08": data
+      FUN_0803d680: bio_printf
+      FUN_0803da74: bio_write
+    notes: >-
+      OpenSSL ASN1_TIME_print. Raw ARM starts at 0x08039cac and its next
+      separately linked function begins at 0x08039e70: 392 instruction bytes
+      plus the 60-byte literal/string pool make the true 452-byte extent,
+      contrary to Ghidra's 140-byte report. Raw whole-image ARM B/BL decoding
+      finds 4 direct inbound calls, all unconditional bl (0x08088ff0,
+      0x0809b5e4, 0x080c0554, 0x080c0598), with no predicated calls, tail
+      branches, or data-word dispatch. It requires twelve decimal bytes and
+      month 01..12; invalid input writes the exact 14-byte "Bad time value"
+      through BIO_write and returns zero. Valid input formats the date via
+      BIO_printf with the " GMT" suffix only when the final byte is Z.
   # --- OpenSSL BIO layer: the formatted-write front end ---
   # The bio_lib.c/b_print.c cluster sits in 0x0803d294-0x0803da74:
   # BIO_ctrl @ 0x0803d294 (callback code 6 = BIO_CB_CTRL), BIO_push @
