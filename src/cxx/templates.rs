@@ -4732,6 +4732,45 @@ pub unsafe extern "C" fn vector_copy_range_u32(
     output
 }
 
+/// vector_copy_range_pair_u32 — original: `FUN_083e94b8` @ `0x083e94b8`
+/// (44 bytes; raw extent `0x083e94b8..0x083e94e4`, with the separately linked
+/// next function opening at `0x083e94e4`). Three inbound direct calls are
+/// unconditional plain `bl`; there are no predicated `bl` calls.
+///
+/// Copies the half-open `[first, last)` range of eight-byte two-word vector
+/// elements into `output`, advancing both cursors by one pair and returning
+/// the resulting output cursor. The ARM loop predicates both source loads and
+/// destination stores on `output != NULL`; a NULL output therefore advances
+/// without reading `first`.
+///
+/// Raw words show a `push {lr}`, compare-header branch, two `ldrne`/`strne`
+/// pairs, and `pop {pc}`. Ghidra's three-pointer signature is accurate; its
+/// apparent function body begins at the true entry. There are no deliberate
+/// deviations: wrapping cursor arithmetic preserves the target's NULL-output
+/// cursor behavior and the copy remains forward-only.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous, aligned readable two-word
+/// elements. When `output` is non-NULL, it must be writable for the same
+/// number of elements. The original has no overlap guard and copies forward.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_pair_u32(
+    mut first: *const [u32; 2],
+    last: *const [u32; 2],
+    mut output: *mut [u32; 2],
+) -> *mut [u32; 2] {
+    while first != last {
+        if !output.is_null() {
+            output.write(first.read());
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
 /// vector_copy_range_u32_alias_8f5c — original: `thunk_FUN_083e8f74`
 /// @ 0x083e8f5c (40 bytes; raw extent 0x083e8f5c..0x083e8f84, bounded by
 /// the separately linked `push {r4,r5,r6,lr}` at 0x083e8f84). Exactly four
@@ -9713,6 +9752,45 @@ mod tests {
         };
 
         assert_eq!(returned, 4usize as *mut u32, "skipped word still advances output");
+    }
+
+    #[test]
+    fn vector_copy_range_pair_u32_copies_pairs_and_returns_advanced_output() {
+        let source = [[0x0102_0304u32, 0x1112_1314], [0x2122_2324, 0x3132_3334]];
+        let mut destination = [
+            [0xaaaa_aaaa, 0xbbbb_bbbb],
+            [0xcccc_cccc, 0xdddd_dddd],
+            [0xeeee_eeee, 0xffff_ffff],
+        ];
+        let output = destination.as_mut_ptr();
+
+        let returned = unsafe {
+            vector_copy_range_pair_u32(source.as_ptr(), source.as_ptr().add(2), output)
+        };
+
+        assert_eq!(&destination[..2], &source);
+        assert_eq!(destination[2], [0xeeee_eeee, 0xffff_ffff], "range end is exclusive");
+        assert_eq!(returned, unsafe { output.add(2) });
+    }
+
+    #[test]
+    fn vector_copy_range_pair_u32_empty_and_null_output_preserve_arm_cursor_rules() {
+        let source = [[0x0102_0304u32, 0x1112_1314]];
+        let mut destination = [[0xaaaa_aaaa, 0xbbbb_bbbb]];
+        let output = destination.as_mut_ptr();
+
+        let empty = unsafe { vector_copy_range_pair_u32(source.as_ptr(), source.as_ptr(), output) };
+        let null_output = unsafe {
+            vector_copy_range_pair_u32(
+                core::ptr::null(),
+                8usize as *const [u32; 2],
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(empty, output);
+        assert_eq!(destination, [[0xaaaa_aaaa, 0xbbbb_bbbb]]);
+        assert_eq!(null_output, 8usize as *mut [u32; 2]);
     }
 
     #[test]
