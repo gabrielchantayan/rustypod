@@ -1584,6 +1584,10 @@ pub mod hints {
     // Dedicated target-width ASN1_OBJECT fixtures for crypto/obj_cmp.
     pub const OBJ_CMP: usize = 0x8080_0000;
     pub const OBJ_CMP_ZERO: usize = 0x8090_0000;
+    // 0x80a0_0000: dedicated to util/zeroing_bump_alloc's raw-u32 arena
+    // state and payload fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const ZEROING_BUMP_ALLOC: usize = 0x80a0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
