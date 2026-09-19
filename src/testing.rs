@@ -320,6 +320,9 @@ pub mod hints {
     // 0x3c00_0000: sibling ports in flight take the sequential slots,
     // and a collision skips tests silently on every host.
     pub const BIT_SET_TEST: usize = 0x3c00_0000;
+    // 0x3d00_0000: dedicated to cxx/opaque_storage_destroy's raw-u32 object
+    // fixture; mappings never unmap, so no other test may reuse this hint.
+    pub const OPAQUE_STORAGE_DESTROY: usize = 0x3d00_0000;
     // 0x4100_0000, skipping 0x3d00_0000..0x4000_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
