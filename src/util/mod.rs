@@ -26,6 +26,7 @@ pub mod collection_item_at;
 pub mod clear_optional_byte;
 pub mod clear_u16_three_word_record;
 pub mod bswap;
+pub mod bswap_four_u32s_inplace;
 pub mod context_field;
 pub mod context_finalize_if_present;
 pub mod copy_four_bytes;
