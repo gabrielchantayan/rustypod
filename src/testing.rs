@@ -403,6 +403,10 @@ pub mod hints {
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const CTYPE_ISDIGIT: usize = 0x7d00_0000;
+    // 0x1230_0000: dedicated to util/indexed_state_set_and_poll's raw-u32
+    // state-table and selected-record fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const INDEXED_STATE_SET_AND_POLL: usize = 0x1230_0000;
     // 0x0400_0000: dedicated to runtime/ctype isspace's raw-u32 LC_CTYPE
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
