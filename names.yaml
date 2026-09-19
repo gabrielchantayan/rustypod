@@ -114799,3 +114799,32 @@ functions:
       calls with host ABI seams; the allocator and mutex calls are direct
       Rust ports. Host tests cover all four flag combinations and page/len
       forwarding. Deviation: helper seams replace direct retail bl calls.
+
+  - address: 0x0806473c
+    ghidra: FUN_0806473c
+    name: singly_linked_list_remove
+    size: 80
+    sig: "void singly_linked_list_remove(u32 *head, u32 *node)"
+    module: util/singly_linked_list_remove
+    status: ported
+    vars:
+      param_1/r0: head
+      param_2/r1: node
+      puVar1/r2: current
+      puVar3/r3: previous
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte leaf extent
+      0x0806473c..0x0806478b: bx lr at 0x08064788 is final, and the next
+      independently entered function begins with push {r4-r8,lr} at
+      0x0806478c. It walks the NULL-terminated singly linked chain rooted at
+      *head, using each node's target-width next word at +0. When node is
+      found, it writes node->next into either *head or previous->next, then
+      clears node->next; empty lists and absent nodes are unchanged. Decoding
+      inbound ARM B/BL-immediate words finds exactly four unconditional plain
+      bl callers (0x08048fd0, 0x0804902c, 0x08049084, 0x080494dc) and zero
+      predicated bl forms; the body itself contains no BL. Ghidra's phantom
+      call from FUN_080494ac is dead overlap after FUN_08049468, not an
+      independent raw call site. Deliberate deviations: none. Host tests use
+      target-width mapped words and cover empty, absent, head, interior, and
+      tail removal. match.py structural diff reviewed: LLVM emits explicit
+      loop and splice branches rather than ARM conditional loads/stores.

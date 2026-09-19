@@ -638,6 +638,10 @@ pub mod hints {
     // raw-u32 queue and entry fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const REQUEST_QUEUE_CLEAR_MATCHING_ENTRIES: usize = 0xed10_0000;
+    // 0xee30_0000: dedicated to util/singly_linked_list_remove's raw-u32
+    // head and node fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const SINGLY_LINKED_LIST_REMOVE: usize = 0xee30_0000;
     // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
     // root/context fixture; mappings never unmap, so no other user may share it.
     pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;
