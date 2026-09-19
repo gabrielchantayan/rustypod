@@ -68494,6 +68494,40 @@ functions:
       both adjacent guard bytes remain unchanged; match.py diff reviewed after
       the ARM release build.
 
+  # --- record stream preamble reader ---
+  - address: 0x08028e4c
+    ghidra: FUN_08028e4c
+    name: read_record_preamble
+    size: 200
+    sig: "i32 read_record_preamble(AdsFile *file, const char *name, u32 *sentinel_out, u32 *mode_out, u32 *record_kind_out)"
+    module: stdio/record_preamble
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: name
+      param_3/r2: sentinel_out
+      param_4/r3: mode_out
+      param_5/stack: record_kind_out
+      DAT_080295f8: native_order_sentinel
+      DAT_080295fc: swapped_order_sentinel
+      FUN_0802fef0: fseek
+      FUN_08392478: strlen
+      FUN_0803677c: fread
+      FUN_0802b504: transform_word_for_mode
+    notes: >-
+      Raw ARM confirms the 200-byte extent 0x08028e4c..0x08028f14, ending
+      immediately before the distinct function prologue at 0x08028f14.
+      Decoding every ARM branch instruction across osos.dec finds four plain
+      unconditional direct callers at 0x08029a70, 0x08029b88, 0x08029da8,
+      and 0x08029ec8, with zero predicated bl forms. The body invokes fseek,
+      strlen, fread twice, and transform_word_for_mode; it seeks file to
+      offset zero and deliberately discards that status, rejects names longer
+      than 0x200, reads one of the paired order sentinels
+      0x44332211/0x11223344 to write mode 1/0, reads and mode-transforms the
+      record-kind word, then accepts exactly values 1 through 9. The Rust port
+      uses typed output pointers rather than retail stack-word aliases; all
+      reached accesses remain four-byte words.
+
   # --- UI checked-byte-block forwarding basic block ---
   - address: 0x0802dd88
     ghidra: FUN_0802dd88
