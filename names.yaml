@@ -41527,6 +41527,29 @@ functions:
       str r4, [r0, #4]; mvn r0, #0`), only the LLVM frame prologue
       differs - the same shape as ata_handle_first_word_or_minus1.
 
+  - address: 0x0806fca4
+    ghidra: FUN_0806fca4
+    name: crypto_tagged_reference_retain
+    size: 76
+    sig: "void crypto_tagged_reference_retain(u32 *entry)"
+    module: crypto/tagged_reference_retain
+    status: ported
+    vars: {param_1: entry, iVar1: reference_count}
+    renames:
+      FUN_08043828: crypto_add_lock
+    notes: >-
+      Raw ARM extent is exactly 76 bytes, 0x0806fca4..0x0806fce8: the final
+      pop {r12,pc} is followed by the separately linked function beginning
+      push {r2-r6,lr} at 0x0806fcf0. Decoding every B/BL word in osos.dec
+      finds four inbound plain unconditional bl calls (0x0806ffec,
+      0x080703a8, 0x08070488, 0x08070610) and zero predicated BL forms.
+      The body has one unconditional direct bl, crypto_add_lock @ 0x08043828,
+      and no predicated BL. Entry kind 1 increments the signed count at
+      entry[1]+0x10 under lock type 3; kind 2 increments entry[1]+0x0c under
+      lock type 6; every other kind returns without reading entry[1].
+      Deviation: the four-byte target object pointer remains a u32 word and
+      is widened only to dereference it on hosts; the direct ARM bl is a
+      normal Rust call to the ported crypto_add_lock.
   - address: 0x08043828
     ghidra: FUN_08043828
     name: crypto_add_lock
