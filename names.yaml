@@ -117277,3 +117277,22 @@ functions:
       {r4,r5,r6,pc} from a frame this veneer never creates. It therefore has
       no Rust-callable ABI; porting it would invent a register and stack
       contract and cannot be faithful.
+
+  - address: 0x080035d8
+    ghidra: thunk_FUN_080cfe50
+    name: tail_call_retail_080cfe50
+    size: 8
+    sig: "u32 tail_call_retail_080cfe50(u32 r0, u32 r1)"
+    module: util/tail_call_retail_080cfe50
+    status: ported
+    renames:
+      DAT_080035dc: retail_080cfe50
+    notes: >-
+      Raw osos.dec words establish the exact eight-byte veneer
+      0x080035d8..0x080035e0: e51ff004 (ldr pc, [pc, #-4]) and literal
+      0x080cfe50. The next distinct veneer begins at 0x080035e0. Raw branch
+      decoding finds four inbound plain unconditional BL sites and no
+      predicated BL forms. The target has no verified semantic identity, so
+      this port deliberately retains it as a named retail tail-call seam;
+      target builds use the same literal-PC transfer and host tests replace
+      that fixed target with a callback.
