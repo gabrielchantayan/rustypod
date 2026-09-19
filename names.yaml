@@ -17340,6 +17340,31 @@ functions:
       operator_new(0x28), all initialized fields verified, and the
       +0x0c/+0x20/+0x22 poison bytes provably survive.
 
+  - address: 0x080b3e1c
+    ghidra: FUN_080b3e1c
+    name: allocate_one_byte_early
+    size: 8
+    sig: "void *allocate_one_byte_early(void)"
+    module: heap/veneers
+    status: ported
+    renames:
+      r0: allocation
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw osos.dec words e3a00001 ea07dbeb establish the exact eight-byte
+      extent 0x080b3e1c..0x080b3e23: mov r0,#1; b 0x082aadd4. The next
+      independent function starts at 0x080b3e24 with push {r4,lr}, so
+      Ghidra's reconstructed lazy-heap calls are outside this body. A complete
+      whole-image A32 branch decode finds four inbound plain unconditional BL
+      calls at 0x081c2690, 0x081c2e94, 0x081c35b4, and 0x081c439c, and zero
+      predicated BL calls. The entry overwrites its dead incoming r0 with one,
+      then tail-branches to the already ported tag-2 operator_new @
+      0x082aadd4, returning that allocation unchanged, including NULL.
+      Deliberate deviation: Rust models the tail transfer through the existing
+      operator_new seam. Current ARM code restores its frame then
+      tail-branches; that extra frame setup is ABI-invisible. A unique target
+      text section prevents folding with its identical siblings.
+
   - address: 0x080b3e54
     ghidra: FUN_080b3e54
     name: allocate_byte_with_value_alternate
