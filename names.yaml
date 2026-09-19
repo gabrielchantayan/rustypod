@@ -117011,3 +117011,31 @@ functions:
       only the verified wire protocol. Deliberate deviation: Rust invokes the
       established writable dispatcher seam rather than the foreign literal
       veneer, adding a normal return edge.
+
+  # --- standard request validation ---
+  - address: 0x080278d8
+    ghidra: FUN_080278d8
+    name: validate_standard_request
+    size: 56
+    sig: "u32 validate_standard_request(u32 request, const u8 *request_name, u32 request_kind)"
+    module: app/standard_request_validate
+    status: ported
+    renames:
+      param_1/r0: request
+      param_2/r1: request_name
+      param_3/r2: request_kind
+      FUN_080276f0: standard_request_validator
+    notes: >-
+      Raw words establish the exact 56-byte code extent
+      0x080278d8..0x08027910: push/move, materialize the twelve-byte
+      "STANDARD\0" stack literal, forward r0-r2, then pass r3=0, the
+      literal as stack argument five, and zero as argument six to
+      0x080276f0. It returns that validator status unchanged. The next
+      real function begins at 0x08027940; 0x08027910..0x0802793f is its
+      literal data. Decoding all B/BL words finds four incoming direct
+      call sites, all plain unconditional bl (0x0802a200, 0x0802a39c,
+      0x0802a590, 0x0802a72c), no predicated BL forms, and one outgoing
+      unconditional bl at 0x08027904. The validator remains unported and
+      has no established identity, so target builds dispatch to its
+      verified address while host tests use a replacement seam. No
+      deliberate behavioral deviations.
