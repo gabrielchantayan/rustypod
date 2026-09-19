@@ -9,6 +9,7 @@ pub mod event_handler_source;
 pub mod gateway_request;
 pub mod clear_pending_gateway_request;
 pub mod gateway_signal;
+pub mod gateway_signal_checked;
 pub mod gateway_service18;
 pub mod gateway_service19;
 pub mod gateway_wake;
