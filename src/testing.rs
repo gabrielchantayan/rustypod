@@ -392,6 +392,9 @@ pub mod hints {
     // 0x6f10_0000: dedicated to util/bit_buffer_copy's raw-u32 cursor and
     // output-buffer fixture; mappings never unmap, so no other user may share it.
     pub const BIT_BUFFER_COPY: usize = 0x6f10_0000;
+    // 0x6f20_0000: dedicated to util/bit_buffer_set_bit's raw-u32 byte
+    // storage fixture; mappings never unmap, so no other user may share it.
+    pub const BIT_BUFFER_SET_BIT: usize = 0x6f20_0000;
     // 0x9200_0000: dedicated to app/service_handler_status's raw-u32 query
     // object fixture; mappings never unmap, so no other user may share it.
     pub const SERVICE_HANDLER_STATUS_QUERY: usize = 0x9200_0000;
