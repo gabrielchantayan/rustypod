@@ -39,6 +39,7 @@ pub mod render_owner_clip;
 pub mod render_request_from_descriptor;
 pub mod render_cell_state;
 pub mod object_resource_count;
+pub mod object_resource_counted_string;
 pub mod rect;
 pub mod indexed_rect;
 pub mod noop_f7f4;

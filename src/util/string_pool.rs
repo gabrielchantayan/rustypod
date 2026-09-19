@@ -678,8 +678,8 @@ pub unsafe extern "C" fn string_pool_intern_counted(
 ///
 /// Reads one pool entry as a u16-length-prefixed byte payload. The blob reader
 /// writes at `counted + 1` with its fixed 510-byte cap, then the wrapper
-/// stores the copied byte count divided by two in `*counted`. It deliberately
-/// discards the reader status. The fourth ABI argument initializes the stack
+/// stores the copied byte count divided by two in `*counted`, and returns the
+/// reader status left in `r0`. The fourth ABI argument initializes the stack
 /// length local before the reader call, but the reader unconditionally clears
 /// its non-NULL length output before any validation; it therefore has no
 /// observable effect.
@@ -705,10 +705,11 @@ pub unsafe extern "C" fn string_pool_read_counted(
     entry_id: i32,
     counted: *mut u16,
     initial_byte_len: u32,
-) {
+) -> i32 {
     let mut byte_len = initial_byte_len;
-    let _ = string_pool_read(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
+    let status = string_pool_read(pool, entry_id, counted.add(1).cast(), &mut byte_len, 0x1fe);
     counted.write((byte_len >> 1) as u16);
+    status
 }
 
 /// string_pool_read_counted_from_context — original: `FUN_080556cc` @

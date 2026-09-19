@@ -3755,6 +3755,36 @@ functions:
       dereference behavior. Host tests cover zero and u32::MAX counts
       through direct backends and kind-2 proxies.
 
+  # --- retailOS UI resource-table counted-string reader ---
+  - address: 0x08053084
+    ghidra: FUN_08053084
+    name: object_resource_counted_string
+    size: 144
+    sig: "i32 object_resource_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_counted_string
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      iVar3/r5: backend
+      iVar3/r5_after_08054724: active_item
+    notes: >-
+      Raw ARM establishes the exact body from push {r4-r8,lr} at
+      0x08053084 through pop {r4-r8,pc} at 0x08053110; the separately
+      entered next function starts at 0x08053114. Whole-image ARM B/BL
+      immediate decoding found four inbound plain bl calls at 0x08066834,
+      0x08115780, 0x0813c3dc, and 0x0813d2d8; no predicated BL calls.
+      The body clears counted[0] before checking it, resolves the kind-1/
+      kind-2 backend, rejects NULL output, negative indices, and indices
+      outside the object+0xebc vector of 16-byte records with -50. It
+      resolves an active item through unported 0x08054724, retains/releases
+      the inline +0xcc string pool, and reads the selected record's first-
+      word id as a counted UTF-16 string. The unported resolver remains an
+      address-backed target seam with a host replacement; its concrete
+      identity is not invented. The reader status is returned, matching r0
+      surviving the counted-reader wrapper.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
