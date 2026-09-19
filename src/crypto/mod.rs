@@ -52,6 +52,7 @@ pub mod base64_decode;
 pub mod base64_table_char;
 pub mod bio_printf;
 pub mod bio_new;
+pub mod bio_s_mem;
 pub mod bio_puts;
 pub mod bio_handle_write;
 pub mod bio_free;

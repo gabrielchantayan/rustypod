@@ -70591,6 +70591,29 @@ functions:
       spill's product); 7 instructions either way.
       #[inline(never)] for the 25 `bl` targets.
 
+  - address: 0x0803d8a8
+    ghidra: FUN_0803d8a8
+    name: bio_s_mem
+    size: 8
+    sig: "BIO_METHOD *bio_s_mem(void)"
+    module: crypto/bio_s_mem
+    status: ported
+    renames:
+      DAT_0803d8b0: memory_bio_method
+    notes: >-
+      OpenSSL BIO_s_mem memory-method factory. Raw ARM words establish the
+      exact 8-byte body at 0x0803d8a8..0x0803d8b0: `ldr r0,[pc]` reads the
+      following literal 0x08a0c27c and `bx lr` returns it unchanged; the
+      separately linked successor begins at 0x0803d8b4. Full-image decoding
+      of every ARM B/BL immediate found exactly four inbound direct calls,
+      all unconditional BL at 0x08060308, 0x082728f4, 0x082d44b4, and
+      0x082d45ac; no predicated BL calls or raw image data words hold the
+      entry address. The pointer supplies BIO_new's method argument for
+      base64 decode chains alongside the base64-filter factory at 0x0803d358.
+      The target export uses a hand-written two-instruction veneer plus its
+      literal word, preserving the original code structure exactly; the host
+      implementation returns the same address for tests.
+
   - address: 0x0803d954
     ghidra: FUN_0803d954
     name: bio_snprintf
