@@ -11130,6 +11130,20 @@ functions:
     status: ported
     notes: Lazy one-time init gated on ROM flag 0x22008c70 bit 0.
 
+  - address: 0x08038090
+    ghidra: thunk_EXT_FUN_22004d7c
+    name: rtxc_irq_enter_veneer
+    size: 8
+    sig: "void *rtxc_irq_enter_veneer(void)"
+    module: kernel/irq
+    status: ported
+    notes: >-
+      Raw words are `ldr pc,[pc,#-4]` and literal 0x22004d7c; next real
+      veneer is 0x08038098. Four direct plain bl callers, zero predicated
+      forms. Tail transfer reaches the mirrored 0x08004d7c rtxc_irq_enter
+      body, which returns dispatch-table base 0x22010200 in r0. Rust invokes
+      its established target port and returns the Rust BSS table address.
+
   - address: 0x08004dfc
     name: vic_dispatch
     size: 100
