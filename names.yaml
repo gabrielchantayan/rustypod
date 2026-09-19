@@ -114893,3 +114893,40 @@ functions:
       match.py structural diff reviewed: the replaceable source seam emits a
       BLX and LLVM saves extra callee registers; cache test, call, store, and
       return structure remain equivalent.
+
+  - address: 0x080620ac
+    ghidra: FUN_080620ac
+    name: callback_table_double_to_i32_dispatch
+    size: 76
+    sig: "void callback_table_double_to_i32_dispatch(void *context, u32 value, u64 double_bits)"
+    module: app/callback_table_double_to_i32_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: value
+      param_3/r2: double_bits_low
+      param_4/r3: double_bits_high
+      DAT_08062150: callback_table_cache
+      FUN_0806212c: callback_table_get
+      FUN_083eb7d0: __d2i
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte instruction extent
+      0x080620ac..0x080620f7: bx r12 at 0x080620f4 is final, and the next
+      separately entered function begins at 0x080620f8. The body has exactly
+      two unconditional direct BL instructions, to callback_table_get at
+      0x080620c0 and the ported ADS __d2i at 0x080620dc; it has zero
+      predicated BL forms. It loads callback-table word +0x0c only when the
+      table is non-NULL, returns for a NULL target, otherwise converts
+      double_bits (r2:r3) to i32 and tail-dispatches
+      (context, value, converted). Decoding inbound raw ARM B/BL-immediate
+      words finds exactly three plain unconditional BL callers
+      (0x08062190, 0x08062298, and 0x0808b318), with zero predicated forms.
+      Ghidra's additional decompiled reference from FUN_080e8b50 does not
+      correspond to a raw branch-immediate call. Host tables model word +0x0c
+      with a native-width optional callback field to avoid truncating host
+      function pointers; returning after that callback is equivalent to the
+      original void-ABI tail branch. Host tests cover negative fractional
+      truncation and the NULL target slot. match.py structural diff reviewed:
+      shared Rust seams add a frame and replace direct BL targets with local
+      relocations, while preserving the table/slot guards, conversion, and
+      final indirect dispatch.

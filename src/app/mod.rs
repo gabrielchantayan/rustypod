@@ -147,6 +147,7 @@ pub mod fixed_point;
 pub mod fixed_value;
 pub mod global_flag_table;
 pub mod callback_table;
+pub mod callback_table_double_to_i32_dispatch;
 pub mod global_event_dispatch;
 pub mod global_dispatch_target;
 pub mod global_identifier_slot;
