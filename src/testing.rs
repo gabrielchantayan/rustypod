@@ -1542,6 +1542,11 @@ pub mod hints {
     // 0x8030_0000: dedicated to util/linked_list_refresh_sort_ascending's
     // target-width anchor, nodes, and cursor fixture; mappings never unmap.
     pub const LINKED_LIST_REFRESH_SORT_ASCENDING: usize = 0x8030_0000;
+    // 0x8040_0000 and 0x8050_0000: dedicated to
+    // util/tagged_record_storage_address's raw-u32 base, descriptor, and
+    // layout fixtures; mappings never unmap, so no other user may share them.
+    pub const TAGGED_RECORD_STORAGE_ADDRESS: usize = 0x8040_0000;
+    pub const TAGGED_RECORD_STORAGE_ADDRESS_RESULT: usize = 0x8050_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
