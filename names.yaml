@@ -10136,6 +10136,32 @@ functions:
     status: ported
     notes: Guard then tail -> ROM 0x220042b4. 11 call sites.
 
+  # --- local timestamp converted through current calendar offset ---
+  - address: 0x0807446c
+    ghidra: FUN_0807446c
+    name: local_seconds_to_utc_seconds
+    size: 56
+    sig: "u32 local_seconds_to_utc_seconds(u32 seconds)"
+    module: time/local_to_utc
+    status: ported
+    renames:
+      param_1/r0/r4: seconds
+      local_10/sp+4: base_utc_offset_minutes
+      local_c/sp+0: daylight_saving_minutes
+      FUN_080ab558: current_utc_offset_query
+    notes: >-
+      Raw ARM extent is exactly 56 bytes, 0x0807446c..0x080744a4; the next
+      separately linked function begins at 0x080744a4 with stmdb
+      sp!, {r4, lr}. Decoding every A32 B/BL word in osos.dec finds exactly
+      four direct unconditional plain BL callers (0x0826fee0, 0x082701f0,
+      0x082a3234, and 0x082a3448) and no predicated BL callers. Zero input
+      returns unchanged without querying the calendar. Otherwise it calls
+      ported current_utc_offset_query, ignores that provider's validity
+      result, and subtracts the signed i16 base offset plus signed i8
+      daylight-saving offset, each scaled by 60 seconds, modulo 2^32.
+      Deliberate deviation: typed Rust locals replace the retail 8-byte stack
+      spill; observable signed loads, unconditional query, ignored validity,
+      and wrapping arithmetic remain identical.
   - address: 0x080744a4
     ghidra: FUN_080744a4
     name: mutex_create
