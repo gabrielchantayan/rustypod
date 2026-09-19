@@ -3061,6 +3061,34 @@ functions:
       private fixed-state backing and recording seams. The IRAM destructor
       target is valid: relocator 0x080046e0 mirrors the 0x08007454 body.
 
+  # --- RAM stream-buffer free capacity ---
+  - address: 0x080380b8
+    ghidra: thunk_EXT_FUN_22006f10
+    name: stream_buffer_free_byte_count
+    size: 8
+    sig: "u32 stream_buffer_free_byte_count(const StreamBuffer *stream_buffer, u32 *free_byte_count)"
+    module: util/stream_buffer_free_byte_count
+    status: ported
+    renames:
+      target: FUN_08006f10 (IRAM mirror @ 0x22006f10)
+      param_1/r0: stream_buffer
+      param_2/r1: free_byte_count
+      stream_buffer+0x08: read_offset
+      stream_buffer+0x0c: write_offset
+      stream_buffer+0x24: capacity_bytes
+    notes: >-
+      The assigned address is an 8-byte veneer, `ldr pc,[pc,#-4]` followed
+      by literal 0x22006f10. The boot relocator mirrors osos
+      0x08000000.. into IRAM 0x22000000.., so the target resolves to the
+      independently linked 48-byte body at 0x08006f10..0x08006f3f. Raw ARM
+      loads write offset +0x0c and read offset +0x08. If write is ahead it
+      returns capacity (+0x24) minus the occupied distance; if read is ahead
+      it returns their direct distance; equality returns full capacity. It
+      stores the result through r1 and returns zero. Decoding every ARM B/BL
+      word in osos.dec found four direct callers: four unconditional bl and
+      zero predicated bl instructions. The Rust port has no deliberate
+      deviations.
+
   # --- RAM stream-buffer page contexts ---
   - address: 0x080071b0
     ghidra: FUN_080071b0
