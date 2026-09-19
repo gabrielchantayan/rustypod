@@ -121,6 +121,18 @@ const BUFFER_INDEX: usize = 0x1c;
 
 /// Byte offset of the u16 selection reset with the buffer cursor.
 const BUFFER_SELECTION: usize = 0x82c;
+/// Byte offset of a tag-4 allocation released by
+/// [`inner_release_record_buffer_and_reset_cursor`].
+const RECORD_BUFFER_ALLOCATION: usize = 0xe98;
+/// Byte offsets delimiting the 16-byte record cursor reset by
+/// [`inner_release_record_buffer_and_reset_cursor`].
+const RECORD_CURSOR_BEGIN: usize = 0xec8;
+const RECORD_CURSOR_END: usize = 0xecc;
+/// Byte offset of the sentinel index reset with the record cursor.
+const RECORD_INDEX: usize = 0x20;
+/// Byte offset of the u16 selection reset with the record cursor.
+const RECORD_SELECTION: usize = 0xa2c;
+
 
 
 /// Byte offsets of the transient resource pointers reset by
@@ -367,6 +379,52 @@ pub unsafe extern "C" fn inner_release_buffer_and_reset_cursor(inner: *mut u8) {
     (inner.add(BUFFER_INDEX) as *mut u32).write(u32::MAX);
     (inner.add(BUFFER_SELECTION) as *mut u16).write(0);
 }
+/// inner_release_record_buffer_and_reset_cursor — original: `FUN_080be1c8`
+/// @ `0x080be1c8` (148 bytes: 140 instruction bytes plus the
+/// `0x00000a2c` literal at `0x080be258`; the next separately entered
+/// function starts at `0x080be25c`).
+///
+/// Raw decoding of every ARM immediate B/BL word finds four direct callers,
+/// all unconditional plain `bl` (no predicated calls): `0x08066788`,
+/// `0x080668b4`, `0x08066a20`, and `0x0809df98`. The body's one `bl` targets
+/// the already-ported [`crate::heap::veneers::free_tag4`] @ `0x0805d070`.
+///
+/// Releases a nonzero tag-4 allocation at `inner + 0xe98`, clears that word,
+/// rewinds the 16-byte record cursor at `+0xec8/+0xecc`, stores -1 at
+/// `+0x20`, and clears the u16 selection at `+0xa2c`.
+///
+/// Ghidra presents a 16-byte record copy, but raw ARM sets `r0 = r9 = end`
+/// before its predicated `ldmne`/`stmne` loop, making it unreachable.
+/// Deliberate deviation: Rust omits that dead copy and the subsequent
+/// side-effect-free 16-byte walker, directly applying its wrapping rewind.
+/// Thus malformed cursor endpoints with mismatched low four bits return
+/// rather than reproducing the stock walker's nontermination. Valid target
+/// behavior is unchanged.
+///
+/// # Safety
+///
+/// `inner` must address writable, suitably aligned storage through `+0xecf`;
+/// a nonzero allocation word must be valid for `free_tag4`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_release_record_buffer_and_reset_cursor(inner: *mut u8) {
+    let allocation = (inner.add(RECORD_BUFFER_ALLOCATION) as *const u32).read();
+    if allocation != 0 {
+        crate::heap::veneers::free_tag4(allocation as usize as *mut u8);
+        (inner.add(RECORD_BUFFER_ALLOCATION) as *mut u32).write(0);
+    }
+
+    let begin = (inner.add(RECORD_CURSOR_BEGIN) as *const u32).read();
+    let end = (inner.add(RECORD_CURSOR_END) as *const u32).read();
+    if begin != end {
+        let rewound = end.wrapping_sub(end.wrapping_sub(begin) & !0xf);
+        (inner.add(RECORD_CURSOR_END) as *mut u32).write(rewound);
+    }
+
+    core::ptr::write_volatile(inner.add(RECORD_INDEX) as *mut u32, u32::MAX);
+    core::ptr::write_volatile(inner.add(RECORD_SELECTION) as *mut u16, 0);
+}
+
 
 /// inner_reset_transient_state — original: `FUN_08059644` @ `0x08059644`
 /// (184 bytes: 180 instruction bytes plus the literal at `0x080596fc`; the
@@ -1325,7 +1383,7 @@ mod tests {
 
     // ---- inner_release_buffer_and_reset_cursor --------------------------
 
-    const BUFFER_RESET_LEN: usize = BUFFER_CURSOR_END + 4;
+    const BUFFER_RESET_LEN: usize = RECORD_CURSOR_END + 4;
 
     #[repr(align(4))]
     struct BufferResetFixture {
@@ -1398,6 +1456,51 @@ mod tests {
         assert_eq!(fixture.word(BUFFER_CURSOR_END), 0x2000);
         assert_eq!(fixture.word(BUFFER_INDEX), u32::MAX);
         assert_eq!(fixture.halfword(BUFFER_SELECTION), 0);
+    }
+
+    // ---- inner_release_record_buffer_and_reset_cursor -------------------
+
+    #[test]
+    fn record_buffer_reset_releases_allocation_and_rewinds_cursor() {
+        let _heap_guard = mock_heap();
+        let mut fixture = BufferResetFixture::new();
+        fixture.set_word(RECORD_BUFFER_ALLOCATION, 0x3333_4444);
+        fixture.set_word(RECORD_CURSOR_BEGIN, 0x1000);
+        fixture.set_word(RECORD_CURSOR_END, 0x1030);
+        fixture.set_word(RECORD_INDEX, 7);
+        fixture.set_halfword(RECORD_SELECTION, u16::MAX);
+        let mut expected = fixture.bytes;
+        expected[RECORD_BUFFER_ALLOCATION..RECORD_BUFFER_ALLOCATION + 4]
+            .copy_from_slice(&0u32.to_le_bytes());
+        expected[RECORD_CURSOR_END..RECORD_CURSOR_END + 4]
+            .copy_from_slice(&0x1000u32.to_le_bytes());
+        expected[RECORD_INDEX..RECORD_INDEX + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[RECORD_SELECTION..RECORD_SELECTION + 2].copy_from_slice(&0u16.to_le_bytes());
+
+        unsafe { inner_release_record_buffer_and_reset_cursor(fixture.bytes.as_mut_ptr()) };
+
+        assert_eq!(free_log(), (1, 0x3333_4444usize as *mut u8, 4));
+        assert_eq!(fixture.bytes, expected);
+    }
+
+    #[test]
+    fn record_buffer_reset_skips_null_release_and_empty_cursor() {
+        let _heap_guard = mock_heap();
+        let mut fixture = BufferResetFixture::new();
+        fixture.set_word(RECORD_BUFFER_ALLOCATION, 0);
+        fixture.set_word(RECORD_CURSOR_BEGIN, 0x2000);
+        fixture.set_word(RECORD_CURSOR_END, 0x2000);
+        fixture.set_word(RECORD_INDEX, 0);
+        fixture.set_halfword(RECORD_SELECTION, 0x1234);
+
+        unsafe { inner_release_record_buffer_and_reset_cursor(fixture.bytes.as_mut_ptr()) };
+
+        assert_eq!(free_log().0, 0);
+        assert_eq!(fixture.word(RECORD_BUFFER_ALLOCATION), 0);
+        assert_eq!(fixture.word(RECORD_CURSOR_BEGIN), 0x2000);
+        assert_eq!(fixture.word(RECORD_CURSOR_END), 0x2000);
+        assert_eq!(fixture.word(RECORD_INDEX), u32::MAX);
+        assert_eq!(fixture.halfword(RECORD_SELECTION), 0);
     }
 
     // ---- inner_reset_transient_state ------------------------------------
