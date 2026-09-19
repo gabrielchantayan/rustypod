@@ -29,6 +29,7 @@ pub mod locale_guard;
 pub mod malloc_rt;
 pub mod object_word;
 pub mod message_0x17;
+pub mod message_0x23;
 pub mod message_0x10;
 pub mod message_dispatch_veneer;
 pub mod qsort;
