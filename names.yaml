@@ -113977,6 +113977,38 @@ functions:
       host tests replace them with recording seams. Deliberate deviation:
       literal veneers replace the original PC-relative BL/B because relocated
       payload code cannot encode those original displacements.
+  - address: 0x08089154
+    ghidra: FUN_08089154
+    name: path_facade_slot_68_from_cstr
+    size: 56
+    sig: "i32 path_facade_slot_68_from_cstr(const char *path, u32 *flag_out, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path (NUL-terminated C string)
+      param_2/r1/r4: flag_out (opaque facade helper output word)
+      param_3/r2/r5: base_hint (forwarded unchanged)
+      FUN_08279284: path_object_construct (ported)
+      FUN_0808918c: path_facade_slot_68_from_path_object (unported structural helper)
+      thunk_FUN_082792fc: string_object_destroy_veneer (ported)
+      r4: saved helper status
+    notes: >-
+      Raw osos.dec words establish the true 56-byte extent from push
+      {r2-r6,lr} at 0x08089154 through pop {r2-r6,pc} at 0x08089188;
+      0x0808918c is the separately linked helper. The wrapper contains three
+      unconditional internal BLs (path_object_construct, the +0x68 helper,
+      and string_object_destroy_veneer) and no predicated BLs. Independent
+      whole-image A32 branch decoding finds exactly four inbound plain BL
+      calls (0x0805a97c, 0x0811c7a8, 0x08196c9c, 0x0820bb2c) and zero
+      predicated inbound BL calls. It constructs a two-word path object on
+      r2/r3 spill storage, passes the constructor RETURN with flag_out and
+      base_hint to 0x0808918c, destroys the original storage unconditionally,
+      and returns the helper status verbatim. The helper loads facade vtable
+      slot +0x68 but its semantic identity is unresolved, so Rust keeps a
+      typed fixed-address device boundary and fail-closed host recording seam.
+      Host tests cover zero, positive, and negative status values; unchanged
+      hint and output-pointer forwarding; derived-vtable identity; storage
+      destruction; and an opaque helper that leaves flag_out untouched.
   - address: 0x080891dc
     ghidra: FUN_080891dc
     name: path_facade_slot_54_from_cstr

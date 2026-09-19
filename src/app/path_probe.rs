@@ -231,6 +231,14 @@ pub type PathFacadeSlot5c =
 pub type PathFacadeSlot54 =
     unsafe extern "C" fn(facade: *mut FacadeObject, path_object: *mut StringObject, flag_out: *mut u32) -> u32;
 
+/// The facade's unclassified vtable-slot-+0x68 cstr operation. The wrapper
+/// at 0x08089154 establishes only its structural ABI.
+pub type PathFacadeSlot68FromPathObject =
+    unsafe extern "C" fn(path_object: *mut StringObject, flag_out: *mut u32, base_hint: u32) -> i32;
+
+/// Firmware load address of the unported slot-+0x68 helper called by
+/// [`path_facade_slot_68_from_cstr`].
+pub const PATH_FACADE_SLOT_68_FROM_PATH_OBJECT_ADDRESS: usize = 0x0808_918c;
 
 /// The interface-guard constructor @ 0x08206e40. It forwards `base_hint` to
 /// the shared base constructor and returns the constructed guard.
@@ -448,6 +456,37 @@ pub static mut PATH_PROBE_GUARD_CTOR: GuardConstruct = firmware_guard_construct;
 /// default is the retailOS boundary (fail-closed on host).
 pub static mut PATH_PROBE_FACADE_FETCH: FacadeFetch = firmware_facade_fetch;
 
+/// Device boundary for the unported slot-+0x68 helper. Its semantic identity
+/// is not established; host builds fail closed while tests install a recorder.
+unsafe extern "C" fn firmware_path_facade_slot_68_from_path_object(
+    path_object: *mut StringObject,
+    flag_out: *mut u32,
+    base_hint: u32,
+) -> i32 {
+    #[cfg(target_os = "none")]
+    {
+        let operation: PathFacadeSlot68FromPathObject =
+            core::mem::transmute(PATH_FACADE_SLOT_68_FROM_PATH_OBJECT_ADDRESS);
+        operation(path_object, flag_out, base_hint)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (path_object, flag_out, base_hint);
+        0
+    }
+}
+
+/// The active unported slot-+0x68 helper. Target builds retain the verified
+/// firmware call; host tests replace it with a recorder.
+pub static mut PATH_FACADE_SLOT_68_FROM_PATH_OBJECT: PathFacadeSlot68FromPathObject =
+    firmware_path_facade_slot_68_from_path_object;
+
+#[inline(always)]
+unsafe fn path_facade_slot_68_from_path_object_fn() -> PathFacadeSlot68FromPathObject {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_FACADE_SLOT_68_FROM_PATH_OBJECT))
+}
+
+
 /// The active interface-guard destructor — the dispatch seam for
 /// 0x08206e6c (`bl` @ 0x080f4b0c). Host tests install a recording
 /// mock; the wired default is the retailOS boundary.
@@ -457,7 +496,8 @@ pub static mut PATH_PROBE_GUARD_DTOR: GuardDestroy = firmware_guard_destroy;
 pub static mut INTERFACE_GUARD_QUERY_OPERATION: InterfaceGuardQueryOperation =
     firmware_interface_guard_query_operation;
 /// The active unported base-teardown deregistration callee. Target builds
-/// retain its verified firmware address; host tests install a recorder.
+/// retain its verified firmware address; host tests replace it with a
+/// recording mock.
 pub static mut INTERFACE_GUARD_DEREGISTER: InterfaceGuardDeregister =
     firmware_interface_guard_deregister;
 
@@ -673,6 +713,39 @@ pub unsafe extern "C" fn path_probe_via_facade(
     status
 }
 
+/// path_facade_slot_68_from_cstr — original: `FUN_08089154` @
+/// **0x08089154** (56 bytes; **4 plain `bl` call sites and 0 predicated
+/// `bl` call sites**, independently counted by decoding every A32
+/// B/BL-immediate word in `osos.dec`: 0x0805a97c, 0x0811c7a8, 0x08196c9c,
+/// and 0x0820bb2c).
+///
+/// Raw words establish the exact extent: `push {r2-r6,lr}` at 0x08089154
+/// through `pop {r2-r6,pc}` at 0x08089188; 0x0808918c starts the distinct
+/// facade slot-+0x68 helper. Constructs a derived path object from the C
+/// string, invokes that helper with the constructor return, `flag_out`, and
+/// `base_hint`, destroys the original path-object storage, then returns the
+/// helper status verbatim.
+///
+/// # Deliberate deviations
+///
+/// The slot-+0x68 helper's semantic identity is not established, so it is a
+/// typed firmware boundary on device and a fail-closed recording seam on host.
+/// The known path-object constructor and destructor are called directly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_68_from_cstr(
+    path: *const u8,
+    flag_out: *mut u32,
+    base_hint: u32,
+) -> i32 {
+    let mut path_storage = MaybeUninit::<StringObject>::uninit();
+    let path_storage = path_storage.as_mut_ptr();
+    let path_object = path_object_construct(path_storage, path);
+    let status = path_facade_slot_68_from_path_object_fn()(path_object, flag_out, base_hint);
+    string_object_destroy_veneer(path_storage);
+    status
+}
+
 /// path_facade_slot_54_from_cstr — original: `FUN_080891dc` @
 /// **0x080891dc** (56 bytes; **4 plain `bl` call sites and 0 predicated
 /// `bl` call sites**, independently counted by decoding every ARM B/BL word
@@ -860,6 +933,8 @@ pub(crate) mod tests {
             .write_volatile(firmware_interface_guard_query_operation);
         core::ptr::addr_of_mut!(INTERFACE_GUARD_DEREGISTER)
             .write_volatile(firmware_interface_guard_deregister);
+        core::ptr::addr_of_mut!(PATH_FACADE_SLOT_68_FROM_PATH_OBJECT)
+            .write_volatile(firmware_path_facade_slot_68_from_path_object);
 
     }
 
@@ -980,6 +1055,19 @@ pub(crate) mod tests {
         QUERY_PATH = path.cast_const().cast();
         QUERY_PATH_VTABLE = (*path).vtable as usize;
         QUERY_RESULT
+    }
+
+    unsafe extern "C" fn recording_path_facade_slot_68_from_path_object(
+        path_object: *mut StringObject,
+        flag_out: *mut u32,
+        base_hint: u32,
+    ) -> i32 {
+        record(EVENT_QUERY);
+        QUERY_PATH = path_object.cast_const().cast();
+        QUERY_PATH_VTABLE = (*path_object).vtable as usize;
+        QUERY_PATH_OBJECT = flag_out.cast();
+        CTOR_HINT = base_hint;
+        QUERY_RESULT as i32
     }
 
     unsafe extern "C" fn recording_interface_guard_deregister(
@@ -1366,6 +1454,41 @@ pub(crate) mod tests {
                 assert_eq!(QUERY_PATH_VTABLE, crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS);
                 assert_eq!(RELEASED_STORAGE as *const u8, QUERY_PATH);
                 assert_eq!(flag_out, 0xa5a5_a5a5, "the opaque slot alone owns flag_out");
+            }
+        }
+    }
+
+    #[test]
+    fn cstr_wrapper_constructs_path_calls_slot_68_and_destroys_storage() {
+        let _path_lock = take_lock();
+        let _string_lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _string_ops_restore = unsafe { StringObjectOpsGuard::new() };
+        let _restore = unsafe { SeamGuard::new() };
+        const PATH: &[u8] = b"iPod_Control/Device/radio\0";
+
+        unsafe {
+            for (base_hint, status) in [(0u32, 0i32), (1, 7), (0x5a5a_f00d, -1)] {
+                install_recording();
+                core::ptr::addr_of_mut!(PATH_FACADE_SLOT_68_FROM_PATH_OBJECT)
+                    .write_volatile(recording_path_facade_slot_68_from_path_object);
+                let mut ops = core::ptr::addr_of!(STRING_OBJECT_OPS).read_volatile();
+                ops.release_payload = recording_release;
+                core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(ops);
+                QUERY_RESULT = status as u32;
+                let mut flag_out = 0xa5a5_a5a5;
+
+                assert_eq!(
+                    path_facade_slot_68_from_cstr(PATH.as_ptr(), &mut flag_out, base_hint),
+                    status
+                );
+                assert_eq!(&EVENTS[..EVENT_COUNT], &[EVENT_QUERY, EVENT_STRING_RELEASE]);
+                assert_eq!(CTOR_HINT, base_hint, "the wrapper forwards r2 unchanged");
+                assert_eq!(QUERY_PATH_VTABLE, crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS);
+                assert_eq!(QUERY_PATH_OBJECT as *mut u32, core::ptr::addr_of_mut!(flag_out));
+                assert_eq!(RELEASED_STORAGE as *const u8, QUERY_PATH);
+                assert_eq!(flag_out, 0xa5a5_a5a5, "the opaque helper alone owns flag_out");
             }
         }
     }
