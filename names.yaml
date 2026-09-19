@@ -41753,6 +41753,30 @@ functions:
       in retail. match.py (--size 8): same `ldr r2,[r0]` + tail-branch
       shape; the LLVM frame prologue is the only addition.
 
+  - address: 0x0803b098
+    ghidra: FUN_0803b098
+    name: namespace_provider_value_release_default_mode
+    size: 8
+    sig: "void namespace_provider_value_release_default_mode(usize *value_slot, const u8 *descriptor, u32 incoming_mode)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r0: value_slot
+      param_2/r1: descriptor
+      param_3/r2: incoming_mode
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent:
+      `mov r2,#0; b 0x080c85bc` at 0x0803b098..0x0803b0a0; the next separately
+      linked function starts at 0x0803b0a0. Decoding every ARM B/BL word found
+      four inbound plain unconditional `bl` calls (0x0803ad00, 0x0803b02c,
+      0x080cc7c0, and 0x080d3cbc) and no predicated `bl` calls. The wrapper
+      discards its incoming r2 value, sets the release-engine mode to zero,
+      and tail-branches to the unrecovered type-erased release engine at
+      0x080c85bc. Its concrete identity is deliberately not invented. There
+      are no ARM deviations: match.py verifies LLVM emits `mov r2,#0` followed
+      by a fixed-address tail jump. Host tests use the existing volatile seam.
+
   - address: 0x0803b8c8
     ghidra: FUN_0803b8c8
     name: namespace_provider_release_value
