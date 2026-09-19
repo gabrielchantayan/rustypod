@@ -8953,6 +8953,26 @@ functions:
       from element flags and selector_state, with 0x33/0x36 optionally
       rewriting the byte reverse_flag. Rust retains the exact byte and
       aligned word access widths and replaces both existing UI stock seams.
+  - address: 0x080b49a4
+    ghidra: FUN_080b49a4
+    name: tagged_link_source_is_valid
+    size: 36
+    sig: "u32 tagged_link_source_is_valid(const TaggedLinkSource *source)"
+    module: ui/tagged_link_source_is_valid
+    status: ported
+    renames:
+      param_1/r0: source
+      DAT_080b49c8: LINK_SOURCE_TAG
+    notes: >-
+      Raw decoding establishes the nine-instruction, 36-byte extent
+      0x080b49a4..0x080b49c8; the tag literal at 0x080b49c8 is data and
+      the next function starts at 0x080b49cc. All four incoming direct
+      calls are plain bl instructions (0x08048840, 0x080488dc,
+      0x0805bc44, and 0x08066bd0); no predicated bl caller exists.
+      The leaf tests a non-NULL source object's first word against
+      LINK_SOURCE_TAG (0x4d536e64) and returns a u32 boolean. Rust uses
+      TaggedLinkSource's existing repr(C) first word, preserving the
+      firmware's four-byte object layout; no deliberate deviations.
   - address: 0x080b4adc
     ghidra: FUN_080b4adc
     name: queue_wait
