@@ -7753,6 +7753,35 @@ functions:
       shape already accepted for calloc_tag4 @ 0x0805d1dc and
       free_tag4 @ 0x0805d070.
 
+  - address: 0x0805d1e4
+    ghidra: FUN_0805d1e4
+    name: memh_resize
+    size: 140
+    sig: "i32 memh_resize(MemhBufferHeader **slot, i32 delta)"
+    module: heap/memh_resize
+    vars: {param_1: slot, param_2: delta}
+    status: ported
+    notes: >-
+      Resizes the optional MemH managed-buffer header at *slot. Raw osos.dec
+      words confirm the 140-byte body from 0x0805d1e4 through 0x0805d26c;
+      0x0805d270 begins memh_set_len with `push {r4-r6,lr}`. The body has
+      exactly four direct calls: three plain `bl` (memh_get_len @
+      0x0805d0cc, memh_set_len @ 0x0805d270, and constructor @ 0x0805d170)
+      and one predicated `blgt` to bzero @ 0x0805cfb4. For a NULL slot, or
+      a negative relative resize whose signed result is negative, it returns
+      -50. A NULL *slot constructs a zero-filled `{payload,"MemH",size,size}`
+      header and returns -108 on either allocation failure. Otherwise it
+      adds delta to the verified current length, calls memh_set_len, and on
+      success zeroes precisely the positive appended range. Deliberate
+      deviations: constructor @ 0x0805d170 is inlined through existing
+      malloc_wrapper/calloc_wrapper/free_wrapper seams, and bzero is emitted
+      as volatile stores rather than a call; both preserve the verified heap
+      tag 4, cleanup, and zero-fill semantics. Host tests cover NULL slot,
+      signed underflow, in-capacity tail zeroing, and header allocation
+      failure. match.py reports 96 Rust instructions versus 35 retail
+      instructions: the verified guard/resize/zero-tail control flow remains,
+      while LLVM expands the existing heap-wrapper dispatch and volatile byte
+      loop rather than retaining retail direct branches.
   - address: 0x0805d270
     ghidra: FUN_0805d270
     name: memh_set_len
