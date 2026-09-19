@@ -20,6 +20,7 @@ pub mod glyph_slot;
 pub mod list;
 pub mod memory;
 pub mod module;
+pub mod linked_module_find_by_class;
 pub mod metrics;
 pub mod outline;
 pub mod offset_buffer;

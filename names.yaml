@@ -16100,6 +16100,31 @@ functions:
       count. The Rust port uses named repr(C) fields, so 64-bit host pointers
       never corrupt the target's four-byte layout; host tests cover enabled
       extra points and signed negative offsets with disabled extra points.
+  - address: 0x0804ced4
+    ghidra: FUN_0804ced4
+    name: ft_linked_module_find_by_class
+    size: 100
+    sig: "FtModule *ft_linked_module_find_by_class(FtModuleOwner *owner, u32 module_class, FtListNode **cursor)"
+    module: ft/linked_module_find_by_class
+    status: ported
+    vars:
+      param_1/r0/r3: owner
+      param_2/r1: module_class
+      param_3/r2: cursor
+      iVar1/r3: record
+      iVar2/r12: module
+    notes: >-
+      Raw osos.dec words confirm the 100-byte body at
+      0x0804ced4..0x0804cf34; the stmdb prologue at 0x0804cf38 is the next
+      separately entered function. The body has no outgoing calls. It returns
+      NULL for a NULL owner, otherwise starts at owner+0x9c or after
+      *cursor, clears a non-NULL cursor, follows record->next (+4), and
+      compares module (+8)->class word (+0x18) against module_class. A match
+      returns the module and records its list node in cursor. Decoding every
+      ARM BL-immediate word in osos.dec finds four direct incoming plain bl
+      call sites (0x0804ce48, 0x0804e6c0, 0x0804e708, 0x080ccdf0) and no
+      predicated BL. The Rust port retains target-width links as volatile u32
+      words so host pointer width cannot alter the ARM layout.
   - address: 0x0804cb24
     ghidra: FUN_0804cb24
     name: ft_list_find
