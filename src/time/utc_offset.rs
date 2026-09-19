@@ -7,9 +7,8 @@
 //! `FUN_08056524` to populate it, then copies the signed little-endian
 //! base UTC offset in minutes from `record[10..12]` and the daylight-saving
 //! adjustment in minutes from `record[12]` to independently nullable outputs.
-//! The calendar provider's `0`/`1` validity result remains in `r0` and is
-//! returned unchanged. The target build calls that still-unported provider at
-//! its fixed load address; host tests install a deterministic provider.
+//! returned unchanged. The target build calls the ported provider; host tests
+//! install a deterministic provider.
 //! Deliberate code-generation deviation: LLVM emits five aligned word stores
 //! for the stack clear rather than calling the IRAM memzero veneer; the
 //! cleared 20-byte record and all observable behavior are unchanged.
@@ -20,7 +19,6 @@ use core::ptr;
 const CALENDAR_QUERY_RECORD_SIZE: usize = 20;
 const BASE_UTC_OFFSET_OFFSET: usize = 10;
 const DAYLIGHT_SAVING_OFFSET: usize = 12;
-const CURRENT_DATETIME_QUERY_ADDRESS: usize = 0x0805_6524;
 
 /// The provider's stack record is word-aligned in the ARM frame. Keeping that
 /// alignment makes the offset at +10 naturally aligned for the original
@@ -42,17 +40,10 @@ unsafe extern "C" fn missing_current_datetime_query(_record: *mut CalendarQueryR
 #[cfg(not(target_os = "none"))]
 static mut CURRENT_DATETIME_QUERY: CurrentDateTimeQueryFn = missing_current_datetime_query;
 
+#[cfg(not(target_os = "none"))]
 #[inline(always)]
 unsafe fn current_datetime_query() -> CurrentDateTimeQueryFn {
-    #[cfg(target_os = "none")]
-    {
-        core::mem::transmute(CURRENT_DATETIME_QUERY_ADDRESS)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        ptr::read_volatile(ptr::addr_of!(CURRENT_DATETIME_QUERY))
-    }
+    ptr::read_volatile(ptr::addr_of!(CURRENT_DATETIME_QUERY))
 }
 
 /// Queries the calendar provider's base UTC offset and daylight-saving
@@ -70,6 +61,9 @@ pub unsafe extern "C" fn current_utc_offset_query(
     daylight_saving_minutes: *mut u8,
 ) -> i32 {
     let mut record = CalendarQueryRecord { bytes: [0; CALENDAR_QUERY_RECORD_SIZE] };
+    #[cfg(target_os = "none")]
+    let valid = crate::time::current_datetime_query::current_datetime_query(record.bytes.as_mut_ptr()) as i32;
+    #[cfg(not(target_os = "none"))]
     let valid = current_datetime_query()(&mut record);
 
     if !base_utc_offset_minutes.is_null() {
