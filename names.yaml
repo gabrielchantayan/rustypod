@@ -7163,6 +7163,38 @@ functions:
       for 0x089d03bc and intentionally adds no null guard, cache, ownership,
       or bit interpretation.
 
+  - address: 0x08087a64
+    ghidra: FUN_08087a64
+    name: ata_data_transfer_status_ok
+    size: 120
+    sig: "u32 ata_data_transfer_status_ok(void)"
+    module: drivers/ata_data_transfer_status
+    status: ported
+    renames:
+      uVar1/r4: ata_transfer_status
+      bVar3/r5: status_ok
+      s_mDS__write_data_CRC_response_err_08087adc: write_response_crc_error_format
+      s_mDS__read_data_CRC_error_08087b00: read_data_crc_error_format
+      s_mDS__write_data_CRC_error_08087b1c: write_data_crc_error_format
+      s_mDS__write_data_card_CRC_error_08087b38: card_crc_error_format
+      s_mDS__read_data_end_bit_error_s__08087b58: read_data_end_bit_error_format
+    notes: >-
+      Raw ARM establishes the 120-byte instruction extent
+      0x08087a64..0x08087ad8; 0x08087adc begins the first inline string and
+      not a function. Its 30 instruction words contain one plain BL at
+      0x08087a6c to global_indirect_status_get and three predicated BLNEs to
+      debug_printf at 0x08087a88, 0x08087a98, and 0x08087ad0. The status word
+      fails on bit 22, bit 23, field bits 19..21 values 5 or 7, or any
+      high-byte bit; all applicable diagnostics emit in that order before a
+      zero result. The four formats contain no conversions. ARM leaves r1
+      unspecified for those variadic calls, so the port deliberately passes a
+      null argument-list pointer, which the formatter cannot observe for these
+      strings. Host tests install the existing packed global-status fixture and
+      debug formatter seam, proving simultaneous-error order, card-CRC
+      selection, and success for unreported low flags. match.py reports a
+      structural diff (38 LLVM instructions versus 30 ADS instructions) but
+      confirms the same straight-line status tests and ordered diagnostic calls.
+
   - address: 0x08077250
     ghidra: FUN_08077250
     name: lazy_init_default_heap
