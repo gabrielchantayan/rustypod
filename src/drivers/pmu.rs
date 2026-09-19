@@ -107,6 +107,30 @@ pub unsafe extern "C" fn pmu_register_0x4b_bit2(
     ((status_byte & 4) >> 2) as u32
 }
 
+/// store_pmu_register_0x4b_bit2 — original: `FUN_080bfbd4` @ `0x080bfbd4`
+/// (24 bytes; 1 plain `bl`, 0 predicated `bl`, binary-verified).
+///
+/// Queries PCF50635 register 0x4b bit 2 through `pmu_register_0x4b_bit2`,
+/// stores that one-bit result through `result`, and returns zero.
+///
+/// # Deviations
+///
+/// The retail function inherits r1-r3 unchanged into its one callee. Rust
+/// declares those otherwise-undeclared ABI words so the callee preserves its
+/// incoming-r3 failed-transfer behavior; the retail `bl` becomes the existing
+/// Rust function call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn store_pmu_register_0x4b_bit2(
+    result: *mut u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    *result = pmu_register_0x4b_bit2(0, incoming_r1, incoming_r2, incoming_r3);
+    0
+}
+
 /// pmu_apply_mode_registers — original: `FUN_082e57a8` @ `0x082e57a8`
 /// (44 bytes; 4 plain `bl` call sites, 0 predicated `bl`, binary-verified).
 ///
@@ -206,7 +230,29 @@ mod tests {
         let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
         assert_eq!(writes, std::vec![(0x73, 1, PMU_REGISTER_0X4B as u8)]);
         assert!(reads.is_empty(), "a failed register write suppresses the read");
+
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+    #[test]
+    fn stored_register_4b_bit_two_returns_zero_and_forwards_r3() {
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 0b0000_0100);
+            let mut result = 0xffff_ffff;
+
+            assert_eq!(
+                unsafe { store_pmu_register_0x4b_bit2(&mut result, 1, 2, 3) },
+                0
+            );
+            assert_eq!(result, 1);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+        let mut result = 0xffff_ffff;
+        assert_eq!(
+            unsafe { store_pmu_register_0x4b_bit2(&mut result, 1, 2, 4) },
+            0
+        );
+        assert_eq!(result, 1, "failed transfer preserves incoming r3 bit 2");
     }
 
     #[test]

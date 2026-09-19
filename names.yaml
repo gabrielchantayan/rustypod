@@ -14272,6 +14272,28 @@ functions:
       board-version/read/5-then-17 release sequence; LLVM adds its frame and
       uses a conditional move plus variable shift instead of ARM predicates.
 
+
+  # --- Store PMU register 0x4b bit 2 (drivers/pmu) ---
+  - address: 0x080bfbd4
+    ghidra: FUN_080bfbd4
+    name: store_pmu_register_0x4b_bit2
+    size: 24
+    sig: "u32 store_pmu_register_0x4b_bit2(u32 *result, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1: result
+      FUN_082e53d8: pmu_register_0x4b_bit2
+    notes: >-
+      Raw ARM extent is exactly 24 bytes, 0x080bfbd4..0x080bfbec: the
+      following push {r4,lr} at 0x080bfbec begins the next real function.
+      Decoding every word finds one direct call, the plain unconditional bl
+      (cond=e) at 0x080bfbdc to pmu_register_0x4b_bit2; there are zero
+      predicated bl forms. The function preserves r1-r3 through that call,
+      writes the returned PMU register-0x4b bit to *result, and returns zero.
+      The port explicitly declares r1-r3 so the callee retains its
+      incoming-r3 failed-transfer behavior. Host tests cover sampled and
+      failed-transfer stores.
   # --- PMU register 0x4b bit 2 (drivers/pmu) ---
   - address: 0x082e53d8
     ghidra: FUN_082e53d8
