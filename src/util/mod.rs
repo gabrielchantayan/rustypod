@@ -126,6 +126,7 @@ pub mod masked_u16_rectangle_fill;
 pub mod parse_ascii_decimal_cursor;
 pub mod plane_cursor;
 pub mod q15_mul;
+pub mod q15_multiply_add_saturating;
 pub mod operation_dispatch;
 pub mod query_object_release;
 pub mod field_query_result_release;

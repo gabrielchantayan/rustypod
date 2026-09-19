@@ -76011,6 +76011,32 @@ functions:
       the product overflows at the (-0x8000)^2 corner and arithmetic-shifts
       to -32768 rather than +32768, matching the original `mul r0,r1,r0;
       mov r0,r0,lsl #1; mov r0,r0,asr #0x10; bx lr`. 12 bl call sites.
+  - address: 0x080b0614
+    ghidra: FUN_080b0614
+    name: q15_multiply_add_saturating
+    size: 40
+    sig: "int q15_multiply_add_saturating(int sample, int gain, int accumulator)"
+    module: util/q15_multiply_add_saturating
+    status: ported
+    renames:
+      param_1/r0: sample
+      param_2/r1: gain
+      param_3/r2: accumulator
+    notes: >-
+      Raw words e0000091 e08207c0 e3500902 a59f0014 aa000001 e3700902
+      b59f000c e1a00800 e1a00840 e12fff1e decode to `mul r0,r1,r0; add
+      r0,r2,r0,asr #15`, then signed saturation: `cmp r0,#0x8000;
+      ldrge r0,[pc,#20]; bge done; cmn r0,#0x8000; ldrlt r0,[pc,#12]`;
+      `lsl #16; asr #16; bx lr` returns the sign-extended Q15 result.
+      The 40-byte extent is exact: 36 instruction bytes followed by the
+      0x7fff and 0xffff8000 clamp literals at 0x080b063c and 0x080b0640;
+      the next real function starts with `push {r4-r9,sl,lr}` at
+      0x080b0644. Decoding every ARM B/BL word in osos.dec finds four
+      direct call sites, all plain unconditional bl (0x0828f6f8,
+      0x0828f718, 0x0828f790, 0x0828f7b0), zero predicated BL forms, and
+      no tail B references. The product and addition use the ARM
+      low-32-bit wrapping semantics before the arithmetic shift; the Rust
+      port preserves both wraps and has no deliberate deviations.
   - address: 0x080789a8
     ghidra: FUN_080789a8
     name: skip_ascii_whitespace_and_comments
