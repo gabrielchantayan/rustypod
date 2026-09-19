@@ -117039,3 +117039,31 @@ functions:
       has no established identity, so target builds dispatch to its
       verified address while host tests use a replacement seam. No
       deliberate behavioral deviations.
+
+
+  # --- statically bound empty C++ destructor ---
+  - address: 0x080276b0
+    ghidra: FUN_080276b0
+    name: empty_destructor_080276b0
+    size: 4
+    sig: "void *empty_destructor_080276b0(void *object)"
+    module: cxx/empty_destructor_080276b0
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: object
+    notes: >-
+      Raw osos.dec establishes the exact 4-byte extent
+      0x080276b0..0x080276b4: e12fff1e (bx lr), after FUN_080276ac and
+      before FUN_080276b4. This is an empty C++ destructor, not a veneer or
+      branch. Decoding every immediate ARM B/BL word in the complete image
+      finds exactly four inbound direct calls, all unconditional plain bl at
+      0x082f8eb0, 0x082fa874, 0x0831317c, and 0x08332948; there are no
+      predicated bl forms or direct B tail calls. Every caller passes a stack
+      object and discards r0 after returning; no aligned image word equals
+      this address, so dispatch is static rather than virtual. The raw
+      instruction preserves r0, so Rust returns object unchanged, performs no
+      reads or writes, accepts NULL, unaligned, and dangling pointers, and has
+      a unique text section to prevent identical-code folding. Host tests
+      cover pointer preservation and prove that a live object has no modified
+      byte.
