@@ -116079,3 +116079,34 @@ functions:
       renews 32-byte records, then adjusts current.subglyphs on success.
       The six-instruction adjust helper is inlined because its sole observed
       caller is this function and its body is exactly that pointer assignment.
+
+  # --- OpenSSL object-name alias registration ---
+  - address: 0x0804b15c
+    ghidra: FUN_0804b15c
+    name: obj_name_alias_register
+    size: 148
+    sig: "u32 obj_name_alias_register(const ObjNameAliasPair *pair)"
+    module: crypto/obj_name_alias_register
+    status: ported
+    renames:
+      param_1/r0: pair
+      param_1_plus_0x00: primary_nid
+      param_1_plus_0x04: secondary_nid
+      DAT_0804b1f0: alias_name_flag
+      FUN_0805efc4: obj_nid2sn
+      FUN_0805ee68: obj_nid2ln
+      FUN_0805e7dc: unported_obj_name_register
+    notes: >-
+      Raw extent is exactly 0x0804b15c..0x0804b1f4: 36 instructions through
+      the tail branch at 0x0804b1ec plus the 0x00008001 literal at
+      0x0804b1f0; 0x0804b1f4 begins the separately linked lookup sibling.
+      The body contains seven unconditional plain BL instructions, no
+      predicated BL, and one tail B. Four inbound direct call sites are
+      0x0805f510, 0x0805f53c, 0x0805f544, and 0x082d426c, all plain BL with
+      no predicated forms. It registers primary NID short and long names with
+      flag one and the original two-word pair; distinct secondary NIDs then
+      register their names with flag 0x8001 and their matching primary name as
+      value. Each failed registration returns zero immediately. Deliberate
+      deviation: the unidentified 0x0805e7dc name-registration worker is a
+      typed volatile seam; the established NID-name ports are also dispatched
+      through target/host typed seams for fixture-controlled host coverage.
