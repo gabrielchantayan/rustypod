@@ -29816,6 +29816,29 @@ functions:
       two-word entry layout. Deliberate deviations: none. Host tests cover
       the zero offset and maximum positive values plus high-bit offsets,
       reclaimed offsets, and zero/negative lengths.
+  - address: 0x080ac17c
+    ghidra: FUN_080ac17c
+    name: bswap_four_u32s_inplace
+    size: 132
+    sig: "u32 *bswap_four_u32s_inplace(u32 *record)"
+    module: util/bswap_four_u32s_inplace
+    status: ported
+    renames:
+      param_1/r0: record
+      r1: word
+      r2: swapped_lanes
+      r3: byte_lane
+    notes: >-
+      Raw osos.dec confirms the 33 ARM words from 0x080ac17c through bx lr at
+      0x080ac1fc, making the true extent 132 bytes; 0x080ac200 starts the next
+      separately linked function. Each of four repeated sequences loads one
+      aligned word, reverses its byte lanes with shifts, masks, and ORRs, then
+      stores it back. A raw ARM branch-word scan finds four inbound predicated
+      blne call sites (0x0809499c, 0x08094f90, 0x080950ec, and 0x08095b5c),
+      zero plain bl call sites, and no BL instructions in the leaf body.
+      Ghidra's void prototype omits the unchanged r0 return value. Deliberate
+      deviations: none. Host tests cover byte-lane extremes, return-pointer
+      preservation, and an interior record with unchanged neighbouring words.
   - address: 0x080b4318
     ghidra: FUN_080b4318
     name: string_pool_read
