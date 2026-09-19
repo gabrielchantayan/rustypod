@@ -3755,6 +3755,35 @@ functions:
       dereference behavior. Host tests cover zero and u32::MAX counts
       through direct backends and kind-2 proxies.
 
+  # --- retailOS UI 12-byte resource-table counted-string reader ---
+  - address: 0x08052e1c
+    ghidra: FUN_08052e1c
+    name: object_resource_string
+    size: 116
+    sig: "i32 object_resource_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_string
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      r6: backend
+      r7: resource_table_vector
+    notes: >-
+      Raw words at 0x08052e1c decode from `stmdb sp!,{r4-r8,lr}` through
+      tail `b 0x080bd8bc`; the next separately entered function starts at
+      0x08052e90, proving the 116-byte extent. Whole-image ARM immediate
+      decoding found four inbound plain BL calls and no predicated BL calls.
+      It clears counted[0] before validation, resolves the kind-1/kind-2
+      backend, rejects a negative index or one outside the object+0xe58
+      vector of 12-byte entries with -50, then reads the entry's first-word
+      id and tail-calls string_pool_read_counted through backend+0xf60+0x278.
+      Ghidra misleadingly presents the tail branch as a five-argument call;
+      its fourth argument is the preserved object pointer but is dead after
+      the counted reader clears its local byte-length output, so Rust passes
+      deterministic zero. Host tests cover negative, out-of-range, and a
+      second valid 12-byte record.
+
   # --- retailOS UI resource-table counted-string reader ---
   - address: 0x08053084
     ghidra: FUN_08053084
