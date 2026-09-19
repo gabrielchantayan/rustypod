@@ -2508,6 +2508,35 @@ functions:
       veneer forwards to that body through a volatile function pointer,
       retaining separate hook-target identity and preventing inlining/ICF;
       it preserves the void byte-copy ABI and forward overlap behavior.
+  - address: 0x08038268
+    ghidra: thunk_EXT_FUN_22003da8
+    name: iram_dispatch_message_0x23_veneer
+    size: 8
+    sig: "u32 iram_dispatch_message_0x23_veneer(u32 arg1, u32 arg2, u32 arg3)"
+    module: runtime/message_0x23
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003da8: iram_dispatch_message_0x23_veneer
+      EXT_FUN_22003da8: dispatch_message_0x23
+      FUN_08003da8: dispatch_message_0x23
+      FUN_08003660: message_dispatch_veneer
+      DAT_08003664: rom_message_dispatch
+      param_1/r0: arg1
+      param_2/r1: arg2_and_return_word
+      param_3/r2: arg3
+    notes: >-
+      Ghidra's 4-byte extent omits the ADS literal target word: raw osos.dec
+      has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038268 and literal 0x22003da8
+      at 0x0803826c; the next veneer begins at 0x08038270, so the true size
+      is 8 bytes. The boot relocator at 0x080046e0 copies this target's
+      0x08003da8 mirror into IRAM. That 32-byte body builds the four-word
+      request {0x23, r0, r1, r2}, dispatches it through the 0x08003660
+      literal veneer (target 0x0802dca8), and reloads request word two as
+      r0. Decoding every ARM B/BL immediate in osos.dec finds four direct
+      inbound calls, all unconditional plain bl; no predicated BL calls.
+      The dispatcher remains an unported volatile callback seam. Rust
+      expresses its call/return directly rather than retaining the literal
+      tail dispatch, while preserving the request ABI and mutable return word.
   - address: 0x08038190
     ghidra: thunk_EXT_FUN_220073b0
     name: iram_stream_buffer_reinitialize_veneer

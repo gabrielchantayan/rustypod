@@ -63,9 +63,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut CALL_COUNT: usize = 0;
     static mut OBSERVED_RECORD: [u32; 4] = [0; 4];
     static mut OBSERVED_ADDRESS: *mut u32 = core::ptr::null_mut();
@@ -82,7 +80,9 @@ mod tests {
     }
 
     fn install_recording_dispatcher() -> TestOps {
-        let lock = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = crate::testing::MESSAGE_DISPATCH_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             let saved = core::ptr::read_volatile(core::ptr::addr_of!(MESSAGE_DISPATCH_OPS));
             MESSAGE_DISPATCH_OPS = MessageDispatchOps {
