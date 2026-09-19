@@ -3115,6 +3115,35 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- RAM stream-buffer mode-zero dispatch ---
+  - address: 0x08007260
+    ghidra: FUN_08007260
+    name: stream_buffer_dispatch_mode_zero
+    size: 36
+    sig: "void stream_buffer_dispatch_mode_zero(StreamBuffer *stream_buffer)"
+    module: kernel/stream_buffer_dispatch_mode_zero
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      FUN_08005018: ui_manager_instance
+      FUN_08005234: stream_buffer_mode_dispatch
+      param_2/r1: mode_zero
+    notes: >-
+      Raw words at 0x08007260 are e92d4010 e1a04000 ebfff76a e3a01000
+      ebfff7ef e1a00004 e8bd4010 e3a01000 eaffffca: a 36-byte body whose
+      pop {r4,lr} precedes its zero-context tail branch to 0x080071b0. The
+      next independent function begins at 0x08007284. This wrapper preserves
+      the input pointer across ui_manager_instance, calls unported 0x08005234
+      with it and r1=0, then tail-dispatches to existing
+      stream_buffer_set_page_contexts with the same zero context. Decoding
+      every ARM B/BL immediate in osos.dec found four direct incoming blne
+      call sites (0x08006bf4, 0x08006ca8, 0x08006d60, and 0x08006e34): zero
+      plain and four predicated forms. The body has two unconditional outgoing
+      bl instructions, one unconditional tail b, and no predicated call. The
+      0x08005234 callee is retained as a target-address seam because its
+      class-level identity is unrecovered; host tests record its opaque pointer
+      and zero mode argument, then verify all 32 page contexts and fallback
+      context are cleared.
   # --- RAM stream-buffer producer-page reset ---
   - address: 0x08007284
     ghidra: FUN_08007284
