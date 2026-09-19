@@ -115,17 +115,14 @@ fn stream_buffer_request_flags_ptr() -> *mut u32 {
     }
 }
 
-/// stream_buffer_request_flags_update — original: `thunk_EXT_FUN_22004450`
-/// @ `0x08037fe8` (Ghidra reports 4 bytes; raw extent is **8** bytes:
-/// `ldr pc, [pc, #-4]` / `0x22004450`). The IRAM mirror makes that target
-/// osos `0x08004450`, whose raw body is 52 bytes including its literal word.
+/// stream_buffer_request_flags_update — original: `FUN_08004450` @
+/// `0x08004450` (**48 bytes**; its following literal word at `0x08004480`
+/// is not executable code).
 ///
-/// Raw decoding of every ARM `B`/`BL` in `work/firmware/osos.dec` found
-/// **30 direct `bl` call sites** to this veneer: 28 unconditional, one
-/// `blhi` (`0x080f5720`), and one `blls` (`0x080f57dc`); there are no tail
-/// `b` callers. The two predicated calls are caller-side bounds gates, not a
-/// null guard: this function unconditionally masks IRQ/FIQ before accessing
-/// its pointer-free global.
+/// Raw decoding establishes one plain internal `bl` (to
+/// `cpsr_disable_irq_fiq`) and no predicated `bl` instructions. The four
+/// recovered plain `bl` callers are `0x080050d0`, `0x08005160`,
+/// `0x08007864`, and `0x08007888`; there are no predicated callers.
 ///
 /// Disables IRQ/FIQ, clears `mask` in the request-controller flags when
 /// `enable` is zero, or sets it for every nonzero `enable`, then restores the
