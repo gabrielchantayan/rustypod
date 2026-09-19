@@ -116376,3 +116376,38 @@ functions:
       the returned decoded count as u16. The Rust port deliberately calls the
       veneer target 0x08046c74 through its existing host/target seam rather
       than creating a port for the four-byte veneer.
+
+  # --- Bignum non-negative remainder candidate ---
+  - address: 0x08040438
+    ghidra: FUN_08040438
+    name: bn_nnmod
+    size: 104
+    sig: "int bn_nnmod(BigNum *remainder, const BigNum *numerator, const BigNum *divisor, BnContext *ctx)"
+    module: crypto/bn_nnmod
+    status: identified
+    renames:
+      param_1/r0/r4: remainder
+      param_2/r1: numerator
+      param_3/r2/r5: divisor
+      param_4/[sp]: ctx
+      FUN_0803e950: bn_div_candidate
+      DAT_080404a0: negative_divisor_tail_target
+      DAT_080404a4: nonnegative_divisor_tail_target
+    notes: >-
+      Raw osos.dec establishes exactly 104 code bytes from 0x08040438 through
+      pop {r3,r4,r5,pc} at 0x0804049c; the two following words at 0x080404a0
+      and 0x080404a4 are its literal pool, and the next separately linked
+      function begins at 0x080404a8. Full-image A32 decoding finds four
+      inbound direct calls, all unconditional plain bl at 0x0803f6ac,
+      0x0803fa84, 0x0803ff30, and 0x0803fffc; there are zero predicated BL
+      callers. The body calls 0x0803e950 as (NULL, remainder, numerator,
+      divisor, ctx), returns zero if that fails, and otherwise returns one
+      without further access when remainder->neg is zero. For a negative
+      remainder it tail-dispatches (remainder, remainder, divisor) to raw
+      literal 0x0803326c when divisor->neg is zero and 0x08035b5c otherwise.
+      This branch tree matches OpenSSL BN_nnmod's post-BN_div correction
+      shape, but it cannot be ported faithfully: raw decoding at both literal
+      targets does not establish compatible BIGNUM binary-operation entries,
+      and names.yaml has no verified identities for either target or for
+      0x0803e950. No callee seam or Rust module was created rather than invent
+      their identities.
