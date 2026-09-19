@@ -17,6 +17,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803a7f0
+    ghidra: FUN_0803a7f0
+    name: generic_descriptor_lookup
+    size: 100
+    sig: "void *generic_descriptor_lookup(u32 *output, void *input, u32 input_len, void *descriptor)"
+    module: cxx/generic_descriptor_lookup
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input
+      param_3/r2: input_len
+      param_4/r3: descriptor
+      local_28: local_output
+      local_24: parser_status
+    notes: >-
+      Raw osos.dec words establish the true 100-byte extent
+      0x0803a7f0..0x0803a854; the next real function starts at 0x0803a854
+      with stmdb sp!, {r2,r3,r4,r5,r6,lr}. Independent raw ARM decoding finds
+      four inbound plain BL calls and no inbound predicated BL calls. The
+      wrapper substitutes a local output word for NULL, clears the first byte
+      of its 24-byte parser-status area, and calls 0x0803a99c with selector
+      -1 and both options zero. It returns output only for a positive parser
+      result, otherwise NULL. Target builds preserve all 25 original words;
+      host builds deliberately use a parser seam because 0x0803a99c is not
+      ported.
   - address: 0x0803c588
     ghidra: FUN_0803c588
     name: singly_linked_list_append
