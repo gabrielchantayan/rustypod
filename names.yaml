@@ -76308,6 +76308,36 @@ functions:
       osos.dec 0x083e1ae4. match.py: structural match reviewed.
       absence of mutation.
 
+  - address: 0x083e6ffc
+    ghidra: FUN_083e6ffc
+    name: vector8_erase
+    size: 76
+    sig: "u32 *vector8_erase(u32 *vector, u32 *position)"
+    module: cxx/vector8_erase
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: position
+      param_1_plus_0x00: begin
+      param_1_plus_0x04: end
+      param_1_plus_0x08: capacity
+      puVar1/r1: source
+      puVar3/r3: destination
+      return/r0: position
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 19 ARM words from
+      push {r4,lr} at 0x083e6ffc through pop {r4,pc} at 0x083e7044; the
+      separately linked next function FUN_083e7048 begins at 0x083e7048.
+      Whole-image decoding finds exactly three inbound direct calls, all
+      unconditional plain bl at 0x0826a1b8, 0x0826a274, and 0x082caa84;
+      there are no predicated bl calls. No BL instruction occurs in the
+      function itself. It is the trivial `std::vector` erase specialization
+      for eight-byte elements: if nonempty, pairs after position shift left by
+      one, end decreases by eight, and position returns. Target-width head
+      words are retained explicitly to avoid 64-bit host pointer layout
+      assumptions. Reference C: decomp/c/038/083e6ffc_FUN_083e6ffc.c;
+      disassembly: osos.dec 0x083e6ffc.
+
   # --- returning three-word clear helper (second instance) ---
   - address: 0x083e7168
     ghidra: FUN_083e7168
