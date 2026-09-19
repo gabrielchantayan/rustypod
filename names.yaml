@@ -58012,6 +58012,38 @@ functions:
       target builds invoke its retail address and host tests use a
       recorder. Host tests cover current-point consumption and post-call
       update, wrapping coordinates, and record-tail preservation.
+  - address: 0x08087870
+    ghidra: FUN_08087870
+    name: draw_horizontal_line
+    size: 104
+    sig: "void draw_horizontal_line(const u8 *surface, i32 left, i32 right, i32 baseline, const u8 *foreground, i32 style, const u8 *clip_rect, i32 thickness)"
+    module: cxx/draw_horizontal_line
+    status: ported
+    renames:
+      param_1/r0: surface (owning surface record; body starts at +4)
+      param_2/r1: left (first horizontal endpoint)
+      param_3/r2: right (second horizontal endpoint before -2 adjustment)
+      param_4/r3: baseline (line y coordinate before +2 adjustment)
+      param_5/[sp]: foreground (line color pointer)
+      param_6/[sp+4]: style (one normalizes to zero)
+      param_7/[sp+8]: clip_rect (engine clip rectangle)
+      param_8/[sp+12]: thickness (engine line thickness)
+      FUN_080e7870: draw_line_engine (ported dispatcher)
+    notes: >-
+      Exact 104-byte extent verified from raw ARM: 0x08087870 begins
+      `push {r4,r5,r6,lr}` and 0x080878d8 begins the distinct next
+      function with `push {r0,r1,r2,r3,r4,r5,r6,lr}`. Decoding every ARM
+      B/BL word in osos.dec finds one unconditional outgoing bl to
+      0x080e7870 and zero predicated bl. Full-image target decoding finds
+      four unconditional inbound bl call sites (0x08077238, 0x080f2a08,
+      0x080f2a44, 0x080f2b34) and zero predicated forms. It calls the
+      line engine with surface +4, `(left, baseline +2)` through
+      `(right -2, baseline +2)`, supplied thickness/foreground/clip, a
+      zero scaled selector, and style 1 normalized to zero. Deliberate
+      deviation: the existing line-engine seam is read volatile; firmware
+      calls 0x080e7870 while host tests install a recorder. Tests cover
+      adjusted endpoints, signed-overflow wrapping, style normalization,
+      style word forwarding, and every engine operand.
   - address: 0x082643c0
     ghidra: FUN_082643c0
     name: draw_state_fill_rect_background
