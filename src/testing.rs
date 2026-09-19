@@ -245,6 +245,10 @@ pub mod hints {
     // 0xe000_0000: dedicated to ui/plst_task_complete's raw-u32 task and
     // element fixture; mappings never unmap, so no other user may share it.
     pub const PLST_TASK_COMPLETE: usize = 0xe000_0000;
+    // 0xe010_0000: dedicated to ui/plst_task_resource_callback's raw-u32
+    // task and element fixture; mappings never unmap, so no other user may
+    // share it.
+    pub const PLST_TASK_RESOURCE_CALLBACK: usize = 0xe010_0000;
     pub const STRING_TABLE: usize = 0x2100_0000;
     pub const VIEW_EVENT_TIMER_STOP: usize = 0x5b00_0000;
     // 0x6000_0000 is reserved for app::view_event's localized-flag
