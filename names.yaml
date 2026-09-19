@@ -115502,3 +115502,37 @@ functions:
       Rust's ARM assembly entry captures inherited r4 explicitly before calling
       the Rust implementation; host tests inject the RTC, timer, session, and
       entropy operations. No other deliberate deviations.
+
+  - address: 0x08053bb8
+    ghidra: FUN_08053bb8
+    name: entry_match_successor
+    size: 24
+    sig: "u32 entry_match_successor(const u8 *entry)"
+    module: app/entry_match_successor
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_1_plus_0x0: successor
+      param_1_plus_0x4: nested_container
+      FUN_08057c04: entry_nested_liti_class_check
+      FUN_08057bdc: nested_liti_class_check
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x08053bb8..0x08053bd0:
+      mov r2,r0; push {lr}; bl 0x08057c04; movs r0,r0; ldrne r0,[r2];
+      pop {pc}. The next separately linked function begins with push {r4,lr}
+      at 0x08053bd0. Decoding every B/BL word in osos.dec finds four inbound
+      unconditional plain bl calls (0x0804700c, 0x08050784, 0x08053b48, and
+      0x0806c000), zero predicated bl calls, and one predicated bne tail
+      caller at 0x08053b0c. The callee 0x08057c04 is a 16-byte wrapper that
+      rejects NULL entry and otherwise passes entry+4 to nested_liti_class_check
+      (0x08057bdc). Therefore this function returns entry's word at +0 only
+      when that nested container's +8 target has the 'liti' class tag; it
+      returns zero otherwise. Deliberate deviation: inline the unported
+      0x08057c04 wrapper and directly call the canonical ported nested check;
+      aligned target-width word loads and zero-on-rejection behavior are
+      unchanged. Host tests use the unique raw-u32
+      hints::ENTRY_MATCH_SUCCESSOR slab and cover NULL entry, NULL nested
+      container, wrong tag, and zero/high-bit successor words. match.py is a
+      structural review: LLVM may choose a different frame and branch shape,
+      but must retain the nested check and conditional word-0 load. Reference
+      C: decomp/c/003/08053bb8_FUN_08053bb8.c.
