@@ -113900,6 +113900,31 @@ functions:
       are all present; otherwise it returns base + layout[5] with ARM u32
       wrapping. Deliberate deviation: Rust models firmware pointer fields as
       u32 words, and host tests map low-address fixture slabs.
+  - address: 0x08090780
+    ghidra: FUN_08090780
+    name: cache_address_translate
+    size: 32
+    sig: "u32 cache_address_translate(u32 address)"
+    module: drivers/cache_address_translate
+    status: ported
+    renames:
+      param_1/r0: address
+      DAT_080907a0: cache_address_map
+      cache_address_map[1]: source_base
+      cache_address_map[2]: mapped_base
+    notes: >-
+      Raw osos.dec words establish the true 32-byte instruction extent:
+      0x08090780..0x080907a0, followed by the literal-pool word
+      0x08a10718; the next independently linked function starts at
+      0x080907a4. The function has zero direct plain or predicated BL
+      instructions. Independent whole-image A32 branch decoding finds four
+      inbound plain BL calls (0x081bc04c, 0x081ef010, 0x081ef0c8, and
+      0x08296a14) and zero predicated inbound BL calls. It compares
+      address >> 20 with 0x180 and, only on equality, returns address -
+      cache_address_map[1] + cache_address_map[2] with ARM u32 wrapping;
+      otherwise it returns address unchanged. The map pointer at 0x08a10718
+      is runtime initialized. Target Rust preserves those volatile reads;
+      host tests use the observed 0x18000000 to 0x22000000 map values.
   - address: 0x08090b70
     ghidra: FUN_08090b70
     name: global_slot_release

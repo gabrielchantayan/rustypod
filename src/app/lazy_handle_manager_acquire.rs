@@ -6,6 +6,7 @@
 //!   pool; the distinct next function begins at `0x081bc07c`).
 
 use crate::app::lazy_handle_manager::LazyHandleManager;
+use crate::drivers::cache_address_translate::cache_address_translate;
 use crate::drivers::timer::read_usec_timer_into_2;
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 use crate::runtime::random::ansi_rand;
@@ -112,11 +113,7 @@ pub unsafe extern "C" fn lazy_handle_manager_acquire(
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*manager).cached_handle), handle as i32);
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*manager).initialized), 1);
     let (cache_start, cache_len) = cache_range();
-    let cache_address = if cache_start >> 20 == 0x180 {
-        cache_start.wrapping_sub(0x1800_0000).wrapping_add(0x2200_0000)
-    } else {
-        cache_start
-    };
+    let cache_address = cache_address_translate(cache_start);
     (CACHE_RANGE_MAINTENANCE)(cache_address, cache_len);
     mutex_unlock(mutex);
     handle
