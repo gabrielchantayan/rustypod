@@ -117085,3 +117085,28 @@ functions:
       destructor. No deliberate deviation: the target port is naked bx lr,
       preserving the original register return state. Reference C:
       decomp/c/001/08027698_FUN_08027698.c.
+  # --- I2S transfer-slot wait ---
+  - address: 0x08008690
+    ghidra: FUN_08008690
+    name: i2s_transfer_slot_wait
+    size: 48
+    sig: "u32 i2s_transfer_slot_wait(i32 controller, i32 channel)"
+    module: util/i2s_transfer_slot_wait
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: channel
+      DAT_080086c0: i2s_transfer_slot_table_base
+      FUN_080039f8: transfer_wait_core_veneer
+    notes: >-
+      Raw osos.dec establishes the 48-byte extent 0x08008690..0x080086c0:
+      the following word is table base 0x2200ae7c and 0x080086c4 begins the
+      next function. A complete A32 decode finds four inbound direct plain
+      unconditional BL call sites (0x080049f0, 0x0800836c, 0x08008380, and
+      0x080085a0), with no predicated BL forms, and one outbound unconditional
+      BL at 0x080086b0. It reads the shared transfer-handle cell at
+      base + controller*0x20 + channel*4 - 0x20; zero returns 0x11, otherwise
+      it calls veneer 0x080039f8 with the handle and channel then returns zero.
+      The veneer resolves to 0x0804bacc, whose identity remains unestablished;
+      target Rust calls that verified target directly while host tests replace
+      it with a callback seam.
