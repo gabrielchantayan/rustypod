@@ -113977,3 +113977,39 @@ functions:
       host tests replace them with recording seams. Deliberate deviation:
       literal veneers replace the original PC-relative BL/B because relocated
       payload code cannot encode those original displacements.
+  - address: 0x080891dc
+    ghidra: FUN_080891dc
+    name: path_facade_slot_54_from_cstr
+    size: 56
+    sig: "i32 path_facade_slot_54_from_cstr(const char *path, u32 *flag_out, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path (NUL-terminated C string)
+      param_2/r1: flag_out (facade slot +0x54 output word)
+      param_3/r2/r5: base_hint (live through the path constructor into the interface guard)
+      FUN_08279284: path_object_construct (ported)
+      FUN_08089214: interface_guard_slot_54_dispatch (inlined through existing path_probe guard seams)
+      thunk_FUN_08277484: string_object_destroy_veneer (ported)
+      r4: saved facade slot status
+    notes: >-
+      Raw osos.dec establishes the true 56-byte extent from push
+      {r2-r6,lr} at 0x080891dc through pop {r2-r6,pc} at 0x08089210;
+      0x08089214 starts the separate scoped interface-guard helper. The
+      body has three unconditional internal BLs and no predicated BLs:
+      path_object_construct, the helper, and string_object_destroy_veneer.
+      Whole-image A32 branch decoding independently finds four inbound plain
+      BL sites (0x0805a870, 0x0805a92c, 0x080b5368, 0x08236754) and zero
+      predicated inbound BL sites. It constructs a two-word PathObject on
+      its r2/r3 spill storage from path, passes the constructor RETURN with
+      flag_out and base_hint into the helper, then destroys the original
+      storage unconditionally and returns the helper status saved in r4.
+      The helper builds a 16-byte interface guard with base_hint, fetches
+      facade selector 1, and invokes vtable slot +0x54 as
+      (facade,path_object,flag_out). Rust reuses the ported path-object
+      construction/destruction and existing interface-guard seams rather
+      than inventing a separate identity for the opaque +0x54 operation.
+      Host tests cover zero, positive, and all-one status words, base-hint
+      forwarding, path-object vtable identity, guard/dispatch/destruction
+      ordering, storage destruction, and preservation of an untouched
+      flag_out by a recording opaque slot.

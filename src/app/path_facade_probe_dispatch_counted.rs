@@ -70,16 +70,14 @@
 //! the concrete semantic identity of slots +0x54/+0x5c/+0x60 remains
 //! unresolved, so the structural names are kept.
 //!
-//! ## RetailOS boundaries
+//! ## RetailOS boundary
 //!
-//! The slot +0x54 probe @ 0x080891dc and the slot +0x60 wrapper @
-//! 0x080a8eb0 remain retailOS boundaries behind the replaceable
-//! [`PATH_FACADE_SLOT_54_FROM_CSTR_IMPL`] and
-//! [`PATH_FACADE_SLOT_60_FROM_CSTR_IMPL`] seams. Device builds dispatch
-//! to their verified fixed addresses; host defaults fail closed with
-//! `-0x32` (mirroring this function's own NULL-argument error path)
-//! without touching the flag slot, and tests install recorders. The slot
-//! +0x5c wrapper @ 0x08084d28 and `map_status_code` @ 0x0809da3c are
+//! The slot +0x60 wrapper @ 0x080a8eb0 remains a retailOS boundary behind
+//! the replaceable [`PATH_FACADE_SLOT_60_FROM_CSTR_IMPL`] seam. The slot
+//! +0x54 probe @ 0x080891dc is now the ported
+//! [`crate::app::path_probe::path_facade_slot_54_from_cstr`]; its seam is
+//! retained only so this caller's host tests can record probe results. The
+//! slot +0x5c wrapper @ 0x08084d28 and `map_status_code` @ 0x0809da3c are
 //! already ported and are called directly.
 //!
 //! ## Deliberate deviations
@@ -91,7 +89,7 @@
 //!   not representable in safe codegen — which is also the value every
 //!   successful probe observed in callers establishes.
 
-/// Verified load address of the unported facade slot +0x54 cstr probe
+/// Load address of the ported facade slot +0x54 cstr probe
 /// (`FUN_080891dc`).
 pub const PATH_FACADE_SLOT_54_FROM_CSTR_ADDRESS: usize = 0x0808_91dc;
 
@@ -117,30 +115,6 @@ pub type PathFacadeSlot54FromCstr =
 pub type PathFacadeSlot60FromCstr =
     unsafe extern "C" fn(path: *const u8, base_hint: u32) -> i32;
 
-/// Boundary default for the probe. Device builds preserve the exact
-/// retailOS call; host builds fail closed with [`PROBE_DISPATCH_ERROR`]
-/// without touching the flag slot.
-unsafe extern "C" fn firmware_path_facade_slot_54_from_cstr(
-    path: *const u8,
-    flag_out: *mut u32,
-    base_hint: u32,
-) -> i32 {
-    #[cfg(target_os = "none")]
-    {
-        let probe: PathFacadeSlot54FromCstr =
-            core::mem::transmute(PATH_FACADE_SLOT_54_FROM_CSTR_ADDRESS);
-        probe(path, flag_out, base_hint)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = path;
-        let _ = flag_out;
-        let _ = base_hint;
-
-        PROBE_DISPATCH_ERROR
-    }
-}
 
 /// Boundary default for the slot +0x60 wrapper, same fail-closed policy
 /// as the probe default.
@@ -164,9 +138,9 @@ unsafe extern "C" fn firmware_path_facade_slot_60_from_cstr(
     }
 }
 
-/// Replaceable seam for the unported probe @ 0x080891dc.
+/// Replaceable seam for the ported probe @ 0x080891dc.
 pub static mut PATH_FACADE_SLOT_54_FROM_CSTR_IMPL: PathFacadeSlot54FromCstr =
-    firmware_path_facade_slot_54_from_cstr;
+    crate::app::path_probe::path_facade_slot_54_from_cstr;
 
 /// Replaceable seam for the unported slot +0x60 wrapper @ 0x080a8eb0.
 pub static mut PATH_FACADE_SLOT_60_FROM_CSTR_IMPL: PathFacadeSlot60FromCstr =
@@ -272,7 +246,8 @@ mod tests {
     impl Drop for SeamGuard {
         fn drop(&mut self) {
             unsafe {
-                PATH_FACADE_SLOT_54_FROM_CSTR_IMPL = firmware_path_facade_slot_54_from_cstr;
+                PATH_FACADE_SLOT_54_FROM_CSTR_IMPL =
+                    crate::app::path_probe::path_facade_slot_54_from_cstr;
                 PATH_FACADE_SLOT_60_FROM_CSTR_IMPL = firmware_path_facade_slot_60_from_cstr;
             }
         }
@@ -352,13 +327,14 @@ mod tests {
     fn host_default_seams_fail_closed() {
         let (_lock, _seam) = SeamGuard::lock();
         unsafe {
-            PATH_FACADE_SLOT_54_FROM_CSTR_IMPL = firmware_path_facade_slot_54_from_cstr;
+            PATH_FACADE_SLOT_54_FROM_CSTR_IMPL =
+                crate::app::path_probe::path_facade_slot_54_from_cstr;
             PATH_FACADE_SLOT_60_FROM_CSTR_IMPL = firmware_path_facade_slot_60_from_cstr;
         }
 
         let status = unsafe { path_facade_probe_dispatch_counted(COUNTED.as_ptr()) };
 
-        assert_eq!(status, map_status_code(PROBE_DISPATCH_ERROR));
+        assert_eq!(status, 0, "the ported probe's host facade slot fails closed");
     }
 
     use crate::util::status_code_map::map_status_code;
