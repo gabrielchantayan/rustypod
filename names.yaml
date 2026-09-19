@@ -69574,6 +69574,44 @@ functions:
       halves with lsr (equivalent for non-negative sums), reloads the
       stack argument through fp, and adds its frame — 30 instructions
       versus the original 28.
+  - address: 0x0805ee68
+    ghidra: FUN_0805ee68
+    name: obj_nid2ln
+    size: 176
+    sig: "const char *obj_nid2ln(int nid)"
+    module: crypto/obj_dat
+    vars: {param_1/r0: nid}
+    renames:
+      DAT_0805ef10: NID_OBJS
+      DAT_0805ef14: ADDED_SLOT
+      local_1c: key_nid
+      local_c: key_kind
+      local_8: key_object
+    status: ported
+    notes: >-
+      OpenSSL crypto/objects/obj_dat.c OBJ_nid2ln. Raw ARM extent is 176
+      bytes: code 0x0805ee68-0x0805ef0c followed by literal-pool words
+      0x0805ef10 (NID_OBJS = 0x08906668) and 0x0805ef14 (ADDED_SLOT =
+      0x08a0c334); Ghidra's 168-byte extent omits both words, and the
+      separately linked next function starts at 0x0805ef18. For unsigned
+      nid < NUM_NID (650), it computes NID_OBJS + nid * sizeof(ASN1_OBJECT)
+      and returns that entry's long name if nid == NID_undef or entry->nid
+      is nonzero. An unresolved in-range entry records error
+      (8, 0x66, 0x65, 0, 0) and returns NULL without probing added.
+      Out-of-range, including negative, nids probe lh_retrieve(added,
+      { ADDED_NID = 3, &nid }) when added is non-NULL; a hit returns
+      adp->obj->ln, while a miss emits the same error and returns NULL.
+      Four raw plain BL callers are 0x0804b188, 0x0804b1dc, 0x0805f278,
+      and 0x0807550c; no predicated BL caller exists. Identification is
+      corroborated by adjacent OBJ_nid2obj and OBJ_nid2sn ports, the shared
+      ASN1_OBJECT long-name field at +0x04, ADDED_NID tag, added slot, and
+      lh_retrieve @ 0x082d7e0c. Deliberate deviation: raw ARM supplies an
+      uninitialized ADDED_OBJ pointer field to lh_retrieve; Rust passes
+      &nid as upstream OpenSSL specifies. Host tests cover undefined,
+      resolved boundary, unresolved in-range, and positive/negative
+      out-of-range added-hash lookups. match.py structural review finds the
+      same range gate, table check, hash probe, diagnostic failure path and
+      field loads; LLVM adds a larger ABI frame and volatile seam call.
   - address: 0x0805ef18
     ghidra: FUN_0805ef18
     name: obj_nid2obj
