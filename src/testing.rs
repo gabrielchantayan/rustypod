@@ -1682,6 +1682,8 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
 /// Serializes host tests that enter `ui::tdat_flag_20_bit_2` through its
 /// shared mutable dispatch table, including callers that set its flag.
 pub static TDAT_FLAG_20_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that replaces the event-loop callback target.
+pub static EVENT_LOOP_CALLBACK_DISPATCH_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Serializes all host tests that replace `runtime::message_0x17::MESSAGE_DISPATCH_OPS`.
 /// The message-0x10, message-0x17, and message-0x23 wrappers share this seam.
 pub static MESSAGE_DISPATCH_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

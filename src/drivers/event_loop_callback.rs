@@ -90,15 +90,18 @@ retail_event_loop_callback_dispatch:
 "#
 );
 
+#[cfg(target_arch = "arm")]
+unsafe extern "C" {
+    pub fn dispatch_event_loop_callback(source: *const u8) -> u32;
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
     static mut CALLS: u32 = 0;
     static mut RECORDED_CALLBACK: u32 = 0;
 
@@ -109,7 +112,7 @@ mod tests {
     }
 
     fn install_recorder() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = crate::testing::EVENT_LOOP_CALLBACK_DISPATCH_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             addr_of_mut!(CALLS).write(0);
             addr_of_mut!(RECORDED_CALLBACK).write(0);
@@ -148,7 +151,7 @@ mod tests {
 
     #[test]
     fn default_target_returns_zero_after_the_same_field_load() {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = crate::testing::EVENT_LOOP_CALLBACK_DISPATCH_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             addr_of_mut!(EVENT_LOOP_CALLBACK_DISPATCH_OPS)
                 .write(DEFAULT_EVENT_LOOP_CALLBACK_DISPATCH_OPS);
