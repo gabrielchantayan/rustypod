@@ -7059,6 +7059,25 @@ functions:
       the comparison call boundary as `blx` rather than LLVM-inlining it as
       observed by match.py.
 
+  - address: 0x080765ec
+    ghidra: FUN_080765ec
+    name: default_heap_free_bytes_below_5_mib
+    size: 28
+    sig: "u32 default_heap_free_bytes_below_5_mib(void)"
+    module: runtime/global_state
+    status: ported
+    renames:
+      r0: default_heap_free_bytes
+      r4: below_threshold
+    notes: >-
+      Raw ARM words from osos.dec are e92d4010 e3a04000 eb0012e1
+      e3500605 33a04001 e1a00004 e8bd8010; the next real function starts
+      at 0x08076608. It has one plain outgoing bl to
+      default_heap_free_bytes_get at 0x0807b180 and no predicated bl calls.
+      It returns one exactly when the getter's unsigned result is less than
+      0x00500000 (5 MiB), otherwise zero. The Rust u32 return deliberately
+      models the ARM register result instead of using the host bool ABI.
+
   - address: 0x0807b180
     ghidra: FUN_0807b180
     name: default_heap_free_bytes_get
