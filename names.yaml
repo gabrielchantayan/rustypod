@@ -122017,3 +122017,34 @@ functions:
       context words unchanged. Identity is confirmed by the adjacent ported
       sqlite3AuthContextPush at 0x0836f9e4 and the callers' nested
       trigger/view compilation paths. Deliberate deviations: none.
+
+  - address: 0x0836f4ac
+    ghidra: FUN_0836f4ac
+    name: array_allocate
+    size: 124
+    sig: "void *array_allocate(sqlite3 *db, void *array, i32 element_size, i32 initial_capacity, i32 *entry_count, i32 *allocation_count, i32 *index)"
+    module: sqlite/array_allocate
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1/r6: array
+      param_3/r2/r7: element_size
+      param_4/r3: initial_capacity
+      param_5/r4: entry_count
+      param_6/r8: allocation_count
+      param_7/r9: index
+      r5: grown_capacity
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent from push at
+      0x0836f4ac through the final branch to the shared epilogue at
+      0x0836f524; the next independently linked function begins with push at
+      0x0836f528. Complete aligned ARM B/BL decoding finds three inbound
+      plain BL call sites and no predicated BL call sites. The body has two
+      unconditional BL instructions: db_realloc at 0x083749bc and the IRAM
+      memzero veneer at 0x08037dc8. This is SQLite 3.5.x's
+      sqlite3ArrayAllocate: when entry_count reaches allocation_count, grow
+      capacity to 2*capacity+initial_capacity and reallocate element_size
+      times that capacity; zero the selected element, publish its old index,
+      and increment entry_count. A failed growth writes index=-1 and returns
+      the original array without changing either count. Deliberate deviations:
+      none.
