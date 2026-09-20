@@ -188,6 +188,7 @@ pub mod pcache_truncate;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod os_close;
+pub mod os_access;
 pub mod os_device_characteristics;
 pub mod os_file_size;
 pub mod os_lock;
