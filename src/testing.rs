@@ -66,6 +66,11 @@ pub mod hints {
     // 0x7e90_0000: dedicated to cxx/list_release_chain_destroy's raw-u32
     // object and sentinel fixtures; mappings never unmap.
     pub const LIST_RELEASE_CHAIN_DESTROY: usize = 0x7e90_0000;
+    // 0x7e50_0000 / 0x7e40_0000: dedicated to
+    // cxx/list_node_prepend_release's target-width list and node fixtures;
+    // mappings never unmap, so no other user may share either hint.
+    pub const LIST_NODE_PREPEND_RELEASE: usize = 0x7e50_0000;
+    pub const LIST_NODE_PREPEND_RELEASE_RELEASE: usize = 0x7e40_0000;
     // 0x7e60_0000: dedicated to util/hash_table_chain_destroy's target-width
     // table, bucket, and intrusive-node fixture; mappings never unmap.
     pub const HASH_TABLE_CHAIN_DESTROY: usize = 0x7e60_0000;

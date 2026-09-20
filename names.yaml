@@ -119475,3 +119475,33 @@ functions:
       new head. No deliberate deviations: target links remain u32 words;
       match.py reports only LLVM's frame-register substitution and unresolved
       linked BL target while preserving the operation sequence.
+
+  # --- List-node release-chain prepend (cxx/list_node_prepend_release) ---
+  - address: 0x083cadd0
+    ghidra: FUN_083cadd0
+    name: list_node_prepend_release
+    size: 40
+    sig: "void *list_node_prepend_release(u32 *list, u32 *node, u32 release_node_chain)"
+    module: cxx/list_node_prepend_release
+    status: ported
+    renames:
+      param_1/r0/r5: list
+      param_2/r1/r4: node
+      param_3/r2: release_node_chain
+      param_1_plus_0x04/r0: old_head
+      param_2_plus_0x0c/r0: previous_node
+      param_2_plus_0x14/r0: release_chain
+      FUN_083dd16c: list_release_chain_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent: ten ARM words from
+      stmdb sp!,{r4,r5,r6,lr} at 0x083cadd0 through ldmia
+      sp!,{r4,r5,r6,pc} at 0x083cadf4; the next separately linked function
+      begins at 0x083cadf8. The body has no plain BL instructions and one
+      predicated blne to ported list_release_chain_destroy @ 0x083dd16c.
+      Whole-image aligned A32 B/BL-immediate decoding finds two inbound plain
+      BL sites (0x083cb280 and 0x083cb5a0) and no predicated inbound calls;
+      Ghidra's third reference is not a direct BL. It writes the old list
+      head to node+0x0c, conditionally releases node+0x14, then publishes
+      node as the list head. Deliberate deviations: Rust expresses blne as a
+      conditional; it preserves the raw r0 result, returning old_head when
+      release_node_chain is zero and the release-chain result otherwise.
