@@ -136,6 +136,7 @@ pub mod observable_array_owned_destroy;
 pub mod observable_array_pair;
 pub mod owned_object_observable_array_destroy;
 pub mod opaque_observable_array_destroy;
+pub mod opaque_observable_array_payload_destroy;
 pub mod owned_element_array_release;
 pub mod derived_observable_array_construct;
 pub mod parse_i32_list;
