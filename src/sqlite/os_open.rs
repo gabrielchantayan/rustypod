@@ -55,6 +55,10 @@ pub struct SqliteVfs {
     pub app_data: *mut u8,
     /// `+0x18`: `xOpen(vfs, path, file, flags, out_flags)`.
     pub open: SqliteVfsOpenFn,
+    /// `+0x1c`: `xDelete`; not modeled by the current ports.
+    pub delete: usize,
+    /// `+0x20`: `xAccess(vfs, path, flags, result)`.
+    pub access: SqliteVfsAccessFn,
 }
 
 /// ABI of SQLite's `sqlite3_vfs::xOpen` entry.
@@ -65,6 +69,13 @@ pub type SqliteVfsOpenFn = unsafe extern "C" fn(
     u32,
     *mut u32,
 ) -> i32;
+
+/// ABI of SQLite's `sqlite3_vfs::xAccess` entry.
+pub type SqliteVfsAccessFn =
+    unsafe extern "C" fn(*mut SqliteVfs, *const u8, u32, *mut i32) -> i32;
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(SqliteVfs, access)];
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x18] = [0; core::mem::offset_of!(SqliteVfs, open)];
@@ -149,7 +160,18 @@ mod tests {
             name: core::ptr::null(),
             app_data: core::ptr::null_mut(),
             open: recording_open,
+            delete: 0,
+            access: recording_access,
         }
+    }
+
+    unsafe extern "C" fn recording_access(
+        _vfs: *mut SqliteVfs,
+        _path: *const u8,
+        _flags: u32,
+        _result: *mut i32,
+    ) -> i32 {
+        0
     }
 
     #[test]

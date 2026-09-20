@@ -41511,6 +41511,35 @@ functions:
       pointers, preserving ARM offsets on 64-bit host tests.
 
 
+  # ---- SQLite VFS access wrapper, sqlite3OsAccess (src/sqlite/os_access.rs) ----
+  - address: 0x0837dae0
+    ghidra: FUN_0837dae0
+    name: sqlite_os_access
+    size: 8
+    sig: "i32 sqlite_os_access(sqlite3_vfs *vfs, const char *path, u32 flags, i32 *result)"
+    module: sqlite/os_access
+    status: ported
+    renames:
+      param_1/r0: vfs
+      r1: path
+      r2: flags
+      r3: result
+      "*(code **)(vfs + 0x20)": sqlite3_vfs::xAccess
+    notes: >-
+      SQLite's sqlite3OsAccess wrapper: tail-dispatches vfs->xAccess(vfs,
+      path, flags, result) and returns its SQLite status unchanged. Raw ARM
+      extent verified as exactly two words at 0x0837dae0..0x0837dae4:
+      ldr r3,[r0,#0x20]; bx r3. The next independently linked function,
+      sqlite3OsClose, begins at 0x0837dae8. Decoding every ARM
+      B/BL-immediate word in osos.dec finds three inbound direct calls, all
+      unconditional bl at 0x082dd4ec, 0x082dd5ac, and 0x0837fc0c; no
+      predicated BL calls. The indirect bx is runtime sqlite3_vfs xAccess
+      dispatch, not an inventable static callee. Deliberate deviation: the
+      host representation uses a native-width function pointer; SqliteVfs
+      asserts the target +0x20 offset on 32-bit builds. match.py reports a
+      preserving push/pop around LLVM's final bx; the load and tail dispatch
+      remain structurally equivalent.
+
   # ---- SQLite OS close wrapper, sqlite3OsClose (src/sqlite/os_close.rs) ----
   - address: 0x0837dae8
     ghidra: FUN_0837dae8

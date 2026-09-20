@@ -196,6 +196,8 @@ mod tests {
             name,
             app_data: core::ptr::null_mut(),
             open: dummy_open,
+            delete: 0,
+            access: dummy_access,
         }
     }
 
@@ -205,6 +207,15 @@ mod tests {
         _file: *mut super::super::os_write::SqliteFile,
         _flags: u32,
         _out_flags: *mut u32,
+    ) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn dummy_access(
+        _vfs: *mut SqliteVfs,
+        _path: *const u8,
+        _flags: u32,
+        _result: *mut i32,
     ) -> i32 {
         0
     }
