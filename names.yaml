@@ -119282,3 +119282,27 @@ functions:
       cover flag values 0, 1, and 255, base reset, padding preservation, and
       the adjacent-word boundary. match.py reports the expected LLVM frame and
       archive relocation structural diff.
+
+  - address: 0x083d0924
+    ghidra: FUN_083d0924
+    name: opaque_observable_array_dispose_elements
+    size: 88
+    sig: "void opaque_observable_array_dispose_elements(void *this)"
+    module: cxx/opaque_observable_array_dispose_elements
+    status: ported
+    vars: {param_1/r0/r5: this, param_1_plus_0x04/r6: count, param_1_plus_0x10: enabled, param_1_vtable_plus_0x40/r2: element_at, element_cell_word: element, element_vtable_plus_0x04/r1: release}
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: twenty-two ARM words
+      from push {r4,r5,r6,lr} at 0x083d0924 through pop {r4,r5,r6,pc} at
+      0x083d0978; the next independently entered function begins at 0x083d097c.
+      The body has no direct BL instructions. Its two virtual call instructions
+      are one unconditional BLX through the array vtable +0x40 at 0x083d0954
+      and one predicated BLXNE through an element vtable +0x04 at 0x083d0968.
+      Whole-image decoding finds three inbound plain BL calls at 0x0815d518,
+      0x083d09cc, and 0x083d09e4, with no predicated direct callers. A nonzero
+      enabled byte gates a signed 0..count walk; each cell yielded by +0x40 has
+      an optional first-word element pointer, whose non-NULL vtable +0x04
+      operation is called. The runtime vtable targets have no recovered static
+      identity, so opaque role names and target-width dispatch preserve the
+      verified contract; host tests use widened callbacks. match.py reports the
+      expected LLVM frame and loop-shape structural diff.
