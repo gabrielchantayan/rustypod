@@ -42,6 +42,12 @@ pub mod hints {
     // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
     // shared-cache, and Schema fixture; mappings never unmap.
     pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;
+    // 0x6a10_0000: dedicated to sqlite/btree_set_cache_size's target-width
+    // Btree and BtShared fixture; mappings never unmap.
+    pub const SQLITE_BTREE_SET_CACHE_SIZE: usize = 0x6a10_0000;
+    // 0x6a20_0000: dedicated to sqlite/btree_factory's target-width
+    // Btree and BtShared fixture; mappings never unmap.
+    pub const SQLITE_BTREE_FACTORY: usize = 0x6a20_0000;
     // 0x6c00_0000: dedicated to sqlite/emit_compound_select_rows's
     // target-width Parse, Select chain, Vdbe, and opcode fixture; mappings
     // never unmap, so no other module may share it.
