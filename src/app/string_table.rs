@@ -50,14 +50,12 @@
 //!
 //! # Callees (all real `bl` boundaries in the original)
 //!
-//! - `FUN_083db55c` @ 0x083db55c — `map<string,string>::find`:
-//!   lower_bound walk from the root (header + 4) comparing
-//!   `cxx_string_less` @ 0x083d74f4 (ported) of node key at node + 0x10
-//!   vs the query, then the equal-range recheck via the node-key
-//!   accessor @ 0x083b6acc (`node + 16`); writes the found node — or
-//!   the header node on a miss — through its first argument. **Not
-//!   ported**; Ghidra's C for our function mis-renders this call as a
-//!   buffer copy, which it is not.
+//! - [`crate::cxx::string_map::string_key_tree_find`] @ 0x083db55c —
+//!   `map<string,string>::find`: lower_bound walk from the root
+//!   (header + 4) comparing `cxx_string_less` @ 0x083d74f4 of node key
+//!   at node + 0x10 vs the query, then the equal-range recheck via the
+//!   node-key accessor @ 0x083b6acc (`node + 16`); writes the found
+//!   node — or the header node on a miss — through its first argument.
 //! - [`crate::cxx::templates::iterator_equal`] @ 0x083cf848 — iterator
 //!   equality: `*a == *b`, directly ported as the header-node miss test.
 //! - [`crate::cxx::string::cxx_string_empty`] @ 0x083d6f0c —
@@ -67,12 +65,9 @@
 //!
 //! # Deviations
 //!
-//! - The one unported callee, `find`, rides the [`STRING_TABLE_OPS`]
-//!   `read_volatile` dispatch table (house pattern). Iterator equality
-//!   is a direct Rust call, while `basic_string::empty`'s target slot
-//!   routes to its Rust port. The target default transmutates the real
-//!   firmware address 0x083db55c; the host default panics until a test
-//!   installs the remaining mock.
+//! - `find` is now the direct [`crate::cxx::string_map::string_key_tree_find`]
+//!   port. Iterator equality is a direct Rust call, while
+//!   `basic_string::empty`'s target slot routes to its Rust port.
 //! - The original spills r0..r3 on entry and reuses those stack slots
 //!   as the two `find` out-slots and the header-temporary; the port
 //!   uses ordinary locals.

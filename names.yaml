@@ -48265,6 +48265,33 @@ functions:
       release call and the +0x14 add all correspond; LLVM additionally
       pre-zeroes the pair/result stack slots and uses a wider frame.
 
+  - address: 0x083db55c
+    ghidra: FUN_083db55c
+    name: string_key_tree_find
+    size: 168
+    sig: "void string_key_tree_find(StringKeyTreeNode **out, StringKeyTree *map, char *const *key)"
+    module: cxx/string_map
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: map
+      param_3/r2: key
+      FUN_083d74f4: cxx_string_less
+      FUN_083cf848: iterator_equal
+      FUN_083b6acc: string_key_node_key
+    notes: >-
+      Raw ARM extent is 0x083db55c..0x083db604: push at 0x083db55c
+      through pop {...,pc} at 0x083db600, followed by the next separately
+      linked function at 0x083db604. It has four plain unconditional bl
+      instructions to three callee targets: cxx_string_less @ 0x083d74f4
+      at 0x083db58c and 0x083db5dc, iterator_equal @ 0x083cf848 at
+      0x083db5bc, and string_key_node_key @ 0x083b6acc at 0x083db5cc;
+      there are no predicated bl forms. This is map<string,string>::find:
+      lower_bound walks from header.parent, selecting the least node whose
+      key is not less than the query, then rejects a non-equal candidate by
+      checking query < candidate.key. It stores the matching node or header
+      sentinel through out. The Rust port retains cxx_string_less calls and
+      directly expresses the decoded equality and node+0x10 key accessor.
   - address: 0x083db69c
     ghidra: FUN_083db69c
     name: string_table_fallback_value_slot
