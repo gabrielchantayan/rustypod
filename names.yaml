@@ -42170,6 +42170,39 @@ functions:
       padding +0x02..+0x03 remains untouched. No dispatch seam: this
       function is a leaf with no direct callees. Rust preserves that
       store-only behavior and the unguarded destination dereference.
+  - address: 0x08384380
+    ghidra: FUN_08384380
+    name: src_list_assign_cursors
+    size: 104
+    sig: "void src_list_assign_cursors(Parse *parse, SrcList *source_list)"
+    module: sqlite/src_list_assign_cursors
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: source_list
+      r4: item
+      r5: index
+      r6: parse
+      r7: source_list
+      "parse+0x44": n_tab
+      "source_list+0x00": n_src
+      "item+0x10": p_select
+      "item+0x18": i_cursor
+      "p_select+0x0c": p_src
+    notes: >-
+      SQLite 3.5.x's sqlite3SrcListAssignCursors. Raw osos.dec words establish
+      the exact 104-byte ARM extent 0x08384380..0x083843e7; the separately
+      linked src_list_delete begins at 0x083843e8. Whole-image ARM B/BL
+      decoding finds three direct BL call sites: plain BLs at 0x082e6c6c and
+      0x0838d2c0 plus the function's predicated recursive BLNE at 0x083843cc;
+      thus two plain and one predicated call. NULL returns before touching
+      parse. The signed pre-tested loop walks inline 0x30-byte SrcList items
+      at +0x08, returns immediately on the first non-negative iCursor,
+      otherwise assigns Parse.nTab at +0x44, increments it, and recurses into
+      pSelect->pSrc. Rust uses aligned target-layout u32 loads/stores rather
+      than widened host pointer fields; this is a deliberate representation
+      deviation only, preserving ARM offsets on host fixtures. Host tests
+      cover NULL, depth-first cursor allocation, and the early-stop invariant.
   - address: 0x083843e8
     ghidra: FUN_083843e8
     name: src_list_delete

@@ -1759,6 +1759,12 @@ pub mod hints {
     // target-width table and trigger-chain fixtures; mappings never unmap.
     pub const SQLITE_TRIGGERS_EXIST: usize = 0x8150_0000;
     pub const SQLITE_TRIGGERS_EXIST_VIRTUAL: usize = 0x8160_0000;
+    // 0x8170_0000..0x8190_0000: dedicated to sqlite/src_list_assign_cursors'
+    // target-layout parse, source-list, and SELECT fixtures; mappings never
+    // unmap, so each test needs its own hint.
+    pub const SQLITE_SRC_LIST_ASSIGN_CURSORS: usize = 0x8170_0000;
+    pub const SQLITE_SRC_LIST_ASSIGN_CURSORS_DEPTH_FIRST: usize = 0x8180_0000;
+    pub const SQLITE_SRC_LIST_ASSIGN_CURSORS_STOP: usize = 0x8190_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
