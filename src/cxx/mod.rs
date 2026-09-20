@@ -91,6 +91,7 @@ pub mod draw_state_surface;
 pub mod draw_state_clip;
 pub mod handler_list_construct;
 pub mod handle;
+pub mod hash_table_bucket_slot;
 pub mod handle_callback_dispatch;
 pub mod heap_string;
 pub mod list_splice;

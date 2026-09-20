@@ -408,6 +408,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const IAP_THREAD_SLOT_WAIT: usize = 0x6c00_0000;
+    // 0x6c80_0000: dedicated to cxx/hash_table_bucket_slot's raw-u32 table
+    // and bucket-array fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const HASH_TABLE_BUCKET_SLOT: usize = 0x6c80_0000;
     // 0x6e00_0000: dedicated to heap/word_buffer's raw-u32 singleton-reset
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const WORD_BUFFER_RESET_OPTIONAL_SINGLETON: usize = 0x6e00_0000;
