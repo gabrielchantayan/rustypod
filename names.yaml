@@ -37194,6 +37194,29 @@ functions:
       arithmetic without dereferencing the result. Host tests cover first and
       final valid records, negative and end addresses, and the unguarded NULL
       aOp behavior. Deliberate deviations: none.
+  - address: 0x083867b8
+    ghidra: FUN_083867b8
+    name: varint_len
+    size: 64
+    sig: "u32 varint_len(u64 value)"
+    module: sqlite/varint_len
+    status: ported
+    renames:
+      param_1/r0: value_lo
+      param_2/r1: value_hi
+      iVar1/r4: len
+    notes: >-
+      SQLite's sqlite3VarintLen. Raw ARM establishes the exact 64-byte extent:
+      16 words from push {r4,r5,r6,lr} at 0x083867b8 through pop
+      {r4,r5,r6,pc} at 0x083867f4; the separately linked next function begins
+      at 0x083867f8. Decoding every aligned ARM B/BL-immediate word in
+      osos.dec finds exactly three inbound direct calls, all unconditional bl
+      at 0x08386ac, 0x0838708, and 0x0838720; there are no predicated bl
+      calls. Each iteration shifts the low/high u32 pair right seven bits,
+      increments the result, and repeats while the value is nonzero and the
+      result remains below nine. Rust expresses the pair shift as u64 >>= 7;
+      this is bit-equivalent. Deliberate deviations: none.
+
 
   - address: 0x083867f8
     ghidra: FUN_083867f8
