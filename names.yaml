@@ -121495,3 +121495,31 @@ functions:
       sqlite3IsRowid: it recognizes those three case-insensitive aliases for
       a table's hidden rowid, testing them in that order and returning one on
       the first match or zero otherwise. Deliberate deviations: none.
+
+  # --- Checked decimal i32 parser ---
+  - address: 0x0837a28c
+    ghidra: FUN_0837a28c
+    name: parse_i32_decimal_checked
+    size: 200
+    sig: "int parse_i32_decimal_checked(const char *text, i32 *output)"
+    module: strto/parse_i32_decimal_checked
+    status: ported
+    renames:
+      param_1/r0/r4: text
+      param_2/r1/r10: output
+      r5: digit_count
+      r6: magnitude_lo
+      r8: magnitude_hi
+      r9: negative
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte code extent from push
+      {r4-r10,lr} at 0x0837a28c through pop {r4-r10,pc} at 0x0837a350; the
+      next separately linked function begins with push {r4-r6,lr} at
+      0x0837a354. Whole-image ARM B/BL decoding finds three inbound
+      unconditional plain BL call sites at 0x082c3f0c, 0x08378540, and
+      0x0837f974, and zero predicated BL call sites. The body contains no BL.
+      It skips one optional sign and leading zeroes, accumulates at most ten
+      decimal digits, accepts only the i32 range (including -2147483648),
+      writes the result, and returns one; invalid range or an eleventh
+      significant digit returns zero without writing. Deliberate deviation:
+      Rust expresses the retail 64-bit carry chain as a u64 accumulator.
