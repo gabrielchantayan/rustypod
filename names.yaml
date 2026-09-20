@@ -119936,6 +119936,30 @@ functions:
       header sentinel. This target body is byte-identical to FUN_083b609c, so
       it deliberately reuses red_black_tree_advance_cursor and its host tests.
 
+  - address: 0x083b5514
+    ghidra: FUN_083b5514
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent 0x083b5514..0x083b5567;
+      0x083b5568 begins the next independently linked function. Full-image A32
+      branch decoding finds exactly three inbound plain BL calls at 0x083bab54,
+      0x083bb024, and 0x083bb120, with zero predicated BL calls; the body makes
+      no calls. It returns cursor unchanged while advancing its target-width node
+      word to the in-order successor by descending the right subtree left edge or
+      climbing parent links to the first left-child ancestor, preserving the
+      header sentinel. This body is byte-identical to
+      red_black_tree_advance_cursor, so it deliberately reuses that exported seam
+      and its host tests. Deliberate deviations: none.
+
   # --- red-black tree in-order cursor successor ---
   - address: 0x083b55bc
     ghidra: FUN_083b55bc

@@ -78,6 +78,20 @@
 //! cursor address unchanged while advancing its target-width node word to the
 //! in-order successor. This exact duplicate deliberately reuses the exported
 //! `red_black_tree_advance_cursor` seam and its host tests; no deviations.
+//!
+//! `FUN_083b5514` at load address `0x083b5514` is a byte-identical 84-byte
+//! (21-word) copy of `red_black_tree_advance_cursor`, through `bx lr` at
+//! `0x083b5564`; the next independently linked function begins at
+//! `0x083b5568`. Full-image A32 branch decoding finds three inbound plain
+//! `bl` calls at 0x083bab54, 0x083bb024, and 0x083bb120, with zero predicated
+//! `bl` calls; the body itself makes no calls. It returns the cursor address
+//! unchanged while advancing its target-width node word to its in-order
+//! successor by descending the right subtree's left edge or climbing parent
+//! links to the first left-child ancestor, preserving the header sentinel.
+//! This exact duplicate deliberately reuses the exported
+//! `red_black_tree_advance_cursor` seam and its host tests; deliberate
+//! deviations: none.
+
 
 
 /// Base node layout used by the C++ red-black tree implementation.
