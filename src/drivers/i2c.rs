@@ -489,6 +489,43 @@ pub unsafe extern "C" fn pmu_i2c_write(reg: u32, len: i32, data: *const u8) -> i
     }
     i2c_write(PMU_I2C_SLAVE, (len as u32).wrapping_add(1), packet.as_ptr())
 }
+/// pmu_i2c_write_packed_selector — original: `FUN_0836d0b4` @
+/// 0x0836d0b4 (68 bytes; 3 plain `bl` call sites, 0 predicated `bl`;
+/// binary-verified from `osos.dec`).
+///
+/// Selectors 0 through 6 map to consecutive even PMU registers starting at
+/// 0x2d; selector 7 maps to 0x26. It packs `encoded_value` into two bytes:
+/// the low input word's bit 6 becomes bit 5 of the first byte together with
+/// `first_byte`, while bits 0..5 become the second byte, then writes both
+/// through [`pmu_i2c_write`]. Selectors above 7 perform no transaction.
+///
+/// # Deviation
+///
+/// Retail directly calls `FUN_0836d524`; this port calls its existing Rust
+/// port. The callee's status is deliberately discarded, as retail leaves its
+/// return value in r0 only after this `void` routine has returned.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_write_packed_selector(
+    selector: u32,
+    first_byte: u32,
+    encoded_value: u32,
+) {
+    if selector > 7 {
+        return;
+    }
+
+    let packet = [
+        (first_byte | ((encoded_value & 0x40) >> 1)) as u8,
+        (encoded_value & 0x3f) as u8,
+    ];
+    let reg = if selector == 7 {
+        0x26
+    } else {
+        (0x2d + selector * 2) & 0xff
+    };
+    pmu_i2c_write(reg, 2, packet.as_ptr());
+}
 
 /// pmu_i2c_read_bank — original: `FUN_0836d698` @ 0x0836d698 (40
 /// bytes).
@@ -1190,6 +1227,7 @@ pub(crate) mod tests {
 
     #[test]
     fn write_non_positive_lengths_copy_no_payload() {
+
         let guard = install_raw(0, 0);
         unsafe {
             let data = [0xaau8; 4];
@@ -1205,6 +1243,33 @@ pub(crate) mod tests {
                 std::vec![std::vec![0x2bu8], std::vec![]],
                 "the signed copy loop never runs for non-positive lengths"
             );
+        }
+        restore_raw(guard);
+    }
+    #[test]
+    fn packed_selector_write_maps_register_and_packs_value_bits() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            pmu_i2c_write_packed_selector(3, 0x91, 0x7f);
+            pmu_i2c_write_packed_selector(7, 0x1ff, 0x40);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![
+                    std::vec![0x33, 0xb1, 0x3f],
+                    std::vec![0x26, 0xff, 0x00],
+                ],
+                "the normal selector and selector-seven exception retain only packed bytes"
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn packed_selector_write_rejects_out_of_range_selector() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            pmu_i2c_write_packed_selector(8, 0xff, 0xff);
+            assert!((*addr_of!(RAW_WRITE_LOG)).is_empty());
         }
         restore_raw(guard);
     }
