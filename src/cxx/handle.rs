@@ -1510,6 +1510,52 @@ pub unsafe extern "C" fn refcounted_body_acquire(
         mutex_unlock(mutex);
     }
 }
+///
+/// refcounted_body_acquire_dtor_copy — original: `FUN_0839cc70` @ 0x0839cc70
+/// (60 bytes; 3 direct `bl` callers, all unconditional: 0x08280a9c,
+/// 0x08280c94, and 0x0839ed2c). Raw ARM spans
+/// 0x0839cc70..0x0839ccac; the separately linked
+/// [`refcounted_body_release_dtor_copy`] starts at 0x0839ccac. Its two
+/// internal calls are predicated `blne` instructions to mutex_lock @
+/// 0x0807f5c4 and mutex_unlock @ 0x0807f6a0; no predicated inbound `bl`
+/// calls occur.
+///
+/// Stores `body` into `dst` before the NULL early-out. A non-NULL body has
+/// its signed target-word refcount at +4 wrapping-incremented between
+/// independent optional-mutex loads at +8, so a NULL mutex leaves the
+/// increment unguarded.
+///
+/// Deliberate deviation: this separately linked copy is byte-identical to
+/// [`refcounted_body_acquire`] @ 0x0839cd5c modulo the two `bl`
+/// displacements, so it composes the same ported mutex helpers. A dedicated
+/// target text section preserves the hookable entry.
+///
+/// # Safety
+/// `dst` must be a valid, aligned pointer slot. A non-NULL `body` must point
+/// to a readable/writable [`RefcountedBody`]. RetailOS NULL-checks neither
+/// pointer before its corresponding dereference.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_acquire_dtor_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_acquire_dtor_copy(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 
 /// refcounted_body_acquire_from_owner — original: `FUN_08131fb8` @
 /// 0x08131fb8 (8 bytes; **9 `bl` call sites**, all unconditional:
@@ -3959,6 +4005,56 @@ mod tests {
             refcounted_body_acquire(&mut slot, &mut body);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, i32::MIN);
+        }
+    }
+
+    #[test]
+    fn acquire_dtor_copy_null_body_overwrites_slot() {
+        unsafe {
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_acquire_dtor_copy(&mut slot, core::ptr::null_mut());
+
+            assert!(slot.is_null());
+        }
+    }
+
+    #[test]
+    fn acquire_dtor_copy_wraps_refcount_without_mutex() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = core::ptr::null_mut();
+
+            refcounted_body_acquire_dtor_copy(&mut slot, &mut body);
+
+            assert_eq!(slot as usize, &mut body as *mut RefcountedBody as usize);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    #[test]
+    fn acquire_dtor_copy_handles_empty_mutex_cell() {
+        unsafe {
+            let mut mutex = Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: &mut mutex,
+            };
+            let mut slot = core::ptr::null_mut();
+
+            refcounted_body_acquire_dtor_copy(&mut slot, &mut body);
+
+            assert_eq!(slot as usize, &mut body as *mut RefcountedBody as usize);
+            assert_eq!(body.refcount, 1);
         }
     }
 
