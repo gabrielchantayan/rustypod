@@ -118017,3 +118017,28 @@ functions:
       boundaries and host tests install recorders. Deliberate deviations:
       those BL calls become dispatch-boundary BLX calls; behavior and reload
       order are preserved.
+  - address: 0x083dbc44
+    ghidra: FUN_083dbc44
+    name: red_black_tree_remove_node_wrapper
+    size: 32
+    sig: "void red_black_tree_remove_node_wrapper(void *tree, void **node_slot, void *unused, void **removed_node)"
+    status: identified
+    renames:
+      param_1/r0: tree
+      param_2/r1: node_slot
+      param_3/r2: unused
+      param_4/r3: removed_node
+      FUN_083ccd94: red_black_tree_remove_node_unported
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte body from 0x083dbc44
+      through `pop {r2,r3,r4,pc}` at 0x083dbc60; 0x083dbc64 begins the next
+      separately entered function with `push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,
+      sl,lr}`. The body has one outbound unconditional `bl` and no predicated
+      outbound `bl`: it loads `*node_slot`, passes its address as the third
+      argument to 0x083ccd94, and passes a stack copy of `removed_node` as
+      that helper's output slot. Whole-image A32 decoding finds three inbound
+      direct calls: `bl` at 0x081f11b4 and `bleq` at 0x081f08f0 and
+      0x081f0e64. The body ignores r2. Faithful Rust implementation is blocked
+      because its sole callee, 0x083ccd94, performs red-black-tree deletion
+      and has neither a port nor an established Rust ABI seam; inventing one
+      would alter the wrapper's observable mutation and output behavior.
