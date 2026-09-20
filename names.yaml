@@ -1567,6 +1567,37 @@ functions:
       0x083b6e0c to red_black_tree_rotate_right. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the transferred
       middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree left rotation ---
+  - address: 0x083b6db8
+    ghidra: FUN_083b6db8
+    name: red_black_tree_rotate_left_b6db8_copy
+    size: 84
+    sig: "void red_black_tree_rotate_left(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_left
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_1_plus_0x10/r0: header
+      param_2_plus_0x04/r3: parent
+      param_2_plus_0x08: left_child
+      param_2_plus_0x0c/r2: right_child
+      right_child: promoted_node
+      right_child_plus_0x08/r12: middle_subtree
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent: 21 ARM words from
+      ldr r2,[r1,#0xc] at 0x083b6db8 through bx lr at 0x083b6e08; the separately
+      linked right-rotation sibling begins at 0x083b6e0c. Decoding every aligned
+      ARM B/BL-immediate word in osos.dec finds exactly three inbound direct calls:
+      unconditional bl at 0x083b70f4, 0x083b7194, and 0x083b7288; there are no
+      predicated bl or direct tail-B callers. The right child replaces the pivot
+      under its old parent (or header root slot), its left subtree becomes the
+      pivot's right subtree, and the pivot becomes that child's left subtree. This
+      body is byte-identical to the established red_black_tree_rotate_left port at
+      0x083ceccc, so this ledger-only alias deliberately adds no redundant dispatch
+      seam; hook 0x083b6db8 to red_black_tree_rotate_left. The shared host test
+      covers root, parent-left-slot, and parent-right-slot rotations, including the
+      transferred middle subtree. Deliberate deviations: none.
   - address: 0x083b74a8
     ghidra: FUN_083b74a8
     name: red_black_tree_rotate_left_b74a8_copy
