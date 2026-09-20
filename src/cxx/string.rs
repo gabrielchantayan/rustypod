@@ -1664,6 +1664,69 @@ fn strstreambuf_set_buffer_owned_preserves_adjacent_words_and_flag_bits() {
     }
 }
 
+/// `strstreambuf_set_frozen` — original: `FUN_083da570` @ load address
+/// **0x083da570** (24 bytes, 0x083da570..0x083da584; the next separately
+/// linked function begins at 0x083da588). Whole-image ARM B/BL decoding finds
+/// three direct inbound calls, all unconditional plain `bl` forms at
+/// 0x083d9300, 0x083d953c, and 0x083d956c; there are no predicated `bl`
+/// forms or tail `b` calls.
+///
+/// Sets bit 1 of the strstream buffer's ownership word (word index 4) when
+/// `frozen` is nonzero and clears it when `frozen` is zero, preserving every
+/// other flag bit. The callers freeze after writing and thaw before refilling
+/// the buffer. The raw `movs r2, r1` makes this a zero/nonzero test, rather
+/// than a Rust `bool` ABI; no deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.strstreambuf_set_frozen"))]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_set_frozen(this: *mut u8, frozen: u32) {
+    let ownership = this.cast::<u32>().add(4);
+    let flags = ownership.read();
+    ownership.write(if frozen == 0 { flags & !2 } else { flags | 2 });
+}
+
+/// The frozen-state helper must leave adjacent target words and every
+/// non-frozen flag untouched, while treating every nonzero input as true.
+#[cfg(test)]
+#[test]
+fn strstreambuf_set_frozen_preserves_adjacent_words_and_flag_bits() {
+    #[repr(C)]
+    struct StrstreamBufferOwnership {
+        vtable: u32,
+        mode: u32,
+        buffer: u32,
+        buffer_length: u32,
+        ownership_flags: u32,
+        trailing: [u32; 2],
+    }
+
+    for (initial_flags, frozen, expected_flags) in [
+        (0xffff_fffd, 0, 0xffff_fffd),
+        (0xffff_ffff, 0, 0xffff_fffd),
+        (0xffff_fffd, 1, 0xffff_ffff),
+        (0x1234_5678, 2, 0x1234_567a),
+        (0x8000_0000, u32::MAX, 0x8000_0002),
+    ] {
+        let mut buffer = StrstreamBufferOwnership {
+            vtable: 0xfeed_face,
+            mode: 0xa5a5_a5a5,
+            buffer: 0x1020_3040,
+            buffer_length: 0x5060_7080,
+            ownership_flags: initial_flags,
+            trailing: [0x1122_3344, 0x5566_7788],
+        };
+
+        unsafe { strstreambuf_set_frozen((&mut buffer as *mut StrstreamBufferOwnership).cast(), frozen) };
+
+        assert_eq!(buffer.ownership_flags, expected_flags, "frozen {frozen:#x}");
+        assert_eq!(buffer.vtable, 0xfeed_face);
+        assert_eq!(buffer.mode, 0xa5a5_a5a5);
+        assert_eq!(buffer.buffer, 0x1020_3040);
+        assert_eq!(buffer.buffer_length, 0x5060_7080);
+        assert_eq!(buffer.trailing, [0x1122_3344, 0x5566_7788]);
+    }
+}
+
 /// Target ABI for the stream buffer's virtual underflow callback.
 type StreambufUnderflow = unsafe extern "C" fn(*mut Streambuf) -> i32;
 

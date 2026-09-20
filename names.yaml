@@ -43559,6 +43559,31 @@ functions:
       set this ownership bit after allocating a backing buffer and consult it
       before releasing a replaced allocation. No deviations.
 
+  - address: 0x083da570
+    ghidra: FUN_083da570
+    name: strstreambuf_set_frozen
+    size: 24
+    sig: "void strstreambuf_set_frozen(u8 *this, u32 frozen)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: frozen, uVar1/r1: ownership_flags}
+    renames:
+      FUN_083da570: strstreambuf_set_frozen
+      param_1/r0: this
+      param_2/r1: frozen
+      uVar1/r1: ownership_flags
+    notes: >-
+      Raw ARM fixes the exact 24-byte extent from 0x083da570 through `bx lr`
+      at 0x083da584; the next separately linked function begins at 0x083da588.
+      It loads the ownership word at this + 0x10 and clears bit 1 only when
+      r1 is zero, otherwise setting bit 1 while preserving every other flag.
+      The initial `movs r2, r1` proves a zero/nonzero condition, so the Rust
+      ABI deliberately receives u32 rather than bool. Decoding every ARM B/BL
+      immediate word in osos.dec finds exactly three inbound calls, all plain
+      unconditional bl at 0x083d9300, 0x083d953c, and 0x083d956c; there are no
+      predicated bl forms or tail b sites. The callers clear this frozen bit
+      before refilling the buffer and set it after writing. No deviations.
+
   - address: 0x083da5a8
     ghidra: FUN_083da5a8
     name: streambuf_sgetc
