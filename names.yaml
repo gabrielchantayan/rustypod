@@ -231,6 +231,34 @@ functions:
       2, or 3 for the latter cases. Deliberate deviation: the verified
       behavior of the unported 0x080c850c is inlined because its return value
       is unused by this function, allowing identical host and target behavior.
+  - address: 0x083d8e88
+    ghidra: FUN_083d8e88
+    name: stream_query_result
+    size: 44
+    sig: "void stream_query_result(u32 *result, u8 *stream, u32 arg2, u32 arg3)"
+    module: util/stream_query_result
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: stream
+      param_3/r2: arg2
+      param_4/r3: arg3
+      FUN_08266bc0: stream_query_unported
+      "[stream + 0x30]": stream_query_state
+      "[result + 0x0]": query_value
+      "[result + 0x4]": reserved_zero
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte extent
+      0x083d8e88..0x083d8eb0; 0x083d8eb4 begins the next real function with
+      push {r4,r5,r6,r7,r8,r9,sl,lr}. The body has one plain unconditional
+      BL, to 0x08266bc0, and zero predicated BL instructions. Whole-image A32
+      decoding finds three inbound direct plain BL calls at 0x083d9014,
+      0x083d92b4, and 0x083d93e8; no predicated BL calls target this address.
+      It invokes the unrecovered query with stream + 0x30 and unchanged arg2
+      and arg3, stores its return word, then clears result + 4. Deliberate
+      deviation: target builds preserve all eleven raw ARM instructions while
+      host builds use a query seam, since no semantic identity for 0x08266bc0
+      has been established.
   - address: 0x0813a318
     ghidra: FUN_0813a318
     name: filesystem_kind_is_hfsplus
