@@ -179,11 +179,59 @@ pub unsafe extern "C" fn red_black_tree_advance_cursor(cursor: *mut u32) -> *mut
     cursor
 }
 
+/// Moves `cursor` to the previous node in red-black-tree in-order traversal.
+/// Original: `FUN_083b59b4` @ `0x083b59b4` (84 bytes; 3 direct,
+/// unconditional `bl` callers).
+///
+/// Raw `osos.dec` establishes the 84-byte extent `0x083b59b4..0x083b5a04`;
+/// the next separately linked sibling begins at `0x083b5a08`. Complete aligned
+/// ARM B/BL decoding finds three inbound calls, all plain `bl` at 0x08259b98,
+/// 0x083b8c60, and 0x083b9130; there are no predicated BL calls. The body has
+/// no outbound calls.
+///
+/// A left child selects that subtree's rightmost node. Otherwise the walk
+/// climbs parent links while leaving left-child edges, then selects the first
+/// ancestor reached from a right-child edge. The final left-link comparison
+/// retains the header sentinel. Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `cursor` must be writable and initially contain a valid non-NULL
+/// [`RedBlackTreeNode`] address. Every traversed link must designate a readable
+/// aligned node. This matches the retail function's absence of NULL checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn red_black_tree_decrement_cursor(cursor: *mut u32) -> *mut u32 {
+    let mut current = node_from_word(cursor.read());
+    let mut previous = (*current).left;
+
+    if previous != 0 {
+        loop {
+            cursor.write(previous);
+            current = node_from_word(previous);
+            previous = (*current).right;
+            if previous == 0 {
+                return cursor;
+            }
+        }
+    }
+
+    previous = (*current).parent;
+    while (*node_from_word(previous)).left == cursor.read() {
+        cursor.write(previous);
+        previous = (*node_from_word(previous)).parent;
+    }
+    if (*node_from_word(cursor.read())).left != previous {
+        cursor.write(previous);
+    }
+    cursor
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::{red_black_tree_advance_cursor, red_black_tree_increment, RedBlackTreeNode};
+    use super::{red_black_tree_advance_cursor, red_black_tree_decrement_cursor, red_black_tree_increment, RedBlackTreeNode};
     use core::ptr;
     use std::sync::LazyLock;
 
@@ -200,12 +248,24 @@ mod tests {
         .map(|p| p as usize)
     });
 
+    static DECREMENT_CURSOR_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::RED_BLACK_TREE_DECREMENT_CURSOR,
+            0x1000,
+        )
+        .map(|p| p as usize)
+    });
+
     fn try_slab() -> Option<*mut u8> {
         (*SLAB).map(|p| p as *mut u8)
     }
 
     fn try_advance_cursor_slab() -> Option<*mut u8> {
         (*ADVANCE_CURSOR_SLAB).map(|p| p as *mut u8)
+    }
+
+    fn try_decrement_cursor_slab() -> Option<*mut u8> {
+        (*DECREMENT_CURSOR_SLAB).map(|p| p as *mut u8)
     }
 
     unsafe fn node(base: *mut u8, index: usize) -> *mut RedBlackTreeNode {
@@ -335,6 +395,54 @@ mod tests {
             cursor = maximum as usize as u32;
             let cursor_address = &mut cursor as *mut u32;
             assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, header as usize as u32);
+        }
+    }
+
+    #[test]
+    fn decrement_cursor_returns_its_address_after_all_predecessor_paths() {
+        let Some(base) = try_decrement_cursor_slab() else {
+            crate::testing::note_missing_u32_fixture("red_black_tree_decrement_cursor");
+            return;
+        };
+
+        unsafe {
+            reset(base);
+            let current = node(base, 0);
+            let left = node(base, 1);
+            let rightmost = node(base, 2);
+            initialize(current, ptr::null_mut(), left, ptr::null_mut());
+            initialize(left, current, ptr::null_mut(), rightmost);
+            initialize(rightmost, left, ptr::null_mut(), ptr::null_mut());
+            let mut cursor = current as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_decrement_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, rightmost as usize as u32);
+
+            reset(base);
+            let current = node(base, 0);
+            let parent = node(base, 1);
+            let sibling = node(base, 2);
+            initialize(parent, ptr::null_mut(), sibling, current);
+            initialize(current, parent, ptr::null_mut(), ptr::null_mut());
+            initialize(sibling, parent, ptr::null_mut(), ptr::null_mut());
+            cursor = current as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_decrement_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, parent as usize as u32);
+
+            reset(base);
+            let header = node(base, 0);
+            let root = node(base, 1);
+            let ancestor = node(base, 2);
+            let minimum = node(base, 3);
+            initialize(header, root, minimum, ptr::null_mut());
+            initialize(root, header, ancestor, ptr::null_mut());
+            initialize(ancestor, root, minimum, ptr::null_mut());
+            initialize(minimum, ancestor, ptr::null_mut(), ptr::null_mut());
+            cursor = minimum as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+            assert_eq!(red_black_tree_decrement_cursor(cursor_address), cursor_address);
             assert_eq!(cursor, header as usize as u32);
         }
     }

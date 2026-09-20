@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b59b4
+    ghidra: FUN_083b59b4
+    name: red_black_tree_decrement_cursor
+    size: 84
+    sig: "u32 *red_black_tree_decrement_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: previous
+      iVar2/r2: current
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte body
+      0x083b59b4..0x083b5a04; the next independently linked function begins
+      at 0x083b5a08. Whole-image aligned ARM B/BL decoding finds three inbound
+      plain BL sites at 0x08259b98, 0x083b8c60, and 0x083b9130, with no
+      predicated BL calls; the body has no outbound calls. It advances an
+      in-order red-black-tree cursor to its predecessor: descend through the
+      left subtree's right spine, or climb parent links from left-child edges
+      until a right-child edge (including the header sentinel) is found.
+      Target links remain u32 words to preserve their 32-bit offsets on hosts;
+      deliberate deviations: none.
   - address: 0x083bf424
     ghidra: FUN_083bf424
     name: red_black_tree_word_node_pool_acquire
