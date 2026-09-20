@@ -118,6 +118,15 @@
 //! the established dispatch seam; the shared host test covers root, both
 //! parent-child slots, and the transferred middle subtree. Deliberate
 //! deviations: none.
+//!
+//! `FUN_083b6e0c` at load address `0x083b6e0c` is a separately linked,
+//! semantically identical 84-byte (21-word) right rotation ending in `bx lr`
+//! at `0x083b6e5c`; its separately linked next function begins at `0x083b6e60`.
+//! Complete raw ARM branch decoding finds three unconditional inbound `bl`
+//! calls at `0x083b7158`, `0x083b71d0`, and `0x083b72c4`, with no predicated
+//! `bl` or direct tail-`B` callers. It shares this semantic dispatch seam;
+//! the existing host test covers root and both parent-child-slot rotations,
+//! including the transferred middle subtree. Deliberate deviations: none.
 
 use super::red_black_tree_increment::RedBlackTreeNode;
 
