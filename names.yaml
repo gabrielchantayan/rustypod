@@ -119445,3 +119445,33 @@ functions:
       the original's dead r1=0 checked-new argument is omitted because the
       ported callee takes only size. Host tests cover fresh allocation,
       free-list reuse, payload preservation, and 32-to-64-node growth.
+
+  # --- Red-black-tree cleanup chain prepend (cxx/red_black_tree_node_prepend_and_destroy_payload) ---
+  - address: 0x083cccc4
+    ghidra: FUN_083cccc4
+    name: red_black_tree_node_prepend_and_destroy_payload
+    size: 40
+    sig: "void red_black_tree_node_prepend_and_destroy_payload(u32 *chain, u32 *node, u32 destroy_payload)"
+    module: cxx/red_black_tree_node_prepend_and_destroy_payload
+    status: ported
+    renames:
+      param_1/r0/r5: chain
+      param_2/r1/r4: node
+      param_3/r2: destroy_payload
+      param_1_plus_0x04/r0: chain_head
+      param_2_plus_0x0c/r0: right_link
+      param_2_plus_0x14/r0: payload
+      FUN_0811f548: opaque_tree_vector_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent: ten ARM words from
+      push {r4,r5,r6,lr} at 0x083cccc4 through pop {r4,r5,r6,pc} at
+      0x083ccce8; the next separately linked function begins at 0x083cccec.
+      The body has no plain internal BL instructions and one predicated blne
+      to ported opaque_tree_vector_destruct @ 0x0811f548. Whole-image aligned
+      A32 B/BL-immediate decoding finds exactly three inbound plain BL sites
+      at 0x081f16b0, 0x083cd174, and 0x083cd494, with no predicated inbound
+      calls. It writes the old cleanup-chain head to node+0x0c, conditionally
+      destroys the opaque payload at node+0x14, then publishes node as the
+      new head. No deliberate deviations: target links remain u32 words;
+      match.py reports only LLVM's frame-register substitution and unresolved
+      linked BL target while preserving the operation sequence.
