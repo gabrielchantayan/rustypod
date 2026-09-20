@@ -205,6 +205,7 @@ pub mod ptrmap_put_overflow_cell;
 pub mod read_schema;
 pub mod release_mem_array;
 pub mod schema_to_index;
+pub mod schema_get;
 pub mod two_part_name;
 pub mod select_height;
 pub mod select_dest_init;
