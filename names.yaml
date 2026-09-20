@@ -43947,6 +43947,33 @@ functions:
       ordered, and high-bit u32 edge values. match.py structurally confirms
       the two aligned word loads, unsigned comparison, and 0/1 result; LLVM
       may use a different conditional-result instruction sequence.
+  - address: 0x083d741c
+    ghidra: FUN_083d741c
+    name: less_unsigned_alias_741c
+    size: 24
+    sig: "u32 less_unsigned_alias_741c(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: a
+      param_3/r2: b
+      return/r0: a_is_less_than_b
+    notes: >-
+      Byte-identical `std::less<unsigned>::operator()` instantiation of
+      less_unsigned @ 0x083d7598. Raw osos.dec establishes the exact 24-byte
+      extent: six ARM instructions from ldr r0,[r1] at 0x083d741c through bx
+      lr at 0x083d7430; the separately linked next sibling starts at
+      0x083d7434. It ignores this, dereferences aligned u32 operands without
+      NULL guards, unsigned-compares them, and returns 1 only when *a < *b.
+      Decoding every ARM B/BL-immediate word in osos.dec finds exactly three
+      inbound direct calls, all unconditional plain bl at 0x083bbbe4,
+      0x083bbd08, and 0x083bbdd4; there are no predicated forms, direct tail
+      branches, or aligned raw data-word references. The callers use the
+      predicate for red-black-tree lookup and insertion over node keys at
+      +0x10. A dedicated text section prevents LLVM from folding this
+      independently hookable target. Deliberate deviations: none; host tests
+      cover equal, ordered, and high-bit unsigned values.
   - address: 0x083d7434
     ghidra: FUN_083d7434
     name: less_unsigned_alias_7434
