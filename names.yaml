@@ -39221,6 +39221,27 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- B-tree shared-schema accessor (src/sqlite/btree_schema.rs) ----
+  - address: 0x08371370
+    ghidra: FUN_08371370
+    name: btree_schema
+    size: 16
+    sig: "Schema *btree_schema(Btree *btree)"
+    module: sqlite/btree_schema
+    status: ported
+    vars: {param_1/r0: btree, r0_after_ldr_4: shared_btree, r0_after_ldr_5c: schema}
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeSchema. Raw osos.dec words establish the
+      entire 16-byte body: ldr r0,[r0,#4]; ldr r0,[r0]; ldr
+      r0,[r0,#0x5c]; bx lr. The following push {r3-r9,lr} at 0x08371380
+      begins btree_get_meta, confirming Ghidra's extent. Decoding ARM BL
+      immediates independently finds exactly three inbound direct plain
+      unconditional bl call sites and no predicated calls. The accessor
+      returns Btree.pBt (+0x04)'s BtShared.pSchema (+0x5c) word verbatim;
+      no deviation was introduced. The Rust intermediate remains a u32 to
+      preserve target field offsets on 64-bit hosts; tests map both
+      target-shaped objects below 4 GiB.
+
   # ---- B-tree factory for one attached database (src/sqlite/btree_factory.rs) ----
   - address: 0x0837126c
     ghidra: FUN_0837126c
