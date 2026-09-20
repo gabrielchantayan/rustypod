@@ -120714,3 +120714,27 @@ functions:
       returns one. Deliberate deviation: 0x082b14e8 has no established
       identity or Rust port, so target builds call its verified retail address
       while host tests install a byte-list-predicate seam.
+
+  - address: 0x0839683c
+    ghidra: FUN_0839683c
+    name: utf16_utf8_byte_len
+    size: 120
+    sig: "u32 utf16_utf8_byte_len(const u16 *units, u32 byte_len, u32 unused, u32 flags)"
+    module: util/utf16_utf8_byte_len
+    status: ported
+    vars:
+      param_1: units
+      param_2: byte_len
+      param_3: unused
+      param_4: flags
+    notes: >-
+      Counts UTF-8 output bytes independently for byte_len >> 1 UTF-16 code
+      units: 0 and units >= 0x800 count three, units < 0x80 count one, and
+      the remaining units count two. flags & 1 selects bswap16 (0x0805dd48)
+      before classification; it does not recognize surrogate pairs or stop
+      at NUL. Raw osos.dec words establish the 120-byte extent ending in pop
+      {r4-r8,pc} at 0x083968b0 and next function at 0x083968b4. Three direct
+      inbound bl callers are unconditional; none are predicated. The body
+      has one predicated outbound blne to bswap16 and no plain bl. The
+      apparent r6/'/' handling branch is dead because r6 is initialized to
+      zero and never written.
