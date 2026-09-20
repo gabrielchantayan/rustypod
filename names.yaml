@@ -2107,6 +2107,32 @@ functions:
       destruct before string release), the return-minus-four release
       argument, and the final slot store. Raw disassembly: osos.dec
       0x083c4de0; match.py structural review recorded.
+  # --- Event-list tree record slot link ---
+  - address: 0x083c1648
+    ghidra: FUN_083c1648
+    name: event_list_tree_record_link
+    size: 64
+    sig: "void event_list_tree_record_link(u8 *owner, u8 *record, i32 teardown)"
+    module: cxx/event_list_tree_record_link
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: record
+      param_3/r2: teardown
+      FUN_083e2558: cxx_string_vector_destruct
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: 16 ARM words from
+      stmdb sp!, {r4,r5,r6,lr} at 0x083c1648 through ldmia sp!, {r4,r5,r6,pc}
+      at 0x083c1684; the next independently linked function starts at
+      0x083c1688. The owner +4 slot is chained into record +0xc unconditionally.
+      A nonzero teardown destructs the embedded CxxStringVector at +0x18 through
+      FUN_083e2558, then releases COW string slots recovered as the returned
+      vector pointer minus four and minus eight through cxx_string_release at
+      0x083d8b04. Raw-word decoding finds exactly three unconditional bl
+      instructions and no predicated calls. Ghidra identifies three direct bl
+      call sites. Deliberate deviations: none; LLVM
+      may fold return-relative release addresses to record-relative addresses.
   # --- C++ red-black-tree right rotation ---
   - address: 0x083c4e68
     ghidra: FUN_083c4e68
