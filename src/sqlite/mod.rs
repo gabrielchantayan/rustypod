@@ -106,6 +106,7 @@ pub mod date_time_parse_clear_flags;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error;
+pub mod error_message;
 pub mod close;
 pub mod exec_first_column_sql;
 pub mod execute_sql;
