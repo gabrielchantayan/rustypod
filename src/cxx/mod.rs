@@ -248,6 +248,7 @@ pub mod equal_key_tree_clear;
 pub mod u32_map_value_slot;
 pub mod element_registry_slot_for_key;
 pub mod word_table_index_pair;
+pub mod word_table_index_pair_at;
 pub mod red_black_tree_increment;
 pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;

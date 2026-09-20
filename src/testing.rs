@@ -181,6 +181,9 @@ pub mod hints {
     // 0x7e50_0000: dedicated to cxx/word_table_index_pair's target-width
     // descriptor and word-table fixture; mappings never unmap.
     pub const WORD_TABLE_INDEX_PAIR: usize = 0x7e50_0000;
+    // 0x7e40_0000: dedicated to cxx/word_table_index_pair_at's target-width
+    // descriptor and word-table fixture; mappings never unmap.
+    pub const WORD_TABLE_INDEX_PAIR_AT: usize = 0x7e40_0000;
     pub const OBSERVABLE_ARRAY: usize = 0x1400_0000;
     pub const OBSERVABLE_ARRAY_DRAIN: usize = 0x1500_0000;
     pub const EVENT_SOURCE_DESTRUCT: usize = 0x1600_0000;
