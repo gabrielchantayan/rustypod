@@ -43346,6 +43346,33 @@ functions:
       strb + four str-zero shape; the diff is LLVM's fp frame and
       register allocation.
 
+  - address: 0x08382d18
+    ghidra: FUN_08382d18
+    name: sqlite3_schema_get
+    size: 192
+    sig: "Schema *sqlite3_schema_get(sqlite3 *db, Btree *pBt)"
+    module: sqlite/schema_get
+    status: ported
+    vars:
+      param_1: db
+      param_2: btree
+      iVar3: schema
+      iVar4: shared_btree
+    notes: >-
+      Raw osos.dec verifies the 192-byte extent
+      0x08382d18..0x08382dd8: the literal at +0xc0 is not code and the
+      next real function starts at 0x08382ddc. The body has seven
+      unconditional plain bl instructions and no predicated bl: btree_enter
+      @ 0x0837118c, sqlite3_malloc_zero @ 0x0837d38c, btree_leave @
+      0x08371da4, and hash_init @ 0x0837ade8 four times. SQLite 3.5's
+      sqlite3SchemaGet reuses pBt->pBt->pSchema or allocates a 100-byte
+      Schema, stores literal 0x08377d80 as its schema-free callback, and
+      initializes tblHash/idxHash/trigHash/fkeyHash at +0x04/+0x18/+0x2c/
+      +0x40 as string hashes (only fkeyHash has copyKey=1) when fileFormat
+      at +0x58 is zero; +0x59 becomes encoding 1. Allocation failure sets
+      db->mallocFailed at +0x1e. Deliberate deviation: the callback remains
+      a target-width literal and allocation uses sqlite3_malloc_zero's
+      established host allocator seam.
   - address: 0x08382ddc
     ghidra: FUN_08382ddc
     name: schema_to_index

@@ -39,6 +39,9 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
+    // shared-cache, and Schema fixture; mappings never unmap.
+    pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;
     // 0x7ea0_0000 / 0x7eb0_0000: dedicated to
     // cxx/opaque_observable_array_destroy's target-width derived object
     // fixtures; mappings never unmap, so no other user may share either hint.
