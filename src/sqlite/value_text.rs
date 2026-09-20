@@ -337,11 +337,38 @@ pub unsafe extern "C" fn sqlite3_value_text(value: *mut u8) -> *mut u8 {
     sqlite_value_text(value, SQLITE_UTF8)
 }
 
+/// sqlite3_value_text16 — original: `FUN_083917a4` @ 0x083917a4
+/// (28 bytes, 0x083917a4..0x083917c0; 3 plain `bl` call sites, no
+/// predicated `bl` or tail-branch callers).
+///
+/// Select SQLite's native UTF-16 encoding from the firmware's byte-order
+/// flag at 0x088fa948, then tail-branch to [`sqlite_value_text`]. A nonzero
+/// flag selects UTF-16LE (2); zero selects UTF-16BE (3). The host model is
+/// deliberately fixed to UTF-16LE, the iPod Classic's native byte order.
+///
+/// # Safety
+/// Same contract as [`sqlite_value_text`]: `value`, when non-NULL, must name
+/// a live 0x28-byte `Mem` whose flags may be rewritten by dispatched callees.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite3_value_text16(value: *mut u8) -> *mut u8 {
+    #[cfg(target_os = "none")]
+    let encoding = if core::ptr::read_volatile(0x088f_a948 as *const u8) != 0 {
+        2
+    } else {
+        3
+    };
+    #[cfg(not(target_os = "none"))]
+    let encoding = 2;
+
+    sqlite_value_text(value, encoding)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
     use std::vec::Vec;
 
     /// Serializes the dispatch-slot swaps (the `sqlite/expr_new.rs`
@@ -597,7 +624,7 @@ mod tests {
 
     #[test]
     fn a_null_value_returns_null_without_touching_anything() {
-        let _guard = SLOT_LOCK.lock().unwrap();
+        let _guard = SLOT_LOCK.lock();
         for enc in [1u8, 2, 3, 9, 10, 11] {
             unsafe {
                 with_recorders(SQLITE_OK, true, true, || {
@@ -614,7 +641,7 @@ mod tests {
 
     #[test]
     fn the_flag_and_encoding_matrix_matches_the_reference_model() {
-        let _guard = SLOT_LOCK.lock().unwrap();
+        let _guard = SLOT_LOCK.lock();
         let flag_shapes = [
             ("null", MEM_NULL),
             ("str+term", MEM_STR | MEM_TERM),
@@ -675,7 +702,7 @@ mod tests {
 
     #[test]
     fn unported_callee_defaults_reproduce_the_documented_end_states() {
-        let _guard = SLOT_LOCK.lock().unwrap();
+        let _guard = SLOT_LOCK.lock();
         unsafe {
             // No recorders: the shipped stubs are in place. A string
             // already in the requested encoding needs no recode, so
@@ -709,7 +736,7 @@ mod tests {
 
     #[test]
     fn the_api_wrapper_forwards_utf8_unchanged_value_and_result() {
-        let _guard = SLOT_LOCK.lock().unwrap();
+        let _guard = SLOT_LOCK.lock();
         unsafe {
             with_recorders(SQLITE_OK, true, true, || {
                 // The recode path: ChangeEncoding receives SQLITE_UTF8
@@ -740,6 +767,31 @@ mod tests {
             with_recorders(SQLITE_OK, true, true, || {
                 assert_eq!(
                     sqlite3_value_text(core::ptr::null_mut()),
+                    core::ptr::null_mut(),
+                );
+                assert!(calls().is_empty());
+            });
+        }
+    }
+
+    #[test]
+    fn the_utf16_api_wrapper_forwards_native_little_endian() {
+        let _guard = SLOT_LOCK.lock();
+        unsafe {
+            with_recorders(SQLITE_OK, true, true, || {
+                let mut mem = TestMem::new(MEM_STR | MEM_TERM, 3, false);
+                let z = mem.z();
+                assert_eq!(sqlite3_value_text16(mem.ptr()), z);
+                assert_eq!(
+                    calls(),
+                    [Call::ChangeEncoding(2), Call::NulTerminate],
+                    "the iPod's native-endian wrapper must request UTF-16LE",
+                );
+            });
+
+            with_recorders(SQLITE_OK, true, true, || {
+                assert_eq!(
+                    sqlite3_value_text16(core::ptr::null_mut()),
                     core::ptr::null_mut(),
                 );
                 assert!(calls().is_empty());

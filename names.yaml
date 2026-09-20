@@ -81119,6 +81119,33 @@ functions:
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
 
+  - address: 0x083917a4
+    ghidra: FUN_083917a4
+    name: sqlite3_value_text16
+    size: 28
+    sig: "const void *sqlite3_value_text16(sqlite3_value *value)"
+    module: sqlite/value_text
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_083917bc: "native UTF-16 byte-order flag at 0x088fa948"
+      r1: encoding
+    notes: >-
+      SQLite 3.5.9's sqlite3_value_text16 public API wrapper. Raw words
+      e59f1010 e5d11000 e3510000 13a01002 03a01003 eaffd3d6 and the
+      next sibling entry at 0x083917c0 establish the true 28-byte extent
+      0x083917a4..0x083917c0, including the literal at 0x083917bc.
+      The byte-order flag selects UTF-16LE (2) when nonzero and UTF-16BE
+      (3) otherwise, then tail-branches to sqlite_value_text @ 0x08386718
+      with r0 untouched. An independent whole-image ARM branch decode finds
+      exactly 3 direct callers, all plain unconditional BL
+      (0x0838fb14, 0x083902f0, 0x08390324), with zero predicated BL or B
+      references. No deliberate target deviation: the port volatile-reads
+      the same flag. The host model deliberately fixes UTF-16LE, the iPod
+      Classic's native byte order; tests prove its recode request, result
+      forwarding, and NULL short-circuit. match.py confirms the
+      literal-load/test/select/tail-forward structure; LLVM may add a frame.
+
   - address: 0x083917d8
     ghidra: FUN_083917d8
     name: sqlite_vfs_find
