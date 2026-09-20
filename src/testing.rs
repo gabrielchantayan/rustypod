@@ -181,6 +181,11 @@ pub mod hints {
     // 0x6b00_0000: dedicated to cxx/owner_callback_dispatch's target-width
     // owner, object, and queued-word-copy fixture; mappings never unmap.
     pub const OWNER_CALLBACK_DISPATCH: usize = 0x6b00_0000;
+    // 0x6e20_0000 / 0x6e30_0000: dedicated to
+    // app/global_transition_callback_dispatch's target-width global-state
+    // fixtures; mappings never unmap.
+    pub const GLOBAL_TRANSITION_CALLBACK_DISPATCH: usize = 0x6e20_0000;
+    pub const GLOBAL_TRANSITION_CALLBACK_DISPATCH_NO_MUTEX: usize = 0x6e30_0000;
     pub const CLIENT_POPULATE: usize = 0x0b00_0000;
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;
