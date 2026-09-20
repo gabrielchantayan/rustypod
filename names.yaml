@@ -1,5 +1,4 @@
 # names.yaml — knowledge base for the retailOS Rust port.
-#
 # Maps osos load addresses to semantic names, signatures, variable renames
 # and notes. Addresses are load addresses (base 0x08000000); file offset in
 # osos.dec = address - 0x08000000. Sizes from Ghidra (decomp/functions.csv)
@@ -110200,6 +110199,30 @@ functions:
       The Rust port inlines those verified unported helper algorithms instead
       of creating seams; host tests cover empty, absent, edge, and middle runs.
 
+  - address: 0x083d7338
+    ghidra: FUN_083d7338
+    name: word_slot_equal
+    size: 24
+    sig: "bool word_slot_equal(const u32 *left, const u32 *right)"
+    module: cxx/word_slot_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      return/r0: equal
+      "[left + 0x0]": left_word
+      "[right + 0x0]": right_word
+    notes: >-
+      Raw osos.dec words e5900000, e5911000, e1500001, 13a00000,
+      03a00001, and e1a0f00e establish the exact 24-byte body
+      0x083d7338..0x083d734f; push {lr} at 0x083d7350 begins the next real
+      function. It loads one aligned word from each opaque slot and returns
+      one only when they are equal, without dereferencing either word or
+      mutating either slot. There are no outgoing BL instructions. Independent
+      whole-image A32 decoding finds three inbound plain BL calls and no
+      predicated BL calls. No deliberate deviations; match.py reports the
+      same two loads and equality result, with LLVM using sub/clz/lsr rather
+      than conditional moves.
   # --- indexed virtual result word ---
   - address: 0x083d6c2c
     ghidra: FUN_083d6c2c
