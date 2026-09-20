@@ -35,14 +35,9 @@
 //!   `sqlite3BtreeSetCacheSize` @ `0x08372cb8` as `(*pp_btree, n_cache)`.
 //!   The open status is returned either way.
 //!
-//! Deliberate deviation: both callees are unported stock functions, so all
-//! calls ride the [`BTREE_FACTORY_OPS`] dispatch seam (the house pattern —
-//! `sqlite/begin_write_operation.rs`). The wired default open fails with
-//! `SQLITE_CANTOPEN` (14) without touching `pp_btree`: the factory then
-//! propagates the failure and never reaches the cache-size call, which is
-//! the same end state the original reaches when the real
-//! `sqlite3BtreeOpen` itself fails. No default invents a B-tree. Host
-//! tests substitute the slots to observe exact arguments and order.
+/// Deliberate deviation: `sqlite3BtreeOpen` remains unported, so that call
+/// rides [`BTREE_FACTORY_OPS`]. Cache sizing is now the direct
+/// [`super::btree_set_cache_size::btree_set_cache_size`] port.
 
 /// `SQLITE_NoReadlock` — the `sqlite3.flags` bit that maps to
 /// `BTREE_NO_READLOCK`.
@@ -95,20 +90,12 @@ const _: () = {
 type BtreeOpen =
     unsafe extern "C" fn(*const u8, *const Connection, *mut *mut u8, u32, u32) -> u32;
 
-/// `sqlite3BtreeSetCacheSize` @ `0x08372cb8` (UNPORTED): clamp and latch
-/// the page-cache size (identity verified from its decompilation:
-/// enter, `max(n_cache, 10)` into the shared cache size, leave, 0).
-type BtreeSetCacheSize = unsafe extern "C" fn(*mut u8, i32) -> u32;
-
-/// Indirect dispatch for the original's two unported callees, kept
-/// behind a table so host tests can observe the calls' arguments and
-/// order (the house pattern — `sqlite/begin_write_operation.rs`).
+/// Indirect dispatch for the one unported `sqlite3BtreeOpen` callee. Host
+/// tests replace this slot to observe its arguments.
 #[derive(Clone, Copy)]
 pub struct BtreeFactoryOps {
     /// `sqlite3BtreeOpen` @ `0x083723a8` (UNPORTED).
     pub btree_open: BtreeOpen,
-    /// `sqlite3BtreeSetCacheSize` @ `0x08372cb8` (UNPORTED).
-    pub btree_set_cache_size: BtreeSetCacheSize,
 }
 
 /// Stand-in for the unported `sqlite3BtreeOpen`: fail with
@@ -125,23 +112,15 @@ unsafe extern "C" fn unavailable_btree_open(
     SQLITE_CANTOPEN
 }
 
-/// Stand-in for the unported `sqlite3BtreeSetCacheSize`: unreachable
-/// behind the default open (which always fails), but reports success if
-/// a test wires it without wiring the open.
-unsafe extern "C" fn unavailable_btree_set_cache_size(_btree: *mut u8, _n_cache: i32) -> u32 {
-    0
-}
-
-/// Wired default for [`BTREE_FACTORY_OPS`]: the failing-open stand-in
-/// and the unreachable cache-size stand-in, on both target and host,
-/// until `sqlite3BtreeOpen` is ported for real.
+/// Wired default for [`BTREE_FACTORY_OPS`]: fail open until
+/// `sqlite3BtreeOpen` is ported.
 pub const DEFAULT_BTREE_FACTORY_OPS: BtreeFactoryOps = BtreeFactoryOps {
     btree_open: unavailable_btree_open,
-    btree_set_cache_size: unavailable_btree_set_cache_size,
 };
 
-/// Active models of the original's two unported callees. Host tests
-/// replace the slots to observe the exact arguments.
+
+/// Active model of the original's unported open call. Host tests replace the
+/// slot to observe its exact arguments.
 pub static mut BTREE_FACTORY_OPS: BtreeFactoryOps = DEFAULT_BTREE_FACTORY_OPS;
 
 /// Reads the dispatch table. Volatile so LLVM cannot constant-fold the
@@ -194,7 +173,7 @@ pub unsafe extern "C" fn btree_factory(
     let ops = ops();
     let status = (ops.btree_open)(filename, db, pp_btree, btree_flags, flags);
     if status == 0 {
-        (ops.btree_set_cache_size)(*pp_btree, n_cache);
+        super::btree_set_cache_size::btree_set_cache_size(*pp_btree, n_cache);
     }
     status
 }
@@ -202,9 +181,10 @@ pub unsafe extern "C" fn btree_factory(
 #[cfg(test)]
 mod tests {
     extern crate std;
-
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex, MutexGuard};
     use std::vec::Vec;
 
     /// Serializes tests that swap the dispatch slots: the seams are
@@ -217,15 +197,27 @@ mod tests {
     static mut OPEN_FILENAME_ID: Vec<u8> = Vec::new();
     /// The db pointer each open saw.
     static mut OPEN_DB_NULL: bool = false;
-    /// Every `(btree-null, n_cache)` the recording cache-size call saw.
-    static mut CACHE_CALLS: Vec<i32> = Vec::new();
     /// What the recording open returns.
     static mut OPEN_STATUS: u32 = 0;
-    /// Whether the recording open writes a fake B-tree into `pp_btree`.
+    /// Whether the recording open writes a B-tree fixture into `pp_btree`.
     static mut OPEN_INSTALLS_BTREE: bool = false;
 
     static FILENAME_A: [u8; 4] = *b"fa\0\0";
     static FILENAME_EMPTY: [u8; 1] = [0];
+
+    static FACTORY_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::SQLITE_BTREE_FACTORY, 0x1000).map(|pointer| pointer as usize)
+    });
+
+    unsafe fn fixture_btree() -> *mut u8 {
+        let Some(base) = *FACTORY_FIXTURE else {
+            panic!("{}", note_missing_u32_fixture("sqlite/btree_factory"));
+        };
+        let base = base as *mut u8;
+        base.write_bytes(0, 0x1000);
+        base.add(4).cast::<u32>().write(base.add(0x100) as u32);
+        base
+    }
 
     unsafe extern "C" fn recording_btree_open(
         filename: *const u8,
@@ -248,17 +240,11 @@ mod tests {
             9
         });
         if OPEN_INSTALLS_BTREE {
-            static mut FAKE_BTREE: u32 = 0;
-            *pp_btree = core::ptr::addr_of_mut!(FAKE_BTREE).cast();
+            *pp_btree = fixture_btree();
         }
         OPEN_STATUS
     }
 
-    unsafe extern "C" fn recording_btree_set_cache_size(btree: *mut u8, n_cache: i32) -> u32 {
-        assert!(!btree.is_null(), "cache size runs on the opened B-tree");
-        CACHE_CALLS.push(n_cache);
-        0
-    }
 
     struct Bench {
         _guard: MutexGuard<'static, ()>,
@@ -280,7 +266,6 @@ mod tests {
         unsafe {
             OPEN_CALLS.clear();
             OPEN_FILENAME_ID.clear();
-            CACHE_CALLS.clear();
             OPEN_DB_NULL = false;
             OPEN_STATUS = open_status;
             OPEN_INSTALLS_BTREE = installs_btree;
@@ -288,7 +273,6 @@ mod tests {
                 core::ptr::addr_of_mut!(BTREE_FACTORY_OPS),
                 BtreeFactoryOps {
                     btree_open: recording_btree_open,
-                    btree_set_cache_size: recording_btree_set_cache_size,
                 },
             );
         }
@@ -319,7 +303,14 @@ mod tests {
             assert_eq!(OPEN_CALLS.as_slice(), &[(0, 0x4)]);
             assert_eq!(OPEN_FILENAME_ID.as_slice(), &[1]);
             assert!(!OPEN_DB_NULL);
-            assert_eq!(CACHE_CALLS.as_slice(), &[2000], "cache size on success");
+            assert_eq!(
+                (out.add(4).cast::<u32>().read() as usize as *const u8)
+                    .add(0x4c)
+                    .cast::<i32>()
+                    .read(),
+                2000,
+                "cache size latches on success"
+            );
         }
         assert!(!out.is_null(), "open installed the B-tree");
     }
@@ -433,9 +424,7 @@ mod tests {
         };
 
         assert_eq!(status, 14, "open status returned verbatim");
-        unsafe {
-            assert!(CACHE_CALLS.is_empty(), "no cache-size call on failure");
-        }
+            assert!(out.is_null(), "open failure does not install a B-tree");
     }
 
     #[test]

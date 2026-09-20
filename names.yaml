@@ -39247,17 +39247,39 @@ functions:
       empty. Then sqlite3BtreeOpen @ 0x083723a8 runs as (filename,
       db, pp_btree, btree_flags, flags) with flags stacked, and on
       SQLITE_OK the predicated bleq runs sqlite3BtreeSetCacheSize @
-      0x08372cb8 as (*pp_btree, n_cache). Both callees are UNPORTED
-      (no ledger entries; identities verified from their
-      decompilations - 0x08372cb8 is enter/max(n,10)-latch/leave) and
-      ride the BTREE_FACTORY_OPS seam; the wired default open fails
-      with SQLITE_CANTOPEN (14) and leaves pp_btree untouched, so the
-      factory propagates the failure and never invents a B-tree -
-      the same end state the original reaches when the real open
-      fails. match.py shows the expected deviations: blx through the
-      two seam slots, LLVM frame setup, and LLVM folding the flag
-      rewrite to bic #768/orr #512, semantically identical to the
-      original's bic #0x100/orr #0x200.
+      0x08372cb8 as (*pp_btree, n_cache). sqlite3BtreeOpen remains
+      unported and rides the BTREE_FACTORY_OPS seam; the wired default
+      fails with SQLITE_CANTOPEN (14) and leaves pp_btree untouched, so
+      the factory propagates the failure and never invents a B-tree - the
+      same end state the original reaches when the real open fails.
+      sqlite3BtreeSetCacheSize is now a direct Rust call. match.py shows
+      the expected LLVM frame setup and folding of the flag rewrite to
+      bic #768/orr #512, semantically identical to the original's
+      bic #0x100/orr #0x200.
+
+  # ---- B-tree shared-cache sizing (src/sqlite/btree_set_cache_size.rs) ----
+  - address: 0x08372cb8
+    ghidra: FUN_08372cb8
+    name: btree_set_cache_size
+    size: 48
+    sig: "u32 btree_set_cache_size(Btree *btree, int n_cache)"
+    module: sqlite/btree_set_cache_size
+    status: ported
+    vars: {param_1/r0: btree, param_2/r1: n_cache, piVar1/r3: shared_cache}
+    notes: >-
+      SQLite 3.5.x's sqlite3BtreeSetCacheSize. Raw osos.dec words establish
+      the 48-byte extent 0x08372cb8..0x08372ce8: push {r4,lr} starts the
+      body, pop {r4,pc} is at 0x08372ce4, and the next distinct function
+      starts push {r4,r5,r6,r7,lr} at 0x08372ce8. Ghidra identifies three
+      direct BL call sites. The body contains two unconditional internal bl:
+      btree_enter @ 0x0837118c and btree_leave @ 0x08371da4; raw-word
+      decoding finds no predicated BL in the body. It enters the Btree,
+      stores max(n_cache,10) at the BtShared cache-size word +0x4c, leaves,
+      and returns SQLITE_OK. Btree.pBt stays a target-width u32 field so
+      host pointer width cannot change the retail +0x04 layout; host tests
+      map the Btree/BtShared fixture below 4 GiB at dedicated hint
+      0x6a10_0000. match.py shows LLVM's expected wider frame and register
+      allocation while preserving enter, clamp/store, leave order.
 
   # ---- Column default-value attachment (src/sqlite/column_default.rs) ----
   - address: 0x0837354c
