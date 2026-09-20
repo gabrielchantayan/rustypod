@@ -35926,6 +35926,29 @@ functions:
       stock ordering. The target section prevents linker folding with a
       byte-identical constructor sibling.
 
+  - address: 0x0839ef54
+    ghidra: FUN_0839ef54
+    name: refcounted_ptr_assign_owned_variant
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_assign_owned_variant(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1/r4: src
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent 0x0839ef54..0x0839ef84:
+      the final instruction is bx lr at 0x0839ef80 and the next separately
+      linked function begins at 0x0839ef84. An independent scan of every A32
+      BL word in osos.dec finds three direct callers, all unconditional at
+      0x081332d4, 0x08133bb8, and 0x08133fa4; no predicated BL callers. The
+      C++ owning copy assignment compares dst and src slot addresses, then on
+      inequality releases the old dst body through 0x0839cf4c and only then
+      loads *src and attaches it through 0x0839cf10, returning dst. The source
+      load ordering is significant. The port composes already ported semantic
+      equivalents refcounted_body_release_owned_variant and
+      refcounted_body_attach; no other deliberate deviations.
+
   - address: 0x0839f100
     ghidra: FUN_0839f100
     name: refcounted_ptr_copy_construct_slot1
