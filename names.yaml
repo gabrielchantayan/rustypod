@@ -39300,6 +39300,30 @@ functions:
       change_p4(-1, value, -8); the diff is the crate fp frame, the
       out-slot pre-initialization, and the blx seam dispatch.
 
+  # ---- Expression affinity comparison (src/sqlite/expr_compare_affinity.rs) ----
+  - address: 0x083735b8
+    ghidra: FUN_083735b8
+    name: expr_compare_affinity
+    size: 68
+    sig: "u8 expr_compare_affinity(Expr *left, u8 right_affinity)"
+    module: sqlite/expr_compare_affinity
+    status: ported
+    renames:
+      param_1: left
+      param_2: right_affinity
+      FUN_083768e0: expr_affinity
+    notes: >-
+      SQLite 3.5.9 sqlite3CompareAffinity. Raw words at
+      0x083735b8..0x083735f8 establish the 68-byte extent: pop {r4,pc}
+      ends at 0x083735f8 and the next independent push begins at
+      0x083735fc. It has three direct inbound bl call sites, all
+      unconditional; the body has one plain
+      bl to sqlite3ExprAffinity @ 0x083768e0 and zero predicated bl.
+      If either affinity is zero, it returns the other, or SQLITE_AFF_NONE
+      (98) if both are zero. Otherwise any affinity >= SQLITE_AFF_NUMERIC
+      (99) yields numeric; only matching text/blob-range affinities retain
+      none. Raw condition codes and returned values were preserved; no
+      deliberate deviations.
   # ---- Schema-cookie verification marker (deferred) ----
   - address: 0x083734bc
     ghidra: FUN_083734bc

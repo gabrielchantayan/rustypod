@@ -121,6 +121,7 @@ pub mod expire_prepared_statements;
 pub mod expr_affinity;
 pub mod expr_and;
 pub mod expr_coll_seq;
+pub mod expr_compare_affinity;
 pub mod expr_code;
 pub mod expr_code_and_cache;
 pub mod expr_code_compare;
