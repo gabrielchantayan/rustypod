@@ -69,6 +69,15 @@
 //! links from right-child edges, preserving the header sentinel. The
 //! byte-identical body deliberately reuses this dispatch seam and shared host
 //! tests; deliberate deviations: none.
+//!
+//! `FUN_083b55bc` at load address `0x083b55bc` is a byte-identical, 84-byte
+//! (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
+//! `0x083b560c`; the next separately linked sibling begins at `0x083b5610`.
+//! Raw full-image A32 branch decoding establishes three inbound plain `bl`
+//! calls and zero predicated `bl` calls; the body has no calls. It returns the
+//! cursor address unchanged while advancing its target-width node word to the
+//! in-order successor. This exact duplicate deliberately reuses the exported
+//! `red_black_tree_advance_cursor` seam and its host tests; no deviations.
 
 
 /// Base node layout used by the C++ red-black tree implementation.
