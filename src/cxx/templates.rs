@@ -105,6 +105,7 @@
 //! with the **source in r2**, and it exists exactly once.
 
 use crate::cxx::handle::{refcounted_body_attach, RefcountedBody};
+use crate::app::scoped_context::scoped_context_destroy;
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{
     string_object_assign, string_object_copy_construct, string_object_destroy, StringObject,
@@ -6093,6 +6094,54 @@ pub unsafe extern "C" fn container_delete_enabled_elements(
     }
 }
 
+/// scoped_context_container_delete_enabled_elements — original:
+/// `FUN_083d10b8` @ `0x083d10b8` (76 bytes; Ghidra reports 76).
+///
+/// Raw `osos.dec` establishes the full 19-word extent from `push
+/// {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}` at `0x083d1100`; the next
+/// independently linked function begins at `0x083d1104`. The body contains
+/// three plain direct `bl` calls — `container_element_at_alias_6a68`,
+/// `scoped_context_destroy`, and `operator_delete` — and no predicated `bl`
+/// calls.
+///
+/// When `delete_enabled` is nonzero, walks signed indices from zero while
+/// less than `count`. Each indexed container element is a ScopedContext:
+/// destroy its no-op body, then tag-2-delete the same element pointer. A
+/// disabled flag or nonpositive count performs no access.
+///
+/// Deliberate deviation: the three verified ported callees are ordinary Rust
+/// calls rather than ARM `bl` instructions. `scoped_context_destroy` is
+/// explicitly followed by `operator_delete(element)` because its recovered
+/// void ABI does not promise the original's incidental r0 pass-through.
+///
+/// # Safety
+///
+/// `container` must point to a readable target-layout head. When enabled with
+/// a positive count, its vtable and selected element slots must satisfy
+/// [`container_element_at_alias_6a68`]'s contract; every element must be a
+/// valid [`ScopedContext`] allocation accepted by
+/// [`crate::heap::veneers::operator_delete`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.scoped_context_container_delete_enabled_elements")]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_container_delete_enabled_elements(
+    container: *mut ContainerDeleteEnabledElements,
+) {
+    if (*container).delete_enabled == 0 {
+        return;
+    }
+    let count = (*container).count;
+    let mut index = 0;
+    while index < count {
+        let element = container_element_at_alias_6a68(container.cast(), index as usize);
+        if !element.is_null() {
+            scoped_context_destroy(element.cast());
+            crate::heap::veneers::operator_delete(element);
+        }
+        index += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -12013,6 +12062,34 @@ mod tests {
             fixture.container.delete_enabled = 1;
             fixture.container.count = -1;
             container_delete_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
+        }
+    }
+
+    #[test]
+    fn scoped_context_delete_enabled_elements_obeys_flag_and_signed_count() {
+        unsafe {
+            let vtable = [delete_enabled_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut fixture = DeleteEnabledFixture {
+                container: ContainerDeleteEnabledElements {
+                    vtable: vtable.as_ptr(),
+                    count: 3,
+                    _unknown_08: 0,
+                    _unknown_0c: 0,
+                    delete_enabled: 1,
+                },
+                elements: [core::ptr::null_mut(); 3],
+                calls: 0,
+            };
+
+            scoped_context_container_delete_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "every index below count is retrieved");
+
+            fixture.container.delete_enabled = 0;
+            scoped_context_container_delete_enabled_elements(&mut fixture.container);
+            fixture.container.delete_enabled = 1;
+            fixture.container.count = -1;
+            scoped_context_container_delete_enabled_elements(&mut fixture.container);
             assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
         }
     }

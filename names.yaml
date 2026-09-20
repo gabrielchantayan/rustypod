@@ -119162,3 +119162,28 @@ functions:
       verified semantic identity, so target-width layout and explicit seams
       preserve their observed contracts; host tests model the target virtual
       slot with a seam because native function pointers widen.
+  - address: 0x083d10b8
+    ghidra: FUN_083d10b8
+    name: scoped_context_container_delete_enabled_elements
+    size: 76
+    sig: "void scoped_context_container_delete_enabled_elements(ContainerDeleteEnabledElements *container)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r0/r6: container, param_1_plus_0x04/r5: count, param_1_plus_0x10/r0: delete_enabled, iVar1/r4: index, FUN_083d6a68: container_element_at_alias_6a68, FUN_08270414: scoped_context_destroy, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: nineteen ARM words
+      from push {r4,r5,r6,lr} at 0x083d10b8 through pop {r4,r5,r6,pc} at
+      0x083d1100; the next independently linked function begins at 0x083d1104.
+      Its three direct calls are all plain unconditional BL instructions:
+      container_element_at_alias_6a68 at 0x083d10e0, scoped_context_destroy at
+      0x083d10ec, and operator_delete at 0x083d10f0; there are no predicated
+      BL calls. The enabled byte at +0x10 gates a signed 0..count walk. Each
+      iteration obtains an element from the vtable +0x40 accessor, invokes the
+      element's no-op ScopedContext destructor, then deletes that same pointer
+      with tag 2. The three inbound plain BL calls are 0x0812f6f8, 0x083d114c,
+      and 0x083d1178; no predicated direct call reaches the entry. Ghidra
+      wrongly drops the index argument of FUN_083d6a68 and marks operator_delete
+      non-returning. Host tests cover every enabled index plus disabled and
+      negative-count guards; the Rust body deliberately passes the saved element
+      explicitly to delete because the recovered void destructor ABI does not
+      promise the stock r0 pass-through.
