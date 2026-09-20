@@ -90,6 +90,28 @@ pub unsafe extern "C" fn read_u32_le_at(base: *const u8, offset: u32) -> u32 {
         | ((*p.add(3) as u32) << 24)
 }
 
+/// store_u32_le_at — original: `FUN_0839e7c4` @ 0x0839e7c4 (36 bytes).
+///
+/// Writes `value` as four unaligned little-endian bytes at `base + offset`.
+/// Raw ARM establishes the exact extent 0x0839e7c4..0x0839e7e8: `strb`
+/// byte 0 at the register-indexed address, advances r0 by `offset`, then
+/// stores bytes 1..3 at fixed offsets and returns with `bx lr`. Three plain
+/// `bl` callers (0x081609b4/0x081609c4/0x081609ec), no predicated `bl`
+/// callers. Deliberate deviations: volatile stores preserve the observed ARM
+/// store order; the source-level return is the advanced destination pointer,
+/// preserving r0 even though the C decompilation inferred `void`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn store_u32_le_at(base: *mut u8, offset: u32, value: u32) -> *mut u8 {
+    let dst = base.add(offset as usize);
+    dst.write_volatile(value as u8);
+    dst.add(1).write_volatile((value >> 8) as u8);
+    dst.add(2).write_volatile((value >> 16) as u8);
+    dst.add(3).write_volatile((value >> 24) as u8);
+    dst
+}
+
+
 /// read_u64_le — original: `FUN_080ed768` @ 0x080ed768 (88 bytes).
 ///
 /// Unaligned little-endian u64 load: the eight bytes at `p` ORed together
@@ -222,6 +244,22 @@ mod tests {
         for value in [0u32, u32::MAX, 1, 0x8000_0000, 0x0102_0304] {
             let bytes = value.to_le_bytes();
             assert_eq!(unsafe { read_u32_le_at(bytes.as_ptr(), 0) }, value);
+        }
+    }
+
+    #[test]
+    fn store_u32_le_at_writes_only_four_little_endian_bytes_at_each_alignment() {
+        for value in [0, u32::MAX, 1, 0x8000_0000, 0x0102_0304, 0xdead_beef] {
+            for offset in 0..4usize {
+                let mut bytes = [0xa5; 12];
+                let returned = unsafe {
+                    store_u32_le_at(bytes.as_mut_ptr(), offset as u32, value)
+                };
+                assert_eq!(returned, unsafe { bytes.as_mut_ptr().add(offset) });
+                assert_eq!(&bytes[offset..offset + 4], value.to_le_bytes());
+                assert!(bytes[..offset].iter().all(|&byte| byte == 0xa5));
+                assert!(bytes[offset + 4..].iter().all(|&byte| byte == 0xa5));
+            }
         }
     }
 
