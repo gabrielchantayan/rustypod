@@ -306,6 +306,36 @@ pub unsafe extern "C" fn i2c_0x39_set_register0_low_bits(value: u32) -> i32 {
     let updated = (register_value & !0x03) | (value as u8 & 0x03);
     i2c_0x39_write_register(0, updated as u32)
 }
+/// i2c_0x39_set_register1_low_nibble — original: `FUN_0836e440` @
+/// 0x0836e440 (16 bytes; 3 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Reads register 1 from I2C slave 0x39, replaces only its low nibble with
+/// the low nibble of `value`, and writes the result back. A read failure is
+/// returned unchanged and skips the write; otherwise the write status is
+/// returned. The separately linked next function begins at 0x0836e450.
+///
+/// # Deviation
+///
+/// Retail is a tail-call wrapper: `mov r2,r0; mov r0,#1; mov r1,#0xf; b
+/// 0x0836e228`. That unported shared helper reads a byte, computes
+/// `(old & !mask) | (value & mask)`, and writes it. This port inlines that
+/// fixed register-1/mask-0xf instance through the existing ported I2C
+/// wrappers, preserving the transfer order and status behavior while using
+/// ordinary Rust calls rather than the tail branch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2c_0x39_set_register1_low_nibble(value: u32) -> i32 {
+    let mut register_value = 0u8;
+    let status = i2c_0x39_read_register(1, &mut register_value);
+    if status != 0 {
+        return status;
+    }
+
+    let updated = (register_value & !0x0f) | (value as u8 & 0x0f);
+    i2c_0x39_write_register(1, updated as u32)
+}
+
 
 /// ABI of the two unported peripheral-0x39 helpers reached by
 /// `peripheral_0x39_mode_action`.
@@ -947,6 +977,46 @@ pub(crate) mod tests {
                 std::vec![(0, PMU_I2C_INNER_SEM), (1, PMU_I2C_INNER_SEM)],
                 "the failed read still signals semaphore 5"
             );
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_low_nibble_preserves_upper_register_bits() {
+        let state = install_0x39_read(0, 0);
+        unsafe {
+            *addr_of_mut!(RAW_READ_VALUE) = 0xa0;
+            assert_eq!(i2c_0x39_set_register1_low_nibble(0xfeed_beec), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![1], std::vec![1, 0xac]],
+                "register one is read, then its low nibble becomes c"
+            );
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                ],
+                "the read and write each retain their retail semaphore bracket"
+            );
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_low_nibble_read_error_skips_update_write() {
+        let state = install_0x39_read(0, -5);
+        unsafe {
+            assert_eq!(i2c_0x39_set_register1_low_nibble(0xf), -5);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![1]],
+                "only the register-select write for the failed read occurs"
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 1);
         }
         restore_0x39_read(state);
     }

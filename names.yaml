@@ -122048,3 +122048,25 @@ functions:
       and increment entry_count. A failed growth writes index=-1 and returns
       the original array without changing either count. Deliberate deviations:
       none.
+  - address: 0x0836e440
+    ghidra: FUN_0836e440
+    name: i2c_0x39_set_register1_low_nibble
+    size: 16
+    sig: "i32 i2c_0x39_set_register1_low_nibble(u32 value)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0/r2: value
+      r0: register
+      r1: mask
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent: mov r2,r0; mov r0,#1;
+      mov r1,#0xf; b 0x0836e228 at 0x0836e440..0x0836e44c. The separately
+      linked next wrapper begins at 0x0836e450. Complete aligned ARM B/BL
+      decoding finds three inbound plain BL callers and zero predicated BL
+      callers; this body contains no BL instruction. The wrapper tail-calls
+      the shared unported helper with register 1, mask 0xf, and value in r2,
+      which reads the register, replaces its low nibble, and writes it back.
+      The Rust port inlines that helper through existing ported I2C wrappers;
+      this deliberately replaces the retail tail branch with ordinary Rust
+      calls while preserving the transfer order and raw status behavior.
