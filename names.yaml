@@ -121076,3 +121076,38 @@ functions:
       sqlite3_column_count: return Vdbe.nResColumn (+0xec) for a non-NULL
       statement and zero otherwise. No deliberate deviations; the repr(C)
       Vdbe field preserves the target offset on 32-bit builds.
+
+  - address: 0x083862e4
+    ghidra: FUN_083862e4
+    name: sqlite3_utf16_to_utf8
+    size: 156
+    sig: "char *sqlite3_utf16_to_utf8(sqlite3 *db, const void *text, int length)"
+    module: sqlite/utf16_to_utf8
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: text
+      param_3/r2: length
+      auStack_38: value
+      local_24: result
+      FUN_0838c158: sqlite3VdbeMemSetStr
+      FUN_083869f4: sqlite3VdbeChangeEncoding
+      FUN_0838c04c: sqlite3VdbeMemRelease
+      FUN_08374a14: sqlite3DbStrDup
+    notes: >-
+      SQLite 3.5.9's sqlite3Utf16to8. Raw osos.dec establishes the
+      156-byte extent 0x083862e4..0x08386380: the final return is
+      ldmia sp!,{r4-r6,pc} at 0x0838637c and the following word is this
+      function's literal pool. It zeroes a 0x28-byte temporary Mem, installs
+      text with the native UTF-16 encoding selected by the byte literal at
+      0x088fa948, recodes to UTF-8, and either returns a dynamic conversion
+      buffer or duplicates static storage for db. A sticky db->mallocFailed
+      at +0x1e releases the temporary and returns NULL. The decrypted-image
+      runtime-skewed selector byte is one, so the port deliberately fixes the
+      observed little-endian UTF-16LE path. sqlite3VdbeChangeEncoding at
+      0x083869f4 remains unported and uses its established volatile,
+      failure-shaped dispatch seam. Full-image ARM decoding finds three
+      inbound plain BL calls, all unconditional (0x08381654, 0x0838ff64,
+      0x0839004c), and no predicated BL calls. The body has five
+      unconditional BL instructions: zero-fill, MemSetStr, ChangeEncoding,
+      MemRelease, and DbStrDup.

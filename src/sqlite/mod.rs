@@ -229,6 +229,7 @@ pub mod table_affinity;
 pub mod table_lock;
 pub mod used_as_column_cache;
 pub mod utf8_read;
+pub mod utf16_to_utf8;
 pub mod utf8_char_len;
 pub mod value_blob;
 pub mod vdbe_free_cursor;
