@@ -65385,6 +65385,28 @@ functions:
       order, verbatim ticks/event/channel forwarding, and tail-call
       result propagation.
 
+  - address: 0x0836dd90
+    ghidra: FUN_0836dd90
+    name: timer_channel_start
+    size: 40
+    sig: "void timer_channel_start(u32 channel)"
+    module: drivers/timer_channel_start
+    status: ported
+    renames:
+      param_1: channel
+      DAT_0836ddb8: TIMER_CHANNEL_EXTENDED_BASE
+    notes: >-
+      3 verified direct `bl` call sites, all unconditional: 0x0819d278,
+      0x0819d284, and 0x0819d290. Raw ARM from 0x0836dd90 through
+      0x0836ddb4 is followed by its high-channel literal word at
+      0x0836ddb8, making the true extent 40 bytes; 0x0836ddbc begins the
+      sibling stop routine. It computes channel 0..3 as 0x3c700000 +
+      channel * 0x20 and higher channels as 0x3c700020 + channel * 0x20,
+      then sets command-word (+0x04) bit 0 with a volatile read-modify-write.
+      Host tests replace target MMIO with local backing for channels 0..4.
+      cg_timer_wait's timer_channel_start dispatch slot now defaults directly
+      to this port; its tests may still replace the table.
+
   - address: 0x0836ddbc
     ghidra: FUN_0836ddbc
     name: timer_channel_stop
