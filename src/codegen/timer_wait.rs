@@ -54,20 +54,20 @@
 //! (the mailbox writer @ 0x0836b5b0 ends `mov r0, #0`).
 //!
 //! Deviations:
-//! - The six remaining unported callees sit behind the
+//! - Five remaining unported callees sit behind the
 //!   [`CG_TIMER_WAIT_OPS`] `read_volatile` dispatch seam (the house
 //!   pattern — see `super::heap::CG_HEAP_OPS`). Their defaults are
 //!   `missing_*` spin-loop stubs, matching the `app/node_list.rs`
 //!   `NODE_LIST_ENQUEUE_OPS` convention for unwired seams;
-//!   `timer_channel_stop` is directly wired to its Rust port. Host tests
-//!   replace the whole table with recording mocks.
+//!   `timer_channel_start` and `timer_channel_stop` are directly wired to
+//!   their Rust ports. Host tests replace the whole table with recording mocks.
 //! - The tail `b` is a plain `return` of the seam call; the observable
 //!   behavior (argument state and returned value) is identical.
 
 use core::ffi::c_void;
 
-/// Indirect dispatch for the six unported callees; `timer_channel_stop` is
-/// wired to its Rust port by default. Host tests replace the whole table.
+/// Indirect dispatch for five unported callees; both timer-channel operations
+/// are wired to their Rust ports by default. Host tests replace the whole table.
 #[derive(Clone, Copy)]
 pub struct CgTimerWaitOps {
     /// `board_version` @ 0x080e624c: the lazily cached system-info word
@@ -112,11 +112,6 @@ unsafe extern "C" fn missing_notify_wait_enter() {
     }
 }
 
-unsafe extern "C" fn missing_timer_channel_start(_channel: u32) {
-    loop {
-        core::hint::spin_loop();
-    }
-}
 
 unsafe extern "C" fn missing_event_wait(_event: *mut c_void) {
     loop {
@@ -131,13 +126,13 @@ unsafe extern "C" fn missing_notify_wait_exit() -> u32 {
     }
 }
 
-/// The active callee bindings. Six remain `missing_*` stubs until their ports
-/// land; `timer_channel_stop` is direct. Host tests replace the table.
+/// The active callee bindings. Five remain `missing_*` stubs until their ports
+/// land; both timer-channel operations are direct. Host tests replace the table.
 pub static mut CG_TIMER_WAIT_OPS: CgTimerWaitOps = CgTimerWaitOps {
     board_version: missing_board_version,
     timer_channel_arm: missing_timer_channel_arm,
     notify_wait_enter: missing_notify_wait_enter,
-    timer_channel_start: missing_timer_channel_start,
+    timer_channel_start: crate::drivers::timer_channel_start::timer_channel_start,
     event_wait: missing_event_wait,
     timer_channel_stop: crate::drivers::timer_channel_stop::timer_channel_stop,
     notify_wait_exit: missing_notify_wait_exit,
@@ -267,7 +262,7 @@ mod tests {
                 board_version: missing_board_version,
                 timer_channel_arm: missing_timer_channel_arm,
                 notify_wait_enter: missing_notify_wait_enter,
-                timer_channel_start: missing_timer_channel_start,
+                timer_channel_start: crate::drivers::timer_channel_start::timer_channel_start,
                 event_wait: missing_event_wait,
                 timer_channel_stop: crate::drivers::timer_channel_stop::timer_channel_stop,
                 notify_wait_exit: missing_notify_wait_exit,
