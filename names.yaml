@@ -120479,3 +120479,32 @@ functions:
       test proves vtable installation, call order, pointer forwarding, and
       return preservation. Deliberate deviation: Rust cannot preserve the
       ARM tail branch.
+
+  - address: 0x0839c6c4
+    ghidra: FUN_0839c6c4
+    name: temporary_registry_destruct
+    size: 36
+    sig: "TemporaryRegistry *temporary_registry_destruct(TemporaryRegistry *registry)"
+    module: cxx/vtable_089825d4_destruct
+    status: ported
+    renames:
+      param_1/r0: registry
+      DAT_0839c6e8: TEMPORARY_REGISTRY_VTABLE
+      FUN_0839c610: validation teardown (address-backed target call)
+      FUN_08135380: registry_container_destruct
+    notes: >-
+      Raw osos.dec is nine ARM words: 32 instruction bytes from 0x0839c6c4
+      through the tail b at 0x0839c6e4, plus vtable literal 0x089825d4 at
+      0x0839c6e8; the next independent function starts at 0x0839c6ec, so the
+      true extent is 36 bytes. Whole-image ARM B/BL decoding finds three
+      inbound plain bl sites and no predicated bl sites. The body stores that
+      vtable at +0x00, calls 0x0839c610 with the same object, restores r0,
+      and tail-branches to registry_container_destruct @ 0x08135380. The
+      temporary object is constructed by 0x0812e1ec at two observed callers;
+      it has a 56-byte target layout and caller-context words at +0x30/+0x34.
+      The direct 0x0839c610 callee has no established identity, so target
+      builds call its verified address while host tests replace it to prove
+      vtable installation, receiver forwarding, call order, and return
+      preservation. Deliberate deviation: Rust cannot preserve the ARM tail
+      branch. match.py exits 1 as expected: frame setup and address-backed
+      blx dispatch differ from the stock bl/tail-b structure.
