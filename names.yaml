@@ -35631,6 +35631,33 @@ functions:
       replace the retail tail branch with a normal call, preserving the
       load/guard/lock behavior. Host test covers a live mutex wait and the
       NULL-mutex early-out.
+  - address: 0x0839c470
+    ghidra: FUN_0839c470
+    name: vtable_slot_40_release_each
+    size: 72
+    sig: "void vtable_slot_40_release_each(VtableReleaseEachObject *object)"
+    module: util/vtable_slot_40_release_each
+    status: ported
+    renames:
+      param_1/r0/r5: object
+      param_1+0x04/r6: iteration_count
+      param_1+0x28/r0: enabled
+      r4: index
+      "vtable+0x40/r2": release_each
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x0839c470..0x0839c4b8; the following push at 0x0839c4bc begins a
+      distinct function. The raw words decode to an enabled-byte guard, then
+      a signed `index < iteration_count` loop. Every iteration dispatches the
+      object's vtable slot +0x40 with (object, index), loads the allocation
+      pointer from that result, and calls the already ported operator_delete
+      @ 0x082aad24. The three direct callers are plain unconditional bl at
+      0x08178d88, 0x0839c508, and 0x0839c52c; no predicated direct bl calls
+      reach this entry. Host fixtures deliberately widen the vtable pointer
+      and model target +0x04/+0x28 as semantic fields, while target builds
+      use the original 32-bit word and byte offsets. Tests cover ordered
+      multi-result release plus disabled, zero, and negative-count early-outs.
   - address: 0x0839d44c
     ghidra: FUN_0839d44c
     name: refcounted_body_mutex_unlock
