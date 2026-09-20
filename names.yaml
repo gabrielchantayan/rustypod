@@ -43089,6 +43089,32 @@ functions:
       testing::TRACED_ALLOC_TEST_LOCK (the ata_cmd allocator tests now
       take the same lock instead of a private one).
 
+  - address: 0x083784bc
+    ghidra: FUN_083784bc
+    name: sqlite_expr_is_constant
+    size: 32
+    sig: "i32 sqlite_expr_is_constant(Expr *expr)"
+    module: sqlite/expr_is_constant
+    status: identified
+    renames:
+      param_1/r0: expr
+      DAT_083784dc: constant_expression_visitor
+    notes: >-
+      Deferred: raw ARM establishes the 32-byte executable extent
+      0x083784bc..0x083784dc, followed by the 0x082c2a44 callback literal;
+      0x083784e0 is the next real function. It initializes a stack-local
+      i32 to 1, calls sqlite_expr_walk @ 0x0839866c with (expr,
+      0x082c2a44, &is_constant), then returns that local. The wrapper is
+      SQLite's sqliteExprIsConstant shape. Ghidra identifies three direct
+      BL callers, all unconditional: 0x08367fe8, 0x083730c4, and
+      0x083771fc. A faithful Rust port is blocked by the required visitor:
+      0x082c2a44 is not a function entry or a normal callback. Its first
+      words read r4 and offsets from the walker stack, and its normal path
+      ends with `add sp, sp, #0xa4; pop {r4-r9, sl, fp, pc}`, consuming a
+      caller frame rather than returning through sqlite_expr_walk's blx.
+      No names.yaml entry provides a ported callable seam for that address,
+      so replacing the walker callback would alter its stack-dependent
+      continuation.
   - address: 0x083787a8
     ghidra: FUN_083787a8
     name: sqlite_resolve_expr_names
