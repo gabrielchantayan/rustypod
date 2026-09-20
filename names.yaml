@@ -35602,6 +35602,24 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e7c4
+    ghidra: FUN_0839e7c4
+    name: store_u32_le_at
+    size: 36
+    sig: "u8 *store_u32_le_at(u8 *base, u32 offset, u32 value)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: base, param_2: offset, param_3: value}
+    notes: >-
+      Raw ARM establishes the exact 36-byte extent 0x0839e7c4..0x0839e7e8:
+      strb r2,[r0,r1] / add r0,r0,r1 / lsr r3,r2,#8 / lsr r1,r2,#16 /
+      strb r3,[r0,#1] / strb r1,[r0,#2] / lsr r1,r2,#24 / strb r1,[r0,#3] /
+      bx lr. It writes an unaligned u32 as four little-endian bytes. Three
+      direct bl callers (0x081609b4, 0x081609c4, 0x081609ec) are all
+      unconditional; no predicated bl forms or tail b sites. Ghidra infers
+      void, but ARM returns base + offset in r0 after its add; the Rust
+      signature deliberately preserves that observable register result.
+
   - address: 0x0839e7e8
     ghidra: FUN_0839e7e8
     name: read_u32_le_at
