@@ -120688,3 +120688,29 @@ functions:
       when the unsigned half-open interval start <= address < start + length
       contains it; ARM's wrapped addition rejects all addresses. Deliberate
       deviations: none.
+  - address: 0x08396dc4
+    ghidra: FUN_08396dc4
+    name: prefix_before_space_has_no_rejected_bytes
+    size: 88
+    sig: "u32 prefix_before_space_has_no_rejected_bytes(const u8 *bytes, i32 len)"
+    module: util/prefix_before_space_has_no_rejected_bytes
+    status: ported
+    renames:
+      param_1/r0/r5: bytes
+      param_2/r1/r6: len
+      r4: index
+      FUN_082b14e8: byte_list_predicate (unported)
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 body
+      0x08396dc4..0x08396e1b; 0x08396e1c begins the next separately linked
+      function with push {r1,r2,r3,r4,r5,r6,r7,lr}. Whole-image ARM branch
+      decoding finds exactly three inbound plain unconditional bl call sites
+      (0x082e313c, 0x082e35c8, and 0x082e63b4) and zero predicated bl forms.
+      The body has one outgoing plain bl to 0x082b14e8, which linearly tests
+      a byte against a literal-addressed, NUL-terminated list. It examines
+      signed indices [0,len): a listed byte before the first space returns
+      zero; a leading space returns zero; a later space returns one without
+      reading its suffix; and exhausting a nonpositive or accepted bound
+      returns one. Deliberate deviation: 0x082b14e8 has no established
+      identity or Rust port, so target builds call its verified retail address
+      while host tests install a byte-list-predicate seam.
