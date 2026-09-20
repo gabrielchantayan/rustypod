@@ -92,6 +92,15 @@
 //! no-guard rotation. This alias reuses the established dispatch seam and
 //! shared host tests; deliberate deviations: none.
 //!
+//! `FUN_083b6db8` at load address `0x083b6db8` is a byte-identical, 84-byte
+//! (21-word) alias, ending at `0x083b6e08`; the separately linked right-rotation
+//! sibling begins at `0x083b6e0c`. Raw ARM B/BL decoding verifies three
+//! unconditional inbound `bl` calls at `0x083b70f4`, `0x083b7194`, and
+//! `0x083b7288`, with no predicated `bl` or direct tail-`B` callers. It promotes
+//! the non-null right child, transfers the middle subtree to the pivot's right
+//! link, and relinks the parent or header root slot. This ledger alias deliberately
+//! reuses the existing dispatch seam and host tests; deliberate deviations: none.
+//!
 //! `FUN_083c0c60` at load address `0x083c0c60` is another byte-identical,
 //! 84-byte (21-word) left-rotation body, ending at `0x083c0cb0`; the
 //! separately linked right-rotation sibling starts at `0x083c0cb4`. Complete
