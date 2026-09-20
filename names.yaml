@@ -985,7 +985,6 @@ functions:
     notes: >-
       Raw osos.dec establishes the exact 20-byte extent
       0x08274458..0x0827446b: cmp r0,#0x40; ldrcc r1,[pc,#8];
-      ldrbcc r0,[r1,r0]; movcs r0,#0x3f; bx lr. The following word is the
       literal table address 0x083ed338, and 0x08274470 begins the next
       independently linked function with push {r4-r9,sl,lr}. A whole-image
       raw A32 branch decode finds four incoming plain BL calls and no
@@ -121964,3 +121963,32 @@ functions:
       words. The loop deliberately increments after replacement, so a swapped
       matching last record is not immediately reconsidered. Deliberate
       deviations: none.
+
+  - address: 0x0836f9e4
+    ghidra: FUN_0836f9e4
+    name: sqlite_auth_context_push
+    size: 24
+    sig: "void sqlite_auth_context_push(Parse *parse, AuthContext *context, const char *z_context)"
+    module: sqlite/auth_context_push
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: context
+      param_3/r2: z_context
+      "[context + 0x00]": saved_z_auth_context
+      "[context + 0x04]": saved_parse
+      "[parse + 0x18c]": z_auth_context
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte extent:
+      0x0836f9e4..0x0836f9f8 (cmp; str; ldrne; strne; strne; bx lr); the
+      next separately entered function begins with stmdb at 0x0836f9fc.
+      Complete aligned ARM B/BL decoding finds one inbound plain BL site at
+      0x08373090 and two predicated BLNE sites at 0x08374c20 and
+      0x083857ec. The body contains no BL instruction.
+      This is SQLite 3.5.x's sqlite3AuthContextPush: always save parse in
+      context +0x04;
+      when parse is non-NULL, save parse->zAuthContext (+0x18c) at context
+      +0x00 then install z_context. With NULL parse, context +0x00 remains
+      untouched. Identity is independently confirmed by the matching
+      sqlite3AuthContextPop sibling at 0x0836f9c8 and its three callers'
+      nested trigger/view compilation paths. Deliberate deviations: none.
