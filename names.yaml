@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083c64b4
+    ghidra: FUN_083c64b4
+    name: red_black_tree_node_pool_release_refcounted
+    size: 36
+    sig: "void red_black_tree_node_pool_release_refcounted(RedBlackTreeNodePool *pool, RedBlackTreeRefcountedNode *node, u32 release_payload)"
+    module: cxx/red_black_tree_node_pool_release_refcounted
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: node
+      param_3/r2: release_payload
+      "[pool + 0x4]": free
+      "[node + 0xc]": right_or_free_link
+      "[node + 0x14]": refcounted_body
+    notes: >-
+      Raw osos.dec words establish the true 36-byte extent
+      0x083c64b4..0x083c64d8; the next independently entered function starts
+      at 0x083c64dc, correcting Ghidra's 40-byte report. An aligned ARM
+      branch decode finds three inbound direct calls: plain BL at 0x081b6848
+      and 0x083c6c7c, plus BLNE at 0x083c69c0; no other direct branch sites.
+      The only outbound call is BLNE at 0x083c64d0 to the ported
+      refcounted_body_release_dtor @ 0x0839cbc0. The helper reuses node+0xc
+      as the pool free-list link, optionally releases its node+0x14
+      RefcountedBody handle, then prepends the node at pool+4. Host pointer
+      width is deliberately adapted by bouncing the target u32 payload word
+      through a native RefcountedBody pointer before storing the NULLed result.
   - address: 0x083d00a0
     ghidra: FUN_083d00a0
     name: indexed_element_array_release

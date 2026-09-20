@@ -266,6 +266,7 @@ pub mod red_black_tree_increment;
 pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;
 pub mod red_black_tree_node_pool_acquire;
+pub mod red_black_tree_node_pool_release_refcounted;
 pub mod red_black_tree_payload_16_node_pool_acquire;
 pub mod red_black_tree_payload_word_node_pool_acquire;
 pub mod red_black_tree_payload_24_node_pool_acquire;
