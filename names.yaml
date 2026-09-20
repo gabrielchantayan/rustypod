@@ -48714,6 +48714,28 @@ functions:
       stamp, hook load/blx, node+0x14 all present; frame style (fp) and
       the dispatch blx differ, as expected.
 
+  - address: 0x083db090
+    ghidra: FUN_083db090
+    name: byte_key_map_lower_bound_value
+    size: 64
+    sig: "u8 *byte_key_map_lower_bound_value(ByteKeyMap *map, const u8 *key)"
+    module: cxx/byte_key_map_lower_bound_value
+    status: ported
+    vars: {param_1: map, param_2: key, local_c: result, local_10: key_pair}
+    notes: >-
+      Raw osos.dec fixes the 64-byte extent at 0x083db090..0x083db0d0:
+      push lr; 20-byte frame; key_pair[0] = *key; key_pair[1] = 0;
+      one direct bl to FUN_083b9168 at 0x083b9168; return
+      result.node + 0x11. The returned byte is the mapped value following
+      the key at node+0x10. Decoding every aligned ARM BL immediate finds
+      exactly three inbound plain unconditional calls (0x08259aec,
+      0x08259b4c, 0x08259d48) and no predicated calls. FUN_083b9168 is
+      an unported byte-key tree lower-bound helper; target builds call its
+      verified fixed address and host tests dispatch through the typed
+      BYTE_KEY_TREE_LOWER_BOUND seam. match.py structural diff: LLVM uses
+      an fp frame, a volatile seam load and blx rather than the retail
+      direct bl; the key pair, result load, and node+0x11 return remain.
+
   - address: 0x083b867c
     ghidra: FUN_083b867c
     name: byte_key_tree_insert_unique

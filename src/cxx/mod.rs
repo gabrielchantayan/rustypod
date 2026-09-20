@@ -16,6 +16,7 @@ pub mod array_index_stride24;
 pub mod slot_array_index_in_bounds;
 pub mod slot_array_owner_get;
 pub mod byte_key_map;
+pub mod byte_key_map_lower_bound_value;
 pub mod byte_key_word_map;
 pub mod character_class;
 pub mod clock_source_base_construct;
