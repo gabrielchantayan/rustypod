@@ -12,41 +12,26 @@
 //! negative requests flow to `sqlite3_malloc` unchanged and do not report an
 //! error when that allocator returns NULL.
 //!
-//! The retail error-reporting helpers `FUN_083911d0` and `FUN_083911a8` are
-//! not ported, so target builds reach their verified fixed load addresses
-//! through the two callback slots. Host tests replace those slots. The raw
-//! `sqlite3_malloc` callee at 0x08390b14 is already ported and is called
-//! directly.
+//! `FUN_083911d0` is ported as
+//! [`sqlite3_result_error_toobig`](super::result_error_toobig::sqlite3_result_error_toobig).
+//! `FUN_083911a8` remains a fixed-address callback so host tests can replace
+//! the allocation-failure path.
 //!
 //! ### Deliberate deviations
 //!
 //! Rust receives the natural `i64` rather than exposing AAPCS's unused `r1`
-//! register. The unported result-error helpers are address-loaded callbacks
-//! instead of their original PC-relative `bl` instructions; their defaults
-//! remain the exact retail entry addresses on the target.
+//! register. The unported NOMEM helper remains an address-loaded callback;
+//! its target default is the exact retail entry address.
 
 use super::aggregate_context::SqliteContext;
 use super::mem::sqlite3_malloc;
 use super::vm_printf::DB_LENGTH_LIMIT_OFFSET;
 
-/// `sqlite3_result_error_toobig(context)` at this retailOS load address.
-pub const RESULT_ERROR_TOOBIG_ADDRESS: usize = 0x0839_11d0;
 /// `sqlite3_result_error_nomem(context)` at this retailOS load address.
 pub const RESULT_ERROR_NOMEM_ADDRESS: usize = 0x0839_11a8;
 
-/// ABI of the two result-error helpers.
+/// ABI of the unported NOMEM result-error helper.
 pub type ResultErrorFn = unsafe extern "C" fn(context: *mut SqliteContext);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_result_error_toobig(context: *mut SqliteContext) {
-    let result_error: ResultErrorFn = core::mem::transmute(RESULT_ERROR_TOOBIG_ADDRESS);
-    result_error(context);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_result_error_toobig(_context: *mut SqliteContext) {
-    panic!("context_malloc requires sqlite3_result_error_toobig @ 0x083911d0")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_result_error_nomem(context: *mut SqliteContext) {
@@ -59,23 +44,21 @@ unsafe extern "C" fn retail_result_error_nomem(_context: *mut SqliteContext) {
     panic!("context_malloc requires sqlite3_result_error_nomem @ 0x083911a8")
 }
 
-/// Callbacks for the two still-stock error-reporting helpers.
+/// Callback for the still-stock NOMEM result-error helper.
 #[derive(Clone, Copy)]
 pub struct ContextMallocOps {
-    pub result_error_toobig: ResultErrorFn,
     pub result_error_nomem: ResultErrorFn,
 }
 
-/// Target defaults preserve the two original calls.
+/// Target default preserves the original NOMEM call.
 pub const DEFAULT_CONTEXT_MALLOC_OPS: ContextMallocOps = ContextMallocOps {
-    result_error_toobig: retail_result_error_toobig,
     result_error_nomem: retail_result_error_nomem,
 };
 
-/// Active result-error helpers; host tests install recorders here.
+/// Active NOMEM helper; host tests install a recorder here.
 pub static mut CONTEXT_MALLOC_OPS: ContextMallocOps = DEFAULT_CONTEXT_MALLOC_OPS;
 
-/// Read the callbacks volatily so target fixed-address calls cannot vanish.
+/// Read the callback volatily so the target fixed-address call cannot vanish.
 #[inline(always)]
 unsafe fn context_malloc_ops() -> ContextMallocOps {
     core::ptr::read_volatile(core::ptr::addr_of!(CONTEXT_MALLOC_OPS))
@@ -98,7 +81,7 @@ pub unsafe extern "C" fn context_malloc(context: *mut SqliteContext, n_byte: i64
     // `asr`/`subs`/`sbcs` compare the sign-extended i32 limit with the full
     // r2:r3 request. Equality remains permitted.
     if n_byte > i64::from(limit) {
-        (ops.result_error_toobig)(context);
+        super::result_error_toobig::sqlite3_result_error_toobig(context);
         return core::ptr::null_mut();
     }
 
@@ -123,9 +106,6 @@ mod tests {
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut ERRORS: Vec<i32> = Vec::new();
 
-    unsafe extern "C" fn record_toobig(_context: *mut SqliteContext) {
-        ERRORS.push(18);
-    }
 
     unsafe extern "C" fn record_nomem(_context: *mut SqliteContext) {
         ERRORS.push(7);
@@ -151,7 +131,6 @@ mod tests {
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(CONTEXT_MALLOC_OPS),
                 ContextMallocOps {
-                    result_error_toobig: record_toobig,
                     result_error_nomem: record_nomem,
                 },
             );
@@ -196,15 +175,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_request_strictly_above_the_limit_reports_toobig() {
-        let _guard = install_recorders();
-        let mut db = Db::with_limit(9);
-        let mut context = context_with_db(db.ptr());
-
-        assert!(unsafe { context_malloc(&mut context, 10) }.is_null());
-        assert_eq!(unsafe { &*core::ptr::addr_of!(ERRORS) }, &[18]);
-    }
 
     #[test]
     fn an_exact_limit_request_is_not_too_big() {

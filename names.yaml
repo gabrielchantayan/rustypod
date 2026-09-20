@@ -120826,3 +120826,28 @@ functions:
       has one predicated outbound blne to bswap16 and no plain bl. The
       apparent r6/'/' handling branch is dead because r6 is initialized to
       zero and never written.
+
+  - address: 0x083911d0
+    ghidra: FUN_083911d0
+    name: sqlite3_result_error_toobig
+    size: 44
+    sig: "void sqlite3_result_error_toobig(SqliteContext *context)"
+    module: sqlite/result_error_toobig
+    status: ported
+    renames:
+      param_1/r0: context
+      DAT_083911fc: too_big_message
+      FUN_0838c158: sqlite3VdbeMemSetStr
+    notes: >-
+      Raw osos.dec fixes the extent at 44 bytes: 0x083911d0..0x083911fc;
+      0x083911fc is the literal pool and 0x08391200 starts the next
+      function. The 11 ARM instructions push r3/lr, store SQLITE_TOOBIG
+      (18) at context + 0x34, prepare (context + 8, message, -1, UTF-8,
+      SQLITE_TRANSIENT), then make one unconditional bl at 0x083911f4 to
+      sqlite3VdbeMemSetStr @ 0x0838c158 and return. Raw target decoding
+      literal is in the runtime-skewed read-only pool, so Rust owns an
+      equivalent static NUL-terminated message. Host test installs the
+      existing vdbe_mem_set_str seams and verifies error 18, transient
+      UTF-8 flags, length 22, and all 23 copied message bytes. match.py
+      reports the same store/call structure; LLVM adds a frame and emits
+      a relocatable local literal.
