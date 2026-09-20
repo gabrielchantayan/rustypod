@@ -104,6 +104,7 @@ pub mod context_scope_selector;
 pub mod current_record_handle;
 pub mod object_state_initialize;
 pub mod indexed_item_value;
+pub mod indexed_virtual_value;
 pub mod indexed_string_resource_fallback;
 pub mod registration_handle_current_status;
 pub mod configured_path_prefix_matches;

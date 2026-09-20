@@ -230,6 +230,31 @@ functions:
       2, or 3 for the latter cases. Deliberate deviation: the verified
       behavior of the unported 0x080c850c is inlined because its return value
       is unused by this function, allowing identical host and target behavior.
+  - address: 0x083d69d8
+    ghidra: FUN_083d69d8
+    name: indexed_virtual_value
+    size: 24
+    sig: "u32 indexed_virtual_value(void *object, i32 index)"
+    module: app/indexed_virtual_value
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      "[object + 0x0]": vtable
+      "[vtable + 0x40]": indexed_value_method
+      puVar1/r0: value
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body
+      0x083d69d8..0x083d69ec: push {r4,lr}; load the object's vtable and its
+      +0x40 entry; blx it with object and index unchanged; load the returned
+      word; pop {r4,pc}. The next separate body begins at 0x083d69f0 with
+      ldr r1,[r0,#0x14]. The body has no direct plain or predicated BL
+      instructions, and one indirect BLX through the vtable. Independent raw
+      caller words at 0x08291dc4, 0x083d0a48, and 0x083d0a8c are three plain
+      BL calls; no predicated BL calls target this address. The vtable method
+      has no established semantic identity, so target builds use its verified
+      +0x40 slot and host builds use a typed seam. No NULL or bounds check
+      exists.
   - address: 0x083d8e88
     ghidra: FUN_083d8e88
     name: stream_query_result
