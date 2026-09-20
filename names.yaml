@@ -35272,6 +35272,38 @@ functions:
       only differences are LLVM's push {fp,lr} frame and the tail branch
       rendered through a relocation.
 
+  - address: 0x0839d350
+    ghidra: FUN_0839d350
+    name: refcounted_body_mutex_lock_owned
+    size: 16
+    sig: "void refcounted_body_mutex_lock_owned(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte extent
+      0x0839d350..0x0839d360: ldr r0,[r0,#8]; cmp r0,#0; bne
+      mutex_lock @ 0x0807f5c4; bx lr. The separately linked
+      refcounted_body_mutex_unlock_owned begins at 0x0839d360. Decoding
+      every A32 B/BL word finds three direct callers, all unconditional
+      plain bl at 0x0820bc48, 0x08215084, and 0x0839d2d4; there are no
+      predicated bl calls or direct b tail callers. No aligned image word
+      equals this address, so it is not virtually dispatched. The helper
+      loads RefcountedBody.mutex at +8 and tail-branches to mutex_lock only
+      when it is non-NULL; body itself has no NULL guard. It is the
+      separately linked lock half paired with
+      refcounted_body_mutex_unlock_owned @ 0x0839d360 inside the owned
+      release template. The direct Rust equivalent in cxx/handle uses a
+      unique target-only link section so LLVM cannot fold this hookable
+      symbol into its byte-identical sibling at 0x0839d43c. Host test proves
+      a live mutex produces exactly one Wait event and the NULL-mutex
+      early-out produces none. match.py shows LLVM's frame setup and a
+      conditional call rather than the retail tail branch; the load/guard/
+      lock behavior is unchanged.
+
   - address: 0x0839d360
     ghidra: FUN_0839d360
     name: refcounted_body_mutex_unlock_owned

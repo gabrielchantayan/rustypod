@@ -205,6 +205,37 @@ pub unsafe extern "C" fn refcounted_body_mutex_lock(body: *mut RefcountedBody) {
         mutex_lock(mutex);
     }
 }
+/// refcounted_body_mutex_lock_owned — original: `FUN_0839d350` @ load
+/// address 0x0839d350 (16 bytes; 3 direct `bl` call sites, all
+/// unconditional: 0x0820bc48, 0x08215084, and 0x0839d2d4). Decoding every
+/// ARM `B`/`BL` word in `osos.dec` finds no predicated `bl` calls. Raw
+/// instructions end with `bx lr` at 0x0839d35c; the separately linked
+/// [`refcounted_body_mutex_unlock_owned`] begins at 0x0839d360.
+///
+/// Loads the optional mutex from `body` at target +8 and, when non-NULL,
+/// tail-branches to [`mutex_lock`] @ 0x0807f5c4. It has no NULL guard for
+/// `body`; callers must supply a readable [`RefcountedBody`]. This is the
+/// lock half paired with `refcounted_body_mutex_unlock_owned` in the owned
+/// release template.
+///
+/// No deliberate behavioral deviations. A distinct target-only section keeps
+/// this separately linked retail helper from folding into its byte-identical
+/// sibling at 0x0839d43c.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_lock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_lock_owned")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_lock_owned(body: *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+}
+
 
 /// refcounted_body_mutex_unlock — original: `FUN_0839d44c` @ 0x0839d44c
 /// (16 bytes; 8 direct `bl` call sites, all unconditional: 0x0811ef44,
@@ -4239,6 +4270,28 @@ mod tests {
             unsafe { refcounted_body_mutex_lock(&mut body) };
             assert_eq!(events(), std::vec![Event::Wait(0x38)]);
         }
+        #[test]
+        fn owned_body_mutex_lock_waits_only_for_a_present_mutex() {
+            let _bench = bench();
+            let mut semaphore = 0x3b;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+
+            unsafe { refcounted_body_mutex_lock_owned(&mut body) };
+            assert_eq!(events(), std::vec![Event::Wait(0x3b)]);
+
+            body.mutex = core::ptr::null_mut();
+            unsafe { refcounted_body_mutex_lock_owned(&mut body) };
+            assert_eq!(events(), std::vec![Event::Wait(0x3b)]);
+        }
+
 
         #[test]
         fn body_mutex_unlock_signals_only_a_present_mutex() {
