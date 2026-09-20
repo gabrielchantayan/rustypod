@@ -1358,19 +1358,16 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign_dtor_copy(
 /// body in `dst`, and adds one to its signed refcount under its optional
 /// mutex. It returns `dst`; neither slot pointer is NULL-checked.
 ///
-/// Deliberate deviation: stock calls the separately linked attach helper
-/// `FUN_0839cf10`. Its decoded body is byte-identical in behavior to the
-/// already ported [`refcounted_body_attach`] @ `0x0839d370` (store, optional
-/// mutex lock, wrapping increment, fresh optional mutex unlock), so this
-/// port calls that canonical implementation. The dedicated target section
-/// keeps this small separately hookable constructor from folding with a
-/// byte-identical Rust sibling.
+/// No deliberate behavioral deviations: this calls the separately ported
+/// [`refcounted_body_attach_owned_variant`] corresponding to the stock
+/// `FUN_0839cf10` target. The dedicated target sections keep both entries
+/// separately hookable.
 ///
 /// # Safety
 ///
 /// `dst` and `src` must be valid, aligned pointer slots. When `*src` is
 /// non-NULL, it must point at a writable [`RefcountedBody`] whose optional
-/// mutex satisfies [`refcounted_body_attach`]'s preconditions.
+/// mutex satisfies [`refcounted_body_attach_owned_variant`]'s preconditions.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_construct")]
 #[inline(never)]
@@ -1378,7 +1375,7 @@ pub unsafe extern "C" fn refcounted_ptr_copy_construct(
     dst: *mut *mut RefcountedBody,
     src: *const *mut RefcountedBody,
 ) -> *mut *mut RefcountedBody {
-    refcounted_body_attach(dst, src.read());
+    refcounted_body_attach_owned_variant(dst, src.read());
     dst
 }
 ///
@@ -1639,6 +1636,50 @@ pub unsafe extern "C" fn refcounted_body_attach(
     (*body).refcount = (*body).refcount.wrapping_add(1);
     // Re-loaded, as in the original: a racing release could in
     // principle have torn the object down under us.
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+///
+/// refcounted_body_attach_owned_variant — original: `FUN_0839cf10` @
+/// `0x0839cf10` (60 bytes; 3 direct `bl` callers, all unconditional:
+/// `0x0815f51c`, `0x0839ef48`, and `0x0839ef78`; one additional direct tail
+/// `b` at `0x0815f478`). Raw words establish the exact extent through the
+/// final `pop {r4, pc}` at `0x0839cf48`; `0x0839cf4c` begins
+/// [`refcounted_body_release_owned_variant`]. Its two internal calls are
+/// predicated `blne` instructions to mutex_lock @ `0x0807f5c4` and
+/// mutex_unlock @ `0x0807f6a0`.
+///
+/// Stores `body` in `dst` before its NULL check. For a non-NULL body, it
+/// locks the optional mutex at +8, wrapping-increments the signed refcount at
+/// +4, reloads and independently NULL-checks that mutex, then unlocks it.
+///
+/// Deliberate deviation: Rust calls the ported mutex helpers directly; LLVM
+/// may inline them rather than retain the stock predicated calls. The
+/// store/guard/increment/reload/guard order is preserved.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned pointer slot. A non-NULL `body` must point
+/// to a readable/writable [`RefcountedBody`]; neither pointer is NULL-checked
+/// by the stock function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_attach_owned_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_attach_owned_variant(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
     let mutex = (*body).mutex;
     if !mutex.is_null() {
         mutex_unlock(mutex);
@@ -3691,6 +3732,39 @@ mod tests {
             let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
             refcounted_body_acquire(&mut slot, core::ptr::null_mut());
             assert!(slot.is_null());
+        }
+    }
+
+    /// The dedicated 0x0839cf10 attach entry overwrites a preexisting slot
+    /// with NULL before its early return.
+    #[test]
+    fn attach_owned_variant_null_body_stores_null() {
+        unsafe {
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_attach_owned_variant(&mut slot, core::ptr::null_mut());
+
+            assert!(slot.is_null());
+        }
+    }
+
+    /// Its raw ARM `add` wraps the refcount and leaves unrelated fields
+    /// untouched when the optional mutex is NULL.
+    #[test]
+    fn attach_owned_variant_bumps_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            refcounted_body_attach_owned_variant(&mut slot, &mut body);
+
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
         }
     }
 
