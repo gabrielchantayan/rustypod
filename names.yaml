@@ -121418,3 +121418,27 @@ functions:
       prologue/register allocation and emits direct Rust calls instead of
       stock addresses. Host test proves the virtual-table early exit does not
       access Parse.
+
+  # --- SQLite hidden rowid-name predicate ---
+  - address: 0x0837cd3c
+    ghidra: FUN_0837cd3c
+    name: is_rowid
+    size: 76
+    sig: "int is_rowid(const char *name)"
+    module: sqlite/is_rowid
+    status: ported
+    renames:
+      param_1/r0: name
+      r4: name
+      FUN_08384f14: str_icmp
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte code extent: push {r4,lr} at
+      0x0837cd3c through pop {r4,pc} at 0x0837cd84. The three adjacent
+      NUL-terminated literals `_ROWID_`, `ROWID`, and `OID` occupy
+      0x0837cd88..0x0837cd9b; the next separately linked function begins at
+      0x0837cd9c. Independently decoding every instruction word in the body
+      finds exactly three unconditional plain bl calls, all to str_icmp @
+      0x08384f14, and zero predicated bl calls. This is SQLite 3.5's
+      sqlite3IsRowid: it recognizes those three case-insensitive aliases for
+      a table's hidden rowid, testing them in that order and returning one on
+      the first match or zero otherwise. Deliberate deviations: none.
