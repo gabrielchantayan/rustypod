@@ -140,6 +140,7 @@ pub mod expr_span;
 pub mod fix_expr;
 pub mod fix_init;
 pub mod fix_select;
+pub mod vtab_lock;
 pub mod walk_expr;
 pub mod find_element_given_hash;
 pub mod finalize;
