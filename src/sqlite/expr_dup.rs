@@ -54,12 +54,12 @@ pub static mut SQLITE_EXPR_LIST_DUP: ExprListDupFn = missing_expr_list_dup;
 pub static mut SQLITE_SELECT_DUP: SelectDupFn = missing_select_dup;
 
 #[inline(always)]
-fn expr_list_dup_op() -> ExprListDupFn {
+pub(crate) fn expr_list_dup_op() -> ExprListDupFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_EXPR_LIST_DUP)) }
 }
 
 #[inline(always)]
-fn select_dup_op() -> SelectDupFn {
+pub(crate) fn select_dup_op() -> SelectDupFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_SELECT_DUP)) }
 }
 

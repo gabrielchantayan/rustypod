@@ -41911,6 +41911,47 @@ functions:
       it for a recorder. The typed repr(C) Trigger preserves every field's
       target offset on ARM and keeps widened host pointer fields disjoint.
 
+  - address: 0x08391954
+    ghidra: FUN_08391954
+    name: trigger_step_dup
+    size: 204
+    sig: "void trigger_step_dup(sqlite3 *db, TriggerStep *step)"
+    module: sqlite/trigger_step_dup
+    status: ported
+    renames:
+      param_1/r0/r6: db
+      param_2/r1/r4: step
+      "step+0x0c": p_select
+      "step+0x10": target_z
+      "step+0x14": target_n_dyn
+      "step+0x18": p_where
+      "step+0x1c": p_expr_list
+      "step+0x20": p_id_list
+      FUN_08374a40: db_str_ndup
+      FUN_08383cc4: select_dup
+      FUN_08383c88: select_delete
+      FUN_08377e58: expr_dup
+      FUN_08377e00: expr_delete
+      FUN_083786c0: expr_list_dup
+      FUN_08378670: expr_list_delete
+      FUN_0837b160: id_list_dup
+      FUN_0837b11c: id_list_delete
+    notes: >-
+      Raw ARM establishes the exact 204-byte extent
+      0x08391954..0x08391a1f; the next independent function starts with push
+      at 0x08391a20. A complete osos.dec ARM B/BL decode found exactly three
+      direct inbound calls, all unconditional bl (0x083851f8, 0x0839b310, and
+      0x0839b3f0), and no predicated forms. The routine replaces each non-NULL
+      TriggerStep child with a duplicate, deleting the old select, expression,
+      expression list, or identifier list only after obtaining its replacement.
+      It duplicates target.z by target.n_dyn >> 1 and unconditionally sets
+      target's ownership bit. select_dup and expr_list_dup remain their
+      existing volatile seams because their callees are not ported; all other
+      calls are direct ports. On 64-bit hosts the typed repr(C) view widens
+      pointers rather than relying on target byte offsets. match.py reports the
+      same five conditional blocks and clone-before-delete order; the expected
+      differences are seam blx dispatches and LLVM's larger frame.
+
   - address: 0x08377f10
     ghidra: FUN_08377f10
     name: expr_function
