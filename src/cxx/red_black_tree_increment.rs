@@ -217,6 +217,18 @@ pub unsafe extern "C" fn red_black_tree_advance_cursor(cursor: *mut u32) -> *mut
 /// 0x083b8c60, and 0x083b9130; there are no predicated BL calls. The body has
 /// no outbound calls.
 ///
+/// `FUN_083b570c` at load address `0x083b570c` is a byte-identical,
+/// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
+/// `bx lr` at `0x083b575c`; the next separately linked function begins at
+/// `0x083b5760`. Complete aligned ARM B/BL decoding verifies three direct
+/// inbound calls, all plain `bl` at 0x083bf620, 0x083bfaec, and 0x083bfbe8;
+/// there are no predicated BL calls or outbound calls. It moves an in-order
+/// red-black-tree cursor to its successor by descending the right subtree's
+/// left spine or climbing parent links from right-child edges, preserving the
+/// header sentinel. Its raw body is byte-identical to this implementation, so
+/// it deliberately reuses this dispatch seam and its host tests; deliberate
+/// deviations: none.
+///
 /// A left child selects that subtree's rightmost node. Otherwise the walk
 /// climbs parent links while leaving left-child edges, then selects the first
 /// ancestor reached from a right-child edge. The final left-link comparison
