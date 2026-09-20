@@ -51,6 +51,7 @@ pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
 pub mod deque_layout_copy;
 pub mod deque_iterator_current_or_zero;
+pub mod vector4_resize_fill;
 pub mod segmented_iter_post_increment;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
