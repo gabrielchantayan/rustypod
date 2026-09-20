@@ -1082,6 +1082,31 @@ pub unsafe extern "C" fn cxx_array_dealloc(ptr: *mut u8, _count: usize, _elem: u
     operator_delete(ptr);
 }
 
+/// cxx_allocator_deallocate — original: `FUN_083d7ff8` @ 0x083d7ff8
+/// (16 bytes; 3 unconditional `bl` call sites, none predicated).
+///
+/// Raw ARM words `e1a00001 e1a01002 e3a02000 eafa3bc8` establish the exact
+/// extent 0x083d7ff8..0x083d8007: move the allocator's `ptr` and `count`
+/// arguments from r1/r2 into r0/r1, clear r2, then tail-branch to
+/// [`cxx_array_dealloc`] @ 0x08266f2c. The following `bx lr` starts the next
+/// independent function. Thus the allocator object is unused, the count
+/// reaches the deallocation veneer but dies at its tag-2 delete tail branch,
+/// and the element-size argument is always zero.
+///
+/// Deliberate deviation: Rust makes the tail branch an ordinary call through
+/// the ported [`cxx_array_dealloc`] seam. A dedicated target text section
+/// keeps this separately linked three-call-site entry from being folded.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.cxx_allocator_deallocate")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_allocator_deallocate(
+    _allocator: *mut u8,
+    ptr: *mut u8,
+    count: usize,
+) {
+    cxx_array_dealloc(ptr, count, 0);
+}
+
 /// operator_delete_forwarder — original: `FUN_08049398` @ 0x08049398
 /// (4 bytes; 8 unconditional `bl` call sites, no predicated forms).
 ///
@@ -1582,6 +1607,25 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 2, "the tag-2 delete, not tag 3");
             cxx_array_dealloc(BLOCK_A as *mut u8, 0, usize::MAX);
+            assert_eq!(FREE_CALLS, 2);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn cxx_allocator_deallocate_discards_allocator_and_element_size() {
+        let _lock = mock_heap();
+        unsafe {
+            cxx_allocator_deallocate(0x1234 as *mut u8, core::ptr::null_mut(), 0x20);
+            assert_eq!(FREE_CALLS, 0);
+
+            cxx_allocator_deallocate(0x5678 as *mut u8, BLOCK_A as *mut u8, 0);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2);
+
+            cxx_allocator_deallocate(core::ptr::null_mut(), BLOCK_A as *mut u8, usize::MAX);
             assert_eq!(FREE_CALLS, 2);
             assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 2);

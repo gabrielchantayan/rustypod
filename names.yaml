@@ -32828,6 +32828,25 @@ functions:
       into destination, then released; zero capacity copies the shared empty
       representation. The temporary ensures destination owns its bytes rather
       than aliases the strstreambuf buffer. No deliberate deviations.
+  - address: 0x083d7ff8
+    ghidra: FUN_083d7ff8
+    name: cxx_allocator_deallocate
+    size: 16
+    sig: "void cxx_allocator_deallocate(void *allocator, u8 *ptr, usize count)"
+    module: heap/veneers
+    status: ported
+    vars: {param_1/r0: allocator, param_2/r1: ptr, param_3/r2: count}
+    renames: {FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw ARM words e1a00001 e1a01002 e3a02000 eafa3bc8 establish the exact
+      16-byte extent 0x083d7ff8..0x083d8007: forwards ptr and count, clears
+      r2, then tail-branches to cxx_array_dealloc @ 0x08266f2c. The next word
+      at 0x083d8008 is bx lr, the next independent function. All three
+      inbound calls are unconditional bl (0x083da8bc, 0x083dabdc,
+      0x083dade0); none is predicated. The allocator object is unused and
+      cxx_array_dealloc discards both count and the forced-zero element size
+      before its tag-2 operator-delete tail branch. Rust uses a normal call
+      through that ported seam instead of the raw tail branch.
   - address: 0x0825c8fc
     ghidra: FUN_0825c8fc
     name: cxx_string_pair_destroy
