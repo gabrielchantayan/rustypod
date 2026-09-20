@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1bf0
+    ghidra: FUN_083d1bf0
+    name: owned_element_array_release
+    size: 96
+    sig: "void owned_element_array_release(OwnedElementArrayRelease *this)"
+    module: cxx/owned_element_array_release
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+4: count
+      param_1+16: enabled
+      piVar1/r0: element_cell
+      iVar2/r4: index
+      iVar3/r6: count
+      FUN_083d1df4: opaque_observable_array_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the 96-byte extent 0x083d1bf0..0x083d1c4f: the
+      next independently entered function begins at 0x083d1c50. The body has
+      two plain direct bl calls (opaque_observable_array_destroy and
+      operator_delete), zero predicated bl calls, and one unconditional virtual
+      blx through vtable slot +0x40. Whole-image ARM B/BL decoding finds three
+      inbound plain bl sites (0x08212110, 0x083d1cb0, 0x083d1d28) and zero
+      predicated direct bl sites. When enabled byte +0x10 is nonzero, it walks
+      indices [0,count), obtains each cell through slot +0x40, skips a NULL
+      cell word, otherwise destructs the object at cell+8 then tag-2 deletes
+      the returned pointer minus 8. Firmware uses the ported direct callees;
+      host fixtures deliberately replace both direct calls and widen the vtable
+      pointer because native callback pointers and fixture allocations cannot
+      occupy retailOS u32 words.
   - address: 0x083d1df4
     ghidra: FUN_083d1df4
     name: opaque_observable_array_destroy
