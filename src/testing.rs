@@ -1755,6 +1755,10 @@ pub mod hints {
     // 0x8140_0000: dedicated to cxx/condition_queue_dequeue's target-width
     // queue, node, and item fixture; mappings never unmap.
     pub const CONDITION_QUEUE_DEQUEUE: usize = 0x8140_0000;
+    // 0x8150_0000 / 0x8160_0000: dedicated to sqlite/triggers_exist's
+    // target-width table and trigger-chain fixtures; mappings never unmap.
+    pub const SQLITE_TRIGGERS_EXIST: usize = 0x8150_0000;
+    pub const SQLITE_TRIGGERS_EXIST_VIRTUAL: usize = 0x8160_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
