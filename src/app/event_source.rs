@@ -359,14 +359,18 @@ unsafe extern "C" fn firmware_erase_child_range(
 }
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_recycle_child_node(
+unsafe extern "C" fn ported_recycle_child_node(
     collection: *mut u8,
     node: *mut u8,
     destroy_value: u32,
 ) {
-    let recycle: unsafe extern "C" fn(*mut u8, *mut u8, u32) =
-        unsafe { core::mem::transmute(0x083b_9ffcusize) };
-    unsafe { recycle(collection, node, destroy_value) }
+    unsafe {
+        crate::cxx::red_black_tree_node_pool_release_vector::red_black_tree_node_pool_release_vector(
+            collection.cast(),
+            node.cast(),
+            destroy_value,
+        )
+    }
 }
 
 #[cfg(target_os = "none")]
@@ -410,7 +414,7 @@ unsafe extern "C" fn missing_destroy_declaration_vector(_vector: *mut u8) -> *mu
 pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDestructOps {
     destroy_event_list: crate::app::event_list::event_list_tree_destruct,
     erase_child_range: firmware_erase_child_range,
-    recycle_child_node: firmware_recycle_child_node,
+    recycle_child_node: ported_recycle_child_node,
     destroy_declaration_vector: firmware_destroy_declaration_vector,
 };
 
