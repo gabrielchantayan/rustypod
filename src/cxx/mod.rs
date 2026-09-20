@@ -131,6 +131,7 @@ pub mod mutex_attr_init;
 pub mod mutex_settype_init;
 pub mod recursive_mutex;
 pub mod observable_array;
+pub mod observable_array_tracked_destruct;
 pub mod observable_element_array_clear;
 pub mod observable_array_owned_destroy;
 pub mod observable_array_pair;

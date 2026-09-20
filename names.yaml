@@ -21702,6 +21702,31 @@ functions:
       +0x14, and return this; LLVM emits the vtable store and null branch
       before saving callee state, and the release wrapper adds five words.
 
+  - address: 0x083d0e84
+    ghidra: FUN_083d0e84
+    name: observable_array_tracked_destruct
+    size: 60
+    sig: "void *observable_array_tracked_destruct(void *this)"
+    module: cxx/observable_array_tracked_destruct
+    vars: {param_1: this, DAT_083d0ebc: VTABLE_089A48C0, FUN_083d0db4: destroy_tracked_items, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 56 bytes of ARM code from 0x083d0e84 through
+      the tail branch at 0x083d0eb8, followed by the vtable literal
+      0x089a48c0 at 0x083d0ebc; 0x083d0ec0 begins the next real function, so
+      the true extent is 60 bytes. Whole-image disassembly finds two inbound
+      plain BL sites (0x0812b3ac and 0x0812b608) and no predicated inbound
+      BL sites. The body has one plain BL to 0x083d0db4 plus one predicated
+      indirect BLX through the non-NULL +0x14 object's vtable slot +0x1c.
+      It installs the derived vtable, invokes that virtual release, calls the
+      unresolved tracked-item destructor, then tail-branches to the ported
+      observable_array_destruct. Target Rust reaches the two unresolved
+      boundaries at their verified addresses; host tests install explicit
+      seams. Rust uses ordinary branches rather than the retail predicated
+      BLX and models the tail branch as a normal call. match.py reports the
+      same vtable store, +0x14 null guard and virtual dispatch, direct item
+      destruction, and base-destructor sequence; LLVM adds a frame and emits
+      an ordinary conditional branch.
   - address: 0x083d56b8
     ghidra: FUN_083d56b8
     name: element_array4_construct
