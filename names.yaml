@@ -1603,6 +1603,35 @@ functions:
       0x083ba024 to red_black_tree_rotate_left. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the transferred
       middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree root replacement ---
+  - address: 0x083c4150
+    ghidra: FUN_083c4150
+    name: red_black_tree_root_replace
+    size: 56
+    sig: "void red_black_tree_root_replace(RedBlackTree *tree, RedBlackTreeNode *node, bool destroy_strings)"
+    module: cxx/red_black_tree_root_replace
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      param_3/r2: destroy_strings
+      param_1_plus_0x04: root
+      param_2_plus_0x0c: parent
+      param_2_plus_0x10: first_string
+      param_2_plus_0x14: second_string
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent: 14 ARM words from
+      push {r4,r5,r6,lr} at 0x083c4150 through pop {r4,r5,r6,pc} at
+      0x083c4184; the separately linked left-rotation sibling begins at
+      0x083c4188. It stores the old tree root in node +0x0c, optionally
+      releases node COW strings +0x14 then +0x10 through cxx_string_release,
+      and installs node as the root. Decoding every aligned ARM B/BL-immediate
+      word in osos.dec finds exactly three incoming direct calls, all
+      unconditional bl at 0x082a812c, 0x083c4610, and 0x083c4ab0; there are no
+      predicated bl or direct tail-B callers. The Rust port uses target u32
+      pointer fields and passes string words through native locals only to make
+      64-bit host fixtures safe; target behavior is unchanged. Deliberate
+      deviations: host-layout adaptation only.
   # --- C++ red-black-tree left rotation ---
   - address: 0x083baa70
     ghidra: FUN_083baa70

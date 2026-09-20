@@ -1712,6 +1712,11 @@ pub mod hints {
     pub const OBJECT_RESOURCE_TABLE_COUNTED_STRING: usize = 0x80f0_0000;
     pub const OBJECT_RESOURCE_VECTOR20_COUNTED_STRING: usize = 0x8100_0000;
     pub const OBJECT_RESOURCE_VECTOR24_COUNTED_STRING: usize = 0x8110_0000;
+    // 0x8120_0000 and 0x8130_0000: dedicated to
+    // cxx/red_black_tree_root_replace's target-layout root and node fixtures;
+    // mappings never unmap, so no other user may share these hints.
+    pub const RED_BLACK_TREE_ROOT_REPLACE: usize = 0x8120_0000;
+    pub const RED_BLACK_TREE_ROOT_REPLACE_STRINGS: usize = 0x8130_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
