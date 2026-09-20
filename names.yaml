@@ -21366,6 +21366,30 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d58ac
+    ghidra: FUN_083d58ac
+    name: vtable_owned_payload_destruct
+    size: 44
+    sig: "void *vtable_owned_payload_destruct(void *this)"
+    module: cxx/vtable_owned_payload_destruct
+    vars: {param_1: this, DAT_083d58d8: VTABLE_089A6690, FUN_0802edc8: free}
+    status: ported
+    notes: >-
+      Raw osos.dec is exactly eleven ARM words from 0x083d58ac through the
+      pop {r4,pc} at 0x083d58d4; 0x083d58d8 is the vtable literal
+      0x089a6690 and the next function begins at 0x083d58dc. Binary decoding
+      finds two inbound plain BL call sites (0x083b46ac and 0x083b476c), and
+      the sole body call is predicated BLNE free @ 0x0802edc8. The function
+      installs that vtable at +0x00, conditionally releases the u32 target
+      pointer at +0x14, clears +0x14, and returns this. Rust addresses target
+      fields as u32 words on hosts, routes the release through an internal
+      noinline wrapper to retain a direct BL target, and deliberately does not
+      preserve the retail predicated branch or register allocation. match.py:
+      structural diff: both bodies install the vtable,
+      load/test +0x14, conditionally invoke one direct release call, clear
+      +0x14, and return this; LLVM emits the vtable store and null branch
+      before saving callee state, and the release wrapper adds five words.
+
   - address: 0x083d56b8
     ghidra: FUN_083d56b8
     name: element_array4_construct
