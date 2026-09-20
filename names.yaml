@@ -34976,6 +34976,33 @@ functions:
       LLVM may inline them, retaining the same operation order. Host tests
       cover NULL, non-final, and final slot-1 teardown paths.
 
+  - address: 0x0839cc70
+    ghidra: FUN_0839cc70
+    name: refcounted_body_acquire_dtor_copy
+    size: 60
+    sig: "void refcounted_body_acquire_dtor_copy(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1/r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+    notes: >-
+      Raw ARM spans exactly 60 bytes, 0x0839cc70..0x0839ccac; the next
+      separately linked function, refcounted_body_release_dtor_copy, begins at
+      0x0839ccac. Full osos.dec A32 branch decoding finds exactly three direct
+      bl callers, all unconditional: 0x08280a9c, 0x08280c94, and 0x0839ed2c;
+      no predicated inbound bl calls occur. The body stores body into dst before
+      its NULL early-out, then independently loads and NULL-checks the optional
+      mutex at body+8 before lock and unlock around the wrapping signed
+      refcount increment at body+4. Its two internal calls are predicated blne
+      instructions to mutex_lock @ 0x0807f5c4 and mutex_unlock @ 0x0807f6a0.
+      It is byte-identical to refcounted_body_acquire @ 0x0839cd5c modulo
+      those two bl displacements. Rust uses the same ported mutex helpers and a
+      dedicated target section to retain this separately hookable entry; host
+      tests cover NULL overwrite, wrapping increment, and a non-NULL mutex
+      with an empty semaphore cell.
   - address: 0x0839ccac
     ghidra: FUN_0839ccac
     name: refcounted_body_release_dtor_copy
