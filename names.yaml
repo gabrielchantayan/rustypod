@@ -119259,3 +119259,26 @@ functions:
       +4 and deletes the returned pointer minus four. Host seams deliberately widen
       the vtable callback and direct calls because host function pointers exceed the
       target u32 slots; tests cover disabled, nonpositive, empty, and populated cells.
+
+  - address: 0x083d0ac8
+    ghidra: FUN_083d0ac8
+    name: opaque_observable_array_flag_construct
+    size: 40
+    sig: "OpaqueObservableArrayFlag *opaque_observable_array_flag_construct(OpaqueObservableArrayFlag *this, u8 flag)"
+    module: cxx/opaque_observable_array_flag_construct
+    vars: {param_1/r0: this, param_2/r1/r4: flag, DAT_083d0aec: OPAQUE_OBSERVABLE_ARRAY_FLAG_VTABLE, FUN_08271cec: observable_array_construct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 40-byte extent: nine ARM code words from
+      0x083d0ac8 through pop {r4,pc} at 0x083d0ae8, followed by literal
+      0x089a4638 at 0x083d0aec; the next independently entered function begins
+      at 0x083d0af0. Whole-image ARM immediate-branch decoding finds three
+      inbound plain unconditional BL callers (0x08291e9c, 0x08291ebc, and
+      0x08291f3c) and no predicated direct BL callers. The body saves the byte
+      argument in r4, calls the ported observable_array_construct @ 0x08271cec,
+      overwrites its returned base vtable with the literal, stores the byte at
+      +0x10, and clears the word at +0x14. The literal has no verified class
+      identity, so opaque names deliberately avoid inventing one. Host tests
+      cover flag values 0, 1, and 255, base reset, padding preservation, and
+      the adjacent-word boundary. match.py reports the expected LLVM frame and
+      archive relocation structural diff.
