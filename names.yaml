@@ -42028,6 +42028,36 @@ functions:
       is blx-through-slot for the two unported callees and LLVM frame
       setup.
 
+  - address: 0x08376910
+    ghidra: FUN_08376910
+    name: sqlite_expr_list_walk_with_continuation
+    size: 68
+    sig: "void sqlite_expr_list_walk_with_continuation(void *context, ExprList *list)"
+    module: null
+    status: identified
+    renames:
+      param_1/r0: context
+      param_2/r1: list
+      DAT_08376954: expression_visitor_continuation
+    notes: >-
+      Deferred: raw ARM proves the 68-byte executable extent
+      0x08376910..0x08376954; 0x08376954 is its literal pool and
+      0x08376958 begins the next real function. It NULL-guards list,
+      snapshots list->items at +0x0c, then for each signed-positive
+      list->n_expr entry loads the item's expression pointer (+0x00) and
+      calls sqlite_expr_walk @ 0x0839866c with the literal
+      0x082a8ec4 as the visitor and context as the third argument.
+      Decoding every ARM B/BL immediate finds one direct call inside the
+      function (the unconditional bl at 0x08376938) and no predicated
+      calls. Exactly three inbound direct calls target the entry, all
+      unconditional bl: 0x08383374, 0x08383380, and 0x083833b8.
+      A faithful Rust port is blocked: 0x082a8ec4 is not a callable
+      function entry in osos.dec. Its raw word is zero and it immediately
+      follows the NUL-terminated "user-defined" data at 0x082a8eb8;
+      names.yaml has no ported callable seam for it. Passing that literal
+      to sqlite_expr_walk makes the retail walker execute blx r5, so
+      replacing it with any Rust callback would invent behavior.
+
   - address: 0x08377e58
     ghidra: FUN_08377e58
     name: expr_dup
