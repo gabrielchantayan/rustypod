@@ -140,6 +140,16 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
 /// calls and no outbound calls. It deliberately reuses this symbol and its
 /// host tests because target code and ABI are identical; no behavior changes.
 ///
+/// `FUN_083b5960` at load address `0x083b5960` is a byte-identical, 84-byte
+/// (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
+/// `0x083b59b0`; the next separately linked function begins at `0x083b59b4`.
+/// Complete aligned ARM B/BL decoding finds three inbound plain `bl` calls at
+/// 0x083b8174, 0x083b8644, and 0x083daff0, with no predicated BL calls and no
+/// outbound calls. It advances an in-order cursor to its successor by taking
+/// the right subtree's leftmost node or climbing parent links from right-child
+/// edges, retaining the header sentinel. The byte-identical body deliberately
+/// reuses this dispatch seam and its host tests; deliberate deviations: none.
+///
 /// A right child selects that subtree's leftmost node. Otherwise the walk
 /// climbs parent links while leaving right-child edges, then selects the first
 /// ancestor reached from a left-child edge. The final right-link comparison
