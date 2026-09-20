@@ -41325,6 +41325,30 @@ functions:
       field preserves the target's +0xf8 pointer slot without host pointer
       field overlap. Host tests cover first/middle/last records, negative,
       endpoint, and INT_MAX indices, and an unallocated result set.
+  - address: 0x0837cc74
+    ghidra: FUN_0837cc74
+    name: sqlite_is_read_only
+    size: 120
+    sig: "int sqlite_is_read_only(Parse *parse, Table *table, int view_ok)"
+    module: sqlite/is_read_only
+    status: ported
+    vars: {param_1: parse, param_2: table, param_3: view_ok}
+    notes: >-
+      Raw osos.dec establishes the 120-byte extent: 30 ARM words from
+      0x0837cc74 through pop {r4,pc} at 0x0837ccf0; inline diagnostic
+      strings begin at 0x0837ccf4. Decoding every aligned ARM B/BL
+      immediate finds exactly three direct inbound calls, all unconditional
+      plain bl: 0x08374b68, 0x0837bb00, 0x08385480. The function makes one
+      unconditional bl to the ported sqlite_error_msg @ 0x083767a0.
+      SQLite 3.5.x sqlite3IsReadOnly rejects read-only tables unless schema
+      writes are enabled (db->flags bit 0x800) or parsing is nested; then
+      rejects materialized ordinary views when view_ok is zero. Compound
+      views (pSelect->pPrior) and views with no aCol are accepted. The
+      Rust port calls sqlite_error_msg directly and represents its C vararg
+      with the established one-word VaList convention; typed repr(C) views
+      preserve target offsets while host pointers widen safely. Host tests
+      cover the read-only, schema-write, nested-parse, ordinary-view,
+      permitted-view, compound-view, and unmaterialized-view paths.
   - address: 0x083767a0
     ghidra: FUN_083767a0
     name: sqlite_error_msg
