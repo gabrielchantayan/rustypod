@@ -37114,6 +37114,33 @@ functions:
 
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   # ---- VDBE operation lookup (src/sqlite/vdbe.rs) ----
+  # ---- VDBE cursor release (src/sqlite/vdbe_free_cursor.rs) ----
+  - address: 0x0838affc
+    ghidra: FUN_0838affc
+    name: vdbe_free_cursor
+    size: 104
+    sig: "void sqlite3VdbeFreeCursor(Vdbe *p, VdbeCursor *cursor)"
+    module: sqlite/vdbe_free_cursor
+    status: ported
+    renames:
+      param_1/r5: vdbe
+      param_2/r4: cursor
+    notes: >-
+      SQLite 3.5.x sqlite3VdbeFreeCursor. Raw osos.dec establishes the exact
+      104-byte extent 0x0838affc..0x0838b064: pop {r4,r5,r6,pc} at 0x0838b060
+      is followed by the separately linked vdbe_get_op at 0x0838b064. Decoding
+      every aligned ARM B/BL-immediate word finds exactly three inbound plain
+      bl sites (0x082b3944, 0x082c38c4, 0x08388ff8) and no predicated bl.
+      The body has two predicated bl calls (btree_close_cursor @ 0x08370b40 and
+      unported sqlite3BtreeClose @ 0x08370a20), then one blx from the
+      virtual-table owner method slot +0x1c. It sets Vdbe.inVtabMethod (+0x101)
+      around that dispatch and tail-branches to tracked_free on cursor +0x38
+      only when cursor byte +0x1f is clear. The direct B-tree cursor close and
+      tracked_free are ported calls; the unported B-tree close and host virtual
+      dispatch use explicit seams. Host tests cover NULL, both B-tree guards,
+      virtual dispatch and guard restoration, and the ordinary no-allocation
+      tail-free path. match.py preserves the guard and operation order; its
+      structural diff is expected from host seams and LLVM frame allocation.
   - address: 0x0838b064
     ghidra: FUN_0838b064
     name: vdbe_get_op

@@ -230,6 +230,7 @@ pub mod used_as_column_cache;
 pub mod utf8_read;
 pub mod utf8_char_len;
 pub mod value_blob;
+pub mod vdbe_free_cursor;
 pub mod value_bytes;
 pub mod value_free;
 pub mod value_new;
