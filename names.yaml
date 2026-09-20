@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1df4
+    ghidra: FUN_083d1df4
+    name: opaque_observable_array_destroy
+    size: 56
+    sig: "ObservableArray *opaque_observable_array_destroy(ObservableArray *this)"
+    module: cxx/opaque_observable_array_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_083d1e2c: OPAQUE_OBSERVABLE_ARRAY_DESTROY_VTABLE
+      FUN_083d1d3c: opaque_observable_array_dispose_items
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec is fourteen ARM words from 0x083d1df4 through the literal
+      0x089a5640 at 0x083d1e2c; the next real function begins at 0x083d1e30,
+      making 56 bytes the true extent. Whole-image ARM B/BL decoding finds
+      three inbound plain bl sites (0x0826b730, 0x083d1c34, 0x083d1c8c) and
+      zero predicated direct bl sites. The body writes its destruction vtable,
+      conditionally dispatches the target-width payload at +0x14 through
+      vtable slot +0x1c, calls unresolved element-disposal stage 0x083d1d3c,
+      then tail-branches to observable_array_destruct @ 0x08271d2c. The
+      unknown class and stage retain behavior-only names. Firmware calls that
+      stage at its verified fixed address; host tests substitute it and the
+      target-width virtual dispatch with recorders because x86-64 function
+      pointers cannot inhabit the firmware's u32 fields.
   - address: 0x083d200c
     ghidra: FUN_083d200c
     name: indexed_release
