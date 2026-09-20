@@ -35646,6 +35646,40 @@ functions:
       (register-indexed first load, fixed offsets 1..3, shifts 8/16/24);
       the crate-wide frame-pointer push/pop is the only diff.
 
+  - address: 0x0839e3d4
+    ghidra: FUN_0839e3d4
+    name: condition_queue_dequeue
+    size: 88
+    sig: "void *condition_queue_dequeue(ConditionQueue *queue)"
+    module: cxx/condition_queue_dequeue
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_1_plus_0x04: item_list
+      param_1_plus_0x0c: mutex
+      param_1_plus_0x14: item_available
+      FUN_0807f5c4: mutex_lock
+      FUN_0839e3bc: condition_queue_list_is_empty
+      FUN_080ed9dc: condvar_wait_forever
+      FUN_080f10b8: list_pop_front
+      FUN_082aad24: operator_delete
+      FUN_0807f6a0: mutex_unlock
+      r4: item
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x0839e3d4..0x0839e42c: twenty-two ARM words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the separately linked alternate empty
+      predicate starts at 0x0839e42c. Whole-image A32 decoding finds exactly
+      three direct unconditional bl callers (0x0819bf30, 0x0819c054,
+      0x0819c144) and zero predicated bl callers. It locks queue+0x0c, waits
+      on queue+0x14 while condition_queue_list_is_empty returns nonzero,
+      pops queue+4, copies a non-NULL node's +4 payload, deletes that node,
+      unlocks, and returns the payload (or NULL for a raced empty pop).
+      mutex_lock, condvar_wait_forever, list_pop_front, operator_delete, and
+      mutex_unlock are ported direct calls; the unported list predicate is a
+      fixed-address target call with an injectable host seam. Host tests map
+      the target-width node payload pointer below 4 GiB.
+
   - address: 0x0839e42c
     ghidra: FUN_0839e42c
     name: condition_queue_is_empty_alternate
