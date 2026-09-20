@@ -117969,3 +117969,29 @@ functions:
       is a volatile target/host dispatch seam until it is ported; host tests
       install a one-slot growth model. Ghidra's 92-byte extent is four bytes
       too long.
+  - address: 0x083dd16c
+    ghidra: FUN_083dd16c
+    name: list_release_chain_destroy
+    size: 60
+    sig: "void *list_release_chain_destroy(void *this)"
+    module: cxx/list_release_chain_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      FUN_083dcf94: prepare_release_chain
+      FUN_083dcf40: release_chain
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083dd16c..0x083dd1a7: push {r4,lr} through pop {r4,pc}; the next
+      independently linked function begins with push {r4,r5,r6,r7,r8,lr} at
+      0x083dd1a8. Whole-image ARM branch decoding finds exactly two incoming
+      plain BL calls (0x0821397c and 0x08213984) and one incoming predicated
+      BLNE call (0x083cadec). The body has exactly two plain BL calls and no
+      predicated calls: when this+0x10 is nonzero, it calls unresolved
+      FUN_083dcf94, reloads this+0x10 and this+4, stores the latter through
+      the former, stores the former at this+4, then calls unresolved
+      FUN_083dcf40 and returns this. Neither callee has an established
+      identity in names.yaml, so target builds retain verified direct-address
+      boundaries and host tests install recorders. Deliberate deviations:
+      those BL calls become dispatch-boundary BLX calls; behavior and reload
+      order are preserved.

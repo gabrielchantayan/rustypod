@@ -43,6 +43,9 @@ pub mod hints {
     // LC_CTYPE table fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STRING_TRIM_CTYPE: usize = 0x7f40_0000;
+    // 0x7e90_0000: dedicated to cxx/list_release_chain_destroy's raw-u32
+    // object and sentinel fixtures; mappings never unmap.
+    pub const LIST_RELEASE_CHAIN_DESTROY: usize = 0x7e90_0000;
     // 0x7fd0_0000: dedicated to crypto/bio_push's raw-u32 BIO-chain fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const BIO_PUSH: usize = 0x7fd0_0000;
