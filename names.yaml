@@ -44029,6 +44029,33 @@ functions:
       hookable target has a dedicated text section so LLVM cannot fold it
       into another identical instantiation. Deliberate deviations: none;
       host tests cover equal, ordered, and high-bit unsigned values.
+  - address: 0x083d7494
+    ghidra: FUN_083d7494
+    name: less_unsigned_alias_7494
+    size: 24
+    sig: "u32 less_unsigned_alias_7494(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: a
+      param_3/r2: b
+      return/r0: a_is_less_than_b
+    notes: >-
+      Byte-identical `std::less<unsigned>::operator()` instantiation of
+      less_unsigned @ 0x083d7598. Raw osos.dec establishes the exact
+      24-byte extent: six ARM instructions from ldr r0,[r1] at 0x083d7494
+      through bx lr at 0x083d74a8; the separately linked next sibling starts
+      at 0x083d74ac. It ignores this, dereferences aligned u32 operands
+      without NULL guards, unsigned-compares them, and returns 1 only when
+      *a < *b. Decoding every ARM B/BL-immediate word in osos.dec finds three
+      inbound direct calls, all unconditional plain bl at 0x083bf0cc,
+      0x083bf1f0, and 0x083bf2bc; there are no predicated forms, direct tail
+      branches, or aligned raw data-word references. The callers perform
+      red-black-tree lookup and insertion over keys at node +0x10. The
+      dedicated text section keeps this independently hookable target from
+      folding into its byte-identical siblings. Deliberate deviations: none;
+      host tests cover equal, ordered, and high-bit unsigned values.
 
 
   - address: 0x083d6b40
