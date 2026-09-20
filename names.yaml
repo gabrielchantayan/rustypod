@@ -119614,3 +119614,29 @@ functions:
       node as the list head. Deliberate deviations: Rust expresses blne as a
       conditional; it preserves the raw r0 result, returning old_head when
       release_node_chain is zero and the release-chain result otherwise.
+  # --- red-black-tree vector-node pool release ---
+  - address: 0x083b9ffc
+    ghidra: FUN_083b9ffc
+    name: red_black_tree_node_pool_release_vector
+    size: 40
+    sig: "void red_black_tree_node_pool_release_vector(RedBlackTreeNodePool *pool, RedBlackTreeVectorNode *node, u32 destroy_value)"
+    module: cxx/red_black_tree_node_pool_release_vector
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: node
+      param_3/r2: destroy_value
+      param_1_plus_0x04/r0: pool_free
+      param_2_plus_0x0c/r0: node_free_link
+      param_2_plus_0x14/r0: vector_payload
+    notes: >-
+      Raw osos.dec establishes the complete 40-byte, ten-word body from push
+      {r4,r5,r6,lr} at 0x083b9ffc through pop {r4,r5,r6,pc} at 0x083ba020;
+      0x083ba024 begins the separately linked left-rotation function. Decoding
+      every aligned ARM B/BL-immediate word independently finds three direct
+      inbound plain bl calls and no predicated bl calls. The sole outbound call
+      is blne 0x083e4b2c, the ported trivial_vector4_destruct seam. The routine
+      first writes the old pool free head to node+0x0c, conditionally destroys
+      the vector descriptor at node+0x14, then makes the node the new free
+      head. Host tests cover both zero and nonzero destroy selectors and verify
+      link ordering. Deliberate deviations: none.
