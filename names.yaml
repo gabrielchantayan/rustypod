@@ -9559,6 +9559,27 @@ functions:
       block_deque's `base_client` calls it. Hook this address to that
       symbol.
 
+  - address: 0x083d6e30
+    ghidra: FUN_083d6e30
+    name: hash_table_bucket_slot_6e30
+    size: 32
+    sig: "u32 *hash_table_bucket_slot_6e30(const HashTable *table, u32 hash)"
+    module: cxx/hash_table_bucket_slot
+    status: ported
+    vars: {param_1: table, param_2: hash}
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte extent
+      0x083d6e30..0x083d6e50: preserve table in r4; pass hash and
+      table+8 bucket count to __rt_udiv (0x08036f14); return table+4 bucket
+      base plus the r1 remainder times four. The next real function begins at
+      0x083d6e50. Independent aligned ARM B/BL-immediate decoding found three
+      inbound plain BL sites (0x083d2750, 0x083d285c, 0x083d2994), zero
+      predicated inbound calls, one plain body BL to __rt_udiv, and zero
+      predicated body calls. It is byte-identical to the canonical
+      hash_table_bucket_slot at 0x083d6e70, but has a separate Rust export to
+      retain this assigned hook target; the existing __rt_udivmod wrapper
+      deliberately exposes ADS's r1 remainder through an out-pointer.
+
   - address: 0x083d6e50
     ghidra: FUN_083d6e50
     name: hash_table_bucket_slot_6e50
