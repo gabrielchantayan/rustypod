@@ -9468,6 +9468,24 @@ functions:
       callers ignore (0x0814c724, 0x081fc0c8, dtor @ 0x08214250, drain
       helper @ 0x083ddcbc — binary-verified); port returns void.
 
+  - address: 0x083ddcac
+    ghidra: FUN_083ddcac
+    name: deque_drain
+    size: 44
+    sig: "BlockDeque *deque_drain(BlockDeque *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    notes: >-
+      Binary-verified 44-byte loop: saves dq in r4, calls
+      deque_pop_front @ 0x083ddbdc while the byte-identical
+      container_is_empty_alias_75b0 @ 0x083d75b0 reports nonempty, then
+      returns dq. Raw ARM has three incoming unconditional plain BL call
+      sites (0x081a8444, 0x081a84c8, 0x081a84d0), no predicated BL forms,
+      and two outgoing plain BL instructions (0x083ddcbc,
+      0x083ddcc4). The Rust port reads BlockDeque::count directly,
+      target and correct under the host's wider pointer layout.
+
   - address: 0x083dfdac
     ghidra: FUN_083dfdac
     name: deque_construct
