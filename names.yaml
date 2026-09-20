@@ -121523,3 +121523,31 @@ functions:
       writes the result, and returns one; invalid range or an eleventh
       significant digit returns zero without writing. Deliberate deviation:
       Rust expresses the retail 64-bit carry chain as a u64 accumulator.
+
+  - address: 0x0837a0d4
+    ghidra: FUN_0837a0d4
+    name: emit_compound_select_rows
+    size: 132
+    sig: "void emit_compound_select_rows(Parse *parse, Select *select, int destination, const u32 *enabled)"
+    module: sqlite/emit_compound_select_rows
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: select
+      param_3/r2: destination
+      param_4/r3: enabled
+      iVar2/r4: member_index
+      iVar3/r5: member
+    notes: >-
+      Raw ARM decoding fixes the true 132-byte extent: 33 words from push
+      {r3,r4,r5,r6,r7,r8,r9,lr} at 0x0837a0d4 through pop
+      {r3,r4,r5,r6,r7,r8,r9,pc} at 0x0837a154; the next independently linked
+      function begins at 0x0837a158. It contains exactly two direct BL calls,
+      both unconditional: select code generation at 0x08379f38 and
+      vdbe_add_op3 at 0x08386840; no predicated BL occurs in the body.
+      It walks Select.pPrior (+0x10 then +0x20), conditionally compiles each
+      member, and emits opcode 62 with consecutive destination registers,
+      the returned first register, and nExpr + 1. Rust preserves target-width
+      pointer fields as u32 words. Deliberate deviation: the unported
+      0x08379f38 callee is a replaceable seam whose target default calls the
+      verified retail address.
