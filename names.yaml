@@ -122148,3 +122148,35 @@ functions:
       out-of-range no-transfer path. match.py reports the same guard,
       packing, mapping, and write call, with expected LLVM frame and
       conditional-return structural differences.
+
+  - address: 0x0836b240
+    ghidra: FUN_0836b240
+    name: global_transition_callback_dispatch
+    size: 212
+    sig: "u32 global_transition_callback_dispatch(u32 kind, u32 argument)"
+    module: app/global_transition_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: kind
+      param_2/r1/r7: argument
+      DAT_0836b314: global_transition_state
+      FUN_0807f5c4: mutex_lock
+      FUN_080c996c: pwrcon_acquire_clock_2
+      FUN_080ce0b8: pwrcon_restore_clock_2
+      FUN_0807f6a0: mutex_unlock
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw osos.dec words establish the exact 212-byte code extent
+      0x0836b240..0x0836b314: the word at 0x0836b314 is the literal
+      0x089ca458 and the next real function starts at 0x0836b318. Decoding
+      every aligned ARM B/BL word finds three inbound direct BL sites: one
+      plain unconditional BL at 0x081595ec and two predicated forms, BLNE at
+      0x08369ad4 and BLEQ at 0x08369b6c. The routine returns 11 when the
+      callback object is absent and 17 when the mutex is absent. Otherwise it
+      locks the target-width four-word global state, temporarily enables clock
+      2, conditionally invokes vtable slot +8 while changing its active flag,
+      restores the clock, unlocks, and posts its notification mailbox for
+      kinds 1 and 4. The port calls the established Rust ports for each direct
+      callee and uses word indices for target-width pointer fields; no
+      deliberate behavioral deviations. Host tests cover both early-return
+      guards, proving they occur before state mutation or any callee.

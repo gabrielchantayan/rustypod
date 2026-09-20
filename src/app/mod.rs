@@ -164,6 +164,7 @@ pub mod global_slot_4_get;
 pub mod global_slot_4_callback_dispatch;
 pub mod global_slot_28_byte_query;
 pub mod global_slot_5c_dispatch;
+pub mod global_transition_callback_dispatch;
 pub mod global_observer_unregister;
 pub mod genius_request_wait_ready;
 pub mod global_callback_unregister;
