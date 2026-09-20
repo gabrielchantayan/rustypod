@@ -2,6 +2,7 @@
 pub mod aligned_buffer;
 pub mod alloc_core;
 pub mod block_deque;
+pub mod deque_push_back_elem4;
 pub mod block_mgr;
 pub mod block_region;
 pub mod client_commit;

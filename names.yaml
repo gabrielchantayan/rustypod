@@ -117924,3 +117924,30 @@ functions:
       unused. Deliberate deviation: none; the existing Rust callee boundary
       is retained, and byte-pointer stepping fixes the target's 16-byte stride
       when host pointers are wider.
+  - address: 0x083df278
+    ghidra: FUN_083df278
+    name: deque_push_back_elem4
+    size: 88
+    sig: "void deque_push_back_elem4(BlockDeque *deque, const u32 *value)"
+    module: heap/deque_push_back_elem4
+    status: ported
+    renames:
+      param_1/r0: deque
+      param_2/r1: value
+      FUN_083d7600: container_is_empty_alias_7600
+      FUN_083defc8: deque_push_back_aux_elem4
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x083df278..0x083df2d4: push {r4,r5,r6,lr} through pop
+      {r4,r5,r6,pc}; the next independently linked function opens with push
+      {r4,lr} at 0x083df2d4. Whole-image ARM branch decoding finds exactly
+      three incoming direct plain BL calls (0x08261870, 0x08261980, and
+      0x083ea334) and zero predicated BL calls. The body has exactly two
+      plain BL calls and no predicated calls: it tests the deque's count with
+      the existing container_is_empty alias at 0x083d7600, and on empty or
+      end-cursor-at-segment-end calls unported deque_push_back_aux_elem4 at
+      0x083defc8. It stores *value only when the resulting cursor is non-NULL,
+      advances the cursor by four, and wraps the count increment. The helper
+      is a volatile target/host dispatch seam until it is ported; host tests
+      install a one-slot growth model. Ghidra's 92-byte extent is four bytes
+      too long.
