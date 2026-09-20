@@ -37112,6 +37112,32 @@ functions:
       NULL guard for connection. The Rust port uses named repr(C) fields
       instead of target byte offsets, preserving distinct host pointers.
 
+  # ---- VDBE pending-frame release (src/sqlite/vdbe_frame_list_clear.rs) ----
+  - address: 0x0838af4c
+    ghidra: FUN_0838af4c
+    name: vdbe_frame_list_clear
+    size: 56
+    sig: "void vdbe_frame_list_clear(void *descriptor)"
+    module: sqlite/vdbe_frame_list_clear
+    status: ported
+    renames:
+      param_1/r5: descriptor
+      iVar1/r0: frame
+      iVar1/r4: next_frame
+    notes: >-
+      Raw osos.dec fixes the exact 56-byte extent 0x0838af4c..0x0838af84:
+      the closing ldmia sp!,{r4,r5,r6,pc} at 0x0838af80 is followed by the
+      separately linked VDBE cursor-release sibling. Decoding all immediate
+      ARM B/BL words finds exactly three inbound plain BL sites
+      (0x08044cd4, 0x08044cfc, and 0x0838a554) and no predicated BL sites.
+      The sole outbound call is plain BL tracked_free @ 0x083906f4. It walks
+      the pending-frame chain starting from descriptor +0x04, saving each
+      node's +0x0c successor before freeing that node, then clears the three
+      target words at descriptor +0x00, +0x04, and +0x08. The Rust target
+      path calls the existing tracked_free port directly; its host-only
+      free seam models target-width pointers for the chain fixture. match.py
+      retains the linked-list loop and stores, with LLVM adding a frame pointer
+      and choosing three individual zero stores rather than the retail stmia.
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   # ---- VDBE operation lookup (src/sqlite/vdbe.rs) ----
   # ---- VDBE cursor release (src/sqlite/vdbe_free_cursor.rs) ----

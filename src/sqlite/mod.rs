@@ -231,6 +231,7 @@ pub mod utf8_read;
 pub mod utf8_char_len;
 pub mod value_blob;
 pub mod vdbe_free_cursor;
+pub mod vdbe_frame_list_clear;
 pub mod value_bytes;
 pub mod value_free;
 pub mod value_new;
