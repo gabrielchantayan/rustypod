@@ -116,8 +116,8 @@ pub struct VdbeOp {
 pub struct Vdbe {
     /// +0x00: the owning connection (`sqlite3 *`).
     pub db: *mut u8,
-    /// +0x04..+0x08: unmodeled.
-    pub _gap_04: [u8; 4],
+    /// +0x04: previous statement on the owning connection's live-statement list.
+    pub p_prev: *mut Vdbe,
     /// +0x08: next statement on the owning connection's live-statement list.
     pub p_next: *mut Vdbe,
     /// +0x0c: number of ops emitted so far.
@@ -170,6 +170,57 @@ pub struct Vdbe {
     /// emitted op clears it.
     pub expired: u8,
 }
+/// The connection prefix `sqlite3VdbeCreate` needs. On the target, `p_vdbe`
+/// is the live-statement head at +0x8c.
+#[repr(C)]
+struct VdbeConnection {
+    _gap_00: [u8; 0x8c],
+    p_vdbe: *mut Vdbe,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _VDBE_CONNECTION_P_VDBE_OFFSET: [u8; 0x8c] =
+    [0; core::mem::offset_of!(VdbeConnection, p_vdbe)];
+
+/// `vdbe_create` — original: `FUN_08386c44` @ 0x08386c44 (72 bytes;
+/// 3 direct inbound `bl` call sites, all unconditional; no predicated
+/// inbound calls).
+///
+/// SQLite's `sqlite3VdbeCreate`: allocate and zero 0x158 bytes through
+/// [`crate::sqlite::mem::db_malloc_zero`], return NULL on allocation failure,
+/// otherwise initialize its owner and magic sentinel, then push it onto the
+/// connection's `pVdbe` list at +0x8c. The previous head's `pPrev` points
+/// back to the new statement before the head is replaced. The target stores
+/// `0x26bceaa5` at +0x44 (`magic`).
+///
+/// Deliberate deviation: the connection list link is a typed host pointer,
+/// so its host offset may widen; the target layout is asserted above.
+///
+/// # Safety
+///
+/// `db` must point to a writable retailOS `sqlite3` whose +0x8c field is a
+/// `Vdbe` list head. The allocator must return writable, 0x158-byte Vdbe
+/// storage when it succeeds.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_create(db: *mut u8) -> *mut Vdbe {
+    let vdbe = crate::sqlite::mem::db_malloc_zero(db, 0x158).cast::<Vdbe>();
+    if vdbe.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    let connection = db.cast::<VdbeConnection>();
+    (*vdbe).db = db;
+    (*vdbe).p_next = (*connection).p_vdbe;
+    if !(*connection).p_vdbe.is_null() {
+        (*(*connection).p_vdbe).p_prev = vdbe;
+    }
+    (*vdbe).p_prev = core::ptr::null_mut();
+    (*connection).p_vdbe = vdbe;
+    (*vdbe).magic = 0x26bc_eaa5;
+    vdbe
+}
+
 
 /// One dynamically-typed SQL value — the original's 40-byte `Mem`
 /// (`sqlite3_value`), reconstructed from the firmware rather than from
@@ -231,6 +282,8 @@ pub const COLNAME_N: i32 = 2;
 const _VDBE_OP_SIZE: [u8; 20] = [0; core::mem::size_of::<VdbeOp>()];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_N_OP_OFFSET: [u8; 0x0c] = [0; core::mem::offset_of!(Vdbe, n_op)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_P_PREV_OFFSET: [u8; 0x04] = [0; core::mem::offset_of!(Vdbe, p_prev)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_P_NEXT_OFFSET: [u8; 0x08] = [0; core::mem::offset_of!(Vdbe, p_next)];
 #[cfg(target_pointer_width = "32")]
@@ -703,7 +756,7 @@ mod tests {
             let mut db = std::boxed::Box::new(db);
             let vdbe = Vdbe {
                 db: db.ptr(),
-                _gap_04: [0; 4],
+                p_prev: core::ptr::null_mut(),
                 p_next: core::ptr::null_mut(),
                 n_op: 0,
                 n_op_alloc: 0,
@@ -1410,6 +1463,47 @@ mod tests {
             core::mem::size_of::<VdbeOp>(),
             "the original advances a NULL aOp for positive in-range addresses",
         );
+    }
+
+    #[repr(align(8))]
+    struct VdbeStorage([u8; 0x158]);
+
+    #[test]
+    fn create_zeroes_and_prepends_the_connection_statement_list() {
+        let mut storage = VdbeStorage([0xa5; 0x158]);
+        let mut previous: Vdbe = unsafe { core::mem::zeroed() };
+        let mut connection = VdbeConnection {
+            _gap_00: [0; 0x8c],
+            p_vdbe: &mut previous,
+        };
+        let _guard = install_recorder(storage.0.as_mut_ptr());
+
+        let created = unsafe { vdbe_create((&mut connection as *mut VdbeConnection).cast()) };
+
+        assert_eq!(created.cast::<u8>(), storage.0.as_mut_ptr());
+        assert_eq!(realloc_log(), std::vec![(0, 0x158)]);
+        assert_eq!(unsafe { (*created).db }, (&mut connection as *mut VdbeConnection).cast());
+        assert!(core::ptr::eq(unsafe { (*created).p_next }, &mut previous));
+        assert_eq!(previous.p_prev, created);
+        assert_eq!(connection.p_vdbe, created);
+        assert_eq!(unsafe { (*created).magic }, 0x26bc_eaa5);
+        assert_eq!(unsafe { (*created).n_op }, 0, "the allocator's zero-fill is retained");
+        assert_eq!(unsafe { (*created).expired }, 0, "the constructor writes no extra state");
+    }
+
+    #[test]
+    fn create_returns_null_without_touching_the_live_statement_list_on_oom() {
+        let mut previous: Vdbe = unsafe { core::mem::zeroed() };
+        let mut connection = VdbeConnection {
+            _gap_00: [0; 0x8c],
+            p_vdbe: &mut previous,
+        };
+        let _guard = install_recorder(core::ptr::null_mut());
+
+        assert!(unsafe { vdbe_create((&mut connection as *mut VdbeConnection).cast()) }.is_null());
+        assert_eq!(realloc_log(), std::vec![(0, 0x158)]);
+        assert!(core::ptr::eq(connection.p_vdbe, &mut previous));
+        assert!(previous.p_prev.is_null());
     }
 
 }

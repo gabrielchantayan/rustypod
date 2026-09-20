@@ -43092,6 +43092,28 @@ functions:
       directly, so tests pass NULL for both (its NULL input returns 0)
       since its failure states live behind its own private ops boundary.
 
+  - address: 0x08386c44
+    ghidra: FUN_08386c44
+    name: vdbe_create
+    size: 72
+    sig: "Vdbe *vdbe_create(sqlite3 *db)"
+    module: sqlite/vdbe
+    status: ported
+    vars: {param_1/r0: db, piVar2/r0: vdbe, iVar1/r1: vdbe_magic}
+    notes: >-
+      Raw osos.dec establishes the 72-byte executable extent
+      0x08386c44..0x08386c88; the next independently linked function starts
+      at 0x08386c90. The body has one plain direct BL, to the ported
+      db_malloc_zero @ 0x08374998 with size 0x158, and no predicated BL.
+      Three inbound direct BL sites are all unconditional (0x0837ad0c,
+      plus the callers rooted at 0x0837f25c and 0x0838f188); no predicated
+      inbound BL reaches this entry. On allocation failure it returns NULL
+      without touching db->pVdbe. Otherwise it records db at Vdbe +0,
+      prepends the zeroed Vdbe to db->pVdbe at +0x8c, back-links the old
+      head through Vdbe.pPrev +0x04, and stores 0x26bceaa5 at magic +0x44.
+      The port calls the existing db_malloc_zero directly; its Vdbe-list
+      field is a typed pointer on the host but has a target-width +0x8c
+      layout assertion.
   - address: 0x0837acf4
     ghidra: FUN_0837acf4
     name: get_vdbe

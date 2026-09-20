@@ -201,7 +201,7 @@ mod tests {
         let mut ops = [blank_op(), blank_op(), blank_op()];
         let mut vdbe = Vdbe {
             db: (&mut db as *mut Connection).cast(),
-            _gap_04: [0; 4],
+            p_prev: core::ptr::null_mut(),
             p_next: core::ptr::null_mut(),
             n_op: 0,
             n_op_alloc: ops.len() as i32,
@@ -265,7 +265,7 @@ mod tests {
         let mut ops = [blank_op(), blank_op()];
         let mut vdbe = Vdbe {
             db: (&mut db as *mut Connection).cast(),
-            _gap_04: [0; 4],
+            p_prev: core::ptr::null_mut(),
             p_next: core::ptr::null_mut(),
             n_op: 0,
             n_op_alloc: ops.len() as i32,
