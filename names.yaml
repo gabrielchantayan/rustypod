@@ -21572,6 +21572,29 @@ functions:
       allocate and zero the slot buffer, allocate/copy tracker metadata, and
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
+  - address: 0x083d4b58
+    ghidra: FUN_083d4b58
+    name: element_array7_tracker_diagnostic_no_op
+    size: 4
+    sig: "void *element_array7_tracker_diagnostic_no_op(void *tracker, ...)"
+    module: cxx/element_array7_tracker_diagnostic_no_op
+    status: ported
+    vars: {param_1: tracker}
+    notes: >-
+      Raw osos.dec is exactly one A32 word at 0x083d4b58: 0xe12fff1e
+      (`bx lr`). The preceding element-array-6 constructor ends at
+      0x083d4b30; 0x083d4b5c starts the separately linked element-array-7
+      insertion routine with `push {r4,r5,r6,lr}`, so the true extent is four
+      bytes. This is neither a veneer nor a branch. Whole-image ARM
+      disassembly finds three direct incoming calls, all plain unconditional
+      bl at 0x08106220, 0x083d4c64, and 0x083d4d88, with zero predicated bl
+      calls. Those callers pass Tracker diagnostic format strings and values,
+      but this retail build reads and writes nothing. The Rust export accepts
+      only r0 and returns it unchanged; the naked target body is the exact
+      `bx lr` word, deliberately preserving the otherwise incidental r0
+      pass-through. Host tests cover NULL, unaligned, maximum, and valid
+      Tracker words plus no object access. match.py: exact
+      instruction-for-instruction match.
 
   - address: 0x083d4b5c
     ghidra: FUN_083d4b5c
