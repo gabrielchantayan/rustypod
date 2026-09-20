@@ -118467,3 +118467,36 @@ functions:
       tail-transfers a 20-byte aligned forward memcpy and returns destination
       + 20. Rust directly calls the verified memcpy body rather than its IRAM
       veneer, preserving grouped forward-copy overlap behavior and r0 result.
+
+  # --- optional vtable +0x44 result word ---
+  - address: 0x083d6004
+    ghidra: FUN_083d6004
+    name: vtable_slot_44_optional_result_word
+    size: 40
+    sig: "u32 vtable_slot_44_optional_result_word(void *receiver, u32 key)"
+    module: cxx/vtable_slot_44_optional_result_word
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: key
+      uStack_c: key_copy
+      puVar1/r0: result
+      uVar2/r0: result_word
+    notes: >-
+      Raw osos.dec establishes the complete 40-byte body at
+      0x083d6004..0x083d602b: push {r0,r1,r4,lr}; ldr r1,[r0]; mov r2,#4;
+      ldr r3,[r1,#0x44]; add r1,sp,#4; blx r3; cmp r0,#0; ldrne r0,[r0];
+      moveq r0,#0; pop {r4,pc}. The next independent function begins at
+      0x083d602c with ldr r0,[r0]. It stores key locally, dispatches through
+      receiver->vtable word 17 (+0x44) with receiver, &key, and byte length
+      four, then returns zero for a NULL result or the result's first word.
+      Ghidra correctly recovers the NULL behavior but invents two additional
+      virtual arguments from call-clobbered registers; raw A32 establishes
+      only r0-r2 as deliberate inputs. The virtual method identity is
+      unrecovered and deliberately unnamed. Whole-image A32 B/BL-immediate
+      decoding finds exactly three inbound direct calls, all unconditional
+      plain bl at 0x0811b3e8, 0x0811b708, and 0x0811bcc0; there are no
+      predicated BL forms. Rust uses a host-sized vtable word array to retain
+      target slot +0x44 with 64-bit host pointers; deliberate deviations:
+      none. Host tests cover a high-bit key, non-NULL result, NULL result,
+      exact byte length, and rejecting the adjacent vtable slot.

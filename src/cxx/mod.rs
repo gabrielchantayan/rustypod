@@ -344,6 +344,7 @@ pub mod vtable_slot_3c_result_u16;
 pub mod vtable_slot_2c_read_i16;
 pub mod vtable_slot_08_optional_payload_word;
 pub mod vtable_slot_40_result_word;
+pub mod vtable_slot_44_optional_result_word;
 pub mod vtable_slot_1b4_decrement_nonzero;
 pub mod vtable_slot_40_result_word_at;
 pub mod vtable_slot_40_result_word_at_alt;
