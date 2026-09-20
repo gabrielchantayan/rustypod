@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d00a0
+    ghidra: FUN_083d00a0
+    name: indexed_element_array_release
+    size: 88
+    sig: "void indexed_element_array_release(IndexedElementArrayRelease *this)"
+    module: cxx/indexed_element_array_release
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+4: count
+      param_1+16: enabled
+      iVar2/r4: index
+      iVar3/r6: count
+      piVar1/r0: element_cell
+      "[this + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_at
+      "[element_cell + 0x0]": element
+      "[element + 0x0]": element_vtable
+      "[element_vtable + 0x4]": element_release
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte body
+      0x083d00a0..0x083d00f4; the next independently entered function begins
+      at 0x083d00f8. The body contains no direct BL instructions: one plain
+      indirect BLX through this vtable slot +0x40 and one predicated BLXNE
+      through a non-NULL element's vtable slot +0x04. Raw decoding verifies
+      three inbound direct plain BL instructions at 0x0817e46c, 0x083d0150,
+      and 0x083d0188, with no predicated direct BL callers. When enabled, it
+      iterates signed indices [0, count), obtains an element cell through the
+      unresolved accessor, and invokes each non-NULL element's unresolved
+      +0x04 virtual method. Deliberate deviation: both unidentified virtual
+      targets dispatch through their fixed slots on target; host tests use
+      typed native-vtable fixtures because target u32 vtable words cannot
+      hold host callbacks.
   - address: 0x083d1bf0
     ghidra: FUN_083d1bf0
     name: owned_element_array_release
