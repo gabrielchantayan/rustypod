@@ -51,6 +51,33 @@ pub unsafe extern "C" fn vtable_slot_40_result_word_at(receiver: *mut u8, index:
     unsafe { result.read() }
 }
 
+/// Indexed virtual slot-`+0x40` result-word wrapper.
+///
+/// `container_element_at_alias_5fbc` — original: `FUN_083d5fbc` @
+/// **0x083d5fbc** (24 bytes; true extent `0x083d5fbc..0x083d5fd4`, with the
+/// next independently linked function beginning at `0x083d5fd4`). Raw ARM
+/// decoding finds three direct incoming calls, all unconditional plain `bl`
+/// (at `0x08128448`, `0x08299d54`, and `0x0839c84c`); there are no predicated
+/// direct `bl` calls. The body calls vtable word 16 (`+0x40`) with the live
+/// `r1` index, then returns the first word of that result.
+///
+/// Ghidra's one-argument prototype and virtual-method return are wrong: raw
+/// `blx r2` preserves `r1`, and the following `ldr r0,[r0]` loads the element
+/// word. Deliberate deviation: host vtable entries use native-width function
+/// pointers; selecting slot 16 preserves the target's four-byte slot layout.
+/// The empty compiler barrier keeps this byte-identical sibling independently
+/// hookable without emitting an ARM instruction.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn container_element_at_alias_5fbc(receiver: *mut u8, index: u32) -> u32 {
+    unsafe { core::arch::asm!("", options(nostack, preserves_flags)) };
+    let vtable = unsafe { (receiver as *const *const VtableSlot40ResultAt).read() };
+    let callback = unsafe { vtable.add(RESULT_WORD_SLOT).read() };
+    let result = unsafe { callback(receiver, index) };
+    unsafe { result.read() }
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -106,6 +133,20 @@ mod tests {
         assert_eq!(unsafe { vtable_slot_40_result_word_at(&mut receiver as *mut _ as *mut u8, 0x7fff_ffff) }, 0xa5a5_5a5a);
         assert_eq!(unsafe { FORWARDED_RECEIVER }, (&mut receiver as *mut *mut u8) as usize);
         assert_eq!(unsafe { FORWARDED_INDEX }, 0x7fff_ffff);
+        assert_eq!(unsafe { DISPATCH_CALLS }, 1);
+        assert_eq!(unsafe { WRONG_SLOT_CALLS }, 0, "only vtable slot +0x40 dispatches");
+    }
+
+    #[test]
+    fn alias_5fbc_forwards_zero_index_and_loads_zero_element() {
+        let _bench = bench();
+        let mut vtable = [wrong_slot as VtableSlot40ResultAt; RESULT_WORD_SLOT + 1];
+        vtable[RESULT_WORD_SLOT] = record_dispatch;
+        let mut receiver = vtable.as_ptr() as *mut u8;
+
+        assert_eq!(unsafe { container_element_at_alias_5fbc(&mut receiver as *mut _ as *mut u8, 0) }, 0);
+        assert_eq!(unsafe { FORWARDED_RECEIVER }, (&mut receiver as *mut *mut u8) as usize);
+        assert_eq!(unsafe { FORWARDED_INDEX }, 0);
         assert_eq!(unsafe { DISPATCH_CALLS }, 1);
         assert_eq!(unsafe { WRONG_SLOT_CALLS }, 0, "only vtable slot +0x40 dispatches");
     }

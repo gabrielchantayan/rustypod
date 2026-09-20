@@ -44212,6 +44212,29 @@ functions:
       host tests cover equal, ordered, and high-bit unsigned values.
 
 
+  - address: 0x083d5fbc
+    ghidra: FUN_083d5fbc
+    name: container_element_at_alias_5fbc
+    size: 24
+    sig: "u32 container_element_at_alias_5fbc(void *receiver, u32 index)"
+    module: cxx/vtable_slot_40_result_word_at
+    status: ported
+    vars: {param_1/r0: receiver, param_2/r1: index, return/r0: element}
+    notes: >-
+      Raw osos.dec establishes the exact six-instruction extent from push
+      {r4,lr} at 0x083d5fbc through pop {r4,pc} at 0x083d5fd0; the next
+      independently linked function begins at 0x083d5fd4. It reads the
+      receiver vtable, invokes word 16 (byte offset +0x40) with receiver and
+      the live r1 index, then loads and returns the first word of that result.
+      Ghidra's one-argument prototype is incomplete: raw blx r2 preserves r1.
+      Decoding every ARM B/BL-immediate word in osos.dec finds three inbound
+      direct calls, all unconditional plain bl at 0x08128448, 0x08299d54, and
+      0x0839c84c; there are no predicated forms. It is byte-identical to
+      container_element_at siblings. The dedicated Rust body is deliberately
+      kept as an independently hookable BL target; host tests cover index zero
+      and a zero element word. Deliberate deviations: host vtable entries use
+      native-width pointers but preserve target word slot 16.
+
   - address: 0x083d6b40
     ghidra: FUN_083d6b40
     name: container_element_at_alias_6b40
