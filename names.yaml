@@ -121693,3 +121693,30 @@ functions:
       pointer fields as u32 words. Deliberate deviation: the unported
       0x08379f38 callee is a replaceable seam whose target default calls the
       verified retail address.
+  - address: 0x08376b8c
+    ghidra: FUN_08376b8c
+    name: strided_record_remove_selector
+    size: 104
+    sig: "void strided_record_remove_selector(u32 *owner, i32 selector)"
+    module: cxx/strided_record_remove_selector
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r5: selector
+      iVar6/lr: index
+      iVar1/r1: record
+      iVar2/r2: last_record
+      "[owner + 0x58]": record_count
+      "[owner + 0x5c]": record_end_count
+      "[owner + 0x60 + index * 0x10]": record
+    notes: >-
+      Raw osos.dec words establish the true 104-byte extent
+      0x08376b8c..0x08376bf0; the next independently entered function begins
+      at 0x08376bf4. Its 26 ARM words have no outbound BL calls. Complete
+      aligned ARM B/BL decoding finds three inbound plain BL sites and no
+      predicated BL calls. A negative selector clears both count words;
+      otherwise the helper scans four-word records at +0x60, replaces each
+      matching record with the current last record, and decrements both count
+      words. The loop deliberately increments after replacement, so a swapped
+      matching last record is not immediately reconsidered. Deliberate
+      deviations: none.
