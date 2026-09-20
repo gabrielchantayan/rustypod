@@ -95,6 +95,7 @@ pub mod check_object_name;
 pub mod column_default;
 pub mod column_index;
 pub mod column_mem;
+pub mod column_text;
 pub mod context_malloc;
 pub mod corrupt_schema;
 pub mod data_size;

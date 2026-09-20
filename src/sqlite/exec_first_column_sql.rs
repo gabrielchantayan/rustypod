@@ -11,10 +11,10 @@
 //! finalization. A prepare failure returns immediately without finalizing.
 //!
 //! Deliberate deviation: the two still-unported direct callees are exposed
-//! as volatile seams. `sqlite3_step`, `sqlite3_finalize`, and the nested SQL
-//! executor are existing Rust ports and are called directly.
-
+//! as volatile seams. `sqlite3_step`, `sqlite3_finalize`, and
+//! `sqlite3_column_text` are existing Rust ports and are called directly.
 use core::ptr::null_mut;
+use crate::sqlite::column_text::sqlite3_column_text;
 
 const SQLITE_ROW: i32 = 100;
 
@@ -42,18 +42,6 @@ unsafe extern "C" fn retail_prepare_v2(
     let prepare: PrepareV2Fn = core::mem::transmute(0x0839_0dccusize);
     prepare(db, query, byte_count, statement_out, tail_out)
 }
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_column_text(statement: *mut u8, column: i32) -> *const u8 {
-    let column_text: ColumnTextFn = core::mem::transmute(0x0838_fae4usize);
-    column_text(statement, column)
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_execute_sql(db: *mut u8, query: *const u8) -> i32 {
-    crate::sqlite::execute_sql::sqlite3_execute_sql(db, query)
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_prepare_v2(
     _db: *mut u8,
@@ -65,10 +53,16 @@ unsafe extern "C" fn missing_prepare_v2(
     panic!("sqlite3_exec_first_column_sql requires sqlite3_prepare_v2 @ 0x08390dcc")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_column_text(_statement: *mut u8, _column: i32) -> *const u8 {
-    panic!("sqlite3_exec_first_column_sql requires sqlite3_column_text @ 0x0838fae4")
+
+unsafe extern "C" fn port_column_text(statement: *mut u8, column: i32) -> *const u8 {
+    sqlite3_column_text(statement.cast(), column)
 }
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_execute_sql(db: *mut u8, query: *const u8) -> i32 {
+    crate::sqlite::execute_sql::sqlite3_execute_sql(db, query)
+}
+
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_execute_sql(_db: *mut u8, _query: *const u8) -> i32 {
@@ -86,14 +80,14 @@ pub struct ExecFirstColumnSqlOps {
 #[cfg(target_os = "none")]
 pub const DEFAULT_EXEC_FIRST_COLUMN_SQL_OPS: ExecFirstColumnSqlOps = ExecFirstColumnSqlOps {
     prepare_v2: retail_prepare_v2,
-    column_text: retail_column_text,
+    column_text: port_column_text,
     execute_sql: retail_execute_sql,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_EXEC_FIRST_COLUMN_SQL_OPS: ExecFirstColumnSqlOps = ExecFirstColumnSqlOps {
     prepare_v2: missing_prepare_v2,
-    column_text: missing_column_text,
+    column_text: port_column_text,
     execute_sql: missing_execute_sql,
 };
 
