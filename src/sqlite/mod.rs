@@ -67,6 +67,7 @@
 
 pub mod api_exit;
 pub mod aux_sweep;
+pub mod array_allocate;
 pub mod aggregate_context;
 pub mod auth_check;
 pub mod auth_context_push;
