@@ -37066,6 +37066,28 @@ functions:
       explicitly sets db->mallocFailed (+0x1e) even though
       sqlite3DbRealloc has set it too.
 
+  # ---- SQLite expression-token dequoting (src/sqlite/dequote_expr_token.rs) ----
+  - address: 0x08375464
+    ghidra: FUN_08375464
+    name: dequote_expr_token
+    size: 60
+    sig: "void dequote_expr_token(sqlite3 *db, Expr *expression)"
+    module: sqlite/dequote_expr_token
+    status: ported
+    vars: {param_1/r0: db, param_2/r4: expression, FUN_08385134: token_copy, FUN_083753d0: dequote}
+    notes: >-
+      Raw ARM establishes the 60-byte extent 0x08375464..0x083754a0: it
+      begins with push {r4,lr} and is followed by the next function's push.
+      A complete ARM BL-immediate scan finds three plain direct inbound BLs
+      at 0x082d707c, 0x083772ac, and 0x08377ae8; its only outbound call is
+      predicated BLEQ token_copy at 0x08375490, followed by a tail branch to
+      dequote at 0x083753d0. The routine returns if the expression +0x02
+      halfword already has bit 0x40. Otherwise it sets that bit, calls
+      token_copy(db, &expression->token, &expression->token) only when the
+      token packed word (+0x18) has a clear low ownership bit, then dequotes
+      token.z. The Rust port directly calls the existing token_copy and
+      dequote ports; its typed repr(C) Expr/Token layout preserves the
+      target's field relationships without host pointer-width offsets.
   # ---- SQLite token copy (src/sqlite/token_copy.rs) ----
   - address: 0x08385134
     ghidra: FUN_08385134
