@@ -43260,6 +43260,38 @@ functions:
       directly, so tests pass NULL for both (its NULL input returns 0)
       since its failure states live behind its own private ops boundary.
 
+  - address: 0x08379710
+    ghidra: FUN_08379710
+    name: sqlite_fix_src_list
+    size: 188
+    sig: "int sqlite3FixSrcList(DbFixer *fixer, SrcList *sources)"
+    module: sqlite/fix_src_list
+    status: ported
+    renames:
+      param_1/r6: fixer
+      param_2/r7: sources
+      FUN_08374a14: sqlite3DbStrDup
+      FUN_08384f14: sqlite3StrICmp
+      FUN_083767a0: sqlite3ErrorMsg
+      FUN_08379694: sqlite3FixSelect
+      FUN_08379598: sqlite3FixExpr
+    notes: >-
+      SQLite 3.5.x sqlite3FixSrcList. Raw osos.dec establishes the exact
+      188-byte extent 0x08379710..0x083797cc: push {r3,r4,r5,r6,r7,r8,r9,lr}
+      begins at entry, pop {r3,r4,r5,r6,r7,r8,r9,pc} ends at 0x083797c8, and
+      the following word begins the diagnostic literal. Decoding aligned ARM
+      branch words finds three direct inbound BL sites, all unconditional:
+      0x0836fe44, 0x08373de8, and 0x083796c0. There are no predicated BL
+      forms or tail branches. The body has five unconditional BL instructions
+      (sqlite3DbStrDup, sqlite3StrICmp, sqlite3ErrorMsg, sqlite3FixSelect,
+      sqlite3FixExpr) and none predicated. It walks signed SrcList.nSrc and
+      48-byte SrcList_item records, fills a NULL zDatabase (+0x08) with a
+      duplicate of fixer.zDb, rejects a nonmatching name, then fixes pSelect
+      (+0x10) and pOn (+0x1c), short-circuiting on failure. The only
+      deliberate deviation is representing sqlite3ErrorMsg's fifth,
+      variadic table-name word as an explicit target-width pointer for its
+      current formatter seam; it is ABI-identical on ARM.
+
   - address: 0x08386c44
     ghidra: FUN_08386c44
     name: vdbe_create

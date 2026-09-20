@@ -206,6 +206,9 @@ pub mod hints {
     // Db-array/DbFixer fixture page; all xx00_0000 slots are taken, so it
     // uses the function's own address prefix. Mappings never unmap.
     pub const SQLITE_FIX_INIT: usize = 0x0837_0000;
+    // 0x0838_0000: dedicated to sqlite/fix_src_list's raw-u32 DbFixer,
+    // Parse, SrcList, and SrcList_item fixture; mappings never unmap.
+    pub const SQLITE_FIX_SRC_LIST: usize = 0x0838_0000;
     // 0x7100_0000: dedicated to sqlite/cursor_moveto's raw-u32 VdbeCursor
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const VDBE_CURSOR_MOVETO: usize = 0x7100_0000;

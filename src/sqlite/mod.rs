@@ -224,6 +224,7 @@ pub mod src_list_delete;
 pub mod src_list_assign_cursors;
 pub mod src_list_from_table;
 pub mod src_list_lookup;
+pub mod fix_src_list;
 pub mod set_string;
 pub mod set_string_formatted;
 pub mod snprintf;
