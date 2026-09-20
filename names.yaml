@@ -39841,6 +39841,41 @@ functions:
       cover fault precedence, incrblob abort, exact movement arguments,
       successful key clearing, and failure retention.
 
+  # ---- B-tree rollback (src/sqlite/btree_rollback.rs) ----
+  - address: 0x08372b50
+    ghidra: FUN_08372b50
+    name: btree_rollback
+    size: 200
+    sig: "i32 btree_rollback(Btree *btree)"
+    module: sqlite/btree_rollback
+    status: ported
+    renames:
+      param_1/r0/r5: btree
+      puVar3/r4: shared
+      iVar1/r6: rc
+      local_18/sp: page
+      FUN_083684fc: btree_save_all_cursors (retail boundary)
+      FUN_08372d8c: btree_trip_all_cursors (retail boundary)
+      FUN_0837ea84: pager_rollback (retail boundary)
+      FUN_08371418: context_child_handle_acquire
+      FUN_0836761c: release_via_field_0x48
+      FUN_083960e8: unlock_if_unused (retail boundary)
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte extent
+      0x08372b50..0x08372c18: pop {r3,r4,r5,r6,r7,pc} ends the body and the
+      following push starts a separately linked sibling. Complete raw-image
+      ARM decoding finds three inbound unconditional plain BL calls at
+      0x082bd938, 0x08370a60, and 0x08382500; no predicated caller targets
+      this address. The body has seven unconditional plain BL instructions
+      and two predicated calls, BLNE btree_trip_all_cursors @ 0x08372d8c and
+      BLEQ release_via_field_0x48 @ 0x0836761c. This is SQLite's
+      sqlite3BtreeRollback: save cursors, trip them on save failure, roll back
+      a write pager, conditionally release page one, then update transaction
+      state and unlock. The four unported target calls remain direct absolute
+      calls on device and use a private volatile host dispatch table; host
+      Btree inTrans moves after widened pointer slots, the deliberate layout
+      adaptation needed to avoid overlap outside the 32-bit target.
+
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
   - address: 0x082c3528
     ghidra: FUN_082c3528
