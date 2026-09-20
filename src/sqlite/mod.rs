@@ -178,6 +178,7 @@ pub mod parse;
 pub mod prepare;
 pub mod pager_lookup;
 pub mod pager_reset;
+pub mod pager_end_transaction;
 pub mod pager_set_page_size;
 pub mod pager_truncate_image;
 pub mod pcache_remove_from_lru_list;

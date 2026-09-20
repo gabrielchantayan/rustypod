@@ -43571,6 +43571,40 @@ functions:
       pager_set_sector_size (0x08369040) remains retailOS-owned; target builds
       call its load address and host tests use a private recording boundary to
       prove the new-page-size sector setup and lease balance.
+  - address: 0x0837ecac
+    ghidra: FUN_0837ecac
+    name: pager_end_transaction
+    size: 144
+    sig: "u32 pager_end_transaction(Pager *pager)"
+    module: sqlite/pager_end_transaction
+    status: ported
+    vars: {param_1/r5: pager, r6: zero, r7: dirty_page_offset, iVar1/r0: dirty_page}
+    renames:
+      "*(u8*)(pager+0x09)": pager->journalOpen
+      "*(u8*)(pager+0x0a)": pager->stmtOpen
+      "*(u8*)(pager+0x14)": pager->memDb
+      "*(u32*)(pager+0x38)": pager->pDirty
+      "*(u32*)(pager+0x3c)": pager->pAll
+      "*(u32*)(pager+0x58)": pager->pInJournal
+      "*(u32*)(pager+0x8c)": pager->pDirtyOffset
+      "*(u32*)(pager+0xe0)": pager->nRef, activity lease count
+      FUN_082dd3d8: context_activity_enter
+      FUN_08370588: sqlite3_bitvec_destroy
+      FUN_083906f4: tracked_free
+    notes: >-
+      SQLite 3.5.x pager end-transaction helper. Raw ARM establishes the exact
+      144-byte extent 0x0837ecac..0x0837ed3c; the following push
+      {r4,r5,r6,lr} begins a separate sibling. Decoding every ARM B/BL
+      immediate in osos.dec finds three inbound direct call sites, all
+      unconditional plain bl (0x082ddaa4, 0x08370d54, 0x0837edd4), with no
+      predicated forms. The body has three unconditional bl calls:
+      context_activity_enter, sqlite3_bitvec_destroy, and tracked_free.
+      When journalOpen is clear it only clears stmtOpen and balances nRef.
+      Otherwise disk pagers destroy pInJournal; memory pagers walk pDirtyOffset
+      from pAll, clear each page's in-journal byte and dirty links, then free
+      its journal buffer. Both paths clear pDirty, journalOpen, and
+      pDirtyOffset. Rust preserves target-width pointers and offsets as u32
+      words; all three callees are already ported and are called directly.
   # ---- SQLite pager image truncation, sqlite3PagerTruncateImage (src/sqlite/pager_truncate_image.rs) ----
   - address: 0x0837edf0
     ghidra: FUN_0837edf0
