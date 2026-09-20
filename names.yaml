@@ -119306,3 +119306,25 @@ functions:
       identity, so opaque role names and target-width dispatch preserve the
       verified contract; host tests use widened callbacks. match.py reports the
       expected LLVM frame and loop-shape structural diff.
+
+  - address: 0x083d0568
+    ghidra: FUN_083d0568
+    name: owned_element_array_delete_cells
+    size: 76
+    sig: "void owned_element_array_delete_cells(OwnedElementArrayRelease *this)"
+    module: cxx/owned_element_array_delete_cells
+    status: ported
+    vars: {param_1/r0/r5: this, param_1_plus_0x04/r6: count, param_1_plus_0x10: enabled, param_1_vtable_plus_0x40/r2: element_at, element_cell_word: allocation, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: nineteen ARM words
+      from push {r4,r5,r6,lr} at 0x083d0568 through pop {r4,r5,r6,pc} at
+      0x083d05b4; the next independently entered function begins at 0x083d05b8.
+      The body has no plain direct BL instructions, one predicated BLNE to the
+      ported operator_delete @ 0x082aad24, and one unconditional virtual BLX
+      through array vtable slot +0x40. Whole-image ARM immediate-branch decoding
+      finds three inbound plain BL callers and no predicated direct callers. A
+      nonzero enabled byte gates a signed 0..count walk; each yielded cell's
+      non-NULL first word is deleted directly. The runtime vtable target has no
+      recovered static identity, so the port retains a target-width dispatch and
+      host tests use widened callbacks. match.py structural differences are
+      expected from LLVM's frame and host/target dispatch seam.
