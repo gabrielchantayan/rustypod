@@ -119187,3 +119187,28 @@ functions:
       negative-count guards; the Rust body deliberately passes the saved element
       explicitly to delete because the recovered void destructor ABI does not
       promise the stock r0 pass-through.
+
+  - address: 0x083d107c
+    ghidra: FUN_083d107c
+    name: opaque_observable_array_payload_destroy
+    size: 56
+    sig: "ObservableArray *opaque_observable_array_payload_destroy(ObservableArray *this)"
+    module: cxx/opaque_observable_array_payload_destroy
+    status: ported
+    vars: {param_1/r0/r4: this, DAT_083d10b4: OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_DESTROY_VTABLE, param_1_plus_0x14: payload, FUN_083d0fbc: OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_CLEANUP, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent: thirteen ARM code
+      words from push {r4,lr} at 0x083d107c through the tail branch at
+      0x083d10b0, followed by literal 0x089a4a70 at 0x083d10b4; 0x083d10b8
+      starts the next independent function. Whole-image ARM immediate-branch
+      decoding finds three inbound unconditional plain BL instructions
+      (0x08119c4c, 0x0811de08, and 0x0826b5e0) and no predicated direct BL
+      callers. The body installs the literal vtable, conditionally dispatches
+      payload->vtable[+0x1c] for the u32 payload at +0x14, calls the
+      still-unidentified 0x083d0fbc member cleanup, then tail-branches to the
+      ported observable_array_destruct. The payload slot and direct cleanup
+      have no verified semantic identity, so target-width layout and explicit
+      seams preserve their observed contracts; host tests model the target
+      virtual slot with a seam because native function pointers widen. match.py
+      reports the expected structural diff from LLVM's frame, unpredicated
+      host/target seam dispatch, and unresolved archive tail relocation.

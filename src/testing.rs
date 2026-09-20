@@ -44,6 +44,11 @@ pub mod hints {
     // fixtures; mappings never unmap, so no other user may share either hint.
     pub const OPAQUE_OBSERVABLE_ARRAY_DESTROY: usize = 0x7ea0_0000;
     pub const OPAQUE_OBSERVABLE_ARRAY_DESTROY_NULL: usize = 0x7eb0_0000;
+    // 0x7ec0_0000 / 0x7ed0_0000: dedicated to
+    // cxx/opaque_observable_array_payload_destroy's target-width derived
+    // object fixtures; mappings never unmap, so no other user may share either hint.
+    pub const OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_DESTROY: usize = 0x7ec0_0000;
+    pub const OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_DESTROY_NULL: usize = 0x7ed0_0000;
     // 0x7f40_0000: dedicated to runtime/trim_ctype_whitespace's raw-u32
     // LC_CTYPE table fixture; mappings never unmap, so no other user may
     // share this hint.
