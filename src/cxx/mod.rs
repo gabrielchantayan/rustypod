@@ -102,6 +102,7 @@ pub mod handle_callback_dispatch;
 pub mod heap_string;
 pub mod list_splice;
 pub mod list_release_chain_destroy;
+pub mod list_node_prepend_release;
 pub mod list_range_clear;
 pub mod list_insert_header_value;
 pub mod list_iter_advance;
