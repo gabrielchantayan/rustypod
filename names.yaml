@@ -122070,3 +122070,27 @@ functions:
       The Rust port inlines that helper through existing ported I2C wrappers;
       this deliberately replaces the retail tail branch with ordinary Rust
       calls while preserving the transfer order and raw status behavior.
+
+  - address: 0x0836e348
+    ghidra: FUN_0836e348
+    name: i2c_0x39_register4_high_bits
+    size: 36
+    sig: "void i2c_0x39_register4_high_bits(u8 *out)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      local_10: register_value
+      FUN_0836e36c: i2c_0x39_read_register
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent from push at
+      0x0836e348 through pop at 0x0836e368; the next independently linked
+      function begins with push at 0x0836e36c. The body has one unconditional
+      BL, to i2c_0x39_read_register(4, &register_value), and no predicated
+      BL instructions. Complete aligned ARM B/BL decoding finds three inbound
+      plain BL sites (0x08084578, 0x08084c48, 0x080e17f8) and zero predicated
+      BL callers. Regardless of the raw I2C status, it shifts the callee's
+      output byte right five bits and stores the result through out. The
+      existing port of 0x0836e36c provides the verified callee boundary.
+      Deliberate deviation: the retail direct BL is an ordinary Rust call;
+      ignored status and the unconditional store are preserved.

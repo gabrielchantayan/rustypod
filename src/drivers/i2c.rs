@@ -251,6 +251,28 @@ pub unsafe extern "C" fn i2c_0x39_read_register(reg: u32, out: *mut u8) -> i32 {
     kernel_sem5_signal();
     status
 }
+/// i2c_0x39_register4_high_bits — original: `FUN_0836e348` @
+/// 0x0836e348 (36 bytes; 3 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Reads register 4 from I2C slave 0x39 through
+/// [`i2c_0x39_read_register`] and stores its high three bits, right-aligned,
+/// in `out`. The raw I2C status is deliberately discarded: the stock wrapper
+/// always shifts and stores the byte its callee left in the stack slot.
+///
+/// # Deviation
+///
+/// Retail invokes the register read with a direct `bl`; this port calls its
+/// existing Rust port instead. The ignored status and unconditional output
+/// store are preserved.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2c_0x39_register4_high_bits(out: *mut u8) {
+    let mut register_value = 0u8;
+    i2c_0x39_read_register(4, &mut register_value);
+    out.write(register_value >> 5);
+}
+
 /// i2c_0x39_write_register — original: `FUN_0836e3c8` @ `0x0836e3c8`
 /// (56 bytes; 7 plain `bl` call sites, 0 predicated `bl`,
 /// binary-verified by decoding every B/BL word in osos.dec).
@@ -1017,6 +1039,28 @@ pub(crate) mod tests {
                 "only the register-select write for the failed read occurs"
             );
             assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 1);
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn i2c_0x39_register4_high_bits_right_aligns_and_ignores_read_status() {
+        let state = install_0x39_read(0, -5);
+        unsafe {
+            *addr_of_mut!(RAW_READ_VALUE) = 0x1f;
+            let mut out = 0xff;
+            i2c_0x39_register4_high_bits(addr_of_mut!(out));
+            assert_eq!(out, 0, "bits below bit 5 do not contribute");
+
+            *addr_of_mut!(RAW_READ_VALUE) = 0xe0;
+            i2c_0x39_register4_high_bits(addr_of_mut!(out));
+            assert_eq!(out, 7, "the three high bits are right-aligned");
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![4], std::vec![4]],
+                "both calls select register 4"
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 2);
         }
         restore_0x39_read(state);
     }
