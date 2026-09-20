@@ -760,9 +760,10 @@ pub unsafe extern "C" fn element_array7_construct(
 /// `{+0x00, +0x04, +0x08, +0x0c, +0x10, +0x14}`, allocates and zeroes
 /// `slots * 4` bytes for its data buffer, then allocates a shortened copy of
 /// the fTable name for the inert `Tracker<%s> fTable=%x, fSize=%d`
-/// instrumentation. `FUN_083d4418` is a four-byte `bx lr`, so it has no port
-/// seam. There is no allocation-failure branch: allocation results are stored
-/// and used exactly as returned, then the constructor returns `this`.
+/// instrumentation. Its four-byte `FUN_083d4418` tracker diagnostic is a
+/// separate no-op port. There is no allocation-failure branch: allocation
+/// results are stored and used exactly as returned, then the constructor
+/// returns `this`.
 ///
 /// On target the fTable name is read from runtime-data record 0x0897bc00 + 4.
 /// The host-only source is independently swappable in tests because that

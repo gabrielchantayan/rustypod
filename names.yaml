@@ -21318,6 +21318,26 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d4418
+    ghidra: FUN_083d4418
+    name: tracker_array_diagnostic_noop
+    size: 4
+    sig: "void *tracker_array_diagnostic_noop(void *tracker)"
+    module: app/tracker_array_diagnostic_noop
+    status: ported
+    vars: {param_1: tracker}
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x083d4418..0x083d441c: bx lr (0xe12fff1e). The preceding bytes end a
+      string, and the next independently linked function starts at 0x083d441c
+      with push {r4,r5,r6,lr}; this is neither a veneer nor a tail branch.
+      Whole-image raw A32 decoding finds three inbound plain unconditional bl
+      calls (0x08106168, 0x083d4524, and 0x083d4648) and no predicated bl
+      calls. It accesses no memory and preserves its r0 tracker word. Callers
+      supply Tracker<%s> fTable diagnostics and array-table relocation
+      details, identifying disabled tracker instrumentation. Target builds use
+      naked A32 assembly to preserve the exact one-word body; host builds
+      return the observed r0 pass-through. No deliberate deviations.
   - address: 0x083d40f0
     ghidra: FUN_083d40f0
     name: element_array2_construct
