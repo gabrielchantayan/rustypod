@@ -21366,6 +21366,25 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d551c
+    ghidra: FUN_083d551c
+    name: tracker_event_log_noop
+    size: 4
+    sig: "void *tracker_event_log_noop(void *tracker)"
+    module: app/tracker_event_log_noop
+    status: ported
+    vars: {param_1: tracker}
+    notes: >-
+      Raw osos.dec is the single `bx lr` word 0xe12fff1e at 0x083d551c;
+      0x083d5518 is the preceding function's return and 0x083d5520 begins
+      the next function. Whole-image ARM decoding finds three incoming plain
+      BL calls (0x081062d8, 0x083d5628, 0x083d574c) and no predicated BL
+      calls. The helper dereferences nothing and returns its r0 tracker word
+      unchanged; its call contexts supply tracker format strings and event
+      details, so it is disabled tracker-event instrumentation. The target
+      export is naked A32 assembly and exactly preserves the single `bx lr`
+      body, including its unchanged r0 return.
+
   - address: 0x083d58ac
     ghidra: FUN_083d58ac
     name: vtable_owned_payload_destruct
