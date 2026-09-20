@@ -21338,6 +21338,25 @@ functions:
       details, identifying disabled tracker instrumentation. Target builds use
       naked A32 assembly to preserve the exact one-word body; host builds
       return the observed r0 pass-through. No deliberate deviations.
+  - address: 0x083d41b4
+    ghidra: FUN_083d41b4
+    name: element_array1_tracker_diagnostic_noop
+    size: 4
+    sig: "void *element_array1_tracker_diagnostic_noop(void *tracker)"
+    module: app/element_array1_tracker_diagnostic_noop
+    status: ported
+    vars: {param_1: tracker}
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x083d41b4..0x083d41b8: bx lr (0xe12fff1e); 0x083d41b0 ends the
+      preceding format string and 0x083d41b8 begins the next real function
+      with push {r4,r5,r6,lr}. Raw A32 decoding verifies three inbound plain
+      unconditional bl calls (0x081063ec, 0x083d42c0, and 0x083d43e8) and no
+      predicated bl calls. It dereferences nothing and preserves its r0 tracker
+      word; callers pass element-array relocation and fTable diagnostics, so it
+      is disabled element-array-1 tracker instrumentation. Target builds use
+      naked A32 assembly to preserve the exact one-word body; host builds
+      return the observed r0 pass-through. No deliberate deviations.
   - address: 0x083d40f0
     ghidra: FUN_083d40f0
     name: element_array2_construct
