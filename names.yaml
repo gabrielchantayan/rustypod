@@ -39469,6 +39469,37 @@ functions:
       0/1 returns; expected differences are LLVM's frame, the explicit
       stack home for the vararg word, and a byte-narrowed flags test
       (ldrb db+13; tsteq #8 == ldreq word db+12; tsteq #0x800).
+  # ---- B-tree commit phase one (src/sqlite/btree_commit_phase_one.rs) ----
+  - address: 0x08370bfc
+    ghidra: FUN_08370bfc
+    name: btree_commit_phase_one
+    size: 144
+    sig: "int btree_commit_phase_one(Btree *btree, const char *master)"
+    module: sqlite/btree_commit_phase_one
+    status: ported
+    renames:
+      param_1/r5: btree
+      param_2/r7: master
+      puVar2/r4: shared
+      local_18: truncation_page_count
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeCommitPhaseOne. Raw osos.dec words establish
+      the exact 144-byte extent 0x08370bfc..0x08370c8c: pop {r3-r7,pc} at
+      0x08370c88 is immediately followed by a distinct push {r4-r8,lr}.
+      Binary decoding finds three direct inbound plain bl call sites and no
+      predicated inbound call. The body has four unconditional plain bl
+      instructions (three unique callees) and no predicated bl: btree_enter
+      at 0x0837118c, autoVacuumCommit at 0x082b58a4, and btree_leave at
+      0x08371da4 twice. For write transactions it enters the B-tree, stores
+      p->db in pBt->db, optionally runs auto-vacuum to obtain a truncation
+      page count, commits pBt->pPager with master and flags zero, then leaves.
+      An auto-vacuum error leaves immediately without committing the pager.
+      Existing btree_enter and btree_leave ports are called directly in target
+      builds; the two unported retail boundaries remain absolute calls.
+      Deliberate host-only deviation: a private dispatch table models those
+      boundaries and entry/leave because target 32-bit pointer slots widen on
+      the host. Tests cover write success with auto-vacuum and a pager error,
+      auto-vacuum early error, and a non-write transaction.
   # ---- B-tree commit phase two (src/sqlite/btree_commit_phase_two.rs) ----
   - address: 0x08370c8c
     ghidra: FUN_08370c8c
