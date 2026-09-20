@@ -119361,3 +119361,28 @@ functions:
       recovered static identity, so the port retains a target-width dispatch and
       host tests use widened callbacks. match.py structural differences are
       expected from LLVM's frame and host/target dispatch seam.
+
+  - address: 0x083cfaf8
+    ghidra: FUN_083cfaf8
+    name: collection_release_first_occupied
+    size: 88
+    sig: "void collection_release_first_occupied(void *collection)"
+    module: cxx/collection_release_first_occupied
+    status: ported
+    vars: {param_1/r0/r5: collection, param_1_plus_0x04/r6: count, param_1_plus_0x10: enabled, param_1_vtable_plus_0x40/r2: element_at, record_word_0: occupied, record_plus_0x04: nested_object, nested_vtable_plus_0x04/r1: destructor, FUN_080fe744: optional_nested_destruct, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: twenty-two ARM words
+      from push {r4,r5,r6,lr} at 0x083cfaf8 through pop {r4,r5,r6,pc} at
+      0x083cfb4c; the next independently entered function begins at 0x083cfb50.
+      The body has two plain direct BL instructions, to the optional nested
+      destructor @ 0x080fe744 and tag-2 operator_delete @ 0x082aad24, plus
+      one unconditional BLX through collection vtable slot +0x40; no branch-
+      with-link call is predicated. Raw decoding confirms its three inbound
+      direct calls are plain BL at 0x0817e458, 0x083cfba8, and 0x083cfbe0.
+      A nonzero enabled byte gates a signed 0..count walk. Each iteration
+      reloads the collection vtable and asks slot +0x40 for a record; the
+      first record with a nonzero first word has its optional +0x04 nested
+      object destructed through vtable +0x04 before the record is deleted.
+      The runtime vtable targets have no recovered static identity, so opaque
+      role names preserve the verified contract. Host fixtures widen pointers;
+      match.py reports the expected LLVM frame and branch-shape diff.
