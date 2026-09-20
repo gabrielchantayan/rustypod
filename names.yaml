@@ -43183,6 +43183,33 @@ functions:
       reproduce their NULL-input result but deliberately do not model
       arbitrary non-NULL unported subtrees.
 
+  - address: 0x08379600
+    ghidra: FUN_08379600
+    name: sqlite_fix_expr_list
+    size: 84
+    sig: "int sqlite3FixExprList(DbFixer *fixer, ExprList *list)"
+    module: sqlite/fix_expr_list
+    status: ported
+    renames:
+      param_1/r7: fixer
+      param_2/r6: list
+      FUN_08379598: sqlite3FixExpr
+    notes: >-
+      SQLite 3.5.x sqlite3FixExprList. Raw ARM establishes the 84-byte
+      extent 0x08379600..0x08379654: push {r4,r5,r6,r7,r8,lr} starts at
+      entry, pop {r4,r5,r6,r7,r8,pc} ends at 0x08379650, and the
+      independently linked sqlite3FixInit prologue begins at 0x08379654.
+      Decoding every aligned ARM B/BL immediate in osos.dec finds exactly
+      three inbound direct BL sites, all unconditional: 0x083793ac,
+      0x083795c4, and 0x083796ac. No predicated BL or tail B reaches this
+      entry. It returns 0 for NULL; otherwise it iterates signed
+      ExprList.nExpr +0x00, reads ExprList.a +0x0c, and invokes
+      sqlite3FixExpr on each 12-byte ExprList_item.pExpr +0x00. A nonzero
+      child result short-circuits with 1. The Rust port uses explicit u32
+      target-pointer loads, deliberately preserving the 32-bit offsets on
+      64-bit hosts; target calls go directly to the ported sqlite_fix_expr,
+      while host tests install a recording boundary.
+
   - address: 0x08379654
     ghidra: FUN_08379654
     name: sqlite_fix_init
