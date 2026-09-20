@@ -37,6 +37,30 @@ pub unsafe extern "C" fn hash_table_bucket_slot(table: *const u8, hash: u32) -> 
     (bucket_base as *mut u32).add(remainder as usize)
 }
 
+/// `hash_table_bucket_slot_6e50` — original `FUN_083d6e50` @ `0x083d6e50`.
+///
+/// Raw osos.dec words `e92d4010 e1a04000 e1a00001 e5941008 ebf1802b
+/// e5940004 e0800101 e8bd8010` establish the 32-byte extent through
+/// `0x083d6e70`. Aligned ARM decoding finds three inbound plain `bl` sites
+/// (`0x083d2a78`, `0x083d2b84`, `0x083d2cbc`) and no predicated inbound calls;
+/// its body makes one plain call to `__rt_udiv` and no predicated calls.
+///
+/// It returns `table.bucket_base[hash % table.bucket_count]`; this separate
+/// export retains the assigned BL target. Its target-only text section prevents
+/// LLVM from folding this required hook entry into the identical 0x083d6e70
+/// body. As above, `__rt_udivmod` deliberately exposes ADS's r1 remainder
+/// through an out-pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.hash_table_bucket_slot_6e50")]
+#[inline(never)]
+pub unsafe extern "C" fn hash_table_bucket_slot_6e50(table: *const u8, hash: u32) -> *mut u32 {
+    let bucket_base = ptr::read(table.add(4) as *const u32);
+    let bucket_count = ptr::read(table.add(8) as *const u32);
+    let mut remainder = 0;
+    __rt_udivmod(hash, bucket_count, &mut remainder);
+    (bucket_base as *mut u32).add(remainder as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +92,8 @@ mod tests {
             for hash in [0, 1, BUCKET_COUNT - 1, BUCKET_COUNT, u32::MAX] {
                 let slot = hash_table_bucket_slot(table, hash);
                 assert_eq!(slot, buckets.add((hash % BUCKET_COUNT) as usize));
+                let target_slot = hash_table_bucket_slot_6e50(table, hash);
+                assert_eq!(target_slot, buckets.add((hash % BUCKET_COUNT) as usize));
             }
 
             ptr::write(table.add(8) as *mut u32, 1);
