@@ -119042,3 +119042,24 @@ functions:
       store and deliberately omitted; this has no observable effect. Host tests
       cover the first and a later slot and verify both output words are
       overwritten.
+  - address: 0x083d1fd0
+    ghidra: FUN_083d1fd0
+    name: vtable_089a57f0_destruct
+    size: 56
+    sig: "Vtable089a57f0Object *vtable_089a57f0_destruct(Vtable089a57f0Object *this)"
+    module: cxx/vtable_089a57f0_destruct
+    status: ported
+    vars: {param_1/r0/r4: this, DAT_083d2008: VTABLE_089A57F0, param_1_plus_0x14: payload, FUN_083d1f40: VTABLE_089A57F0_BASE_CLEANUP, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent: 13 ARM code words
+      from push {r4,lr} at 0x083d1fd0 through the tail branch at 0x083d2004,
+      followed by literal 0x089a57f0 at 0x083d2008; 0x083d200c starts the
+      next function. Independent whole-image ARM branch decoding finds three
+      inbound unconditional BL instructions (0x0826b760, 0x0827759c, and
+      0x082775cc) and no predicated BL callers. It installs the literal
+      vtable, conditionally dispatches payload->vtable[+0x1c] for the u32
+      payload at +0x14, calls the still-unidentified 0x083d1f40 cleanup, then
+      tail-branches to observable_array_destruct. The payload slot and direct
+      cleanup have no verified semantic identity, so target-width layout and
+      explicit seams preserve their observed contracts; host tests model the
+      target virtual slot with a seam because native function pointers widen.
