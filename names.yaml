@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d3174
+    ghidra: FUN_083d3174
+    name: hash_table_chain_destroy
+    size: 152
+    sig: "u8 *hash_table_chain_destroy(u8 *table)"
+    module: util/hash_table_chain_destroy
+    status: ported
+    renames:
+      param_1/r0/r6: table
+      puVar3/r5: bucket
+      puVar4/r7: bucket_end
+      puVar1/r4: node
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x083d3174..0x083d320b; the
+      next independently linked function begins at 0x083d320c. The body has
+      two plain unconditional bl instructions, both to cxx_array_dealloc
+      (0x08266f2c), and no predicated bl instructions. There are three plain
+      inbound bl call sites: 0x08268fc4, 0x0826a740, and 0x083d24c0.
+      It treats table words +4/+8/+12 as a bucket allocation, bucket count,
+      and current-bucket cursor. It clears each bucket below buckets + count*4,
+      walks its word-0 intrusive chain, and deallocates each node from node-16.
+      It then releases the bucket allocation with count+1 and returns table.
+      The Rust port retains all fields as target-width u32 words rather than
+      host pointers, deliberately preserving the 32-bit target layout.
   - address: 0x083d3a8c
     ghidra: FUN_083d3a8c
     name: tracker_trace
