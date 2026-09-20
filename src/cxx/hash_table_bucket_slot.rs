@@ -62,6 +62,32 @@ pub unsafe extern "C" fn hash_table_bucket_slot_6e30(table: *const u8, hash: u32
     (bucket_base as *mut u32).add(remainder as usize)
 }
 
+/// `hash_table_bucket_slot_6e10` — original `FUN_083d6e10` @ `0x083d6e10`.
+///
+/// Raw osos.dec words `e92d4010 e1a04000 e1a00001 e5941008 ebf1803b
+/// e5940004 e0800101 e8bd8010` establish the 32-byte extent through
+/// `0x083d6e30`; the next real function starts with `push {r4, lr}` there.
+/// Aligned ARM decoding finds three inbound plain `bl` sites (`0x083d2428`,
+/// `0x083d2534`, `0x083d266c`), no predicated inbound calls, one body plain
+/// `bl` to `__rt_udiv`, and no predicated body calls.
+///
+/// It returns `table.bucket_base[hash % table.bucket_count]`; this separate
+/// export retains the assigned BL target. Its target-only text section prevents
+/// LLVM from folding this required hook entry into the identical 0x083d6e70
+/// body. Rust calls `__rt_udivmod` with an out-pointer because ADS returns the
+/// remainder in r1; that is the only deliberate ABI deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.hash_table_bucket_slot_6e10")]
+#[inline(never)]
+pub unsafe extern "C" fn hash_table_bucket_slot_6e10(table: *const u8, hash: u32) -> *mut u32 {
+    let bucket_base = ptr::read(table.add(4) as *const u32);
+    let bucket_count = ptr::read(table.add(8) as *const u32);
+    let mut remainder = 0;
+    __rt_udivmod(hash, bucket_count, &mut remainder);
+    (bucket_base as *mut u32).add(remainder as usize)
+}
+
+
 
 /// `hash_table_bucket_slot_6e50` — original `FUN_083d6e50` @ `0x083d6e50`.
 ///
@@ -121,6 +147,8 @@ mod tests {
                 let target_slot = hash_table_bucket_slot_6e50(table, hash);
                 assert_eq!(target_slot, buckets.add((hash % BUCKET_COUNT) as usize));
                 let assigned_slot = hash_table_bucket_slot_6e30(table, hash);
+                assert_eq!(assigned_slot, buckets.add((hash % BUCKET_COUNT) as usize));
+                let assigned_slot = hash_table_bucket_slot_6e10(table, hash);
                 assert_eq!(assigned_slot, buckets.add((hash % BUCKET_COUNT) as usize));
             }
 
