@@ -140,6 +140,15 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
 /// calls and no outbound calls. It deliberately reuses this symbol and its
 /// host tests because target code and ABI are identical; no behavior changes.
 ///
+/// `FUN_083b590c` at load address `0x083b590c` is a byte-identical, 84-byte
+/// (21-word) copy of `red_black_tree_advance_cursor`, through `bx lr` at
+/// `0x083b595c`; the next separately linked function begins at `0x083b5960`.
+/// Complete aligned ARM B/BL decoding finds three inbound calls, all plain
+/// `bl` at 0x083b7550, 0x083b79b4, and 0x083b7a94; there are no predicated
+/// BL calls or outbound calls. It deliberately reuses this dispatch seam and
+/// shared host tests because its target code and ABI are identical; no
+/// behavior deviations.
+///
 /// `FUN_083b5960` at load address `0x083b5960` is a byte-identical, 84-byte
 /// (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
 /// `0x083b59b0`; the next separately linked function begins at `0x083b59b4`.
