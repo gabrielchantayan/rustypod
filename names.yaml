@@ -121992,3 +121992,28 @@ functions:
       untouched. Identity is independently confirmed by the matching
       sqlite3AuthContextPop sibling at 0x0836f9c8 and its three callers'
       nested trigger/view compilation paths. Deliberate deviations: none.
+
+  - address: 0x0836f9c8
+    ghidra: FUN_0836f9c8
+    name: sqlite_auth_context_pop
+    size: 28
+    sig: "void sqlite_auth_context_pop(AuthContext *context)"
+    module: sqlite/auth_context_pop
+    status: ported
+    renames:
+      param_1/r0: context
+      "[context + 0x00]": saved_z_auth_context
+      "[context + 0x04]": saved_parse
+      "[parse + 0x18c]": z_auth_context
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte body:
+      0x0836f9c8..0x0836f9e0 (ldr; cmp; ldrne; strne; movne; strne; bx lr).
+      The next separately entered function begins with cmp at 0x0836f9e4.
+      Complete aligned ARM B/BL decoding finds three inbound plain BL sites
+      and zero predicated BL callers; the body contains no BL instruction.
+      This is SQLite 3.5.x's sqlite3AuthContextPop: when context +0x04 holds
+      a parse pointer, it restores context +0x00 to parse->zAuthContext
+      (+0x18c), then clears context +0x04. A NULL saved parse leaves both
+      context words unchanged. Identity is confirmed by the adjacent ported
+      sqlite3AuthContextPush at 0x0836f9e4 and the callers' nested
+      trigger/view compilation paths. Deliberate deviations: none.

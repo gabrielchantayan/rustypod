@@ -70,6 +70,7 @@ pub mod aux_sweep;
 pub mod aggregate_context;
 pub mod auth_check;
 pub mod auth_context_push;
+pub mod auth_context_pop;
 pub mod begin_write_operation;
 pub mod blob_to_hex;
 pub mod binary_compare_coll_seq;
