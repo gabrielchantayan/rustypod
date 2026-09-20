@@ -15,6 +15,7 @@ pub mod active_slot_count;
 pub mod array_index_stride24;
 pub mod slot_array_index_in_bounds;
 pub mod slot_array_tracker_diagnostic_no_op;
+pub mod element_array7_tracker_diagnostic_no_op;
 pub mod slot_array_owner_get;
 pub mod byte_key_map;
 pub mod byte_key_map_lower_bound_value;
