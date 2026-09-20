@@ -48735,6 +48735,33 @@ functions:
       volatile host seam and a direct call to its retailOS address on target;
       equal_deref is inlined as the equivalent candidate != header test.
 
+  - address: 0x0839bdb4
+    ghidra: FUN_0839bdb4
+    name: container_dispose_elements
+    size: 76
+    sig: "void container_dispose_elements(void *this)"
+    module: cxx/container_dispose_elements
+    status: ported
+    renames:
+      param_1: this
+      local_14: count
+      local_10: index
+      local_0c: element_cell
+      local_08: element
+    notes: >-
+      Raw osos.dec establishes the 76-byte body from push {r4,r5,r6,lr} at
+      0x0839bdb4 through pop {r4,r5,r6,pc} at 0x0839bdfc; 0x0839be00 starts
+      the next independently entered function. When this+0x28 is nonzero, it
+      walks signed indexes [0, this+4), calls the container vtable +0x40
+      accessor, and invokes vtable +0x04 on each non-NULL element. Decoding
+      all ARM B/BL words finds exactly three inbound unconditional plain bl
+      calls at 0x081b1338, 0x0839be4c, and 0x0839be70; there are no
+      predicated direct bl callers. The body itself has an unconditional blx
+      through +0x40 and a predicated blxne through element +0x04. Ghidra
+      drops the live r1 index and does not identify either virtual target.
+      Deliberate deviation: host fixtures use native-width pointers and typed
+      callbacks; target builds retain volatile u32 vtable reads and slots.
+
   # --- Task-message pool release ---
   - address: 0x0812c1b4
     ghidra: FUN_0812c1b4

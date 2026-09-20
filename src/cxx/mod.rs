@@ -264,6 +264,7 @@ pub mod path_escape_record;
 pub mod string_encoding;
 pub mod string_export_counted_utf16;
 pub mod templates;
+pub mod container_dispose_elements;
 pub mod fixed_record_range_copy;
 pub mod copy_record_24_if_destination;
 pub mod signed_key_tree_find;
