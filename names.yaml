@@ -42761,6 +42761,35 @@ functions:
       forwarding and upgrade, factory failure reporting with an explicit
       non-NUL-terminated length, and the negative-length strlen path.
 
+  - address: 0x0837b254
+    ghidra: FUN_0837b254
+    name: vdbe_attach_index_affinity
+    size: 160
+    sig: "void vdbe_attach_index_affinity(Vdbe *vdbe, Index *index)"
+    module: sqlite/index_affinity
+    status: ported
+    renames:
+      param_1/r6: vdbe
+      param_2/r4: index
+      iVar1/r0: affinity_cache
+      iVar3/r5: table
+      FUN_08374960: db_malloc_raw
+      FUN_08386aa4: vdbe_change_p4
+    notes: >-
+      Raw osos.dec fixes the true extent at 0x0837b254..0x0837b2f4: 40 ARM
+      words from push {r4,r5,r6,lr} through the tail branch to
+      vdbe_change_p4, with the next separately linked push at 0x0837b2f4.
+      Image-wide ARM immediate decoding found three inbound direct BLs, all
+      unconditional; no predicated BL targets this entry. SQLite's
+      index-affinity helper lazily allocates nColumn+2 through
+      db_malloc_raw, follows aiColumn into the owning Table's 20-byte Column
+      array to gather each affinity byte, appends 'b' and NUL, caches the
+      result in Index.zColAff (+0x1c), then tail-calls vdbe_change_p4 with
+      addr -1 and n 0. Allocation failure returns before the P4 operation.
+      The Rust port reads target-layout Index/Table pointer fields as u32
+      words, deliberately avoiding host pointer-width offset drift; the
+      already-ported VDBE and allocator functions are direct calls.
+
   - address: 0x0837b2f4
     ghidra: FUN_0837b2f4
     name: index_key_info

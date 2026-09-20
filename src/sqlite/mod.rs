@@ -237,6 +237,7 @@ pub mod strhash;
 pub mod stricmp;
 pub mod store_u16_le;
 pub mod store_u32_le;
+pub mod index_affinity;
 pub mod table_affinity;
 pub mod table_lock;
 pub mod used_as_column_cache;
