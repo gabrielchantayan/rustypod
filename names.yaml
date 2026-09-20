@@ -120508,3 +120508,35 @@ functions:
       preservation. Deliberate deviation: Rust cannot preserve the ARM tail
       branch. match.py exits 1 as expected: frame setup and address-backed
       blx dispatch differ from the stock bl/tail-b structure.
+  - address: 0x0839c540
+    ghidra: FUN_0839c540
+    name: container_release_enabled_elements
+    size: 76
+    sig: "void container_release_enabled_elements(void *container)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: container
+      "container+0x4": count
+      "container+0x28": release_enabled
+      FUN_083d5f74: container_element_at_alias_5f74
+      "element vtable+0x4": release
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x0839c540..0x0839c58b: `push {r4,r5,r6,lr}; mov r6,r0; ldrb
+      r0,[r0,#0x28]; cmp r0,#0; popeq {r4,r5,r6,pc}; ldr r5,[r6,#4];
+      mov r4,#0; b loop; ...; pop {r4,r5,r6,pc}`. The next real function
+      begins at 0x0839c58c. Three inbound direct call sites are unconditional
+      plain bl at 0x08178d70, 0x0839c5d8, and 0x0839c5f0; no predicated
+      inbound calls. Its body has one plain bl, to ported
+      container_element_at_alias_5f74, and one predicated blxne through each
+      non-NULL element's vtable slot +0x4. When container+0x28 is nonzero, it
+      iterates signed indices [0,count), resolves each pointer with the
+      container's vtable+0x40 accessor, and invokes that release slot only
+      for non-NULL elements. The Rust port retains the exact target field
+      offsets and uses typed calls in place of ARM bl/blx; otherwise no
+      deliberate deviations. Host tests cover enabled release ordering,
+      NULL elements, disabled gate, and nonpositive count. match.py finds
+      the same flag, loop, accessor, NULL guard, and virtual release
+      structure; LLVM adds its crate-wide frame pointer and lowers signed
+      loop comparison to equality after a positive-count guard.

@@ -6155,6 +6155,77 @@ pub unsafe extern "C" fn scoped_context_container_delete_enabled_elements(
     }
 }
 
+/// A target-layout callback container whose release gate is at `+0x28`.
+///
+/// The leading vtable and count are consumed by
+/// [`container_element_at_alias_5f74`]; the intervening words are opaque.
+#[repr(C)]
+pub struct ContainerReleaseEnabledElements {
+    vtable: *const ElementSlotFn,
+    count: i32,
+    _unknown_08_24: [u32; 8],
+    release_enabled: u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(ContainerReleaseEnabledElements, count)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x28] = [0; core::mem::offset_of!(ContainerReleaseEnabledElements, release_enabled)];
+
+/// The recovered callback object's vtable prefix.
+#[repr(C)]
+pub struct ContainerElementReleaseVtable {
+    _slot_00: usize,
+    release: unsafe extern "C" fn(*mut u8),
+}
+
+/// container_release_enabled_elements — original: `FUN_0839c540` @
+/// `0x0839c540` (76 bytes; Ghidra agrees).
+///
+/// Raw `osos.dec` establishes the complete 19-word extent from `push
+/// {r4,r5,r6,lr}` at `0x0839c540` through `pop {r4,r5,r6,pc}` at
+/// `0x0839c588`; the next real function begins at `0x0839c58c`. The body has
+/// one plain `bl`, to [`container_element_at_alias_5f74`], and one predicated
+/// `blxne` virtual release call. There are three inbound plain `bl` sites
+/// (0x08178d70, 0x0839c5d8, and 0x0839c5f0), and no predicated inbound calls.
+///
+/// # Algorithm
+///
+/// If `release_enabled` is nonzero, walk signed indices from zero while less
+/// than `count`; resolve each element through the verified container accessor,
+/// and invoke non-NULL elements' vtable slot `+0x04`.
+///
+/// # Deliberate deviations
+///
+/// The direct ARM call is a Rust call, and the indirect `blxne` is a typed
+/// vtable call. Both preserve the original unchecked contracts; none else.
+///
+/// # Safety
+///
+/// `container` must identify a readable target-layout container. For every
+/// enabled index, its accessor and any non-NULL element's release slot must be
+/// valid to call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_release_enabled_elements")]
+#[inline(never)]
+pub unsafe extern "C" fn container_release_enabled_elements(
+    container: *mut ContainerReleaseEnabledElements,
+) {
+    if (*container).release_enabled == 0 {
+        return;
+    }
+    let count = (*container).count;
+    let mut index = 0;
+    while index < count {
+        let element = container_element_at_alias_5f74(container.cast(), index as usize);
+        if !element.is_null() {
+            let vtable = element.cast::<*const ContainerElementReleaseVtable>().read();
+            ((*vtable).release)(element);
+        }
+        index += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -12104,6 +12175,79 @@ mod tests {
             fixture.container.count = -1;
             scoped_context_container_delete_enabled_elements(&mut fixture.container);
             assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
+        }
+    }
+    #[repr(C)]
+    struct ReleaseEnabledFixture {
+        container: ContainerReleaseEnabledElements,
+        elements: [*mut u8; 3],
+        accessor_calls: usize,
+    }
+
+    #[repr(C)]
+    struct ReleaseEnabledElement {
+        vtable: *const ContainerElementReleaseVtable,
+        id: usize,
+    }
+
+    static RELEASE_ENABLED_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static mut RELEASED_ELEMENTS: [usize; 3] = [0; 3];
+    static mut RELEASED_COUNT: usize = 0;
+
+    unsafe extern "C" fn release_enabled_element(element: *mut u8) {
+        let element = element.cast::<ReleaseEnabledElement>();
+        RELEASED_ELEMENTS[RELEASED_COUNT] = (*element).id;
+        RELEASED_COUNT += 1;
+    }
+
+    unsafe extern "C" fn release_enabled_element_slot(
+        container: *mut u8,
+        index: usize,
+    ) -> *mut *mut u8 {
+        let fixture = container.cast::<ReleaseEnabledFixture>();
+        (*fixture).accessor_calls += 1;
+        (*fixture).elements.as_mut_ptr().add(index)
+    }
+
+    #[test]
+    fn release_enabled_elements_skips_nulls_and_honors_flag_and_count() {
+        let _guard = RELEASE_ENABLED_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            RELEASED_COUNT = 0;
+            let accessor_vtable = [release_enabled_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let release_vtable = ContainerElementReleaseVtable {
+                _slot_00: 0,
+                release: release_enabled_element,
+            };
+            let mut first = ReleaseEnabledElement { vtable: &release_vtable, id: 7 };
+            let mut second = ReleaseEnabledElement { vtable: &release_vtable, id: 9 };
+            let mut fixture = ReleaseEnabledFixture {
+                container: ContainerReleaseEnabledElements {
+                    vtable: accessor_vtable.as_ptr(),
+                    count: 3,
+                    _unknown_08_24: [0; 8],
+                    release_enabled: 1,
+                },
+                elements: [
+                    &mut first as *mut ReleaseEnabledElement as *mut u8,
+                    core::ptr::null_mut(),
+                    &mut second as *mut ReleaseEnabledElement as *mut u8,
+                ],
+                accessor_calls: 0,
+            };
+
+            container_release_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.accessor_calls, 3);
+            assert_eq!(RELEASED_COUNT, 2);
+            assert_eq!(RELEASED_ELEMENTS[..2], [7, 9]);
+
+            fixture.container.release_enabled = 0;
+            container_release_enabled_elements(&mut fixture.container);
+            fixture.container.release_enabled = 1;
+            fixture.container.count = -1;
+            container_release_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.accessor_calls, 3);
+            assert_eq!(RELEASED_COUNT, 2);
         }
     }
 }
