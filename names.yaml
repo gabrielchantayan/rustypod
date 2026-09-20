@@ -81144,6 +81144,36 @@ functions:
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
 
+  - address: 0x0838fae4
+    ghidra: FUN_0838fae4
+    name: sqlite3_column_text
+    size: 36
+    sig: "const void *sqlite3_column_text(sqlite3_stmt *statement, i32 column)"
+    module: sqlite/column_text
+    status: ported
+    renames:
+      param_1/r0/r5: statement
+      param_2/r1: column
+      FUN_082c43f0: column_mem
+      FUN_0839179c: sqlite3_value_text
+      FUN_082c43d0: sqlite_api_exit
+    notes: >-
+      SQLite 3.5.9's sqlite3_column_text wrapper. Raw words
+      e92d4070 e1a05000 ebfcd23f eb000729 e1a04000 e1a00005
+      ebfcd233 e1a00004 e8bd8070 establish the exact 36-byte extent
+      0x0838fae4..0x0838fb08: select column_mem(statement,column), convert
+      it with sqlite3_value_text, preserve that text pointer, then invoke
+      sqlite_api_exit(statement->db, statement->rc) and return the saved
+      pointer. The next separately linked sibling begins at 0x0838fb08.
+      Raw instruction decoding confirms exactly three direct inbound BL
+      sites, all unconditional (0x08215b3c, 0x082ccef4, 0x08390470) and
+      zero predicated forms; the body likewise has three unconditional BL
+      calls. No semantic deviation: Rust keeps the returned pointer in a
+      local instead of ARM r4, preserves the original call order, and updates
+      exec_first_column_sql's default seam to the port. Host tests cover two
+      result positions and UTF-8 pointer forwarding; match.py checks the
+      three-call wrapper structure.
+
   - address: 0x083917a4
     ghidra: FUN_083917a4
     name: sqlite3_value_text16
