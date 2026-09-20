@@ -35036,6 +35036,35 @@ functions:
       retaining the guard/decrement/slot-1-dispatch/teardown order. Host tests
       cover NULL, non-final mutex, final dispatch/teardown, and wrapping-zero
       paths.
+  - address: 0x0839cb84
+    ghidra: FUN_0839cb84
+    name: refcounted_body_acquire_dtor
+    size: 60
+    sig: "void refcounted_body_acquire_dtor(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1/r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x0839cb84..0x0839cbc0: the next real function,
+      refcounted_body_release_dtor, starts at 0x0839cbc0. Full A32 B/BL
+      decoding independently finds exactly three direct inbound calls: plain
+      bl at 0x0839ec94 and 0x083db810, plus predicated blne at 0x083c6ccc.
+      The body unconditionally stores body in dst, returns early for NULL,
+      then locks the optional body+8 mutex, wrapping-increments body+4,
+      reloads and independently NULL-checks the mutex, and unlocks it.
+      Its internal calls are blne mutex_lock @ 0x0807f5c4 and a tail bne to
+      mutex_unlock @ 0x0807f6a0. This is byte-identical to
+      refcounted_body_acquire @ 0x0839cd5c modulo those branch
+      displacements; Rust keeps a dedicated target-only text section for the
+      separately hookable entry and directly calls the ported mutex helpers.
+      Host tests cover NULL overwrite, wrapping increment, and an optional
+      mutex whose semaphore cell is NULL.
+
   - address: 0x0839cbc0
     ghidra: FUN_0839cbc0
     name: refcounted_body_release_dtor
