@@ -43571,6 +43571,38 @@ functions:
       pager_set_sector_size (0x08369040) remains retailOS-owned; target builds
       call its load address and host tests use a private recording boundary to
       prove the new-page-size sector setup and lease balance.
+  # ---- SQLite pager image truncation, sqlite3PagerTruncateImage (src/sqlite/pager_truncate_image.rs) ----
+  - address: 0x0837edf0
+    ghidra: FUN_0837edf0
+    name: pager_truncate_image
+    size: 168
+    sig: "u32 pager_truncate_image(Pager *pager, u32 page_count)"
+    module: sqlite/pager_truncate_image
+    status: ported
+    vars: {param_1/r4: pager, param_2/r5: page_count, "*(u32*)(pager+0x20)": pager->errCode,
+      "*(u32*)(pager+0x24)": pager->dbSize, "*(u8*)(pager+0x14)": pager->memDb,
+      "*(u32*)(pager+0xe0)": pager->activity}
+    renames:
+      FUN_0837e7ac: pager_page_count
+      FUN_082de78c: pager_truncate_cache
+      FUN_082dd3d8: context_activity_enter
+      FUN_08392a20: pager_sync
+      FUN_082de8f4: pager_wait_on_lock
+      FUN_082de6c4: pager_finish_truncate
+    notes: >-
+      Raw ARM establishes the exact 168-byte extent
+      0x0837edf0..0x0837ee94: the next separately linked function begins at
+      0x0837ee98. Decoding every ARM B/BL immediate in osos.dec finds exactly
+      three inbound direct call sites (0x082bd94c, 0x0837df9c, 0x0837e004),
+      all unconditional plain bl; no predicated calls or image-data references
+      were found. The discarded pager_page_count result may initialize pager
+      state. A prior pager error returns unchanged; a request at or beyond
+      dbSize returns zero. memDb stores dbSize and invokes pager_truncate_cache.
+      Disk pagers take/release the activity lease around pager_sync and
+      pager_wait_on_lock(pager, 4), propagating either error, then tail-branch
+      to the unported pager_finish_truncate @ 0x082de6c4. Deliberate
+      deviations: target builds call the unported helpers at their fixed
+      retailOS load addresses; host tests use private recording seams.
   - address: 0x0837ee98
     ghidra: FUN_0837ee98
     name: release_object
