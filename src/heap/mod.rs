@@ -25,6 +25,7 @@ pub mod fixed_block_pool;
 pub mod free_path;
 pub mod init;
 pub mod flagged_pointer_group;
+pub mod indexed_release;
 pub mod heap_poison;
 pub mod managed_handle;
 pub mod memh_handle;

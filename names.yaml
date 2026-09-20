@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d200c
+    ghidra: FUN_083d200c
+    name: indexed_release
+    size: 72
+    sig: "void indexed_release(IndexedRelease *this)"
+    module: heap/indexed_release
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+4: count
+      param_1+16: enabled
+      puVar1/r0: element_cell
+      iVar4/r4: index
+      iVar6/r6: count
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x083d200c..0x083d2053: the next independently entered function begins
+      at 0x083d2054. The body has one direct plain bl (operator_delete) and
+      one virtual blx through vtable slot +0x40, with no predicated calls.
+      Whole-image call analysis finds three inbound plain bl calls and no
+      predicated bl calls. It gates on enabled byte +0x10, then for each index
+      [0,count) invokes that slot and deletes the pointer stored in its returned
+      cell. Target code reads target-width fields at verified byte offsets;
+      the host fixture representation deliberately widens only its vtable
+      pointer so native callback addresses remain valid.
   - address: 0x083d20f0
     ghidra: FUN_083d20f0
     name: indexed_record_pointer_and_value
