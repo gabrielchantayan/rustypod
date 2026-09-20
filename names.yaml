@@ -119702,3 +119702,29 @@ functions:
       the vector descriptor at node+0x14, then makes the node the new free
       head. Host tests cover both zero and nonzero destroy selectors and verify
       link ordering. Deliberate deviations: none.
+  - address: 0x083b6b54
+    ghidra: FUN_083b6b54
+    name: vector4_resize_fill
+    size: 124
+    sig: "u32 *vector4_resize_fill(u32 *vector, u32 new_len, const u32 *fill)"
+    module: cxx/vector4_resize_fill
+    status: ported
+    renames:
+      param_1/r0/r4: vector
+      param_2/r1/r5: new_len
+      param_3/r2/r7: fill
+      FUN_082aad74: operator_new_tag3
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent: 31 ARM words from
+      push {r4-r7,lr} at 0x083b6b54 through pop {r4-r7,pc} at 0x083b6bcc;
+      0x083b6bd0 begins the next separately linked function. The body contains
+      exactly two plain unconditional BL instructions: operator_new_tag3 at
+      0x083b6b68 and operator_delete_tag3 at 0x083b6bbc; it has no predicated
+      BL calls. A whole-image A32 branch decode finds three incoming calls:
+      predicated BLLS at 0x082a7330 and 0x082a7374, and plain BL at
+      0x082a74dc. It allocates new_len u32 words through tag-3 allocation,
+      copies min(old_len,new_len) words, fills the remainder from *fill,
+      releases the old allocation, then stores the new length and pointer.
+      Deliberate deviation: calls use the existing Rust tag-3 allocator and
+      release veneers; vector pointers remain target-width u32 words on host.
