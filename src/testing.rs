@@ -411,6 +411,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const IAP_THREAD_SLOT_WAIT: usize = 0x6c00_0000;
+    // 0x6d80_0000: dedicated to util/unique_word_array_insert's raw-u32
+    // header and backing-array fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const UNIQUE_WORD_ARRAY_INSERT: usize = 0x6d80_0000;
     // 0x6c80_0000: dedicated to cxx/hash_table_bucket_slot's raw-u32 table
     // and bucket-array fixture; mappings never unmap, so no other user may
     // share this hint.

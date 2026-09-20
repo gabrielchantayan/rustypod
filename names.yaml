@@ -118603,3 +118603,33 @@ functions:
       tracker unchanged. Deliberate deviation: the Rust ABI expresses only r0,
       while bx lr also preserves other registers. match.py structural diff
       (exit 1, expected) shows Rust's frame setup around the equivalent return.
+
+  # --- unique word-array insertion ---
+  - address: 0x083d5040
+    ghidra: FUN_083d5040
+    name: unique_word_array_insert
+    size: 152
+    sig: "i32 unique_word_array_insert(u32 *array, u32 value)"
+    module: util/unique_word_array_insert
+    status: ported
+    renames:
+      param_1/r0: array
+      param_2/r1: value
+      param_1_plus_0: data
+      param_1_plus_4: capacity
+      param_1_plus_8: count
+      param_1_plus_0xc: growth_factor
+      FUN_083d50d8: unique_word_array_grow (role only; identity unrecovered)
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte body at
+      0x083d5040..0x083d50d4; the separately linked grow helper begins at
+      0x083d50d8. Whole-image A32 B/BL-immediate decoding finds three inbound
+      direct calls, all unconditional plain bl at 0x082c7cd4, 0x082c834c,
+      and 0x0839bdac; no predicated BL targets this entry. The body contains
+      no plain outbound bl and one predicated bleq to 0x083d50d8 when count
+      equals capacity. It rejects duplicate words across the entire backing
+      array, then locates a zero word. Index zero is deliberately not stored
+      or counted even though it is returned; a nonzero empty index receives
+      value and increments count. Target builds invoke the unported helper at
+      its verified address and host tests install a recording seam that proves
+      the post-grow data and capacity reload. Deliberate deviations: none.
