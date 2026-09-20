@@ -79,6 +79,7 @@ pub mod btree_cursor;
 pub mod btree_close_cursor;
 pub mod btree_clear_cursor;
 pub mod btree_rollback;
+pub mod btree_commit_phase_one;
 pub mod btree_commit_phase_two;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
