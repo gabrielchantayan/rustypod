@@ -120453,3 +120453,29 @@ functions:
       directly to operator_delete. The unidentified stage deliberately remains
       an address-backed seam: target builds call retailOS at its verified
       address, while host fixtures substitute it and widen the vtable pointer.
+
+  - address: 0x0839c888
+    ghidra: FUN_0839c888
+    name: vtable_08982784_destruct
+    size: 36
+    sig: "u32 *vtable_08982784_destruct(u32 *this)"
+    module: cxx/vtable_08982784_destruct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0839c8ac: VTABLE_08982784
+      FUN_0839c7d4: destroy_derived_state
+      FUN_08275380: destroy_base
+    notes: >-
+      Raw osos.dec is nine ARM words: 32 bytes of instructions from
+      0x0839c888 through the tail b at 0x0839c8a8, followed by vtable literal
+      0x08982784 at 0x0839c8ac; 0x0839c8b0 opens the next independent
+      function, establishing the 36-byte extent. The body writes the literal
+      to this+0x00, calls 0x0839c7d4 with this, restores r0 from r4, then
+      tail-branches to 0x08275380. Whole-image ARM B/BL decoding finds three
+      inbound plain bl sites and no predicated bl sites. The two direct
+      destructor-stage identities are not established, so Rust uses
+      address-backed seams on firmware and replaceable host seams. The host
+      test proves vtable installation, call order, pointer forwarding, and
+      return preservation. Deliberate deviation: Rust cannot preserve the
+      ARM tail branch.
