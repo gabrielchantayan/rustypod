@@ -120933,3 +120933,24 @@ functions:
       retail sqlite3ErrStr transfer uses an absolute literal veneer on ARM,
       because relocated payload code cannot retain the stock PC-relative
       branch; host tests replace that known target with a recording callback.
+
+  - address: 0x0838fa1c
+    ghidra: FUN_0838fa1c
+    name: sqlite3_column_count
+    size: 12
+    sig: "i32 sqlite3_column_count(const Vdbe *statement)"
+    module: sqlite/column_count
+    status: ported
+    renames:
+      param_1/r0: statement
+      param_1_plus_0xec: n_res_column
+    notes: >-
+      Raw extent is exactly 12 bytes: 0x0838fa1c..0x0838fa28. The three
+      ARM words are `cmp r0,#0`, `ldrne r0,[r0,#0xec]`, and `bx lr`; the
+      separately linked next function begins at 0x0838fa28. Decoding every
+      aligned ARM B/BL word in osos.dec finds exactly three direct bl call
+      sites, all unconditional: 0x08215a6c, 0x082c445c, and 0x083903b4.
+      There are no predicated bl forms or tail-b callers. This is SQLite's
+      sqlite3_column_count: return Vdbe.nResColumn (+0xec) for a non-NULL
+      statement and zero otherwise. No deliberate deviations; the repr(C)
+      Vdbe field preserves the target offset on 32-bit builds.
