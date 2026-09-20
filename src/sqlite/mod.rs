@@ -155,6 +155,7 @@ pub mod free_p4;
 pub mod vdbe_free_ops;
 pub mod get_varint;
 pub mod get_varint64;
+pub mod varint_len;
 pub mod get_temp_range;
 pub mod get_temp_reg;
 pub mod hash_clear;
