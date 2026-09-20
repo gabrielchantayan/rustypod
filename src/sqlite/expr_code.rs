@@ -236,7 +236,7 @@ mod tests {
                 }],
                 vdbe: Vdbe {
                     db: core::ptr::null_mut(),
-                    _gap_04: [0; 4],
+                    p_prev: core::ptr::null_mut(),
                     p_next: core::ptr::null_mut(),
                     n_op: 0,
                     n_op_alloc: 1,

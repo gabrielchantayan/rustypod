@@ -190,7 +190,7 @@ mod tests {
         let mut vdbe_connection = VdbeConnection::healthy();
         vdbe.write(Vdbe {
             db: core::ptr::null_mut(),
-            _gap_04: [0; 4],
+            p_prev: core::ptr::null_mut(),
             p_next: core::ptr::null_mut(),
             n_op: 0,
             n_op_alloc: OPS_LEN as i32,
