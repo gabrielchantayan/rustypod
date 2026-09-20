@@ -1322,6 +1322,44 @@ pub unsafe extern "C" fn refcounted_ptr_copy_construct(
     refcounted_body_attach(dst, src.read());
     dst
 }
+///
+/// refcounted_ptr_assign_owned_variant — original: `FUN_0839ef54` @
+/// `0x0839ef54` (48 bytes; 3 direct `bl` call sites, all unconditional:
+/// `0x081332d4`, `0x08133bb8`, and `0x08133fa4`). Raw instructions run
+/// through `bx lr` at `0x0839ef80`; the next separately linked function
+/// starts at `0x0839ef84`. A full A32 branch-word scan of `osos.dec` finds
+/// no predicated `bl` callers.
+///
+/// The owning copy-assignment operator for a refcounted handle slot. It
+/// compares the slot addresses; unequal slots release the destination's old
+/// owned body, then load `*src` and attach it to `dst`. The source load follows
+/// the release exactly as the ARM's `ldr r1,[r4]` does. It returns `dst`.
+///
+/// Deliberate deviation: stock calls the separately linked release and attach
+/// helpers at `0x0839cf4c` and `0x0839cf10`. This composes their already
+/// ported semantic equivalents,
+/// [`refcounted_body_release_owned_variant`] and [`refcounted_body_attach`],
+/// preserving release/load/attach ordering.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL
+/// bodies must satisfy the safety requirements of
+/// [`refcounted_body_release_owned_variant`] and [`refcounted_body_attach`].
+/// Neither slot pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_assign_owned_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_assign_owned_variant(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_owned_variant(dst);
+        refcounted_body_attach(dst, src.read());
+    }
+    dst
+}
+
 
 ///
 /// refcounted_ptr_assign_owned — original: `FUN_0839f1b0` @ 0x0839f1b0
@@ -3357,6 +3395,37 @@ mod tests {
             assert_eq!(ret, &mut destination as *mut *mut RefcountedBody);
             assert_eq!(destination, &mut replacement as *mut RefcountedBody);
             assert_eq!(old.refcount, 1);
+            assert_eq!(replacement.refcount, 8);
+        }
+    }
+
+    #[test]
+    fn owned_variant_assign_releases_then_attaches_and_skips_self_assignment() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut replacement = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut destination: *mut RefcountedBody = &mut old;
+            let source: *mut RefcountedBody = &mut replacement;
+
+            let ret = refcounted_ptr_assign_owned_variant(&mut destination, &source);
+
+            assert_eq!(ret, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut replacement as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1);
+            assert_eq!(replacement.refcount, 8);
+
+            let ret = refcounted_ptr_assign_owned_variant(&mut destination, &destination);
+
+            assert_eq!(ret, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut replacement as *mut RefcountedBody);
             assert_eq!(replacement.refcount, 8);
         }
     }
