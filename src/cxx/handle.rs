@@ -3230,6 +3230,111 @@ pub unsafe extern "C" fn refcounted_body_release_slot1(slot: *mut *mut Refcounte
     slot.write(core::ptr::null_mut());
 }
 
+/// Element-destructor ABI used by the fixed array release at 0x0839ce48.
+type RefcountedArrayElementDestructor = extern "C" fn(*mut u8);
+
+/// Calls the directly linked, still-unported array-element destructor.
+#[cfg(target_os = "none")]
+#[inline(always)]
+extern "C" fn refcounted_array_element_destroy(element: *mut u8) {
+    let destructor: RefcountedArrayElementDestructor = unsafe { core::mem::transmute(0x083d_b9c8usize) };
+    destructor(element);
+}
+
+#[cfg(not(target_os = "none"))]
+extern "C" fn missing_refcounted_array_element_destroy(_element: *mut u8) {}
+
+#[cfg(not(target_os = "none"))]
+static mut REFCOUNTED_ARRAY_ELEMENT_DESTROY: RefcountedArrayElementDestructor =
+    missing_refcounted_array_element_destroy;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+extern "C" fn refcounted_array_element_destroy(element: *mut u8) {
+    let destructor = unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(REFCOUNTED_ARRAY_ELEMENT_DESTROY))
+    };
+    destructor(element);
+}
+
+/// refcounted_body_release_array — original: `FUN_0839ce48` @ 0x0839ce48
+/// (156 bytes; 3 inbound direct `bl` call sites, all unconditional).
+///
+/// Raw ARM occupies 0x0839ce48..0x0839ceec: the `pop {r4,r5,r6,pc}` at
+/// 0x0839cee8 ends the body and its following word is the 0x083db9c8
+/// element-destructor literal; 0x0839cef0 begins the distinct mutex-lock
+/// helper. The body contains eight plain `bl` instructions and no predicated
+/// `bl`: lock, array finalizer, three tag-2 deletes, two unlocks, and
+/// mutex-delete. It decrements a non-NULL [`RefcountedBody`] under its optional
+/// mutex; a final reference destroys four 12-byte implementation elements
+/// through `cpp_finalise_dtor_guard`, then tag-2-deletes that array, unlocks,
+/// and tears down the mutex and body. Every non-NULL-body path clears `slot`;
+/// a NULL body leaves it untouched. The plain ARM `subs` wraps, so only an
+/// exactly-zero result is final.
+///
+/// Deliberate deviations: the fixed 0x083db9c8 element destructor remains
+/// unported, so target builds call that exact address and host builds expose a
+/// replaceable test seam. Rust calls existing finalizer, mutex, and heap ports
+/// directly; LLVM may inline them rather than preserve the retail `bl`s.
+///
+/// # Safety
+///
+/// `slot` must be valid and aligned. A non-NULL body, its mutex, and its
+/// implementation array must remain live for all operations the firmware
+/// reaches.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_release_array")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_array(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let allocation = crate::heap::veneers::cpp_finalise_dtor_guard(
+                implementation,
+                4,
+                12,
+                Some(refcounted_array_element_destroy),
+            );
+            operator_delete(allocation);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_unlock(mutex);
+                mutex_delete(mutex);
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_unlock(mutex);
+            }
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4185,6 +4290,7 @@ mod tests {
         enum Event {
             Wait(u32),
             Destructor(usize),
+            ArrayElementDestructor(usize),
             CallbackRelease(usize),
             Slot1Release(usize),
             OwnedVariantDispose(usize),
@@ -4224,6 +4330,12 @@ mod tests {
             (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Destructor(implementation as usize));
         }
 
+        extern "C" fn recording_array_element_destructor(element: *mut u8) {
+            unsafe {
+                (*core::ptr::addr_of_mut!(EVENTS)).push(Event::ArrayElementDestructor(element as usize));
+            }
+        }
+
         /// Records the callback interface's virtual slot 1, dispatched by
         /// the host model of the 0x0827948c implementation disposal.
         unsafe extern "C" fn recording_callback_release(callback: *mut u8) {
@@ -4246,6 +4358,7 @@ mod tests {
         struct Bench {
             old_kernel: RomKernelOps,
             old_heap: HeapVeneerOps,
+            old_array_element_destroy: RefcountedArrayElementDestructor,
             old_owned_variant_dispose: RefcountedImplementationDisposer,
             old_retain_count_dispose: RefcountedRetainCountDisposer,
         }
@@ -4266,6 +4379,9 @@ mod tests {
                 );
                 let old_retain_count_dispose = core::ptr::read_volatile(
                     core::ptr::addr_of!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
+                );
+                let old_array_element_destroy = core::ptr::read_volatile(
+                    core::ptr::addr_of!(REFCOUNTED_ARRAY_ELEMENT_DESTROY),
                 );
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(ROM_KERNEL),
@@ -4292,9 +4408,14 @@ mod tests {
                     core::ptr::addr_of_mut!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
                     recording_retain_count_dispose,
                 );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(REFCOUNTED_ARRAY_ELEMENT_DESTROY),
+                    recording_array_element_destructor,
+                );
                 Bench {
                     old_kernel,
                     old_heap,
+                    old_array_element_destroy,
                     old_owned_variant_dispose,
                     old_retain_count_dispose,
                 }
@@ -4314,6 +4435,10 @@ mod tests {
                         core::ptr::addr_of_mut!(REFCOUNTED_RETAIN_COUNT_DISPOSE),
                         self.old_retain_count_dispose,
                     );
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!(REFCOUNTED_ARRAY_ELEMENT_DESTROY),
+                        self.old_array_element_destroy,
+                    );
                 }
                 OPS_LOCK.store(false, Ordering::Release);
             }
@@ -4321,6 +4446,66 @@ mod tests {
 
         fn events() -> Vec<Event> {
             unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
+        }
+
+        #[test]
+        fn array_release_final_reference_finalises_backwards_then_tears_down() {
+            let _bench = bench();
+            let mut semaphore = 0x65;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut allocation = [0u8; 56];
+            let implementation = unsafe { allocation.as_mut_ptr().add(8) };
+            let mut body = RefcountedBody {
+                opaque0: implementation as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_array(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(mutex.sem_cell.is_null());
+            assert!(body.mutex.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x65),
+                    Event::ArrayElementDestructor(implementation as usize + 36),
+                    Event::ArrayElementDestructor(implementation as usize + 24),
+                    Event::ArrayElementDestructor(implementation as usize + 12),
+                    Event::ArrayElementDestructor(implementation as usize),
+                    Event::HeapFree(allocation.as_mut_ptr() as usize, 2),
+                    Event::Signal(0x65),
+                    Event::Delete(0x65),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        #[test]
+        fn array_release_wraps_nonfinal_zero_count_and_clears_slot() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_array(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
         }
 
         #[test]
