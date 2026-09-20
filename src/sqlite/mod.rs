@@ -190,6 +190,7 @@ pub mod open_table;
 pub mod os_close;
 pub mod os_device_characteristics;
 pub mod os_file_size;
+pub mod os_lock;
 pub mod os_open;
 pub mod os_read;
 pub mod os_sync;
