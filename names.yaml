@@ -121111,3 +121111,40 @@ functions:
       0x0839004c), and no predicated BL calls. The body has five
       unconditional BL instructions: zero-fill, MemSetStr, ChangeEncoding,
       MemRelease, and DbStrDup.
+
+  # --- SQLite trigger availability (sqlite/triggers_exist) ---
+  - address: 0x08385220
+    ghidra: FUN_08385220
+    name: triggers_exist
+    size: 92
+    sig: "u8 triggers_exist(const Parse *parse, const Table *table, u32 op, const ExprList *changes)"
+    module: sqlite/triggers_exist
+    status: ported
+    vars:
+      param_1/r0: parse (unused)
+      param_2/r1: table
+      param_3/r2: op
+      param_4/r3: changes
+      iVar2/r4: trigger
+      bVar3/r5: timing_mask
+      FUN_082c24f0: checkColumnOverlap (unported seam)
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte body
+      0x08385220..0x0838527c: the return is `pop {r4-r8,pc}` at
+      0x08385278 and the next separately entered function starts at
+      0x0838527c. Its body contains exactly one plain unconditional BL
+      (`bl 0x082c24f0` at 0x08385258), with zero predicated BL forms.
+      Ghidra identifies three direct BL callers. This is SQLite 3.5.9's
+      sqlite3TriggersExist: a virtual table (Table+0x39) returns zero;
+      otherwise the Table+0x20 Trigger chain is walked, ORing each matching
+      Trigger+0x09 timing mask when Trigger+0x08 equals op and
+      checkColumnOverlap(Trigger+0x10, changes) is nonzero. The unported
+      overlap callee is a volatile target seam (host tests install its
+      predicate); all target pointer fields remain u32 words, deliberately
+      decoded with unaligned reads on host. match.py exits 1 with the expected
+      structural diff: the Rust seam is blx through a literal slot and LLVM
+      expands target-word reads into byte loads, while preserving the
+      virtual-table gate, trigger walk, operation gate, predicate call, and
+      conditional timing-mask OR. Host tests cover nonmatching operations,
+      mask accumulation, predicate filtering, and the virtual-table early
+      exit.
