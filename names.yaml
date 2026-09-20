@@ -118697,3 +118697,30 @@ functions:
       value and increments count. Target builds invoke the unported helper at
       its verified address and host tests install a recording seam that proves
       the post-grow data and capacity reload. Deliberate deviations: none.
+
+  # --- Tracker diagnostic no-op ---
+  - address: 0x083d48f8
+    ghidra: FUN_083d48f8
+    name: tracker_array_diagnostic_no_op
+    size: 4
+    sig: "void *tracker_array_diagnostic_no_op(void *context)"
+    module: util/tracker_array_diagnostic_no_op
+    status: ported
+    renames:
+      param_1/r0: context (unused)
+      param_2/r1: diagnostic argument (unused)
+      param_3/r2: diagnostic argument (unused)
+      param_4/r3: diagnostic argument (unused)
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x083d48f8..0x083d48fc: bx lr. The next independently linked function
+      begins at 0x083d48fc with push {r4,r5,r6,lr}. Whole-image A32
+      B/BL-immediate decoding finds exactly three inbound direct calls, all
+      unconditional plain bl at 0x081061c4, 0x083d4a04, and 0x083d4b28; no
+      predicated bl calls target this entry. The callers pass Tracker
+      diagnostic formatting arguments after destruction, relocation, or
+      initialization work. This body reads no argument and changes no memory,
+      returning directly with r0 unchanged. Ghidra's void(void) signature
+      therefore omits observed argument and return-register behavior. Rust
+      explicitly exposes r0 as the context pass-through; target builds retain
+      the exact naked bx lr instruction.
