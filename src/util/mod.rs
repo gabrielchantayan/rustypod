@@ -92,6 +92,7 @@ pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
 pub mod indexed_record_value_lookup;
 pub mod indexed_slot_pointer;
+pub mod indexed_record_pointer_and_value;
 pub mod indexed_state_set_and_poll;
 pub mod indexed_state_status;
 pub mod id3_synchsafe_u28_decode;

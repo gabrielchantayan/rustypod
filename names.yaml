@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d20f0
+    ghidra: FUN_083d20f0
+    name: indexed_record_pointer_and_value
+    size: 36
+    sig: "void indexed_record_pointer_and_value(u32 *output, const u32 *input)"
+    module: util/indexed_record_pointer_and_value
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input
+      piVar1/r1: record
+      iVar2/r2: record_value
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte extent
+      0x083d20f0..0x083d2113: the next independently entered function starts
+      at 0x083d2114 with push {r0,r1,r2,r3,lr}. The body has no outbound bl
+      instructions. Whole-image call analysis finds three inbound plain bl
+      calls and no predicated bl calls. It loads target-width input words +20
+      and +24 as a base and index, derives base + index*4, and stores that
+      record address plus its first word to output. Rust uses u32 word fields
+      and volatile accesses deliberately, preserving the target layout and
+      retail load/store order on hosts with wider pointers.
   - address: 0x083d22e4
     ghidra: FUN_083d22e4
     name: callback_result_build

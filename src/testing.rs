@@ -48,6 +48,10 @@ pub mod hints {
     pub const SEGMENTED_ITER_POST_INCREMENT: usize = 0x6d40_0000;
     // 0x083d_0000: dedicated to app/element_table's raw-u32 one-based array
     // accessor fixture; mappings never unmap, so no other user may share it.
+    // 0x7c00_0000 and 0x7c10_0000: dedicated to
+    // util/indexed_record_pointer_and_value's target-width record fixtures.
+    pub const INDEXED_RECORD_POINTER_AND_VALUE_FIRST: usize = 0x7c00_0000;
+    pub const INDEXED_RECORD_POINTER_AND_VALUE_SECOND: usize = 0x7c10_0000;
     pub const ELEMENT_ARRAY_ONE_BASED_AT: usize = 0x083d_0000;
     // 0x7e90_0000: dedicated to cxx/list_release_chain_destroy's raw-u32
     // object and sentinel fixtures; mappings never unmap.
