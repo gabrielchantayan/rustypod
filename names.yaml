@@ -35462,6 +35462,30 @@ functions:
       structural review (match.py) shows LLVM retains the tail branch after
       harmless frame setup, identical to the accepted sibling port. Host test
       covers a live mutex signal and the NULL-mutex early-out.
+  - address: 0x0839d43c
+    ghidra: FUN_0839d43c
+    name: refcounted_body_mutex_lock
+    size: 16
+    sig: "void refcounted_body_mutex_lock(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+    notes: >-
+      Raw ARM extent is exactly 16 bytes, 0x0839d43c..0x0839d44c: ldr
+      r0,[r0,#8]; cmp r0,#0; bne mutex_lock @ 0x0807f5c4 (branch word
+      0x1af3885e, bit24 clear so a tail bne, not blne); bx lr. The next
+      separately linked function starts at 0x0839d44c. Decoding every ARM
+      B/BL word in osos.dec finds three direct bl callers, all unconditional
+      at 0x0811ef0c, 0x0816cf38, and 0x0839d3c0; no predicated calls or
+      direct tail b sites. No word-aligned image word equals this address, so
+      it is not virtually dispatched. It loads the RefcountedBody's optional
+      mutex at target +8 and tail-branches to the already ported mutex_lock
+      only when non-NULL. No deliberate behavioral deviations: LLVM may
+      replace the retail tail branch with a normal call, preserving the
+      load/guard/lock behavior. Host test covers a live mutex wait and the
+      NULL-mutex early-out.
   - address: 0x0839d44c
     ghidra: FUN_0839d44c
     name: refcounted_body_mutex_unlock
