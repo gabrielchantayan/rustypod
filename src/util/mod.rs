@@ -265,6 +265,7 @@ pub mod word_list_matches_value;
 pub mod wstr_casecmp;
 pub mod wstr_default_trim_compare;
 pub mod value_predicate;
+pub mod prefix_before_space_has_no_rejected_bytes;
 pub mod xor_transposed_block;
 pub mod xor_c6_in_place;
 pub mod xor_6b_in_place;
