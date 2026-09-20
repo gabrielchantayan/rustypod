@@ -76694,6 +76694,30 @@ functions:
       and the release seam shipping the ported releaseMemArray as its
       default.
 
+  # --- sqlite: virtual-table lock tracking ---
+  - address: 0x0838d6f0
+    ghidra: FUN_0838d6f0
+    name: vtab_lock
+    size: 104
+    sig: "void vtab_lock(Parse *parse, VTable *vtab)"
+    module: sqlite/vtab_lock
+    status: ported
+    vars: {param_1: parse, param_2: vtab, iVar1/r1: lock_index, iVar2/r2: n_vtab_lock}
+    notes: >-
+      SQLite 3.5.x's sqlite3VtabLock. Raw osos.dec confirms the complete
+      104-byte body at 0x0838d6f0..0x0838d758: the next real function begins
+      with push at 0x0838d758. It has one plain bl, sqlite3_realloc @
+      0x08390eec at 0x0838d72c, and no predicated bl calls; its three plain
+      BL callers are 0x08374ae0, 0x0837b9ec, and 0x083962f8. It scans the
+      Parse +0x1a0 VTable-pointer list for identity, returns on a duplicate,
+      otherwise reallocates exactly (Parse +0x19c + 1) * 4 bytes. The result
+      is stored before the NULL check; failure therefore clears apVtabLock and
+      latches parse->db->mallocFailed (+0x1e), while success increments the
+      count and appends. Parse pointer fields are target-width u32 words,
+      avoiding 64-bit host-pointer offset drift. Reallocation dispatches
+      through DB_MEM_OPS.realloc, whose wired default is ported sqlite3_realloc.
+      Host tests cover duplicate no-op, one-word growth and append, and failure
+      latching.
   # --- sqlite: VDBE b-tree use tracking ---
   - address: 0x0838d100
     ghidra: FUN_0838d100

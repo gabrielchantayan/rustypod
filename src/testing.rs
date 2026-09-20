@@ -561,6 +561,9 @@ pub mod hints {
     // 0x8400_0000: dedicated to sqlite/expr_list_key_info's raw-u32 Parse,
     // ExprList, KeyInfo, and allocation fixtures; mappings never unmap.
     pub const SQLITE_EXPR_LIST_KEY_INFO: usize = 0x8400_0000;
+    // 0x8500_0000: dedicated to sqlite/vtab_lock's target-width Parse,
+    // sqlite3, and VTable pointer-list fixtures; mappings never unmap.
+    pub const SQLITE_VTAB_LOCK: usize = 0x8500_0000;
     // 0x7600_0000: dedicated to app/resource_chain's
     // resource_chain_find_on_current_task chain fixture (the context
     // block carries the chain head as a raw u32 word); mappings never
