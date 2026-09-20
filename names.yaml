@@ -80010,6 +80010,31 @@ functions:
       0x080a938c, 0x080a9494, 0x080a94cc, 0x080a95a0, 0x080b8050,
       0x080cdab8, 0x080cdb48, 0x080d46d4, 0x080d472c, and 0x080d47b4);
       no predicated forms.
+  - address: 0x083911a8
+    ghidra: FUN_083911a8
+    name: sqlite3_result_error_nomem
+    size: 40
+    sig: "void sqlite3_result_error_nomem(SqliteContext *context)"
+    module: sqlite/result_error_nomem
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      "context+0x08": result_mem
+      "context+0x18": db
+      "context+0x34": is_error
+      FUN_0838c13c: vdbe_mem_set_null
+    notes: >-
+      SQLite 3.5.x sqlite3_result_error_nomem: NULLs the scalar result Mem
+      embedded at context+0x08, stores SQLITE_NOMEM (7) at context+0x34,
+      then stores 1 to db->mallocFailed at +0x1e. Raw words
+      e92d4010 e1a04000 e2800008 ebffebe0 e3a00007 e5840034 e5941018
+      e3a00001 e5c1001e e8bd8010 establish the exact
+      0x083911a8..0x083911d0 extent: the next word is the push entry of
+      FUN_083911d0. Binary decoding finds 3 direct call sites: plain bl at
+      0x08367d4c and 0x08391ff8, plus predicated bllt at 0x082c4ee0; no
+      other predicated BL forms. The Rust port uses SqliteContext's named
+      repr(C) fields to avoid host-pointer-width offset assumptions; no
+      behavioral deviations.
   - address: 0x083913b4
     ghidra: FUN_083913b4
     name: sqlite_snprintf

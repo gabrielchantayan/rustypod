@@ -233,6 +233,7 @@ pub mod value_set_str;
 pub mod value_text;
 pub mod result_text;
 pub mod result_error;
+pub mod result_error_nomem;
 pub mod result_error_toobig;
 pub mod step;
 pub mod vdbe;
