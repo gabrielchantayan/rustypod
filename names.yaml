@@ -118902,3 +118902,24 @@ functions:
       advances segment_map_slot by one target-width word and loads its segment
       pointer. Rust preserves target pointers as u32 words and writes result
       last, retaining the stock behavior when result aliases iterator.
+
+  - address: 0x083d2e44
+    ghidra: FUN_083d2e44
+    name: scaled_byte_pair_record_finalize
+    size: 60
+    sig: "void scaled_byte_pair_record_finalize(u8 *this)"
+    module: cxx/scaled_byte_pair_record_finalize
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083d2e44..0x083d2e80: push {r4,r5,r6,lr}; load this+0x18 and bl
+      __u2d; save r0:r1; load this+0x08 and bl __f2d; pass the converted
+      scale in r0:r1 and table value in r2:r3 to __dmul; then bl ceil and
+      double_to_u32_saturating before storing r0 at this+0x0c. The next
+      real function starts at 0x083d2e80. Independent aligned ARM immediate
+      decoding finds two plain inbound BL sites (0x083d2378, 0x083d2e30)
+      and zero predicated sites. A word at 0x088a5b70 decodes as blhi to
+      this address, but is outside every decompiled function and therefore
+      data, not a call. Rust keeps all five ported helper call boundaries via
+      volatile function-pointer loads.

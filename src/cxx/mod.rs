@@ -321,6 +321,7 @@ pub mod trivial_vector8_destruct;
 pub mod trivial_vector12_destruct;
 pub mod byte_pair_prefix_init;
 pub mod scaled_byte_pair_record_construct;
+pub mod scaled_byte_pair_record_finalize;
 pub mod wheel_event;
 pub mod word_key_map;
 pub mod tagged_buffer_release;
