@@ -119412,3 +119412,36 @@ functions:
       The runtime vtable targets have no recovered static identity, so opaque
       role names preserve the verified contract. Host fixtures widen pointers;
       match.py reports the expected LLVM frame and branch-shape diff.
+
+  # --- Red-black-tree word-payload node pool (cxx/red_black_tree_payload_word_node_pool_acquire) ---
+  - address: 0x083cec14
+    ghidra: FUN_083cec14
+    name: red_black_tree_payload_word_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePayloadWordNode *red_black_tree_payload_word_node_pool_acquire(RedBlackTreePayloadWordNodePool *pool)"
+    module: cxx/red_black_tree_payload_word_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      uVar6/r6: capacity
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 ARM words from
+      push {r4,r5,r6,r7,r8,lr} at 0x083cec14 through pop {r4,r5,r6,r7,r8,pc}
+      at 0x083cecc8; the next independently entered tree-rotation function
+      begins at 0x083ceccc. The body has two unconditional BL instructions,
+      both to ported operator_new_checked @ 0x08266c70, and no predicated BL
+      instructions. Whole-image aligned ARM B/BL-immediate decoding finds
+      exactly three inbound plain BL sites (0x080d1eec, 0x0818534c,
+      0x083cf49c), no predicated direct calls, and no tail branch. This is the
+      libstdc++ red-black-tree pool allocator for 0x14-byte nodes: free-list
+      pop through node+0x0c, otherwise bump allocation, growing from 32 nodes
+      by max(previous+32, previous+previous/2+previous/8), with a 12-byte
+      chunk header and capacity*0x14 arena. It clears color and parent/left/
+      right while preserving the caller-owned word payload at +0x10.
+      Deliberate deviations: target pointer fields remain u32 words on hosts;
+      the original's dead r1=0 checked-new argument is omitted because the
+      ported callee takes only size. Host tests cover fresh allocation,
+      free-list reuse, payload preservation, and 32-to-64-node growth.
