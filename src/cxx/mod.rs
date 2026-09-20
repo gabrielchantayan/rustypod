@@ -300,6 +300,7 @@ pub mod red_black_tree_rotate_right_twentieth;
 pub mod red_black_tree_rotate_right_nineteenth;
 pub mod red_black_tree_rotate_right_eighth;
 pub mod red_black_tree_rotate_right_fifth;
+pub mod red_black_tree_node_prepend_and_destroy_payload;
 pub mod red_black_tree_rotate_right_sixth;
 pub mod red_black_tree_rotate_right_seventh;
 pub mod red_black_tree_rotate_right_ninth;
