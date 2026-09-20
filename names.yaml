@@ -41092,6 +41092,33 @@ functions:
       doHardCopy gate, nOp-1 Vdbe lookup, opcode/range checks, and count
       return; LLVM uses explicit branches instead of ADS predication.
 
+  - address: 0x08376c28
+    ghidra: FUN_08376c28
+    name: expr_code_and_cache
+    size: 108
+    sig: "int expr_code_and_cache(Parse *parse, Expr *expr, int target)"
+    module: sqlite/expr_code_and_cache
+    status: ported
+    renames:
+      param_1: parse
+      param_2: expr
+      param_3: target
+      uVar1: in_reg
+      iVar2: cache_reg
+      uVar3: p_vdbe
+    notes: >-
+      SQLite 3.5.9's sqlite3ExprCodeAndCache. Raw osos.dec words establish
+      the 108-byte extent: the next real function begins at 0x08376c94
+      (push {r4-r10,lr}). Decoding every word finds two unconditional BL
+      instructions at 0x08376c38 (expr_code @ 0x08376bf4) and 0x08376c74
+      (vdbe_add_op3 @ 0x08386840), with no predicated BL; Ghidra's
+      three-call-site report is incorrect. It evaluates expr in the supplied
+      target, and if Expr.op (+0x00) is not TK_REGISTER (0x7f), increments
+      Parse.nMem (+0x48), emits OP_MemStore (19) with the result register and
+      new cache register, writes Expr.iTable (+0x24), then marks it cached.
+      The cache-miss path deliberately retains the firmware's unguarded
+      Parse.pVdbe (+0x0c) dereference. No other deviations.
+
   - address: 0x08376bf4
     ghidra: FUN_08376bf4
     name: expr_code
