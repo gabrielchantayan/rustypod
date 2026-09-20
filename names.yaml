@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083bf424
+    ghidra: FUN_083bf424
+    name: red_black_tree_word_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreeWordNode *red_black_tree_word_node_pool_acquire(RedBlackTreeWordNodePool *pool)"
+    module: cxx/red_black_tree_word_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      "[pool + 0x0]": chunks
+      "[pool + 0x4]": free
+      "[pool + 0x8]": next
+      "[pool + 0xc]": end
+      puVar1/r0: node
+      piVar3/r5: chunk
+      uVar6/r6: capacity
+    notes: >-
+      Raw osos.dec establishes the true 184-byte extent
+      0x083bf424..0x083bf4d8; the next independently entered function starts
+      at 0x083bf4dc. The body has two unconditional BL calls, both to the
+      ported checked operator new @ 0x08266c70, and no predicated BL calls.
+      Its three inbound direct calls are unconditional BL at 0x0819f988,
+      0x083bf4e4, and 0x083c0070. It pops a node from the +0xc-threaded
+      free list or bump-allocates a 0x14-byte word-payload red-black-tree
+      node, growing through a 0xc-byte chunk header when exhausted. Target
+      pointer fields deliberately remain u32 words so their firmware offsets
+      are invariant on the 64-bit host; the original's dead r1=0 second
+      allocator argument is omitted from the Rust callee signature.
   - address: 0x083c64b4
     ghidra: FUN_083c64b4
     name: red_black_tree_node_pool_release_refcounted
