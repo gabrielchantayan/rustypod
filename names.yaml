@@ -35334,6 +35334,38 @@ functions:
       resolves in librustypod.a (no folding).
 
 
+  - address: 0x0839d550
+    ghidra: FUN_0839d550
+    name: refcounted_body_release_tag3
+    size: 132
+    sig: "void refcounted_body_release_tag3(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_0839d5d4: refcounted_body_mutex_lock_tag3
+      FUN_0839d5e4: refcounted_body_mutex_unlock_tag3
+      FUN_082aad14: operator_delete_tag3
+      FUN_0807f650: mutex_delete
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the 132-byte extent 0x0839d550..0x0839d5d3:
+      the next independently linked function at 0x0839d5d4 is the 16-byte
+      optional-mutex lock helper, followed by the matching unlock helper at
+      0x0839d5e4. Ghidra's 124-byte extent is short. The body contains six
+      plain direct BL instructions (lock, tag-3 delete, unlock, mutex delete,
+      and two tag-2 deletes), no predicated BL instructions, and raw
+      whole-image decoding finds two direct callers at 0x0826f87c and
+      0x083d3728. A NULL body leaves slot untouched. Otherwise it locks the
+      optional mutex, wrapping-decrements body+4, and clears the slot. On
+      exactly zero, body+0 is passed directly to NULL-guarded
+      operator_delete_tag3, then the mutex is unlocked; a fresh body load
+      gates destruction and tag-2 deletion of the mutex, followed by tag-2
+      deletion of the body. Rust calls the existing heap and mutex seams
+      rather than branch-linking to their firmware addresses.
   - address: 0x0839d498
     ghidra: FUN_0839d498
     name: refcounted_body_release_retain_count
