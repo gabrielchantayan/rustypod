@@ -58,6 +58,18 @@
 //! 0x083b7374; there are no predicated BL calls or outbound calls. It
 //! deliberately reuses this dispatch seam and its host tests because its
 //! target code and ABI are identical; deliberate deviations: none.
+//!
+//! `FUN_083b5664` at load address `0x083b5664` is a byte-identical, 84-byte
+//! (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
+//! `0x083b56b4`; the next separately linked function begins at `0x083b56b8`.
+//! Complete aligned ARM B/BL decoding finds three inbound calls, all plain
+//! `bl` at 0x083be03c, 0x083be50c, and 0x083be608, with zero predicated BL
+//! calls and no outbound calls. It advances an in-order cursor to its
+//! successor by descending the right subtree's left spine or climbing parent
+//! links from right-child edges, preserving the header sentinel. The
+//! byte-identical body deliberately reuses this dispatch seam and shared host
+//! tests; deliberate deviations: none.
+
 
 /// Base node layout used by the C++ red-black tree implementation.
 ///
