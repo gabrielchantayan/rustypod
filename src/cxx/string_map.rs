@@ -22,6 +22,9 @@
 //!   0x083c327c (396 bytes; libstdc++ `_Rb_tree::_M_insert_unique` —
 //!   the find-or-insert walk the lookup dispatches to, built on
 //!   `_M_insert` above).
+//! - [`string_key_tree_find`] — original: `FUN_083db55c` @ 0x083db55c
+//!   (168 bytes; 4 direct unconditional `bl` instructions to 3 callee
+//!   targets, the only copy).
 //!
 //! Algorithm (from the disassembly): copy-construct a temporary
 //! `basic_string` from the caller's string object into the key half of
@@ -185,6 +188,65 @@ fn pair_string_copy_ctor(dst: *mut *mut u8, src: *const *mut u8) -> *mut *mut u8
 #[inline(never)]
 fn pair_string_release(string: *mut *mut u8) {
     unsafe { cxx_string_release(string) }
+}
+
+/// string_key_tree_find — original: `FUN_083db55c` @ 0x083db55c
+/// (168 bytes; 4 direct unconditional `bl` instructions to 3 callee
+/// targets, no predicated calls; the next independently linked function
+/// starts at 0x083db604).
+///
+/// libstdc++ `_Rb_tree::find` for the string-keyed map family. Walks from
+/// `header.parent`, retaining the least node whose key is not less than
+/// `key`; then confirms equality by checking that `key` is not less than
+/// that candidate's key. Writes the candidate node on a match, or the
+/// header sentinel on a miss, through `out`.
+///
+/// Deliberate deviations: the original reaches the one-word iterator
+/// equality helper @ 0x083cf848 and the node-key accessor @ 0x083b6acc by
+/// `bl`; their decoded operations are expressed directly as pointer equality
+/// and the typed `node.key.key` field. The two string comparator calls retain
+/// the real `cxx_string_less` seam @ 0x083d74f4.
+///
+/// # Safety
+/// `out` must be writable, `map` must be a live [`StringKeyTree`], and
+/// `key` must point at a live COW string word. Every reachable node must have
+/// a valid key and child links matching the red-black-tree layout.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_key_tree_find(
+    out: *mut *mut StringKeyTreeNode,
+    map: *mut StringKeyTree,
+    key: *const *mut u8,
+) {
+    let header = (*map).header;
+    let comparator = core::ptr::addr_of!((*map).comparator);
+    let mut node = (*header).parent;
+    let mut lower_bound = header;
+
+    while !node.is_null() {
+        if pair_string_less(
+            comparator,
+            core::ptr::addr_of!((*node).key.key),
+            key,
+        ) == 0 {
+            lower_bound = node;
+            node = (*node).left;
+        } else {
+            node = (*node).right;
+        }
+    }
+
+    if lower_bound != header
+        && pair_string_less(
+            comparator,
+            key,
+            core::ptr::addr_of!((*lower_bound).key.key),
+        ) == 0
+    {
+        out.write(lower_bound);
+    } else {
+        out.write(header);
+    }
 }
 
 /// string_map_lookup_or_insert — original: `FUN_083db4c4` @ 0x083db4c4
@@ -1183,6 +1245,60 @@ mod tests {
             node_count: 0,
             multi_insert: 0,
             comparator: 0,
+        }
+    }
+
+    // --- string_key_tree_find (@ 0x083db55c) ------------------------
+
+    /// The lower-bound walk returns the matching node, but rejects both
+    /// below-minimum and between-node keys by its final reverse comparison.
+    #[test]
+    fn find_returns_matching_node_or_header_sentinel() {
+        unsafe {
+            let mut header = test_header();
+            let mut root = test_node();
+            let mut left = test_node();
+            let mut right = test_node();
+            let mut key_a = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b'a', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut key_c = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b'c', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut key_m = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b'm', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut key_t = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b't', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let root_ptr = core::ptr::addr_of_mut!(root);
+            let left_ptr = core::ptr::addr_of_mut!(left);
+            let right_ptr = core::ptr::addr_of_mut!(right);
+            root.key.key = core::ptr::addr_of_mut!(key_m.data).cast::<u8>();
+            left.key.key = core::ptr::addr_of_mut!(key_c.data).cast::<u8>();
+            right.key.key = core::ptr::addr_of_mut!(key_t.data).cast::<u8>();
+            header.parent = root_ptr;
+            root.parent = header_ptr;
+            root.left = left_ptr;
+            root.right = right_ptr;
+            left.parent = root_ptr;
+            right.parent = root_ptr;
+            let mut tree = test_tree(header_ptr);
+
+            for (query, expected) in [
+                (core::ptr::addr_of_mut!(key_c.data).cast::<u8>(), left_ptr),
+                (core::ptr::addr_of_mut!(key_m.data).cast::<u8>(), root_ptr),
+                (core::ptr::addr_of_mut!(key_a.data).cast::<u8>(), header_ptr),
+            ] {
+                let mut found = core::ptr::null_mut();
+                string_key_tree_find(&mut found, &mut tree, &query);
+                assert_eq!(found, expected);
+            }
         }
     }
 
