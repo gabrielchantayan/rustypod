@@ -39725,6 +39725,33 @@ functions:
       the 0x0837ef64 literal while retaining enter, pager write, be store,
       the strbeq latch, and leave.
 
+  # ---- VDBE cursor-reference list release (src/sqlite/vdbe_cursor_reference_list_release.rs) ----
+  - address: 0x08372244
+    ghidra: FUN_08372244
+    name: vdbe_cursor_reference_list_release
+    size: 68
+    sig: "void vdbe_cursor_reference_list_release(VdbeCursorReferenceList *list)"
+    module: sqlite/vdbe_cursor_reference_list_release
+    status: ported
+    renames:
+      param_1/r0: list
+      iVar2/r2: index
+      iVar1/r1: referenced_object
+      iVar3/r3: remaining_references
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x08372244..0x08372288: the entry initializes index and zero byte,
+      and bx lr ends at 0x08372284 before sqlite3BtreeNext begins at
+      0x08372288. Four inbound direct calls are unconditional plain bl:
+      two in FUN_0838b084 and one each in Ghidra's FUN_08386ecc and
+      FUN_08386ef8; no predicated bl targets this entry. The body has no
+      BL/BLX calls. It rereads the signed list count on each loop test,
+      decrements every listed object's word at +0x0c with wrapping ARM
+      subtraction, and clears its +0x0a byte only when the remaining count
+      is zero and that byte was nonzero. No deliberate deviations: host
+      tests use a dedicated below-4-GiB slab to preserve target pointer
+      width and cover nonpositive counts, zero-count wrapping, final-flag
+      clearing, and nonfinal preservation.
   # ---- B-tree page size control (src/sqlite/btree_set_page_size.rs) ----
   - address: 0x08372cf0
     ghidra: FUN_08372cf0

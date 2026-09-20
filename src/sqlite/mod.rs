@@ -255,6 +255,7 @@ pub mod utf16_to_utf8;
 pub mod utf8_char_len;
 pub mod value_blob;
 pub mod vdbe_free_cursor;
+pub mod vdbe_cursor_reference_list_release;
 pub mod vdbe_frame_list_clear;
 pub mod value_bytes;
 pub mod value_free;

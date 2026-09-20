@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
     // shared-cache, and Schema fixture; mappings never unmap.
     pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;
+    // 0x6901_0000: dedicated to sqlite/vdbe_cursor_reference_list_release's
+    // target-width list and cursor-reference fixtures; mappings never unmap.
+    pub const SQLITE_VDBE_CURSOR_REFERENCE_LIST_RELEASE: usize = 0x6901_0000;
     // 0x6a10_0000: dedicated to sqlite/btree_set_cache_size's target-width
     // Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_SET_CACHE_SIZE: usize = 0x6a10_0000;
