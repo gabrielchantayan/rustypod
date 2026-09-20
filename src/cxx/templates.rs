@@ -6029,6 +6029,70 @@ pub unsafe extern "C" fn vector_copy_construct_range_attach_8c0c(
 
 
 
+/// A target-layout container head whose elements are destroyed by
+/// [`container_delete_enabled_elements`].
+///
+/// On ARM, `count` and `delete_enabled` reside at byte offsets +0x04 and
+/// +0x10. `repr(C)` preserves those target offsets while keeping the native
+/// host vtable pointer and subsequent fields disjoint.
+#[repr(C)]
+pub struct ContainerDeleteEnabledElements {
+    vtable: *const ElementSlotFn,
+    count: i32,
+    _unknown_08: u32,
+    _unknown_0c: u32,
+    delete_enabled: u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(ContainerDeleteEnabledElements, count)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(ContainerDeleteEnabledElements, delete_enabled)];
+
+/// container_delete_enabled_elements — original: `FUN_083d1f40` @
+/// 0x083d1f40 (64 bytes; Ghidra reports 60).
+///
+/// Raw `osos.dec` establishes the complete 16-word body from `push
+/// {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}` at 0x083d1f7c; the next
+/// independently linked function begins at 0x083d1f80. Three inbound calls
+/// are unconditional plain `bl` instructions (0x081b9430, 0x083d1fc0, and
+/// 0x083d1ff8), with no predicated `bl` forms. The body has two plain direct
+/// `bl` calls per iteration, to `container_element_at_alias_6c6c` and
+/// `operator_delete`, and no predicated calls.
+///
+/// When `delete_enabled` is nonzero, walks signed indices from zero while
+/// less than `count`; it obtains each element from the container's vtable
+/// +0x40 accessor and passes the returned pointer to tag-2 `operator_delete`.
+/// A disabled flag or nonpositive count performs no access. Deliberate
+/// deviation: the two verified, already ported callees are ordinary Rust calls
+/// rather than ARM `bl` instructions.
+///
+/// # Safety
+///
+/// `container` must point to a readable target-layout head. When enabled with
+/// a positive count, its vtable and each selected element slot must satisfy
+/// [`container_element_at_alias_6c6c`]'s contract; every returned element must
+/// satisfy [`crate::heap::veneers::operator_delete`]'s ownership contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_delete_enabled_elements")]
+#[inline(never)]
+pub unsafe extern "C" fn container_delete_enabled_elements(
+    container: *mut ContainerDeleteEnabledElements,
+) {
+    if (*container).delete_enabled == 0 {
+        return;
+    }
+    let count = (*container).count;
+    let mut index = 0;
+    while index < count {
+        crate::heap::veneers::operator_delete(container_element_at_alias_6c6c(
+            container.cast(),
+            index as usize,
+        ));
+        index += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -11907,6 +11971,49 @@ mod tests {
             let mut overlapping = [1u32, 2, 3, 4, 5];
             deque_iter_assign_alias_a1b0(overlapping.as_mut_ptr().add(1), overlapping.as_ptr());
             assert_eq!(overlapping, [1, 1, 1, 1, 1]);
+        }
+    }
+    unsafe extern "C" fn delete_enabled_element_slot(
+        container: *mut u8,
+        index: usize,
+    ) -> *mut *mut u8 {
+        let fixture = container.cast::<DeleteEnabledFixture>();
+        (*fixture).calls += 1;
+        (*fixture).elements.as_mut_ptr().add(index)
+    }
+
+    #[repr(C)]
+    struct DeleteEnabledFixture {
+        container: ContainerDeleteEnabledElements,
+        elements: [*mut u8; 3],
+        calls: usize,
+    }
+
+    #[test]
+    fn delete_enabled_elements_obeys_flag_and_signed_count() {
+        unsafe {
+            let vtable = [delete_enabled_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut fixture = DeleteEnabledFixture {
+                container: ContainerDeleteEnabledElements {
+                    vtable: vtable.as_ptr(),
+                    count: 3,
+                    _unknown_08: 0,
+                    _unknown_0c: 0,
+                    delete_enabled: 1,
+                },
+                elements: [core::ptr::null_mut(); 3],
+                calls: 0,
+            };
+
+            container_delete_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "every index below count is retrieved");
+
+            fixture.container.delete_enabled = 0;
+            container_delete_enabled_elements(&mut fixture.container);
+            fixture.container.delete_enabled = 1;
+            fixture.container.count = -1;
+            container_delete_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
         }
     }
 }

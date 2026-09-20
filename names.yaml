@@ -119042,6 +119042,28 @@ functions:
       store and deliberately omitted; this has no observable effect. Host tests
       cover the first and a later slot and verify both output words are
       overwritten.
+  - address: 0x083d1f40
+    ghidra: FUN_083d1f40
+    name: container_delete_enabled_elements
+    size: 64
+    sig: "void container_delete_enabled_elements(ContainerDeleteEnabledElements *container)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r0/r6: container, param_1_plus_0x04/r5: count, param_1_plus_0x10/r0: delete_enabled, iVar1/r4: index, FUN_083d6c6c: container_element_at_alias_6c6c, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen ARM words
+      from push {r4,r5,r6,lr} at 0x083d1f40 through pop {r4,r5,r6,pc} at
+      0x083d1f7c; the next independently linked function starts at 0x083d1f80.
+      Complete branch decoding finds three inbound unconditional plain BL calls
+      at 0x081b9430, 0x083d1fc0, and 0x083d1ff8, with no predicated BL calls.
+      The enabled flag at +0x10 gates a signed 0..count walk. Every iteration
+      directly calls the ported vtable +0x40 element accessor
+      container_element_at_alias_6c6c with the index, then passes its returned
+      pointer to the ported tag-2 operator_delete. Ghidra's 60-byte extent and
+      noreturn interpretation of operator_delete are both wrong: raw code
+      returns after the loop. Host tests cover all elements, a disabled flag,
+      and a negative count; native-width vtable pointers deliberately move
+      host fields while repr(C) retains the target layout on ARM.
   - address: 0x083d1fd0
     ghidra: FUN_083d1fd0
     name: vtable_089a57f0_destruct
