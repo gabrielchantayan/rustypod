@@ -23,6 +23,7 @@ pub mod clock_source_base_construct;
 pub mod clock_source_construct;
 pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;
+pub mod copy_record_20_if_destination;
 pub mod color_copy;
 pub mod color_pack;
 pub mod color_unpack;
