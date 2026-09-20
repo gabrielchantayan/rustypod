@@ -120567,3 +120567,31 @@ functions:
       the same flag, loop, accessor, NULL guard, and virtual release
       structure; LLVM adds its crate-wide frame pointer and lowers signed
       loop comparison to equality after a positive-count guard.
+  - address: 0x0839c358
+    ghidra: FUN_0839c358
+    name: vtable_08982274_destruct
+    size: 36
+    sig: "u32 *vtable_08982274_destruct(u32 *this)"
+    module: cxx/vtable_08982274_destruct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0839c37c: VTABLE_08982274
+      FUN_0839c298: validate_derived_state
+      FUN_08135380: destroy_base
+    notes: >-
+      Raw osos.dec establishes nine ARM words: eight instructions from
+      0x0839c358 through the tail `b 0x08135380` at 0x0839c378, then
+      literal 0x08982274 at 0x0839c37c; the next independently linked
+      function begins at 0x0839c380. Thus Ghidra's 36-byte extent includes
+      the literal and is correct. Decoding every ARM B/BL word independently
+      finds exactly three inbound plain bl sites (0x0811d958, 0x08159880,
+      0x0828c1e8) and no predicated bl sites. The body installs the vtable,
+      calls 0x0839c298 to validate the derived indexed state, and tail-branches
+      to unresolved base destructor 0x08135380. Neither complete class
+      identity nor either callee's implementation is established; target Rust
+      calls their verified addresses and host tests replace them with seams to
+      prove vtable installation, receiver forwarding, ordering, and return
+      propagation. Deliberate deviation: Rust cannot preserve the ARM tail
+      branch. match.py reports the expected frame and address-backed blx/bx
+      structural difference.
