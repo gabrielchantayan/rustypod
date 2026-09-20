@@ -148,6 +148,7 @@ pub mod opaque_observable_array_flag_construct;
 pub mod opaque_observable_array_payload_destroy;
 pub mod opaque_observable_array_dispose_elements;
 pub mod owned_element_array_release;
+pub mod owned_element_array_dispose;
 pub mod indexed_element_array_release;
 pub mod owned_element_array_delete_cells;
 pub mod owned_string_object_array_release;

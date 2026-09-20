@@ -120424,3 +120424,32 @@ functions:
       signed loop, virtual lookup, null skip, +8 destruction, and delete
       shape; LLVM's larger frame and loop lowering are deliberate codegen
       differences.
+  - address: 0x0839c98c
+    ghidra: FUN_0839c98c
+    name: owned_element_array_dispose
+    size: 76
+    sig: "void owned_element_array_dispose(OwnedElementArrayDispose *this)"
+    module: cxx/owned_element_array_dispose
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+4: count
+      param_1+40: enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      FUN_083d5fec: indexed_element_at
+      FUN_0811c15c: unresolved_element_direct_stage
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte body
+      0x0839c98c..0x0839c9d7: the next independently entered function begins
+      at 0x0839c9d8. The body has three plain direct bl calls, to indexed
+      accessor 0x083d5fec, unresolved direct stage 0x0811c15c, and tag-2
+      operator_delete 0x082aad24; it has no predicated bl calls. Whole-image
+      ARM B/BL decoding finds three inbound plain bl sites and no predicated
+      direct callers. When byte +0x28 is nonzero, it walks signed indices
+      [0,count), skips NULL cell words from the +0x40 accessor, passes every
+      other word to the unresolved stage, then passes that returned pointer
+      directly to operator_delete. The unidentified stage deliberately remains
+      an address-backed seam: target builds call retailOS at its verified
+      address, while host fixtures substitute it and widen the vtable pointer.
