@@ -9559,6 +9559,28 @@ functions:
       block_deque's `base_client` calls it. Hook this address to that
       symbol.
 
+  - address: 0x083d6e70
+    ghidra: FUN_083d6e70
+    name: hash_table_bucket_slot
+    size: 32
+    sig: "u32 *hash_table_bucket_slot(const HashTable *table, u32 hash)"
+    module: cxx/hash_table_bucket_slot
+    status: ported
+    vars: {param_1: table, param_2: hash}
+    notes: >-
+      Raw osos.dec establishes the 32-byte extent
+      0x083d6e70..0x083d6e90: push {r4,lr}; preserve table in r4; move
+      hash into r0; load the u32 bucket count from table+8; bl __rt_udiv
+      (0x08036f14); load the u32 bucket-array base from table+4; return
+      base + (r1 remainder << 2). The next real leaf starts at 0x083d6e90.
+      Independent aligned ARM B/BL-immediate decoding finds exactly three
+      inbound plain unconditional bl sites (0x083d2da0, 0x083d2eac,
+      0x083d2fdc), zero predicated inbound calls; its own body has one plain
+      bl to __rt_udiv and zero predicated calls. Rust uses the existing
+      __rt_udivmod out-pointer wrapper because Rust cannot observe ADS's r1
+      remainder return register; this preserves the division result and
+      keeps the divider call boundary.
+
   - address: 0x08266f2c
     ghidra: FUN_08266f2c
     name: cxx_array_dealloc
