@@ -568,6 +568,10 @@ pub mod hints {
     // KeyInfo, collation-array, and tracked-allocation fixtures; mappings
     // never unmap, so no other user may share this hint.
     pub const SQLITE_INDEX_KEY_INFO: usize = 0x8300_0000;
+    // 0x8600_0000: dedicated to sqlite/open_table_and_indices' target-width
+    // Parse and Table fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SQLITE_OPEN_TABLE_AND_INDICES: usize = 0x8600_0000;
     // 0x8400_0000: dedicated to sqlite/expr_list_key_info's raw-u32 Parse,
     // ExprList, KeyInfo, and allocation fixtures; mappings never unmap.
     pub const SQLITE_EXPR_LIST_KEY_INFO: usize = 0x8400_0000;
