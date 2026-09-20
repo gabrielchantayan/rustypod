@@ -882,6 +882,40 @@ unsafe fn element_array_at(array: usize, index: i32) -> *mut u8 {
     array_data(base).add(index as usize).read()
 }
 
+/// element_array_one_based_at — original: `FUN_083d5500` @ **0x083d5500**
+/// (**28 bytes**; **three plain inbound `bl` calls, no predicated calls**).
+///
+/// Raw ARM is seven words through its `bx lr` at `0x083d5518`; the next real
+/// function is the independent `bx lr` at `0x083d551c`. It returns entry
+/// `index` from an element array only when `index` is strictly positive and
+/// below the signed slot count. Otherwise it returns NULL without reading the
+/// array data pointer.
+///
+/// Deliberate deviation: none. The target header remains raw 32-bit words on
+/// hosts so its data pointer and slot count retain their target offsets.
+///
+/// # Safety
+///
+/// `this` must be non-null and aligned through two target-width words. For a
+/// positive, in-range `index`, word zero must be a readable array of
+/// target-width pointers through that index.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array_one_based_at(this: *const u32, index: i32) -> *mut u8 {
+    if index <= 0 {
+        return core::ptr::null_mut();
+    }
+
+    let slots = this.add(ARRAY_SLOTS_INDEX).read() as i32;
+    if slots <= index {
+        return core::ptr::null_mut();
+    }
+
+    let data = this.read() as usize as *const u32;
+    data.add(index as usize).read() as usize as *mut u8
+}
+
+
 /// element_array0_at — original: `FUN_080f1038` @ 0x080f1038
 /// (40 bytes; 47 `bl` call sites, binary-scanned).
 ///
@@ -2230,5 +2264,37 @@ mod element_array7_insert_tests {
         assert_eq!(unsafe { element_array7_insert_unique(this, inserted) }, -1);
         assert_eq!(entries, [first, second]);
         assert_eq!(unsafe { used(this) }, 1);
+    }
+}
+
+#[cfg(test)]
+mod element_array_one_based_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+    #[test]
+    fn rejects_nonpositive_and_out_of_range_indices_without_reading_data() {
+        let Some(slab) = try_map_u32_slab(hints::ELEMENT_ARRAY_ONE_BASED_AT, 0x1000) else {
+            assert!(note_missing_u32_fixture("app/element_table one-based accessor"));
+            return;
+        };
+
+        unsafe {
+            slab.write_bytes(0, 0x1000);
+            let header = slab.cast::<u32>();
+            header.add(1).write(3);
+            assert!(element_array_one_based_at(header, -1).is_null());
+            assert!(element_array_one_based_at(header, 0).is_null());
+            assert!(element_array_one_based_at(header, 3).is_null());
+
+            let entries = slab.add(0x100).cast::<u32>();
+            header.write(entries as usize as u32);
+            entries.add(1).write(slab.add(0x200) as usize as u32);
+            entries.add(2).write(slab.add(0x300) as usize as u32);
+            assert_eq!(element_array_one_based_at(header, 1), slab.add(0x200));
+            assert_eq!(element_array_one_based_at(header, 2), slab.add(0x300));
+        }
     }
 }
