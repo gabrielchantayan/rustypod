@@ -28,6 +28,16 @@
 //! returned. This alias reuses the established dispatch seam and shared host
 //! tests; deliberate deviations: none.
 //!
+//! `FUN_083b5e50` at load address `0x083b5e50` is an 84-byte (21-word) copy
+//! of `red_black_tree_advance_cursor`, through `bx lr` at `0x083b5ea0`; the
+//! next separately linked sibling begins at `0x083b5ea4`. Aligned ARM B/BL
+//! decoding verifies three direct inbound calls, all unconditional `bl` at
+//! `0x083c7a50`, `0x083c7f20`, and `0x083c801c`; there are no predicated BL
+//! calls and the body itself contains no calls. Its raw bytes are identical to
+//! the port at `0x083b609c`, so it deliberately reuses this implementation and
+//! its host tests. The function leaves r0 unchanged and returns the cursor
+//! address; deliberate deviations: none.
+//!
 //! `FUN_083b5cac` at load address `0x083b5cac` is a third byte-identical,
 //! 84-byte (21-word) copy of the same `red_black_tree_advance_cursor` body,
 //! ending with `bx lr` at `0x083b5cfc`; the separately linked sibling begins
