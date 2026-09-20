@@ -189,6 +189,7 @@ pub mod slot_reset;
 pub mod state_object_destroy;
 pub mod state_object_initialize;
 pub mod string;
+pub mod filebuf_is_open;
 pub mod string_pair_word_uninitialized_copy;
 pub mod named_object_cache;
 pub mod string_range_destroy;
