@@ -18,18 +18,19 @@
 //!
 //! The stock `0x0839ef54` handle-assignment body is expressed with the
 //! already ported, exact callee pair `refcounted_body_release_owned_variant`
-//! (`0x0839cf4c`) and `refcounted_body_attach` (`0x0839cf10`). The message
-//! constructor `0x081cd7b8` is inlined as its four recovered word stores;
-//! this avoids creating a second dispatch seam for a simple allocator-backed
-//! constructor. Host-only pool and vtable substitutions exist solely to make
-//! the target-width message allocation and release path observable in tests.
+//! (`0x0839cf4c`) and `refcounted_body_attach_owned_variant` (`0x0839cf10`).
+//! The message constructor `0x081cd7b8` is inlined as its four recovered word
+//! stores; this avoids creating a second dispatch seam for a simple
+//! allocator-backed constructor. Host-only pool and vtable substitutions exist
+//! solely to make the target-width message allocation and release path
+//! observable in tests.
 
 use crate::app::callback_dispatch_release::{
     callback_dispatch_release, DispatchValue, ValueDispatch,
 };
 use crate::app::message_0x13_arena::message_0x13_arena_pool;
 use crate::cxx::handle::{
-    refcounted_body_attach, refcounted_body_release_owned_variant, RefcountedBody,
+    refcounted_body_attach_owned_variant, refcounted_body_release_owned_variant, RefcountedBody,
 };
 use crate::heap::fixed_block_pool::{fixed_block_pool_alloc, FixedBlockPool};
 
@@ -134,7 +135,7 @@ pub unsafe extern "C" fn dispatch_bool_message(
     let destination = core::ptr::addr_of_mut!((*context).body);
     if destination != source.cast_mut() {
         refcounted_body_release_owned_variant(destination);
-        refcounted_body_attach(destination, source.read());
+        refcounted_body_attach_owned_variant(destination, source.read());
     }
 
     let message = fixed_block_pool_alloc(message_pool(), core::mem::size_of::<BoolMessage>())

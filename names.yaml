@@ -34857,6 +34857,33 @@ functions:
       behavior. Host test covers a live mutex signal and the NULL-mutex
       early-out.
 
+  - address: 0x0839cf10
+    ghidra: FUN_0839cf10
+    name: refcounted_body_attach_owned_variant
+    size: 60
+    sig: "void refcounted_body_attach_owned_variant(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: body
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte extent
+      0x0839cf10..0x0839cf4c: `push {r4,lr}; mov r4,r1; str r1,[r0];
+      popeq {r4,pc}; ldr r0,[r4,#8]; cmp r0,#0; blne mutex_lock; ldr
+      r0,[r4,#4]; add r0,r0,#1; str r0,[r4,#4]; ldr r0,[r4,#8]; cmp
+      r0,#0; popeq {r4,pc}; blne mutex_unlock; pop {r4,pc}`. The next
+      real function, refcounted_body_release_owned_variant, begins at
+      0x0839cf4c. Full A32 branch decoding finds three direct bl callers,
+      all unconditional (0x0815f51c, 0x0839ef48, 0x0839ef78), plus one
+      direct tail b at 0x0815f478; no predicated inbound calls. The body
+      unconditionally stores the body pointer, then for non-NULL bodies
+      locks the optional mutex at +8, wrapping-increments refcount +4,
+      reloads and independently NULL-checks the mutex, and unlocks it.
+      Rust keeps this separately hookable entry with a target-only text
+      section; LLVM may inline the two ported mutex calls rather than emit
+      the stock blne instructions, but preserves their ordering. Host tests
+      cover the NULL store and wrapping increment.
   - address: 0x0839cf4c
     ghidra: FUN_0839cf4c
     name: refcounted_body_release_owned_variant
