@@ -118234,3 +118234,31 @@ functions:
       destination + 24. Rust directly calls the verified memcpy body rather
       than its IRAM veneer, preserving the grouped forward-copy overlap
       behavior and result.
+
+  # --- conditional 20-byte forward record copy ---
+  - address: 0x083d7cfc
+    ghidra: FUN_083d7cfc
+    name: copy_record_20_if_destination
+    size: 20
+    sig: "void *copy_record_20_if_destination(void *context, void *destination, const void *source)"
+    module: cxx/copy_record_20_if_destination
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: destination
+      param_3/r2: source
+      FUN_08000188: memcpy_forward_words
+      FUN_08037df8: memcpy_forward_words_veneer
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x083d7cfc..0x083d7d0f: movs r0,r1; mov r1,r2; movne r2,#0x14; bne
+      0x08037df8; bx lr. The separately linked next function begins at
+      0x083d7d10 with movs r0,r1. The veneer at 0x08037df8 is ldr
+      pc,[pc,#-4] with target 0x22000188, the IRAM mirror of the ported
+      memcpy_forward_words at 0x08000188. Whole-image A32 decoding finds three
+      inbound plain BL calls and no inbound predicated BL calls; the body has
+      zero plain BL and zero predicated BL instructions. It returns NULL
+      without reading source when destination is NULL; otherwise it
+      tail-transfers a 20-byte aligned forward memcpy and returns destination
+      + 20. Rust directly calls the verified memcpy body rather than its IRAM
+      veneer, preserving grouped forward-copy overlap behavior and r0 result.
