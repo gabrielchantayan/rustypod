@@ -43124,6 +43124,36 @@ functions:
       0x08385564, and 0x08385974. This port is deferred until the
       stack-dependent visitor/continuation can be recovered faithfully.
 
+  - address: 0x083788a0
+    ghidra: FUN_083788a0
+    name: column_set_collation
+    size: 92
+    sig: "Column *column_set_collation(Parse *parse, Column *column, const Token *token)"
+    module: sqlite/column_set_collation
+    status: ported
+    renames:
+      param_1/r6: parse
+      param_2/r4: column
+      param_3/r5: token
+      iVar1/r5: name
+      iVar2/r0: collation
+      FUN_0837d7ac: name_from_token
+      FUN_0837d18c: locate_coll_seq
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the exact 92-byte extent
+      0x083788a0..0x083788fc: `pop {r4-r6,pc}` at 0x083788f8 is followed
+      by the next separately linked function's `push` at 0x083788fc.
+      It has exactly three outbound plain BL calls — name_from_token at
+      0x083788b4, locate_coll_seq at 0x083788cc, and tracked_free at
+      0x083788e4 — and no predicated BL calls. It duplicates the token
+      name, resolves it with an explicit -1 length, stores a successful
+      CollSeq at column +0x04, and ORs 0x0100 into column +0x02 before
+      always freeing the temporary name. Rust uses target-width word
+      indexing for the collation field so a host pointer cannot overlap
+      the target's 4-byte slot; no callable seam was created because all
+      three verified callees are already ported.
+
   - address: 0x083788fc
     ghidra: FUN_083788fc
     name: expr_set_height
