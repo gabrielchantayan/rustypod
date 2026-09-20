@@ -118852,3 +118852,28 @@ functions:
       therefore omits observed argument and return-register behavior. Rust
       explicitly exposes r0 as the context pass-through; target builds retain
       the exact naked bx lr instruction.
+
+  # --- Sparse segmented iterator post-increment ---
+  - address: 0x083d36a4
+    ghidra: FUN_083d36a4
+    name: segmented_iter_post_increment
+    size: 68
+    sig: "void segmented_iter_post_increment(u32 *result, u32 *iterator)"
+    module: cxx/segmented_iter_post_increment
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: iterator
+      param_2_plus_0: segment_map_slot
+      param_2_plus_4: current_segment
+      iVar1/r2: next_segment
+    notes: >-
+      Raw osos.dec establishes the 68-byte body from 0x083d36a4 through
+      0x083d36e4; push {r4-r10,lr} at 0x083d36e8 begins the next separately
+      linked function. Whole-image A32 B/BL-immediate decoding finds exactly
+      three inbound direct calls, all unconditional plain bl, and no
+      predicated bl calls; the body makes no direct calls. It saves the
+      two-word iterator for result, then while current_segment is zero,
+      advances segment_map_slot by one target-width word and loads its segment
+      pointer. Rust preserves target pointers as u32 words and writes result
+      last, retaining the stock behavior when result aliases iterator.
