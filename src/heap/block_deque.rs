@@ -49,6 +49,12 @@
 //!   NULL and frees the segment map itself. The stale `map`/`map_cap`
 //!   words are deliberately not cleared — the original leaves them
 //!   dangling too.
+//! - `deque_drain` — original: `FUN_083ddcac` @ 0x083ddcac (44 bytes; 3
+//!   incoming plain `bl` call sites at 0x081a8444, 0x081a84c8, and
+//!   0x081a84d0; no predicated sites, binary-verified). Repeatedly pops
+//!   the front element until the deque's count reaches zero, then returns
+//!   the original deque pointer.
+
 //! The block-manager client handle at +0x4 is read through
 //! `cxx::handle::handle_deref_or_null` — the original's `FUN_083d64f4`
 //! @ 0x083d64f4 is one of 22 byte-identical copies of that accessor, so
@@ -609,6 +615,25 @@ pub unsafe extern "C" fn deque_pop_front(dq: *mut BlockDeque) {
         (op!(seg_dealloc))(d.map as *mut u8, d.map_cap as usize, 0);
     }
 }
+/// deque_drain — original: `FUN_083ddcac` @ 0x083ddcac (44 bytes).
+///
+/// Verified incoming calls: three plain `bl` sites (0x081a8444,
+/// 0x081a84c8, 0x081a84d0) and no predicated sites. The body makes two
+/// plain calls: `deque_pop_front` at 0x083ddcbc and
+/// `container_is_empty_alias_75b0` at 0x083ddcc4. Repeatedly removes the
+/// front element while the count is nonzero, then returns the original deque
+/// pointer. Deliberate deviation:
+/// uses the typed `count` field instead of the local empty-predicate alias;
+/// its target read is the same target word and keeps host layout correct.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_drain(dq: *mut BlockDeque) -> *mut BlockDeque {
+    while (*dq).count != 0 {
+        deque_pop_front(dq);
+    }
+    dq
+}
+
 
 /// pool_base_construct — original: `FUN_082141bc` @ 0x082141bc
 /// (100 bytes).
@@ -1203,6 +1228,66 @@ mod tests {
                 events(),
                 std::vec![
                     Ev::ElemDtor(seg.as_mut_ptr() as usize),
+                    Ev::SegFree {
+                        ptr: seg.as_mut_ptr() as usize,
+                        count: 0x20
+                    },
+                    Ev::SegFree {
+                        ptr: map.as_mut_ptr() as usize,
+                        count: 1
+                    },
+                ]
+            );
+        }
+        restore();
+    }
+
+    // ---- drain ----------------------------------------------------------
+
+    #[test]
+    fn drain_empty_deque_preserves_pointer_without_events() {
+        let _guard = mock_all();
+        let mut dq = BlockDeque {
+            begin: DequeIter::NULL,
+            end: DequeIter::NULL,
+            count: 0,
+            map: core::ptr::null_mut(),
+            map_cap: 0,
+        };
+        unsafe {
+            assert_eq!(deque_drain(&mut dq) as usize, core::ptr::addr_of_mut!(dq) as usize);
+            assert_eq!(events(), std::vec![]);
+        }
+        restore();
+    }
+
+    #[test]
+    fn drain_pops_every_element_and_returns_original_pointer() {
+        let _guard = mock_all();
+        let mut seg = [0u8; DEQUE_SEG_BYTES];
+        let mut map = [seg.as_mut_ptr()];
+        unsafe {
+            let first = seg.as_mut_ptr();
+            let second = first.add(DEQUE_ELEM_SIZE);
+            init_elem(first);
+            init_elem(second);
+            let mut dq = BlockDeque {
+                begin: DequeIter::NULL,
+                end: DequeIter::NULL,
+                count: 2,
+                map: map.as_mut_ptr(),
+                map_cap: 1,
+            };
+            deque_iter_init(&mut dq.begin, first, map.as_mut_ptr());
+
+            assert_eq!(deque_drain(&mut dq) as usize, core::ptr::addr_of_mut!(dq) as usize);
+            assert_eq!(dq.count, 0);
+            assert!(dq.begin.cur.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Ev::ElemDtor(first as usize),
+                    Ev::ElemDtor(second as usize),
                     Ev::SegFree {
                         ptr: seg.as_mut_ptr() as usize,
                         count: 0x20
