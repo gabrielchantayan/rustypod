@@ -119085,3 +119085,25 @@ functions:
       cleanup have no verified semantic identity, so target-width layout and
       explicit seams preserve their observed contracts; host tests model the
       target virtual slot with a seam because native function pointers widen.
+  - address: 0x083d1f04
+    ghidra: FUN_083d1f04
+    name: vtable_089a5718_destruct
+    size: 56
+    sig: "Vtable089a5718Object *vtable_089a5718_destruct(Vtable089a5718Object *this)"
+    module: cxx/vtable_089a5718_destruct
+    status: ported
+    vars: {param_1/r0/r4: this, DAT_083d1f3c: VTABLE_089A5718, param_1_plus_0x14: payload, FUN_083d1e30: VTABLE_089A5718_BASE_CLEANUP, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent: 13 ARM code words
+      from push {r4,lr} at 0x083d1f04 through the tail branch at 0x083d1f38,
+      followed by literal 0x089a5718 at 0x083d1f3c; 0x083d1f40 starts the
+      next independent function. Whole-image ARM immediate-branch decoding
+      finds three inbound unconditional plain BL instructions (0x0826b748,
+      0x083d1d74, and 0x083d1dc0) and no predicated BL callers. The body
+      installs the literal vtable, conditionally dispatches
+      payload->vtable[+0x1c] for the u32 payload at +0x14, calls the
+      still-unidentified 0x083d1e30 cleanup, then tail-branches to the ported
+      observable_array_destruct. The payload slot and direct cleanup have no
+      verified semantic identity, so target-width layout and explicit seams
+      preserve their observed contracts; host tests model the target virtual
+      slot with a seam because native function pointers widen.
