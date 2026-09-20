@@ -33083,6 +33083,28 @@ functions:
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
 
+  - address: 0x08398904
+    ghidra: FUN_08398904
+    name: expr_worklist_push_matching_subtree
+    size: 80
+    sig: "i32 expr_worklist_push_matching_subtree(ExprWorklist *worklist, Expr *expression, u8 opcode)"
+    module: sqlite/expr_worklist
+    status: ported
+    renames:
+      param_1/r6: worklist
+      param_2/r4: expression
+      param_3/r5: opcode
+      FUN_083987f8: expr_worklist_push
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent
+      0x08398904..0x08398954, followed by a separate function at
+      0x08398954. It recursively visits +0x08 then +0x0c child pointers
+      while expression opcode byte +0x00 equals opcode; every mismatch
+      tail-branches to expr_worklist_push with control 0. The only direct
+      BL is the unconditional self-call at 0x08398940; no predicated BL
+      exists. NULL returns the worklist value unchanged. The Rust port names
+      the target-width offsets and uses a normal call for the tail branch.
+
   - address: 0x083989f8
     ghidra: FUN_083989f8
     name: sqlite_write32bits

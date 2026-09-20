@@ -197,6 +197,41 @@ pub unsafe extern "C" fn expr_worklist_push(
     (*item).parent_index = -1;
     index
 }
+/// `expr_worklist_push_matching_subtree` — original `FUN_08398904` @
+/// `0x08398904` (80 bytes, `0x08398904..0x08398954`; the next independently
+/// linked function starts at `0x08398954`). Raw ARM has one unconditional
+/// direct `bl` (the self-call at `0x08398940`) and no predicated `bl`.
+///
+/// Walks an expression's left/right children while its opcode equals
+/// `opcode`; each nonmatching node is handed to `expr_worklist_push` with a
+/// zero control byte. A NULL expression returns the worklist address without
+/// changing it. Deliberate deviation: named byte-offset accesses replace the
+/// original's untyped expression words; the tail branch to
+/// `expr_worklist_push` becomes a normal Rust call.
+///
+/// # Safety
+///
+/// `worklist` and every non-NULL expression must be valid target-width
+/// storage. Child words at +0x08 and +0x0c are target pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn expr_worklist_push_matching_subtree(
+    worklist: *mut ExprWorklist,
+    expression: *mut u8,
+    opcode: u8,
+) -> i32 {
+    if expression.is_null() {
+        return worklist as usize as u32 as i32;
+    }
+    if expression.read() != opcode {
+        return expr_worklist_push(worklist, expression, 0);
+    }
+
+    let left = (expression.add(8).cast::<u32>()).read() as usize as *mut u8;
+    expr_worklist_push_matching_subtree(worklist, left, opcode);
+    let right = (expression.add(12).cast::<u32>()).read() as usize as *mut u8;
+    expr_worklist_push_matching_subtree(worklist, right, opcode)
+}
 
 #[cfg(test)]
 mod tests {
@@ -222,6 +257,14 @@ mod tests {
 
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::SQLITE_EXPR_WORKLIST, SLAB_LEN).map(|pointer| pointer as usize)
+    });
+    const MATCHING_SUBTREE_SLAB_LEN: usize = 0x3000;
+    static MATCHING_SUBTREE_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(
+            hints::SQLITE_EXPR_WORKLIST_MATCHING_SUBTREE,
+            MATCHING_SUBTREE_SLAB_LEN,
+        )
+        .map(|pointer| pointer as usize)
     });
     const RELEASE_SLAB_LEN: usize = 0x1000;
     const RELEASE_CONTEXT_OFFSET: usize = 0x000;
@@ -366,6 +409,44 @@ mod tests {
             assert_eq!((*item).owner, target_pointer(worklist.cast()));
         }
     }
+    #[test]
+    fn matching_subtree_pushes_only_nonmatching_leaves_in_left_first_order() {
+        let Some(base) = *MATCHING_SUBTREE_SLAB else {
+            assert!(note_missing_u32_fixture("sqlite/expr_worklist matching subtree"));
+            return;
+        };
+        unsafe {
+            ptr::write_bytes(base as *mut u8, 0, MATCHING_SUBTREE_SLAB_LEN);
+            let base = base as *mut u8;
+            let worklist = reset_worklist(base, 0, 4, base.add(0x18));
+            let root = base.add(0x100);
+            let matching_left = base.add(0x120);
+            let first_leaf = base.add(0x140);
+            let second_leaf = base.add(0x160);
+            root.write(7);
+            (root.add(8).cast::<u32>()).write(target_pointer(matching_left));
+            (root.add(12).cast::<u32>()).write(target_pointer(second_leaf));
+            matching_left.write(7);
+            (matching_left.add(8).cast::<u32>()).write(target_pointer(first_leaf));
+            first_leaf.write(4);
+            second_leaf.write(5);
+
+            assert_eq!(expr_worklist_push_matching_subtree(worklist, root, 7), 1);
+            assert_eq!((*worklist).count, 2);
+            let entries = base.add(0x18).cast::<ExprWorkItem>();
+            assert_eq!((*entries).expression, target_pointer(first_leaf));
+            assert_eq!((*entries.add(1)).expression, target_pointer(second_leaf));
+            assert_eq!((*entries).control, 0);
+            assert_eq!((*entries.add(1)).control, 0);
+
+            assert_eq!(
+                expr_worklist_push_matching_subtree(worklist, ptr::null_mut(), 7),
+                target_pointer(worklist.cast()) as i32
+            );
+            assert_eq!((*worklist).count, 2, "NULL leaves the worklist unchanged");
+        }
+    }
+
 
     #[test]
     fn grows_copies_initialized_prefixes_and_releases_heap_entries() {
