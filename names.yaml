@@ -48092,6 +48092,28 @@ functions:
       the NULL path. No dispatch seam was introduced because the original
       calls both vtables directly at runtime.
 
+  - address: 0x083dc0f8
+    ghidra: FUN_083dc0f8
+    name: list_insert_header_value
+    size: 40
+    sig: "void list_insert_header_value(u32 *list, u32 value, u32 unused, u32 discarded_output_seed)"
+    module: cxx/list_insert_header_value
+    status: ported
+    vars: {param_1: list, param_2: value, param_3: unused, param_4: discarded_output_seed}
+    notes: >-
+      Raw osos.dec fixes the body at 40 bytes from push {r2,r3,r4,lr} through
+      pop {r2,r3,r4,pc}; the next real function begins at 0x083dc120.
+      Whole-image A32 decoding finds exactly three inbound direct calls, all
+      unconditional plain bl (0x08133350, 0x081334a8, 0x08133504), and no
+      predicated calls. The wrapper loads the target node word through
+      list + 0x10, materializes it on the stack, and forwards it with list
+      and value to the unported FUN_083dc2d0 @ 0x083dc2d0. Its fourth ABI
+      argument only seeds an output stack slot that the callee overwrites;
+      the wrapper discards it. Target builds retain that verified firmware
+      boundary; the host test injects its ABI to prove the target-word load,
+      local indirection, argument order, and discarded seed without inventing
+      an identity for the callee.
+
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
     name: pair_assign_guarded
