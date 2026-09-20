@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d22e4
+    ghidra: FUN_083d22e4
+    name: callback_result_build
+    size: 68
+    sig: "void callback_result_build(CallbackResult *output, void *context, const u32 *input)"
+    module: util/callback_result_build
+    status: ported
+    renames:
+      param_1/r0/r4: output
+      param_2/r1: context
+      param_3/r2: input
+      local_14: local_result.first
+      local_10: local_result.second
+      local_c: local_result.status
+      FUN_083d2e80: opaque_retail_result_builder
+    notes: >-
+      Raw osos.dec words establish the exact 68-byte extent
+      0x083d22e4..0x083d2327: the next independently entered function starts
+      at 0x083d2328 with push {r4,r5,r6,r7,r8,lr}. The body has one plain
+      unconditional BL, to 0x083d2e80, and no predicated BL instructions.
+      Whole-image ARM decoding finds three inbound plain BL calls
+      (0x082698c4, 0x0826a390, 0x0826a504) and no predicated BL calls.
+      It forwards context and input unchanged to the opaque worker with a
+      stack-local result, then writes only result words +0/+4 and status byte
+      +8 to output; bytes +9..+11 are untouched. The worker's concrete
+      identity is unestablished, so Rust preserves the exact target call
+      address rather than inventing a callee identity. Host tests use a
+      recording replacement solely to verify argument forwarding and the
+      observable nine-byte copy, including preservation of trailing padding.
   - address: 0x083d3174
     ghidra: FUN_083d3174
     name: hash_table_chain_destroy

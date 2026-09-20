@@ -23,6 +23,7 @@ pub mod checked_word_block;
 pub mod choice_state_prune_duplicate_tail;
 pub mod checked_byte_block;
 pub mod checked_runtime_scale;
+pub mod callback_result_build;
 pub mod collection_item_at;
 pub mod clear_optional_byte;
 pub mod clear_u16_three_word_record;
