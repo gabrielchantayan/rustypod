@@ -1515,6 +1515,32 @@ functions:
       clz, and lsr rather than ARM ADS cmn plus predicated moves, while retaining
       the aligned load and exact boolean result. Host tests cover zero, one,
       maximum-minus-one, and the maximum sentinel. Deliberate deviations: none.
+  # --- free-index table growth ---
+  - address: 0x083b479c
+    ghidra: FUN_083b479c
+    name: free_index_table_grow
+    size: 148
+    sig: "void free_index_table_grow(u32 *table, u32 required_capacity)"
+    module: util/free_index_table_grow
+    status: ported
+    renames:
+      param_1/r0/r4: table
+      param_2/r1: required_capacity
+      uVar3/r5: new_capacity
+      iVar1/r6: new_slots
+    notes: >-
+      Raw osos.dec establishes the 37-word, 148-byte extent
+      0x083b479c..0x083b482c; the next separately linked function starts at
+      0x083b4830. The body contains two unconditional BL calls and no
+      predicated BL: operator_new_tag3 @ 0x082aad74 allocates capacity*4
+      bytes, then operator_delete_tag3 @ 0x082aad14 releases the old slots.
+      Three direct inbound BL call sites are all unconditional; none is
+      predicated. The table's four target-width words are slots, free_count,
+      capacity, and free_head. Capacity grows to max(capacity*2, required);
+      existing entries copy unchanged, appended entries chain as
+      ((index+1)<<1)|1, and the final entry is 0xffffffff. The port directly
+      calls both already ported heap veneers. Deliberate deviations: host
+      tests substitute only those veneers to observe allocation and release.
   # --- u32 maximum-sentinel predicate alias ---
   - address: 0x083b4928
     ghidra: FUN_083b4928

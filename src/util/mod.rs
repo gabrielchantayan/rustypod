@@ -250,6 +250,7 @@ pub mod vtable_query;
 pub mod vtable_slot_0x40_result_word;
 pub mod wang_hash;
 pub mod hash_word;
+pub mod free_index_table_grow;
 pub mod word_list;
 pub mod word_list_assign_value;
 pub mod word_list_modular_add;
