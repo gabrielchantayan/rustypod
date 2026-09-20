@@ -21366,6 +21366,23 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d5500
+    ghidra: FUN_083d5500
+    name: element_array_one_based_at
+    size: 28
+    sig: "void *element_array_one_based_at(const ElementArray *this, i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: index, param_3: slots}
+    notes: >-
+      Raw osos.dec decodes as seven ARM words through bx lr at 0x083d5518;
+      0x083d551c is the next real function. The verified inbound count is
+      three plain BL calls (0x081ee4e8, 0x081ee504, 0x081ef3e4) and no
+      predicated BL calls. It returns data[index] only for index > 0 and
+      index < the signed +4 slot count, otherwise NULL; the Rust port keeps
+      the header target-width on hosts so data and count remain four bytes
+      apart. No deliberate behavioral deviations.
+
   - address: 0x083d551c
     ghidra: FUN_083d551c
     name: tracker_event_log_noop
