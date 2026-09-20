@@ -81,6 +81,7 @@ pub mod btree_clear_cursor;
 pub mod btree_rollback;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
+pub mod btree_schema;
 pub mod btree_update_meta;
 pub mod btree_set_page_size;
 pub mod btree_set_cache_size;

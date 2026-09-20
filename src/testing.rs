@@ -51,6 +51,10 @@ pub mod hints {
     // 0x6a20_0000: dedicated to sqlite/btree_factory's target-width
     // Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_FACTORY: usize = 0x6a20_0000;
+    // 0x6a30_0000: dedicated to sqlite/btree_schema's target-width Btree
+    // and BtShared fixture; mappings never unmap, so no other module may
+    // share this hint.
+    pub const BTREE_SCHEMA: usize = 0x6a30_0000;
     // 0x6c00_0000: dedicated to sqlite/emit_compound_select_rows's
     // target-width Parse, Select chain, Vdbe, and opcode fixture; mappings
     // never unmap, so no other module may share it.
