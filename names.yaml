@@ -119728,3 +119728,25 @@ functions:
       releases the old allocation, then stores the new length and pointer.
       Deliberate deviation: calls use the existing Rust tag-3 allocator and
       release veneers; vector pointers remain target-width u32 words on host.
+  - address: 0x083b60f0
+    ghidra: FUN_083b60f0
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent
+      0x083b60f0..0x083b6143; the next independently entered sibling begins
+      at 0x083b6144. Aligned ARM B/BL decoding identifies three inbound plain
+      BL calls at 0x083cd828, 0x083cdcfc, and 0x083cdddc, with zero predicated
+      BL calls; the body makes no calls. It advances a red-black-tree cursor
+      to its in-order successor by descending a right subtree's left edge or
+      climbing parent links to the first left-child ancestor, preserving the
+      header sentinel. This target body is byte-identical to FUN_083b609c, so
+      it deliberately reuses red_black_tree_advance_cursor and its host tests.

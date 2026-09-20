@@ -122,6 +122,14 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
 /// 0x083ccdd0, and 0x083cd2a4; there are no predicated calls or direct
 /// tail branches. Deliberate deviations: none.
 ///
+/// `FUN_083b60f0` at load address `0x083b60f0` is a fourth byte-identical,
+/// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, through `bx lr`
+/// at `0x083b6140`; the next separately linked sibling starts at `0x083b6144`.
+/// Complete aligned ARM B/BL decoding finds its three inbound calls are plain
+/// `bl` at 0x083cd828, 0x083cdcfc, and 0x083cdddc, with zero predicated `bl`
+/// calls and no outbound calls. It deliberately reuses this symbol and its
+/// host tests because target code and ABI are identical; no behavior changes.
+///
 /// A right child selects that subtree's leftmost node. Otherwise the walk
 /// climbs parent links while leaving right-child edges, then selects the first
 /// ancestor reached from a left-child edge. The final right-link comparison
