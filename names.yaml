@@ -119212,3 +119212,25 @@ functions:
       virtual slot with a seam because native function pointers widen. match.py
       reports the expected structural diff from LLVM's frame, unpredicated
       host/target seam dispatch, and unresolved archive tail relocation.
+
+  - address: 0x083d0ec0
+    ghidra: FUN_083d0ec0
+    name: owned_string_owner_array_release
+    size: 88
+    sig: "void owned_string_owner_array_release(OwnedElementArrayRelease *this)"
+    module: cxx/owned_string_owner_array_release
+    status: ported
+    vars: {param_1/r0/r5: this, param_1_plus_0x04/r6: count, param_1_plus_0x10: enabled, FUN_0826c994: opaque_string_owner_destroy, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from push
+      {r4,r5,r6,lr} at 0x083d0ec0 through pop {r4,r5,r6,pc} at 0x083d0f14;
+      the next independently entered function begins at 0x083d0f18. The body has
+      two plain direct BL calls, to opaque_string_owner_destroy @ 0x0826c994 and
+      operator_delete @ 0x082aad24, no predicated BL, and one virtual BLX through
+      vtable slot +0x40. Whole-image decoding finds three inbound plain BL calls
+      at 0x081a293c, 0x083d0f70, and 0x083d0fa8, with no predicated direct
+      callers. When enabled at +0x10, it walks signed indices 0..count; a non-NULL
+      cell word is an allocation header, so it destroys the opaque string owner at
+      +4 and deletes the returned pointer minus four. Host seams deliberately widen
+      the vtable callback and direct calls because host function pointers exceed the
+      target u32 slots; tests cover disabled, nonpositive, empty, and populated cells.
