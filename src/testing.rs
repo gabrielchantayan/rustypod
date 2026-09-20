@@ -227,6 +227,10 @@ pub mod hints {
     // 0x1a20_0000: dedicated to sqlite/vdbe_free_cursor's target-width
     // Vdbe/cursor fixture; mappings never unmap, so no other user may share it.
     pub const VDBE_FREE_CURSOR: usize = 0x1a20_0000;
+    // 0x1a30_0000: dedicated to sqlite/vdbe_frame_list_clear's target-width
+    // descriptor and pending-frame fixtures; mappings never unmap, so no other
+    // port may share this hint.
+    pub const VDBE_FRAME_LIST_CLEAR: usize = 0x1a30_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
     pub const PENDING_EVENT_DISCARD_ALL_FOR_KEY: usize = 0x1b10_0000;
     // Dedicated raw-u32 owner fixtures for iterator seek tests; mappings
