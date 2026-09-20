@@ -118042,3 +118042,27 @@ functions:
       because its sole callee, 0x083ccd94, performs red-black-tree deletion
       and has neither a port nor an established Rust ABI seam; inventing one
       would alter the wrapper's observable mutation and output behavior.
+  - address: 0x083dbc04
+    ghidra: FUN_083dbc04
+    name: list_range_clear
+    size: 64
+    sig: "void list_range_clear(void *this)"
+    module: cxx/list_range_clear
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_083cd1fc: list_range_worker_unported
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent
+      0x083dbc04..0x083dbc43: push {lr} through pop
+      {r0,r1,r2,r3,r12,pc}; 0x083dbc44 begins the next separately entered
+      function. Whole-image A32 decoding finds exactly three inbound plain BL
+      calls (0x081f0308, 0x081f0fd8 and 0x081f15a4) and no predicated BL
+      calls. The body has one unconditional BL to 0x083cd1fc and no
+      predicated calls. It snapshots the target pointer at this+0x10 and its
+      +0x08 word, then passes stack addresses for output, bound, and list
+      handle to 0x083cd1fc; its return is ignored. That worker has no
+      established identity in names.yaml, so the port retains a verified
+      direct-address dispatch boundary and host tests record its ABI. The
+      target BL becomes a seam BLX; arguments and local lifetimes are
+      preserved.
