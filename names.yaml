@@ -121381,3 +121381,40 @@ functions:
       the stored byte is returned. No deliberate deviations. match.py reports
       the same two condition gates and byte load/store sequence; LLVM only
       changes the prologue and branch layout.
+
+  - address: 0x0837d99c
+    ghidra: FUN_0837d99c
+    name: open_table_and_indices
+    size: 184
+    sig: "int open_table_and_indices(Parse *parse, Table *table, int base, int opcode)"
+    module: sqlite/open_table_and_indices
+    status: ported
+    vars:
+      param_1/r0: parse
+      param_2/r1: table
+      param_3/r2: base
+      param_4/r3: opcode
+      "table+0x10": indices
+      "table+0x39": is_virtual
+      "table+0x4c": schema
+      "parse+0x44": n_tab
+    notes: >-
+      Raw osos.dec words establish the exact 184-byte body
+      0x0837d99c..0x0837da54, ending in pop {r1-r11,pc}; the next
+      separately linked function begins with push {r2-r6,lr} at 0x0837da54.
+      The body has five unconditional plain BL instructions and no predicated
+      BL: schema_to_index (0x08382ddc), get_vdbe (0x0837acf4), open_table
+      (0x0837d918), index_key_info (0x0837b2f4), and vdbe_add_op4
+      (0x083868c8). Whole-image ARM B/BL decoding finds three inbound plain
+      BL call sites at 0x08374ae0, 0x0837b9ec, and 0x0837f25c. This is SQLite
+      3.5's sqlite3OpenTableAndIndices: virtual tables return zero; otherwise
+      it opens the table, emits one KeyInfo-handoff VDBE operation per linked
+      index, raises Parse.nTab for every allocated cursor, and returns the
+      index count. get_vdbe is ledger-marked ported but has no Rust symbol, so
+      as open_table does, this port reads the stored Parse.pVdbe word; this is
+      exact once statement construction exists and preserves NULL/OOM behavior.
+      match.py reports the same virtual gate, five-call flow, linked-index
+      walk, cursor arithmetic, and conditional nTab store; LLVM changes the
+      prologue/register allocation and emits direct Rust calls instead of
+      stock addresses. Host test proves the virtual-table early exit does not
+      access Parse.

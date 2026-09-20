@@ -187,6 +187,7 @@ pub mod pcache_remove_from_lru_list;
 pub mod pcache_truncate;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
+pub mod open_table_and_indices;
 pub mod os_close;
 pub mod os_access;
 pub mod os_device_characteristics;
