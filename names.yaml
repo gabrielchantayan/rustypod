@@ -41621,6 +41621,36 @@ functions:
       a callee. Host test verifies exact file and output-pointer forwarding,
       callee mutation to i64::MIN, and unchanged negative status propagation.
 
+  # ---- SQLite OS lock forwarding wrapper, sqlite3OsLock (src/sqlite/os_lock.rs) ----
+  - address: 0x0837db74
+    ghidra: FUN_0837db74
+    name: sqlite_os_lock
+    size: 12
+    sig: "i32 sqlite_os_lock(sqlite3_file *file, i32 lock_level)"
+    module: sqlite/os_lock
+    status: ported
+    renames:
+      param_1/r0: file
+      param_2/r1: lock_level
+      r2: "file->pMethods, then xLock"
+      "*(code**)(*param_1 + 0x1c)": sqlite3_io_methods::xLock
+    notes: >-
+      SQLite's sqlite3OsLock from os.c. Raw osos.dec words are exactly three
+      instructions at 0x0837db74..0x0837db7c: ldr r0,[r0]; ldr r2,[r2,#0x1c];
+      bx r2. The next separately linked function starts at 0x0837db80, so
+      Ghidra's 12-byte extent is exact with no literal pool. Decoding inbound
+      ARM branch words finds exactly three unconditional plain bl call sites
+      (the three callers are 0x082dd3fc, 0x082de8f4, and 0x0837dc6c), with no
+      predicated BL forms, direct tail branches, or aligned raw data words
+      targeting this wrapper. The adjacent 0x0837db44..0x0837dc18 forwarding
+      family matches SQLite's sqlite3_io_methods, whose +0x1c slot is xLock;
+      the concrete implementation is runtime method-table data, so this port
+      dispatches the supplied slot rather than inventing a callee. Host tests
+      verify the +0x1c word index, exact file and i32::MIN lock-level
+      forwarding, and unchanged negative status propagation. Deliberate
+      deviation: the shared recovered method-table prefix ends at +0x18, so
+      the +0x1c method is read by native-width word index for host parity.
+
   # ---- SQLite file big-endian word reader (src/sqlite/read_be32.rs) ----
   - address: 0x08365598
     ghidra: FUN_08365598
