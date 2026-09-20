@@ -21526,6 +21526,29 @@ functions:
       index with a NULL this (no dereference, as insert relies on for
       its -1 result), empty array, and negative-capacity rejection.
 
+
+  - address: 0x083d4dd0
+    ghidra: FUN_083d4dd0
+    name: slot_array_tracker_diagnostic_no_op
+    size: 4
+    sig: "void *slot_array_tracker_diagnostic_no_op(void *tracker, ...)"
+    module: cxx/slot_array_tracker_diagnostic_no_op
+    status: ported
+    vars: {param_1: tracker}
+    notes: >-
+      Raw osos.dec is exactly one A32 word at 0x083d4dd0: 0xe12fff1e
+      (`bx lr`). The preceding slot_array_index_in_bounds ends at 0x083d4dcc;
+      0x083d4dd4 starts the separately linked slot-array insert routine with
+      `push {r4,r5,r6,lr}`, so the true extent is four bytes. This is neither a
+      veneer nor a branch. Whole-image ARM disassembly finds three direct
+      incoming calls, all plain unconditional bl at 0x081ee418, 0x083d4ee8,
+      and 0x083d500c, with zero predicated bl calls. Those callers pass Tracker
+      diagnostic format strings and values, but this retail build reads and
+      writes nothing. The Rust export accepts only r0 and returns it unchanged;
+      the naked target body is the exact `bx lr` word, deliberately preserving
+      the otherwise incidental r0 pass-through. Host tests cover NULL,
+      unaligned, maximum, and valid Tracker words plus no object access.
+      match.py: exact instruction-for-instruction match.
   - address: 0x083d4cf4
     ghidra: FUN_083d4cf4
     name: element_array7_construct
