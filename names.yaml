@@ -118583,3 +118583,23 @@ functions:
       target slot +0x44 with 64-bit host pointers; deliberate deviations:
       none. Host tests cover a high-bit key, non-NULL result, NULL result,
       exact byte length, and rejecting the adjacent vtable slot.
+
+  - address: 0x083d52a0
+    ghidra: FUN_083d52a0
+    name: tracker_diagnostic_no_op
+    size: 4
+    sig: "void *tracker_diagnostic_no_op(void *tracker)"
+    module: cxx/tracker_diagnostic_no_op
+    status: ported
+    renames:
+      param_1/r0: tracker
+    notes: >-
+      Raw osos.dec word 0xe12fff1e at 0x083d52a0 is bx lr, so the full body
+      is exactly four bytes; 0x083d52a4 begins the next independent function
+      with push {r4,r5,r6,lr}. This is not a veneer or branch. Three inbound
+      direct plain bl callers (0x081ee4b0, 0x083d5338, and 0x083d54b8) pass
+      Tracker diagnostic format data; no predicated bl calls target it. The
+      retail body reads and writes nothing and preserves r0, so Rust returns
+      tracker unchanged. Deliberate deviation: the Rust ABI expresses only r0,
+      while bx lr also preserves other registers. match.py structural diff
+      (exit 1, expected) shows Rust's frame setup around the equivalent return.
