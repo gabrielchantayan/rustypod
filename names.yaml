@@ -33398,6 +33398,32 @@ functions:
       a slot; the neighboring copy/release helpers 0x083b50e4 / 0x083b524c
       retain and release that cell. Direct application callers compare member
       slot +0x894 with a temporary slot before replacing or forwarding it.
+  # --- shared-cell handle copy assignment, secondary release sibling ---
+  - address: 0x083b516c
+    ghidra: FUN_083b516c
+    name: shared_cell_assign_secondary
+    size: 60
+    sig: "SharedCell **shared_cell_assign_secondary(SharedCell **dst, SharedCell **src)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar1/r0: cell
+      iVar2/r1: refcount
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x083b516c..0x083b51a4; the next
+      separately linked sibling begins at 0x083b51a8. Distinct slots first BL
+      the already-ported shared_cell_release_secondary at 0x083b52a0, then
+      load src, store its cell into dst, and increment the non-NULL cell's
+      signed refcount with wrapping ADD. The source read deliberately follows
+      the destination release; self-assignment returns dst untouched. A full
+      binary decode of every ARM B/BL word found exactly three incoming calls:
+      all are unconditional BL, with zero predicated BL forms and zero direct
+      tail branches. Host SharedCell uses usize for its payload field, while
+      source slots and refcounts retain target-word semantics. Its own target
+      text section retains this device-callable sibling despite equivalent
+      copy-assignment bodies.
   # --- shared-cell handle slot comparison, secondary call-site cluster ---
   - address: 0x083b51a8
     ghidra: FUN_083b51a8
