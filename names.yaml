@@ -121274,3 +121274,27 @@ functions:
       conditional timing-mask OR. Host tests cover nonmatching operations,
       mask accumulation, predicate filtering, and the virtual-table early
       exit.
+
+  - address: 0x0837e1b0
+    ghidra: FUN_0837e1b0
+    name: btree_set_auto_vacuum
+    size: 24
+    sig: "u8 btree_set_auto_vacuum(BtShared *bt, i32 requested_mode)"
+    module: sqlite/btree_set_auto_vacuum
+    status: ported
+    vars:
+      param_1/r0: bt
+      param_2/r1: requested_mode
+      "bt+0x0f": update_guard
+      "bt+0x17": auto_vacuum
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body
+      0x0837e1b0..0x0837e1c7: cmp r1,#0; ldrbge r2,[r0,#0xf]; cmpge r2,#0;
+      strbeq r1,[r0,#0x17]; ldrb r0,[r0,#0x17]; bx lr. The next independent
+      function starts with stmdb at 0x0837e1c8. A whole-image ARM B/BL decode
+      finds exactly three inbound direct BL forms, all unconditional plain bl,
+      with no predicated BL forms. Negative modes leave the byte untouched;
+      otherwise the mode's low byte is stored only when bt+0x0f is zero, and
+      the stored byte is returned. No deliberate deviations. match.py reports
+      the same two condition gates and byte load/store sequence; LLVM only
+      changes the prologue and branch layout.
