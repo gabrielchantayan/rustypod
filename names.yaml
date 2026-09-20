@@ -43501,6 +43501,30 @@ functions:
       load/compare/null-or-+0x38 structure; LLVM folds the add into a
       post-indexed load and emits a conventional frame.
 
+  # ---- Incremental-vacuum B-tree flag setter (src/sqlite/btree_set_incr_vacuum.rs) ----
+  - address: 0x0837e1a0
+    ghidra: FUN_0837e1a0
+    name: btree_set_incr_vacuum
+    size: 16
+    sig: "u8 btree_set_incr_vacuum(BtShared *bt, i32 requested_flag)"
+    module: sqlite/btree_set_incr_vacuum
+    status: ported
+    renames:
+      param_1/r0: bt
+      param_2/r1: requested_flag
+      "*(u8*)(bt+0x18)": bt->incrVacuum
+    notes: >-
+      Raw ARM establishes the exact 16-byte extent
+      0x0837e1a0..0x0837e1af: cmp r1,#0; strge r1,[r0,#0x18]; ldrb
+      r0,[r0,#0x18]; bx lr. The sibling at 0x0837e1b0 begins a separately
+      linked function. Decoding inbound branch instructions finds three plain
+      direct bl callers (0x082b549c, 0x0837dacc, and 0x0837f5b8) and no
+      predicated bl callers. The decompiler's fourth apparent call
+      (0x083734bc) is a tail branch to 0x0837da54, whose direct bl is counted
+      above. Algorithm: negative requests preserve and return the current
+      incrVacuum byte; non-negative requests store their low byte and return
+      it. No deliberate behavioral deviations.
+
   - address: 0x0837e8dc
     ghidra: FUN_0837e8dc
     name: retain_object
