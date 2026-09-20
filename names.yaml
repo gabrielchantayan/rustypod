@@ -120393,3 +120393,34 @@ functions:
       first left-child ancestor, preserving the header sentinel. This body is
       byte-identical to red_black_tree_advance_cursor, so it deliberately
       reuses that exported seam and its host tests. Deliberate deviations: none.
+
+  # --- owned StringObject array release ---
+  - address: 0x0839ca9c
+    ghidra: FUN_0839ca9c
+    name: owned_string_object_array_release
+    size: 88
+    sig: "void owned_string_object_array_release(void *this)"
+    module: cxx/owned_string_object_array_release
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x04: count
+      param_1_plus_0x28: enabled
+      FUN_081b022c: string_object_owner_destroy_at_08
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the complete 22-word, 88-byte extent from
+      0x0839ca9c through 0x0839caf0; 0x0839caf4 starts the separately linked
+      next function. The body has two plain direct BL instructions, no
+      predicated BL instructions, and one virtual BLX through vtable slot
+      +0x40. When enabled byte +0x28 is nonzero, it walks signed indexes
+      [0,count), obtains each cell from that slot, and skips null owner words.
+      For every owner, FUN_081b022c destroys the embedded StringObject at +8
+      and returns the owner address, which is passed to the already ported
+      tag-2 operator_delete. Rust directly uses the established
+      string_object_destroy and operator_delete seams; host vtable and cell
+      pointers are native-width fixtures while target accesses remain u32
+      words at the verified offsets. match.py confirms the enabled guard,
+      signed loop, virtual lookup, null skip, +8 destruction, and delete
+      shape; LLVM's larger frame and loop lowering are deliberate codegen
+      differences.

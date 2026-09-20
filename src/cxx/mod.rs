@@ -150,6 +150,7 @@ pub mod opaque_observable_array_dispose_elements;
 pub mod owned_element_array_release;
 pub mod indexed_element_array_release;
 pub mod owned_element_array_delete_cells;
+pub mod owned_string_object_array_release;
 pub mod owned_string_owner_array_release;
 pub mod derived_observable_array_construct;
 pub mod parse_i32_list;
