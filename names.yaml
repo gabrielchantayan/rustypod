@@ -34823,6 +34823,36 @@ functions:
       opflags +2 (NEVER written), p5 +3 (u8), p1 +4, p2 +8, p3 +12
       (`stmib`), p4 +16 (zeroed). Also clears p->expired at +0xff.
 
+  - address: 0x0839ce48
+    ghidra: FUN_0839ce48
+    name: refcounted_body_release_array
+    size: 156
+    sig: "void refcounted_body_release_array(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: slot
+      "body+0": implementation_array
+      "body+4": refcount
+      "body+8": mutex
+      FUN_0839cef0: refcounted_body_mutex_lock_array_variant
+      FUN_082ab3ec: cpp_finalise_dtor_guard
+      FUN_082aad24: operator_delete
+      FUN_0839cf00: refcounted_body_mutex_unlock_array_variant
+      FUN_0807f650: mutex_delete
+    notes: >-
+      Raw osos.dec establishes the exact 156-byte extent
+      0x0839ce48..0x0839ceeb: the following word at 0x0839ceec is the
+      0x083db9c8 element-destructor literal and 0x0839cef0 begins the distinct
+      mutex-lock helper. Three inbound direct bl sites are all unconditional;
+      the body has eight plain bl instructions and no predicated bl forms.
+      A non-NULL body is optionally locked, its signed refcount is decremented
+      with wrapping subs, and every reached path clears slot. A final count
+      finalises four 12-byte implementation elements through the fixed
+      0x083db9c8 destructor and cpp_finalise_dtor_guard, tag-2 deletes that
+      array, unlocks, deletes and frees the mutex, then frees the body.
+      The unported fixed destructor is a target-address call with a host test
+      seam; existing Rust finalizer, mutex, and heap ports replace direct bls.
   - address: 0x0839cf00
     ghidra: FUN_0839cf00
     name: refcounted_body_mutex_unlock_array_variant
