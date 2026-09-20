@@ -39469,6 +39469,38 @@ functions:
       0/1 returns; expected differences are LLVM's frame, the explicit
       stack home for the vararg word, and a byte-narrowed flags test
       (ldrb db+13; tsteq #8 == ldreq word db+12; tsteq #0x800).
+  # ---- B-tree commit phase two (src/sqlite/btree_commit_phase_two.rs) ----
+  - address: 0x08370c8c
+    ghidra: FUN_08370c8c
+    name: btree_commit_phase_two
+    size: 148
+    sig: "int btree_commit_phase_two(Btree *btree)"
+    module: sqlite/btree_commit_phase_two
+    status: ported
+    renames:
+      param_1/r5: btree
+      puVar2/r4: shared
+      iVar1/r6: pager_commit_result
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeCommitPhaseTwo. Raw osos.dec words establish
+      the exact 148-byte extent 0x08370c8c..0x08370d20: pop {r4-r8,pc} at
+      0x08370d1c is immediately followed by a distinct push {r4-r6,lr}.
+      Binary decoding independently finds three direct callers: unconditional
+      plain bl at 0x08370be4 and 0x083971c8, plus predicated blne at
+      0x0839748c. The body contains six unconditional plain bl instructions
+      and no predicated bl. It enters the B-tree, stores p->db in pBt->db,
+      commits pBt->pPager for a write transaction, changes pBt->inTransaction
+      to read and clears its unlock guard, releases this Btree's locks,
+      decrements pBt->nTransaction for every active transaction, clears
+      p->inTrans, unlocks an unused shared B-tree, and leaves. A pager commit
+      error leaves immediately without the cleanup. Existing btree_enter and
+      btree_leave ports are called directly in target builds; the three
+      unported retail boundaries are absolute calls: pager commit phase two
+      at 0x0837e02c, lock release at 0x08396098, and unlock-if-unused at
+      0x083960e8. Deliberate host-only deviation: a private dispatch table
+      models these boundaries and B-tree entry/leave because target 32-bit
+      pointer slots widen on the host. Tests cover write success, pager-error
+      early return, and read-transaction cleanup.
   # ---- B-tree cursor close (src/sqlite/btree_close_cursor.rs) ----
   - address: 0x08370b40
     ghidra: FUN_08370b40
