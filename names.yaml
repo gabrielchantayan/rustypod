@@ -120876,3 +120876,30 @@ functions:
       UTF-8 flags, length 22, and all 23 copied message bytes. match.py
       reports the same store/call structure; LLVM adds a frame and emits
       a relocatable local literal.
+
+  - address: 0x0839024c
+    ghidra: FUN_0839024c
+    name: sqlite3_errmsg
+    size: 72
+    sig: "const char *sqlite3_errmsg(sqlite3 *db)"
+    module: sqlite/error_message
+    status: ported
+    renames:
+      param_1/r0: db
+      FUN_08382c18: object_type_tag_is_recognized
+      FUN_0839179c: sqlite3_value_text
+      FUN_083762d8: sqlite3ErrStr
+    notes: >-
+      Raw words establish the exact 72-byte extent 0x0839024c..0x08390294:
+      push {r4,lr}, the two calls at 0x08390260 and 0x0839027c, and a final
+      tail b at 0x08390290 to sqlite3ErrStr @ 0x083762d8. Full-image ARM
+      decoding finds exactly three inbound direct plain BL calls
+      (0x0838f44c, 0x0839059c, 0x083905c4), with no predicated BL calls.
+      This is SQLite 3.5.9 sqlite3_errmsg: NULL maps to SQLITE_NOMEM (7);
+      a rejected type tag maps to SQLITE_MISUSE (21); a valid db returns
+      sqlite3_value_text(db->pErr) when non-NULL, otherwise sqlite3ErrStr
+      (db->errCode). The 0x15 errCode shortcut deliberately skips pErr.
+      The port preserves the two direct calls to existing ports. Its final
+      retail sqlite3ErrStr transfer uses an absolute literal veneer on ARM,
+      because relocated payload code cannot retain the stock PC-relative
+      branch; host tests replace that known target with a recording callback.
