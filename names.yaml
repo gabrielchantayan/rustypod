@@ -122180,3 +122180,26 @@ functions:
       callee and uses word indices for target-width pointer fields; no
       deliberate behavioral deviations. Host tests cover both early-return
       guards, proving they occur before state mutation or any callee.
+
+
+  # --- Global transition callback presence code (app) ---
+  - address: 0x0836b17c
+    ghidra: FUN_0836b17c
+    name: global_transition_callback_presence_code
+    size: 24
+    sig: "u32 global_transition_callback_presence_code()"
+    module: app/global_transition_callback_presence
+    status: ported
+    renames:
+      DAT_0836b194: global_transition_callback_state
+    notes: >-
+      Raw osos.dec establishes a 24-byte instruction body at
+      0x0836b17c..0x0836b193, followed by the 0x089ca458 global-pointer
+      literal at 0x0836b194; the next real function begins at 0x0836b198,
+      making the true extent 28 bytes. Decoding every aligned ARM B/BL word
+      finds three inbound direct calls, all plain unconditional BL at
+      0x08369ac0, 0x08393480, and 0x083934b8, with zero predicated BL forms.
+      The function returns 2 for a NULL global transition callback state and
+      1 otherwise. The target reads a 32-bit global pointer word; host builds
+      deliberately use a native-width static so fixture pointers remain valid
+      on 64-bit hosts.
