@@ -118,6 +118,7 @@ pub mod demo_mode_datetime;
 pub mod fallback_keyed_object;
 pub mod flag_2c_is_one;
 pub mod tracker_event_log_noop;
+pub mod tracker_array_diagnostic_noop;
 pub mod element_table;
 pub mod element_registry;
 pub mod entry_match_first;
