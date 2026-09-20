@@ -122116,3 +122116,35 @@ functions:
       existing port of 0x0836e36c provides the verified callee boundary.
       Deliberate deviation: the retail direct BL is an ordinary Rust call;
       ignored status and the unconditional store are preserved.
+
+  # --- Packed two-byte PMU selector write (drivers/i2c) ---
+  - address: 0x0836d0b4
+    ghidra: FUN_0836d0b4
+    name: pmu_i2c_write_packed_selector
+    size: 68
+    sig: "void pmu_i2c_write_packed_selector(u32 selector, u32 first_byte, u32 encoded_value)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: first_byte
+      param_3/r2: encoded_value
+      local_8/sp: packed_bytes
+      FUN_0836d524: pmu_i2c_write
+    notes: >-
+      Raw ARM establishes the exact 68-byte extent
+      0x0836d0b4..0x0836d0f4; the following ldr at 0x0836d0f8 starts the
+      next function. Decoding every aligned ARM B/BL word in osos.dec finds
+      three inbound direct calls, all plain unconditional bl, and zero
+      predicated BL forms; the body has one unconditional outbound bl to
+      FUN_0836d524. Selectors 0..6 map to 0x2d + selector*2 and selector 7
+      maps to 0x26. The routine writes first_byte | ((encoded_value & 0x40)
+      >> 1) then encoded_value & 0x3f as a two-byte PMU payload; selectors
+      above 7 make no transfer. The ABI consumes all of r0-r2 despite
+      Ghidra's callers displaying only two arguments. The port calls the
+      existing pmu_i2c_write Rust port instead of retail's direct bl and
+      deliberately discards its status. Host tests cover ordinary and
+      selector-seven register mapping, truncation, bit packing, and the
+      out-of-range no-transfer path. match.py reports the same guard,
+      packing, mapping, and write call, with expected LLVM frame and
+      conditional-return structural differences.
