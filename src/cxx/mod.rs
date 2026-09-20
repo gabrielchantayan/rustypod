@@ -108,6 +108,7 @@ pub mod list_range_clear;
 pub mod list_insert_header_value;
 pub mod list_iter_advance;
 pub mod list_item_count;
+pub mod linked_list_has_items;
 pub mod identified_vtable_object_construct;
 pub mod identified_vtable_flagged_pair_construct;
 pub mod list_cursor_index;
