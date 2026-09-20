@@ -33083,6 +33083,29 @@ functions:
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
 
+  - address: 0x08398788
+    ghidra: FUN_08398788
+    name: expr_worklist_delete
+    size: 80
+    sig: "void expr_worklist_delete(ExprWorklist *worklist)"
+    module: sqlite/expr_worklist
+    status: ported
+    renames:
+      param_1/r6: worklist
+      r4: entries
+      r5: index
+      FUN_08377e00: expr_delete
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec establishes the true 80-byte extent
+      0x08398788..0x083987d8, followed by a separate initializer at
+      0x083987d8; Ghidra incorrectly merges unrelated heap code into this
+      address. Raw ARM has exactly three plain inbound BL sites
+      (0x082cd598, 0x0838eba8, 0x0838ebbc) and no predicated inbound BL.
+      It walks count-1 down through 40-byte entries, conditionally calls
+      expr_delete for control bit 0, then tail-branches to tracked_free only
+      when entries is not the inline slot at worklist+0x18.
+
   - address: 0x08398904
     ghidra: FUN_08398904
     name: expr_worklist_push_matching_subtree

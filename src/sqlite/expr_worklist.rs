@@ -197,6 +197,41 @@ pub unsafe extern "C" fn expr_worklist_push(
     (*item).parent_index = -1;
     index
 }
+/// `expr_worklist_delete` — original `FUN_08398788` @ `0x08398788` (80 bytes,
+/// `0x08398788..0x083987d8`; the next separately linked function begins at
+/// `0x083987d8`). Three inbound `bl` sites are plain (`0x082cd598`,
+/// `0x0838eba8`, and `0x0838ebbc`); raw words contain no predicated inbound
+/// `bl`. Its only outbound direct call is the predicated `blne` at
+/// `0x083987ac` to [`expr_delete`].
+///
+/// Releases every owned expression (work-item control bit 0) in descending
+/// index order. The entries allocation is then tail-freed only when it is not
+/// the list's inline first item at +0x18. Deliberate deviation: the retail
+/// tail branch to `tracked_free` is a normal Rust call.
+///
+/// # Safety
+///
+/// `worklist` and its `count` entries must name valid target-width storage.
+/// Every bit-0 expression must satisfy [`expr_delete`]'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn expr_worklist_delete(worklist: *mut ExprWorklist) {
+    let count = (*worklist).count;
+    let mut index = count.wrapping_sub(1);
+    let entries = (*worklist).entries as usize as *mut ExprWorkItem;
+    while index >= 0 {
+        let item = entries.add(index as usize);
+        if (*item).control & 1 != 0 {
+            expr_delete((*item).expression as usize as *mut u8);
+        }
+        index = index.wrapping_sub(1);
+    }
+
+    if entries as usize != (worklist.cast::<u8>().add(0x18)) as usize {
+        tracked_free(entries.cast());
+    }
+}
+
 /// `expr_worklist_push_matching_subtree` — original `FUN_08398904` @
 /// `0x08398904` (80 bytes, `0x08398904..0x08398954`; the next independently
 /// linked function starts at `0x08398954`). Raw ARM has one unconditional
@@ -389,6 +424,54 @@ mod tests {
         (*root).parent_index = 1;
         (*entries.add(1)).parent_index = -1;
         (context, expression, root, entries)
+    }
+
+    #[test]
+    fn delete_releases_owned_entries_in_reverse_order_and_keeps_inline_storage() {
+        let Some(base) = *SLAB else {
+            assert!(note_missing_u32_fixture("sqlite/expr_worklist delete"));
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            let _heap = HeapFixture::new(base, false);
+            let worklist = reset_worklist(base, 2, 2, base.add(0x18));
+            let ignored_raw = base.add(EXPR_RAW_OFFSET);
+            let owned_raw = ignored_raw.add(0x100);
+            let ignored = tracked_payload(ignored_raw, EXPR_BLOCK_SIZE as i32);
+            let owned = tracked_payload(owned_raw, EXPR_BLOCK_SIZE as i32);
+            ptr::write_bytes(ignored, 0, EXPR_BLOCK_SIZE);
+            ptr::write_bytes(owned, 0, EXPR_BLOCK_SIZE);
+            let entries = base.add(0x18).cast::<ExprWorkItem>();
+            (*entries).expression = target_pointer(ignored);
+            (*entries).control = 0;
+            (*entries.add(1)).expression = target_pointer(owned);
+            (*entries.add(1)).control = 1;
+
+            expr_worklist_delete(worklist);
+
+            assert_eq!(FREED_RAW, owned_raw, "only bit-0 entries are expressions owned by the list");
+        }
+    }
+
+    #[test]
+    fn delete_frees_heap_backed_entries_even_when_empty() {
+        let Some(base) = *SLAB else {
+            assert!(note_missing_u32_fixture("sqlite/expr_worklist delete"));
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            let _heap = HeapFixture::new(base, false);
+            let entries_raw = base.add(EXPR_RAW_OFFSET);
+            let worklist = reset_worklist(base, 0, 1, entries_raw);
+            let entries = tracked_payload(entries_raw, EXPR_WORK_ITEM_SIZE as i32);
+            (*worklist).entries = target_pointer(entries);
+
+            expr_worklist_delete(worklist);
+
+            assert_eq!(FREED_RAW, entries_raw);
+        }
     }
 
     #[test]
