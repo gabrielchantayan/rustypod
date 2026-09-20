@@ -72,7 +72,7 @@
 
 #[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
-use crate::heap::veneers::{operator_delete, operator_new};
+use crate::heap::veneers::{operator_delete, operator_delete_tag3, operator_new};
 use crate::kernel::sync_mutex::{mutex_create, mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
 /// handle_deref_or_null — original: `FUN_083d604c` @ 0x083d604c
@@ -2020,6 +2020,68 @@ pub unsafe extern "C" fn refcounted_body_release_owned(slot: *mut *mut Refcounte
                 // as the ARM does, then cleared after that free.
                 let mutex = (*body).mutex;
                 operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
+/// refcounted_body_release_tag3 — original: `FUN_0839d550` @ 0x0839d550
+/// (132 bytes; Ghidra's 124-byte extent incorrectly includes only through
+/// 0x0839d5cc; the independently linked mutex-lock helper begins at
+/// 0x0839d5d4). Raw ARM decoding establishes six plain direct `bl` calls
+/// (mutex_lock, operator_delete_tag3, mutex_unlock, mutex_delete, and two
+/// operator_delete calls) and no predicated `bl` calls.
+///
+/// Drops a [`RefcountedBody`] reference under its optional mutex. The final
+/// transition tag-3-deletes its non-NULL implementation word, unlocks,
+/// destroys and tag-2-deletes the mutex, then tag-2-deletes the body; every
+/// non-NULL body path clears the caller slot. Deliberate deviation: direct
+/// ARM calls become the existing Rust heap and mutex seams.
+///
+/// # Safety
+/// `slot` must be valid and aligned. A non-NULL body and its optional mutex
+/// must be live and valid; its non-NULL implementation must be a tag-3 heap
+/// allocation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_tag3(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        operator_delete_tag3((*body).opaque0 as *mut u8);
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                operator_delete((*body).mutex.cast());
                 (*body).mutex = core::ptr::null_mut();
             }
             operator_delete(body.cast());
@@ -5782,11 +5844,53 @@ mod tests {
             assert!(slot.is_null());
             assert!(events().is_empty());
         }
+    #[test]
+    fn tag3_release_shared_reference_decrements_and_nulls_slot() {
+        let _bench = bench();
+        let mut body = RefcountedBody {
+            opaque0: 0,
+            refcount: 2,
+            mutex: core::ptr::null_mut(),
+        };
+        let mut slot = &mut body as *mut RefcountedBody;
+
+        unsafe { refcounted_body_release_tag3(&mut slot) };
+
+        assert_eq!(body.refcount, 1);
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    #[test]
+    fn tag3_release_finally_frees_implementation_before_body() {
+        let _bench = bench();
+        let mut implementation = [0usize; 1];
+        let mut body = RefcountedBody {
+            opaque0: implementation.as_mut_ptr() as usize,
+            refcount: 1,
+            mutex: core::ptr::null_mut(),
+        };
+        let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+        let body_ptr = &mut body as *mut RefcountedBody;
+        let mut slot = body_ptr;
+
+        unsafe { refcounted_body_release_tag3(&mut slot) };
+
+        assert!(slot.is_null());
+        assert_eq!(
+            events(),
+            std::vec![
+                Event::HeapFree(implementation_ptr as usize, 3),
+                Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+            ]
+        );
+    }
     }
 
     /// Direct tests of the constructor use recording heap/kernel hooks
     /// over the ported `operator_new` and `mutex_create` surfaces — the
     /// same bench pattern as `release`.
+
     mod construct {
         extern crate std;
 
