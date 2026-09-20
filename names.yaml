@@ -32917,6 +32917,25 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083d6f20
+    ghidra: FUN_083d6f20
+    name: filebuf_is_open
+    size: 16
+    sig: "bool filebuf_is_open(const u32 *filebuf)"
+    module: cxx/filebuf_is_open
+    status: ported
+    vars: {param_1: filebuf}
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0x30]; cmp r0,#0; movne r0,#1; mov pc,lr`.
+      The true 16-byte extent ends at 0x083d6f2c; an independently linked
+      duplicate predicate begins at 0x083d6f30. Whole-image ARM B/BL
+      immediate decoding finds three incoming unconditional plain `bl` call
+      sites (0x083d9224, 0x083d934c, 0x083d9588) and zero predicated forms.
+      The checked word is the file handle passed to the read/write helpers by
+      all callers, identifying this as `basic_filebuf::is_open()`. The port
+      reads target word index 12 and normalizes nonzero to bool; no
+      deviations.
+
   - address: 0x083d6f0c
     ghidra: FUN_083d6f0c
     name: cxx_string_empty
