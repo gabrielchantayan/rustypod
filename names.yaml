@@ -120622,3 +120622,24 @@ functions:
       propagation. Deliberate deviation: Rust cannot preserve the ARM tail
       branch. match.py reports the expected frame and address-backed blx/bx
       structural difference.
+  - address: 0x0839bab8
+    ghidra: FUN_0839bab8
+    name: address_in_range_or_zero
+    size: 20
+    sig: "u32 address_in_range_or_zero(u32 address, u32 start, u32 length)"
+    module: util/address_in_range_or_zero
+    status: ported
+    renames:
+      param_1/r0: address
+      param_2/r1: start
+      param_3/r2: length
+      r1+length: end
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte body
+      0x0839bab8..0x0839bacc; the next independently linked function begins
+      at 0x0839bacc. The body has no outbound BL calls. Raw decoding of its
+      three inbound direct calls finds plain BL at 0x080f405c, 0x080f4098,
+      and 0x080f4214, with zero predicated BL calls. It returns address only
+      when the unsigned half-open interval start <= address < start + length
+      contains it; ARM's wrapped addition rejects all addresses. Deliberate
+      deviations: none.
