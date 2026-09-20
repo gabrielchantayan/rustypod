@@ -118952,3 +118952,24 @@ functions:
       this address, but is outside every decompiled function and therefore
       data, not a call. Rust keeps all five ported helper call boundaries via
       volatile function-pointer loads.
+
+  - address: 0x083d2244
+    ghidra: FUN_083d2244
+    name: word_table_index_pair
+    size: 36
+    sig: "void word_table_index_pair(WordTableIndexPair *out_pair, const WordTableIndex *table_index)"
+    module: cxx/word_table_index_pair
+    status: ported
+    vars: {param_1/r0: out_pair, param_2/r1: table_index, param_2_plus_0x14: table, param_2_plus_0x18: index, piVar1/r1: slot, iVar2/r2: value}
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r0-r3,lr} at 0x083d2244 through pop {r1-r3,ip,pc} at 0x083d2264;
+      0x083d2268 begins the next real function with push {r0-r8,lr}. The body
+      loads the target-width table pointer at +0x14 and index at +0x18, computes
+      the selected four-byte slot with wrapping ARM address arithmetic, then
+      stores {slot, *slot} to the output pair. Independent raw decoding of the
+      three known caller bodies confirms exactly three inbound unconditional BL
+      calls (0x082690f8, 0x08269374, and 0x08269620) and no predicated BL calls.
+      The ADS stack copies are redundant before the output store and deliberately
+      omitted; this has no observable effect. Host tests cover the first and a
+      later slot and verify both output words are overwritten.
