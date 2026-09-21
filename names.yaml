@@ -16362,6 +16362,40 @@ functions:
       Rust calls. Host tests cover nonzero-mode serialization, lock order,
       and the failed-second-write path that skips register 0x1b.
 
+  # --- PMU mode response query (drivers/pmu) ---
+  - address: 0x082e57d4
+    ghidra: FUN_082e57d4
+    name: pmu_query_mode_response
+    size: 112
+    sig: "i32 pmu_query_mode_response(u32 mode, u32 *response)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: mode
+      param_2/r5: response
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d260: pmu_query
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw osos.dec words establish the exact 112-byte extent
+      0x082e57d4..0x082e5840; the following push {r4,r5,r6,lr} at
+      0x082e5844 begins the distinct next function. Independent ARM branch
+      decoding finds three direct inbound callers, all plain unconditional bl
+      instructions at 0x080db75c, 0x082bc928, and 0x082e5850; no predicated
+      inbound bl form exists. The body has five unconditional direct callee
+      bl instructions. It acquires semaphores 17 then 5, maps modes 1, 2, and
+      3/4 to PMU command pairs (7,3), (1,0), and (2,0), respectively, and
+      returns 1 without dispatch for every other mode. It always releases 5
+      then 17 and otherwise returns the command status verbatim. FUN_0836d260
+      is not otherwise named: its raw ABI is verified as
+      (u32 request, u32 flags, u32 *response) -> i32, but its higher-level
+      protocol identity is not established. Target builds call that verified
+      address through a typed seam; host tests inject it. Deliberate
+      deviations: direct retail calls become ordinary Rust calls or the seam's
+      indirect target call.
+
   # --- PMU register 0x0c one write (drivers/pmu) ---
   - address: 0x082e5a70
     ghidra: FUN_082e5a70

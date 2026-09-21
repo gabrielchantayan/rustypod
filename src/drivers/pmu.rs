@@ -42,6 +42,33 @@ const PMU_REGISTER_0X4B: u32 = 0x4b;
 /// established from the retail image.
 const PMU_REGISTER_0X0C: u32 = 0x0c;
 
+/// ABI of the still-unported PMU command/response transaction
+/// `FUN_0836d260`.
+type PmuQueryFn = unsafe extern "C" fn(request: u32, flags: u32, response: *mut u32) -> i32;
+
+const PMU_QUERY_ADDRESS: usize = 0x0836_d260;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
+    let query: PmuQueryFn = core::mem::transmute(PMU_QUERY_ADDRESS);
+    query(request, flags, response)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_pmu_query(_request: u32, _flags: u32, _response: *mut u32) -> i32 {
+    panic!("pmu_query_mode_response requires PMU command transaction 0x0836d260")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PMU_QUERY: PmuQueryFn = missing_pmu_query;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PMU_QUERY))(request, flags, response)
+}
+
 /// pmu_write_register_0x0c_one — original: `FUN_082e5a70` @ `0x082e5a70`
 /// (60 bytes; 1 plain `bl` and 2 predicated `bl` call sites,
 /// binary-verified).
@@ -192,6 +219,39 @@ pub unsafe extern "C" fn pmu_apply_mode_registers(mode: u32) {
     kernel_sem17_signal();
 }
 
+/// pmu_query_mode_response — original: `FUN_082e57d4` @ `0x082e57d4`
+/// (112 bytes; 3 plain inbound `bl` call sites, 0 predicated inbound `bl`
+/// call sites; 5 direct callee `bl` instructions, binary-verified).
+///
+/// Holds PMU transaction semaphores 17 then 5 while issuing one PMU
+/// command/response transaction. Mode 1 uses request 7 with flags 3; mode 2
+/// uses request 1 with flags 0; modes 3 and 4 use request 2 with flags 0.
+/// Other modes skip the transaction and return 1. Both semaphores release in
+/// reverse order on every path; a transaction status returns verbatim.
+///
+/// # Deviations
+///
+/// The command transaction `FUN_0836d260` has no established higher-level
+/// identity. Target builds call its verified load address through a typed
+/// boundary; host tests replace the volatile boundary. The semaphore veneers
+/// are existing Rust ports, so all five retail direct `bl` edges become
+/// ordinary Rust calls.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_query_mode_response(mode: u32, response: *mut u32) -> i32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = match mode {
+        1 => pmu_query(7, 3, response),
+        2 => pmu_query(1, 0, response),
+        3 | 4 => pmu_query(2, 0, response),
+        _ => 1,
+    };
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+    status
+}
+
 
 
 #[cfg(test)]
@@ -200,6 +260,62 @@ mod tests {
     use crate::drivers::i2c::tests::{
         install_raw_i2c_for_test, raw_i2c_calls_for_test, raw_i2c_packets_for_test,
     };
+    use parking_lot::Mutex;
+
+    static PMU_QUERY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut PMU_QUERY_ARGS: (u32, u32) = (0, 0);
+    static mut PMU_QUERY_RESPONSE: u32 = 0;
+    static mut PMU_QUERY_STATUS: i32 = 0;
+
+    unsafe extern "C" fn record_pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
+        PMU_QUERY_ARGS = (request, flags);
+        *response = PMU_QUERY_RESPONSE;
+        PMU_QUERY_STATUS
+    }
+
+    struct PmuQueryFixture;
+
+    impl Drop for PmuQueryFixture {
+        fn drop(&mut self) {
+            unsafe {
+                PMU_QUERY = missing_pmu_query;
+            }
+        }
+    }
+
+    unsafe fn install_pmu_query_for_test(response: u32, status: i32) -> PmuQueryFixture {
+        PMU_QUERY_ARGS = (0, 0);
+        PMU_QUERY_RESPONSE = response;
+        PMU_QUERY_STATUS = status;
+        PMU_QUERY = record_pmu_query;
+        PmuQueryFixture
+    }
+
+    #[test]
+    fn query_modes_select_the_verified_request_pairs() {
+        let _lock = PMU_QUERY_TEST_LOCK.lock();
+        let _query = unsafe { install_pmu_query_for_test(0xfeed_beef, -7) };
+        let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+        for (mode, request, flags) in [(1, 7, 3), (2, 1, 0), (3, 2, 0), (4, 2, 0)] {
+            let mut response = 0;
+            assert_eq!(unsafe { pmu_query_mode_response(mode, &mut response) }, -7);
+            assert_eq!(response, 0xfeed_beef);
+            assert_eq!(unsafe { PMU_QUERY_ARGS }, (request, flags));
+        }
+    }
+
+    #[test]
+    fn invalid_query_mode_skips_the_transaction_and_returns_one() {
+        let _lock = PMU_QUERY_TEST_LOCK.lock();
+        let _query = unsafe { install_pmu_query_for_test(0xfeed_beef, -7) };
+        let mut response = 0x1234_5678;
+        let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+        assert_eq!(unsafe { pmu_query_mode_response(0, &mut response) }, 1);
+        assert_eq!(response, 0x1234_5678);
+        assert_eq!(unsafe { PMU_QUERY_ARGS }, (0, 0));
+    }
 
     #[test]
     fn register_0c_one_returns_write_status_and_releases_locks() {
