@@ -39,6 +39,35 @@ functions:
       unported: target builds dispatch to 0x082e2b34 and host tests use a
       recording seam. match.py reports the expected structural diff from the
       target address literal and LLVM frame setup.
+  - address: 0x082e03f4
+    ghidra: FUN_082e03f4
+    name: fat_cluster_clear
+    size: 88
+    sig: "void fat_cluster_clear(u8 *cache, u32 cluster, u32 unused_value, u32 packed_value)"
+    module: fs/fat_cluster_clear
+    status: ported
+    renames:
+      param_1/r0/r4: cache
+      param_2/r1/r5: cluster
+      param_3/r2: unused_value
+      param_4/r3: packed_value
+      param_1+0x1ec: cache_position_minimum
+      param_1+0x1f0: cache_position_maximum
+      param_1+0x1f4: dirty_count
+      FUN_082e39f4: write_cache_position_value
+    notes: >-
+      Raw osos.dec establishes the 88-byte extent
+      0x082e03f4..0x082e044b; push {r4-r8,lr} at 0x082e044c begins the next
+      function. Whole-image ARM decoding finds three inbound plain BL calls
+      at 0x082e1910, 0x082e326c, and 0x082e32fc, zero predicated BL calls,
+      and one direct plain BL to FUN_082e39f4. Clusters below two return
+      without calling the writer. Otherwise the body clears the cluster
+      through FUN_082e39f4 with r2 forced to zero and r3 passed through. On
+      success it narrows the inclusive cache-position maximum when the cluster
+      is in range and increments a nonzero dirty count. FUN_082e39f4 remains
+      a resident boundary; target builds dispatch to its verified address and
+      host tests use its established recording seam. match.py reports the
+      expected structural differences from LLVM's frame and pointer code.
   - address: 0x082e38b4
     ghidra: FUN_082e38b4
     name: dos_wildcard_match_including_deleted
