@@ -30,6 +30,7 @@ pub mod bitstream;
 pub mod cursor_advance_with_start;
 pub mod dec_ref_pic_marking;
 pub mod decoder_range_lookup;
+pub mod fragment_list_append;
 /// `h264_nal_header_parse` @ 0x082c5da8 — validates and splits the
 /// one-byte H.264 NAL-unit header shared by the decoder's stream parsers.
 pub mod nal_header;
