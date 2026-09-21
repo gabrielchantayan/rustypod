@@ -29322,6 +29322,30 @@ functions:
       0x08369384) and zero predicated BLs. No deliberate deviations: capacity
       and entries after index zero remain untouched, and entries is
       dereferenced even when value is zero.
+  - address: 0x082d6c90
+    ghidra: FUN_082d6c90
+    name: clear_cursor_saved_overflows
+    size: 36
+    sig: "void clear_cursor_saved_overflows(cursors: *mut BtCursorList)"
+    module: sqlite/clear_cursor_saved_overflows
+    status: ported
+    renames:
+      param_1/r0: cursors
+      "[cursors + 0x08]": cursor
+      "[cursor + 0x08]": next_cursor
+      FUN_082d6d08: clear_saved_overflow
+    notes: >-
+      Raw osos.dec establishes the complete 36-byte extent
+      0x082d6c90..0x082d6cb4: it loads the target-width cursor-list head at
+      +0x08, calls clear_saved_overflow for every cursor, then follows each
+      cursor's +0x08 link until NULL. The successor at 0x082d6cb4 starts a
+      separately linked function with push {r4,r5,r6,lr}. The body contains
+      one plain BL to clear_saved_overflow @ 0x082d6d08 and no predicated
+      calls. Complete-image decoding finds three inbound plain BL calls
+      (0x082b58b8, 0x082bd9a0, and 0x0838a78c) and no predicated BL calls.
+      Deliberate deviation: pointer slots are target-width u32 words so
+      offsets remain correct on 64-bit host fixtures. The existing direct
+      clear_saved_overflow port provides the callee behavior.
   - address: 0x082d6d08
     ghidra: FUN_082d6d08
     name: clear_saved_overflow
