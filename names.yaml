@@ -44301,6 +44301,33 @@ functions:
   # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
   # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
   # (already ported) belongs to this island, not to the database engine.
+  - address: 0x083699a8
+    ghidra: FUN_083699a8
+    name: gpio_port_registers_load
+    size: 60
+    sig: "void gpio_port_registers_load(const u8 *records)"
+    module: drivers/gpio_port_registers_load
+    status: ported
+    renames:
+      param_1/r0: records
+      DAT_083699e4: gpio_controller_base_literal
+      iVar2/r1: port_index
+      iVar4/r3: record
+      puVar3/r2: gpio_port_registers
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x083699a8..0x083699e3; the following
+      word at 0x083699e4 is the 0x3cf00000 GPIO controller base literal, and
+      the next real function begins at 0x083699e8. Decoding every ARM B/BL word
+      in osos.dec finds three direct inbound calls: two unconditional plain BLs
+      at 0x08369b1c and 0x08369b78, plus one predicated BLNE at 0x08369af0; the
+      leaf has no outbound calls. For each port index 0..15, copies source word
+      +0 to GPIO block +0 and zero-extends source bytes +4/+5 into block words
+      +12/+16; the remaining block words are untouched. Target stores are
+      volatile MMIO writes; host tests use a private register-file stand-in.
+      `black_box(16)` prevents LLVM from unrolling the target loop and does not
+      change its behavior. match.py shows the same scaled record/block loop,
+      stores, and loop back-edge, with expected setup overhead from the opaque
+      bound.
   - address: 0x0836954c
     ghidra: FUN_0836954c
     name: namespace_provider_find
