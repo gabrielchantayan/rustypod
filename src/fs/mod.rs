@@ -47,6 +47,8 @@ pub(crate) mod cache_position_value;
 pub mod fat_next_cluster;
 /// Releases a FAT cluster chain through the shared cache-position writer @ 0x082e18f8.
 pub mod fat_cluster_chain_release;
+/// Clears an allocatable FAT cluster through the shared cache-position writer @ 0x082e03f4.
+pub mod fat_cluster_clear;
 /// FAT directory-cursor initialization and advancement @ 0x082b2014.
 /// FAT directory cursor cache-block advancement @ 0x082e36c8.
 pub mod fat_cursor_advance_block;
