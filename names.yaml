@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082d6648
+    ghidra: FUN_082d6648
+    name: tagged_pointer_u16_init
+    size: 16
+    sig: "u8 *tagged_pointer_u16_init(u8 *this, u32 tag, u32 state, u32 target)"
+    module: cxx/tagged_pointer_u16_init
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: tag
+      param_3/r2: state
+      param_4/r3: target
+    notes: >-
+      Raw osos.dec words e1c010b0 e1c020b2 e5803004 e12fff1e establish the
+      exact 16-byte body 0x082d6648..0x082d6657: strh r1,[r0],
+      strh r2,[r0,#2], str r3,[r0,#4], bx lr. The mov r1,#0 word at
+      0x082d6658 begins the next independently linked function. Whole-image
+      A32 decoding finds three inbound plain BL calls (0x08084840,
+      0x082cb42c, and 0x082cb440), zero predicated inbound BL calls, and no
+      outbound calls. It writes the low 16 bits of tag and state followed by
+      the 32-bit target word; all known callers use (0, 6, record + 8).
+      The Rust u32 target preserves the ARM four-byte field on 64-bit hosts;
+      it returns this because r0 passes through unchanged. Deliberate
+      deviations: none.
   - address: 0x082d7bd4
     ghidra: FUN_082d7bd4
     name: hash_table_visit_with_context
