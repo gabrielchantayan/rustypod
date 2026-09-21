@@ -24,8 +24,8 @@
 //!
 //! # Algorithm
 //!
-//! The unported selector `FUN_0829e310` receives the collection and selector
-//! word, and returns a vector head. Starting at index zero, this function
+//! The ported selector `opaque_keyed_collection_vector_select` receives the
+//! collection and selector word, and returns a vector head. Starting at index zero, this function
 //! dereferences each vector entry as an opaque item and compares its word at
 //! +4 with `item_id`. A match writes the entry pointer to `result` and returns
 //! one; exhaustion returns zero without writing `result`. The ARM loop performs
@@ -33,16 +33,16 @@
 //! sign-extends its 16-bit index after every miss, so it cannot visit index
 //! 32768 or higher.
 //!
-//! # Deliberate deviation
-//!
-//! `FUN_0829e310` remains unported. This port reuses the existing keyed-vector
-//! selector seam from its sibling accessors: target builds call its verified
-//! retail address, while host tests install a recording selector. The concrete
-//! collection, selector, and item types are not recovered.
+//! The selector is now ported. Target builds call it directly; host tests
+//! retain their local recording boundary. The concrete collection, selector,
+//! and item types remain unrecovered.
 
 use core::ptr;
 
+#[cfg(not(target_os = "none"))]
 use super::opaque_keyed_collection_item_at::OPAQUE_KEYED_COLLECTION_VECTOR;
+#[cfg(target_os = "none")]
+use super::opaque_keyed_collection_vector_select::opaque_keyed_collection_vector_select;
 #[cfg(target_os = "none")]
 use crate::cxx::templates::{vector_size_elem4_alias_78e4, VectorBounds};
 
@@ -82,8 +82,13 @@ pub unsafe extern "C" fn opaque_keyed_collection_find_item_by_id(
     item_id: u32,
     result: *mut u32,
 ) -> u32 {
-    let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
-    let vector = select(collection, selector);
+    #[cfg(target_os = "none")]
+    let vector = opaque_keyed_collection_vector_select(collection, selector);
+    #[cfg(not(target_os = "none"))]
+    let vector = {
+        let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
+        select(collection, selector)
+    };
     let mut index = 0i16;
 
     loop {

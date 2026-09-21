@@ -306,6 +306,7 @@ pub mod record_commit;
 pub mod record_result_word;
 pub mod opaque_keyed_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
+pub mod opaque_keyed_collection_vector_select;
 pub mod opaque_keyed_collection_find_item_by_id;
 pub mod object_dispatch_target;
 pub mod object_subobject_at_0c;
