@@ -884,6 +884,71 @@ pub unsafe extern "C" fn video_frame_dispatch_operation(
     );
 }
 
+/// Firmware entry of the video-engine selector/value dispatcher
+/// (`FUN_0824cdbc`, unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_SET_SELECTOR_VALUE_ADDR: usize = 0x0824_cdbc;
+
+/// ABI of the resident dispatcher: engine followed by selector and value.
+type VideoEngineSetSelectorValue = unsafe extern "C" fn(*mut u8, u32, u32);
+
+/// Host-test stand-in for `FUN_0824cdbc`.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_SET_SELECTOR_VALUE: Option<VideoEngineSetSelectorValue> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_set_selector_value`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_set_selector_value(
+    dispatch: Option<VideoEngineSetSelectorValue>,
+) {
+    core::ptr::addr_of_mut!(MOCK_SET_SELECTOR_VALUE).write(dispatch);
+}
+
+/// Transfers a selector/value pair to the resident video-engine dispatcher.
+#[inline]
+unsafe fn set_selector_value(engine: *mut u8, selector: u32, value: u32) {
+    #[cfg(target_arch = "arm")]
+    {
+        let dispatch: VideoEngineSetSelectorValue =
+            core::mem::transmute(VIDEO_ENGINE_SET_SELECTOR_VALUE_ADDR);
+        dispatch(engine, selector, value);
+    }
+
+    #[cfg(not(target_arch = "arm"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(MOCK_SET_SELECTOR_VALUE))
+            .expect("video-engine selector/value dispatch must be installed")(engine, selector, value);
+    }
+}
+
+/// video_engine_set_selector_value — retailOS `FUN_082d0cb8` @
+/// **0x082d0cb8** (40 bytes, `0x082d0cb8..0x082d0cdc`; the next independently
+/// linked wrapper starts at `0x082d0ce0`).
+///
+/// Raw ARM saves `(selector, value)`, calls [`video_engine_get`], and silently
+/// returns when no session is installed. Otherwise it restores
+/// `(engine, selector, value)` and conditionally tail-branches to
+/// `FUN_0824cdbc`. The body has one plain `bl` (the getter); an aligned ARM
+/// B/BL-immediate decode finds three direct inbound plain `bl` calls and no
+/// predicated `bl` calls. Ghidra's 124-byte extent incorrectly joins this
+/// wrapper to the two independently linked wrappers at 0x082d0ce0 and
+/// 0x082d0d08.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0824cdbc` is unported. Target builds transfer to its resident firmware
+/// entry; host tests install a recording seam. The wrapper adds no selector or
+/// value validation, and the NULL-session path never accesses that seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_selector_value(selector: u32, value: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        set_selector_value(engine, selector, value);
+    }
+}
+
 /// Firmware entry of the video-engine control/value dispatcher
 /// (`FUN_0824e074`, unported).
 #[cfg(target_arch = "arm")]
@@ -1728,6 +1793,46 @@ mod tests {
             assert_eq!(state.add(0xd4 / 4).read(), 0);
         }
     }
+    static mut SELECTOR_VALUE_RECORDED: Option<(*mut u8, u32, u32)> = None;
+
+    unsafe extern "C" fn record_selector_value(engine: *mut u8, selector: u32, value: u32) {
+        unsafe {
+            SELECTOR_VALUE_RECORDED = Some((engine, selector, value));
+        }
+    }
+
+    #[test]
+    fn selector_value_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            SELECTOR_VALUE_RECORDED = None;
+            set_mock_set_selector_value(None);
+            set_mock_instance(ptr::null_mut());
+            video_engine_set_selector_value(0x88e4, u32::MAX);
+            assert_eq!(SELECTOR_VALUE_RECORDED, None);
+        }
+    }
+
+    #[test]
+    fn selector_value_prepends_instance_and_preserves_edge_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_set_selector_value(Some(record_selector_value));
+            set_mock_instance(engine.as_mut_ptr());
+            for &(selector, value) in &[(0, 0), (0x88e4, 0x2600), (u32::MAX, u32::MAX)] {
+                SELECTOR_VALUE_RECORDED = None;
+                video_engine_set_selector_value(selector, value);
+                assert_eq!(
+                    SELECTOR_VALUE_RECORDED,
+                    Some((engine.as_mut_ptr(), selector, value))
+                );
+            }
+            set_mock_instance(ptr::null_mut());
+            set_mock_set_selector_value(None);
+        }
+    }
+
     static mut CONTROL_VALUE_RECORDED: Option<(*mut u8, u32, u32)> = None;
 
     unsafe extern "C" fn record_control_value(engine: *mut u8, control: u32, value: u32) {
