@@ -23,6 +23,8 @@ pub mod shared_data;
 pub mod path_node_lookup;
 /// Cache-entry reference release @ 0x082e18bc.
 pub mod cache_entry;
+/// Sequential cache-entry allocation @ 0x082e4320.
+pub mod cache_entry_next;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
 /// Four-slot disk block read/write gates and dispatch @ 0x082c6244 / 0x082c62f0.
