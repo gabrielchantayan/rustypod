@@ -20,6 +20,7 @@
 /// or −1 when `value` is 0. `leading_zeros` lowers to ARM `clz`, so the
 /// port is instruction-faithful.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub extern "C" fn highest_set_bit(value: u32) -> i32 {
     31 - value.leading_zeros() as i32
 }
