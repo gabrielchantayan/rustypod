@@ -3727,6 +3727,53 @@ pub unsafe extern "C" fn path_chain_to_string(out: *mut StringObject, context: *
         node = core::ptr::read(node.add(0x1c).cast::<u32>()) as usize as *const u8;
     }
 }
+///
+/// string_object_construct_from_linked_chain — original: `FUN_082a2004` @
+/// `0x082a2004` (96 bytes; **4 plain direct `bl` calls**, no predicated
+/// calls). Raw words establish the true extent `0x082a2004..0x082a2063`;
+/// the next separately linked function begins at `0x082a2064`.
+///
+/// It copy-constructs `out` from the embedded StringObject at `context + 0x0c`,
+/// then walks the raw-u32 linked chain at `context + 0x1c`. For every node,
+/// including the terminal node, it prepends one UTF-16 `\` and the node's
+/// embedded C string. The direct callees are the established
+/// `string_object_copy_construct`, `string_object_insert_utf16`,
+/// `string_object_c_str`, and `string_object_insert_cstr` ports.
+///
+/// Deliberate deviation: host builds explicitly read the target-layout
+/// node payload word at `+0x10`, because host pointers are wider than the
+/// target's four-byte StringObject fields. The copied initial StringObject
+/// remains a native Rust layout on host, so its existing constructor is used
+/// directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_from_linked_chain(
+    out: *mut StringObject,
+    context: *const u8,
+) {
+    string_object_copy_construct(out, context.add(0x0c).cast::<StringObject>());
+    let mut node = core::ptr::read(context.add(0x1c).cast::<u32>()) as usize as *const u8;
+
+    while !node.is_null() {
+        let separator = b'\\' as u16;
+        string_object_insert_utf16(out, 0, &separator, 1);
+        #[cfg(target_os = "none")]
+        let name = string_object_c_str(node.add(0x0c).cast::<StringObject>());
+        #[cfg(not(target_os = "none"))]
+        let name = {
+            let payload = core::ptr::read(node.add(0x10).cast::<u32>());
+            if payload == 0 {
+                core::ptr::addr_of!(STRING_OBJECT_EMPTY_CSTR)
+            } else {
+                payload as usize as *const u8
+            }
+        };
+        string_object_insert_cstr(out, 0, name);
+        node = core::ptr::read(node.add(0x1c).cast::<u32>()) as usize as *const u8;
+    }
+}
+
+///
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -5170,7 +5217,7 @@ pub(crate) mod tests {
         }
         guard
     }
-    static mut PATH_CHAIN_BUFFERS: [[u8; 32]; 4] = [[0; 32]; 4];
+    static mut PATH_CHAIN_BUFFERS: [[u8; 32]; 8] = [[0; 32]; 8];
     static mut PATH_CHAIN_ALLOCATION_INDEX: usize = 0;
 
     unsafe extern "C" fn recording_path_chain_allocate(
@@ -5210,7 +5257,7 @@ pub(crate) mod tests {
             second.add(0x1c).cast::<u32>().write_unaligned(terminal as usize as u32);
 
             let _bench = assign_cstr_bench(core::ptr::null_mut());
-            PATH_CHAIN_BUFFERS = [[0; 32]; 4];
+            PATH_CHAIN_BUFFERS = [[0; 32]; 8];
             PATH_CHAIN_ALLOCATION_INDEX = 0;
             (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
                 recording_path_chain_allocate;
@@ -5218,6 +5265,50 @@ pub(crate) mod tests {
             path_chain_to_string(&mut out, slab);
             assert_eq!(core::slice::from_raw_parts(out.payload, 5), b"B\\A\\\0");
             assert_eq!(PATH_CHAIN_ALLOCATION_INDEX, 4);
+        }
+    }
+
+    #[test]
+    fn linked_chain_constructor_copies_empty_source_and_prepends_every_node() {
+        use crate::testing::{hints, try_map_u32_slab};
+
+        let Some(slab) = try_map_u32_slab(hints::STRING_OBJECT_CONSTRUCT_FROM_LINKED_CHAIN, 0x1000) else { return; };
+        unsafe {
+            slab.write_bytes(0, 0x1000);
+            let context = slab.add(4);
+            let first = slab.add(0x104);
+            let second = slab.add(0x144);
+            let terminal = slab.add(0x184);
+            let first_name = slab.add(0x304);
+            let second_name = slab.add(0x324);
+            let terminal_name = slab.add(0x344);
+            first_name.copy_from_nonoverlapping(b"A\0".as_ptr(), 2);
+            second_name.copy_from_nonoverlapping(b"B\0".as_ptr(), 2);
+            terminal_name.copy_from_nonoverlapping(b"C\0".as_ptr(), 2);
+            context.add(0x0c).cast::<StringObject>().write(StringObject {
+                vtable: &STRING_OBJECT_VTABLE,
+                payload: core::ptr::null_mut(),
+            });
+            context.add(0x1c).cast::<u32>().write_unaligned(first as usize as u32);
+            first.add(0x10).cast::<u32>().write_unaligned(first_name as usize as u32);
+            first.add(0x1c).cast::<u32>().write_unaligned(second as usize as u32);
+            second.add(0x10).cast::<u32>().write_unaligned(second_name as usize as u32);
+            second.add(0x1c).cast::<u32>().write_unaligned(terminal as usize as u32);
+            terminal.add(0x10).cast::<u32>().write_unaligned(terminal_name as usize as u32);
+
+            PATH_CHAIN_BUFFERS = [[0; 32]; 8];
+            PATH_CHAIN_ALLOCATION_INDEX = 0;
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
+                recording_path_chain_allocate;
+            let mut out = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+            string_object_construct_from_linked_chain(&mut out, context);
+            assert_eq!(core::slice::from_raw_parts(out.payload, 7), b"C\\B\\A\\\0");
+            assert_eq!(PATH_CHAIN_ALLOCATION_INDEX, 6);
+            assert!(core::ptr::eq(
+                context.add(0x0c).cast::<StringObject>().read().vtable,
+                &STRING_OBJECT_VTABLE,
+            ));
+            assert!(context.add(0x0c).cast::<StringObject>().read().payload.is_null());
         }
     }
 
