@@ -124035,3 +124035,30 @@ functions:
       behavior is private in this port; host builds use a callback/release/free
       operation table because target-width callback pointers cannot hold host
       function addresses.
+  - address: 0x082bc8e4
+    ghidra: FUN_082bc8e4
+    name: initialize_fixed_scale_parameters
+    size: 44
+    sig: "u32 initialize_fixed_scale_parameters(u32 divisor, u32 *scale_numerator, u32 *scale_denominator, u32 *scaled_count)"
+    module: util/fixed_scale_parameters
+    status: ported
+    renames:
+      param_1/r0: divisor
+      param_2/r1: scale_numerator
+      param_3/r2: scale_denominator
+      param_4/r3/r4: scaled_count
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04003 e3a0303f e5813000 e3a030ff
+      e5823000 e5911000 e0611401 ebf5e982 e5840000 e8bd8010 establish the
+      exact 44-byte body at 0x082bc8e4..0x082bc90f; push {r4,lr} at
+      0x082bc910 begins the next independent function. Decoding every
+      aligned ARM BL word finds exactly three inbound plain BL calls
+      (0x080d99d4, 0x080dd334, and 0x080e3b44), zero predicated inbound BL
+      calls, and one outbound plain BL to the already ported __rt_udiv at
+      0x08036f14. It stores 63 and 255 through its second and third
+      arguments, computes 63 * 255 / divisor, and stores the quotient through
+      its fourth argument; r0 retains that quotient despite Ghidra's void
+      signature. Field identities are not established, so Rust uses
+      descriptive scale names. Deliberate deviations: the Rust signature
+      exposes the retained r0 quotient.
