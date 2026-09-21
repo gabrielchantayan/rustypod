@@ -150,6 +150,9 @@ pub mod hints {
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const TT_FACE_LOOKUP: usize = 0x5500_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
+    // 0xf200_0000: dedicated to sqlite/pager_page_unlink's target-width page
+    // and owner fixture; mappings never unmap, so no other port may share it.
+    pub const SQLITE_PAGER_PAGE_UNLINK: usize = 0xf200_0000;
     // 0x6300_0000: dedicated to util/video_engine's target-width frame-slot
     // table fixture; mappings never unmap, so no other user may share it.
     pub const VIDEO_ENGINE_CURRENT_FRAME_SLOT: usize = 0x6300_0000;
