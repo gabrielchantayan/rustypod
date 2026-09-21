@@ -17431,6 +17431,26 @@ functions:
       port deliberately uses byte-wise volatile accesses, so unaligned input
       is defined; aligned records match the retail halfword-load helpers.
 
+  - address: 0x082d3334
+    ghidra: FUN_082d3334
+    name: bswap_512_byte_block_inplace
+    size: 200
+    sig: "void bswap_512_byte_block_inplace(u8 *block)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: block}
+    notes: >-
+      Raw ARM words establish the exact 200-byte extent at
+      0x082d3334..0x082d33fb; the next real function begins at 0x082d33fc.
+      It swaps two 16-bit fields at offsets 0 and 2, sixteen 32-bit fields
+      at offsets 4..68, and one 64-bit field at offset 72; bytes 80..111 are
+      untouched; then it transforms five 80-byte records at offsets 112,
+      192, 272, 352, and 432. Binary decoding finds 23 plain unconditional
+      BL instructions (two bswap16_inplace, sixteen bswap32_inplace, one
+      bswap64-inplace operation, and four bswap_80_byte_record_inplace), no
+      predicated BL instructions, and a tail B to the fifth record. The Rust
+      port uses byte-wise volatile accesses, deliberately defining unaligned
+      inputs while matching every aligned ARMv5 input.
   - address: 0x082d33fc
     ghidra: FUN_082d33fc
     name: ft_too_many_hints

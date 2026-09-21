@@ -28,6 +28,10 @@
 //!   bytes; 6 plain `bl` callers plus one tail `b`). Reverses a fixed
 //!   80-byte record: its first 8 bytes as one lane, followed by eighteen
 //!   32-bit lanes.
+//! - `bswap_512_byte_block_inplace` — `FUN_082d3334` @ 0x082d3334 (200
+//!   bytes; 23 plain `bl` calls). Reverses the fixed-width scalar fields and
+//!   five 80-byte records in a 512-byte metadata block.
+
 
 //!
 //! Deviation: `bswap32_inplace`'s original reads with `ldrh`, which on the
@@ -131,6 +135,47 @@ pub unsafe extern "C" fn bswap_80_byte_record_inplace(record: *mut u8) {
     }
     for offset in (8..80).step_by(4) {
         bswap32_inplace(record.add(offset));
+    }
+}
+
+/// bswap_512_byte_block_inplace — original: `FUN_082d3334` @ 0x082d3334
+/// (200 bytes; 23 plain unconditional `bl` calls, no predicated `bl` calls).
+///
+/// Reverses the two 16-bit fields at offsets 0 and 2, sixteen 32-bit fields
+/// at offsets 4 through 68, and the 64-bit field at offset 72. It leaves the
+/// 32 bytes at offsets 80 through 111 unchanged, then transforms five
+/// consecutive 80-byte records at offsets 112, 192, 272, 352, and 432. Raw
+/// instructions establish the extent through the tail branch at 0x082d33f8;
+/// the distinct next function begins at 0x082d33fc.
+///
+/// Deliberate deviation: the original delegates to halfword-load helpers and
+/// requires aligned input on ARMv5. The byte-wise helpers make unaligned
+/// pointers defined while preserving all aligned-input results.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bswap_512_byte_block_inplace(block: *mut u8) {
+    bswap16_inplace(block);
+    bswap16_inplace(block.add(2));
+    for offset in (4..72).step_by(4) {
+        bswap32_inplace(block.add(offset));
+    }
+
+    let field64 = [
+        block.add(72).read_volatile(),
+        block.add(73).read_volatile(),
+        block.add(74).read_volatile(),
+        block.add(75).read_volatile(),
+        block.add(76).read_volatile(),
+        block.add(77).read_volatile(),
+        block.add(78).read_volatile(),
+        block.add(79).read_volatile(),
+    ];
+    for (offset, byte) in field64.into_iter().enumerate() {
+        block.add(79 - offset).write_volatile(byte);
+    }
+
+    for offset in (112..512).step_by(80) {
+        bswap_80_byte_record_inplace(block.add(offset));
     }
 }
 
@@ -371,6 +416,35 @@ mod tests {
 
         unsafe { bswap_80_byte_record_inplace(fixture.as_mut_ptr().add(1)) };
         assert_eq!(fixture, original, "the lane transform is an involution");
+    }
+
+    #[test]
+    fn bswap_512_byte_block_reverses_only_its_defined_lanes() {
+        let mut fixture = [0xaau8; 514];
+        for (offset, byte) in fixture[1..513].iter_mut().enumerate() {
+            *byte = offset.wrapping_mul(37).wrapping_add(11) as u8;
+        }
+        let original = fixture;
+        let mut expected = fixture;
+        expected[1..3].reverse();
+        expected[3..5].reverse();
+        for offset in (5..73).step_by(4) {
+            expected[offset..offset + 4].reverse();
+        }
+        expected[73..81].reverse();
+        for offset in (113..513).step_by(80) {
+            expected[offset..offset + 8].reverse();
+            for field in (offset + 8..offset + 80).step_by(4) {
+                expected[field..field + 4].reverse();
+            }
+        }
+
+        unsafe { bswap_512_byte_block_inplace(fixture.as_mut_ptr().add(1)) };
+        assert_eq!(fixture, expected, "only defined block lanes are transformed");
+        assert_eq!(&fixture[81..113], &original[81..113], "reserved bytes stay intact");
+
+        unsafe { bswap_512_byte_block_inplace(fixture.as_mut_ptr().add(1)) };
+        assert_eq!(fixture, original, "the block transform is an involution");
     }
 
     /// Over the whole 16-bit domain the 0x08076f48 form is exactly a u16
