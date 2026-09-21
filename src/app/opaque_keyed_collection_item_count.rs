@@ -27,16 +27,17 @@
 //! shift by two of `end - begin`: the signed, target-width element count. It
 //! has no NULL guard, selector normalization, validation, or writes.
 //!
-//! # Deliberate deviation
-//!
-//! `FUN_0829e310` remains unported, so this function reuses its sibling
-//! accessor's existing `OPAQUE_KEYED_COLLECTION_VECTOR` dispatch seam. Target
-//! builds reach the verified retail address; host tests install a recording
-//! selector. No concrete collection or selector identity is claimed.
+//! The selector is now ported. Target builds call
+//! [`super::opaque_keyed_collection_vector_select::opaque_keyed_collection_vector_select`];
+//! host tests retain their local recording boundary. The concrete collection
+//! and selector types remain unrecovered.
 
 use core::ptr;
 
+#[cfg(not(target_os = "none"))]
 use super::opaque_keyed_collection_item_at::OPAQUE_KEYED_COLLECTION_VECTOR;
+#[cfg(target_os = "none")]
+use super::opaque_keyed_collection_vector_select::opaque_keyed_collection_vector_select;
 #[cfg(test)]
 use super::opaque_keyed_collection_item_at::OpaqueKeyedCollectionVector;
 
@@ -59,8 +60,13 @@ pub unsafe extern "C" fn opaque_keyed_collection_item_count(
     collection: *const u8,
     selector: u32,
 ) -> u32 {
-    let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
-    let vector = select(collection, selector);
+    #[cfg(target_os = "none")]
+    let vector = opaque_keyed_collection_vector_select(collection, selector);
+    #[cfg(not(target_os = "none"))]
+    let vector = {
+        let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
+        select(collection, selector)
+    };
     let begin = ptr::addr_of!((*vector).begin).read_volatile();
     let end = ptr::addr_of!((*vector).end).read_volatile();
     ((end.wrapping_sub(begin) as i32) >> 2) as u32

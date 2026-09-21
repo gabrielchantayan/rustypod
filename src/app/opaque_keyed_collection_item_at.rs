@@ -28,15 +28,14 @@
 //! word, then returns the 32-bit entry at `begin + index * 4`. It has no NULL
 //! guard, bounds check, selector normalization, or writes.
 //!
-//! # Deliberate deviation
-//!
-//! `FUN_0829e310` is not ported (and `names.yaml` contains no port for it), so
-//! target builds call it at its verified retail address while host tests swap
-//! [`OPAQUE_KEYED_COLLECTION_VECTOR`] with a recording implementation. The
-//! selector's concrete identity is not recovered; this module deliberately
-//! models only the vector head consumed by this function.
+//! The selector is now ported. Target builds call
+//! [`super::opaque_keyed_collection_vector_select::opaque_keyed_collection_vector_select`];
+//! host tests retain their local recording boundary. The concrete collection,
+//! selector, and item types remain unrecovered.
 
 use core::ptr;
+#[cfg(target_os = "none")]
+use super::opaque_keyed_collection_vector_select::opaque_keyed_collection_vector_select;
 
 /// The two-word vector head returned by the unported selector.
 ///
@@ -110,8 +109,13 @@ pub unsafe extern "C" fn opaque_keyed_collection_item_at(
     selector: u32,
     index: u32,
 ) -> u32 {
-    let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
-    let vector = select(collection, selector);
+    #[cfg(target_os = "none")]
+    let vector = opaque_keyed_collection_vector_select(collection, selector);
+    #[cfg(not(target_os = "none"))]
+    let vector = {
+        let select = ptr::read_volatile(ptr::addr_of!(OPAQUE_KEYED_COLLECTION_VECTOR));
+        select(collection, selector)
+    };
     let begin = ptr::addr_of!((*vector).begin).read_volatile();
     (begin as usize as *const u32).wrapping_add(index as usize).read_volatile()
 }

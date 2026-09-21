@@ -125279,3 +125279,27 @@ functions:
       word load prevents LLVM from narrowing the verified ldr-and-mask sequence
       into a byte load. Host tests cover word selection plus zero and maximum
       low-byte values.
+
+  # --- opaque keyed-collection vector selector ---
+  - address: 0x0829e310
+    ghidra: FUN_0829e310
+    name: opaque_keyed_collection_vector_select
+    size: 76
+    sig: "OpaqueKeyedCollectionVector *opaque_keyed_collection_vector_select(const u8 *collection, u32 selector)"
+    module: app/opaque_keyed_collection_vector_select
+    status: ported
+    renames:
+      param_1/r4: collection
+      param_2: selector
+      FUN_083d7248: opaque_keyed_collection_lookup
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte body
+      0x0829e310..0x0829e35c: push {r0,r1,r4,r5,lr}; lookup of the selector
+      through collection+0x1c; comparison against collection+0x2c; an equal
+      result retries lookup with selector one; add r0,#0x14; pop
+      {r4,r5,pc}. The next separately entered function starts at 0x0829e35c.
+      Whole-image A32 decoding finds three inbound plain unconditional bl
+      calls and zero predicated bl calls. The unported helper at 0x083d7248
+      remains an explicit boundary because its concrete collection type is
+      unrecovered; Rust passes selector locals by address as the retail ABI
+      does. Host tests cover the direct result and sentinel-triggered fallback.
