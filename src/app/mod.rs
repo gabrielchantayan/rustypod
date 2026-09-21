@@ -99,6 +99,7 @@ pub mod controller_event_is_enabled;
 pub mod controller_history_select;
 pub mod controller_history_select_core;
 pub mod context_scope;
+pub mod context_index_matches_context_field_f40;
 pub mod directory_iterator;
 pub mod context_scope_selector;
 pub mod current_record_handle;

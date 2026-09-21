@@ -35,6 +35,34 @@ functions:
       BL forms, and no calls in the leaf. It returns the opaque object's
       aligned word at +0x1c normalized as zero/nonzero. No deliberate
       deviations.
+  - address: 0x082982e4
+    ghidra: FUN_082982e4
+    name: context_index_matches_context_field_f40
+    size: 12
+    sig: "u32 context_index_matches_context_field_f40(const void *object, u32 index)"
+    module: app/context_index_matches_context_field_f40
+    status: ported
+    renames:
+      param_1/r0: object_then_context
+      param_2/r1: index_then_one_based_index
+      "object+0x30/r0": context
+      "context+0xf64/r2": index_table
+      "context+0xf40/r0": selected_word
+      "index_table+(index+1)*4/r1": indexed_word
+      FUN_08059c08: unnamed_context_index_compare_tail_target
+    notes: >-
+      Raw osos.dec words establish the true 12-byte thunk extent
+      0x082982e4..0x082982ef: ldr r0,[r0,#0x30]; add r1,r1,#1; b
+      0x08059c08. The next real function starts at 0x082982f0 with push
+      {lr}; Ghidra's 40-byte extent incorrectly absorbs that successor and
+      decompiles the tail target into this function. The tail target at
+      0x08059c08 loads context+0xf64, context+0xf40, and index_table[index]
+      before returning their equality predicate. Full-image A32 decoding
+      finds three inbound plain BL calls (0x08111990, 0x08114648,
+      0x081151f4), zero predicated inbound BL forms, zero tail-B callers,
+      and zero internal BL forms. The Rust port inlines the unnamed,
+      unported tail target rather than creating a speculative seam; it
+      preserves the target's u32 pointer fields and one-based index.
   - address: 0x0829cf68
     ghidra: FUN_0829cf68
     name: object_word_0x18_is_nonzero
