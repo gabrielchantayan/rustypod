@@ -564,6 +564,10 @@ pub mod hints {
     // state-table and selected-record fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const INDEXED_STATE_STATUS: usize = 0x1240_0000;
+    // 0x1250_0000: dedicated to util/indexed_record_bounded_value's raw-u32
+    // header and record fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const INDEXED_RECORD_BOUNDED_VALUE: usize = 0x1250_0000;
     // 0x0400_0000: dedicated to runtime/ctype isspace's raw-u32 LC_CTYPE
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
