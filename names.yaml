@@ -125234,3 +125234,25 @@ functions:
       only to retain the original byte-store order; ordinary-memory values
       are unchanged. Host tests cover zero, nonzero values, output bounds,
       and source/destination overlap.
+
+  # --- opaque object word low-byte accessor ---
+  - address: 0x0829f23c
+    ghidra: FUN_0829f23c
+    name: object_word_0x8_low_byte
+    size: 12
+    sig: "u32 object_word_0x8_low_byte(const u32 *object)"
+    module: util/object_word_0x8_low_byte
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: low_byte
+    notes: >-
+      Raw osos.dec words establish the exact 12-byte extent 0x0829f23c..0x0829f247:
+      ldr r0,[r0,#8]; and r0,r0,#0xff; bx lr. The next separately linked function
+      begins at 0x0829f248. It reads the aligned word at object+8 and returns its
+      low byte. Whole-image A32 decoding finds exactly three incoming plain
+      unconditional BL calls and zero predicated BL calls. No callee seam is
+      involved. The Rust port retains the unchecked aligned access; its volatile
+      word load prevents LLVM from narrowing the verified ldr-and-mask sequence
+      into a byte load. Host tests cover word selection plus zero and maximum
+      low-byte values.
