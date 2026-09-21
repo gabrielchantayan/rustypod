@@ -101334,6 +101334,30 @@ functions:
       Host defaults report zero because retailOS is unmapped, while tests
       install a recorder; this is the deliberate host-only deviation.
 
+  - address: 0x082f777c
+    ghidra: FUN_082f777c
+    name: bigint_trim_high_zero_limbs
+    size: 120
+    sig: "u32 bigint_trim_high_zero_limbs(u32 *value)"
+    module: fp/bigint_trim_high_zero_limbs
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_082f77f4: encoded_count_multiplier
+      DAT_082f77f8: limb_nonzero_multiplier
+      DAT_082f77fc: count_encoding_multiplier
+    notes: >-
+      Raw osos.dec confirms the 120-byte extent from mov r1,r0 at
+      0x082f777c through pop {pc} at 0x082f77f0, followed by the three
+      literals at 0x082f77f4, 0x082f77f8, and 0x082f77fc; the next separately
+      linked function starts with push {r0-r11,lr} at 0x082f7800. Complete
+      aligned ARM B/BL-immediate decoding finds exactly three direct inbound
+      calls, all unconditional plain bl (zero predicated forms): 0x082eacd0,
+      0x082eace8, and 0x082f76c8. The routine decodes the signed limb count
+      with 0x0a7e377f, scans backward over zero high limbs using the nonzero
+      multiplier 0x76b4197f, and re-encodes the retained count with
+      0xed99887f while preserving its sign. No deliberate deviations.
+
   # --- Video-engine control-code enable wrapper (src/util/video_engine.rs) ---
   - address: 0x082d12b0
     ghidra: FUN_082d12b0

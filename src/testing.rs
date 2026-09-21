@@ -1811,6 +1811,7 @@ pub mod hints {
     pub const SQLITE_SRC_LIST_ASSIGN_CURSORS: usize = 0x8170_0000;
     pub const SQLITE_SRC_LIST_ASSIGN_CURSORS_DEPTH_FIRST: usize = 0x8180_0000;
     pub const SQLITE_SRC_LIST_ASSIGN_CURSORS_STOP: usize = 0x8190_0000;
+    pub const BIGINT_TRIM_HIGH_ZERO_LIMBS: usize = 0x81a0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

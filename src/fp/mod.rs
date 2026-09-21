@@ -2,6 +2,7 @@
 pub mod d2f_checked;
 pub mod decimal_magnitude_bias;
 pub mod bigint_sign;
+pub mod bigint_trim_high_zero_limbs;
 pub mod fp_bigint_shift;
 pub mod fp_compare;
 pub mod fp_dadd;
