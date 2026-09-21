@@ -249,6 +249,7 @@ pub mod token_copy;
 pub mod trigger_delete;
 pub mod trigger_step_dup;
 pub mod triggers_exist;
+pub mod select_op_name;
 pub mod strhash;
 pub mod stricmp;
 pub mod store_u16_le;
