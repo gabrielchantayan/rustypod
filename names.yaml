@@ -29322,6 +29322,30 @@ functions:
       0x08369384) and zero predicated BLs. No deliberate deviations: capacity
       and entries after index zero remain untouched, and entries is
       dereferenced even when value is zero.
+  - address: 0x082d6d08
+    ghidra: FUN_082d6d08
+    name: clear_saved_overflow
+    size: 28
+    sig: "void clear_saved_overflow(cursor: *mut BtCursor)"
+    module: sqlite/clear_saved_overflow
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      "[cursor + 0x58]": saved_overflow
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the complete 28-byte extent
+      0x082d6d08..0x082d6d24: push {r4,lr}; cursor copy; ldr r0,[cursor,#0x58];
+      plain BL tracked_free @ 0x083906f4; zero r0; str r0,[cursor,#0x58]; pop
+      {r4,pc}. The successor at 0x082d6d24 is independently linked and begins
+      with push {r4,lr}. Whole-image decoding finds one outbound plain BL and
+      no predicated BL, plus three inbound plain BL instructions at 0x082d6ca0,
+      0x083685a8, and 0x08370bac. This SQLite BtCursor cleanup releases its
+      target-width +0x58 saved-overflow cache through the direct ported
+      tracked_free callee, then clears the field even for NULL. Deliberate
+      deviation: Rust models the pointer slot as a u32 word so its target
+      offset remains 0x58 on 64-bit hosts. Host tests cover NULL and a valid
+      tracked allocation, including raw-block/tag forwarding and field clear.
   - address: 0x082d6c24
     ghidra: FUN_082d6c24
     name: cg_inst_create_base

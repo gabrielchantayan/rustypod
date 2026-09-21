@@ -13,11 +13,12 @@
 //! the walk after discarding that cursor's overflow cache.
 //!
 //! Deliberate deviations: target pointer slots are read as little-endian u32
-//! values so their offsets remain four bytes on hosts. The raw direct calls
-//! are direct calls to their ported Rust twins; no seam is introduced.
+//! values so their offsets remain four bytes on hosts. The overflow-cache
+//! cleanup is the separately ported `clear_saved_overflow` helper.
 
 use crate::cxx::release::release_via_field_0x48;
 use crate::heap::tracked::tracked_free;
+use crate::sqlite::clear_saved_overflow::clear_saved_overflow;
 use crate::sqlite::data_size::btree_key_size;
 use crate::sqlite::key::btree_key;
 use crate::sqlite::mem::sqlite3_malloc;
@@ -94,9 +95,7 @@ pub unsafe extern "C" fn btree_save_all_cursors(
                     *cursor.add(CUR_E_STATE) = CURSOR_REQUIRESEEK;
                 }
             }
-            let overflow = read_u32(cursor, CUR_OVERFLOW_CACHE) as usize as *mut u8;
-            tracked_free(overflow);
-            write_u32(cursor, CUR_OVERFLOW_CACHE, 0);
+            clear_saved_overflow(cursor);
             if rc != 0 {
                 return rc;
             }
