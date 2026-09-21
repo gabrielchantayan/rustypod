@@ -38023,6 +38023,26 @@ functions:
       with the following (unrelated) body and invents a second
       parameter.
 
+  - address: 0x082cf36c
+    ghidra: FUN_082cf36c
+    name: free_function_context
+    size: 28
+    sig: "void free_function_context(void *context)"
+    module: sqlite/free_function_context
+    status: ported
+    renames:
+      param_1: context
+    notes: >-
+      The true extent is 0x082cf36c..0x082cf387: raw words are push
+      {r4,lr}; mov r4,r0; ldr r0,[r0,#0x1c]; bl sqlite3_free; mov r0,r4;
+      pop {r4,lr}; b sqlite3_free. The cmp at 0x082cf388 starts
+      vdbe_free_p4, disproving Ghidra's merged body. Binary scan finds
+      three inbound BL sites: plain at 0x08375270 and 0x0838a15c, and
+      predicated BLNE at 0x08374750. It frees the owned context payload
+      at target word 7 (+0x1c), then tail-frees the context itself through
+      sqlite3_free @ 0x083906f4, represented by tracked_free. Host tests
+      use a low-address raw-u32 fixture to verify the target-width field.
+
   - address: 0x082cf388
     ghidra: FUN_082cf388
     name: vdbe_free_p4

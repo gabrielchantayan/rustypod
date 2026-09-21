@@ -184,6 +184,9 @@ pub mod hints {
     // 0x6b00_0000: dedicated to cxx/owner_callback_dispatch's target-width
     // owner, object, and queued-word-copy fixture; mappings never unmap.
     pub const OWNER_CALLBACK_DISPATCH: usize = 0x6b00_0000;
+    // 0x6b10_0000: dedicated to sqlite/free_function_context's raw-u32
+    // context fixture; mappings never unmap, so no other port may share it.
+    pub const SQLITE_FREE_FUNCTION_CONTEXT: usize = 0x6b10_0000;
     // 0x6e20_0000 / 0x6e30_0000: dedicated to
     // app/global_transition_callback_dispatch's target-width global-state
     // fixtures; mappings never unmap.
