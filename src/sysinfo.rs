@@ -63,6 +63,38 @@ static HOST_DIAGNOSTICS_BOARD_GENERATION_CACHE_LOCK: std::sync::Mutex<()> =
 #[cfg(test)]
 pub(crate) static HOST_CACHED_BOARD_VERSION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Host replacement for the unported tail target at `0x082bc488`.
+#[cfg(not(target_os = "none"))]
+type StorageBackendPin89Status = unsafe extern "C" fn() -> u32;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_storage_backend_pin_89_status() -> u32 {
+    panic!("storage backend pin-89 status tail target is unported")
+}
+
+/// The direct tail-branch target selected by most board-version values.
+#[cfg(not(target_os = "none"))]
+static mut STORAGE_BACKEND_PIN_89_STATUS: StorageBackendPin89Status =
+    missing_storage_backend_pin_89_status;
+
+#[cfg(test)]
+static STORAGE_BACKEND_PIN_89_STATUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[inline(always)]
+unsafe fn storage_backend_pin_89_status() -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let target: unsafe extern "C" fn() -> u32 = core::mem::transmute(0x082b_c488usize);
+        target()
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(STORAGE_BACKEND_PIN_89_STATUS))()
+    }
+}
+
+
 /// Restores the host board-version cache to its sentinel on drop.
 #[cfg(test)]
 pub(crate) struct HostCachedBoardVersion {
@@ -174,6 +206,36 @@ pub unsafe extern "C" fn board_version() -> u32 {
         }
     }
     cache.read_volatile()
+}
+
+/// storage_backend_status — retailOS `FUN_082bc7c4` at `0x082bc7c4`.
+///
+/// Raw ARM runs from `push {r4,lr}` through `pop {r4,pc}` at `0x082bc844`:
+/// **132 bytes** (33 words); the distinct `push {r4,r5,r6,lr}` at
+/// `0x082bc848` is the next function boundary. Binary decoding finds **three
+/// direct inbound `bl` callers**, all plain unconditional instructions at
+/// `0x080e4b80`, `0x080e706c`, and `0x082bcb80; no predicated `bl` callers.
+/// The body has one unconditional `bl` to [`board_version`] and tail-branches
+/// to `0x082bc488` for the remaining cases.
+///
+/// It classifies `board_version() >> 16`: 0, 14, and out-of-range values
+/// return 0; 13, 15 through 18, and 20 return 4; all other in-range values
+/// (1 through 12, 19, and 21) tail-call the pin-89 status target, which
+/// returns 2 or 3 after reading GPIO pin 0x59.
+///
+/// # Deliberate deviation
+///
+/// `board_version` is already ported and called directly. The separate
+/// tail-call target at `0x082bc488` is not yet ported: firmware builds call
+/// that verified fixed entry, while host builds use a replaceable seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn storage_backend_status() -> u32 {
+    match board_version() >> 16 {
+        1..=12 | 19 | 21 => storage_backend_pin_89_status(),
+        13 | 15..=18 | 20 => 4,
+        _ => 0,
+    }
 }
 
 #[inline(always)]
@@ -363,12 +425,83 @@ mod tests {
         assert_eq!(unsafe { board_version() }, 0);
         assert_eq!(unsafe { core::ptr::addr_of!(HOST_CACHED_BOARD_VERSION).read() }, 0);
 
+
         context.write_version_word(0x0010_0006);
         assert_eq!(
             unsafe { board_version() },
             0,
             "a cached zero is not mistaken for the sentinel"
         );
+    }
+    static mut STORAGE_BACKEND_PIN_89_RESULT: u32 = 0;
+    static mut STORAGE_BACKEND_PIN_89_CALLS: u32 = 0;
+
+    unsafe extern "C" fn recording_storage_backend_pin_89_status() -> u32 {
+        STORAGE_BACKEND_PIN_89_CALLS += 1;
+        STORAGE_BACKEND_PIN_89_RESULT
+    }
+
+    struct StorageBackendStatusFixture {
+        _pin_status_guard: MutexGuard<'static, ()>,
+        _board_version: HostCachedBoardVersion,
+        previous_pin_status: StorageBackendPin89Status,
+    }
+
+    impl StorageBackendStatusFixture {
+        fn install(version_high: u32, pin_status: u32) -> StorageBackendStatusFixture {
+            let pin_status_guard = STORAGE_BACKEND_PIN_89_STATUS_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let board_version = install_host_cached_board_version(version_high << 16);
+            unsafe {
+                STORAGE_BACKEND_PIN_89_RESULT = pin_status;
+                STORAGE_BACKEND_PIN_89_CALLS = 0;
+                let previous_pin_status =
+                    core::ptr::addr_of!(STORAGE_BACKEND_PIN_89_STATUS).read_volatile();
+                core::ptr::addr_of_mut!(STORAGE_BACKEND_PIN_89_STATUS)
+                    .write_volatile(recording_storage_backend_pin_89_status);
+                StorageBackendStatusFixture {
+                    _pin_status_guard: pin_status_guard,
+                    _board_version: board_version,
+                    previous_pin_status,
+                }
+            }
+        }
+    }
+
+    impl Drop for StorageBackendStatusFixture {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STORAGE_BACKEND_PIN_89_STATUS)
+                    .write_volatile(self.previous_pin_status);
+            }
+        }
+    }
+
+    #[test]
+    fn storage_backend_status_classifies_all_board_generation_edges() {
+        for (version_high, expected, calls_tail) in [
+            (0, 0, false),
+            (1, 3, true),
+            (12, 3, true),
+            (13, 4, false),
+            (14, 0, false),
+            (15, 4, false),
+            (18, 4, false),
+            (19, 3, true),
+            (20, 4, false),
+            (21, 3, true),
+            (22, 0, false),
+            (u32::MAX, 0, false),
+        ] {
+            let _fixture = StorageBackendStatusFixture::install(version_high, 3);
+            assert_eq!(unsafe { storage_backend_status() }, expected, "{version_high}");
+            assert_eq!(
+                unsafe { STORAGE_BACKEND_PIN_89_CALLS },
+                calls_tail as u32,
+                "{version_high}: only the tail-branch cases call 0x082bc488"
+            );
+        }
     }
 
     struct DiagnosticsFixture {
