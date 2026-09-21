@@ -89,6 +89,28 @@ functions:
       entry and remains a fixed-address target seam; host tests verify mode,
       NULL callback, and forwarding for null/non-null table values and zero/
       u32::MAX contexts. Deliberate deviations: none.
+  - address: 0x082b14b0
+    ghidra: FUN_082b14b0
+    name: short_filename_byte_is_rejected
+    size: 52
+    sig: "u32 short_filename_byte_is_rejected(u32 byte)"
+    module: util/short_filename_byte_is_rejected
+    status: ported
+    renames:
+      param_1/r0: byte
+      DAT_082b14e4/r3: rejection_list
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte A32 body
+      0x082b14b0..0x082b14e3, with its literal pointer (0x08905994) at
+      0x082b14e4; 0x082b14e8 starts the next real function. Whole-image
+      aligned A32 branch decoding finds exactly three inbound plain
+      unconditional BL call sites (0x082e2cac, 0x082e2d0c, and 0x082e4ab4)
+      and zero inbound predicated BL forms. The body makes no BL calls. It
+      linearly scans from 0x08905994 through the NUL after adjacent `SQLite
+      format 3` bytes, returning one for 0x20, L, Q, S, 0x31..0x40, and
+      0x61..0xff; non-byte u32 values do not match. Deliberate deviation:
+      Rust represents the literal list with equivalent ranges and singleton
+      comparisons rather than dereferencing firmware storage.
   - address: 0x082d8e30
     ghidra: FUN_082d8e30
     name: pager_page_unlink
