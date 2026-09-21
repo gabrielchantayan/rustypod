@@ -8859,6 +8859,36 @@ functions:
       operator_new seam because it cannot guarantee a tail branch; its
       target-only section preserves the separately linked entry.
 
+  - address: 0x082a89e0
+    ghidra: FUN_082a89e0
+    name: lazy_string_tables_initialize
+    size: 152
+    sig: "void lazy_string_tables_initialize(void)"
+    module: cxx/lazy_string_tables_initialize
+    status: ported
+    vars:
+      DAT_082a8aa4/r6: lazy_string_tables_holder
+      DAT_082a8aa8: c_seed
+      DAT_082a8aac: empty_seed
+      FUN_082aadd4: operator_new
+      FUN_08266f34: opaque_string_table_construct
+      FUN_083d8ca0: cxx_string_assign_cstr
+    notes: >-
+      Raw osos.dec words establish the exact 152-byte extent
+      0x082a89e0..0x082a8a74: 0x082a8a78 is the next separately linked
+      function, while 0x082a8aa4..0x082a8aac is this function's literal
+      pool. The body has three plain unconditional BL calls (two to tag-2
+      operator_new @ 0x082aadd4, one each to the resident opaque table
+      constructor @ 0x08266f34 and COW-string assignment @ 0x083d8ca0 in
+      the loop) and zero predicated BL calls. Four direct callers are
+      recovered by Ghidra. When holder+16 is zero, it constructs 32-byte
+      tables from "C"/mode 2 and ""/mode 1, assigns the first source to five
+      four-byte slots, writes 0x3f0 to the second table+16, then publishes
+      the first at holder+16. The concrete identity of 0x08266f34 is not
+      established; target builds call its verified ABI directly and host
+      tests install exact seams. The port uses the existing operator_new
+      implementation rather than the retail direct BL.
+
   - address: 0x082a94d0
     ghidra: FUN_082a94d0
     name: shared_handle_owner_destroy
