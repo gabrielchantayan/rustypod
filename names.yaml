@@ -122393,3 +122393,35 @@ functions:
       INTERSECT, UNION, and EXCEPT. It selects UNION ALL for token 0x6b,
       INTERSECT for 0x6c, EXCEPT for 0x6d, and UNION otherwise. Deliberate
       deviations: none.
+
+  # --- JIT expression dependency-tail coverage check ---
+  - address: 0x083672e4
+    ghidra: FUN_083672e4
+    name: cg_dependency_tail_has_uncovered_mask
+    size: 116
+    sig: "i32 cg_dependency_tail_has_uncovered_mask(const u32 *rules, const u32 *context, i32 start_index, u32 identifier)"
+    module: codegen/dependency_tail_has_uncovered_mask
+    status: ported
+    renames:
+      param_1/r5: rules
+      param_2/r8: context
+      param_3/r4: start_index
+      param_4/r3: identifier
+      r6-r7: inverted_identifier_mask
+      "[rules+0x00]": rule_count
+      "[rules+0x0c]": expression_entries
+      "entry[index*3]": expression_node
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte all-code extent from
+      0x083672e4 through pop {r4-r8,pc} at 0x08367354; the next separately
+      entered function begins at 0x08367358. Complete aligned ARM B/BL
+      decoding finds three inbound plain unconditional BL callers at
+      0x082d7218, 0x082d7280, and 0x0836995c, with zero predicated BL
+      callers. The body has two unconditional BL calls, to the already
+      ported cg_dependency_mask_lookup (0x082d07f8) and
+      cg_expression_dependency_mask (0x082cda48). It obtains the
+      identifier's 64-bit dependency mask, scans signed-counted 12-byte
+      expression entries from start_index, and returns one upon finding a
+      mask bit absent from that initial mask; it returns zero after the
+      suffix has no such bit. Target pointers remain u32 words. Deliberate
+      deviations: none.
