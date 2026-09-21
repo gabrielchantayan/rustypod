@@ -16484,6 +16484,39 @@ functions:
       resolve to already-ported Rust functions. Host tests cover a successful
       sampled bit and the failed-write incoming-r3 result.
 
+  # --- Locked PCF50635 register-range read (drivers/i2c) ---
+  - address: 0x082e58b4
+    ghidra: FUN_082e58b4
+    name: pmu_i2c_read_locked
+    size: 60
+    sig: "i32 pmu_i2c_read_locked(u32 reg, u32 len, u8 *buf)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: len
+      param_3/r2: buf
+      uVar1/r4: status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d39c: pmu_i2c_read_checked
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x082e58b4..0x082e58f0: the
+      following push {r4,r5,r6,lr} starts the next real sibling. It acquires
+      semaphore 17 then 5, calls FUN_0836d39c(reg,len,buf), releases 5 then
+      17 unconditionally, and returns that status verbatim. The function has
+      five unconditional internal BL instructions and zero predicated forms.
+      Decoding every ARM B/BL word in osos.dec finds three inbound plain BL
+      call sites, 0x08094124, 0x08094148, and 0x08094158, with zero
+      predicated inbound BL forms. The Rust port preserves every operation's
+      order and the unconditional releases. Deliberate deviation: the five
+      retail direct BL calls become ordinary calls to their existing Rust
+      ports; the checked callee's tail branch is a Rust call and return. Host
+      tests cover valid transfer, bad-range no-transfer, wrapping arithmetic,
+      lock order, and error-path unlocks.
+
   # --- Mutexed PMU I2C register-block read (drivers/i2c) ---
   - address: 0x082e58f0
     ghidra: FUN_082e58f0
