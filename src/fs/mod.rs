@@ -82,6 +82,8 @@ pub mod volume_info;
 pub mod volume_seek;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.
 pub mod drive_slot;
+/// Four-slot filesystem drive-index validator @ 0x082e4b3c.
+pub mod drive_slot_index;
 /// Flushes a drive slot's pending metadata writes @ 0x082e149c.
 pub mod drive_slot_flush;
 /// Path prefix drive-index resolver @ 0x082c3000.

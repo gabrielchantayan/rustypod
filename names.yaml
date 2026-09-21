@@ -122678,3 +122678,22 @@ functions:
       relocated tail transfer; host tests use a callback seam. Ghidra's
       0x0834be0c body incorrectly absorbs the separately linked function
       beginning at 0x0834be3c.
+  - address: 0x082e4b3c
+    ghidra: FUN_082e4b3c
+    name: drive_slot_index_is_valid
+    size: 16
+    sig: "u32 drive_slot_index_is_valid(u32 index)"
+    module: fs/drive_slot_index
+    status: ported
+    renames:
+      param_1/r0: index
+      return/r0: is_valid
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte body
+      0x082e4b3c..0x082e4b4b: cmp r0,#4; movcc r0,#1; movcs r0,#0; bx lr.
+      The next independently entered function begins at 0x082e4b4c with
+      movs r2,r0. Whole-image ARM B/BL decoding finds exactly three inbound
+      plain BL calls at 0x082e0708, 0x082e07b0, and 0x082e37bc, with zero
+      predicated BL calls; the body has no outbound calls. It returns one for
+      unsigned indices 0 through 3 and zero for every other u32 value.
+      Deliberate deviations: none.
