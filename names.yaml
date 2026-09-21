@@ -12782,10 +12782,9 @@ functions:
       Fixed-id semaphore-release shim: `mov r0, #0x11; b 0x08037e10`
       (rom_sem_signal veneer -> ROM 0x220042b4), the r0 result word
       passing back through the tail branch. Semaphore 0x11 is
-      PMU_I2C_OUTER_SEM, the OUTER lock of the wait(0x11)/wait(5)
-      bracket around every raw PMU transfer; this shim is its release
-      half, mirror of kernel_sem17_wait @ 0x0806a4b0 (see drivers/i2c).
-      Extent verified: Ghidra's 8 bytes are correct - the next
+      the OUTER lock of the wait(0x11)/wait(5) bracket around every raw
+      PMU transfer (kernel_sem5_wait @ 0x0806a4a0 is the INNER lock; see
+      drivers/i2c). Extent verified: Ghidra's 8 bytes are correct - the next
       function's `push {r4, lr}` prologue starts at 0x0806460c. No data
       word in osos references 0x08064604 - the shim is never dispatched
       virtually. 31 call sites (binary-verified against osos.dec;
@@ -122757,3 +122756,75 @@ functions:
       through the ROM-kernel host seam. Host tests cover mismatches at every
       metadata position, a tail match, an absent lookup, and u32 refcount
       wraparound.
+  - address: 0x082e4218
+    ghidra: FUN_082e4218
+    name: record_commit
+    size: 152
+    sig: "u32 record_commit(u32 *record)"
+    module: app/record_commit
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1[0]: context
+      param_1[1]: descriptor
+      "[descriptor + 0x24]": state
+      FUN_082e0520: record_range_prepare
+      FUN_082e1378: record_selection_read
+      FUN_082e3d30: record_selection_clear
+      FUN_082e48bc: record_bind
+      FUN_082e18f8: record_selection_release
+      FUN_082e149c: record_finalize
+      FUN_082e406c: record_commit_report
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte body at
+      0x082e4218..0x082e42ac; the next real function begins at 0x082e42b0
+      with push {r4-r8,lr}. The body has five unconditional plain BL calls,
+      no predicated BL calls, and a tail branch to 0x082e149c. The three
+      inbound callers recovered from the raw direct-BL sites are
+      0x082e36a4, 0x082e41bc, and 0x082e48a4; all are plain BL forms, with
+      zero predicated forms. The port rejects signed descriptor state values
+      above one, reports code 8 on rejection or range-prepare failure, writes
+      byte 0xe5 at descriptor+0, then prepares, saves and clears selection,
+      binds, releases, and finalizes the record. The unported target calls
+      are fixed-address host seams; the finalizer intentionally takes no
+      argument because its first instruction overwrites the tail branch's
+      loaded r0 halfword. match.py exits 1 with the reviewed structural diff:
+      volatile seam loads become BLX calls and LLVM saves extra registers,
+      while preserving the condition branches, byte store, call order, and
+      final volatile halfword read.
+
+  - address: 0x082e4218
+    ghidra: FUN_082e4218
+    name: record_commit
+    size: 152
+    sig: "u32 record_commit(u32 *record)"
+    module: app/record_commit
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1[0]: context
+      param_1[1]: descriptor
+      "[descriptor + 0x24]": state
+      FUN_082e0520: record_range_prepare
+      FUN_082e1378: record_selection_read
+      FUN_082e3d30: record_selection_clear
+      FUN_082e48bc: record_bind
+      FUN_082e18f8: record_selection_release
+      FUN_082e149c: record_finalize
+      FUN_082e406c: record_commit_report
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte body at
+      0x082e4218..0x082e42ac; the next real function begins at 0x082e42b0
+      with push {r4-r8,lr}. The body has five unconditional plain BL calls,
+      no predicated BL calls, and a tail branch to 0x082e149c. Raw
+      disassembly confirms three inbound plain BL calls at 0x082e3670,
+      0x082e41c0, and 0x082e4884, with zero predicated forms. The port
+      rejects signed descriptor state values above one, reports code 8 on
+      rejection or range-prepare failure, writes byte 0xe5 at descriptor+0,
+      then prepares, saves and clears selection, binds, releases, and
+      finalizes the record. The unported target calls are fixed-address host
+      seams; the finalizer intentionally takes no argument because its first
+      instruction overwrites the tail branch's loaded r0 halfword. match.py
+      exits 1 with the reviewed structural diff: volatile seam loads become
+      BLX calls and LLVM saves extra registers, while preserving the condition
+      branches, byte store, call order, and final volatile halfword read.
