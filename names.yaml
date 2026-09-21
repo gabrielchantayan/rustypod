@@ -125303,3 +125303,41 @@ functions:
       remains an explicit boundary because its concrete collection type is
       unrecovered; Rust passes selector locals by address as the retail ABI
       does. Host tests cover the direct result and sentinel-triggered fallback.
+
+  # --- cached opaque font-descriptor resource ---
+  - address: 0x0829de34
+    ghidra: FUN_0829de34
+    name: font_descriptor_cached_resource
+    size: 144
+    sig: "u32 font_descriptor_cached_resource(FontDescriptorCache *descriptor, u16 variant, u32 scratch_first, u32 scratch_second)"
+    module: ui/font_descriptor_cached_resource
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      param_2/r1: variant
+      param_3/r2: scratch_first
+      param_4/r3: scratch_second
+      "descriptor+0x01": mode
+      "descriptor+0x04": backing
+      "descriptor+0x08": backing_argument
+      "descriptor+0x0c": cached_resource
+      FUN_0826b318: font_descriptor_resource_construct_unported
+      FUN_082750b8: font_descriptor_resource_register_unported
+      FUN_082756fc: font_descriptor_font_handle_unported
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte extent
+      0x0829de34..0x0829dec3: push {r2,r3,r4,lr}; the next independently
+      linked function starts at 0x0829dec4 with mov r0,#0x2600; bx lr.
+      Whole-image A32 decoding finds three incoming plain BL calls at
+      0x0808dca0, 0x0808dd30, and 0x08275354, with no predicated BL calls.
+      The body has three unconditional direct BL instructions. It returns a
+      nonzero +0x0c cached word immediately, likewise leaves a null +0x04
+      backing unchanged. Mode 0 constructs via 0x0826b318 selector zero;
+      mode 1 constructs with selector one then calls 0x082750b8; mode 2 calls
+      0x082756fc with a two-word stack output, backing+2, zero-extended r1,
+      and 0x80, then clears bit zero of the first returned word. Other modes
+      leave the cache unchanged. The three concrete callee identities remain
+      unrecovered, so target Rust calls their verified addresses and host tests
+      substitute role-based typed seams. match.py reports 55 Rust instructions
+      versus 36 stock instructions: volatile seam loads and the Rust frame
+      replace direct BLs and the original r2/r3 save pair.
