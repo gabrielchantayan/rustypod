@@ -122875,3 +122875,25 @@ functions:
       exits 1 with the reviewed structural diff: volatile seam loads become
       BLX calls and LLVM saves extra registers, while preserving the condition
       branches, byte store, call order, and final volatile halfword read.
+
+  - address: 0x082e2b2c
+    ghidra: FUN_082e2b2c
+    name: record_result_word
+    size: 8
+    sig: "u32 record_result_word(const RecordResultWord *record)"
+    module: app/record_result_word
+    status: ported
+    renames:
+      param_1/r0: record
+      "[record + 0x14]": result
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte body at
+      0x082e2b2c..0x082e2b30: ldr r0,[r0,#0x14]; bx lr. The next real
+      function begins at 0x082e2b34 with push {r4,r5,r6,lr}. Full-image ARM
+      decoding finds exactly three inbound direct BL calls, all unconditional
+      plain forms at 0x082e2938, 0x082e3530, and 0x082e4854; no predicated
+      BL forms target this function. The accessor returns the record's +0x14
+      result word with no validation. Callers compare it as a status value,
+      but its exact enum is unrecovered. match.py exits 1 with the reviewed
+      structural diff: LLVM adds a frame but retains the single +0x14 load
+      and return. Deliberate deviations: none.
