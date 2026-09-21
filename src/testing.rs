@@ -627,6 +627,10 @@ pub mod hints {
     // data fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const TWO_BUFFER_OWNER_RELEASE: usize = 0xcd00_0000;
+    // 0xce00_0000: dedicated to heap/bucket_chain_table's target-width
+    // bucket and linked-node fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const BUCKET_CHAIN_TABLE_DESTROY: usize = 0xce00_0000;
     // 0xc500_0000: dedicated to heap/three_buffer_owner_create's raw-u32
     // allocation fixture; mappings never unmap, so no other user may share
     // this hint.
