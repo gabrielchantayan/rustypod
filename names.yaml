@@ -124202,3 +124202,30 @@ functions:
       unported 0x082b39f8 helper remains a verified four-register seam;
       target builds invoke its address and host tests install a recording
       seam. Deliberate deviations: none.
+  - address: 0x082b2c94
+    ghidra: FUN_082b2c94
+    name: append_owned_pointer
+    size: 124
+    sig: "void append_owned_pointer(sqlite3 *db, void *owner, void *item)"
+    module: sqlite/append_owned_pointer
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1/r5: owner
+      param_3/r2/r9: item
+      param_2_plus_0x44: item_count
+      param_2_plus_0x48: items
+      FUN_083749bc: db_realloc
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte body
+      0x082b2c94..0x082b2d0f; push {r4-r6,lr} at 0x082b2d10 begins the next
+      independently linked function. The body has three outbound plain BL
+      instructions (db_realloc at 0x083749bc and tracked_free at 0x083906f4
+      twice) and no predicated BL instructions. It increments the signed
+      +0x44 item count before reallocating the +0x48 target-width pointer
+      array to `(old_count + 2) * 4`, appends item and a NULL sentinel on
+      success, and on failure releases each existing item, item, and the old
+      array before clearing both fields. The exact higher-level owner type is
+      not established; Rust deliberately uses a semantic raw target-layout
+      view rather than inventing one.

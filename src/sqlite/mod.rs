@@ -66,6 +66,7 @@
 //! their targets are readable C strings only at `+0xaed8`.
 
 pub mod api_exit;
+pub mod append_owned_pointer;
 pub mod aux_sweep;
 pub mod array_allocate;
 pub mod aggregate_context;
