@@ -1765,6 +1765,10 @@ pub mod hints {
     // target-width object, successor, and payload fixtures; mappings never
     // unmap, so no other user may share this hint.
     pub const OBJECT_HAS_RESOLVED_FLAG_0X40: usize = 0x7701_0000;
+    // 0x7702_0000: dedicated to app/resolve_successor_value's target-width
+    // successor, child, and value fixtures; mappings never unmap, so no other
+    // user may share this hint.
+    pub const RESOLVE_SUCCESSOR_VALUE: usize = 0x7702_0000;
     // 0x7800_0000: dedicated to util/object_selected_payload_index's
     // target-width object, descriptor, and payload fixture; mappings never
     // unmap, so no other user may share this hint.
