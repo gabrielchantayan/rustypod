@@ -51196,6 +51196,33 @@ functions:
       helper's identity; host tests verify literal slots, opaque extreme words,
       one call, and r0-result forwarding.
 
+  - address: 0x082ab288
+    ghidra: FUN_082ab288
+    name: cpp_array_allocate_without_header
+    size: 40
+    sig: "u32 *cpp_array_allocate_without_header(u32 element_size, u32 element_count, u32 element_initializer)"
+    module: runtime/cpp_array_allocate_without_header
+    status: ported
+    renames:
+      param_1: element_size
+      param_2: element_count
+      param_3: element_initializer
+      FUN_082ab400: cpp_array_allocate_helper_adapter
+      FUN_082b498c: unported_array_helper (existing PairHeaderElementArrayOps seam)
+    notes: >-
+      Raw ARM establishes the exact 40-byte extent 0x082ab288..0x082ab2b0;
+      0x082ab2b0 begins the next function. Decoding every aligned B/BL word
+      in osos.dec finds exactly three direct callers, all unconditional bl
+      and none predicated. The body forwards the ADS
+      (element_size, element_count, element_initializer) convention through
+      0x082ab400 into the unported 0x082b498c helper ABI as
+      (0, element_count, element_size, 0, 0, element_initializer, 0, 0, 0,
+      0, 0). The helper's pointer result survives pop {r3,pc}, so Ghidra's
+      void return is incorrect. The port uses the existing exact-ABI
+      PairHeaderElementArrayOps seam without inventing the helper's identity;
+      host tests verify literal slots, opaque extreme words, one call, and
+      r0-result forwarding.
+
   - address: 0x082ab398
     ghidra: FUN_082ab398
     name: pair_header_grand_base_reset
