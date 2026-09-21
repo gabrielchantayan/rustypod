@@ -86034,6 +86034,24 @@ functions:
       0x4b6143ff literal pool word; differs only by the crate fp frame
       and register allocation, the accepted house profile.
 
+  - address: 0x082dafdc
+    ghidra: FUN_082dafdc
+    name: signal_object_51
+    size: 8
+    sig: "u32 signal_object_51(void)"
+    module: kernel/signal_object_51
+    status: ported
+    notes: >-
+      Raw words 0xe3a00033 (`mov r0,#0x33`) and 0xeaf573a4 (`b
+      0x08037e78`) make this an 8-byte fixed-id tail wrapper: it signals
+      kernel object 51 through the recovered signal gateway and forwards its
+      status word. The next real function begins at 0x082dafe4. Every ARM
+      B/BL decode found exactly three direct call sites: one plain bl at
+      0x081e63c8 plus blne at 0x081e6458 and 0x081e647c. Rust deliberately
+      calls gateway_signal_object rather than emitting the ARM tail branch,
+      preserving the observable fixed id and returned status on both target
+      and host.
+
   - address: 0x082f5364
     ghidra: FUN_082f5364
     name: inline_encoded_word_block_compare

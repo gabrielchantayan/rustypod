@@ -29,6 +29,7 @@ pub mod resource_op;
 pub mod sync_mutex;
 pub mod sync_sem;
 pub mod task;
+pub mod signal_object_51;
 pub mod task_local;
 pub mod task_delay;
 pub mod task_priority;
