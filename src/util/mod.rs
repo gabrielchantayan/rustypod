@@ -137,6 +137,7 @@ pub mod object_release_slot1;
 pub mod obfuscated_buffer_prepare;
 pub mod xor_index_key;
 pub mod object_word_payload_resolve;
+pub mod object_word_payload_dispatch;
 pub mod object_candidate_payload_resolve;
 pub mod object_validation_status;
 pub mod object_type_tag_is_recognized;

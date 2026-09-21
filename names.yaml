@@ -125458,3 +125458,35 @@ functions:
       object's byte at +0x4 and returns one precisely when bit 0 is clear.
       The concrete object type is unrecovered, so the name preserves the
       verified field offset and predicate. Deliberate deviations: none.
+
+  # --- object payload operation dispatch ---
+  - address: 0x0829b734
+    ghidra: FUN_0829b734
+    name: object_word_payload_dispatch
+    size: 48
+    sig: "u32 object_word_payload_dispatch(u32 *object, u32 discarded_arg1, u32 operation_arg2, u32 operation_arg3)"
+    module: util/object_word_payload_dispatch
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: discarded_arg1
+      r2: operation_arg2
+      r3: operation_arg3
+      "object payload word 1": operation_key
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte A32 extent from 0x0829b734
+      through 0x0829b760; the next separately linked function starts with
+      push {r4,r5,r6,r7,lr} at 0x0829b764. Whole-image aligned A32
+      branch-immediate decoding finds three inbound plain BL calls at
+      0x08127100, 0x081271f8, and 0x08127e20, with zero predicated inbound BL
+      forms. The body contains three unconditional direct BL instructions:
+      object_word_payload_resolve (0x0829b490), the four-word copy helper
+      (0x08158c94), and unported 0x081404b4. It resolves the object's
+      four-word payload into a stack record, copies it to a second stack
+      record, then passes payload word 1 as the operation key and the first
+      record's address in r1 to 0x081404b4; incoming r2/r3 pass through,
+      while incoming r1 is overwritten. The dispatcher has no recovered
+      semantic identity and remains a target-address host-test seam. Rust's
+      aligned [u32; 4] local replaces the two overlapping stack records
+      without changing their observable contents; no target semantic
+      deviations.
