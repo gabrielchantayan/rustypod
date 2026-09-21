@@ -122898,6 +122898,38 @@ functions:
       structural diff: LLVM adds a frame but retains the single +0x14 load
       and return. Deliberate deviations: none.
 
+  - address: 0x082e2594
+    ghidra: FUN_082e2594
+    name: decoder_range_segments
+    size: 220
+    sig: "DecoderRangeSegment *decoder_range_segments(u32 index, DecoderState *state)"
+    module: h264/range_segments
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: state
+      DAT_000001ce: segment_shift_table
+      FUN_082e1378: decoder_initial_position
+      FUN_082e1d98: decoder_next_range
+      FUN_0802edec: realloc
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec establishes the exact 220-byte extent
+      0x082e2594..0x082e2670: the aligned word at 0x082e2670 is literal
+      0x000001ce, and the next independently linked function begins at
+      0x082e2674 with push {r4-r10,lr}. The body contains exactly three
+      unconditional plain BL instructions (0x082e1378, 0x082e1d98, and
+      realloc @ 0x0802edec) plus one predicated BLNE free @ 0x0802edc8.
+      It calculates ceil(state[+0x1c] / 2^(shift_table[index]+9)), obtains
+      successive ranges through the unported decoder helpers, and grows an
+      eight-byte {start,length} list ending in {0,0}; decoder failure frees
+      a partial list, while realloc failure returns NULL. The helpers have
+      no established identity beyond these recovered ABIs, so target builds
+      call their verified fixed addresses and host tests use replaceable
+      seams. realloc/free are direct ports. match.py reports the expected
+      structural divergence from retained helper/host allocation seams
+      (102 Rust instructions versus 55 retail instructions).
+
   # --- Fixed-width packet record initialization ---
   - address: 0x082e2674
     ghidra: FUN_082e2674
