@@ -1013,6 +1013,101 @@ pub unsafe extern "C" fn video_engine_set_control_value(control: u32, value: u32
         set_control_value(engine, control, value);
     }
 }
+/// Firmware entry of the video-engine instance setter (`FUN_08252d4c`,
+/// unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_SET_INSTANCE_ADDR: usize = 0x0825_2d4c;
+
+/// Firmware entry of the primary frame-source setter (`FUN_08251dd4`,
+/// unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_SET_PRIMARY_SOURCE_ADDR: usize = 0x0825_1dd4;
+
+/// Firmware entry of the secondary frame-source setter (`FUN_08251ea4`,
+/// unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_SET_SECONDARY_SOURCE_ADDR: usize = 0x0825_1ea4;
+
+type VideoEngineSetInstance = unsafe extern "C" fn(*mut u8);
+type VideoEngineSetSource = unsafe extern "C" fn(*mut u8, *mut u8);
+
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_SET_INSTANCE: Option<VideoEngineSetInstance> = None;
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_SET_PRIMARY_SOURCE: Option<VideoEngineSetSource> = None;
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_SET_SECONDARY_SOURCE: Option<VideoEngineSetSource> = None;
+
+#[cfg(not(target_os = "none"))]
+unsafe fn set_mock_video_engine_installers(
+    set_instance: Option<VideoEngineSetInstance>,
+    set_primary_source: Option<VideoEngineSetSource>,
+    set_secondary_source: Option<VideoEngineSetSource>,
+) {
+    core::ptr::addr_of_mut!(MOCK_SET_INSTANCE).write(set_instance);
+    core::ptr::addr_of_mut!(MOCK_SET_PRIMARY_SOURCE).write(set_primary_source);
+    core::ptr::addr_of_mut!(MOCK_SET_SECONDARY_SOURCE).write(set_secondary_source);
+}
+
+#[inline]
+unsafe fn set_video_engine_instance(engine: *mut u8) {
+    #[cfg(target_arch = "arm")]
+    core::mem::transmute::<usize, VideoEngineSetInstance>(VIDEO_ENGINE_SET_INSTANCE_ADDR)(engine);
+    #[cfg(not(target_arch = "arm"))]
+    core::ptr::read_volatile(core::ptr::addr_of!(MOCK_SET_INSTANCE))
+        .expect("video-engine instance setter must be installed")(engine);
+}
+
+#[inline]
+unsafe fn set_video_engine_primary_source(engine: *mut u8, source: *mut u8) {
+    #[cfg(target_arch = "arm")]
+    core::mem::transmute::<usize, VideoEngineSetSource>(VIDEO_ENGINE_SET_PRIMARY_SOURCE_ADDR)(engine, source);
+    #[cfg(not(target_arch = "arm"))]
+    core::ptr::read_volatile(core::ptr::addr_of!(MOCK_SET_PRIMARY_SOURCE))
+        .expect("video-engine primary-source setter must be installed")(engine, source);
+}
+
+#[inline]
+unsafe fn set_video_engine_secondary_source(engine: *mut u8, source: *mut u8) {
+    #[cfg(target_arch = "arm")]
+    core::mem::transmute::<usize, VideoEngineSetSource>(VIDEO_ENGINE_SET_SECONDARY_SOURCE_ADDR)(engine, source);
+    #[cfg(not(target_arch = "arm"))]
+    core::ptr::read_volatile(core::ptr::addr_of!(MOCK_SET_SECONDARY_SOURCE))
+        .expect("video-engine secondary-source setter must be installed")(engine, source);
+}
+
+/// video_engine_install — retailOS `FUN_082cb038` @ **0x082cb038** (64 bytes,
+/// `0x082cb038..0x082cb077`; the next independently linked function begins at
+/// `0x082cb078`). A complete B/BL-immediate decode finds three direct inbound
+/// plain `bl` calls, no predicated inbound `bl` calls, and three unconditional
+/// outbound `bl` calls.
+///
+/// Installs `engine` as the global video-engine instance, then, only when it is
+/// non-NULL, sets its primary and secondary frame sources. `context` occupies
+/// r0 but the raw body never reads it; the function returns one unconditionally.
+///
+/// # Deliberate deviations
+///
+/// The three callees are not independently ported. Target builds transfer to
+/// their resident firmware entries; host tests install recording seams. The
+/// seams preserve the raw call order and the unconditional instance-setter
+/// call, including for a NULL engine.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_install(
+    _context: *mut u8,
+    primary_source: *mut u8,
+    secondary_source: *mut u8,
+    engine: *mut u8,
+) -> u32 {
+    set_video_engine_instance(engine);
+    if !engine.is_null() {
+        set_video_engine_primary_source(engine, primary_source);
+        set_video_engine_secondary_source(engine, secondary_source);
+    }
+    1
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1870,6 +1965,83 @@ mod tests {
             }
             set_mock_instance(ptr::null_mut());
             set_mock_set_control_value(None);
+        }
+    }
+    static mut INSTALL_CALLS: [Option<(*mut u8, *mut u8)>; 3] = [None; 3];
+    static mut INSTALL_CALL_COUNT: usize = 0;
+
+    unsafe fn record_install_call(engine: *mut u8, source: *mut u8) {
+        INSTALL_CALLS[INSTALL_CALL_COUNT] = Some((engine, source));
+        INSTALL_CALL_COUNT += 1;
+    }
+
+    unsafe extern "C" fn record_instance_set(engine: *mut u8) {
+        record_install_call(engine, ptr::null_mut());
+    }
+
+    unsafe extern "C" fn record_primary_source_set(engine: *mut u8, source: *mut u8) {
+        record_install_call(engine, source);
+    }
+
+    unsafe extern "C" fn record_secondary_source_set(engine: *mut u8, source: *mut u8) {
+        record_install_call(engine, source);
+    }
+
+    #[test]
+    fn install_sets_instance_before_non_null_sources_and_ignores_context() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        let mut primary = [0u8; 16];
+        let mut secondary = [0u8; 16];
+        unsafe {
+            INSTALL_CALLS = [None; 3];
+            INSTALL_CALL_COUNT = 0;
+            set_mock_video_engine_installers(
+                Some(record_instance_set),
+                Some(record_primary_source_set),
+                Some(record_secondary_source_set),
+            );
+            assert_eq!(
+                video_engine_install(
+                    0xfeed_c0deusize as *mut u8,
+                    primary.as_mut_ptr(),
+                    secondary.as_mut_ptr(),
+                    engine.as_mut_ptr(),
+                ),
+                1
+            );
+            assert_eq!(INSTALL_CALL_COUNT, 3);
+            assert_eq!(
+                INSTALL_CALLS,
+                [
+                    Some((engine.as_mut_ptr(), ptr::null_mut())),
+                    Some((engine.as_mut_ptr(), primary.as_mut_ptr())),
+                    Some((engine.as_mut_ptr(), secondary.as_mut_ptr())),
+                ]
+            );
+            set_mock_video_engine_installers(None, None, None);
+        }
+    }
+
+    #[test]
+    fn install_null_engine_only_sets_the_global_instance() {
+        let _guard = LOCK.lock();
+        unsafe {
+            INSTALL_CALLS = [None; 3];
+            INSTALL_CALL_COUNT = 0;
+            set_mock_video_engine_installers(Some(record_instance_set), None, None);
+            assert_eq!(
+                video_engine_install(
+                    ptr::null_mut(),
+                    0xffff_ffffusize as *mut u8,
+                    1usize as *mut u8,
+                    ptr::null_mut(),
+                ),
+                1
+            );
+            assert_eq!(INSTALL_CALL_COUNT, 1);
+            assert_eq!(INSTALL_CALLS[0], Some((ptr::null_mut(), ptr::null_mut())));
+            set_mock_video_engine_installers(None, None, None);
         }
     }
 }

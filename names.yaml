@@ -123691,3 +123691,33 @@ functions:
       FUN_0824e0c0 remains resident on target; host builds reproduce only its
       verified stores. Tests cover NULL-session no-op, word preservation, and
       the helper's non-register field order.
+  - address: 0x082cb038
+    ghidra: FUN_082cb038
+    name: video_engine_install
+    size: 64
+    sig: "u32 video_engine_install(void *context, void *primary_source, void *secondary_source, void *engine)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1/r5: primary_source
+      param_3/r2/r6: secondary_source
+      param_4/r3/r4: engine
+      FUN_08252d4c: video_engine_set_instance
+      FUN_08251dd4: video_engine_set_primary_source
+      FUN_08251ea4: video_engine_set_secondary_source
+    notes: >-
+      Raw osos.dec words e92d4070 e1a06002 e1a05001 e1a04003 e1a00003
+      ebfe1f3e e3540000 0a000005 e1a01005 e1a00004 ebfe1b5b e1a01006
+      e1a00004 ebfe1b8c e3a00001 e8bd8070 establish the exact 64-byte body
+      0x082cb038..0x082cb077: install engine through 0x08252d4c; when engine
+      is non-NULL, set primary and secondary sources through 0x08251dd4 and
+      0x08251ea4; return one. The push at 0x082cb078 is the next independent
+      function boundary. Whole-image A32 decoding finds three direct inbound
+      plain BL calls (0x0825be68, 0x08295a8c, and 0x08295bb8), zero predicated
+      inbound BL calls, and three unconditional outbound BL calls. Target
+      builds call the three resident unported helpers; host recording seams
+      verify the unconditional instance call, NULL short circuit, argument
+      order, and constant return. match.py confirms the stack frame, NULL
+      branch, three helper transfers, and return-one structure; LLVM uses
+      indirect BLX calls for the resident function-address seams.
