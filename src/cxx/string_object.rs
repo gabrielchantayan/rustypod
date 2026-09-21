@@ -450,6 +450,17 @@ pub struct StringRecordWithStringAt0x0c {
     /// +0x0c on ARM.
     pub string: StringObject,
 }
+/// The decoded prefix of an otherwise unidentified record whose sixth word
+/// is a [`StringObject`]. On ARM this places `string` at +0x14; the wider host
+/// pointer fields are deliberately separated by named fields.
+#[repr(C)]
+pub struct StringRecordWithStringAt0x14 {
+    /// Undecoded leading ARM words at +0x00 through +0x10.
+    pub header: [usize; 5],
+    /// +0x14 on ARM.
+    pub string: StringObject,
+}
+
 
 /// Original load address of the outer vtable planted by
 /// [`string_owner_destroy`] (literal-pool word @ 0x0820bf20).
@@ -1944,6 +1955,26 @@ pub unsafe extern "C" fn string_record_string_at_0x0c_c_str(
 ) -> *const u8 {
     string_object_c_str(&(*record).string)
 }
+/// string_record_string_at_0x14_c_str — original: `FUN_0829b198` @
+/// 0x0829b198 (8 bytes; **3 direct `bl` call sites**, all unconditional and
+/// zero predicated, binary-scanned: 0x08127168, 0x081271a0, and 0x08299ad4).
+///
+/// Raw ARM is `add r0,r0,#0x14; b 0x082a50b0`; the next independently linked
+/// function starts at 0x0829b1a0. It tail-returns the NULL-safe C string of
+/// the embedded [`StringObject`] at record +0x14 (whose payload is at +0x18).
+/// The record's identity remains unknown, so the type models only its five
+/// leading words and accessed member. No NULL guard exists: the tail target
+/// dereferences the shifted pointer.
+///
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_record_string_at_0x14_c_str(
+    record: *const StringRecordWithStringAt0x14,
+) -> *const u8 {
+    string_object_c_str(&(*record).string)
+}
+
 /// primary_string_record_assign_from_string_object — original:
 /// `FUN_0826bcf0` @ 0x0826bcf0 (32 bytes; **6 direct `bl` call sites**,
 /// all unconditional and zero predicated, binary-scanned: 0x0811850c,
@@ -3878,6 +3909,28 @@ pub(crate) mod tests {
             );
             record.string.payload = core::ptr::null_mut();
             let fallback = string_record_string_at_0x0c_c_str(&record);
+            assert!(!fallback.is_null());
+            assert_eq!(fallback.read(), 0);
+        }
+    }
+
+    #[test]
+    fn string_record_string_at_0x14_accessor_uses_embedded_string() {
+        let mut text = *b"value\0";
+        let mut record = StringRecordWithStringAt0x14 {
+            header: [0x11, 0x22, 0x33, 0x44, 0x55],
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: text.as_mut_ptr(),
+            },
+        };
+        unsafe {
+            assert_eq!(
+                string_record_string_at_0x14_c_str(&record),
+                text.as_ptr(),
+            );
+            record.string.payload = core::ptr::null_mut();
+            let fallback = string_record_string_at_0x14_c_str(&record);
             assert!(!fallback.is_null());
             assert_eq!(fallback.read(), 0);
         }
