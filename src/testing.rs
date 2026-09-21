@@ -1830,6 +1830,9 @@ pub mod hints {
     // stream and packed range-table fixture; mappings never unmap, so no
     // other test may share this hint.
     pub const DECODER_RANGE_LOOKUP: usize = 0x81e0_0000;
+    // 0x81f0_0000: dedicated to app/linked_list_merge_by_word_4's
+    // target-width intrusive-node fixture; mappings never unmap.
+    pub const LINKED_LIST_MERGE_BY_WORD_4: usize = 0x81f0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
