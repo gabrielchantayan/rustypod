@@ -125597,3 +125597,24 @@ functions:
       because its raw body is only ldr r0,[r0,#8]; bx lr, avoiding an
       unverified callee seam. Host tests cover a selected singleton,
       normal all-entry range, and the empty-list underflow.
+
+  - address: 0x08298848
+    ghidra: FUN_08298848
+    name: u32_deref
+    size: 8
+    sig: "u32 u32_deref(const u32 *word)"
+    module: util/u32_deref
+    status: ported
+    renames:
+      param_1/r0: word
+      "*word/r0": value
+    notes: >-
+      Raw osos.dec words e5900000 e12fff1e establish the exact two-instruction
+      A32 body 0x08298848..0x0829884f: ldr r0,[r0]; bx lr. The next
+      independently entered function begins at 0x08298850 with push {r4,lr}.
+      Whole-image A32 decoding identifies three inbound plain BL call sites,
+      zero predicated inbound BL forms, and no internal calls. It returns the
+      aligned u32 at word with no NULL guard. match.py reports the expected
+      LLVM frame prologue and epilogue around the same ldr r0,[r0] operation.
+      Deliberate deviations: none.
+

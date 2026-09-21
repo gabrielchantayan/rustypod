@@ -247,6 +247,7 @@ pub mod expand_u32_pair_to_u64_pair;
 pub mod expand_byte_pair;
 pub mod u32_indirect_equal;
 pub mod u32_deref_equal;
+pub mod u32_deref;
 pub mod u32_deref_is_max;
 pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
