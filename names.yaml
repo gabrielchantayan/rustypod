@@ -125668,3 +125668,33 @@ functions:
       seam only represents target-width pointer production for the vector
       callback and trailing range; device builds perform the recovered
       vtable dispatch directly.
+
+  - address: 0x08297df8
+    ghidra: FUN_08297df8
+    name: heap_string_assign_suffix
+    size: 60
+    sig: "void heap_string_assign_suffix(HeapString *destination, const HeapString *source, u32 suffix_len)"
+    module: cxx/heap_string
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: suffix_len
+      "*destination/r3": destination_data
+      "*source/r1": source_data
+      FUN_0810b568: heap_string_assign_from_buffer
+    notes: >-
+      Raw osos.dec establishes the true 60-byte A32 extent at
+      0x08297df8..0x08297e30: the next independently entered function starts
+      at 0x08297e34 with `ldr r0,[r0]; bx lr`. Ghidra's 160-byte extent
+      incorrectly absorbs that accessor and later code. Complete aligned ARM
+      B/BL decoding finds exactly three inbound direct calls, all unconditional
+      plain BL at 0x08113324, 0x08113388, and 0x081a3628; no predicated BL
+      forms target this entry. The body has no BL and tail-branches to the
+      verified assign-from-buffer target at 0x0810b568 after clearing the
+      destination, NULL-checking source data, scanning to its NUL, and
+      clamping suffix_len to the source byte length with an unsigned compare.
+      It copies the final suffix_len bytes; zero selects empty and an oversized
+      length selects the whole source. Rust delegates the equivalent selected
+      NUL-terminated suffix to the already ported assign-from-cstr routine,
+      rather than creating a speculative seam for the unported tail target.

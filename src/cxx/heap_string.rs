@@ -201,6 +201,42 @@ pub unsafe extern "C" fn heap_string_construct_from_cstr(
 
 
 
+/// heap_string_assign_suffix — original: `FUN_08297df8` @ 0x08297df8
+/// (60 bytes, 0x08297df8..0x08297e30). The next independently entered
+/// function begins at 0x08297e34 with `ldr r0,[r0]; bx lr`; Ghidra's
+/// 160-byte extent absorbs this accessor and later code. **Three inbound
+/// plain `bl` call sites (0x08113324, 0x08113388, 0x081a3628), zero
+/// predicated `bl` forms; the body has zero `bl` instructions and one
+/// unconditional tail `b`**, verified by decoding raw `osos.dec` words.
+///
+/// Clears `destination.data`, then reads `source.data`. A NULL source returns
+/// with destination empty. Otherwise it scans to the NUL, clamps `suffix_len`
+/// to that byte length with the ARM unsigned comparison, and tail-branches to
+/// assign-from-buffer at 0x0810b568 with the final `suffix_len` bytes. That
+/// suffix is copied. Thus zero selects an empty suffix, while a length at
+/// least the source length selects the entire source.
+/// Deliberate deviation: the raw tail branch is expressed through the ported
+/// [`heap_string_assign_from_cstr`] equivalent. After clamping, the selected
+/// suffix is NUL-terminated, so that routine's allocation and copy behavior
+/// is identical to the stock assign-from-buffer target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_assign_suffix(
+    destination: *mut HeapString,
+    source: *const HeapString,
+    suffix_len: u32,
+) {
+    (*destination).data = core::ptr::null_mut();
+    let source_data = (*source).data;
+    if source_data.is_null() {
+        return;
+    }
+
+    let source_len = strlen_safe(source_data);
+    let suffix_len = core::cmp::min(suffix_len as usize, source_len);
+    heap_string_assign_from_cstr(destination, source_data.add(source_len - suffix_len));
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -299,6 +335,54 @@ mod tests {
     }
 
 
+    /// The suffix selection clamps an oversized count, leaves no stale
+    /// destination allocation, and routes the selected tail through the
+    /// assign-from-buffer-equivalent allocation path.
+    #[test]
+    fn assign_suffix_clamps_and_replaces_destination() {
+        let _heap = mock_heap();
+        let mut source_data = *b"OTGPlaylistInfo\0";
+        let source = HeapString {
+            data: source_data.as_mut_ptr(),
+        };
+        let mut output = [0u8; 16];
+        set_alloc_ret(output.as_mut_ptr());
+        let mut destination = HeapString {
+            data: 0xdead_beefusize as *mut u8,
+        };
+
+        unsafe { heap_string_assign_suffix(&mut destination, &source, 4) };
+
+        assert_eq!(destination.data, output.as_mut_ptr());
+        assert_eq!(&output[..5], b"Info\0");
+        assert_eq!(realloc_log(), (1, core::ptr::null_mut(), 5, HEAP_STRING_PAYLOAD_FREE_TAG, 0));
+        assert_eq!(free_log().0, 0);
+
+        set_alloc_ret(output.as_mut_ptr());
+        unsafe { heap_string_assign_suffix(&mut destination, &source, u32::MAX) };
+        assert_eq!(destination.data, output.as_mut_ptr());
+        assert_eq!(&output[..16], b"OTGPlaylistInfo\0");
+        assert_eq!(realloc_log(), (2, core::ptr::null_mut(), 16, HEAP_STRING_PAYLOAD_FREE_TAG, 0));
+    }
+
+    /// A NULL source is observed after destination clearing, so it cannot
+    /// retain the old payload or enter either heap path.
+    #[test]
+    fn assign_suffix_null_source_clears_without_heap_call() {
+        let _heap = mock_heap();
+        let source = HeapString {
+            data: core::ptr::null_mut(),
+        };
+        let mut destination = HeapString {
+            data: 0xdead_beefusize as *mut u8,
+        };
+
+        unsafe { heap_string_assign_suffix(&mut destination, &source, 0) };
+
+        assert!(destination.data.is_null());
+        assert_eq!(realloc_log().0, 0);
+        assert_eq!(free_log().0, 0);
+    }
     /// Returns the payload pointer unchanged for a live holder.
     #[test]
     fn returns_payload_word() {
