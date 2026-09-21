@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e38b4
+    ghidra: FUN_082e38b4
+    name: dos_wildcard_match_including_deleted
+    size: 320
+    sig: "u32 dos_wildcard_match_including_deleted(u8 *pattern, const u8 *candidate, u32 wildcards_enabled)"
+    module: util/dos_wildcard_match_including_deleted
+    status: ported
+    renames:
+      param_1/r0: pattern
+      param_2/r1: candidate
+      param_3/r2: wildcards_enabled
+      FUN_082e0180: ascii_upper
+    notes: >-
+      Raw ARM establishes the true extent as 0x082e38b4..0x082e39f4 (320
+      bytes), not Ghidra's 8-byte entry stub: mov r3,#1 falls through to the
+      shared matcher at 0x082e38bc and push {r3-r11,lr} at 0x082e39f4 starts
+      the next function. Three inbound plain bl call sites and zero
+      predicated forms were independently decoded. The body has four direct
+      plain bl instructions (two recursive entry calls and two calls to
+      FUN_082e0180), zero predicated. It normalizes mutable *.* to *, folds
+      ASCII lowercase, and implements ? and * only when wildcards_enabled is
+      nonzero; r3=1 deliberately includes FAT deleted (0xe5) candidates.
+      Rust inlines the verified FUN_082e0180 ASCII fold rather than creating
+      an unproven callee seam.
   - address: 0x08324364
     ghidra: FUN_08324364
     name: hmac_digest_20
