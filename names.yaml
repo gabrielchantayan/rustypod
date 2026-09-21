@@ -31968,6 +31968,44 @@ functions:
       direct c_str, UTF-8 comparison, inverted boolean and NULL-payload path
       without dereferencing an unmapped firmware address.
 
+  - address: 0x082a21b8
+    ghidra: FUN_082a21b8
+    name: string_object_path_basename
+    size: 172
+    sig: "void string_object_path_basename(StringObject *out, const void *context, const StringObject *source, u32 unused)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r7: out
+      param_2/r1: context_unused
+      param_3/r2/r6: source
+      param_4/r3: unused
+      local_18/sp: cursor
+      r4: codepoint_index
+      r5: last_separator_index
+      FUN_082a50b0: string_object_c_str
+      FUN_08276214: utf8_next_codepoint
+      FUN_08276288: utf8_prev_codepoint
+      FUN_082773e0: string_object_copy_construct
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082a52e8: string_object_suffix
+    notes: >-
+      Raw osos.dec establishes the exact 172-byte extent
+      0x082a21b8..0x082a2260; the next independently linked function begins at
+      0x082a2264. The body has seven unconditional plain bl instructions
+      (c_str, next twice, prev, copy-construct, count, suffix) and zero
+      predicated bl instructions. Whole-image decoding finds exactly three
+      direct inbound plain-bl sites, at 0x081789e4, 0x08178d00, and
+      0x08178dd0. It decodes source through the NULL-safe c_str accessor,
+      records the final unescaped '\\', '/', or ':' codepoint, and treats '#'
+      plus a following '\\', '/', or '#' as an escaped pair. A '#' before any
+      other codepoint invokes the previous decoder to restore that codepoint
+      for normal scanning. With no separator it copy-constructs out; otherwise
+      it computes source's codepoint count from the raw payload and calls the
+      existing suffix port for count-minus-separator-index codepoints. The
+      r1 and r3 ABI arguments are unused. No deliberate deviations; all seven
+      callees were already ported and are called directly. Host tests cover
+      escaped versus unescaped separators and a multibyte final component.
   - address: 0x082a50b0
     ghidra: FUN_082a50b0
     name: string_object_c_str
