@@ -125569,3 +125569,31 @@ functions:
       Ghidra folds the tail call and shows the equivalent direct expression.
       Deliberate deviation: the recovered tail target is inlined rather than
       exposed as a separate Rust seam.
+  - address: 0x08299700
+    ghidra: FUN_08299700
+    name: selected_or_all_entry_range
+    size: 56
+    sig: "void selected_or_all_entry_range(const u32 *owner, u32 *first, u32 *last)"
+    module: util/selected_or_all_entry_range
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: first
+      param_3/r2: last
+      "owner+0xf4": selected_index
+      "owner+0xbc": entry_list
+      FUN_08299d78: entry_list_count
+    notes: >-
+      Raw words e92d4010 e1a04002 e59020f4 e3720001 15812000
+      159000f4 1a000004 e3a02000 e5812000 e59000bc eb000192
+      e2400001 e5840000 e8bd8010 establish the 56-byte A32 extent
+      0x08299700..0x08299737; the next separately linked function begins
+      at 0x08299738. The body has one unconditional outbound BL to
+      FUN_08299d78 and no predicated outbound BL forms. Whole-image A32
+      branch decoding identifies three inbound plain BL calls and no
+      predicated forms. A non-sentinel selected index is returned as both
+      bounds; otherwise the bounds are zero and entry-list word +8 minus
+      one, wrapping for an empty list. The Rust port inlines FUN_08299d78
+      because its raw body is only ldr r0,[r0,#8]; bx lr, avoiding an
+      unverified callee seam. Host tests cover a selected singleton,
+      normal all-entry range, and the empty-list underflow.

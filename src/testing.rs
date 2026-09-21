@@ -1931,6 +1931,9 @@ pub mod hints {
     // 0x8230_0000: dedicated to util/object_record_at's target-width object
     // and eight-byte record-table fixture; mappings never unmap.
     pub const OBJECT_RECORD_AT: usize = 0x8230_0000;
+    // 0x8240_0000: dedicated to util/selected_or_all_entry_range's
+    // target-width owner and entry-list fixture; mappings never unmap.
+    pub const SELECTED_OR_ALL_ENTRY_RANGE: usize = 0x8240_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
