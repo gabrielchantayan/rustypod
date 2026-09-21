@@ -20,6 +20,9 @@ pub mod arm_immediate_rotation;
 /// `cg_wait_and_dispatch` @ 0x082bcd2c — waits for either availability
 /// predicate, then performs the target callback dispatch.
 pub mod availability_dispatch;
+/// `cg_first_availability` @ 0x082bcf38 — checks the first code-generator
+/// availability condition and feeds the dispatch wait loop.
+pub mod first_availability;
 /// `cg_exp_golomb_ue_read` @ 0x082c5df0 — the H.264 decoder's `ue(v)`
 /// Exp-Golomb reader. Not IR either, but it sits inside the JIT's
 /// address block (0x082c5dxx), one function away from `se(v)` @

@@ -13,10 +13,11 @@
 //! `+0x08` callback with the state payload, and returns its optional `+0x24`
 //! callback's result for `dispatch_arg`.
 //!
-//! Deliberate deviations: the three unported predicates/setup gate remain
-//! literal retailOS veneers on ARM and host callback seams. Host callback
-//! targets use native-width function pointers, while firmware accesses the
-//! verified target-width words at `+0x08` and `+0x24`.
+//! Deliberate deviations: the unported second predicate and setup gate remain
+//! literal retailOS veneers on ARM and host callback seams. The first
+//! predicate is the direct Rust port at `0x082bcf38`. Host callback targets
+//! use native-width function pointers, while firmware accesses the verified
+//! target-width words at `+0x08` and `+0x24`.
 
 use core::ptr;
 
@@ -49,7 +50,6 @@ pub static mut CG_DISPATCH_SETUP: SetupGate = setup_ok;
 
 #[cfg(target_arch = "arm")]
 extern "C" {
-    fn retail_cg_first_availability() -> u32;
     fn retail_cg_second_availability() -> u32;
     fn retail_cg_dispatch_setup() -> u32;
 }
@@ -59,16 +59,16 @@ unsafe fn retail_cg_first_availability() -> u32 { ptr::read_volatile(ptr::addr_o
 unsafe fn retail_cg_second_availability() -> u32 { ptr::read_volatile(ptr::addr_of!(CG_SECOND_AVAILABILITY))() }
 #[cfg(not(target_arch = "arm"))]
 unsafe fn retail_cg_dispatch_setup() -> u32 { ptr::read_volatile(ptr::addr_of!(CG_DISPATCH_SETUP))() }
+#[cfg(target_arch = "arm")]
+unsafe fn first_availability() -> u32 { crate::codegen::first_availability::cg_first_availability() }
+#[cfg(not(target_arch = "arm"))]
+unsafe fn first_availability() -> u32 { retail_cg_first_availability() }
 
 #[cfg(target_arch = "arm")]
 core::arch::global_asm!(r#"
     .syntax unified
     .text
     .p2align 2
-    .globl retail_cg_first_availability
-retail_cg_first_availability:
-    ldr pc, [pc, #-4]
-    .word 0x082bcf38
     .globl retail_cg_second_availability
 retail_cg_second_availability:
     ldr pc, [pc, #-4]
@@ -127,10 +127,10 @@ unsafe fn dispatch_target(target: u32, _payload: u32, _arg: u32) -> u32 { target
 #[inline(never)]
 pub unsafe extern "C" fn cg_wait_and_dispatch(dispatch_arg: u32) -> u32 {
     let state = state();
-    if retail_cg_first_availability() == 0 && retail_cg_second_availability() == 0 {
+    if first_availability() == 0 && retail_cg_second_availability() == 0 {
         ptr::write_volatile(ptr::addr_of_mut!((*state).active), 1);
         post_mailbox();
-        while retail_cg_first_availability() == 0 && retail_cg_second_availability() == 0 { sleep_retry(); }
+        while first_availability() == 0 && retail_cg_second_availability() == 0 { sleep_retry(); }
         return 0;
     }
     ptr::write_volatile(ptr::addr_of_mut!((*state).active), 0);
