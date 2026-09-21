@@ -299,6 +299,7 @@ pub mod opaque_collection_item_at;
 pub mod opaque_collection_copy_entry;
 pub mod opaque_record_table_entry;
 pub mod record_commit;
+pub mod record_result_word;
 pub mod opaque_keyed_collection_item_count;
 pub mod opaque_keyed_collection_item_at;
 pub mod opaque_keyed_collection_find_item_by_id;
