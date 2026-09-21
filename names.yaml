@@ -124359,3 +124359,39 @@ functions:
       flag and invokes drive_slot_flush_pending_writes with the zero-extended
       descriptor+0x78 halfword as its drive index. Host tests use a recording
       seam around the two existing ports. Deliberate deviations: none.
+
+  # --- Deferred record table accessor (app) ---
+  - address: 0x082a9630
+    ghidra: FUN_082a9630
+    name: deferred_record_table_get
+    size: 96
+    sig: "u32 *deferred_record_table_get(void)"
+    module: app/deferred_record_table
+    status: ported
+    renames:
+      DAT_082a9680: deferred_record_table_guard (0x08a0fc74)
+      DAT_082a9684: deferred_record_table (0x08a0fc78)
+      DAT_082a9688: dso_handle (0x089ca09c)
+      DAT_082a968c: opaque_shutdown_handler_word (0x083abd48)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes 80 instruction bytes
+      0x082a9630..0x082a9680, followed by the four-word literal pool
+      0x082a9680..0x082a9690; `mov r0,#1; bx lr` at 0x082a9690 is the
+      next independently entered function, making the true extent 96
+      bytes rather than Ghidra's code-only 80. The accessor tests guard
+      bit zero, acquires the full guard word, zeroes both table words,
+      registers the table with cxa_atexit(handler 0x083abd48,
+      __dso_handle 0x089ca09c), releases the guard, then returns the
+      table on every path. Its exactly three internal calls are plain,
+      unconditional BL instructions (cxa_guard_acquire, cxa_atexit,
+      cxa_guard_release); there are no predicated BL forms. Independent
+      whole-image A32 decoding finds three direct inbound plain BL sites:
+      0x082a7084, 0x082a71dc, and 0x082a7210. The registration handler
+      has no recovered function identity: target builds retain its exact
+      raw address; host builds use an inert handler. Host tests prove both
+      table words are cleared and registration occurs exactly once, plus
+      the initialized-guard fast path preserves existing words and skips
+      registration.

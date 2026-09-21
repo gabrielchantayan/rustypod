@@ -159,6 +159,7 @@ pub mod callback_table;
 pub mod callback_table_double_to_i32_dispatch;
 pub mod global_event_dispatch;
 pub mod global_dispatch_target;
+pub mod deferred_record_table;
 pub mod global_identifier_slot;
 pub mod global_slot_4_get;
 pub mod global_slot_4_callback_dispatch;
