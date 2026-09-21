@@ -40710,6 +40710,37 @@ functions:
       argument shuffle, and tail transfer; LLVM emits an indirect bx through
       literal 0x082e8790 instead of retailOS fall-through.
 
+  # ---- B-tree table-lock compatibility probe (src/sqlite/btree_query_table_lock.rs) ----
+  - address: 0x082e8980
+    ghidra: FUN_082e8980
+    name: btree_query_table_lock
+    size: 136
+    sig: "u32 btree_query_table_lock(Btree *btree, u32 root_page, u32 lock_kind)"
+    module: sqlite/btree_query_table_lock
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: root_page
+      param_3/r2: lock_kind
+      puVar1/r3: table_lock
+      piVar2/r12: shared_owner
+      iVar3/r12: pager
+      uVar4/r12: transaction_flags
+    notes: >-
+      Raw osos.dec words establish the exact 136-byte body at
+      0x082e8980..0x082e8a08: the independent table-lock routine begins
+      with ldr r1,[pc,#112] at 0x082e8a08. The body contains no outgoing bl
+      (plain or predicated). Whole-image ARM branch decoding finds three
+      direct plain bl callers and no predicated caller: 0x083713ac,
+      0x08381220, and 0x0838a82c.
+      For sharable Btrees, reject another shared-cache owner with
+      SQLITE_LOCKED (6); otherwise scan BtShared.aTableLock (+0x58) when no
+      write transaction is active, the requested lock is pending, or root page
+      one is requested. A matching existing read lock is compatible; every
+      other matching lock returns SQLITE_LOCKED. Target-width pointer fields
+      are decoded as u32 words so host fixtures retain the target offsets;
+      no behavioral deviation.
+
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
     ghidra: FUN_0837ac30
