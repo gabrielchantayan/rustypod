@@ -457,6 +457,9 @@ pub mod hints {
     // 0x5c10_0000: dedicated to cxx/string_object's raw-u32 path-chain
     // context, nodes, and C-string fixture; mappings never unmap.
     pub const PATH_CHAIN_TO_STRING: usize = 0x5c10_0000;
+    // 0x5c20_0000: dedicated to cxx/string_object's raw-u32 linked-chain
+    // constructor fixture; mappings never unmap.
+    pub const STRING_OBJECT_CONSTRUCT_FROM_LINKED_CHAIN: usize = 0x5c20_0000;
     // 0x5b00_0000: dedicated to app/transition_page_clone's raw-u32 source,
     // destination, and transition fixtures; mappings never unmap, so no other
     // test may share this hint.

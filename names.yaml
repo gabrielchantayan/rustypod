@@ -124956,3 +124956,38 @@ functions:
       the established StringObject functions directly; only host test builds
       read the embedded payload as a target-width u32 because host pointers
       cannot represent that ARM +0x0c subobject layout.
+
+  - address: 0x082a2004
+    ghidra: FUN_082a2004
+    name: string_object_construct_from_linked_chain
+    size: 96
+    sig: "void string_object_construct_from_linked_chain(StringObject *out, const void *context)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r6: out
+      param_2/r1/r4: context
+      "context+0x0c": initial_string
+      "context+0x1c": linked_chain_head
+      "node+0x0c": node_string
+      "node+0x1c": next_node
+      FUN_082773e0: string_object_copy_construct
+      FUN_08276b64: string_object_insert_utf16
+      FUN_082a50b0: string_object_c_str
+      FUN_08276a18: string_object_insert_cstr
+    notes: >-
+      Raw osos.dec words establish a 96-byte all-code extent
+      0x082a2004..0x082a2063: the next independently linked push prologue
+      starts at 0x082a2064. The body copy-constructs out from the embedded
+      StringObject at context+0x0c, loads the raw-u32 chain head at
+      context+0x1c, and for every non-NULL node prepends UTF-16 backslash
+      then the C string at node+0x0c before loading node+0x1c. Decoding its
+      body finds exactly four plain unconditional BL instructions
+      (0x082773e0, 0x08276b64, 0x082a50b0, 0x08276a18) and zero predicated
+      BL instructions; Ghidra's reported three calls omitted the direct
+      copy constructor. The direct Rust ports preserve the retail call
+      sequence. Host builds explicitly read the target-layout node payload
+      word at +0x10 because host pointers are wider; the copied initial
+      StringObject uses its native host layout. Host tests cover an empty
+      copied source, every node including the terminal node, prepend order,
+      separators, and untouched source storage.
