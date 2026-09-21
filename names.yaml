@@ -1423,6 +1423,29 @@ functions:
       0x082a2cac with object and its +4 successor link, then returns bit 6
       of the resolved object's +0x1c flags. The target retains both original
       call ABIs; host tests install seams because neither callee is ported.
+  - address: 0x082a2cac
+    ghidra: FUN_082a2cac
+    name: resolve_successor_value
+    size: 48
+    sig: "u32 *resolve_successor_value(u32 *object, u32 *successor)"
+    module: app/resolve_successor_value
+    status: ported
+    renames:
+      param_1/r0: object_unused
+      param_2/r1: successor
+      r0: child_or_resolved_value
+      r1: child_flags
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x082a2cac..0x082a2cdb; 0x082a2cdc begins the next distinct
+      `ldr r0,[r0,#8]; bx lr` function. Decoding every aligned A32
+      branch-immediate word finds three direct unconditional plain BL callers
+      (0x082a2770, 0x082a3350, and 0x082a44e4) and zero predicated BL
+      callers. The first argument is never read. A non-null successor must
+      have flag bit 0 set at byte +0x1d; its +0x20 child must be non-null and
+      have that bit clear, then the child +0x20 word is returned. Opaque
+      storage is deliberately addressed as aligned u32 words, preserving
+      target four-byte offsets on 64-bit hosts.
   - address: 0x082a32e8
     ghidra: FUN_082a32e8
     name: scoped_context_owner_byte_15_bit_1
