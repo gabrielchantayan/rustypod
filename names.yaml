@@ -114,6 +114,30 @@ functions:
       intrusive list, then, only if owner+0x14 is zero, tail-removes page+0x2c
       from the global anchor at 0x08adc2c0. The unported common list-remover
       remains a fixed-address call at 0x082d801c; host tests inject it.
+  - address: 0x082b1520
+    ghidra: FUN_082b1520
+    name: pcache_pin_page
+    size: 60
+    sig: "void pcache_pin_page(PgHdr *page)"
+    module: sqlite/pcache_pin_page
+    status: ported
+    renames:
+      param_1/r0/r4: page
+      page+0: cache
+      page+34: nRef
+      cache+72: nRef
+      FUN_082d8e30: pager_page_unlink
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte body
+      0x082b1520..0x082b155b; the next independently entered function starts
+      with push at 0x082b155c. Whole-image aligned A32 decoding finds three
+      inbound plain BL calls at 0x082dd270, 0x08367b7c, and 0x0837e904, with
+      zero inbound predicated BL calls. The body has one outbound plain BL to
+      FUN_082d8e30 and no predicated BL calls. This is SQLite pcachePinPage:
+      on a zero-to-one page nRef transition it unlinks the page and increments
+      cache nRef, then increments page nRef with ARM wrapping arithmetic.
+      Deliberate deviation: calls the ported pager_page_unlink seam rather
+      than branching to retailOS at 0x082d8e30.
   - address: 0x082dfdc0
     ghidra: FUN_082dfdc0
     name: fat_lfn_fragment_note

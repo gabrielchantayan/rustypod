@@ -218,6 +218,7 @@ pub mod pager_truncate_image;
 pub mod pcache_remove_from_lru_list;
 pub mod pcache_add_to_lru_list;
 pub mod pcache_truncate;
+pub mod pcache_pin_page;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod open_table_and_indices;
