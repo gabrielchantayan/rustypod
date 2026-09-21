@@ -25,6 +25,8 @@ pub mod path_node_lookup;
 pub mod cache_entry;
 /// Sequential cache-entry allocation @ 0x082e4320.
 pub mod cache_entry_next;
+/// Bounded cache-entry allocation with a cleared 512-byte payload @ 0x082e254c.
+pub mod cache_entry_allocate_cleared;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
 /// Four-slot disk block read/write gates and dispatch @ 0x082c6244 / 0x082c62f0.
