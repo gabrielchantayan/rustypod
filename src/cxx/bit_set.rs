@@ -291,6 +291,44 @@ pub unsafe extern "C" fn bit_set_find_next_set(set: *mut BitSet, mut start_bit: 
     }
     core::ptr::read_volatile(capacity)
 }
+/// bit_set_find_nth_set — original: `FUN_082a4e4c` @ **0x082a4e4c**
+/// (**88 bytes**, 0x082a4e4c..0x082a4ea4; the next separately linked function
+/// begins `push {r4, r5, r6, lr}` at 0x082a4ea4). **3 plain `bl` call sites,
+/// 0 predicated `bl`**, binary-scanned by decoding every ARM B/BL word in
+/// `osos.dec`: 0x0815f8c4, 0x0815f96c, and 0x0815fa14.
+///
+/// Scans the bit set from bit zero, counting set bits. Returns the bit index
+/// of the zero-based `occurrence`th set bit, or `set->bit_capacity` when the
+/// set contains too few bits. Both the bit index and matched count use the
+/// original ARM wrapping add.
+///
+/// Deliberate deviation: the retail body calls [`bit_set_contains`] with a
+/// real `bl`; this port invokes the already ported direct sibling. Volatile
+/// capacity loads preserve the original's load before every test and its
+/// fresh capacity load on the exhausted return.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose word storage covers every bit
+/// below `bit_capacity`. The original performs no NULL check.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_find_nth_set(set: *mut BitSet, occurrence: u32) -> u32 {
+    let capacity = core::ptr::addr_of!((*set).bit_capacity);
+    let mut bit = 0u32;
+    let mut matched_count = 0u32;
+    while core::ptr::read_volatile(capacity) > bit {
+        if bit_set_contains(set, bit) != 0 {
+            if matched_count == occurrence {
+                return bit;
+            }
+            matched_count = matched_count.wrapping_add(1);
+        }
+        bit = bit.wrapping_add(1);
+    }
+    core::ptr::read_volatile(capacity)
+}
+
 
 
 /// bit_set_test — original: `FUN_082a4ef8` @ 0x082a4ef8
@@ -954,11 +992,42 @@ mod tests {
             assert_eq!(bit_set_contains(set, 0), 1, "first bit of word 0");
             assert_eq!(bit_set_contains(set, 31), 0, "last bit of word 0");
             assert_eq!(bit_set_contains(set, 32), 0, "first bit of word 1");
+
             assert_eq!(bit_set_contains(set, 63), 1, "last bit of word 1 normalizes to one");
             assert_eq!(bit_set_contains(set, 64), 1, "first bit of word 2");
             assert_eq!(bit_set_contains(set, 95), 0, "last bit of word 2");
             assert_eq!(bit_set_contains(set, 127), 1, "last bit of word 3");
         }
+    }
+    // --- bit_set_find_nth_set @ 0x082a4e4c ---
+
+    #[test]
+    fn find_nth_set_returns_requested_occurrence_or_capacity_sentinel() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = find_next_set(&[(1 << 3) | (1 << 31), (1 << 0) | (1 << 31)], 64) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of_mut!(set);
+
+        unsafe {
+            assert_eq!(bit_set_find_nth_set(set, 0), 3, "first occurrence");
+            assert_eq!(bit_set_find_nth_set(set, 1), 31, "same-word occurrence");
+            assert_eq!(bit_set_find_nth_set(set, 2), 32, "cross-word occurrence");
+            assert_eq!(bit_set_find_nth_set(set, 3), 63, "final occurrence");
+            assert_eq!(bit_set_find_nth_set(set, 4), 64, "absent occurrence");
+        }
+    }
+
+    #[test]
+    fn find_nth_set_does_not_count_padding_bits() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = find_next_set(&[0, 1 << 8], 35) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+
+        assert_eq!(unsafe { bit_set_find_nth_set(&mut set, 0) }, 35);
     }
 
     // --- bit_set_find_next_set @ 0x082a4ea4 ---
