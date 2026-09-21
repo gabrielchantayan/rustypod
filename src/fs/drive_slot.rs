@@ -5,7 +5,7 @@
 //! a slot is usable only when it is nonzero. This module ports the guarded
 //! lookup used by the drive-letter and cache-entry families.
 
-use crate::fs::cache_lock;
+use crate::fs::{cache_lock, drive_slot_index};
 
 /// BSS word holding the four drive-slot table's base pointer.
 const DRIVE_SLOT_TABLE_PTR: *const u32 = 0x08a0_a724 as *const u32;
@@ -74,8 +74,8 @@ unsafe fn drive_slot_table_base() -> *mut u8 {
 /// never flag-gate the lookup. No data word in osos references `0x082e06f4`,
 /// so it is not dispatched virtually.
 ///
-/// Deviation: inlines the 8-byte `index < 4` validator `FUN_082e4b3c` rather
-/// than introducing a dispatch seam. The cache lock pair dispatches through
+/// Deviation: calls the ported `drive_slot_index_is_valid` validator rather
+/// than the original branch target. The cache lock pair dispatches through
 /// ported `cache_lock_wait` / `cache_lock_signal`; host builds read the table
 /// base from the private BSS model above.
 #[inline(never)]
@@ -83,7 +83,7 @@ unsafe fn drive_slot_table_base() -> *mut u8 {
 pub unsafe extern "C" fn drive_slot_lookup(index: u32) -> *mut u8 {
     cache_lock::cache_lock_wait();
     let mut result = core::ptr::null_mut();
-    if index < DRIVE_SLOT_CAPACITY {
+    if drive_slot_index::drive_slot_index_is_valid(index) != 0 {
         let slot = drive_slot_table_base().wrapping_add(index as usize * DRIVE_SLOT_STRIDE);
         if core::ptr::read_volatile(slot as *const u32) != 0 {
             result = slot;
