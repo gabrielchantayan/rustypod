@@ -71320,6 +71320,38 @@ functions:
       and stale unlink/push/clear sequence.
 
 
+  - address: 0x082d8140
+    ghidra: FUN_082d8140
+    name: cg_bind_register_for_emit
+    size: 60
+    sig: "CgBinding *cg_bind_register_for_emit(CgCodegen *codegen, CgVirtualReg *reg, u32 mask)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: codegen
+      param_2/r1: reg
+      param_3/r2: mask (eligible hardware-resource bitset)
+      r4: binding (selected by cg_binding_acquire and returned unchanged)
+      FUN_082b3c34: cg_binding_acquire
+      FUN_082b5234: cg_binding_rebind
+      FUN_082ccbb0: unported binding materialization stage
+    notes: >-
+      Verified raw extent: exactly 60 bytes,
+      0x082d8140..0x082d8178, followed by distinct FUN_082d817c.
+      Decoding the raw ARM body found 3 plain bl instructions and 0
+      predicated bl instructions: cg_binding_acquire, cg_binding_rebind,
+      then FUN_082ccbb0. The helper acquires an eligible binding with the
+      supplied mask, rebinds it to the virtual register, materializes any
+      required register state, and returns that binding. The first two
+      callees are ported direct calls. Deliberate deviation: FUN_082ccbb0's
+      identity is not invented; its verified (codegen, binding, reg) call
+      shape is an inert CG_BIND_REGISTER_FOR_EMIT_OPS materialize_binding
+      seam. Host coverage proves acquire, rebind, and materialization order
+      with a parent-web reuse and records every seam argument. match.py exits
+      1 as expected: LLVM adds the crate frame and reaches the unported
+      callee through the seam's function pointer, while preserving the two
+      direct helper calls, final materialization call, and binding return.
+
   - address: 0x082d817c
     ghidra: FUN_082d817c
     name: cg_consume_register_use

@@ -3689,29 +3689,69 @@ pub unsafe extern "C" fn cg_materialize_cpsr_vreg(codegen: *mut CgCodegen) {
     );
 }
 
+/// CgBindRegisterForEmitOps isolates the final, still-unported materializer
+/// `FUN_082ccbb0`. Its precise identity has not been recovered; raw ARM
+/// proves only its `(codegen, binding, reg)` call shape after allocation and
+/// rebind.
+#[derive(Clone, Copy)]
+pub struct CgBindRegisterForEmitOps {
+    pub materialize_binding:
+        unsafe extern "C" fn(codegen: *mut CgCodegen, binding: *mut CgBinding, reg: *mut CgVirtualReg),
+}
 
-/// The unported tail callee of [`cg_consume_register_use`]. The raw tail
-/// target `FUN_082d8140` acquires a binding, rebinds it to the virtual
-/// register, and emits any required register materialization. Its identity
-/// beyond those observed operations is not yet recovered.
+unsafe extern "C" fn default_cg_materialize_binding(
+    _codegen: *mut CgCodegen,
+    _binding: *mut CgBinding,
+    _reg: *mut CgVirtualReg,
+) {
+}
+
+pub const DEFAULT_CG_BIND_REGISTER_FOR_EMIT_OPS: CgBindRegisterForEmitOps =
+    CgBindRegisterForEmitOps {
+        materialize_binding: default_cg_materialize_binding,
+    };
+
+/// Active direct-callee table for [`cg_bind_register_for_emit`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BIND_REGISTER_FOR_EMIT_OPS: CgBindRegisterForEmitOps =
+    DEFAULT_CG_BIND_REGISTER_FOR_EMIT_OPS;
+
+/// cg_bind_register_for_emit — original: `FUN_082d8140` @ **0x082d8140**
+/// (60 bytes; **3 plain `bl` call sites**, no predicated calls).
+///
+/// Acquires an eligible hardware binding, rebinds it to `reg`, then invokes
+/// the stock materialization stage before returning that binding. Raw ARM
+/// establishes the exact extent `0x082d8140..0x082d8178`: the distinct next
+/// function begins at `0x082d817c`. Deliberate deviation: unported direct
+/// callee `FUN_082ccbb0` is a semantic `(codegen, binding, reg)` seam rather
+/// than an invented identity; its default is inert.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_bind_register_for_emit(
+    codegen: *mut CgCodegen,
+    reg: *mut CgVirtualReg,
+    mask: u32,
+) -> *mut CgBinding {
+    let binding = cg_binding_acquire(codegen, reg, mask);
+    cg_binding_rebind(codegen, binding, reg);
+    (hook(core::ptr::addr_of!(CG_BIND_REGISTER_FOR_EMIT_OPS)).materialize_binding)(
+        codegen, binding, reg,
+    );
+    binding
+}
+
+/// The tail callee of [`cg_consume_register_use`], now ported as
+/// [`cg_bind_register_for_emit`].
 #[derive(Clone, Copy)]
 pub struct CgConsumeRegisterUseOps {
     pub bind_for_emit:
         unsafe extern "C" fn(codegen: *mut CgCodegen, reg: *mut CgVirtualReg, mask: u32) -> *mut CgBinding,
 }
 
-unsafe extern "C" fn default_cg_bind_register_for_emit(
-    _codegen: *mut CgCodegen,
-    _reg: *mut CgVirtualReg,
-    _mask: u32,
-) -> *mut CgBinding {
-    core::ptr::null_mut()
-}
-
-/// Default preserves the recovered unlink and leaves the unported
-/// allocation/emission tail inert.
+/// The ported tail is the default; the remaining materialization callee is
+/// isolated in [`CG_BIND_REGISTER_FOR_EMIT_OPS`].
 pub const DEFAULT_CG_CONSUME_REGISTER_USE_OPS: CgConsumeRegisterUseOps = CgConsumeRegisterUseOps {
-    bind_for_emit: default_cg_bind_register_for_emit,
+    bind_for_emit: cg_bind_register_for_emit,
 };
 
 /// Active tail dispatch for [`cg_consume_register_use`].
@@ -3729,9 +3769,8 @@ pub static mut CG_CONSUME_REGISTER_USE_OPS: CgConsumeRegisterUseOps = DEFAULT_CG
 /// match was found, tail-calls the binding/allocation helper with a mask
 /// containing `resource`; an ARM register shift of 32 or more produces zero.
 ///
-/// Deliberate deviation: the raw tail target `FUN_082d8140` is unported, so
-/// [`CG_CONSUME_REGISTER_USE_OPS`] defaults to an inert dispatch after the
-/// exact use-list unlink. No callee identity is invented.
+/// Deliberate deviation: `FUN_082ccbb0`, the ported tail's final direct
+/// callee, remains an inert semantic seam in [`CG_BIND_REGISTER_FOR_EMIT_OPS`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_consume_register_use(
@@ -9920,6 +9959,52 @@ mod tests {
         teardown();
     }
 
+    // --- cg_bind_register_for_emit -----------------------------------
+
+    static mut BIND_REGISTER_FOR_EMIT_LOG: std::vec::Vec<(usize, usize, usize)> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_materialize_binding(
+        codegen: *mut CgCodegen,
+        binding: *mut CgBinding,
+        reg: *mut CgVirtualReg,
+    ) {
+        BIND_REGISTER_FOR_EMIT_LOG.push((codegen as usize, binding as usize, reg as usize));
+    }
+
+    #[test]
+    fn bind_register_for_emit_acquires_rebinds_and_materializes_in_order() {
+        let _g = setup();
+        let mut f = AcquireFixture::new();
+        unsafe {
+            let saved_acquire = install_acquire_ops();
+            let saved_materialize = hook(core::ptr::addr_of!(CG_BIND_REGISTER_FOR_EMIT_OPS));
+            *core::ptr::addr_of_mut!(CG_BIND_REGISTER_FOR_EMIT_OPS) = CgBindRegisterForEmitOps {
+                materialize_binding: recording_materialize_binding,
+            };
+            BIND_REGISTER_FOR_EMIT_LOG.clear();
+            f.reg[CG_VREG_PARENT] = f.parent.as_mut_ptr() as usize;
+            f.parent[CG_VREG_BINDING] = f.bindings[0].as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_REG] = f.bound_reg.as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_ANCHOR] = f.anchor.as_mut_ptr() as usize;
+            f.bindings[0][CG_BINDING_RESOURCE] = 2;
+            f.bound_reg[CG_VREG_PARENT] = f.parent.as_mut_ptr() as usize;
+            let binding = f.bindings[0].as_mut_ptr() as *mut CgBinding;
+            let codegen = f.codegen_ptr();
+            let reg = f.reg_ptr();
+
+            assert_eq!(cg_bind_register_for_emit(codegen, reg, 1 << 2), binding);
+            assert_eq!(ACQUIRE_LOG, std::vec![AcquireStage::Promote(f.anchor.as_mut_ptr() as *mut u8, binding)]);
+            assert_eq!(f.bindings[0][CG_BINDING_REG], reg as usize, "rebind precedes materialization");
+            assert_eq!(f.reg[CG_VREG_BINDING], binding as usize);
+            assert_eq!(BIND_REGISTER_FOR_EMIT_LOG, std::vec![(codegen as usize, binding as usize, reg as usize)]);
+
+            *core::ptr::addr_of_mut!(CG_BIND_REGISTER_FOR_EMIT_OPS) = saved_materialize;
+            *core::ptr::addr_of_mut!(CG_BINDING_ACQUIRE_OPS) = saved_acquire;
+        }
+        drop(f);
+        teardown();
+    }
+
     // --- cg_consume_register_use -------------------------------------
 
     static mut CONSUME_REGISTER_USE_LOG: std::vec::Vec<(usize, usize, u32)> = std::vec::Vec::new();
@@ -10110,11 +10195,11 @@ mod tests {
     }
 
     #[test]
-    fn consume_register_use_seam_keeps_its_unported_tail_inert() {
+    fn consume_register_use_seam_defaults_to_the_ported_tail() {
         let _g = setup();
         unsafe {
             let ops = hook(core::ptr::addr_of!(CG_CONSUME_REGISTER_USE_OPS));
-            assert_eq!(ops.bind_for_emit as usize, default_cg_bind_register_for_emit as usize);
+            assert_eq!(ops.bind_for_emit as usize, cg_bind_register_for_emit as usize);
         }
         teardown();
     }
