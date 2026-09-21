@@ -88,6 +88,38 @@ pub unsafe extern "C" fn word_list_copy(src: *const WordList, dst: *mut WordList
     (*dst).count = (*src).count;
 }
 
+/// word_list_trim_trailing_zeros — original: `FUN_082d27d4` @ 0x082d27d4
+/// (68 bytes).
+///
+/// Verified extent: 17 ARM words ending in `bx lr` at 0x082d2814; the next
+/// function begins with `push {r4-r9, lr}` at 0x082d2818. The leaf contains
+/// zero plain and zero predicated `bl` instructions. It examines the final
+/// occupied word and, only when that word is zero, walks backward to leave
+/// `count` immediately after the final nonzero word. A list whose occupied
+/// words are all zero becomes empty. No deliberate deviations.
+///
+/// # Safety
+/// `list` must have a nonzero count and an `entries` buffer holding at least
+/// that many readable `u32` words. The nonzero-count precondition is required
+/// by the original's initial `count - 1` indexed load.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_trim_trailing_zeros(list: *mut WordList) {
+    let entries = (*list).entries;
+    let mut last = (*list).count as i32 - 1;
+    if *entries.add(last as usize) != 0 {
+        return;
+    }
+
+    loop {
+        last -= 1;
+        if last < 0 || *entries.add(last as usize) != 0 {
+            break;
+        }
+    }
+    (*list).count = (last + 1) as u16;
+}
+
 /// Inline element capacity set by `word_list_init_capacity_10`; the original
 /// hardcodes `mov r2, #10`.
 pub const WORD_LIST_INLINE_CAPACITY_10: u16 = 10;
@@ -165,8 +197,8 @@ mod tests {
     extern crate std;
 
     use super::{
-        word_list_copy, word_list_init, word_list_init_capacity_10, WordList,
-        WORD_LIST_INLINE_CAPACITY, WORD_LIST_INLINE_CAPACITY_10,
+        word_list_copy, word_list_init, word_list_init_capacity_10, word_list_trim_trailing_zeros,
+        WordList, WORD_LIST_INLINE_CAPACITY, WORD_LIST_INLINE_CAPACITY_10,
     };
     use std::vec;
 
@@ -193,6 +225,39 @@ mod tests {
         assert_eq!(dst.entries, dst_ptr_before, "buffer pointer must not be copied");
         assert_eq!(&dst_buf[..3], &src_buf[..3]);
         assert_eq!(&dst_buf[3..], &[0xaaaa_aaaa; 3], "tail beyond count untouched");
+    }
+
+    #[test]
+    fn trim_trailing_zeros_keeps_final_nonzero_word() {
+        let mut buf = [0x11, 0, 0x33, 0, 0, 0xdead_beef];
+        let mut word_list = list(&mut buf, 5);
+
+        unsafe { word_list_trim_trailing_zeros(&mut word_list) };
+
+        assert_eq!(word_list.count, 3);
+        assert_eq!(buf, [0x11, 0, 0x33, 0, 0, 0xdead_beef]);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_keeps_count_when_tail_is_nonzero() {
+        let mut buf = [0, 0x22, 0x33, 0xdead_beef];
+        let mut word_list = list(&mut buf, 3);
+
+        unsafe { word_list_trim_trailing_zeros(&mut word_list) };
+
+        assert_eq!(word_list.count, 3);
+        assert_eq!(buf, [0, 0x22, 0x33, 0xdead_beef]);
+    }
+
+    #[test]
+    fn trim_trailing_zeros_makes_all_zero_list_empty() {
+        let mut buf = [0, 0, 0, 0xdead_beef];
+        let mut word_list = list(&mut buf, 3);
+
+        unsafe { word_list_trim_trailing_zeros(&mut word_list) };
+
+        assert_eq!(word_list.count, 0);
+        assert_eq!(buf, [0, 0, 0, 0xdead_beef]);
     }
 
     #[test]
