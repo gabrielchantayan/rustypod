@@ -32371,6 +32371,37 @@ functions:
       modeled empty C string. match.py structural review: same load of
       the second object word and immediate return.
 
+
+  - address: 0x082a549c
+    ghidra: FUN_082a549c
+    name: string_object_path_component_count
+    size: 136
+    sig: "int string_object_path_component_count(const StringObject *this, int collapse_backslash_separator_runs)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: collapse_backslash_separator_runs
+      iVar3: component_count
+      bVar1: in_component
+      local_18: cursor
+    notes: >-
+      Raw osos.dec confirms the 34-word ARM body at
+      0x082a549c..0x082a5524; the next separately linked function begins
+      at 0x082a5524. It has four unconditional direct BL instruction sites
+      and no predicated BL sites: string_object_c_str once,
+      utf8_next_codepoint twice, and utf8_prev_codepoint once (three distinct
+      callees, matching Ghidra's report). It counts nonempty UTF-8 path
+      components separated by :, /, or backslash. With a nonzero second
+      argument, a backslash followed by / or backslash is consumed as a pair
+      rather than a separator; other speculative lookaheads rewind through
+      utf8_prev_codepoint. This preserves the retail decoders permissive
+      malformed-sequence behavior. Callers use it as a path-depth test before
+      path normalization/loading. Host tests cover empty and repeated
+      separators, multibyte components, and both backslash-pair modes.
+      match.py reports LLVM frame/call-layout differences but retains the
+      decoder walk, conditional pair skip, rewind, and component-count flow.
+      No deliberate deviations.
   - address: 0x082cf9e4
     ghidra: FUN_082cf9e4
     name: ft_glyphslot_free_bitmap
