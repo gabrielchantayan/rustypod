@@ -182,6 +182,7 @@ pub mod selector_slot_address;
 pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
 pub mod state_flags;
+pub mod selected_or_all_entry_range;
 pub mod short_filename_byte_is_rejected;
 pub mod scaled_word_list_from_i32;
 pub mod scoped_global_guard_destroy;
