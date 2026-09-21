@@ -124577,3 +124577,23 @@ functions:
       vtable_slot_0x40_result_word implementation rather than creating a
       callee seam. Deliberate deviation: the retail tail branch becomes a
       normal Rust call; the adjusted receiver and result are unchanged.
+  - address: 0x082a6774
+    ghidra: FUN_082a6774
+    name: shared_control_flow_entry
+    size: 4
+    sig: "not a callable function; unconditional branch"
+    status: identified
+    notes: >-
+      Raw osos.dec word ea000d0b at 0x082a6774 decodes as
+      `b 0x082a9ba8`, not Ghidra's claimed eight-byte
+      `ldr r0,[r0,#12]; bx lr` function. The adjacent words at
+      0x082a6760..0x082a677c are unconditional branch entries, and the next
+      independently executing body starts at 0x082a6780 with `cmp r2,#3`.
+      The branch target 0x082a9ba8 lies within another body: it conditionally
+      clears r9, moves r4 to r0, then falls through to a BL at 0x082a9bb8.
+      Three inbound plain BL instructions at 0x08299a10, 0x08299ab8, and
+      0x08299b5c target this entry; aligned whole-image decoding found zero
+      predicated inbound BL forms. Because this is a non-returning shared
+      control-flow entry whose required live-register contract is not
+      recoverable as a Rust callable ABI, it cannot be ported faithfully.
+      Deliberate deviation: none; no Rust symbol or hook is created.
