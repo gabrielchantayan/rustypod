@@ -12,12 +12,13 @@
 //! `+0xcc`, the temporary-space word `+0xd0`, and the related `+0x44`/`+0x48`
 //! state words in the same order as ARM.
 //!
-//! Deliberate deviation: `FUN_082d8e30` @ `0x082d8e30` is not ported. Target
-//! builds call that exact load address; host builds use the private ops slot
-//! only to observe page-unlink ordering. `tracked_free` is already ported and
-//! is called directly.
+//! Deliberate deviation: host builds retain a private unlink seam so pager
+//! reset tests can observe page-unlink ordering. Target builds call the
+//! ported `pager_page_unlink` directly.
 
 use crate::heap::tracked::tracked_free;
+#[cfg(target_os = "none")]
+use crate::sqlite::pager_page_unlink::pager_page_unlink;
 
 const RESET_GUARD: usize = 0x20;
 const PAGE_LIST: usize = 0x88;
@@ -35,8 +36,7 @@ type PageUnlink = unsafe extern "C" fn(*mut u8);
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn unlink_page_from_cache(page: *mut u8) {
-    let unlink: PageUnlink = core::mem::transmute(0x082d_8e30usize);
-    unlink(page);
+    pager_page_unlink(page);
 }
 
 #[cfg(not(target_os = "none"))]
