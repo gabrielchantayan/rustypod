@@ -523,37 +523,28 @@ const _: [u8; 0xb8] = [0; core::mem::offset_of!(ObservableArrayEraseVtable, move
 #[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
 const _: [u8; 0xbc] = [0; core::mem::offset_of!(ObservableArrayEraseVtable, finish_remove)];
 
-/// Direct-call boundary for `FUN_082a48e4` @ 0x082a48e4, the stock signed
-/// index validator. Its role is recovered, but it is intentionally not a
-/// second port in this commit.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_observable_array_index_is_valid(
-    this: *mut ObservableArray,
+/// observable_array_index_is_valid — retailOS `FUN_082a48e4` @
+/// `0x082a48e4` (24 bytes, `0x082a48e4..0x082a48fb`).
+///
+/// Raw words establish the six-instruction leaf ending in `bx lr`; the next
+/// real function starts with `push {r3-r11,lr}` at `0x082a48fc`. Decoding all
+/// ARM B/BL-immediate words finds three incoming plain `bl` sites
+/// (0x08271a4c, 0x08271c18, and 0x082a4d40), no predicated `bl` sites, and
+/// no calls in this body. It rejects negative signed indices before reading
+/// `this+0x04`, then returns one exactly when the signed array length exceeds
+/// the index; otherwise it returns zero. Deliberate deviations: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_index_is_valid(
+    this: *const ObservableArray,
     index: i32,
 ) -> i32 {
-    let validate: unsafe extern "C" fn(*mut ObservableArray, i32) -> i32 =
-        core::mem::transmute(0x082a_48e4usize);
-    validate(this, index)
+    if index < 0 {
+        return 0;
+    }
+    let len = core::ptr::addr_of!((*this).len).read_volatile() as i32;
+    (len > index) as i32
 }
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_observable_array_index_is_valid(
-    _this: *mut ObservableArray,
-    _index: i32,
-) -> i32 {
-    panic!("observable_array_erase_at requires index validator 0x082a48e4")
-}
-
-#[cfg(target_os = "none")]
-pub static mut OBSERVABLE_ARRAY_INDEX_IS_VALID: unsafe extern "C" fn(
-    *mut ObservableArray,
-    i32,
-) -> i32 = firmware_observable_array_index_is_valid;
-#[cfg(not(target_os = "none"))]
-pub static mut OBSERVABLE_ARRAY_INDEX_IS_VALID: unsafe extern "C" fn(
-    *mut ObservableArray,
-    i32,
-) -> i32 = missing_observable_array_index_is_valid;
 
 /// Direct-call boundary for `FUN_082a4c74` @ 0x082a4c74, the observer
 /// broadcast following an erase. Its concrete observer callback is unported.
@@ -600,7 +591,7 @@ pub static mut OBSERVABLE_ARRAY_NOTIFY_ERASE: unsafe extern "C" fn(
 /// direction -1, then every valid removal finishes through +0xbc and
 /// broadcasts the removed index. Deliberate host deviation: native callback
 /// pointers use [`ObservableArrayEraseHost`]; target code reads target-width
-/// vtable words. The two direct callees remain explicit stock seams.
+/// vtable words. The erase broadcast remains an explicit stock seam.
 #[cfg(not(target_arch = "arm"))]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -609,11 +600,8 @@ pub unsafe extern "C" fn observable_array_erase_at(this: *mut ObservableArray, m
     let len = core::ptr::read_volatile(core::ptr::addr_of!((*array).len));
     if index == crate::cxx::array_element_at::LAST_ELEMENT_INDEX && len > 0 {
         index = len - 1;
-    } else {
-        let validate = core::ptr::read_volatile(core::ptr::addr_of!(OBSERVABLE_ARRAY_INDEX_IS_VALID));
-        if validate(this, index) == 0 {
-            return -1;
-        }
+    } else if index < 0 || len <= index {
+        return -1;
     }
     let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*array).vtable));
     if index + 1 < len {
@@ -632,7 +620,7 @@ pub unsafe extern "C" fn observable_array_erase_at(this: *mut ObservableArray, m
     let len = core::ptr::read_volatile(core::ptr::addr_of!((*this).len)) as i32;
     if index == crate::cxx::array_element_at::LAST_ELEMENT_INDEX && len > 0 {
         index = len - 1;
-    } else if OBSERVABLE_ARRAY_INDEX_IS_VALID(this, index) == 0 {
+    } else if observable_array_index_is_valid(this, index) == 0 {
         return -1;
     }
     let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).base.vtable)) as *const u32;
@@ -1021,6 +1009,33 @@ mod tests {
             [0xa5a5_a5a5; 3],
             "the empty destructor must not read or write its object"
         );
+    }
+
+    #[test]
+    fn index_validation_rejects_negative_and_out_of_bounds_signed_indices() {
+        for (len, index, expected) in [
+            (0u32, -1, 0),
+            (0, 0, 0),
+            (1, -1, 0),
+            (1, 0, 1),
+            (1, 1, 0),
+            (3, 2, 1),
+            (3, 3, 0),
+            (i32::MAX as u32, i32::MAX - 1, 1),
+            (i32::MAX as u32, i32::MAX, 0),
+        ] {
+            let array = ObservableArray {
+                base: FrameworkObject { vtable: 0xfeed_face },
+                len,
+                storage: 0xa5a5_a5a5,
+                observers: 0xa5a5_a5a5,
+            };
+            assert_eq!(
+                unsafe { observable_array_index_is_valid(&array, index) },
+                expected,
+                "len {len}, index {index}"
+            );
+        }
     }
 
     #[test]
@@ -1553,19 +1568,11 @@ mod tests {
     }
     static ERASE_LOCK: Mutex<()> = Mutex::new(());
     static ERASE_TRACE: Mutex<Vec<EraseStep>> = Mutex::new(Vec::new());
-    static mut ERASE_VALID: i32 = 0;
-
     #[derive(Debug, PartialEq)]
     enum EraseStep {
-        Validate(i32),
         Move(i32, i32, i32),
         Finish(i32),
         Notify(i32),
-    }
-
-    unsafe extern "C" fn record_erase_validate(_this: *mut ObservableArray, index: i32) -> i32 {
-        ERASE_TRACE.lock().push(EraseStep::Validate(index));
-        ERASE_VALID
     }
 
     unsafe extern "C" fn record_erase_move(
@@ -1595,19 +1602,14 @@ mod tests {
     impl Drop for EraseSeamGuard {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_INDEX_IS_VALID)
-                    .write_volatile(missing_observable_array_index_is_valid);
                 core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_ERASE)
                     .write_volatile(missing_observable_array_notify_erase);
             }
         }
     }
 
-    fn install_erase_recorder(valid: i32) -> EraseSeamGuard {
+    fn install_erase_recorder() -> EraseSeamGuard {
         unsafe {
-            ERASE_VALID = valid;
-            core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_INDEX_IS_VALID)
-                .write_volatile(record_erase_validate);
             core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_ERASE)
                 .write_volatile(record_erase_notify);
         }
@@ -1618,7 +1620,7 @@ mod tests {
     #[test]
     fn erase_last_sentinel_skips_validation_and_shifts_nothing() {
         let _lock = ERASE_LOCK.lock();
-        let _seams = install_erase_recorder(0);
+        let _seams = install_erase_recorder();
         let mut array = ObservableArrayEraseHost { vtable: &ERASE_VTABLE, len: 3 };
 
         assert_eq!(unsafe { observable_array_erase_at(core::ptr::addr_of_mut!(array).cast(), 0x7fff_ffff) }, 2);
@@ -1628,14 +1630,13 @@ mod tests {
     #[test]
     fn erase_valid_middle_index_shifts_then_finishes_and_notifies() {
         let _lock = ERASE_LOCK.lock();
-        let _seams = install_erase_recorder(1);
+        let _seams = install_erase_recorder();
         let mut array = ObservableArrayEraseHost { vtable: &ERASE_VTABLE, len: 3 };
 
         assert_eq!(unsafe { observable_array_erase_at(core::ptr::addr_of_mut!(array).cast(), 1) }, 1);
         assert_eq!(
             *ERASE_TRACE.lock(),
             [
-                EraseStep::Validate(1),
                 EraseStep::Move(2, 2, -1),
                 EraseStep::Finish(-1),
                 EraseStep::Notify(1),
@@ -1646,10 +1647,10 @@ mod tests {
     #[test]
     fn erase_rejects_invalid_index_without_virtual_or_observer_calls() {
         let _lock = ERASE_LOCK.lock();
-        let _seams = install_erase_recorder(0);
+        let _seams = install_erase_recorder();
         let mut array = ObservableArrayEraseHost { vtable: &ERASE_VTABLE, len: 0 };
 
         assert_eq!(unsafe { observable_array_erase_at(core::ptr::addr_of_mut!(array).cast(), -1) }, -1);
-        assert_eq!(*ERASE_TRACE.lock(), [EraseStep::Validate(-1)]);
+        assert_eq!(*ERASE_TRACE.lock(), []);
     }
 }

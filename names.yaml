@@ -116188,6 +116188,29 @@ functions:
       walks owned state and dispatches several unresolved callees and virtual
       destructors. No established semantic identity or Rust seam exists for
       that target, so replacing this veneer alone cannot preserve its behavior.
+  - address: 0x082a48e4
+    ghidra: FUN_082a48e4
+    name: observable_array_index_is_valid
+    size: 24
+    sig: "i32 observable_array_index_is_valid(const ObservableArray *this, i32 index)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      "*(i32 *)(this + 0x04)": len
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte extent
+      0x082a48e4..0x082a48fb: `cmp r1,#0`, `ldrge r0,[r0,#4]`,
+      `cmpge r0,r1`, `movle r0,#0`, `movgt r0,#1`, then `bx lr`.
+      0x082a48fc begins the next independently linked push-prologue. Decoding
+      every aligned ARM B/BL-immediate word finds three incoming plain BL sites
+      at 0x08271a4c, 0x08271c18, and 0x082a4d40, with zero predicated BL
+      forms; the leaf has no outbound call. It rejects a negative signed index
+      without reading this, then returns one exactly when signed this+0x04 is
+      greater than index; otherwise it returns zero. The Rust port uses a
+      volatile target-word length read and preserves the direct entry used by
+      observable-array append, erase, and indexed write paths.
   - address: 0x08271bec
     ghidra: FUN_08271bec
     name: observable_array_erase_at
@@ -116198,7 +116221,7 @@ functions:
     renames:
       param_1/r0/r5: this
       param_2/r1/r4: index
-      FUN_082a48e4: observable_array_index_is_valid (stock absolute-entry seam)
+      FUN_082a48e4: observable_array_index_is_valid
       FUN_082a4c74: observable_array_notify_erase (stock absolute-entry seam)
     notes: >-
       Raw osos.dec words at 0x08271bec..0x08271c84 establish the true
@@ -116212,7 +116235,7 @@ functions:
       A valid non-final erase shifts [index+1, len-1] left with direction
       -1 through +0xb8, then calls +0xbc with -1 and broadcasts the index.
       Host tests use native callback vtables; target code retains the
-      target-width vtable words and the two stock absolute-entry seams.
+      target-width vtable words and the erase-broadcast stock seam.
       match.py reports its expected structural diff: LLVM uses an fp frame
       and literal-loaded blx calls for the two direct stock entries, while
       preserving validation, conditional move, finish, notification, and
