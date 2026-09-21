@@ -68798,6 +68798,35 @@ functions:
       ADS predicated (ldrbEQ/cmpeq/movls), with the follower compare
       as `cmp #4; movcc` instead of `cmp #3; movls`.
 
+  # --- H.264 / MPEG-4 AVC video decoder: NAL-unit header parser ---
+  - address: 0x082c5da8
+    ghidra: FUN_082c5da8
+    name: h264_nal_header_parse
+    size: 36
+    sig: "i32 h264_nal_header_parse(u32 nal_header, u8 *nal_ref_idc, u8 *nal_unit_type)"
+    module: h264/nal_header
+    vars: {param_1/r0: nal_header, param_2/r1: nal_ref_idc, param_3/r2: nal_unit_type}
+    status: ported
+    notes: >-
+      The one-byte H.264 NAL-unit header parser. Raw osos.dec words establish
+      the exact 36-byte extent 0x082c5da8..0x082c5dcc: tst r0,#0x80;
+      andeq/lsreq for bits 6..5; andeq for bits 4..0; two predicated byte
+      stores; mvnne/moveq; bx lr. It is a leaf: zero outgoing plain or
+      predicated bl calls. There are three inbound unconditional plain bl
+      calls at 0x081c12dc, 0x081c13b0, and 0x081c14f4; no inbound predicated
+      call. Callers pass a NAL header byte in r0 and consume its
+      nal_ref_idc and nal_unit_type fields. A set forbidden_zero_bit returns
+      -1 without dereferencing either output; otherwise stores
+      nal_ref_idc = (header & 0x60) >> 5 and nal_unit_type = header & 0x1f,
+      then returns 0. Ghidra's C agrees with these effects, but raw words
+      establish the bounds and predication. Deliberate deviations: none;
+      Rust preserves the word-width r0 input and ignores bits above the low
+      byte, exactly as the masks do. Host tests cover all reference-priority
+      values and representative unit types, untouched sentinels and null
+      outputs on rejection, plus high-bit masking. match.py reports the
+      expected frame and branch lowering but preserves the forbidden-bit
+      test, masks, shifts, byte stores, and zero/-1 results.
+
   # --- H.264 / MPEG-4 AVC video decoder: Exp-Golomb ue(v) reader ---
   - address: 0x082c5df0
     ghidra: FUN_082c5df0
