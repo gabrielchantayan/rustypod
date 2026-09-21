@@ -125370,3 +125370,29 @@ functions:
       word; all other modes return the word unchanged. Rust uses target-width u32
       header fields and volatile loads to preserve target layout and load ordering;
       no semantic deviations.
+
+  # --- two-word nonzero predicate ---
+  - address: 0x0829d858
+    ghidra: FUN_0829d858
+    name: word_pair_has_nonzero_word
+    size: 28
+    sig: "u32 word_pair_has_nonzero_word(const u32 *pair)"
+    module: util/word_pair_has_nonzero_word
+    status: ported
+    renames:
+      param_1/r0: pair
+      "*pair/r1": first_word
+      "pair+0x4/r0": second_word
+      r0: result
+    notes: >-
+      Raw osos.dec words establish the exact seven-instruction A32 body at
+      0x0829d858..0x0829d870; the next independently entered function starts
+      with push {r1,r2,r3,r4,r5,lr} at 0x0829d874. The body has no outgoing
+      BL calls. Decoding every aligned A32 B/BL-immediate word finds three
+      direct inbound unconditional plain BL calls at 0x0815fb58, 0x081dcb04,
+      and 0x0829b618, zero predicated BL calls, and one direct tail B at
+      0x0829b18c. It reads the first target-width word and returns one when
+      it is nonzero; otherwise it reads and tests the second word. The pair
+      concrete type is unrecovered and deliberately remains two u32 target
+      words, preserving four-byte field spacing on hosts. Deliberate
+      deviations: none.
