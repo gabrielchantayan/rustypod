@@ -123326,3 +123326,31 @@ functions:
       right list first. Rust intentionally exposes target pointers as u32 so
       the retailOS +0x24 layout survives 64-bit host tests. Host fixtures
       verify null-side handling, sorted merge order, and equal-key tie order.
+
+  - address: 0x082d7bf0
+    ghidra: FUN_082d7bf0
+    name: bucket_chain_table_destroy
+    size: 88
+    sig: "void bucket_chain_table_destroy(u32 *table)"
+    module: heap/bucket_chain_table
+    status: ported
+    renames:
+      param_1/r0: table
+      "[table + 0x0]": buckets
+      "[table + 0xc]": bucket_count
+      "[node + 0x4]": next
+      FUN_08043994: traced_free
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent
+      0x082d7bf0..0x082d7c48; the independently linked successor
+      FUN_082d7c48 begins at 0x082d7c48. The body has two unconditional plain
+      BL instructions to traced_free @ 0x08043994, no predicated BL, and a
+      final tail B to the same function: three direct release transfers, which
+      explains Ghidra's three-call report. It returns on NULL. Otherwise it
+      visits each target-width bucket head from index zero through
+      bucket_count - 1, saving each node's +0x04 next link before freeing the
+      node, then frees buckets and table in that order. Rust uses u32 word
+      indices so the retail offsets are preserved on 64-bit hosts. Deliberate
+      deviation: the final tail branch is a normal returning call; traced_free
+      returns normally, preserving observable behavior. Host tests cover the
+      NULL guard and empty/nonempty bucket ordering.
