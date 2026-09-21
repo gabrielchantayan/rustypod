@@ -124229,3 +124229,29 @@ functions:
       array before clearing both fields. The exact higher-level owner type is
       not established; Rust deliberately uses a semantic raw target-layout
       view rather than inventing one.
+  - address: 0x082b172c
+    ghidra: FUN_082b172c
+    name: cache_request_flush
+    size: 84
+    sig: "u32 cache_request_flush(u8 *request)"
+    module: fs/cache_request_flush
+    status: ported
+    renames:
+      param_1/r0/r4: request
+      param_1+0: descriptor
+      param_1+20: pending_flush
+      descriptor+0x78/r0: drive_context
+      FUN_082e48bc: cache_block_prepare
+      FUN_082e149c: drive_slot_flush
+    notes: >-
+      Raw osos.dec words establish the true 84-byte body
+      0x082b172c..0x082b177f, not Ghidra's reported 88 bytes; push
+      {r4-r11,lr} at 0x082b1780 begins the next independently entered
+      function. Whole-image A32 decoding finds three inbound plain BL calls
+      (0x082e0b7c, 0x082e5e20, and 0x082e6260), zero predicated inbound BL
+      calls, and two outbound plain BL calls: FUN_082e48bc and FUN_082e149c.
+      A zero pending flag returns one without calls. Otherwise it invokes
+      cache_block_prepare(request, 1, 1); only a nonzero result clears the
+      flag and invokes drive_slot_flush_pending_writes with the zero-extended
+      descriptor+0x78 halfword as its drive index. Host tests use a recording
+      seam around the two existing ports. Deliberate deviations: none.

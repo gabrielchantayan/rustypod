@@ -1878,6 +1878,9 @@ pub mod hints {
     // never unmap, so no other test may share either hint.
     pub const H264_FRAGMENT_LIST_APPEND: usize = 0x8200_0000;
     pub const H264_FRAGMENT_LIST_APPEND_ZERO: usize = 0x8210_0000;
+    // 0x8220_0000: dedicated to fs/cache_request_flush's target-width
+    // request and descriptor fixture; mappings never unmap.
+    pub const CACHE_REQUEST_FLUSH: usize = 0x8220_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
