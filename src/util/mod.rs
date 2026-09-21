@@ -94,6 +94,7 @@ pub mod i2s_transfer_slot;
 pub mod i2s_transfer_slot_wait;
 pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
+pub mod indexed_record_bounded_value;
 pub mod indexed_record_value_lookup;
 pub mod indexed_slot_pointer;
 pub mod indexed_record_pointer_and_value;

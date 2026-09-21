@@ -125341,3 +125341,32 @@ functions:
       substitute role-based typed seams. match.py reports 55 Rust instructions
       versus 36 stock instructions: volatile seam loads and the Rust frame
       replace direct BLs and the original r2/r3 save pair.
+  - address: 0x0829db34
+    ghidra: FUN_0829db34
+    name: indexed_record_bounded_value
+    size: 100
+    sig: "u32 indexed_record_bounded_value(const IndexedRecordHeader *header, u32 index, u32 mode)"
+    module: util/indexed_record_bounded_value
+    status: ported
+    renames:
+      param_1/r0: header
+      param_2/r1: index
+      param_3/r2: mode
+      "header+0x0/r3": record_base
+      "header+0x4/r3": record_count
+      "header+0x8/r0": limit
+      "record_base[index]/r1": value
+      r0 (return): selected_value_or_zero
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent from 0x0829db34
+      through 0x0829db97. The 0x0000ffff literal at 0x0829db98 is not code;
+      the next independently entered function starts at 0x0829db9c. Whole-image
+      aligned A32 branch decoding finds exactly three inbound plain BL calls at
+      0x080f532c, 0x080f5358, and 0x080f53c0, zero predicated inbound BL forms,
+      and zero internal BL instructions. It bounds-checks index against header+4,
+      returning 0xffff0000 | (index << 16) on failure. Otherwise it reads the
+      indexed word from header+0: mode 0 returns zero when its high halfword is
+      at most the header+8 halfword limit; mode 2 does the same for the complete
+      word; all other modes return the word unchanged. Rust uses target-width u32
+      header fields and volatile loads to preserve target layout and load ordering;
+      no semantic deviations.
