@@ -28350,6 +28350,28 @@ functions:
       context clipping, hidden-origin preservation, and the parent-clip
       branch.
 
+  - address: 0x082a2458
+    ghidra: FUN_082a2458
+    name: ui_element_has_flag_2
+    size: 16
+    sig: "int ui_element_has_flag_2(const UiElement *element)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      r0: flags_then_flag_2
+      "element+0x48": flags
+    notes: >-
+      Raw osos.dec words e5900048 e2000002 e1a000a0 e12fff1e establish the
+      exact 16-byte A32 body 0x082a2458..0x082a2467; the next distinct
+      function starts at 0x082a2468. It loads the full element flag word at
+      +0x48, masks bit 1, and returns that bit shifted to 0 or 1. Whole-image
+      aligned A32 decoding finds exactly three inbound plain unconditional BL
+      call sites, zero inbound predicated BL forms, and no outbound calls.
+      Ghidra's C reference agrees with the raw data flow; callers use the
+      result as a boolean before selecting a virtual callback. Deliberate
+      deviations: none.
+
   - address: 0x082a2468
     ghidra: FUN_082a2468
     name: ui_element_content_inset
