@@ -1622,6 +1622,9 @@ pub mod hints {
     // 0x8200_0000: dedicated to sqlite/clear_saved_overflow's target-width
     // BtCursor and tracked-allocation fixture; mappings never unmap.
     pub const SQLITE_CLEAR_SAVED_OVERFLOW: usize = 0x8200_0000;
+    // 0x8230_0000: dedicated to sqlite/release_tracked_pair's target-width
+    // pair and tracked-allocation fixture; mappings never unmap.
+    pub const SQLITE_RELEASE_TRACKED_PAIR: usize = 0x8230_0000;
     // 0x8210_0000 and 0x8220_0000: dedicated to
     // sqlite/clear_cursor_saved_overflows' target-width cursor-list fixtures;
     // mappings never unmap, so each test needs its own hint.
