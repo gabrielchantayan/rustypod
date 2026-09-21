@@ -123721,3 +123721,31 @@ functions:
       order, and constant return. match.py confirms the stack frame, NULL
       branch, three helper transfers, and return-one structure; LLVM uses
       indirect BLX calls for the resident function-address seams.
+
+  - address: 0x082cacec
+    ghidra: FUN_082cacec
+    name: metadata_fetch_or_null
+    size: 16
+    sig: "u32 metadata_fetch_or_null(void *source, u32 context, u32 key, u32 value)"
+    module: util/metadata_fetch_or_null
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: context
+      param_3/r2: key
+      param_4/r3: value
+      0x082689c8: retail_metadata_fetch
+    notes: >-
+      Raw osos.dec words e3500000 1afe7734 03a00000 e12fff1e prove the
+      complete 16-byte extent 0x082cacec..0x082cacefb: cmp r0,#0; bne
+      0x082689c8; mov r0,#0; bx lr. The cmp at 0x082cacfc starts the next
+      distinct function. Therefore this wrapper contains zero plain BL calls
+      and zero predicated BL calls; Ghidra's 140-byte, three-call extent
+      incorrectly absorbs following functions and the tail target body.
+      A null source returns zero. A non-null source tail-transfers all four
+      A32 argument registers to the resident implementation at 0x082689c8,
+      whose entry is independently confirmed by its push {r3-r7,lr}. Target
+      builds use a conditional literal veneer because the relocated payload
+      cannot encode the retail PC-relative branch; host tests install a
+      four-word recording seam and cover both the null short circuit and
+      exact non-null argument/result forwarding.
