@@ -1143,6 +1143,9 @@ pub mod hints {
     // 0x8c00_0000: dedicated to app/descriptor_attachment's raw-u32 owner,
     // descriptor, and link fixtures; mappings never unmap.
     pub const DESCRIPTOR_ATTACHMENT: usize = 0x8c00_0000;
+    // 0x8d00_0000: dedicated to cxx/descriptor_lookup_exact_or_tail's
+    // descriptor-result fixture; mappings never unmap.
+    pub const DESCRIPTOR_LOOKUP_EXACT_OR_TAIL: usize = 0x8d00_0000;
     // 0x8f00_0000: dedicated to mov/chain_value_span's raw-u32 chain-value
     // record fixture; mappings never unmap, so no other user may share it.
     pub const MOV_CHAIN_TABLE_LOAD_SPAN: usize = 0x8f00_0000;

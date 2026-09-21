@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod bit_set;
 pub mod generic_descriptor_lookup;
+pub mod descriptor_lookup_exact_or_tail;
 pub mod string_record;
 pub mod record_work_pump;
 pub mod string_object_word_merge;
