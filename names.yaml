@@ -64957,6 +64957,35 @@ functions:
       returned without a context, sentinel kept on NULL context, one-shot
       refresh from context+0x84 that then sticks, and a zero context word
       cached as a valid value (not mistaken for the sentinel).
+  # --- retailOS storage-backend status selector ---
+  - address: 0x082bc7c4
+    ghidra: FUN_082bc7c4
+    name: storage_backend_status
+    size: 132
+    sig: "u32 storage_backend_status(void)"
+    module: sysinfo
+    status: ported
+    renames:
+      FUN_080e624c: board_version
+      FUN_082bc488: >-
+        storage_backend_pin_89_status (unported tail target: calls
+        gpio_pin_read(0x59) and maps its output to status 2 or 3)
+      FUN_0836b6cc: gpio_pin_read (callee of the unported tail target)
+    notes: >-
+      Raw ARM confirms Ghidra's 132-byte extent: 33 words from 0x082bc7c4
+      through 0x082bc844; 0x082bc848 begins the next independently entered
+      push {r4,r5,r6,lr} function. Binary decoding finds three direct inbound
+      plain unconditional bl callers at 0x080e4b80, 0x080e706c, and
+      0x082bcb80, with no predicated bl callers. The body has one
+      unconditional bl to board_version and a direct tail b to 0x082bc488.
+      It switches on board_version() >> 16: 0, 14, and values above 21 return
+      0; 13, 15..18, and 20 return 4; 1..12, 19, and 21 tail-call the
+      pin-0x59 status target. The tail target's raw body invokes
+      gpio_pin_read(0x59,&out), returning 2 when out is zero and 3 otherwise.
+      Deliberate deviation: board_version is called through its existing Rust
+      port; the unported tail target remains a fixed-address target seam on
+      firmware and a replaceable host callback. Host tests cover every switch
+      boundary and prove only the tail cases invoke that callback.
   # --- retailOS object counted-text install from the shared context's dotted-triple word ---
   - address: 0x08055f50
     ghidra: FUN_08055f50
