@@ -122203,3 +122203,31 @@ functions:
       1 otherwise. The target reads a 32-bit global pointer word; host builds
       deliberately use a native-width static so fixture pointers remain valid
       on 64-bit hosts.
+
+  # --- NULL-guarded forward byte copy (libc) ---
+  - address: 0x08369bc0
+    ghidra: FUN_08369bc0
+    name: null_guarded_forward_byte_copy
+    size: 44
+    sig: "u32 null_guarded_forward_byte_copy(u8 *dst, const u8 *src, u32 len)"
+    module: libc/null_guarded_forward_byte_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: len
+      local_0/r3: byte
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte body from cmp r0,#0 at
+      0x08369bc0 through bx lr at 0x08369be8; the next independently linked
+      function begins with ldr r0,[pc,#20] at 0x08369bec. Complete aligned ARM
+      B/BL decoding finds three inbound plain unconditional BL callers
+      (0x0808c5f8, 0x08098f50, 0x080b5220) and zero predicated BL callers.
+      The body contains no BL. It returns 9 when either pointer is NULL,
+      otherwise copies len bytes forwards with post-incremented byte accesses
+      and returns 0; the raw sub/cmn loop proves len is an unsigned wrapping
+      counter despite Ghidra's int display. The Rust port uses volatile byte
+      accesses to prevent freestanding LLVM memcpy substitution; this is the
+      sole deliberate deviation and preserves byte order and forward-overlap
+      behavior. Host tests cover successful copying, zero length, both NULL
+      guards, and forward overlap.

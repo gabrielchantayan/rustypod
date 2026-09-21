@@ -7,6 +7,7 @@ pub mod byte_fill;
 pub mod swap_byte_ranges;
 pub mod forward_byte_copy;
 pub mod forward_byte_copy_returning_dst;
+pub mod null_guarded_forward_byte_copy;
 pub mod counted_copy;
 pub mod copy_byte_range_returning_end;
 pub mod bounded_copy;
