@@ -2662,6 +2662,51 @@ pub unsafe extern "C" fn string_object_utf8_strcasecmp_safe(
     )
 }
 
+/// `contact_phone_label_construct` — original: `FUN_0829acbc` @
+/// 0x0829acbc (56 bytes: 52 code bytes plus the literal-pool word at
+/// 0x0829acf4; **3 direct `bl` callers**, all unconditional; no direct calls
+/// in its own body).
+///
+/// Raw ARM establishes the true extent: fourteen words from 0x0829acbc through
+/// the tail branch at 0x0829acf0; the literal pool begins at 0x0829acf4. The
+/// next real function starts at 0x0829ad34. It loads the source record's kind
+/// from target word +8, selects the matching display label and `"Str "` resource
+/// id for cell (2), home (1), or work (8), then tail-branches to
+/// [`string_object_copy_or_resource_on_casefold_match`] @ 0x080ed884. Other
+/// kinds branch to the StringObject copy constructor @ 0x082773e0.
+///
+/// Deliberate deviation: the ARM tail branches are ordinary Rust calls. The
+/// source remains a target-layout three-word record so its embedded
+/// StringObject occupies words +0/+1 even where host pointers are wider.
+const PHONE_LABEL_CELL: &[u8] = b"<<<cell phone>>>\0";
+const PHONE_LABEL_HOME: &[u8] = b"<<<home phone>>>\0";
+const PHONE_LABEL_WORK: &[u8] = b"<<<work phone>>>\0";
+
+#[inline]
+fn contact_phone_label(kind: u32) -> Option<(*const u8, u32)> {
+    match kind {
+        2 => Some((PHONE_LABEL_CELL.as_ptr(), 0x6d73)),
+        1 => Some((PHONE_LABEL_HOME.as_ptr(), 0x6d71)),
+        8 => Some((PHONE_LABEL_WORK.as_ptr(), 0x6d72)),
+        _ => None,
+    }
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn contact_phone_label_construct(
+    this: *mut StringObject,
+    source_words: *const u32,
+) -> *mut StringObject {
+    let source = source_words.cast::<StringObject>();
+    match contact_phone_label(source_words.add(2).read()) {
+        Some((label, resource_id)) => {
+            string_object_copy_or_resource_on_casefold_match(this, source, label, resource_id)
+        }
+        None => string_object_copy_construct(this, source),
+    }
+}
+
 /// string_object_copy_or_resource_on_casefold_match — original:
 /// `FUN_080ed884` @ 0x080ed884 (76 bytes; **10 direct `bl` call sites**,
 /// binary-scanned, all unconditional; also 2 unconditional `b` and 1 `bne`
@@ -7111,6 +7156,27 @@ pub(crate) mod tests {
         let result = unsafe { string_object_utf8_strcasecmp_safe(&object, b"jpg\0".as_ptr()) };
 
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn contact_phone_label_maps_all_recognized_kinds_to_raw_literals_and_resources() {
+        for (kind, label, resource_id) in [
+            (2, PHONE_LABEL_CELL, 0x6d73),
+            (1, PHONE_LABEL_HOME, 0x6d71),
+            (8, PHONE_LABEL_WORK, 0x6d72),
+        ] {
+            let (selected_label, selected_resource_id) =
+                contact_phone_label(kind).expect("recognized retail kind");
+            assert_eq!(unsafe { core::slice::from_raw_parts(selected_label, label.len()) }, label);
+            assert_eq!(selected_resource_id, resource_id);
+        }
+    }
+
+    #[test]
+    fn contact_phone_label_rejects_unknown_kinds_for_copy_construction() {
+        for kind in [0, 3, 7, u32::MAX] {
+            assert_eq!(contact_phone_label(kind), None, "kind {kind}");
+        }
     }
 
     #[test]

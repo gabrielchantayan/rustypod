@@ -32392,6 +32392,35 @@ functions:
       volatile-read slot (the documented deviation, same as
       string_object_len_plus1 / string_object_utf8_strcmp_safe).
 
+  - address: 0x0829acbc
+    ghidra: FUN_0829acbc
+    name: contact_phone_label_construct
+    size: 56
+    sig: "StringObject *contact_phone_label_construct(StringObject *this, const u32 *source_words)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source_words
+      r2: phone_label
+      r3: resource_id
+      param_2[2]: phone_kind
+    notes: >-
+      Raw osos.dec establishes the true 56-byte extent: fourteen ARM words
+      from 0x0829acbc through the tail branch at 0x0829acf0, followed by the
+      literal pool at 0x0829acf4. The next separately linked function begins
+      at 0x0829ad34. Binary-scanning every B/BL word finds 3 direct bl
+      callers, all unconditional (0 predicated): 0x081b23bc, 0x08298d00,
+      0x0829d704. Its own body contains no bl: source_words[2] selects cell
+      (2, "<<<cell phone>>>", Str id 0x6d73), home (1,
+      "<<<home phone>>>", 0x6d71), or work (8, "<<<work phone>>>",
+      0x6d72), then b 0x080ed884
+      (string_object_copy_or_resource_on_casefold_match). Every other kind
+      bne branches to string_object_copy_construct @ 0x082773e0. The port
+      keeps the source as target-layout u32 words so the embedded
+      StringObject remains at words +0/+1 on 64-bit hosts; host tests cover
+      all recognized selectors and representative unknown kinds.
+
   - address: 0x080ed884
     ghidra: FUN_080ed884
     name: string_object_copy_or_resource_on_casefold_match
