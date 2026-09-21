@@ -8859,6 +8859,34 @@ functions:
       operator_new seam because it cannot guarantee a tail branch; its
       target-only section preserves the separately linked entry.
 
+  - address: 0x082a7e70
+    ghidra: FUN_082a7e70
+    name: opaque_vtable_record_construct
+    size: 84
+    sig: "void *opaque_vtable_record_construct(void *storage, unsigned use_default_source, const void *source)"
+    module: cxx/opaque_vtable_record_construct
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1: use_default_source
+      param_3/r2: source
+      DAT_082a7ec4: default_source
+      FUN_083dadd4: opaque_base_construct
+      FUN_082a7868: conditional_member_destroy
+      FUN_082a94d0: shared_handle_owner_destroy
+    notes: >-
+      Raw osos.dec words prove the 84-byte extent
+      0x082a7e70..0x082a7ec0; 0x082a7ec4 is the default-source literal and
+      0x082a7ec8 begins the next real function. A32 branch decoding finds
+      three plain BL calls (0x083dadd4, 0x082a7868, and conditionally
+      0x082a94d0), with no predicated BL calls. The function selects a
+      supplied or default source, writes its vtable and word three at the
+      vtable-selected target offset, constructs the embedded base at +4,
+      then returns its containing record. Its call to 0x082a7868 always
+      passes zero, and raw callee decoding proves this is an identity path;
+      Rust expresses that no-op directly. Target builds retain the verified
+      0x083dadd4 ABI call; host tests install an exact seam.
+
   - address: 0x082a89e0
     ghidra: FUN_082a89e0
     name: lazy_string_tables_initialize

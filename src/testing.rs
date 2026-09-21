@@ -323,6 +323,10 @@ pub mod hints {
     // cxx/opaque_vtable_record_copy_construct's target-width source fixtures.
     pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT: usize = 0xc000_0000;
     pub const OPAQUE_VTABLE_RECORD_COPY_CONSTRUCT_DEFAULT: usize = 0xc100_0000;
+    // 0xc400_0000 and 0xc500_0000: dedicated to
+    // cxx/opaque_vtable_record_construct's target-width source fixtures.
+    pub const OPAQUE_VTABLE_RECORD_CONSTRUCT: usize = 0xc400_0000;
+    pub const OPAQUE_VTABLE_RECORD_CONSTRUCT_DEFAULT: usize = 0xc500_0000;
     // 0xc200_0000: dedicated to cxx/opaque_shared_record_construct's
     // target-width source, vtable, shared-object, and destination fixture.
     pub const OPAQUE_SHARED_RECORD_CONSTRUCT: usize = 0xc200_0000;
