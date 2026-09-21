@@ -124957,6 +124957,37 @@ functions:
       read the embedded payload as a target-width u32 because host pointers
       cannot represent that ARM +0x0c subobject layout.
 
+  - address: 0x082a1f6c
+    ghidra: FUN_082a1f6c
+    name: video_frame_data_offset
+    size: 84
+    sig: "i32 video_frame_data_offset(const u32 *words)"
+    module: h264/video_frame_data_offset
+    status: ported
+    renames:
+      param_1/r0/r4: words
+      "words+0x04": first_plane_present
+      "words+0x10": second_plane_stride
+      "words+0x18": first_plane_rows
+      "words+0x1c": second_plane_rows
+      "words+0x20": first_plane_bits_per_row
+      FUN_082a1fc0: first_plane_present
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec decoding establishes the 84-byte, 21-instruction code
+      extent 0x082a1f6c..0x082a1fbf; FUN_082a1fc0 begins immediately at
+      0x082a1fc0. It has exactly two plain unconditional outbound BL calls
+      (the 16-byte boolean helper at 0x082a1fc0 and __rt_sdiv at
+      0x08031568), no predicated BL calls, and three inbound plain BL calls
+      at 0x080c76e4, 0x080c770c, and 0x080c7ee8. It adds the signed,
+      truncating /8 byte count for the first plane (rows * bits per row) to
+      the second plane's rows * stride divided by 1 or 2 according to the
+      first-plane-present flag. The Rust port uses target-width word indices,
+      preserving ARM field offsets on 64-bit hosts, and folds the unported
+      boolean helper's verified word-1 nonzero test into the caller rather
+      than adding an unnamed seam. Host tests cover both divisors and signed
+      rounding toward zero.
+
   - address: 0x082a2004
     ghidra: FUN_082a2004
     name: string_object_construct_from_linked_chain
