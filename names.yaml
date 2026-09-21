@@ -40180,6 +40180,35 @@ functions:
       raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
       than the original's aligned ldrh/ldrd/ldr.
 
+  - address: 0x08369040
+    ghidra: FUN_08369040
+    name: pager_set_sector_size
+    size: 52
+    sig: "void pager_set_sector_size(Pager *pager)"
+    module: sqlite/pager_set_sector_size
+    status: ported
+    vars:
+      param_1/r4: pager
+      r0: sector_size
+    renames:
+      "*(u8*)(pager+0x0f)": pager->noSync
+      "*(sqlite3_file**)(pager+0x6c)": pager->fd
+      "*(u32*)(pager+0xc0)": pager->sectorSize
+      FUN_0837dbc0: file_sector_size (retailOS-owned direct callee)
+    notes: >-
+      Raw ARM establishes the exact 52-byte extent
+      0x08369040..0x08369074: push {r4,lr}, flag load/test, optional
+      file-sector helper call for pager+0x6c, sectorSize store, minimum-512
+      compare/store, and pop {r4,pc}; 0x08369074 begins the next separately
+      linked function. The body has one unconditional plain bl, to
+      0x0837dbc0. Independently decoding every ARM B/BL immediate in
+      osos.dec finds three inbound direct calls: plain bl at 0x082de148 and
+      0x0837ec5c, plus predicated bleq at 0x0837e720. The helper call occurs
+      only when pager+0x0f is zero; regardless of that gate sectorSize is
+      clamped to 0x200. Target builds call unported 0x0837dbc0 directly;
+      host tests use a private callback because its sqlite3_file virtual
+      dispatch has target-width method-table offsets.
+
   - address: 0x083684fc
     ghidra: FUN_083684fc
     name: btree_save_all_cursors
