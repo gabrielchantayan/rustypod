@@ -124532,3 +124532,23 @@ functions:
       and len to __rt_memcpy, then restores dst as its result. Deliberate
       deviation: Rust calls the existing __rt_memcpy port directly rather
       than the retailOS IRAM veneer; the copy and return contract is the same.
+
+  - address: 0x082a7638
+    ghidra: FUN_082a7638
+    name: vtable_slot_18_result_dispatch
+    size: 24
+    sig: "i32 vtable_slot_18_result_dispatch(void *receiver)"
+    module: cxx/vtable_slot_18_result_dispatch
+    status: ported
+    vars:
+      param_1/r0: receiver
+      vtable+0x18: unrecovered_virtual_method
+    notes: >-
+      Raw osos.dec words prove the six-instruction, 24-byte A32 extent
+      0x082a7638..0x082a764c; 0x082a7650 starts the next real function.
+      Complete aligned A32 decoding finds three inbound plain BL calls at
+      0x083d8ddc, 0x083d8f24, and 0x083d9240, with no predicated BL calls.
+      The wrapper loads receiver.vtable[6], invokes it with receiver in r0,
+      and returns the virtual method result. The target identity is not
+      recovered; host fixtures use pointer-width vtable cells because host
+      pointers exceed the target's four-byte cells.
