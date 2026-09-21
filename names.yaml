@@ -28839,6 +28839,28 @@ functions:
       mutation through the embedded reference on it. The class check
       stays in retailOS behind the TARGET_CLASS_CHECK seam.
 
+  - address: 0x082a66c0
+    ghidra: FUN_082a66c0
+    name: ui_element_reference_target_flag_bit_0
+    size: 48
+    sig: "u32 ui_element_reference_target_flag_bit_0(const UiElementReference *reference)"
+    module: ui/element_reference_target_flag_bit_0
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x1ac": flag_byte}
+    notes: >-
+      Raw extent is exactly 48 bytes, 0x082a66c0 through 0x082a66ef:
+      0x082a66f0 begins the next separately linked function with
+      push {r4,lr}. The words decode to push/mov, vtable slot-3 (+0xc)
+      load and blx with the reference, cmp, conditional target +0x4
+      ldr, conditional target+0x1ac ldrb, and #1, conditional zero, and
+      pop. It returns zero without reading the target when slot 3 returns
+      zero; otherwise it returns bit 0 of the target byte. The flag's
+      semantic identity remains unestablished, so the name records its
+      verified location and bit. Three direct callers at 0x08176c4c,
+      0x08176d80, and 0x08177754 decode as plain unconditional bl;
+      decoding every ARM B/BL word found no predicated direct call. The
+      body has one indirect blx through the unresolved runtime vtable
+      target, deliberately preserved without inventing a callee name.
   - address: 0x082a66f0
     ghidra: FUN_082a66f0
     name: ui_element_reference_target_has_cookie
