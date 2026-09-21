@@ -1464,6 +1464,33 @@ functions:
       and every relative triplet overlap. match.py structural review was
       completed. Deliberate deviations: volatile Rust accesses preserve the ARM
       load/store ordering against LLVM optimization.
+  # --- H.264 stream-position block rounding ---
+  - address: 0x08368784
+    ghidra: FUN_08368784
+    name: h264_stream_position_round_up_to_block
+    size: 112
+    sig: "void h264_stream_position_round_up_to_block(u32 *state)"
+    module: h264/stream_position_round_up
+    status: ported
+    renames:
+      param_1/r0: state
+      r7:r8: stream_position
+      r5: block_size_then_position_low
+      r6: rounded_position_high
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte extent
+      0x08368784..0x083687f4: the next independently linked function begins
+      with `push {r0-r10,fp,lr}` at 0x083687f4. It reads the signed 64-bit
+      stream position at state+0x98, leaves zero unchanged, and otherwise
+      stores ((position - 1) / block_size + 1) * block_size using the signed
+      block_size at state+0xc0. The sole outbound call is __aeabi_ldivmod at
+      0x0802ee34. Raw caller decoding finds two unconditional `bl` calls
+      (0x08365a24, 0x08398a68) and one predicated `blne` (0x08398bbc); no
+      other direct caller or predicated form was recovered. Host tests cover
+      zero, positive boundaries, negative truncation, full-width positions,
+      and negative block sizes. match.py structural review was completed.
+      Deliberate deviations: Rust uses wrapping i64 arithmetic instead of the
+      retail umull/mla product sequence, preserving its low/high word result.
   # --- big-endian word bit-index conversion ---
   - address: 0x0836b698
     ghidra: FUN_0836b698
