@@ -125154,3 +125154,28 @@ functions:
       predicated BL calls. The function neither reads nor writes memory and
       preserves r0, so it is an empty non-deleting destructor despite Ghidra's
       void prototype. Deliberate deviations: none.
+  - address: 0x0829f9b4
+    ghidra: FUN_0829f9b4
+    name: four_byte_nonzero_to_ff_mask
+    size: 68
+    sig: "void four_byte_nonzero_to_ff_mask(u8 *destination, const u8 *source)"
+    module: util/four_byte_nonzero_to_ff_mask
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_2+0x7c: source_flags
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x0829f9b4..0x0829f9f8: it ends in bx lr and the next separately
+      linked function starts at 0x0829f9f8. The four ldrb reads at source
+      +0x7c through +0x7f precede all writes; each is stored to destination
+      +0 through +3 as zero or 0xff according to whether its input was zero.
+      Whole-image A32 decoding finds three incoming plain unconditional BL
+      calls at 0x0824e2dc, 0x08253cd8, and 0x08253d68, with zero incoming
+      predicated BL calls. Caller 0x082d0d98 supplies an engine subobject
+      at +0x944, while the 0x0c23 branch in caller 0x082d1488 combines this
+      mask with a second four-byte mask. The Rust port uses volatile writes
+      only to retain the original byte-store order; ordinary-memory values
+      are unchanged. Host tests cover zero, nonzero values, output bounds,
+      and source/destination overlap.
