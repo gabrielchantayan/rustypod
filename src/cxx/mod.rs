@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod bit_set;
+pub mod basic_ostream_construct;
 pub mod generic_descriptor_lookup;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod string_record;

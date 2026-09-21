@@ -8859,6 +8859,30 @@ functions:
       operator_new seam because it cannot guarantee a tail branch; its
       target-only section preserves the separately linked entry.
 
+  - address: 0x082a7818
+    ghidra: FUN_082a7818
+    name: basic_ostream_construct
+    size: 76
+    sig: "void *basic_ostream_construct(void *storage, u32 streambuf)"
+    module: cxx/basic_ostream_construct
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1: streambuf
+      DAT_082a7864: basic_ostream_descriptor
+      FUN_083e78b4: vtable_shared_handle_construct
+      FUN_083e77dc: basic_ios_initialize
+    notes: >-
+      Raw osos.dec proves 72 instruction bytes at 0x082a7818..0x082a7860
+      followed by the descriptor literal at 0x082a7864, for the true 76-byte
+      extent; 0x082a7868 starts the next real function. A32 branch decoding
+      finds three inbound plain BL calls and no predicated BL calls. The two
+      outbound plain BLs construct the embedded +0x04 shared-handle record and
+      initialize the descriptor-selected basic_ios subobject with streambuf.
+      Host tests deliberately substitute a fixture-only basic_ios offset:
+      the target descriptor is an absolute firmware pointer and cannot be
+      dereferenced on the host. Target builds retain the descriptor read.
+
   - address: 0x082a7e70
     ghidra: FUN_082a7e70
     name: opaque_vtable_record_construct
