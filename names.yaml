@@ -33118,6 +33118,33 @@ functions:
       expected) should retain the recovered load/load/add/ldr leaf
       structure, with ordinary LLVM frame differences.
 
+  - address: 0x082d0ce0
+    ghidra: FUN_082d0ce0
+    name: video_engine_set_control_value
+    size: 40
+    sig: "void video_engine_set_control_value(u32 control, u32 value)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: control
+      param_2/r1: value
+      FUN_08252bec: video_engine_get
+      FUN_0824e074: video_engine_set_control_value_dispatch
+    notes: >-
+      Raw ARM proves Ghidra's recovered C is a false tail-call boundary:
+      the wrapper is exactly 40 bytes at 0x082d0ce0..0x082d0d04, ending
+      in `pop {r4,r5,r6,pc}`; 0x082d0d08 begins the next independently
+      linked wrapper. It preserves both incoming words, calls
+      video_engine_get, returns silently when that singleton is NULL, and
+      otherwise restores `(engine,control,value)` before conditional
+      tail-branching to unported FUN_0824e074. An aligned ARM
+      B/BL-immediate scan verifies three direct inbound plain bl calls and
+      zero predicated bl calls. No control/value validation belongs in this
+      wrapper. Deliberate deviation: FUN_0824e074 remains resident
+      firmware on target through a transmute seam; host tests install a
+      recording seam and cover NULL-session no-dispatch plus zero, known,
+      and all-ones word preservation.
+
   - address: 0x082d1f6c
     ghidra: FUN_082d1f6c
     name: video_engine_set_type_continuation

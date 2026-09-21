@@ -884,6 +884,71 @@ pub unsafe extern "C" fn video_frame_dispatch_operation(
     );
 }
 
+/// Firmware entry of the video-engine control/value dispatcher
+/// (`FUN_0824e074`, unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_SET_CONTROL_VALUE_ADDR: usize = 0x0824_e074;
+
+/// ABI of the resident dispatcher: engine followed by the caller's control
+/// and value words.
+type VideoEngineSetControlValue = unsafe extern "C" fn(*mut u8, u32, u32);
+
+/// Host-test stand-in for `FUN_0824e074`.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_SET_CONTROL_VALUE: Option<VideoEngineSetControlValue> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_set_control_value`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_set_control_value(
+    dispatch: Option<VideoEngineSetControlValue>,
+) {
+    core::ptr::addr_of_mut!(MOCK_SET_CONTROL_VALUE).write(dispatch);
+}
+
+/// Transfers a control/value pair to the resident video-engine dispatcher.
+#[inline]
+unsafe fn set_control_value(engine: *mut u8, control: u32, value: u32) {
+    #[cfg(target_arch = "arm")]
+    {
+        let dispatch: VideoEngineSetControlValue =
+            core::mem::transmute(VIDEO_ENGINE_SET_CONTROL_VALUE_ADDR);
+        dispatch(engine, control, value);
+    }
+
+    #[cfg(not(target_arch = "arm"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(MOCK_SET_CONTROL_VALUE))
+            .expect("video-engine control/value dispatch must be installed")(engine, control, value);
+    }
+}
+
+/// video_engine_set_control_value — retailOS `FUN_082d0ce0` @ **0x082d0ce0**
+/// (40 bytes, `0x082d0ce0..0x082d0d04`; the next independently linked wrapper
+/// starts at `0x082d0d08`).
+///
+/// Raw ARM saves `(control, value)`, calls [`video_engine_get`], and silently
+/// returns when no session is installed. Otherwise it restores
+/// `(engine, control, value)` and conditionally tail-branches to
+/// `FUN_0824e074`. The body has one plain `bl` (the getter); an aligned ARM
+/// B/BL-immediate decode finds three direct inbound plain `bl` calls and no
+/// predicated `bl` calls.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0824e074` is unported. Target builds transfer to its resident
+/// firmware entry; host tests install a recording seam. The wrapper adds no
+/// control or value validation, and the NULL-session path never accesses that
+/// seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_control_value(control: u32, value: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        set_control_value(engine, control, value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1661,6 +1726,45 @@ mod tests {
             assert_eq!(RELEASED_HANDLE_SEQUENCE, [high_handle, low_handle]);
             assert_eq!(state.add(0xd8 / 4).read(), 0);
             assert_eq!(state.add(0xd4 / 4).read(), 0);
+        }
+    }
+    static mut CONTROL_VALUE_RECORDED: Option<(*mut u8, u32, u32)> = None;
+
+    unsafe extern "C" fn record_control_value(engine: *mut u8, control: u32, value: u32) {
+        unsafe {
+            CONTROL_VALUE_RECORDED = Some((engine, control, value));
+        }
+    }
+
+    #[test]
+    fn control_value_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            CONTROL_VALUE_RECORDED = None;
+            set_mock_set_control_value(None);
+            set_mock_instance(ptr::null_mut());
+            video_engine_set_control_value(0xde1, u32::MAX);
+            assert_eq!(CONTROL_VALUE_RECORDED, None);
+        }
+    }
+
+    #[test]
+    fn control_value_prepends_instance_and_preserves_edge_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_set_control_value(Some(record_control_value));
+            set_mock_instance(engine.as_mut_ptr());
+            for &(control, value) in &[(0, 0), (0xde1, 0x2600), (u32::MAX, u32::MAX)] {
+                CONTROL_VALUE_RECORDED = None;
+                video_engine_set_control_value(control, value);
+                assert_eq!(
+                    CONTROL_VALUE_RECORDED,
+                    Some((engine.as_mut_ptr(), control, value))
+                );
+            }
+            set_mock_instance(ptr::null_mut());
+            set_mock_set_control_value(None);
         }
     }
 }
