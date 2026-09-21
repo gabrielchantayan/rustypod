@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e0194
+    ghidra: FUN_082e0194
+    name: fat_lfn_short_name_checksum
+    size: 56
+    sig: "u32 fat_lfn_short_name_checksum(const u8 *short_name)"
+    module: fs/fat_lfn_short_name_checksum
+    status: ported
+    renames:
+      param_1/r0/r3: short_name
+      uVar2/r0: checksum
+      uVar3/r1: index
+    notes: >-
+      Raw osos.dec words establish the true 56-byte extent
+      0x082e0194..0x082e01cb; 0x082e01cc begins the next independent
+      function with cmp r1,#2. Raw disassembly of both real callers finds
+      three inbound plain BL instructions (0x082e120c, 0x082e12bc, and
+      0x082e27ec) and zero inbound predicated BL instructions. The leaf reads
+      exactly eleven short-name bytes, rotates its u8 accumulator right by one
+      before each wrapping byte addition, and returns the result zero-extended
+      in r0. This is the FAT LFN checksum. No deliberate deviations; the Rust
+      fixed-count loop is equivalent to the retail index-mask loop.
   - address: 0x082e36c8
     ghidra: FUN_082e36c8
     name: fat_cursor_advance_block
