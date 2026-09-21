@@ -26,6 +26,7 @@ pub mod memmove;
 pub mod memzero;
 pub mod rom_string;
 pub mod rt_memcpy;
+pub mod rt_memcpy_returning_destination;
 pub mod rt_unaligned;
 pub mod strcat;
 pub mod strchr;

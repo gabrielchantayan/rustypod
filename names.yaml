@@ -124483,3 +124483,28 @@ functions:
       contract or existing Rust seam, so a faithful host fixture cannot be
       defined without inventing object-layout semantics. Deliberate
       deviations: none; no Rust port is committed.
+
+  # --- __rt_memcpy return-preserving wrapper (libc) ---
+  - address: 0x082a789c
+    ghidra: FUN_082a789c
+    name: rt_memcpy_returning_destination
+    size: 20
+    sig: "u8 *rt_memcpy_returning_destination(u8 *dst, const u8 *src, u32 len)"
+    module: libc/rt_memcpy_returning_destination
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1: src
+      param_3/r2: len
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec establishes the exact five-instruction A32 body
+      0x082a789c..0x082a78af: push {r4,lr}; mov r4,r0; bl 0x08037db0;
+      mov r0,r4; pop {r4,pc}. The push at 0x082a78b0 begins the next
+      independently entered function. Whole-image A32 decoding finds three
+      inbound plain BL calls (0x08134b6c, 0x081de8a8, 0x081e8b74), zero
+      predicated BL calls, and one outbound plain BL to the 0x08037db0 IRAM
+      veneer, whose target is __rt_memcpy. The wrapper forwards dst, src,
+      and len to __rt_memcpy, then restores dst as its result. Deliberate
+      deviation: Rust calls the existing __rt_memcpy port directly rather
+      than the retailOS IRAM veneer; the copy and return contract is the same.
