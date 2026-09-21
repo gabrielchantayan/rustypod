@@ -123833,3 +123833,34 @@ functions:
       and release seams. Host tests cover exact-consumption acceptance and the
       failed-tail release path. match.py confirms the original branch and call
       structure; its exit status 1 is the documented structural-diff result.
+
+  - address: 0x082c4038
+    ghidra: FUN_082c4038
+    name: emit_left_join_null_row
+    size: 120
+    sig: "void emit_left_join_null_row(Vdbe *vdbe, const WhereLevel *level, int break_addr)"
+    module: sqlite/left_join_null_row
+    status: ported
+    renames:
+      param_1/r0/r6: vdbe
+      param_2/r1/r5: level
+      param_3/r2/r4: break_addr
+      param_2_plus_0x38: left_join_register
+      FUN_08386824: vdbe_add_op2
+      FUN_08386810: vdbe_add_op1
+      FUN_08386840: vdbe_add_op3
+      FUN_08386a44: vdbe_change_p2
+    notes: >-
+      The raw ARM extent is exactly 120 bytes, 0x082c4038..0x082c40b0:
+      the following push {r4-r6,lr} at 0x082c40b0 is the next real
+      function. A whole-image raw A32 B/BL scan finds three direct inbound
+      sites: one plain bl (0x082d033c) and two predicated bleq
+      (0x08368860, 0x08368944). Decoding the body independently finds four
+      unconditional outbound BL instructions and no predicated outbound
+      calls, to the already ported VDBE builders and P2 patcher. When the
+      signed WhereLevel.iLeftJoin word at +0x38 is non-negative and
+      break_addr is nonzero, it emits opcodes 0x29(iLeftJoin,-1),
+      0x16(iLeftJoin), and 0x5b(0,break_addr,0), then patches the middle
+      op's P2 with the post-emission nOp. Otherwise it emits nothing.
+      Rust uses the existing typed Vdbe helpers and a raw aligned
+      target-layout WhereLevel pointer; no semantic deviation.
