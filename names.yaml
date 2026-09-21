@@ -35,6 +35,25 @@ functions:
       BL forms, and no calls in the leaf. It returns the opaque object's
       aligned word at +0x1c normalized as zero/nonzero. No deliberate
       deviations.
+  - address: 0x0829cf68
+    ghidra: FUN_0829cf68
+    name: object_word_0x18_is_nonzero
+    size: 16
+    sig: "u32 object_word_0x18_is_nonzero(const void *object)"
+    module: util/object_word_0x18_is_nonzero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x18/r0": word
+    notes: >-
+      Raw osos.dec words establish the exact four-instruction A32 body
+      0x0829cf68..0x0829cf77: ldr r0,[r0,#0x18]; cmp r0,#0; movne r0,#1;
+      bx lr. The next separately entered function begins at 0x0829cf78 with
+      ldr r0,[r0,#0x28]. Full-image A32 decoding finds three inbound plain BL
+      call sites (0x081bb18c, 0x081bb544, 0x081cb4d4), zero predicated inbound
+      BL forms, and no calls in the leaf. It returns the opaque object's
+      aligned word at +0x18 normalized as zero/nonzero. No deliberate
+      deviations.
   - address: 0x0829f1f4
     ghidra: FUN_0829f1f4
     name: range_byte_lookup
