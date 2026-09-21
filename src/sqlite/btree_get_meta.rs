@@ -16,13 +16,14 @@
 //!
 //! Deliberate host-only deviation: the target directly calls the already
 //! ported enter/leave, page resolver, page release, and big-endian loader.
-//! The two unported lock helpers (`0x082e8980`, `0x082d8574`) are absolute
-//! target calls. Host builds route the six non-loader boundaries through a
-//! dispatch table: a host `Btree` widens its adjacent pointer fields while the older
-//! enter/leave port intentionally uses target byte offsets, so direct host
-//! composition would make `sharable` overlap `pBt`. The dispatch preserves
-//! the port's observable call order and lets tests model the real page cache
-//! without inventing a second host layout.
+//! The query-table-lock helper at `0x082e8980` is now ported as
+//! `btree_query_table_lock`; the setter at `0x082d8574` remains an absolute
+//! target call. Host builds route the six non-loader boundaries through a
+//! dispatch table: a host `Btree` widens its adjacent pointer fields while the
+//! older target-byte-offset lock-counter port intentionally uses target byte
+//! offsets, so direct host composition would make `sharable` overlap `pBt`.
+//! The dispatch preserves the port's observable call order and lets tests model
+//! the real page cache without inventing a second host layout.
 
 use crate::sqlite::btree_lock::{btree_enter, btree_leave};
 use crate::util::beload::load_be32;
@@ -61,8 +62,7 @@ type BtreeBoundary = unsafe extern "C" fn(*mut Btree);
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn query_table_lock(btree: *mut Btree, root_page: u32, lock: u32) -> u32 {
-    let query: QueryTableLock = core::mem::transmute(0x082e_8980usize);
-    query(btree, root_page, lock)
+    crate::sqlite::btree_query_table_lock::btree_query_table_lock(btree.cast(), root_page, lock)
 }
 
 #[cfg(target_os = "none")]
