@@ -50,7 +50,7 @@
 //! target and volatile host test seams.
 
 use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
-use crate::kernel::task_lock::{kernel_sem5_signal, kernel_sem5_wait};
+use crate::kernel::task_lock::{kernel_sem17_signal, kernel_sem17_wait, kernel_sem5_signal, kernel_sem5_wait};
 #[cfg(test)]
 use crate::kernel::task_lock::{RomThunkOps, ROM_KERNEL as TASK_LOCK_ROM_KERNEL};
 
@@ -184,6 +184,56 @@ pub unsafe extern "C" fn pmu_i2c_read_regs(bank: u32, buf: *mut u8) -> i32 {
     let status = (read_regs)(bank, buf);
     (kernel.sema_signal)(PMU_I2C_INNER_SEM);
     (kernel.sema_signal)(PMU_I2C_OUTER_SEM);
+    status
+}
+
+/// pmu_i2c_read_checked — original: `FUN_0836d39c` @ 0x0836d39c (28
+/// bytes).
+///
+/// Validates that the unsigned register range `reg..reg + len` fits below
+/// 16, maps `reg` to PCF50635 address `(reg + 0x67) & 0xff`, then
+/// tail-branches to [`pmu_i2c_read`]. Invalid ranges return the stock
+/// bad-range status 8 without starting an I2C transfer. The addition uses
+/// ARM's wrapping unsigned arithmetic, so `u32::MAX + 1` is valid. The next
+/// real function begins at 0x0836d3b8.
+///
+/// # Deviation
+///
+/// The retail tail branch becomes a Rust call and return; the validated
+/// transfer therefore inherits [`pmu_i2c_read`]'s fixed-address target and
+/// volatile host-test seams.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_read_checked(reg: u32, len: u32, buf: *mut u8) -> i32 {
+    let range_end = reg.wrapping_add(len);
+    if range_end >= 16 {
+        return 8;
+    }
+    pmu_i2c_read(reg.wrapping_add(0x67) & 0xff, len as i32, buf)
+}
+
+/// pmu_i2c_read_locked — original: `FUN_082e58b4` @ 0x082e58b4 (60
+/// bytes; 3 plain `bl` call sites, 0 predicated `bl`, binary-verified by
+/// decoding every B/BL word in osos.dec).
+///
+/// Acquires PMU semaphores 17 then 5, invokes [`pmu_i2c_read_checked`],
+/// releases 5 then 17 unconditionally, and returns its status verbatim.
+/// The following `push {r4,r5,r6,lr}` at 0x082e58f0 starts the next real
+/// function, confirming Ghidra's 60-byte extent.
+///
+/// # Deviation
+///
+/// Retail directly calls fixed semaphore veneers and `FUN_0836d39c`; this
+/// port calls their existing Rust ports, so those direct `bl` instructions
+/// become ordinary Rust calls.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_read_locked(reg: u32, len: u32, buf: *mut u8) -> i32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = pmu_i2c_read_checked(reg, len, buf);
+    kernel_sem5_signal();
+    kernel_sem17_signal();
     status
 }
 
@@ -875,7 +925,62 @@ pub(crate) mod tests {
         }
         restore_raw(guard);
     }
+    #[test]
+    fn checked_read_routes_only_ranges_below_sixteen() {
+        let guard = install_raw(0, 0x15);
+        unsafe {
+            let mut buf = [0xaau8; 15];
+            assert_eq!(pmu_i2c_read_checked(0, 15, buf.as_mut_ptr()), 0x15);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(PMU_I2C_SLAVE, 1, 0x67)],
+                "the inclusive valid upper boundary maps register zero to 0x67"
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 1);
 
+            for (reg, len) in [(15, 1), (16, 0)] {
+                assert_eq!(pmu_i2c_read_checked(reg, len, buf.as_mut_ptr()), 8);
+            }
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone().len(),
+                1,
+                "out-of-range additions never begin a transfer"
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 1);
+
+            assert_eq!(pmu_i2c_read_checked(u32::MAX, 1, buf.as_mut_ptr()), 0x15);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(PMU_I2C_SLAVE, 1, 0x67), (PMU_I2C_SLAVE, 1, 0x66)]
+            );
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone().len(), 2);
+        }
+        restore_raw(guard);
+    }
+
+
+    #[test]
+    fn locked_checked_read_orders_locks_and_releases_on_bad_range() {
+        let _fixture = install_raw_i2c_for_test(0, 0x15, 0);
+        unsafe {
+            let mut buf = [0xaau8; 1];
+            assert_eq!(pmu_i2c_read_locked(0, 1, buf.as_mut_ptr()), 0x15);
+            assert_eq!(pmu_i2c_read_locked(15, 1, buf.as_mut_ptr()), 8);
+            let (writes, reads, semaphores) = raw_i2c_calls_for_test();
+            assert_eq!(writes, std::vec![(PMU_I2C_SLAVE, 1, 0x67)]);
+            assert_eq!(reads.len(), 1);
+            assert_eq!(
+                semaphores,
+                std::vec![
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                ],
+                "both success and bad-range paths retain the retail lock bracket"
+            );
+        }
+    }
     #[test]
     fn raw_non_positive_lengths_write_register_but_skip_read() {
         let guard = install_raw(0, 0);
