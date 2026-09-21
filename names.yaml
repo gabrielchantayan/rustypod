@@ -39940,6 +39940,31 @@ functions:
       (99) yields numeric; only matching text/blob-range affinities retain
       none. Raw condition codes and returned values were preserved; no
       deliberate deviations.
+  # ---- Comparison expression affinity (src/sqlite/expr_comparison_affinity.rs) ----
+  - address: 0x082c4718
+    ghidra: FUN_082c4718
+    name: expr_comparison_affinity
+    size: 84
+    sig: "u8 expr_comparison_affinity(Expr *expression)"
+    module: sqlite/expr_comparison_affinity
+    status: ported
+    renames:
+      param_1: expression
+      iVar1: left_affinity
+      iVar2: right
+      FUN_083768e0: expr_affinity
+      FUN_083735b8: expr_compare_affinity
+    notes: >-
+      SQLite 3.5.9 comparison-affinity helper. Raw ARM words establish the
+      84-byte extent at 0x082c4718..0x082c476b: pop {r4,pc} ends there and
+      the next independent push starts at 0x082c476c. Three direct inbound
+      bl call sites are all unconditional; the body has two plain outbound
+      bl calls (sqlite3ExprAffinity @ 0x083768e0 and
+      sqlite3CompareAffinity @ 0x083735b8) and zero predicated bl calls.
+      It combines the left operand's affinity with the right operand, or the
+      first result of a subquery when the right operand is absent; with
+      neither it returns the left affinity or SQLITE_AFF_NONE (98). No
+      deliberate deviations.
   # ---- Schema-cookie verification marker (deferred) ----
   - address: 0x083734bc
     ghidra: FUN_083734bc
