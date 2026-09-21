@@ -92457,6 +92457,38 @@ functions:
       invokes their verified retailOS addresses; host tests install recording
       seams for both.
 
+  # --- Filesystem bounded cleared cache-entry allocation ---
+  - address: 0x082e254c
+    ghidra: FUN_082e254c
+    name: cache_entry_allocate_cleared
+    size: 72
+    sig: "u8 *cache_entry_allocate_cleared(CacheContext *context, u32 block_index, u32 fallback_block_limit, u32 cache_key)"
+    module: fs/cache_entry_allocate_cleared
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: block_index
+      param_3/r2: fallback_block_limit
+      param_4/r3: cache_key
+      local_8: entry
+      FUN_082dfdf0: cache_entry_allocate
+      FUN_082e2ef0: byte_fill
+    notes: >-
+      Raw ARM confirms the 72-byte extent from 0x082e254c through
+      0x082e2590; the separately entered next function begins at 0x082e2594.
+      Exactly three direct ARM B/BL words target this entry, all unconditional
+      plain bl at 0x082e0474, 0x082e29bc, and 0x082e3320; there are no
+      predicated caller forms or tail branches. Internally, the body calls
+      cache_entry_allocate with its stack output slot, context, block index,
+      and preserved r3 cache key, then uses predicated blne to byte_fill at
+      entry +0x18 for 0x200 zero bytes if an entry was returned. A non-NULL
+      context overwrites r2 with context +0x1d8 before the exclusive bound
+      check; only the NULL-context path uses incoming r2. The port deliberately
+      uses the existing Rust byte_fill port; cache_entry_allocate remains a
+      verified retailOS-address target with a recording host seam. Tests cover
+      both rejection paths, cache-key forwarding, returned-entry clearing, and
+      a NULL allocator result.
+
   # --- Filesystem cache-backed block acquisition ---
   - address: 0x082e3f98
     ghidra: FUN_082e3f98
