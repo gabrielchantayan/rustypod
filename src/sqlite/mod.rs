@@ -221,6 +221,7 @@ pub mod os_write;
 pub mod vfs_find;
 pub mod write32bits;
 pub mod read_be32;
+pub mod pager_read_pending;
 pub mod randomness;
 pub mod parse_cell;
 pub mod parse_expr;
