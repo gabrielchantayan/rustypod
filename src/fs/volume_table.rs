@@ -127,6 +127,35 @@ pub unsafe extern "C" fn volume_table_lookup(index: i32, flags: u32) -> *mut u8 
     cache_lock::cache_lock_signal();
     result
 }
+ 
+/// volume_table_slot_destroy — original: `FUN_082e1934` @ `0x082e1934` (44
+/// bytes, `0x082e1934..0x082e1960`; the next separately entered function
+/// starts with `push {r4,lr}` at `0x082e1960`). Raw ARM decoding finds three
+/// inbound direct calls: two plain `bl` at `0x082e5e3c` and `0x082e6524`, and
+/// one predicated `bleq` at `0x082e0bb0`.
+///
+/// Looks up an unflagged mounted-volume descriptor, releases its non-NULL
+/// path-resolution node at word +0, then marks the descriptor destroyed by
+/// storing one at word +0x18. Missing or already-flagged entries are no-ops.
+///
+/// Deliberate deviations: the lookup and path-node release dispatch to their
+/// existing Rust ports rather than their original `bl` targets; this preserves
+/// their locking and NULL behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn volume_table_slot_destroy(index: i32) {
+    let entry = volume_table_lookup(index, 0);
+    if entry.is_null() {
+        return;
+    }
+
+    let node = core::ptr::read_volatile(entry as *const u32) as *mut u8;
+    if !node.is_null() {
+        super::path_node::path_node_release(node);
+    }
+    core::ptr::write_volatile(entry.add(0x18) as *mut u32, 1);
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -204,6 +233,9 @@ mod tests {
             unsafe {
                 core::ptr::write_volatile(self.slot(index).add(0x18) as *mut u32, value);
             }
+        }
+        fn word_18(&self, index: usize) -> u32 {
+            unsafe { core::ptr::read_volatile(self.slot(index).add(0x18) as *const u32) }
         }
     }
 
@@ -311,6 +343,24 @@ mod tests {
             // Zero mask accepts regardless of the field.
             fx.set_flags(9, 0);
             assert_eq!(volume_table_lookup(9, 0), fx.slot(9));
+        }
+    }
+
+    #[test]
+    fn destroy_marks_a_present_empty_slot_and_skips_rejected_slots() {
+        let Some(fx) = Fixture::new() else {
+            assert!(crate::testing::note_missing_u32_fixture("fs/volume_table"));
+            return;
+        };
+        unsafe {
+            // A NULL node takes the original's `beq` around path_node_release.
+            volume_table_slot_destroy(12);
+            assert_eq!(fx.word_18(12), 1);
+
+            fx.set_word_18(13, 0xfeed_beef);
+            volume_table_slot_destroy(13);
+            volume_table_slot_destroy(-1);
+            assert_eq!(fx.word_18(13), 0xfeed_beef);
         }
     }
 

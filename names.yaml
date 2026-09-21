@@ -19213,6 +19213,27 @@ functions:
       fixed-address firmware/recording-host pool boundary rather than the
       original tail branch.
 
+  - address: 0x082e1934
+    ghidra: FUN_082e1934
+    name: volume_table_slot_destroy
+    size: 44
+    sig: "void volume_table_slot_destroy(i32 index)"
+    module: fs/volume_table
+    status: ported
+    renames:
+      param_1: index
+      FUN_082e0e1c: volume_table_lookup
+      FUN_082e19cc: path_node_release
+    notes: >-
+      Raw ARM establishes the 44-byte extent 0x082e1934..0x082e1960: push
+      {r4,lr}, a zero-mask volume_table_lookup, an optional path_node_release
+      for the non-NULL word at slot +0, then a store of one at slot +0x18.
+      The next real function begins at 0x082e1960. A decoded whole-image ARM
+      B/BL scan found three direct callers: plain bl at 0x082e5e3c and
+      0x082e6524, plus predicated bleq at 0x082e0bb0; no tail branch. The
+      Rust port uses the existing lookup and node-release ports, preserving
+      their locking and NULL behavior rather than issuing the original BLs.
+
   - address: 0x082e19cc
     ghidra: FUN_082e19cc
     name: path_node_release
