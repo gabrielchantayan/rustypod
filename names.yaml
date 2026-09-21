@@ -16362,6 +16362,37 @@ functions:
       Rust calls. Host tests cover nonzero-mode serialization, lock order,
       and the failed-second-write path that skips register 0x1b.
 
+  # --- PMU register 0x0c one write (drivers/pmu) ---
+  - address: 0x082e5a70
+    ghidra: FUN_082e5a70
+    name: pmu_write_register_0x0c_one
+    size: 60
+    sig: "i32 pmu_write_register_0x0c_one()"
+    module: drivers/pmu
+    status: ported
+    renames:
+      local_10/sp: value_one
+      uVar1/r4: i2c_write_status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d524: pmu_i2c_write
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM extent is exactly 60 bytes, 0x082e5a70..0x082e5aa8: the
+      following push {r4,r5,r6,r7,lr} at 0x082e5aac starts the next real
+      function. Decoding every ARM B/BL word in osos.dec finds three direct
+      inbound calls: plain unconditional bl at 0x08393870, plus predicated
+      bleq at 0x080608b0 and blne at 0x080e36c0. The function stores byte one
+      in its 16-byte stack frame, waits on semaphores 17 then 5, writes that
+      byte to PCF50635 register 0x0c through pmu_i2c_write, signals 5 then 17
+      unconditionally, and returns the raw write status. The register's
+      hardware role is not established from the retail image. Its five direct
+      callee edges resolve to existing Rust semaphore and PMU-I2C ports,
+      deliberately replacing retail direct bl edges with ordinary Rust calls.
+      Host tests cover packet serialization, status propagation, and lock
+      release after both successful and failed writes.
+
   # --- PMU board-version status bit (drivers/pmu) ---
   - address: 0x082e5b64
     ghidra: FUN_082e5b64
