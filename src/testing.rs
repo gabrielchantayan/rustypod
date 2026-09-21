@@ -1823,6 +1823,10 @@ pub mod hints {
     pub const RECORD_COMMIT_REJECT: usize = 0x81b0_0000;
     pub const RECORD_COMMIT_FAILURE: usize = 0x81c0_0000;
     pub const RECORD_COMMIT_SUCCESS: usize = 0x81d0_0000;
+    // 0x81e0_0000: dedicated to h264/decoder_range_lookup's target-width
+    // stream and packed range-table fixture; mappings never unmap, so no
+    // other test may share this hint.
+    pub const DECODER_RANGE_LOOKUP: usize = 0x81e0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
