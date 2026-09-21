@@ -1448,6 +1448,9 @@ pub mod hints {
     // 0x4800_0000: dedicated to sqlite/pager_lookup's raw-u32 Pager,
     // bucket table, and page-hash chain fixture; mappings never unmap.
     pub const SQLITE_PAGER_LOOKUP: usize = 0x4800_0000;
+    // 0x4900_0000: dedicated to sqlite/pager_read_pending's raw-u32 PgHdr
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const SQLITE_PAGER_READ_PENDING: usize = 0x4900_0000;
     // 0x3300_0000: dedicated to sqlite/pager_set_page_size's raw-u32 Pager
     // and replacement-temporary-space fixture; mappings never unmap.
     pub const SQLITE_PAGER_SET_PAGE_SIZE: usize = 0x3300_0000;

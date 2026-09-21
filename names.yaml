@@ -14109,6 +14109,35 @@ functions:
       low byte while preserving high bits, a non-terminator, and each of
       the two independent recovery gates.
 
+  - address: 0x082ddc7c
+    ghidra: FUN_082ddc7c
+    name: pager_read_pending
+    size: 56
+    sig: "i32 pager_read_pending(PgHdr *page)"
+    module: sqlite/pager_read_pending
+    status: ported
+    renames:
+      param_1/r0: page
+      "*(u32*)(page+0x00)": page->pPager
+      "*(u32*)(page+0x04)": page->pgno
+      "*(u8*)(page+0x20)": page->needRead
+      FUN_083655cc: pager_read_db_page
+    notes: >-
+      Raw ARM establishes the 56-byte extent exactly:
+      0x082ddc7c..0x082ddcb0, followed by a distinct function beginning
+      with push {r1,r2,r3,r4,r5,r6,r7,lr} at 0x082ddcb4. The body tests
+      PgHdr.needRead at +0x20; if set, it calls pager_read_db_page with
+      page->pPager, page, and page->pgno. A nonzero helper result returns
+      immediately with needRead intact; zero clears needRead and returns
+      zero. Decoding every ARM B/BL word in osos.dec finds exactly three
+      inbound plain unconditional bl sites (0x082dd24c, 0x082de98c, and
+      0x0837e1e4), no predicated bl forms, and no tail branch. The body
+      has one plain bl to 0x083655cc and no predicated bl. Ghidra gives
+      the helper an invented fourth parameter: raw 0x083655cc only consumes
+      r0-r2 before its nested sqlite_os_read call. That unported helper is
+      a fixed target call on device and a volatile host seam; PgHdr pointer
+      fields remain u32 words to preserve four-byte target offsets on hosts.
+
   - address: 0x082ddd78
     ghidra: FUN_082ddd78
     name: pager_lookup
