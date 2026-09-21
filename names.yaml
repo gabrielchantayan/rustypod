@@ -79643,6 +79643,33 @@ functions:
       Host tests cover zero, all-low-byte-set, observed dispatch codes with
       unrelated high bits, the aligned +8 word position, and no mutation.
 
+  # --- Three-word fixed-point zero predicate (app/fixed3_is_zero) ---
+  - address: 0x0829f7a4
+    ghidra: FUN_0829f7a4
+    name: fixed3_is_zero
+    size: 36
+    sig: "u32 fixed3_is_zero(const u32 *value)"
+    module: app/fixed3_is_zero
+    status: ported
+    renames:
+      param_1/r0: value
+      value[0]: first
+      value[1]: second
+      value[2]: third
+      r0: is_zero
+    notes: >-
+      Raw ARM establishes the true extent as 0x0829f7a4..0x0829f7c8: three
+      conditionally executed loads test word 0, then word 2, then word 1,
+      ending with `movne r0,#0; moveq r0,#1; bx lr`. The function has no
+      internal BL calls. Decoding the raw firmware's inbound ARM branch words
+      found exactly three unconditional plain BL callers at 0x0824c3c0,
+      0x0824c3dc, and 0x0824c3f8, with no predicated BL forms or tail
+      branches. Those three sites update bits 0, 1, and 2 respectively after
+      fixed4_componentwise_mul, establishing this as a predicate over the
+      first three words of a fixed-point vector; its fourth word is ignored.
+      The port keeps the original's short-circuit order with volatile loads;
+      no semantic deviation. Host tests cover the all-zero vector, each
+      component independently nonzero, and no mutation.
   # --- Q16.16 four-word componentwise multiply (app/fixed4_componentwise_mul) ---
   - address: 0x0829f848
     ghidra: FUN_0829f848
