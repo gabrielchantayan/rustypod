@@ -123216,3 +123216,27 @@ functions:
       while host tests inject recording seams. match.py reports the expected
       structural difference: LLVM materializes those relocated absolute targets
       and uses blx instead of the retail direct BL instructions.
+  - address: 0x082d9538
+    ghidra: FUN_082d9538
+    name: linked_list_merge_by_word_4
+    size: 100
+    sig: "u32 linked_list_merge_by_word_4(u32 left, u32 right)"
+    module: app/linked_list_merge_by_word_4
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      puVar2/r2: tail_link
+      "[node + 0x4]": sort_key
+      "[node + 0x24]": next
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte body at
+      0x082d9538..0x082d9598; the next independently linked function begins
+      with push {r3-r9,sl,fp,lr} at 0x082d959c. Whole-image ARM decoding finds
+      three inbound plain BL instructions at 0x083698c4, 0x083698e8, and
+      0x08369904, with zero predicated BL calls and no outbound calls. This
+      leaf merges two target-width intrusive singly linked lists by their
+      unsigned +0x04 words, writing +0x24 next links; equal keys select the
+      right list first. Rust intentionally exposes target pointers as u32 so
+      the retailOS +0x24 layout survives 64-bit host tests. Host fixtures
+      verify null-side handling, sorted merge order, and equal-key tie order.
