@@ -123778,3 +123778,33 @@ functions:
       cannot encode the retail PC-relative branch; host tests install a
       four-word recording seam and cover both the null short circuit and
       exact non-null argument/result forwarding.
+
+  - address: 0x082c59f4
+    ghidra: FUN_082c59f4
+    name: descriptor_lookup_exact_or_tail
+    size: 100
+    sig: "void *descriptor_lookup_exact_or_tail(u32 unused, u32 *cursor, u32 input_len)"
+    module: cxx/descriptor_lookup_exact_or_tail
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1/r5: cursor
+      param_3/r2/r7: input_len
+      r4: primary_allocation
+      r6: initial_cursor
+      DAT_082c5a58: primary_descriptor
+      DAT_082c5a64: tail_descriptor
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent 0x082c59f4..0x082c5a57:
+      25 A32 words from push {r4-r8,lr} through the descriptor literal
+      0x089063e8. The next real function is the ldr r3,[pc]; b 0x0803a7f0
+      thunk at 0x082c5a5c; Ghidra incorrectly folds that thunk into a distinct
+      callee. The body has exactly three unconditional outbound BL calls
+      (0x0803a7f0, 0x082c5a5c, and 0x0803b3a4) and zero predicated BL calls.
+      It resolves the primary descriptor, accepts exact cursor consumption, or
+      attempts a tail descriptor at primary_allocation+0x50 with the remainder.
+      A failed tail releases the primary allocation and returns NULL. Target
+      builds retain all 25 original words; host builds use established parser
+      and release seams. Host tests cover exact-consumption acceptance and the
+      failed-tail release path. match.py confirms the original branch and call
+      structure; its exit status 1 is the documented structural-diff result.
