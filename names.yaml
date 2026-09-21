@@ -125646,3 +125646,25 @@ functions:
       LLVM frame prologue and epilogue around the same ldr r0,[r0] operation.
       Deliberate deviations: none.
 
+  - address: 0x08297e84
+    ghidra: FUN_08297e84
+    name: glyph_range_contains_character
+    size: 172
+    sig: "bool glyph_range_contains_character(GlyphRangeOwner *owner, u32 character)"
+    module: app/glyph_range_contains_character
+    status: ported
+    vars: {param_1: owner, param_2: character}
+    notes: >-
+      Raw osos.dec establishes the true 172-byte extent
+      0x08297e84..0x08297f30, ending before the next push at 0x08297f30.
+      It contains two plain bl instructions (mutex_lock_counted at
+      0x08297e94 and mutex_unlock_counted on each exit), zero predicated bl
+      instructions, and one indirect blx through the indexed-range vector
+      vtable slot +0x40 at 0x08297eb8. The two direct inbound bl callers are
+      0x0810f1d4 and 0x082a6e6c. While holding the CountedMutex at owner+0x18,
+      it examines each indexed range followed by the optional owner+0x14
+      trailing range; a character is present only when it is inclusively
+      bounded by a range and its u16 table entry is not 0xffff. The host
+      seam only represents target-width pointer production for the vector
+      callback and trailing range; device builds perform the recovered
+      vtable dispatch directly.
