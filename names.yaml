@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829f1f4
+    ghidra: FUN_0829f1f4
+    name: range_byte_lookup
+    size: 32
+    sig: "u8 range_byte_lookup(const RangeByteTable *table, i32 key)"
+    module: ui/range_byte_lookup
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      "*table/r2": first
+      "table+0x4/r2": last
+      "table+0x8/r0": data
+    notes: >-
+      Raw osos.dec words establish the exact eight-instruction A32 body
+      0x0829f1f4..0x0829f213; the next independently entered function
+      starts at 0x0829f214 with `mov r0,#0`. It compares key inclusively
+      against signed i32 first and last bounds at target offsets +0 and +4,
+      then reads the byte at the 32-bit target pointer at +8 plus key; an
+      out-of-range key returns zero. The body has zero plain and zero
+      predicated BL instructions. Full-image A32 decoding finds three
+      inbound plain BL call sites (0x080dae2c, 0x082331ec, 0x08233230) and
+      zero predicated inbound BL forms. No deliberate deviations.
   - address: 0x082a17c8
     ghidra: FUN_082a17c8
     name: q16_i32_to_f32_bits

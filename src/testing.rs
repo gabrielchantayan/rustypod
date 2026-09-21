@@ -1921,6 +1921,9 @@ pub mod hints {
     // may share these hints.
     pub const LAZY_STRING_TABLES_INITIALIZE_FIRST: usize = 0x6f00_0000;
     pub const LAZY_STRING_TABLES_INITIALIZE_SECOND: usize = 0x6f10_0000;
+    // 0x6f20_0000: dedicated to ui/range_byte_lookup's target-width table
+    // fixture; mappings never unmap, so no other test may share this hint.
+    pub const RANGE_BYTE_LOOKUP: usize = 0x6f20_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
