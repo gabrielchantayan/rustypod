@@ -73,6 +73,7 @@ pub mod empty_destructor_083d8008;
 pub mod tracker_diagnostic_no_op;
 pub mod tracker_table_diagnostic_no_op;
 pub mod empty_destructor_2a1ebc;
+pub mod empty_destructor_2a1e98;
 pub mod opaque_record_payload_length;
 pub mod opaque_storage_destroy;
 pub mod flagged_pair_copy;

@@ -125022,3 +125022,22 @@ functions:
       StringObject uses its native host layout. Host tests cover an empty
       copied source, every node including the terminal node, prepend order,
       separators, and untouched source storage.
+  - address: 0x082a1e98
+    ghidra: FUN_082a1e98
+    name: empty_destructor_2a1e98
+    size: 4
+    sig: "void *empty_destructor_2a1e98(void *this)"
+    module: cxx/empty_destructor_2a1e98
+    status: ported
+    renames:
+      param_1/r0: this
+      return/r0: this
+    notes: >-
+      Raw osos.dec establishes the exact four-byte extent
+      0x082a1e98..0x082a1e9c: e12fff1e decodes to bx lr, and the next
+      independently linked function starts at 0x082a1e9c with add r0,r0,#0x1c.
+      Whole-image A32 decoding finds three incoming plain unconditional BL
+      calls at 0x0807a4bc, 0x0807a4d4, and 0x08296920, with zero incoming
+      predicated BL calls. The function neither reads nor writes memory and
+      preserves r0, so it is an empty non-deleting destructor despite Ghidra's
+      void prototype. Deliberate deviations: none.
