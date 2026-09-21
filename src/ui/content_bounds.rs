@@ -41,6 +41,24 @@ const _: [u8; 0x90] = [0; size_of::<ElementFields>()];
 const _: [u8; 0x48] = [0; offset_of!(ElementFields, flags)];
 const _: [u8; 0x80] = [0; offset_of!(ElementFields, bounds)];
 
+/// ui_element_has_flag_2 — original: `FUN_082a2458` @ 0x082a2458
+/// (16 bytes; `0x082a2458..0x082a2468`; the next distinct function starts at
+/// `0x082a2468`).
+///
+/// Loads the element flag word at +0x48 and returns its bit 1 as 0 or 1.
+/// Raw decoding finds exactly three direct, unconditional `bl` call sites and
+/// no predicated `bl` forms. The function has no NULL guard.
+///
+/// # Deliberate deviations
+///
+/// None.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_has_flag_2(element: *const u8) -> i32 {
+    let flags = ptr::addr_of!((*element.cast::<ElementFields>()).flags).read();
+    ((flags & 2) >> 1) as i32
+}
+
 /// ui_element_content_inset — original: `FUN_082a2468` @ 0x082a2468
 /// (84 bytes; `0x082a2468..0x082a24bc`; the next function starts at
 /// `0x082a24bc`).
@@ -288,6 +306,28 @@ mod tests {
                 assert_eq!(fixture._before_bounds, [0x5a; 0x34]);
                 assert_eq!(fixture.bounds, rect(-11, 13, 17, 19));
             }
+        }
+    }
+
+    #[test]
+    fn element_flag_2_returns_only_the_second_flag_bit_without_writing_element() {
+        for flags in [0, 1, 2, 3, 0xffff_fffc, 0xffff_ffff] {
+            let mut fixture = Fixture {
+                _before_flags: [0xa5; 0x48],
+                flags,
+                _before_bounds: [0x5a; 0x34],
+                bounds: rect(-11, 13, 17, 19),
+            };
+
+            let got = unsafe {
+                ui_element_has_flag_2((&mut fixture as *mut Fixture).cast::<u8>())
+            };
+
+            assert_eq!(got, ((flags & 2) >> 1) as i32, "flags={flags:#010x}");
+            assert_eq!(fixture._before_flags, [0xa5; 0x48]);
+            assert_eq!(fixture.flags, flags);
+            assert_eq!(fixture._before_bounds, [0x5a; 0x34]);
+            assert_eq!(fixture.bounds, rect(-11, 13, 17, 19));
         }
     }
 
