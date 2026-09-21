@@ -204,6 +204,7 @@ pub mod pager_set_page_size;
 pub mod pager_set_sector_size;
 pub mod pager_truncate_image;
 pub mod pcache_remove_from_lru_list;
+pub mod pcache_add_to_lru_list;
 pub mod pcache_truncate;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;

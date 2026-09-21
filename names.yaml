@@ -14034,6 +14034,35 @@ functions:
       SVC plus the exact op/pointer order and preservation of SYS_READC's
       return over both ignored SYS_WRITE0 results.
 
+  - address: 0x082d90b0
+    ghidra: FUN_082d90b0
+    name: pcache_add_to_lru_list
+    size: 60
+    sig: "void pcache_add_to_lru_list(PgHdr *page)"
+    module: sqlite/pcache_add_to_lru_list
+    status: ported
+    renames:
+      param_1/r0: page
+      "*(u32*)(page+0x00)": page->pCache
+      "*(u8*)(page+0x1d)": page->onLruList
+      "*(PgHdr**)(page+0x24)": page->pLruPrev
+      "*(PgHdr**)(page+0x28)": page->pLruNext
+      "*(PgHdr**)(page->pCache+0x90)": cache->pLruHead
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent
+      0x082d90b0..0x082d90e8; 0x082d90ec begins a separately linked
+      function with push {r4,r5,lr}, so no literal pool follows. If the
+      page's +0x1d membership byte is nonzero, return without reads or
+      writes beyond that byte. Otherwise set it to one, make the old
+      cache +0x90 head the page's +0x24 previous link, repair that old
+      head's +0x28 next link when non-null, clear page +0x28, and install
+      page as cache +0x90 head. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly three inbound plain unconditional bl sites
+      (0x082de99c, 0x0837e288, 0x0837e2fc), no predicated bl forms, no
+      tail branches, and no outbound calls. This is SQLite 3.5.x
+      pcacheAddToLruList; host pointer fields are explicit u32 words to
+      retain the four-byte target layout. No deliberate deviations.
+
   - address: 0x082dd3d8
     ghidra: FUN_082dd3d8
     name: context_activity_enter
