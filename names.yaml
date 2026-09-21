@@ -124838,3 +124838,30 @@ functions:
       callee seam. Deliberate deviation: Rust branches where ADS predicates
       the owner-byte load and bit extraction; the gate, target byte, and result
       remain identical.
+  - address: 0x082a2ac0
+    ghidra: FUN_082a2ac0
+    name: scoped_context_owner_byte_8f_bit_2
+    size: 52
+    sig: "u32 scoped_context_owner_byte_8f_bit_2(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "*this/r0": vtable
+      this+8/r0: owner
+      owner+0x8f/r0: capability_byte
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte A32 body
+      0x082a2ac0..0x082a2af3: the closing `pop {r4,pc}` is at 0x082a2af0,
+      and `push {r4,r5,r6,lr}` at 0x082a2af4 begins the next independent
+      function. Whole-image aligned ARM decoding finds three inbound plain
+      unconditional BL instructions (0x0817df5c, 0x0817e128, and
+      0x0823b0d4) and zero inbound predicated BL forms. The body makes one
+      indirect BLX through vtable slot +0x08, returns zero without reading
+      the owner when that validity gate is zero, otherwise returns owner byte
+      +0x8f bit 2 normalized to zero or one. The virtual callee's identity is
+      unrecovered; its established ScopedContext vtable slot contract is used
+      directly. match.py reports the expected LLVM frame and predication
+      lowering but preserves the dispatch, short circuit, byte load, mask,
+      and normalization. Deliberate deviation: the existing repr(C) host
+      object model uses native pointers rather than target-width raw words.
