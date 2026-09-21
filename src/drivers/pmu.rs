@@ -38,6 +38,36 @@ const PMU_OTHER_BOARD_STATUS_REGISTER: u32 = 0x12;
 /// is not established from the retail image.
 const PMU_REGISTER_0X4B: u32 = 0x4b;
 
+/// PMU register selected by `FUN_082e5a70`; its hardware role is not
+/// established from the retail image.
+const PMU_REGISTER_0X0C: u32 = 0x0c;
+
+/// pmu_write_register_0x0c_one — original: `FUN_082e5a70` @ `0x082e5a70`
+/// (60 bytes; 1 plain `bl` and 2 predicated `bl` call sites,
+/// binary-verified).
+///
+/// Writes the byte one to PCF50635 register 0x0c while holding semaphore 17
+/// then semaphore 5. Releases semaphore 5 then semaphore 17 unconditionally
+/// and returns the raw PMU I2C write status.
+///
+/// # Deviations
+///
+/// Retail's five direct callee edges resolve to existing Rust semaphore and
+/// PMU-I2C ports, replacing direct `bl` edges with ordinary Rust calls.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_write_register_0x0c_one() -> i32 {
+    let value = 1_u32;
+
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = pmu_i2c_write(PMU_REGISTER_0X0C, 1, (&value as *const u32).cast());
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+
+    status
+}
+
 
 /// pmu_board_version_status_bit — original: `FUN_082e5b64` @ `0x082e5b64`
 /// (76 bytes; 8 unconditional `bl` call sites, binary-verified).
@@ -170,6 +200,26 @@ mod tests {
     use crate::drivers::i2c::tests::{
         install_raw_i2c_for_test, raw_i2c_calls_for_test, raw_i2c_packets_for_test,
     };
+
+    #[test]
+    fn register_0c_one_returns_write_status_and_releases_locks() {
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+            assert_eq!(unsafe { pmu_write_register_0x0c_one() }, 0);
+            let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+            assert_eq!(writes, std::vec![(0x73, 2, PMU_REGISTER_0X0C as u8)]);
+            assert!(reads.is_empty());
+            assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![std::vec![0x0c, 1]]);
+            assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+        assert_eq!(unsafe { pmu_write_register_0x0c_one() }, -5);
+        let (_writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert!(reads.is_empty());
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
     use crate::sysinfo::install_host_cached_board_version;
     extern crate std;
 
