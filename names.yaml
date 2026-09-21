@@ -124453,3 +124453,33 @@ functions:
       table words are cleared and registration occurs exactly once, plus
       the initialized-guard fast path preserves existing words and skips
       registration.
+
+  # --- Deferred construction-vtable wrapper (cxx) ---
+  - address: 0x082a7bd0
+    ghidra: FUN_082a7bd0
+    name: construction_vtable_wrapper
+    size: 76
+    sig: "u8 *construction_vtable_wrapper(u8 *storage, u32 initializer_argument)"
+    module: cxx/construction_vtable_wrapper
+    status: identified
+    renames:
+      param_1/r0/r4: storage
+      param_2/r1/r6: initializer_argument
+      DAT_082a7c1c/r5: construction_vtable_pair
+      FUN_083e798c: embedded_base_constructor
+      FUN_083e78f8: adjusted_subobject_initializer
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte A32 body
+      0x082a7bd0..0x082a7c1b, followed by its literal word 0x089a8738 at
+      0x082a7c1c; push {r4-r6,lr} at 0x082a7c20 begins the next independently
+      entered function. Whole-image aligned A32 decoding finds three inbound
+      plain BL calls (0x082a91f0, 0x082a9240, and 0x082a9290), zero inbound
+      predicated BL calls, and two outbound plain BL calls (0x083e798c and
+      0x083e78f8), with no predicated outbound BL forms. This remains
+      identified because the raw construction-vtable sequence stores the
+      adjacent 0x089a8738/0x08217040 words and derives its final subobject
+      address by dereferencing the word at 0x08217034. Neither the two direct
+      callees nor that construction-vtable ABI has a recovered semantic
+      contract or existing Rust seam, so a faithful host fixture cannot be
+      defined without inventing object-layout semantics. Deliberate
+      deviations: none; no Rust port is committed.
