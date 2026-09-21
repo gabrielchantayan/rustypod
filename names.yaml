@@ -122897,3 +122897,34 @@ functions:
       but its exact enum is unrecovered. match.py exits 1 with the reviewed
       structural diff: LLVM adds a frame but retains the single +0x14 load
       and return. Deliberate deviations: none.
+
+  # --- Fixed-width packet record initialization ---
+  - address: 0x082e2674
+    ghidra: FUN_082e2674
+    name: initialize_packet_record
+    size: 120
+    sig: "void initialize_packet_record(u8 *record, const u8 *first_text, const u8 *second_text, u8 kind, u32 packed_value, u32 context, const u16 *pair)"
+    module: util/packet_record_initialize
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: first_text
+      param_3/r2: second_text
+      param_4/r3: kind
+      param_5/stack: packed_value
+      param_6/stack: context
+      param_7/stack: pair
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent: 30 ARM words from
+      0x082e2674 through b 0x082e4b84 at 0x082e26e8; the next independently
+      linked function starts at 0x082e26ec with push {r4,r5,r6,lr}. The body
+      has exactly three direct call instructions, all unconditional plain bl:
+      two calls to 0x082e04d0, which copy fixed-width bytes while substituting
+      spaces for NULs, and one call to 0x082e2ef0, which clears ten bytes.
+      There are no predicated BL instructions. It initializes fixed 8-byte and
+      3-byte text fields, kind at +0xb, reserved bytes +0xc..+0x15, high/low
+      halves of packed_value at +0x14/+0x1a, pair words at +0x16/+0x18 in
+      reversed source order, and context at +0x1c. Its final tail target
+      0x082e4b84 clears u32 state fields at +0x40, +0x44, +0x4c, and +0x50.
+      The three unported fixed-behavior callees are deliberately inlined rather
+      than exposed as invented Rust dispatch seams; otherwise no deviations.
