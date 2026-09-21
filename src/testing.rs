@@ -1619,6 +1619,9 @@ pub mod hints {
     // MemPage and cell-data fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const SQLITE_CLEAR_PAGE_OVERFLOW_CELLS: usize = 0x45ff_0000;
+    // 0x4600_0000: dedicated to sqlite/clear_overflow_cell's target-width
+    // MemPage, BtShared, and overflow-cell fixture; mappings never unmap.
+    pub const SQLITE_CLEAR_OVERFLOW_CELL: usize = 0x4600_0000;
     // 0x8200_0000: dedicated to sqlite/clear_saved_overflow's target-width
     // BtCursor and tracked-allocation fixture; mappings never unmap.
     pub const SQLITE_CLEAR_SAVED_OVERFLOW: usize = 0x8200_0000;

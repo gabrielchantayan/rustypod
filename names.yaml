@@ -40609,6 +40609,40 @@ functions:
       the target fields as u32 words so their offsets do not widen on 64-bit
       hosts; this is the sole deliberate representation deviation.
 
+  # ---- SQLite overflow-cell cleanup (src/sqlite/clear_overflow_cell.rs) ----
+  - address: 0x082c3454
+    ghidra: FUN_082c3454
+    name: clear_overflow_cell
+    size: 212
+    sig: "i32 clear_overflow_cell(MemPage *page, const u8 *cell)"
+    module: sqlite/clear_overflow_cell
+    status: ported
+    renames:
+      param_1/r0/r5: page
+      param_2/r1/r4: cell
+      local_38: overflow_page
+      local_34: overflow_page_number
+      FUN_083727ec: btree_parse_cell_ptr
+      FUN_0837a158: load_be32
+      FUN_0837e7ac: pager_page_count
+      FUN_082d0838: get_overflow_page
+      FUN_082cf41c: free_page
+      FUN_0837ee98: release_object
+    notes: >-
+      Raw osos.dec establishes the exact 212-byte extent
+      0x082c3454..0x082c3528: pop {r4,r5,r6,pc} returns at 0x082c34d4
+      and the next separately linked function begins with push {r4,lr} at
+      0x082c3528. Whole-image ARM decoding finds exactly three inbound
+      unconditional plain BL instructions at 0x082c35f8, 0x08370fec, and
+      0x08371778, with no predicated BL callers. The body has seven
+      unconditional plain BL instructions and no predicated calls. This is
+      SQLite sqlite3BtreeClearCell: parse the cell, calculate its overflow
+      page count, reject zero or out-of-range page numbers, then resolve,
+      free, and release each overflow page. The three unported SQLite
+      services and release boundary are direct calls on target; host tests
+      use a private dispatch table because target-width pointer fields remain
+      u32 words.
+
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
   - address: 0x082c3528
     ghidra: FUN_082c3528
