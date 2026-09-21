@@ -122287,3 +122287,29 @@ functions:
       sole deliberate deviation and preserves byte order and forward-overlap
       behavior. Host tests cover successful copying, zero length, both NULL
       guards, and forward overlap.
+
+  - address: 0x08368c78
+    ghidra: FUN_08368c78
+    name: select_op_name
+    size: 40
+    sig: "u32 select_op_name(u32 operation)"
+    module: sqlite/select_op_name
+    status: ported
+    renames:
+      param_1/r0: operation
+      DAT_08368ca0: union_all
+      DAT_08368ca4: intersect
+      DAT_08368ca8: except
+      DAT_08368cac: union
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte instruction body at
+      0x08368c78..0x08368c9f; four literal words follow at
+      0x08368ca0..0x08368caf, and the next real function begins at
+      0x08368cb0 with push {r4-r10,lr}. Complete aligned ARM BL decoding
+      finds three inbound plain unconditional BL callers (0x082d9ea4,
+      0x082d9ec4, and 0x082da5c0) and zero predicated BL callers. The body
+      contains no BL. The literal targets, corrected by SQLite's verified
+      image/runtime data skew of +0xaed8, name the ASCII strings UNION ALL,
+      INTERSECT, UNION, and EXCEPT. It selects UNION ALL for token 0x6b,
+      INTERSECT for 0x6c, EXCEPT for 0x6d, and UNION otherwise. Deliberate
+      deviations: none.
