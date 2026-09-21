@@ -45304,6 +45304,31 @@ functions:
       0x0803bbb0). match.py: same mov r0,#0 + tail-call shape, plus the
       hook-table ldr/bx indirection and an LLVM frame.
 
+  - address: 0x082d0960
+    ghidra: FUN_082d0960
+    name: parse_boolean_value
+    size: 132
+    sig: "u32 parse_boolean_value(const u8 *input)"
+    module: strto/parse_boolean_value
+    status: ported
+    renames:
+      param_1: input
+      iVar4: index
+      uVar5: token_index
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte extent
+      0x082d0960..0x082d09e3; its three-word literal pool follows and the
+      next separately linked function begins at 0x082d09f0. Decoding every
+      ARM B/BL word finds exactly 3 unconditional plain BL call sites
+      (the CTYPE accessor 0x0802eca0, strlen 0x08392478, and str_nicmp
+      0x08384fa0), zero predicated BL forms, and one conditional BEQ
+      tail branch to atoi_dead_sign @ 0x082b5298. Its overlapping token
+      data decodes to `on`, `no`, `off`, `false`, `yes`, `true`, and
+      `full`, returning 1, 0, 0, 0, 1, 1, and 2; unknown input returns 1.
+      A CTYPE value of exactly 0x20 takes the atoi tail path, which the
+      retail ASCII CTYPE table assigns to decimal digits. Deliberate
+      deviation: Rust expresses that verified digit class directly rather
+      than dereferencing the fixed CTYPE table.
   - address: 0x082d0ab4
     ghidra: FUN_082d0ab4
     name: parse_ascii_decimal_cursor

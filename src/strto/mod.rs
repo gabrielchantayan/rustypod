@@ -1,5 +1,6 @@
 //! String-to-number conversions (strto* family, atof, bsearch).
 pub mod atoi_dead_sign;
+pub mod parse_boolean_value;
 pub mod atoi_decimal;
 pub mod decimal_cursor;
 pub mod hash_radix_i32;
