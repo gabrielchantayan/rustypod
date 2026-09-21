@@ -146,6 +146,7 @@ pub mod parse_ascii_decimal_cursor;
 pub mod plane_cursor;
 pub mod q15_mul;
 pub mod q15_multiply_add_saturating;
+pub mod q16_i32_to_f32_bits;
 pub mod operation_dispatch;
 pub mod enum_value_bitset;
 pub mod query_object_release;

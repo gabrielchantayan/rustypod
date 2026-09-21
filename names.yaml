@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a17c8
+    ghidra: FUN_082a17c8
+    name: q16_i32_to_f32_bits
+    size: 100
+    sig: "u32 q16_i32_to_f32_bits(const i32 *value)"
+    module: util/q16_i32_to_f32_bits
+    status: ported
+    renames:
+      param_1/r0: value
+      "*value/r4": raw
+      r5: sign
+      r0: highest_bit_then_significand
+      r1: packed_sign_and_exponent
+      r2: biased_exponent
+    notes: >-
+      Raw osos.dec words establish the exact 25-instruction A32 body
+      0x082a17c8..0x082a182c; the next function starts at 0x082a182c
+      with `ldr r0,[r0]`. It reads the signed Q16 input, records its sign
+      in the high bit, forms a wrapping magnitude, calls the already ported
+      highest_set_bit at 0x080377d8, and packs a truncating IEEE-754
+      single-precision bit pattern with bias 111. Its unusual zero result
+      is 0x37000000 and i32::MIN uses ARM's wrapping negate; both are
+      preserved. Raw instruction decoding finds one internal plain BL, zero
+      predicated internal BL forms, and three inbound plain BL call sites
+      in FUN_081b8894; none is predicated. No deliberate deviations.
   - address: 0x082a1cac
     ghidra: FUN_082a1cac
     name: timespec_is_after
