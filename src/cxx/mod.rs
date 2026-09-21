@@ -228,6 +228,7 @@ pub mod string;
 pub mod filebuf_is_open;
 pub mod string_pair_word_uninitialized_copy;
 pub mod named_object_cache;
+pub mod keyed_record_find_string_match;
 pub mod string_range_destroy;
 pub mod string_vector_destruct;
 pub mod lazy_string_tables_initialize;
