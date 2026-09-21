@@ -124552,3 +124552,28 @@ functions:
       and returns the virtual method result. The target identity is not
       recovered; host fixtures use pointer-width vtable cells because host
       pointers exceed the target's four-byte cells.
+
+  - address: 0x082a6784
+    ghidra: FUN_082a6784
+    name: subobject_vtable_slot_0x40_result_word
+    size: 8
+    sig: "u32 subobject_vtable_slot_0x40_result_word(void *receiver)"
+    module: util/subobject_vtable_slot_0x40_result_word
+    status: ported
+    vars:
+      param_1/r0: receiver
+      param_1_plus_8: vtable_subobject
+      vtable+0x40: unrecovered_virtual_method
+      FUN_083d5f2c: subobject_vtable_slot_0x40_result_word_tail_target
+    notes: >-
+      Raw osos.dec words establish the exact two-instruction, eight-byte A32
+      body 0x082a6784..0x082a678b: add r0,r0,#8; b 0x083d5f2c. The branch at
+      0x082a678c is the next independently entered tail-call wrapper. Complete
+      aligned A32 decoding finds three inbound plain BL calls at 0x08299a28,
+      0x08299ad0, and 0x08299b74, and zero predicated BL calls. The target
+      loads vtable slot +0x40 on the adjusted receiver, invokes it, then
+      reads and returns its result word. Because 0x083d5f2c has no recovered
+      semantic identity, this port reuses the independently verified
+      vtable_slot_0x40_result_word implementation rather than creating a
+      callee seam. Deliberate deviation: the retail tail branch becomes a
+      normal Rust call; the adjusted receiver and result are unchanged.
