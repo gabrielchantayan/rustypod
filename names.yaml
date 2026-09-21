@@ -125396,3 +125396,27 @@ functions:
       concrete type is unrecovered and deliberately remains two u32 target
       words, preserving four-byte field spacing on hosts. Deliberate
       deviations: none.
+
+  # --- object byte +0x4 low-bit-clear predicate ---
+  - address: 0x0829d3c0
+    ghidra: FUN_0829d3c0
+    name: object_byte_0x4_low_bit_is_clear
+    size: 16
+    sig: "u32 object_byte_0x4_low_bit_is_clear(const u8 *object)"
+    module: util/object_byte_0x4_low_bit_is_clear
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x4/r0": byte_at_offset_0x4
+      r1: low_bit_mask
+      r0 (return): low_bit_is_clear
+    notes: >-
+      Raw osos.dec words establish the exact four-instruction A32 body at
+      0x0829d3c0..0x0829d3cf; the next independently entered function begins
+      at 0x0829d3d0 with `mov r0,#0; bx lr`. The body has no outgoing BL
+      calls. Decoding every aligned A32 B/BL-immediate word finds three direct
+      inbound unconditional plain BL calls at 0x0826b940, 0x0826b9a0, and
+      0x0826ba54, with zero predicated inbound BL forms. It reads the unchecked
+      object's byte at +0x4 and returns one precisely when bit 0 is clear.
+      The concrete object type is unrecovered, so the name preserves the
+      verified field offset and predicate. Deliberate deviations: none.
