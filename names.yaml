@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e36c8
+    ghidra: FUN_082e36c8
+    name: fat_cursor_advance_block
+    size: 36
+    sig: "u32 fat_cursor_advance_block(u32 *cursor)"
+    module: fs/fat_cursor_advance_block
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      param_1+0: volume
+      param_1+12: cache_block_index
+      FUN_082e2b34: fat_cursor_next_block
+    notes: >-
+      Raw osos.dec words establish the true 36-byte extent
+      0x082e36c8..0x082e36eb; 0x082e36ec starts the next independent
+      function with mov r3,r0. Whole-image ARM decoding finds three inbound
+      plain BL calls (0x082e1340, 0x082e208c, and 0x082e2918), zero
+      predicated BL calls, and one direct plain BL to FUN_082e2b34. The
+      wrapper replaces cursor + 12 only when that helper returns a nonzero
+      next cache-block index, then returns its boolean. FUN_082e2b34 remains
+      unported: target builds dispatch to 0x082e2b34 and host tests use a
+      recording seam. match.py reports the expected structural diff from the
+      target address literal and LLVM frame setup.
   - address: 0x082e38b4
     ghidra: FUN_082e38b4
     name: dos_wildcard_match_including_deleted

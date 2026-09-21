@@ -46,6 +46,8 @@ pub mod fat_next_cluster;
 /// Releases a FAT cluster chain through the shared cache-position writer @ 0x082e18f8.
 pub mod fat_cluster_chain_release;
 /// FAT directory-cursor initialization and advancement @ 0x082b2014.
+/// FAT directory cursor cache-block advancement @ 0x082e36c8.
+pub mod fat_cursor_advance_block;
 pub mod fat_cursor;
 /// Searches a cache-position range for its first zero value @ 0x082e1098.
 pub mod zero_cache_position;
