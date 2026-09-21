@@ -64335,6 +64335,35 @@ functions:
       r4` return; differing by the crate's fp frame and the loop rotated so
       the first decode is peeled.
 
+  - address: 0x082a4e4c
+    ghidra: FUN_082a4e4c
+    name: bit_set_find_nth_set
+    size: 88
+    sig: "u32 bit_set_find_nth_set(BitSet *set, u32 occurrence)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r6: set
+      param_2/r7: occurrence
+      r4: bit
+      r5: matched_count
+      FUN_082a4ee8: bit_set_contains
+    notes: >-
+      EXTENT - raw osos.dec decodes from 0x082a4e4c through the `pop {r4, r5,
+      r6, r7, r8, pc}` at 0x082a4ea0; the next separately linked function
+      opens at 0x082a4ea4 with `push {r4, r5, r6, lr}`, giving the true
+      88-byte extent. CALL SITES - raw ARM B/BL decoding finds 3 unconditional
+      BLs (0x0815f8c4, 0x0815f96c, 0x0815fa14) and 0 predicated BLs. BODY -
+      scans bits from zero, counting each set bit, and returns the index of the
+      zero-based requested occurrence; if it exhausts bit_capacity first,
+      returns bit_capacity. Both counters use ARM-wrapping add. CALLEE -
+      bit_set_contains @ 0x082a4ee8 is already ported; Rust calls it directly
+      rather than reproducing the stock BL. TESTS - mapped target-width backing
+      words cover first, cross-word, final, absent, and padding-bit-only
+      occurrences. Deviations - volatile capacity loads preserve the stock
+      repeated condition load and fresh exhausted return; direct sibling call
+      replaces the stock BL.
+
   - address: 0x082a4ea4
     ghidra: FUN_082a4ea4
     name: bit_set_find_next_set
