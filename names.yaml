@@ -122992,3 +122992,32 @@ functions:
       0x082e4b84 clears u32 state fields at +0x40, +0x44, +0x4c, and +0x50.
       The three unported fixed-behavior callees are deliberately inlined rather
       than exposed as invented Rust dispatch seams; otherwise no deviations.
+  - address: 0x082e1ed0
+    ghidra: FUN_082e1ed0
+    name: decoder_range_lookup
+    size: 164
+    sig: "u32 decoder_range_lookup(const u32 *stream, u32 decoder, u32 start, u32 *next_start, u32 units)"
+    module: h264/decoder_range_lookup
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: decoder
+      param_3/r2: start
+      param_4/r3: next_start
+      param_5/[sp]: units
+      "[stream + 0x20]": range_table
+      FUN_082e1d98: decoder_next_range
+    notes: >-
+      Raw ARM words establish the exact 164-byte extent
+      0x082e1ed0..0x082e1f73; 0x082e1f74 starts the next independently linked
+      function with push {r4-r6,lr}. Independent decoding finds no plain or
+      predicated BL instructions in this body; the apparent fallback call is
+      the tail branch at 0x082e1f70 to FUN_082e1d98. The packed table contains
+      adjacent {start,length} pairs terminated by length zero. A hit returns
+      min(units, remaining), writes either start+units, the next pair's start,
+      or the terminal range end, and otherwise tail-dispatches to
+      FUN_082e1d98. The existing DECODER_NEXT_RANGE seam preserves that
+      unported target on ARM and makes host testing possible; table pointers
+      deliberately remain target-width u32 words.
+      match.py reports the expected structural reordering: LLVM emits the
+      indirect tail-dispatch before its table loop rather than after it.
