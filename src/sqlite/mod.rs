@@ -173,6 +173,7 @@ pub mod find_index;
 pub mod locate_coll_seq;
 pub mod locate_table;
 pub mod lock_and_prepare;
+pub mod free_function_context;
 pub mod free_p4;
 pub mod vdbe_free_ops;
 pub mod get_varint;
