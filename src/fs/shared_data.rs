@@ -154,6 +154,102 @@ pub unsafe extern "C" fn shared_data_initialize(
     set_shared_data_list_head(data);
     cache_lock_signal()
 }
+ 
+/// shared_data_find_and_retain — original: `FUN_082e42b0` @ `0x082e42b0`
+/// (108 bytes; the following word at `0x082e431c` is the list-head literal
+/// `0x08a0a720`, and the next separately entered function starts at
+/// `0x082e4320`). Raw ARM decoding finds three unconditional `bl` call sites,
+/// zero predicated `bl` call sites, and two direct calls in the body: one to
+/// `cache_lock_wait`, one to `cache_lock_signal`.
+///
+/// Acquires the cache lock, linearly searches the shared-data list for exact
+/// volume, cluster, and entry-index words at +0x2c, +0x30, and +0x34, then
+/// increments a matching block's +0x24 reference count with wrapping ARM
+/// arithmetic. It always releases the lock and returns either the retained
+/// block or NULL.
+///
+/// Deliberate deviation: calls the already-ported cache-lock thunks instead
+/// of their retailOS load addresses; this preserves the acquire/search/retain/
+/// release ordering while using the project's ROM-kernel seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn shared_data_find_and_retain(
+    volume: u32,
+    cluster: u32,
+    entry_index: u32,
+) -> *mut u8 {
+    cache_lock_wait();
+
+    let mut data = shared_data_list_head();
+    while !data.is_null() {
+        if read_word(data, 0x2c / 4) == volume
+            && read_word(data, 0x30 / 4) == cluster
+            && read_word(data, 0x34 / 4) == entry_index
+        {
+            write_word(data, REFCOUNT_WORD, read_word(data, REFCOUNT_WORD).wrapping_add(1));
+            cache_lock_signal();
+            return data;
+        }
+        data = read_link(data, NEXT_WORD);
+    }
+
+    cache_lock_signal();
+    core::ptr::null_mut()
+}
+
+
+#[cfg(test)]
+mod find_and_retain_tests {
+    extern crate std;
+
+    use super::*;
+
+    unsafe fn slab() -> Option<*mut u8> {
+        crate::testing::try_map_u32_slab(crate::testing::hints::SHARED_DATA_FIND_AND_RETAIN, 0x1000)
+    }
+
+    #[test]
+    fn retains_only_the_exact_metadata_match() {
+        let _bench = super::tests::bench();
+        let Some(slab) = (unsafe { slab() }) else {
+            assert!(crate::testing::note_missing_u32_fixture("fs/shared_data_find_and_retain"));
+            return;
+        };
+        let first = slab;
+        let match_entry = unsafe { slab.add(0x80) };
+        let last = unsafe { slab.add(0x100) };
+
+        unsafe {
+            write_word(first, 0x2c / 4, 4);
+            write_word(first, 0x30 / 4, 5);
+            write_word(first, 0x34 / 4, 6);
+            write_word(first, REFCOUNT_WORD, 7);
+            write_link(first, NEXT_WORD, match_entry);
+            write_word(match_entry, 0x2c / 4, 4);
+            write_word(match_entry, 0x30 / 4, 5);
+            write_word(match_entry, 0x34 / 4, 7);
+            write_word(match_entry, REFCOUNT_WORD, u32::MAX);
+            write_link(match_entry, NEXT_WORD, last);
+            write_word(last, 0x2c / 4, 4);
+            write_word(last, 0x30 / 4, 8);
+            write_word(last, 0x34 / 4, 7);
+            write_word(last, REFCOUNT_WORD, 9);
+            write_link(last, NEXT_WORD, core::ptr::null_mut());
+            set_shared_data_list_head(first);
+
+            assert_eq!(shared_data_find_and_retain(4, 5, 7), match_entry);
+            assert_eq!(read_word(first, REFCOUNT_WORD), 7);
+            assert_eq!(read_word(match_entry, REFCOUNT_WORD), 0);
+            assert_eq!(read_word(last, REFCOUNT_WORD), 9);
+            assert_eq!((*core::ptr::addr_of!(super::tests::SEMAPHORE_EVENTS)).clone(), std::vec![0, 1]);
+
+            (*core::ptr::addr_of_mut!(super::tests::SEMAPHORE_EVENTS)).clear();
+            assert!(shared_data_find_and_retain(4, 5, 8).is_null());
+            assert_eq!((*core::ptr::addr_of!(super::tests::SEMAPHORE_EVENTS)).clone(), std::vec![0, 1]);
+        }
+    }
+}
+
 
 
 /// shared_data_release — original: `FUN_082e1960` @ `0x082e1960` (104 bytes:
@@ -208,10 +304,9 @@ mod tests {
     use std::sync::MutexGuard;
     use std::vec::Vec;
 
-    static mut SEMAPHORE_EVENTS: Vec<u8> = Vec::new();
+    pub(super) static mut SEMAPHORE_EVENTS: Vec<u8> = Vec::new();
     static mut RECYCLED: Vec<usize> = Vec::new();
     static mut ALLOCATED: *mut u8 = core::ptr::null_mut();
-
 
     unsafe extern "C" fn record_wait(_semaphore: usize) -> usize {
         (*addr_of_mut!(SEMAPHORE_EVENTS)).push(0);
@@ -234,12 +329,12 @@ mod tests {
     }
 
 
-    struct Bench {
+    pub(super) struct Bench {
         saved_kernel: RomThunkOps,
         _guard: MutexGuard<'static, ()>,
     }
 
-    fn bench() -> Bench {
+    pub(super) fn bench() -> Bench {
         let guard = crate::kernel::task_lock::tests::OPS_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
