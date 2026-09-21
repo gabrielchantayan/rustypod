@@ -2,6 +2,8 @@
 //! HFS B-tree node access).
 /// FAT directory-entry start-cluster extraction @ 0x082e1378.
 pub mod fat_dirent;
+/// FAT long-file-name checksum for an 11-byte short name @ 0x082e0194.
+pub mod fat_lfn_short_name_checksum;
 /// FAT data-cluster to cache-block-index conversion @ 0x082e01cc.
 pub mod fat_cluster_to_block;
 /// FAT cache-block-index to data-cluster conversion @ 0x082e4358.
