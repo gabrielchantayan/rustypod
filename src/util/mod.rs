@@ -205,6 +205,7 @@ pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod tail_call_retail_080e76b8;
 pub mod tail_call_retail_080cfe50;
+pub mod metadata_fetch_or_null;
 pub mod table_transform_fixed_selector;
 pub mod text_layout_fit_glyph_count;
 pub mod tagged_counter;
