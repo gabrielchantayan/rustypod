@@ -123042,3 +123042,35 @@ functions:
       deliberately remain target-width u32 words.
       match.py reports the expected structural reordering: LLVM emits the
       indirect tail-dispatch before its table loop rather than after it.
+  - address: 0x082e073c
+    ghidra: FUN_082e073c
+    name: drive_slot_cleanup
+    size: 104
+    sig: "u32 drive_slot_cleanup(u32 index, u32 force_cleanup)"
+    module: fs/drive_slot_cleanup
+    status: ported
+    renames:
+      param_1/r0/r6: index
+      param_2/r1/r5: force_cleanup
+      r4: slot
+      "[slot + 0]": reference_count
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082e186c: clear_index_registrations
+      FUN_082e1804: clear_slot_volumes
+      FUN_082e180c: clear_slot_events
+      FUN_082e17b0: clear_slot_references
+    notes: >-
+      Raw osos.dec words establish the exact 104-byte extent
+      0x082e073c..0x082e07a3; 0x082e07a4 starts the next independent function
+      with push {r4-r9,lr}. Whole-image ARM decoding finds three inbound BL
+      instructions: one plain BL at 0x081bc9b0 and two predicated BLNE forms
+      at 0x082c30e8 and 0x082c3158. The body has five unconditional direct BL
+      instructions: the ported drive_slot_lookup and four unported helpers at
+      0x082e186c, 0x082e1804, 0x082e180c, and 0x082e17b0. It returns zero for
+      an absent slot; otherwise force_cleanup sets its first word to one, runs
+      all four helpers when forced or when that word was already one, decrements
+      the word, and returns one. The four helper names describe only their
+      observed use here; target builds retain their verified retail addresses,
+      while host tests inject recording seams. match.py reports the expected
+      structural difference: LLVM materializes those relocated absolute targets
+      and uses blx instead of the retail direct BL instructions.
