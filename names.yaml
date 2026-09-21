@@ -123562,3 +123562,33 @@ functions:
       deviation: the final tail branch is a normal returning call; traced_free
       returns normally, preserving observable behavior. Host tests cover the
       NULL guard and empty/nonempty bucket ordering.
+
+  - address: 0x082d0dec
+    ghidra: FUN_082d0dec
+    name: video_engine_set_output_transform
+    size: 52
+    sig: "void video_engine_set_output_transform(u32 horizontal_scale, u32 vertical_scale, u32 x_offset, u32 y_offset)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: horizontal_scale
+      param_2/r1: vertical_scale
+      param_3/r2: x_offset
+      param_4/r3: y_offset
+      FUN_08252bec: video_engine_get
+      FUN_0824e0c0: video_engine_set_output_transform_fields
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte extent
+      0x082d0dec..0x082d0e20: the final pop {r4-r7,pc} at 0x082d0e1c is
+      followed by a distinct push {r4,lr}. Whole-image B/BL-immediate decoding
+      finds three direct inbound calls, all unconditional plain BL at
+      0x08142c94, 0x0816e944, and 0x0825bee8; no predicated BL targets this
+      entry. The wrapper saves four transform words, gets the video-engine
+      singleton, returns silently when it is NULL, and otherwise passes the
+      engine plus all four words to FUN_0824e0c0. That verified 40-byte helper
+      writes engine words +0x8a4, +0x8ac, +0x8a8, and +0x8b0 in the order r1,
+      r4, r2, r3. The output-transform name is inferred from the four fields
+      and their 1.0 (0x10000) setup values. Deliberate deviation:
+      FUN_0824e0c0 remains resident on target; host builds reproduce only its
+      verified stores. Tests cover NULL-session no-op, word preservation, and
+      the helper's non-register field order.

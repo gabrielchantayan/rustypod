@@ -92,6 +92,69 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+/// Firmware entry of the output-transform setter (`FUN_0824e0c0`, unported).
+///
+/// The raw helper stores its four input words at engine offsets +0x8a4,
+/// +0x8ac, +0x8a8, and +0x8b0, in that register-order permutation.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_SET_OUTPUT_TRANSFORM_ADDR: usize = 0x0824_e0c0;
+
+/// ABI of the resident output-transform setter.
+type VideoEngineSetOutputTransform = unsafe extern "C" fn(*mut u8, u32, u32, u32, u32);
+
+/// Applies four output-transform words with the original helper's field order.
+fn set_output_transform(engine: *mut u8, horizontal_scale: u32, vertical_scale: u32, x_offset: u32, y_offset: u32) {
+    #[cfg(target_os = "none")]
+    unsafe {
+        let set_transform: VideoEngineSetOutputTransform =
+            core::mem::transmute(VIDEO_ENGINE_SET_OUTPUT_TRANSFORM_ADDR);
+        set_transform(engine, horizontal_scale, vertical_scale, x_offset, y_offset);
+    }
+    #[cfg(not(target_os = "none"))]
+    unsafe {
+        (engine.add(0x8a4).cast::<u32>()).write(horizontal_scale);
+        (engine.add(0x8ac).cast::<u32>()).write(y_offset);
+        (engine.add(0x8a8).cast::<u32>()).write(vertical_scale);
+        (engine.add(0x8b0).cast::<u32>()).write(x_offset);
+    }
+}
+
+/// video_engine_set_output_transform — retailOS `FUN_082d0dec` @
+/// **0x082d0dec** (52 bytes, `0x082d0dec..0x082d0e1c`). The next
+/// independently linked wrapper begins at `0x082d0e20`.
+///
+/// The raw ARM body preserves all four input words, calls
+/// [`video_engine_get`], silently returns when no session is installed, and
+/// otherwise calls `FUN_0824e0c0` with the engine prepended. That helper
+/// stores the words at engine offsets +0x8a4, +0x8ac, +0x8a8, and +0x8b0.
+/// A complete B/BL-immediate decode finds three direct inbound calls, all
+/// unconditional plain `bl` (0x08142c94, 0x0816e944, and 0x0825bee8);
+/// no predicated `bl` targets this entry.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0824e0c0` is not independently ported. Target builds transfer to
+/// its resident firmware entry; host builds reproduce its verified four-word
+/// stores so the wrapper's observable contract is testable.
+///
+/// # Safety
+///
+/// When a video session is installed, it must identify writable storage
+/// through offset +0x8b3. The retailOS wrapper performs no validation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_output_transform(
+    horizontal_scale: u32,
+    vertical_scale: u32,
+    x_offset: u32,
+    y_offset: u32,
+) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        set_output_transform(engine, horizontal_scale, vertical_scale, x_offset, y_offset);
+    }
+}
+
 /// Firmware entry of the video-engine type-continuation dispatcher
 /// (`FUN_0825359c`, unported).
 #[cfg(target_os = "none")]
@@ -992,6 +1055,34 @@ mod tests {
     /// Serializes wrapper tests: MOCK_INSTANCE and their host dispatch seams
     /// are shared mutable state.
     static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    // --- video_engine_set_output_transform (FUN_082d0dec) ---
+
+    #[test]
+    fn output_transform_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            video_engine_set_output_transform(0, 1, u32::MAX, 0x8000_0000);
+        }
+    }
+
+    #[test]
+    fn output_transform_preserves_words_and_helper_store_order() {
+        let _guard = LOCK.lock();
+        let mut engine = [0xaaaa_aaaau32; 0x8b4 / 4];
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr().cast());
+            video_engine_set_output_transform(0x0001_0000, 0x1234_5678, 0, u32::MAX);
+            set_mock_instance(ptr::null_mut());
+        }
+
+        assert_eq!(engine[0x8a4 / 4], 0x0001_0000);
+        assert_eq!(engine[0x8a8 / 4], 0x1234_5678);
+        assert_eq!(engine[0x8ac / 4], u32::MAX);
+        assert_eq!(engine[0x8b0 / 4], 0);
+        assert_eq!(engine[0x8a0 / 4], 0xaaaa_aaaa);
+    }
 
     // --- video_engine_set_type_continuation (FUN_082d1f6c) ---
 
