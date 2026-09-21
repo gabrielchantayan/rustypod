@@ -125699,6 +125699,28 @@ functions:
       NUL-terminated suffix to the already ported assign-from-cstr routine,
       rather than creating a speculative seam for the unported tail target.
 
+  - address: 0x08297608
+    ghidra: FUN_08297608
+    name: ring_buffer_used_bytes
+    size: 32
+    sig: "u32 ring_buffer_used_bytes(const u32 *ring)"
+    module: util/ring_buffer_used_bytes
+    status: ported
+    vars: {param_1/r0: ring, return/r0: used_bytes}
+    notes: >-
+      Raw osos.dec words establish the exact eight-instruction A32 extent
+      0x08297608..0x08297624: ldr r1,[r0,#0x10]; ldr r2,[r0,#0xc]; sub
+      r1,r1,r2; ldr r2,[r0,#8]; ldr r0,[r0,#0x14]; add r1,r1,r2; and
+      r0,r1,r0; bx lr. The next independently linked function starts at
+      0x08297638; the intervening 0x08297628..0x08297634 words are two
+      unreferenced `mov r0,#0; bx lr` stubs. Complete raw A32 branch decoding
+      finds exactly three inbound direct calls, all unconditional plain bl at
+      0x080fe908, 0x080fe970, and 0x08103b0c, with zero predicated forms.
+      The leaf has no outbound calls. It returns `(write - read + capacity) &
+      mask`, reading the ring's aligned 32-bit capacity/read/write/mask words
+      at +0x08/+0x0c/+0x10/+0x14. The three callers guard read or write
+      transfers against this occupied count. Deliberate deviations: none.
+
   - address: 0x08297638
     ghidra: FUN_08297638
     name: half_open_word_range_contains
