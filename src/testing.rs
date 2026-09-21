@@ -1613,6 +1613,9 @@ pub mod hints {
     // MemPage and cell-data fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const SQLITE_CLEAR_PAGE_OVERFLOW_CELLS: usize = 0x45ff_0000;
+    // 0x8200_0000: dedicated to sqlite/clear_saved_overflow's target-width
+    // BtCursor and tracked-allocation fixture; mappings never unmap.
+    pub const SQLITE_CLEAR_SAVED_OVERFLOW: usize = 0x8200_0000;
     // 0x2c00_0000: dedicated to sqlite/pager_reset's raw-u32 Pager, Page,
     // page-payload, and temporary-space fixture; mappings never unmap, so no
     // other user may share this hint.
