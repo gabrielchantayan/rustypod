@@ -124925,3 +124925,34 @@ functions:
       lowering but preserves the dispatch, short circuit, byte load, mask,
       and normalization. Deliberate deviation: the existing repr(C) host
       object model uses native pointers rather than target-width raw words.
+
+  - address: 0x082a2118
+    ghidra: FUN_082a2118
+    name: path_chain_to_string
+    size: 104
+    sig: "void path_chain_to_string(StringObject *out, const void *context)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: out
+      param_2: context
+      iVar3: node
+      local_18: separator
+      FUN_08277440: string_default_construct
+      FUN_08276b64: string_object_insert_utf16
+      FUN_082a50b0: string_object_c_str
+      FUN_08276a18: string_object_insert_cstr
+    notes: >-
+      Raw osos.dec establishes the 104-byte extent from push {r3,r4,r5,r6,r7,lr}
+      at 0x082a2118 through pop {r3,r4,r5,r6,r7,pc} at 0x082a217c; the next
+      separately linked function starts at 0x082a2180. Decoding every branch
+      word finds four direct BL calls, all unconditional: string_default_construct
+      @ 0x08277440, string_object_insert_utf16 @ 0x08276b64,
+      string_object_c_str @ 0x082a50b0, and string_object_insert_cstr @
+      0x08276a18. It default-constructs out, then walks context +0x1c while
+      the current node and its +0x1c successor are non-NULL, prepending a
+      backslash UTF-16 unit and the node's embedded StringObject C string at
+      +0x0c. The terminal node is deliberately omitted. The target port calls
+      the established StringObject functions directly; only host test builds
+      read the embedded payload as a target-width u32 because host pointers
+      cannot represent that ARM +0x0c subobject layout.
