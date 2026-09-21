@@ -28698,6 +28698,33 @@ functions:
       Host tests cover both gates and a valid 'tdat'-tagged lookup miss,
       proving no destination mutation on every zero result.
 
+  - address: 0x082a6040
+    ghidra: FUN_082a6040
+    name: resource_cache_get_if_available
+    size: 52
+    sig: "u32 resource_cache_get_if_available(void *object)"
+    module: app/resource/cache_available
+    renames:
+      param_1/r4: object
+      "object+0x0": vtable
+      "object+0x4": cache_object
+      "vtable+0xc": available
+      FUN_08047020: resource_cache_refresh_get
+    status: ported
+    notes: >-
+      Raw osos.dec words decode exactly from 0x082a6040 through the pop
+      {r4,pc} at 0x082a6070 (13 instructions, 52 bytes); the following word
+      at 0x082a6074 is a separate push {r4,lr} prologue. The virtual +0xc
+      call returns zero without reading object+0x4; any nonzero result
+      tail-branches to resource_cache_refresh_get(object+0x4, 0). Decoding
+      every ARM B/BL word finds three direct inbound call sites, all
+      unconditional plain BL, and no predicated forms. The body has no direct
+      BL instructions, one indirect BLX at 0x082a6054, and one tail B at
+      0x082a6068. The vtable target identity is not established, so the port
+      preserves raw dispatch rather than inventing a callee. Deliberate host
+      deviation: the fixture stores the vtable slot as a native-width
+      function pointer while object links remain firmware u32 words.
+
   - address: 0x082a63c0
     ghidra: FUN_082a63c0
     name: ui_element_reference_target_field_210

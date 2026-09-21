@@ -660,6 +660,10 @@ pub mod hints {
     // raw-u32 reference/target fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const ELEMENT_REFERENCE_TARGET_FIELD_210: usize = 0xa800_0000;
+    // 0xa900_0000: dedicated to app/resource/cache_available's raw-u32
+    // object/vtable fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const RESOURCE_CACHE_GET_IF_AVAILABLE: usize = 0xa900_0000;
     // 0x6a00_0000: dedicated to ui/element_reference_target_flag_bit_0's
     // raw-u32 reference/target fixture; mappings never unmap, so no other
     // user may share this hint.
