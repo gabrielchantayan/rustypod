@@ -1928,6 +1928,9 @@ pub mod hints {
     // 0x6f20_0000: dedicated to ui/range_byte_lookup's target-width table
     // fixture; mappings never unmap, so no other test may share this hint.
     pub const RANGE_BYTE_LOOKUP: usize = 0x6f20_0000;
+    // 0x8230_0000: dedicated to util/object_record_at's target-width object
+    // and eight-byte record-table fixture; mappings never unmap.
+    pub const OBJECT_RECORD_AT: usize = 0x8230_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
