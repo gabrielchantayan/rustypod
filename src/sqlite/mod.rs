@@ -75,6 +75,7 @@ pub mod auth_context_pop;
 pub mod begin_write_operation;
 pub mod blob_to_hex;
 pub mod binary_compare_coll_seq;
+pub mod bind_text;
 pub mod bitvec;
 pub mod btree_lock;
 pub mod btree_query_table_lock;
