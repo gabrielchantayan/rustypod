@@ -1628,6 +1628,11 @@ pub mod hints {
     // 0x8230_0000: dedicated to sqlite/release_tracked_pair's target-width
     // pair and tracked-allocation fixture; mappings never unmap.
     pub const SQLITE_RELEASE_TRACKED_PAIR: usize = 0x8230_0000;
+    // 0x2b80_0000 and 0x2b90_0000: dedicated to
+    // sqlite/release_refcounted_list's target-width owner and object-list
+    // fixtures; mappings never unmap, so no other user may share them.
+    pub const SQLITE_RELEASE_REFCOUNTED_LIST: usize = 0x2b80_0000;
+    pub const SQLITE_RELEASE_REFCOUNTED_LIST_EMPTY: usize = 0x2b90_0000;
     // 0x8210_0000 and 0x8220_0000: dedicated to
     // sqlite/clear_cursor_saved_overflows' target-width cursor-list fixtures;
     // mappings never unmap, so each test needs its own hint.

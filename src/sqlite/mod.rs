@@ -87,6 +87,7 @@ pub mod clear_overflow_cell;
 pub mod clear_cursor_saved_overflows;
 pub mod clear_saved_overflow;
 pub mod release_tracked_pair;
+pub mod release_refcounted_list;
 pub mod btree_rollback;
 pub mod btree_commit_phase_one;
 pub mod btree_commit_phase_two;

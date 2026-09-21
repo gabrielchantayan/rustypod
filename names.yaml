@@ -123971,3 +123971,32 @@ functions:
       op's P2 with the post-emission nOp. Otherwise it emits nothing.
       Rust uses the existing typed Vdbe helpers and a raw aligned
       target-layout WhereLevel pointer; no semantic deviation.
+
+  - address: 0x082bead4
+    ghidra: FUN_082bead4
+    name: release_refcounted_list
+    size: 120
+    sig: "void release_refcounted_list(void *owner, unsigned callback_slot)"
+    module: sqlite/release_refcounted_list
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r7: callback_slot
+      param_1_plus_0x10c: objects
+      param_1_plus_0x110: object_count
+      FUN_0838d878: release_final_reference
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent
+      0x082bead4..0x082beb4c; the next independently linked function begins
+      with push {r4-r6,lr} at 0x082beb4c. The body has two plain BL calls
+      (the raw-verified reference decrement/destroy helper at 0x0838d878 and
+      tracked_free at 0x083906f4) plus one predicated blxne through the
+      object's callback-slot vtable word, and three inbound plain-BL sites.
+      It walks signed object_count entries until a NULL object, invokes the
+      requested callback where non-NULL, releases each reference, frees the
+      object-word list, then zeroes object_count and objects. The helper has
+      no established port/name, so its raw-verified decrement-and-destroy
+      behavior is private in this port; host builds use a callback/release/free
+      operation table because target-width callback pointers cannot hold host
+      function addresses.
