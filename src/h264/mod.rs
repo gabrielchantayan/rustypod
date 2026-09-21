@@ -29,5 +29,6 @@ pub mod aligned_buffer_status;
 pub mod bitstream;
 pub mod cursor_advance_with_start;
 pub mod dec_ref_pic_marking;
+pub mod range_segments;
 pub mod stream_buffer_reset;
 pub mod stream_position_round_up;
