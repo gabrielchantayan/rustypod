@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08324364
+    ghidra: FUN_08324364
+    name: hmac_digest_20
+    size: 84
+    sig: "void hmac_digest_20(u8 *output, u32 input_len, u8 *input, const u8 *key, u32 key_len)"
+    module: crypto/hmac_digest_20
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input_len
+      param_3/r2: input
+      param_4/r3: key
+      param_5/[sp]: key_len
+      auStack_b8/sp: digest_context
+      FUN_0835ab54: hmac_key_schedule
+      FUN_0834be0c: input_dispatch
+      FUN_0834f42c: digest_final
+    notes: >-
+      Raw ARM confirms the 84-byte body at 0x08324364..0x083243b8; the
+      next real function begins with push {r0-r12,lr} at 0x083243b8.
+      Decoding every aligned ARM BL word finds exactly three direct inbound
+      plain BL calls at 0x082f9f1c, 0x0834621c, and 0x08359e08, with zero
+      predicated BL calls. The wrapper reserves a 0xa8-byte digest context,
+      calls the HMAC key schedule @ 0x0835ab54 with key_len, key, and digest
+      selector 2, feeds input/input_len through input_dispatch @ 0x0834be0c,
+      then finalizes into output through digest_final @ 0x0834f42c. The two
+      unported workers remain volatile target-address seams; input_dispatch
+      is the existing Rust port. Host tests verify call order, the selector,
+      and verbatim forwarding of zero and u32::MAX lengths. match.py exits 1
+      with the reviewed structural diff: volatile seams become BLX calls and
+      LLVM saves extra registers, while retaining the 0xa8-byte context and
+      call order.
   - address: 0x083b5664
     ghidra: FUN_083b5664
     name: red_black_tree_advance_cursor_copy
