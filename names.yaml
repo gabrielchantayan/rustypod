@@ -124091,3 +124091,26 @@ functions:
       signature. Field identities are not established, so Rust uses
       descriptive scale names. Deliberate deviations: the Rust signature
       exposes the retained r0 quotient.
+  - address: 0x082b8028
+    ghidra: FUN_082b8028
+    name: bn_cmp_words
+    size: 96
+    sig: "i32 bn_cmp_words(const u32 *a, const u32 *b, i32 words)"
+    module: crypto/bn_cmp_words
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+      param_3/r2: words
+    notes: >-
+      Raw osos.dec words e0803102 e081c102 e51cc004 e5133004 e153000c
+      02422002 0a00000c 9a000008 ea000005 e7903102 e791c102 e153000c
+      0a000005 e153000c 9a000001 e3a00001 e12fff1e e3e00000 e12fff1e
+      e2422001 e3520000 aafffff2 e3a00000 e12fff1e establish the exact
+      96-byte body at 0x082b8028..0x082b8087; push {r4-r10,lr} at
+      0x082b8088 begins the next independently entered function. The
+      assigned raw-code call-site count is three inbound plain BL calls and
+      zero predicated BL calls; this leaf has no outbound BL. It compares
+      positive-length little-endian u32 limb arrays from the highest limb
+      downward and returns 1, -1, or 0 using unsigned comparisons. Deliberate
+      deviations: none.
