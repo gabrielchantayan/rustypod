@@ -74191,6 +74191,40 @@ functions:
       branches. Host tests cover NID_undef, resolved low and upper boundary
       entries, unresolved in-range bypass of added, and out-of-range plus
       negative added-hash hits with the exact key tag and nid.
+  - address: 0x082d39bc
+    ghidra: FUN_082d39bc
+    name: i2s_asn1_integer
+    size: 92
+    sig: "char *i2s_ASN1_INTEGER(const X509V3_EXT_METHOD *method, const ASN1_INTEGER *value)"
+    module: crypto/i2s_asn1_integer
+    status: ported
+    renames:
+      param_1/r0: method
+      param_2/r1: value
+      iVar1/r0/r4: bignum
+      iVar2/r0/r5: decimal
+      FUN_0803a0d0: ASN1_INTEGER_to_BN
+      FUN_0803e438: BN_bn2dec
+      FUN_08049a84: diag_ring_record
+      FUN_0803eee4: releasable_buffer_release
+    notes: >-
+      OpenSSL's i2s_ASN1_INTEGER. Raw words establish the exact 92-byte
+      extent 0x082d39bc..0x082d3a18: the next separately linked function
+      begins with mov r0,r1 at 0x082d3a18. Full-image A32 decoding finds
+      exactly three inbound plain unconditional BL call sites (0x0806eb68,
+      0x0807d1c4, 0x080f5114), no predicated BL callers, and four outbound
+      plain BL instructions: ASN1_INTEGER_to_BN @ 0x0803a0d0, BN_bn2dec @
+      0x0803e438, diag_ring_record @ 0x08049a84, and
+      releasable_buffer_release @ 0x0803eee4. It calls
+      ASN1_INTEGER_to_BN(value, NULL), converts the temporary BIGNUM to a
+      decimal string, records diagnostic (0x22,0x78,0x41,0,0) if either
+      conversion yields NULL, releases the temporary BIGNUM even when it is
+      NULL, and returns the decimal pointer. ASN1_INTEGER_to_BN and BN_bn2dec
+      are unported: target defaults call their verified stock addresses;
+      host tests install volatile workers. That dispatch is the deliberate
+      deviation. Tests prove NULL conversion does not render or release,
+      successful conversion passes NULL as the BIGNUM destination and releases
+      the temporary buffer, and decimal failure still releases it.
   - address: 0x082d3a28
     ghidra: FUN_082d3a28
     name: i2t_asn1_object

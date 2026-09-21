@@ -45,6 +45,7 @@ pub mod obj_bsearch;
 pub mod obj_cmp;
 pub mod asn1_integer_set;
 pub mod asn1_integer_get;
+pub mod i2s_asn1_integer;
 pub mod asn1_adb;
 pub mod asn1_time_print;
 pub mod buffered_writer_write;
